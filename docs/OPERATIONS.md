@@ -855,7 +855,7 @@ or your stack.
   earlier version: [DEPLOY.md](DEPLOY.md#updating-to-0729-from-an-earlier-version).
 - **Pacing only gets gentler here.** On the page the Archidekt and Scryfall
   pacing can only be set to ask less often than the gateway's defaults. Only the
-  stack can set faster values, within the bounds in
+  stack can make them ask more often, within the bounds in
   [DEPLOY.md](DEPLOY.md#environment-reference).
 - **Some settings stay in the stack only**: sign-in, secrets, token and session
   lifetimes, the membership check, `MTG_WRITES_ENABLED`, the backup folder's

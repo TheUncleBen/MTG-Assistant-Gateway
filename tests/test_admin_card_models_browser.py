@@ -11,6 +11,7 @@ from .test_cardsearch_browser import SIZES, _chromium, _page
 from .test_overflow_sweep_browser import MEASURE
 from .test_settings_page_browser import _admin, _shot
 from .test_suggest_browser import Server
+from .test_text_zoom_browser import ROOT_200, TEXT_200
 
 pytest.importorskip("playwright")
 
@@ -29,6 +30,12 @@ NAME_BREAKS = """
   }
   return out;
 })
+"""
+
+
+ROW_HEIGHTS = """
+() => Object.fromEntries([...document.querySelectorAll('.models li')]
+  .map(li => [li.querySelector('.name').textContent, Math.round(li.getBoundingClientRect().height)]))
 """
 
 
@@ -71,6 +78,9 @@ def test_the_card_models_page_fits_and_reads(server: Server, width: int, theme: 
             ".map(b => Math.round(b.getBoundingClientRect().right))"
         )
         assert len(set(rights)) == 1, rights
+        # round 3, R3-1: a row with a one-line name is about as tall as its text and button
+        heights = page.evaluate(ROW_HEIGHTS)
+        assert heights["Opt"] < (80 if width >= 673 else 120), heights
         if width >= 673:
             assert page.evaluate(NAME_BREAKS) == []
         _shot(page, f"admin-models-{width}-{theme}.png")
@@ -78,5 +88,36 @@ def test_the_card_models_page_fits_and_reads(server: Server, width: int, theme: 
         page.wait_for_load_state("networkidle")
         assert "Card model removed." in page.locator(".notice.ok").inner_text()
         assert page.locator(".models li").count() == 3
+        browser.close()
+    assert errors == []
+
+
+@pytest.mark.parametrize(("width", "zoom"), [(344, "root"), (344, "text"), (360, "root"), (360, "text")])
+def test_the_card_models_page_fits_a_phone_at_200_percent_text(server: Server, width: int, zoom: str) -> None:
+    """Review round 3, R3-2: no sideways scroll, and a name breaks inside a word only when that one
+    word is wider than the row (Remove moves under the text instead of squeezing it)."""
+    from playwright.sync_api import sync_playwright
+
+    sid = _admin(server)
+    server.db.upsert_user(
+        "user-9",
+        email=None,
+        name=None,
+        preferred_username="a_member_with_a_really_long_username_here",
+        groups=[],
+    )
+    names = ["Sol Ring", "Kenrith, the Returned King", "Asmoranomardicadaistinaculdacar", "Opt"]
+    for i, name in enumerate(names):
+        server.db.put_card_model(name.casefold(), name, "{}", "user-9", 100 + i)
+    exe = _chromium()
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, width, "light", exe)
+        page.goto(f"{server.base}/admin/models", wait_until="networkidle")
+        page.evaluate(ROOT_200 if zoom == "root" else TEXT_200)
+        assert page.evaluate(MEASURE) == []
+        breaks = [b for b in page.evaluate(NAME_BREAKS) if not b.startswith("Asmoran")]
+        assert breaks == []
+        assert page.evaluate(CONTRAST, ".models li .name, .models li .small, .models button") == []
+        _shot(page, f"admin-models-{width}-{zoom}200.png")
         browser.close()
     assert errors == []

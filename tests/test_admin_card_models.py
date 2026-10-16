@@ -93,3 +93,16 @@ async def test_a_page_past_the_end_shows_the_last_page(gw: Harness) -> None:
             assert r.status_code == 200 and "Opt" in r.text, page
     finally:
         await b.aclose()
+
+
+async def test_an_account_without_a_name_is_not_called_deleted(gw: Harness) -> None:
+    """PROOFREAD-W3 L4: "a deleted account" only when the account is gone."""
+    gw.db.upsert_user("user-8", email=None, name=None, preferred_username=None, groups=[])
+    gw.db.put_card_model("opt", "Opt", MODEL, "user-8", 100)
+    assert gw.db.admin_delete_card_model("opt", by="admin-1")
+    b = await admin_browser(gw)
+    try:
+        text = html.unescape((await b.http.get("/admin/activity", headers=NAVIGATE)).text)
+        assert "Opt (added by an account with no username or email)" in text
+    finally:
+        await b.aclose()

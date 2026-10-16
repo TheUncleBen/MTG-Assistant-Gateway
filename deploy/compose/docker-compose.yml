@@ -65,7 +65,7 @@ services:
       # - mtg_ntfy_token
     # A setting passed as ${MTG_X:-} (empty unless your env sets it) is one an admin changes on
     # the gateway's Settings page (/admin/settings), which starts from the gateway's default. A
-    # value set in your env wins and shows there as set in your stack, read-only.
+    # value set in your env wins and locks the setting: the page shows it greyed out with its value.
     environment:
       MTG_PUBLIC_URL: ${MTG_PUBLIC_URL:?PUBLIC HTTPS URL REQUIRED e.g. https://mtg.example.com}
       MTG_OIDC_ISSUER: ${MTG_OIDC_ISSUER:?OIDC ISSUER URL REQUIRED}

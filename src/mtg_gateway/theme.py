@@ -589,10 +589,14 @@ details.disclosure[open] > summary::before{content:'\\25BE'}
 .plist form{margin:0;display:inline}
 .plist form button{margin:0;height:35px;padding:0 .7rem;width:auto}
 /* Admin > Card models: the name and who added it on the left, every Remove button in one column,
-   44 px tall; a long name breaks between words (review round 2, R2-2 and R2-4) */
-.plist.models li{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center}
-.plist.models .model{display:flex;flex-direction:column;gap:.15rem;min-width:0}
-.plist.models .name{overflow-wrap:break-word;hyphens:auto;-webkit-hyphens:auto}
+   44 px tall; a long name breaks between words (review round 2, R2-2 and R2-4).
+   Where the text has too little room (a phone at 200% text) Remove moves under it (review round 3).
+   The text's basis is in em, so it grows with the text. */
+.plist.models li{flex-wrap:wrap}
+.plist.models .model{display:flex;flex-direction:column;gap:.15rem;flex:1 1 12em;min-width:0}
+.plist.models .name{flex:none;overflow-wrap:break-word;hyphens:auto;-webkit-hyphens:auto}
+.plist.models .model .small{overflow-wrap:anywhere}
+.plist.models form{flex:none;margin-left:auto}
 .plist.models form button{height:auto;min-height:44px}
 
 """

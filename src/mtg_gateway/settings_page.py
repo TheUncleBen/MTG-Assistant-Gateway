@@ -79,8 +79,9 @@ TEXT: dict[str, tuple[str, str]] = {
     ),
     "archidekt_backup_copies": (
         "Backup copies kept per deck",
-        "Older copies are deleted from the backup folder on Archidekt, one at a time, after that deck's "
-        "next edit. A copy the member changed or moved, or one the gateway couldn't delete, is kept.",
+        "Older copies are deleted from the backup folder on Archidekt, one at a time, once that deck gets "
+        "its next new backup copy. A copy the member changed or moved, or one the gateway couldn't "
+        "delete, is kept.",
     ),
     "archidekt_backup_box_default": (
         "Backup box ticked by default",
@@ -177,7 +178,8 @@ CONFIRM: dict[str, tuple[str, str]] = {
     "archidekt_backup_copies": (
         "lower",
         "I understand that each deck's copies past the new number are deleted from the backup folder on "
-        "Archidekt, one at a time, after that deck's next edit. Copies a member changed or moved are kept.",
+        "Archidekt, one at a time, once that deck gets its next new backup copy. Copies a member changed "
+        "or moved are kept.",
     ),
     "snapshots_per_deck": (
         "lower",
@@ -456,8 +458,8 @@ def chatgpt_name_warning(live: LiveSettings) -> str:
     if not long:
         return ""
     fix = (
-        f"change {MANAGED_SETTINGS['chatgpt_name'].env} in your stack to {CHATGPT_NAME_MAX} characters "
-        "or fewer and redeploy"
+        f"change {MANAGED_SETTINGS['chatgpt_name'].env} in your stack to a name of {CHATGPT_NAME_MAX} "
+        "characters or fewer, then redeploy"
         if live.locked("chatgpt_name")
         else f"set a name of {CHATGPT_NAME_MAX} characters or fewer here"
     )

@@ -234,25 +234,32 @@ docker compose up -d
 ```
 
 Read the [CHANGELOG](../CHANGELOG.md) first; it says when a release needs a
-settings change.
+settings change. The gateway upgrades its database on start and records the
+schema version in the file. To go back to an older release, restore the backup
+you took before updating (see [OPERATIONS.md](OPERATIONS.md#backups)) and run
+the old image on that; don't run an old image on an upgraded database.
 
 ### Updating to 0.7.29 from an earlier version
 
-Download the new `docker-compose.yml` too, before `docker compose pull`:
+Before the commands above, note your own edits to the old `docker-compose.yml`:
+the optional secret lines you removed the `# ` from (`mtg_authentik_api_token`,
+`mtg_ntfy_token`) and any line you added under `environment:`. Then download
+the new file (or `git pull`, if you cloned the repository):
 
 ```bash
 base=https://raw.githubusercontent.com/TheUncleBen/MTG-Assistant-Gateway/main/deploy/compose
 curl -fsSLO "$base/docker-compose.yml"
 ```
 
+This replaces your old file, so make the same edits in the new one. Without
+the Authentik lines the removed-member clean-up turns off (the admin page says
+so); without the ntfy lines the gateway won't start.
+
 The old file gives 24 of the Settings page's 47 settings a value of its own,
 which locks them on the page (greyed out with that value). An `.env` made
 from the older `.env.example` sets 17 of them. **Optional:** delete the lines
 of the ones you want to change on the Settings page. Any you keep stay
-locked, and you change them in `.env`. The gateway upgrades its database on start and records the
-schema version in the file. To go back to an older release, restore the backup
-you took before updating (see [OPERATIONS.md](OPERATIONS.md#backups)) and run
-the old image on that; don't run an old image on an upgraded database.
+locked: you change them in `.env`, then run `docker compose up -d`.
 
 ## Backups
 
