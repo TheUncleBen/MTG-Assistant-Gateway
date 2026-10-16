@@ -11,11 +11,15 @@ on:
     paths:
       - "docker/forge/**"
       - "scripts/ci_smoke_forge.sh"
+      - "scripts/ci_measure_forge.sh"
+      - "scripts/measure_recognition.py"
       - ".github/workflows/forge-image.yml"
   pull_request:
     paths:
       - "docker/forge/**"
       - "scripts/ci_smoke_forge.sh"
+      - "scripts/ci_measure_forge.sh"
+      - "scripts/measure_recognition.py"
       - ".github/workflows/forge-image.yml"
   workflow_dispatch:
 
@@ -31,6 +35,8 @@ env:
   DOCKERFILE: docker/forge/Dockerfile
   # "1" while the one-off games-at-once measurement is wanted (smoke-arm64), else "0"
   MEASURE_PARALLEL: "1"
+  # "1" while the one-off card recognition figure is wanted (smoke-arm64), else "0"
+  MEASURE_RECOGNITION: "1"
 
 jobs:
   pin:
@@ -146,6 +152,26 @@ jobs:
         continue-on-error: true
         timeout-minutes: 25
         run: scripts/ci_measure_forge.sh forge:ci-arm64 6
+      # One-off figure for card recognition (0.7.30): how much of the newest precons and the
+      # repository's test decks the solo test (Mystic Forge, at the commit its image pins) models,
+      # files as out of scope, or plays without effect. Precons and test decks only, never members'
+      # decks. Numbers only, never a gate.
+      - name: Measure card recognition (numbers only)
+        if: github.event_name == 'pull_request' && env.MEASURE_RECOGNITION == '1'
+        continue-on-error: true
+        timeout-minutes: 15
+        run: |
+          repo=$(sed -n 's/^ARG MF_REPO=//p' docker/mystic-forge/Dockerfile)
+          commit=$(sed -n 's/^ARG MF_COMMIT=//p' docker/mystic-forge/Dockerfile)
+          mkdir -p /tmp/mf && cd /tmp/mf
+          git init -q . && git fetch -q --depth 1 "$repo" "$commit" && git checkout -q FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "$commit"
+          for p in "$GITHUB_WORKSPACE"/docker/mystic-forge/patches/*.patch; do git apply "$p"; done
+          cd "$GITHUB_WORKSPACE"
+          echo "### Card recognition (Mystic Forge $commit)" >> "$GITHUB_STEP_SUMMARY"
+          python3 -I scripts/measure_recognition.py --mf /tmp/mf docker/forge/precons.json \
+            tests/fixtures/sample_deck.csv tests/fixtures/live/archidekt_deck_blink_sample.json \
+            | tee -a "$GITHUB_STEP_SUMMARY"
 
   image:
     needs: [pin, smoke-arm64]
