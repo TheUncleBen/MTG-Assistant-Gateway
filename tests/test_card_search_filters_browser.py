@@ -317,3 +317,84 @@ def test_a_printing_tile_adds_that_printing(server: Server) -> None:
         assert f"This printing: {code.upper()} #{number}." in note, note
         assert errors == [], errors
         browser.close()
+
+
+def test_a_search_that_failed_can_be_asked_again_and_old_tiles_go(server: Server) -> None:
+    """An error answer lets Search or Enter ask the same search again (the form is unchanged), and
+    the tiles of the earlier search are not left under the error. The same holds when the page's
+    own first search failed."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium()
+    sid = _link(server)
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, 1280, "light", exe)
+        page.goto(f"{server.base}/cards?q=sol", wait_until="networkidle")
+        _wait_count(page, "2 cards")
+        server.sf.fail_with = 503
+        page.locator("#c-q").fill("sol r")
+        page.wait_for_function(
+            "() => /not answering/.test(document.getElementById('cs-status').innerText)", timeout=5000
+        )
+        assert page.locator("#cardgrid .cc").count() == 0  # the "sol" tiles are not this search's
+        assert page.locator("#cs-count").text_content() == "Cards"
+        server.sf.fail_with = None
+        before = len(server.sf.searches)
+        page.locator("#c-q").press("Enter")  # the same search again
+        _wait_count(page, "1 card")
+        assert len(server.sf.searches) - before == 1, server.sf.searches[before:]
+        assert _names(page) == ["Sol Ring"]
+        assert page.locator("#cs-status").inner_text() == ""
+        # the page's own first search failed: Enter asks it again
+        server.sf.fail_with = 503
+        page.goto(f"{server.base}/cards?q=sol+t", wait_until="networkidle")
+        assert "not answering" in page.locator("#cs-status").inner_text()
+        server.sf.fail_with = None
+        page.locator("#c-q").press("Enter")
+        _wait_count(page, "1 card")
+        assert _names(page) == ["Sol Talisman"]
+        assert errors == [], errors
+        browser.close()
+
+
+def test_a_late_next_page_is_not_added_to_a_newer_search(server: Server) -> None:
+    """A next page asked for before the name changed is not added under the new search's tiles,
+    and "Load more" asks for the next page of the search on screen, not of newer typed text."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium()
+    sid = _link(server)
+    held: list = []
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, 1280, "light", exe)
+        page.route("**/cards/api/search?*page=2*", lambda route: held.append(route))
+        page.goto(f"{server.base}/cards?q=test+land", wait_until="domcontentloaded")
+        page.wait_for_function("() => document.querySelectorAll('#cardgrid .cc').length > 0", timeout=5000)
+        if not held:
+            page.locator("#cs-more [data-more]").click()
+        page.wait_for_timeout(300)
+        assert held, "no page-2 request was made"
+        assert _query(held[0].request.url)["q"] == ["test land"]
+        page.locator("#c-q").fill("sol")
+        _wait_count(page, "2 cards")
+        try:
+            held[0].continue_()  # the old page's answer arrives late (or was already called off)
+        except Exception:  # noqa: BLE001 - an aborted request cannot be continued, which is the point
+            pass
+        page.wait_for_timeout(800)
+        assert _names(page) == ["Sol Ring", "Sol Talisman"], _names(page)
+        assert page.locator("#cs-count").text_content() == "2 cards"
+        assert page.locator("#cs-more [data-more]").is_hidden()
+        # "Load more" within the typing pause asks for the next page of the tiles on screen
+        page.unroute("**/cards/api/search?*page=2*")
+        page.goto(f"{server.base}/cards?q=test+land", wait_until="networkidle")
+        _wait_count(page, "30 cards")
+        asked: list[str] = []
+        page.on("request", lambda r: asked.append(r.url) if "page=" in r.url else None)
+        page.locator("#c-q").press_sequentially("x", delay=10)  # the search waits 400 ms
+        page.evaluate("document.querySelector('#cs-more [data-more]').click()")
+        page.wait_for_load_state("networkidle")
+        page.wait_for_timeout(600)
+        assert asked and all(_query(u)["q"] == ["test land"] for u in asked), asked
+        assert errors == [], errors
+        browser.close()
