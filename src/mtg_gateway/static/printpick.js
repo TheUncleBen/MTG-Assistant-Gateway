@@ -498,9 +498,10 @@
     var extra = extraMine();
     var shown = sorted(st.list.filter(matches).concat(extra));
     // the printings that match, and the card's own shown only because it is the card's: one the
-    // search or filters leave out here, or one Scryfall's filtered list doesn't hold
+    // search or filters leave out here, or one not in the pages read (asked for by itself, or
+    // left out of Scryfall's filtered list), which "Showing n of m" doesn't count either
     var filtered = st.q || st.params.finish || st.params.frame || st.params.border;
-    var ownOnly = shown.filter(function (p) { return !wanted(p) || (filtered && extra.indexOf(p) >= 0); });
+    var ownOnly = shown.filter(function (p) { return !wanted(p) || extra.indexOf(p) >= 0; });
     var hits = shown.length - ownOnly.length;
     var hidden = st.all ? 0 : st.list.filter(function (p) {
       return english(p) && (preview(p) || digital(p)) && !samePrint(p, st.opts.current) && !samePrint(p, st.opts.pending);
@@ -525,7 +526,6 @@
     if (!st.list.length) words = filtered || st.all ? "" : "Scryfall lists no printing of this card.";
     else if (st.complete) words = filtered ? hits + " of " + plural(english_n, "printing") + (hits === 1 ? " matches." : " match.") : plural(hits, "printing") + ".";
     else words = (st.q ? plural(hits, "match", "matches") + ". " : "") + "Showing " + st.list.length + " of " + plural(st.total, "printing") + ".";
-    if (!words && ownOnly.length) words = "No printing matches these filters.";
     if (ownOnly.length) words += (words ? " " : "") + ownWords(ownOnly);
     if (hidden) words += (words ? " " : "") + plural(hidden, "digital-only or preview printing") + " hidden.";
     if (!words && !shown.length) words = "No printing matches these filters.";  // read out; the box shows it
