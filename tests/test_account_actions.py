@@ -222,8 +222,9 @@ async def test_an_assistant_comment_is_posted_as_plain_text_only(stack: Stack) -
 
 
 COMMENT_NOTE = (
-    "Only the words of this comment are saved: the gateway writes plain text, so the links, "
-    "formatting and embeds in it were removed. Don't tell the user a link or formatting was added."
+    "Only the words of this comment are saved: the gateway writes new text as plain text, so the "
+    "links, formatting and embeds in what you sent were removed (formatting already on Archidekt "
+    "stays where its words did not change). Don't tell the user a link or formatting was added."
 )
 
 

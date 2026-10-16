@@ -21,7 +21,8 @@ from typing import TYPE_CHECKING, Any
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
-from .archidekt import VOTE_DOWN, VOTE_NONE, VOTE_UP, ArchidektError, Deck, plain_text, rich_text
+from . import formatting
+from .archidekt import VOTE_DOWN, VOTE_NONE, VOTE_UP, ArchidektError, Deck, QuillDoc, plain_text, rich_text
 from .decklist import clean_text
 from .decks import DeckError, _clean_deck_id
 from .pages import NO_STORE, browser_session, csrf_header_ok, read_limited
@@ -86,12 +87,16 @@ def _int(value: Any) -> int | None:
     return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
-def comment_out(c: dict[str, Any], depth: int = 0) -> dict[str, Any]:
-    """One comment of Archidekt's thread in the gateway's shape; replies nest to a depth limit."""
+def comment_out(c: dict[str, Any], depth: int = 0, *, keep_doc: bool = False) -> dict[str, Any]:
+    """One comment of Archidekt's thread in the gateway's shape; replies nest to a depth limit.
+    ``keep_doc``: a formatted comment also carries its stored document as ``_doc`` (Q137), for an
+    edit that keeps its formatting; never shown or sent to an assistant."""
     owner = c.get("owner") if isinstance(c.get("owner"), dict) else {}
     kids = c.get("children")
     results = kids.get("results") if isinstance(kids, dict) else kids if isinstance(kids, list) else []
+    doc = {"_doc": c["text"]} if keep_doc and formatting.is_formatted(c.get("text")) else {}
     return {
+        **doc,
         "id": _int(c.get("id")),
         "text": rich_text(c.get("text")),  # Archidekt keeps a Quill document; shown as its text
         "owner": {
@@ -103,7 +108,7 @@ def comment_out(c: dict[str, Any], depth: int = 0) -> dict[str, Any]:
         "points": _int(c.get("points")) or 0,
         "user_vote": _int(c.get("userInput")) or 0,
         "archived": c.get("archived") is True,
-        "replies": [comment_out(k, depth + 1) for k in results if isinstance(k, dict)]
+        "replies": [comment_out(k, depth + 1, keep_doc=keep_doc) for k in results if isinstance(k, dict)]
         if depth < MAX_THREAD_DEPTH
         else [],
         "reply_count": _int(c.get("childrenCount")) or 0,
@@ -307,7 +312,9 @@ class SocialService:
         self.state.db.audit("user_followed", sub=sub, detail={"user_id": user_id, "on": on})
         return {"following": on}
 
-    async def comments(self, sub: str, deck_id: str, page: int = 1) -> dict[str, Any]:
+    async def comments(
+        self, sub: str, deck_id: str, page: int = 1, *, keep_doc: bool = False
+    ) -> dict[str, Any]:
         deck = await self.deck(sub, deck_id)
         if deck.comment_root is None:
             return {"root": None, "count": 0, "comments": [], "page": 1, "has_more": False}
@@ -323,7 +330,7 @@ class SocialService:
         results = kids.get("results") if isinstance(kids, dict) else kids if isinstance(kids, list) else []
         links = kids.get("links") if isinstance(kids, dict) else {}
         count = kids.get("count") if isinstance(kids, dict) else None
-        comments = [comment_out(c) for c in results if isinstance(c, dict)]
+        comments = [comment_out(c, keep_doc=keep_doc) for c in results if isinstance(c, dict)]
         link = self.state.db.get_link(sub) if linked else None
         raw_me = str((link or {}).get("archidekt_user_id") or "")
         me = int(raw_me) if raw_me.isdigit() else None
@@ -349,18 +356,31 @@ class SocialService:
             raise DeckError("forbidden", "only your own comments can be edited or deleted here")
         return found
 
-    async def edit_comment(self, sub: str, deck_id: str, comment_id: int, text: str) -> dict[str, Any]:
+    async def edit_comment(
+        self, sub: str, deck_id: str, comment_id: int, text: str, *, expect_doc: str | None = None
+    ) -> dict[str, Any]:
         """Change the text of one of the member's own comments (Archidekt's edit); verified by
-        re-reading the thread."""
+        re-reading the thread. The new words are plain, and the comment's bold text, links and
+        pictures stay where their words did not change (Q137, ``formatting.keep_formatting``).
+        ``expect_doc``: for an approved proposal, the document its review showed ("" for plain
+        text); a comment whose stored document gives another one now is not sent."""
         self.decks._writes_switch()
         text = comment_text(text)
         if not text:
             raise DeckError("invalid", "write something first")
         if len(text) > MAX_COMMENT:
             raise DeckError("invalid", f"a comment can be at most {MAX_COMMENT} characters")
-        thread = await self.comments(sub, deck_id)
-        self._own_comment(sub, thread, comment_id)
-        await self.decks._call(sub, lambda t: self.client.comment_update(t, comment_id, text))
+        thread = await self.comments(sub, deck_id, keep_doc=True)
+        found = self._own_comment(sub, thread, comment_id)
+        kept = formatting.keep_formatting(found.get("_doc"), text)
+        if expect_doc is not None and (kept[0] if kept else "") != expect_doc:
+            raise DeckError(
+                "stale",
+                "This comment changed on Archidekt since the change was reviewed, so it would not "
+                "look as reviewed. Nothing was sent to Archidekt.",
+            )
+        write: str = QuillDoc(kept[0]) if kept else text
+        await self.decks._call(sub, lambda t: self.client.comment_update(t, comment_id, write))
         after = _find((await self.comments(sub, deck_id))["comments"], comment_id)
         ok = after is not None and after["text"] == text
         self.state.db.audit(

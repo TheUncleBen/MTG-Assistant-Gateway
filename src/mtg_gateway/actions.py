@@ -14,6 +14,7 @@ import secrets
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
+from . import formatting
 from .archidekt import VOTE_DOWN, VOTE_NONE, VOTE_UP, drops_formatting, words_only_note
 from .decklist import clean_text
 from .decks import DeckError, _clean_deck_id, _row, needs_look_error
@@ -24,6 +25,11 @@ if TYPE_CHECKING:
 
 ACCOUNT_TARGET = "account"  # deck_id of a proposal that is about the account, not one deck
 ACCOUNT_NAME = "Your Archidekt account"
+# A comment edit that keeps formatting (Q137) whose comment changed since its review: its
+# "needs a look" reason, in words (recheck.reason_text shows any other text as it is)
+COMMENT_CHANGED = (
+    "The comment changed on Archidekt since this was reviewed, so it would not look as reviewed."
+)
 
 # What each action is called on the review page and the in-chat card.
 LABELS = {
@@ -91,12 +97,14 @@ def _owner(deck: Any) -> str:
     return clean_text(str(getattr(deck, "owner", "") or "")) or "its owner"
 
 
-async def _thread_comment(decks: DeckService, sub: str, deck_id: str, comment_id: Any) -> dict[str, Any]:
+async def _thread_comment(
+    decks: DeckService, sub: str, deck_id: str, comment_id: Any, *, keep_doc: bool = False
+) -> dict[str, Any]:
     from .social import _find
 
     if not isinstance(comment_id, int) or isinstance(comment_id, bool) or comment_id <= 0:
         raise DeckError("invalid", "comment_id must be a comment's number (get_deck_comments lists them)")
-    thread = await _social(decks).comments(sub, deck_id)
+    thread = await _social(decks).comments(sub, deck_id, keep_doc=keep_doc)
     found = _find(thread["comments"], comment_id)
     if found is None:
         raise DeckError("not_found", "that comment is not in this deck's thread (or not on its first page)")
@@ -239,7 +247,7 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
         changes.update(text=text, parent=parent)
         row["after_text"] = text
     elif action in ("comment_edit", "comment_delete", "comment_vote"):
-        found = await _thread_comment(decks, sub, deck.id, params.get("comment_id"))
+        found = await _thread_comment(decks, sub, deck.id, params.get("comment_id"), keep_doc=True)
         own = found["_me"] is not None and found["owner"]["id"] == found["_me"]
         changes["comment_id"] = found["id"]
         row["before_text"] = found["text"]
@@ -262,6 +270,11 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
                 text = _comment_text(params.get("text"))
                 changes["text"] = text
                 row["after_text"] = text
+                # Q137: its bold text, links and pictures stay where their words did not change;
+                # the review page draws the result, and the edit is approved there
+                kept = formatting.keep_formatting(found.get("_doc"), text)
+                if kept is not None:
+                    row["after_doc"], row["dropped_embeds"] = kept
                 row["text"] = f"Change your comment on the deck {where}"
             else:
                 row["text"] = f"Delete your comment on the deck {where}"
@@ -351,7 +364,20 @@ async def apply(
         out = await _social(decks).comment(sub, deck_id, str(c["text"]), c.get("parent"))
         result = {"comment_id": out["comment"]["id"], "parent": out["parent"]}
     elif action == "comment_edit":
-        out = await _social(decks).edit_comment(sub, deck_id, int(c["comment_id"]), str(c["text"]))
+        # Q137: the comment's formatting is kept as the review showed it (after_doc), or not sent
+        reviewed = next((r for r in row.get("rows") or [] if r.get("kind") == "action"), {})
+        try:
+            out = await _social(decks).edit_comment(
+                sub,
+                deck_id,
+                int(c["comment_id"]),
+                str(c["text"]),
+                expect_doc=str(reviewed.get("after_doc") or ""),
+            )
+        except DeckError as exc:
+            if exc.kind == "stale":
+                raise needs_look_error(COMMENT_CHANGED) from exc
+            raise
         result = {"comment_id": out["comment"]["id"], "verified": True}
     elif action == "comment_delete":
         out = await _social(decks).delete_comment(sub, deck_id, int(c["comment_id"]))
