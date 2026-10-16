@@ -19,6 +19,7 @@ from urllib.parse import urlparse
 from cryptography.fernet import Fernet
 
 from .oidc import TOKEN_AUTH_METHODS, validate_groups_claim
+from .plugin_page import CHATGPT_NAME_MAX
 
 
 class ConfigError(Exception):
@@ -79,6 +80,25 @@ def _ntfy_url_env(name: str) -> str | None:
         # members see this address on their Account page; the token goes in its Docker secret
         raise ConfigError(f"{name} must not hold a user name or password; use the mtg_ntfy_token secret")
     return raw
+
+
+def _chatgpt_name_env(name: str) -> str | None:
+    """The ChatGPT connector name, when it should differ from MTG_SERVER_NAME. A long one is
+    warned about (chatgpt_name_warning), never refused: a stopped gateway locks everyone out."""
+    raw = (_env(name, "") or "").strip()
+    return raw or None
+
+
+def chatgpt_name_warning(settings: Settings) -> str | None:
+    """The startup log warning when MTG_CHATGPT_NAME is over the plugin file's limit, else None."""
+    raw = settings.chatgpt_name
+    if raw is None or len(raw) <= CHATGPT_NAME_MAX:
+        return None
+    return (
+        f"MTG_CHATGPT_NAME is {len(raw)} characters; ChatGPT refuses a plugin file whose name is over "
+        f"{CHATGPT_NAME_MAX}. The gateway runs, but set a shorter name, or leave it empty to use "
+        "MTG_SERVER_NAME."
+    )
 
 
 def _bool_env(name: str, default: bool) -> bool:
@@ -276,6 +296,9 @@ class Settings:
     listen_port: int = 8080
     log_level: str = "INFO"
     server_name: str = "MTG Assistant Gateway"
+    # The ChatGPT connector name (its plugin's displayName and the ChatGPT install steps); None =
+    # server_name. Over 80 characters it is only warned about.
+    chatgpt_name: str | None = None
     # Optional hourly clean-up of removed members' Archidekt sessions (idp_sweep.py): an Authentik
     # API token that may only view the gateway's groups and its own tokens, and the Authentik
     # address (empty = the issuer's).
@@ -466,6 +489,7 @@ def load_settings() -> Settings:
         listen_port=_int_env("MTG_LISTEN_PORT", 8080, lo=1, hi=65535),
         log_level=(_env("MTG_LOG_LEVEL", "INFO") or "INFO").upper(),
         server_name=_env("MTG_SERVER_NAME", "MTG Assistant Gateway") or "MTG Assistant Gateway",
+        chatgpt_name=_chatgpt_name_env("MTG_CHATGPT_NAME"),
         authentik_api_token=sweep_token,
         authentik_api_token_problem=sweep_problem,
         authentik_api_url=_authentik_api_url(oidc_issuer),

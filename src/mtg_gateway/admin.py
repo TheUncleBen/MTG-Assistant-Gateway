@@ -32,6 +32,7 @@ from .pages import (
     login_redirect,
     read_limited,
 )
+from .plugin_page import CHATGPT_NAME_MAX, chatgpt_name_too_long
 from .theme import display_name, plural, render
 
 if TYPE_CHECKING:
@@ -419,6 +420,20 @@ def system_data(state: Any) -> dict[str, Any]:
     return out
 
 
+def _chatgpt_name_warning(settings: Any) -> str:
+    """A notice when the ChatGPT connector name (MTG_CHATGPT_NAME, else MTG_SERVER_NAME) is over
+    the limit ChatGPT puts on a plugin file's name."""
+    long = chatgpt_name_too_long(settings.server_name, getattr(settings, "chatgpt_name", None))
+    if not long:
+        return ""
+    text = (
+        f"The ChatGPT connector name, “{long[0]}”, is {long[1]} characters; ChatGPT refuses a plugin "
+        f"file whose name is over {CHATGPT_NAME_MAX} characters. Set a shorter MTG_CHATGPT_NAME (see "
+        "docs/DEPLOY.md)."
+    )
+    return f"<div class='notice warn'>{html.escape(text)}</div>"
+
+
 def _updates_card(u: dict[str, Any]) -> str:
     """Whether a newer gateway release is out (update_check.py) and how to move to it."""
     found = update_check.newer()
@@ -639,6 +654,7 @@ def _overview_body(state: Any) -> str:
             if sysd.get("last_backup_copy_error")
             else ""
         )
+        + _chatgpt_name_warning(state.settings)
         + "</div>"
     )
     cards.append(_updates_card(sysd["updates"]))

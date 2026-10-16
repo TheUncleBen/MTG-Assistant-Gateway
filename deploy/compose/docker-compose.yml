@@ -79,6 +79,7 @@ services:
       MTG_OIDC_PREVIOUS_ISSUERS: ${MTG_OIDC_PREVIOUS_ISSUERS:-}
       MTG_OIDC_TOKEN_AUTH_METHOD: ${MTG_OIDC_TOKEN_AUTH_METHOD:-}
       MTG_SERVER_NAME: ${MTG_SERVER_NAME:-}
+      MTG_CHATGPT_NAME: ${MTG_CHATGPT_NAME:-}
       # Optional removed-member clean-up: /run/secrets/mtg_authentik_api_token once that secret
       # is listed above. Empty = off. The API URL defaults to the issuer's address.
       MTG_AUTHENTIK_API_TOKEN_FILE: ${MTG_AUTHENTIK_API_TOKEN_FILE:-}
