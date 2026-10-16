@@ -440,6 +440,15 @@ class ReportService:
             **extra,
         }
 
+    def is_admin(self, sub: str) -> bool:
+        """Whether ``sub`` is a gateway admin (MTG_ADMIN_GROUP, as admin.is_admin): an admin may
+        replace any member's kept card model (Q138 item 3)."""
+        group = getattr(getattr(self.decks, "settings", None), "admin_group", None)
+        if not group:
+            return False
+        user = self.db.get_user(sub)
+        return bool(user) and not user.get("disabled_at") and group in (user.get("groups") or [])
+
     def _share_from(self, sub: str, report_id: Any) -> dict[str, Any]:
         """K6 (Q136): what seating another of the member's reports' opponents takes, checked now:
         that report must be the member's own and have (or be waiting for) Forge games. Its
@@ -810,7 +819,7 @@ class ReportService:
             goldfish["models_saved"] = True  # the report may say descriptions are saved (Q136 K1)
         own = [a for a in options.get("annotations") or [] if isinstance(a, dict)]
         if own and goldfish.get("ok") and self.models.available:
-            goldfish["models_kept"] = self.models.keep(sub, own, names)
+            goldfish["models_kept"] = self.models.keep(sub, own, names, admin=self.is_admin(sub))
         return goldfish
 
     async def _mf(self, sub: str, tool: str, arguments: dict[str, Any]) -> dict[str, Any]:

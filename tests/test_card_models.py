@@ -6,6 +6,7 @@ B's (db.py); a fake with the agreed methods stands in for it until the join."""
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -18,8 +19,13 @@ from mtg_gateway.db import Database
 from mtg_gateway.report_view import report_body_html, report_markdown
 from mtg_gateway.reports import ReportService
 
+from .conftest import Stack, stack_with
+from .test_companion import COMPANION, NAV, linked_browser
+from .test_decks_and_proxy import call, mcp_token, structured
 from .test_forge import _Decks
-from .test_history_page import GOLDFISH
+from .test_history_page import GOLDFISH, store_report
+
+stack_options = stack_with(COMPANION)
 
 GOOD = {
     "name": "Puresteel Paladin",
@@ -70,7 +76,8 @@ def test_models_out_of_shape_or_bounds_are_refused(raw: Any, why: str) -> None:
 
 
 class FakeModelsDb(Database):
-    """The schema 14 methods as agreed with Track B (one model per card, newest wins)."""
+    """The schema 14 methods as Track B built them (7a42c07): one model per card, the newest
+    put wins, and a member deletes only their own."""
 
     def __init__(self, path: Path) -> None:
         super().__init__(path)
@@ -92,6 +99,8 @@ class FakeModelsDb(Database):
         return not was or was["added_by"] != sub
 
     def delete_card_model(self, key: str, sub: str) -> bool:
+        if self.rows.get(key, {}).get("added_by") != sub:
+            return False
         return self.rows.pop(key, None) is not None
 
     def count_card_models(self, sub: str) -> int:
@@ -209,3 +218,124 @@ def test_a_name_too_long_for_a_card_is_refused(tmp_path: Path) -> None:
     out = KeptModels(db).keep("alice", [{"name": "Front", "inert": True}], [long])
     assert out == {"kept": [], "refused": [{"name": long[:141], "why": "the card's name is too long"}]}
     assert db.rows == {}
+
+
+async def test_only_the_adder_or_an_admin_replaces_a_model_and_the_adder_removes_it(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    """Q138 items 3-4: another member's assistant cannot replace a card's model (its own still
+    plays in its runs); an admin can; the adder removes their own, nobody else's."""
+    reports, db, mf = _service(tmp_path)
+    name = next(c.name for c in (await _Decks().get_any_deck(None, "42")).cards if c.name != "Plains")
+    key = card_models.card_key(name)
+    alice = {"name": name, "triggers": [{"on": "etb", "do": "draw", "count": 2}]}
+    await reports.run("alice", "42", options={"annotations": [alice]})
+    bob = {"name": name, "triggers": [{"on": "etb", "do": "gain_life", "count": 5}]}
+    out = await reports.run("bob", "42", options={"annotations": [bob]})
+    assert out["goldfish"]["models_kept"] == {
+        "kept": [],
+        "refused": [{"name": name, "why": card_models.ANOTHER_MEMBERS_TEXT}],
+    }
+    assert mf.calls[-1][1]["annotations"] == [bob]  # bob's own model still played in his run
+    assert db.rows[key]["added_by"] == "alice"
+    assert reports.models.remove("bob", name) is False and key in db.rows
+    monkeypatch.setattr(reports, "is_admin", lambda sub: sub == "bob")
+    out = await reports.run("bob", "42", options={"annotations": [bob], "seed": 2})
+    assert out["goldfish"]["models_kept"]["kept"] == [{"name": name}] and db.rows[key]["added_by"] == "bob"
+    assert reports.models.remove("alice", name) is False
+    assert reports.models.remove("bob", name) is True and key not in db.rows
+
+
+def test_is_admin_follows_the_admin_group(tmp_path: Path) -> None:
+    reports, db, _ = _service(tmp_path)
+    assert reports.is_admin("alice") is False  # no settings, no admin group
+    reports.decks.settings = SimpleNamespace(admin_group="admins")  # type: ignore[attr-defined]
+    db.upsert_user("ben", email=None, name=None, preferred_username=None, groups=["admins"])
+    assert reports.is_admin("ben") is True and reports.is_admin("alice") is False
+
+
+class _Store:
+    """The schema 14 methods over a dict, for a gateway built on the plain test database."""
+
+    def __init__(self) -> None:
+        self.rows: dict[str, dict[str, Any]] = {}
+
+    def get_card_models(self, keys: list[str]) -> list[dict[str, Any]]:
+        return [self.rows[k] for k in keys if k in self.rows]
+
+    def put_card_model(self, key: str, name: str, model_json: str, sub: str, now: int) -> bool:
+        was = self.rows.get(key)
+        self.rows[key] = {
+            "card_key": key,
+            "name": name,
+            "model_json": model_json,
+            "added_by": sub,
+            "added_at": now,
+            "updated_at": now,
+        }
+        return not was or was["added_by"] != sub
+
+    def delete_card_model(self, key: str, sub: str) -> bool:
+        if self.rows.get(key, {}).get("added_by") != sub:
+            return False
+        return self.rows.pop(key) is not None
+
+    def count_card_models(self, sub: str) -> int:
+        return sum(1 for r in self.rows.values() if r["added_by"] == sub)
+
+
+async def test_the_adder_removes_a_saved_model_from_the_report_and_through_the_assistant(
+    stack: Stack,
+) -> None:
+    """Q138 item 4: the report page offers Remove only for the member's own saved descriptions;
+    the assistant's remove_card_model removes the member's own and nobody else's."""
+    h = stack.h
+    b = await linked_browser(stack)
+    gw = h.app.state.gateway
+    real = gw.reports.models
+    store = _Store()
+    gw.reports.models = KeptModels(store)
+    try:
+        sub = gw.db._one("SELECT sub FROM users", ())["sub"]
+        store_report(gw.db, sub, "rep_kept")
+        used = [
+            {"name": "Sol Ring", "model": "abc123abc123", "yours": True, "changed_at": 1_700_000_000},
+            {"name": "Arcane Signet", "model": "def456def456", "yours": False, "changed_at": 1_700_000_000},
+        ]
+        row = gw.db._one("SELECT goldfish_json FROM reports WHERE id = 'rep_kept'", ())
+        goldfish = {**json.loads(row["goldfish_json"]), "kept_models": used}
+        with gw.db.tx() as c:
+            c.execute("UPDATE reports SET goldfish_json = ? WHERE id = 'rep_kept'", (json.dumps(goldfish),))
+        model = json.dumps({"name": "Sol Ring", "inert": True})
+        store.put_card_model("sol ring", "Sol Ring", model, sub, 1)
+        store.put_card_model("arcane signet", "Arcane Signet", model, "someone-else", 1)
+        page = await b.http.get("/history/reports/rep_kept", headers=NAV)
+        assert "Played with saved card descriptions" in page.text
+        assert "aria-label='Remove the saved description of Sol Ring'" in page.text
+        assert "Remove the saved description of Arcane Signet" not in page.text
+        csrf = re.search(r"name='csrf' value='([^']+)'", page.text).group(1)
+        url = "/history/reports/rep_kept/models/remove"
+        assert (await b.http.post(url, data={"card": "Sol Ring"})).status_code == 403
+        gone = await b.http.post(url, data={"csrf": csrf, "card": "Arcane Signet"})
+        assert gone.status_code == 303 and gone.headers["location"].endswith("?models=gone")
+        assert "arcane signet" in store.rows
+        done = await b.http.post(url, data={"csrf": csrf, "card": "Sol Ring"})
+        assert done.headers["location"] == "/history/reports/rep_kept?models=removed"
+        assert "sol ring" not in store.rows
+        after = await b.http.get(done.headers["location"], headers=NAV)
+        assert "The saved description was removed." in after.text and "Remove the saved" not in after.text
+        missing = await b.http.post("/history/reports/nope/models/remove", data={"csrf": csrf, "card": "x"})
+        assert missing.status_code == 404
+        # the assistant's tool: the member's own only
+        token = await mcp_token(h)
+        store.put_card_model("sol ring", "Sol Ring", model, sub, 2)
+        out = structured(await call(h, token, "remove_card_model", {"card_name": "Arcane Signet"}))
+        assert out["ok"] and out["removed"] is False and "another member" in out["message"]
+        out = structured(await call(h, token, "remove_card_model", {"card_name": "sol ring"}))
+        assert out == {"ok": True, "removed": True} and store.rows.keys() == {"arcane signet"}
+        gw.reports.models = real  # the plain database keeps no models
+        out = structured(await call(h, token, "remove_card_model", {"card_name": "Sol Ring"}))
+        assert out["ok"] is False and "does not save card models" in out["message"]
+    finally:
+        gw.reports.models = real
+        await b.aclose()

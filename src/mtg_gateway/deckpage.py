@@ -1664,6 +1664,9 @@ GOLDFISH_GUIDE_STEPS = (
 )
 GOLDFISH_GUIDE_HIDE = "Hide the guide"
 GOLDFISH_GUIDE_SHOW = "How to play"
+# Phones show the step the game is at; this opens all six (Q138 item 8, "don't restrict")
+GOLDFISH_GUIDE_ALL = "Show all steps"
+GOLDFISH_GUIDE_CURRENT = "Show the current step only"
 
 
 def goldfish_guide_html(*, hidden: bool = False) -> str:
@@ -1678,9 +1681,14 @@ def goldfish_guide_html(*, hidden: bool = False) -> str:
         "<section class='panel gf-guide' id='gf-guide' aria-labelledby='gf-guide-h'"
         f"{' hidden' if hidden else ''}>"
         "<div class='gf-guide-head'><h2 id='gf-guide-h'>How to play</h2>"
-        f"<button type='button' class='btn small' data-guide='hide'>{esc(GOLDFISH_GUIDE_HIDE)}</button></div>"
+        "<span class='gf-guide-btns'>"
+        "<button type='button' class='btn small gf-allsteps' aria-expanded='false' aria-controls='gf-steps' "
+        f"data-all='{esc(GOLDFISH_GUIDE_ALL)}' data-current='{esc(GOLDFISH_GUIDE_CURRENT)}'>"
+        f"{esc(GOLDFISH_GUIDE_ALL)}</button>"
+        f"<button type='button' class='btn small' data-guide='hide'>{esc(GOLDFISH_GUIDE_HIDE)}</button>"
+        "</span></div>"
         f"<p class='muted small'>{esc(GOLDFISH_GUIDE_INTRO)}</p>"
-        f"<ol class='gf-steps'>{steps}</ol>"
+        f"<ol class='gf-steps' id='gf-steps'>{steps}</ol>"
         "</section>"
     )
 
@@ -1786,7 +1794,12 @@ GOLDFISH_CSS = """
 .gf-steps li[aria-current=step] .gf-step-n{background:var(--orange);color:var(--on-orange)}
 .gf-steps li.done{color:var(--text-muted)}
 /* phones: only the step the game is at, so the hand stays near the top */
-@media (max-width:600px){ .gf-steps:has(li[aria-current=step]) li:not([aria-current=step]){display:none} }
+.gf-guide-btns{display:flex;flex-wrap:wrap;gap:.4rem}
+.gf-allsteps{display:none}
+@media (max-width:600px){
+  .gf-allsteps{display:inline-flex}
+  .gf-steps:not(.all):has(li[aria-current=step]) li:not([aria-current=step]){display:none}
+}
 """
 
 # Track C's own deck page styles (S3): DECK_CSS ends with this, so C's rules for its parts of the

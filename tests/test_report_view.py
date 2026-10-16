@@ -270,9 +270,12 @@ def test_no_causal_claim_and_one_coverage_figure() -> None:
     and out of scope: 98 - 32 - 17 = 49), for Commander games only (60-card decks hold copies)."""
     html = rv.report_body_html(report())
     assert "underperforms" not in html and "says nothing about how the card does" in html
-    assert "Modeled: 49 of 98 cards (50% of the deck); the rest are listed below." in html
+    assert (
+        "Played with their effect: 49 of 98 cards (50% of the deck). Modeled or set aside on purpose: 66 "
+        "(67%). The rest are listed below." in html
+    )
     md = rv.report_markdown(report())
-    assert "underperforms" not in md and "Modeled: 49 of 98 cards (50% of the deck)" in md
+    assert "underperforms" not in md and "Played with their effect: 49 of 98 cards (50% of the deck)" in md
     g = rv.parse_goldfish({"ok": True, "text": GOLDFISH})
     assert (
         rv.coverage({**g, "format": "constructed"}) is None and rv.coverage({**g, "deck_size": None}) is None
@@ -316,7 +319,7 @@ def test_copies_and_sixty_card_coverage_come_from_the_kept_quantities() -> None:
     assert first["copies"] == 3 and g["honesty"]["unrecognized"][1]["copies"] is None
     assert f"<li>3× {rv.front_face(name)}" in rv.honesty_html(g)
     # 98 cards less 34 copies played without their effect (32 cards, one of them 3 times) less 17 = 47
-    assert rv.coverage(g) == {"modeled": 47, "deck_size": 98, "pct": 48}
+    assert rv.coverage(g) == {"modeled": 47, "deck_size": 98, "pct": 48, "known": 64, "known_pct": 65}
     con = {**g, "format": "constructed", "deck_size": 60}
     assert rv.coverage({**con, "quantities": {}}) is None
     assert rv.coverage(con)["deck_size"] == 60

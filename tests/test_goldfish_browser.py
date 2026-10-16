@@ -272,9 +272,23 @@ def test_goldfish_guide_walks_a_first_game_and_can_be_hidden(server: Server, wid
         guide = page.locator("#gf-guide")
         assert guide.is_visible() and page.locator("[data-guide=show]").is_hidden()
         assert guide.locator("li").count() == 6
-        # phones show only the step the game is at; wider screens all six
+        # phones show the step the game is at, and open all six on request (Q138 item 8); wider
+        # screens show all six and no such button
         assert guide.locator("li:visible").count() == (1 if width <= 600 else 6)
         assert _current_step(page) == "hand"
+        all_btn = guide.locator(".gf-allsteps")
+        if width <= 600:
+            assert all_btn.is_visible() and all_btn.get_attribute("aria-expanded") == "false"
+            all_btn.click()
+            assert guide.locator("li:visible").count() == 6
+            assert all_btn.inner_text() == "Show the current step only"
+            assert all_btn.get_attribute("aria-expanded") == "true"
+            assert _overflow(page) == 0
+            _shot(page, f"goldfish-guide-all-{width}-{scheme}")
+            all_btn.click()
+            assert guide.locator("li:visible").count() == 1 and all_btn.inner_text() == "Show all steps"
+        else:
+            assert all_btn.is_hidden()
         worst, what = page.evaluate(GUIDE_CONTRAST)
         assert worst >= 4.5, (worst, what)
         assert _overflow(page) == 0

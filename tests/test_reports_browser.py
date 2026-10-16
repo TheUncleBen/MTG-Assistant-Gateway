@@ -491,3 +491,88 @@ def test_reports_page_fits_and_reads(server: Server, width: int, scheme: str) ->
         assert page.locator(".rp-row").count() == 1 and "deck_id=43" in page.url
         assert not errors, errors
         browser.close()
+
+
+@pytest.mark.parametrize("width", [320, 717, 1366])
+@pytest.mark.parametrize("scheme", ["light", "dark"])
+def test_saved_descriptions_and_remove_fit_and_read(server: Server, width: int, scheme: str) -> None:
+    """Q138 items 4 and 6: a report's saved card descriptions, with Remove on the member's own,
+    and both recognition figures: no sideways scroll, 4.5:1 text, a 44px Remove target; Remove
+    takes the description away and says so."""
+    import json
+    import os
+
+    from playwright.sync_api import sync_playwright
+
+    from mtg_gateway.card_models import KeptModels
+
+    from .test_card_models import _Store
+    from .test_editor_leave_browser import CONTRAST
+
+    exe = _chromium_path()
+    if exe == "missing":
+        pytest.skip("no Chromium available for Playwright")
+    sid = server.sign_in_and_link()
+    store = _Store()
+    reports = server.app.state.gateway.reports
+    reports.models = KeptModels(store)
+    store_report(server.db, "user-1", "rep_kept")
+    used = [
+        {"name": "Sol Ring", "model": "abc123abc123", "yours": True, "changed_at": 1_790_000_000},
+        {
+            "name": "An Unusually Long Card Name, the Wanderer of the Endless Plains",
+            "model": "def456def456",
+            "yours": False,
+            "changed_at": 1_790_000_000,
+        },
+    ]
+    row = server.db._one("SELECT goldfish_json FROM reports WHERE id = 'rep_kept'", ())
+    goldfish = {**json.loads(row["goldfish_json"]), "kept_models": used}
+    with server.db.tx() as c:
+        c.execute("UPDATE reports SET goldfish_json = ? WHERE id = 'rep_kept'", (json.dumps(goldfish),))
+    store.put_card_model("sol ring", "Sol Ring", json.dumps({"name": "Sol Ring", "inert": True}), "user-1", 1)
+    shots = os.environ.get("MTG_SHOTS")
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+        ctx = browser.new_context(viewport={"width": width, "height": 900}, color_scheme=scheme)
+        ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
+        page = ctx.new_page()
+        errors: list[str] = []
+        page.on("pageerror", lambda e: errors.append(str(e)))
+        page.goto(f"{server.base}/history/reports/rep_kept", wait_until="networkidle")
+        kept = page.locator(".report .kept")
+        kept.scroll_into_view_if_needed()
+        if shots:
+            kept.screenshot(path=f"{shots}/report-saved-{width}-{scheme}.png")
+            page.locator(".report .coverage").screenshot(path=f"{shots}/report-coverage-{width}-{scheme}.png")
+        state = page.evaluate(
+            """(contrast) => {
+              const ratio = eval(contrast);
+              const box = document.querySelector('.report .kept');
+              const texts = Array.from(box.querySelectorAll('*'))
+                .filter(e => Array.from(e.childNodes).some(n => n.nodeType === 3 && n.textContent.trim()))
+                .filter(e => e.getClientRects().length && !e.closest('.sr-only'));
+              return {
+                scrollWidth: document.documentElement.scrollWidth,
+                innerWidth: window.innerWidth,
+                right: Math.max(...Array.from(box.querySelectorAll('*'))
+                  .map(e => e.getBoundingClientRect().right)),
+                low: texts.map(e => [e.textContent.trim().slice(0, 30), ratio(e)]).filter(([, r]) => r < 4.5),
+                buttons: Array.from(box.querySelectorAll('button')).map(b => b.getBoundingClientRect().height),
+              };
+            }""",
+            CONTRAST,
+        )
+        assert state["scrollWidth"] <= state["innerWidth"], state
+        assert state["right"] <= state["innerWidth"] + 0.5, state
+        assert not state["low"], state["low"]
+        assert len(state["buttons"]) == 1 and state["buttons"][0] >= 44, state["buttons"]
+        coverage = page.locator(".report .coverage").inner_text()
+        assert "Played with their effect:" in coverage and "Modeled or set aside on purpose:" in coverage
+        page.get_by_role("button", name="Remove the saved description of Sol Ring").click()
+        page.wait_for_load_state("networkidle")
+        assert "models=removed" in page.url and "sol ring" not in store.rows
+        assert "The saved description was removed." in page.locator("main").inner_text()
+        assert page.locator(".report .kept button").count() == 0
+        assert not errors, errors
+        browser.close()
