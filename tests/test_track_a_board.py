@@ -241,3 +241,31 @@ async def test_every_tool_that_changes_something_is_refused_to_a_read_only_token
         res = await call(h, reader, tool, args)
         assert res.get("isError") and "insufficient_scope" in json.dumps(res), (tool, res)
     assert h.db.get_proposal(p["proposal_id"], SUB)["version"] == 1
+
+
+async def test_approval_settings_changed_on_the_settings_page_apply_at_once(stack: Stack) -> None:
+    """Step 0's live settings: the approval values an admin stores on the Settings page reach the
+    next proposal, the account page and the mode without a restart."""
+    from .test_approval_modes import _set_mode
+
+    h = stack.h
+    token = await linked_user(stack)
+    await _set_mode(h, "auto")
+    decks = h.app.state.gateway.decks
+    two = [{"action": "add", "card_name": "Opt"}, {"action": "add", "card_name": "Swamp"}]
+    p = structured(await call(h, token, "propose_deck_changes", {"deck_id": "42", "changes": two}))
+    assert p["assistant_may_apply"] is True, p
+    decks.live.set("auto_big_edit_rows", 1, by="admin-test")  # O8: more than 1 row waits in auto
+    p = structured(await call(h, token, "get_proposal", {"proposal_id": p["proposal_id"]}))
+    assert p["assistant_may_apply"] is False and "changes 2 rows" in p["risk_reason"], p
+    decks.live.set("approval_mode_max", "semi", by="admin-test")  # the cap, read now
+    assert decks.mode_of(SUB) == "semi"
+    decks.live.set("auto_apply_max_rows", 1, by="admin-test")
+    p = structured(await call(h, token, "get_proposal", {"proposal_id": p["proposal_id"]}))
+    assert p["approval_mode"] == "semi" and p["risk"] == "high" and p["assistant_may_apply"] is False
+    # a member who has not chosen follows the default as it is now
+    assert h.db.set_approval_mode(SUB, None)
+    decks.live.set("approval_mode_default", "manual", by="admin-test")
+    assert decks.mode_of(SUB) == "manual"
+    decks.live.set("approval_mode_default", "semi", by="admin-test")
+    assert decks.mode_of(SUB) == "semi"

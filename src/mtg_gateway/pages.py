@@ -1033,21 +1033,21 @@ def _sweep_on(state: Any) -> bool:
 def _mode_card(state: Any, sub: str, csrf_in: str) -> str:
     """The member's approval mode (modes.py): three radio choices, the current one checked,
     choices above the gateway's cap shown disabled, and the plain cost of the auto modes."""
-    s = state.settings
+    live = state.decks.live  # the admin's Settings page values, read now (step 0)
     current = state.decks.mode_of(sub)
-    big = int(state.decks.live.get("auto_big_edit_rows"))  # O8, the admin's live setting
+    big = int(live.get("auto_big_edit_rows"))  # O8
+    rows = int(live.get("auto_apply_max_rows"))
     choices = []
     for mode in modes.MODES:
-        allowed = modes.rank(mode) <= modes.rank(s.approval_mode_max)
+        allowed = modes.rank(mode) <= modes.rank(str(live.get("approval_mode_max")))
         choices.append(
             f"<label class='check mode{'' if allowed else ' muted'}'>"
             f"<input type='radio' name='mode' value='{mode}'{' checked' if mode == current else ''}"
             f"{'' if allowed else ' disabled'}><span><strong>{html.escape(modes.MODE_LABELS[mode])}</strong>"
             f"<br><span class='small'>"
-            f"{html.escape(modes.mode_help(mode, max_rows=s.auto_apply_max_rows, big_rows=big))}"
+            f"{html.escape(modes.mode_help(mode, max_rows=rows, big_rows=big))}"
             f"{'' if allowed else ' (not allowed on this gateway)'}</span></span></label>"
         )
-    rows = s.auto_apply_max_rows
     return (
         "<div class='card'><h2>Approval mode</h2>"
         "<p>How much your assistant may change on Archidekt without asking you first. This is "

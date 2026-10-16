@@ -1937,8 +1937,8 @@ class DeckService:
         user = self.db.get_user(sub) or {}
         return modes.effective_mode(
             user.get("approval_mode"),
-            default=self.settings.approval_mode_default,
-            cap=self.settings.approval_mode_max,
+            default=str(self.live.get("approval_mode_default")),
+            cap=str(self.live.get("approval_mode_max")),
         )
 
     def mode_info(self, sub: str) -> dict[str, Any]:
@@ -1948,7 +1948,7 @@ class DeckService:
             "approval_mode_label": modes.MODE_LABELS[mode],
             "approval_mode_note": modes.mode_help(
                 mode,
-                max_rows=self.settings.auto_apply_max_rows,
+                max_rows=int(self.live.get("auto_apply_max_rows")),
                 big_rows=int(self.live.get("auto_big_edit_rows")),
             )
             + " Change it on the account page.",
@@ -2405,7 +2405,7 @@ class DeckService:
         every mode an assistant never applies a proposal another app changed after it was made
         (G5, K7) or one that is held (Q27j, K6)."""
         kind = row.get("kind", "edit")
-        risk, why = modes.risk_of(kind, row.get("rows"), max_rows=self.settings.auto_apply_max_rows)
+        risk, why = modes.risk_of(kind, row.get("rows"), max_rows=int(self.live.get("auto_apply_max_rows")))
         mode = self.mode_of(sub)
         creator, amender = row.get("created_by_client"), row.get("amended_by_client")
         if risk not in modes.MEMBER_ONLY and amender and amender != creator:
