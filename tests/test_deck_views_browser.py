@@ -996,8 +996,12 @@ def test_mana_value_grouping_restacks_at_once(server: Server, width: int, height
         assert cell.inner_text() == "3"
         # refused: back where it was
         server.ark.fail_card_writes = True
-        save("4")
-        assert "Cultivate" in page.evaluate(stacks)["4 mana value"]
+        held = _held(server)  # the refusal waits until the moved card is checked
+        try:
+            save("4")
+            assert "Cultivate" in page.evaluate(stacks)["4 mana value"]
+        finally:
+            held.set()
         assert _error(page).endswith("Cultivate is back to its own mana value.")
         assert "Cultivate" in page.evaluate(stacks)["3 mana value"] and cell.inner_text() == "3"
         # Clear puts it back under its printed mana value
