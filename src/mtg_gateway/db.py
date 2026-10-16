@@ -176,9 +176,6 @@ BUSY_TIMEOUT_MS = 5000
 MAX_PREFS_PER_ACCOUNT = 300
 MAX_PREF_BYTES = 4096
 MAX_PREF_NAME = 120
-# Proposal states that end a proposal without applying it. ``withdrawn`` and ``replaced`` (0.7.29,
-# the assistant board) can be brought back while unexpired; all are deleted after
-# CLOSED_PROPOSAL_RETENTION_SECONDS.
 # Earlier versions kept per waiting proposal (proposal_versions): past it an amend is refused, so an
 # app that keeps amending one note can't grow the database without bound (step 0 review, fix 3).
 MAX_PROPOSAL_VERSIONS = 50
@@ -188,6 +185,9 @@ class ProposalVersionsFull(Exception):
     """amend_proposal refused: the proposal already keeps MAX_PROPOSAL_VERSIONS earlier versions."""
 
 
+# Proposal states that end a proposal without applying it. ``withdrawn`` and ``replaced`` (0.7.29,
+# the assistant board) can be brought back while unexpired; all are deleted after
+# CLOSED_PROPOSAL_RETENTION_SECONDS.
 CLOSED_PROPOSAL_STATES = ("expired", "rejected", "failed", "withdrawn", "replaced")
 # Waiting statuses of a pending proposal (0.7.29 flexible approvals): None is plain waiting.
 PROPOSAL_STATUSES = ("updated", "needs_look", "held")
