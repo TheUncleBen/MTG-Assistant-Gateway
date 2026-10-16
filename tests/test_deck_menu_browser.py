@@ -258,11 +258,12 @@ def test_right_click_menu_and_quantity_plus_redraw_in_place(server: Server, widt
 def test_undo_of_a_remove_puts_back_printing_finish_tag_and_mana_value(server: Server) -> None:
     """Undo of a removal used to add the card back by name and category only, so a foil Cultivate
     with a color tag and a custom mana value came back as a plain one. The Undo now sends the
-    printing and finish with the add, and the tag and mana value after it."""
+    printing and finish with the add, and the tag and mana value after it; the companion and
+    "flipped by default" flags go with the add too."""
     from playwright.sync_api import sync_playwright
 
     row = next(c for c in server.ark.decks[42]["cards"] if c["card"]["oracleCard"]["name"] == "Cultivate")
-    row.update(modifier="Foil", label="Have,#37d67a", customCmc=5)
+    row.update(modifier="Foil", label="Have,#37d67a", customCmc=5, companion=True, flippedDefault=True)
     printing = (row["card"]["edition"]["editioncode"], row["card"]["collectorNumber"])
     _chromium()
     sid = server.sign_in_and_link()
@@ -293,6 +294,8 @@ def test_undo_of_a_remove_puts_back_printing_finish_tag_and_mana_value(server: S
                     "set_code": printing[0],
                     "collector_number": printing[1],
                     "finish": "foil",
+                    "companion": True,
+                    "flipped_default": True,
                 }
             ],
             [{"action": "set_label", "card_name": "Cultivate", "label": "Have", "color": "#37d67a"}],
@@ -303,7 +306,7 @@ def test_undo_of_a_remove_puts_back_printing_finish_tag_and_mana_value(server: S
         got = rows[0]
         assert (got["card"]["edition"]["editioncode"], got["card"]["collectorNumber"]) == printing
         assert got["modifier"] == "Foil" and got["label"] == "Have,#37d67a" and got["customCmc"] == 5, got
-        assert got["quantity"] == 1
+        assert got["quantity"] == 1 and got["companion"] is True and got["flippedDefault"] is True, got
         # and the page shows it as it was
         again = page.locator(".deckview .c[data-card='Cultivate']").first
         assert again.get_attribute("data-finish") == "Foil" and again.get_attribute("data-mv") == "5"

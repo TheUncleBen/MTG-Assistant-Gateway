@@ -967,6 +967,8 @@ class FakeArchidekt:
                         rel["label"] = e["modifications"]["label"]  # the colour tag, "Name,#rrggbb"
                     if "companion" in e["modifications"]:
                         rel["companion"] = bool(e["modifications"]["companion"])
+                    if "flippedDefault" in e["modifications"]:
+                        rel["flippedDefault"] = bool(e["modifications"]["flippedDefault"])
                     if "customCmc" in e["modifications"]:  # the deck's own mana value for the row
                         rel["customCmc"] = e["modifications"]["customCmc"]
             else:
@@ -980,6 +982,8 @@ class FakeArchidekt:
                         if self.add_rows_lose_finish
                         else e["modifications"].get("modifier", "Normal"),
                         "card": self.printing(self.add_rows_swap_printing.get(e["cardid"], e["cardid"])),
+                        "companion": bool(e["modifications"].get("companion")),
+                        "flippedDefault": bool(e["modifications"].get("flippedDefault")),
                     }
                 )
                 for cat in e.get("categories") or []:
