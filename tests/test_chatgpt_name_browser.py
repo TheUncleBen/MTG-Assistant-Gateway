@@ -104,13 +104,14 @@ def test_admin_warning_reads_everywhere(server: Server, width: int, theme: str) 
     with sync_playwright() as p:
         browser, page, errors = _page(p, server, sid, width, theme, exe)
         page.goto(f"{server.base}/admin", wait_until="networkidle")
-        note = page.locator(".notice.warn", has_text="MTG_CHATGPT_NAME")
+        note = page.locator(".notice.warn", has_text="Name in ChatGPT")
         assert note.count() == 1 and note.is_visible()
         assert note.inner_text() == (
             f"The ChatGPT connector name, “{LONG}”, is 85 characters; ChatGPT refuses a plugin file "
-            "whose name is over 80 characters. Set MTG_CHATGPT_NAME to a name of 80 characters or "
-            "fewer (see docs/DEPLOY.md)."
+            "whose name is over 80 characters. Set a name of 80 characters or fewer under “Name in "
+            "ChatGPT” on the Settings page."
         )
+        assert note.locator("a").get_attribute("href") == "/admin/settings#s-row-chatgpt_name"
         assert page.evaluate(CONTRAST, ".notice.warn") == []
         assert page.evaluate(MEASURE) == []
         _shot(page, note, f"admin-{width}-{theme}.png", pad=80)
@@ -167,7 +168,7 @@ def test_both_name_notices_read_together(tmp_path: Path, width: int, theme: str)
         with sync_playwright() as p:
             browser, page, errors = _page(p, s, sid, width, theme, exe)
             page.goto(f"{s.base}/admin", wait_until="networkidle")
-            w14 = page.locator(".notice.warn", has_text="Set MTG_CHATGPT_NAME")
+            w14 = page.locator(".notice.warn", has_text="Name in ChatGPT")
             dev = page.locator(".notice.warn", has_text="developer and author name")
             assert w14.count() == 1 and w14.is_visible() and dev.count() == 1 and dev.is_visible()
             assert dev.inner_text() == developer_name_warning(site)

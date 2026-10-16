@@ -252,13 +252,17 @@ async def test_watch_refusals_limits_and_unknown_cards(tmp_path: Path, idp: Fake
             assert r.status_code == 400 and "goes with a set code" in r.text
             assert (await _watch(b, name="Sol Ring")).status_code == 303
             r = await _watch(b, name="Command Tower")
-            assert r.status_code == 429 and "You watch 1 cards; this gateway keeps at most 1" in r.text
+            assert r.status_code == 429
+            said = "You watch 1 card; this gateway keeps at most 1 per member. Remove 1 to add another."
+            assert said in r.text
             # 0.7.29: the admin Settings page's limit applies at once, raised or lowered
             st.gw.live.set("watch_max_cards", 2, by="admin-1")
             assert (await _watch(b, name="Command Tower")).status_code == 303
             st.gw.live.set("watch_max_cards", 1, by="admin-1")
             r = await _watch(b, name="Cultivate")
-            assert r.status_code == 429 and "You watch 2 cards; this gateway keeps at most 1" in r.text
+            assert r.status_code == 429
+            said = "You watch 2 cards; this gateway keeps at most 1 per member. Remove 2 to add another."
+            assert said in r.text
             # no form token: refused
             r = await b.http.post("/watchlist", data={"action": "add_card", "name": "Opt"})
             assert r.status_code == 403
@@ -733,3 +737,22 @@ async def test_each_deck_value_names_its_price_source(stack: Stack, monkeypatch)
         assert "(Archidekt prices)</span>" in deck and "<span>Est cost (Archidekt)</span>" in deck
     finally:
         await b.aclose()
+
+
+@pytest.mark.parametrize(("watched", "remove"), [(["1"], "Remove 1"), (["1", "2", "3"], "Remove 3")])
+def test_the_deck_limit_says_how_many_to_remove(watched: list[str], remove: str) -> None:
+    """0.7.29 (W2): a lowered limit can leave a member several over, so the refusal counts them."""
+    from types import SimpleNamespace
+
+    from mtg_gateway.decks import DeckError
+
+    svc = object.__new__(prices.PriceService)
+    svc.settings, svc.decks = SimpleNamespace(watch_max_decks=1), SimpleNamespace()
+    svc._rows = lambda sql, args: [{"deck_id": d} for d in watched]
+    with pytest.raises(DeckError) as refused:
+        svc._check_deck_limit("user-1", "99")
+    noun = "deck" if len(watched) == 1 else "decks"
+    assert str(refused.value) == (
+        f"You watch {len(watched)} {noun}; this gateway keeps at most 1 per member. {remove} to add another."
+    )
+    svc._check_deck_limit("user-1", "1")  # a deck already watched is never refused

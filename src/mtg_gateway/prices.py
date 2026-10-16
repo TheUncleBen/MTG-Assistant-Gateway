@@ -32,6 +32,7 @@ from typing import TYPE_CHECKING, Any
 
 from .decklist import clean_text
 from .decks import DeckError, _clean_deck_id
+from .theme import plural
 
 if TYPE_CHECKING:
     from .config import Settings
@@ -355,8 +356,8 @@ class PriceService:
                     # watches are kept), so the message names both numbers.
                     raise DeckError(
                         "rate_limited",
-                        f"You watch {count} cards; this gateway keeps at most {most} per member. "
-                        "Remove some first.",
+                        f"You watch {plural(count, 'card')}; this gateway keeps at most {most} per member. "
+                        f"Remove {count - most + 1} to add another.",
                     )
                 wid = "w_" + secrets.token_urlsafe(9)
                 stored = c.execute(
@@ -425,8 +426,8 @@ class PriceService:
         if str(deck_id) not in {str(d) for d in have} and len(have) >= most:
             raise DeckError(
                 "rate_limited",
-                f"You watch {len(have)} decks; this gateway keeps at most {most} per member. "
-                "Remove one first.",
+                f"You watch {plural(len(have), 'deck')}; this gateway keeps at most {most} per member. "
+                f"Remove {len(have) - most + 1} to add another.",
             )
 
     async def watch_deck(self, sub: str, deck_ref: str) -> dict[str, Any]:

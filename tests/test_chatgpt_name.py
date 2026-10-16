@@ -42,8 +42,8 @@ def _install_warning(name: str) -> str:
 def _admin_warning(name: str) -> str:
     return (
         f"The ChatGPT connector name, “{name}”, is {len(name)} characters; ChatGPT refuses a plugin file "
-        "whose name is over 80 characters. Set MTG_CHATGPT_NAME to a name of 80 characters or fewer "
-        "(see docs/DEPLOY.md)."
+        "whose name is over 80 characters. Set a name of 80 characters or fewer under “Name in ChatGPT” "
+        "on the Settings page."
     )
 
 
@@ -310,9 +310,11 @@ async def test_admin_warns_about_a_long_chatgpt_name(
             await b.aclose()
     assert r.status_code == 200
     if shown is None:
-        assert "MTG_CHATGPT_NAME" not in r.text
+        assert "ChatGPT connector name" not in r.text
     else:
-        assert f"<div class='notice warn'>{html.escape(_admin_warning(shown))}</div>" in r.text
+        said = _admin_warning(shown).removesuffix("Settings page.")
+        link = "<a href='/admin/settings#s-row-chatgpt_name'>Settings page</a>.</div>"
+        assert f"<div class='notice warn'>{html.escape(said)}{link}" in r.text
         assert '<b>"Deck"' not in r.text
 
 
