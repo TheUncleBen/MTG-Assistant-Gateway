@@ -42,7 +42,8 @@ def _install_warning(name: str) -> str:
 def _admin_warning(name: str) -> str:
     return (
         f"The ChatGPT connector name, “{name}”, is {len(name)} characters; ChatGPT refuses a plugin file "
-        "whose name is over 80 characters. Set a shorter MTG_CHATGPT_NAME (see docs/DEPLOY.md)."
+        "whose name is over 80 characters. Set MTG_CHATGPT_NAME to a name of 80 characters or fewer "
+        "(see docs/DEPLOY.md)."
     )
 
 

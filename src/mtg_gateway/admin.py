@@ -428,8 +428,8 @@ def _chatgpt_name_warning(settings: Any) -> str:
         return ""
     text = (
         f"The ChatGPT connector name, “{long[0]}”, is {long[1]} characters; ChatGPT refuses a plugin "
-        f"file whose name is over {CHATGPT_NAME_MAX} characters. Set a shorter MTG_CHATGPT_NAME (see "
-        "docs/DEPLOY.md)."
+        f"file whose name is over {CHATGPT_NAME_MAX} characters. Set MTG_CHATGPT_NAME to a name of "
+        f"{CHATGPT_NAME_MAX} characters or fewer (see docs/DEPLOY.md)."
     )
     return f"<div class='notice warn'>{html.escape(text)}</div>"
 

@@ -41,8 +41,8 @@ so going back to 0.7.27 is a plain image swap. The Android app is unchanged.
 - `MTG_CHATGPT_NAME` (optional) gives the ChatGPT connector its own name: the name in the ChatGPT
   plugin file and the name the ChatGPT install steps tell people to type. Empty keeps
   `MTG_SERVER_NAME`. Per OpenAI's plugin docs, ChatGPT refuses a plugin file whose name is over
-  80 characters, so a longer name is warned about in the log, on the admin page and on the install
-  page's plugin-file step; the gateway still starts.
+  80 characters, so the gateway warns about a longer name in the log, on the admin page and on
+  the install page's plugin-file step, and still starts.
 
 ### Changed
 - The collection CSV export writes condition and language in Archidekt's own codes (D for
