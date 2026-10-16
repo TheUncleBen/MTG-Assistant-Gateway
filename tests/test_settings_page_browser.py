@@ -140,7 +140,7 @@ CHOICES_WHOLE = """
     [(344, ""), (360, ""), (1280, ""), (360, "root"), (673, "root"), (360, "text"), (673, "text")],
 )
 def test_review_round_1_settings_details(server: Server, width: int, zoom: str) -> None:
-    """Review round 1: a locked setting's variable name stays on one line (finding 4), the approval
+    """Review round 1: a locked setting's variable name never breaks mid-word (finding 4), the approval
     modes show their whole names at any width and text size (9), a refused value doesn't paint the
     tick box red (9), and Back to default keeps the section's other unsaved values (6)."""
     from playwright.sync_api import sync_playwright
@@ -154,11 +154,8 @@ def test_review_round_1_settings_details(server: Server, width: int, zoom: str) 
             page.evaluate(ROOT_200 if zoom == "root" else TEXT_200)
         code = page.locator("#s-forge_games code")
         assert code.inner_text() == "MTG_FORGE_GAMES"
-        # one line: a single box no taller than two of its own letters
-        assert code.evaluate(
-            "c => c.getClientRects().length === 1"
-            " && c.getBoundingClientRect().height < 2 * parseFloat(getComputedStyle(c).fontSize)"
-        )
+        # it breaks only after an underscore, never mid-word (round 2 made this the rule at any size)
+        assert page.evaluate(MIDWORD_BREAKS) == []
         modes = page.locator("#s-row-approval_mode_max .set-choices label")
         assert modes.all_inner_texts() == [
             "Ask me every time",

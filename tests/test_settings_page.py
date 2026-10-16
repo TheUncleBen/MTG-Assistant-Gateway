@@ -72,7 +72,7 @@ async def test_the_page_lists_every_setting_and_locks_the_deployments(gw: Harnes
             assert f"id='s-row-{key}'" in r.text, key
             assert settings_page.label(key) in page, key
         forge = r.text.split("id='s-row-forge_games'", 1)[1].split("id='s-row-", 1)[0]
-        assert "Set in your stack" in forge and "<code>MTG_FORGE_GAMES</code>" in forge
+        assert "Set in your stack" in forge and "<code>MTG_<wbr>FORGE_<wbr>GAMES</code>" in forge
         assert "disabled" in forge and "value='12'" in forge and "Back to default" not in forge
         # the scan thresholds start folded away; the others are open
         assert "<details><summary>Card scanning (advanced)</summary>" in r.text
