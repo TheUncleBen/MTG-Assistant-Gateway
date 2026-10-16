@@ -729,8 +729,9 @@ def _copies(cards: list[dict[str, Any]]) -> int:
 
 
 def coverage(g: dict[str, Any]) -> dict[str, Any] | None:
-    """One figure for how much of the deck the simulator modeled: the deck's cards less those it
-    played without their effect and those out of its scope, counted in copies. The honesty report
+    """How much of the deck the simulator modeled, counted in copies: ``modeled``, the deck's cards
+    less those it played without their effect and those out of its scope (set aside on purpose),
+    and ``known``, those less only the ones played without their effect (Q138 item 6). The honesty report
     names each card once; the copies come from the quantities kept with the run (0.7.30, A30). A
     60-card game stored before that has several copies per card and no quantities, so no figure."""
     h = g.get("honesty") or {}
@@ -739,21 +740,27 @@ def coverage(g: dict[str, Any]) -> dict[str, Any] | None:
         return None
     if g.get("format") == "constructed" and not g.get("quantities"):
         return None
-    listed = [
-        *(h.get("unrecognized") or []),
-        *(c for grp in h.get("out_of_scope") or [] for c in grp["cards"]),
-    ]
-    modeled = max(0, size - _copies(listed))
-    return {"modeled": modeled, "deck_size": size, "pct": round(100 * modeled / size)}
+    blanks = _copies(h.get("unrecognized") or [])
+    aside = _copies([c for grp in h.get("out_of_scope") or [] for c in grp["cards"]])
+    modeled = max(0, size - blanks - aside)
+    known = max(0, size - blanks)
+    return {
+        "modeled": modeled,
+        "deck_size": size,
+        "pct": round(100 * modeled / size),
+        "known": known,
+        "known_pct": round(100 * known / size),
+    }
 
 
 def coverage_text(g: dict[str, Any]) -> str:
     c = coverage(g)
     if c is None:
         return ""
+    # Q138 item 6: both figures, as scripts/measure_recognition.py prints them
     return (
-        f"Modeled: {c['modeled']} of {c['deck_size']} cards ({c['pct']}% of the deck); the rest are "
-        "listed below."
+        f"Played with their effect: {c['modeled']} of {c['deck_size']} cards ({c['pct']}% of the deck). "
+        f"Modeled or set aside on purpose: {c['known']} ({c['known_pct']}%). The rest are listed below."
     )
 
 
@@ -793,11 +800,46 @@ def _kept_who(u: dict[str, Any]) -> str:
     return f"{who}, last changed {when}" if when else who
 
 
-def kept_models_html(used: list[dict[str, Any]]) -> str:
+REMOVE_MODEL_LABEL = "Remove"
+# What the report page says after a Remove (?models=…)
+MODEL_NOTICES = {
+    "removed": "The saved description was removed. Later solo tests play that card without its effect "
+    "again, until a new description is saved.",
+    "gone": "That saved description was already removed, or another member's replaced it.",
+}
+
+
+def _remove_form(u: dict[str, Any], csrf: str, report_id: str) -> str:
+    """The adder's Remove button for a saved description (Q138 item 4)."""
+    card = front_face(u["name"])
+    return (
+        f"<form method='post' action='/history/reports/{_esc(report_id)}/models/remove' class='inline'>"
+        f"<input type='hidden' name='csrf' value='{_esc(csrf)}'>"
+        f"<input type='hidden' name='card' value='{_esc(u['name'])}'>"
+        f"<button type='submit' class='btn small' aria-label='Remove the saved description of {_esc(card)}'>"
+        f"{REMOVE_MODEL_LABEL}</button></form>"
+    )
+
+
+def kept_models_html(
+    used: list[dict[str, Any]],
+    *,
+    removable: frozenset[str] = frozenset(),
+    csrf: str = "",
+    report_id: str = "",
+) -> str:
+    """The saved descriptions this run played. ``removable`` holds the cards (front face, case
+    aside) whose saved description is now the member's own: those get a Remove button."""
     if not used:
         return ""
     items = "".join(
-        f"<li>{_esc(front_face(u['name']))} <i>{_esc(_kept_who(u))}</i></li>"
+        f"<li>{_esc(front_face(u['name']))} <i>{_esc(_kept_who(u))}</i>"
+        + (
+            " " + _remove_form(u, csrf, report_id)
+            if csrf and report_id and front_face(u["name"]).casefold() in removable
+            else ""
+        )
+        + "</li>"
         for u in sorted(used, key=lambda u: u["name"].casefold())
     )
     return (
@@ -1381,6 +1423,8 @@ def report_body_html(
     actions_html: str = "",
     reused: bool = False,
     standalone: bool = False,
+    removable: frozenset[str] = frozenset(),
+    csrf: str = "",
 ) -> str:
     """The report page's body. ``stats_html`` is the deck statistics strip (companion.stats_strip)
     and ``actions_html`` the export buttons row; ``standalone`` leaves out everything that needs
@@ -1463,7 +1507,9 @@ def report_body_html(
             + (f"<div class='tiles wide'>{tiles}</div>" if tiles else "")
             + (f"<div class='charts'>{charts}</div>" if charts else "")
             + s["triggers"]
-            + kept_models_html(kept_models(r))
+            + kept_models_html(
+                kept_models(r), removable=removable, csrf=csrf, report_id=str(r.get("report_id") or "")
+            )
             + summary
             + "</div>"
         )
@@ -1659,6 +1705,10 @@ REPORT_CSS = """
 @media (max-width:480px){ .report .approx{grid-template-columns:1fr} }
 .report .kept{margin:1rem 0 0;padding-top:.75rem;border-top:1px solid var(--border-soft)}
 .report .kept h3 small{font-weight:400;color:var(--text-muted);font-size:.86rem;margin-left:.4rem}
+.report .kept .names li{flex-wrap:wrap;align-items:center}
+.report .kept .names li i{white-space:normal}
+.report .kept .names form{margin:0}
+.report .kept .names button{min-height:44px}
 .report .vlines{margin:.25rem 0 0;padding-left:1.25rem}
 .report .vlines li{margin:.2rem 0;overflow-wrap:anywhere}
 .report .sumlines{margin:.5rem 0 0;padding-left:1.25rem}

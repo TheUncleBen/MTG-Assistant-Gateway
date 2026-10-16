@@ -219,6 +219,16 @@
       body: JSON.stringify({ hidden: hidden })
     }).catch(function () { /* offline: shown or hidden for this page only */ });
   }
+  // phones: the step the game is at, or all six (Q138 item 8)
+  var allBtn = $("#gf-guide .gf-allsteps"), stepList = $("#gf-steps");
+  if (allBtn && stepList) {
+    allBtn.addEventListener("click", function () {
+      var all = !stepList.classList.contains("all");
+      stepList.classList.toggle("all", all);
+      allBtn.setAttribute("aria-expanded", all ? "true" : "false");
+      allBtn.textContent = allBtn.getAttribute(all ? "data-current" : "data-all");
+    });
+  }
   $$("[data-guide]").forEach(function (b) {
     b.addEventListener("click", function () { setGuide(b.getAttribute("data-guide") === "hide"); });
   });

@@ -235,11 +235,24 @@ def add_history_routes(
             f"<textarea id='rep-md' class='sr-only' readonly aria-label='The report as Markdown'>{_esc(md)}"
             "</textarea>"
         )
-        body = report_body_html(
+        # the saved descriptions this run played that are still the member's own (Q138 item 4);
+        # imported here so the module's shared import block stays as it is (ownership table)
+        from .report_view import MODEL_NOTICES, front_face, kept_models
+
+        used = [u["name"] for u in kept_models(r)]
+        mine = frozenset(
+            front_face(str(k.get("name") or "")).casefold()
+            for k in reports.models.for_cards(used).values()
+            if k.get("added_by") == sub
+        )
+        notice = MODEL_NOTICES.get(request.query_params.get("models") or "", "")
+        body = (f"<p class='notice'>{notice}</p>" if notice else "") + report_body_html(
             r,
             stats_html=stats_strip(r.get("stats")),
             actions_html=actions,
             reused=request.query_params.get("reused") == "1",
+            removable=mine,
+            csrf=_csrf(s, sid) or "",
         )
         return page(
             f"Report: {r['deck_name']}",
@@ -250,6 +263,36 @@ def add_history_routes(
             current="/history",
             extra_scripts=("export.js", "forge-live.js"),
             extra_css=REPORT_CSS,
+        )
+
+    @server.custom_route("/history/reports/{rid}/models/remove", methods=["POST"], include_in_schema=False)
+    async def report_model_remove(request: Request) -> Response:
+        """The adder removes a saved card description from a report it played in (Q138 item 4).
+        Only the member's own goes; the report itself keeps its record of what it played."""
+        sub, sid = browser_session(state, request)
+        rid = request.path_params["rid"]
+        if not sub:
+            return login_redirect("/history")
+        data = await form(request)
+        if not check_csrf(sid, data):
+            return page(
+                "Report",
+                "<p class='notice error'>This form expired. Reload and try again.</p>",
+                sub=sub,
+                sid=sid,
+                status=403,
+            )
+        if _report_or_404(sub, rid) is None:
+            return page(
+                "Report",
+                "<div class='card'><p>No such report for your account.</p></div>",
+                sub=sub,
+                sid=sid,
+                status=404,
+            )
+        done = reports.models.remove(sub, str(data.get("card") or ""))
+        return RedirectResponse(
+            f"/history/reports/{_esc(rid)}?models={'removed' if done else 'gone'}", status_code=303
         )
 
     def _report_file(r: dict[str, Any], ext: str, body: str, media_type: str) -> Response:
