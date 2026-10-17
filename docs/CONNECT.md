@@ -244,8 +244,11 @@ each a card added or removed, or a new quantity, category, finish,
 printing, color tag or custom mana value, no more than 4 copies a row,
 never the commander; it also makes a private copy of a deck; a new deck,
 a restore, the deck's details and bigger edits still ask you) or *Full
-auto* (it applies the rest too, except a restore, a commander change, a new deck and an edit of more
-than 20 rows, which still wait for your press).
+auto* (it applies the rest too, except a restore, a commander change, a new deck, an edit of more
+than 20 rows, making a deck public or unlisted, and a description edit that keeps or removes bold
+text or links, which still wait for your press; so does a held change, a change waiting for
+another change first, one another app had a hand in, and one that another app's waiting change
+would replace).
 Actions on your Archidekt account (likes, votes, bookmarks, follows,
 comments, new folders and collaborator changes) and deleting a deck are
 never applied by an assistant: each one waits for your own press, in every mode, on the card in the chat or on its review page (deleting a deck: on the review page only). It is your own setting:
