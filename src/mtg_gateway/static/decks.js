@@ -25,7 +25,7 @@
   function fillToolbar(data) {
     var total = document.getElementById("decks-total");
     if (total && typeof data.total === "number") total.textContent = "Total decks: " + data.total;
-    if (total && data.total === null) total.hidden = true; // the list couldn't be read (Q64): no count
+    if (total && data.total === null) total.hidden = true; // the list couldn't be read: no count
   }
 
   boxes.forEach(function (box) {

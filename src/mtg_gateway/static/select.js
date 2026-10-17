@@ -1,4 +1,4 @@
-/* Themed dropdown lists for every single-value <select> (R-131): the browser's own pop-up list
+/* Themed dropdown lists for every single-value <select>: the browser's own pop-up list
    is replaced by the gateway's menu panel on every page, in the Android app's WebView too. The
    native select stays in the document (the form posts it, scripts read and set its value and
    "change" still fires) but is hidden off-screen; a button in its place shows the chosen label

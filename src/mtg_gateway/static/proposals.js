@@ -1,7 +1,7 @@
 // The waiting-changes lists (waiting_strip.py): the Proposals page and the deck page's strip.
 // The checked count goes on the bar's buttons ("Apply 3", "Reject 3"); the bar's buttons wait
 // until a row is checked; a deck's "all" box checks its rows; the deck strip opens by itself on a
-// wide screen (Q134 A2: one line on a phone). Without this script every form still works.
+// wide screen (one line on a phone). Without this script every form still works.
 (function () {
   "use strict";
   var forms = document.querySelectorAll("form.wform");
@@ -68,7 +68,7 @@
         update();
       });
     }
-    // Q141 item 8C: Reject asks first, in the bar ("Reject 3 changes?"); a rejected change can't
+    // Reject asks first, in the bar ("Reject 3 changes?"); a rejected change can't
     // be brought back from the page. Without this script the server asks on a page of its own.
     var reject = bar.querySelector("button[name=action][value=reject]");
     var asking = null;

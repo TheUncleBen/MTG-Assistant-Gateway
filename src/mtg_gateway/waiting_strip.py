@@ -180,7 +180,7 @@ form.guarded button[data-guard][aria-disabled=true]{opacity:1;background:transpa
   border:1px dashed currentColor;cursor:default}
 form.guarded button.primary[aria-disabled=true]{color:var(--orange-text)}
 form.guarded button.danger[aria-disabled=true]{color:var(--danger-text)}
-/* Reject's short confirm in the bar (Q141 item 8C); focus moves to its Reject by script */
+/* Reject's short confirm in the bar; focus moves to its Reject by script */
 .wbar .rejectask{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem;flex:1 1 100%}
 .wbar .rejectask span{flex:1 1 10rem;font-weight:700}
 .wbar .rejectask button{min-height:44px}

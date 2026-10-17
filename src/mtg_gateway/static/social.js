@@ -82,7 +82,7 @@
     if (likeBtn) {
       likeBtn.addEventListener("click", function () {
         var liked = likeBtn.getAttribute("data-state") === "1";
-        var down = likeBtn.getAttribute("data-state") === "2"; // Q141 item 5A: a down vote is taken back
+        var down = likeBtn.getAttribute("data-state") === "2"; // a down vote is taken back
         var ask = down ? "Remove your down vote?" : liked ? "Remove your like?" : "Like this deck on Archidekt?";
         confirmChip(likeBtn, ask, down ? "Remove vote" : liked ? "Remove" : "Like", function () {
           busy(likeBtn, true);
@@ -124,7 +124,7 @@
     var name = btn.getAttribute("data-name") || "this user";
     var holder = btn.closest(".social") || btn.parentNode;
     // one live note, there and empty from the start, so a screen reader announces what is set in
-    // it (a status note added already filled is often not read: proofread of WORDING-5, 15)
+    // it (a status note added already filled is often not read)
     var live = holder.querySelector(".note[role=status]");
     if (!live) {
       live = el("p", "note");
@@ -145,7 +145,7 @@
       var sp = btn.querySelector("span");
       if (sp) sp.textContent = (following ? "Following " : "Follow ") + name;
     };
-    var extra = null; // Q141 item 4A: an Unfollow beside Follow while the state is not known
+    var extra = null; // an Unfollow beside Follow while the state is not known
     var send = function (b, on) {
       b.disabled = true;
       socialRequest("POST", "/social/api/users/" + encodeURIComponent(user) + "/follow", { on: on }).then(function (d) {
@@ -163,7 +163,7 @@
       paint(d.following);
       if (d.unknown && !extra) {
         // the following list was read only in part, and they are not in that part: say so and
-        // offer both, rather than a Follow that may be wrong (wording draft, WORDING-4)
+        // offer both, rather than a Follow that may be wrong
         extra = el("button", btn.className.replace(/\bon\b/, "").trim(), "");
         extra.type = "button";
         extra.setAttribute("data-social", "unfollow");
@@ -291,7 +291,7 @@
           f.addEventListener("submit", function (ev) {
             ev.preventDefault();
             var text = ta.value.trim();
-            // one wording with the assistant's (Q141 item 7A, refusals.EMPTY_COMMENT)
+            // one wording with the assistant's (refusals.EMPTY_COMMENT)
             if (!text) { note.textContent = "The comment is empty: write it first."; ta.focus(); return; }
             note.textContent = "";
             // asked first, like every other write (social review, 0.7.29)
@@ -423,7 +423,7 @@
       e.preventDefault();
       var text = textarea.value.trim();
       if (!text) {
-        // one wording with the assistant's (Q141 item 7A, refusals.EMPTY_COMMENT)
+        // one wording with the assistant's (refusals.EMPTY_COMMENT)
         var was = $(".notice", form); if (was) was.remove();
         var empty = el("p", "notice error", "The comment is empty: write it first.");
         empty.setAttribute("role", "alert");
