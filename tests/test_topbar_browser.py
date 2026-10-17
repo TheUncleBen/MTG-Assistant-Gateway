@@ -701,7 +701,10 @@ def test_the_app_bar_keeps_its_own_spacing(chromium, server: Server, width: int)
         assert got["cut"] == (got["full"] > end - got["wordStart"] + 0.5), (name, got)
         if got["cut"]:
             assert abs(got["wordEnd"] - end) <= 0.5, (name, got)
-    assert seen[LONG_NAME]["cut"], seen[LONG_NAME]
+    # at 884 px the brand has about 400 px, about as wide as the long name itself (418 px in Inter,
+    # 374 px in serif), so whether it is cut there depends on the font; the check above covers it
+    if width < 800:
+        assert seen[LONG_NAME]["cut"], seen[LONG_NAME]
 
 
 # The Account page on a phone with 200% text, scripts on and off (a Track A review note on the
