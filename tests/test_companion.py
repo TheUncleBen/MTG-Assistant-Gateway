@@ -359,7 +359,7 @@ async def test_compare_press_starts_or_queues_both_decks_or_neither(stack: Stack
         assert (
             "You already have 1 Forge run playing and 1 report waiting for its games. Comparing two "
             "decks needs room for 2 more, and each member can have at most 2 reports waiting, so "
-            "nothing was started. Try again once one of them has finished."
+            "nothing was started. Try again when none of your reports is waiting for its games."
         ) in html.unescape(full.text)
         assert "href='/decks/42/compare?with=43'>Back to the comparison</a>" in full.text
         assert states() == ["running", "queued"]  # no report made for either deck
