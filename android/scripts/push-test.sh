@@ -13,7 +13,6 @@ set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/.." && pwd)"
 PKG="$(tr -d '[:space:]' < "$ROOT/app/application-id.txt")"
-SERVICE="$PKG/local.mtgassistantgateway.app.NotifyService"
 KEY="mtg-PushTestKeyAbCdEfGhIjK" # the app takes only mtg- and 22 letters, digits, - or _ (Push.isKey)
 printf %s "$KEY" | grep -Eqx "mtg-[A-Za-z0-9_-]{22}" || { echo "the test key is not one the app accepts"; exit 2; }
 PORT=8443
@@ -128,14 +127,18 @@ adb shell input keyevent KEYCODE_HOME
 adb install -r "$APK" >/dev/null
 adb shell pm grant "$PKG" android.permission.POST_NOTIFICATIONS
 adb shell dumpsys deviceidle whitelist "+$PKG" >/dev/null
-adb shell run-as "$PKG" sh -c "mkdir -p shared_prefs && cat > shared_prefs/mtgassistant.xml" <<XML
+# adb shell joins its arguments into one command line, so the device's sh -c gets one quoted string.
+adb shell "run-as $PKG sh -c 'mkdir -p shared_prefs && cat > shared_prefs/mtgassistant.xml'" <<XML
 <?xml version='1.0' encoding='utf-8' standalone='yes' ?>
 <map>
     <string name="gateway_origin">https://localhost:$PORT</string>
     <string name="push_key">$KEY</string>
 </map>
 XML
-adb shell am start-foreground-service -n "$SERVICE" >/dev/null
+adb shell run-as "$PKG" cat shared_prefs/mtgassistant.xml | grep -q push_key || echo "note: the member's key was not written"
+# The service isn't exported, so adb can't start it; opening the app starts it, as on a phone.
+adb shell am start -W -n "$PKG/local.mtgassistantgateway.app.MainActivity" >/dev/null; sleep 3
+adb shell input keyevent KEYCODE_HOME
 if until_ok connected 60; then result "connects with the key" ok; else result "connects with the key" no "no connection"; fi
 if until_ok 'shows "Always connected"' 30; then result "quiet Always connected notification" ok; else result "quiet Always connected notification" no "not in dumpsys"; fi
 shot 01-connected
