@@ -16,6 +16,7 @@ box, keeps the rail's current entry in step with the reader's position and shows
 from __future__ import annotations
 
 import html
+import re
 from typing import TYPE_CHECKING
 
 from starlette.requests import Request
@@ -91,11 +92,23 @@ details.gnav > summary::-webkit-details-marker{display:none}
 .guide .steps li::before{content:counter(step);flex:0 0 1.6rem;height:1.6rem;border-radius:50%;
   background:var(--orange);color:var(--on-orange);font-weight:900;display:inline-flex;align-items:center;
   justify-content:center;font-size:.9rem}
-.guide .tbl{overflow-x:auto;max-width:100%}
+.guide .tbl{overflow-x:auto;max-width:100%;container-type:inline-size}
 .guide table{border-collapse:collapse;width:100%;font-size:.95rem}
-.guide th,.guide td{text-align:left;vertical-align:top;padding:.4rem .5rem;overflow-wrap:anywhere;
+.guide th,.guide td{text-align:left;vertical-align:top;padding:.4rem .5rem;overflow-wrap:break-word;
   border-bottom:1px solid var(--border-soft)}
 .guide th{background:var(--surface-2);font-weight:700}
+/* Where four columns would squeeze to a word a line (a phone, or large text: the query is in em, so
+   it follows the text size), each row is a block and each cell sits under its column's name. The
+   roles keep it a table for screen readers; the names come from data-label, with no spoken text. */
+@container (max-width:40em){
+  .guide table,.guide tbody,.guide tr,.guide td{display:block;width:auto}
+  .guide thead{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);
+    white-space:nowrap}
+  .guide tbody tr{border-bottom:1px solid var(--border-soft);padding:.35rem 0}
+  .guide tbody td{border:0;padding:.15rem .5rem}
+  .guide td[data-label]::before{content:attr(data-label);content:attr(data-label) / "";display:block;
+    font-size:.85em;font-weight:700;color:var(--text-muted)}
+}
 .guide code,.guide kbd{font:inherit;font-size:.9em;background:var(--surface-2);border-radius:3px;
   padding:.05rem .3rem}
 .guide kbd{border:1px solid var(--border);font-weight:700;white-space:nowrap}
@@ -188,6 +201,34 @@ def _anchor(target: str, label: str) -> str:
 
 def _h4(hid: str, label: str) -> str:
     return f"<h4 id='{hid}'>{_esc(label)}{_anchor(hid, label)}</h4>"
+
+
+def _stackable(page: str) -> str:
+    """Each reference table's cells carry their column's name (``data-label``) for the stacked layout
+    on narrow screens or large text, and the table its roles, which ``display:block`` would drop."""
+
+    def one(m: re.Match[str]) -> str:
+        head, body = m.group(1), m.group(2)
+        names = [html.unescape(re.sub(r"<[^>]+>", "", h)) for h in re.findall(r"<th>(.*?)</th>", head, re.S)]
+        head = head.replace("<tr>", "<tr role='row'>").replace("<th>", "<th role='columnheader'>")
+
+        def row(r: re.Match[str]) -> str:
+            cells = iter(names)
+            return (
+                "<tr role='row'>"
+                + re.sub(
+                    r"<td>", lambda _c: f"<td role='cell' data-label='{_esc(next(cells, ''))}'>", r.group(1)
+                )
+                + "</tr>"
+            )
+
+        body = re.sub(r"<tr>(.*?)</tr>", row, body, flags=re.S)
+        return (
+            f"<table role='table'><thead role='rowgroup'>{head}</thead>"
+            f"<tbody role='rowgroup'>{body}</tbody></table>"
+        )
+
+    return re.sub(r"<table><thead>(.*?)</thead><tbody>(.*?)</tbody></table>", one, page, flags=re.S)
 
 
 def _nav(parts: list[tuple[str, str, str, str, list[tuple[str, str, str]]]]) -> str:
@@ -1179,12 +1220,14 @@ def guide_body(
             f"<h3 id='{sid}-h'>{icon(ic)}{_esc(label)}{_anchor(sid, label)}</h3>{bodies[sid]}</section>"
         )
 
-    main = "".join(
-        f"<section class='gpart' id='{pid}' aria-labelledby='{pid}-h'><header>"
-        f"<h2 id='{pid}-h'>{icon(ic)}{_esc(title)}{_anchor(pid, title)}</h2><p>{_esc(lead)}</p></header>"
-        + "".join(section(*s) for s in sections)
-        + "</section>"
-        for pid, ic, title, lead, sections in parts
+    main = _stackable(
+        "".join(
+            f"<section class='gpart' id='{pid}' aria-labelledby='{pid}-h'><header>"
+            f"<h2 id='{pid}-h'>{icon(ic)}{_esc(title)}{_anchor(pid, title)}</h2><p>{_esc(lead)}</p></header>"
+            + "".join(section(*s) for s in sections)
+            + "</section>"
+            for pid, ic, title, lead, sections in parts
+        )
     )
     search = (
         "<div class='gsearch' hidden><label for='guide-q'>Search the guide</label>"
