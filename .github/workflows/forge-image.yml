@@ -175,9 +175,11 @@ jobs:
             | tee -a "$GITHUB_STEP_SUMMARY"
 
   smoke-amd64:
-    # The same image built natively for amd64 (an x86 machine running Forge), started, checked and
-    # played once, so both published architectures are proven on every change. The heavier
-    # measurements stay on arm64.
+    # The same image built natively for amd64 (an x86 machine running Forge), with the same checks
+    # and games-at-once measurement as arm64, so both published architectures are proven on every
+    # change and the hardware choice has x86 figures too. The card-recognition figure is not
+    # repeated here: it runs Mystic Forge's Python on the runner, not the image, so it is the same
+    # on both.
     needs: [pin, claim]
     if: >-
       !cancelled() && needs.pin.result == 'success'
@@ -204,6 +206,8 @@ jobs:
           build-args: FORGE_URL=${{ needs.pin.outputs.url }}
       - name: Image size
         run: docker image ls forge:ci-amd64
+      - name: Service tests (offline)
+        run: python3 -m unittest discover -s docker/forge -p 'test_*.py' -v
       - name: Coverage gate (cards legal in at least one format)
         run: |
           set -o pipefail
@@ -212,6 +216,12 @@ jobs:
           head -1 coverage.txt >> "$GITHUB_STEP_SUMMARY"
       - name: Smoke test
         run: scripts/ci_smoke_forge.sh forge:ci-amd64
+      # The arm64 job's games-at-once measurement (numbers only, never a gate), on x86.
+      - name: Measure Forge games at once (numbers only)
+        if: github.event_name == 'pull_request' && env.MEASURE_PARALLEL == '1'
+        continue-on-error: true
+        timeout-minutes: 170
+        run: scripts/ci_measure_forge.sh forge:ci-amd64 15
 
   image:
     needs: [pin, smoke-arm64, smoke-amd64]
