@@ -173,7 +173,8 @@ def test_card_renders_and_approve_calls_confirm_with_the_code() -> None:
                 m["params"] == {"name": "get_proposal", "arguments": {"proposal_id": "p-1"}} for m in reads
             )
             assert _calls(page, "ui/notifications/size-changed"), "the card reports its size"
-            # Press Approve: one confirm_proposal call with the proposal id and the code.
+            # Press Approve: one confirm_proposal call with the proposal id, the code and the
+            # status the card shows (none here).
             approve.click()
             page.wait_for_function(
                 "() => window.log.some(m => m.params && m.params.name === 'confirm_proposal')",
@@ -183,7 +184,12 @@ def test_card_renders_and_approve_calls_confirm_with_the_code() -> None:
             assert len(calls) == 1
             assert calls[0]["params"] == {
                 "name": "confirm_proposal",
-                "arguments": {"proposal_id": "p-1", "approval": "code-123", "decision": "approve"},
+                "arguments": {
+                    "proposal_id": "p-1",
+                    "approval": "code-123",
+                    "decision": "approve",
+                    "shown_status": "",
+                },
             }
             card.locator("#status.ok").wait_for(timeout=5_000)
             assert "Applied" in card.locator("#status").inner_text()

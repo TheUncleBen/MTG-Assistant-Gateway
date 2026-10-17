@@ -40,6 +40,24 @@ from .schemas import (
 from .views import deck_out
 
 
+def _shown_map(shown: Any, ids: list[str]) -> dict[str, dict[str, Any]]:
+    """The statuses a card showed for the changes it applies, kept only for those changes and
+    only in the expected shape (anything else is dropped, as if the card sent none)."""
+    out: dict[str, dict[str, Any]] = {}
+    if not isinstance(shown, dict):
+        return out
+    for pid in ids:
+        one = shown.get(pid)
+        if not isinstance(one, dict):
+            continue
+        at = one.get("status_at")
+        out[pid] = {
+            "status": str(one.get("status") or "")[:20],
+            "status_at": at if isinstance(at, int) and not isinstance(at, bool) else None,
+        }
+    return out
+
+
 def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
     """Register the deck, proposal and snapshot tools."""
     _closed_at = h._closed_at
@@ -476,7 +494,11 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
         },
         meta=dict(CONFIRM_TOOL_META),
     )
-    async def confirm_waiting(proposal_ids: list[str], approval: str) -> CallToolResult:
+    async def confirm_waiting(
+        proposal_ids: list[str], approval: str, shown: dict[str, Any] | None = None
+    ) -> CallToolResult:
+        # shown: proposal id -> {"status", "status_at"} as the card showed them. A change held
+        # since is left out and reported as not sent, the rest are applied.
         try:
             sub = _sub()
             if not s.apply_in_chat:
@@ -485,7 +507,7 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
                     "This gateway doesn't apply changes from the chat card. Use the Proposals page.",
                 )
             ids = state.decks.check_set_approval(sub, proposal_ids, approval)
-            run = state.decks.apply_selection(sub, ids, via="app")
+            run = state.decks.apply_selection(sub, ids, via="app", shown=_shown_map(shown, ids))
             await state.decks.batches.wait(run["batch_id"], APPLY_WAIT_SECONDS)
             return _card_result(state.decks.selection_result(run), None)
         except DeckError as exc:
@@ -636,7 +658,16 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
         },
         meta=dict(CONFIRM_TOOL_META),
     )
-    async def confirm_proposal(proposal_id: str, approval: str, decision: str = "approve") -> CallToolResult:
+    async def confirm_proposal(
+        proposal_id: str,
+        approval: str,
+        decision: str = "approve",
+        shown_status: str | None = None,
+        shown_status_at: int | None = None,
+    ) -> CallToolResult:
+        # shown_status: the status the card showed ("" for none). A change held since is refused
+        # and nothing is sent, even when the card could not read the change again. shown_status_at:
+        # when that status was set, so a change held for a new cause since is refused too.
         try:
             sub = _sub()
             if not s.apply_in_chat:
@@ -657,9 +688,11 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
             state.decks.check_approval(sub, proposal_id, approval)
             if decision == "reject":
                 return _card_result({"ok": True, **state.decks.reject(sub, proposal_id, via="app")}, None)
-            return _card_result(
-                with_words_note({"ok": True, **(await state.decks.apply(sub, proposal_id, via="app"))}), None
+            shown = None if shown_status is None else str(shown_status)[:20]
+            applied = await state.decks.apply(
+                sub, proposal_id, via="app", shown_status=shown, shown_status_at=shown_status_at
             )
+            return _card_result(with_words_note({"ok": True, **applied}), None)
         except DeckError as exc:
             out = _tool_error(exc)
             if "state" not in out:

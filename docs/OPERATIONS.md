@@ -575,7 +575,15 @@ card and not to the model, and which needs a one-time code the gateway
 puts only in the tool result's `_meta` (handed to the card, kept out of the
 model's context). A call without the right code is refused and logged as
 `approval_refused`, with nothing sent; the code is tied to the proposal, the
-member and the app that proposed, and is spent by the apply. The gateway
+member and the app that proposed, and is spent by the apply. Approve also
+sends the status the card showed: a change held since (for example, the
+change it would replace was applied in the meantime) is refused with nothing
+sent, and the card shows the hold, even when the app does not let the card
+read the change again first. The waiting changes card's Approve, and Apply
+all on either card, send what they showed too. Approve refuses a change held
+since, as above. Apply all leaves it out, lists it as not sent with why it is
+held, and goes on with the rest. The review page refuses such a change too,
+and the Proposals page's Apply confirm leaves it out as Apply all does. The gateway
 cannot see who pressed; it relies on the app keeping the tool and the code
 away from the model, as the MCP Apps standard says. Set it to `false` and
 the card, the code and the tool disappear: members use the review page.
