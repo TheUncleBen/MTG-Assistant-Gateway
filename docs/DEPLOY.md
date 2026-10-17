@@ -624,8 +624,8 @@ default, and an install that leaves it off behaves exactly as before.
   95% intervals, not game by game. `MTG_FORGE_PARALLEL_GAMES` (default 1, or
   the admin Settings page) asks for that many groups at once, and `FORGE_MAX_PARALLEL` on the Forge
   service (default 1) is the most it allows, for all runs together: runs start in order, and a run
-  that uses fewer lets the next one play beside it (with 2 or more, a Compare's two decks play at
-  once). Each group is its own Java process with up to `FORGE_XMX` of memory. One four-player game has used up to about 930 MiB in the measurements so
+  that uses fewer lets the next one play beside it (with 2 or more, a Compare's second deck plays
+  beside the first when a place is still free for it). Each group is its own Java process with up to `FORGE_XMX` of memory. One four-player game has used up to about 930 MiB in the measurements so
   far, and two at once about 1780 MiB (simple test decks on a PC; real precons on a Pi are not
   measured yet). That is more than the default `FORGE_MEMORY_LIMIT` of 1536M, so raise
   `FORGE_MEMORY_LIMIT` before raising `FORGE_MAX_PARALLEL` above 1. `FORGE_GAME_SECONDS`
@@ -634,7 +634,7 @@ default, and an install that leaves it off behaves exactly as before.
   halves each Java start (measured 7 s to 3 s on a 4-CPU PC); `FORGE_LAZY_CARDS=0` makes it read
   them all at start again.
 - **More than one machine** (optional; one copy is the default): the gateway can use several
-  copies of the Forge service, for example a Pi and an x86 PC, each playing its own members' runs.
+  copies of the Forge service, for example a Pi and an x86 PC, each playing whole runs.
   `MTG_FORGE_URL` stays the same. The stack's Forge service uses `endpoint_mode: dnsrr`, so the
   gateway sees each copy's address; it starts each run on the copy with the most free places and
   keeps asking that copy about it. One run still plays on one copy, never split across machines.
@@ -643,8 +643,9 @@ default, and an install that leaves it off behaves exactly as before.
   `node.labels.mtg-forge == true`, add `max_replicas_per_node: 1` under `placement`, and set
   `FORGE_REPLICAS` to the number of labelled machines. ARM and x86 machines can be mixed (the
   image is built and tested for both). The CPU and memory limits apply to each copy, so size them
-  for the smallest machine, or run one Forge service per kind of machine. With Docker Compose,
-  `docker compose up --scale forge=2` gives two copies on one host.
+  for the smallest machine. With Docker Compose, `docker compose up --scale forge=2` gives two
+  copies on one host. The gateway's handling of several copies is so far tested only with a
+  stand-in, not yet on real machines or on a mix of ARM and x86.
 - **No upkeep:** the image carries Forge's card scripts, an index of Scryfall's alternative printed
   names, and the newest Commander precons as opponents, each with a bracket estimated from the game
   changers it holds (Scryfall's list, read once when CI builds the image). The gateway seats the
