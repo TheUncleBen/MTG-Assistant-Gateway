@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from mtg_gateway.config import MANAGED_SETTINGS
-from mtg_gateway.settings_page import label
+from mtg_gateway.settings_page import LINK_TEXT, label, link_text
 
 from .test_card_search_filters_browser import CONTRAST
 from .test_cardsearch_browser import SIZES, _chromium, _page
@@ -317,7 +317,10 @@ def test_a_setting_the_stack_sets_shows_greyed_out_and_cannot_be_changed(
         links = summary.locator("a")
         names = links.all_inner_texts()
         order = [k for k in MANAGED_SETTINGS if k in LOCKED]
-        assert names == [f"{label(k)} ({MANAGED_SETTINGS[k].env})" for k in order]
+        assert names == [f"{link_text(k)} ({MANAGED_SETTINGS[k].env})" for k in order]
+        assert names[order.index("deck_sync_minutes")].startswith(
+            "How often to check Archidekt for deck changes ("
+        )
         assert summary.evaluate("e => e.getBoundingClientRect().top") < page.locator(".set-nav").evaluate(
             "e => e.getBoundingClientRect().top"
         )
@@ -424,5 +427,55 @@ def test_a_locked_setting_shows_its_value_in_words_and_its_variable_whole(
             f"settings-locked-r2-modes-{width}-{theme}-{zoom or 'plain'}.png",
             page.locator("#g-approvals"),
         )
+        browser.close()
+    assert errors == []
+
+
+# The five settings whose row name only reads right beside its value box get a whole wording in
+# the summary box (SUMMARY-LINK-TEXTS-r3.md option a, R-216). The two longest are drawn here at
+# phone width and 200% text, where a link wraps inside its chip.
+WORDED = {
+    "deck_sync_minutes": 60,
+    "archidekt_cache_seconds": 120,
+    "archidekt_card_cache_seconds": 7200,
+    "scan_ambiguity_margin": 0.1,
+    "scan_art_gallery_idle_days": 90,
+}
+
+
+@pytest.fixture
+def worded_server(tmp_path: Path):
+    s = Server(tmp_path, admin_group="mtg-admins", env_set=frozenset(WORDED), **WORDED)
+    s.start()
+    try:
+        yield s
+    finally:
+        s.stop()
+
+
+@pytest.mark.parametrize(("width", "zoom"), [(344, "text"), (344, "root"), (1280, "")])
+def test_the_summary_box_says_the_whole_name_where_a_row_name_needs_its_value(
+    worded_server: Server, width: int, zoom: str
+) -> None:
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium()
+    sid = _admin(worded_server)
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, worded_server, sid, width, "light", exe)
+        page.goto(f"{worded_server.base}/admin/settings?open=scan", wait_until="networkidle")
+        if zoom:
+            page.evaluate(ROOT_200 if zoom == "root" else TEXT_200)
+        page.wait_for_timeout(30)
+        links = page.locator(".set-stack a")
+        order = [k for k in MANAGED_SETTINGS if k in WORDED]
+        assert links.all_inner_texts() == [f"{LINK_TEXT[k]} ({MANAGED_SETTINGS[k].env})" for k in order]
+        # the rows keep the names Ben approved
+        for k in order:
+            assert page.locator(f"#s-row-{k}").inner_text().startswith(label(k)), k
+        assert page.evaluate(MEASURE) == []
+        assert page.evaluate(MIDWORD_BREAKS) == []
+        assert page.evaluate(CONTRAST, TEXT) == []
+        _shot(page, f"settings-worded-{width}-{zoom or 'plain'}.png", page.locator(".set-stack"))
         browser.close()
     assert errors == []
