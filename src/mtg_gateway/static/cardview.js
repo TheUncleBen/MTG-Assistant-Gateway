@@ -101,7 +101,7 @@
   });
 
   function titleCase(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : ""; }
-  // a printing as every screen writes it (N15): "SLD 1074" (the pages' data-set) reads "SLD #1074"
+  // a printing as every screen writes it: "SLD 1074" (the pages' data-set) reads "SLD #1074"
   function printLabel(set) { return String(set || "").trim().replace(/^([A-Za-z0-9]{2,6}) +(\S+)$/, "$1 #$2"); }
   function faceBlock(face, isOnly) {
     var block = el("div", "face");

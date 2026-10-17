@@ -62,7 +62,7 @@ button.danger:disabled{color:var(--red)}
   function lowerFirst(t) { return t ? t.charAt(0).toLowerCase() + t.slice(1) : t; }
   // The waiting changes as a card (show_waiting_changes). Each of this app's own waiting
   // changes has Approve and Reject (confirm_proposal, with the per-proposal code in _meta);
-  // another app's has its review link only (O9). "Apply all N" applies this app's own together,
+  // another app's has its review link only. "Apply all N" applies this app's own together,
   // after a confirm that lists the order, each re-checked against the deck just before it is
   // sent (confirm_waiting, with the set's code); get_apply_result follows a long run. Undo is on
   // the result page, which needs the member's sign-in.

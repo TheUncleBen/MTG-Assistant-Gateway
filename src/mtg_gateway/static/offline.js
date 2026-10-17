@@ -8,7 +8,7 @@
 // One reload at most per page: once it starts, nothing else is checked. A check waits for the one
 // before it (each gives up after a few seconds), and none is made while the page is hidden. The
 // page's Try again link keeps working as before.
-// Review N11: a page that keeps failing while /healthz answers would be loaded again every few
+// A page that keeps failing while /healthz answers would be loaded again every few
 // seconds for good, so the automatic reloads of one address stop after TRIES in a row (counted in
 // this tab's session storage); the page then stays, with its Try again link. Any other way of
 // coming here (a link, Try again, a new address) starts the count afresh.

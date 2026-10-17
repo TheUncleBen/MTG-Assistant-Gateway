@@ -230,7 +230,7 @@ form.guarded button.danger[aria-disabled=true]{color:var(--danger-text)}
 .wstrip .sep{color:var(--text-muted)}
 .wstrip .wform{padding:0 .75rem .6rem}
 .wstrip .more{margin:.5rem 0 0}
-/* links a thumb taps on their own are 44 px tall (review round 1, finding 13) */
+/* links a thumb taps on their own are 44 px tall */
 .wstrip .more a,.dgroup h2 > a,.results li > a{display:inline-flex;align-items:center;min-height:44px}
 .order{margin:0 0 1rem;padding-left:1.4rem}
 .order li{margin:.3rem 0;overflow-wrap:break-word}
@@ -240,7 +240,7 @@ form.guarded button.danger[aria-disabled=true]{color:var(--danger-text)}
   .wbar:not(.inline){position:fixed;left:0;right:0;bottom:0;margin:0;border-radius:0;border-width:1px 0 0;
     padding:.5rem .75rem calc(.5rem + env(safe-area-inset-bottom))}
   /* the count and Clear on one row, Apply and Reject side by side on the next: two rows at
-     200% text too (review round 1, finding 8) */
+     200% text too */
   .wbar:not(.inline) .wtop{flex-basis:100%}
   .wbar button[name=action]{flex:1 1 0;min-width:0}
   .pick .by{flex-basis:100%;padding-left:1.85rem}

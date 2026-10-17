@@ -199,7 +199,7 @@
     var form = $("form.newcomment", commentsPanel);
     var textarea = form ? $("textarea", form) : null;
     var replyTo = form ? $(".replyto", form) : null;
-    var parentId = null, parentPage = 1;  // the comment replied to, and the thread page it is on (A29)
+    var parentId = null, parentPage = 1;  // the comment replied to, and the thread page it is on
     var me = null;  // the member's Archidekt user id, from the thread load; own comments get Edit and Delete
     var deckUrl = "/social/api/decks/" + encodeURIComponent(commentsPanel.getAttribute("data-deck")) + "/comments";
     var when = function (iso) {  // one date format across the site (feedback.js)
@@ -294,7 +294,7 @@
             // one wording with the assistant's (refusals.EMPTY_COMMENT)
             if (!text) { note.textContent = "The comment is empty: write it first."; ta.focus(); return; }
             note.textContent = "";
-            // asked first, like every other write (social review, 0.7.29)
+            // asked first, like every other write
             confirmChip(save, "Change your public comment on Archidekt?", "Change", function () {
               save.disabled = true; note.textContent = "Saving…";
               socialRequest("PATCH", deckUrl + "/" + encodeURIComponent(c.id), { text: text, page: pg }).then(function (d) {
@@ -380,7 +380,7 @@
         if (d.has_more) showMore(2);
       }).catch(function () { failed("The comments could not be loaded: no connection."); });
     };
-    // The next page of the thread, added under the comments already shown (A29: every page can be
+    // The next page of the thread, added under the comments already shown (every page can be
     // voted on and replied to, not only the first).
     var showMore = function (pg) {
       var wrap = el("p", "more-comments");
