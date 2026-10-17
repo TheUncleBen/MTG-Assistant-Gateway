@@ -60,6 +60,8 @@ def add_deck_tool_routes(
         first). Own decks only; the script does the work, the
         server hands it the deck, the categories and anything to prefill (a scan session or a
         Quick add name)."""
+        from . import refusals  # here, so this file's import block stays as the other tracks have it
+
         deck_id = request.path_params["deck_id"]
         sub, sid = browser_session(state, request)
         if not sub:
@@ -169,8 +171,9 @@ def add_deck_tool_routes(
             + (
                 ""
                 if s.writes_enabled
-                else "<p class='notice warn'>Deck writes are switched off on this gateway; "
-                "your changes are kept as a proposal to apply once they are on.</p>"
+                # Q141 item 7A: the writes-off line reads as everywhere else (wording draft, WORDING-4)
+                else f"<p class='notice warn'>{refusals.WRITES_OFF_STATE}; "
+                "your changes are kept as a proposal to apply once they are switched on.</p>"
             )
             + "</section>"
             "<div class='editbar' role='region' aria-label='Pending changes'>"
