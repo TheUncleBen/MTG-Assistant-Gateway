@@ -9,8 +9,9 @@ decks and connected apps:
 * ``semi``: the assistant may apply a *low-risk* proposal itself; anything high-risk waits for
   the member's press as in manual.
 * ``auto``: the assistant may apply every proposal itself, except the ones that always wait for
-  a card press (O7, O8; ``auto_waits``): restoring a snapshot, a commander change, a new deck, and
-  a big edit (more rows than the ``auto_big_edit_rows`` setting, 20 by default).
+  a card press (O7, O8; ``auto_waits``): restoring a snapshot, a commander change, a new deck, a
+  big edit (more rows than the ``auto_big_edit_rows`` setting, 20 by default), and (Q141 item 3B)
+  making a deck public or unlisted and a description edit that keeps formatting.
 
 In every mode an assistant never applies a proposal that is held (a proposal it depends on was
 rejected, withdrawn or failed, Q27j) or that another app changed after it was made (G5).
@@ -110,9 +111,10 @@ MEMBER_ONLY_TEXT = (
 def auto_waits_text(big_rows: int = DEFAULT_BIG_EDIT_ROWS) -> str:
     """What still waits for a press in auto mode (O7, O8), as one sentence."""
     return (
-        "Restoring a snapshot, a commander change, a new deck and an edit of more than "
-        f"{_rows(big_rows)} still wait for your press on the card, and so does a held change, a "
-        "change waiting for another change first, or one another app had a hand in."
+        "Restoring a snapshot, a commander change, a new deck, an edit of more than "
+        f"{_rows(big_rows)}, making a deck public or unlisted, and a description edit that keeps "
+        "its formatting still wait for your press, and so does a held change, a change waiting "
+        "for another change first, or one another app had a hand in."
     )
 
 
@@ -258,11 +260,17 @@ def _copies_moved(row: dict[str, Any]) -> int:
 
 
 def auto_waits(
-    kind: str, rows: list[dict[str, Any]] | None, *, big_rows: int = DEFAULT_BIG_EDIT_ROWS
+    kind: str,
+    rows: list[dict[str, Any]] | None,
+    *,
+    big_rows: int = DEFAULT_BIG_EDIT_ROWS,
+    changes: dict[str, Any] | None = None,
 ) -> str | None:
     """Why a proposal waits for the member's press even in auto mode (O7, O8), or None when auto
     applies it: a restore, a new deck, a commander change, or an edit (deck or collection, A7) of
-    more than ``big_rows`` rows. Deck details and clones apply in auto."""
+    more than ``big_rows`` rows; and of the deck's details (Q141 item 3B) making it public or
+    unlisted, and a description edit that keeps formatting (seen on its review page first,
+    Q137). Other details changes and clones apply in auto."""
     if kind == "restore":
         return "restores a snapshot"
     if kind == "create_deck":
@@ -275,7 +283,16 @@ def auto_waits(
         if len(rows) > big_rows:
             return f"changes {len(rows)} rows, more than the {big_rows} Full auto applies by itself"
         return None
-    if kind in ("details", "clone"):
+    if kind == "details":
+        wanted = changes if isinstance(changes, dict) else {}
+        if wanted.get("private") is False:
+            return "makes the deck public"
+        if wanted.get("unlisted") is True:
+            return "makes the deck unlisted"
+        if any(isinstance(r, dict) and r.get("after_doc") for r in rows or []):
+            return "keeps the description's formatting, which is seen on its review page first"
+        return None
+    if kind == "clone":
         return None
     return "is not a deck or collection change"
 

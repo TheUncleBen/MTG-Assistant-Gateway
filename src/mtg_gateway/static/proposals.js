@@ -68,6 +68,70 @@
         update();
       });
     }
+    // Q141 item 8C: Reject asks first, in the bar ("Reject 3 changes?"); a rejected change can't
+    // be brought back from the page. Without this script the server asks on a page of its own.
+    var reject = bar.querySelector("button[name=action][value=reject]");
+    var asking = null;
+    function stopAsking(back) {
+      if (!asking) return;
+      asking.remove();
+      asking = null;
+      for (var i = 0; i < acts.length; i++) acts[i].hidden = false;
+      update();
+      if (back && reject) reject.focus();
+    }
+    if (reject) {
+      reject.addEventListener("click", function (e) {
+        if (form.querySelector("input[name=sure]")) return;
+        e.preventDefault();
+        var n = 0, all = picks();
+        for (var i = 0; i < all.length; i++) if (all[i].checked) n++;
+        if (!n) return;
+        asking = document.createElement("div");
+        asking.className = "confirm rejectask";
+        asking.setAttribute("role", "group");
+        var q = document.createElement("span");
+        q.textContent = n === 1 ? "Reject this change?" : "Reject " + n + " changes?";
+        var yes = document.createElement("button");
+        yes.type = "button";
+        yes.className = "danger";
+        yes.textContent = "Reject " + n;
+        var no = document.createElement("button");
+        no.type = "button";
+        no.className = "btn";
+        no.textContent = "Cancel";
+        asking.appendChild(q);
+        asking.appendChild(yes);
+        asking.appendChild(no);
+        for (var j = 0; j < acts.length; j++) acts[j].hidden = true;
+        bar.appendChild(asking);
+        no.addEventListener("click", function () { stopAsking(true); });
+        asking.addEventListener("keydown", function (ev) { if (ev.key === "Escape") stopAsking(true); });
+        yes.addEventListener("click", function () {
+          var sure = document.createElement("input");
+          sure.type = "hidden";
+          sure.name = "sure";
+          sure.value = "1";
+          form.appendChild(sure);
+          var act = document.createElement("input");
+          act.type = "hidden";
+          act.name = "action";
+          act.value = "reject";
+          form.appendChild(act);
+          yes.disabled = true;
+          form.submit();
+        });
+        yes.focus();
+      });
+    }
+    // back from the next page (the browser's page cache): ask again next time
+    window.addEventListener("pageshow", function () {
+      var left = form.querySelectorAll("input[name=sure], input[type=hidden][name=action]");
+      for (var i = 0; i < left.length; i++) left[i].remove();
+      stopAsking(false);
+    });
+    // a change of the checked rows while asking: ask again for the new set
+    form.addEventListener("change", function () { stopAsking(false); });
     update();
   }
 })();

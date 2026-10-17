@@ -39,7 +39,7 @@ from urllib.parse import urlparse
 
 from cryptography.fernet import Fernet, InvalidToken
 
-from . import batch, board, formatting, modes
+from . import batch, board, formatting, modes, refusals
 from .approve import approval_code, approval_matches, approval_set_code
 from .archidekt import (
     FORMAT_IDS,
@@ -2473,16 +2473,22 @@ class DeckService:
             # it waits for the member's own press whatever the mode; its risk tier stays what it
             # is (proofread A2, finding 5), and press_reason says why
             return risk, why, mode, False
-        wait = modes.auto_waits(kind, row.get("rows"), big_rows=int(self.live.get("auto_big_edit_rows")))
+        wait = modes.auto_waits(
+            kind,
+            row.get("rows"),
+            big_rows=int(self.live.get("auto_big_edit_rows")),
+            changes=row.get("changes") if isinstance(row.get("changes"), dict) else None,
+        )
         if mode == "auto" and wait and risk not in modes.MEMBER_ONLY:
             why = wait  # what the assistant is told: why auto mode still waits for the user
         return risk, why, mode, modes.assistant_may_apply(mode, risk, auto_wait=wait)
 
     def press_reason(self, sub: str, row: dict[str, Any]) -> str | None:
-        """Why this waiting note needs the member's own press in every mode, or None. Safe
-        defaults pending Ben's cards (review round 1; the Q142 check): another app's change
-        taken in (G5, Q27m), a change that would replace this one, a hold (K6), and a first step
-        not applied (Q134 item 9, Q140 item 8 option A). The member may still press (A8)."""
+        """Why this waiting note needs the member's own press in every mode, or None: a hold (K6;
+        Q140 item 8 option A, Ben approved 10-17) and a first step not applied (Q134 item 9, the
+        same answer); and, safe defaults pending Ben's cards (review rounds 1 and 3, the Q142
+        check), another app's change taken in (G5, Q27m), a change that would replace this one,
+        and a replaced change applied on its own. The member may still press (A8)."""
         if row.get("state") != "pending":
             return None
         if row.get("status") == "held" and str(row.get("status_reason") or "").startswith("replaces:"):
@@ -3066,6 +3072,22 @@ class DeckService:
         # formatting is shown, the review page; the card asks the member to open it there
         return not formatting.keeps_formatting(row)
 
+    def rewritten_by_another_app(self, sub: str, row: dict[str, Any]) -> bool:
+        """Whether an app other than the one that made this note changed it, in any version
+        (Q141 item 1B: such a change is approved on its own, never in "Apply all")."""
+        if int(row.get("version") or 1) <= 1:
+            return False
+        maker = row.get("created_by_client")
+        apps = {row.get("amended_by_client")} | {
+            v.get("made_by_client") for v in self.db.proposal_versions(row["id"], sub)
+        }
+        return any(a and a != maker for a in apps)
+
+    def in_apply_all(self, sub: str, row: dict[str, Any]) -> bool:
+        """Whether a card's "Apply all" may include this note: one the card may approve, and not
+        rewritten by another app (Q141 item 1B)."""
+        return self.card_may_approve(row) and not self.rewritten_by_another_app(sub, row)
+
     def approval_for(self, sub: str, row: dict[str, Any], *, version: int | None = None) -> str:
         """The in-chat card's one-time code for a proposal (approve.py), bound to the proposal,
         its owner, the app that made it, its creation time and its version. A deck deletion has
@@ -3153,7 +3175,7 @@ class DeckService:
         client = current_client.get()
         rows = [self.db.get_proposal(pid, sub) for pid in ids]
         if not ids or any(
-            r is None or not client or r.get("created_by_client") != client or not self.card_may_approve(r)
+            r is None or not client or r.get("created_by_client") != client or not self.in_apply_all(sub, r)
             for r in rows
         ):
             self._audit("approval_refused", sub=sub, detail={"proposal_ids": ids[:20], "set": True})
@@ -3217,10 +3239,15 @@ class DeckService:
                     codes[row["id"]] = self.approval_for(sub, row)
             if codes:
                 meta[approve.APPROVALS_META_KEY] = codes
-            if len(codes) >= 2:
+            # Q141 item 1B: a change another app rewrote is approved on its own, not in Apply all
+            in_set = [
+                pid for pid in codes if self.in_apply_all(sub, self.db.get_proposal(pid, sub) or {"id": pid})
+            ]
+            data["left_out"] = len(codes) - len(in_set)
+            if len(in_set) >= 2:
                 meta[approve.APPROVAL_SET_META_KEY] = {
-                    "ids": list(codes),
-                    "code": self.set_approval_for(sub, list(codes)),
+                    "ids": in_set,
+                    "code": self.set_approval_for(sub, in_set),
                 }
         return data, meta
 
@@ -3261,11 +3288,7 @@ class DeckService:
         version the caller showed (G16, K3): the apply claims only that version, and a proposal
         amended since is refused with ``changed`` and nothing sent."""
         if not self.settings.writes_enabled:
-            raise DeckError(
-                "writes_disabled",
-                "Deck writes are switched off on this gateway (MTG_WRITES_ENABLED is false). "
-                "The proposal is kept for review; nothing was sent to Archidekt.",
-            )
+            raise DeckError("writes_disabled", refusals.WRITES_OFF_KEPT)  # Q141 item 7A
         row = self.db.get_proposal(proposal_id, sub)
         if row is None:
             raise DeckError("not_found", "No such proposal for your account.")
@@ -3404,7 +3427,7 @@ class DeckService:
         changes oldest first, each re-checked just before it is sent. Returns the run, whose
         ``state`` is "applying" until every change has been tried."""
         if not self.settings.writes_enabled:
-            raise DeckError("writes_disabled", "Deck writes are disabled on this gateway.")
+            raise DeckError("writes_disabled", refusals.WRITES_OFF_KEPT)  # Q141 item 7A
         the_plan = self.plan_selection(sub, proposal_ids, versions)
         if not the_plan["count"]:
             only = the_plan["skipped"][0] if len(the_plan["skipped"]) == 1 else {}
@@ -5222,11 +5245,7 @@ class DeckService:
         cover, tags, deck move and folder rename (0.7.26); likes, bookmarks, follows, comments and
         collaborators (social.py) and collection edits (collection.py) too."""
         if not self.settings.writes_enabled:
-            raise DeckError(
-                "writes_disabled",
-                "Archidekt writes are switched off on this gateway (MTG_WRITES_ENABLED is false); "
-                "nothing was sent to Archidekt.",
-            )
+            raise DeckError("writes_disabled", refusals.WRITES_OFF)  # Q141 item 7A
 
     async def delete_deck(
         self, sub: str, deck_id: str, typed_name: str, *, progress: dict[str, Any] | None = None

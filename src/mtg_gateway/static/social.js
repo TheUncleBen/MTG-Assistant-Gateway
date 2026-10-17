@@ -82,16 +82,18 @@
     if (likeBtn) {
       likeBtn.addEventListener("click", function () {
         var liked = likeBtn.getAttribute("data-state") === "1";
-        confirmChip(likeBtn, liked ? "Remove your like?" : "Like this deck on Archidekt?", liked ? "Remove" : "Like", function () {
+        var down = likeBtn.getAttribute("data-state") === "2"; // Q141 item 5A: a down vote is taken back
+        var ask = down ? "Remove your down vote?" : liked ? "Remove your like?" : "Like this deck on Archidekt?";
+        confirmChip(likeBtn, ask, down ? "Remove vote" : liked ? "Remove" : "Like", function () {
           busy(likeBtn, true);
-          socialRequest("POST", "/social/api/decks/" + encodeURIComponent(deck) + "/vote", { vote: liked ? "none" : "up" }).then(function (d) {
+          socialRequest("POST", "/social/api/decks/" + encodeURIComponent(deck) + "/vote", { vote: liked || down ? "none" : "up" }).then(function (d) {
             busy(likeBtn, false);
             if (!d.ok) { note(socialProblem(d)); return; }
             likeBtn.setAttribute("data-state", String(d.vote));
             likeBtn.classList.toggle("on", d.vote === 1);
             likeBtn.setAttribute("aria-pressed", d.vote === 1 ? "true" : "false");
             $(".n", likeBtn).textContent = d.points;
-            setLabel(likeBtn, d.vote === 1 ? "Liked" : "Like");
+            setLabel(likeBtn, d.vote === 1 ? "Liked" : d.vote === 2 ? "Voted down" : "Like");
             if (noteEl) noteEl.remove();
           }).catch(function () { busy(likeBtn, false); note("No connection; the like was not changed."); });
         });
@@ -135,21 +137,40 @@
       var sp = btn.querySelector("span");
       if (sp) sp.textContent = (following ? "Following " : "Follow ") + name;
     };
+    var extra = null; // Q141 item 4A: an Unfollow beside Follow while the state is not known
+    var send = function (b, on) {
+      b.disabled = true;
+      socialRequest("POST", "/social/api/users/" + encodeURIComponent(user) + "/follow", { on: on }).then(function (d) {
+        b.disabled = false;
+        if (!d.ok) { say(socialProblem(d)); return; }
+        if (extra) { extra.remove(); extra = null; }
+        paint(d.following);
+        var old = holder.querySelector(".note");
+        if (old) old.remove();
+      }).catch(function () { b.disabled = false; say("No connection; the follow was not changed."); });
+    };
     socialRequest("GET", "/social/api/users/" + encodeURIComponent(user) + "/follow").then(function (d) {
       if (d.ok && d.self) { btn.hidden = true; return; }
-      if (d.ok) paint(d.following);
+      if (!d.ok) return;
+      paint(d.following);
+      if (d.unknown && !extra) {
+        // the following list was read only in part, and they are not in that part: say so and
+        // offer both, rather than a Follow that may be wrong (wording draft, WORDING-4)
+        extra = el("button", btn.className.replace(/\bon\b/, "").trim(), "");
+        extra.type = "button";
+        extra.setAttribute("data-social", "unfollow");
+        extra.appendChild(el("span", "", "Unfollow " + name));
+        btn.parentNode.insertBefore(extra, btn.nextSibling);
+        extra.addEventListener("click", function () {
+          confirmChip(extra, "Stop following " + name + "?", "Unfollow", function () { send(extra, false); });
+        });
+        say("We could not check whether you follow " + name + ".");
+      }
     }).catch(function () {});
     btn.addEventListener("click", function () {
       var on = btn.getAttribute("data-state") === "1";
       confirmChip(btn, on ? "Stop following " + name + "?" : "Follow " + name + " on Archidekt?", on ? "Unfollow" : "Follow", function () {
-        btn.disabled = true;
-        socialRequest("POST", "/social/api/users/" + encodeURIComponent(user) + "/follow", { on: !on }).then(function (d) {
-          btn.disabled = false;
-          if (!d.ok) { say(socialProblem(d)); return; }
-          paint(d.following);
-          var old = holder.querySelector(".note");
-          if (old) old.remove();
-        }).catch(function () { btn.disabled = false; say("No connection; the follow was not changed."); });
+        send(btn, !on);
       });
     });
   });

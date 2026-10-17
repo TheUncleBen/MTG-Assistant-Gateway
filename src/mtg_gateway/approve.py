@@ -256,7 +256,11 @@ def deck_waiting(data: dict[str, Any], *, decks: Any, sub: str) -> tuple[dict[st
         **({"this_app": decks._creator_label(client)} if client else {}),
     }
     full = [decks.db.get_proposal(r["id"], sub) or {} for r in mine]
-    items = [(r["id"], int(r.get("version") or 1)) for r in full if r and decks.card_may_approve(r)]
+    # Q141 item 1B: a change another app rewrote is approved on its own, never in "Apply all"
+    items = [(r["id"], int(r.get("version") or 1)) for r in full if r and decks.in_apply_all(sub, r)]
+    info["left_out"] = sum(
+        1 for r in full if r and decks.card_may_approve(r) and not decks.in_apply_all(sub, r)
+    )
     if len(items) < 2 or not client:
         return info, None
     # what "Apply all" would apply, listed on its confirm before the press (Q134 item 8: a held

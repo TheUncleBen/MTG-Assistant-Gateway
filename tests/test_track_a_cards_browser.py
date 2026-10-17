@@ -619,3 +619,39 @@ def test_approve_says_when_it_could_not_check_and_waits_for_a_second_press() -> 
         finally:
             browser.close()
     assert not errors, errors
+
+
+def test_the_waiting_cards_apply_all_confirm_warns_of_a_held_change() -> None:
+    """Q140 item 8 (Ben approved A, 10-17): a held change in the set shows its Held line on the
+    Apply all confirm, before anything is sent."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_or_skip()
+    held = {
+        **WAITING,
+        "waiting": [
+            _line("p1", 1, "+1 Opt"),
+            _line("p2", 2, "+1 Ponder", status="held", status_reason="It depends on #3, which failed."),
+        ],
+        "count": 2,
+        "own_count": 2,
+        "other_apps": [],
+    }
+    with sync_playwright() as p:
+        browser = _launch(p, exe)
+        try:
+            page = browser.new_page(viewport={"width": 390, "height": 900})
+            errors: list[str] = []
+            page.on("pageerror", lambda e: errors.append(str(e)))
+            card = _open(
+                page, cards_html("waiting-card"), {"structuredContent": held, "_meta": WAITING_META}, {}
+            )
+            card.locator("#apply-all:not([disabled])").click()
+            assert card.locator("#order li").all_inner_texts() == [
+                "#1 +1 Opt",
+                "#2 +1 Ponder\nHeld: it depends on #3, which failed.",
+            ]
+            assert not _tool_calls(page, "confirm_waiting")
+        finally:
+            browser.close()
+    assert not errors, errors

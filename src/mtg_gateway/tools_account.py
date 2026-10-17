@@ -133,7 +133,9 @@ def add_account_tools(state: AppState, h: SimpleNamespace) -> None:
             "Step 1 of a social action on a deck, under the user's linked Archidekt account. action: "
             "'like', 'vote_down' or 'clear_vote' (the deck's like), 'bookmark' or 'unbookmark', "
             "'follow_owner' or 'unfollow_owner' (Archidekt follows people, not decks: this follows the "
-            "deck's owner). Returns a proposal (kind 'action', risk 'consent') that only the user applies, "
+            "deck's owner), or 'follow_user' or 'unfollow_user' with username instead of deck_id (the "
+            "person is found through their public decks, so someone with none can't be followed this "
+            "way). Returns a proposal (kind 'action', risk 'consent') that only the user applies, "
             "with their press on the card in the chat or on its review page, in every approval mode: never "
             "call apply_proposal for it. "
             "Changes nothing by itself."
@@ -141,7 +143,17 @@ def add_account_tools(state: AppState, h: SimpleNamespace) -> None:
         annotations={"readOnlyHint": True, "destructiveHint": False, "openWorldHint": True},
         meta=card_meta,
     )
-    async def propose_deck_social(deck_id: str, action: str) -> CallToolResult:
+    async def propose_deck_social(
+        action: str, deck_id: str | None = None, username: str | None = None
+    ) -> CallToolResult:
+        if action in ("follow_user", "unfollow_user"):  # Q141 item 6A: by username, no deck
+            try:
+                out = await state.decks.propose_action(
+                    _sub(), "follow", username=username or "", on=action == "follow_user"
+                )
+                return _proposal({"ok": True, **out})
+            except DeckError as exc:
+                return _proposal(_tool_error(exc))
         spec = {
             "like": ("deck_vote", {"vote": "up"}),
             "vote_down": ("deck_vote", {"vote": "down"}),
@@ -160,7 +172,7 @@ def add_account_tools(state: AppState, h: SimpleNamespace) -> None:
                 }
             )
         try:
-            out = await state.decks.propose_action(_sub(), spec[0], deck_id=deck_id, **spec[1])
+            out = await state.decks.propose_action(_sub(), spec[0], deck_id=deck_id or "", **spec[1])
             return _proposal({"ok": True, **out})
         except DeckError as exc:
             return _proposal(_tool_error(exc))
@@ -206,7 +218,7 @@ def add_account_tools(state: AppState, h: SimpleNamespace) -> None:
                 }
             )
         try:
-            out = await state.decks.propose_action(_sub(), spec[0], deck_id=deck_id, **spec[1])
+            out = await state.decks.propose_action(_sub(), spec[0], deck_id=deck_id or "", **spec[1])
             return _proposal({"ok": True, **out})
         except DeckError as exc:
             return _proposal(_tool_error(exc))

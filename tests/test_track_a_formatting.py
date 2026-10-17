@@ -250,3 +250,42 @@ async def test_a_comment_changed_since_its_review_is_not_sent(stack: Stack) -> N
     assert mine["text"] == _doc({"insert": "Bold words\n"})
     got = h.db.get_proposal(p["proposal_id"], SUB)
     assert got["state"] == "pending" and got.get("status") == "needs_look"
+
+
+async def test_full_auto_waits_for_a_formatted_description_and_for_making_a_deck_public(stack: Stack) -> None:
+    """Q141 item 3B (Ben approved 10-17): in Full auto, making a deck public or unlisted and a
+    description edit that keeps formatting wait for the member's press; other details apply."""
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    await _set_mode(h, "auto")
+    ark.decks[42]["description"] = FORMATTED
+    new = rich_text(FORMATTED).replace("Great", "Fun")
+    kept = structured(
+        await call(h, token, "propose_deck_details", {"deck_id": "42", "details": {"description": new}})
+    )
+    assert kept["assistant_may_apply"] is False, kept
+    assert kept["risk_reason"] == "keeps the description's formatting, which is seen on its review page first"
+    out = structured(await call(h, token, "apply_proposal", {"proposal_id": kept["proposal_id"]}))
+    assert out.get("state") != "applied", out
+    ark.decks[42]["private"] = True
+    public = structured(
+        await call(h, token, "propose_deck_details", {"deck_id": "42", "details": {"private": False}})
+    )
+    assert public.get("assistant_may_apply") is False, public
+    assert public["risk_reason"] == "makes the deck public"
+    unlisted = structured(
+        await call(h, token, "propose_deck_details", {"deck_id": "42", "details": {"unlisted": True}})
+    )
+    assert unlisted["assistant_may_apply"] is False and unlisted["risk_reason"] == "makes the deck unlisted"
+    name = structured(
+        await call(h, token, "propose_deck_details", {"deck_id": "42", "details": {"name": "Auto name"}})
+    )
+    assert name["assistant_may_apply"] is True  # O7: other details still apply in Full auto
+    # Semi-auto is unchanged: every details change waits there
+    await _set_mode(h, "semi")
+    assert (
+        structured(await call(h, token, "get_proposal", {"proposal_id": name["proposal_id"]}))[
+            "assistant_may_apply"
+        ]
+        is False
+    )

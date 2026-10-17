@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING, Any
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
-from . import formatting
+from . import formatting, refusals
 from .archidekt import VOTE_DOWN, VOTE_NONE, VOTE_UP, ArchidektError, Deck, QuillDoc, plain_text, rich_text
 from .decklist import clean_text
 from .decks import DeckError, _clean_deck_id
@@ -151,6 +151,8 @@ class SocialService:
         self.decks = state.decks
         self.client = state.decks.client
         self._following: dict[str, tuple[float, dict[int, str]]] = {}
+        # whether the last read stopped at FOLLOWING_PAGES with more pages left (Q141 item 4A)
+        self._following_cut: dict[str, bool] = {}
         self._following_fresh: dict[str, float] = {}  # sub -> when a fresh read was last forced
         # (sub, deck id) -> (when, the deck's comment thread root) from that member's last read, so a
         # vote or a comment write straight after the thread loaded skips reading the whole deck
@@ -200,7 +202,7 @@ class SocialService:
         uid, _name = self._me(sub)
         found, _thread = await self.find_comment(sub, deck_id, comment_id, page)
         if str(found["owner"]["id"]) == uid:
-            raise DeckError("invalid", "that is your own comment")
+            raise DeckError("invalid", refusals.OWN_COMMENT_VOTE)  # Q141 item 7A
         if found["archived"]:
             raise DeckError("invalid", "that comment is archived on Archidekt")
         if found["user_vote"] == want:  # already so: nothing is sent (Archidekt might toggle it)
@@ -241,7 +243,7 @@ class SocialService:
         if hit and hit[0] > now and not fresh:
             return hit[1]
         users: dict[int, str] = {}
-        page = 1
+        page, cut = 1, False
         while page <= FOLLOWING_PAGES:
             body = await self.decks._call(sub, lambda t, page=page: self.client.following(t, uid, page))
             for row in body["results"]:
@@ -249,8 +251,10 @@ class SocialService:
                     users[int(row["id"])] = str(row.get("username") or "")
             if not body.get("next"):
                 break
+            cut = page == FOLLOWING_PAGES  # more pages, but no more reads (gentle on Archidekt)
             page += 1
         self._following[sub] = (time.monotonic() + FOLLOWING_TTL, users)
+        self._following_cut[sub] = cut
         return users
 
     # -- deck collaborators (Archidekt's "editors": people who may change the deck) -----------------
@@ -312,13 +316,18 @@ class SocialService:
         uid, _name = self._me(sub)
         if str(user_id) == uid:
             return {"self": True, "following": False}
-        return {"self": False, "following": user_id in await self.following(sub)}
+        following = user_id in await self.following(sub)
+        if not following and self._following_cut.get(sub):
+            # Q141 item 4A: the list was cut short and they are not in the part read, so whether
+            # the member follows them is not known; the page offers both Follow and Unfollow
+            return {"self": False, "following": False, "unknown": True}
+        return {"self": False, "following": following}
 
     async def follow(self, sub: str, user_id: int, on: bool) -> dict[str, Any]:
         self.decks._writes_switch()
         uid, _name = self._me(sub)
         if str(user_id) == uid:
-            raise DeckError("invalid", "you cannot follow yourself")
+            raise DeckError("invalid", refusals.FOLLOW_SELF)  # Q141 item 7A
         await self.decks._call(sub, lambda t: self.client.follow_user(t, user_id, on=on))
         self._following.pop(sub, None)
         self.state.db.audit("user_followed", sub=sub, detail={"user_id": user_id, "on": on})
@@ -406,7 +415,7 @@ class SocialService:
         """``found`` when it is the member's own comment, else a refusal."""
         uid, _name = self._me(sub)
         if str(found["owner"]["id"]) != uid:
-            raise DeckError("forbidden", "only your own comments can be edited or deleted here")
+            raise DeckError("forbidden", refusals.NOT_OWN_COMMENT)  # Q141 item 7A
         return found
 
     async def edit_comment(
@@ -427,7 +436,7 @@ class SocialService:
         self.decks._writes_switch()
         text = comment_text(text)
         if not text:
-            raise DeckError("invalid", "write something first")
+            raise DeckError("invalid", refusals.EMPTY_COMMENT)
         if len(text) > MAX_COMMENT:
             raise DeckError("invalid", f"a comment can be at most {MAX_COMMENT} characters")
         found, thread = await self.find_comment(sub, deck_id, comment_id, page, keep_doc=True)
@@ -480,7 +489,7 @@ class SocialService:
         _uid, name = self._me(sub)
         text = comment_text(text)
         if not text:
-            raise DeckError("invalid", "write something first")
+            raise DeckError("invalid", refusals.EMPTY_COMMENT)
         if len(text) > MAX_COMMENT:
             raise DeckError("invalid", f"a comment can be at most {MAX_COMMENT} characters")
         if parent is None:

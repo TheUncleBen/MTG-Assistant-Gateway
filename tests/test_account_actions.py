@@ -1351,3 +1351,52 @@ async def test_an_action_whose_write_landed_is_never_put_back_to_pending(
     assert row["result"]["error"] == "rate_limited", row["result"]
     assert "Nothing was changed" not in row["result"]["detail"], row["result"]["detail"]
     assert "Part of this change had already reached Archidekt" in row["result"]["detail"]
+
+
+async def test_follow_and_unfollow_someone_by_username(stack: Stack) -> None:
+    """Q141 item 6A: the assistant can follow or unfollow anyone by their Archidekt username. It
+    is an account action like the rest: only the member's press applies it, and the person is
+    found with one read, through their public decks."""
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    before = len(ark.calls)
+    res = await call(h, token, "propose_deck_social", {"action": "follow_user", "username": "@amy"})
+    p = structured(res)
+    assert p["ok"] and p["kind"] == "action" and p["assistant_may_apply"] is False, p
+    assert p["rows"][0]["text"] == "Follow amy on Archidekt", p["rows"]
+    assert [c for c in ark.calls[before:] if "/decks/v3/" in c[1]], ark.calls[before:]
+    refused = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
+    assert refused["ok"] is False and 78 not in ark.follows.get("alice", set()), refused
+    await _press(h, token, res)
+    assert 78 in ark.follows["alice"]
+    res = await call(h, token, "propose_deck_social", {"action": "unfollow_user", "username": "amy"})
+    assert structured(res)["rows"][0]["text"] == "Stop following amy on Archidekt"
+    await _press(h, token, res)
+    assert 78 not in ark.follows["alice"]
+    # yourself, someone with no public decks, and no name at all are refused, with nothing proposed
+    for name, kind in (("alice", "invalid"), ("nobody-here", "not_found"), ("", "invalid")):
+        out = structured(
+            await call(h, token, "propose_deck_social", {"action": "follow_user", "username": name})
+        )
+        assert out["ok"] is False and out["error"] == kind, (name, out)
+    ark.private.add(43)  # amy's only deck private: she can't be found
+    out = structured(
+        await call(h, token, "propose_deck_social", {"action": "follow_user", "username": "amy"})
+    )
+    assert out["error"] == "not_found" and "public decks" in out["message"], out
+
+
+async def test_apply_all_on_the_card_lists_account_actions_before_the_press(stack: Stack) -> None:
+    """Q141 item 9A: likes, follows and the like can be in one "Apply all" press, and the proposal
+    card's confirm lists each one first (set_lines), as the waiting card does."""
+    from mtg_gateway.approve import APPROVAL_SET_META_KEY
+
+    h = stack.h
+    token = await linked_user(stack)
+    await call(h, token, "propose_deck_social", {"deck_id": "43", "action": "like"})
+    res = await call(h, token, "propose_deck_social", {"deck_id": "43", "action": "follow_owner"})
+    info = structured(res)["deck_waiting"]
+    ids = res["_meta"][APPROVAL_SET_META_KEY]["ids"]
+    lines = {x["proposal_id"]: x["summary"] for x in info["set_lines"]}
+    assert len(ids) == 2 and set(lines) == set(ids), (ids, lines)
+    assert any("Like" in s for s in lines.values()) and any("Follow" in s for s in lines.values()), lines

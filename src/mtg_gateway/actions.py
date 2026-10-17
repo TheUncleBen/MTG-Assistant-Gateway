@@ -14,7 +14,7 @@ import secrets
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
-from . import formatting
+from . import formatting, refusals
 from .archidekt import VOTE_DOWN, VOTE_NONE, VOTE_UP, drops_formatting, words_only_note
 from .decklist import clean_text
 from .decks import DeckError, _clean_deck_id, _row, needs_look_error
@@ -81,7 +81,7 @@ def _comment_text(text: Any) -> str:
 
     clean = comment_text(str(text or ""))
     if not clean:
-        raise DeckError("invalid", "text is required: write the comment first")
+        raise DeckError("invalid", refusals.EMPTY_COMMENT)  # Q141 item 7A
     if len(clean) > MAX_COMMENT:
         raise DeckError("invalid", f"a comment can be at most {MAX_COMMENT} characters")
     return clean
@@ -159,6 +159,27 @@ async def collaborator_target(
     return found["user_id"], found["username"]
 
 
+async def follow_target(decks: DeckService, sub: str, username: Any) -> tuple[int, str]:
+    """(user id, username) of the person to follow by name (Q141 item 6A): one Archidekt read,
+    through their public decks, which is the only lookup the gateway has, so someone with no
+    public decks is not found."""
+    want = clean_text(str(username or "")).lstrip("@")
+    if not want:
+        raise DeckError("invalid", "username is required: the Archidekt username of the person")
+    found = await decks.user_profile(sub, want)
+    name = clean_text(str((found or {}).get("username") or ""))
+    if not found or not str(found.get("id") or "").isdigit() or name.casefold() != want.casefold():
+        # wording draft (WORDING-4)
+        raise DeckError(
+            "not_found",
+            f"No Archidekt user called {want} with public decks was found. The gateway finds people "
+            "through their public decks, so someone with none can't be followed from here: follow "
+            f"them on Archidekt ({profile_url(want)}).",
+            follow_url=profile_url(want),
+        )
+    return int(found["id"]), name
+
+
 async def collaborator_by_hand(
     decks: DeckService, sub: str, deck_id: str, action: str, username: Any
 ) -> dict[str, Any]:
@@ -198,7 +219,9 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
     changes: dict[str, Any] = {"action": action}
     row: dict[str, Any] = {"action": action, "label": LABELS[action]}
     deck = None
-    if action != "create_folder":
+    # Q141 item 6A: follow or unfollow someone by username, not through one of their decks
+    by_name = action == "follow" and params.get("username") is not None and not params.get("deck_id")
+    if action != "create_folder" and not by_name:
         deck_id = _clean_deck_id(str(params.get("deck_id") or ""))
         deck = (
             await decks.get_own_deck(sub, deck_id)
@@ -229,17 +252,26 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
             row["text"] += " (already the case; applying changes nothing)"
     elif action == "follow":
         on = params.get("on") is not False
-        owner_id = int(deck.owner_id) if deck and str(deck.owner_id or "").isdigit() else None
+        if by_name:
+            owner_id, who = await follow_target(decks, sub, params.get("username"))
+        else:
+            owner_id = int(deck.owner_id) if deck and str(deck.owner_id or "").isdigit() else None
+            who = _owner(deck)
         if owner_id is None:
             raise DeckError(
                 "unavailable", "Archidekt does not say who owns this deck, so there is no one to follow"
             )
         state = await social.follow_state(sub, owner_id)
         if state["self"]:
-            raise DeckError("invalid", "that is your own deck: you cannot follow yourself")
+            raise DeckError("invalid", refusals.FOLLOW_SELF)  # Q141 item 7A
         changes.update(user_id=owner_id, on=on)
-        row["text"] = ("Follow " if on else "Stop following ") + f"{_owner(deck)} on Archidekt"
-        if state["following"] == on:
+        if by_name:
+            changes["username"] = who
+        row["text"] = ("Follow " if on else "Stop following ") + f"{who} on Archidekt"
+        if state.get("unknown"):
+            # Q141 item 4A (wording draft, WORDING-4)
+            row["text"] += " (the gateway could not check whether you follow them already)"
+        elif state["following"] == on:
             row["text"] += " (already the case; applying changes nothing)"
     elif action == "comment_post":
         text = _comment_text(params.get("text"))
@@ -264,7 +296,7 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
         row["before_text"] = found["text"]
         if action == "comment_vote":
             if own:
-                raise DeckError("invalid", "that is your own comment")
+                raise DeckError("invalid", refusals.OWN_COMMENT_VOTE)  # Q141 item 7A
             if found.get("archived"):
                 raise DeckError("invalid", "that comment is archived on Archidekt and takes no votes")
             vote = _vote(params.get("vote"))
@@ -276,7 +308,7 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
             }[vote] + f" {found['owner']['username'] or 'a'}'s comment on the deck {where}"
         else:
             if not own:
-                raise DeckError("forbidden", "only your own comments can be edited or deleted")
+                raise DeckError("forbidden", refusals.NOT_OWN_COMMENT)  # Q141 item 7A
             if action == "comment_edit":
                 text = _comment_text(params.get("text"))
                 changes["text"] = text
