@@ -187,11 +187,20 @@ CSS = (
     + _LIGHT
     + """}
 *{box-sizing:border-box}
-/* --bar-room is the top bar's height plus 10 px (static/topbar.js). Without scripts, 9.5rem covers
-   the bar at every text size from 100% to 200% (milestone review M-2). Measured from 600 to
-   1920 px: at most 191 px at 200% text, and at most about 8.7rem (183 px) at 920 px and 150%. */
-html{font-size:14px;scroll-padding:var(--bar-room,9.5rem) 0 120px;-webkit-text-size-adjust:100%;
+/* --bar-room is the top bar's height plus 10 px (static/topbar.js). Without scripts: 60 px over the
+   one-row bar (50 px), and 9.5rem where the bar's links wrap, which covers it at every text size
+   from 100% to 200% (milestone review M-2; measured from 600 to 1920 px: at most 191 px at 200%
+   text, and at most about 8.7rem, 183 px, at 920 px and 150%). The links wrap when the bar is
+   narrower than 42.5em (600 to 899 px with a mouse) or 58em (900 px and wider; the container
+   queries below); the bar's em is the root's, so the test is in rem, with 20 px for a scroll bar.
+   clamp((T - 100vw) * 1000) is 0 above T and 9.5rem below it (review R12-2: 9.5rem everywhere
+   left 133 px over the one-row bar). */
+html{font-size:14px;scroll-padding:var(--bar-room,60px) 0 120px;-webkit-text-size-adjust:100%;
   min-width:320px;font-family:Lato,"Helvetica Neue",Arial,Helvetica,sans-serif;line-height:1.15}
+@media (min-width:600px) and (max-width:899.98px) and (not ((pointer:coarse) or (hover:none))){
+  html{scroll-padding-top:var(--bar-room,max(60px,clamp(0px,(42.5rem + 20px - 100vw) * 1000,9.5rem)))} }
+@media (width >= 900px){
+  html{scroll-padding-top:var(--bar-room,max(60px,clamp(0px,(58rem + 20px - 100vw) * 1000,9.5rem)))} }
 body{margin:0;min-height:100vh;display:flex;flex-direction:column;background:var(--bg);color:var(--text);
   font:inherit;font-size:1rem;line-height:1.35;transition:background-color .25s ease-in}
 a{color:var(--link)} a:hover{color:var(--orange-text)}
