@@ -439,7 +439,6 @@ def test_nothing_in_the_top_bar_sits_over_anything_else(server: Server, role: st
 
 
 LONG_NAME = "The Very Long Name Of Our Friends' Deck Gateway"
-FULL_SEARCH = 18.8  # rem: the search box measured 18.86 to 18.98rem with room to spare (flex-basis 20rem)
 BRAND_AND_SEARCH = """() => {
   const word = document.querySelector('.topbar .brand .word');
   const search = document.querySelector('.topbar .topsearch');
@@ -457,31 +456,43 @@ def test_a_long_server_name_gives_way_before_the_search_box_and_the_links(server
     if exe == "missing":
         pytest.skip("no Chromium available for Playwright")
     sid = _admin(server)
-    object.__setattr__(server.app.state.gateway.settings, "server_name", LONG_NAME)
+    settings = server.app.state.gateway.settings
+    short_name = settings.server_name
     problems: list[str] = []
+    cut_alone: list[str] = []  # sizes where the name was cut and the search box kept its full width
     with sync_playwright() as p:
         browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
         ctx = browser.new_context(viewport={"width": 1280, "height": 800})
         ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
         page = ctx.new_page()
-        for width in (900, 960, 1000, 1100, 1280, 1440, 1920):
-            for zoom in ("none", "root-110", "root-125", "text-125"):
-                page.set_viewport_size({"width": width, "height": 800})
-                page.goto(f"{server.base}/history", wait_until="networkidle")
-                _zoom(page, zoom)
-                page.wait_for_timeout(20)
-                g = page.evaluate(BAR_OVERLAP)
-                if g["overlap"] or g["outside"] or g["doc"] != g["win"]:
-                    problems.append(f"@{width}px {zoom}: {g}")
-                b = page.evaluate(BRAND_AND_SEARCH)
-                if b["search"] < 9 - 0.05 or (b["search"] < FULL_SEARCH and not b["cut"]):
-                    problems.append(f"@{width}px {zoom}: search box shrank first: {b}")
-        page.set_viewport_size({"width": 1280, "height": 800})
-        page.goto(f"{server.base}/history", wait_until="networkidle")
-        at_1280 = page.evaluate(BRAND_AND_SEARCH)
-        browser.close()
+
+        def measure(name: str, width: int, zoom: str) -> dict:
+            object.__setattr__(settings, "server_name", name)
+            page.set_viewport_size({"width": width, "height": 800})
+            page.goto(f"{server.base}/history", wait_until="networkidle")
+            _zoom(page, zoom)
+            page.wait_for_timeout(20)
+            return page.evaluate(BRAND_AND_SEARCH)
+
+        try:
+            for width in (900, 960, 1000, 1100, 1280, 1440, 1920):
+                for zoom in ("none", "root-110", "root-125", "text-125"):
+                    # The search box's full width depends on the browser's fonts, so it is
+                    # measured with the usual short name at the same width and text size.
+                    full = measure(short_name, width, zoom)["search"]
+                    b = measure(LONG_NAME, width, zoom)
+                    g = page.evaluate(BAR_OVERLAP)
+                    if g["overlap"] or g["outside"] or g["doc"] != g["win"]:
+                        problems.append(f"@{width}px {zoom}: {g}")
+                    if b["search"] < 9 - 0.05 or (b["search"] < full - 0.05 and not b["cut"]):
+                        problems.append(f"@{width}px {zoom}: search box shrank first: {b}, full {full}")
+                    if b["cut"] and b["search"] >= full - 0.05:
+                        cut_alone.append(f"{width}px {zoom}")
+        finally:
+            object.__setattr__(settings, "server_name", short_name)
+            browser.close()
     assert problems == [], "\n".join(problems)
-    assert at_1280["cut"] and at_1280["search"] >= FULL_SEARCH, at_1280  # the name is cut, not the box
+    assert cut_alone, "the long name was never cut while the search box kept its full width"
 
 
 def test_without_scripts_the_scroll_room_is_large_only_where_the_bar_wraps(server: Server) -> None:
