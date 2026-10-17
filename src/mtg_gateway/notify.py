@@ -164,6 +164,39 @@ def save_prefs(db: Database, sub: str, **values: Any) -> None:
             )
 
 
+# The job_runs row saying that every topic members had before 0.7.30 was replaced (replace_old_topics)
+OLD_TOPICS_REPLACED_JOB = "notify_old_topics_replaced"
+
+
+def replace_old_topics(db: Database) -> int:
+    """Give every member who had a topic before 0.7.30 a new one from :func:`new_topic`, once per
+    database, and return how many were replaced. A topic a member typed then can have the same form
+    as one the gateway makes, so the form can't tell them apart: the job_runs row records that this
+    ran, and every topic stored after it came from new_topic (members no longer choose one)."""
+    now = int(time.time())
+    with db.tx() as c:
+        if c.execute("SELECT 1 FROM job_runs WHERE name = ?", (OLD_TOPICS_REPLACED_JOB,)).fetchone():
+            return 0
+        subs = [r["sub"] for r in c.execute("SELECT sub FROM notify_prefs WHERE ntfy_topic IS NOT NULL")]
+        for sub in subs:
+            c.execute(
+                "UPDATE notify_prefs SET ntfy_topic = ?, updated_at = ? WHERE sub = ?",
+                (new_topic(), now, sub),
+            )
+        c.execute(
+            "INSERT INTO job_runs (name, day, at, detail_json) VALUES (?, ?, ?, ?)",
+            (
+                OLD_TOPICS_REPLACED_JOB,
+                time.strftime("%Y-%m-%d", time.gmtime(now)),
+                now,
+                json.dumps({"replaced": len(subs)}),
+            ),
+        )
+    if subs:
+        logger.info("notifications: replaced %d topic(s) chosen before this version", len(subs))
+    return len(subs)
+
+
 def topic_owner(db: Database, topic: str) -> tuple[str, bool] | None:
     """Whose topic this is and whether their notifications are on, or None for nobody's."""
     with db._lock:
@@ -725,7 +758,7 @@ def _phone_html(state: AppState, sub: str, p: dict[str, Any]) -> str:
     button that connects it (which asks Android for the notification permission and for the
     app to keep running in the background). The app says which part applies (feedback.js)."""
     topic = p["ntfy_topic"]
-    if not strong_topic(topic):  # one chosen before 0.7.30, or none: give the account a key now
+    if not strong_topic(topic):  # none yet, or not one new_topic made: give the account a key now
         topic = new_topic()
         save_prefs(state.db, sub, ntfy_topic=topic)
     key = _esc(topic)
