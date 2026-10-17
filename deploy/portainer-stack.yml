@@ -20,7 +20,7 @@ secrets:
   # mtg_authentik_api_token:
   #   external: true
   # The token the gateway uses with the stack's own ntfy server (the members' notifications);
-  # nothing else gets in there. docs/DEPLOY.md, step 4, has the command that makes it.
+  # ntfy lets nothing else in. docs/DEPLOY.md, step 4, has the command that makes it.
   mtg_ntfy_token:
     external: true
 

@@ -96,7 +96,7 @@
             android:foregroundServiceType="specialUse">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="Keeps a connection open to the person's own self-hosted gateway to receive their notifications, without Google push services." />
+                android:value="Keeps a connection open to the self-hosted gateway the person signs in to, so they receive its notifications without Google push services." />
         </service>
         <!-- Starts NotifyService again after the phone restarts and after the app is updated. -->
         <receiver
