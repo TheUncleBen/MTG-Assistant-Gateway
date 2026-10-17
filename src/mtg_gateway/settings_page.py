@@ -265,7 +265,7 @@ SETTINGS_CSS = """
 .set-confirm{grid-column:1 / -1}
 /* Set in the stack: shown where it would be changed, greyed out, its value still readable (4.5:1) */
 /* the radios of On/Off and the approval modes are left out: they stay hidden or plain, and their
-   labels carry the value (review round 2, R2-1) */
+   labels carry the value */
 .set-row.locked input:disabled:not([type=radio]):not([type=checkbox]),.set-row.locked select:disabled,
 .set-row.locked .msel-btn:disabled{
   background:var(--surface-2);color:var(--text-muted);-webkit-text-fill-color:var(--text-muted);

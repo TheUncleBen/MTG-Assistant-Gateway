@@ -189,12 +189,12 @@ CSS = (
 *{box-sizing:border-box}
 /* --bar-room is the top bar's height plus 10 px (static/topbar.js). Without scripts: 60 px over the
    one-row bar (50 px), and 9.5rem where the bar's links wrap, which covers it at every text size
-   from 100% to 200% (milestone review M-2; measured from 600 to 1920 px: at most 191 px at 200%
+   from 100% to 200% (measured from 600 to 1920 px: at most 191 px at 200%
    text, and at most about 8.7rem, 183 px, at 920 px and 150%). The links wrap when the bar is
    narrower than 42.5em (600 to 899 px with a mouse) or 58em (900 px and wider; the container
    queries below); the bar's em is the root's, so the test is in rem, with 20 px for a scroll bar.
-   clamp((T - 100vw) * 1000) is 0 above T and 9.5rem below it (review R12-2: 9.5rem everywhere
-   left 133 px over the one-row bar). */
+   clamp((T - 100vw) * 1000) is 0 above T and 9.5rem below it (9.5rem everywhere would leave
+   133 px over the one-row bar). */
 html{font-size:14px;scroll-padding:var(--bar-room,60px) 0 120px;-webkit-text-size-adjust:100%;
   min-width:320px;font-family:Lato,"Helvetica Neue",Arial,Helvetica,sans-serif;line-height:1.15}
 @media (min-width:600px) and (max-width:899.98px) and (not ((pointer:coarse) or (hover:none))){
@@ -603,8 +603,8 @@ details.disclosure[open] > summary::before{content:'\\25BE'}
 .plist form{margin:0;display:inline}
 .plist form button{margin:0;height:35px;padding:0 .7rem;width:auto}
 /* Admin > Card models: the name and who added it on the left, every Remove button in one column,
-   44 px tall; a long name breaks between words (review round 2, R2-2 and R2-4).
-   Where the text has too little room (a phone at 200% text) Remove moves under it (review round 3).
+   44 px tall; a long name breaks between words.
+   Where the text has too little room (a phone at 200% text) Remove moves under it.
    The text's basis is in em, so it grows with the text. */
 .plist.models li{flex-wrap:wrap}
 .plist.models .model{display:flex;flex-direction:column;gap:.15rem;flex:1 1 12em;min-width:0}
@@ -688,8 +688,8 @@ details.raw{margin:.5rem 0 0} details.raw summary{cursor:pointer;color:var(--tex
 .wide main.wrap{padding-left:1rem;padding-right:1rem}
 
 @media (max-width:900px){ .topbar nav.site a{padding:0 .4rem;font-size:.93rem} .brand{margin-right:.25rem} }
-/* The proposal review's three choices sit at one height (gate D8), and the deck banner's
-   Comments link matches its Like and Bookmark buttons (gate D9). */
+/* The proposal review's three choices sit at one height, and the deck banner's
+   Comments link matches its Like and Bookmark buttons. */
 .choice button,.choice .btn{min-height:48px}
 .banner .social a.soc,.banner .social button.soc{height:34px;min-height:34px}
 /* A control that carries text a member typed (a username in Follow, a deck's category in the
@@ -726,9 +726,9 @@ details.raw{margin:.5rem 0 0} details.raw summary{cursor:pointer;color:var(--tex
 /* The brand, the links and the account side are the bar's own flex items (.left only groups the
    brand and the links in the markup). The links never shrink. When the row is short, the brand's
    word gives way first (an ellipsis, for a long MTG_SERVER_NAME), then the search box, down to its
-   9rem; before even that is not enough, the links wrap (the container queries below). Review
-   R12-1: with .left{flex:1 1 0} the left side could shrink below its links, which then ran under
-   the search box, so a click on History or Admin landed in the box. */
+   9rem; before even that is not enough, the links wrap (the container queries below). With
+   .left{flex:1 1 0} the left side could shrink below its links, which then ran under the search
+   box, so a click on History or Admin landed in the box. */
 .topbar .wrap{gap:.25rem}
 .topbar .left{display:contents}
 .topbar nav.site{flex:none}
@@ -972,8 +972,7 @@ html[data-card-size=s] .deckview.grid .cards{grid-template-columns:repeat(auto-f
 html[data-card-size=l] .deckview.grid .cards{grid-template-columns:repeat(auto-fill,minmax(230px,1fr))}
 html[data-card-size=s] .deckview.scroll .c{flex-basis:clamp(105px,16.5vw,150px)}
 /* at S a stack's name gets its own line under the grip and menu, so a narrow stack still shows it
-   whole (review round 1, finding 3), and a tile without a picture starts its name below the 38 px
-   quantity corner (finding 8) */
+   whole, and a tile without a picture starts its name below the 38 px quantity corner */
 html[data-card-size=s] .deckview.stacks .stackhead h2{flex-wrap:wrap;row-gap:0}
 html[data-card-size=s] .deckview.stacks .stackhead .title{
   order:2;flex:1 0 100%;white-space:normal;overflow-wrap:anywhere;hyphens:auto;-webkit-hyphens:auto}
