@@ -2011,10 +2011,12 @@ h3 .count{font-weight:400;color:var(--text-muted);font-size:.9rem}
 /* one-word headings can't wrap whole: with large text on a narrow phone they stop growing at 8% of the
    screen width (min(), so 100% text and wider screens are unchanged); a longer word still breaks */
 .panel.description > h2,.comments .panel-head h2{min-width:0;overflow-wrap:anywhere;font-size:min(1.5rem,8vw)}
-/* the View as / Group by / Sort by boxes on a phone: two a row, one a row when large text makes a
-   box wider than half the row (scripts off, the longest choice used to push the page 39 px wide) */
+/* the View as / Group by / Sort by boxes on a phone: two a row as before (each column at least half
+   the row, so never three), one a row when large text makes a box wider than half the row (scripts
+   off, the longest choice used to push the page 39 px wide) */
 @media (max-width:600px){
-  .toolbar form.views{grid-template-columns:repeat(auto-fit,minmax(min(100%,7.5rem),1fr))} }
+  .toolbar form.views{
+    grid-template-columns:repeat(auto-fit,minmax(min(100%,max(7.5rem,calc(50% - .5rem))),1fr))} }
 .toolbar form.views .field,.toolbar form.views .sel,.toolbar form.views select{min-width:0}
 .comments .thread{margin:.75rem 0 1rem}
 .comments .cmt{border-top:1px solid var(--border);padding:.6rem 0 .4rem}
@@ -2492,9 +2494,13 @@ table.qty td:last-child{text-align:right;font-variant-numeric:tabular-nums;font-
 .odds{margin-top:1.25rem} .odds h3{margin:0 0 .4rem}
 .odds .oddsform{display:flex;flex-wrap:wrap;gap:.4rem;align-items:center;font-size:.9rem;
   color:var(--text-muted)}
-.odds .oddsform select,.odds .oddsform .msel-btn,.odds .oddsform input{height:2rem;padding:0 .4rem;
+.odds .oddsform select:not(.msel-native),.odds .oddsform .msel-btn,.odds .oddsform input{height:2rem;
+  padding:0 .4rem;
   font-size:.9rem;width:auto;min-width:6rem;flex:none}
 .odds .oddsform .msel-btn{padding-right:1.5rem;background-position:right .5rem center}
+/* a long choice (Group by) never runs past the panel on a narrow phone with large text; the hidden
+   native select behind a script-drawn one keeps the theme's 1 px size (it used to get 6rem here) */
+.odds .oddsform select:not(.msel-native),.odds .oddsform .msel,.odds .oddsform .msel-btn{max-width:100%}
 .odds .oddsform input{width:4rem;min-width:4rem}
 .odds .oddstable{margin-top:.5rem;max-height:16rem;overflow:auto;display:block;width:100%}
 .odds .oddstable td:nth-child(2),.odds .oddstable td:nth-child(3){text-align:right;white-space:nowrap}
@@ -2506,8 +2512,10 @@ table.qty td:last-child{text-align:right;font-variant-numeric:tabular-nums;font-
   padding:.2rem 0;border-top:1px solid var(--border)} .checks li:first-child{border-top:0}
 .checks li b{flex:none} .checks li span{color:var(--text-muted);overflow-wrap:anywhere;min-width:0}
 /* large text on a narrow phone: the value goes under its label instead of past the panel, and the
-   label stays beside its icon (it breaks inside a word only if that word alone is too wide) */
+   label stays beside its icon (it breaks inside a word only if that word alone is too wide). The
+   value keeps its place beside the label, wrapping inside it, while at least 6rem is left there */
 .checks li{flex-wrap:wrap;column-gap:min(.4rem,2vw)} .checks li svg{flex:none}
+.checks li span{flex:1 1 6rem}
 .checks li b{flex:0 1 auto;min-width:0;overflow-wrap:anywhere}
 .checks li.ok svg{color:var(--green-text)} .checks li.bad svg{color:var(--red-text,#d33)}
 @media (max-width:1000px){ .stats .grid{grid-template-columns:minmax(0,1fr)} }
