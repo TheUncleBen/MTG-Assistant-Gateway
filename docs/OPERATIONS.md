@@ -37,7 +37,7 @@ the gateway's user.
 - [Rotating secrets](#rotating-secrets)
 - [Revoking access](#revoking-access)
 - [Archidekt links and relinking](#archidekt-links-and-relinking)
-- [Deck writes and the kill switch](#deck-writes-and-the-kill-switch)
+- [Archidekt writes and the kill switch](#archidekt-writes-and-the-kill-switch)
 - [The admin page](#the-admin-page)
 - [Watchlists, prices and notifications](#watchlists-prices-and-notifications)
 - [Looking at proposals, snapshots, links and the audit log](#looking-at-proposals-snapshots-links-and-the-audit-log)
@@ -253,7 +253,7 @@ purpose. Keep your copy of the key with your other credentials.
 
 Separately, every applied edit also leaves a private backup copy of the deck
 in the user's own Archidekt account (see
-[Deck writes](#deck-writes-and-the-kill-switch)). Those live on Archidekt,
+[Archidekt writes](#archidekt-writes-and-the-kill-switch)). Those live on Archidekt,
 not in your backups.
 
 - **Nightly:** at `MTG_BACKUP_HOUR_UTC` the gateway writes
@@ -493,7 +493,9 @@ to its member inside the encryption, so a session copied to another member's
 row opens nothing. A session stored by 0.7.6 or earlier carries no owner, so
 the first start of 0.7.7 seals it to whichever member's row holds it then. Only that first start does: an unsealed session found at a later start (copied in from an old disk image, or written by an older version after a rollback) is deleted, with an `archidekt_link_unsealed` audit row, and that member links again.
 
-## Deck writes and the kill switch
+<a id="deck-writes-and-the-kill-switch"></a>
+
+## Archidekt writes and the kill switch
 
 The gateway only writes to someone's Archidekt account in two steps:
 
@@ -759,8 +761,8 @@ Retry-After pause is on, and Archidekt failing or asking us to slow down ends
 the whole round, so a round adds at most one failure to the breaker. A session
 Archidekt rejects ends the check without unlinking (the member's own next
 request decides); a token refresh it needs is stored and logged as the deck
-sync's. These marks are kept with the proposal, so a restart keeps them.
-Not yet confirmed live: whether Archidekt moves a deck's "updated" time on
+sync's. The Updated and Needs a look marks are kept with the proposal, so a
+restart keeps them. Not yet confirmed live: whether Archidekt moves a deck's "updated" time on
 every card change. If it doesn't, a change can go unmarked, and Apply still
 checks the change against the deck as it is now before sending anything.
 

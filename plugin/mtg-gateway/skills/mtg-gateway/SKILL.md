@@ -272,8 +272,9 @@ own linked account. Follow every step, in order.
    a few card rows, no commander change, or a clone); `auto` lets you apply
    most changes, but some still wait for the user's press (a restore, a
    commander change, a new deck, a big edit, making a deck public or
-   unlisted, any edit of a description that has formatting, actions on
-   their Archidekt account, and deleting a deck; in every mode also a held
+   unlisted, any edit of a description that has formatting, such as bold
+   text, links or pictures, actions on their Archidekt account, and
+   deleting a deck; in every mode also a held
    change, a change waiting for another change first, one another app had
    a hand in, one that replaces another app's change, and one that another
    app's waiting change would replace); the answer says why one waits.

@@ -137,7 +137,9 @@ def mode_help(mode: str, *, max_rows: int = DEFAULT_MAX_ROWS, big_rows: int = DE
             "copies each, never the commander) and a private copy of a deck (a clone, which changes "
             "nothing that exists). A new deck built from a list, restores, deck details, commander "
             f"changes, bigger edits, and anything on your Archidekt account ({ACCOUNT_ACTIONS_TEXT}) "
-            "or deleting a deck still wait for your press."
+            "or deleting a deck still wait for your press. So does a held change, a change waiting for "
+            "another change first, one another app had a hand in, one that replaces another app's change, "
+            "or one that another app's waiting change would replace."
         )
     return (
         "Your assistant applies the deck and collection changes it proposes, without asking you. "

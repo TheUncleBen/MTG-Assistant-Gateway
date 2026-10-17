@@ -80,6 +80,10 @@ def _context(browser, server: Server, sid: str, vw: int, vh: int, phone: bool, s
     return ctx
 
 
+def _local_only(route, base: str) -> None:
+    route.continue_() if route.request.url.startswith(base) else route.abort()
+
+
 def _readable(page, selector: str, where: str) -> None:
     for el in page.locator(selector).all():
         if not el.is_visible():
@@ -421,8 +425,9 @@ def test_the_full_test_buttons_fit_every_screen_and_text_size(tmp_path: Path) ->
                                 page.evaluate(WORDS_BROKEN, sel),
                             )
                             _readable(page, sel, where)
-                            # the banner itself never runs wider than the screen (the rest of the deck
-                            # page at 344 px and 200% text is reported separately, WORDING-8)
+                            # the banner itself never runs wider than the screen (the whole page:
+                            # test_the_deck_page_never_scrolls_sideways)
+                            _no_sideways(page, vw, where)
                             banner = page.locator(".banner").first.bounding_box()
                             assert banner and banner["x"] + banner["width"] <= vw + 0.5, (where, banner)
                             assert page.evaluate(
@@ -433,6 +438,128 @@ def test_the_full_test_buttons_fit_every_screen_and_text_size(tmp_path: Path) ->
                             if shots:
                                 page.screenshot(path=f"{shots}/a-full-test-{where.replace('%', '')}.png")
                             ctx.close()
+            finally:
+                browser.close()
+    finally:
+        s.stop()
+
+
+WIDENS_PAGE = """(vw) => { const de = document.documentElement, base = de.scrollWidth, out = [];
+  for (const e of document.querySelectorAll('body *')) {
+    const r = e.getBoundingClientRect();
+    if (!(r.width > 0 && r.right > vw + 0.5)) continue;
+    const old = e.style.display; e.style.display = 'none';
+    if (de.scrollWidth < base)
+      out.push(`${e.tagName}.${e.getAttribute('class')} ${(e.textContent || '').trim().slice(0, 30)}`);
+    e.style.display = old; }
+  return out.slice(-6); }"""
+
+# each of these stays inside its panel (they used to run past the panel's edge at 344 px, 200% text)
+INSIDE_PANEL = """() => [...document.querySelectorAll(
+    '.panel.description > h2, .comments .panel-head h2, .checks li, .curve, .curveaxis')]
+  .filter(e => { const p = e.closest('.panel').getBoundingClientRect(), r = e.getBoundingClientRect();
+    return r.width > 0 && (r.right > p.right + 0.5 || e.scrollWidth > e.clientWidth + 1); })
+  .map(e => `${e.tagName}.${e.getAttribute('class')} ${(e.textContent || '').trim().slice(0, 30)}`)"""
+
+
+def test_the_deck_page_never_scrolls_sideways(tmp_path: Path) -> None:
+    """The whole deck page, not only its banner: 344, 360 and 390 px, the Fold and desktop, light
+    and dark, 100% and 200% text, scripts on and off. At 344 px with 200% text a mana curve count
+    pushed the page 4 px wider than the screen (39 px with scripts off, from the Group by box), and
+    the Description and Comments headings and a long deck check ran past their panels."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_path()
+    if exe == "missing":
+        pytest.skip("no Chromium available for Playwright")
+    s = Server(tmp_path, writes_enabled=True, forge_url="http://127.0.0.1:9")
+    s.start()
+    try:
+        sid = _link(s)
+        with sync_playwright() as p:
+            browser = p.chromium.launch(executable_path=exe) if exe else p.chromium.launch()
+            try:
+                for vw, vh, phone in (
+                    (344, 882, True),
+                    (360, 780, True),
+                    (390, 844, True),
+                    (673, 841, True),
+                    (1280, 800, False),
+                ):
+                    for scheme in ("light", "dark"):
+                        for text in ("100%", "200%"):
+                            for scripts in (True, False):
+                                where = f"{vw}-{scheme}-{text}-{'js' if scripts else 'nojs'}"
+                                ctx = browser.new_context(
+                                    viewport={"width": vw, "height": vh},
+                                    color_scheme=scheme,
+                                    is_mobile=phone,
+                                    has_touch=phone,
+                                    java_script_enabled=scripts,
+                                )
+                                ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": s.base}])
+                                ctx.route("**/*", lambda r: _local_only(r, s.base))
+
+                                # the text size goes into the page itself: with scripts off a style
+                                # tag can't be added afterwards
+                                def sized(route, _request, text=text):
+                                    got = route.fetch()
+                                    head, _, tail = got.text().rpartition("</body>")
+                                    body = f"{head}<style>html{{font-size:{text}}}</style></body>{tail}"
+                                    route.fulfill(response=got, body=body)
+
+                                ctx.route("**/decks/42", sized)
+                                page = ctx.new_page()
+                                page.goto(f"{s.base}/decks/42", wait_until="load")
+                                assert page.locator("section.panel.description").count() == 1, where
+                                fs = page.evaluate("getComputedStyle(document.documentElement).fontSize")
+                                assert text == "100%" or fs == "32px", (where, fs)
+                                width = page.evaluate("document.documentElement.scrollWidth")
+                                assert width <= vw, (where, width, page.evaluate(WIDENS_PAGE, vw))
+                                assert page.evaluate(INSIDE_PANEL) == [], where
+                                ctx.close()
+            finally:
+                browser.close()
+    finally:
+        s.stop()
+
+
+def test_card_search_keeps_its_name_and_no_mana_data_is_readable(tmp_path: Path) -> None:
+    """On a phone the Quick add row's Card search button shows only its icon: screen readers still
+    hear "Card search", as on wider screens. "No mana data" reads at 4.5:1 or better in both themes
+    (it used to be dimmed with opacity to 2.77:1 light and 3.24:1 dark)."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_path()
+    if exe == "missing":
+        pytest.skip("no Chromium available for Playwright")
+    s = Server(tmp_path, writes_enabled=True, forge_url="http://127.0.0.1:9")
+    s.start()
+    try:
+        sid = _link(s)
+        with sync_playwright() as p:
+            browser = p.chromium.launch(executable_path=exe) if exe else p.chromium.launch()
+            try:
+                for vw, vh, phone in ((344, 882, True), (390, 844, True), (1280, 800, False)):
+                    for scheme in ("light", "dark"):
+                        where = f"{vw}-{scheme}"
+                        ctx = _context(browser, s, sid, vw, vh, phone, scheme)
+                        page = ctx.new_page()
+                        page.goto(f"{s.base}/decks/42", wait_until="networkidle")
+                        search = page.locator("form.quick button[type=submit]")
+                        assert search.is_visible(), where
+                        assert page.get_by_role("button", name="Card search", exact=True).count() == 1, where
+                        label = search.locator("span")
+                        assert label.is_visible() == (not phone), where
+                        empty = page.locator(".cbar.empty span", has_text="No mana data").first
+                        assert empty.is_visible(), where
+                        assert empty.evaluate(
+                            "e => { for (; e; e = e.parentElement) if (+getComputedStyle(e).opacity < 1)"
+                            " return false; return true; }"
+                        ), where
+                        got = empty.evaluate(CONTRAST)
+                        assert got["ratio"] >= 4.5, (where, got)
+                        ctx.close()
             finally:
                 browser.close()
     finally:

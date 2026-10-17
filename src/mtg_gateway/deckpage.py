@@ -576,7 +576,8 @@ def toolbar_html(deck: Deck, *, own: bool, view: str, group: str, sort: str, q: 
         "<label for='quick'>Add card</label><div class='quickrow'>"
         "<input id='quick' type='text' name='add' placeholder='Quick add (card name)' data-suggest='cards' "
         "autocomplete='off'>"
-        f"<button type='submit' class='primary'>{icon('search')} "
+        # on a phone the label is hidden and only the icon shows: the name stays the same
+        f"<button type='submit' class='primary' aria-label='Card search'>{icon('search')} "
         "<span>Card search</span></button></div></form>"
         if own
         else ""
@@ -2007,6 +2008,14 @@ h3 .count{font-weight:400;color:var(--text-muted);font-size:.9rem}
   gap:0 1rem}
 .comments .panel-head [data-count]:empty{display:none}
 .comments .panel-head h2{margin:0}
+/* one-word headings can't wrap whole: with large text on a narrow phone they stop growing at 8% of the
+   screen width (min(), so 100% text and wider screens are unchanged); a longer word still breaks */
+.panel.description > h2,.comments .panel-head h2{min-width:0;overflow-wrap:anywhere;font-size:min(1.5rem,8vw)}
+/* the View as / Group by / Sort by boxes on a phone: two a row, one a row when large text makes a
+   box wider than half the row (scripts off, the longest choice used to push the page 39 px wide) */
+@media (max-width:600px){
+  .toolbar form.views{grid-template-columns:repeat(auto-fit,minmax(min(100%,7.5rem),1fr))} }
+.toolbar form.views .field,.toolbar form.views .sel,.toolbar form.views select{min-width:0}
 .comments .thread{margin:.75rem 0 1rem}
 .comments .cmt{border-top:1px solid var(--border);padding:.6rem 0 .4rem}
 .comments .cmt .who{display:flex;gap:.5rem;align-items:center;font-size:.85rem;color:var(--text-muted)}
@@ -2407,7 +2416,7 @@ html.cardview-open{overflow:hidden}
 .stats .lbl{font-weight:700;margin:.75rem 0 .25rem}
 .cbar{display:flex;height:36px;border-radius:3px;overflow:hidden;background:var(--surface-2);gap:2px}
 .cbar .seg{display:block;height:100%;clip-path:polygon(0 0,100% 0,calc(100% - 7px) 100%,0 100%);min-width:6px}
-.cbar.empty{opacity:.7;align-items:center;justify-content:center;font-size:.8rem;color:var(--text-muted)}
+.cbar.empty{align-items:center;justify-content:center;font-size:.8rem;color:var(--text-muted)}
 .seg-W{background:#f8f6d8} .seg-U{background:#92c5de} .seg-B{background:#8a8a8a} .seg-R{background:#e6948a}
 .seg-G{background:#a6d8a0} .seg-C{background:#cbc2bf}
 .ccards{display:grid;grid-template-columns:repeat(auto-fill,minmax(14rem,1fr));gap:1rem;margin-top:1rem}
@@ -2421,10 +2430,10 @@ html.cardview-open{overflow:hidden}
   border:1px solid var(--border)}
 .ccard .sub{font-size:.8rem;color:var(--text-muted);text-align:center;margin-top:.2rem}
 .stats .avg{margin:1rem 0 .25rem}
-.curve{display:flex;align-items:flex-end;gap:.5rem;height:9rem;padding:.25rem 0;
+.curve{display:flex;align-items:flex-end;gap:min(.5rem,2.1vw);height:9rem;padding:.25rem 0;
   border-bottom:1px solid var(--border)}
-.curve .bar{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;
-  font-size:.75rem}
+.curve .bar{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;
+  justify-content:flex-end;height:100%;font-size:min(.75rem,3.5vw)}
 .curve .bar .col{display:flex;flex-direction:column-reverse;width:70%;gap:2px;border-radius:2px 2px 0 0;
   overflow:hidden}
 .curve .bar b{font-variant-numeric:tabular-nums;margin-bottom:.15rem}
@@ -2441,9 +2450,11 @@ html.cardview-open{overflow:hidden}
 .sg{display:block;flex:1 1 0;min-height:2px;background:var(--orange);cursor:pointer}
 .k1{background:#3987e5} .k2{background:#eb6834} .k3{background:#1baf7a} .k4{background:#eda100}
 .k5{background:#e87ba4} .k6{background:#9085e9} .k7{background:#e34948} .k0{background:#8a8a8a}
-.curveaxis{display:flex;gap:.5rem}
+/* the counts and the axis can't wrap: with large text on a narrow phone their gaps and type stop
+   growing at a share of the screen width (min(), so 100% text is unchanged) */
+.curveaxis{display:flex;gap:min(.5rem,2.1vw)}
 .curveaxis .mv{flex:1;min-width:0;min-height:28px;padding:0;border:0;background:none;font-weight:700;
-  font-size:.8rem;color:var(--text)}
+  font-size:min(.8rem,3.8vw);color:var(--text)}
 .curveaxis .mv:hover:not(:disabled),.slegend button:hover,.rowbtn:hover{background:var(--surface-2)}
 .slegend{list-style:none;display:flex;flex-wrap:wrap;gap:.25rem .5rem;margin:.5rem 0 0;padding:0}
 .slegend button{min-height:28px;padding:0 .4rem;border:0;background:none;font-size:.85rem;gap:.35rem;
@@ -2493,7 +2504,11 @@ table.qty td:last-child{text-align:right;font-variant-numeric:tabular-nums;font-
 .checks ul{list-style:none;margin:.25rem 0 0;padding:0} .checks li{display:flex;gap:.4rem;
   align-items:baseline;
   padding:.2rem 0;border-top:1px solid var(--border)} .checks li:first-child{border-top:0}
-.checks li b{flex:none} .checks li span{color:var(--text-muted);overflow-wrap:anywhere}
+.checks li b{flex:none} .checks li span{color:var(--text-muted);overflow-wrap:anywhere;min-width:0}
+/* large text on a narrow phone: the value goes under its label instead of past the panel, and the
+   label stays beside its icon (it breaks inside a word only if that word alone is too wide) */
+.checks li{flex-wrap:wrap;column-gap:min(.4rem,2vw)} .checks li svg{flex:none}
+.checks li b{flex:0 1 auto;min-width:0;overflow-wrap:anywhere}
 .checks li.ok svg{color:var(--green-text)} .checks li.bad svg{color:var(--red-text,#d33)}
 @media (max-width:1000px){ .stats .grid{grid-template-columns:minmax(0,1fr)} }
 
