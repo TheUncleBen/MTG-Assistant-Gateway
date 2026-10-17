@@ -39,10 +39,30 @@ if [ "${1:-}" = "--prepare" ]; then
     </debug-overrides>
 </network-security-config>
 XML
+  # The push tests' hook: removes the app's task as Recents does (see the Recents scenario). Debug
+  # source set only, written here in CI: a release build never has it.
+  mkdir -p "$ROOT/app/src/debug/java/local/mtgassistantgateway/app"
+  cat > "$ROOT/app/src/debug/java/local/mtgassistantgateway/app/PushTestHooks.kt" <<'KT'
+package local.mtgassistantgateway.app
+
+import android.app.ActivityManager
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+
+/** Push tests only: removes the app's tasks, as removing it from Recents does. */
+class PushTestHooks : BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent) {
+        context.getSystemService(ActivityManager::class.java).appTasks.forEach { it.finishAndRemoveTask() }
+    }
+}
+KT
   cat > "$ROOT/app/src/debug/AndroidManifest.xml" <<'XML'
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <application android:networkSecurityConfig="@xml/push_test_network" />
+    <application android:networkSecurityConfig="@xml/push_test_network">
+        <receiver android:name="local.mtgassistantgateway.app.PushTestHooks" android:exported="true" />
+    </application>
 </manifest>
 XML
   exit 0
@@ -89,7 +109,23 @@ shows() { notes | grep -F "$1" >/dev/null; }
 running() { adb shell dumpsys activity services "$PKG" 2>/dev/null | grep NotifyService >/dev/null; }
 prefs() { adb shell run-as "$PKG" cat shared_prefs/mtgassistant.xml 2>/dev/null | tr -d '\r'; }
 key_stored() { prefs | grep -F "<string name=\"push_key\">$KEY</string>" >/dev/null; }
-in_recents() { adb shell dumpsys activity recents 2>/dev/null | grep "realActivity=.*$PKG/" >/dev/null; }
+# The app's tasks in Recents, one line each: the task's own line and what dumpsys says about whether
+# it is shown. A task marked hidden, excluded or not in Recents is left out, since the launcher
+# doesn't show it and no gesture can remove it.
+recents_tasks() {
+  adb shell dumpsys activity recents 2>/dev/null | tr -d '\r' | python3 -c '
+import re, sys
+pkg = sys.argv[1]
+blocks = re.split(r"\n(?=\s*\* Recent #)", sys.stdin.read())
+for b in blocks:
+    if not re.search(r"realActivity=\{?" + re.escape(pkg) + "/", b):
+        continue
+    if re.search(r"inRecents=false|isAvailable=false|excludeFromRecents|mHidden=true|hidden=true", b):
+        continue
+    flags = " ".join(sorted(set(re.findall(r"\b(?:inRecents|isAvailable|mHidden|hidden)=\w+", b))))
+    print(b.strip().splitlines()[0].strip() + ("  [" + flags + "]" if flags else ""))' "$PKG"
+}
+in_recents() { [ -n "$(recents_tasks)" ]; }
 connected() { [ "$(state connections)" -ge 1 ]; }
 boot() {
   adb wait-for-device
@@ -200,6 +236,7 @@ fi
 # -- the app swiped away from Recents: the service keeps running
 adb shell am start -W -n "$PKG/local.mtgassistantgateway.app.MainActivity" >/dev/null
 sleep 3
+in_recents_before=no; until_ok in_recents 10 && in_recents_before=yes
 size=$(adb shell wm size | tr -d '\r' | awk '{print $NF}')
 w=${size%x*}; h=${size#*x}
 # Up to three tries: Recents can still be opening when the first swipe lands. Removing the task is
@@ -212,25 +249,23 @@ for _ in 1 2 3; do
   adb shell input swipe $((w / 2)) $((h * 6 / 10)) $((w / 2)) $((h / 20)) 200
   until_ok '! in_recents' 6 && break
 done
-# The swipe gesture is not reliable on the emulator: Recents' own Clear all removes the task the same
-# way (Android ends the task, and the service's onTaskRemoved runs), so it is the fallback. It sits
-# past the last task, so Recents is scrolled each way to find it.
+# The swipe gesture is not reliable on the emulator, so if it didn't take, the debug build's test
+# hook (PushTestHooks, written by --prepare into the debug source set only) removes the app's task
+# with ActivityManager.AppTask.finishAndRemoveTask, which goes through Android's own task removal as
+# a swipe does (read from AOSP, not checked on a device), except that a swipe may also try to end
+# the app's process.
 if in_recents; then
-  how="Clear all"
-  adb shell input keyevent KEYCODE_APP_SWITCH
-  sleep 3
-  for dir in "$((w / 5)) $((w * 9 / 10))" "$((w * 9 / 10)) $((w / 5))"; do
-    set -- $dir
-    adb shell input swipe "$1" $((h / 2)) "$2" $((h / 2)) 300
-    sleep 2
-    tap_text "Clear all" && until_ok '! in_recents' 10 && break
-  done
-  shot recents-clear-all
+  echo "note: still in Recents after the swipes: $(recents_tasks | tr '\n' ';')"
+  how="test hook (not a launcher swipe)"
+  adb shell input keyevent KEYCODE_HOME
+  adb shell am broadcast -n "$PKG/local.mtgassistantgateway.app.PushTestHooks" >/dev/null
 fi
 adb shell input keyevent KEYCODE_HOME
 send m004AbCdEf "After swipe" "Still here"
-if ! until_ok '! in_recents' 10; then
-  result "swiped away from Recents" no "the app was still in Recents after the swipe"
+if [ "$in_recents_before" = no ]; then
+  result "swiped away from Recents" no "the app was not in Recents to begin with"
+elif ! until_ok '! in_recents' 10; then
+  result "swiped away from Recents" no "the app was still in Recents after the $how: $(recents_tasks | tr '\n' ';')"
 elif running && until_ok 'shows "After swipe"' 30; then
   result "swiped away from Recents (removed by $how)" ok
 else
