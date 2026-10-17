@@ -314,7 +314,7 @@ details.dd[open] > summary.dd-trigger{border-color:var(--orange)}
 .wrap{width:100%;max-width:52rem;margin:0 auto;padding:0 1rem}
 main.wrap{flex:1;padding:1rem 1rem 3rem}
 h1{font-size:2rem;font-weight:700;line-height:1.2;margin:.5rem 0 1rem;overflow-wrap:anywhere}
-h2{font-size:1.5rem;font-weight:700;margin:0 0 .6rem}
+h2{font-size:1.5rem;font-weight:700;margin:0 0 .6rem;overflow-wrap:anywhere}
 h2:not(:first-child){margin-top:1.25rem}
 h3{font-size:1.1rem;font-weight:700;margin:.5rem 0 .4rem}
 h4{font-size:1rem;font-weight:700;margin:0}
@@ -572,8 +572,9 @@ button.thumbbtn:focus-visible{outline:2px solid var(--accent);outline-offset:2px
 .notice.disclosure{font-weight:400;color:var(--text);border-left-color:var(--orange)}
 .disclosure h3{font-size:1rem;margin:.9rem 0 .3rem}
 .disclosure ul{margin:0 0 .4rem;padding-left:1.25rem}
-.disclosure li{margin:.2rem 0;line-height:1.45}
-.disclosure p{margin:0 0 .4rem}
+/* a long path such as /decks/{deck_id} breaks rather than widen the page (200% text on a phone) */
+.disclosure li{margin:.2rem 0;line-height:1.45;overflow-wrap:anywhere}
+.disclosure p{margin:0 0 .4rem;overflow-wrap:anywhere}
 details.disclosure{margin:.75rem 0 0;border-top:1px solid var(--border);padding-top:.6rem}
 details.disclosure > summary{cursor:pointer;font-weight:700;min-height:2rem;display:flex;align-items:center}
 /* the folded full detail inside the link-form disclosure (link_disclosure.form_html) */
@@ -687,7 +688,10 @@ details.raw{margin:.5rem 0 0} details.raw summary{cursor:pointer;color:var(--tex
 .wide .wrap{max-width:2300px}
 .wide main.wrap{padding-left:1rem;padding-right:1rem}
 
-@media (max-width:900px){ .topbar nav.site a{padding:0 .4rem;font-size:.93rem} .brand{margin-right:.25rem} }
+/* below 1024 px the links sit closer and a little smaller, so the search box keeps room for its
+   whole placeholder beside an admin's eight links, in wide fonts too */
+@media (max-width:1023.98px){ .topbar nav.site a{padding:0 .4rem;font-size:.93rem}
+  .brand{margin-right:.25rem} }
 /* The proposal review's three choices sit at one height, and the deck banner's
    Comments link matches its Like and Bookmark buttons. */
 .choice button,.choice .btn{min-height:48px}
@@ -723,17 +727,23 @@ details.raw{margin:.5rem 0 0} details.raw summary{cursor:pointer;color:var(--tex
    button and the page needs no sideways scroll. The word returns above 800 px. */
 @media (min-width:600px) and (max-width:799.98px) and (hover:hover) and (pointer:fine){
   .topbar .brand .word{display:none} }
-/* The brand, the links and the account side are the bar's own flex items (.left only groups the
-   brand and the links in the markup). The links never shrink. When the row is short, the brand's
-   word gives way first (an ellipsis, for a long MTG_SERVER_NAME), then the search box, down to its
-   9rem; before even that is not enough, the links wrap (the container queries below). With
-   .left{flex:1 1 0} the left side could shrink below its links, which then ran under the search
-   box, so a click on History or Admin landed in the box. */
-.topbar .wrap{gap:.25rem}
-.topbar .left{display:contents}
+/* Where the bar has no text links (a phone, the app): the brand takes the room the account side
+   leaves, and a long MTG_SERVER_NAME shortens the brand's word (an ellipsis). */
+.topbar .left{flex:1 1 0}
 .topbar nav.site{flex:none}
-.topbar .brand{flex:0 1000 auto;min-width:25px}
-.topbar .right{flex:0 1 auto;min-width:auto;margin-left:auto;padding-left:.75rem}
+.topbar .right{flex:0 1 auto}
+.brand{min-width:0}
+/* Where it has them (600 px and wider, not the app): the brand, the links and the account side
+   are the bar's own flex items (.left only groups the brand and the links in the markup). The
+   links never shrink. When the row is short, the brand's word gives way first (an ellipsis), then
+   the search box, down to its 9rem; before even that is not enough, the links wrap (the container
+   queries below). With .left{flex:1 1 0} the left side could shrink below its links, which then
+   ran under the search box, so a click on History or Admin landed in the box. */
+@media (min-width:600px){
+  body:not(.app) .topbar .wrap{gap:.25rem}
+  body:not(.app) .topbar .left{display:contents}
+  body:not(.app) .topbar .brand{flex:0 1000 auto;min-width:25px}
+  body:not(.app) .topbar .right{min-width:auto;margin-left:auto;padding-left:.75rem} }
 .brand .word{overflow:hidden;text-overflow:ellipsis;min-width:0}
 /* Large text with a mouse (a raised font size, a text-only zoom, 200% text): when the bar's text
    links no longer fit on one row beside the brand and the account button, they wrap onto more

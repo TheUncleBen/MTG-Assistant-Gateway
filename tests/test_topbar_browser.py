@@ -459,7 +459,6 @@ def test_a_long_server_name_gives_way_before_the_search_box_and_the_links(server
     settings = server.app.state.gateway.settings
     short_name = settings.server_name
     problems: list[str] = []
-    cut_alone: list[str] = []  # sizes where the name was cut and the search box kept its full width
     with sync_playwright() as p:
         browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
         ctx = browser.new_context(viewport={"width": 1280, "height": 800})
@@ -472,6 +471,9 @@ def test_a_long_server_name_gives_way_before_the_search_box_and_the_links(server
             page.goto(f"{server.base}/history", wait_until="networkidle")
             _zoom(page, zoom)
             page.wait_for_timeout(20)
+            g = page.evaluate(BAR_OVERLAP)
+            if g["overlap"] or g["outside"] or g["doc"] != g["win"]:
+                problems.append(f"@{width}px {zoom} {name!r}: {g}")
             return page.evaluate(BRAND_AND_SEARCH)
 
         try:
@@ -481,18 +483,15 @@ def test_a_long_server_name_gives_way_before_the_search_box_and_the_links(server
                     # measured with the usual short name at the same width and text size.
                     full = measure(short_name, width, zoom)["search"]
                     b = measure(LONG_NAME, width, zoom)
-                    g = page.evaluate(BAR_OVERLAP)
-                    if g["overlap"] or g["outside"] or g["doc"] != g["win"]:
-                        problems.append(f"@{width}px {zoom}: {g}")
                     if b["search"] < 9 - 0.05 or (b["search"] < full - 0.05 and not b["cut"]):
                         problems.append(f"@{width}px {zoom}: search box shrank first: {b}, full {full}")
-                    if b["cut"] and b["search"] >= full - 0.05:
-                        cut_alone.append(f"{width}px {zoom}")
+            full_1280 = measure(short_name, 1280, "none")["search"]
+            at_1280 = measure(LONG_NAME, 1280, "none")
         finally:
             object.__setattr__(settings, "server_name", short_name)
             browser.close()
     assert problems == [], "\n".join(problems)
-    assert cut_alone, "the long name was never cut while the search box kept its full width"
+    assert at_1280["cut"] and at_1280["search"] >= full_1280 - 0.05, (at_1280, full_1280)  # name cut, not box
 
 
 def test_without_scripts_the_scroll_room_is_large_only_where_the_bar_wraps(server: Server) -> None:
@@ -530,3 +529,111 @@ def test_without_scripts_the_scroll_room_is_large_only_where_the_bar_wraps(serve
                 bar,
             )
     assert seen[(1280, "none")][1] == 50 and seen[(920, "root-150")][1] > 50  # both kinds were seen
+
+
+# The search box's placeholder, whole, beside the links at the normal text size (review R13-3:
+# at 920 px it read "Search cards and d"). Large text may shrink the box further, by design.
+PLACEHOLDER_FIT = """() => {
+  const i = document.querySelector('.topbar .topsearch input');
+  const cs = getComputedStyle(i);
+  const c = document.createElement('canvas').getContext('2d');
+  c.font = cs.font;
+  return {text: c.measureText(i.placeholder).width,
+    room: i.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight),
+    bar: document.querySelector('.topbar').offsetHeight};
+}"""
+
+
+@pytest.mark.parametrize("role", ["member", "admin"])
+def test_the_search_placeholder_fits_beside_the_links_at_normal_size(server: Server, role: str) -> None:
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_path()
+    if exe == "missing":
+        pytest.skip("no Chromium available for Playwright")
+    sid = _admin(server) if role == "admin" else server.sign_in()
+    problems: list[str] = []
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+        ctx = browser.new_context(viewport={"width": 1280, "height": 800})
+        ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
+        page = ctx.new_page()
+        for width in (900, 920, 940, 960, 980, 1000, 1010, 1023, 1024, 1040, 1100, 1280, 1920):
+            page.set_viewport_size({"width": width, "height": 800})
+            page.goto(f"{server.base}/history", wait_until="networkidle")
+            m = page.evaluate(PLACEHOLDER_FIT)
+            if m["text"] > m["room"] + 0.5 or m["bar"] != 50:
+                problems.append(f"@{width}px: {m}")
+        browser.close()
+    assert problems == [], "\n".join(problems)
+
+
+# The app has no text links in its bar, so the one-row rules for the links leave it alone (review
+# R13-2: at 344 px, the Fold's cover screen, they cut the gateway's name one letter earlier).
+@pytest.mark.parametrize("width", [344, 360, 412, 884])
+def test_the_app_bar_keeps_its_own_spacing(server: Server, width: int) -> None:
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_path()
+    if exe == "missing":
+        pytest.skip("no Chromium available for Playwright")
+    sid = server.sign_in()
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+        ctx = browser.new_context(
+            viewport={"width": width, "height": 800},
+            has_touch=True,
+            is_mobile=True,
+            user_agent="Mozilla/5.0 (Linux; Android 14) MTGAssistant/0.7.27",
+        )
+        ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
+        page = ctx.new_page()
+        page.goto(f"{server.base}/decks", wait_until="networkidle")
+        got = page.evaluate(
+            "() => { const s = q => getComputedStyle(document.querySelector(q)); return {"
+            " app: document.body.classList.contains('app'), left: s('.topbar .left').display,"
+            " pad: s('.topbar .right').paddingLeft, word: s('.topbar .brand .word').display,"
+            " doc: document.documentElement.scrollWidth, win: innerWidth}; }"
+        )
+        browser.close()
+    assert got["app"] and got["word"] != "none", got
+    assert got["left"] == "flex" and got["pad"] == "0px", got  # the brand gets the room the old way
+    assert got["doc"] == got["win"], got
+
+
+# The Account page on a phone with 200% text, scripts on and off (a Track A review note on the
+# bottom tab bar at 344 and 360 px; 320 px too): nothing reaches past the window. The causes found
+# were the link disclosure's "/decks/{deck_id}" (shown open without scripts) and the
+# "Notifications" heading at 320 px; both now break instead.
+@pytest.mark.parametrize("script", [True, False], ids=["script", "no-script"])
+def test_the_account_page_fits_a_phone_at_200_percent_text(server: Server, script: bool) -> None:
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_path()
+    if exe == "missing":
+        pytest.skip("no Chromium available for Playwright")
+    sid = server.sign_in()
+    problems: list[str] = []
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+        for width in (320, 344, 360):
+            for zoom in ("root", "text"):
+                ctx = browser.new_context(
+                    viewport={"width": width, "height": 800}, java_script_enabled=script
+                )
+                ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
+                page = ctx.new_page()
+                page.goto(f"{server.base}/account", wait_until="networkidle")
+                _zoom(page, zoom)
+                page.wait_for_timeout(50)
+                got = page.evaluate(
+                    "() => ({doc: document.documentElement.scrollWidth,"
+                    " win: document.documentElement.clientWidth,"
+                    " tabbar: document.querySelector('.tabbar').getBoundingClientRect().right,"
+                    " disclosure: !!document.querySelector('#archidekt-disclosure')})"
+                )
+                if got["doc"] > got["win"] or got["tabbar"] > got["win"] + 0.5 or not got["disclosure"]:
+                    problems.append(f"@{width}px {zoom}: {got}")
+                ctx.close()
+        browser.close()
+    assert problems == [], "\n".join(problems)
