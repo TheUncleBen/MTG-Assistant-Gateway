@@ -607,6 +607,54 @@ async def test_each_decks_message_follows_its_proposals(stack: Stack) -> None:
         await b.aclose()
 
 
+async def test_an_admins_approval_setting_brings_each_decks_message_in_step(stack: Stack) -> None:
+    """The admin's approval settings decide what waits for a member's press, and changing one
+    writes no proposal: the deck's message follows it both ways, after a restart too."""
+    b, key = await _member(stack)
+    n = stack.gw.notifier
+    n.recount_delay = 0.01
+    live = stack.gw.decks.live
+    try:
+        r = await b.link("alice", "pw-alice")
+        assert r.status_code == 303, r.text
+        token = await mcp_token(stack.h)
+        p = structured(
+            await call(
+                stack.h,
+                token,
+                "propose_deck_changes",
+                {"deck_id": "42", "changes": [{"action": "add", "card_name": "Arcane Signet"}]},
+            )
+        )
+        assert p["state"] == "pending" and p["assistant_may_apply"] is False  # the default: manual
+        await n.drain()
+        assert stack.ntfy.published[-1]["title"] == notify.waiting_title(1, p["deck_name"])
+        # the default becomes auto: the assistant may apply it, so nothing waits for the member
+        live.set("approval_mode_default", "auto", by="admin-1")
+        await n.drain()
+        assert stack.ntfy.deleted == [f"/{key}/deck-42"]
+        assert stack.gw.decks.waiting_by_deck("user-1") == {}
+        # the cap comes down to manual: it waits for the member's press again
+        sent = len(stack.ntfy.published)
+        live.set("approval_mode_max", "manual", by="admin-1")
+        await n.drain()
+        assert len(stack.ntfy.published) == sent + 1
+        assert stack.ntfy.published[-1]["title"] == notify.waiting_title(1, p["deck_name"])
+        # after a restart the gateway no longer knows what it sent: withdrawn all the same
+        n._waiting.clear()
+        n._cleared.clear()
+        live.set("approval_mode_max", "auto", by="admin-1")
+        await n.drain()
+        assert stack.ntfy.deleted == [f"/{key}/deck-42"] * 2
+        # a setting that decides nothing about waiting changes no message
+        sent = len(stack.ntfy.published)
+        live.set("snapshots_per_deck", 30, by="admin-1")
+        await n.drain()
+        assert len(stack.ntfy.published) == sent and len(stack.ntfy.deleted) == 2
+    finally:
+        await b.aclose()
+
+
 async def test_drain_returns_when_a_send_finished_in_the_same_turn() -> None:
     """A finished task leaves the set only in its done callback, a loop turn later: drain called
     right then must still return (it spun for ever, at shutdown too)."""

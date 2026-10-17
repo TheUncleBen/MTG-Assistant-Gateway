@@ -913,6 +913,12 @@ def build_mcp_server(state: AppState) -> MCPServer:
     return server
 
 
+# The admin settings DeckService.waiting_by_deck reads (decks.py mode_of, _assistant_policy).
+WAITING_SETTINGS = frozenset(
+    {"approval_mode_default", "approval_mode_max", "auto_apply_max_rows", "auto_big_edit_rows"}
+)
+
+
 def _notify_events(state: AppState) -> None:
     """Hook the member's notifications (notify.py) to the events they may ask for: one message per
     deck while an assistant's changes wait there for their own press, kept in step with every
@@ -922,6 +928,15 @@ def _notify_events(state: AppState) -> None:
         return
     notifier.watch_waiting(state.decks.waiting_by_deck)
     state.db.watch_proposals(notifier.proposals_changed)
+
+    def setting_changed(key: str) -> None:
+        # an approval setting decides what waits for each member's press: count every deck with
+        # a pending proposal again (the admin's change writes no proposal, so no trigger fires)
+        if key in WAITING_SETTINGS:
+            for sub, deck_id in state.db.pending_proposal_decks():
+                notifier.proposals_changed(sub, deck_id)
+
+    state.live.on_change.append(setting_changed)
 
     def report_finished(sub: str, report_id: str) -> None:
         notifier.soon(
