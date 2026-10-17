@@ -164,7 +164,7 @@ class ReportService:
         deck: Deck | None = None,
         snapshot_id: str | None = None,
         same_opponents_as: str | None = None,
-        pair_with: str | None = None,
+        pair_with: str | Deck | None = None,
     ) -> dict[str, Any]:
         """Read the deck, compute its statistics, optionally simulate and validate it, store
         the result and return it. Refuses a second report of an unchanged deck within
@@ -174,14 +174,18 @@ class ReportService:
         ``deck`` is a deck already read (one of the member's snapshots, ``snapshot_id``), filed
         under its Archidekt deck like any other report. ``same_opponents_as`` is another of the
         member's reports: this run's Forge games seat that run's opponents (K6, Q136), and the run
-        is never a reused report. ``pair_with`` is the other deck of the Compare page's Forge games
-        (Q140 item 3): the opponents are picked for the higher of the two decks' brackets, and the
-        run is never a reused report either."""
+        is never a reused report. ``pair_with`` is the other deck of a Forge comparison (its id,
+        or the deck already read; Q140 item 3): the opponents are picked for the higher of the two
+        decks' brackets, and the run is never a reused report either. The other deck is read
+        before anything is stored, so a deck that can't be read leaves no report behind.
+        A ``deck`` given without ``snapshot_id`` is the Archidekt deck already read."""
         if not isinstance(games, int) or isinstance(games, bool) or games < 10 or games > MAX_GAMES:
             raise DeckError("invalid", f"games must be an integer from 10 to {MAX_GAMES}")
         options = sim_options(options)
+        if same_opponents_as is not None and pair_with is not None:
+            raise DeckError("invalid", BOTH_PAIRINGS)
         shared = self._share_from(sub, same_opponents_as) if same_opponents_as is not None else None
-        key = (sub, f"snapshot:{snapshot_id}" if deck is not None else _clean_deck_id(deck_ref))
+        key = (sub, f"snapshot:{snapshot_id}" if snapshot_id else _clean_deck_id(deck_ref))
         flight = self._runs.setdefault(key, _Flight())
         flight.users += 1
         seen = flight.finished
@@ -279,7 +283,7 @@ class ReportService:
         deck: Deck | None = None,
         snapshot_id: str | None = None,
         shared: dict[str, Any] | None = None,
-        pair_with: str | None = None,
+        pair_with: str | Deck | None = None,
     ) -> dict[str, Any]:
         if deck is None:
             deck = await self.decks.get_any_deck(sub, deck_ref)
@@ -303,6 +307,10 @@ class ReportService:
             return out
         stats = deck_stats.compute(deck)
         mode = sim_mode(stats)
+        plays_forge = self.forge is not None and forge and mode == "commander"
+        # The other deck of a comparison is read now, before anything is stored and outside the
+        # Forge start lock: a deck that can't be read stops the run with no report kept.
+        other = await self.pair_deck(sub, pair_with) if plays_forge and pair_with is not None else None
         goldfish: dict[str, Any] | None = None
         validation: dict[str, Any] | None = None
         if self.mf is not None:
@@ -385,26 +393,23 @@ class ReportService:
         else:
             # Forge's own seed when given (A34), else the goldfish's, else one the gateway picks
             seed = options.get("forge_seed", options.get("seed"))
+            bracket = _pair_bracket(deck, stats, other)
             async with self._forge_start_lock:
-                await self._start_or_queue_forge(
-                    sub, rid, deck, games, seed, await self._pair_bracket(sub, deck, stats, pair_with), shared
-                )
+                await self._start_or_queue_forge(sub, rid, deck, games, seed, bracket, shared)
         return self.get(sub, rid)
 
-    async def _pair_bracket(
-        self, sub: str, deck: Any, stats: dict[str, Any], pair_with: str | None
-    ) -> tuple[Any, ...]:
-        """The bracket this run's opponents are picked for: the deck's own (forge_bracket), or on
-        the Compare page the higher of the two decks' (Q140 item 3), each deck's set bracket where
-        it has one, else Archidekt's estimate from cards; a tie keeps this deck's."""
-        own = forge_bracket(deck, stats)
-        if pair_with is None:
-            return own
-        other = await self.decks.get_any_deck(sub, pair_with)
-        theirs = forge_bracket(other, deck_stats.compute(other))
-        if theirs[0] is not None and (own[0] is None or theirs[0] > own[0]):
-            return (*theirs, other.name or f"Deck {other.id}", True)
-        return (*own, None, True)
+    async def pair_deck(self, sub: str, pair_with: str | Deck) -> Deck:
+        """The other deck of a Forge comparison, read for its bracket. A deck that can't be read
+        is refused with the reason (its kind and wait kept, for the busy page), saying that no
+        report was made."""
+        if isinstance(pair_with, Deck):
+            return pair_with
+        try:
+            return await self.decks.get_any_deck(sub, pair_with)
+        except DeckError as exc:
+            raise DeckError(
+                exc.kind, f"{PAIR_UNREAD} {exc}", retry_after=exc.retry_after, sent=exc.sent, **exc.extra
+            ) from exc
 
     async def _start_or_queue_forge(
         self,
@@ -1119,6 +1124,11 @@ NO_FORGE_TO_SHARE = (
     "That report has no Forge games, so there are no opponents to share. Run it again with Forge, then "
     "compare."
 )
+PAIR_UNREAD = "The gateway could not read the other deck, so no report was made:"
+BOTH_PAIRINGS = (
+    "compare_with and same_opponents_as each pick the opponents: use compare_with on the first deck's "
+    "report and same_opponents_as on the second's, not both on one."
+)
 
 
 def _number(value: Any) -> bool:
@@ -1448,6 +1458,19 @@ def sim_mode(stats: dict[str, Any]) -> str:
     if count < MIN_CONSTRUCTED:
         return SMALL_DECK_TEXT.format(min=MIN_CONSTRUCTED, count=count)
     return "constructed"
+
+
+def _pair_bracket(deck: Any, stats: dict[str, Any], other: Deck | None) -> tuple[Any, ...]:
+    """The bracket this run's opponents are picked for: the deck's own (forge_bracket), or in a
+    Forge comparison the higher of the two decks' (Q140 item 3), each deck's set bracket where it
+    has one, else Archidekt's estimate from cards; a tie keeps this deck's."""
+    own = forge_bracket(deck, stats)
+    if other is None:
+        return own
+    theirs = forge_bracket(other, deck_stats.compute(other))
+    if theirs[0] is not None and (own[0] is None or theirs[0] > own[0]):
+        return (*theirs, other.name or f"Deck {other.id}", True)
+    return (*own, None, True)
 
 
 def forge_bracket(deck: Any, stats: dict[str, Any]) -> tuple[int | None, str | None]:

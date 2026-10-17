@@ -318,14 +318,15 @@ def pick_opponents(
     }
 
 
-# Q140 item 3: the Compare page's "Test both in Forge" seats both decks against precons picked for
-# the higher of their brackets, so the order of the two decks doesn't matter.
-PAIR_LEAD = "Both decks on the Compare page meet opponents picked for the higher of their two brackets."
+# Q140 item 3: a Forge comparison (the Compare page's "Test both in Forge", or an assistant's
+# compare_with) seats both decks against precons picked for the higher of their brackets, so the
+# order of the two decks doesn't matter.
+PAIR_LEAD = "Both decks in this comparison meet opponents picked for the higher of their two brackets."
 
 
 def bracket_parts(value: Any) -> tuple[int | None, str | None, str | None, bool]:
     """A run's stored bracket: [level, source] for the deck's own, or [level, source, deck, True]
-    for a Compare page run (``deck`` names the other deck when its bracket was the higher, else
+    for a comparison's run (``deck`` names the other deck when its bracket was the higher, else
     is None)."""
     parts = list(value) if isinstance(value, (list, tuple)) else []
     parts += [None] * (4 - len(parts))
@@ -366,7 +367,7 @@ def shared_opponents(
             "note": f"The same opponents as {deck}'s Forge games, so both decks met the same table.",
         }
     # its run has not started yet: picked as that run will pick them, for the bracket it waits
-    # with (the higher of the two decks' on the Compare page, Q140 item 3: then [n, source, deck])
+    # with (the higher of the two decks' in a comparison, Q140 item 3: then [n, source, deck])
     level, source, of_deck, pair = bracket_parts(shared.get("bracket"))
     chosen, picked = pick_opponents(precons, level, source, deck=of_deck or deck)
     if pair:
@@ -399,7 +400,7 @@ async def start_run(
     ``forge`` section. ``shared`` (K6, Q136) seats the opponents of another report's run, so two
     decks meet the same table: its ``opponents`` (that run's precons) when it has them, else
     they are picked for its ``bracket``; ``report_id`` and ``deck_name`` say whose they were.
-    ``pair`` (Q140 item 3): the Compare page's run, whose ``bracket`` is the higher of the two
+    ``pair`` (Q140 item 3): a comparison's first run, whose ``bracket`` is the higher of the two
     decks' (``bracket_deck`` names the other deck when it is that one's).
     Cards Forge lacks are removed from the run and named in ``not_played``; the run is refused
     only when the commander itself is missing. Every run is seeded: without a seed from the

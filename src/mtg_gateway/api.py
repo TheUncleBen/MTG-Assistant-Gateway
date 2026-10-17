@@ -509,7 +509,7 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
         if isinstance(data, Response):
             return data
         games = data.get("games", 300)
-        forge, share = data.get("forge"), data.get("same_opponents_as")
+        forge, share, pair = data.get("forge"), data.get("same_opponents_as"), data.get("compare_with")
         return ok(
             await reports.run(
                 who.sub,
@@ -520,6 +520,8 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
                 forge=forge if isinstance(forge, bool) else None,
                 # K6: seat another of the member's reports' Forge opponents
                 same_opponents_as=share if isinstance(share, str) else None,
+                # Q140 item 3: precons for the higher of this deck's and that deck's brackets
+                pair_with=str(pair) if isinstance(pair, (str, int)) and not isinstance(pair, bool) else None,
             ),
             201,
         )

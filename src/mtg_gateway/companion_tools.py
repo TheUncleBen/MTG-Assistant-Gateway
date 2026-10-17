@@ -641,9 +641,10 @@ def add_deck_tool_routes(
     async def compare_forge(request: Request) -> Response:
         """K6 (Q136): both decks' Forge games against the same opponents. This deck's report runs
         first, with precons picked for the higher of the two decks' brackets (Q140 item 3, so the
-        order doesn't matter); the other deck's seats them
-        (``same_opponents_as``), as the assistants' run_deck_report does. Both run without the
-        solo test, so starting them is quick; the second report opens and links the first."""
+        order doesn't matter); the other deck's seats them (``same_opponents_as``), as the
+        assistants' run_deck_report does with compare_with. The other deck is read once, before
+        either report is made, and both runs use that read. Both run without the solo test, so
+        starting them is quick; the second report opens and links the first."""
         deck_id = request.path_params["deck_id"]
         sub, sid = browser_session(state, request)
         if not sub:
@@ -664,10 +665,16 @@ def add_deck_tool_routes(
         try:
             if not other.isdigit():
                 raise DeckError("invalid", "Pick the other deck on the Compare page first.")
-            first = await reports.run(sub, deck_id, simulate=False, forge=True, pair_with=other)
+            other_deck = await reports.pair_deck(sub, other)
+            first = await reports.run(sub, deck_id, simulate=False, forge=True, pair_with=other_deck)
             try:
                 second = await reports.run(
-                    sub, other, simulate=False, forge=True, same_opponents_as=first["report_id"]
+                    sub,
+                    other,
+                    simulate=False,
+                    forge=True,
+                    deck=other_deck,
+                    same_opponents_as=first["report_id"],
                 )
             except DeckError as exc:
                 if str(exc) != NO_FORGE_TO_SHARE:

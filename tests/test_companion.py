@@ -320,6 +320,117 @@ async def test_compare_page_tests_both_decks_against_the_same_forge_opponents(st
         await b.aclose()
 
 
+async def test_forge_comparison_reads_the_other_deck_first_on_every_path(stack: Stack) -> None:
+    """Review r3 items 1 and 2 (Q140 item 3): the website's Compare press, run_deck_report's
+    compare_with and the REST route's compare_with all pick the precons for the higher of the two
+    decks' brackets. The other deck is read before anything is stored: a deck that can't be read
+    leaves no report and says so. A press reads each deck once."""
+    from mtg_gateway.forge import PAIR_LEAD, bracket_parts
+    from mtg_gateway.reports import BOTH_PAIRINGS, PAIR_UNREAD
+
+    from .test_forge import BRACKETED, FakeForge
+
+    h = stack.h
+    b = await linked_browser(stack)
+    reports = h.app.state.gateway.reports
+    fake = FakeForge(brackets=BRACKETED)
+    reports.forge = fake.client()
+    stack.ark.private.discard(43)  # Amy's deck, public for this test
+    stack.ark.decks[43]["edhBracket"] = 4
+    db = reports.db._conn
+
+    def stored() -> list[object]:
+        return db.execute("SELECT deck_id, forge_json FROM reports ORDER BY rowid").fetchall()
+
+    def paired_on_4(row: object) -> None:
+        section = json.loads(row["forge_json"])
+        if "start" in section:  # waiting behind the member's earlier run, with its bracket
+            assert bracket_parts(section["start"]["bracket"])[:2] == (4, "archidekt"), section
+        else:
+            assert "opponent_choice" in section, section
+            note = section["opponent_choice"]["note"]
+            assert PAIR_LEAD in note and "Bracket 4 (the bracket set on" in note, section
+
+    try:
+        page = await b.http.get("/decks/42/compare?with=43", headers=NAV)
+        csrf = re.search(r"name='csrf' value='([^']+)'", page.text).group(1)
+        # the website: one read of each deck per press
+        db.execute("DELETE FROM reports")
+        calls = len(stack.ark.calls)
+        r = await b.http.post("/decks/42/compare/forge", data={"csrf": csrf, "with": "43"})
+        assert r.status_code == 303, r.text
+        reads = [p for m, p in stack.ark.calls[calls:] if m == "GET" and p.startswith("/api/decks/")]
+        assert sorted(reads) == ["/api/decks/42/", "/api/decks/43/"], reads
+        paired_on_4(stored()[0])
+        # a deck that can't be read: nothing is kept, and the page says so
+        db.execute("DELETE FROM reports")
+        bad = await b.http.post("/decks/42/compare/forge", data={"csrf": csrf, "with": "99999"})
+        assert bad.status_code == 404 and html.unescape(PAIR_UNREAD) in html.unescape(bad.text), bad.text
+        assert stored() == []
+        # run_deck_report's compare_with, either order
+        token = await mcp_token(h)
+        for here, there in (("42", "43"), ("43", "42")):
+            db.execute("DELETE FROM reports")
+            tool = structured(
+                await call(
+                    h,
+                    token,
+                    "run_deck_report",
+                    {"deck_ref": here, "simulate": False, "forge": True, "compare_with": there},
+                )
+            )
+            assert tool["ok"], tool
+            assert [r["deck_id"] for r in stored()] == [here]
+            paired_on_4(stored()[0])
+        db.execute("DELETE FROM reports")
+        gone = structured(
+            await call(
+                h,
+                token,
+                "run_deck_report",
+                {"deck_ref": "42", "simulate": False, "forge": True, "compare_with": "99999"},
+            )
+        )
+        assert gone["ok"] is False and PAIR_UNREAD in gone["message"] and stored() == [], gone
+        both = structured(
+            await call(
+                h,
+                token,
+                "run_deck_report",
+                {"deck_ref": "42", "compare_with": "43", "same_opponents_as": "rep_x"},
+            )
+        )
+        assert both["ok"] is False and both["message"] == BOTH_PAIRINGS
+        listed = structured(
+            await call(h, token, "run_deck_report", {"deck_ref": "1 Sol Ring\n", "compare_with": "43"})
+        )
+        assert listed["ok"] is False and "so compare_with needs a deck id or URL" in listed["message"]
+        # the REST route's compare_with
+        auth = {"Authorization": f"Bearer {await mcp_token(h)}"}
+        for here, there in (("43", "42"), ("42", 43)):
+            db.execute("DELETE FROM reports")
+            api = await h.http.post(
+                "/api/v1/reports",
+                json={"deck_id": here, "simulate": False, "forge": True, "compare_with": there},
+                headers=auth,
+            )
+            assert api.status_code == 201, api.text
+            paired_on_4(stored()[0])
+        db.execute("DELETE FROM reports")
+        missing = await h.http.post(
+            "/api/v1/reports",
+            json={"deck_id": "42", "simulate": False, "forge": True, "compare_with": "99999"},
+            headers=auth,
+        )
+        assert missing.status_code == 404 and PAIR_UNREAD in missing.text and stored() == []
+    finally:
+        stack.ark.decks[43]["edhBracket"] = None
+        reports.forge = None
+        if reports._forge_task:
+            reports._forge_task.cancel()
+        await b.aclose()
+
+
 async def test_reports_page_lists_every_report_and_what_forge_plays(stack: Stack) -> None:
     """K8 (Q136, T-152): /reports lists the member's reports newest first with their status, what
     ran and a link to the deck's trend in History; a deck filter; and the Forge runs playing or

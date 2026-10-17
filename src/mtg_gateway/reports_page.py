@@ -167,11 +167,13 @@ REPORTS_PAGE_CSS = """
   min-height:44px;margin:0}
 .reports-page .rp-filter .btn{min-height:44px;margin:0}
 .reports-page .rp-filter .msel-btn{width:auto;min-width:min(11rem,100%);max-width:min(18rem,100%);height:44px}
-/* one line beside the heading where there is room; a fixed minimum there, as a percentage one
-   makes the filter measure narrower than its contents and wrap the Show button */
+/* The filter keeps its one-line width and moves below the heading when it doesn't fit beside it;
+   only wider than the panel (large text) does it wrap, Show below the select. A fixed minimum on
+   wider screens: the filter's one-line width is measured without percentage limits, so a long deck
+   name would make it measure wider than the panel and wrap Show. */
+.reports-page .rp-head .rp-filter{flex-shrink:0}
 @media (min-width:600px){
-  .reports-page .rp-filter{flex-wrap:nowrap}
-  .reports-page .rp-filter .msel-btn{min-width:11rem}
+  .reports-page .rp-filter .msel-btn{min-width:11rem;max-width:18rem}
 }
 .reports-page .rp-list,.reports-page .rp-runs{list-style:none;margin:0;padding:0}
 .reports-page .rp-row{display:grid;grid-template-columns:minmax(0,1fr);gap:.2rem;padding:.75rem 0;

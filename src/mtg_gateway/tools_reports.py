@@ -162,9 +162,10 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
             "differences, precon upgrades and A/B simulations; its goldfish A/B is the like-for-like "
             "comparison of two decks. Forge seats each deck against precons of its own bracket, so two "
             "decks' Forge win rates (one run_deck_report each) are each against their own bracket's table, "
-            "even with the same options.seed; for the same table, run deck a's report first, then deck "
-            "b's with same_opponents_as set to deck a's report_id (the website's Compare page does the "
-            "same with its Forge button)."
+            "even with the same options.seed; for the same table, run deck a's report with compare_with "
+            "set to deck b (opponents for the higher of the two decks' brackets, so the order doesn't "
+            "matter), then deck b's with same_opponents_as set to deck a's report_id (the website's "
+            "Compare page does the same with its Forge button)."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": True},
         meta=compare_card_meta,
@@ -298,7 +299,11 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
             "user's report ids, one with Forge games) seats that report's opponents instead of the precons "
             "picked for this deck's bracket (or Archidekt's estimate when none is set), so two decks' "
             "Forge numbers come from the same table; the forge section's "
-            "opponent_choice then has rule 'shared' and shared_with. status is the report's overall "
+            "opponent_choice then has rule 'shared' and shared_with. compare_with (the other deck's id "
+            "or URL, or one of your snapshot ids) picks this report's precons for the higher of the two "
+            "decks' brackets, so a pair's table doesn't depend on which deck runs first: use it on the "
+            "first report, then same_opponents_as on the second; the other deck is read first, and if "
+            "it can't be read no report is made. status is the report's overall "
             "state: queued, running, complete, partial or failed. "
             "This is the one tool that "
             "runs goldfish games of one deck; compare_decks with simulate=true is the paired A/B of two. "
@@ -328,14 +333,23 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
                 "so both decks meet the same table."
             ),
         ] = None,
+        compare_with: Annotated[
+            str | None,
+            Field(
+                description="The other deck of a Forge comparison (deck id or URL, or one of your "
+                "snapshot ids): pick precons for the higher of the two decks' brackets. Use it on the "
+                "first report, then same_opponents_as on the second."
+            ),
+        ] = None,
     ) -> dict[str, object]:
         options = dumped(options)
         try:
             if _looks_like_list(deck_ref):
-                if same_opponents_as is not None:
+                if same_opponents_as is not None or compare_with is not None:
+                    which = "same_opponents_as" if same_opponents_as is not None else "compare_with"
                     raise DeckError(
                         "invalid",
-                        "A pasted list gets no Forge games, so same_opponents_as needs a deck id or URL.",
+                        f"A pasted list gets no Forge games, so {which} needs a deck id or URL.",
                     )
                 report = await state.reports.run_text(
                     _sub(), deck_ref, simulate=simulate, games=games, options=options
@@ -345,6 +359,10 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
                 # reported as the deck stood then; anything else is an Archidekt deck.
                 ref = str(deck_ref or "").strip()
                 snap = _own_snapshot(_sub(), ref)
+                pair: Any = None
+                if compare_with is not None:
+                    other = str(compare_with).strip()
+                    pair = _own_snapshot(_sub(), other) or other
                 report = await state.reports.run(
                     _sub(),
                     ref,
@@ -355,6 +373,7 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
                     deck=snap,
                     snapshot_id=ref if snap is not None else None,
                     same_opponents_as=same_opponents_as,
+                    pair_with=pair,
                 )
             failed = _simulation_failure(report.get("goldfish")) if simulate else None
             if failed:
