@@ -78,7 +78,9 @@ async def test_propose_details_then_apply_changes_and_verifies(stack: Stack) -> 
         "private: yes -> no",
         'description: (changed, 120 chars) "' + "x" * 120 + '"',
     }
-    a2 = structured(await call(h, token, "apply_proposal", {"proposal_id": p2["proposal_id"]}))
+    # Q141 item 3B: making a deck public waits for the member's press even in Full auto
+    assert p2["assistant_may_apply"] is False and p2["risk_reason"] == "makes the deck public", p2
+    a2 = await apply_any(h, token, p2["proposal_id"])
     assert a2["ok"] and a2["result"]["verified"] is True, a2
     assert ark.decks[42]["edhBracket"] is None and ark.decks[42]["description"] == rich_doc("x" * 120)
     assert 42 not in ark.private
