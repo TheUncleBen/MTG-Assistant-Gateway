@@ -87,7 +87,8 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
             return login_redirect("/decks")
         qp = request.query_params
         if qp.get("reread"):  # Try again on the Q64 notice: read the list again, then show it
-            decks.reread_deck_list(sub)
+            if prefs.from_this_site(request):  # a link on another site only shows the page
+                decks.reread_deck_list(sub)
             rest = urlencode([(k, v) for k, v in qp.multi_items() if k != "reread"])
             return RedirectResponse("/decks" + (f"?{rest}" if rest else ""), 303)
         chosen, remember = prefs.view_choice(state.db, sub, request, "decks", LIST_VIEWS, "grid")
