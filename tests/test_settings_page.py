@@ -81,6 +81,44 @@ async def test_the_page_lists_every_setting_and_locks_the_deployments(gw: Harnes
         await b.aclose()
 
 
+async def test_the_top_line_names_what_the_stack_sets(tmp_path: Path, idp: FakeIdP) -> None:
+    """Card Q139 item 3: one line at the top names every setting the stack sets, by variable, each
+    a link to its row; a setting in the folded scan group opens it. No line when the stack sets
+    none."""
+    settings = make_settings(tmp_path, required_group="mtg-users", admin_group="mtg-admins")
+    async with running(_with_admin(Harness(settings, idp))) as h:
+        b = await admin_browser(h)
+        try:
+            r = await b.http.get("/admin/settings", headers=NAVIGATE)
+            assert r.status_code == 200 and "class='set-stack'" not in r.text
+        finally:
+            await b.aclose()
+    locked = {"forge_games": 12, "scan_ambiguity_margin": MANAGED_SETTINGS["scan_ambiguity_margin"].default}
+    settings = make_settings(
+        tmp_path, required_group="mtg-users", admin_group="mtg-admins", env_set=frozenset(locked), **locked
+    )
+    async with running(_with_admin(Harness(settings, idp))) as h:
+        b = await admin_browser(h)
+        try:
+            r = await b.http.get("/admin/settings", headers=NAVIGATE)
+            top = r.text.split("<div class='set-stack' role='note'>", 1)[1].split("</div>", 1)[0]
+            assert _words(top).startswith(
+                "Your stack sets 2 of these settings, so they can only be changed there. To manage one "
+                "on this page instead, remove its variable from your stack, then redeploy."
+            )
+            assert "<a href='#s-row-forge_games'><code>MTG_<wbr>FORGE_<wbr>GAMES</code></a>" in top
+            assert "href='?open=scan#s-row-scan_ambiguity_margin'" in top
+            assert r.text.index("class='set-stack'") < r.text.index("class='set-nav'")
+            # the scan group starts folded, and opens for that link
+            assert "<details><summary>Card scanning (advanced)</summary>" in r.text
+            r = await b.http.get("/admin/settings?open=scan", headers=NAVIGATE)
+            assert "<details open><summary>Card scanning (advanced)</summary>" in r.text
+            r = await b.http.get("/admin/settings?open=general", headers=NAVIGATE)
+            assert r.status_code == 200 and "<details open>" not in r.text
+        finally:
+            await b.aclose()
+
+
 async def test_saving_a_section_stores_and_reports_each_change(gw: Harness) -> None:
     b = await admin_browser(gw)
     try:
@@ -367,4 +405,13 @@ async def test_a_stack_value_holds_for_every_kind_of_setting(tmp_path: Path, idp
             assert h.app.state.gateway.settings.deck_sync_minutes == 60
         finally:
             await b.aclose()
-    assert with_stored(settings, Database(settings.db_path)).deck_sync_minutes == 60
+    db = Database(settings.db_path)
+    try:
+        assert with_stored(settings, db).deck_sync_minutes == 60
+        # card Q139 item 7: the page's value saved before the lock is kept, and applies again once
+        # the stack no longer sets it
+        assert db.stored_settings()["deck_sync_minutes"] == 30
+        unlocked = make_settings(tmp_path, required_group="mtg-users", admin_group="mtg-admins")
+        assert with_stored(unlocked, db).deck_sync_minutes == 30
+    finally:
+        db.close()

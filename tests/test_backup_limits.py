@@ -172,27 +172,26 @@ async def test_the_record_of_a_copy_outlives_a_restart(stack: Stack, tmp_path: P
 
 
 @pytest.mark.usefixtures("no_sharing")
-async def test_a_copy_from_before_0729_follows_the_legacy_rule(stack: Stack) -> None:
+async def test_a_copy_from_before_0729_is_left_alone(stack: Stack) -> None:
+    """Card Q140 item 4: a copy made before the update (no record of how it was made) is never
+    deleted and doesn't count toward "Backup copies kept per deck"."""
     token = await linked_user(stack)
     _live(stack).set("archidekt_backup_copies", 2, by="admin-1")
     made = [(await _apply(stack, token, c))["result"]["backup_deck_id"] for c in ADDS[:2]]
     db = stack.h.db
     with db.tx() as c:  # as if both were made by 0.7.28, which kept no record
         c.execute("DELETE FROM job_runs WHERE name LIKE 'backup_made:%'")
-    # The older copy was edited on Archidekt long after it was made: kept.
-    stack.ark.decks[int(made[0])]["updatedAt"] = "2030-01-01T00:00:00Z"
-    await _apply(stack, token, ADDS[2])
-    await _apply(stack, token, ADDS[3])
-    queued = {j["backup_deck_id"]: j for j in db.queued_backup_deletes()}
-    assert set(queued) == set(made) and all(j["expect"].get("legacy") for j in queued.values())
+    # unchanged since they were made, in the backup folder: still left alone
+    newer = [(await _apply(stack, token, c))["result"]["backup_deck_id"] for c in ADDS[2:4]]
+    assert db.queued_backup_deletes() == []
+    # the two newer copies are the two counted: a fifth edit's copy pushes out the older of them
+    await _apply(stack, token, ADDS[4])
+    assert [j["backup_deck_id"] for j in db.queued_backup_deletes()] == [newer[0]]
     _due_now(stack)
-    svc = _svc(stack)
-    results = {}
-    for _ in range(2):
-        out = await svc.delete_one_queued_backup()
-        assert out
-        results[out.get("deleted") or out.get("given_up")] = out
-    assert int(made[1]) in stack.ark.deleted and int(made[0]) not in stack.ark.deleted
+    out = await _svc(stack).delete_one_queued_backup()
+    assert out and out.get("deleted")
+    assert int(newer[0]) in stack.ark.deleted
+    assert all(int(m) in stack.ark.decks and int(m) not in stack.ark.deleted for m in made)
 
 
 @pytest.mark.usefixtures("quick_waits")
@@ -252,6 +251,8 @@ def test_pruning_restore_points_keeps_the_ones_a_copy_or_a_queued_delete_needs(t
     db.set_snapshot_backup("s6", backup_deck_id="500", backup_url="u")  # shared later
     db.record_backup_made("500", {"name": "x"})
     db.queue_backup_delete("s1", sub=SUB, backup_deck_id="501", deck_id="42", proposal_id=None, due=0)
+    # a copy made before 0.7.29 (no record) is never deleted (card Q140 item 4): it holds nothing
+    db.set_snapshot_backup("s2", backup_deck_id="502", backup_url="u")
     db.purge_expired()
     with db.tx() as c:
         left = {r[0] for r in c.execute("SELECT id FROM snapshots")}
@@ -288,26 +289,6 @@ def test_the_shared_note_reads_as_a_sentence() -> None:
     recent = decks_mod.backup_shared_note(made, recent=True)
     assert recent.endswith("(made less than 15 minutes before this edit).")
     assert json.dumps(decks_mod.backup_shared_note(made, recent=False)).count("UTC") == 1
-
-
-@pytest.mark.usefixtures("no_sharing")
-async def test_a_copy_from_before_0729_moved_out_of_the_backup_folder_is_kept(stack: Stack) -> None:
-    """Card Q135 item 8: only a copy in the backup folder is deleted, also one with no record
-    (review round 1, finding 1)."""
-    token = await linked_user(stack)
-    _live(stack).set("archidekt_backup_copies", 1, by="admin-1")
-    first = (await _apply(stack, token, ADDS[0]))["result"]["backup_deck_id"]
-    db = stack.h.db
-    with db.tx() as c:  # made by 0.7.28: no record
-        c.execute("DELETE FROM job_runs WHERE name LIKE 'backup_made:%'")
-    stack.ark.deck_folder[int(first)] = 999999  # the member moved it to a folder of their own
-    await _apply(stack, token, ADDS[1])
-    queued = db.queued_backup_deletes()
-    assert [j["backup_deck_id"] for j in queued] == [first] and queued[0]["expect"]["folder_id"]
-    _due_now(stack)
-    out = await _svc(stack).delete_one_queued_backup()
-    assert out == {"given_up": queued[0]["snapshot_id"], "error": "copy_changed"}
-    assert int(first) not in stack.ark.deleted
 
 
 @pytest.mark.usefixtures("no_sharing")
