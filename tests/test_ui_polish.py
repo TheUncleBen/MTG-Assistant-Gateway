@@ -210,6 +210,30 @@ async def test_page_head_and_skip_link(stack: Stack) -> None:  # noqa: F811
         await b.aclose()
 
 
+async def test_the_account_page_names_archidekt_writes_in_plain_words(stack: Stack) -> None:  # noqa: F811
+    """Q141 item 7A: the Account page says "Archidekt writes", on or off, with Track A's words and
+    no variable name."""
+    import dataclasses
+
+    b = await linked_browser(stack)
+    decks = stack.h.app.state.gateway.decks
+    note = (
+        "<p class='muted small'>Archidekt writes are switched on or off for the whole gateway by the "
+        "person who runs it. While they are off, changes can be reviewed but not applied.</p>"
+    )
+    try:
+        page = (await b.http.get("/account", headers=NAV)).text
+        assert "<dt>Archidekt writes</dt><dd><span class='badge ok'>on</span></dd>" in page and note in page
+        decks.settings = dataclasses.replace(decks.settings, writes_enabled=False)
+        page = (await b.http.get("/account", headers=NAV)).text
+        assert "<dt>Archidekt writes</dt><dd><span class='badge'>off</span></dd>" in page and note in page
+        for old in ("Deck writes", "MTG_WRITES_ENABLED", "by its operator"):
+            assert old not in page, old
+    finally:
+        decks.settings = dataclasses.replace(decks.settings, writes_enabled=True)
+        await b.aclose()
+
+
 async def test_signed_out_shell_offers_sign_in(stack: Stack) -> None:  # noqa: F811
     page = (await stack.h.http.get("/no-such-page", headers=NAV)).text
     assert "<a class='btn signin' href='/login'>" in page and "Sign in</a>" in page
