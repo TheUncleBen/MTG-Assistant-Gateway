@@ -377,7 +377,9 @@ def test_with_writes_switched_off_the_deck_page_is_read_only(tmp_path, monkeypat
                 follow = page.locator("[data-social=follow]")
                 assert follow.count() == 1 and follow.is_disabled(), where
                 line = page.locator(".profile .social-off")
-                assert line.is_visible() and line.inner_text().endswith("so Follow is off."), where
+                assert line.is_visible() and line.inner_text().endswith(
+                    "so following can't be changed here."
+                ), where
                 got = line.evaluate(CONTRAST)
                 assert got["ratio"] >= 4.5, (where, got)
                 follow.click(force=True)  # a disabled button sends nothing

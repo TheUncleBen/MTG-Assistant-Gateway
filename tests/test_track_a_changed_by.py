@@ -160,12 +160,13 @@ async def test_the_guide_says_what_full_auto_still_waits_for(stack: Stack) -> No
         await b.login()
         page = (await b.http.get("/guide")).text
         assert (
-            "a new deck, an edit of more than 25 rows, making a deck public (or unlisted, from private)"
-            in page
+            "a new deck, an edit of more than 25 rows, making a deck public or unlisted, and a description "
+            "edit that keeps or removes bold text or links" in page
         )
         assert (
             "deleting a deck always wait for your press, and so does a held change, a change waiting for "
-            "another change first, or one another app had a hand in" in page
+            "another change first, one another app had a hand in, or one that another app's waiting "
+            "change would replace" in page
         )
         assert "applies the rest too" not in page
     finally:
@@ -192,15 +193,20 @@ async def test_a_change_another_app_rewrote_waits_even_after_its_own_app_changed
         got = structured(await call(h, token, "get_proposal", {"proposal_id": pid}))
         assert got["assistant_may_apply"] is False, (mode, got)
         assert got["changed_by_apps"][0] == "app: another-app" and len(got["changed_by_apps"]) == 2, got
+        if mode == "auto":
+            # each app once, at its latest change: another app again puts it last (finding 7)
+            _amend(h, pid, got, by="another-app", what="Ponder once more")
+            again = structured(await call(h, token, "get_proposal", {"proposal_id": pid}))
+            assert again["changed_by_apps"][-1] == "app: another-app", again["changed_by_apps"]
+            assert len(again["changed_by_apps"]) == 2, again["changed_by_apps"]
         refused = structured(await call(h, token, "apply_proposal", {"proposal_id": pid}))
         assert refused["ok"] is False and ark.patches == [], (mode, refused)
     b = Browser(h)
     try:
         await b.login()
         page = (await b.http.get(f"/proposals/{pid}")).text
-        assert "<dt>Version</dt><dd>3, changed by an assistant, then " in page, page[page.find("Version") :][
-            :200
-        ]
+        assert "<dt>Version</dt><dd>4, changed by " in page, page[page.find("Version") :][:200]
+        assert ", then an assistant: Ponder once more</dd>" in page
         assert "changed by <span class='badge'" not in page
     finally:
         await b.aclose()

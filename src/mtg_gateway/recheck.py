@@ -102,8 +102,21 @@ def first_difference(was: list[dict[str, Any]], now: list[dict[str, Any]]) -> st
         a = was[i] if i < len(was) else None
         b = now[i] if i < len(now) else None
         if a != b:
-            return f"{d.row_line(a) if a else ''} | {d.row_line(b) if b else ''}"
+            return f"{_line(a) if a else ''} | {_line(b) if b else ''}"
     return " | "
+
+
+def _line(row: dict[str, Any]) -> str:
+    """A row's line, with who can see the deck for a private or unlisted row, so a change of
+    visibility alone does not read as two identical lines (delta review 2, E-3; wording draft,
+    WORDING-6)."""
+    line = d.row_line(row)
+    before, after = row.get("seen_before"), row.get("seen_after")
+    if not before or not after:
+        return line
+    return line + (
+        f", so the deck stays {after}" if before == after else f", so the deck goes from {before} to {after}"
+    )
 
 
 def reason_text(reason: str | None) -> str:

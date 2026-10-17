@@ -165,16 +165,16 @@ async def follow_target(decks: DeckService, sub: str, username: Any) -> tuple[in
     public decks is not found."""
     want = clean_text(str(username or "")).lstrip("@")
     if not want:
-        raise DeckError("invalid", "Give the Archidekt username of the person to follow.")
+        raise DeckError("invalid", "Give the person's Archidekt username.")
     found = await decks.user_profile(sub, want)
     name = clean_text(str((found or {}).get("username") or ""))
     if not found or not str(found.get("id") or "").isdigit() or name.casefold() != want.casefold():
-        # wording draft (WORDING-4)
+        # wording draft (WORDING-6): one text for follow and unfollow
         raise DeckError(
             "not_found",
             f"No Archidekt user called {want} with public decks was found. Check the spelling. The "
             "gateway finds people only through their public decks, so someone with none can't be "
-            f"followed from here: follow them on Archidekt instead ({profile_url(want)}).",
+            f"found from here: go to their page on Archidekt instead ({profile_url(want)}).",
             follow_url=profile_url(want),
         )
     return int(found["id"]), name

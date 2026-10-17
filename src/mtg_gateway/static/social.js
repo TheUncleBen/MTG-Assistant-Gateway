@@ -123,14 +123,21 @@
     var user = btn.getAttribute("data-user");
     var name = btn.getAttribute("data-name") || "this user";
     var holder = btn.closest(".social") || btn.parentNode;
+    // one live note, there and empty from the start, so a screen reader announces what is set in
+    // it (a status note added already filled is often not read: proofread of WORDING-5, 15)
+    var live = holder.querySelector(".note[role=status]");
+    if (!live) {
+      live = el("p", "note");
+      live.setAttribute("role", "status");
+      live.style.margin = "0";
+      holder.appendChild(live);
+    }
     var say = function (content) {
-      var old = holder.querySelector(".note");
-      if (old) old.remove();
-      var p = el("p", "note");
-      p.setAttribute("role", "status"); // announced when it appears (proofread of WORDING-4)
-      if (typeof content === "string") p.textContent = content; else p.appendChild(content);
-      holder.appendChild(p);
+      live.textContent = "";
+      live.style.margin = "";
+      if (typeof content === "string") live.textContent = content; else live.appendChild(content);
     };
+    var hush = function () { live.textContent = ""; live.style.margin = "0"; };
     var paint = function (following) {
       btn.setAttribute("data-state", following ? "1" : "0");
       btn.classList.toggle("on", following);
@@ -146,8 +153,7 @@
         if (!d.ok) { say(socialProblem(d)); return; }
         if (extra) { extra.remove(); extra = null; }
         paint(d.following);
-        var old = holder.querySelector(".note");
-        if (old) old.remove();
+        hush();
         btn.focus(); // the confirm and an Unfollow it came from are gone: focus stays on the page's button
       }).catch(function () { b.disabled = false; say("No connection; the follow was not changed."); });
     };
@@ -279,6 +285,7 @@
           var save = el("button", "btn-primary", "Save");
           var cancel = el("button", "", "Cancel"); cancel.type = "button";
           var note = el("span", "muted small", "");
+          note.setAttribute("role", "status"); // read out when it says the comment is empty
           f.appendChild(ta); f.appendChild(save); f.appendChild(cancel); f.appendChild(note);
           cancel.addEventListener("click", function () { f.remove(); p.hidden = false; });
           f.addEventListener("submit", function (ev) {
@@ -286,6 +293,7 @@
             var text = ta.value.trim();
             // one wording with the assistant's (Q141 item 7A, refusals.EMPTY_COMMENT)
             if (!text) { note.textContent = "The comment is empty: write it first."; ta.focus(); return; }
+            note.textContent = "";
             // asked first, like every other write (social review, 0.7.29)
             confirmChip(save, "Change your public comment on Archidekt?", "Change", function () {
               save.disabled = true; note.textContent = "Saving…";
@@ -423,6 +431,8 @@
         textarea.focus();
         return;
       }
+      var stale = $(".notice", form); // the comment has words now: the empty notice goes
+      if (stale) stale.remove();
       var old = $(".confirmbar", form);
       if (old) old.remove();
       var bar = el("div", "confirmbar");
