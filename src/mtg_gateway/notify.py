@@ -104,6 +104,9 @@ STREAM_KEEPALIVE = 25.0  # seconds: under nginx's (and so NPM's) default 60 s re
 STREAM_RECHECK = 60.0  # seconds between checks that the key still belongs to a member who is on
 STREAM_STALE = 150.0  # seconds without a line from ntfy (it sends one every 45 s) before giving up
 STREAM_MAX_PER_KEY = 4  # connections at once with one key (a phone reconnecting overlaps its old one)
+# App connections at once for the whole gateway. Each one is a subscription of the gateway's single
+# ntfy visitor, so the stack files set ntfy's NTFY_VISITOR_SUBSCRIPTION_LIMIT above this (250).
+STREAM_MAX_TOTAL = 200
 # ``since``: an ntfy message id, or a Unix time; anything else starts from now.
 SINCE_RE = re.compile(r"^(?:[A-Za-z0-9]{8,24}|\d{9,11})$")
 # A deck's grouped message (Notifier.deck_waiting): a later one with the same id replaces it.
@@ -640,6 +643,10 @@ class Notifier:
         self._streams[topic] = self._streams.get(topic, 0) + 1
         return True
 
+    def full(self) -> bool:
+        """Whether the gateway already has :data:`STREAM_MAX_TOTAL` app connections open."""
+        return sum(self._streams.values()) >= STREAM_MAX_TOTAL
+
     def release(self, topic: str) -> None:
         left = self._streams.get(topic, 1) - 1
         if left > 0:
@@ -678,7 +685,8 @@ def add_stream_route(state: AppState, server: Any) -> None:
     The app sends its key (the member's topic) as ``Authorization: Bearer``, and ``since`` (the
     id of the last message it got) to get what it missed. Answers 401 for a key that is nobody's
     (replaced, or the member is gone), 403 while the member's notifications are off, 404 when the
-    gateway has no notification server, 429 past :data:`STREAM_MAX_PER_KEY` connections and 503
+    gateway has no notification server, 429 past :data:`STREAM_MAX_PER_KEY` connections, 503 past
+    :data:`STREAM_MAX_TOTAL` for the whole gateway and 503
     when ntfy or the identity provider can't be reached (the app tries again later). The reply
     carries ``X-Accel-Buffering: no`` so nginx (and so NPM) passes each line on at once."""
     from .membership import Membership
@@ -701,6 +709,8 @@ def add_stream_route(state: AppState, server: Any) -> None:
                 return _refuse(401, "unknown_key", "This phone's notification key is no longer valid.")
             if outcome is Membership.UNAVAILABLE:
                 return _refuse(503, "unavailable", "The sign-in service isn't answering. Try again shortly.")
+        if n.full():  # the app tries again later, like any refusal but these three
+            return _refuse(503, "busy", "The gateway has too many phones connected. Try again shortly.")
         if not n.claim(key):
             return _refuse(429, "too_many", "This key already has too many connections open.")
         since = request.query_params.get("since", "")

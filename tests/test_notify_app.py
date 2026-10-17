@@ -207,6 +207,10 @@ async def test_the_stream_refuses_removed_members_too_many_connections_and_a_sil
         stack.gw.notifier._streams[key] = notify.STREAM_MAX_PER_KEY
         status, body = await _refusal(stack, key)
         assert (status, body["error"]) == (429, "too_many")
+        # the whole gateway's cap: every other member's phones together
+        stack.gw.notifier._streams = {f"mtg-other{i:04d}": 1 for i in range(notify.STREAM_MAX_TOTAL)}
+        status, body = await _refusal(stack, key)
+        assert (status, body["error"]) == (503, "busy")
         stack.gw.notifier._streams.clear()
         stack.ntfy.status = 500
         status, body = await _refusal(stack, key)
