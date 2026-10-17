@@ -227,7 +227,7 @@ OUT_OF_DATE_STEP = (
 # A selection with a change and the change that replaces it (wording draft, WORDING-3 item 6).
 PICK_ONE = (
     "{new} replaces {old} on {deck}, so they can't be applied together. Nothing was sent. "
-    "Untick one of them, then apply again."
+    "Uncheck one of them, then apply again."
 )
 
 
@@ -2903,8 +2903,8 @@ class DeckService:
         """The refusal of an apply of a version that is no longer the proposal's (G16, K4)."""
         return DeckError(
             "changed",
-            "Replaced by a newer version. The proposal was changed after this was shown, so nothing "
-            "was sent to Archidekt. Open it again to see what it does now.",
+            "There is a newer version of this change, so nothing was sent to Archidekt. Open it again "
+            "to see what it does now.",
             review_url=f"{self.settings.public_url}/proposals/{row['id']}",
             state=row["state"],
             version=int(row.get("version") or 1),
@@ -3155,8 +3155,8 @@ class DeckService:
         ):
             raise DeckError(
                 "changed",
-                "Replaced by a newer version. This card shows an earlier version of the proposal, so "
-                "nothing was sent to Archidekt. Open the proposal again to see what it does now.",
+                "There is a newer version of this change than this card shows, so nothing was sent to "
+                "Archidekt. Open it again to see what it does now.",
                 review_url=f"{self.settings.public_url}/proposals/{proposal_id}",
                 state=row["state"],
                 version=version,
@@ -3213,8 +3213,8 @@ class DeckService:
         if any(int(r.get("version") or 1) > 1 for r in rows if r is not None):
             raise DeckError(
                 "changed",
-                "Replaced by a newer version. One of these proposals changed since this card was "
-                "drawn, so nothing was sent to Archidekt. Show the waiting changes again.",
+                "There is a newer version of one of these changes than this card shows, so nothing was "
+                "sent to Archidekt. Show the waiting changes again.",
                 review_url=f"{self.settings.public_url}/proposals",
             )
         self._audit("approval_refused", sub=sub, detail={"proposal_ids": ids[:20], "set": True})
@@ -4874,7 +4874,8 @@ class DeckService:
                 raise DeckError("invalid", f"{pid} is not a waiting proposal of this user")
             if str(row["deck_id"]) != str(deck_id):
                 raise DeckError(
-                    "invalid", f"{pid} is for another deck; a proposal replaces notes on its own deck only"
+                    "invalid",
+                    f"{pid} is for another deck; a proposal replaces proposals on its own deck only",
                 )
             out.append(pid)
         return out
@@ -6160,7 +6161,7 @@ def needs_look_error(reason: str | None) -> DeckError:
     exc = DeckError(
         "stale",
         f"Not applied: {recheck.reason_text(reason or recheck.REASON_CHANGED)} Nothing was sent to "
-        "Archidekt. The proposal is "
+        "Archidekt. The change is "
         "still waiting, marked Needs a look: review it again, then apply, amend or reject it.",
         state="pending",
         status="needs_look",

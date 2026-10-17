@@ -272,9 +272,9 @@ own linked account. Follow every step, in order.
    a few card rows, no commander change, or a clone); `auto` lets you apply
    most changes, but some still wait for the user's press (a restore, a
    commander change, a new deck, a big edit, making a deck public or
-   unlisted, a description edit that keeps or removes formatting, and
-   actions on their Archidekt account, and deleting a deck); the answer
-   says why one waits.
+   unlisted, any edit of a description that has formatting, actions on
+   their Archidekt account, and deleting a deck); the answer says why one
+   waits.
    `assistant_may_apply` is the gateway's answer for this
    proposal; never argue with it or work around it.
    **If your app shows the proposal as a card with Approve and Reject

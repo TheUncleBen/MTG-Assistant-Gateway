@@ -266,8 +266,8 @@ For the exact devices and plans tested, see
   itself: at most `MTG_AUTO_APPLY_MAX_ROWS` review rows of card adds,
   removes, quantity, category, finish, printing, color tag or custom mana
   value changes of at most four copies each, never the commander; or a
-  clone) or `auto` (the assistant may apply every deck and collection
-  change). No mode lets an assistant apply an Archidekt account action
+  clone) or `auto` (the assistant may apply deck and collection changes,
+  except those Full auto still leaves to the member, `modes.auto_waits`). No mode lets an assistant apply an Archidekt account action
   (likes, votes, bookmarks, follows, comments, new folders and collaborator
   changes) or a deck deletion (R-142). The wording every page and doc uses
   for the modes comes from `modes.py`.

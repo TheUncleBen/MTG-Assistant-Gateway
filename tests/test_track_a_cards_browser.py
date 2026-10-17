@@ -228,7 +228,7 @@ def test_apply_all_on_the_waiting_card_lists_the_order_then_sends_the_set() -> N
             assert card.locator("#confirm:focus").count() == 1
             assert "Apply 2 changes in this order" in card.locator("#confirm-text").inner_text()
             assert card.locator("#order li").all_inner_texts() == [
-                "#1 +1 Opt\nChanged by ChatGPT: Opt instead of Ponder.",
+                "#1 +1 Opt\nChanged by ChatGPT. Last change: Opt instead of Ponder.",
                 "#2 -1 Island <img src=x onerror=alert(1)>",
             ]
             assert not _tool_calls(page, "confirm_waiting")
@@ -335,7 +335,8 @@ def test_the_proposal_card_names_the_others_and_applies_all(width: int, theme: s
             )
             # the confirm lists what the press applies, a held one and a changed one saying so
             assert card.locator("#also-list li").all_inner_texts() == [
-                "#1 +1 Opt\nHeld: #3 it depends on was rejected.\nChanged by ChatGPT: Opt instead of Ponder.",
+                "#1 +1 Opt\nHeld: #3 it depends on was rejected.\n"
+                "Changed by ChatGPT. Last change: Opt instead of Ponder.",
                 "#2 +1 Delver of Secrets",
             ]
             _shot(page, f"proposal-card-confirm-{width}-{theme}")
@@ -428,7 +429,7 @@ def test_the_card_says_who_changed_a_change_and_where_to_approve_another_apps(wi
         browser = _launch(p, exe)
         try:
             for data, want in (
-                (amended, "Changed by ChatGPT: Added Delver of Secrets."),
+                (amended, "Changed by ChatGPT. Last change: Added Delver of Secrets."),
                 (
                     other,
                     "Claude made this change, so this card can't approve it. Approve it on Claude's card "
@@ -654,3 +655,49 @@ def test_the_waiting_cards_apply_all_confirm_warns_of_a_held_change() -> None:
         finally:
             browser.close()
     assert not errors, errors
+
+
+@pytest.mark.parametrize("width", [344, 360, 390])
+@pytest.mark.parametrize("text", ["100%", "200%"])
+def test_the_no_press_badge_fits_a_phone_at_any_text_size(width: int, text: str) -> None:
+    """D-4 (coordinator 04:26Z 10-17): a high-risk change Full auto applies shows "No press needed",
+    not "high risk"; on the Fold cover (344 px) and a phone (390 px), at 100% and 200% text, the
+    badge stays inside the card and the title keeps room. The sizes are printed for the record."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_or_skip()
+    with sync_playwright() as p:
+        browser = _launch(p, exe)
+        try:
+            page = browser.new_page(viewport={"width": width, "height": 900})
+            page.route("https://api.scryfall.com/**", lambda r: r.abort())
+            sc = {
+                **PROPOSAL,
+                "deck_waiting": None,
+                "risk": "high",
+                "risk_reason": "changes 8 card rows",
+                "approval_mode": "auto",
+                "assistant_may_apply": True,
+            }
+            card = _open(page, card_html(), {"structuredContent": sc}, {"get_proposal": sc})
+            badge = card.locator("#risk")
+            badge.wait_for()
+            frame = page.frames[1]
+            frame.evaluate("(t) => { document.documentElement.style.fontSize = t; }", text)
+            page.wait_for_timeout(100)
+            assert badge.inner_text().lower() == "no press needed"
+            assert "high" not in (badge.get_attribute("class") or "")
+            box = frame.evaluate(
+                "() => { const b = document.getElementById('risk').getBoundingClientRect();"
+                " const t = document.getElementById('title').getBoundingClientRect();"
+                " const meet = b.left < t.right && t.left < b.right && b.top < t.bottom && t.top < b.bottom;"
+                " return {right: b.right, left: b.left, width: b.width, title: t.width, overlap: meet,"
+                " page: document.documentElement.clientWidth,"
+                " scroll: document.documentElement.scrollWidth}; }"
+            )
+            print(f"D-4 badge at {width}px, {text} text: {box}")
+            assert box["right"] <= box["page"] + 0.5 and box["scroll"] <= box["page"], box
+            assert box["title"] >= 100 and not box["overlap"], box
+            _shot(page, f"proposal-card-nopress-{width}-{text.rstrip('%')}")
+        finally:
+            browser.close()

@@ -242,7 +242,7 @@ async def test_a_change_and_its_replacement_ticked_together_are_refused_by_name(
     decks = h.app.state.gateway.decks
     want = (
         f"#{new['board_no']} replaces #{theirs['board_no']} on {theirs['deck_name']}, so they can't "
-        "be applied together. Nothing was sent. Untick one of them, then apply again."
+        "be applied together. Nothing was sent. Uncheck one of them, then apply again."
     )
     reset = current_client.set(BROWSER_CLIENT)
     try:
@@ -261,11 +261,11 @@ async def test_a_change_and_its_replacement_ticked_together_are_refused_by_name(
         form = {"csrf": csrf, "action": "apply", "back": "/proposals"}
         versions = {f"v_{p}": "1" for p in pair}
         r = await br.http.post("/proposals/select", data={**form, **versions, "pick": pair})
-        assert r.status_code == 409 and "Untick one of them" in r.text, r.text
+        assert r.status_code == 409 and "Uncheck one of them" in r.text, r.text
         r = await br.http.post(
             "/proposals/apply", data={**form, **versions, "picks": ",".join(pair), "shown": "1.x"}
         )
-        assert r.status_code == 409 and "Untick one of them" in r.text
+        assert r.status_code == 409 and "Uncheck one of them" in r.text
     finally:
         await br.aclose()
     assert ark.patches == []

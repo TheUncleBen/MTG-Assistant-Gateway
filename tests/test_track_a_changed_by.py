@@ -51,7 +51,8 @@ async def test_an_amended_change_says_who_changed_it_and_what(stack: Stack) -> N
     try:
         await b.login()
         page = (await b.http.get(f"/proposals/{p['proposal_id']}")).text
-        assert "<dt>Version</dt><dd>2, changed by " in page and ": Opt instead of Ponder</dd>" in page
+        assert "<dt>Version</dt><dd>2, changed by " in page
+        assert ". Last change: Opt instead of Ponder</dd>" in page
         other = (await b.http.get(f"/proposals/{q['proposal_id']}")).text
         assert "<dt>Version</dt>" not in other
     finally:
@@ -143,7 +144,7 @@ async def test_a_review_page_apply_without_its_version_is_refused(stack: Stack) 
         assert r.status_code == 303 and r.headers["location"] == f"{url}?err=changed"
         assert ark.patches == [] and h.db.get_proposal(p["proposal_id"], SUB)["state"] == "pending"
         page = (await b.http.get(r.headers["location"])).text
-        assert "changed since you opened it" in page
+        assert "was made since you opened it" in page
         # with the version the page showed, it applies
         r = await b.http.post(url, data={**await b.review_form(url), "action": "apply"})
         assert r.headers["location"].endswith("?ok=applied"), r.headers["location"]
@@ -160,13 +161,13 @@ async def test_the_guide_says_what_full_auto_still_waits_for(stack: Stack) -> No
         await b.login()
         page = (await b.http.get("/guide")).text
         assert (
-            "a new deck, an edit of more than 25 rows, making a deck public or unlisted, and a description "
-            "edit that keeps or removes bold text or links" in page
+            "a new deck, an edit of more than 25 rows, making a deck public or unlisted, and any edit of a "
+            "description that has bold text, links or pictures" in page
         )
         assert (
             "deleting a deck always wait for your press, and so does a held change, a change waiting for "
-            "another change first, one another app had a hand in, or one that another app's waiting "
-            "change would replace" in page
+            "another change first, one another app had a hand in, one that replaces another app's change, "
+            "or one that another app's waiting change would replace" in page
         )
         assert "applies the rest too" not in page
     finally:
@@ -206,7 +207,7 @@ async def test_a_change_another_app_rewrote_waits_even_after_its_own_app_changed
         await b.login()
         page = (await b.http.get(f"/proposals/{pid}")).text
         assert "<dt>Version</dt><dd>4, changed by " in page, page[page.find("Version") :][:200]
-        assert ", then an assistant: Ponder once more</dd>" in page
+        assert ", then an assistant. Last change: Ponder once more</dd>" in page
         assert "changed by <span class='badge'" not in page
     finally:
         await b.aclose()

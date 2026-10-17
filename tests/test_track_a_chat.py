@@ -125,7 +125,7 @@ async def test_apply_all_applies_the_set_and_refuses_a_wrong_or_stale_code(stack
         await call(h, token, "confirm_waiting", {"proposal_ids": the_set["ids"], "approval": the_set["code"]})
     )
     assert stale["ok"] is False and stale["error"] == "changed"
-    assert stale["message"].startswith("Replaced by a newer version")
+    assert stale["message"].startswith("There is a newer version of one of these changes")
     assert _writes(ark) == before
     # drawn again, the new code applies both, oldest first
     the_set = (await call(h, token, "show_waiting_changes", {"deck_id": "42"}))["_meta"][
