@@ -1396,7 +1396,10 @@ def forge_stopped_text(f: dict[str, Any]) -> str:
     if total is not None and played >= total:
         # every game asked for played, then one group still ended badly (proofread 6 P7)
         text = (
-            f"Forge played all {played} {games}, but the run did not end cleanly. "
+            "Forge played the one game asked for, but the run did not end cleanly. "
+            "The results below count it."
+            if played == 1
+            else f"Forge played all {played} {games}, but the run did not end cleanly. "
             f"The results below count all {played}."
         )
     elif f.get("state") == "lost":

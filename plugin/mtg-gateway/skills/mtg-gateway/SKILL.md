@@ -208,7 +208,8 @@ Forge's rules engine with opponents, combat and the stack. It runs in the
 background, so `forge.state` is `queued` or `running` at first; read the
 report again with `get_deck_report` until it is `done`, or another final state
 (`failed`, `timeout`, `cancelled`, `lost`): then quote the games it did play
-(`games_done` of `games_requested`) as a run that stopped early.
+(`games_done` of `games_requested`); when that is fewer than asked for, call it
+a run that stopped early.
 
 - Quote `forge.result`: games played, the deck's wins and `win_rate_95`, and
   the opponent decks (`forge.seats`). These are Forge AI games, not a
