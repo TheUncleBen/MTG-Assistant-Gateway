@@ -20,6 +20,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from . import card_models, deck_stats
+from . import forge as forge_module
 from .archidekt import Deck
 from .db import Database, _like
 from .decklist import DecklistError, front_faces, parse_decklist, to_text
@@ -780,9 +781,11 @@ class ReportService:
             except Exception:
                 logger.exception("report notification failed")
 
-    def _cancel_forge(self, section: Any) -> None:
+    def _cancel_forge(self, section: Any, *, keep_asking: bool = False) -> None:
         """Best effort: stop the Forge job behind an unfinished section, so a deleted report does
-        not keep a game running (or queued) that nobody will read."""
+        not keep a game running (or queued) that nobody will read. ``keep_asking``, for a run given
+        up because its copy went silent: asked again each round while the copy does not answer, for
+        up to SILENT_CANCEL_SECONDS."""
         if (
             self.forge is None
             or not isinstance(section, dict)
@@ -793,10 +796,19 @@ class ReportService:
         forge, job_id = self._engine(section), str(section["job_id"])
 
         async def cancel() -> None:
-            try:
-                await forge.cancel(job_id)
-            except Exception as exc:  # the job may have finished or been forgotten meanwhile
-                logger.info("cancelling Forge job %s: %s", job_id, exc)
+            until = time.monotonic() + (forge_module.SILENT_CANCEL_SECONDS if keep_asking else 0.0)
+            while True:
+                try:
+                    await forge.cancel(job_id)
+                    return
+                except ForgeError as exc:
+                    if exc.kind != "unavailable" or time.monotonic() >= until:
+                        logger.info("cancelling Forge job %s: %s", job_id, exc)
+                        return
+                except Exception as exc:  # the job may have finished or been forgotten meanwhile
+                    logger.info("cancelling Forge job %s: %s", job_id, exc)
+                    return
+                await asyncio.sleep(self.forge_interval)
 
         try:
             task = asyncio.get_running_loop().create_task(cancel())
@@ -856,6 +868,9 @@ class ReportService:
                     )
                     if fresh != section:  # written only when a game finished or the state moved
                         self._save_forge(row["id"], fresh)
+                    if fresh.get("state") == "lost" and fresh.get("error") == forge_module.FORGE_SILENT:
+                        # given up while the job may still be on the copy: stop it there (L6)
+                        self._cancel_forge(section, keep_asking=True)
                 except Exception:  # one bad row must not stop the others
                     logger.exception("forge refresh failed for %s", row["id"])
             try:
