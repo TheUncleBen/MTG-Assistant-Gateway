@@ -52,23 +52,39 @@ jobs:
           android/scripts/push-test.sh --prepare "$RUNNER_TEMP/certs"
           android/scripts/build.sh debug
       - name: Start an Android 15 emulator
+        env:
+          # One place for the virtual device, named to both the tool that makes it and the emulator.
+          ANDROID_AVD_HOME: ${{ runner.temp }}/avd
         run: |
           set -eu
           sdk="$ANDROID_HOME/cmdline-tools/latest/bin"
+          emu="$ANDROID_HOME/emulator/emulator"
           yes | "$sdk/sdkmanager" --licenses > /dev/null
           "$sdk/sdkmanager" "emulator" "platform-tools" "system-images;android-35;google_apis;x86_64" > /dev/null
+          mkdir -p "$ANDROID_AVD_HOME" "$RUNNER_TEMP/push-test"
           echo no | "$sdk/avdmanager" create avd -n push -k "system-images;android-35;google_apis;x86_64" -d pixel_6
-          mkdir -p "$RUNNER_TEMP/push-test"
-          log="$RUNNER_TEMP/push-test/emulator.log"
-          "$ANDROID_HOME/emulator/emulator" -accel-check || true
-          nohup "$ANDROID_HOME/emulator/emulator" -avd push -no-window -no-audio -no-boot-anim -no-snapshot \
-            -gpu swiftshader_indirect > "$log" 2>&1 &
-          # Never wait for ever: an emulator that doesn't come up fails here, with its log.
-          if ! timeout 600 "$ANDROID_HOME/platform-tools/adb" wait-for-device; then
-            echo "the emulator did not come up in 10 minutes"; tail -n 80 "$log"; exit 1
+          # If the device was written somewhere else, bring its pointer file to where the emulator looks.
+          if [ ! -f "$ANDROID_AVD_HOME/push.ini" ]; then
+            found="$(find "$HOME" "$ANDROID_HOME" -name push.ini -path '*avd*' 2>/dev/null | head -n 1)"
+            echo "push.ini was written to: ${found:-nowhere found}"
+            [ -n "$found" ] && cp "$found" "$ANDROID_AVD_HOME/push.ini"
           fi
-          if ! timeout 600 sh -c 'until [ "$("$0" shell getprop sys.boot_completed 2>/dev/null | tr -d "\r")" = 1 ]; do sleep 5; done' \
-            "$ANDROID_HOME/platform-tools/adb"; then
+          if ! "$emu" -list-avds | grep -qx push; then
+            echo "the emulator cannot see the push device"; "$emu" -list-avds || true; exit 1
+          fi
+          log="$RUNNER_TEMP/push-test/emulator.log"
+          "$emu" -accel-check || true
+          nohup "$emu" -avd push -no-window -no-audio -no-boot-anim -no-snapshot \
+            -gpu swiftshader_indirect > "$log" 2>&1 &
+          pid=$!
+          # Never wait for ever: stop at once if the emulator quits, and after 10 minutes otherwise.
+          adb="$ANDROID_HOME/platform-tools/adb"
+          for _ in $(seq 120); do
+            kill -0 "$pid" 2>/dev/null || { echo "the emulator stopped"; tail -n 80 "$log"; exit 1; }
+            [ "$("$adb" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = 1 ] && break
+            sleep 5
+          done
+          if [ "$("$adb" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" != 1 ]; then
             echo "the emulator did not finish starting in 10 minutes"; tail -n 80 "$log"; exit 1
           fi
       - name: Push tests
