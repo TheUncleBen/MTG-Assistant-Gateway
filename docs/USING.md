@@ -390,8 +390,8 @@ Archidekt, so it needs no proposal.
 
 ## Notifications and summaries
 
-The **Notifications** card on your Account page can send a short message
-to your phone when an assistant leaves changes waiting for your press (one
+The **Notifications** card on your Account page can send a short message,
+in the gateway's Android app on your phone, when an assistant leaves changes waiting for your press (one
 message per deck, such as "2 changes waiting for Atraxa"), a deck report
 finishes (Forge runs that waited in the queue included), or a watched card
 crosses your price alert. The messages come in the gateway's Android app;

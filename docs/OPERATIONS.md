@@ -939,9 +939,10 @@ who watches it) and one per watched deck a day, deleted after
 member: `MTG_WATCH_MAX_CARDS` (200) and `MTG_WATCH_MAX_DECKS` (10). "Delete
 my data" removes a member's watches, deck values and notification choices.
 
-Notifications go through the stack's own ntfy server to the members'
-Android app, on the gateway's own address; how it works is in
-[DEPLOY.md](DEPLOY.md#notifications-on-members-phones). The token never
+Notifications go from the stack's own ntfy server to the members' Android
+app. Phones reach the server through the gateway's own address, so it needs
+no proxy host of its own.
+[DEPLOY.md](DEPLOY.md#notifications-on-members-phones) explains how it works. The token never
 appears in a log line; a message ntfy refuses is logged as
 `ntfy publish refused: HTTP <status>`, one that cannot be sent as
 `ntfy publish failed: <error type>`. The gateway has no AI model and writes

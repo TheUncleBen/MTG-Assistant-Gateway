@@ -51,9 +51,10 @@ SUMMARY_CHOICES = ("off", "daily", "weekly")
 ACCOUNT_OK = {
     "notify_saved": "Notifications saved.",
     "notify_off": "Notifications are off.",
-    "notify_topic": "Your phones are disconnected. To connect a phone again, open this page in the app on "
-    "it and press Get notifications on this phone.",
-    "notify_test_sent": "Test sent. It should reach your connected phones in a few seconds.",
+    "notify_topic": "Your phones are disconnected. To connect a phone again, open the Account page in the "
+    "gateway's app on that phone and press Get notifications on this phone.",
+    "notify_test_sent": "The test message is sent. Each phone you connected should show it within a few "
+    "seconds.",
     "summary_saved": "Summary choice saved.",
 }
 ACCOUNT_ERR = {
@@ -92,9 +93,11 @@ WAITING_TEXT = "Open it to look at the changes, then apply or reject them."
 
 
 def waiting_title(count: int, deck_name: str) -> str:
-    """The title of a deck's message: "1 change waiting for Atraxa", "2 changes waiting for ..."."""
+    """The title of a deck's message: "1 change to Atraxa is waiting for you", "2 changes to ... are"."""
     name = " ".join(str(deck_name or "").split())[:80] or "your deck"
-    return f"{count} change{'' if count == 1 else 's'} waiting for {name}"
+    if count == 1:
+        return f"1 change to {name} is waiting for you"
+    return f"{count} changes to {name} are waiting for you"
 
 
 def new_topic() -> str:
@@ -495,9 +498,9 @@ def add_stream_route(state: AppState, server: Any) -> None:
             if outcome is Membership.REVOKED:
                 return _refuse(401, "unknown_key", "This phone's notification key is no longer valid.")
             if outcome is Membership.UNAVAILABLE:
-                return _refuse(503, "unavailable", "Try again shortly.")
+                return _refuse(503, "unavailable", "The sign-in service isn't answering. Try again shortly.")
         if n.streams(key) >= STREAM_MAX_PER_KEY:
-            return _refuse(429, "too_many", "Too many connections with this key.")
+            return _refuse(429, "too_many", "This key already has too many connections open.")
         since = request.query_params.get("since", "")
         upstream = await n.open_upstream(key, since if SINCE_RE.fullmatch(since) else "")
         if upstream is None:
@@ -571,13 +574,13 @@ def _phone_html(state: AppState, sub: str, p: dict[str, Any]) -> str:
         f"<div class='phone' data-native-state='notificationsState' data-native-arg='{key}'>"
         "<h3>This phone</h3>"
         "<p data-native-show='connected' hidden><span class='badge ok'>Connected</span> This phone gets your "
-        "notifications, also while the app is closed. Android shows a quiet Connected notification "
-        "while it is.</p>"
+        "notifications, also while the app is closed. While it is connected, Android shows a quiet "
+        "notification called Always connected.</p>"
         "<p data-native-show='blocked' hidden>Android has notifications turned off for this app. Turn "
-        "them on in Android's settings for the app, then press the button below.</p>"
-        "<p data-native-show='off blocked' hidden>This phone doesn't get your notifications yet. The "
-        "button asks Android once to allow notifications and once to let the app run in the "
-        "background, so they arrive while the app is closed.</p>"
+        "them on in Android's settings for the app, then press Get notifications on this phone.</p>"
+        "<p data-native-show='off' hidden>This phone doesn't get your notifications yet. Press Get "
+        "notifications on this phone. Android may ask you to allow notifications and to let the app run "
+        "in the background. Allow both so notifications arrive while the app is closed.</p>"
         "<div class='form-actions' data-native-show='off blocked' hidden>"
         f"<button type='button' class='primary' data-native='startNotifications' data-native-arg='{key}' "
         "data-native-auto>Get notifications on this phone</button></div>"
@@ -593,12 +596,12 @@ def account_card_html(state: AppState, sub: str, csrf_in: str) -> str:
     the app, Send test, Disconnect my phones and the summary schedule."""
     n = state.notifier
     if n is None or not n.enabled:
-        watched = "a watched card crosses your alert, " if state.prices is not None else ""
+        watched = ", a watched card crosses your alert" if state.prices is not None else ""
         return (
             "<div class='card' id='notifications'><h2>Notifications</h2><p class='muted'>This gateway has no "
-            "notification server set up, so the Android app can't get notifications. Its operator can turn "
-            f"them on; then the app tells you when an assistant's change waits for you, a deck report "
-            f"finishes, {watched}or your summary is ready.</p></div>"
+            "notification server set up, so the Android app can't get notifications. The person who runs "
+            "this gateway can turn them on. The app then tells you when an assistant leaves changes waiting "
+            f"for your press, a deck report finishes{watched} or your summary is ready.</p></div>"
         )
     p = prefs(state.db, sub)
 
@@ -614,15 +617,15 @@ def account_card_html(state: AppState, sub: str, csrf_in: str) -> str:
     else:
         phone = (
             "<p class='muted small'>Notifications arrive in the gateway's Android app, also while it is "
-            "closed. Install it from <a href='/install?for=android'>Android app</a>, sign in, and on this "
-            "page in the app press Get notifications on this phone.</p>"
+            "closed. To get them, install the app from the <a href='/install?for=android'>Android app</a> "
+            "page, sign in, open this page in the app and press Get notifications on this phone.</p>"
         )
     test = (
         f"<form method='post'>{csrf_in}<input type='hidden' name='action' value='notify_test'>"
         "<button>Send test</button></form>"
         f"<form method='post'>{csrf_in}<input type='hidden' name='action' value='notify_new_topic'>"
-        "<button class='inline' title='Your phones stop getting notifications until each is connected "
-        "again'>Disconnect my phones</button></form>"
+        "<button class='inline' title='Your phones stop getting notifications until each one is connected "
+        "again.'>Disconnect my phones</button></form>"
         if on
         else ""
     )
@@ -634,9 +637,9 @@ def account_card_html(state: AppState, sub: str, csrf_in: str) -> str:
     )
     return (
         "<div class='card' id='notifications'><h2>Notifications</h2>"
-        "<p>Get a short message in the gateway's Android app. Each one says only what happened and links "
-        "to the page here: never your deck's cards. The choices below are for your whole account, on "
-        "every phone you connect.</p>"
+        "<p>The gateway's Android app can show you a short message when something happens. Each message "
+        "says only what happened and links to the right page on this gateway. It never lists your deck's "
+        "cards. The choices below apply to your whole account and to every phone you connect.</p>"
         f"<form method='post'>{csrf_in}<input type='hidden' name='action' value='notify_save'>"
         f"{box('ntfy_on', 'Send me notifications')}"
         "<fieldset><legend>When</legend>"

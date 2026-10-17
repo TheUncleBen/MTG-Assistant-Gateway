@@ -3,8 +3,8 @@
 # same digests) because anonymous pulls from Docker Hub are rate-limited per address, and shared CI
 # runners hit that limit (0.7.10). CI also signs in to Docker Hub when the owner set DOCKERHUB_USERNAME
 # and DOCKERHUB_TOKEN (docs/DEPLOY.md).
-# Every image is pinned by digest (the tag stays for people), so a rebuild uses exactly the image that
-# was tested. To move to a newer one, take the digest that
+# Every image is pinned by digest (the tag stays so people can read which version it is), so a rebuild
+# uses exactly the image that was pinned. To move to a newer one, take the digest that
 # `docker buildx imagetools inspect mirror.gcr.io/library/python:3.12-slim-bookworm` prints.
 # The gateway's dependencies as a requirements list, so the step that builds their wheels below is
 # cached until the dependencies themselves change (pyproject.toml also changes with every version).

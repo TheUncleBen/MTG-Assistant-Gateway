@@ -179,7 +179,7 @@ The stack expects four Swarm secrets with exactly these names:
 | `mtg_fernet_key` | A random encryption key for linked Archidekt sessions and the identity provider's tokens the gateway keeps. **Keep a copy** (password manager or similar). Lose it and every linked account has to be relinked (and everyone signs in once more), and old backups' Archidekt sessions can't be decrypted |
 | `mtg_session_secret` | A random string of 32+ characters that signs the browser sign-in cookie. No need to keep a copy |
 | `mtg_oidc_client_secret` | The Client Secret from the Authentik provider in step 3 |
-| `mtg_ntfy_token` | The token the gateway uses with the stack's own notification server: `tk_` and 29 random lowercase letters and digits. No need to keep a copy |
+| `mtg_ntfy_token` | The token the gateway uses with the stack's own notification server: `tk_` and 29 random lowercase letters and digits. You don't need to keep a copy. |
 
 A fifth secret is optional: `mtg_authentik_api_token`, an Authentik API
 token that may view only the gateway's one or two groups (and its own tokens, see IDP-AUTHENTIK.md §12), turns on the hourly clean-up of removed
@@ -220,7 +220,7 @@ ways below.
 
 ### Option B: on a Swarm manager
 
-Same four secrets from the command line. Nothing is written to disk or your
+This creates the same four secrets from the command line. Nothing is written to disk or your
 shell history:
 
 ```bash
@@ -233,7 +233,7 @@ openssl rand -base64 48 | docker secret create mtg_session_secret -
 # 3. mtg_oidc_client_secret. Paste the Authentik Client Secret at the (silent) prompt and press Enter.
 read -rs S && printf %s "$S" | docker secret create mtg_oidc_client_secret - ; unset S
 
-# 4. mtg_ntfy_token. No need to keep a copy.
+# 4. mtg_ntfy_token. You don't need to keep a copy.
 printf 'tk_%s' "$(LC_ALL=C tr -dc a-z0-9 </dev/urandom | head -c 29)" | docker secret create mtg_ntfy_token -
 ```
 
@@ -339,10 +339,11 @@ gateway's own address.
 3. Update the stack with the new file, as in the 0.7.29 steps below (your
    old `mtg_ntfy_token` lines, if you had them, are already in it).
 4. Tell the members: notifications now come in the gateway's own Android
-   app, not the ntfy app. Each member who wants them opens their Account
-   page in the app and presses **Get notifications on this phone**. Their
-   old subscriptions in the ntfy app stop getting messages and can be
-   deleted. There are no notifications on iPhone.
+   app, not the ntfy app, and members need app 0.7.30 to get them. Each
+   member who wants them opens their Account page in the app and presses
+   **Get notifications on this phone**. Their old subscriptions in the ntfy
+   app stop getting messages and can be deleted. There are no notifications
+   on iPhone.
 5. **Members on an app older than 0.7.12 must update the app:** the gateway
    no longer serves the old app's hooks. They install the new app from the
    gateway's Install page (uninstalling the old one first, since it was

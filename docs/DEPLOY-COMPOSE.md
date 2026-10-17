@@ -62,7 +62,7 @@ variables:
 | `mtg_fernet_key.txt` | Encryption key for linked Archidekt sessions and the identity provider's tokens the gateway keeps. **Keep a copy**: lose it and everyone has to relink Archidekt (and sign in once more) |
 | `mtg_session_secret.txt` | Random key that signs browser cookies. No need to keep a copy |
 | `mtg_oidc_client_secret.txt` | The client secret from step 1 |
-| `mtg_ntfy_token.txt` | Random token the gateway uses with the stack's own notification server. No need to keep a copy |
+| `mtg_ntfy_token.txt` | Random token the gateway uses with the stack's own notification server. You don't need to keep a copy. |
 
 Run the helper as the user in `PUID` (see step 3), or with `sudo`, in which
 case it hands the files to `PUID:PGID` from `.env`:
@@ -251,7 +251,8 @@ has `MTG_NTFY_URL` or `MTG_NTFY_TOKEN_FILE` with a value, delete those lines;
 an ntfy server you ran for the gateway can go, with its proxy host.
 Notifications now come in the gateway's Android app (members press **Get
 notifications on this phone** on their Account page in the app), not the
-ntfy app. **Members on an app older than 0.7.12 must update the app.**
+ntfy app, and members need app 0.7.30 to get them. **Members on an app older than 0.7.12 must
+update the app.**
 
 ### Updating to 0.7.29 from an earlier version
 
