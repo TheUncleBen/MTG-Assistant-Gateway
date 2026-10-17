@@ -121,16 +121,26 @@ def card_size(db: Database, sub: str | None) -> str:
     return size if size in CARD_SIZES else "m"
 
 
+def from_this_site(request: Request) -> bool:
+    """Whether the browser says the request came from this gateway's own pages, or was typed or
+    bookmarked (``Sec-Fetch-Site``; a browser that doesn't send it counts as this site). A link on
+    another site still opens the page, but changes nothing kept on the account."""
+    return request.headers.get("sec-fetch-site", "none") in ("none", "same-origin")
+
+
 def view_choice(
     db: Database, sub: str, request: Request, kind: str, allowed: tuple[str, ...] | list[str], default: str
 ) -> tuple[str, bool]:
     """The view to render for ``kind``: the address's ``view`` when it is a known one, else the
     account's, else the one this browser's cookie held before 0.7.29, else ``default``. True:
-    remember it on the account (a new pick, or the cookie's value copied once)."""
+    remember it on the account (a new pick, or the cookie's value copied once). A view in a link
+    from another site is shown but not remembered (:func:`from_this_site`)."""
     allowed = tuple(allowed)
     stored = db.get_pref(sub, VIEW + kind)
     asked = request.query_params.get("view")
     if asked in allowed:
+        if not from_this_site(request):
+            return asked, False
         return asked, asked != stored or VIEW_COOKIE + kind in request.cookies
     if stored in allowed:
         return stored, VIEW_COOKIE + kind in request.cookies

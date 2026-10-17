@@ -151,6 +151,37 @@ async def test_view_as_moves_from_the_cookie_to_the_account(stack: Stack) -> Non
         await other.aclose()
 
 
+async def test_a_link_from_another_site_shows_a_view_but_never_saves_it(stack: Stack) -> None:
+    """A plain link carries the sign-in cookie, so a view in a link on another site is shown but
+    not kept on the account, and its Try again on the deck list doesn't read the list again."""
+    b = await linked(stack)
+    try:
+        await b.http.get("/cards", params={"q": "sol", "view": "grid"})
+        assert stack.h.db.get_pref(SUB, "view.cards") == "grid"
+        for site in ("cross-site", "same-site"):
+            r = await b.http.get(
+                "/cards", params={"q": "sol", "view": "list"}, headers={"Sec-Fetch-Site": site}
+            )
+            assert "value='list' form='cs-form' checked" in r.text
+            assert stack.h.db.get_pref(SUB, "view.cards") == "grid"
+        decks = stack.h.app.state.gateway.decks
+        dropped: list[str] = []
+        decks.reread_deck_list = dropped.append
+        r = await b.http.get("/decks", params={"reread": "1"}, headers={"Sec-Fetch-Site": "cross-site"})
+        assert r.status_code == 303 and dropped == []
+        # the gateway's own pages, and an address typed or bookmarked, still save
+        await b.http.get(
+            "/cards", params={"q": "sol", "view": "list"}, headers={"Sec-Fetch-Site": "same-origin"}
+        )
+        assert stack.h.db.get_pref(SUB, "view.cards") == "list"
+        await b.http.get("/cards", params={"q": "sol", "view": "grid"}, headers={"Sec-Fetch-Site": "none"})
+        assert stack.h.db.get_pref(SUB, "view.cards") == "grid"
+        await b.http.get("/decks", params={"reread": "1"}, headers={"Sec-Fetch-Site": "same-origin"})
+        assert dropped == [SUB]
+    finally:
+        await b.aclose()
+
+
 async def test_forget_my_view_choices(stack: Stack) -> None:
     b = await linked(stack)
     try:
