@@ -14,7 +14,7 @@ ChatGPT's 10 KB limit). Upload the icon while creating the connector:
 ChatGPT reportedly lets you set it only then (a user report, not OpenAI's
 documentation).
 
-The block is under 4,000 characters. OpenAI's help pages say custom
+The block is at most 4,000 characters. OpenAI's help pages say custom
 instructions take up to 5,000 characters on paid plans and 1,500 on Free; no
 limit is published for project instructions (all reported, not tested).
 
@@ -44,10 +44,10 @@ Bracket: archidekt_bracket is THE bracket; bracket_estimate is "Archidekt's esti
 goldfish_annotate, validate_decklist: pass decklist_text, never a private deck's id. Mention unread_lines, warnings.
 
 RESEARCH
-scryfall_named/_card_text/_search/_rulings/_price/_price_list (prices can be a day old); rules_get, rules_search; edhrec_commander/_average_deck/_recommendations/_top_cards/_salt/_combos/_precon_upgrade; spellbook_combos/_card_combos; compare_decks (precon upgrades); validate_decklist (pasted lists). Check colour identity, legality.
+scryfall_named/_card_text/_search/_rulings/_price/_price_list (prices may lag a day); rules_get, rules_search; edhrec_commander/_average_deck/_recommendations/_top_cards/_salt/_combos/_precon_upgrade; spellbook_combos/_card_combos; compare_decks (precon upgrades); validate_decklist (pasted lists). Check colour identity, legality.
 
 SIMULATION
-Solo test (the Goldfish page is hand play): deck alone, speed not win rate. goldfish_odds for draw odds; else goldfish_annotate, then run_deck_report (options.annotations); A/B speed: compare_decks simulate true. Report games, report_id, unsimulated cards, intervals. Forge: AI games vs precons; get_deck_report till it ends; quote win_rate_95; name not_played. Forge foes match each deck's bracket; same table: report 1 compare_with=deck 2, report 2 same_opponents_as=report 1's id. Seeds may not replay Forge games: compare win rate, 95% interval. Cite rule numbers.
+Solo test (the Goldfish page is hand play): deck alone, speed not win rate. goldfish_odds for draw odds; else goldfish_annotate, then run_deck_report (options.annotations); A/B speed: compare_decks simulate true. Report games, report_id, unsimulated cards, intervals. Forge: AI games vs precons; get_deck_report till it ends; quote win_rate_95; name not_played. Forge foes: own bracket; same table, higher bracket: report 1 compare_with=deck 2, report 2 same_opponents_as=report 1. Seeds may not replay Forge games: compare win rate, 95% interval. Cite rule numbers.
 
 WRITING
 1. Edit: get_deck, propose_deck_changes(deck_id, changes), changes=[{action: add|remove|set_quantity, name, quantity}], max 40 (remove without quantity: all copies; zone side: maybeboard). Settings, folder, tags, cover: propose_deck_details.

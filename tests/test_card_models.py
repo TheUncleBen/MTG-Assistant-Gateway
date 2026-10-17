@@ -1,6 +1,6 @@
 """Kept card models (K1-K3 in Q136): only Mystic Forge's validated shape is kept, every number is
 bounded, a member's count is capped, later solo tests of the member's decks play their kept models
-(each member keeps their own: Q140 item 1), and a report says "added by you". The schema 14 table is Track
+(each member keeps their own: Q140 item 1), and a report gives each one's date. The schema 14 table is Track
 B's (db.py); a fake with the agreed methods stands in for it until the join."""
 
 from __future__ import annotations
@@ -219,15 +219,17 @@ async def test_a_kept_model_plays_only_in_its_members_later_runs(tmp_path: Path)
     second = await reports.run("bob", "42")
     assert "annotations" not in mf.last_run() and "kept_models" not in second["goldfish"]
     assert second["goldfish"]["models_saved"] is True
-    # alice's own later run plays hers ("added by you"); her assistant's own model for the card wins
+    # alice's own later run plays hers (shown with its date only, as every one is hers); her
+    # assistant's own model for the card wins
     mine = await reports.run("alice", "42", options={"seed": 3})
     assert mf.last_run()["annotations"] == [clean_model(model, card=name)]
     used = mine["goldfish"]["kept_models"]
     assert [u["name"] for u in used] == [name] and len(used[0]["model"]) == 12 and "yours" not in used[0]
     assert "alice" not in json.dumps(mine) and "added_by" not in json.dumps(mine)
     page = report_body_html(mine)
-    assert "Played with saved card descriptions" in page and "added by you" in page
-    assert "another member" not in page and "added by you" in report_markdown(mine)
+    assert "Played with saved card descriptions" in page and "last changed " in page
+    assert "another member" not in page and "added by you" not in page
+    assert "last changed " in report_markdown(mine) and "added by you" not in report_markdown(mine)
     own = {"name": name, "triggers": [{"on": "etb", "do": "gain_life", "count": 3}]}
     await reports.run("alice", "42", options={"annotations": [own]})
     assert mf.last_run()["annotations"] == [own]

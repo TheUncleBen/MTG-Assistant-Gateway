@@ -993,3 +993,23 @@ async def test_shared_opponents_that_left_the_engine_or_never_sat() -> None:
     assert pick_opponents(precons, 4, "estimate")[1]["note"].startswith(
         "Archidekt's estimate from cards is bracket 4"
     )
+    # proofread R4 fixes 3 and 4: a comparison's notes, in the first report and the second
+    from mtg_gateway.forge import PAIR_LEAD, PAIR_NO_BRACKET, pair_choice
+
+    first = pair_choice(pick_opponents(precons, 3, "archidekt")[1], 3)
+    assert first["pair"] and first["note"].startswith(f"{PAIR_LEAD} Opponents are bracket 3 precons")
+    assert PAIR_LEAD == "Opponents for this comparison are picked for the higher of the two decks' brackets."
+    assert pair_choice(pick_opponents(precons, None, None)[1], None)["note"] == PAIR_NO_BRACKET
+    _, waiting = shared_opponents(precons, {"deck_name": "Deck A", "bracket": [None, None, None, True]})
+    assert waiting["note"] == (
+        "The same opponents Deck A's Forge games get, so both decks meet the same table. Neither deck has "
+        "a bracket (none set in Archidekt and no estimate), so the newest precons play."
+    )
+    sat = {"deck_name": "Deck A", "opponents": ["New 3", "Mid 3", "Old 4"]}
+    assert shared_opponents(precons, {**sat, "pair": True})[1]["note"] == (
+        "The same opponents as Deck A's Forge games, picked for the higher of the two decks' brackets, so "
+        "both decks met the same table."
+    )
+    assert shared_opponents(precons, sat)[1]["note"] == (
+        "The same opponents as Deck A's Forge games, so both decks met the same table."
+    )

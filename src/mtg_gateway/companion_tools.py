@@ -11,7 +11,7 @@ from starlette.responses import JSONResponse, RedirectResponse, Response
 
 from . import deck_stats
 from .archidekt import Deck
-from .busy import busy_json_response, busy_response, busy_text_response
+from .busy import _headers, busy_body, busy_json_response, busy_plan, busy_response, busy_text_response
 from .companion import DECK_CSP, DECK_ERR_MESSAGES, EDITOR_CSP, TEXT_PLAIN, _filename, _json_for_html
 from .decklist import DecklistError, parse_decklist
 from .deckpage import (
@@ -666,7 +666,10 @@ def add_deck_tool_routes(
             if not other.isdigit():
                 raise DeckError("invalid", "Pick the other deck on the Compare page first.")
             other_deck = await reports.pair_deck(sub, other)
-            first = await reports.run(sub, deck_id, simulate=False, forge=True, pair_with=other_deck)
+            # without Forge on the gateway no pair is asked for: the first report says why it has no
+            # Forge games and the page below names that deck (compare_with is refused then)
+            pair = other_deck if reports.forge is not None else None
+            first = await reports.run(sub, deck_id, simulate=False, forge=True, pair_with=pair)
             try:
                 second = await reports.run(
                     sub,
@@ -694,7 +697,11 @@ def add_deck_tool_routes(
                     status=409,
                 )
         except DeckError as exc:
-            if busy := busy_response(exc, request, page, sub=sub, sid=sid):
+            if (plan := busy_plan(exc)) is not None:
+                # the shared busy page, but Try again opens the Compare page: this route takes POST only
+                compare_url = f"/decks/{deck_id}/compare{query}"
+                busy = page(plan.title, busy_body(plan, compare_url), sub=sub, sid=sid, status=plan.status)
+                busy.headers.update(_headers(plan))
                 return busy
             return page(
                 "Compare",

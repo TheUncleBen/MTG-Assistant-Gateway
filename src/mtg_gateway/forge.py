@@ -321,7 +321,17 @@ def pick_opponents(
 # Q140 item 3: a Forge comparison (the Compare page's "Test both in Forge", or an assistant's
 # compare_with) seats both decks against precons picked for the higher of their brackets, so the
 # order of the two decks doesn't matter.
-PAIR_LEAD = "Both decks in this comparison meet opponents picked for the higher of their two brackets."
+PAIR_LEAD = "Opponents for this comparison are picked for the higher of the two decks' brackets."
+PAIR_NO_BRACKET = (
+    "Neither deck has a bracket (none set in Archidekt and no estimate), so the newest precons play."
+)
+
+
+def pair_choice(choice: dict[str, Any], bracket: int | None) -> dict[str, Any]:
+    """A comparison's opponent choice: marked as one, its note led by PAIR_LEAD, or saying that
+    neither deck has a bracket."""
+    note = PAIR_NO_BRACKET if bracket is None else f"{PAIR_LEAD} {choice['note']}"
+    return {**choice, "pair": True, "note": note}
 
 
 def bracket_parts(value: Any) -> tuple[int | None, str | None, str | None, bool]:
@@ -360,18 +370,20 @@ def shared_opponents(
             }
         by_name = {p["name"]: p for p in precons}
         brackets = {o: by_name[o]["bracket"] for o in opponents if isinstance(by_name[o].get("bracket"), int)}
+        how = ", picked for the higher of the two decks' brackets," if shared.get("pair") else ","
         return list(opponents), {
             "rule": "shared",
             "shared_with": link,
             **({"opponent_brackets": brackets} if brackets else {}),
-            "note": f"The same opponents as {deck}'s Forge games, so both decks met the same table.",
+            **({"pair": True} if shared.get("pair") else {}),
+            "note": f"The same opponents as {deck}'s Forge games{how} so both decks met the same table.",
         }
     # its run has not started yet: picked as that run will pick them, for the bracket it waits
     # with (the higher of the two decks' in a comparison, Q140 item 3: then [n, source, deck])
     level, source, of_deck, pair = bracket_parts(shared.get("bracket"))
     chosen, picked = pick_opponents(precons, level, source, deck=of_deck or deck)
     if pair:
-        picked = {**picked, "pair": True, "note": f"{PAIR_LEAD} {picked['note']}"}
+        picked = pair_choice(picked, level)
     # how they were picked is pick_opponents' own note, true also with no bracket or unrated precons
     return chosen, {
         **picked,
@@ -432,7 +444,7 @@ async def start_run(
     else:
         chosen, choice = pick_opponents(precons, bracket, bracket_source, deck=bracket_deck)
         if pair:
-            choice = {**choice, "pair": True, "note": f"{PAIR_LEAD} {choice['note']}"}
+            choice = pair_choice(choice, bracket)
     if not chosen:
         return {"state": "failed", "error": "Forge has no opponent decks."}
     seats = [deck_name, *chosen]

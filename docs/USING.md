@@ -139,14 +139,14 @@ One deck:
   enough precons of that bracket, the nearest bracket fills in, and an older
   Forge image without precon brackets plays the newest precons; the report
   names the opponents, their brackets and why they were picked. Forge plays
-  10 games per report by default (`MTG_FORGE_GAMES`) and shows each win rate
-  with its 95% interval. Forge does not run 60-card decks (its opponents are
+  10 games per report by default (your gateway's operator can change this)
+  and shows each win rate with its 95% interval. Forge does not run 60-card decks (its opponents are
   Commander precons): their reports never start or queue a Forge run and say
   why. When the Forge engine is busy
   with other runs, a report waits in the queue and starts by itself. Unless you
   use the Compare page's Forge button (or your assistant asks for the same
-  opponents), each deck meets precons picked for its own bracket (or its
-  estimate), so two decks' Forge
+  opponents), each deck meets precons picked for its own bracket (or
+  Archidekt's estimate when none is set), so two decks' Forge
   win rates are not a like-for-like comparison; the paired goldfish A/B of
   `compare_decks` is.
 - A report without Forge games (Forge not set up, a 60-card deck, or Forge
@@ -349,7 +349,8 @@ assistant applies what that mode allows, always with a snapshot.
   or both, so you can follow how a deck develops.
 - **Compare** has **Test both in Forge against the same opponents** when
   Forge is on and both are Commander decks: both decks play Forge games
-  against the same three precons.
+  against the same three precons, picked for the higher of the two decks'
+  brackets, so it doesn't matter which deck you compare from.
 - The **Goldfish** page's **How to play** guide walks a first game step by
   step; you can hide it.
 

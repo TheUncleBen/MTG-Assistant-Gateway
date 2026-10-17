@@ -780,8 +780,9 @@ UNMODELED_TEXT = (
     "model, such as opponents to interact with."
 )
 UNMODELED_SAVED_TEXT = (
-    "The gateway can save descriptions that pass its check, up to 200 for you, and your later solo "
-    "tests then play that card with it. Your saved descriptions play only in your own tests."
+    "The gateway can keep up to 200 of these descriptions for you once they pass its check, and your "
+    "later solo tests then play those cards with them. Your saved descriptions play only in your own "
+    "solo tests."
 )
 KEPT_HEADING = "Played with saved card descriptions"
 KEPT_TEXT = (
@@ -802,9 +803,9 @@ def kept_models(r: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _kept_who(u: dict[str, Any]) -> str:
-    who = "added by you"  # each member keeps their own (Q140 item 1)
+    # every saved description is the member's own (Q140 item 1), so only its date is said
     when = time_text(u.get("changed_at"))[:10]
-    return f"{who}, last changed {when}" if when else who
+    return f"last changed {when}" if when else ""
 
 
 REMOVE_MODEL_LABEL = "Remove"
@@ -841,7 +842,8 @@ def kept_models_html(
     if not used:
         return ""
     items = "".join(
-        f"<li>{_esc(front_face(u['name']))} <i>{_esc(_kept_who(u))}</i>"
+        f"<li>{_esc(front_face(u['name']))}"
+        + (f" <i>{_esc(_kept_who(u))}</i>" if _kept_who(u) else "")
         + (
             " " + _remove_form(u, csrf, report_id)
             if csrf and report_id and front_face(u["name"]).casefold() in removable
@@ -1654,7 +1656,9 @@ def report_markdown(r: dict[str, Any]) -> str:
         lines += [f"## {solo_heading(g)}", "", g["message"], ""]
     if kept_models(r):
         used = sorted(kept_models(r), key=lambda u: u["name"].casefold())
-        named = ", ".join(f"{front_face(u['name'])} ({_kept_who(u)})" for u in used)
+        named = ", ".join(
+            front_face(u["name"]) + (f" ({_kept_who(u)})" if _kept_who(u) else "") for u in used
+        )
         lines += [f"{KEPT_HEADING}: {named}", ""]
     forge = r.get("forge") if isinstance(r.get("forge"), dict) else None
     if forge is None or forge.get("state") == "skipped":
