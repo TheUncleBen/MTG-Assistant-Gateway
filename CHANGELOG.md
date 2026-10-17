@@ -11,8 +11,9 @@ with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 
 The simulator release: a Reports page under More, Forge games of two decks against the same
 opponents, laid-out Forge results, a guide on the Goldfish page and quicker Forge runs. Forge stays
-off by default. The database moves to schema 14, which only adds one table. Notifications move into
-the gateway's own Android app, from the stack's own notification server.
+off by default. The database moves to schema 14, which only adds one table. Members can now get
+their notifications in the gateway's own Android app, from a notification server that runs in the
+stack.
 
 ### Added
 - **Reports page** under More: your stored deck reports, newest first (the newest 200), with their status and what ran. It also shows what Forge is playing for you now and what waits, with the expected times. A deck filter narrows the list, and each report links to its deck's trend in History. Reports stay in History too.
@@ -32,9 +33,9 @@ the gateway's own Android app, from the stack's own notification server.
 - **Forge on more than one machine** (optional): the gateway can use several copies of the Forge service, for example on a Pi and a PC. Each run plays on one copy, the one with the most free places, and stays there. One copy is still the usual setup. So far this is tested only with a stand-in, not on real machines.
 - `scripts/measure_recognition.py` and a one-off CI step: for the precons and test decks, the share of cards played with their effect and the share known (played with their effect or left out on purpose).
 - The Goldfish page has the card size switch too, and its cards follow it.
-- **Notifications in the Android app.** Members can get their notifications in the gateway's own Android app instead of a separate notification app. There is no Google push service and no iPhone version. On the Account page in the app, **Get notifications on this phone** asks Android to allow notifications and to let the app run in the background. Android then shows a quiet notification while the app listens.
+- **Notifications in the Android app.** Members can get their notifications in the gateway's own Android app instead of a separate notification app. There is no Google push service and no iPhone version. On the Account page in the app, **Get notifications on this phone** asks once to let the app run in the background, and on Android 13 and later it first asks to allow notifications. Android then shows a quiet "Always connected" notification while the app listens.
 - **Disconnect my phones** on the Account page stops every connected phone.
-- The stack runs its own ntfy server (`mtg-assistant-ntfy`) on a private network with no published port. Phones reach it through the gateway's own address.
+- The stack runs its own ntfy server (`mtg-assistant-ntfy`; `ntfy` with Docker Compose) on a private network with no published port. Phones reach it through the gateway's own address.
 
 ### Changed
 - **Names:**
@@ -78,7 +79,7 @@ the gateway's own Android app, from the stack's own notification server.
 ### Deployment
 - **Create the `mtg_ntfy_token` secret before updating** (DEPLOY.md step 4, or `./make-secrets.sh` for Compose). Delete any `MTG_NTFY_URL` or `MTG_NTFY_TOKEN_FILE` value from the stack's environment. An ntfy server you ran for the gateway, and its proxy host, can go.
 - **Members need app 0.7.30 to get notifications. Members on an app older than 0.7.12 must update the app first.**
-- Members who used the ntfy app connect again in the gateway's app. Their old ntfy subscriptions get nothing more.
+- Members who used the ntfy app connect again in the gateway's Android app; there are no notifications on iPhone. Their old ntfy subscriptions get nothing more.
 
 ## [0.7.29] - Unreleased
 
