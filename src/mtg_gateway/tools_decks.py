@@ -57,8 +57,8 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
         name="account_status",
         title="Account status",
         description=(
-            "Show whether the signed-in user has linked an Archidekt account, whether deck writes "
-            "are enabled on this gateway, and the user's approval mode (approval_mode_note says what "
+            "Show whether the signed-in user has linked an Archidekt account, whether Archidekt writes "
+            "are switched on for this gateway, and the user's approval mode (approval_mode_note says what "
             "you may apply yourself and what waits for the user). Linking happens in the browser at "
             "the account page."
         ),
