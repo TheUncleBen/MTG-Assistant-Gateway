@@ -560,30 +560,148 @@ def test_the_search_placeholder_fits_beside_the_links_at_normal_size(
     assert problems == [], "\n".join(problems)
 
 
+# Review R14-1: with a font about 15% wider than Lato (DejaVu Sans, a monospace font) and large
+# text, an admin's one-row bar ran past the window (up to 59 px at 125%, 1024 to 1082 px; and,
+# found while fixing it, up to 48 px at 110% to 150% between 660 and 898 px). The
+# browser may lack DejaVu Sans (it then falls back), so the page's own font with wider letter
+# spacing stands in for a wide font too.
+WIDE_FONTS = ("'DejaVu Sans'", "monospace", "letter-spacing")
+WIDE_BANDS = (
+    ("root-110", range(640, 700, 6)),
+    ("root-125", range(720, 800, 6)),
+    ("root-150", range(880, 900, 4)),
+    ("root-125", range(1000, 1104, 4)),
+    ("text-125", range(1000, 1104, 4)),
+    ("root-140", range(1100, 1250, 10)),
+    ("root-150", range(1180, 1330, 10)),
+)
+
+
+@pytest.mark.parametrize("font", WIDE_FONTS)
+def test_a_wide_font_at_large_text_keeps_the_bar_inside_the_window(
+    chromium, server: Server, font: str
+) -> None:
+    sid = _admin(server)
+    rule = "*{letter-spacing:.05em}" if font == "letter-spacing" else f"*{{font-family:{font} !important}}"
+    problems: list[str] = []
+    with _session(chromium) as browser:
+        ctx = browser.new_context(viewport={"width": 1280, "height": 800})
+        ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
+        page = ctx.new_page()
+        for zoom, widths in WIDE_BANDS:
+            for width in widths:
+                page.set_viewport_size({"width": width, "height": 800})
+                _open(page, f"{server.base}/history")
+                page.evaluate(
+                    "r => { const s = document.createElement('style'); s.textContent = r;"
+                    " document.head.append(s); }",
+                    rule,
+                )
+                _zoom(page, zoom)
+                _settle(page)
+                g = page.evaluate(BAR_OVERLAP)
+                if g["overlap"] or g["outside"] or g["doc"] != g["win"]:
+                    problems.append(f"@{width}px {zoom}: {g}")
+    assert problems == [], "\n".join(problems[:40]) + f"\n… {len(problems)} in all"
+
+
+# Review R14-2: where the brand's word gives way, a stub such as "M." (920 px, an admin) read
+# oddly. The word now shows at least 3em ("MTG…") or none of it, and the brand keeps its height
+# with the mark in the middle either way.
+BRAND_WORD = """() => {
+  const brand = document.querySelector('.topbar .brand'), word = brand.querySelector('.word');
+  const b = brand.getBoundingClientRect(), w = word.getBoundingClientRect();
+  const m = brand.querySelector('.mark').getBoundingClientRect();
+  return {shown: getComputedStyle(word).display !== 'none' && w.top < b.bottom && w.bottom > b.top,
+    width: w.width, em: parseFloat(getComputedStyle(word).fontSize), height: b.height,
+    bar: document.querySelector('.topbar').offsetHeight,
+    middle: Math.abs((m.top + m.bottom) / 2 - (b.top + b.bottom) / 2)};
+}"""
+
+
+@pytest.mark.parametrize("touch", [False, True], ids=["mouse", "touch"])
+@pytest.mark.parametrize("role", ["member", "admin"])
+def test_the_brand_word_shows_at_least_three_letters_or_none(
+    chromium, server: Server, role: str, touch: bool
+) -> None:
+    sid = _admin(server) if role == "admin" else server.sign_in()
+    problems: list[str] = []
+    heights = set()
+    with _session(chromium) as browser:
+        ctx = browser.new_context(viewport={"width": 1280, "height": 800}, has_touch=touch)
+        ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
+        page = ctx.new_page()
+        for width in (*range(900, 1024, 6), 1023, 1024, 1100, 1280):
+            for zoom in ("none", "root-125"):
+                page.set_viewport_size({"width": width, "height": 800})
+                _open(page, f"{server.base}/history")
+                _zoom(page, zoom)
+                _settle(page)
+                g = page.evaluate(BRAND_WORD)
+                if (g["shown"] and g["width"] < 3 * g["em"] - 0.5) or g["middle"] > 0.6:
+                    problems.append(f"@{width}px {zoom}: {g}")
+                if g["bar"] == 50:
+                    heights.add((zoom, round(g["height"], 1)))
+    assert problems == [], "\n".join(problems)
+    assert len(heights) == 2, heights  # in one row, one height per text size, word shown or not
+
+
 # The app has no text links in its bar, so the one-row rules for the links leave it alone (review
 # R13-2: at 344 px, the Fold's cover screen, they cut the gateway's name one letter earlier).
+# Review R14-3: besides the styles, where the name is cut. The bar's left side ends one gap before
+# the account side and holds the brand (and the links' empty row after it); a long name is cut
+# where the brand's room ends, and the usual name only when its whole width does not fit there.
+APP_BAR = """() => {
+  const q = sel => document.querySelector(sel), box = sel => q(sel).getBoundingClientRect();
+  const cs = sel => getComputedStyle(q(sel)), word = q('.topbar .brand .word');
+  return {app: document.body.classList.contains('app'), left: cs('.topbar .left').display,
+    pad: cs('.topbar .right').paddingLeft, shown: cs('.topbar .brand .word').display,
+    doc: document.documentElement.scrollWidth, win: innerWidth,
+    leftEnd: box('.topbar .left').right, brandEnd: box('.topbar .brand').right,
+    wordStart: box('.topbar .brand .word').left, wordEnd: box('.topbar .brand .word').right,
+    rightStart: box('.topbar .right').left, gap: parseFloat(cs('.topbar .wrap').columnGap),
+    navStart: box('.topbar nav.site').left, navEnd: box('.topbar nav.site').right,
+    leftGap: parseFloat(cs('.topbar .left').columnGap), margin: parseFloat(cs('.topbar .brand').marginRight),
+    full: word.scrollWidth, cut: word.scrollWidth > word.clientWidth + 1};
+}"""
+
+
 @pytest.mark.parametrize("width", [344, 360, 412, 884])
 def test_the_app_bar_keeps_its_own_spacing(chromium, server: Server, width: int) -> None:
     sid = server.sign_in()
+    settings = server.app.state.gateway.settings
+    short_name = settings.server_name
+    seen = {}
     with _session(chromium) as browser:
-        ctx = browser.new_context(
-            viewport={"width": width, "height": 800},
-            has_touch=True,
-            is_mobile=True,
-            user_agent="Mozilla/5.0 (Linux; Android 14) MTGAssistant/0.7.27",
-        )
-        ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
-        page = ctx.new_page()
-        _open(page, f"{server.base}/decks")
-        got = page.evaluate(
-            "() => { const s = q => getComputedStyle(document.querySelector(q)); return {"
-            " app: document.body.classList.contains('app'), left: s('.topbar .left').display,"
-            " pad: s('.topbar .right').paddingLeft, word: s('.topbar .brand .word').display,"
-            " doc: document.documentElement.scrollWidth, win: innerWidth}; }"
-        )
-    assert got["app"] and got["word"] != "none", got
-    assert got["left"] == "flex" and got["pad"] == "0px", got  # the brand gets the room the old way
-    assert got["doc"] == got["win"], got
+        try:
+            for name in (short_name, LONG_NAME):
+                object.__setattr__(settings, "server_name", name)
+                ctx = browser.new_context(
+                    viewport={"width": width, "height": 800},
+                    has_touch=True,
+                    is_mobile=True,
+                    user_agent="Mozilla/5.0 (Linux; Android 14) MTGAssistant/0.7.27",
+                )
+                ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
+                page = ctx.new_page()
+                _open(page, f"{server.base}/decks")
+                seen[name] = page.evaluate(APP_BAR)
+                ctx.close()
+        finally:
+            object.__setattr__(settings, "server_name", short_name)
+    for name, got in seen.items():
+        assert got["app"] and got["shown"] != "none", (name, got)
+        # the brand gets the room the old way
+        assert got["left"] == "flex" and got["pad"] == "0px", (name, got)
+        assert got["doc"] == got["win"], (name, got)
+        assert got["leftEnd"] <= got["rightStart"] - got["gap"] + 0.5, (name, got)
+        assert got["navEnd"] <= got["leftEnd"] + 0.5, (name, got)  # the left side holds the brand
+        end = got["navStart"] - got["leftGap"] - got["margin"]  # where the brand's room ends
+        assert abs(got["brandEnd"] - end) <= 0.5, (name, got)
+        assert got["cut"] == (got["full"] > end - got["wordStart"] + 0.5), (name, got)
+        if got["cut"]:
+            assert abs(got["wordEnd"] - end) <= 0.5, (name, got)
+    assert seen[LONG_NAME]["cut"], seen[LONG_NAME]
 
 
 # The Account page on a phone with 200% text, scripts on and off (a Track A review note on the

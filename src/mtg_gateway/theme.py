@@ -193,12 +193,14 @@ CSS = (
    text, and at most about 8.7rem, 183 px, at 920 px and 150%). The links wrap when the bar is
    narrower than 42.5em (600 to 899 px with a mouse) or 58em (900 px and wider; the container
    queries below); the bar's em is the root's, so the test is in rem, with 20 px for a scroll bar.
+   At 600 to 899 px the links can also wrap within the one row a little above 42.5em (an admin's
+   eight links up to 625 px at the normal size), so there the large room lasts to 45rem.
    clamp((T - 100vw) * 1000) is 0 above T and 9.5rem below it (9.5rem everywhere would leave
    133 px over the one-row bar). */
 html{font-size:14px;scroll-padding:var(--bar-room,60px) 0 120px;-webkit-text-size-adjust:100%;
   min-width:320px;font-family:Lato,"Helvetica Neue",Arial,Helvetica,sans-serif;line-height:1.15}
 @media (min-width:600px) and (max-width:899.98px) and (not ((pointer:coarse) or (hover:none))){
-  html{scroll-padding-top:var(--bar-room,max(60px,clamp(0px,(42.5rem + 20px - 100vw) * 1000,9.5rem)))} }
+  html{scroll-padding-top:var(--bar-room,max(60px,clamp(0px,(45rem + 20px - 100vw) * 1000,9.5rem)))} }
 @media (width >= 900px){
   html{scroll-padding-top:var(--bar-room,max(60px,clamp(0px,(58rem + 20px - 100vw) * 1000,9.5rem)))} }
 body{margin:0;min-height:100vh;display:flex;flex-direction:column;background:var(--bg);color:var(--text);
@@ -692,6 +694,14 @@ details.raw{margin:.5rem 0 0} details.raw summary{cursor:pointer;color:var(--tex
    whole placeholder beside an admin's eight links, in wide fonts too */
 @media (max-width:1023.98px){ .topbar nav.site a{padding:0 .4rem;font-size:.93rem}
   .brand{margin-right:.25rem} }
+/* and with large text (a raised font size, a text zoom) from 1024 px, while the bar is narrower
+   than 68em: a font about 15% wider than Lato (DejaVu Sans, a monospace font) needs up to 65em
+   for an admin's one row with the full-size links, and at most 57.5em with these, so the row
+   fits until the links wrap at 58em (below; the wrapped rows keep the full size). 68em is 952 px
+   at the normal size, so there the 1024 px rule above still decides. */
+@media (width >= 1024px){ @container topbar (58em <= width < 68em){
+  body:not(.app) .topbar nav.site a{padding:0 .4rem;font-size:.93rem}
+  body:not(.app) .topbar .brand{margin-right:.25rem} } }
 /* The proposal review's three choices sit at one height, and the deck banner's
    Comments link matches its Like and Bookmark buttons. */
 .choice button,.choice .btn{min-height:48px}
@@ -712,7 +722,7 @@ details.raw{margin:.5rem 0 0} details.raw summary{cursor:pointer;color:var(--tex
   details > summary{min-height:40px;display:flex;align-items:center}
   details.dd > summary.icon-only{min-height:40px;min-width:40px}
   footer.site .links a{display:inline-flex;align-items:center;min-height:40px;padding:0 .5rem}
-  .brand{min-height:40px}
+  .brand{min-height:40px;--brand-line:max(40px,1.35em)}
   .hrow a.kind,.hrow a.name,.proposals a.name,.report .crumbs a,li > a.name{display:inline-block;
     padding:.6rem 0}
   .banner .social a.soc,.banner .social button.soc{height:40px;min-height:40px;border-radius:20px}
@@ -745,6 +755,30 @@ details.raw{margin:.5rem 0 0} details.raw summary{cursor:pointer;color:var(--tex
   body:not(.app) .topbar .brand{flex:0 1000 auto;min-width:25px}
   body:not(.app) .topbar .right{min-width:auto;margin-left:auto;padding-left:.75rem} }
 .brand .word{overflow:hidden;text-overflow:ellipsis;min-width:0}
+/* Where the brand's word gives way, it shows at least 3em of it ("MTG…") or none: below that the
+   word wraps onto a second line inside the brand, 100px below the first, which the brand clips,
+   instead of showing a stub such as "M.". The brand keeps its one line's height (--brand-line;
+   40px on a touch screen), and the empty ::before holds the first line at that height, so the
+   mark stays in the middle with the word gone too. */
+@media (min-width:600px){
+  body:not(.app) .topbar .brand{flex-wrap:wrap;row-gap:100px;overflow:hidden;
+    height:var(--brand-line,max(25px,1.35em))}
+  body:not(.app) .topbar .brand::before{content:"";width:0;margin-right:-.5rem;
+    height:var(--brand-line,max(25px,1.35em))}
+  body:not(.app) .topbar .brand .word{flex:1 1 3em;max-width:max-content} }
+/* A font about 15% wider than Lato (DejaVu Sans) needs up to about 45em for an admin's links on
+   one row at 600 to 899 px, so a bar wider than 42.5em (where they wrap, below) could still be
+   too short for them. There the links wrap within the row (the bar grows) instead of running past
+   the window, but only as the last resort: when the row is short, the brand's word gives way
+   first, then the bar's right padding (the ::after, 2rem, as before, when the account button
+   could sit nearer the edge), and only then do the links. Any shrink of the links at all would
+   wrap them, so the brand's and the padding's shrink factors are large enough that the links'
+   share stays under a pixel's 1/64 while either can still give way. */
+@media (min-width:600px) and (max-width:899.98px) and (not ((pointer:coarse) or (hover:none))){
+  body:not(.app) .topbar .wrap{height:auto;min-height:50px;padding-right:0}
+  body:not(.app) .topbar .wrap::after{content:"";flex:0 1000000 2rem;min-width:0;margin-left:-.25rem}
+  body:not(.app) .topbar .brand{flex-shrink:100000000}
+  body:not(.app) .topbar nav.site{flex:0 1 auto;flex-wrap:wrap;min-width:0} }
 /* Large text with a mouse (a raised font size, a text-only zoom, 200% text): when the bar's text
    links no longer fit on one row beside the brand and the account button, they wrap onto more
    rows between them (_NAV_ROW_RULES), so the page never scrolls sideways and nothing runs under
@@ -942,7 +976,9 @@ CSS = CSS.replace(
 # size (milestone review M-1: with the links on a row of their own under the account side, Tab
 # went from the links' row back up to search and account).
 _NAV_ROW_RULES = (
-    "body:not(.app) .topbar .wrap{flex-wrap:wrap;height:auto;row-gap:0;column-gap:1rem;padding-bottom:.35rem}"
+    "body:not(.app) .topbar .wrap{flex-wrap:wrap;height:auto;row-gap:0;column-gap:1rem;padding-bottom:.35rem;"
+    "padding-right:2rem}"
+    "body:not(.app) .topbar .wrap::after{display:none}"
     "body:not(.app) .topbar .left{display:contents}"
     "body:not(.app) .topbar .brand{min-height:50px;align-self:flex-start}"
     "body:not(.app) .topbar .brand .word{display:none}"
