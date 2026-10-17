@@ -256,9 +256,9 @@ no new login:
 3. Deploy (step 6). Portainer stores the login with each service, so
    whichever node runs it can pull. To update later, open the stack, change
    `MTG_TAG` if you're moving to a new release, and click **Update the
-   stack** (with the Repository build method, **Pull and redeploy**). In the
-   box that asks "Are you sure?", make sure **Re-pull image and redeploy** is
-   on, then click **Update**.
+   stack** (if your stack uses the Repository build method, the button is
+   called **Pull and redeploy**). In the box that asks “Are you sure?”, make
+   sure **Re-pull image and redeploy** is on, then click **Update**.
 
 If tasks show `rejected` with `No such image: ghcr.io/<owner>/...`, check
 the image name and tag first, then the registry URL above. A `docker login`
@@ -347,10 +347,10 @@ locked (greyed out) even with no variable set.
    the stack and redeploy.
 3. If `MTG_TAG` names a version, change it to `0.7.29` first (in the stack's
    variables, or in `mtg.env` without Portainer); otherwise you redeploy the
-   old version with the new stack file. Click **Update the stack** (with the
-   Repository build method, **Pull and redeploy**). In the box that asks
-   "Are you sure?", make sure **Re-pull image and redeploy** is on, then
-   click **Update**. Without Portainer: open a new shell (a variable you
+   old version with the new stack file. Click **Update the stack** (if your
+   stack uses the Repository build method, the button is called **Pull and
+   redeploy**). In the box that asks “Are you sure?”, make sure **Re-pull
+   image and redeploy** is on, then click **Update**. Without Portainer: open a new shell (a variable you
    deleted from `mtg.env` stays set in the old one), go to your copy of the
    repository (`cd` into it), and run the last two lines under “Without
    Portainer” again.
