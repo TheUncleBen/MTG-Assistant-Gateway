@@ -416,6 +416,28 @@ class Run(unittest.TestCase):
         finally:
             fs.QUEUE = old
 
+    def test_a_job_on_every_place_gives_one_back_to_a_job_that_waits(self):
+        # security review S-10: a run on every place held them all until its last game; now each
+        # of its places lets go after its group while another job waits, and the run goes on
+        old = fs.QUEUE
+        try:
+            os.environ["FAKE_SLOW"] = "0.6"
+            deck = {"commander": ["Liesa, Forgotten Archangel"], "main": [[99, "Forest"]]}
+            q = self.worker_with(2)
+            big = fs.Job([deck, deck], 20, "Commander", 1, 2)  # four groups on both places
+            q.put(big)
+            time.sleep(0.2)
+            small = fs.Job([deck, deck], 5, "Commander", 2, 1)
+            q.put(small)
+            self.wait_done([big, small])
+            self.assertEqual([big.state, small.state], ["done", "done"])
+            self.assertEqual(big.view()["games_done"], 20)
+            # the small job started when the big one's first groups ended, not after all four
+            self.assertLess(small.started - big.started, 1.0)
+            self.assertEqual(sorted(fs.FREE_PLACES), [0, 1])
+        finally:
+            fs.QUEUE = old
+
     def test_a_job_cancelled_while_waiting_for_a_place_never_starts(self):
         old = fs.QUEUE
         try:
