@@ -181,7 +181,9 @@ if ! until_ok 'shows "1 change to Atraxa is waiting for you"' 30; then
   result "a deck's message is replaced" no "the deck's first message never showed"
 else
   send m003AbCdEf "2 changes to Atraxa are waiting for you" "Open it." deck-42
-  if until_ok 'shows "2 changes to Atraxa are waiting for you"' 30 && ! shows "1 change to Atraxa is waiting for you"; then
+  # Waits for the end state: while Android swaps the message, dumpsys can list the new one before the
+  # old one is gone.
+  if until_ok 'shows "2 changes to Atraxa are waiting for you" && ! shows "1 change to Atraxa is waiting for you"' 30; then
     result "a deck's message is replaced" ok
   else
     result "a deck's message is replaced" no "both or neither in dumpsys"
@@ -200,21 +202,37 @@ adb shell am start -W -n "$PKG/local.mtgassistantgateway.app.MainActivity" >/dev
 sleep 3
 size=$(adb shell wm size | tr -d '\r' | awk '{print $NF}')
 w=${size%x*}; h=${size#*x}
-# Up to three tries: Recents can still be opening when the first swipe lands.
+# Up to three tries: Recents can still be opening when the first swipe lands. Removing the task is
+# not instant, so each try waits a little for it to go.
+how="swipe"
 for _ in 1 2 3; do
   adb shell input keyevent KEYCODE_APP_SWITCH
   sleep 3
   shot recents
   adb shell input swipe $((w / 2)) $((h * 6 / 10)) $((w / 2)) $((h / 20)) 200
-  sleep 2
-  in_recents || break
+  until_ok '! in_recents' 6 && break
 done
+# The swipe gesture is not reliable on the emulator: Recents' own Clear all removes the task the same
+# way (Android ends the task, and the service's onTaskRemoved runs), so it is the fallback. It sits
+# past the last task, so Recents is scrolled each way to find it.
+if in_recents; then
+  how="Clear all"
+  adb shell input keyevent KEYCODE_APP_SWITCH
+  sleep 3
+  for dir in "$((w / 5)) $((w * 9 / 10))" "$((w * 9 / 10)) $((w / 5))"; do
+    set -- $dir
+    adb shell input swipe "$1" $((h / 2)) "$2" $((h / 2)) 300
+    sleep 2
+    tap_text "Clear all" && until_ok '! in_recents' 10 && break
+  done
+  shot recents-clear-all
+fi
 adb shell input keyevent KEYCODE_HOME
 send m004AbCdEf "After swipe" "Still here"
-if in_recents; then
+if ! until_ok '! in_recents' 10; then
   result "swiped away from Recents" no "the app was still in Recents after the swipe"
 elif running && until_ok 'shows "After swipe"' 30; then
-  result "swiped away from Recents" ok
+  result "swiped away from Recents (removed by $how)" ok
 else
   result "swiped away from Recents" no "service gone or message missing"
 fi
