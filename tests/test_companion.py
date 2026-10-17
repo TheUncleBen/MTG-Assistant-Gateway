@@ -415,6 +415,21 @@ async def test_forge_comparison_reads_the_other_deck_first_on_every_path(stack: 
         ):
             unknown = structured(await call(h, token, "run_deck_report", args))
             assert unknown["ok"] is False and unknown["message"].endswith(NOT_DECK_OR_SNAPSHOT), unknown
+        # proofread R5 finding 1: another site's link on compare_with reads as on deck_ref
+        elsewhere = structured(
+            await call(
+                h,
+                token,
+                "run_deck_report",
+                {"deck_ref": "42", "forge": True, "compare_with": "https://moxfield.com/decks/x"},
+            )
+        )
+        assert elsewhere["message"] == f"{PAIR_UNREAD} Only archidekt.com deck links are accepted.", elsewhere
+        # proofread R5 finding 6: compare_decks gives the same refusal, per side
+        cmp_unknown = structured(await call(h, token, "compare_decks", {"a": "snap_nothere", "b": "42"}))
+        assert cmp_unknown["ok"] is False and cmp_unknown["message"] == (
+            f"Deck a: {NOT_DECK_OR_SNAPSHOT} A pasted list goes in a_list."
+        ), cmp_unknown
         stats_unknown = structured(await call(h, token, "deck_stats", {"deck_ref": "snap_nothere"}))
         assert stats_unknown["ok"] is False and stats_unknown["message"] == NOT_DECK_OR_SNAPSHOT, (
             stats_unknown
@@ -470,6 +485,19 @@ async def test_forge_comparison_reads_the_other_deck_first_on_every_path(stack: 
             headers=auth,
         )
         assert no_forge.status_code == 400 and no_forge.json()["message"] == PAIR_NO_FORGE and stored() == []
+        # proofread R5 finding 4: the deck lost its commander after the page loaded: plain words for
+        # the member, never the assistant's parameter names, and nothing kept
+        from mtg_gateway.companion_tools import COMPARE_NO_COMMANDER
+
+        db.execute("DELETE FROM reports")
+        saved = json.loads(json.dumps(stack.ark.decks[42]))
+        for row in stack.ark.decks[42]["cards"]:
+            row["categories"] = [c for c in (row.get("categories") or []) if c != "Commander"]
+        stack.ark.decks[42]["updatedAt"] = "2026-10-03T00:00:00Z"
+        lost = await b.http.post("/decks/42/compare/forge", data={"csrf": csrf, "with": "43"})
+        stack.ark.decks[42] = saved
+        assert lost.status_code == 400 and COMPARE_NO_COMMANDER in html.unescape(lost.text), lost.text
+        assert "compare_with" not in lost.text and "forge is false" not in lost.text and stored() == []
         # Archidekt busy during a press: the shared busy page, whose Try again opens the Compare
         # page (the press itself answers POST only, so the same URL would be a 405)
         reports.decks.archidekt_budget = RateBudget(per_window=1, window=600)

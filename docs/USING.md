@@ -140,9 +140,9 @@ One deck:
   Forge image without precon brackets plays the newest precons; the report
   names the opponents, their brackets and why they were picked. Forge plays
   10 games per report by default (your gateway's operator can change this)
-  and shows each win rate with its 95% interval. Forge does not run 60-card decks (its opponents are
-  Commander precons): their reports never start or queue a Forge run and say
-  why. When the Forge engine is busy
+  and shows each win rate with its 95% interval. Forge does not run 60-card
+  decks (its opponents are Commander precons): their reports never start or
+  queue a Forge run and say why. When the Forge engine is busy
   with other runs, a report waits in the queue and starts by itself. Unless you
   use the Compare page's Forge button (or your assistant asks for the same
   opponents), each deck meets precons picked for its own bracket (or

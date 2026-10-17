@@ -655,6 +655,30 @@ async def test_compare_with_is_refused_whenever_no_forge_games_run(tmp_path: Pat
     assert db._conn.execute("SELECT COUNT(*) FROM reports").fetchone()[0] == 0
 
 
+def test_a_shared_comparison_run_names_the_higher_bracket_only_when_one_picked(tmp_path: Path) -> None:
+    """Proofread R5 finding 5: the second report says its table was picked for the higher of the two
+    brackets only when a bracket picked it; a comparison whose first run seated the newest precons
+    (no bracket on either deck, or unrated precons) gets the plain share note."""
+    import json
+
+    from .test_history_page import store_report
+
+    db = Database(tmp_path / "t.sqlite")
+    db.upsert_user("alice", email=None, name=None, preferred_username=None, groups=[])
+    reports = ReportService(db, _Decks(), None, forge=FakeForge().client(), forge_games=4)  # type: ignore[arg-type]
+    seats = ["Liesa", "New 3", "Mid 3", "Old 4"]
+    for rid, choice, paired in (
+        ("rep_b", {"rule": "bracket", "pair": True, "note": "x"}, True),
+        ("rep_n", {"rule": "newest", "pair": True, "note": "x"}, False),
+        ("rep_o", {"rule": "bracket", "note": "x"}, False),
+    ):
+        store_report(db, "alice", rid)
+        section = {"state": "done", "seats": seats, "opponent_choice": choice}
+        db._conn.execute("UPDATE reports SET forge_json = ? WHERE id = ?", (json.dumps(section), rid))
+        now = reports._shared_now("alice", {"report_id": rid, "deck_name": "Deck A"})
+        assert now["opponents"] == seats[1:] and bool(now.get("pair")) is paired, (rid, now)
+
+
 async def test_a_sixty_card_report_never_starts_or_queues_forge(tmp_path: Path) -> None:
     """Consolidation bug 2: every 60-card report started a Forge run bound to fail, which could take
     a waiting place. Now it never reaches the engine, takes no place, and says why."""
