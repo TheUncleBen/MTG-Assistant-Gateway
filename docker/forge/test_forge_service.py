@@ -158,8 +158,32 @@ class Places(unittest.TestCase):
         self.assertEqual(fs.size_bytes("2g"), 2 * 2**30)
         self.assertEqual(fs.size_bytes("800000k"), 800000 * 2**10)
         self.assertEqual(fs.size_bytes("1000"), 1000)
+        self.assertEqual(fs.size_bytes("1.5g"), int(1.5 * 2**30))
+        self.assertEqual(fs.size_bytes("1.5GB"), int(1.5 * 2**30))
         self.assertIsNone(fs.size_bytes(""))
         self.assertIsNone(fs.size_bytes("lots"))
+        self.assertIsNone(fs.size_bytes("1,5g"))
+
+    def test_a_budget_that_is_not_a_size_gives_one_place_not_the_whole_machine(self):
+        reads = {"/proc/meminfo": "MemTotal:        8000000 kB"}
+        saved, fs._read = fs._read, lambda path: reads.get(path, "")
+        saved_budget = fs.MEMORY_BUDGET
+        try:
+            fs.MEMORY_BUDGET = "1.5 gigs"
+            self.assertIsNone(fs.machine_memory())
+            self.assertEqual(fs.places_for(8, fs.machine_memory()), 1)
+            fs.MEMORY_BUDGET = "1.5g"
+            self.assertEqual(fs.machine_memory(), int(1.5 * 2**30))
+        finally:
+            fs._read, fs.MEMORY_BUDGET = saved, saved_budget
+
+    def test_out_of_memory_scores_forge_cannot_set_are_left_out(self):
+        self.assertEqual(fs.oom_score("1000"), (1000, ""))
+        self.assertEqual(fs.oom_score(" 500 "), (500, ""))
+        for text in ("0", "-500", "1001", "high", ""):
+            score, why = fs.oom_score(text)
+            self.assertEqual(score, 0, text)
+            self.assertIn("FORGE_OOM_SCORE_ADJ", why)
 
 
 class Slices(unittest.TestCase):
@@ -297,6 +321,18 @@ class Run(unittest.TestCase):
         self.assertEqual(oom, str(fs.OOM_SCORE_ADJ))  # the kernel's first pick when memory runs out
         self.assertIn(f"-Xmx{fs.XMX}", java)
         self.assertIn(f"-XX:MaxMetaspaceSize={fs.MAX_METASPACE}", java)
+
+    def test_java_starts_without_choom_when_the_score_is_off(self):
+        flags = self.tmp / "flags"
+        os.environ["FAKE_FLAGS"] = str(flags)
+        saved, fs.OOM_SCORE_ADJ = fs.OOM_SCORE_ADJ, fs.oom_score("-500")[0]
+        try:
+            self.assertEqual(self.run_job(1).view()["state"], "done")
+        finally:
+            os.environ.pop("FAKE_FLAGS")
+            fs.OOM_SCORE_ADJ = saved
+        oom = flags.read_text().split()[0]
+        self.assertNotEqual(oom, "1000")  # no choom: the score the service itself runs with
 
     def test_parallel_is_capped_and_extra_places_get_their_own_home(self):
         fs.MAX_PARALLEL = 2
