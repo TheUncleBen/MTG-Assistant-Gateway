@@ -167,6 +167,12 @@ REPORTS_PAGE_CSS = """
   min-height:44px;margin:0}
 .reports-page .rp-filter .btn{min-height:44px;margin:0}
 .reports-page .rp-filter .msel-btn{width:auto;min-width:min(11rem,100%);max-width:min(18rem,100%);height:44px}
+/* one line beside the heading where there is room; a fixed minimum there, as a percentage one
+   makes the filter measure narrower than its contents and wrap the Show button */
+@media (min-width:600px){
+  .reports-page .rp-filter{flex-wrap:nowrap}
+  .reports-page .rp-filter .msel-btn{min-width:11rem}
+}
 .reports-page .rp-list,.reports-page .rp-runs{list-style:none;margin:0;padding:0}
 .reports-page .rp-row{display:grid;grid-template-columns:minmax(0,1fr);gap:.2rem;padding:.75rem 0;
   border-top:1px solid var(--border-soft)}

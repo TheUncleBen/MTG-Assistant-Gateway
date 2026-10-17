@@ -483,13 +483,20 @@ def test_reports_page_fits_and_reads(server: Server, width: int, scheme: str) ->
         assert state["checked"] > 10 and not state["low"], state["low"]
         assert state["rows"] == 3 and state["runs"] == 2
         assert min(state["targets"]) >= 44, state["targets"]
+        if width >= 600:
+            # review r2 item 19: on wider screens the Show button stays on the select's line
+            tops = page.evaluate(
+                "() => ['.rp-filter .msel-btn', '.rp-filter .btn'].map(s =>"
+                " Math.round(document.querySelector(s).getBoundingClientRect().top))"
+            )
+            assert tops[0] == tops[1], tops
         text = page.locator(".rp-queue").inner_text()
         # review r1 fix 1: the games played so far, as the report page counts them
         assert "Playing: 3 of 10 games" in text
         assert "Waiting: number 1 in line" in text
         # review r1 fix 2: at 200% text the deck filter still fits (no sideways scroll). Not at 717:
-        # there the site's own top bar (theme.py, not this page's) runs 207px past the window at
-        # 200% text; reported to its owner.
+        # there the site's own top bar (theme.py's nav.site, on every page) runs 207px past the
+        # window at 200% text; reported to its owner.
         from .test_overflow_sweep_browser import MEASURE
         from .test_text_zoom_browser import ROOT_200, TEXT_200
 
