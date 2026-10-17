@@ -14,7 +14,8 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/.." && pwd)"
 PKG="$(tr -d '[:space:]' < "$ROOT/app/application-id.txt")"
 SERVICE="$PKG/local.mtgassistantgateway.app.NotifyService"
-KEY="mtg-PushTestKeyAbCdEfGhIj"
+KEY="mtg-PushTestKeyAbCdEfGhIjK" # the app takes only mtg- and 22 letters, digits, - or _ (Push.isKey)
+printf %s "$KEY" | grep -Eqx "mtg-[A-Za-z0-9_-]{22}" || { echo "the test key is not one the app accepts"; exit 2; }
 PORT=8443
 
 if [ "${1:-}" = "--prepare" ]; then
