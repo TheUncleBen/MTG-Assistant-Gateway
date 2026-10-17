@@ -514,3 +514,71 @@ def test_the_semi_auto_notice_names_what_semi_auto_applies() -> None:
         "or a private copy of a deck) and asks for everything else."
     )
     assert "a private copy of a deck" in modes.mode_help("semi")
+
+
+AESI = "Aesi, Tyrant of Gyre Strait"  # deck 42's commander
+COMMANDER_MOVES = {
+    "card into Commander": [{"action": "set_category", "card_name": "Sol Ring", "category": "Commander"}],
+    "commander out of Commander": [{"action": "set_category", "card_name": AESI, "category": "Creatures"}],
+    "commander removed": [{"action": "remove", "card_name": AESI}],
+    "card added under Commander": [{"action": "add", "card_name": "Opt", "category": "Commander"}],
+}
+
+
+def _commanders(ark) -> list[str]:
+    return [
+        c["card"]["oracleCard"]["name"]
+        for c in ark.decks[42]["cards"]
+        if "Commander" in (c.get("categories") or [])
+    ]
+
+
+@pytest.mark.parametrize("shape", list(COMMANDER_MOVES))
+@pytest.mark.parametrize("mode", ["auto", "semi"])
+async def test_every_commander_change_waits_for_the_members_press(
+    stack: Stack, mode: str, shape: str
+) -> None:
+    """Not only set_commander: moving a card into or out of Commander, removing the commander and
+    adding a card under Commander change the commanders too, so they wait in Full auto and
+    Semi-auto on every assistant path (the tool and the API), and the member can still apply them."""
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    await _set_mode(h, mode)
+    before = _commanders(ark)
+    p = structured(
+        await call(h, token, "propose_deck_changes", {"deck_id": "42", "changes": COMMANDER_MOVES[shape]})
+    )
+    assert p["ok"] and p["state"] == "pending", p
+    assert "commander" in [r.get("kind") for r in p["rows"]]
+    assert p["risk"] == "high" and p["assistant_may_apply"] is False
+    out = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
+    assert out["ok"] is False and out["error"] == "browser_required"
+    r = await h.http.post(
+        f"/api/v1/proposals/{p['proposal_id']}/apply", headers={"Authorization": f"Bearer {token}"}
+    )
+    assert r.status_code == 403 and r.json()["error"] == "browser_required"
+    assert ark.patches == [] and _commanders(ark) == before
+    # the member's own press applies it
+    b = Browser(h)
+    try:
+        await b.login()
+        r = await b.http.post(
+            f"/api/v1/proposals/{p['proposal_id']}/apply", headers={"X-CSRF-Token": await b.csrf()}
+        )
+        assert r.status_code == 200 and r.json()["state"] == "applied", r.text
+    finally:
+        await b.aclose()
+    assert _commanders(ark) != before
+
+
+async def test_a_category_move_that_leaves_the_commanders_alone_still_applies_in_auto(stack: Stack) -> None:
+    h = stack.h
+    token = await linked_user(stack)
+    await _set_mode(h, "auto")
+    changes = [
+        {"action": "set_category", "card_name": "Sol Ring", "category": "Ramp"},
+        {"action": "add", "card_name": AESI, "category": "Commander"},  # one more copy, still the commander
+    ]
+    p = structured(await call(h, token, "propose_deck_changes", {"deck_id": "42", "changes": changes}))
+    assert "commander" not in [r.get("kind") for r in p["rows"]]
+    assert p["assistant_may_apply"] is True
