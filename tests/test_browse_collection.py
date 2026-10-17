@@ -344,7 +344,9 @@ async def test_collection_tools(stack: Stack) -> None:
         review = await b.http.get(f"/proposals/{p['proposal_id']}", headers=NAV)
         assert review.status_code == 200 and "Your Archidekt collection" in review.text
         applied = await b.http.post(
-            f"/api/v1/proposals/{p['proposal_id']}/apply", headers={"X-CSRF-Token": csrf}
+            f"/api/v1/proposals/{p['proposal_id']}/apply",
+            headers={"X-CSRF-Token": csrf},
+            json={"version": p["version"]},
         )
         assert applied.status_code == 200, applied.text
         a = applied.json()
@@ -358,7 +360,11 @@ async def test_collection_tools(stack: Stack) -> None:
             await call(stack.h, token, "propose_collection_changes", {"remove": [{"id": rid, "quantity": 1}]})
         )
         assert p2["ok"] is True and "-1 Sol Ring" in p2["diff"], p2
-        a2 = await b.http.post(f"/api/v1/proposals/{p2['proposal_id']}/apply", headers={"X-CSRF-Token": csrf})
+        a2 = await b.http.post(
+            f"/api/v1/proposals/{p2['proposal_id']}/apply",
+            headers={"X-CSRF-Token": csrf},
+            json={"version": p2["version"]},
+        )
         assert a2.status_code == 200 and a2.json()["result"]["removed"][0]["quantity"] == 2
         assert sorted(r["quantity"] for r in stack.ark.collections["alice"].values()) == [1, 1]
         # the assistant cannot apply it itself in manual mode
