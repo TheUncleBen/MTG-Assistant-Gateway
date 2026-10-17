@@ -477,8 +477,8 @@ class ReportService:
         have = f"{playing} Forge run{'' if playing == 1 else 's'} playing and {queued}" if playing else queued
         return (
             f"You already have {have}. Comparing two decks needs room for 2 more, and each member can "
-            f"have at most {MAX_FORGE_WAITING} reports waiting, so nothing was started. Try again once "
-            "one of them has finished."
+            f"have at most {MAX_FORGE_WAITING} reports waiting, so nothing was started. Try again when "
+            "none of your reports is waiting for its games."
         )
 
     def _side_by_side(self, sub: str, shared: dict[str, Any] | None) -> bool:
