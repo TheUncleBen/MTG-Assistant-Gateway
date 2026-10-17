@@ -188,7 +188,7 @@ form.guarded button.danger[aria-disabled=true]{color:var(--danger-text)}
 .wlist{list-style:none;margin:0;padding:0}
 .wrow{display:flex;flex-wrap:wrap;align-items:stretch;column-gap:.5rem;border-top:1px solid var(--surface-2)}
 .wrow:first-child{border-top:0}
-/* with big text the row has no room for Review beside it, so Review goes under (finding 8) */
+/* with big text the row has no room for Review beside it, so Review goes under */
 .pick{display:flex;align-items:flex-start;gap:.6rem;flex:1 1 12em;min-width:0;min-height:44px;
   padding:.55rem .25rem;cursor:pointer;flex-wrap:wrap}
 .pick input[type=checkbox]{width:1.25rem;height:1.25rem;margin:.1rem 0 0;flex:none;

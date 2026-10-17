@@ -140,7 +140,7 @@ PARTS: list[tuple[str, str, str, str, list[tuple[str, str, str]]]] = [
             ("tut-link", "link", "Link Archidekt"),
             ("tut-connect", "report", "Connect your assistant"),
             ("tut-first-edit", "edit", "Your first deck edit"),
-            ("tut-first-sim", "stats", "Your first simulation"),
+            ("tut-first-sim", "stats", "Your first solo test"),
         ],
     ),
     (
@@ -712,12 +712,12 @@ def guide_body(
             "the hand path",
         ),
         (
-            "Goldfish simulation of one deck or pasted list, stored with its stats and validation (a "
-            "pasted list is returned, not stored)",
+            "Solo test (300 games, no opponents) of one deck or pasted list, stored with its stats and "
+            "validation (a pasted list is returned, not stored)",
             "<code>run_deck_report</code> (+ <code>list_deck_reports</code>, <code>get_deck_report</code>)",
             "stores a report",
             "hides <code>goldfish_run</code>; takes the simulator's options; the deck page's Run "
-            "simulation is the hand path",
+            "full test is the hand path",
         ),
         (
             "Draw odds; what the engine models for a deck",
@@ -842,7 +842,7 @@ def guide_body(
         "changes it worked out itself. <strong>Both reach:</strong> reading decks and collections, "
         "statistics, creating and editing decks, deck settings (folder, tags and cover included), "
         "cloning, restoring snapshots, collection changes, scan drafts; your path applies at once, the "
-        "assistant's is a proposal under your mode. The goldfish simulation of one deck and the "
+        "assistant's is a proposal under your mode. The solo test of one deck and the "
         "comparison of two are both paths: Run full test and Compare on the deck page for people, "
         "<code>run_deck_report</code> and <code>compare_decks</code> for the assistant, same engine and "
         "settings.</p>"

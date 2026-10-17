@@ -1,12 +1,13 @@
 """Kept card models (K1-K3 in Q136): only Mystic Forge's validated shape is kept, every number is
 bounded, a member's count is capped, later solo tests of the member's decks play their kept models
 (each member keeps their own: Q140 item 1), and a report gives each one's date. The schema 14 table is Track
-B's (db.py); a fake with the agreed methods stands in for it until the join."""
+B's (db.py): each test runs against a fake with the agreed methods and against the real database."""
 
 from __future__ import annotations
 
 import json
 import re
+from collections.abc import Iterator, MutableMapping
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -151,6 +152,74 @@ class FakeModelsDb(Database):
 
     def count_card_models(self, sub: str) -> int:
         return sum(1 for s, _ in self.rows if s == sub)
+
+
+class _RowsView(MutableMapping):
+    """``rows`` of the real table, keyed (member, card key) like the fake's, for the tests that
+    read or set the stored models directly."""
+
+    FIELDS = ("card_key", "name", "model_json", "added_by", "sim_version", "added_at", "updated_at")
+
+    def __init__(self, db: Database) -> None:
+        self.db = db
+
+    def _all(self) -> dict[tuple[str, str], dict[str, Any]]:
+        with self.db._lock:
+            got = self.db._conn.execute(f"SELECT {', '.join(self.FIELDS)} FROM card_models").fetchall()
+        return {(r["added_by"], r["card_key"]): dict(r) for r in got}
+
+    def __getitem__(self, key: tuple[str, str]) -> dict[str, Any]:
+        return self._all()[key]
+
+    def __setitem__(self, key: tuple[str, str], row: dict[str, Any]) -> None:
+        sub, card = key
+        with self.db.tx() as c:
+            c.execute(
+                "INSERT OR REPLACE INTO card_models (card_key, name, model_json, sim_version, added_by, "
+                "added_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    card,
+                    row.get("name") or card,
+                    row.get("model_json") or "{}",
+                    row.get("sim_version"),
+                    sub,
+                    row.get("added_at") or 0,
+                    row.get("updated_at") or 0,
+                ),
+            )
+
+    def __delitem__(self, key: tuple[str, str]) -> None:
+        if not self.db.delete_card_model(key[1], key[0]):
+            raise KeyError(key)
+
+    def __iter__(self) -> Iterator[tuple[str, str]]:
+        return iter(self._all())
+
+    def __len__(self) -> int:
+        return len(self._all())
+
+
+class RealModelsDb(Database):
+    """Track B's real schema 14 table and methods (db.py), with the fake's ``rows`` as a view of
+    the table: every test that uses the fake also runs against the real database (the join check)."""
+
+    @property
+    def rows(self) -> _RowsView:
+        return _RowsView(self)
+
+    @rows.setter
+    def rows(self, value: dict[tuple[str, str], dict[str, Any]]) -> None:
+        view = _RowsView(self)
+        view.clear()
+        for key, row in value.items():
+            view[key] = row
+
+
+@pytest.fixture(autouse=True, params=["fake", "real"])
+def _models_db(request: Any, monkeypatch: Any) -> None:
+    """Each test runs with the fake and with Track B's real database."""
+    if request.param == "real":
+        monkeypatch.setitem(globals(), "FakeModelsDb", RealModelsDb)
 
 
 class FakeMF:

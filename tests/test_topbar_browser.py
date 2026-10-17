@@ -214,7 +214,17 @@ def test_home_is_never_under_more(chromium, server: Server, where: str) -> None:
         assert got["home"]["bottom"] <= got["decks"]["y"] + 1, got
         assert abs(got["home"]["x"] - got["decks"]["x"]) < 1, got
         assert not got["moreShown"], got
-        for href in ("/", "/decks", "/search", "/scan", "/collection", "/proposals", "/history", "/guide"):
+        for href in (
+            "/",
+            "/decks",
+            "/search",
+            "/scan",
+            "/collection",
+            "/proposals",
+            "/history",
+            "/reports",
+            "/guide",
+        ):
             assert href in got["tabs"], (href, got)
         assert got["tabsBottom"] <= got["height"], got  # every tab on screen without scrolling the rail
     else:  # a row: Home left of Decks
@@ -222,13 +232,103 @@ def test_home_is_never_under_more(chromium, server: Server, where: str) -> None:
         assert abs(got["home"]["y"] - got["decks"]["y"]) < 1, got
     if where.startswith("phone"):  # the bar: Home, Decks, Scan, Collection and More
         assert got["tabs"] == ["/", "/decks", "/scan", "/collection"], got
-        assert got["moreShown"] and "/proposals" in got["moreItems"], got
+        assert got["moreShown"] and "/proposals" in got["moreItems"] and "/reports" in got["moreItems"], got
+
+
+REPORTS_PLACE = """() => {
+  const shown = e => !!e && e.getClientRects().length > 0 && getComputedStyle(e).visibility !== 'hidden';
+  const lum = c => { const [r, g, b] = c.match(/\\d+(\\.\\d+)?/g).slice(0, 3).map(v => {
+      v = v / 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; });
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
+  const ratio = (a, b) => { const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p);
+    return (x + 0.05) / (y + 0.05); };
+  const bg = e => { for (; e; e = e.parentElement) { const c = getComputedStyle(e).backgroundColor;
+      if (c && !c.startsWith('rgba(0, 0, 0, 0)') && c !== 'transparent') return c; }
+    return getComputedStyle(document.body).backgroundColor; };
+  const contrast = e => ratio(getComputedStyle(e).color, bg(e));
+  const more = document.querySelector('.tabbar details.more');
+  const summary = more && more.querySelector('summary');
+  const tabs = [...document.querySelectorAll('.tabbar > a')].filter(shown);
+  const tab = tabs.find(a => a.getAttribute('href') === '/reports');
+  const out = {moreShown: shown(summary), moreOn: !!summary && summary.classList.contains('on'),
+    tabs: tabs.map(a => a.getAttribute('href')),
+    tabsBottom: Math.max(0, ...tabs.map(a => a.getBoundingClientRect().bottom)), height: innerHeight,
+    tabCurrent: !!tab && tab.getAttribute('aria-current') === 'page',
+    tabContrast: tab ? contrast(tab) : null,
+    doc: document.documentElement.scrollWidth, win: innerWidth};
+  if (out.moreShown) {
+    more.open = true;
+    const items = [...more.querySelectorAll('.menu a')];
+    const item = items.find(a => a.getAttribute('href') === '/reports');
+    const b = item ? item.getBoundingClientRect() : null;
+    Object.assign(out, {moreItems: items.map(a => a.getAttribute('href')),
+      itemCurrent: !!item && item.getAttribute('aria-current') === 'page',
+      itemText: item ? item.textContent.trim() : null,
+      itemContrast: item ? contrast(item) : null,
+      itemInside: !!b && b.left >= -1 && b.right <= innerWidth + 1 && b.top >= -1
+        && b.bottom <= innerHeight + 1});
+    more.open = false;
+  }
+  return out;
+}"""
+
+
+@pytest.mark.parametrize("zoom", ["none", "root", "text"])
+@pytest.mark.parametrize("theme", ["light", "dark"])
+@pytest.mark.parametrize(
+    "where",
+    ["phone", "fold-folded", "phone-app", "fold-unfolded", "fold-unfolded-app", "fold-landscape-app"],
+)
+def test_reports_is_under_more_on_the_phone_bar_and_a_tab_on_the_rail(
+    chromium, server: Server, where: str, theme: str, zoom: str
+) -> None:
+    """Reports (0.7.30) sits under More after History on the phone bar's sheet, is a tab on the rail
+    with every tab still on screen, and marks More (or its own rail tab) as the current page on
+    /reports, at normal and 200% text, light and dark."""
+    width, height, app = {
+        "phone": (390, 844, False),
+        "fold-folded": (344, 882, False),
+        "phone-app": (390, 844, True),
+        "fold-unfolded": (673, 841, False),
+        "fold-unfolded-app": (884, 1104, True),
+        "fold-landscape-app": (1104, 820, True),
+    }[where]
+    sid = server.sign_in()
+    with _session(chromium) as browser:
+        extra = {"user_agent": "Mozilla/5.0 (Linux; Android 14) MTGAssistant/0.7.30"} if app else {}
+        ctx = browser.new_context(
+            viewport={"width": width, "height": height}, has_touch=True, is_mobile=True, **extra
+        )
+        ctx.add_cookies(
+            [
+                {"name": "mtg_session", "value": sid, "url": server.base},
+                {"name": "mtg_theme", "value": theme, "url": server.base},
+            ]
+        )
+        page = ctx.new_page()
+        _open(page, f"{server.base}/reports")
+        _zoom(page, zoom)
+        _settle(page)
+        got = page.evaluate(REPORTS_PLACE)
+    assert got["doc"] == got["win"], got  # no sideways scroll
+    if got["moreShown"]:  # the phone bar: Reports under More, right after History
+        assert got["moreItems"][got["moreItems"].index("/history") + 1] == "/reports", got
+        assert got["moreOn"] and got["itemCurrent"], got
+        assert got["itemText"] == "Reports" and got["itemInside"], got
+        assert got["itemContrast"] >= 4.5, got
+        assert "/reports" not in got["tabs"], got
+    else:  # the rail: Reports is a tab after History, every tab on screen, the current one marked
+        assert where != "phone" and where != "fold-folded", got
+        assert got["tabs"][got["tabs"].index("/history") + 1] == "/reports", got
+        assert got["tabCurrent"], got
+        assert got["tabsBottom"] <= got["height"], got
+        assert got["tabContrast"] >= 4.5, got
 
 
 # The top bar with large text (review note, 0.7.29): with a mouse, the eight text links of an
 # admin used to run to 1036 px at 200% text, past a 717 px window and under the account button.
 # Now they keep one row while they fit and otherwise wrap in a row of their own under the brand
-# and the account side. /reports is Track C's page (0.7.30) and is not on this branch yet.
+# and the account side.
 NAV_FIT = """() => {
   const box = e => e.getBoundingClientRect();
   const shown = [...document.querySelectorAll('.topbar nav.site a')]
@@ -269,7 +369,7 @@ def test_the_top_bar_links_fit_at_every_width_and_text_size(chromium, server: Se
                 ]
             )
             page = ctx.new_page()
-            for path in ("/history", "/decks"):
+            for path in ("/history", "/decks", "/reports"):
                 for width in (344, 360, 599, 600, 673, 717, 800, 899, 900, 1000, 1280, 1440):
                     for zoom in ("none", "root", "text"):
                         page.set_viewport_size({"width": width, "height": 800})
@@ -330,7 +430,7 @@ def test_a_focused_control_is_never_hidden_under_the_top_bar(
             ctx = browser.new_context(viewport={"width": width, "height": height}, java_script_enabled=script)
             ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
             page = ctx.new_page()
-            for path in ("/admin/settings", "/history"):
+            for path in ("/admin/settings", "/history", "/reports"):
                 _open(page, f"{server.base}{path}")
                 _zoom(page, zoom)
                 _settle(page)

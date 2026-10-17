@@ -59,8 +59,8 @@ TEXT: dict[str, tuple[str, str]] = {
     ),
     "auto_big_edit_rows": (
         "Rows before an edit counts as big",
-        "With \u201cApply deck and collection changes without asking\u201d, an edit with more card rows "
-        "than this waits for the member.",
+        f"With \u201c{MODE_LABELS['auto']}\u201d, an edit with more card rows than this waits for the "
+        "member.",
     ),
     "proposal_expiry_days": (
         "Days a change waits for approval",
