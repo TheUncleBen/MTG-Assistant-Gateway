@@ -835,8 +835,9 @@ def more_games_html(f: Any, csrf: str, report_id: str) -> str:
         )
     else:
         line = (
-            f"Plays {games} more Forge {word} against the same opponents and adds them to the results "
-            "above, so the win rates and their 95% intervals count every game."
+            f"Plays {games} more Forge {word} against the same opponents and adds "
+            f"{'it' if games == 1 else 'them'} to the results above, so the win rates and their 95% "
+            "intervals count every game."
         )
     return (
         "<div id='forge-more' class='card more-games'>"

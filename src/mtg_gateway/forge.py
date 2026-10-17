@@ -177,8 +177,8 @@ def summarise(job: dict[str, Any], seats: list[str]) -> dict[str, Any]:
 
 FORGE_RESTARTED = "Forge restarted before this run finished."
 MORE_GONE = (
-    "Some of this report's opponents are no longer in this Forge ({gone}), so more games can't be "
-    "played at the same table. Run the report again."
+    "Some of this report's opponents are no longer in this gateway's Forge ({gone}), so more games "
+    "can't be played at the same table. Run the report (or its comparison) again."
 )
 FORGE_SILENT = "Forge stopped answering about this run."
 

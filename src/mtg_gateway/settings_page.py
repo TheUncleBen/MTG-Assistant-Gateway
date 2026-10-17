@@ -102,8 +102,8 @@ TEXT: dict[str, tuple[str, str]] = {
     ),
     "forge_parallel_games": (
         "Forge games played at once",
-        "The most one report asks Forge to play at the same time. Forge plays fewer when its machine "
-        "has no room for more.",
+        "The most one report asks Forge to play at the same time. Forge plays fewer when it has no room "
+        "for more.",
     ),
     "watchlists_enabled": (
         "Watchlist and price features",
