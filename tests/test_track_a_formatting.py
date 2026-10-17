@@ -256,6 +256,58 @@ async def test_a_comment_changed_since_its_review_is_not_sent(stack: Stack) -> N
     assert got["state"] == "pending" and got.get("status") == "needs_look"
 
 
+async def test_a_comment_rewrite_that_keeps_none_of_its_formatting_says_so(stack: Stack) -> None:
+    """Review M-2, E-2 for comments: a comment edit that keeps none of its link says so on its
+    review page, is approved there (not on the card) and writes plain text."""
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    await _set_mode(h, "manual")
+    await _press(
+        h, token, await call(h, token, "propose_comment", {"deck_id": "42", "action": "post", "text": "x"})
+    )
+    mine = ark.comments[300042][-1]
+    mine["text"] = _doc(
+        {"insert": "Read "},
+        {"insert": "this", "attributes": {"link": "https://example.com/t"}},
+        {"insert": " first.\n"},
+    )
+    res = await call(
+        h,
+        token,
+        "propose_comment",
+        {"deck_id": "42", "action": "edit", "comment_id": mine["id"], "text": "Totally different."},
+    )
+    p = structured(res)
+    row = p["rows"][0]
+    assert row.get("formatting_lost") is True and "after_doc" not in row, row
+    assert not (res.get("_meta") or {}).get(APPROVAL_META_KEY), res.get("_meta")
+    b = Browser(h)
+    try:
+        await b.login()
+        page = (await b.http.get(f"/proposals/{p['proposal_id']}")).text
+        assert (
+            "This edit removes all the bold text, links and pictures from the comment: it is written as "
+            "plain text.</p>" in page
+        ), page
+    finally:
+        await b.aclose()
+    plan = batch.plan(h.app.state.gateway.decks, SUB, [p["proposal_id"]])
+    assert [s["why"] for s in plan["skipped"]] == [batch.FORMATTING_LOST_ALONE], plan
+    out = await _browser_apply(h, p["proposal_id"])
+    assert out.get("state") == "applied", out
+    assert rich_text(mine["text"]) == "Totally different." and "example.com" not in mine["text"]
+    # a plain comment's rewrite has nothing to lose and says nothing
+    plain = structured(
+        await call(
+            h,
+            token,
+            "propose_comment",
+            {"deck_id": "42", "action": "edit", "comment_id": mine["id"], "text": "Other words."},
+        )
+    )
+    assert not plain["rows"][0].get("formatting_lost"), plain["rows"]
+
+
 async def test_full_auto_waits_for_a_formatted_description_and_for_making_a_deck_public(stack: Stack) -> None:
     """Q141 item 3B (Ben approved 10-17): in Full auto, making a deck public or unlisted and a
     description edit that keeps formatting wait for the member's press; other details apply."""

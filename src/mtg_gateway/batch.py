@@ -58,8 +58,8 @@ FORMATTING_ALONE = (
 )
 # D-1, E-2 (wording draft, WORDING-6)
 FORMATTING_LOST_ALONE = (
-    "Not sent: it removes all the bold text, links and pictures from the description, so it is "
-    "approved on its own review page, which says what goes. It is still waiting."
+    "Not sent: it removes all the bold text, links and pictures already there, so it is approved on "
+    "its own review page, which says what goes. It is still waiting."
 )
 EARLIER_FAILED = (
     "Not sent: an earlier change to this deck in this selection failed after part of it reached "
