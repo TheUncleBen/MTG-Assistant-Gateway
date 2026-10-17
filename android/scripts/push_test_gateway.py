@@ -8,6 +8,7 @@ then the messages the test sends. The test drives it on the same port:
   POST /control/send     {"id", "title", "message", "sequence_id"?}  a message to every connection
   POST /control/delete   {"sequence_id"}                             withdraw a deck's message
   POST /control/refuse   {"status", "error"}                         refuse from now on, end streams
+  POST /control/drop                                                 end streams (the app reconnects)
   GET  /control/state    {"connections", "connects", "last_since", "pages": {path: requests}}
 
 Only the key in PUSH_TEST_KEY is accepted. Every other path answers a small page with the account
@@ -175,6 +176,8 @@ class Handler(BaseHTTPRequestHandler):
                     "sequence_id": body["sequence_id"],
                 }
             )
+        elif self.path == "/control/drop":
+            _publish({"event": "end"})
         elif self.path == "/control/refuse":
             with lock:
                 state["refuse"] = body
