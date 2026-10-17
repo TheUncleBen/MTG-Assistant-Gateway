@@ -714,7 +714,8 @@ def guide_body(
         (
             "Solo test (300 games, no opponents) of one deck or pasted list, stored with its stats and "
             "validation (a pasted list is returned, not stored)",
-            "<code>run_deck_report</code> (+ <code>list_deck_reports</code>, <code>get_deck_report</code>)",
+            "<code>run_deck_report</code> (+ <code>list_deck_reports</code>, <code>get_deck_report</code>, "
+            "<code>remove_card_model</code>)",
             "stores a report",
             "hides <code>goldfish_run</code>; takes the simulator's options; the deck page's Run "
             "full test is the hand path",

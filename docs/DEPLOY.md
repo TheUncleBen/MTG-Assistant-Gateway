@@ -345,7 +345,7 @@ locked (greyed out) even with no variable set.
    and `MTG_DECK_SYNC_MINUTES=30`. Any variable you keep stays locked: the
    Settings page shows it greyed out with its value, and you change it in
    the stack and redeploy.
-3. If `MTG_TAG` names a version, change it to `0.7.29` first (in the stack's
+3. If `MTG_TAG` names a version, change it to `0.7.30` first (in the stack's
    variables, or in `mtg.env` without Portainer); otherwise you redeploy the
    old version with the new stack file. Click **Update the stack** (if your
    stack uses the Repository build method, the button is called **Pull and

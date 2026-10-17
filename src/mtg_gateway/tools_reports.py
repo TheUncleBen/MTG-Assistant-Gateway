@@ -441,9 +441,8 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
             out["trend"] = state.reports.trend(_sub(), deck_id)
         return out
 
-    # The tool exists only while kept models are switched on (card_models.SWITCHED_ON). When they
-    # are, guide.py lists it (Track C asks the owner) and test_approval_modes must not read "model"
-    # as "mode".
+    # The tool exists only while kept models are switched on (card_models.SWITCHED_ON); guide.py
+    # lists it.
     if card_models.SWITCHED_ON:
 
         @server.tool(

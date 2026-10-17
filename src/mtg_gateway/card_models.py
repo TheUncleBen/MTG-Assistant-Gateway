@@ -18,9 +18,9 @@ Safeguards (the coordinator's check of Q136):
 - Models are data: an assistant that reads one (in a report) is told it was written by an assistant.
 
 The table is schema 14, one model per member and card (Track B's db.py: get_card_models(keys, sub),
-put_card_model(..., sim_version=, most=), delete_card_model, count_card_models). Until that lands,
-and while ``SWITCHED_ON`` is False, ``KeptModels.available`` is False: runs keep nothing, use no
-kept model, and no page or tool says descriptions are saved.
+put_card_model(..., sim_version=, most=), delete_card_model, count_card_models). Without those
+methods, or with ``SWITCHED_ON`` set to False, ``KeptModels.available`` is False: runs keep nothing,
+use no kept model, and no page or tool says descriptions are saved.
 """
 
 from __future__ import annotations
@@ -34,9 +34,9 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-# Off until the rest of the gate is met (Q140 item 1 answered: each member keeps their own; Track
-# B's per-member schema 14 and its interface, then the join check against it).
-SWITCHED_ON = False
+# On from 0.7.30: each member keeps their own, in schema 14's per-member table.
+# Setting it to False turns kept models off everywhere: no page, tool or run uses them.
+SWITCHED_ON = True
 MAX_MODEL_BYTES = 4096
 MAX_PER_MEMBER = 200  # Q138 item 2
 MAX_PER_RUN = 100  # kept models merged into one run (a 100-card deck at most)

@@ -18,7 +18,7 @@ unchanged.
 - **Reports page** under More: your stored deck reports, newest first (the newest 200), with their status and what ran. It also shows what Forge is playing for you now and what waits, with the expected times. A deck filter narrows the list, and each report links to its deck's trend in History. Reports stay in History too.
 - **Same opponents in compares:**
   - The Compare page's **Test both in Forge against the same opponents** seats both decks at the same three precons, picked for the higher of the two decks' brackets (the bracket set on each deck, or Archidekt's estimate when none is set), so it doesn't matter which deck you compare from. Assistants and the app API do the same with `compare_with` on the first report and `same_opponents_as` on the second.
-- **Saved card descriptions:** built, switched off in this release: each member keeps their own (up to 200), they play only in that member's solo tests, and the member or an admin removes them.
+- **Saved card descriptions:** each member keeps their own (up to 200), they play only in that member's solo tests, and the member or an admin removes them.
 - **Goldfish page guide:** "How to play" walks a first game step by step, and you can hide it (remembered for your account). Phones show the current step, with **Show all steps** to open all six.
 - **Forge results laid out:**
   - Tiles: games played, your deck's win rate with its 95% interval, median game time and length.
@@ -55,15 +55,16 @@ unchanged.
 
 ### Card models (schema 14, for the simulator work)
 - Database schema 14 adds one table, `card_models` (the simulator's card models). The upgrade is automatic and only adds the table; going back to an earlier version needs the backup taken before the upgrade, as for every schema step.
-- Each member keeps their own card models, one per card, used only in their own simulations. Each records the simulator version it was checked with.
+- Each member keeps their own card models (the saved card descriptions above), one per card, used only in their own solo tests. Each records the simulator version it was checked with.
 - Admin > Card models lists every member's models, most recently changed first, with who added each (admins only) and Remove for any of them (audited as `card_model_removed`). "Delete my data" removes a member's models.
 
 ## [0.7.29] - Unreleased
 
 Changes that wait can be amended, combined and approved in the chat, account actions are approved
-on the card, an admin Settings page manages the gateway's settings, view choices follow your
-account, and backup copies are kept to a set number per deck. The database moves to schema 13 in
-one upgrade step. The Android app is unchanged.
+on the card, an admin Settings page manages most of the gateway's tuning settings, view choices
+follow your account, and the gateway deletes its older backup copies past a set number per deck
+(copies from earlier versions stay). The database moves to schema 13 in one upgrade step. The
+Android app is unchanged.
 
 ### Added
 - **Approve account actions on the card in the chat.** These are likes, bookmarks, follows,
@@ -160,7 +161,7 @@ one upgrade step. The Android app is unchanged.
 - **Comment count.** It counted replies.
 - **A new comment.** It could show vote buttons instead of Edit and Delete.
 - **Refusal text.** A refusal with no stored reason had a double space.
-- **Chat cards at a larger text size.** Card text is sized in rem.
+- **Chat cards at a larger text size.** Card text now follows your text size setting.
 - **The deck page at 200% text on a narrow phone.** It no longer scrolls sideways, with or without
   scripts: the mana curve, the deck checks, the View as, Group by and Sort by boxes and the Description
   and Comments headings fit their panels. On a phone, Card search keeps its name for screen readers,
@@ -171,7 +172,7 @@ one upgrade step. The Android app is unchanged.
 
 ### Deployment
 - The stack and Compose files pass the 24 settings the Settings page manages that they used to set (each with its default) as empty unless your environment sets them, so the page can change them. The example env files list every setting the stack passes, commented out with the default. A value you set in your environment still wins and is shown locked.
-- **Upgrade note for existing deployments (DEPLOY.md and DEPLOY-COMPOSE.md "Updating to 0.7.29 from an earlier version"):** a stack or Compose file from before 0.7.29 gives 24 of the page's 47 settings a value of its own, so they show locked. Before replacing the file, note your own edits to it (the uncommented Authentik and ntfy secret lines, lines added under `environment:`) and redo them in the new one. Portainer: paste the new stack file if it was pasted into the Web editor before (the Repository method brings it). Without Portainer: `git checkout deploy/portainer-stack.yml`, then `git pull`. Compose: download the new docker-compose.yml (in a clone, `git checkout docker-compose.yml` then `git pull`). Optionally delete the variables you want to manage on the page (an older Portainer variables file sets 19, an older .env 17). Any variable kept stays locked. Then update with re-pull (if `MTG_TAG` names a version, change it to `0.7.29` first; without Portainer: from a new shell in your copy of the repository, load `mtg.env` and run `docker stack deploy` again).
+- **Upgrade note for existing deployments (DEPLOY.md and DEPLOY-COMPOSE.md "Updating to 0.7.29 from an earlier version"):** a stack or Compose file from before 0.7.29 gives 24 of the page's 47 settings a value of its own, so they show locked. Before replacing the file, note your own edits to it (the uncommented Authentik and ntfy secret lines, lines added under `environment:`) and redo them in the new one. Portainer: paste the new stack file if it was pasted into the Web editor before (the Repository method brings it). Without Portainer: `git checkout deploy/portainer-stack.yml`, then `git pull`. Compose: download the new docker-compose.yml (in a clone, `git checkout docker-compose.yml` then `git pull`). Optionally delete the variables you want to manage on the page (an older Portainer variables file sets 19, an older .env 17). Any variable kept stays locked. Then update with re-pull (if `MTG_TAG` names a version, change it to `0.7.30` first; without Portainer: from a new shell in your copy of the repository, load `mtg.env` and run `docker stack deploy` again).
 - New variables: `MTG_ARCHIDEKT_BACKUP_COPIES` (10), `MTG_ARCHIDEKT_BACKUP_BOX_DEFAULT` (false), `MTG_SNAPSHOTS_PER_DECK` (25). DEPLOY.md's environment table describes them; OPERATIONS.md "The Settings page" describes the page.
 
 ## [0.7.28] - Unreleased
