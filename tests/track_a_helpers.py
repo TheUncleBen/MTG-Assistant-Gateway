@@ -43,8 +43,26 @@ async def press_approve(h, token: str, pid: str) -> dict:
 
 async def apply_any(h, token: str, pid: str) -> dict:
     """Apply a proposal as the tests did before 0.7.29: the assistant's own apply when the mode
-    lets it, else the member's press on the card."""
+    lets it, else the member's press on the card, or on the review page for a change that keeps
+    formatting (Q137, Q141 items 3B and 10: no card approves it, and Full auto waits for it)."""
     p = structured(await call(h, token, "get_proposal", {"proposal_id": pid}))
     if p.get("assistant_may_apply"):
         return structured(await call(h, token, "apply_proposal", {"proposal_id": pid}))
+    if any(isinstance(r, dict) and r.get("after_doc") for r in p.get("rows") or []):
+        return await review_page_apply(h, token, pid)
     return await press_approve(h, token, pid)
+
+
+async def review_page_apply(h, token: str, pid: str) -> dict:
+    """The member's press on Apply on the signed-in review page; the proposal as it is after."""
+    from .test_decks_and_proxy import Browser
+
+    b = Browser(h)
+    try:
+        await b.login()
+        url = f"/proposals/{pid}"
+        r = await b.http.post(url, data={**await b.review_form(url), "action": "apply"})
+        assert r.status_code == 303, r.text
+    finally:
+        await b.aclose()
+    return structured(await call(h, token, "get_proposal", {"proposal_id": pid}))
