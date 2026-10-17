@@ -1435,7 +1435,7 @@ def _page_step(p: dict[str, Any]) -> str:
     state = p.get("state")
     result = p.get("result") if isinstance(p.get("result"), dict) else {}
     if state == "pending" and not p.get("writes_enabled"):
-        return "Review only: deck writes are turned off on this gateway, so this can't be applied yet."
+        return "Review only: Archidekt writes are switched off on this gateway, so this can't be applied yet."
     if state == "pending" and p.get("out_of_date"):
         why = str(p.get("status_reason") or "").strip()
         return OUT_OF_DATE_PAGE + (f" Why: {why}" if why else "")
