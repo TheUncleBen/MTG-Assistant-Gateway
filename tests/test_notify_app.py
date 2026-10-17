@@ -246,7 +246,7 @@ async def test_the_app_gets_its_messages_filtered_once_each_with_keepalives(
             "event": "message",
             "topic": key,
             "sequence_id": "deck-42",
-            "title": "2 changes waiting for Atraxa",
+            "title": "2 changes to Atraxa are waiting for you",
             "message": "Open the review page to look at them.",
             "click": "https://mtg.test/proposals",
             "tags": ["memo"],
@@ -345,7 +345,7 @@ async def test_a_group_replaces_its_message_and_withdraw_removes_it(stack: Stack
     try:
         n = stack.gw.notifier
         assert await n.send(
-            "user-1", "proposals", "2 changes waiting for Atraxa", "Look.", "/p", group="deck-42"
+            "user-1", "proposals", "2 changes to Atraxa are waiting for you", "Look.", "/p", group="deck-42"
         )
         assert stack.ntfy.published[-1]["sequence_id"] == "deck-42"
         assert await n.send("user-1", "reports", "Deck report finished", "Done.", "/r", group="../x")
@@ -406,19 +406,22 @@ async def test_one_message_per_deck_follows_its_waiting_count(stack: Stack) -> N
         n.deck_waiting("user-1", "42", "Atraxa, Grand  Unifier", 1, "/decks/42")
         await n.drain()
         msg = stack.ntfy.published[-1]
-        assert msg["title"] == "1 change waiting for Atraxa, Grand Unifier"
+        assert msg["title"] == "1 change to Atraxa, Grand Unifier is waiting for you"
         assert msg["sequence_id"] == "deck-42" and msg["click"] == "https://mtg.test/decks/42"
         assert msg["message"] == notify.WAITING_TEXT
         n.deck_waiting("user-1", "42", "Atraxa, Grand Unifier", 1, "/decks/42")  # no change: nothing sent
         n.deck_waiting("user-1", "42", "Atraxa, Grand Unifier", 2, "/decks/42")
         await n.drain()
-        assert len(stack.ntfy.published) == 2 and stack.ntfy.published[-1]["title"].startswith("2 changes")
+        assert (
+            len(stack.ntfy.published) == 2
+            and stack.ntfy.published[-1]["title"] == "2 changes to Atraxa, Grand Unifier are waiting for you"
+        )
         n.deck_waiting("user-1", "42", "Atraxa, Grand Unifier", 0, "/decks/42")
         await n.drain()
         assert stack.ntfy.deleted == [f"/{key}/deck-42"]
         n.deck_waiting("user-1", "x", "Odd", 3, "/decks/x")  # not a deck id: nothing
         await n.drain()
         assert len(stack.ntfy.published) == 2
-        assert notify.waiting_title(3, "") == "3 changes waiting for your deck"
+        assert notify.waiting_title(3, "") == "3 changes to your deck are waiting for you"
     finally:
         await b.aclose()

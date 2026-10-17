@@ -19,11 +19,11 @@ class PushTest {
 
     @Test fun aMessageIsShownUnderItsDecksGroup() {
         val a = Push.parse(
-            """{"id":"m1AbCdEf9","time":2,"event":"message","sequence_id":"deck-42","title":"2 changes waiting for Atraxa",""" +
+            """{"id":"m1AbCdEf9","time":2,"event":"message","sequence_id":"deck-42","title":"2 changes to Atraxa are waiting for you",""" +
                 """"message":"Open the review page.","click":"https://mtg.example.com/proposals"}""",
         )
         assertEquals(
-            Push.Action.Show("m1AbCdEf9", "deck-42", "2 changes waiting for Atraxa", "Open the review page.", "https://mtg.example.com/proposals"),
+            Push.Action.Show("m1AbCdEf9", "deck-42", "2 changes to Atraxa are waiting for you", "Open the review page.", "https://mtg.example.com/proposals"),
             a,
         )
     }

@@ -1,0 +1,75 @@
+name: Android push test
+
+# The Android app's notifications on an emulator (android/scripts/push-test.sh): connecting with the
+# member's key, the quiet Connected notification, a message, one message per deck replaced and
+# withdrawn, swiped away from Recents, the ongoing notification dismissed, Doze, an app update, a
+# reboot, a message missed while offline, Stop and opening the app again, and the gateway switching
+# notifications off. The gateway is a small stand-in (android/scripts/push_test_gateway.py) on the
+# runner, reached through adb reverse. Also takes the launcher screenshots at phone and Fold widths.
+# A 24 hour battery test needs a real phone and is not run here.
+#
+# Runs on pull requests that change the app, the gateway's notification code or this test, drafts
+# included (the push behaviour is what this job is for), and by hand. No secrets: the debug build
+# only, with a test certificate made for this run.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - "android/**"
+      - "src/mtg_gateway/notify.py"
+      - ".github/workflows/android-push-test.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-push-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  push-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: gradle/actions/wrapper-validation@0723195856401067f7a2779048b490ace7a47d7c # v5.0.2
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: "17"
+      # The emulator needs KVM; GitHub's Linux runners have it, behind this permission.
+      - name: Allow KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Debug build with the test certificate
+        run: |
+          set -eu
+          android/scripts/push-test.sh --prepare "$RUNNER_TEMP/certs"
+          android/scripts/build.sh debug
+      - name: Start an Android 15 emulator
+        run: |
+          set -eu
+          sdk="$ANDROID_HOME/cmdline-tools/latest/bin"
+          yes | "$sdk/sdkmanager" --licenses > /dev/null
+          "$sdk/sdkmanager" "emulator" "platform-tools" "system-images;android-35;google_apis;x86_64" > /dev/null
+          echo no | "$sdk/avdmanager" create avd -n push -k "system-images;android-35;google_apis;x86_64" -d pixel_6
+          nohup "$ANDROID_HOME/emulator/emulator" -avd push -no-window -no-audio -no-boot-anim -no-snapshot \
+            -gpu swiftshader_indirect > "$RUNNER_TEMP/emulator.log" 2>&1 &
+          "$ANDROID_HOME/platform-tools/adb" wait-for-device
+      - name: Push tests
+        env:
+          PUSH_TEST_CERTS: ${{ runner.temp }}/certs
+        run: |
+          export PATH="$ANDROID_HOME/platform-tools:$PATH"
+          android/scripts/push-test.sh android/out/mtg-assistant-gateway-debug.apk "$RUNNER_TEMP/push-test"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: android-push-test
+          path: ${{ runner.temp }}/push-test
+          if-no-files-found: warn

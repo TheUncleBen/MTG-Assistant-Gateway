@@ -25,6 +25,7 @@ still the owner's test to report.
 - [1. Getting the app](#1-getting-the-app)
   - [Updates](#updates)
   - [Adding the app to a gateway](#adding-the-app-to-a-gateway)
+  - [Notifications](#notifications)
 - [2. Using it](#2-using-it)
 - [3. Scanning with the phone camera](#3-scanning-with-the-phone-camera)
 - [4. Foldables and large screens](#4-foldables-and-large-screens)
@@ -168,6 +169,34 @@ For operators whose image has no app, or who build their own:
 
 Requirements: Android 10 or later. A camera is optional; without one the app
 still works, it just can't scan.
+
+### Notifications
+
+From 0.7.30 the app shows the member's notifications itself. There is no
+Google push service and no separate notification app. On the Account page in
+the app, **Get notifications on this phone** asks Android to allow
+notifications (Android 13 and later ask; older versions allow them by
+default) and, once, to let the app run in the background. The app then runs
+a foreground service that holds one connection to the gateway's own address
+(`/app/notifications/stream`). Android shows its quiet **Always connected**
+notification while the service runs, as it does for every foreground
+service. The service starts again after the phone restarts, after an app
+update and whenever the app is opened. It stops when the gateway says the
+phone's key is no longer valid or notifications are off, and when the app is
+set up for another gateway. A connection that fails is tried again after 5
+seconds, then after longer waits up to 5 minutes, and at once when the
+phone's network comes back.
+
+**Push test on an emulator.** The `Android push test` workflow
+(`.github/workflows/android-push-test.yml`) runs `android/scripts/push-test.sh`
+on an Android 15 emulator against a small stand-in gateway
+(`android/scripts/push_test_gateway.py`). It covers a message, one message per
+deck replaced and withdrawn, swiping the app away from Recents, dismissing
+the ongoing notification, Doze, an app update, a reboot, a message missed
+while offline, Stop and opening the app again, and the gateway switching
+notifications off. It also takes launcher screenshots at phone and Fold
+widths. The debug build it tests trusts a certificate made for that run
+only; a release build never does. A 24 hour battery test needs a real phone.
 
 ## 2. Using it
 
