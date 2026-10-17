@@ -6,8 +6,10 @@ from __future__ import annotations
 
 WRITES_OFF = "Archidekt writes are switched off on this gateway, so nothing was sent to Archidekt."
 # the same, where the change stays waiting (the review page, an apply), and several (a selection)
-WRITES_OFF_KEPT = WRITES_OFF + " It stays waiting and can be applied once writes are switched on."
-WRITES_OFF_KEPT_MANY = WRITES_OFF + " They stay waiting and can be applied once writes are switched on."
+WRITES_OFF_KEPT = WRITES_OFF + " The change stays waiting and can be applied once writes are switched on."
+WRITES_OFF_KEPT_MANY = (
+    WRITES_OFF + " The changes stay waiting and can be applied once writes are switched on."
+)
 # the start of every line that says so without a refusal (the deck page, the cards)
 WRITES_OFF_STATE = "Archidekt writes are switched off on this gateway"
 FOLLOW_SELF = "You can't follow yourself on Archidekt."

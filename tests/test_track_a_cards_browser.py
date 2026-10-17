@@ -216,7 +216,7 @@ def test_apply_all_on_the_waiting_card_lists_the_order_then_sends_the_set() -> N
                 {"structuredContent": changed, "_meta": WAITING_META},
                 {"confirm_waiting": DONE},
             )
-            assert "Version 2, changed by ChatGPT" in card.locator("#row-p1").inner_text()
+            assert "Changed by ChatGPT" in card.locator("#row-p1").inner_text()
             # by keyboard: the press redraws the buttons, and focus lands on what replaced them
             card.locator("#apply-all:not([disabled])").focus()
             page.keyboard.press("Enter")
@@ -228,7 +228,7 @@ def test_apply_all_on_the_waiting_card_lists_the_order_then_sends_the_set() -> N
             assert card.locator("#confirm:focus").count() == 1
             assert "Apply 2 changes in this order" in card.locator("#confirm-text").inner_text()
             assert card.locator("#order li").all_inner_texts() == [
-                "#1 +1 Opt\nVersion 2, changed by ChatGPT: Opt instead of Ponder.",
+                "#1 +1 Opt\nChanged by ChatGPT: Opt instead of Ponder.",
                 "#2 -1 Island <img src=x onerror=alert(1)>",
             ]
             assert not _tool_calls(page, "confirm_waiting")
@@ -335,8 +335,7 @@ def test_the_proposal_card_names_the_others_and_applies_all(width: int, theme: s
             )
             # the confirm lists what the press applies, a held one and a changed one saying so
             assert card.locator("#also-list li").all_inner_texts() == [
-                "#1 +1 Opt\nHeld: #3 it depends on was rejected.\n"
-                "Version 2, changed by ChatGPT: Opt instead of Ponder.",
+                "#1 +1 Opt\nHeld: #3 it depends on was rejected.\nChanged by ChatGPT: Opt instead of Ponder.",
                 "#2 +1 Delver of Secrets",
             ]
             _shot(page, f"proposal-card-confirm-{width}-{theme}")
@@ -429,7 +428,7 @@ def test_the_card_says_who_changed_a_change_and_where_to_approve_another_apps(wi
         browser = _launch(p, exe)
         try:
             for data, want in (
-                (amended, "Version 3, changed by ChatGPT: Added Delver of Secrets."),
+                (amended, "Changed by ChatGPT: Added Delver of Secrets."),
                 (
                     other,
                     "Claude made this change, so this card can't approve it. Approve it on Claude's card "

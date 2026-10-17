@@ -270,7 +270,12 @@ own linked account. Follow every step, in order.
    every proposal waits for their own press on the card or the review
    page; `semi` lets you apply a low-risk edit yourself (`risk` is `low`:
    a few card rows, no commander change, or a clone); `auto` lets you apply
-   everything. `assistant_may_apply` is the gateway's answer for this
+   most changes, but some still wait for the user's press (a restore, a
+   commander change, a new deck, a big edit, making a deck public or
+   unlisted, a description edit that keeps or removes formatting, and
+   actions on their Archidekt account, and deleting a deck); the answer
+   says why one waits.
+   `assistant_may_apply` is the gateway's answer for this
    proposal; never argue with it or work around it.
    **If your app shows the proposal as a card with Approve and Reject
    buttons** (Claude on the web, desktop and phones; ChatGPT), the user

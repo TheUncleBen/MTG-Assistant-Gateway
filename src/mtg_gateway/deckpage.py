@@ -436,7 +436,7 @@ def banner_html(
 WRITES_OFF_TITLE = "Archidekt writes are switched off on this gateway"
 # shown under the greyed buttons too: a phone shows no tooltip (social review, Q141 check)
 WRITES_OFF_LINE = "Archidekt writes are switched off on this gateway, so these buttons are off."
-WRITES_OFF_FOLLOW = "Archidekt writes are switched off on this gateway, so Follow is off."
+WRITES_OFF_FOLLOW = "Archidekt writes are switched off on this gateway, so following can't be changed here."
 
 
 def social_html(deck: Deck, *, own: bool, writes_enabled: bool = True) -> str:

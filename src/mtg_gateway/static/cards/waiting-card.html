@@ -89,7 +89,8 @@ button.danger:disabled{color:var(--red)}
     if (Number(x.version) <= 1 || !x.changed_by) return "";
     var what = String(x.what_changed || "").trim();
     var apps = (x.changed_by_apps && x.changed_by_apps.length ? x.changed_by_apps : [x.changed_by]).map(creator);
-    return "Version " + Number(x.version) + ", changed by " + apps.join(", then ") + (what ? ": " + what : "") + (/[.!?]$/.test(what) ? "" : ".");
+    // Q141 1B in Ben's approved form, "Changed by ChatGPT" (coordinator 03:19Z 10-17)
+    return "Changed by " + apps.join(", then ") + (what ? ": " + what : "") + (/[.!?]$/.test(what) ? "" : ".");
   }
   function statusWord(x) {
     return { updated: "Updated", needs_look: "Needs a look", held: "Held" }[x.status] || "Waiting";
@@ -153,7 +154,7 @@ button.danger:disabled{color:var(--red)}
     var out = Number(data.left_out || 0), nos = (data.left_out_nos || []).map(function (x) { return "#" + x; });
     if (out && nos.length) notes.push("Apply all leaves out " + (nos.length === 1 ? nos[0] : nos.slice(0, -1).join(", ") + " and " + nos[nos.length - 1])
       + ", which another app changed: approve " + (nos.length === 1 ? "it" : "each") + " on its own.");
-    else if (out) notes.push("Apply all leaves out " + out + (out === 1 ? " change" : " changes") + " another app changed: approve " + (out === 1 ? "it" : "each") + " on its own.");
+    else if (out) notes.push("Apply all leaves out " + out + (out === 1 ? " change, because another app changed it: approve it" : " changes, because another app changed them: approve each") + " on its own.");
     if (n && !data.writes_enabled) notes.push("Archidekt writes are switched off on this gateway; this is a preview only.");
     $("note").textContent = notes.join(" "); $("note").className = notes.length ? "note" : "note hidden";
     drawActions();

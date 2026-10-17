@@ -80,6 +80,8 @@ MODE_LABELS = {
     "semi": "Apply small, low-risk edits without asking",
     "auto": "Apply deck and collection changes without asking",
 }
+# Each mode's name, as the Guide and the Account page write it (wording draft, WORDING-6)
+MODE_NAMES = {"manual": "Manual", "semi": "Semi-auto", "auto": "Full auto"}
 
 
 def _rows(max_rows: int) -> str:
@@ -112,9 +114,10 @@ def auto_waits_text(big_rows: int = DEFAULT_BIG_EDIT_ROWS) -> str:
     """What still waits for a press in auto mode (O7, O8), as one sentence."""
     return (
         "Restoring a snapshot, a commander change, a new deck, an edit of more than "
-        f"{_rows(big_rows)}, making a deck public (or unlisted, from private), and a description "
-        "edit that keeps bold text or links still wait for your press, and so does a held change, a "
-        "change waiting for another change first, or one another app had a hand in."
+        f"{_rows(big_rows)}, making a deck public or unlisted, and a description edit that keeps or "
+        "removes bold text or links still wait for your press. So does a held change, a change "
+        "waiting for another change first, one another app had a hand in, and one that another app's "
+        "waiting change would replace."
     )
 
 
@@ -269,8 +272,9 @@ def auto_waits(
     """Why a proposal waits for the member's press even in auto mode (O7, O8), or None when auto
     applies it: a restore, a new deck, a commander change, or an edit (deck or collection, A7) of
     more than ``big_rows`` rows; and of the deck's details (Q141 item 3B) making it public or
-    unlisted, and a description edit that keeps formatting (seen on its review page first,
-    Q137). Other details changes and clones apply in auto."""
+    unlisted (from any other visibility: D-3, a safe default pending Ben's card), a description
+    edit that keeps formatting (seen on its review page first, Q137) and one that removes all of
+    it (D-1, the same). Other details changes and clones apply in auto."""
     if kind == "restore":
         return "restores a snapshot"
     if kind == "create_deck":
@@ -295,15 +299,18 @@ def auto_waits(
             None,
         )
         if seen is not None:
-            # any move toward more visible waits (review of 4103450); less visible applies
-            if rank[seen["seen_after"]] > rank[seen["seen_before"]]:
+            # D-3 (coordinator 03:19Z 10-17, Ben's Q141 3B words "making a deck public or unlisted"):
+            # any move to unlisted or public waits, public to unlisted too; to private applies
+            if seen["seen_after"] != "private" and seen["seen_after"] != seen["seen_before"]:
                 return f"makes the deck {seen['seen_after']}"
         elif wanted.get("private") is False or wanted.get("unlisted") is False:
-            return "may make the deck public"  # a proposal stored before the rows said who sees it
+            return "may let more people see the deck"  # stored before the rows said who sees it
         elif wanted.get("unlisted") is True:
             return "makes the deck unlisted"
         if any(isinstance(r, dict) and r.get("after_doc") for r in rows or []):
             return "keeps bold text or links in the description, so you see how it will look first"
+        if any(isinstance(r, dict) and r.get("formatting_lost") for r in rows or []):
+            return "removes all the bold text, links and pictures from the description"
         return None
     if kind == "clone":
         return None

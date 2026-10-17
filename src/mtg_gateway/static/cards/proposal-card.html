@@ -217,7 +217,8 @@ button.danger:disabled{color:var(--red)}
   function changeNote(p) {
     if (Number(p.version) <= 1 || !p.changed_by) return "";
     var what = String(p.what_changed || "").trim();
-    return "Version " + Number(p.version) + ", changed by " + appNames(p) + (what ? ": " + what : "") + (/[.!?]$/.test(what) ? "" : ".");
+    // Q141 1B in Ben's approved form, "Changed by ChatGPT" (coordinator 03:19Z 10-17)
+    return "Changed by " + appNames(p) + (what ? ": " + what : "") + (/[.!?]$/.test(what) ? "" : ".");
   }
   function modeNote(p) {
     if (p.state !== "pending" || !p.writes_enabled) return "";
@@ -236,6 +237,9 @@ button.danger:disabled{color:var(--red)}
     }
     // Q137: a change that keeps formatting is approved on the review page, which shows it
     var keeps = (p.rows || []).some(function (r) { return r && r.after_doc; });
+    var loses = (p.rows || []).some(function (r) { return r && r.formatting_lost; });
+    // D-1, E-2 (wording draft, WORDING-6): approved on its review page, which says what goes
+    if (loses && !p.assistant_may_apply) return "This removes all the bold text, links and pictures already there. Open it to see what goes, and approve it there.";
     if (keeps && !p.assistant_may_apply) return "This keeps the bold text, links or pictures already there. Open it to see how it will look, and approve it there.";
     if (p.assistant_may_apply) {
       return p.approval_mode === "auto"
@@ -286,7 +290,10 @@ button.danger:disabled{color:var(--red)}
     }
     var risk = $("risk");
     var RISK_TEXT = { consent: "Needs your approval", destructive: "Destructive: deletes a deck" };
-    if (sc.risk) { risk.textContent = RISK_TEXT[sc.risk] || sc.risk + " risk"; risk.className = "badge risk " + sc.risk; }
+    if (sc.risk === "high" && sc.state === "pending" && sc.assistant_may_apply && sc.approval_mode === "auto") {
+      // D-4 (wording draft, WORDING-6): not "high risk" beside "your assistant may apply this itself"
+      risk.textContent = "Applies by itself in Full auto"; risk.className = "badge risk";
+    } else if (sc.risk) { risk.textContent = RISK_TEXT[sc.risk] || sc.risk + " risk"; risk.className = "badge risk " + sc.risk; }
     else risk.className = "badge risk hidden";
     var note = [changeNote(sc), statusNote(sc), sc.state === "pending" ? sc.replace_note : "", modeNote(sc)].filter(Boolean).join(" ");
     $("note").textContent = note; $("note").className = "note" + (note ? "" : " hidden");
@@ -373,11 +380,11 @@ button.danger:disabled{color:var(--red)}
       })
       .catch(function () { refreshing = false; });
   }
-  // Q141 item 1B, wording drafts (WORDING-5): only where Apply all is offered, by number
+  // Q141 item 1B, wording drafts (WORDING-6): only where Apply all is offered, by number
   function leftOutText(nos, n) {
     var list = (nos || []).map(function (x) { return "#" + x; });
-    if (!list.length) return n === 1 ? "Apply all leaves out 1 change another app changed: approve it on its own."
-      : "Apply all leaves out " + n + " changes another app changed: approve each on its own.";
+    if (!list.length) return n === 1 ? "Apply all leaves out 1 change, because another app changed it: approve it on its own."
+      : "Apply all leaves out " + n + " changes, because another app changed them: approve each on its own.";
     var named = list.length === 1 ? list[0] : list.slice(0, -1).join(", ") + " and " + list[list.length - 1];
     return "Apply all leaves out " + named + ", which another app changed: approve " + (list.length === 1 ? "it" : "each") + " on its own.";
   }

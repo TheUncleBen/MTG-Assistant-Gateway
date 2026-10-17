@@ -304,17 +304,54 @@ def test_an_edit_that_keeps_no_formatting_is_plain_text() -> None:
     assert formatting.keep_formatting(doc, "Primer and more notes") is not None  # the link's word stays
 
 
+async def test_an_edit_that_removes_all_formatting_waits_and_says_so(stack: Stack) -> None:
+    """D-1, safe default pending Ben's card (coordinator 03:19Z 10-17): a rewrite of a formatted
+    description keeps none of its bold text, links or pictures, so Full auto waits, the review
+    page says they go, and a plain description's edit still applies."""
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    await _set_mode(h, "auto")
+    ark.decks[42]["description"] = FORMATTED
+    res = await call(
+        h, token, "propose_deck_details", {"deck_id": "42", "details": {"description": "Brand new words"}}
+    )
+    p = structured(res)
+    assert p["assistant_may_apply"] is False, p
+    assert p["risk_reason"] == "removes all the bold text, links and pictures from the description", p
+    assert any(r.get("formatting_lost") for r in p["rows"]), p["rows"]
+    # E-2: approved on its review page only, as at 4103450 (the card can't approve it)
+    assert not (res.get("_meta") or {}).get(APPROVAL_META_KEY), res.get("_meta")
+    out = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
+    assert out.get("state") != "applied" and ark.patches == [], out
+    b = Browser(h)
+    try:
+        await b.login()
+        page = (await b.http.get(f"/proposals/{p['proposal_id']}")).text
+        assert "This edit removes all the bold text, links and pictures from the description" in page
+        assert "or card links will be removed with it." in page, page
+    finally:
+        await b.aclose()
+    ark.decks[42]["description"] = "Plain words only"
+    plain = structured(
+        await call(
+            h, token, "propose_deck_details", {"deck_id": "42", "details": {"description": "Other words"}}
+        )
+    )
+    assert plain["assistant_may_apply"] is True, plain
+    assert not any(r.get("formatting_lost") for r in plain["rows"]), plain["rows"]
+
+
 STATES = {"private": (True, False), "unlisted": (False, True), "public": (False, False)}
-RANK = {"private": 0, "unlisted": 1, "public": 2}
 
 
 @pytest.mark.parametrize("old", list(STATES))
 @pytest.mark.parametrize("new", list(STATES))
-async def test_full_auto_waits_for_any_move_toward_more_visible(stack: Stack, old: str, new: str) -> None:
-    """Review of 4103450 (High): Full auto compares who can see the deck before and after, so any
-    move toward more visible waits for the member's press (private to unlisted or public,
-    unlisted to public) and a move toward less visible applies. A deck marked both private and
-    unlisted is taken as private (not checked on Archidekt)."""
+async def test_full_auto_waits_for_a_move_to_unlisted_or_public(stack: Stack, old: str, new: str) -> None:
+    """Review of 4103450 (High) and D-3 (coordinator 03:19Z 10-17, Ben's Q141 3B words "making a
+    deck public or unlisted"): Full auto compares who can see the deck before and after, so any
+    move to unlisted or public waits for the member's press, public to unlisted too, and a move to
+    private applies. A deck marked both private and unlisted is taken as private (not checked on
+    Archidekt)."""
     if old == new:
         pytest.skip("no change")
     h, ark = stack.h, stack.ark
@@ -335,9 +372,62 @@ async def test_full_auto_waits_for_any_move_toward_more_visible(stack: Stack, ol
         )
     )
     assert p["ok"], p
-    if RANK[new] > RANK[old]:
+    if new != "private":
         assert p["assistant_may_apply"] is False and p["risk_reason"] == f"makes the deck {new}", p
         refused = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
         assert refused.get("state") != "applied", refused
     else:
         assert p["assistant_may_apply"] is True, p
+
+
+def _set_visibility(ark, private: bool, unlisted: bool) -> None:
+    """On the fake Archidekt only, without moving updatedAt (whether Archidekt moves it for these
+    is not checked)."""
+    ark.decks[42]["private"], ark.decks[42]["unlisted"] = private, unlisted
+    (ark.private.add if private else ark.private.discard)(42)
+
+
+async def test_full_auto_judges_who_sees_the_deck_again_when_it_applies(stack: Stack) -> None:
+    """Delta review 2, E-1 (the reviewer's probe): "turn unlisted off" on a private and unlisted
+    deck keeps it private, so Full auto may apply it; once the member makes the deck non-private
+    on Archidekt (updatedAt not moved), the same change would make it public. It is judged again on
+    the deck just read: nothing is sent, and it needs a look with the move in words (E-3)."""
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    await _set_mode(h, "manual")
+    _set_visibility(ark, True, True)
+    p = structured(
+        await call(h, token, "propose_deck_details", {"deck_id": "42", "details": {"unlisted": False}})
+    )
+    assert p["ok"], p
+    _set_visibility(ark, False, True)
+    await _set_mode(h, "auto")
+    out = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
+    assert out.get("state") != "applied", out
+    assert ark.patches == [] and ark.decks[42]["unlisted"] is True, ark.patches
+    row = h.db.get_proposal(p["proposal_id"], SUB)
+    assert row["state"] == "pending" and row["status"] == "needs_look", row
+    got = structured(await call(h, token, "get_proposal", {"proposal_id": p["proposal_id"]}))
+    assert "so the deck stays private" in got["status_reason"], got["status_reason"]
+    assert "so the deck goes from unlisted to public" in got["status_reason"], got["status_reason"]
+
+
+async def test_a_description_that_gained_formatting_is_judged_again(stack: Stack) -> None:
+    """Delta review 2, E-1 for E-2: a plain description's edit may apply in Full auto, but if the
+    description gained bold text or links on Archidekt since, the edit would now remove them: it
+    needs a look and nothing is sent."""
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    await _set_mode(h, "manual")
+    ark.decks[42]["description"] = "Plain words only"
+    p = structured(
+        await call(
+            h, token, "propose_deck_details", {"deck_id": "42", "details": {"description": "Brand new words"}}
+        )
+    )
+    assert p["ok"], p
+    ark.decks[42]["description"] = FORMATTED
+    await _set_mode(h, "auto")
+    out = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
+    assert out.get("state") != "applied" and ark.patches == [], out
+    assert h.db.get_proposal(p["proposal_id"], SUB)["status"] == "needs_look"

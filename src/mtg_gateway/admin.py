@@ -603,6 +603,13 @@ def _sparkline(values: list[int], *, label: str, width: int = 240, height: int =
     )
 
 
+def _mode_name(mode: object) -> str:
+    """An approval mode as the Guide names it, with the word its setting takes: "Semi-auto (semi)"."""
+    from .modes import MODE_NAMES
+
+    return f"{MODE_NAMES.get(str(mode), str(mode))} ({mode})"
+
+
 def _overview_body(state: Any) -> str:
     d = overview_data(state)
     props = d["proposals"]
@@ -645,10 +652,9 @@ def _overview_body(state: Any) -> str:
         + _stat("Simulation engine (Forge)", sysd["forge"])
         + _stat("Removed-member clean-up", _cleanup_text(sysd["member_cleanup"]))
         + _archidekt_stats(sysd.get("archidekt"))
-        + _stat(
-            "Default approval mode", str(state.decks.live.get("approval_mode_default"))
-        )  # Q142 item 8 A: live
-        + _stat("Highest approval mode allowed", str(state.decks.live.get("approval_mode_max")))
+        # Q142 item 8 A: the live settings; each by its name, with the setting's own word
+        + _stat("Default approval mode", _mode_name(state.decks.live.get("approval_mode_default")))
+        + _stat("Highest approval mode allowed", _mode_name(state.decks.live.get("approval_mode_max")))
         + "</dl>"
         + (
             _err(f"The last nightly backup failed ({sysd['last_backup_error']}). Check the gateway's log.")

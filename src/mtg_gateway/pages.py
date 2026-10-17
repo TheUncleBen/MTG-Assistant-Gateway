@@ -891,7 +891,7 @@ OK_MESSAGES = {
     "everything else.",
     "mode_auto": "Saved: your assistant applies deck and collection changes without asking. Restoring a "
     "snapshot, a commander change, a new deck, an edit of more rows than Full auto applies by itself, "
-    "making a deck public (or unlisted, from private), a description edit that keeps bold text or links, "
+    "making a deck public or unlisted, a description edit that keeps or removes bold text or links, "
     "actions on your Archidekt account and deleting a deck still wait for you. When a change waits for "
     "your press, its card and review page say why. Each change keeps a snapshot you can restore from "
     "History.",
@@ -1754,6 +1754,19 @@ DOC_STYLE = (
 def _formatted_preview(r: dict[str, Any]) -> str:
     """Q137: a description or comment change that keeps formatting, drawn as it will look on
     Archidekt (bold, links with their sites, lists, card links, pictures as "[picture]")."""
+    if r.get("formatting_lost"):  # D-1, E-2: the edit keeps none of it (wording draft, WORDING-6)
+        lost = int(r.get("dropped_embeds") or 0)
+        return (
+            "<p class='notice warn'>This edit removes all the bold text, links and pictures from the "
+            "description: it is written as plain text."
+            + (
+                f" {lost} picture{'s' if lost != 1 else ''} or card link{'s' if lost != 1 else ''} "
+                "will be removed with it."
+                if lost
+                else ""
+            )
+            + "</p>"
+        )
     if not r.get("after_doc"):
         return ""
     lost = int(r.get("dropped_embeds") or 0)

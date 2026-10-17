@@ -3087,8 +3087,9 @@ class DeckService:
         return any(a and a != maker for a in apps)
 
     def changed_by_apps(self, sub: str, row: dict[str, Any]) -> list[str]:
-        """The apps that changed this note after it was made, in order, each once (actor labels;
-        Q141 item 1B: the line names every one, "changed by ChatGPT, then Claude")."""
+        """The apps that changed this note after it was made, each once at its latest change, so
+        the last one named made the change the line describes (actor labels; Q141 item 1B: "Changed
+        by Claude, then ChatGPT"; proofread of WORDING-5, finding 7)."""
         if int(row.get("version") or 1) <= 1:
             return []
         makers = [
@@ -3099,7 +3100,9 @@ class DeckService:
         out: list[str] = []
         for c in [*makers, row.get("amended_by_client")]:
             label = self._creator_label(c) if c else ""
-            if label and label not in out:
+            if label:
+                if label in out:
+                    out.remove(label)
                 out.append(label)
         return out
 
@@ -4921,18 +4924,18 @@ class DeckService:
             if (row.get("kind") or "edit") != "edit":
                 raise DeckError("invalid", f"{pid} is not a deck edit; only card edits can be combined")
             # Q142 item 2 A (Ben approved 10-17 02:29Z): only this app's own waiting changes that
-            # no other app changed, and never a held one (wording drafts, WORDING-5)
+            # no other app changed, and never a held one (wording drafts, WORDING-6)
             no = f"#{row['board_no']}" if row.get("board_no") else pid
             if row.get("created_by_client") != client or self.rewritten_by_another_app(sub, row):
                 raise DeckError(
                     "invalid",
                     f"{no} was made or changed by another app, so it can't be combined. Ask the user "
-                    "to approve or reject it, or leave it apart.",
+                    "to approve or reject it, or leave it separate.",
                 )
             if row.get("status") == "held":
                 raise DeckError(
                     "invalid",
-                    f"{no} is held, so it can't be combined. Ask the user about it, or leave it apart.",
+                    f"{no} is held, so it can't be combined. Ask the user about it, or leave it separate.",
                 )
             rows.append(row)
         if len({str(r["deck_id"]) for r in rows}) != 1:
@@ -5211,6 +5214,19 @@ class DeckService:
             raise needs_look_error(DESCRIPTION_CHANGED)
         if not changes and not organise:
             raise DeckError("invalid", "The deck already has these details; nothing was sent.")
+        # delta review 2, E-1 and E-2: what Full auto and the review judged (who can see the deck,
+        # whether a description edit removes its formatting) is judged again on the deck just read,
+        # not trusted from when the change was made: Archidekt may not move updatedAt for these
+        if formatting.loses_formatting({"rows": now_rows}) != formatting.loses_formatting(row):
+            raise needs_look_error(DESCRIPTION_CHANGED)
+        was_seen = [
+            (r.get("seen_before"), r.get("seen_after")) for r in row.get("rows") or [] if r.get("seen_after")
+        ]
+        now_seen = [(r.get("seen_before"), r.get("seen_after")) for r in now_rows if r.get("seen_after")]
+        if was_seen and was_seen != now_seen:
+            from . import recheck
+
+            raise needs_look_error("rows:" + recheck.first_difference(row.get("rows") or [], now_rows))
         snapshot_id = self._take_snapshot(sub, row, deck)
         progress["snapshot_id"] = snapshot_id
         backup = await self._backup_shared(sub, row, deck, snapshot_id)
@@ -5830,6 +5846,16 @@ def details_rows(deck: Deck, wanted: dict[str, Any]) -> tuple[dict[str, Any], li
                     before_text=current,
                     after_text=after,
                     **({"after_doc": kept[0], "dropped_embeds": kept[1]} if kept else {}),
+                    # D-1 and E-2, safe default pending Ben's card (coordinator 03:19Z and 03:28Z
+                    # 10-17): an edit of a formatted description that keeps none of it says so and
+                    # what goes, is approved on its review page only, and Full auto waits
+                    **(
+                        {"formatting_lost": True, "dropped_embeds": formatting.embeds(deck.description)}
+                        if not kept
+                        and not isinstance(value, QuillDoc)
+                        and formatting.is_formatted(deck.description)
+                        else {}
+                    ),
                 )
             )
         elif key == "deck_format":
@@ -5850,8 +5876,8 @@ def details_rows(deck: Deck, wanted: dict[str, Any]) -> tuple[dict[str, Any], li
                     field=key,
                     before=_detail_label(key, _current_detail(deck, key)),
                     after=_detail_label(key, value),
-                    # who can see the deck before and after, from both flags (review of 4103450:
-                    # Full auto waits for any move toward more visible, modes.auto_waits)
+                    # who can see the deck before and after, from both flags (modes.auto_waits:
+                    # Full auto waits for a move to unlisted or public, D-3)
                     seen_before=visibility(bool(deck.private), bool(deck.unlisted)),
                     seen_after=visibility(
                         bool(wanted.get("private", deck.private)), bool(wanted.get("unlisted", deck.unlisted))
@@ -6401,8 +6427,14 @@ def _needs_user_message(mode: str, why: str) -> str:
 
 
 def formatting_review_only(row: dict[str, Any]) -> str:
-    """Why a change that keeps formatting (Q137) is approved on its review page only."""
+    """Why a change that keeps formatting (Q137), or removes all of it (D-1, E-2), is approved on
+    its review page only."""
     noun = "comment" if row.get("kind") == "action" else "description"
+    if formatting.loses_formatting(row):  # wording draft, WORDING-6
+        return (
+            f"It removes all the bold text, links and pictures from the {noun}, which only the review "
+            "page shows, so the user approves it there (review_url), not on a card in the chat."
+        )
     return (
         f"It keeps the bold text, links or pictures already in the {noun}, which only the review page "
         "shows, so the user approves it there (review_url), not on a card in the chat."
@@ -6440,7 +6472,7 @@ def _next_step(
         else "Show"
     )
     if state == "pending" and not writes_enabled:
-        return "Review only: deck writes are disabled on this gateway, so this cannot be applied yet."
+        return "Review only: Archidekt writes are switched off on this gateway, so this can't be applied yet."
     if state == "pending" and rate_limited:
         # Q78: the last apply stopped on Archidekt's waits before it changed anything. No "call
         # apply_proposal now", even when the member's mode lets the assistant apply: not yet.

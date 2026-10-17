@@ -50,6 +50,14 @@ def is_formatted(value: Any) -> bool:
     return ops is not None and not all(_plain_insert(op) for op in ops)
 
 
+def embeds(value: Any) -> int:
+    """How many pictures and card links a stored Quill document holds (what a rewrite that keeps
+    none of it removes; D-1, E-2)."""
+    return sum(
+        1 for op in _quill_ops(value) or [] if isinstance(op, dict) and not isinstance(op.get("insert"), str)
+    )
+
+
 def _length(op: dict[str, Any]) -> int:
     """How many characters of the plain text (``rich_text``) one op makes: its text, a card link's
     card name, and nothing for another embed (a picture)."""
@@ -238,8 +246,18 @@ def keep_formatting(old: Any, new_text: str) -> tuple[str, int] | None:
 
 def keeps_formatting(row: dict[str, Any]) -> bool:
     """Whether a stored proposal writes a document that keeps formatting (a review row with
-    ``after_doc``): the member approves it on the review page, which shows it (Q137)."""
-    return any(isinstance(r, dict) and r.get("after_doc") for r in row.get("rows") or [])
+    ``after_doc``), or removes all of a formatted description's (``formatting_lost``, D-1 and E-2:
+    the 4103450 behaviour, a safe default pending Ben's milestone card): the member approves it on
+    the review page, which shows it or says what goes (Q137)."""
+    return any(
+        isinstance(r, dict) and (r.get("after_doc") or r.get("formatting_lost"))
+        for r in row.get("rows") or []
+    )
+
+
+def loses_formatting(row: dict[str, Any]) -> bool:
+    """Whether a stored proposal removes all of a formatted description's formatting (D-1, E-2)."""
+    return any(isinstance(r, dict) and r.get("formatting_lost") for r in row.get("rows") or [])
 
 
 # -- drawing a document for the review page ------------------------------------------------------

@@ -414,9 +414,10 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
         description=(
             "Make one proposal of several waiting deck edits on one deck (for example six small ones), "
             "their changes in order, oldest first. The old ones are kept, marked replaced, and come back "
-            "if the combined one is rejected. Only your own app's waiting changes that no other app "
-            "changed, and none that is held: for the rest, ask the user or leave them apart. Card edits "
-            "only, up to 40 changes in all, and one kind of change per card. Changes nothing on Archidekt."
+            "if the combined one is rejected. It takes only your own app's waiting changes that no other "
+            "app changed and that are not held; for any other, ask the user, or leave it separate. Card "
+            "edits only, up to 40 changes in all, and one kind of change per card. Changes nothing on "
+            "Archidekt."
         ),
         annotations={"readOnlyHint": False, "destructiveHint": False, "openWorldHint": True},
         meta=card_meta,
@@ -641,8 +642,8 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
                     {
                         "ok": False,
                         "error": "in_chat_disabled",
-                        "message": "This gateway does not apply proposals from the chat card "
-                        "(MTG_APPLY_IN_CHAT is off). Use the review page.",
+                        "message": "This gateway doesn't apply changes from the chat card. Use the "
+                        "Proposals page.",
                         "review_url": p["review_url"],
                         "state": p["state"],
                     },
