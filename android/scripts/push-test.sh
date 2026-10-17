@@ -130,13 +130,20 @@ for line in sys.stdin.read().splitlines():
         cur = None
 for t in tasks:
     own = "\n".join(t)
-    hit = next((l.strip() for l in t if re.search(r"realActivity=\{?" + re.escape(pkg) + "/", l)), None)
+    # Without -a, dumpsys prints only the task headers, which name the app as A=<uid>:<affinity>
+    # (the package, as the app sets no taskAffinity) or I=<package>/<activity>.
+    p = re.escape(pkg)
+    hit = next((l.strip() for l in t if re.search(r"realActivity=\{?" + p + r"/|\bA=\d+:" + p + r"(?=[\s}])|\bI=\{?" + p + "/", l)), None)
     if hit is None or re.search(r"inRecents=false|isAvailable=false|excludeFromRecents|mHidden=true|hidden=true", own):
         continue
     flags = " ".join(sorted(set(re.findall(r"\b(?:inRecents|isAvailable|mHidden|hidden)=\w+", own))))
     print(t[0].strip() + ("  [" + flags + "]" if flags else "") + "  matched: " + hit)' "$PKG"
 }
 in_recents() { [ -n "$(recents_tasks)" ]; }
+# For a failed check: every task header dumpsys lists, and the whole listing in the run's files.
+recents_headers() {
+  adb shell dumpsys activity recents 2>/dev/null | tr -d '\r' | tee "$OUT/recents.txt" | grep '\* Recent #' | sed 's/^ *//' | tr '\n' ';'
+}
 connected() { [ "$(state connections)" -ge 1 ]; }
 boot() {
   adb wait-for-device
@@ -274,7 +281,7 @@ fi
 adb shell input keyevent KEYCODE_HOME
 send m004AbCdEf "After swipe" "Still here"
 if [ "$in_recents_before" = no ]; then
-  result "swiped away from Recents" no "the app was not in Recents to begin with"
+  result "swiped away from Recents" no "the app was not in Recents to begin with; tasks listed: $(recents_headers)"
 elif ! until_ok '! in_recents' 10; then
   result "swiped away from Recents" no "the app was still in Recents after the $how: $(recents_tasks | tr '\n' ';')"
 elif running && until_ok 'shows "After swipe"' 30; then
