@@ -56,7 +56,7 @@ FAILED=0
 ctl() { curl -sS --cacert "$CERTS/ca.pem" "https://localhost:$PORT/control/$1" "${@:2}"; }
 state() { ctl state | python3 -c "import json,sys; print(json.load(sys.stdin)['$1'])"; }
 hits() { ctl state | python3 -c "import json,sys; print(json.load(sys.stdin)['pages'].get('$1', 0))"; }
-top() { adb shell dumpsys activity activities 2>/dev/null | tr -d '\r' | grep -m1 -E 'topResumedActivity|mResumedActivity'; }
+top() { adb shell dumpsys activity activities 2>/dev/null | tr -d '\r' | grep -E 'topResumedActivity|mResumedActivity'; }
 # Tap the on-screen element whose text is $1 (the app's own views and its web page alike)
 tap_text() {
   adb shell uiautomator dump /sdcard/ui.xml >/dev/null 2>&1
@@ -80,13 +80,16 @@ send() { ctl send -d "{\"id\":\"$1\",\"title\":\"$2\",\"message\":\"$3\",\"seque
 notes() { adb shell dumpsys notification --noredact 2>/dev/null | tr -d '\r'; }
 result() { if [ "$2" = ok ]; then echo "PASS  $1"; else echo "FAIL  $1: $3"; FAILED=1; fi; }
 shot() { adb exec-out screencap -p > "$OUT/$1.png" 2>/dev/null || true; }
-# Wait up to $2 seconds for the command in $1 to succeed.
-until_ok() { local t=0; while ! eval "$1" >/dev/null 2>&1; do sleep 2; t=$((t + 2)); [ "$t" -ge "$2" ] && return 1; done; }
-shows() { notes | grep -qF "$1"; }
-running() { adb shell dumpsys activity services "$PKG" 2>/dev/null | grep -q NotifyService; }
+# Wait up to $2 seconds for the command in $1 to succeed. The explicit return 0 matters: a loop that
+# ran its body ends with the body's last status, which here is the failed timeout test.
+until_ok() { local t=0; until eval "$1" >/dev/null 2>&1; do [ "$t" -ge "$2" ] && return 1; sleep 2; t=$((t + 2)); done; return 0; }
+# With pipefail, grep -q stopping early makes the writer fail (SIGPIPE) and so the whole check: the
+# greps below read all their input instead.
+shows() { notes | grep -F "$1" >/dev/null; }
+running() { adb shell dumpsys activity services "$PKG" 2>/dev/null | grep NotifyService >/dev/null; }
 prefs() { adb shell run-as "$PKG" cat shared_prefs/mtgassistant.xml 2>/dev/null | tr -d '\r'; }
-key_stored() { prefs | grep -qF "<string name=\"push_key\">$KEY</string>"; }
-in_recents() { adb shell dumpsys activity recents 2>/dev/null | grep -q "realActivity=.*$PKG/"; }
+key_stored() { prefs | grep -F "<string name=\"push_key\">$KEY</string>" >/dev/null; }
+in_recents() { adb shell dumpsys activity recents 2>/dev/null | grep "realActivity=.*$PKG/" >/dev/null; }
 connected() { [ "$(state connections)" -ge 1 ]; }
 boot() {
   adb wait-for-device
@@ -138,7 +141,7 @@ adb shell "run-as $PKG sh -c 'mkdir -p shared_prefs && cat > shared_prefs/mtgass
     <string name="push_key">$KEY</string>
 </map>
 XML
-if key_stored && prefs | grep -qF "<string name=\"gateway_origin\">https://localhost:$PORT</string>"; then
+if key_stored && prefs | grep -F "<string name=\"gateway_origin\">https://localhost:$PORT</string>" >/dev/null; then
   result "set up with the key and the gateway address" ok
 else
   result "set up with the key and the gateway address" no "the app's settings file was not written"
@@ -164,7 +167,7 @@ if [ -n "$fab" ]; then
   shot app-menu
   adb shell input keyevent KEYCODE_BACK
 else
-  echo "note: the app's Menu button was not found (see 01-connected.png)"
+  echo "note: the app's Menu button was not found; it shows only over pages that are not the gateway's (see 01-connected.png)"
 fi
 adb shell input keyevent KEYCODE_HOME
 
@@ -309,7 +312,7 @@ app
 before=$(hits /)
 if tap_text "Reload" && until_ok '[ "$(hits /)" -gt '"$before"' ]' 20; then result "menu: Reload" ok; else result "menu: Reload" no "no new page load"; fi
 sleep 2
-if tap_text "Open in browser" && until_ok '! top | grep -q "$PKG/"' 20; then result "menu: Open in browser" ok; else result "menu: Open in browser" no "the app stayed in front"; fi
+if tap_text "Open in browser" && until_ok 'a=$(top) && ! printf "%s" "$a" | grep -F "$PKG/" >/dev/null' 20; then result "menu: Open in browser" ok; else result "menu: Open in browser" no "the app stayed in front"; fi
 shot menu-open-in-browser
 app
 before=$(hits /scan)
@@ -319,7 +322,7 @@ shot menu-scan
 adb shell input keyevent KEYCODE_BACK; sleep 1
 # The app opens no https links itself, so it is opened afresh on the gateway's page.
 adb shell am force-stop "$PKG"; app
-if tap_text "Change gateway" && until_ok 'top | grep -q SetupActivity' 20; then result "menu: Change gateway" ok; else result "menu: Change gateway" no "the setup screen did not open"; fi
+if tap_text "Change gateway" && until_ok 'top | grep SetupActivity >/dev/null' 20; then result "menu: Change gateway" ok; else result "menu: Change gateway" no "the setup screen did not open"; fi
 shot menu-change-gateway
 
 echo "battery: a 24 hour battery test needs a real phone; not run here."
