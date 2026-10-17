@@ -633,6 +633,18 @@ default, and an install that leaves it off behaves exactly as before.
   draws in the report. Forge reads a card's rules only when a game needs that card, which roughly
   halves each Java start (measured 7 s to 3 s on a 4-CPU PC); `FORGE_LAZY_CARDS=0` makes it read
   them all at start again.
+- **More than one machine** (optional; one copy is the default): the gateway can use several
+  copies of the Forge service, for example a Pi and an x86 PC, each playing its own members' runs.
+  `MTG_FORGE_URL` stays the same. The stack's Forge service uses `endpoint_mode: dnsrr`, so the
+  gateway sees each copy's address; it starts each run on the copy with the most free places and
+  keeps asking that copy about it. One run still plays on one copy, never split across machines.
+  Placement is your choice: instead of `node.hostname == ${FORGE_NODE}`, label each machine
+  (`docker node update --label-add mtg-forge=true <node>`), set the constraint to
+  `node.labels.mtg-forge == true`, add `max_replicas_per_node: 1` under `placement`, and set
+  `FORGE_REPLICAS` to the number of labelled machines. ARM and x86 machines can be mixed (the
+  image is built and tested for both). The CPU and memory limits apply to each copy, so size them
+  for the smallest machine, or run one Forge service per kind of machine. With Docker Compose,
+  `docker compose up --scale forge=2` gives two copies on one host.
 - **No upkeep:** the image carries Forge's card scripts, an index of Scryfall's alternative printed
   names, and the newest Commander precons as opponents, each with a bracket estimated from the game
   changers it holds (Scryfall's list, read once when CI builds the image). The gateway seats the
@@ -774,6 +786,7 @@ gateway's `environment:` in the stack file, or it has no effect.
 | `MTG_MYSTIC_FORGE_URL` | no, *stack* | empty (no research tools) | Internal Mystic Forge MCP URL; the stack sets `http://mtg-assistant-mysticforge:8000/mcp` |
 | `MTG_FORGE_URL` | no, *stack* | empty (Forge off) | Internal Forge runner URL; deck reports add real Forge games when set (see the Forge section above) |
 | `MTG_FORGE_GAMES` | no, *stack* | `10` | Forge games per deck report (1 to 50) |
+| `FORGE_REPLICAS`, `FORGE_NODE` | no, *stack* | `0`, empty | Copies of the Forge service, and the node they run on. `0` leaves Forge off; `1` with `FORGE_NODE` is the usual setup. For copies on several machines, place them by a node label instead of `FORGE_NODE` (see "More than one machine" in the Forge section above) |
 | `MTG_WRITES_ENABLED` | no, *stack* | `false` | `true` lets approved proposals be applied to Archidekt |
 | `MTG_APPROVAL_MODE_DEFAULT` | no, *stack* | `manual` | The approval mode of a member who has not chosen one on their Account page: `manual` (every change waits for their own press), `semi` (the assistant applies low-risk edits itself) or `auto` (the assistant applies everything). Members pick their own; see [OPERATIONS.md](OPERATIONS.md#approval-modes-when-the-assistant-may-apply-by-itself) |
 | `MTG_APPROVAL_MODE_MAX` | no, *stack* | `auto` | The highest mode members may choose; `auto` means no cap. A stored choice above the cap is read as the cap |

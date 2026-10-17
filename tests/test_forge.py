@@ -1180,3 +1180,119 @@ async def test_each_forge_game_shows_as_it_finishes(tmp_path: Path, monkeypatch:
     fake.finish(jid, [1, 3, 1, 1])
     await asyncio.wait_for(reports._forge_task, timeout=20)
     assert reports.get("alice", rid)["forge"]["state"] == "done"
+
+
+class _TwoCopies:
+    """Two copies of the Forge service, each with its own jobs (forge_service.py keeps them in
+    memory). The service name ("forge.test") is spread over both in turn, as Swarm's load balancing
+    does; each copy's own address reaches only that copy."""
+
+    def __init__(self, free: tuple[int, int] = (1, 1)) -> None:
+        self.copies = {"10.0.9.1": FakeForge(), "10.0.9.2": FakeForge()}
+        self.free = dict(zip(self.copies, free, strict=True))
+        self.turn = 0
+
+    def handler(self, request: httpx.Request) -> httpx.Response:
+        host = request.url.host
+        if host not in self.copies:
+            self.turn += 1
+            host = list(self.copies)[self.turn % 2]
+        if request.url.path == "/health":
+            return httpx.Response(
+                200, json={"status": "ok", "busy": False, "queued": 0, "free_places": self.free[host]}
+            )
+        return self.copies[host].handler(request)
+
+    def client(self, *, resolve: bool) -> ForgeClient:
+        async def addresses(host: str, port: int) -> list[str]:
+            assert (host, port) == ("forge.test", 8000)
+            return list(self.copies)
+
+        return ForgeClient(
+            "http://forge.test:8000",
+            transport=httpx.MockTransport(self.handler),
+            resolver=addresses if resolve else None,
+        )
+
+
+async def test_runs_stay_with_the_forge_copy_that_started_them(tmp_path: Path) -> None:
+    """Coordinator 05:09Z item 2: with two copies of the Forge service behind one name, a run
+    started on one copy and asked about on the other was marked lost. Each run now keeps the copy
+    it started on and is always asked there; with one address nothing changes."""
+    db = Database(tmp_path / "t.sqlite")
+    db.upsert_user("alice", email=None, name=None, preferred_username=None, groups=[])
+    db.upsert_user("bob", email=None, name=None, preferred_username=None, groups=[])
+
+    # before: one name, two copies, nothing pinned: the refresh lands on the other copy
+    two = _TwoCopies()
+    reports = ReportService(db, _Decks(), None, forge=two.client(resolve=False), forge_games=4)  # type: ignore[arg-type]
+    reports.forge_interval = 0.05
+    out = await reports.run("alice", "42", games=300, options={"seed": 1})
+    assert "engine" not in out["forge"]
+    await asyncio.wait_for(reports._forge_task, timeout=20)
+    lost = reports.get("alice", out["report_id"])["forge"]
+    assert lost["state"] == "lost" and lost["error"] == "Forge restarted before this run finished."
+
+    # after: each copy's address is known, the run is pinned and finishes
+    two = _TwoCopies(free=(0, 1))
+    reports = ReportService(db, _Decks(), None, forge=two.client(resolve=True), forge_games=4)  # type: ignore[arg-type]
+    reports.forge_interval = 0.05
+    a = await reports.run("alice", "42", games=300, options={"seed": 2})
+    assert a["forge"]["engine"] == "http://10.0.9.2:8000" and a["forge"]["engine_copies"] == 2
+    two.free = {"10.0.9.1": 1, "10.0.9.2": 0}  # the second copy is now playing alice's run
+    b = await reports.run("bob", "42", games=300, options={"seed": 3})
+    assert b["forge"]["engine"] == "http://10.0.9.1:8000"  # bob's run plays on the other machine
+    assert [len(c.started) for c in two.copies.values()] == [1, 1]
+    for copy in two.copies.values():
+        for jid in copy.jobs:
+            copy.finish(jid, [1, 2])
+    await asyncio.wait_for(reports._forge_task, timeout=20)
+    for sub, rep in (("alice", a), ("bob", b)):
+        assert reports.get(sub, rep["report_id"])["forge"]["state"] == "done"
+    # a stored engine is used only as an address on the service's own scheme and port
+    assert reports.forge.at("http://evil.example:8000") is None
+    assert reports.forge.at("http://10.0.9.1:9999") is None
+    assert reports.forge.at("http://10.0.9.1:8000/x") is None
+    assert reports.forge.at("http://10.0.9.1:8000") is not None
+
+    # a compare across two copies of one place each: the second deck plays at once on the other
+    two = _TwoCopies(free=(1, 1))
+    reports = ReportService(db, _Decks(), None, forge=two.client(resolve=True), forge_games=4)  # type: ignore[arg-type]
+    reports.forge_interval = 0.05
+    deck = await _Decks().get_any_deck("alice", "42")
+    first = await reports.run("alice", "42", games=300, options={"seed": 4}, pair_with=deck)
+    two.free[first["forge"]["engine"].split("//")[1].split(":")[0]] = 0
+    second = await reports.run(
+        "alice", "42", games=300, options={"seed": 5}, deck=deck, same_opponents_as=first["report_id"]
+    )
+    assert second["forge"]["state"] == "running" and second["forge"]["engine"] != first["forge"]["engine"]
+    for copy in two.copies.values():
+        for jid in copy.jobs:
+            copy.finish(jid, [1])
+    await asyncio.wait_for(reports._forge_task, timeout=20)
+
+
+async def test_one_forge_address_changes_nothing(tmp_path: Path) -> None:
+    """A single copy (one address, an address given directly, "localhost", or a name that can't be
+    looked up): no copy is picked or stored, every call goes to the one URL."""
+
+    async def one(host: str, port: int) -> list[str]:
+        return ["10.0.9.7"]
+
+    async def loopback(host: str, port: int) -> list[str]:
+        return ["127.0.0.1", "::1"]
+
+    async def broken(host: str, port: int) -> list[str]:
+        raise OSError("no such host")
+
+    fake = FakeForge()
+    for url, resolver in (
+        ("http://forge.test:8000", one),
+        ("http://localhost:8000", loopback),
+        ("http://forge.test:8000", broken),
+        ("http://10.0.9.7:8000", one),
+    ):
+        client = ForgeClient(url, transport=httpx.MockTransport(fake.handler), resolver=resolver)
+        assert await client.copies() == []
+        picked, engine, copies = await client.pick()
+        assert picked is client and engine is None and copies == 1

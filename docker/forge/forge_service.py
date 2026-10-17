@@ -14,7 +14,7 @@ came, each when a place is free, on the free places it asked for (fewer when few
 job that leaves places unused (a comparison's first deck, say) lets the next one play beside it.
 
 Endpoints (JSON):
-  GET    /health          status, Forge version, busy flag, queue length
+  GET    /health          status, Forge version, busy flag, queue length, free places
   GET    /precons         the bundled Commander precons a deck entry can name as {"precon": name}
   POST   /check           {"names": [...]} -> each name's spelling in Forge's card list, or null
   POST   /jobs            {"decks": [{"commander": [...], "main": [[count, name], ...]}], "games": n,
@@ -592,6 +592,8 @@ class Handler(BaseHTTPRequestHandler):
                     "busy": busy,
                     "queued": QUEUE.qsize() + len(HELD),
                     "max_parallel": MAX_PARALLEL,
+                    # places no job holds now: the gateway starts a run on the copy with the most
+                    "free_places": len(FREE_PLACES),
                 },
             )
             return
