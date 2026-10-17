@@ -493,6 +493,7 @@ EVENT_LABELS = {
     "not_in_group_refused": "Request refused: not in an allowed group",
     "setting_changed": "Gateway setting changed",
     "card_model_removed": "Card model removed",
+    "backup_trim_queued": "Older backup copies queued for deletion from Archidekt",
 }
 DETAIL_LABELS = {
     "proposal_id": "proposal",

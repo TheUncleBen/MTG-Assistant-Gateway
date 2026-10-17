@@ -1112,7 +1112,7 @@ class LiveSettings:
         try:
             return MANAGED_SETTINGS[key]
         except KeyError:
-            raise SettingError(key, "isn't a setting this page can change") from None
+            raise SettingError(key, "isn't one of the Settings page's settings") from None
 
     def locked(self, key: str) -> bool:
         """True when the deployment set it: the page shows it and cannot change it."""

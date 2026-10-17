@@ -47,6 +47,11 @@ def test_plural_and_short_name_and_time() -> None:
 def test_event_sentences_and_actor_badges() -> None:
     assert companion.event_label("archidekt_linked") == "Archidekt account linked"
     assert companion.event_label("something_new") == "Something new"
+    # the backup trim says what it does in the approved words, not "Backup trim queued"
+    assert (
+        companion.event_label("backup_trim_queued")
+        == "Older backup copies queued for deletion from Archidekt"
+    )
     html = companion.event_detail_html(
         {"deck_id": "42", "deck_name": "Reap", "proposal_id": "p0123456789", "via": "x"}
     )

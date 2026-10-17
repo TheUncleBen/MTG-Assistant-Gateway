@@ -311,7 +311,7 @@ def label(key: str) -> str:
 
 # The summary box's link text where the row's name only reads right beside its value box ("Check
 # Archidekt for deck changes every [30] minutes"). A link has no value after it, so these five say
-# the whole thing (SUMMARY-LINK-TEXTS-r3.md option a, approved 10-17 03:16Z, R-216). The rows, the
+# the whole thing (SUMMARY-LINK-TEXTS-r3.md option a, approved 10-17 about 03:21Z, R-216). The rows, the
 # save notices and the Activity log keep the row's name.
 LINK_TEXT = {
     "deck_sync_minutes": "How often to check Archidekt for deck changes",
