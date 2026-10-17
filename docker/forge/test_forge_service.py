@@ -120,15 +120,18 @@ class Slices(unittest.TestCase):
 
 
 # A stand-in for `java`: prints one result line per game with the seed it was given, so the tests
-# see which slice played which game. FAKE_SLOW makes a slice wait (to see slices overlap).
+# see which slice played which game. FAKE_SLOW makes a slice wait (to see slices overlap). It logs
+# the home a real Java would use: -Duser.home when given, else the user account's, never $HOME
+# (checked on Java 21: HOME=/tmp/x still gives user.home=/root).
 FAKE_JAVA = """#!/usr/bin/env python3
-import os, sys, time
+import os, pwd, sys, time
 a = sys.argv
 n = int(a[a.index("-n") + 1])
 seed = a[a.index("-s") + 1] if "-s" in a else "none"
 print("Ai(1)-D1 vs Ai(2)-D2 - %d games of Commander seed %s" % (n, seed), flush=True)
 log = os.path.join(os.environ["FAKE_LOG"], "start-%s-%s" % (seed, time.time()))
-open(log, "w").write(os.environ.get("HOME", ""))
+given = [x[len("-Duser.home="):] for x in a if x.startswith("-Duser.home=")]
+open(log, "w").write(given[0] if given else pwd.getpwuid(os.getuid()).pw_dir)
 time.sleep(float(os.environ.get("FAKE_SLOW", "0")))
 for g in range(1, n + 1):
     w = 1 + g % 2
@@ -199,6 +202,29 @@ class Run(unittest.TestCase):
         self.assertEqual(job.view()["games_done"], 15)
         starts = sorted(float(p.name.split("-")[-1]) for p in (self.tmp / "log").iterdir())
         self.assertLess(starts[1] - starts[0], 0.4)  # the first two slices played at once
+
+    def test_each_place_has_its_own_forge_home_with_lazy_card_loading(self):
+        # Speed findings C1, C2: parallel Forge processes shared the account's home folder, as
+        # Java ignores $HOME; each place now names its own, and Forge loads card scripts lazily.
+        fs.MAX_PARALLEL = 2
+        os.environ["FAKE_SLOW"] = "0.3"
+        home = self.tmp / "home"
+        prefs = home / ".forge" / "preferences" / "forge.preferences"
+        prefs.parent.mkdir(parents=True)
+        prefs.write_text("UI_THEME=Default\nLOAD_CARD_SCRIPTS_LAZILY=false\n", "utf-8")
+        self.run_job(10, parallel=2)
+        homes = sorted(p.read_text() for p in (self.tmp / "log").iterdir())
+        self.assertEqual(homes, [str(home), str(home / "slot-1")])
+        # an existing preferences file keeps its other lines; the one setting is replaced
+        self.assertEqual(prefs.read_text("utf-8"), "UI_THEME=Default\nLOAD_CARD_SCRIPTS_LAZILY=true\n")
+        slot = home / "slot-1" / ".forge" / "preferences" / "forge.preferences"
+        self.assertEqual(slot.read_text("utf-8"), "LOAD_CARD_SCRIPTS_LAZILY=true\n")
+        fs.LAZY_CARDS = False
+        try:
+            self.assertEqual(fs.place_home(1), home / "slot-1")
+        finally:
+            fs.LAZY_CARDS = True
+        self.assertEqual(slot.read_text("utf-8"), "LOAD_CARD_SCRIPTS_LAZILY=false\n")
 
     def test_one_slice_is_one_process_as_before(self):
         job = self.run_job(5, parallel=4)
