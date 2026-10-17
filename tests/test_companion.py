@@ -691,7 +691,7 @@ async def test_reports_page_lists_every_report_and_what_forge_plays(stack: Stack
         queued = await b.http.get("/reports", headers=NAV)
         assert (
             "Forge now" in queued.text
-            and "Playing: 0 of" in queued.text
+            and "Going: 0 of" in queued.text
             and "Waiting: number 1 in line" in queued.text
         )
         assert f"href='/history/reports/{first['report_id']}'" in queued.text

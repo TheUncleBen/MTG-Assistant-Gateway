@@ -344,8 +344,8 @@ pre{font-size:.86rem;line-height:1.5;background:var(--bg);border:1px solid var(-
 
 /* forms: phatInput / phatButton */
 label{display:block;margin:.9rem 0 .3rem;font-weight:700}
-input[type=text],input[type=password],input[type=email],input[type=search],input[type=number],input[type=url],
-select{width:100%;height:var(--ctl);padding:0 1rem;font:inherit;border-radius:var(--radius);
+input:not([type]),input[type=text],input[type=password],input[type=email],input[type=search],input[type=number],
+input[type=url],select{width:100%;height:var(--ctl);padding:0 1rem;font:inherit;border-radius:var(--radius);
   border:1px solid var(--control-border);background:var(--surface);color:var(--text);
   transition:background-color .2s ease-in-out}
 /* a field inside a <label> keeps its normal weight: only the label's own text is bold */
@@ -482,7 +482,7 @@ button.thumbbtn{all:unset;display:block;cursor:pointer;line-height:0;border-radi
 .exportblock .head h2{margin:0;min-width:0;overflow-wrap:anywhere}
 .exportblock textarea{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
   font-size:.85rem}
-button.thumbbtn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+button.thumbbtn:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
 .choice{display:flex;flex-direction:column;gap:.6rem;margin-top:1rem}
 /* The three choices (Apply…, Reject…, Not now) sit in one row only from 800px: narrower than
    that the row would wrap and leave "Not now" alone on a second line, so they stack full width. */
@@ -554,7 +554,7 @@ button.thumbbtn:focus-visible{outline:2px solid var(--accent);outline-offset:2px
 
 /* badges, pills and notices */
 .badge{display:inline-block;vertical-align:middle;padding:.125rem .5rem;border-radius:5px;font-size:.86rem;
-  font-weight:700;line-height:1.4;background:#6b6b6b;color:#fff}
+  font-weight:700;line-height:1.4;background:#6b6b6b;color:#fff;max-width:100%;overflow-wrap:anywhere}
 .badge.ok{background:var(--green);color:var(--on-green)}
 .badge.warn{background:var(--orange);color:var(--on-orange)}
 .badge.danger{background:var(--danger-fill)}
@@ -727,8 +727,15 @@ details.raw{margin:.5rem 0 0} details.raw summary{cursor:pointer;color:var(--tex
 @media (pointer:coarse){
   .addbox button.tchip,.popular a,.cardview .chip{min-height:40px}
   .odds form.oddsform select,.odds form.oddsform input,.odds form.oddsform button{min-height:40px;height:40px}
-  details > summary{min-height:40px;display:flex;align-items:center}
+  /* kept a list item (a flex summary loses its native fold-out marker in Chromium); the padding
+     makes the 40 px */
+  details > summary{min-height:40px;padding:.55rem 0}
+  .tabbar details.more > summary{padding:0}  /* the More tab has its own 56 px; padding would grow the bar */
   details.dd > summary.icon-only{min-height:40px;min-width:40px}
+  .check,.addbox form.addcard .go .foil{min-height:44px}
+  .reports-page a.rp-deck,.coll-totals a.ext{display:inline-flex;align-items:center;min-height:44px}
+  .guide .anchor{display:inline-flex;align-items:center;justify-content:center;min-width:44px;min-height:44px;
+    margin-top:-.6rem;margin-bottom:-.6rem}
   footer.site .links a{display:inline-flex;align-items:center;min-height:40px;padding:0 .5rem}
   .brand{min-height:40px;--brand-line:max(40px,1.35em)}
   .hrow a.kind,.hrow a.name,.proposals a.name,.report .crumbs a,li > a.name{display:inline-block;

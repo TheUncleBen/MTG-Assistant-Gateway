@@ -416,6 +416,8 @@ def banner_html(
         f"<section class='banner{'' if art_url else ' noart'}'{style}>"
         "<div class='shade'><div class='content'>"
         f"<div class='strip'{style}></div>"
+        f"<a class='owner' href='/users/{esc(deck.owner)}' title='{esc(deck.owner)}: public decks'>"
+        f"{avatar_html(deck.owner)}<span class='uname'>{esc(deck.owner or 'unknown')}</span></a>"
         "<div class='info'>"
         f"<h1 class='deckname'>{privacy}<span title='{esc(deck.name)}'>{esc(deck.name)}</span></h1>"
         "<div class='row'>"
@@ -432,8 +434,6 @@ def banner_html(
         f"<div class='controls'><div class='primary'>{primary}{more}</div></div>{writes_note}"
         f"{social_html(deck, own=own, writes_enabled=writes_enabled) if csrf else ''}"
         "</div>"
-        f"<a class='owner' href='/users/{esc(deck.owner)}' title='{esc(deck.owner)}: public decks'>"
-        f"{avatar_html(deck.owner)}<span class='uname'>{esc(deck.owner or 'unknown')}</span></a>"
         "</div></div></section>"
     )
 
@@ -986,7 +986,7 @@ def checks_panel_html(deck: Deck, stats: dict[str, Any] | None) -> str:
                         else ""
                     )
                     + (
-                        f" · not verified: {esc(zone['unverified_note'])}"
+                        f" · not checked: {esc(zone['unverified_note'])}"
                         if zone.get("unverified_note")
                         else ""
                     ),
@@ -2175,7 +2175,7 @@ h3 .count{font-weight:400;color:var(--text-muted);font-size:.9rem}
 .comments .confirmbar button{margin:0}
 .comments .notice button{margin:0 0 0 .5rem;min-height:30px;padding:0 .7rem;font-size:.9rem}
 .banner .owner{display:flex;flex-direction:column;align-items:center;gap:.35rem;color:#fff;
-  text-decoration:none;font-weight:700;max-width:160px;flex:none}
+  text-decoration:none;font-weight:700;max-width:160px;flex:none;order:1}
 .banner .owner:hover{color:var(--orange)}
 .banner .strip{display:none}
 .banner .owner .uname{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:160px}
@@ -2872,7 +2872,7 @@ ul.plain.collablist{margin:0 0 .75rem;border-bottom:1px solid var(--surface-2)}
 .erow .note:empty{display:none}
 .erow .note{color:var(--orange-text)}
 .erow .qty{display:inline-flex;align-items:center;gap:.25rem}
-.erow .qty input{width:3.4rem;height:2.25rem;text-align:center;margin:0;padding:0 .25rem;
+.erow .qty input{width:min(3.4rem,18vw);height:2.25rem;text-align:center;margin:0;padding:0 .25rem;
   font-variant-numeric:tabular-nums}
 .erow .qty button.mini{margin:0}
 .erow .sel select,.erow .sel .msel-btn{height:2.25rem}
@@ -3017,6 +3017,12 @@ html.printpick-open{overflow:hidden}
   .printpick .ppfilters:not(.open){display:none} }
 /* finger-sized on a touch screen (44 px) */
 @media (pointer:coarse){
+  /* the stats panel's buttons that pick out cards (colours, types, keywords), the curve's axis
+     buttons, the legend and the dialog strip's buttons: 44 px, set here, after their own rules
+     above, so the touch size wins */
+  .rowbtn,.curveaxis .mv,.slegend button{min-height:44px}
+  .deck-toast .acts button,.deck-toast .acts .btn{min-height:44px}
+  .deck-toast .close{width:44px;height:44px;min-height:44px}
   .printpick .close{width:44px;min-height:44px;height:44px}
   .printpick input[type=search],.printpick .msel-btn,.printpick select{height:44px;min-height:44px}
   .printpick .ppfiltbtn,.printpick .ppacts button,.printpick .ppmore .btn,.printpick .ppempty .btn,

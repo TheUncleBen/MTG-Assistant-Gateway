@@ -1077,7 +1077,7 @@ PREFLIGHT_ONLY = "Preflight only (no rules engine)"
 # The overall status (reports.report_status) in words, for the page head and the Markdown.
 STATUS_TEXT = {
     "complete": "complete",
-    "running": "running: Forge games are playing",
+    "running": "running: Forge games are going",
     "queued": "queued: Forge games are waiting to start",
     "partial": "partial: some parts did not run or did not finish",
     "failed": "failed: nothing beyond the deck statistics came back",
