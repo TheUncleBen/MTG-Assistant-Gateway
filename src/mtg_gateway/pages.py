@@ -887,8 +887,8 @@ OK_MESSAGES = {
     "disconnected_all": "Every connected app was disconnected. Each has to be connected and approved again. "
     "Their pending proposals were rejected.",
     "mode_manual": "Saved: your assistant asks you every time.",
-    "mode_semi": "Saved: your assistant applies small, low-risk edits without asking and asks for "
-    "everything else.",
+    "mode_semi": "Saved: your assistant applies low-risk changes without asking (a small deck or collection "
+    "edit, or a private copy of a deck) and asks for everything else.",
     "mode_auto": "Saved: your assistant applies deck and collection changes without asking. Restoring a "
     "snapshot, a commander change, a new deck, an edit of more rows than Full auto applies by itself, "
     "making a deck public or unlisted, any edit of a description that has formatting, such as bold text, "
