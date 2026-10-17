@@ -677,15 +677,16 @@ default, and an install that leaves it off behaves exactly as before.
   per 2 CPUs and per 1.2 GB of memory, 1 to 4, which is 1 inside the default limits; its log and
   `/health` (`max_parallel`, `max_parallel_from`) say which. Each game takes up to `FORGE_XMX` of
   Java memory. Measured on GitHub's build machines (not a Pi) with the default limits (1536M, 2
-  CPUs, 15 games), while each Java process still played a group of up to five games: one at a time
-  peaked at about 770 MiB, two at once at about 1,230 to 1,290 MiB and finished 15 to 27% sooner,
-  and three at once were stopped for memory. One game per process is not measured yet. To play more
-  at once, raise `FORGE_MEMORY_LIMIT` and `FORGE_CPUS`. Set `FORGE_MAX_PARALLEL` by hand only to a
-  number the memory holds (in these measurements, 2 in 1536M, not 3). `FORGE_GAME_SECONDS` (default
-  240, four minutes) is how long one game may run before Forge calls it a draw; such games are
-  counted as draws in the report. Forge reads a card's rules only when a game needs that card, which
-  roughly halves each Java start (measured 7 s to 3 s on a 4-CPU PC); `FORGE_LAZY_CARDS=0` makes it
-  read them all at start again.
+  CPUs, 15 four-player games, one game per Java process): one at a time peaked at about 600 MiB;
+  two at once at about 970 to 1,050 MiB, and finished about 25% sooner on the arm64 machine but
+  about 14% later on the x86 machine; three at once fit in the memory (about 1,210 to 1,380 MiB) but
+  slowed the games so much that 3 and 7 of the 15 reached the four-minute limit. To play more at
+  once, raise `FORGE_MEMORY_LIMIT` and `FORGE_CPUS`. Set `FORGE_MAX_PARALLEL` by hand only to a
+  number the machine holds (in these measurements, 2 in 1536M and 2 CPUs, not 3).
+  `FORGE_GAME_SECONDS` (default 240, four minutes) is how long one game may run before Forge calls
+  it a draw; such games are counted as draws in the report. Forge reads a card's rules only when a
+  game needs that card, which roughly halves each Java start (measured 7 s to 3 s on a 4-CPU PC);
+  `FORGE_LAZY_CARDS=0` makes it read them all at start again.
 - **Memory where Docker can't cap it:** on Raspberry Pi OS the kernel's memory controller is off by
   default, so Docker drops the stack's `FORGE_MEMORY_LIMIT` and nothing caps Forge's memory. Forge
   keeps to it from inside, with nothing to change on the machine: the stack also passes
