@@ -421,7 +421,7 @@ def guide_body(
         "<ol class='steps'>"
         "<li><span>Approve on the card the assistant shows in the chat (Reject can carry a reason), or "
         "open <a href='/proposals'>Proposals</a>, which lists what is waiting by deck, oldest first. "
-        "Open one to read the diff and press <strong>Apply</strong> or <strong>Reject</strong>, or tick "
+        "Open one to read the diff and press <strong>Apply</strong> or <strong>Reject</strong>, or check "
         "several and press <strong>Apply</strong>: the gateway shows the order first, then applies them "
         "one deck at a time. A deck's own page shows its waiting changes at the top, and asking the "
         "assistant what is waiting shows them as a card with <strong>Apply all</strong>.</span></li>"
@@ -448,7 +448,8 @@ def guide_body(
         "(the assistant applies small, low-risk edits itself and asks about the rest) or Full auto (it "
         "also applies bigger deck and collection edits and changes to a deck's details, except a "
         f"restore, a commander change, a new deck, an edit of more than {int(big_rows)} rows, making a "
-        "deck public or unlisted, and any edit of a description that has bold text, links or pictures). "
+        "deck public or unlisted, and any edit of a description that has formatting, such as bold text, "
+        "links or pictures). "
         "Actions on your Archidekt account (likes, follows, comments and the like) and deleting a deck "
         "always wait for your press, and so does a held change, a change waiting for another change "
         "first, one another app had a hand in, one that replaces another app's change, or one that "
@@ -914,8 +915,8 @@ def guide_body(
     )
     # R-142, in every mode; since 0.7.29 (Q8) the card in the chat too, but never for a deck deletion
     on_review_page = (
-        "<td>you press Approve on the card or Apply on its review page (deleting a deck: on its review "
-        "page only)</td>"
+        "<td>you press Approve on the card or Apply on its review page (deleting a deck, and an edit of a "
+        "comment that has formatting: on its review page only)</td>"
     )
     ref_approval = (
         "<p>Your approval mode on the <a href='/account'>Account</a> page says how much your assistant "
@@ -932,7 +933,8 @@ def guide_body(
         f"<tr><td><strong>Full auto</strong>: {_esc(modes.MODE_LABELS['auto'])}</td>"
         "<td>the assistant applies it</td><td>the assistant applies it, except a restore, a commander "
         f"change, a new deck, an edit of more than {big_rows} rows, making a deck public or unlisted, "
-        "and any edit of a description that has bold text, links or pictures: you press</td>"
+        "and any edit of a description that has formatting, such as bold text, links or pictures: you "
+        "press</td>"
         f"{on_review_page}</tr>"
         "</tbody></table></div>"
         f"<p><strong>Low risk:</strong> {_esc(modes.low_risk_text(max_rows))} "

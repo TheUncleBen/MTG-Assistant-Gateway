@@ -24,7 +24,7 @@ assistant:
 | --- | --- | --- |
 | Manual (default) | the member presses Approve or Apply | the member presses |
 | Semi-auto | the assistant applies it (`apply_proposal`) | the member presses |
-| Full auto | the assistant applies it | the assistant applies it, except a restore, a commander change, a new deck, an edit of more than 20 rows, making a deck public or unlisted, and any edit of a description that has bold text, links or pictures: the member presses |
+| Full auto | the assistant applies it | the assistant applies it, except a restore, a commander change, a new deck, an edit of more than 20 rows, making a deck public or unlisted, and any edit of a description that has formatting, such as bold text, links or pictures: the member presses |
 
 Low risk (`MTG_AUTO_APPLY_MAX_ROWS` sets the row limit, 5 here): A small edit
 to an existing deck or to your collection: at most 5 card rows, each a card
@@ -36,7 +36,8 @@ deck, restoring a snapshot, and the deck's details (name, format, bracket,
 description, visibility, folder, tags and cover).
 Always the member's own press: Actions on your Archidekt account (likes,
 votes, bookmarks, follows, comments, new folders and collaborator changes) and
-deleting a deck are never applied by an assistant: each one waits for your own press, in every mode, on the card in the chat or on its review page (deleting a deck: on the review page only).
+deleting a deck are never applied by an assistant: each one waits for your own press, in every mode, on the card in the chat or on its review page (deleting a deck, and an edit of a comment that has formatting: on the review page only).
+In every mode: a held change, a change waiting for another change first, one another app had a hand in, one that replaces another app's change, or one that another app's waiting change would replace waits for the member's press; its card and review page say why.
 Every applied proposal keeps a snapshot first and is read back to verify.
 
 | Capability | The one tool | Writes? | Notes |

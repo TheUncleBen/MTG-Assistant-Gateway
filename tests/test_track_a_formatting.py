@@ -136,7 +136,7 @@ async def test_a_description_edit_keeps_formatting_and_is_approved_on_the_review
     assert p["ok"], p
     row = next(r for r in p["rows"] if r["kind"] == "description")
     assert row["after_text"] == new and rich_text(row["after_doc"]) == new
-    assert "keeps the bold text, links or pictures" in p["next_step"]
+    assert "keeps the formatting already in the description" in p["next_step"]
     # no code for the card: it asks the member to open the review page
     assert not (res.get("_meta") or {}).get(APPROVAL_META_KEY)
     stored = h.db.get_proposal(p["proposal_id"], SUB)
@@ -286,8 +286,8 @@ async def test_a_comment_rewrite_that_keeps_none_of_its_formatting_says_so(stack
         await b.login()
         page = (await b.http.get(f"/proposals/{p['proposal_id']}")).text
         assert (
-            "This edit removes all the bold text, links and pictures from the comment: it is written as "
-            "plain text.</p>" in page
+            "This edit removes all the formatting from the comment, such as bold text, links and pictures: "
+            "it is written as plain text.</p>" in page
         ), page
     finally:
         await b.aclose()
@@ -322,7 +322,8 @@ async def test_full_auto_waits_for_a_formatted_description_and_for_making_a_deck
     assert kept["assistant_may_apply"] is False, kept
     assert (
         kept["risk_reason"]
-        == "keeps bold text, links or pictures in the description, so you see how it will look first"
+        == "keeps the description's formatting, such as bold text, links or pictures, so you see how it "
+        "will look first"
     )
     out = structured(await call(h, token, "apply_proposal", {"proposal_id": kept["proposal_id"]}))
     assert out.get("state") != "applied", out
@@ -369,7 +370,10 @@ async def test_an_edit_that_removes_all_formatting_waits_and_says_so(stack: Stac
     )
     p = structured(res)
     assert p["assistant_may_apply"] is False, p
-    assert p["risk_reason"] == "removes all the bold text, links and pictures from the description", p
+    assert (
+        p["risk_reason"]
+        == "removes all of the description's formatting, such as bold text, links and pictures"
+    ), p
     assert any(r.get("formatting_lost") for r in p["rows"]), p["rows"]
     # E-2: approved on its review page only, as at 4103450 (the card can't approve it)
     assert not (res.get("_meta") or {}).get(APPROVAL_META_KEY), res.get("_meta")
@@ -379,7 +383,7 @@ async def test_an_edit_that_removes_all_formatting_waits_and_says_so(stack: Stac
     try:
         await b.login()
         page = (await b.http.get(f"/proposals/{p['proposal_id']}")).text
-        assert "This edit removes all the bold text, links and pictures from the description" in page
+        assert "This edit removes all the formatting from the description, such as bold text" in page
         assert "or card links will be removed with it." in page, page
     finally:
         await b.aclose()

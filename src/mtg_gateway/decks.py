@@ -6388,9 +6388,9 @@ def _clean_deck_id(deck_id: Any) -> str:
         try:
             host = urlparse(raw if "://" in raw else "https://" + raw).hostname or ""
         except ValueError:  # e.g. "http://[::1": an unterminated IPv6 host
-            raise DeckError("invalid", "only archidekt.com deck links are accepted") from None
+            raise DeckError("invalid", "Only archidekt.com deck links are accepted.") from None
         if host.lower() not in ("archidekt.com", "www.archidekt.com"):
-            raise DeckError("invalid", "only archidekt.com deck links are accepted")
+            raise DeckError("invalid", "Only archidekt.com deck links are accepted.")
     parts = [p for p in raw.split("/") if p]
     if "decks" in parts and parts.index("decks") + 1 < len(parts):
         raw = parts[parts.index("decks") + 1]
@@ -6433,12 +6433,14 @@ def formatting_review_only(row: dict[str, Any]) -> str:
     noun = "comment" if row.get("kind") == "action" else "description"
     if formatting.loses_formatting(row):  # wording draft, WORDING-6
         return (
-            f"It removes all the bold text, links and pictures from the {noun}, which only the review "
-            "page shows, so the user approves it there (review_url), not on a card in the chat."
+            f"It removes all of the {noun}'s formatting (such as bold text, links and pictures), which "
+            "only the review page shows, so the user approves it there (review_url), not on a card in "
+            "the chat."
         )
     return (
-        f"It keeps the bold text, links or pictures already in the {noun}, which only the review page "
-        "shows, so the user approves it there (review_url), not on a card in the chat."
+        f"It keeps the formatting already in the {noun} (such as bold text, links or pictures), which "
+        "only the review page shows, so the user approves it there (review_url), not on a card in the "
+        "chat."
     )
 
 
