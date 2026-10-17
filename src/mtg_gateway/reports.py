@@ -108,6 +108,15 @@ class _Flight:
         self.report_id: str | None = None
 
 
+class PairHold:
+    """Queue room kept for a Forge comparison's two runs from the check (``reserve_pair``) until
+    each run is saved, so presses at once can't both pass the member's limit while the decks are
+    read. ``left``: runs of the pair not saved yet."""
+
+    def __init__(self) -> None:
+        self.left = 2
+
+
 class ReportService:
     def __init__(
         self,
@@ -133,6 +142,7 @@ class ReportService:
         self._forge_cancels: set[asyncio.Task[None]] = set()  # held so a pending cancel is not collected
         # Held from the one-run-per-member check until the new run is saved (one gateway process).
         self._forge_start_lock = asyncio.Lock()
+        self._pair_holds: dict[str, list[PairHold]] = {}  # per member, see reserve_pair
         self.min_interval = min_interval
         # (member, report id) once a report is finished, its Forge games included; set by app.py
         # to notify the member (notify.py).
@@ -173,6 +183,7 @@ class ReportService:
         snapshot_id: str | None = None,
         same_opponents_as: str | None = None,
         pair_with: str | Deck | None = None,
+        pair_hold: PairHold | None = None,
     ) -> dict[str, Any]:
         """Read the deck, compute its statistics, optionally simulate and validate it, store
         the result and return it. Refuses a second report of an unchanged deck within
@@ -220,6 +231,7 @@ class ReportService:
                     snapshot_id=snapshot_id,
                     shared=shared,
                     pair_with=pair_with,
+                    pair_hold=pair_hold,
                 )
                 flight.report_id = out["report_id"]
                 flight.finished += 1
@@ -292,6 +304,7 @@ class ReportService:
         snapshot_id: str | None = None,
         shared: dict[str, Any] | None = None,
         pair_with: str | Deck | None = None,
+        pair_hold: PairHold | None = None,
     ) -> dict[str, Any]:
         if deck is None:
             deck = await self.decks.get_any_deck(sub, deck_ref)
@@ -407,7 +420,9 @@ class ReportService:
             bracket = _pair_bracket(deck, stats, other)
             copies = await self.forge.copies()  # the name's lookup, kept out of the start lock
             async with self._forge_start_lock:
-                await self._start_or_queue_forge(sub, rid, deck, games, seed, bracket, shared, copies)
+                await self._start_or_queue_forge(
+                    sub, rid, deck, games, seed, bracket, shared, copies, hold=pair_hold
+                )
         return self.get(sub, rid)
 
     async def pair_deck(self, sub: str, pair_with: str | Deck) -> Deck:
@@ -437,12 +452,34 @@ class ReportService:
         bracket: tuple[Any, ...],
         shared: dict[str, Any] | None = None,
         copies: list[str] | None = None,
+        *,
+        hold: PairHold | None = None,
+    ) -> None:
+        try:
+            await self._start_or_queue(sub, rid, deck, games, seed, bracket, shared, copies, hold)
+        finally:
+            if hold is not None:  # this run is saved: its place is in the reports table now
+                hold.left = max(0, hold.left - 1)
+
+    async def _start_or_queue(
+        self,
+        sub: str,
+        rid: str,
+        deck: Any,
+        games: int,
+        seed: Any,
+        bracket: tuple[Any, ...],
+        shared: dict[str, Any] | None,
+        copies: list[str] | None,
+        hold: PairHold | None,
     ) -> None:
         text, seed = deck_to_text(deck), seed if isinstance(seed, int) else None
         if self._forge_running(sub, rid) and not self._side_by_side(sub, shared):
             # One unfinished Forge run per member, so nobody can fill the shared engine's queue:
-            # this one waits for theirs (MAX_FORGE_WAITING at most).
+            # this one waits for theirs (MAX_FORGE_WAITING at most, counting the places another
+            # comparison has reserved).
             waiting = sum(1 for _, _, s in self._member_runs(sub) if _waiting(s))
+            waiting += self._reserved(sub, hold)
             if waiting >= MAX_FORGE_WAITING:
                 self._save_forge(
                     rid,
@@ -465,10 +502,11 @@ class ReportService:
         and at most MAX_FORGE_WAITING do. Asked before either report is made, so a comparison
         never makes one deck's report with Forge games and the other's without."""
         runs = self._member_runs(sub)
-        waiting = sum(1 for _, _, s in runs if _waiting(s))
-        if not runs or waiting + 2 <= MAX_FORGE_WAITING:
+        playing = sum(1 for _, _, s in runs if not _waiting(s))
+        # a comparison already pressed but not saved yet counts as the reports it will make
+        waiting = len(runs) - playing + self._reserved(sub)
+        if (not runs and not waiting) or waiting + 2 <= MAX_FORGE_WAITING:
             return None
-        playing = len(runs) - waiting
         queued = (
             f"{waiting} report waiting for its games"
             if waiting == 1
@@ -480,6 +518,29 @@ class ReportService:
             f"have at most {MAX_FORGE_WAITING} reports waiting, so nothing was started. Try again when "
             "none of your reports is waiting for its games."
         )
+
+    def reserve_pair(self, sub: str) -> tuple[PairHold | None, str | None]:
+        """Check the member's room for a comparison's two runs (``pair_room``) and reserve it in
+        the same step, before either deck is read: (the hold, None), or (None, why not). The
+        caller passes the hold to both runs and calls ``release_pair`` when done, failed or not."""
+        full = self.pair_room(sub)
+        if full is not None:
+            return None, full
+        hold = PairHold()
+        self._pair_holds.setdefault(sub, []).append(hold)
+        return hold, None
+
+    def release_pair(self, sub: str, hold: PairHold | None) -> None:
+        """Give back what a comparison's hold still reserves (nothing once both runs are saved)."""
+        holds = self._pair_holds.get(sub, [])
+        if hold in holds:
+            holds.remove(hold)
+        if not holds:
+            self._pair_holds.pop(sub, None)
+
+    def _reserved(self, sub: str, mine: PairHold | None = None) -> int:
+        """Places other comparisons of the member hold for runs not saved yet."""
+        return sum(h.left for h in self._pair_holds.get(sub, []) if h is not mine)
 
     def _side_by_side(self, sub: str, shared: dict[str, Any] | None) -> bool:
         """Whether a comparison's second deck may start now, beside its first (R-215): the member's

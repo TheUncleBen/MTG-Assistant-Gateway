@@ -383,6 +383,74 @@ async def test_compare_press_starts_or_queues_both_decks_or_neither(stack: Stack
         await b.aclose()
 
 
+async def test_compare_presses_at_once_never_pass_the_member_limit(stack: Stack) -> None:
+    """Review L7: the room check reserved nothing, so two presses at once (two tabs) both passed
+    while the other deck was read, and each pair lost its second deck's Forge games; so did a
+    press beside an assistant's report. The room is now kept from the check until both runs are
+    saved: one press goes through whole, the other is refused, and no pair loses a deck."""
+    import asyncio
+
+    from .test_forge import BRACKETED, FakeForge
+
+    h = stack.h
+    b = await linked_browser(stack)
+    reports = h.app.state.gateway.reports
+    db = h.app.state.gateway.db._conn
+    stack.ark.private.discard(43)
+    real_pair = reports.pair_deck
+
+    async def slow_pair(sub, other):  # the other deck's Archidekt read, slow enough to overlap
+        await asyncio.sleep(0.3)
+        return await real_pair(sub, other)
+
+    def states() -> list[str]:
+        rows = db.execute("SELECT forge_json FROM reports ORDER BY rowid").fetchall()
+        return [json.loads(r["forge_json"])["state"] for r in rows]
+
+    reports.pair_deck = slow_pair
+    try:
+        csrf = await b.csrf("/account")
+        await b.http.post("/decks/42/report", data={"csrf": csrf, "forge": "0"})
+        sub = db.execute("SELECT owner_sub FROM reports").fetchone()[0]
+        db.execute("DELETE FROM reports")
+        reports.forge = FakeForge(brackets=BRACKETED).client()
+        await reports.run(sub, "42", simulate=False, forge=True, options={"seed": 1})  # playing
+
+        def press():
+            return b.http.post("/decks/42/compare/forge", data={"csrf": csrf, "with": "43"})
+
+        one, two = await asyncio.gather(press(), press())
+        assert sorted([one.status_code, two.status_code]) == [303, 409], (one.text, two.text)
+        refused = one if one.status_code == 409 else two
+        assert "Comparing two decks needs room for 2 more" in html.unescape(refused.text)
+        assert states() == ["running", "queued", "queued"]  # one whole pair waits, nothing skipped
+        assert not reports._pair_holds  # every hold given back
+
+        # a press beside an assistant's report: the pair keeps both decks; the report, arriving
+        # while the pair's room is kept, waits only if the limit allows
+        db.execute("DELETE FROM reports WHERE rowid > (SELECT MIN(rowid) FROM reports)")
+        later = asyncio.create_task(press())
+        await asyncio.sleep(0.1)  # the press holds its room and is reading the other deck
+        solo = await reports.run(sub, "43", simulate=False, forge=True, options={"seed": 5})
+        assert (await later).status_code == 303
+        assert solo["forge"]["state"] == "skipped", solo["forge"]
+        assert "2 reports waiting" in solo["forge"]["error"]
+        assert states() == ["running", "skipped", "queued", "queued"]
+        assert not reports._pair_holds
+
+        # a press that fails after its check gives its room back
+        db.execute("DELETE FROM reports WHERE rowid > (SELECT MIN(rowid) FROM reports)")
+        bad = await b.http.post("/decks/42/compare/forge", data={"csrf": csrf, "with": "99999"})
+        assert bad.status_code == 404 and not reports._pair_holds
+        assert (await press()).status_code == 303
+    finally:
+        reports.pair_deck = real_pair
+        reports.forge = None
+        if reports._forge_task:
+            reports._forge_task.cancel()
+        await b.aclose()
+
+
 async def test_forge_comparison_reads_the_other_deck_first_on_every_path(stack: Stack) -> None:
     """Review r3 items 1 and 2 (Q140 item 3): the website's Compare press, run_deck_report's
     compare_with and the REST route's compare_with all pick the precons for the higher of the two
