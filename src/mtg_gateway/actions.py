@@ -314,6 +314,10 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
                 kept = formatting.keep_formatting(found.get("_doc"), text)
                 if kept is not None:
                     row["after_doc"], row["dropped_embeds"] = kept
+                elif text and formatting.is_formatted(found.get("_doc")):
+                    # E-2 for comments (review M-2): a rewrite that keeps none of it says what goes
+                    row["formatting_lost"] = True
+                    row["dropped_embeds"] = formatting.embeds(found.get("_doc"))
                 row["text"] = f"Change your comment on the deck {where}"
             else:
                 row["text"] = f"Delete your comment on the deck {where}"

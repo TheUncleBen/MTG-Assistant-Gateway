@@ -1757,9 +1757,10 @@ def _formatted_preview(r: dict[str, Any]) -> str:
     Archidekt (bold, links with their sites, lists, card links, pictures as "[picture]")."""
     if r.get("formatting_lost"):  # D-1, E-2: the edit keeps none of it (wording draft, WORDING-6)
         lost = int(r.get("dropped_embeds") or 0)
+        noun = "comment" if r.get("action") == "comment_edit" else "description"
         return (
             "<p class='notice warn'>This edit removes all the bold text, links and pictures from the "
-            "description: it is written as plain text."
+            f"{noun}: it is written as plain text."
             + (
                 f" {lost} picture{'s' if lost != 1 else ''} or card link{'s' if lost != 1 else ''} "
                 "will be removed with it."
