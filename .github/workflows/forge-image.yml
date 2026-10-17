@@ -2,7 +2,7 @@ name: Forge image
 
 # Builds the Forge simulation image (docker/forge/): Forge's release archive, unmodified, plus the
 # gateway's job service. A pull request that touches it builds natively on arm64 (the Pi's
-# architecture) and plays a smoke game there, pushing nothing. A push to main publishes the image tag
+# architecture) and on amd64 (an x86 PC's) and plays a smoke game on each, pushing nothing. A push to main publishes the image tag
 # the Dockerfile names (<FORGE_VERSION>-<FORGE_LOCAL>) only the first time main carries it, the same
 # claim rule as the Mystic Forge image (git tag forge-<that tag>).
 on:
@@ -174,10 +174,49 @@ jobs:
             tests/fixtures/sample_deck.csv tests/fixtures/live/archidekt_deck_blink_sample.json \
             | tee -a "$GITHUB_STEP_SUMMARY"
 
-  image:
-    needs: [pin, smoke-arm64]
+  smoke-amd64:
+    # The same image built natively for amd64 (an x86 machine running Forge), started, checked and
+    # played once, so both published architectures are proven on every change. The heavier
+    # measurements stay on arm64.
+    needs: [pin, claim]
     if: >-
-      !cancelled() && needs.smoke-arm64.result == 'success'
+      !cancelled() && needs.pin.result == 'success'
+      && (github.event_name != 'push' || needs.claim.outputs.build == 'true')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+        with:
+          driver-opts: image=mirror.gcr.io/moby/buildkit:buildx-stable-1@sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea
+      - name: Scryfall's printed names and the newest Commander precons
+        run: |
+          python3 docker/forge/scryfall_names.py docker/forge/scryfall-names.json docker/forge/scryfall-legal.json
+          python3 docker/forge/precons.py docker/forge/precons.json
+      - name: Build amd64 image
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: ${{ env.DOCKERFILE }}
+          load: true
+          tags: forge:ci-amd64
+          build-args: FORGE_URL=${{ needs.pin.outputs.url }}
+      - name: Image size
+        run: docker image ls forge:ci-amd64
+      - name: Coverage gate (cards legal in at least one format)
+        run: |
+          set -o pipefail
+          docker run --rm -v "$PWD/docker/forge/scryfall-legal.json:/tmp/legal.json:ro" -w /app forge:ci-amd64 \
+            python3 coverage.py /tmp/legal.json 99.5 | tee coverage.txt
+          head -1 coverage.txt >> "$GITHUB_STEP_SUMMARY"
+      - name: Smoke test
+        run: scripts/ci_smoke_forge.sh forge:ci-amd64
+
+  image:
+    needs: [pin, smoke-arm64, smoke-amd64]
+    if: >-
+      !cancelled() && needs.smoke-arm64.result == 'success' && needs.smoke-amd64.result == 'success'
       && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:

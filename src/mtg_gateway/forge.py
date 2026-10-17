@@ -11,11 +11,14 @@ explains those from the card's exact text.
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import logging
 import math
 import secrets
+import socket
 import statistics
 import time
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 import httpx
@@ -161,14 +164,112 @@ def summarise(job: dict[str, Any], seats: list[str]) -> dict[str, Any]:
     return out
 
 
+async def _addresses(host: str, port: int) -> list[str]:
+    """Every address ``host`` resolves to (one per copy of a service in Swarm's dnsrr endpoint mode
+    or Docker Compose, one in Swarm's default virtual-IP mode)."""
+    infos = await asyncio.get_running_loop().getaddrinfo(host, port, type=socket.SOCK_STREAM)
+    return [str(info[4][0]) for info in infos]
+
+
 class ForgeClient:
+    """The Forge service at ``base_url``. When that name resolves to several addresses (several
+    copies of the service, each with its own jobs), ``pick`` chooses the least busy copy for a new
+    run and ``at`` reaches that same copy later, so a run is always asked about where it plays.
+    With one address nothing changes: every call goes to ``base_url``."""
+
     def __init__(
-        self, base_url: str, *, timeout: float = 15.0, transport: httpx.AsyncBaseTransport | None = None
+        self,
+        base_url: str,
+        *,
+        timeout: float = 15.0,
+        transport: httpx.AsyncBaseTransport | None = None,
+        resolver: Callable[[str, int], Awaitable[list[str]]] | None = None,
     ):
         self.base_url = base_url.rstrip("/")
         self._client = httpx.AsyncClient(base_url=self.base_url, timeout=timeout, transport=transport)
         self._health: tuple[float, bool] = (0.0, False)  # (checked at, answering), for the admin page
         self._health_lock = asyncio.Lock()
+        self._timeout, self._transport = timeout, transport
+        # A client given its own transport (the tests) has no network to look names up on, unless
+        # it is given a resolver too.
+        self._resolver = resolver or (_addresses if transport is None else None)
+        url = httpx.URL(self.base_url)
+        self._scheme, self._host = url.scheme, url.host
+        self._port = url.port or (443 if url.scheme == "https" else 80)
+        self._copies: dict[str, ForgeClient] = {}
+
+    def _copy_url(self, address: str) -> str:
+        host = f"[{address}]" if ":" in address else address
+        return f"{self._scheme}://{host}:{self._port}"
+
+    async def copies(self) -> list[str]:
+        """The base URL of each copy behind ``base_url``, or [] when there is only one (one address,
+        an address given directly, or a name that can't be looked up now)."""
+        if self._resolver is None:
+            return []
+        try:
+            ipaddress.ip_address(self._host)
+            return []  # an address, not a name: one copy
+        except ValueError:
+            pass
+        try:
+            found = sorted(set(await self._resolver(self._host, self._port)))
+        except Exception as exc:  # no answer now: the one service, as before
+            logger.info("looking up Forge's copies failed: %s", type(exc).__name__)
+            return []
+        if all(ipaddress.ip_address(a.split("%")[0]).is_loopback for a in found):
+            return []  # "localhost" as 127.0.0.1 and ::1 is one service, not two copies
+        return [self._copy_url(a) for a in found] if len(found) > 1 else []
+
+    def at(self, url: Any) -> ForgeClient | None:
+        """The client for one copy, from a run's stored ``engine``: only an address URL on this
+        service's scheme and port (what ``copies`` gives), never any other host."""
+        if not isinstance(url, str):
+            return None
+        try:
+            parsed = httpx.URL(url)
+            ipaddress.ip_address(parsed.host)
+        except (ValueError, TypeError, httpx.InvalidURL):
+            return None
+        if (
+            parsed.scheme != self._scheme
+            or (parsed.port or self._port) != self._port
+            or parsed.path not in ("", "/")
+        ):
+            return None
+        clean = self._copy_url(parsed.host)
+        if clean not in self._copies:
+            self._copies[clean] = ForgeClient(clean, timeout=self._timeout, transport=self._transport)
+        return self._copies[clean]
+
+    async def pick(self) -> tuple[ForgeClient, str | None, int]:
+        """Where a new run starts: (client, that copy's URL to store with the run, number of copies).
+        With one copy: (this client, None, 1). Otherwise the copy with the most free places, then
+        the shortest queue; a copy that does not answer is passed over."""
+        urls = await self.copies()
+        if not urls:
+            return self, None, 1
+
+        async def load(url: str) -> tuple[Any, ...] | None:
+            client = self.at(url)
+            try:
+                h = await asyncio.wait_for(client.health(), HEALTH_DEADLINE_SECONDS) if client else None
+            except Exception:
+                return None
+            if not isinstance(h, dict) or h.get("status") != "ok":
+                return None
+            free = h.get("free_places")
+            if not isinstance(free, int):  # an image before 0.7.30: idle or not
+                free = 0 if h.get("busy") else 1
+            queued = h.get("queued") if isinstance(h.get("queued"), int) else 0
+            return (-free, queued)
+
+        scores = await asyncio.gather(*(load(u) for u in urls))
+        ranked = sorted((s, i) for i, s in enumerate(scores) if s is not None)
+        best = urls[ranked[0][1]] if ranked else urls[0]  # none answered: the start says so
+        client = self.at(best)
+        assert client is not None
+        return client, best, len(urls)
 
     @property
     def last_health(self) -> tuple[float, bool]:

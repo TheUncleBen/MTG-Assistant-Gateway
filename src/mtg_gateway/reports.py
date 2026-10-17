@@ -463,13 +463,13 @@ class ReportService:
         if len(runs) != 1 or runs[0][0] != shared.get("report_id"):
             return False
         first = runs[0][2]
-        places = first.get("max_parallel")
+        places, copies = first.get("max_parallel"), first.get("engine_copies")
+        room = (isinstance(places, int) and places >= 2) or (isinstance(copies, int) and copies >= 2)
         return (
             bool(first.get("job_id"))
             and not _waiting(first)
             and bool((first.get("opponent_choice") or {}).get("pair"))
-            and isinstance(places, int)
-            and places >= 2
+            and room
         )
 
     def _waiting_section(
@@ -575,8 +575,11 @@ class ReportService:
         try:
             if shared is not None:
                 shared = self._shared_now(self._owner(rid), shared)
+            # several copies of the Forge service: the least busy one, kept with the run (engine)
+            # so it is always asked about where it plays; one copy: as before, nothing kept
+            client, engine, copies = await self.forge.pick()
             section = await start_run(
-                self.forge,
+                client,
                 text,
                 name,
                 games=min(games, self.forge_games),
@@ -588,6 +591,8 @@ class ReportService:
                 parallel=self.forge_parallel,
                 shared=shared,
             )
+            if engine is not None and section.get("job_id"):
+                section.update(engine=engine, engine_copies=copies)
         except ForgeError as exc:
             if exc.kind == "busy":
                 # The engine's own queue (FORGE_MAX_QUEUE, shared by the whole gateway) is full:
@@ -776,7 +781,7 @@ class ReportService:
             or not section.get("job_id")
         ):
             return
-        forge, job_id = self.forge, str(section["job_id"])
+        forge, job_id = self._engine(section), str(section["job_id"])
 
         async def cancel() -> None:
             try:
@@ -790,6 +795,12 @@ class ReportService:
             return
         self._forge_cancels.add(task)
         task.add_done_callback(self._forge_cancels.discard)
+
+    def _engine(self, section: dict[str, Any]) -> ForgeClient:
+        """The copy of the Forge service a run plays on: the one stored with it, else the one URL."""
+        assert self.forge is not None
+        pinned = self.forge.at(section.get("engine")) if section.get("engine") else None
+        return pinned or self.forge
 
     def _ensure_forge_refresher(self) -> None:
         """Keep one background task refreshing unfinished Forge runs until none is left. Also
@@ -818,7 +829,7 @@ class ReportService:
                     section = json.loads(row["forge_json"])
                     if _waiting(section):
                         continue  # no engine job yet; started below when its turn comes
-                    fresh = await refresh(self.forge, section)
+                    fresh = await refresh(self._engine(section), section)
                     if fresh != section:  # written only when a game finished or the state moved
                         self._save_forge(row["id"], fresh)
                 except Exception:  # one bad row must not stop the others
