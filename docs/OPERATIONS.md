@@ -939,10 +939,9 @@ who watches it) and one per watched deck a day, deleted after
 member: `MTG_WATCH_MAX_CARDS` (200) and `MTG_WATCH_MAX_DECKS` (10). "Delete
 my data" removes a member's watches, deck values and notification choices.
 
-Notifications are off until you set `MTG_NTFY_URL` (and, for a server with
-access control, `MTG_NTFY_TOKEN_FILE`); setup, the self-hosted ntfy with
-`auth-default-access: deny-all` and the ntfy.sh trade-off are in
-[DEPLOY.md](DEPLOY.md#notifications-through-ntfy-optional). The token never
+Notifications go through the stack's own ntfy server to the members'
+Android app, on the gateway's own address; how it works is in
+[DEPLOY.md](DEPLOY.md#notifications-on-members-phones). The token never
 appears in a log line; a message ntfy refuses is logged as
 `ntfy publish refused: HTTP <status>`, one that cannot be sent as
 `ntfy publish failed: <error type>`. The gateway has no AI model and writes

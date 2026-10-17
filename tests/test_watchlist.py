@@ -383,7 +383,9 @@ async def test_opt_in_topic_test_button_and_the_token_never_logged(stack: Stack,
         topic = notify.prefs(stack.h.db, "user-1")["ntfy_topic"]
         assert re.fullmatch(r"mtg-[A-Za-z0-9_-]{22}", topic)
         page = (await b.http.get("/account")).text
-        assert topic in page and "https://ntfy.test" in page and "Send test" in page
+        # in a browser: no topic or server on show (the app is the only way to read them), Send test
+        assert topic not in page and "https://ntfy.test" not in page and "Send test" in page
+        assert "data-native='startNotifications'" not in page and "/install?for=android" in page
         assert TOKEN not in page
         r = await _post(b, "/account", {"action": "notify_test"})
         assert r.headers["location"] == "/account?ok=notify_test_sent#notifications"
@@ -403,15 +405,20 @@ async def test_opt_in_topic_test_button_and_the_token_never_logged(stack: Stack,
         assert "ntfy publish refused: HTTP 403" in caplog.text
         assert TOKEN not in caplog.text
         assert TOKEN not in repr(stack.gw.settings) and TOKEN not in repr(stack.gw.notifier)
-        # a chosen topic must be long enough and nobody else's
-        r = await _opt_in(b, ntfy_topic="short")
-        assert r.headers["location"].startswith("/account?err=notify_topic_invalid")
-        r = await _opt_in(b, ntfy_topic="my-own-topic-1234")  # no mtg- prefix
-        assert r.headers["location"].startswith("/account?err=notify_topic_invalid")
+        # a topic sent with the form is ignored: the gateway makes every topic
         r = await _opt_in(b, ntfy_topic="mtg-my-own-topic-1234")
-        assert notify.prefs(stack.h.db, "user-1")["ntfy_topic"] == "mtg-my-own-topic-1234"
+        assert notify.prefs(stack.h.db, "user-1")["ntfy_topic"] == topic
+        # Disconnect my phones: a new topic
         r = await _post(b, "/account", {"action": "notify_new_topic"})
-        assert notify.prefs(stack.h.db, "user-1")["ntfy_topic"] != "mtg-my-own-topic-1234"
+        assert r.headers["location"] == "/account?ok=notify_topic#notifications"
+        assert notify.prefs(stack.h.db, "user-1")["ntfy_topic"] != topic
+        # off keeps the topic; on again keeps it too
+        kept = notify.prefs(stack.h.db, "user-1")["ntfy_topic"]
+        r = await _post(b, "/account", {"action": "notify_save"})
+        assert r.headers["location"] == "/account?ok=notify_off#notifications"
+        assert "Send test" not in (await b.http.get("/account")).text
+        await _opt_in(b)
+        assert notify.prefs(stack.h.db, "user-1")["ntfy_topic"] == kept
     finally:
         await b.aclose()
 
