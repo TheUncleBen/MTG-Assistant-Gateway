@@ -265,6 +265,11 @@ HELD_STEP = (
 )
 # The same, for a proposal whose replaced proposal was applied on its own (review round 3; Q142
 # item 11 A, Ben approved 10-17; WORDING-3-r3).
+# the card's press reached a change that was held after the card showed it
+NOW_HELD = (
+    "This change is now held, so nothing was sent to Archidekt. {reason} The user can read why and "
+    "still apply it with another press."
+)
 HELD_REPLACED_STEP = (
     "Held: the proposal this one would replace was applied on its own (status_reason says which), "
     "so applying this one too would change the deck twice. An assistant never applies it in any "
@@ -3316,12 +3321,16 @@ class DeckService:
         via: str,
         archidekt_backup: bool | None = None,
         version: int | None = None,
+        shown_status: str | None = None,
     ) -> dict[str, Any]:
         """``archidekt_backup=False`` (a member's own hand edit, the save bar's tick box unticked, or a
         quick edit on the deck page) skips the extra backup copy on Archidekt; the gateway's own
         snapshot is always taken. The assistant's applies always keep the copy. ``version`` is the
         version the caller showed (G16, K3): the apply claims only that version, and a proposal
-        amended since is refused with ``changed`` and nothing sent."""
+        amended since is refused with ``changed`` and nothing sent. ``shown_status`` is the status
+        the chat card showed with the press: a change held since is refused with
+        ``now_held`` and nothing sent, so the member sees the hold even when the card could not
+        read the change again first."""
         if not self.settings.writes_enabled:
             raise DeckError("writes_disabled", refusals.WRITES_OFF_KEPT)  # Q141 item 7A
         row = self.db.get_proposal(proposal_id, sub)
@@ -3400,7 +3409,9 @@ class DeckService:
 
         async def run() -> dict[str, Any]:
             async with self.archidekt_slot(sub):  # refused before the claim, so nothing is sent
-                return await self._apply_slotted(sub, proposal_id, row, via=via, version=expect)
+                return await self._apply_slotted(
+                    sub, proposal_id, row, via=via, version=expect, shown_status=shown_status
+                )
 
         # The apply runs as its own task: a caller that gives up (an app's tool timeout, a closed
         # browser tab) cannot cancel it halfway. The caller waits up to APPLY_WAIT_SECONDS for the
@@ -3419,6 +3430,19 @@ class DeckService:
             return await asyncio.wait_for(asyncio.shield(task), timeout=APPLY_WAIT_SECONDS)
         except TimeoutError:
             return self.describe(sub, proposal_id)
+
+    def _now_held(self, sub: str, row: dict[str, Any]) -> DeckError:
+        """A press on a card that showed the change before it was held: nothing is sent, and the
+        reply carries the hold so the card can show it."""
+        info = self._status_fields(sub, row)
+        return DeckError(
+            "now_held",
+            NOW_HELD.format(reason=info["status_reason"]).strip(),
+            review_url=f"{self.settings.public_url}/proposals/{row['id']}",
+            state="pending",
+            version=int(row.get("version") or 1),
+            **info,
+        )
 
     async def wait_applied(self, proposal_id: str) -> None:
         """Until a running apply of ``proposal_id`` has ended (its outcome is on the proposal)."""
@@ -3539,8 +3563,23 @@ class DeckService:
         await asyncio.gather(*pending, return_exceptions=True)
 
     async def _apply_slotted(
-        self, sub: str, proposal_id: str, row: dict[str, Any], *, via: str, version: int | None = None
+        self,
+        sub: str,
+        proposal_id: str,
+        row: dict[str, Any],
+        *,
+        via: str,
+        version: int | None = None,
+        shown_status: str | None = None,
     ) -> dict[str, Any]:
+        if shown_status is not None:
+            # checked just before the claim, with nothing awaited in between, so no hold can be
+            # set after this check and before the claim
+            self.db.hold_blocked(sub)
+            now = self.db.get_proposal(proposal_id, sub)
+            held = now is not None and now["state"] == "pending" and now.get("status") == "held"
+            if held and shown_status != "held":
+                raise self._now_held(sub, now)
         if not self.db.claim_proposal(proposal_id, sub, expect_version=version):
             now = self.db.get_proposal(proposal_id, sub)
             if now is not None and now["state"] == "pending" and version is not None:
@@ -5350,6 +5389,10 @@ class DeckService:
         # (the deck's fingerprint is its cards, so the re-check does not see a description edit)
         if _description_doc(now_rows) != _description_doc(row.get("rows")):
             raise needs_look_error(DESCRIPTION_CHANGED)
+        # words changed on Archidekt since the review are never written over, formatted or not
+        was, now_text = _description_before(row.get("rows")), _description_before(now_rows)
+        if was is not None and now_text is not None and was != now_text:
+            raise needs_look_error(DESCRIPTION_CHANGED)
         if not changes and not organise:
             raise DeckError("invalid", "The deck already has these details; nothing was sent.")
         # delta review 2, E-1 and E-2: what Full auto and the review judged (who can see the deck,
@@ -6041,6 +6084,15 @@ DESCRIPTION_CHANGED = (
 def _description_doc(rows: list[dict[str, Any]] | None) -> str:
     """The document a details change writes for the description when it keeps formatting, else ""."""
     return next((str(r.get("after_doc") or "") for r in rows or [] if r.get("kind") == "description"), "")
+
+
+def _description_before(rows: list[dict[str, Any]] | None) -> str | None:
+    """The description's words before a details change, as its review row recorded them, or None
+    when the change does not touch the description (or was stored without them)."""
+    return next(
+        (str(r["before_text"]) for r in rows or [] if r.get("kind") == "description" and "before_text" in r),
+        None,
+    )
 
 
 def stored_details(changes: dict[str, Any]) -> dict[str, Any]:
