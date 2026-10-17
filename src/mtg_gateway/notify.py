@@ -437,11 +437,15 @@ class Notifier:
     async def drain(self) -> None:
         """Wait for background sends, and for counts still to run (tests, shutdown)."""
         deadline = time.monotonic() + self.recount_delay + 5
-        while self._tasks or (self._dirty and time.monotonic() < deadline):
+        while True:
+            # A finished task leaves the set only in its done callback, which runs on a later turn
+            # of the loop: drop finished ones here, or gathering them again would never yield.
+            self._tasks.difference_update([t for t in self._tasks if t.done()])
+            if not (self._tasks or (self._dirty and time.monotonic() < deadline)):
+                return
             if self._tasks:
                 await asyncio.gather(*list(self._tasks), return_exceptions=True)
-            else:
-                await asyncio.sleep(0.02)
+            await asyncio.sleep(0.02 if not self._tasks else 0)
 
     # -- the Android app's connection ------------------------------------------------------
 
