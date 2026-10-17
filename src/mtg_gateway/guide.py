@@ -721,6 +721,14 @@ def guide_body(
             "full test is the hand path",
         ),
         (
+            "Play more Forge games for a report whose games have finished, against the same "
+            "opponents (on a comparison, both decks get the same number)",
+            "<code>play_more_games</code>",
+            "starts Forge games",
+            "the report page's Play more games button is the hand path, with the same rules: up to 50 "
+            "games a report, and nothing starts when the member's Forge queue is full",
+        ),
+        (
             "Draw odds; what the engine models for a deck",
             "<code>goldfish_odds</code>, <code>goldfish_annotate</code> (Mystic Forge)",
             "no",
