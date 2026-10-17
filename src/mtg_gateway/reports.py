@@ -479,17 +479,16 @@ class ReportService:
             # this one waits for theirs (MAX_FORGE_WAITING at most, counting the places another
             # comparison has reserved).
             waiting = sum(1 for _, _, s in self._member_runs(sub) if _waiting(s))
-            waiting += self._reserved(sub, hold)
-            if waiting >= MAX_FORGE_WAITING:
-                self._save_forge(
-                    rid,
-                    {
-                        "state": "skipped",
-                        "error": f"You already have a Forge run going and {waiting} reports waiting for "
-                        "theirs, the most the gateway keeps; this report has no Forge games. Run the "
-                        "report again once one of them has finished.",
-                    },
+            reserved = self._reserved(sub, hold)
+            if waiting + reserved >= MAX_FORGE_WAITING:
+                error = (
+                    PAIR_SETTING_UP_SKIP  # places another comparison keeps: its reports are not made yet
+                    if reserved
+                    else f"You already have a Forge run going and {waiting} reports waiting for "
+                    "theirs, the most the gateway keeps; this report has no Forge games. Run the "
+                    "report again once one of them has finished."
                 )
+                self._save_forge(rid, {"state": "skipped", "error": error})
                 return
             self._save_forge(rid, self._waiting_section(text, deck.name, games, seed, bracket, shared=shared))
             self._ensure_forge_refresher()
@@ -1295,6 +1294,11 @@ class ReportService:
 PAIR_SETTING_UP = (
     "Another comparison of yours is still being set up, so nothing was started. Try again once it "
     "is set up and none of your reports is waiting for its games."
+)
+PAIR_SETTING_UP_SKIP = (
+    "Another comparison of yours is still being set up and needs the rest of your Forge queue, so "
+    "this report has no Forge games. Run the report again once that comparison is set up and fewer "
+    f"than {MAX_FORGE_WAITING} of your reports are waiting."
 )
 NO_FORGE_TO_SHARE = (
     "That report has no Forge games, so there are no opponents to share. Run it again with Forge, then "
