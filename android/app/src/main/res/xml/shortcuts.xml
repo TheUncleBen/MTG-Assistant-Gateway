@@ -24,7 +24,8 @@
         android:shortcutId="page_scan"
         android:enabled="true"
         android:icon="@mipmap/ic_launcher"
-        android:shortcutShortLabel="@string/shortcut_scan">
+        android:shortcutShortLabel="@string/shortcut_scan"
+        android:shortcutLongLabel="@string/shortcut_scan_long">
         <intent
             android:action="local.mtgassistantgateway.app.OPEN_PAGE"
             android:targetPackage="local.mtgassistantgateway.app"

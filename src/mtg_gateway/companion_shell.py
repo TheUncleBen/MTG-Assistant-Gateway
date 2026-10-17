@@ -76,7 +76,7 @@ def add_shell_routes(server: MCPServer, h: SimpleNamespace) -> None:
             ],
             "shortcuts": [
                 {"name": "My decks", "url": "/decks", "icons": [SHORTCUT_ICON]},
-                {"name": "Scan cards", "url": "/scan", "icons": [SHORTCUT_ICON]},
+                {"name": "Scan page", "url": "/scan", "icons": [SHORTCUT_ICON]},
                 {"name": "Proposals", "url": "/proposals", "icons": [SHORTCUT_ICON]},
             ],
         }

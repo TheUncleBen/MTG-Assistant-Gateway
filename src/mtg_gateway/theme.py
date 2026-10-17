@@ -1472,7 +1472,7 @@ def render(
                 # feedback.js calls window.MtgNative for each data-native button. Open a copied link
                 # and Check for app updates live in the app's own menu and the Account page's App card.
                 "<div class='sep'></div><div class='head'>App</div>"
-                f"<button type='button' data-native='openCamera'>{icon('camera')}Scan with phone camera"
+                f"<button type='button' data-native='openCamera'>{icon('camera')}Scan with the app's camera"
                 "</button>"
                 f"<button type='button' data-native='reload'>{icon('refresh')}Reload</button>"
                 f"<button type='button' data-native='openInBrowser'>{icon('link')}Open in browser</button>"
