@@ -42,7 +42,7 @@ code and a human `message`:
 | `browser_required` | 403 | the member's approval mode wants their own press for this proposal (review page or in-chat card); nothing was sent (`review_url` is included) |
 | `browser_pending` | 409 | MCP only: the client opened the review page for the user (URL elicitation) but the proposal is still pending |
 | `invalid_approval` | 403 | MCP only: `confirm_proposal` was called without the card's one-time code for this proposal, app and member; audited as `approval_refused` |
-| `now_held` | 409 | MCP only: Approve on the card reached a change that was held after the card showed it; nothing was sent, and the reply carries the hold (`status`, `status_reason`) so the card shows it |
+| `now_held` | 409 | MCP only: Approve on the card reached a change held for a reason that came up after the card showed it; nothing was sent, and the reply carries the hold (`status`, `status_reason`) so the card shows it |
 | `in_chat_disabled` | 403 | MCP only: `MTG_APPLY_IN_CHAT` is off, so the card cannot apply; use the review page |
 | `insufficient_scope` | 403 | the bearer token is read-only (`mtg.read`) and the route writes |
 | `other_account` | 409 | a new-deck proposal was made for another Archidekt account than the one linked now |

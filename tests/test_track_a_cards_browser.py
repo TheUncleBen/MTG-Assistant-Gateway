@@ -43,7 +43,7 @@ window.addEventListener("message", (ev) => {
       send({jsonrpc: "2.0", id: m.id, error: {code: -32000, message: "blocked"}});
     } else {
       send({jsonrpc: "2.0", id: m.id,
-            result: {content: [{type: "text", text: "x"}], structuredContent: r, _meta: {}}});
+            result: {content: [{type: "text", text: "x"}], structuredContent: r, _meta: r.__meta || {}}});
     }
   } else if (m.id !== undefined && m.method) {
     send({jsonrpc: "2.0", id: m.id, result: {}});
@@ -874,6 +874,67 @@ def test_apply_all_on_the_proposal_card_lists_what_it_did_not_send_and_why(width
             )
             assert box["scroll"] <= box["page"], box
             _shot(page, f"proposal-card-not-sent-{width}-{theme}")
+        finally:
+            browser.close()
+    assert not errors, errors
+
+
+@pytest.mark.parametrize("decision", ["approve", "reject"])
+def test_the_proposal_cards_not_sent_list_goes_when_its_own_change_is_decided(decision: str) -> None:
+    """Apply all left out the card's own change; the member then approves or rejects it on the
+    card: the list that said it is still waiting goes."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_or_skip()
+    why = (
+        "Not sent: it is held for a reason that came up after you saw it. It would replace #3, "
+        "which was applied. It is still waiting."
+    )
+    result = {
+        **DONE,
+        "summary": "Applied 1. 1 not sent.",
+        "applied": [{"proposal_id": "p1", "board_no": 1, "summary": "+1 Opt"}],
+        "not_sent": [{"proposal_id": "p2", "board_no": 2, "summary": "+1 Delver of Secrets", "why": why}],
+    }
+    state = "applied" if decision == "approve" else "rejected"
+    with sync_playwright() as p:
+        browser = _launch(p, exe)
+        try:
+            page = browser.new_page(viewport={"width": 390, "height": 900})
+            errors: list[str] = []
+            page.on("pageerror", lambda e: errors.append(str(e)))
+            page.route("https://api.scryfall.com/**", lambda r: r.abort())
+            meta = {
+                APPROVAL_META_KEY: "code-2",
+                APPROVAL_SET_META_KEY: {"ids": ["p1", "p2"], "code": "set-code"},
+            }
+            card = _open(
+                page,
+                card_html(),
+                {"structuredContent": PROPOSAL, "_meta": meta},
+                {"confirm_waiting": result, "get_proposal": PROPOSAL},
+            )
+            card.locator("#apply-all:not([disabled])").click()
+            # the read after the apply: still waiting, with its own code again
+            page.evaluate(
+                "(r) => { window.replies.get_proposal = r; }",
+                {**PROPOSAL, "deck_waiting": None, "__meta": {APPROVAL_META_KEY: "code-2"}},
+            )
+            card.locator("#apply-all:not([disabled])", has_text="Apply 2 changes").click()
+            card.locator("#status.ok").wait_for()
+            assert card.locator("#not-sent li").all_inner_texts() == ["#2 +1 Delver of Secrets: " + why]
+            page.evaluate(
+                "(r) => { window.replies.confirm_proposal = r; window.replies.get_proposal = r; }",
+                {**PROPOSAL, "deck_waiting": None, "ok": True, "state": state},
+            )
+            if decision == "approve":
+                card.locator("#approve:not([disabled])").click()
+            else:
+                card.locator("#reject:not([disabled])").click()
+                card.locator("#reject-go").click()
+            card.locator("#state", has_text=state.capitalize()).wait_for()
+            assert card.locator("#not-sent li").count() == 0
+            assert not card.locator("#not-sent").is_visible()
         finally:
             browser.close()
     assert not errors, errors
