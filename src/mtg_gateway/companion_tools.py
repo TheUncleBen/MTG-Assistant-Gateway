@@ -580,15 +580,6 @@ def add_deck_tool_routes(
         )
         return page("Reports", body, sub=sub, sid=sid, current="/reports", extra_css=REPORTS_PAGE_CSS)
 
-    @server.custom_route("/decks/{deck_id}/playtest", methods=["GET"], include_in_schema=False)
-    async def playtest_page(request: Request) -> Response:
-        """Old links to the gateway's framed playtester go straight to Archidekt's own (D-13): a frame
-        never carried the person's Archidekt sign-in, so private decks stayed empty in it."""
-        deck_id = str(request.path_params["deck_id"])
-        if not deck_id.isdigit():
-            return RedirectResponse("/decks", status_code=303)
-        return RedirectResponse(f"https://archidekt.com/playtester-v2/{deck_id}", status_code=303)
-
     @server.custom_route("/decks/{deck_id}/goldfish", methods=["GET"], include_in_schema=False)
     async def goldfish_page(request: Request) -> Response:
         """Goldfish by hand: the deck shuffled, an opening hand with London mulligans, then draw,
