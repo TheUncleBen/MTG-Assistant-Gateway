@@ -102,6 +102,20 @@ async def test_a_page_past_the_end_shows_the_last_page(gw: Harness) -> None:
         await b.aclose()
 
 
+async def test_an_account_without_a_name_is_named_in_words_on_the_list(gw: Harness) -> None:
+    """PROOFREAD-r10 fix 9: the list and the Remove button say "an account with no username or
+    email", as the Activity log does, not the account's raw id."""
+    gw.db.upsert_user("user-8", email=None, name=None, preferred_username=None, groups=[])
+    gw.db.put_card_model("opt", "Opt", MODEL, "user-8", 100)
+    b = await admin_browser(gw)
+    try:
+        text = html.unescape((await b.http.get("/admin/models", headers=NAVIGATE)).text)
+        assert "added by an account with no username or email" in text
+        assert "aria-label='Remove the model of Opt added by an account with no username or email'" in text
+    finally:
+        await b.aclose()
+
+
 async def test_an_account_without_a_name_is_not_called_deleted(gw: Harness) -> None:
     """PROOFREAD-W3 L4: "a deleted account" only when the account is gone."""
     gw.db.upsert_user("user-8", email=None, name=None, preferred_username=None, groups=[])

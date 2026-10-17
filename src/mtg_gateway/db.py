@@ -667,6 +667,36 @@ def _step_14(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_card_models_added_by ON card_models(added_by)")
 
 
+def _card_models_need_repair(conn: sqlite3.Connection) -> bool:
+    """Whether ``card_models`` exists in the shape of an earlier build of schema 14 (no
+    ``sim_version``, or not keyed by the card and the member)."""
+    cols = {r[1]: r[5] for r in conn.execute("PRAGMA table_info(card_models)")}
+    return bool(cols) and not ("sim_version" in cols and cols.get("card_key") and cols.get("added_by"))
+
+
+def _repair_card_models(conn: sqlite3.Connection) -> bool:
+    """Bring a ``card_models`` table written by an earlier build of schema 14 to the shape
+    ``_step_14`` makes now. Step 14 changed in place before any release carried it (card Q140 item 1,
+    card Q139 item 5): those builds kept one model per card for the whole gateway (``card_key``
+    alone the key) and had no ``sim_version``, so a test database from them would fail every read
+    with "no such column". Each kept model stays, kept by the member who added it, with no simulator
+    version recorded. Runs at every start and does nothing once the table has the new shape, so the
+    schema number stays 14. Returns whether it changed the table."""
+    if not _card_models_need_repair(conn):
+        return False
+    conn.execute("ALTER TABLE card_models RENAME TO card_models_old")
+    conn.execute("DROP INDEX IF EXISTS idx_card_models_added_by")
+    _step_14(conn)
+    conn.execute(
+        """INSERT INTO card_models (card_key, name, model_json, sim_version, oracle_hash, added_by,
+               added_at, updated_at)
+           SELECT card_key, name, model_json, NULL, oracle_hash, added_by, added_at, updated_at
+           FROM card_models_old"""
+    )
+    conn.execute("DROP TABLE card_models_old")
+    return True
+
+
 # Applied in order; ``PRAGMA user_version`` records how many have run. Append, never edit.
 MIGRATIONS = [
     _step_1,
@@ -770,6 +800,16 @@ class Database:
                 self._conn.execute("ROLLBACK")
                 raise
             self._conn.execute("COMMIT")
+        # an earlier build of schema 14 (see _repair_card_models); its own transaction, as a step
+        if not _card_models_need_repair(self._conn):
+            return
+        self._conn.execute("BEGIN IMMEDIATE")
+        try:
+            _repair_card_models(self._conn)
+        except BaseException:
+            self._conn.execute("ROLLBACK")
+            raise
+        self._conn.execute("COMMIT")
 
     @property
     def schema_version(self) -> int:

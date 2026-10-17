@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 from mtg_gateway.config import MANAGED_SETTINGS
+from mtg_gateway.settings_page import label
 
 from .test_card_search_filters_browser import CONTRAST
 from .test_cardsearch_browser import SIZES, _chromium, _page
@@ -308,11 +309,15 @@ def test_a_setting_the_stack_sets_shows_greyed_out_and_cannot_be_changed(
         assert rows["deck_sync_minutes"]["shown"] == ["60"]
         # card Q139 item 3: the line at the top names every one, in the page's order, each a link
         summary = page.locator(".set-stack")
-        assert summary.locator("p").inner_text().startswith("Your stack sets 6 of these settings, so they")
+        assert (
+            summary.locator("p")
+            .inner_text()
+            .startswith("Your stack sets 6 of the settings on this page, so they")
+        )
         links = summary.locator("a")
         names = links.all_inner_texts()
         order = [k for k in MANAGED_SETTINGS if k in LOCKED]
-        assert names == [MANAGED_SETTINGS[k].env for k in order]
+        assert names == [f"{label(k)} ({MANAGED_SETTINGS[k].env})" for k in order]
         assert summary.evaluate("e => e.getBoundingClientRect().top") < page.locator(".set-nav").evaluate(
             "e => e.getBoundingClientRect().top"
         )
