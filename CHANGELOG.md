@@ -57,7 +57,7 @@ stack.
 - **Forge image:** 2.0.15-mag3. Build pins are by digest (Dockerfile frontend and base, buildkit, binfmt).
 - **Report wording:** "Out of scope" reads "Left out on purpose", and "Modeled but never mattered" reads "Played with their effect but never mattered". The report adds a second coverage figure, the cards known to the solo test (played with their effect or left out on purpose).
 
-- The Notifications card no longer shows a server or topic, and members no longer choose a topic. A topic chosen before is replaced by a random one the first time the card opens in the app.
+- The Notifications card no longer shows a server or topic, and members no longer choose a topic. When the gateway first starts after the update, every member who had a topic gets a new random one.
 - **Check for app updates** says at once that it is checking.
 - The Android app's menu entry **Scan with phone camera** is now **Scan with the app's camera**, and the launcher shortcut **Scan cards** is now **Scan page**.
 - The build images (Dockerfile, the Mystic Forge Dockerfile and the BuildKit and binfmt images in CI) are pinned by digest, and so are pip and wheel. The image installs only the wheels it built.
