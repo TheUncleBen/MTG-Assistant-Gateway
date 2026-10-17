@@ -2053,8 +2053,8 @@
    button's data-src, made by export_formats.to_edhplay) and the button turns on once it is here,
    so the copy can still be made inside that press, the way the app's WebView allows it; a list
    that can't be had shows why, with Try again. The two import steps show open until the member
-   has launched once (kept on the account from 0.7.29), then sit folded in the same box (Ben, 01:36Z 10-14). The box
-   closes with ×, Escape or a press outside it (Ben, 02:08Z 10-14: no Cancel). Sideboard cards left
+   has launched once (kept on the account from 0.7.29), then sit folded in the same box. The box
+   closes with ×, Escape or a press outside it (there is no Cancel button). Sideboard cards left
    out to fit EDHPlay's 15-card limit are named in the box and in the note that follows. Without
    script the button is a plain link to EDHPlay. */
 (function () {
