@@ -12,16 +12,31 @@
 
   function live() { return document.querySelector(".card.forge[data-forge-live]"); }
 
+  function imported(nodes) {
+    return Array.prototype.map.call(nodes, function (n) { return document.importNode(n, true); });
+  }
+
+  // Only what changed is replaced: an unchanged poll leaves every node as it is, and a changed one
+  // swaps just the parts that differ, so the aria-live card announces only the news (a finished
+  // game), never the whole card every 5 seconds.
+  function patch(target, nodes) {
+    var old = target.childNodes;
+    if (old.length !== nodes.length) {
+      target.replaceChildren.apply(target, imported(nodes));
+      return;
+    }
+    for (var i = 0; i < nodes.length; i++) {
+      if (!old[i].isEqualNode(nodes[i])) target.replaceChild(document.importNode(nodes[i], true), old[i]);
+    }
+  }
+
   function swapCard(html) {
     var doc = new DOMParser().parseFromString("<div>" + html + "</div>", "text/html");
     var fresh = doc.querySelector(".card.forge");
     var card = live();
     if (!fresh || !card) return false;
-    // The card itself stays (it is the aria-live region, so screen readers announce the change);
-    // only its contents are swapped, and the live mark goes once the run has ended.
-    card.replaceChildren.apply(card, Array.prototype.map.call(fresh.childNodes, function (n) {
-      return document.importNode(n, true);
-    }));
+    // The card itself stays (it is the aria-live region); the live mark goes once the run has ended.
+    patch(card, Array.prototype.slice.call(fresh.childNodes));
     if (!fresh.hasAttribute("data-forge-live")) card.removeAttribute("data-forge-live");
     return fresh.hasAttribute("data-forge-live");
   }
@@ -30,9 +45,7 @@
     var shown = document.getElementById("rep-status");
     if (!shown || typeof html !== "string") return;
     var doc = new DOMParser().parseFromString("<div>" + html + "</div>", "text/html");
-    shown.replaceChildren.apply(shown, Array.prototype.map.call(doc.body.firstChild.childNodes, function (n) {
-      return document.importNode(n, true);
-    }));
+    patch(shown, Array.prototype.slice.call(doc.body.firstChild.childNodes));
   }
 
   // Once the run has ended, the Markdown copy (built from the whole report) is read from the page.
