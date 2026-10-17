@@ -250,6 +250,7 @@ WRITE_TOOLS = frozenset(
         "combine_proposals",
         "confirm_waiting",
         "run_deck_report",
+        "play_more_games",  # starts more Forge games for a stored report
         "remove_card_model",  # removes a saved card model
         "save_scan_session",
         "propose_collection_changes",

@@ -572,14 +572,26 @@ class ReportService:
         count them all). It starts or waits like any run of the member's; with no room in their
         queue nothing is started and the report stays as it was. A report of a Forge comparison
         gets the same number of games as the other deck's report, so the two stay even, and
-        nothing starts unless the queue has room for both."""
+        nothing starts unless the queue has room for both. The report page's button, the
+        assistants' play_more_games tool and the app's API all come here, so the rules are the
+        same everywhere; a refusal carries its ``reason`` code (MORE_REFUSALS, or ``notfound`` for a
+        report that is not the member's)."""
+        try:
+            return await self._play_more(sub, report_id)
+        except DeckError as exc:
+            code = more_reason(str(exc))
+            if code and "reason" not in exc.extra:
+                exc.extra["reason"] = code
+            raise
+
+    async def _play_more(self, sub: str, report_id: str) -> dict[str, Any]:
         if self.forge is None:
             raise DeckError("invalid", MORE_NO_FORGE)
         copies = await self.forge.copies()  # the name's lookup, kept out of the start lock
         async with self._forge_start_lock:
             mine = self._own_forge(sub, str(report_id))
             if mine is None:
-                raise DeckError("not_found", "No such report for your account.")
+                raise DeckError("not_found", "No such report for your account.", reason="notfound")
             rid, section = mine
             games, why, pair = self._more_for(sub, rid, section)
             if why:
@@ -627,7 +639,7 @@ class ReportService:
                 if hold is not None:
                     self.release_pair(sub, hold)
         detail = {"report_id": rid, "games": games, **({"with": pair[0]} if pair else {})}
-        self.db.audit("report_more_games", sub=sub, detail=detail)
+        self.db.audit("report_more_games", sub=sub, client_id=current_client.get(), detail=detail)
         return self.get(sub, rid)
 
     def _undo_more(self, sub: str, rid: str, before: dict[str, Any], note: str) -> None:
@@ -1072,7 +1084,7 @@ class ReportService:
         out = {k: v for k, v in section.items() if k not in NOT_SHOWN}
         out["games_done"] = _done_games(out)
         if out.get("state") in FINAL_STATES:
-            # how many games Play more games would add on the report page (0: it can't)
+            # how many games Play more games would add (0: it can't)
             games, _, pair = self._more_for(sub, rid, section) if self.forge is not None else (0, None, None)
             out["more_games"] = games
             if pair is not None and games:  # a comparison: the other deck gets as many
@@ -1605,6 +1617,26 @@ MORE_QUEUE_FULL = (
     f"{MAX_FORGE_WAITING} waiting, so nothing was started. Try again once fewer than {MAX_FORGE_WAITING} "
     "of your reports are waiting."
 )
+# Why Play more games started nothing, by a short code: the report page's notice (?more=) and the
+# ``reason`` of a tool's or the API's refusal.
+MORE_REFUSALS = {
+    "queue": MORE_QUEUE_FULL,
+    "full": MORE_FULL,
+    "ended": MORE_NOT_ENDED,
+    "none": MORE_NOT_THIS_ONE,
+    "noforge": MORE_NO_FORGE,
+    "pairwait": MORE_PAIR_WAIT,
+    "paircant": MORE_PAIR_CANT,
+    "pairqueue": MORE_PAIR_QUEUE,
+    "setup": PAIR_SETTING_UP,
+}
+
+
+def more_reason(text: str) -> str:
+    """The MORE_REFUSALS code of a Play more games refusal ("" for any other message)."""
+    return next((code for code, t in MORE_REFUSALS.items() if t == text), "")
+
+
 PAIR_SETTING_UP_SKIP = (
     "Another comparison of yours is still being set up and needs the rest of your Forge queue, so "
     "this report has no Forge games. Run the report again once that comparison is set up and fewer "

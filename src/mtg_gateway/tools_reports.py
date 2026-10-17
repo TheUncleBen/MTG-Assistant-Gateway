@@ -18,6 +18,7 @@ from .decks import (
     _clean_deck_id,
     deck_to_text,
 )
+from .report_view import MORE_DID_NOT_START
 from .reports import PAIR_UNREAD, _sentence, sim_mode
 from .schemas import (
     AbOptions,
@@ -296,7 +297,7 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
             + (KEPT_MODELS_TEXT if card_models.SWITCHED_ON else "")
             + "When the gateway runs Forge, a stored report also gets a forge section: real games against "
             "Commander precons of the deck's bracket, played in the background, one run at a time per "
-            "member (a report made while an earlier one is still playing is queued behind it, state queued "
+            "member (a report made while an earlier one is still going is queued behind it, state queued "
             "with position and "
             "waiting_for, and starts by itself; at most two wait, then a report gets no Forge games; the "
             "second report of a compare_with pair starts beside the first when Forge has places for two "
@@ -501,3 +502,41 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
             return {"ok": True, **state.reports.get(_sub(), report_id)}
         except DeckError as exc:
             return _tool_error(exc)
+
+    @server.tool(
+        name="play_more_games",
+        title="Play more Forge games for a report",
+        description=(
+            "Play more games, as the report page's button does: another round of Forge games for one "
+            "of the member's stored reports, against the same opponents, added to its earlier games "
+            "(its win rates and 95% intervals then count them all). Only once the report's Forge "
+            "games have finished; it adds the games-per-report number again (forge.more_games in "
+            "get_deck_report says how many, 0 when it can't), up to 50 Forge games per report. It "
+            "queues like any report: when the member already has 2 reports waiting for Forge, "
+            "nothing is started (on a compare_with pair, which needs room for 2, when any already "
+            "waits). On a report of a compare_with pair the other deck's report gets the "
+            "same number, so the two stay even. Never contacts Archidekt. Returns started, the "
+            "report's forge_status (poll get_deck_report with view 'forge' until it ends) and, when "
+            "the games did not start, message; a refusal gives error, message and reason (queue, "
+            "full, ended, none, noforge, pairwait, paircant, pairqueue, setup, or notfound for a report "
+            "that is not the member's)."
+        ),
+        annotations={
+            "readOnlyHint": False,
+            "destructiveHint": False,
+            "idempotentHint": False,
+            "openWorldHint": False,
+        },
+    )
+    async def play_more_games(report_id: str) -> dict[str, object]:
+        sub = _sub()
+        try:
+            full = await state.reports.play_more(sub, report_id)
+            status = state.reports.forge_only(sub, report_id)
+        except DeckError as exc:
+            return _tool_error(exc)
+        note = (full.get("forge") or {}).get("more_note")
+        out: dict[str, object] = {"ok": True, "started": not note, **status}
+        if note:
+            out["message"] = MORE_DID_NOT_START + str(note)
+        return out

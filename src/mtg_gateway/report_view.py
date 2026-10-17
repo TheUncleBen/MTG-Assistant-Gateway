@@ -818,6 +818,11 @@ MODEL_NOTICES = {
 }
 
 
+# Put before a Play more games run's reason when its games did not start (the report page and the
+# play_more_games tool).
+MORE_DID_NOT_START = "The extra games did not start. "
+
+
 def more_games_html(f: Any, csrf: str, report_id: str) -> str:
     """The Play more games button under the Forge card, when the report can take more games (the
     Forge view's ``more_games``). Always present as an empty holder, so forge-live.js can fill it in
@@ -1350,9 +1355,7 @@ def forge_html(f: Any, *, live: bool = False, report_id: Any = None) -> str:
     ]
     pending = state in ("queued", "running")
     if f.get("more_note"):
-        parts.append(
-            f"<p class='notice warn'>{_esc('The extra games did not start. ' + str(f['more_note']))}</p>"
-        )
+        parts.append(f"<p class='notice warn'>{_esc(MORE_DID_NOT_START + str(f['more_note']))}</p>")
     if state != "done":
         msg = stopped or f.get("error") or FORGE_STATE_TEXT.get(_forge_key(f), "")
         if msg and pending:
