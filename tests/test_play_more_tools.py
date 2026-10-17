@@ -175,3 +175,35 @@ async def test_both_assistants_get_the_same_tool_and_it_counts_as_a_change(stack
     assert tool["annotations"]["readOnlyHint"] is False and tool["annotations"]["openWorldHint"] is False
     assert "button" in tool["description"] and "Never contacts Archidekt" in tool["description"]
     assert "play_more_games" in WRITE_TOOLS
+
+
+async def test_a_read_only_app_is_refused_on_both_paths_and_starts_nothing(stack: Stack) -> None:
+    """An app connected read-only (scope mtg.read) gets insufficient_scope from the tool and the
+    API, and no Forge games start; the same app with the mtg scope starts them, and a repeat is
+    refused with its reason on both paths."""
+    from .test_round4_data import _app_token
+
+    h = stack.h
+    fake = FakeForge(brackets=BRACKETED)
+    _forge(stack, fake)
+    rid = await _finished(stack, fake, await mcp_token(h), {"deck_ref": "42"})
+    started, before = len(fake.started), _section(stack, rid)
+    reader, _ = await _app_token(h, "reader", scope="mtg.read")
+    tool = await call(h, reader, "play_more_games", {"report_id": rid})
+    assert tool.get("isError") or (tool.get("structuredContent") or {}).get("ok") is False
+    assert "insufficient_scope" in json.dumps(tool)
+    api = await h.http.post(
+        f"/api/v1/reports/{rid}/forge/more", headers={"Authorization": f"Bearer {reader}"}
+    )
+    assert api.status_code == 403 and api.json()["error"] == "insufficient_scope"
+    assert len(fake.started) == started and _section(stack, rid) == before  # nothing started
+    writer, _ = await _app_token(h, "writer", scope="mtg")
+    first = structured(await call(h, writer, "play_more_games", {"report_id": rid}))
+    assert first["ok"] and first["started"] and len(fake.started) == started + 1
+    again = structured(await call(h, writer, "play_more_games", {"report_id": rid}))
+    assert (again["ok"], again["error"], again["reason"]) == (False, "invalid", "ended")
+    api_again = await h.http.post(
+        f"/api/v1/reports/{rid}/forge/more", headers={"Authorization": f"Bearer {writer}"}
+    )
+    assert api_again.status_code == 400 and api_again.json()["reason"] == "ended"
+    assert len(fake.started) == started + 1
