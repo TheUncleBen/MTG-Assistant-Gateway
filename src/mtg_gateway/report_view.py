@@ -17,7 +17,7 @@ import re
 from typing import Any
 
 from . import card_models
-from .theme import ICON_DATA_URL, time_html, time_text
+from .theme import ICON_DATA_URL, icon, time_html, time_text
 from .theme import esc as _esc
 
 # The simulator's honesty classes, in plain words.
@@ -818,6 +818,26 @@ MODEL_NOTICES = {
 }
 
 
+def more_games_html(f: Any, csrf: str, report_id: str) -> str:
+    """The Play more games button under the Forge card, when the report can take more games (the
+    Forge view's ``more_games``). Always present as an empty holder, so forge-live.js can fill it in
+    once a run ends."""
+    games = f.get("more_games") if isinstance(f, dict) else None
+    if not (isinstance(games, int) and games > 0 and csrf and report_id):
+        return "<div id='forge-more'></div>"
+    word = "game" if games == 1 else "games"
+    return (
+        "<div id='forge-more' class='card more-games'>"
+        f"<form method='post' action='/history/reports/{_esc(report_id)}/forge/more'>"
+        f"<input type='hidden' name='csrf' value='{_esc(csrf)}'>"
+        f"<button type='submit' class='btn'>{icon('play')} Play more games</button>"
+        "</form>"
+        f"<p class='muted small'>Plays {games} more Forge {word} against the same opponents and adds them "
+        "to the results above, so the win rates and their 95% intervals count every game.</p>"
+        "</div>"
+    )
+
+
 def _remove_form(u: dict[str, Any], csrf: str, report_id: str) -> str:
     """The adder's Remove button for a saved description (Q138 item 4)."""
     card = front_face(u["name"])
@@ -1317,6 +1337,10 @@ def forge_html(f: Any, *, live: bool = False, report_id: Any = None) -> str:
         "not a prediction for your table.</p>",
     ]
     pending = state in ("queued", "running")
+    if f.get("more_note"):
+        parts.append(
+            f"<p class='notice warn'>{_esc('The extra games did not start. ' + str(f['more_note']))}</p>"
+        )
     if state != "done":
         msg = stopped or f.get("error") or FORGE_STATE_TEXT.get(_forge_key(f), "")
         if msg and pending:
@@ -1559,6 +1583,8 @@ def report_body_html(
         + "</div>"
     )
     body = head + engine_html(r, live=not standalone)
+    if not standalone:
+        body += more_games_html(r.get("forge"), csrf, str(r.get("report_id") or ""))
     if g is None and v is None:
         body += (
             f"<div class='card'><h2>{_esc(solo_heading(g))}</h2><p class='muted'>The research service "

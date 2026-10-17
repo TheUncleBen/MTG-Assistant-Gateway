@@ -846,10 +846,10 @@ async def test_an_engine_busy_run_waits_and_is_retried(tmp_path: Path) -> None:
 
 
 def test_forge_games_default_and_win_rate_range() -> None:
-    """D15: ten Forge games a report by default, each win rate shown with its 95% range."""
+    """Four Forge games a report by default (more on request), each win rate shown with its 95% range."""
     from mtg_gateway.config import Settings
 
-    assert Settings.__dataclass_fields__["forge_games"].default == 10
+    assert Settings.__dataclass_fields__["forge_games"].default == 4
     lines = forge_lines(
         {
             "state": "done",

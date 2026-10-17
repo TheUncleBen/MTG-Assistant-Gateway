@@ -615,6 +615,9 @@ details.disclosure[open] > summary::before{content:'\\25BE'}
 .plist.models .model .small{overflow-wrap:anywhere}
 .plist.models form{flex:none;margin-left:auto}
 .plist.models form button{height:auto;min-height:44px}
+/* Play more games under the Forge card: a 44px target, its words wrapping at 200% text */
+.more-games button{height:auto;min-height:44px;max-width:100%;white-space:normal}
+.more-games p{margin:.5rem 0 0}
 
 """
     + VIZ_CSS
