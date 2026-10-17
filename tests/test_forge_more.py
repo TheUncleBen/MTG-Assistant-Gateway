@@ -157,7 +157,8 @@ def test_more_room_caps_a_report_at_its_most_games() -> None:
     assert more_room(section(4, "running"), 4) == (0, MORE_NOT_ENDED)
     assert more_room(section(4, "failed"), 4) == (4, None)  # the games it did play count
     assert more_room(section(0), 4) == (0, MORE_NOT_THIS_ONE)
-    assert more_room(None, 4) == (0, MORE_NOT_ENDED)
+    assert more_room(None, 4) == (0, MORE_NOT_THIS_ONE)
+    assert more_room({}, 4) == (0, MORE_NOT_THIS_ONE)  # a report with no Forge games at all
 
 
 async def test_opponents_gone_from_forge_keep_the_earlier_games(tmp_path: Path) -> None:
@@ -169,8 +170,8 @@ async def test_opponents_gone_from_forge_keep_the_earlier_games(tmp_path: Path) 
     assert len(fake.started) == 1
     assert after["state"] == "done" and after["result"]["games"] == 4
     assert after["more_note"] == (
-        "Some of this report's opponents are no longer in this Forge (Precon 2, Precon 3), so more games "
-        "can't be played at the same table. Run the report again."
+        "Some of this report's opponents are no longer in this gateway's Forge (Precon 2, Precon 3), so "
+        "more games can't be played at the same table. Run the report (or its comparison) again."
     )
     html = forge_html(after)
     assert "The extra games did not start. Some of this report&#x27;s opponents" in html
@@ -204,7 +205,8 @@ def test_the_button_shows_only_when_more_games_can_be_added() -> None:
     assert "action='/history/reports/rep_1/forge/more'" in html and "value='tok'" in html
     assert "Play more games</button>" in html
     assert "Plays 4 more Forge games against the same opponents" in html
-    assert "Plays 1 more Forge game against" in more_games_html({"more_games": 1}, "tok", "rep_1")
+    one = more_games_html({"more_games": 1}, "tok", "rep_1")
+    assert "Plays 1 more Forge game against the same opponents and adds it to the results above" in one
 
 
 async def _finished_pair(reports: ReportService, fake: FakeForge) -> tuple[str, str]:
@@ -300,4 +302,81 @@ async def test_a_comparison_whose_other_report_is_gone_or_full(tmp_path: Path) -
         c.execute("DELETE FROM reports WHERE id = ?", (a,))
     view = (await reports.play_more("alice", b))["forge"]
     assert view["state"] in ("running", "queued") and len(fake.started) == 3
+    reports._forge_task.cancel()
+
+
+async def test_a_later_report_at_the_same_table_never_replaces_the_partner(tmp_path: Path) -> None:
+    """Review L10: the partner is recorded when the comparison is made, so a later report seating
+    the first deck's opponents is a report of its own, not the new partner."""
+    db = Database(tmp_path / "t.sqlite")
+    db.upsert_user("alice", email=None, name=None, preferred_username=None, groups=[])
+    fake = FakeForge(brackets=BRACKETED)
+    reports = ReportService(db, _PairDecks(), None, forge=fake.client(), forge_games=4)  # type: ignore[arg-type]
+    reports.forge_interval = 0.05
+    a, b = await _finished_pair(reports, fake)
+    later = await reports.run("alice", "44", simulate=False, forge=True, same_opponents_as=a)
+    fake.finish(later["forge"]["job_id"], [1, 1, 1, 1])
+    c = later["report_id"]
+    await _until(lambda: reports.get("alice", c)["forge"]["state"] == "done")
+    assert reports.get("alice", a)["forge"]["more_with"] == "Deck 43"
+    assert reports.get("alice", b)["forge"]["more_with"] == "Deck 42"
+    alone = reports.get("alice", c)["forge"]
+    assert alone["more_games"] == 4 and "more_with" not in alone
+    await reports.play_more("alice", c)  # only its own games
+    assert len(fake.started) == 4  # one run: the comparison's two reports are left alone
+    assert reports.get("alice", a)["forge"]["state"] == reports.get("alice", b)["forge"]["state"] == "done"
+    reports._forge_task.cancel()
+
+
+async def test_the_first_deck_is_taken_back_when_the_second_does_not_start(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    """Review L12: the second deck's extra games failing to start (here when its turn comes, after
+    the first deck's) takes the first deck's back too, so the two stay even."""
+    db = Database(tmp_path / "t.sqlite")
+    db.upsert_user("alice", email=None, name=None, preferred_username=None, groups=[])
+    fake = FakeForge(brackets=BRACKETED)
+    reports = ReportService(db, _PairDecks(), None, forge=fake.client(), forge_games=4)  # type: ignore[arg-type]
+    reports.forge_interval = 0.05
+    a, b = await _finished_pair(reports, fake)
+    real = reports_module.start_run
+
+    async def second_fails(client: Any, text: str, name: str, **kw: Any) -> dict[str, Any]:
+        if name == "Deck 43":
+            return {"state": "failed", "error": "Forge gave an unexpected answer."}
+        return await real(client, text, name, **kw)
+
+    monkeypatch.setattr(reports_module, "start_run", second_fails)
+    await reports.play_more("alice", a)
+    assert reports.get("alice", b)["forge"]["state"] == "queued"  # waits for the first deck's
+    fake.finish(reports.get("alice", a)["forge"]["job_id"], [1, 1, 1, 1])
+    await _until(lambda: reports.get("alice", b)["forge"].get("more_note"))
+    after_a, after_b = reports.get("alice", a)["forge"], reports.get("alice", b)["forge"]
+    assert after_a["result"]["games"] == after_b["result"]["games"] == 4
+    assert after_a["more_note"] == after_b["more_note"] == "Forge gave an unexpected answer."
+    assert after_a["state"] == after_b["state"] == "done"
+    reports._forge_task.cancel()
+
+
+async def test_a_retry_on_a_busy_forge_keeps_the_runs_place(tmp_path: Path) -> None:
+    """Review L11: each retry against a busy Forge gave the waiting run a new queue time, so the
+    member's waiting runs could swap places. It keeps the first one."""
+    from .test_forge import _BusyForge
+
+    db = Database(tmp_path / "t.sqlite")
+    db.upsert_user("alice", email=None, name=None, preferred_username=None, groups=[])
+    fake = _BusyForge()
+    reports = ReportService(db, _Decks(), None, forge=fake.client(), forge_games=4)  # type: ignore[arg-type]
+    reports.forge_interval = 0.05
+    out = await reports.run("alice", "42", games=300, options={"seed": 9})
+    rid = out["report_id"]
+    stored = json.loads(db._one("SELECT forge_json FROM reports WHERE id = ?", (rid,))["forge_json"])
+    with db.tx() as c:
+        c.execute(
+            "UPDATE reports SET forge_json = ? WHERE id = ?", (json.dumps({**stored, "queued_at": 1000}), rid)
+        )
+    before = fake.refused
+    await _until(lambda: fake.refused >= before + 3)
+    again = json.loads(db._one("SELECT forge_json FROM reports WHERE id = ?", (rid,))["forge_json"])
+    assert again["engine_busy"] is True and again["queued_at"] == 1000
     reports._forge_task.cancel()
