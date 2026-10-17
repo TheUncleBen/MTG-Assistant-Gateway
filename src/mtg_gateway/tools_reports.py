@@ -297,7 +297,7 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
             + (KEPT_MODELS_TEXT if card_models.SWITCHED_ON else "")
             + "When the gateway runs Forge, a stored report also gets a forge section: real games against "
             "Commander precons of the deck's bracket, played in the background, one run at a time per "
-            "member (a report made while an earlier one is still playing is queued behind it, state queued "
+            "member (a report made while an earlier one is still going is queued behind it, state queued "
             "with position and "
             "waiting_for, and starts by itself; at most two wait, then a report gets no Forge games; the "
             "second report of a compare_with pair starts beside the first when Forge has places for two "
@@ -513,11 +513,13 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
             "games have finished; it adds the games-per-report number again (forge.more_games in "
             "get_deck_report says how many, 0 when it can't), up to 50 Forge games per report. It "
             "queues like any report: when the member already has 2 reports waiting for Forge, "
-            "nothing is started. On a report of a compare_with pair the other deck's report gets the "
+            "nothing is started (on a compare_with pair, which needs room for 2, when any already "
+            "waits). On a report of a compare_with pair the other deck's report gets the "
             "same number, so the two stay even. Never contacts Archidekt. Returns started, the "
             "report's forge_status (poll get_deck_report with view 'forge' until it ends) and, when "
             "the games did not start, message; a refusal gives error, message and reason (queue, "
-            "full, ended, none, noforge, pairwait, paircant, pairqueue or setup)."
+            "full, ended, none, noforge, pairwait, paircant, pairqueue, setup, or notfound for a report "
+            "that is not the member's)."
         ),
         annotations={
             "readOnlyHint": False,
