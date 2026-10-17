@@ -397,6 +397,11 @@ def test_drag_between_stacks_saves_set_category_with_the_zone(server: Server) ->
         assert body["changes"] == [
             {"action": "set_category", "card_name": "Sol Ring", "category": "Commander", "zone": "side"}
         ]
+        # filed under Commander, Sol Ring becomes a second commander: a commander change asks first
+        dialog = page.locator(".deck-toast[role='alertdialog']")
+        dialog.wait_for(timeout=5000)
+        assert "This changes the deck's commander. Save anyway?" in dialog.inner_text()
+        dialog.locator("button", has_text="Save anyway").click()
         page.locator(".deck-toast .msg", has_text="Saved").wait_for(timeout=8000)
         page.wait_for_timeout(200)
         assert page.url == url and page.locator(".movebar").count() == 0  # no staging bar
