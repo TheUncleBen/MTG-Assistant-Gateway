@@ -98,7 +98,7 @@ from .idp_sweep import AuthentikSweep
 from .membership import Membership, MembershipChecker
 from .metrics import Metrics
 from .mf_proxy import ALLOWED_TOOLS, BUSY_PREFIX, MysticForgeProxy
-from .notify import Notifier
+from .notify import Notifier, add_stream_route
 from .oidc import OIDCClient
 from .pages import SESSION_COOKIE, _csrf, add_browser_routes, browser_session
 from .plugin_page import CONNECTOR_ICON_PATH, CONNECTOR_ICON_PX, SERVER_DESCRIPTION, add_plugin_routes
@@ -904,6 +904,7 @@ def build_mcp_server(state: AppState) -> MCPServer:
         tool.parameters = compact_schema(inline_refs(tool.parameters))
 
     add_gateway_routes(state, h)
+    add_stream_route(state, server)  # the Android app's notifications (notify.py)
 
     return server
 

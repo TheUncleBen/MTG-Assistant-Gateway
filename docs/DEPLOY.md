@@ -172,15 +172,16 @@ In the Authentik admin UI:
 
 ## 4. Docker secrets (once)
 
-The stack expects three Swarm secrets with exactly these names:
+The stack expects four Swarm secrets with exactly these names:
 
 | Secret name | What goes in it |
 | --- | --- |
 | `mtg_fernet_key` | A random encryption key for linked Archidekt sessions and the identity provider's tokens the gateway keeps. **Keep a copy** (password manager or similar). Lose it and every linked account has to be relinked (and everyone signs in once more), and old backups' Archidekt sessions can't be decrypted |
 | `mtg_session_secret` | A random string of 32+ characters that signs the browser sign-in cookie. No need to keep a copy |
 | `mtg_oidc_client_secret` | The Client Secret from the Authentik provider in step 3 |
+| `mtg_ntfy_token` | The token the gateway uses with the stack's own notification server: `tk_` and 29 random lowercase letters and digits. No need to keep a copy |
 
-A fourth secret is optional: `mtg_authentik_api_token`, an Authentik API
+A fifth secret is optional: `mtg_authentik_api_token`, an Authentik API
 token that may view only the gateway's one or two groups (and its own tokens, see IDP-AUTHENTIK.md §12), turns on the hourly clean-up of removed
 members' stored Archidekt sessions. Its setup, and the three stack lines to
 uncomment, are in
@@ -195,7 +196,7 @@ ways below.
 ### Option A: in Portainer
 
 1. On any machine with `openssl` (Linux, macOS, WSL or Git Bash), generate
-   the two random values:
+   the three random values:
 
    ```bash
    # mtg_fernet_key: a Fernet key (URL-safe base64 of 32 random bytes)
@@ -203,20 +204,23 @@ ways below.
 
    # mtg_session_secret
    openssl rand -base64 48
+
+   # mtg_ntfy_token
+   printf 'tk_%s\n' "$(LC_ALL=C tr -dc a-z0-9 </dev/urandom | head -c 29)"
    ```
 
 2. In Portainer, pick your Swarm environment, then **Secrets → Add secret**.
 3. Name `mtg_fernet_key`, paste the first value into **Secret**, leave
    **Encode secret** on (the default), and click **Create the secret**.
    Save that value in your password manager now.
-4. Do the same for `mtg_session_secret` (the second value) and for
-   `mtg_oidc_client_secret` (paste the Client Secret straight from
-   Authentik).
+4. Do the same for `mtg_session_secret` (the second value),
+   `mtg_ntfy_token` (the third) and `mtg_oidc_client_secret` (paste the
+   Client Secret straight from Authentik).
 5. Clear your terminal (`clear`) so the values aren't left on screen.
 
 ### Option B: on a Swarm manager
 
-Same three secrets from the command line. Nothing is written to disk or your
+Same four secrets from the command line. Nothing is written to disk or your
 shell history:
 
 ```bash
@@ -228,10 +232,13 @@ openssl rand -base64 48 | docker secret create mtg_session_secret -
 
 # 3. mtg_oidc_client_secret. Paste the Authentik Client Secret at the (silent) prompt and press Enter.
 read -rs S && printf %s "$S" | docker secret create mtg_oidc_client_secret - ; unset S
+
+# 4. mtg_ntfy_token. No need to keep a copy.
+printf 'tk_%s' "$(LC_ALL=C tr -dc a-z0-9 </dev/urandom | head -c 29)" | docker secret create mtg_ntfy_token -
 ```
 
 Either way, Portainer's **Secrets** page (or `docker secret ls`) should now
-list all three.
+list all four.
 
 Swarm secrets can't be edited. To change one later, remove the stack (or
 take the secret out of it), delete the secret, create it again with the
@@ -314,6 +321,32 @@ If the packages are public you can skip this step.
 4. Click **Deploy the stack**. The gateway should go healthy within about
    30 seconds. Check from a manager with
    `docker service logs mtg_mtg-assistant-gateway`.
+
+### Updating to 0.7.30 from an earlier version
+
+0.7.30 brings its own notification server (ntfy) into the stack, and the
+gateway's Android app gets the members' notifications from it through the
+gateway's own address.
+
+1. **Before you update the stack**, create the `mtg_ntfy_token` secret
+   (step 4, the fourth command in Option B, or Option A). The new stack file
+   needs it; without it the stack won't deploy.
+2. If your stack's environment has `MTG_NTFY_URL` or `MTG_NTFY_TOKEN_FILE`
+   with a value, delete those lines (empty is fine): the stack file now
+   points the gateway at its own ntfy server. If you ran an ntfy server of
+   your own for the gateway, you can stop it after the update. It needs no
+   proxy host: delete the one you made for it.
+3. Update the stack with the new file, as in the 0.7.29 steps below (your
+   old `mtg_ntfy_token` lines, if you had them, are already in it).
+4. Tell the members: notifications now come in the gateway's own Android
+   app, not the ntfy app. Each member who wants them opens their Account
+   page in the app and presses **Get notifications on this phone**. Their
+   old subscriptions in the ntfy app stop getting messages and can be
+   deleted. There are no notifications on iPhone.
+5. **Members on an app older than 0.7.12 must update the app:** the gateway
+   no longer serves the old app's hooks. They install the new app from the
+   gateway's Install page (uninstalling the old one first, since it was
+   signed with a different key).
 
 ### Updating to 0.7.29 from an earlier version
 
@@ -701,84 +734,40 @@ default, and an install that leaves it off behaves exactly as before.
 - Cards Forge cannot play are listed in each report's `forge.not_played`, and the games run without
   them.
 
-## Notifications through ntfy (optional)
+## Notifications on members' phones
 
-Members can get a short message on their phone when a proposal waits for their approval, a deck
-report finishes (Forge runs that waited in the queue included), a watched card crosses a price
-alert they set, or their daily or weekly summary is ready. The gateway sends them through an
-[ntfy](https://ntfy.sh/) server. It is off by default: with `MTG_NTFY_URL` empty nothing is sent,
-the Account page says the gateway has no notification server, and nothing else changes. ntfy is
-free and open source; the gateway uses no paid service for this.
+Members can get a short message on their phone when an assistant leaves changes waiting for their
+press (one message per deck, such as "2 changes waiting for Atraxa", updated as the count changes
+and removed when nothing waits), a deck report finishes (Forge runs that waited in the queue
+included), a watched card crosses a price alert they set, or their daily or weekly summary is
+ready. They come in the gateway's own Android app. There is no iPhone version, no Firebase or
+Google push service, and no separate notification app.
 
-What a message holds: a title, one short line and a link to the gateway page (the proposal, the
-report, the watchlist, the Account page's summary). Never a deck's cards. A price alert names the
-watched card and its old and new price; a summary gives counts and totals and the card that moved
-most. The access token is read from a Docker secret file, sent only in the `Authorization` header
-and never written to the log; a refused message is logged with its HTTP status alone.
+How it works: the stack runs its own [ntfy](https://ntfy.sh/) server (`mtg-assistant-ntfy`, free
+and open source) on a private network with no published port and no internet access. The gateway
+is its only user: it publishes each member's messages to the member's own topic, `mtg-` and 22
+random characters, with the `mtg_ntfy_token` secret, and ntfy refuses everything else. The app
+holds one long request open to the gateway's own address (`/app/notifications/stream`), and the
+gateway passes the member's messages along it. ntfy keeps messages for 12 hours, in memory, so a
+phone that was offline gets them when it is back; a restart of the ntfy service drops messages not
+yet picked up.
 
-Each member turns notifications on in the **Notifications** card of their Account page. They get
-their own topic, `mtg-` and 22 random characters (128 bits) that nobody can guess, or choose one:
-`mtg-` and then 12 to 60 letters, digits, `-` or `_` (the prefix keeps members inside an
-`mtg-*` grant); two members can't have the same topic. **Send test** sends one message to check
-it, at most once a minute.
-
-### Self-hosted ntfy with access control (recommended)
-
-Run ntfy next to the gateway with `auth-default-access: deny-all`, so nobody can read or publish
-without a user and a grant. The ntfy image is `binwiederhier/ntfy` (pin a release tag); the
-settings below are its documented `server.yml` keys, also accepted as `NTFY_*` environment
-variables:
-
-```yaml
-# server.yml (or NTFY_BASE_URL, NTFY_AUTH_FILE, NTFY_AUTH_DEFAULT_ACCESS, NTFY_BEHIND_PROXY)
-base-url: https://ntfy.example.com
-auth-file: /var/lib/ntfy/user.db
-auth-default-access: deny-all
-behind-proxy: true
-```
-
-Then, inside the ntfy container (`docker exec -it <ntfy container> sh`):
-
-```bash
-# 1. A user for the gateway that may only publish, and a token for it.
-ntfy user add gateway                     # asks for a password; you won't need it again
-ntfy access gateway 'mtg-*' write-only    # or '*' when this server is only for the gateway
-ntfy token add gateway                    # prints tk_...; that is the token
-
-# 2. One user per member who wants notifications, allowed to read only their own topic
-#    (the member reads it on their Account page once they turned notifications on).
-ntfy user add alice
-ntfy access alice mtg-AbCdEf... read-only
-```
-
-Put the token in a Docker secret and point the gateway at the server:
-
-```bash
-printf '%s' 'tk_...' | docker secret create mtg_ntfy_token -
-```
-
-In the stack file remove the `# ` from the `mtg_ntfy_token` lines (under `secrets:` at the top and
-in the gateway's `secrets:` list), then set `MTG_NTFY_URL=https://ntfy.example.com` and
-`MTG_NTFY_TOKEN_FILE=/run/secrets/mtg_ntfy_token` and update the stack. For Docker Compose, write
-the token to `secrets/mtg_ntfy_token.txt` and uncomment the same lines in
-`deploy/compose/docker-compose.yml`. When ntfy runs on the same Docker network, `MTG_NTFY_URL` may
-be its internal `http://` address, but the link members subscribe with is the one they can reach,
-so give ntfy a public `https://` address through your reverse proxy and use that. A member who
-chooses their own topic needs it to start with `mtg-` for the `mtg-*` grant above, or a grant of
-its own.
-
-Members subscribe in the ntfy app on their phone: add this server, sign in with the user you gave
-them, and subscribe to their topic (the app's own help shows where; it differs between Android
-and iOS).
-
-### ntfy.sh instead (no server to run)
-
-`MTG_NTFY_URL=https://ntfy.sh` with no token works too, free. The trade-off is privacy: ntfy.sh is
-a public service run by someone else, a topic there is open to anyone who knows its name, and
-messages pass through and are kept on its servers for a while. The random topic is then the only
-protection, so members should keep it to themselves. Messages carry little (see above), but a price
-alert does name a card and a summary its biggest mover. ntfy.sh also limits how many messages one
-address may send.
+- **No new proxy host.** Don't make one for ntfy. The stream goes through the gateway's existing
+  one; the gateway sends a small keepalive every 25 seconds, so a proxy read timeout of 60 seconds
+  or more is enough, and it asks nginx (and Nginx Proxy Manager) not to buffer the stream. A proxy
+  that buffers responses anyway delays every message until the buffer fills.
+- **What a message holds:** a title, one short line and a link to the gateway page (the review
+  page, the report, the watchlist, the Account page's summary). Never a deck's cards. A price
+  alert names the watched card and its old and new price; a summary gives counts and totals and
+  the card that moved most. The token is read from the secret file, sent only in the
+  `Authorization` header and never written to the log.
+- **Members** turn notifications on in the **Notifications** card of their Account page, in the
+  app: **Get notifications on this phone** asks once to allow notifications and once to let the
+  app run in the background, then the app shows a quiet "Connected" notification while it listens.
+  It reconnects after the phone restarts and after an app update. **Disconnect my phones** gives
+  the member a new topic, which signs out every phone; turning notifications off ends the stream
+  too. **Send test** sends one message to check it, at most once a minute.
+- **Memory:** ntfy is limited to 128 MB (`NTFY_MEMORY_LIMIT`); it used about 15 MB in testing.
 
 ## Environment reference
 
@@ -869,8 +858,8 @@ value. Leave it out to manage it on the page.
 | `MTG_TRUSTED_PROXIES` | no, *stack* | private networks (`10/8`, `172.16/12`, `192.168/16`, loopback) | Comma-separated IPs or CIDR ranges whose `X-Forwarded-*` headers are trusted. Recommended: narrow it to NPM's address or the overlay subnet (see [step 7](#7-reverse-proxy)) |
 | `MTG_CIMD_ENABLED` | no, *stack* | `true` | Accept clients that identify themselves with a Client ID Metadata Document URL (Claude's "Use Claude's published identity" and, reportedly, ChatGPT). `false` leaves only automatic registration |
 | `MTG_CIMD_ALLOWED_HOSTS` | no, *stack* | empty (any https host) | Comma-separated hostnames whose metadata documents are accepted, subdomains included. **Leave it empty** unless you know every client's host: listing only Claude's can lock ChatGPT out. Details in [OPERATIONS.md](OPERATIONS.md#which-ai-clients-may-connect) |
-| `MTG_NTFY_URL` | no, *stack* | empty (off) | The ntfy server notifications are sent through, such as `https://ntfy.example.com` or `https://ntfy.sh` (an `http://` address works for a server on the same private network). Empty sends nothing. See [Notifications through ntfy](#notifications-through-ntfy-optional) |
-| `MTG_NTFY_TOKEN_FILE` | no, *stack* | empty | File holding the ntfy access token the gateway publishes with (`/run/secrets/mtg_ntfy_token`, an optional secret). Needed for a server with access control; never logged |
+| `MTG_NTFY_URL` | no, *stack* | the stack's own ntfy server (`http://mtg-assistant-ntfy:8080`; `http://ntfy:8080` with Docker Compose) | The ntfy server the members' notifications go through. Leave it empty to use the stack's own. See [Notifications on members' phones](#notifications-on-members-phones) |
+| `MTG_NTFY_TOKEN_FILE` | no, *stack* | `/run/secrets/mtg_ntfy_token` | File holding the token the gateway uses with ntfy (the `mtg_ntfy_token` secret); never logged |
 | `MTG_DECK_SYNC_MINUTES` | no, *stack* | `30` | Deck sync (Archidekt is the master copy): minutes between background checks of Archidekt for members with proposals waiting; a member opening the app (any signed-in page, at most once in 5 minutes) checks too. A check reads the member's deck list (one request per 50 decks) and reads a deck only when it has a waiting proposal and Archidekt says it changed, or the deck is someone else's (at most 5 per check), so a proposal made before an outside change is checked again at once: Updated when it still does what was reviewed, Needs a look when it would now do something else. Never writes to Archidekt or unlinks an account, never retries, waits behind every member's own requests and uses no member's limits. 0 to 1440; `0` turns it off |
 | `MTG_WATCHLISTS_ENABLED` | no, *stack* | `false` (off) | Watchlists and prices. Off by default: the Watchlist page and its links, the card viewer's price buttons and the watch tools (`watch_card`, `watch_deck`, `unwatch`, `list_watchlist`, `card_price_history`) are absent and the daily price check does not run. Turning it off keeps members' stored watches and prices; old prices are still pruned after `MTG_PRICE_HISTORY_DAYS`. Summaries through ntfy work either way, without prices when it is off |
 | `MTG_WATCH_MAX_CARDS` | no, *stack* | `200` | Cards one member may watch (0 to 5000; 0 turns card watching off) |

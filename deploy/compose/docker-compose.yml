@@ -1,6 +1,6 @@
 # MTG Assistant Gateway: plain Docker Compose (one machine, no Swarm).
 #
-# Same two services as deploy/portainer-stack.yml, for people who don't run a
+# Same services as deploy/portainer-stack.yml, for people who don't run a
 # Swarm. Walkthrough: docs/DEPLOY-COMPOSE.md. In short:
 #
 #   cp .env.example .env              # then edit the REQUIRED lines
@@ -28,11 +28,10 @@ secrets:
   # remove the "# " from the next two lines and from "# - mtg_authentik_api_token" below.
   # mtg_authentik_api_token:
   #   file: ${MTG_SECRETS_DIR:-./secrets}/mtg_authentik_api_token.txt
-  # Optional: the access token the gateway publishes notifications with, for an ntfy server with
-  # access control (docs/DEPLOY.md, "Optional: notifications through ntfy"). After creating it,
-  # remove the "# " from the next two lines and from "# - mtg_ntfy_token" below.
-  # mtg_ntfy_token:
-  #   file: ${MTG_SECRETS_DIR:-./secrets}/mtg_ntfy_token.txt
+  # The token the gateway uses with this stack's own ntfy server (the members' notifications);
+  # make-secrets.sh creates it.
+  mtg_ntfy_token:
+    file: ${MTG_SECRETS_DIR:-./secrets}/mtg_ntfy_token.txt
 
 services:
   # The gateway: OAuth server for AI clients, MCP endpoint and browser pages.
@@ -62,7 +61,7 @@ services:
       - mtg_session_secret
       - mtg_oidc_client_secret
       # - mtg_authentik_api_token
-      # - mtg_ntfy_token
+      - mtg_ntfy_token
     # A setting passed as ${MTG_X:-} (empty unless your env sets it) is one an admin changes on
     # the gateway's Settings page (/admin/settings), which starts from the gateway's default. A
     # value set in your env wins and locks the setting: the page shows it greyed out with its value.
@@ -87,10 +86,10 @@ services:
       # is listed above. Empty = off. The API URL defaults to the issuer's address.
       MTG_AUTHENTIK_API_TOKEN_FILE: ${MTG_AUTHENTIK_API_TOKEN_FILE:-}
       MTG_AUTHENTIK_API_URL: ${MTG_AUTHENTIK_API_URL:-}
-      # Optional notifications through an ntfy server (empty = off), and its token file:
-      # /run/secrets/mtg_ntfy_token once that secret is listed above (docs/DEPLOY.md).
-      MTG_NTFY_URL: ${MTG_NTFY_URL:-}
-      MTG_NTFY_TOKEN_FILE: ${MTG_NTFY_TOKEN_FILE:-}
+      # Notifications to the members' Android app go through this stack's own ntfy server
+      # (the ntfy service below); the phones reach it through the gateway's own address.
+      MTG_NTFY_URL: ${MTG_NTFY_URL:-http://ntfy:8080}
+      MTG_NTFY_TOKEN_FILE: ${MTG_NTFY_TOKEN_FILE:-/run/secrets/mtg_ntfy_token}
       # Watchlists and prices, off by default: with false the Watchlist pages, the price buttons,
       # the five watch tools and the daily price check are absent (stored watches are kept).
       MTG_WATCHLISTS_ENABLED: ${MTG_WATCHLISTS_ENABLED:-}
@@ -163,6 +162,7 @@ services:
       - mtg
       - mysticforge
       - forge
+      - ntfy
     # Least privilege: the entrypoint starts as root only to match PUID/PGID, then drops to
     # that user with setpriv --no-new-privs; these four capabilities are all it needs.
     cap_drop:
@@ -176,6 +176,8 @@ services:
       - no-new-privileges:true
     depends_on:
       mysticforge:
+        condition: service_started
+      ntfy:
         condition: service_started
     deploy:
       resources:
@@ -237,6 +239,67 @@ services:
           memory: ${MF_MEMORY_LIMIT:-512M}
           pids: 512 # processes and threads, as for the gateway
 
+  # ntfy: holds the members' notifications until their Android app picks them up (it keeps
+  # them for 12 hours, in memory, for a phone that was offline). The gateway is its only user:
+  # it publishes with the mtg_ntfy_token secret and relays each member's own topic to their app
+  # at /app/notifications/stream, on the gateway's address. No published port: don't put a
+  # reverse proxy in front of it. Every other request is refused, and its web app is off.
+  ntfy:
+    image: ${NTFY_IMAGE:-binwiederhier/ntfy:v2.31.1@sha256:91bb7fa607b02006c119bb4a31032923b414a713a032ecb40f0c5d6bfd5b7e40}
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    # The gateway's only user is made at each start from the secret (a random password nobody
+    # knows, the token, and read-write on the members' mtg- topics); the token goes in the
+    # environment of ntfy alone, never on its command line. "$$" is a "$" for the shell.
+    entrypoint:
+      - sh
+      - -c
+      - |
+        set -eu
+        pw=$$(head -c 32 /dev/urandom | base64)
+        hash=$$(printf '%s\n%s\n' "$$pw" "$$pw" | ntfy user hash 2>/dev/null | tr ' ' '\n' | grep '^\$$2')
+        NTFY_AUTH_USERS="mtg-gateway:$$hash:user"
+        NTFY_AUTH_TOKENS="mtg-gateway:$$(cat /run/secrets/mtg_ntfy_token):gateway"
+        export NTFY_AUTH_USERS NTFY_AUTH_TOKENS
+        unset pw hash
+        exec ntfy serve
+    environment:
+      NTFY_LISTEN_HTTP: ":8080"
+      NTFY_AUTH_FILE: /tmp/ntfy-auth.db
+      NTFY_AUTH_DEFAULT_ACCESS: deny-all
+      NTFY_AUTH_ACCESS: "mtg-gateway:mtg-*:rw"
+      NTFY_WEB_ROOT: disable
+      NTFY_CACHE_DURATION: 12h
+      TZ: ${TIMEZONE:-UTC}
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - wget -q -O /dev/null http://127.0.0.1:8080/v1/health
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    secrets:
+      - mtg_ntfy_token
+    # Runs as PUID (the owner of the secret files), with no capabilities at all: it listens on
+    # 8080 and writes only to /tmp.
+    user: "${PUID:-1000}:${PGID:-1000}"
+    networks:
+      - ntfy
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          memory: ${NTFY_MEMORY_LIMIT:-128M}
+          pids: 128
+
   # Forge, the rules engine for deck simulations (docker/forge/, GPL-3.0, unmodified). Optional and
   # off by default: start it with COMPOSE_PROFILES=forge and set MTG_FORGE_URL=http://forge:8000 for
   # the gateway. It starts Java only while a simulation runs, one at a time, and needs no internet.
@@ -286,4 +349,7 @@ networks:
   mysticforge:
   # Only the gateway and Forge are on it, and it has no way out: Forge needs no internet.
   forge:
+    internal: true
+  # Only the gateway and ntfy are on it, and it has no way out: phones never reach ntfy directly.
+  ntfy:
     internal: true

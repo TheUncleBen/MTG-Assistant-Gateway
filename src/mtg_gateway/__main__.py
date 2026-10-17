@@ -91,7 +91,7 @@ def main(argv: list[str] | None = None) -> int:
         logging.getLogger("httpx").setLevel(
             logging.NOTSET if running.log_level == "DEBUG" else logging.WARNING
         )
-    uvicorn.run(
+    config = uvicorn.Config(
         app,
         host=settings.listen_host,
         port=settings.listen_port,
@@ -103,6 +103,18 @@ def main(argv: list[str] | None = None) -> int:
         # The stack files give the container a longer stop_grace_period than this.
         timeout_graceful_shutdown=GRACEFUL_SHUTDOWN_SECONDS,
     )
+    notifier = app.state.gateway.notifier
+
+    class _Server(uvicorn.Server):
+        """Ends the Android app's notification connections at the stop signal: they never end on
+        their own, so they would hold the stop for the whole grace period. The apps reconnect."""
+
+        def handle_exit(self, sig: int, frame: object) -> None:
+            if notifier is not None:
+                notifier.close_streams()
+            super().handle_exit(sig, frame)  # type: ignore[arg-type]
+
+    _Server(config).run()
     return 0
 
 

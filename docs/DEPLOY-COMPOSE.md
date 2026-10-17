@@ -54,7 +54,7 @@ secret**. The secret only goes into a file in the next step.
 
 ## 2. Secrets
 
-The gateway reads three secrets from files, never from environment
+The gateway reads four secrets from files, never from environment
 variables:
 
 | File in `secrets/` | What's in it |
@@ -62,6 +62,7 @@ variables:
 | `mtg_fernet_key.txt` | Encryption key for linked Archidekt sessions and the identity provider's tokens the gateway keeps. **Keep a copy**: lose it and everyone has to relink Archidekt (and sign in once more) |
 | `mtg_session_secret.txt` | Random key that signs browser cookies. No need to keep a copy |
 | `mtg_oidc_client_secret.txt` | The client secret from step 1 |
+| `mtg_ntfy_token.txt` | Random token the gateway uses with the stack's own notification server. No need to keep a copy |
 
 Run the helper as the user in `PUID` (see step 3), or with `sudo`, in which
 case it hands the files to `PUID:PGID` from `.env`:
@@ -70,7 +71,7 @@ case it hands the files to `PUID:PGID` from `.env`:
 ./make-secrets.sh
 ```
 
-It generates the two random values, prints the Fernet key once so you can
+It generates the three random values, prints the Fernet key once so you can
 save it in your password manager, and asks for the client secret at a
 hidden prompt. It never overwrites a file that's already there. Clear your
 terminal afterwards.
@@ -239,6 +240,19 @@ schema version in the file. To go back to an older release, restore the backup
 you took before updating (see [OPERATIONS.md](OPERATIONS.md#backups)) and run
 the old image on that; don't run an old image on an upgraded database.
 
+### Updating to 0.7.30 from an earlier version
+
+0.7.30 adds the stack's own notification server (ntfy). Get the new
+`docker-compose.yml` as in the 0.7.29 steps below, and the new helper with
+`curl -fsSLO "$base/make-secrets.sh"` (same `base`). Then run
+`./make-secrets.sh` again before `docker compose up -d`: it adds
+`secrets/mtg_ntfy_token.txt` and leaves your other files alone. If your `.env`
+has `MTG_NTFY_URL` or `MTG_NTFY_TOKEN_FILE` with a value, delete those lines;
+an ntfy server you ran for the gateway can go, with its proxy host.
+Notifications now come in the gateway's Android app (members press **Get
+notifications on this phone** on their Account page in the app), not the
+ntfy app. **Members on an app older than 0.7.12 must update the app.**
+
 ### Updating to 0.7.29 from an earlier version
 
 Before the commands above, note your own edits to the old `docker-compose.yml`:
@@ -288,6 +302,6 @@ start.
 ## Moving to Swarm later
 
 The Swarm stack ([DEPLOY.md](DEPLOY.md)) uses the same images and variables.
-Create the three Swarm secrets from your three files
+Create the four Swarm secrets from your four files
 (`docker secret create mtg_fernet_key secrets/mtg_fernet_key.txt`, and so on),
 copy `data/` to the node in `MTG_NODE`, and deploy the stack.
