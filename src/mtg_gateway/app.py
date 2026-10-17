@@ -193,6 +193,7 @@ ERROR_CODES = {
     "stale": "FAILED_PRECONDITION",
     "changed": "FAILED_PRECONDITION",
     "pick_one": "FAILED_PRECONDITION",
+    "now_held": "FAILED_PRECONDITION",
     "backup_failed": "UPSTREAM_ERROR",
     "verify_mismatch": "UPSTREAM_ERROR",
     "simulation_failed": "UPSTREAM_ERROR",
