@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 from mtg_gateway.config import MANAGED_SETTINGS
+from mtg_gateway.modes import MODE_LABELS
 from mtg_gateway.settings_page import LINK_TEXT, label, link_text
 
 from .test_card_search_filters_browser import CONTRAST
@@ -160,11 +161,7 @@ def test_review_round_1_settings_details(server: Server, width: int, zoom: str) 
         # it breaks only after an underscore, never mid-word (round 2 made this the rule at any size)
         assert page.evaluate(MIDWORD_BREAKS) == []
         modes = page.locator("#s-row-approval_mode_max .set-choices label")
-        assert modes.all_inner_texts() == [
-            "Ask me every time",
-            "Apply small, low-risk edits without asking",
-            "Apply deck and collection changes without asking",
-        ]
+        assert modes.all_inner_texts() == [MODE_LABELS["manual"], MODE_LABELS["semi"], MODE_LABELS["auto"]]
         assert page.evaluate(CHOICES_WHOLE) == []
         assert page.evaluate(MEASURE) == []
         assert page.evaluate(CONTRAST, TEXT) == []
@@ -416,7 +413,7 @@ def test_a_locked_setting_shows_its_value_in_words_and_its_variable_whole(
         backups, modes = rows["archidekt_backups"], rows["approval_mode_max"]
         assert backups["words"] == ["On", "Off"] and backups["chosen"] == ["Off"], backups
         assert backups["segInputs"] and set(backups["segInputs"]) == {"0"}, backups
-        semi = "Apply small, low-risk edits without asking"
+        semi = MODE_LABELS["semi"]
         assert len(modes["words"]) == 3 and modes["chosen"] == [semi], modes
         assert backups["dashedRadios"] == 0 and modes["dashedRadios"] == 0
         assert page.evaluate(MEASURE) == []

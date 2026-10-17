@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .config import MANAGED_SETTINGS, STACK_LOCK_HOW, LiveSettings, SettingError, SettingSpec, _number
+from .modes import MODE_LABELS
 from .plugin_page import CHATGPT_NAME_MAX, chatgpt_name_too_long
 
 # (group, title, intro). The order is the page's; "scan" starts folded away.
@@ -53,8 +54,8 @@ TEXT: dict[str, tuple[str, str]] = {
     ),
     "auto_apply_max_rows": (
         "Rows a small edit may have",
-        "With \u201cApply small, low-risk edits without asking\u201d, an edit with at most this many card "
-        "rows counts as small.",
+        # the Semi-auto mode's own label, so the help always names the choice as the page shows it
+        f"With \u201c{MODE_LABELS['semi']}\u201d, an edit with at most this many card rows counts as small.",
     ),
     "auto_big_edit_rows": (
         "Rows before an edit counts as big",
