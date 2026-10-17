@@ -61,6 +61,8 @@ FORMATTING_LOST_ALONE = (
     "Not sent: it removes all the formatting already there, such as bold text, links and pictures, so "
     "it is approved on its own review page, which says what goes. It is still waiting."
 )
+# a change held after the list Apply all was pressed on was drawn: left out, as on the card
+HELD_SINCE = "Not sent: it was held after this list was shown. {reason} It is still waiting."
 EARLIER_FAILED = (
     "Not sent: an earlier change to this deck in this selection failed after part of it reached "
     "Archidekt. It is still waiting: open it to check it against the deck as it is now."
@@ -104,12 +106,20 @@ def _order_key(row: dict[str, Any]) -> tuple[int, int, str]:
     return (int(row.get("created_at") or 0), int(row.get("board_no") or 0), str(row["id"]))
 
 
-def plan(svc: Any, sub: str, picks: list[str], versions: dict[str, int] | None = None) -> dict[str, Any]:
+def plan(
+    svc: Any,
+    sub: str,
+    picks: list[str],
+    versions: dict[str, int] | None = None,
+    shown: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     """What applying ``picks`` would do, before anything is sent: per deck, the changes in the
     order they will run, the ones that will not be sent and why, and the older changes left
     waiting. ``versions`` (proposal id -> the version the member saw) is carried to the apply,
-    which refuses a change amended since (G16)."""
+    which refuses a change amended since (G16). ``shown`` (proposal id -> the status the member
+    saw and when it was set) is carried too: a change held since is left out, not sent."""
     db = svc.db
+    shown = dict(shown or {})
     versions = dict(versions or {})
     seen: set[str] = set()
     rows: list[dict[str, Any]] = []
@@ -146,6 +156,9 @@ def plan(svc: Any, sub: str, picks: list[str], versions: dict[str, int] | None =
             else:
                 line = _line(svc, sub, row)
                 line["version"] = int(versions.get(row["id"]) or row.get("version") or 1)
+                if row["id"] in shown:
+                    line["shown_status"] = str(shown[row["id"]].get("status") or "")
+                    line["shown_status_at"] = shown[row["id"]].get("status_at")
                 run.append(line)
         if not run:
             continue
@@ -195,6 +208,9 @@ def _line(svc: Any, sub: str, row: dict[str, Any], why: str | None = None) -> di
         "row_count": len(row.get("rows") or []),
         "created_by": svc._creator_label(row.get("created_by_client")),
         "created_at": row.get("created_at"),
+        # what the confirm showed, so its press can say so (a change held since is left out)
+        "status": row.get("status") or "",
+        "status_at": row.get("status_at"),
     }
     if row.get("status") == "held":
         out["held"] = held_text(svc._status_fields(sub, row)["status_reason"])
@@ -299,10 +315,24 @@ async def _run(svc: Any, sub: str, run: dict[str, Any], *, via: str) -> None:
                         run["not_sent"].append({**item, "why": waits_for_text(no)})
                         continue
                     try:
-                        await svc.apply(sub, pid, via=via, version=item.get("version"))
+                        await svc.apply(
+                            sub,
+                            pid,
+                            via=via,
+                            version=item.get("version"),
+                            shown_status=item.get("shown_status"),
+                            shown_status_at=item.get("shown_status_at"),
+                        )
                         await svc.wait_applied(pid)
                     except DeckError as exc:
                         not_applied.add(pid)
+                        if exc.kind == "now_held":
+                            # held after the list was drawn: left out, its hold said (a safe default)
+                            reason = str(exc.extra.get("status_reason") or "")
+                            run["not_sent"].append(
+                                {**item, "why": HELD_SINCE.format(reason=reason).replace("  ", " ")}
+                            )
+                            continue
                         row = svc.db.get_proposal(pid, sub) or {}
                         if row.get("state") == "failed":
                             run["failed"].append({**item, "why": str(exc)})

@@ -210,7 +210,7 @@ button.danger:disabled{color:var(--red)}
     busy = true; $("go").disabled = true; $("cancel").disabled = true;
     B.setStatus("Applying to Archidekt…", "");
     $("status").focus();
-    B.request("tools/call", { name: "confirm_waiting", arguments: { proposal_ids: set.ids, approval: set.code } })
+    B.request("tools/call", { name: "confirm_waiting", arguments: { proposal_ids: set.ids, approval: set.code, shown: shownFor(set.ids) } })
       .then(function (res) {
         var sc = (res && res.structuredContent) || {};
         $("confirm").className = "confirm hidden"; $("cancel").disabled = false;
@@ -231,6 +231,19 @@ button.danger:disabled{color:var(--red)}
         draw();
       });
   };
+
+  // the status each change showed when pressed: a change held since is not sent
+  function shown(x) {
+    var o = { status: String((x && x.status) || "") };
+    if (x && typeof x.status_at === "number") o.status_at = x.status_at;
+    return o;
+  }
+  function shownFor(ids) {
+    var byId = {}, out = {};
+    (data.waiting || []).forEach(function (x) { byId[x.proposal_id] = x; });
+    ids.forEach(function (id) { if (byId[id]) out[id] = shown(byId[id]); });
+    return out;
+  }
 
   var polls = 0;
   function showResult(sc) {
@@ -272,12 +285,27 @@ button.danger:disabled{color:var(--red)}
     if (!code || !armed || busy) return;
     busy = true; draw();
     B.setStatus(decision === "approve" ? "Applying to Archidekt…" : "Rejecting…", "");
-    B.request("tools/call", { name: "confirm_proposal", arguments: { proposal_id: x.proposal_id, approval: code, decision: decision } })
+    var args = { proposal_id: x.proposal_id, approval: code, decision: decision };
+    if (decision === "approve") {
+      var sh = shown(x);
+      args.shown_status = sh.status;
+      if (typeof sh.status_at === "number") args.shown_status_at = sh.status_at;
+    }
+    B.request("tools/call", { name: "confirm_proposal", arguments: args })
       .then(function (res) {
         busy = false;
         var sc = (res && res.structuredContent) || {};
         if (sc.ok === false || (res && res.isError)) {
           var msg = String(sc.message || (res && res.content && res.content[0] && res.content[0].text) || "The gateway refused.");
+          if (sc.error === "now_held") {
+            // held since this card was drawn: its row shows the hold, the next press may apply it
+            x.status = "held"; x.status_reason = String(sc.status_reason || ""); delete x.status_text;
+            if (typeof sc.status_at === "number") x.status_at = sc.status_at;
+            B.setStatus("This change is now held, so nothing was approved. Read why on its row, then press Approve again if you still want it.", "err");
+            draw();
+            B.tellModel("The user pressed approve for proposal " + x.proposal_id + " on the waiting changes card, but the gateway answered: " + msg);
+            return;
+          }
           if (sc.state && sc.state !== "pending") { delete codes[x.proposal_id]; decided[x.proposal_id] = { text: "Now " + sc.state, kind: "" }; }
           B.setStatus(msg, "err");
           draw();
