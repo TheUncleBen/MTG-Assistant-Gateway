@@ -765,6 +765,9 @@ def test_play_more_games_fits_reads_and_starts(server: Server, width: int, schem
         page.goto(f"{server.base}/history/reports/rep_more?more=queue", wait_until="networkidle")
         notice = page.locator("p.notice.warn").first.inner_text()
         assert notice.startswith("Your Forge queue has no room for more games now")
+        page.goto(f"{server.base}/history/reports/rep_more?more=pairqueue", wait_until="networkidle")
+        notice = page.locator("p.notice.warn").first.inner_text()
+        assert notice.startswith("More games for this comparison need room for 2 more runs")
         assert not errors, errors
         browser.close()
     with httpx.Client(base_url=server.base, cookies={"mtg_session": sid}) as h:

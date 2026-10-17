@@ -142,7 +142,8 @@ One deck:
   4 games per report by default (your gateway's operator can change this)
   and shows each win rate with its 95% interval. Once they have finished,
   **Play more games** on the report page plays that many more against the
-  same opponents and adds them to the results, up to 50 games a report. A
+  same opponents and adds them to the results, up to 50 games a report
+  (on a comparison, both decks get the same number, so the two stay even). A
   game still going after four minutes (by default) stops and counts as a draw. Forge does not run 60-card
   decks (its opponents are Commander precons): their reports never start or
   queue a Forge run and say why. When the Forge engine is busy
