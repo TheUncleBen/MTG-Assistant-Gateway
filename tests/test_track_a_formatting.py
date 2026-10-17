@@ -203,6 +203,22 @@ async def test_words_changed_on_archidekt_since_review_are_not_written_over(
     assert row["state"] == "pending" and row["status"] == "needs_look", row
 
 
+async def test_new_words_already_on_archidekt_need_a_look(stack: Stack) -> None:
+    """The description was changed on archidekt.com to exactly the change's new words: the change
+    needs a look (nothing is sent) instead of failing."""
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    await _set_mode(h, "manual")
+    ark.decks[42]["description"] = _doc({"insert": "Plain one\n"})
+    details = {"deck_id": "42", "details": {"description": "Brand new words"}}
+    p = structured(await call(h, token, "propose_deck_details", details))
+    ark.decks[42]["description"] = _doc({"insert": "Brand new words\n"})
+    out = await _browser_apply(h, p["proposal_id"])
+    assert out.get("ok") is False and out.get("error") in ("stale", "needs_look"), out
+    row = h.db.get_proposal(p["proposal_id"], SUB)
+    assert row["state"] == "pending" and row["status"] == "needs_look", row
+
+
 async def test_a_plain_description_is_still_approved_on_the_card(stack: Stack) -> None:
     h, ark = stack.h, stack.ark
     token = await linked_user(stack)

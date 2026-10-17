@@ -637,10 +637,15 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
         meta=dict(CONFIRM_TOOL_META),
     )
     async def confirm_proposal(
-        proposal_id: str, approval: str, decision: str = "approve", shown_status: str | None = None
+        proposal_id: str,
+        approval: str,
+        decision: str = "approve",
+        shown_status: str | None = None,
+        shown_status_at: int | None = None,
     ) -> CallToolResult:
         # shown_status: the status the card showed ("" for none). A change held since is refused
-        # and nothing is sent, even when the card could not read the change again.
+        # and nothing is sent, even when the card could not read the change again. shown_status_at:
+        # when that status was set, so a change held for a new cause since is refused too.
         try:
             sub = _sub()
             if not s.apply_in_chat:
@@ -662,7 +667,9 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
             if decision == "reject":
                 return _card_result({"ok": True, **state.decks.reject(sub, proposal_id, via="app")}, None)
             shown = None if shown_status is None else str(shown_status)[:20]
-            applied = await state.decks.apply(sub, proposal_id, via="app", shown_status=shown)
+            applied = await state.decks.apply(
+                sub, proposal_id, via="app", shown_status=shown, shown_status_at=shown_status_at
+            )
             return _card_result(with_words_note({"ok": True, **applied}), None)
         except DeckError as exc:
             out = _tool_error(exc)

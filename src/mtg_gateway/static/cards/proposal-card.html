@@ -699,7 +699,11 @@ button.danger:disabled{color:var(--red)}
     var args = { proposal_id: pid, approval: approval, decision: decision };
     // the status this card shows goes with Approve: a change held since is refused, and the
     // answer carries the hold, so it is seen even when the read above could not get through
-    if (decision === "approve") args.shown_status = String(proposal.status || "");
+    if (decision === "approve") {
+      args.shown_status = String(proposal.status || "");
+      // when that status was set: a change held for a new cause since is refused too
+      if (typeof proposal.status_at === "number") args.shown_status_at = proposal.status_at;
+    }
     request("tools/call", { name: "confirm_proposal", arguments: args })
       .then(function (res) {
         var sc = (res && res.structuredContent) || {};

@@ -109,3 +109,75 @@ async def test_an_unchanged_status_applies(stack: Stack) -> None:
     code = await card_code(h, a, p["proposal_id"])
     done = await _press(h, a, p["proposal_id"], code, shown_status="")
     assert done["ok"] and done["state"] == "applied", done
+
+
+async def test_a_held_change_held_for_a_new_cause_records_it_shows_it_and_refuses_an_old_card(
+    stack: Stack,
+) -> None:
+    """Claude's #3 depends on its #1 and replaces ChatGPT's #2. The member rejects #1 (held), then
+    applies #2: #3 is now also held because applying it would change the deck twice. That cause is
+    recorded beside the first, shown on the card and the review page, and a card that showed only
+    the first cause is refused."""
+    from .test_decks_and_proxy import Browser
+
+    h, ark = stack.h, stack.ark
+    await linked_user(stack)
+    await _set_mode(h, "manual")
+    a, _ = await _app_token(h, "Claude")
+    b, _ = await _app_token(h, "ChatGPT")
+    first = await _propose(h, a, _add("Opt"))
+    theirs = await _propose(h, b, _add("Arcane Signet"))
+    new = await _propose(
+        h,
+        a,
+        _add("Delver of Secrets"),
+        depends_on=[first["proposal_id"]],
+        replaces=[theirs["proposal_id"]],
+    )
+    pid = new["proposal_id"]
+    code = await card_code(h, a, pid)
+    structured(await call(h, a, "reject_proposal", {"proposal_id": first["proposal_id"]}))
+    shown = structured(await call(h, a, "get_proposal", {"proposal_id": pid}))
+    assert shown["status"] == "held" and shown["status_reason"] == "It depends on #1, which you rejected."
+    tb = await card_code(h, b, theirs["proposal_id"])
+    assert (await _press(h, b, theirs["proposal_id"], tb))["state"] == "applied"
+    now = structured(await call(h, a, "get_proposal", {"proposal_id": pid}))
+    assert now["status_reason"] == (
+        "It depends on #1, which you rejected. It would replace #2, which was applied."
+    ), now
+    assert now["press_reason"] == "would replace #2, which was applied"
+    assert now["status_at"] >= shown["status_at"]
+    before = _qty(ark, "Delver of Secrets")
+    got = await _press(h, a, pid, code, shown_status="held", shown_status_at=shown["status_at"] - 1)
+    assert got["error"] == "now_held" and got["status_reason"] == now["status_reason"], got
+    assert _qty(ark, "Delver of Secrets") == before
+    # the review page says both causes
+    br = Browser(h)
+    try:
+        await br.login()
+        page = (await br.http.get(f"/proposals/{pid}")).text
+    finally:
+        await br.aclose()
+    assert (
+        "<dt>Held</dt><dd>It depends on #1, which you rejected. It would replace #2, which was applied.</dd>"
+    ) in page
+    # a card showing both causes applies it (the member's own press)
+    done = await _press(h, a, pid, code, shown_status="held", shown_status_at=now["status_at"])
+    assert done["ok"] and done["state"] == "applied", done
+
+
+async def test_a_held_change_records_each_cause_once(stack: Stack) -> None:
+    """Each cause is recorded once, newest last; a new state of the same first step takes the
+    place of its earlier one."""
+    from mtg_gateway.board import CAUSES_SEP, add_hold
+
+    h = stack.h
+    await linked_user(stack)
+    await _set_mode(h, "manual")
+    a, _ = await _app_token(h, "Claude")
+    p = await _propose(h, a, _add("Opt"))
+    add_hold(h.db, SUB, p["proposal_id"], "depends:x:failed")
+    add_hold(h.db, SUB, p["proposal_id"], "replaces:y:applied")
+    add_hold(h.db, SUB, p["proposal_id"], "depends:x:rejected")  # the same first step, a new state
+    row = h.db.get_proposal(p["proposal_id"], SUB)
+    assert row["status_reason"].split(CAUSES_SEP) == ["replaces:y:applied", "depends:x:rejected"]

@@ -89,6 +89,34 @@ def what_changed(old_rows: list[dict[str, Any]] | None, new_rows: list[dict[str,
     return text if len(text) <= WHAT_CHANGED_MAX else text[: WHAT_CHANGED_MAX - 3] + "..."
 
 
+# A held note keeps every cause it was held for, newest last, joined by this (each cause is
+# ``depends:<id>:<state>`` or ``replaces:<id>:applied``); every new cause moves its status_at.
+CAUSES_SEP = "|"
+
+
+def hold_causes(reason: Any) -> list[str]:
+    """The causes a hold's stored reason records, oldest first."""
+    return [c for c in str(reason or "").split(CAUSES_SEP) if c]
+
+
+def _cause_key(cause: str) -> str:
+    kind, _, rest = cause.partition(":")
+    return kind + ":" + rest.split(":", 1)[0]
+
+
+def add_hold(db: Any, sub: str, proposal_id: str, cause: str) -> None:
+    """Hold a waiting note for ``cause`` as well as for whatever already holds it. A cause about
+    the same note as one it records (another state of the same first step) takes its place."""
+    row = db.get_proposal(proposal_id, sub)
+    if row is None or row.get("state") != "pending":
+        return
+    causes = hold_causes(row.get("status_reason")) if row.get("status") == "held" else []
+    if cause in causes:
+        return
+    causes = [c for c in causes if _cause_key(c) != _cause_key(cause)] + [cause]
+    db.set_hold(proposal_id, sub, CAUSES_SEP.join(causes))
+
+
 def settle(svc: Any, sub: str, proposal_id: str, state: str) -> None:
     """After a note was applied, rejected, withdrawn, failed or came back: hold the notes that
     depend on it, or lift their hold (K6), and bring back what a rejected or withdrawn
@@ -98,9 +126,10 @@ def settle(svc: Any, sub: str, proposal_id: str, state: str) -> None:
         if state in HOLDING_STATES:
             for dep in db.dependents(sub, proposal_id):
                 note = db.get_proposal(proposal_id, sub) or {}
-                db.set_hold(
-                    dep,
+                add_hold(
+                    db,
                     sub,
+                    dep,
                     hold_reason({"id": proposal_id, "board_no": note.get("board_no"), "state": state}),
                 )
             if state in ("rejected", "withdrawn"):
@@ -117,7 +146,11 @@ def settle(svc: Any, sub: str, proposal_id: str, state: str) -> None:
             for dep in db.dependents(sub, proposal_id):
                 row = db.get_proposal(dep, sub)
                 if row and row.get("status") == "held" and not _still_blocked(db, sub, dep):
-                    db.set_hold(dep, sub, None)
+                    # its first steps no longer hold it; a replaced note applied on its own still does
+                    causes = hold_causes(row.get("status_reason"))
+                    rest = [c for c in causes if not c.startswith("depends:")]
+                    if rest != causes:
+                        db.set_hold(dep, sub, CAUSES_SEP.join(rest) if rest else None)
     except Exception:
         logger.exception("settling the links of a proposal failed")
 
@@ -149,8 +182,9 @@ def hold_replacing(svc: Any, sub: str, proposal_id: str) -> None:
         if link["other_id"] != proposal_id or link["kind"] != "replaces":
             continue
         new = db.get_proposal(link["proposal_id"], sub)
-        if new is not None and new["state"] == "pending" and new.get("status") != "held":
-            db.set_hold(new["id"], sub, replaced_hold_reason(proposal_id))
+        if new is not None and new["state"] == "pending":
+            # also when it is held already: the member must see this cause too
+            add_hold(db, sub, new["id"], replaced_hold_reason(proposal_id))
 
 
 # What the member reads about a replace (proofread A2, finding 2; WORDING-3-r2 item 2).
@@ -225,16 +259,9 @@ def link_note(db: Any, sub: str, row: dict[str, Any]) -> str:
     return WAITS_FOR.format(first=number(first)) if first is not None else ""
 
 
-def status_text(db: Any, sub: str, row: dict[str, Any]) -> str:
-    """A waiting note's status in words, for the pages, the card and the assistant: why it is
-    "held" (Q27j; Q134 A8 "which you rejected"), what "updated" means, or why it "needs a look"
-    (recheck.py)."""
-    from . import recheck
-
-    status = row.get("status")
-    reason = str(row.get("status_reason") or "")
-    if status == "held" and reason.startswith("depends:"):
-        _tag, other, closed = (reason.split(":", 2) + ["", ""])[:3]
+def _cause_text(db: Any, sub: str, cause: str) -> str:
+    if cause.startswith("depends:"):
+        _tag, other, closed = (cause.split(":", 2) + ["", ""])[:3]
         no = db.proposal_board_numbers(sub, [other]).get(other)
         words = {
             "rejected": "you rejected",
@@ -244,10 +271,26 @@ def status_text(db: Any, sub: str, row: dict[str, Any]) -> str:
         }
         which = f"#{no}" if no else "another change"
         return f"It depends on {which}, which {words.get(closed, closed)}."
-    if status == "held" and reason.startswith("replaces:"):
-        other = reason.split(":", 2)[1] if reason.count(":") >= 1 else ""
-        no = db.proposal_board_numbers(sub, [other]).get(other)
-        return f"It would replace {f'#{no}' if no else 'a change'}, which was applied."
+    other = cause.split(":", 2)[1] if cause.count(":") >= 1 else ""
+    no = db.proposal_board_numbers(sub, [other]).get(other)
+    return f"It would replace {f'#{no}' if no else 'a change'}, which was applied."
+
+
+def status_text(db: Any, sub: str, row: dict[str, Any]) -> str:
+    """A waiting note's status in words, for the pages, the card and the assistant: why it is
+    "held" (Q27j; Q134 A8 "which you rejected"), what "updated" means, or why it "needs a look"
+    (recheck.py)."""
+    from . import recheck
+
+    status = row.get("status")
+    reason = str(row.get("status_reason") or "")
+    if (
+        status == "held"
+        and hold_causes(reason)
+        and all(c.startswith(("depends:", "replaces:")) for c in hold_causes(reason))
+    ):
+        # every cause it is held for, in the order they came
+        return " ".join(_cause_text(db, sub, c) for c in hold_causes(reason))
     if status == "updated":
         return "The deck changed since this was made; it still does exactly what was reviewed."
     return recheck.reason_text(reason)
