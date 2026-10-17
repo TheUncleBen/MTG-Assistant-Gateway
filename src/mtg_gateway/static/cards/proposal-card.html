@@ -71,6 +71,9 @@ button.danger:disabled{color:var(--red)}
 .also ol{margin:6px 0 0;padding-left:22px;font-size:.8125rem}
 .also ol li{margin:3px 0;overflow-wrap:anywhere}
 .also ol .why{display:block;font-size:.75rem;color:var(--muted)}
+/* What an Apply all did not send, each with why. */
+.notsent{margin:8px 0 0;padding-left:22px;font-size:.8125rem}
+.notsent li{margin:3px 0;overflow-wrap:anywhere}
 </style>
 </head>
 <body>
@@ -92,6 +95,7 @@ button.danger:disabled{color:var(--red)}
     <div class="actions"><button type="button" class="danger" id="reject-go">Reject this proposal</button><button type="button" id="reject-cancel">Keep it open</button></div>
   </div>
   <div class="status hidden" id="status" role="status" aria-live="polite" tabindex="-1"></div>
+  <ul class="notsent hidden" id="not-sent" aria-label="Not sent"></ul>
 </div>
 <script>
 /*@BRIDGE@*/
@@ -233,6 +237,10 @@ button.danger:disabled{color:var(--red)}
       return p.created_by === "browser"
         ? "This change was made in your browser, so this card can't approve it. Approve it in your browser."
         : maker + " made this change, so this card can't approve it. Approve it on " + maker + "'s card or in your browser.";
+    }
+    if (p.press_reason && p.status === "held" && /^(would replace .*, which was applied|is held because)/.test(String(p.press_reason))) {
+      // the Held line above already says why: say only what it means, once
+      return "It needs your press" + (p.approval_mode === "auto" ? " even in Full auto" : "") + ".";
     }
     if (p.press_reason) {
       // it waits for the member's own press in every mode: say why
@@ -637,6 +645,12 @@ button.danger:disabled{color:var(--red)}
           })
           .catch(done);
         function done() {
+          // each change not sent, with why, as the Proposals page's result lists them
+          var ns = $("not-sent"); ns.replaceChildren();
+          (sc.not_sent || []).forEach(function (c) {
+            ns.appendChild(el("li", "", (c.board_no ? "#" + c.board_no + " " : "") + String(c.summary || c.proposal_id) + (c.why ? ": " + c.why : "")));
+          });
+          ns.className = ns.children.length ? "notsent" : "notsent hidden";
           setStatus(summary + (sc.state === "applying" ? " Still applying; the Proposals page shows how it goes." : ""), (sc.failed || []).length ? "err" : "ok");
           if (sc.result_url && (sc.applied || []).length) {
             var u = el("a", "link", "Undo or see the details"); u.href = "#";

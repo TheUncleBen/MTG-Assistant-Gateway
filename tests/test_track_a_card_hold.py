@@ -181,3 +181,56 @@ async def test_a_held_change_records_each_cause_once(stack: Stack) -> None:
     add_hold(h.db, SUB, p["proposal_id"], "depends:x:rejected")  # the same first step, a new state
     row = h.db.get_proposal(p["proposal_id"], SUB)
     assert row["status_reason"].split(CAUSES_SEP) == ["replaces:y:applied", "depends:x:rejected"]
+
+
+async def test_a_new_cause_in_the_same_second_still_moves_the_hold_time(stack: Stack, monkeypatch) -> None:
+    """Hold times are whole seconds: a cause added in the same second as the one a card showed
+    still moves the time forward, so that card's press is refused (both ways a cause is added)."""
+    import time as _time
+
+    h = stack.h
+    await linked_user(stack)
+    await _set_mode(h, "manual")
+    a, _ = await _app_token(h, "Claude")
+    b, _ = await _app_token(h, "ChatGPT")
+    first = await _propose(h, a, _add("Opt"))
+    theirs = await _propose(h, b, _add("Arcane Signet"))
+    new = await _propose(
+        h, a, _add("Delver of Secrets"), depends_on=[first["proposal_id"]], replaces=[theirs["proposal_id"]]
+    )
+    pid = new["proposal_id"]
+    code = await card_code(h, a, pid)
+    frozen = float(int(_time.time()))
+    monkeypatch.setattr(_time, "time", lambda: frozen)
+    structured(await call(h, a, "reject_proposal", {"proposal_id": first["proposal_id"]}))
+    shown = h.db.get_proposal(pid, SUB)
+    assert shown["status"] == "held"
+    # the replaced change applied without its own links being settled: the lazy hold adds it
+    with h.db.tx() as c:
+        c.execute("UPDATE proposals SET state = 'applied' WHERE id = ?", (theirs["proposal_id"],))
+    h.db.hold_blocked(SUB)
+    now = h.db.get_proposal(pid, SUB)
+    assert "replaces:" in now["status_reason"] and now["status_at"] > shown["status_at"], now
+    monkeypatch.undo()
+    before = _qty(stack.ark, "Delver of Secrets")
+    got = await _press(h, a, pid, code, shown_status="held", shown_status_at=shown["status_at"])
+    assert got["error"] == "now_held", got
+    assert _qty(stack.ark, "Delver of Secrets") == before
+
+
+async def test_a_cause_added_in_the_same_second_moves_the_hold_time(stack: Stack, monkeypatch) -> None:
+    import time as _time
+
+    from mtg_gateway.board import add_hold
+
+    h = stack.h
+    await linked_user(stack)
+    await _set_mode(h, "manual")
+    a, _ = await _app_token(h, "Claude")
+    p = await _propose(h, a, _add("Opt"))
+    frozen = float(int(_time.time()))
+    monkeypatch.setattr(_time, "time", lambda: frozen)
+    add_hold(h.db, SUB, p["proposal_id"], "depends:x:failed")
+    one = h.db.get_proposal(p["proposal_id"], SUB)["status_at"]
+    add_hold(h.db, SUB, p["proposal_id"], "replaces:y:applied")
+    assert h.db.get_proposal(p["proposal_id"], SUB)["status_at"] > one

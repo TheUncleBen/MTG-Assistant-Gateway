@@ -2528,12 +2528,13 @@ class Database:
             "AND COALESCE(status, '') <> 'held' "
         )
         # one held already gets the new cause added to the ones it records (board.add_hold), so
-        # the member sees it and status_at moves
+        # the member sees it and status_at moves, by at least a second even within the same one
         again = "WHERE owner_sub = :sub AND state = 'pending' AND expires_at >= :now AND status = 'held' "
 
         def added(cause: str) -> str:
             return (
-                f"UPDATE proposals SET status_at = :now, status_reason = status_reason || '|' || ({cause}) "
+                "UPDATE proposals SET status_at = MAX(:now, COALESCE(status_at, 0) + 1), "
+                f"status_reason = status_reason || '|' || ({cause}) "
                 f"{again}AND instr('|' || COALESCE(status_reason, '') || '|', '|' || ({cause}) || '|') = 0 "
             )
 
@@ -2564,8 +2565,11 @@ class Database:
                     (now, proposal_id, owner_sub),
                 )
             else:
+                # a new hold, or a new cause of one, always moves status_at forward (a press that
+                # showed the earlier hold in the same second still counts as not having seen it)
                 cur = c.execute(
-                    "UPDATE proposals SET status = 'held', status_reason = ?, status_at = ? "
+                    "UPDATE proposals SET status = 'held', status_reason = ?, "
+                    "status_at = MAX(?, COALESCE(status_at, 0) + 1) "
                     "WHERE id = ? AND owner_sub = ? AND state = 'pending'",
                     (reason, now, proposal_id, owner_sub),
                 )

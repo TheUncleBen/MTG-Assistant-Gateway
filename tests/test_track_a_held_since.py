@@ -20,6 +20,7 @@ from .track_a_helpers import card_code
 
 SUB = "user-1"
 HELD = "It would replace #1, which was applied."
+HELD_SINCE_TEXT = "Not sent: it is held for a reason that came up after you saw it. "
 
 
 async def _replacement(stack: Stack) -> tuple:
@@ -80,7 +81,7 @@ async def test_apply_all_leaves_out_a_change_held_since_and_applies_the_rest(sta
     assert [c["proposal_id"] for c in got["applied"]] == [other], got
     assert h.db.get_proposal(other, SUB)["state"] == "applied"
     out = next(c for c in got["not_sent"] if c["proposal_id"] == pid)
-    assert out["why"] == "Not sent: it was held after this list was shown. " + HELD + " It is still waiting."
+    assert out["why"] == HELD_SINCE_TEXT + HELD + " It is still waiting."
     assert _qty(stack.ark, "Delver of Secrets") == before
     assert h.db.get_proposal(pid, SUB)["state"] == "pending"
 
@@ -151,8 +152,14 @@ async def test_the_review_page_refuses_a_change_held_after_it_was_opened(stack: 
         assert _qty(stack.ark, "Delver of Secrets") == before
         assert h.db.get_proposal(pid, SUB)["state"] == "pending"
         page = (await br.http.get(r.headers["location"])).text
-        assert "This change was held after you opened this page, so nothing was sent." in page
+        assert (
+            "This change is held for a reason that came up after you opened this page, so nothing was sent."
+            in page
+        )
         assert f"<dt>Held</dt><dd>{HELD}</dd>" in page
+        # the Held row says why; the row after it does not say it again
+        assert "<dt>Waits for you</dt><dd>It needs your press.</dd>" in page, page
+        assert "This one would replace" not in page
         # the page now shows the hold: the member's press applies it
         form = await br.review_form(url)
         assert form["seen_status"] == "held"
@@ -192,7 +199,7 @@ async def test_the_proposals_confirm_leaves_out_a_change_held_after_it_was_drawn
         )
         assert r.status_code == 303 and r.headers["location"].startswith("/proposals/applied/"), r.text
         result = (await br.http.get(r.headers["location"])).text
-        assert "Not sent: it was held after this list was shown. " + HELD in result, result
+        assert HELD_SINCE_TEXT + HELD in result, result
         assert h.db.get_proposal(other, SUB)["state"] == "applied"
         assert h.db.get_proposal(pid, SUB)["state"] == "pending"
         assert _qty(stack.ark, "Delver of Secrets") == before

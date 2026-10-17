@@ -245,11 +245,17 @@ button.danger:disabled{color:var(--red)}
     return out;
   }
 
+  // the gateway's reason starts "Not sent: …", which this line has said already
+  function whyAfter(why) {
+    var w = String(why).replace(/^Not sent:\s*/, "");
+    return w.charAt(0).toUpperCase() + w.slice(1);
+  }
+
   var polls = 0;
   function showResult(sc) {
     var rl = $("res-list"); rl.replaceChildren();
     (sc.applied || []).forEach(function (c) { decided[c.proposal_id] = { text: "Applied", kind: "ok" }; rl.appendChild(el("li", "", "Applied: " + label(c))); });
-    (sc.not_sent || []).forEach(function (c) { if (decided[c.proposal_id]) return; rl.appendChild(el("li", "", "Not sent: " + label(c) + (c.why ? ". " + c.why : ""))); });
+    (sc.not_sent || []).forEach(function (c) { if (decided[c.proposal_id]) return; rl.appendChild(el("li", "", "Not sent: " + label(c) + (c.why ? ". " + whyAfter(c.why) : ""))); });
     (sc.failed || []).forEach(function (c) { decided[c.proposal_id] = { text: "Failed", kind: "err" }; rl.appendChild(el("li", "", "Failed: " + label(c) + (c.why ? ". " + c.why : ""))); });
     $("result").className = rl.children.length ? "" : "hidden";
     var running = sc.state === "applying";
@@ -300,6 +306,7 @@ button.danger:disabled{color:var(--red)}
           if (sc.error === "now_held") {
             // held since this card was drawn: its row shows the hold, the next press may apply it
             x.status = "held"; x.status_reason = String(sc.status_reason || ""); delete x.status_text;
+            x.link_note = String(sc.replace_note || ""); // as it is now, not as when drawn
             if (typeof sc.status_at === "number") x.status_at = sc.status_at;
             B.setStatus("This change is now held, so nothing was approved. Read why on its row, then press Approve again if you still want it.", "err");
             draw();
