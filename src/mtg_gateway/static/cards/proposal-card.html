@@ -758,6 +758,8 @@ button.danger:disabled{color:var(--red)}
         }
         heldCode = sc.state === "applying" ? approval : null;
         approval = null; busy = false;
+        // this change was decided: an earlier Apply all's "not sent" list no longer fits it
+        var ns = $("not-sent"); ns.replaceChildren(); ns.className = "notsent hidden";
         render({ structuredContent: Object.assign({}, proposal, sc), _meta: {} });
         if (sc.state === "applying") {
           tellModel("The user pressed Approve on the proposal card; proposal " + pid + " is still being applied to Archidekt (large change). The card shows its progress.");
