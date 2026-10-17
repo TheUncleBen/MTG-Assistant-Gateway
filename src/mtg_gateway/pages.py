@@ -808,16 +808,15 @@ def _account_body(state: Any, sub: str, csrf: str | None, *, disclosure_read: bo
     who = html.escape(user.get("preferred_username") or user.get("email") or sub)
     csrf_in = f"<input type='hidden' name='csrf' value='{html.escape(csrf or '')}'>"
     writes = (
-        "<span class='badge ok'>enabled</span>"
-        if info["writes_enabled"]
-        else "<span class='badge'>disabled</span>"
+        "<span class='badge ok'>on</span>" if info["writes_enabled"] else "<span class='badge'>off</span>"
     )
     out = [
         "<div class='card'><dl class='meta'>"
         f"<dt>Signed in as</dt><dd><strong>{who}</strong></dd>"
-        f"<dt>Deck writes</dt><dd>{writes}</dd></dl>"
-        "<p class='muted small'>Deck writes are switched on or off for the whole gateway by its "
-        "operator. While they are off, proposals can be reviewed but not applied.</p>"
+        f"<dt>Archidekt writes</dt><dd>{writes}</dd></dl>"
+        # Q141 item 7A: the same words as Track A's writes-off texts, and no variable names
+        "<p class='muted small'>Archidekt writes are switched on or off for the whole gateway by the "
+        "person who runs it. While they are off, changes can be reviewed but not applied.</p>"
         f"{_identity_details(user)}"
         "<div class='form-actions'>"
         "<a class='btn' href='/install?for=skill'>Get the assistant skill for Claude or ChatGPT</a>"
