@@ -96,8 +96,8 @@ Updating to 0.7.29 from an earlier version may need a step first: see
 In Portainer: **Stacks** → `mtg`. With a pinned version (for example
 `0.6.6`), change `MTG_TAG` first ([VERSIONS.md](VERSIONS.md)); with
 `MTG_TAG=latest` the update pulls the newest version. Then click **Update the
-stack** (with the Repository build method, **Pull and redeploy**), and in the
-box that asks "Are you sure?" make sure **Re-pull image and redeploy** is on,
+stack** (if your stack uses the Repository build method, the button is called
+**Pull and redeploy**), and in the box that asks “Are you sure?” make sure **Re-pull image and redeploy** is on,
 then click **Update**. Or from the command line:
 
 ```bash

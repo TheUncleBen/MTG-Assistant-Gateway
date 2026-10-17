@@ -164,10 +164,17 @@ body.picker-open{overflow:hidden}
 /* camera panel: one column, controls stick to the bottom on phones */
 .scan .cam-panel{display:flex;flex-direction:column;gap:.75rem}
 .scan .camera{position:relative;background:#000;border-radius:var(--s-radius-lg);overflow:hidden;
-  aspect-ratio:3/4;max-height:54vh;width:100%;margin:0 auto}
+  aspect-ratio:3/4;max-height:54vh;width:min(100%,calc(54vh * 3 / 4));margin:0 auto}
 .scan .camera video{width:100%;height:100%;object-fit:cover;display:block}
 /* once there is a match to confirm, the preview gives up room so the result shows above the controls */
-/* Shrinking by width keeps the 3:4 box and the guide's 78% width, which scan.js relies on for the crop. */
+/* Shrinking by width keeps the 3:4 box and the guide's 78% width, which scan.js relies on for the crop
+   (and keeps the guide's card name box inside the preview). The one-column rules apply below a 700 px
+   window and, at large text, wherever the scan area is too narrow for two columns: the same block
+   twice, as CSS can't join a media and a container query with "or". */
+@media (max-width:699px){
+  .scan .cam-panel.has-result .camera{width:min(100%,calc(30vh * 3 / 4));max-height:30vh}
+  .scan .cam-panel.has-result .camera .hint{display:none}
+}
 @container (width < 42.25em){
   .scan .cam-panel.has-result .camera{width:min(100%,calc(30vh * 3 / 4));max-height:30vh}
   .scan .cam-panel.has-result .camera .hint{display:none}
@@ -255,6 +262,13 @@ body.picker-open{overflow:hidden}
 .scan .cam-ctl input[type=range]:focus-visible{outline:2px solid var(--s-accent);outline-offset:2px}
 @media (max-width:420px){ .scan .cam-ctl .ctl{grid-template-columns:auto minmax(0,1fr) 3.4rem 44px} .scan .cam-ctl .lbl{display:none} }
 /* on phones the sliders must fit between the preview and the sticky control bar */
+@media (max-width:699px){
+  .scan .cam-panel:has(.cam-ctl:not([hidden])) .camera{max-height:40vh;width:min(100%,calc(40vh * 3 / 4))}
+  .scan .cam-panel:has(.cam-ctl:not([hidden])) .camera .hint{display:none}
+  /* while Auto scanning the preview shrinks so the add toast and Undo sit clear of the shutter bar */
+  .scan .cam-panel:has(#auto-switch[aria-checked=true]) .camera{max-height:40vh;width:min(100%,calc(40vh * 3 / 4))}
+  .scan .cam-panel:has(#auto-switch[aria-checked=true]) .camera .hint{display:none}
+}
 @container (width < 42.25em){
   .scan .cam-panel:has(.cam-ctl:not([hidden])) .camera{max-height:40vh;width:min(100%,calc(40vh * 3 / 4))}
   .scan .cam-panel:has(.cam-ctl:not([hidden])) .camera .hint{display:none}
@@ -263,19 +277,20 @@ body.picker-open{overflow:hidden}
   .scan .cam-panel:has(#auto-switch[aria-checked=true]) .camera .hint{display:none}
 }
 
-/* two columns from an unfolded foldable up (a 700 px window at the normal text size): camera
-   left, status and result right */
-@container (width >= 42.25em){
+/* two columns from an unfolded foldable up (a 700 px window), camera left, status and result right,
+   when the scan area also has room for them in its own text size: at 200% text a 717-900 px window
+   keeps one column */
+@media (min-width:700px){ @container (width >= 42.25em){
   .scan .cam-panel{display:grid;grid-template-columns:minmax(0,22rem) minmax(0,1fr);grid-template-areas:
     "camera opts" "camera status" "camera unid" "camera result" "ctl result" "controls result";align-items:start;column-gap:1.25rem}
   .scan .unid{grid-area:unid;align-items:flex-start}
   .scan .scan-opts{grid-area:opts}
   .scan .cam-ctl{grid-area:ctl}
-  .scan .camera{grid-area:camera;max-height:none}
+  .scan .camera{grid-area:camera;max-height:none;width:100%}
   .scan .controls{grid-area:controls;position:static;margin:0;padding:.5rem 0 0;border:0;background:transparent}
   .scan #cam-status{grid-area:status;text-align:left}
   .scan #result{grid-area:result}
-}
+} }
 
 /* match result: the confirm or fix step */
 .scan .result{display:flex;gap:.9rem;align-items:flex-start;border-left:5px solid var(--s-border)}

@@ -90,7 +90,8 @@ def test_stack_order_by_keyboard_is_kept_and_reset(server: Server) -> None:
         assert len(names) >= 3
         grip = page.locator(f".stack[data-group='{names[1]}'] .stackgrip")
         grip.focus()
-        page.keyboard.press("ArrowUp")
+        with page.expect_response(_stack_saved):
+            page.keyboard.press("ArrowUp")
         now = page.eval_on_selector_all(".deckview .stack", "l => l.map(s => s.dataset.group)")
         assert now[:2] == [names[1], names[0]]
         assert grip.evaluate("e => document.activeElement === e")
@@ -107,7 +108,8 @@ def test_stack_order_by_keyboard_is_kept_and_reset(server: Server) -> None:
         assert page2.eval_on_selector_all(".deckview .stack", "l => l.map(s => s.dataset.group)") == now
         assert "this device" not in page2.locator(".stack-reset").inner_text()
         other.close()
-        page.locator(".stack-reset").click()
+        with page.expect_response(_stack_saved):
+            page.locator(".stack-reset").click()
         back = page.eval_on_selector_all(".deckview .stack", "l => l.map(s => s.dataset.group)")
         assert back == names
         page.reload(wait_until="networkidle")
@@ -177,6 +179,12 @@ def test_after_forget_a_devices_old_choices_are_never_shown(server: Server) -> N
 ORDER = "() => [...document.querySelectorAll('.deckview .stack')].map(s => s.dataset.group)"
 
 
+def _stack_saved(r) -> bool:
+    """The answer to the stack order's save (prefs.js POST /api/v1/prefs). A test that reloads
+    after a move waits for it: under load the reload can otherwise be served before the save."""
+    return r.url.endswith("/api/v1/prefs") and '"stack:42:' in (r.request.post_data or "")
+
+
 def _poll(page, js: str, timeout_ms: int = 6000) -> None:
     """Wait for a condition while a pointer or finger is held down (no clicks, no locators)."""
     for _ in range(timeout_ms // 50):
@@ -221,7 +229,8 @@ def test_stack_drag_by_mouse_scrolls_on_and_lands_where_the_bar_shows(server: Se
         # upright, after the last stack in its row
         assert "scale(4," in bar.evaluate("e => e.style.transform")
         _shot(page, "stack-drag-mouse-1440")
-        page.mouse.up()
+        with page.expect_response(_stack_saved):
+            page.mouse.up()
         now = page.evaluate(ORDER)
         assert now == [n for n in names if n != "Commander"] + ["Commander"]
         assert page.locator(".stackdrop, .stacktag").count() == 0
@@ -281,7 +290,8 @@ def test_stack_and_card_drag_by_touch_scroll_on_near_the_edge(server: Server) ->
         _touch(cdp, "touchMove", x, t + 20)  # on Instant's header: before it
         page.wait_for_timeout(100)
         _shot(page, "stack-drag-touch-390")
-        _touch(cdp, "touchEnd")
+        with page.expect_response(_stack_saved):
+            _touch(cdp, "touchEnd")
         page.wait_for_timeout(100)
         now = page.evaluate(ORDER)
         assert now.index("Commander") == now.index("Instant") - 1 and now[0] != "Commander"
