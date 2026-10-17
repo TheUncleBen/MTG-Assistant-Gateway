@@ -230,3 +230,71 @@ def test_a_down_vote_shows_as_voted_down_and_can_be_taken_back(server: Server) -
             assert errors == []
         finally:
             browser.close()
+
+
+def test_with_writes_off_the_unknown_follows_unfollow_is_off_too(tmp_path, monkeypatch) -> None:
+    """Proofread of WORDING-4: with Archidekt writes switched off, the Unfollow offered beside
+    Follow (follow state not known) is off like Follow, with the same reason; the server refuses
+    a follow sent anyway, and nothing reaches Archidekt."""
+    from playwright.sync_api import sync_playwright
+
+    from . import test_social_browser
+
+    exe = _chromium_path()
+    if exe == "missing":
+        pytest.skip("no Chromium available for Playwright")
+    real = test_social_browser.make_settings
+    monkeypatch.setattr(
+        test_social_browser, "make_settings", lambda *a, **k: real(*a, **{**k, "writes_enabled": False})
+    )
+    server = test_social_browser.Server(tmp_path)
+    server.ark.private.discard(43)
+    server.start()
+    try:
+        sid = server.sign_in_and_link()
+        with sync_playwright() as p:
+            browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+            try:
+                ctx = browser.new_context(
+                    viewport={"width": 412, "height": 915}, is_mobile=True, has_touch=True
+                )
+                ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
+                page = ctx.new_page()
+                page.route(
+                    "**/social/api/users/*/follow",
+                    lambda r: (
+                        r.fulfill(
+                            status=200,
+                            content_type="application/json",
+                            body='{"ok":true,"self":false,"following":false,"unknown":true}',
+                        )
+                        if r.request.method == "GET"
+                        else r.continue_()
+                    ),
+                )
+                for url, scope in (
+                    (f"{server.base}/decks/43", ".banner"),
+                    (f"{server.base}/users/amy", ".profile"),
+                ):
+                    page.goto(url, wait_until="networkidle")
+                    unfollow = page.locator(f"{scope} [data-social=unfollow]")
+                    unfollow.wait_for(timeout=5000)
+                    follow = page.locator(f"{scope} [data-social=follow]")
+                    assert follow.evaluate("e => e.disabled") and unfollow.evaluate("e => e.disabled"), url
+                    assert unfollow.get_attribute("title") == follow.get_attribute("title"), url
+                    note = page.locator(f"{scope} p.note")
+                    assert note.get_attribute("role") == "status", url
+                sent = page.evaluate(
+                    "async () => { const t = document.querySelector('input[name=csrf]');"
+                    " const r = await fetch('/social/api/users/78/follow', {method: 'POST',"
+                    " headers: {'Content-Type': 'application/json', 'X-CSRF-Token': t ? t.value : ''},"
+                    " body: JSON.stringify({on: false})});"
+                    " return [r.status, await r.text()]; }"
+                )
+                assert sent[0] >= 400 and "switched off" in sent[1], sent
+                writes = [c for c in server.ark.calls if c[0] != "GET" and "rest-auth" not in c[1]]
+                assert writes == [], writes
+            finally:
+                browser.close()
+    finally:
+        server.stop()

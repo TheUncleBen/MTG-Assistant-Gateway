@@ -83,7 +83,7 @@ def _comment_text(text: Any) -> str:
     if not clean:
         raise DeckError("invalid", refusals.EMPTY_COMMENT)  # Q141 item 7A
     if len(clean) > MAX_COMMENT:
-        raise DeckError("invalid", f"a comment can be at most {MAX_COMMENT} characters")
+        raise DeckError("invalid", refusals.comment_too_long(MAX_COMMENT))
     return clean
 
 
@@ -165,16 +165,16 @@ async def follow_target(decks: DeckService, sub: str, username: Any) -> tuple[in
     public decks is not found."""
     want = clean_text(str(username or "")).lstrip("@")
     if not want:
-        raise DeckError("invalid", "username is required: the Archidekt username of the person")
+        raise DeckError("invalid", "Give the Archidekt username of the person to follow.")
     found = await decks.user_profile(sub, want)
     name = clean_text(str((found or {}).get("username") or ""))
     if not found or not str(found.get("id") or "").isdigit() or name.casefold() != want.casefold():
         # wording draft (WORDING-4)
         raise DeckError(
             "not_found",
-            f"No Archidekt user called {want} with public decks was found. The gateway finds people "
-            "through their public decks, so someone with none can't be followed from here: follow "
-            f"them on Archidekt ({profile_url(want)}).",
+            f"No Archidekt user called {want} with public decks was found. Check the spelling. The "
+            "gateway finds people only through their public decks, so someone with none can't be "
+            f"followed from here: follow them on Archidekt instead ({profile_url(want)}).",
             follow_url=profile_url(want),
         )
     return int(found["id"]), name
@@ -191,11 +191,7 @@ async def collaborator_by_hand(
         raise DeckError("invalid", "Pick add or remove.")
     # Before 0.7.24 this form made a proposal, which the writes switch held back; keep it so.
     if not decks.settings.writes_enabled:
-        raise DeckError(
-            "writes_disabled",
-            "Deck writes are switched off on this gateway (MTG_WRITES_ENABLED is false); nothing was "
-            "sent to Archidekt.",
-        )
+        raise DeckError("writes_disabled", refusals.WRITES_OFF)  # Q141 item 7A
     social = _social(decks)
     social._me(sub)
     deck = await decks.get_own_deck(sub, _clean_deck_id(str(deck_id or "")))
@@ -270,7 +266,7 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
         row["text"] = ("Follow " if on else "Stop following ") + f"{who} on Archidekt"
         if state.get("unknown"):
             # Q141 item 4A (wording draft, WORDING-4)
-            row["text"] += " (the gateway could not check whether you follow them already)"
+            row["text"] += " (the gateway could not check whether you already follow them)"
         elif state["following"] == on:
             row["text"] += " (already the case; applying changes nothing)"
     elif action == "comment_post":
@@ -298,7 +294,7 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
             if own:
                 raise DeckError("invalid", refusals.OWN_COMMENT_VOTE)  # Q141 item 7A
             if found.get("archived"):
-                raise DeckError("invalid", "that comment is archived on Archidekt and takes no votes")
+                raise DeckError("invalid", refusals.ARCHIVED_COMMENT)
             vote = _vote(params.get("vote"))
             changes["vote"] = vote
             row["text"] = {

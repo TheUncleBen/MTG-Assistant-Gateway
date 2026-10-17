@@ -447,5 +447,5 @@ async def test_a_follow_the_gateway_could_not_check_says_so(stack: Stack, monkey
     finally:
         await b.aclose()
     p = structured(await call(h, token, "propose_deck_social", {"deck_id": "43", "action": "follow_owner"}))
-    assert p["rows"][0]["text"].endswith("(the gateway could not check whether you follow them already)"), p
+    assert p["rows"][0]["text"].endswith("(the gateway could not check whether you already follow them)"), p
     assert ark.follows.get("alice", set()) == set()

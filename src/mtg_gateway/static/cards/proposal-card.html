@@ -217,7 +217,7 @@ button.danger:disabled{color:var(--red)}
   function changeNote(p) {
     if (Number(p.version) <= 1 || !p.changed_by) return "";
     var what = String(p.what_changed || "").trim();
-    return "Version " + Number(p.version) + ", changed by " + creator(p.changed_by) + (what ? ": " + what : "") + (/[.!?]$/.test(what) ? "" : ".");
+    return "Version " + Number(p.version) + ", changed by " + appNames(p) + (what ? ": " + what : "") + (/[.!?]$/.test(what) ? "" : ".");
   }
   function modeNote(p) {
     if (p.state !== "pending" || !p.writes_enabled) return "";
@@ -373,10 +373,17 @@ button.danger:disabled{color:var(--red)}
       })
       .catch(function () { refreshing = false; });
   }
-  function leftOutText(n) {
-    return n === 1
-      ? "1 changed by another app is left out of Apply all: approve it on its own."
-      : n + " changed by another app are left out of Apply all: approve each on its own.";
+  // Q141 item 1B, wording drafts (WORDING-5): only where Apply all is offered, by number
+  function leftOutText(nos, n) {
+    var list = (nos || []).map(function (x) { return "#" + x; });
+    if (!list.length) return n === 1 ? "Apply all leaves out 1 change another app changed: approve it on its own."
+      : "Apply all leaves out " + n + " changes another app changed: approve each on its own.";
+    var named = list.length === 1 ? list[0] : list.slice(0, -1).join(", ") + " and " + list[list.length - 1];
+    return "Apply all leaves out " + named + ", which another app changed: approve " + (list.length === 1 ? "it" : "each") + " on its own.";
+  }
+  function appNames(p) {
+    var apps = (p.changed_by_apps && p.changed_by_apps.length ? p.changed_by_apps : [p.changed_by]).map(creator);
+    return apps.join(", then ");
   }
   function moved(p, sc) {
     return ["status", "status_reason", "press_reason", "replace_note"].some(function (k) {
@@ -531,7 +538,8 @@ button.danger:disabled{color:var(--red)}
     });
     // Q141 item 1B: a change another app rewrote is approved on its own (wording draft, WORDING-4)
     var out = Number(w.left_out || 0);
-    if (out) bits.push(leftOutText(out));
+    if (w.this_left_out) bits.push("Another app changed this one, so Apply all leaves it out: approve it here on its own.");
+    if (out) bits.push(leftOutText(w.left_out_nos, out));
     var n = applySet ? applySet.ids.length : 0;
     $("also-text").textContent = confirming
       ? "Apply these " + n + " changes to this deck, oldest first? Each is checked against the deck just before it is sent; one that no longer fits stays waiting."

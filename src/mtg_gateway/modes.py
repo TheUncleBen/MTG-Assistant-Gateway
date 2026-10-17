@@ -112,9 +112,9 @@ def auto_waits_text(big_rows: int = DEFAULT_BIG_EDIT_ROWS) -> str:
     """What still waits for a press in auto mode (O7, O8), as one sentence."""
     return (
         "Restoring a snapshot, a commander change, a new deck, an edit of more than "
-        f"{_rows(big_rows)}, making a deck public or unlisted, and a description edit that keeps "
-        "its formatting still wait for your press, and so does a held change, a change waiting "
-        "for another change first, or one another app had a hand in."
+        f"{_rows(big_rows)}, making a deck public (or unlisted, from private), and a description "
+        "edit that keeps bold text or links still wait for your press, and so does a held change, a "
+        "change waiting for another change first, or one another app had a hand in."
     )
 
 
@@ -285,12 +285,25 @@ def auto_waits(
         return None
     if kind == "details":
         wanted = changes if isinstance(changes, dict) else {}
-        if wanted.get("private") is False:
-            return "makes the deck public"
-        if wanted.get("unlisted") is True:
+        rank = {"private": 0, "unlisted": 1, "public": 2}
+        seen = next(
+            (
+                r
+                for r in rows or []
+                if isinstance(r, dict) and r.get("seen_after") in rank and r.get("seen_before") in rank
+            ),
+            None,
+        )
+        if seen is not None:
+            # any move toward more visible waits (review of 4103450); less visible applies
+            if rank[seen["seen_after"]] > rank[seen["seen_before"]]:
+                return f"makes the deck {seen['seen_after']}"
+        elif wanted.get("private") is False or wanted.get("unlisted") is False:
+            return "may make the deck public"  # a proposal stored before the rows said who sees it
+        elif wanted.get("unlisted") is True:
             return "makes the deck unlisted"
         if any(isinstance(r, dict) and r.get("after_doc") for r in rows or []):
-            return "keeps the description's formatting, which is seen on its review page first"
+            return "keeps bold text or links in the description, so you see how it will look first"
         return None
     if kind == "clone":
         return None

@@ -258,11 +258,15 @@ def deck_waiting(data: dict[str, Any], *, decks: Any, sub: str) -> tuple[dict[st
     full = [decks.db.get_proposal(r["id"], sub) or {} for r in mine]
     # Q141 item 1B: a change another app rewrote is approved on its own, never in "Apply all"
     items = [(r["id"], int(r.get("version") or 1)) for r in full if r and decks.in_apply_all(sub, r)]
-    info["left_out"] = sum(
-        1 for r in full if r and decks.card_may_approve(r) and not decks.in_apply_all(sub, r)
-    )
     if len(items) < 2 or not client:
         return info, None
+    # said only where an Apply all is offered, without the card's own change, by number
+    # (proofread of WORDING-4); the card of such a change says so of itself
+    out = [r for r in full if r and decks.card_may_approve(r) and not decks.in_apply_all(sub, r)]
+    info["left_out"] = sum(1 for r in out if r["id"] != pid)
+    info["left_out_nos"] = [r["board_no"] for r in out if r["id"] != pid and r.get("board_no")]
+    if any(r["id"] == pid for r in out):
+        info["this_left_out"] = True
     # what "Apply all" would apply, listed on its confirm before the press (Q134 item 8: a held
     # one says so; G16: an amended one says who changed it and what)
     keys = (
@@ -273,6 +277,7 @@ def deck_waiting(data: dict[str, Any], *, decks: Any, sub: str) -> tuple[dict[st
         "status_reason",
         "version",
         "changed_by",
+        "changed_by_apps",
         "what_changed",
     )
     in_set = {pid for pid, _v in items}

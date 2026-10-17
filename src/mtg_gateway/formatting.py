@@ -226,6 +226,10 @@ def keep_formatting(old: Any, new_text: str) -> tuple[str, int] | None:
             _push(out, op["insert"], op.get("attributes"))
     if not out or not isinstance(out[-1].get("insert"), str) or not out[-1]["insert"].endswith("\n"):
         _push(out, "\n")
+    if all(_plain_insert(op) for op in out):
+        # nothing kept: every bold or linked word and every picture went with changed text, so it
+        # is plain text as before 0.7.29, approved anywhere (proofread of WORDING-4, option a)
+        return None
     doc = json.dumps({"ops": out}, ensure_ascii=False, separators=(",", ":"))
     if rich_text(doc) != new_text:
         return None

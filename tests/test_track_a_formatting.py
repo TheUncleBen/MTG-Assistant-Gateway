@@ -7,6 +7,8 @@ from __future__ import annotations
 import json
 import time
 
+import pytest
+
 from mtg_gateway import batch, formatting
 from mtg_gateway.approve import APPROVAL_META_KEY
 from mtg_gateway.archidekt import rich_text
@@ -91,9 +93,11 @@ def test_a_long_description_rewritten_throughout_stays_quick() -> None:
     old = rich_text(doc)
     assert len(old) > 15_000
     started = time.monotonic()
-    for new in (old[::-1], "\n".join(x.replace("end", "stop") for x in old.split("\n"))):
-        out, _ = formatting.keep_formatting(doc, new)
-        assert rich_text(out) == new
+    # reversed, no bold word is left where it was: nothing is kept, so it is plain text (None)
+    assert formatting.keep_formatting(doc, old[::-1]) is None
+    new = "\n".join(x.replace("end", "stop") for x in old.split("\n"))
+    out, _ = formatting.keep_formatting(doc, new)
+    assert rich_text(out) == new and '"bold":true' in out
     assert time.monotonic() - started < 5, "the merge must not hold an apply up"
 
 
@@ -264,7 +268,10 @@ async def test_full_auto_waits_for_a_formatted_description_and_for_making_a_deck
         await call(h, token, "propose_deck_details", {"deck_id": "42", "details": {"description": new}})
     )
     assert kept["assistant_may_apply"] is False, kept
-    assert kept["risk_reason"] == "keeps the description's formatting, which is seen on its review page first"
+    assert (
+        kept["risk_reason"]
+        == "keeps bold text or links in the description, so you see how it will look first"
+    )
     out = structured(await call(h, token, "apply_proposal", {"proposal_id": kept["proposal_id"]}))
     assert out.get("state") != "applied", out
     ark.decks[42]["private"] = True
@@ -273,10 +280,6 @@ async def test_full_auto_waits_for_a_formatted_description_and_for_making_a_deck
     )
     assert public.get("assistant_may_apply") is False, public
     assert public["risk_reason"] == "makes the deck public"
-    unlisted = structured(
-        await call(h, token, "propose_deck_details", {"deck_id": "42", "details": {"unlisted": True}})
-    )
-    assert unlisted["assistant_may_apply"] is False and unlisted["risk_reason"] == "makes the deck unlisted"
     name = structured(
         await call(h, token, "propose_deck_details", {"deck_id": "42", "details": {"name": "Auto name"}})
     )
@@ -289,3 +292,52 @@ async def test_full_auto_waits_for_a_formatted_description_and_for_making_a_deck
         ]
         is False
     )
+
+
+def test_an_edit_that_keeps_no_formatting_is_plain_text() -> None:
+    """Proofread of WORDING-4, option a: when every bold or linked word changes, nothing is kept,
+    so the edit is plain text: no "keeps the bold text" note, and the card may approve it."""
+    doc = _doc(
+        {"insert": "Primer", "attributes": {"link": "https://example.com/p"}}, {"insert": " and notes\n"}
+    )
+    assert formatting.keep_formatting(doc, "Brand new words") is None
+    assert formatting.keep_formatting(doc, "Primer and more notes") is not None  # the link's word stays
+
+
+STATES = {"private": (True, False), "unlisted": (False, True), "public": (False, False)}
+RANK = {"private": 0, "unlisted": 1, "public": 2}
+
+
+@pytest.mark.parametrize("old", list(STATES))
+@pytest.mark.parametrize("new", list(STATES))
+async def test_full_auto_waits_for_any_move_toward_more_visible(stack: Stack, old: str, new: str) -> None:
+    """Review of 4103450 (High): Full auto compares who can see the deck before and after, so any
+    move toward more visible waits for the member's press (private to unlisted or public,
+    unlisted to public) and a move toward less visible applies. A deck marked both private and
+    unlisted is taken as private (not checked on Archidekt)."""
+    if old == new:
+        pytest.skip("no change")
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    await _set_mode(h, "auto")
+    ark.decks[42]["private"], ark.decks[42]["unlisted"] = STATES[old]
+    if STATES[old][0]:
+        ark.private.add(42)
+    else:
+        ark.private.discard(42)
+    private, unlisted = STATES[new]
+    p = structured(
+        await call(
+            h,
+            token,
+            "propose_deck_details",
+            {"deck_id": "42", "details": {"private": private, "unlisted": unlisted}},
+        )
+    )
+    assert p["ok"], p
+    if RANK[new] > RANK[old]:
+        assert p["assistant_may_apply"] is False and p["risk_reason"] == f"makes the deck {new}", p
+        refused = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
+        assert refused.get("state") != "applied", refused
+    else:
+        assert p["assistant_may_apply"] is True, p

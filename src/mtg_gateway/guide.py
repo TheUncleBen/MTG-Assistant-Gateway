@@ -221,8 +221,8 @@ def guide_body(
         "Edits are switched on here: what you save in the app goes to Archidekt at once, and an "
         "approved proposal from your assistant is applied for you."
         if writes_enabled
-        else "Edits are switched off on this gateway for now: your saves and your assistant's proposals "
-        "are kept as proposals and applied once the person running it turns writes on."
+        else "Archidekt writes are switched off on this gateway for now: your saves and your assistant's "
+        "proposals are kept as proposals and applied once the person running it turns writes on."
     )
     backup_box = (
         "The save bar has a tick box, <strong>Also keep a backup copy on Archidekt</strong>, off by "
@@ -446,7 +446,7 @@ def guide_body(
         "(the assistant applies small, low-risk edits itself and asks about the rest) or Full auto (it "
         "also applies bigger deck and collection edits and changes to a deck's details, except a "
         f"restore, a commander change, a new deck, an edit of more than {int(big_rows)} rows, making a "
-        "deck public or unlisted, and a description edit that keeps its formatting). "
+        "deck public (or unlisted, from private), and a description edit that keeps bold text or links). "
         "Actions on your Archidekt account (likes, follows, comments and the like) and deleting a deck "
         "always wait for your press, and so does a held change, a change waiting for another change "
         "first, or one another app had a hand in. When a change waits for your press, its card and "
@@ -927,8 +927,8 @@ def guide_body(
         f"{on_review_page}</tr>"
         f"<tr><td><strong>Full auto</strong>: {_esc(modes.MODE_LABELS['auto'])}</td>"
         "<td>the assistant applies it</td><td>the assistant applies it, except a restore, a commander "
-        f"change, a new deck, an edit of more than {big_rows} rows, making a deck public or unlisted, "
-        "and a description edit that keeps its formatting: you press</td>"
+        f"change, a new deck, an edit of more than {big_rows} rows, making a deck public (or unlisted, "
+        "from private), and a description edit that keeps bold text or links: you press</td>"
         f"{on_review_page}</tr>"
         "</tbody></table></div>"
         f"<p><strong>Low risk:</strong> {_esc(modes.low_risk_text(max_rows))} "

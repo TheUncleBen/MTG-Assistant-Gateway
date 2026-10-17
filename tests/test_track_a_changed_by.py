@@ -114,6 +114,15 @@ async def test_apply_all_lists_its_changes_with_held_and_changed_and_names_the_a
     assert structured(board)["left_out"] == 1
     # its own Approve still works on the card: it has its own code
     assert first["proposal_id"] in board["_meta"][APPROVALS_META_KEY]
+    # proofread of WORDING-4: the note names it by number, and its row says so
+    no = h.db.get_proposal(first["proposal_id"], SUB)["board_no"]
+    assert structured(board)["left_out_nos"] == [no]
+    rows = {x["proposal_id"]: x for x in structured(board)["waiting"]}
+    assert rows[first["proposal_id"]].get("not_in_apply_all") is True
+    assert not any(x.get("not_in_apply_all") for k, x in rows.items() if k != first["proposal_id"])
+    # its own card says it of itself, and does not count itself among the left out
+    own = structured(await call(h, token, "get_proposal", {"proposal_id": first["proposal_id"]}))["deck_waiting"]
+    assert own.get("this_left_out") is True and own["left_out"] == 0 and own["left_out_nos"] == [], own
 
 
 async def test_a_review_page_apply_without_its_version_is_refused(stack: Stack) -> None:
@@ -148,11 +157,48 @@ async def test_the_guide_says_what_full_auto_still_waits_for(stack: Stack) -> No
     try:
         await b.login()
         page = (await b.http.get("/guide")).text
-        assert "a new deck, an edit of more than 25 rows, making a deck public or unlisted" in page
+        assert (
+            "a new deck, an edit of more than 25 rows, making a deck public (or unlisted, from private)"
+            in page
+        )
         assert (
             "deleting a deck always wait for your press, and so does a held change, a change waiting for "
             "another change first, or one another app had a hand in" in page
         )
         assert "applies the rest too" not in page
+    finally:
+        await b.aclose()
+
+
+async def test_a_change_another_app_rewrote_waits_even_after_its_own_app_changed_it_again(
+    stack: Stack,
+) -> None:
+    """Proofread of WORDING-4 (G5): ChatGPT rewrites Claude's change and Claude changes it back.
+    Another app still had a hand in it, so no assistant applies it by itself, in Semi-auto or
+    Full auto; its line names both apps, in order, and the review page has no "app:" badge text."""
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    for mode, card in (("semi", "Opt"), ("auto", "Brainstorm")):
+        await _set_mode(h, mode)
+        p = structured(await _propose(h, token, card))
+        pid = p["proposal_id"]
+        maker = h.db.get_proposal(pid, SUB)["created_by_client"]
+        assert p["assistant_may_apply"] is True, (mode, p)
+        _amend(h, pid, p, by="another-app", what="Ponder instead")
+        got = structured(await call(h, token, "get_proposal", {"proposal_id": pid}))
+        _amend(h, pid, got, by=maker, what="Opt again")
+        got = structured(await call(h, token, "get_proposal", {"proposal_id": pid}))
+        assert got["assistant_may_apply"] is False, (mode, got)
+        assert got["changed_by_apps"][0] == "app: another-app" and len(got["changed_by_apps"]) == 2, got
+        refused = structured(await call(h, token, "apply_proposal", {"proposal_id": pid}))
+        assert refused["ok"] is False and ark.patches == [], (mode, refused)
+    b = Browser(h)
+    try:
+        await b.login()
+        page = (await b.http.get(f"/proposals/{pid}")).text
+        assert "<dt>Version</dt><dd>3, changed by an assistant, then " in page, page[page.find("Version") :][
+            :200
+        ]
+        assert "changed by <span class='badge'" not in page
     finally:
         await b.aclose()

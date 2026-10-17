@@ -88,7 +88,8 @@ button.danger:disabled{color:var(--red)}
   function changeNote(x) {
     if (Number(x.version) <= 1 || !x.changed_by) return "";
     var what = String(x.what_changed || "").trim();
-    return "Version " + Number(x.version) + ", changed by " + creator(x.changed_by) + (what ? ": " + what : "") + (/[.!?]$/.test(what) ? "" : ".");
+    var apps = (x.changed_by_apps && x.changed_by_apps.length ? x.changed_by_apps : [x.changed_by]).map(creator);
+    return "Version " + Number(x.version) + ", changed by " + apps.join(", then ") + (what ? ": " + what : "") + (/[.!?]$/.test(what) ? "" : ".");
   }
   function statusWord(x) {
     return { updated: "Updated", needs_look: "Needs a look", held: "Held" }[x.status] || "Waiting";
@@ -118,6 +119,8 @@ button.danger:disabled{color:var(--red)}
       if ((x.status === "needs_look" || x.status === "held") && why) what.appendChild(el("span", "why", String(why)));
       if (changeNote(x)) what.appendChild(el("span", "why", changeNote(x)));
       if (x.link_note) what.appendChild(el("span", "why", String(x.link_note)));
+      // Q141 item 1B (wording draft, WORDING-5): which row Apply all leaves out
+      if (x.not_in_apply_all) what.appendChild(el("span", "why", "Not in Apply all: another app changed it."));
       if (x.review_page_only && x.own) what.appendChild(el("span", "why", "Approve it on its review page."));
       li.appendChild(what);
       var btns = el("span", "btns");
@@ -147,10 +150,10 @@ button.danger:disabled{color:var(--red)}
       notes.push(o.count + " from " + (o.app === "you" ? "your browser" : o.app) + " also " + (o.count === 1 ? "waits" : "wait") + ". Approve " + (o.count === 1 ? "it" : "them") + " on the Proposals page.");
     });
     // Q141 item 1B: a change another app rewrote is approved on its own (wording draft, WORDING-4)
-    var out = Number(data.left_out || 0);
-    if (out) notes.push(out === 1
-      ? "1 changed by another app is left out of Apply all: approve it on its own."
-      : out + " changed by another app are left out of Apply all: approve each on its own.");
+    var out = Number(data.left_out || 0), nos = (data.left_out_nos || []).map(function (x) { return "#" + x; });
+    if (out && nos.length) notes.push("Apply all leaves out " + (nos.length === 1 ? nos[0] : nos.slice(0, -1).join(", ") + " and " + nos[nos.length - 1])
+      + ", which another app changed: approve " + (nos.length === 1 ? "it" : "each") + " on its own.");
+    else if (out) notes.push("Apply all leaves out " + out + (out === 1 ? " change" : " changes") + " another app changed: approve " + (out === 1 ? "it" : "each") + " on its own.");
     if (n && !data.writes_enabled) notes.push("Archidekt writes are switched off on this gateway; this is a preview only.");
     $("note").textContent = notes.join(" "); $("note").className = notes.length ? "note" : "note hidden";
     drawActions();
