@@ -301,6 +301,12 @@ services:
       NTFY_AUTH_ACCESS: "mtg-gateway:mtg-*:rw"
       NTFY_WEB_ROOT: disable
       NTFY_CACHE_DURATION: 12h
+      # Every phone's connection reaches ntfy from the gateway, so ntfy counts them all as one
+      # visitor: room for the gateway's own cap of 200 connections, and for a mass reconnect
+      # (ntfy 2.31.1's defaults are 30 subscriptions and a burst of 60 requests, one more per 5 s).
+      NTFY_VISITOR_SUBSCRIPTION_LIMIT: "250"
+      NTFY_VISITOR_REQUEST_LIMIT_BURST: "600"
+      NTFY_VISITOR_REQUEST_LIMIT_REPLENISH: "1s"
       TZ: ${TIMEZONE:-UTC}
     healthcheck:
       test:

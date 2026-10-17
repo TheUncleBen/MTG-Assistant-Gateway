@@ -156,3 +156,20 @@ def test_every_managed_setting_the_stack_passes_is_in_its_example(stack_file: st
     text = (ROOT / example).read_text()
     listed = {s.env for s in MANAGED_SETTINGS.values() if re.search(rf"^# {s.env}=", text, re.M)}
     assert passed and passed - listed == set()
+
+
+@pytest.mark.parametrize(
+    ("name", "service"),
+    [("deploy/portainer-stack.yml", "mtg-assistant-ntfy"), ("deploy/compose/docker-compose.yml", "ntfy")],
+)
+def test_ntfy_has_room_for_every_phone_the_gateway_relays(name: str, service: str):
+    """ntfy sees every phone's connection coming from the gateway, one visitor, so its per-visitor
+    limits are raised above the gateway's own cap on connections (option names and defaults
+    from ntfy 2.31.1's cmd/serve.go and server/config.go)."""
+    from mtg_gateway.notify import STREAM_MAX_TOTAL
+
+    svc = _service((ROOT / name).read_text(), service)
+    limits = dict(re.findall(r'^      (NTFY_VISITOR_[A-Z_]+): "([^"]+)"$', svc, re.M))
+    assert int(limits["NTFY_VISITOR_SUBSCRIPTION_LIMIT"]) > STREAM_MAX_TOTAL
+    assert int(limits["NTFY_VISITOR_REQUEST_LIMIT_BURST"]) >= 2 * STREAM_MAX_TOTAL
+    assert limits["NTFY_VISITOR_REQUEST_LIMIT_REPLENISH"] == "1s"
