@@ -1335,12 +1335,42 @@ async def test_a_run_whose_forge_copy_restarted_elsewhere_is_marked_lost(
     silent = reports.get("alice", second["report_id"])["forge"]
     assert silent["state"] == "lost" and silent["error"] == "Forge stopped answering about this run."
 
+    # review round 5 L6: the given-up job is cancelled on its copy once that copy answers again,
+    # so a copy that comes back does not play the abandoned run to its end
+    job_id = _section(db, second["report_id"])["job_id"]
+    assert two.copies[playing].cancelled == [] and reports._forge_cancels  # still asking
+    await asyncio.sleep(0.2)
+    two.silent.discard(playing)
+    await asyncio.wait_for(asyncio.gather(*reports._forge_cancels), timeout=20)
+    assert two.copies[playing].cancelled == [job_id]
+    assert reports.get("alice", second["report_id"])["forge"]["state"] == "lost"
+
     # one copy (nothing pinned): a refused connection stays a wait, as before
     one = await refresh(
         ForgeClient("http://10.0.9.2:8000", transport=httpx.MockTransport(two.handler)),
         {"state": "running", "job_id": "j", "started_at": int(time.time())},
     )
     assert one["state"] == "running" and "unanswered_since" not in one
+
+
+async def test_cancelling_on_a_silent_copy_stops_asking_after_a_while(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    """Review round 5 L6: the cancel of a given-up run is asked again only while its copy stays
+    silent, up to SILENT_CANCEL_SECONDS; a job the copy no longer knows ends it at once."""
+    db = Database(tmp_path / "t.sqlite")
+    two = _TwoCopies()
+    reports = ReportService(db, _Decks(), None, forge=two.client(resolve=True), forge_games=4)  # type: ignore[arg-type]
+    reports.forge_interval = 0.02
+    monkeypatch.setattr(forge_module, "SILENT_CANCEL_SECONDS", 0.2)
+    two.silent.add("10.0.9.1")
+    section = {"state": "running", "job_id": "j1", "engine": "http://10.0.9.1:8000"}
+    reports._cancel_forge(section, keep_asking=True)
+    await asyncio.wait_for(asyncio.gather(*reports._forge_cancels), timeout=5)  # gave up
+    two.silent.clear()
+    assert two.copies["10.0.9.1"].cancelled == []
+    reports._cancel_forge({**section, "job_id": "unknown"}, keep_asking=True)
+    await asyncio.wait_for(asyncio.gather(*reports._forge_cancels), timeout=0.15)  # not found: done
 
 
 async def test_one_forge_address_changes_nothing(tmp_path: Path, monkeypatch: Any) -> None:

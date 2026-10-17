@@ -43,6 +43,10 @@ LOOKUP_DEADLINE_SECONDS = 3.0
 # once when its address is no longer the service's: a restarted or moved copy has a new address,
 # and its old one never answers about the run again (one copy answers "not found" instead).
 PINNED_SILENCE_SECONDS = 120.0
+# A run given up because its copy went silent is cancelled there, asked again while the copy stays
+# silent for up to this long: a copy that answers again would otherwise play the abandoned run to
+# its end and keep its places busy.
+SILENT_CANCEL_SECONDS = 1800.0
 
 
 class ForgeError(Exception):
