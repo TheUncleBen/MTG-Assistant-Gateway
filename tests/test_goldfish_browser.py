@@ -361,9 +361,14 @@ SIZE_STATE = """() => {
   const ratio = e => { const a = lum(getComputedStyle(e).color), b = lum(bg(e));
     return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05); };
   const r = seg.getBoundingClientRect();
+  const lbl = document.querySelector('.gf-size .lbl').getBoundingClientRect();
+  const first = [...document.querySelectorAll('.gf-controls > *')].find(e => e.getClientRects().length);
   return {size: document.documentElement.getAttribute('data-card-size'),
     card: c.getBoundingClientRect().width,
     segInside: r.left >= -1 && r.right <= innerWidth + 1,
+    // the label beside the buttons, and lined up with the game's buttons above (join review J1-7)
+    row: lbl.top < r.bottom - 1 && r.top < lbl.bottom - 1 && lbl.right <= r.left + 1,
+    lined: Math.abs(lbl.left - first.getBoundingClientRect().left) <= 2,
     contrast: Math.min(...[...seg.querySelectorAll('button')].map(ratio))};
 }"""
 
@@ -401,6 +406,7 @@ def test_goldfish_cards_follow_the_card_size(server: Server, width: int, scheme:
                 page.locator(f".gf-size [data-card-size-set={size}]").click()
                 got = page.evaluate(SIZE_STATE)
                 assert got["segInside"] and got["contrast"] >= 4.5, (size, zoom is not None, got)
+                assert got["lined"] and (got["row"] or zoom is not None), (size, zoom is not None, got)
                 assert _overflow(page) == 0, (size, zoom is not None)
             _contrast_ok(page)
         _shot(page, f"goldfish-size-{width}-{scheme}")

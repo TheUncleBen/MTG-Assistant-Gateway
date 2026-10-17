@@ -196,9 +196,13 @@ CSS = (
    At 600 to 899 px the links can also wrap within the one row a little above 42.5em (an admin's
    eight links up to 625 px at the normal size), so there the large room lasts to 45rem.
    clamp((T - 100vw) * 1000) is 0 above T and 9.5rem below it (9.5rem everywhere would leave
-   133 px over the one-row bar). */
-html{font-size:14px;scroll-padding:var(--bar-room,60px) 0 120px;-webkit-text-size-adjust:100%;
-  min-width:320px;font-family:Lato,"Helvetica Neue",Arial,Helvetica,sans-serif;line-height:1.15}
+   133 px over the one-row bar).
+   --foot-room is what stays at the foot of the window plus 10 px (the phone's tab bar, the waiting
+   changes' Apply bar, the Guide's Back to top; static/topbar.js). Without scripts: 120 px, or 9rem
+   once that is more, so the room grows with the text. */
+html{font-size:14px;scroll-padding:var(--bar-room,60px) 0 var(--foot-room,max(120px,9rem));
+  -webkit-text-size-adjust:100%;min-width:320px;font-family:Lato,"Helvetica Neue",Arial,Helvetica,sans-serif;
+  line-height:1.15}
 @media (min-width:600px) and (max-width:899.98px) and (not ((pointer:coarse) or (hover:none))){
   html{scroll-padding-top:var(--bar-room,max(60px,clamp(0px,(45rem + 20px - 100vw) * 1000,9.5rem)))} }
 @media (width >= 900px){
@@ -1456,6 +1460,8 @@ def render(
             f"<a href='/account'>{icon('account')}Account</a>"
             f"<a href='/proposals'>{icon('proposals')}Proposals</a>"
             f"<a href='/history'>{icon('history')}History</a>"
+            # Reports is under More on a phone and a tab on the rail; at desktop width it is here
+            f"<a href='/reports'>{icon('report')}Reports</a>"
             + (f"<a href='/watchlist'>{icon('stats')}Watchlist</a>" if WATCHLISTS else "")
             + f"<a href='/activity'>{icon('activity')}My activity</a>"
             f"<a href='/guide'>{icon('guide')}Guide</a>"

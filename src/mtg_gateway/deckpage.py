@@ -1824,7 +1824,7 @@ GOLDFISH_CSS = """
 .gf-controls{display:flex;flex-wrap:wrap;gap:.5rem}
 .gf-controls [hidden]{display:none}
 .gf-size{margin-top:.75rem}
-.gf-size .cardsize{display:flex;flex-wrap:wrap;align-items:center;gap:.25rem .5rem}
+.gf-size .cardsize{display:flex;flex-direction:row;flex-wrap:wrap;align-items:center;gap:.25rem .5rem}
 .gf-size .cardsize .lbl{color:var(--text-muted)}
 .gf-zone{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-panel);
   padding:.75rem;margin:0 0 1rem;min-width:0}
@@ -2213,9 +2213,14 @@ h3 .count{font-weight:400;color:var(--text-muted);font-size:.9rem}
 .toolbar .views{display:grid;grid-template-columns:repeat(3,minmax(0,1fr)) minmax(10rem,1.4fr);
   gap:.5rem 1rem;margin:0}
 .toolbar .views .field{margin:0}
-/* with the card size switch (0.7.29) next to View as: it takes only its own width */
-.toolbar .views:has(.cardsize){
-  grid-template-columns:minmax(0,1fr) auto repeat(2,minmax(0,1fr)) minmax(10rem,1.4fr)}
+/* with the card size switch (0.7.29) next to View as: it takes only its own width. Above 1200 px the
+   boxes share one row while they fit and wrap onto the next row when large text makes them wider
+   (one grid row let Group by and Sort by run over each other at 200% text) */
+@media (min-width:1200.02px){
+  .toolbar .views:has(.cardsize){display:flex;flex-wrap:wrap;align-items:flex-end}
+  .toolbar .views:has(.cardsize) > .field{flex:1 1 8rem;min-width:max-content}
+  .toolbar .views:has(.cardsize) > .field.cardsize{flex:0 0 auto}
+  .toolbar .views:has(.cardsize) > .field.filter{flex:1.4 1 10rem;min-width:10rem} }
 .field .sel{position:relative;display:block}
 .field .sel > svg{position:absolute;left:.75rem;top:50%;transform:translateY(-50%);color:var(--orange);
   pointer-events:none}
