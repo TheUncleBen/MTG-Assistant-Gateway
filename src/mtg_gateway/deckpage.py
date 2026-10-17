@@ -367,24 +367,28 @@ def banner_html(
         f"{icon('play')} Play on EDHPlay</a>"
     )
     if csrf:
-        # The same run as the assistant's run_deck_report: statistics, validation and 300
-        # simulated games on the research service, stored under History. "Simulated", not
-        # "goldfish": Goldfish is the button beside it, where the member plays by hand (D3).
+        # The same run as the assistant's run_deck_report: statistics, validation and the solo
+        # test on the research service, plus Forge games when Forge is on, stored under History.
+        # "Solo test", not "goldfish": Goldfish is the button beside it, where the member plays by
+        # hand (D3). Texts: Track C's C-W-281 to C-W-283, coordinator-approved ~05:24Z 10-17.
         primary += (
             f"<form method='post' action='/decks/{did}/report' class='inline'>{csrf_in}"
-            "<button type='submit' data-busy-label='Simulating…' title='300 simulated games, a decklist "
-            "check and the deck statistics, saved under History. The run takes up to a minute; the result "
-            f"page opens when it is done.'>{icon('stats')} Run simulation</button></form>"
+            "<button type='submit' data-busy-label='Testing…' title='The solo test (300 games, no "
+            "opponents), a legality check and the deck statistics, plus Forge games against precons when "
+            "Forge is on and the deck has a commander; saved under History. The solo test takes up to a "
+            f"minute; the result page opens when the solo test is done.'>{icon('stats')} Run full test"
+            "</button></form>"
         )
     more_items = []
     if csrf and forge_on:
         # D17: the same run without the Forge games, for a quick result (forge=0, companion_tools.py).
+        # Texts: Track C's C-W-284 to C-W-286, coordinator-approved ~05:24Z 10-17.
         more_items.append(
             f"<form method='post' action='/decks/{did}/report'>{csrf_in}"
             "<input type='hidden' name='forge' value='0'>"
-            "<button type='submit' data-busy-label='Simulating…' title='The same run without Forge games: "
-            f"300 simulated games, the decklist check and the statistics'>{icon('stats')} "
-            "Quick simulation (no Forge)</button></form>"
+            "<button type='submit' data-busy-label='Testing…' title='The same run without Forge games: "
+            f"the solo test, the legality check and the statistics'>{icon('stats')} "
+            "Solo test only</button></form>"
         )
     if own and csrf:
         more_items.append(f"<a href='/decks/{did}/settings'>{icon('settings')} Deck settings</a>")
@@ -1999,7 +2003,9 @@ h3 .count{font-weight:400;color:var(--text-muted);font-size:.9rem}
 .banner .social .confirm button{margin:0;height:26px;padding:0 .7rem;border-radius:13px;font-size:.85rem}
 .banner .social .note{flex-basis:100%;color:#ffd9b3;font-size:.9rem}
 .banner .social .note a{color:#fff}
-.comments .panel-head{display:flex;align-items:baseline;justify-content:space-between;gap:1rem}
+.comments .panel-head{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;
+  gap:0 1rem}
+.comments .panel-head [data-count]:empty{display:none}
 .comments .panel-head h2{margin:0}
 .comments .thread{margin:.75rem 0 1rem}
 .comments .cmt{border-top:1px solid var(--border);padding:.6rem 0 .4rem}
@@ -2049,12 +2055,14 @@ h3 .count{font-weight:400;color:var(--text-muted);font-size:.9rem}
   .banner .owner{flex-direction:row;justify-content:flex-end;max-width:none;padding:.5rem 1rem 0;order:-1}
   .banner .owner .avatar{width:80px;height:80px;font-size:2rem;margin-right:auto;margin-top:0;
     border-width:3px;border-color:var(--bg)}
-  /* phones: the actions in two columns instead of five full-width rows */
-  .banner .controls .primary{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.5rem}
+  /* phones: the actions in two columns instead of five full-width rows; a column is at least 9rem,
+     so at large text sizes they go one a row, and a long label wraps whole instead of being cut */
+  .banner .controls .primary{display:grid;width:100%;gap:.5rem;
+    grid-template-columns:repeat(auto-fill,minmax(min(100%,9rem),1fr))}
   .banner .controls .primary .btn,.banner .controls .primary button,.banner .controls details.dd{width:100%;
     min-width:0}
   .banner .controls .primary .btn,.banner .controls .primary button{padding-left:.5rem;padding-right:.5rem;
-    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    white-space:normal;overflow-wrap:normal;text-align:center}
   .banner .controls .primary form.inline{display:contents}
   .banner .controls details.dd > summary.btn{width:100%}
 }
