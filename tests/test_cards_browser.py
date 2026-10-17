@@ -595,6 +595,12 @@ def test_account_card_points_at_what_is_missing() -> None:
                 and "Alice" in card.locator("#facts").inner_text()
             )
             assert card.locator("#open").inner_text() == "Open the Account page"
+            # writes off: the 7A wording, no setting name (Track A, WORDING-6)
+            card = _open(page, "account-card", {"structuredContent": {**ready, "writes_enabled": False}})
+            card.locator("#open").wait_for()
+            assert "Archidekt writes" in card.locator("#facts").inner_text()
+            text = card.locator("#summary").inner_text()
+            assert "switch Archidekt writes on" in text and "MTG_" not in text, text
             # whoami's shape works too (a name, the version and the account page; nothing else).
             who = {
                 "signed_in": True,
