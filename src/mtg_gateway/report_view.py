@@ -759,8 +759,8 @@ def coverage_text(g: dict[str, Any]) -> str:
     c = coverage(g)
     if c is None:
         return ""
-    # Q138 item 6: both figures, as scripts/measure_recognition.py prints them. TODO(Q140 item 7,
-    # held for Ben's re-confirmation card): the second figure's name ("Known") and these headings
+    # Q138 item 6: both figures, as scripts/measure_recognition.py prints them (Q140 item 7: measured
+    # now on precons and test decks, on Ben's decks at deploy)
     return (
         f"Played with their effect: {c['modeled']} of {c['deck_size']} cards ({c['pct']}% of the deck). "
         f"Known: {c['known']} of {c['deck_size']} cards ({c['known_pct']}% of the deck), counting the "
@@ -769,7 +769,6 @@ def coverage_text(g: dict[str, Any]) -> str:
 
 
 # The cards the simulator plays without their effect (its "unrecognized" group), in plain words.
-# TODO(Q140 item 7, held for Ben's re-confirmation card): the honesty headings' names
 UNMODELED_HEADING = "Played without their effect"
 # Q136 item 1: an assistant can describe only some of these (about 6 to 8 of Liesa's 33), so the
 # text says so; the sentence on saving shows only when the gateway can save (the schema 14 table).
@@ -781,19 +780,19 @@ UNMODELED_TEXT = (
     "model, such as opponents to interact with."
 )
 UNMODELED_SAVED_TEXT = (
-    "The gateway can save descriptions that pass its check, up to 200 per member, and later solo "
-    "tests of any member's deck then play that card with it."
+    "The gateway can save descriptions that pass its check, up to 200 for you, and your later solo "
+    "tests then play that card with it. Your saved descriptions play only in your own tests."
 )
 KEPT_HEADING = "Played with saved card descriptions"
 KEPT_TEXT = (
-    "An assistant described each of these cards in a form the solo test can play, and the gateway "
+    "Your assistant described each of these cards in a form the solo test can play, and the gateway "
     "checked its format and saved it. This run played these cards with those descriptions."
 )
 
 
 def kept_models(r: dict[str, Any]) -> list[dict[str, Any]]:
-    """The kept card models a report's solo test played (K1): card, model hash, whether the
-    member added it, when it last changed. Never who else added one (K2). None while kept models
+    """The kept card models a report's solo test played (K1): card, model hash, when it last
+    changed; only the member's own play (Q140 item 1). None while kept models
     are switched off (Q140 item 1), even for a report made while they were on (review r1 fix 5)."""
     if not card_models.SWITCHED_ON:
         return []
@@ -803,7 +802,7 @@ def kept_models(r: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _kept_who(u: dict[str, Any]) -> str:
-    who = "added by you" if u.get("yours") else "added by another member"
+    who = "added by you"  # each member keeps their own (Q140 item 1)
     when = time_text(u.get("changed_at"))[:10]
     return f"{who}, last changed {when}" if when else who
 
@@ -813,7 +812,7 @@ REMOVE_MODEL_LABEL = "Remove"
 MODEL_NOTICES = {
     "removed": "The saved description was removed. Later solo tests play that card without its effect "
     "again, until a new description is saved.",
-    "gone": "That saved description was already removed, or an admin removed or replaced it.",
+    "gone": "That saved description was already removed, or an admin removed it.",
     "error": "The saved description could not be removed. Try again later.",
 }
 
@@ -865,8 +864,7 @@ def ask_prompt(deck_name: str, deck_url: str, cards: list[dict[str, Any]], *, mo
     for both): the assistant reads each card's exact text and passes its models to a new run.
     ``models``: the gateway keeps card models, so the request asks which it kept."""
     names = ", ".join(front_face(c["name"]) for c in cards)
-    # TODO(Q140 item 1, held for Ben's re-confirmation card): the last clause only while kept
-    # models are switched on (review r1 fix 4)
+    # the last clause only while kept models are switched on (review r1 fix 4)
     told = (
         ", which cards you could not describe, and which models the gateway kept, if any."
         if models
@@ -1202,8 +1200,8 @@ def _interval(pair: Any) -> str:
     return f"{_pct(low)} to {_pct(high)}" if _float(low) is not None and _float(high) is not None else ""
 
 
-# R-207: "Reports carry the 'later games can differ' note". TODO(Ben's re-confirmation card): the
-# exact words wait on his answer (WORDING-1-TEXT-r3); the slot is on the page and every export.
+# R-207 and Q140 item 2 (no replay promise): the seed is for the record only, and every report, the
+# page and every export, says how to compare runs instead.
 FORGE_DRIFT_NOTE = (
     "Forge does not always replay the same games from the same seed, so compare runs by their win "
     "rates and 95% intervals, not game by game."

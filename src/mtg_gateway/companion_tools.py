@@ -640,7 +640,8 @@ def add_deck_tool_routes(
     @server.custom_route("/decks/{deck_id}/compare/forge", methods=["POST"], include_in_schema=False)
     async def compare_forge(request: Request) -> Response:
         """K6 (Q136): both decks' Forge games against the same opponents. This deck's report runs
-        first (its own bracket picks the precons); the other deck's seats them
+        first, with precons picked for the higher of the two decks' brackets (Q140 item 3, so the
+        order doesn't matter); the other deck's seats them
         (``same_opponents_as``), as the assistants' run_deck_report does. Both run without the
         solo test, so starting them is quick; the second report opens and links the first."""
         deck_id = request.path_params["deck_id"]
@@ -663,7 +664,7 @@ def add_deck_tool_routes(
         try:
             if not other.isdigit():
                 raise DeckError("invalid", "Pick the other deck on the Compare page first.")
-            first = await reports.run(sub, deck_id, simulate=False, forge=True)
+            first = await reports.run(sub, deck_id, simulate=False, forge=True, pair_with=other)
             try:
                 second = await reports.run(
                     sub, other, simulate=False, forge=True, same_opponents_as=first["report_id"]

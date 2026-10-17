@@ -23,7 +23,7 @@ from .archidekt import Deck
 from .db import Database, _like
 from .decklist import DecklistError, front_faces, parse_decklist, to_text
 from .decks import DeckError, DeckService, _clean_deck_id, current_client, deck_to_text
-from .forge import FINAL_STATES, GIVE_UP_SECONDS, ForgeClient, ForgeError, refresh, start_run
+from .forge import FINAL_STATES, GIVE_UP_SECONDS, ForgeClient, ForgeError, bracket_parts, refresh, start_run
 from .mf_proxy import FULL_REPORT, MysticForgeProxy, busy_retry_after, is_busy
 from .report_view import PREFLIGHT_ONLY, goldfish_settings, speed_numbers
 
@@ -164,6 +164,7 @@ class ReportService:
         deck: Deck | None = None,
         snapshot_id: str | None = None,
         same_opponents_as: str | None = None,
+        pair_with: str | None = None,
     ) -> dict[str, Any]:
         """Read the deck, compute its statistics, optionally simulate and validate it, store
         the result and return it. Refuses a second report of an unchanged deck within
@@ -173,7 +174,9 @@ class ReportService:
         ``deck`` is a deck already read (one of the member's snapshots, ``snapshot_id``), filed
         under its Archidekt deck like any other report. ``same_opponents_as`` is another of the
         member's reports: this run's Forge games seat that run's opponents (K6, Q136), and the run
-        is never a reused report."""
+        is never a reused report. ``pair_with`` is the other deck of the Compare page's Forge games
+        (Q140 item 3): the opponents are picked for the higher of the two decks' brackets, and the
+        run is never a reused report either."""
         if not isinstance(games, int) or isinstance(games, bool) or games < 10 or games > MAX_GAMES:
             raise DeckError("invalid", f"games must be an integer from 10 to {MAX_GAMES}")
         options = sim_options(options)
@@ -184,7 +187,7 @@ class ReportService:
         seen = flight.finished
         try:
             async with flight.lock:
-                if flight.finished > seen and flight.report_id and shared is None:
+                if flight.finished > seen and flight.report_id and shared is None and pair_with is None:
                     # A run for this deck finished while this request waited: reuse its report
                     # instead of starting a second simulation (unless that run's research
                     # calls failed; then this request gets its own try).
@@ -204,6 +207,7 @@ class ReportService:
                     deck=deck,
                     snapshot_id=snapshot_id,
                     shared=shared,
+                    pair_with=pair_with,
                 )
                 flight.report_id = out["report_id"]
                 flight.finished += 1
@@ -275,6 +279,7 @@ class ReportService:
         deck: Deck | None = None,
         snapshot_id: str | None = None,
         shared: dict[str, Any] | None = None,
+        pair_with: str | None = None,
     ) -> dict[str, Any]:
         if deck is None:
             deck = await self.decks.get_any_deck(sub, deck_ref)
@@ -283,6 +288,7 @@ class ReportService:
         if (
             not options
             and shared is None
+            and pair_with is None
             and latest is not None
             and latest["fingerprint"] == deck.fingerprint()
             and now - int(latest["taken_at"]) < self.min_interval
@@ -381,9 +387,24 @@ class ReportService:
             seed = options.get("forge_seed", options.get("seed"))
             async with self._forge_start_lock:
                 await self._start_or_queue_forge(
-                    sub, rid, deck, games, seed, forge_bracket(deck, stats), shared
+                    sub, rid, deck, games, seed, await self._pair_bracket(sub, deck, stats, pair_with), shared
                 )
         return self.get(sub, rid)
+
+    async def _pair_bracket(
+        self, sub: str, deck: Any, stats: dict[str, Any], pair_with: str | None
+    ) -> tuple[Any, ...]:
+        """The bracket this run's opponents are picked for: the deck's own (forge_bracket), or on
+        the Compare page the higher of the two decks' (Q140 item 3), each deck's set bracket where
+        it has one, else Archidekt's estimate from cards; a tie keeps this deck's."""
+        own = forge_bracket(deck, stats)
+        if pair_with is None:
+            return own
+        other = await self.decks.get_any_deck(sub, pair_with)
+        theirs = forge_bracket(other, deck_stats.compute(other))
+        if theirs[0] is not None and (own[0] is None or theirs[0] > own[0]):
+            return (*theirs, other.name or f"Deck {other.id}", True)
+        return (*own, None, True)
 
     async def _start_or_queue_forge(
         self,
@@ -392,7 +413,7 @@ class ReportService:
         deck: Any,
         games: int,
         seed: Any,
-        bracket: tuple[int | None, str | None],
+        bracket: tuple[Any, ...],
         shared: dict[str, Any] | None = None,
     ) -> None:
         text, seed = deck_to_text(deck), seed if isinstance(seed, int) else None
@@ -440,15 +461,6 @@ class ReportService:
             **({"shared_with": _shared_link(shared)} if shared is not None else {}),
             **extra,
         }
-
-    def is_admin(self, sub: str) -> bool:
-        """Whether ``sub`` is a gateway admin (MTG_ADMIN_GROUP, as admin.is_admin): an admin may
-        replace any member's kept card model (Q138 item 3)."""
-        group = getattr(getattr(self.decks, "settings", None), "admin_group", None)
-        if not group:
-            return False
-        user = self.db.get_user(sub)
-        return bool(user) and not user.get("disabled_at") and group in (user.get("groups") or [])
 
     def _share_from(self, sub: str, report_id: Any) -> dict[str, Any]:
         """K6 (Q136): what seating another of the member's reports' opponents takes, checked now:
@@ -521,7 +533,7 @@ class ReportService:
         shared: dict[str, Any] | None = None,
     ) -> None:
         assert self.forge is not None
-        level, source = bracket if isinstance(bracket, (list, tuple)) and len(bracket) == 2 else (None, None)
+        level, source, of_deck, pair = bracket_parts(bracket)
         try:
             if shared is not None:
                 shared = self._shared_now(self._owner(rid), shared)
@@ -531,8 +543,10 @@ class ReportService:
                 name,
                 games=min(games, self.forge_games),
                 seed=seed,
-                bracket=level if isinstance(level, int) else None,
-                bracket_source=source if isinstance(source, str) else None,
+                bracket=level,
+                bracket_source=source,
+                bracket_deck=of_deck,
+                pair=pair,
                 parallel=self.forge_parallel,
                 shared=shared,
             )
@@ -835,7 +849,7 @@ class ReportService:
         own = [a for a in options.get("annotations") or [] if isinstance(a, dict)]
         if own and keep and goldfish.get("ok") and self.models.available:
             goldfish["models_kept"] = self.models.keep(
-                sub, own, names, admin=self.is_admin(sub), unmodeled=await self._unmodeled(sub, text, mode)
+                sub, own, names, unmodeled=await self._unmodeled(sub, text, mode)
             )
         return goldfish
 
@@ -845,12 +859,14 @@ class ReportService:
         run's "unrecognized" list cannot say: an annotated card counts as modelled there."""
         args = {"deck": text, **({"constructed": True} if mode == "constructed" else {})}
         try:
-            out = await self._mf(sub, "goldfish_annotate", args)
+            out = await self._mf(sub, "goldfish_annotate", args, whole=True)
         except DeckError:
             return None  # past the member's research cap: the run itself still stands
         return card_models.needs_annotation(str(out.get("text") or "")) if out.get("ok") else None
 
-    async def _mf(self, sub: str, tool: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    async def _mf(
+        self, sub: str, tool: str, arguments: dict[str, Any], *, whole: bool = False
+    ) -> dict[str, Any]:
         """One Mystic Forge call, recorded as it came back: structured content when the tool
         gives it, else its text. Failures are recorded, never raised, so a report still holds
         the deck statistics when the research service is down. The call counts against the
@@ -875,7 +891,7 @@ class ReportService:
             out["data"] = result.structured_content
         if texts:
             text = "\n".join(texts)
-            out["text"] = text[:60_000]
+            out["text"] = text if whole else text[:60_000]  # whole: read here, never stored
             if "data" not in out:
                 try:
                     parsed = json.loads(text)

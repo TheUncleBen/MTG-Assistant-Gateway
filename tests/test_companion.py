@@ -274,6 +274,36 @@ async def test_compare_page_tests_both_decks_against_the_same_forge_opponents(st
             )
         )
         assert listed["ok"] is False and "pasted list gets no Forge games" in listed["message"]
+        # Q140 item 3: the higher of the two decks' set brackets picks them, whichever page it ran
+        # from (the runs wait behind the member's first one, so each keeps the bracket it waits with)
+        from mtg_gateway.forge import PAIR_LEAD, bracket_parts, shared_opponents
+
+        stack.ark.decks[43]["edhBracket"] = 4
+        precons = [{"name": n, "bracket": v} for n, v in BRACKETED.items()]
+        for here, there in (("42", "43"), ("43", "42")):
+            reports.db._conn.execute("DELETE FROM reports")  # an empty Forge queue for each press
+            again = await b.http.post(f"/decks/{here}/compare/forge", data={"csrf": csrf, "with": there})
+            assert again.status_code == 303, again.text
+            rows = reports.db._conn.execute(
+                "SELECT deck_id, forge_json FROM reports ORDER BY rowid DESC LIMIT 2"
+            ).fetchall()
+            second, first = (json.loads(r["forge_json"]) for r in rows)
+            assert [r["deck_id"] for r in rows] == [there, here]
+            if "start" in first:  # waiting behind the member's earlier run
+                assert bracket_parts(first["start"]["bracket"])[:2] == (4, "archidekt")
+                shared = {"deck_name": "x", "bracket": first["start"]["bracket"]}
+                chosen, choice = shared_opponents(precons, shared)
+            else:
+                choice = first["opponent_choice"]
+                chosen = [d["precon"] for d in fake.started[-1]["decks"][1:]]
+            assert chosen == ["Old 4", "New 3", "Mid 3"], (first, chosen)
+            assert PAIR_LEAD in choice["note"] and "Bracket 4 (the bracket set on" in choice["note"]
+            if "opponent_choice" in second:  # it started: it seats the same table
+                assert [d["precon"] for d in fake.started[-1]["decks"][1:]] == chosen
+                assert second["opponent_choice"]["rule"] == "shared"
+            else:
+                assert "start" in second and second["start"]["shared"]["report_id"], second
+        stack.ark.decks[43]["edhBracket"] = None
         # the first deck gets no Forge games: the page names that deck, not "that report"
         reports.forge = None
         h.app.state.gateway.db._conn.execute("DELETE FROM reports")  # nothing to reuse

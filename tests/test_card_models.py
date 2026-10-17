@@ -1,6 +1,6 @@
 """Kept card models (K1-K3 in Q136): only Mystic Forge's validated shape is kept, every number is
-bounded, a member's count is capped, later solo tests of any member's deck play a kept model, and
-a report says "added by you" or "added by another member", never who. The schema 14 table is Track
+bounded, a member's count is capped, later solo tests of the member's decks play their kept models
+(each member keeps their own: Q140 item 1), and a report says "added by you". The schema 14 table is Track
 B's (db.py); a fake with the agreed methods stands in for it until the join."""
 
 from __future__ import annotations
@@ -24,6 +24,8 @@ from .test_companion import COMPANION, NAV, linked_browser
 from .test_decks_and_proxy import call, mcp_token, structured
 from .test_forge import FakeArchidekt, _Decks, parse_deck
 from .test_history_page import GOLDFISH, store_report
+
+DOCKERFILE = Path(__file__).resolve().parents[1] / "docker" / "mystic-forge" / "Dockerfile"
 
 stack_options = stack_with(COMPANION)
 
@@ -92,36 +94,63 @@ def test_models_out_of_shape_or_bounds_are_refused(raw: Any, why: str) -> None:
         clean_model(raw, card="Puresteel Paladin")
 
 
+class CardModelRefused(Exception):
+    """Track B's db.CardModelRefused (schema 14, review r1 item 18): nothing was written."""
+
+    def __init__(self, why: str) -> None:
+        super().__init__(why)
+        self.why = why
+
+
+def _refuse(rows: dict[Any, dict[str, Any]], key: str, sub: str, most: int | None) -> None:
+    """Track B's put_card_model check, made in its own write: with ``most``, a save that newly counts
+    toward ``sub`` stops at that many. Each member keeps their own model of a card (Q140 item 1)."""
+    if most is not None and (sub, key) not in rows:
+        if sum(1 for s, _ in rows if s == sub) >= most:
+            raise CardModelRefused("most")
+
+
 class FakeModelsDb(Database):
     """The schema 14 methods as Track B built them (7a42c07): one model per card, the newest
     put wins, and a member deletes only their own."""
 
     def __init__(self, path: Path) -> None:
         super().__init__(path)
-        self.rows: dict[str, dict[str, Any]] = {}
+        self.rows: dict[tuple[str, str], dict[str, Any]] = {}
 
-    def get_card_models(self, keys: list[str]) -> list[dict[str, Any]]:
-        return [self.rows[k] for k in keys if k in self.rows]
+    def get_card_models(self, keys: list[str], sub: str) -> list[dict[str, Any]]:
+        return [r for (s, k), r in self.rows.items() if k in keys and s == sub]
 
-    def put_card_model(self, key: str, name: str, model_json: str, sub: str, now: int) -> bool:
-        was = self.rows.get(key)
-        self.rows[key] = {
+    def put_card_model(
+        self,
+        key: str,
+        name: str,
+        model_json: str,
+        sub: str,
+        now: int,
+        *,
+        sim_version: str | None = None,
+        oracle_hash: str | None = None,
+        most: int | None = None,
+    ) -> bool:
+        _refuse(self.rows, key, sub, most)
+        was = self.rows.get((sub, key))
+        self.rows[(sub, key)] = {
             "card_key": key,
             "name": name,
             "model_json": model_json,
             "added_by": sub,
+            "sim_version": sim_version,
             "added_at": was["added_at"] if was else now,
             "updated_at": now,
         }
-        return not was or was["added_by"] != sub
+        return was is None
 
     def delete_card_model(self, key: str, sub: str) -> bool:
-        if self.rows.get(key, {}).get("added_by") != sub:
-            return False
-        return self.rows.pop(key, None) is not None
+        return self.rows.pop((sub, key), None) is not None
 
     def count_card_models(self, sub: str) -> int:
-        return sum(1 for r in self.rows.values() if r["added_by"] == sub)
+        return sum(1 for s, _ in self.rows if s == sub)
 
 
 class FakeMF:
@@ -173,7 +202,8 @@ def _service(tmp_path: Path) -> tuple[ReportService, FakeModelsDb, FakeMF]:
     return ReportService(db, _Decks(), mf), db, mf  # type: ignore[arg-type]
 
 
-async def test_a_kept_model_plays_in_every_members_later_runs(tmp_path: Path) -> None:
+async def test_a_kept_model_plays_only_in_its_members_later_runs(tmp_path: Path) -> None:
+    """Q140 item 1: each member keeps their own models, with no shared set."""
     reports, db, mf = _service(tmp_path)
     name = next(c.name for c in (await _Decks().get_any_deck(None, "42")).cards if c.name != "Plains")
     model = {"name": name, "triggers": [{"on": "etb", "do": "draw", "count": 2}]}
@@ -183,26 +213,21 @@ async def test_a_kept_model_plays_in_every_members_later_runs(tmp_path: Path) ->
     kept = first["goldfish"]["models_kept"]
     assert kept["kept"] == [{"name": name}]
     assert kept["refused"] == [{"name": "Not In Deck", "why": "the deck does not hold this card"}]
-    assert json.loads(db.rows[card_models.card_key(name)]["model_json"]) == clean_model(model, card=name)
-    # bob's website run (no options) plays alice's model, and his report never names her
+    saved = db.rows[("alice", card_models.card_key(name))]
+    assert json.loads(saved["model_json"]) == clean_model(model, card=name)
+    # bob's website run (no options) plays none of alice's models
     second = await reports.run("bob", "42")
-    sent = mf.last_run()
-    assert sent["annotations"] == [clean_model(model, card=name)]
-    used = second["goldfish"]["kept_models"]
+    assert "annotations" not in mf.last_run() and "kept_models" not in second["goldfish"]
     assert second["goldfish"]["models_saved"] is True
-    assert [(u["name"], u["yours"]) for u in used] == [(name, False)] and len(used[0]["model"]) == 12
-    # the adder's member id never leaves the gateway (schema 14 review, note b)
-    assert "alice" not in json.dumps(second) and "added_by" not in json.dumps(second)
-    page = report_body_html(second)
-    assert (
-        "Played with saved card descriptions" in page
-        and "added by another member" in page
-        and "alice" not in page
-    )
-    assert "added by another member" in report_markdown(second)
-    # alice's own later run says "added by you"; her assistant's own model for the card wins
+    # alice's own later run plays hers ("added by you"); her assistant's own model for the card wins
     mine = await reports.run("alice", "42", options={"seed": 3})
-    assert mine["goldfish"]["kept_models"][0]["yours"] is True
+    assert mf.last_run()["annotations"] == [clean_model(model, card=name)]
+    used = mine["goldfish"]["kept_models"]
+    assert [u["name"] for u in used] == [name] and len(used[0]["model"]) == 12 and "yours" not in used[0]
+    assert "alice" not in json.dumps(mine) and "added_by" not in json.dumps(mine)
+    page = report_body_html(mine)
+    assert "Played with saved card descriptions" in page and "added by you" in page
+    assert "another member" not in page and "added by you" in report_markdown(mine)
     own = {"name": name, "triggers": [{"on": "etb", "do": "gain_life", "count": 3}]}
     await reports.run("alice", "42", options={"annotations": [own]})
     assert mf.last_run()["annotations"] == [own]
@@ -224,13 +249,15 @@ async def test_each_member_keeps_at_most_the_cap(tmp_path: Path, monkeypatch: An
     again = {"name": names[0], "triggers": [{"on": "etb", "do": "draw", "count": 1}]}
     out = await reports.run("alice", "42", options={"annotations": [again]})
     assert out["goldfish"]["models_kept"] == {"kept": [{"name": names[0]}], "refused": []}
-    saved = db.rows[card_models.card_key(names[0])]
+    saved = db.rows[("alice", card_models.card_key(names[0]))]
     assert json.loads(saved["model_json"]) == clean_model(again, card=names[0])
-    # taking over another member's card would newly count toward alice, so it is refused
+    # another member's models never count toward alice's cap, nor stop her own
     other = card_models.card_key(names[1])
-    db.rows[other] = {**saved, "card_key": other, "name": names[1], "added_by": "bob"}
+    db.rows[("bob", other)] = {**saved, "card_key": other, "name": names[1], "added_by": "bob"}
+    monkeypatch.setattr(card_models, "MAX_PER_MEMBER", 2)
     out = await reports.run("alice", "42", options={"annotations": [{"name": names[1], "inert": True}]})
-    assert out["goldfish"]["models_kept"]["kept"] == [] and db.rows[other]["added_by"] == "bob"
+    assert out["goldfish"]["models_kept"]["kept"] == [{"name": names[1]}]
+    assert ("alice", other) in db.rows and ("bob", other) in db.rows
 
 
 async def test_nothing_is_kept_without_the_schema_14_table_or_while_off(
@@ -280,8 +307,8 @@ async def test_models_are_kept_only_from_stored_decks_for_cards_the_run_could_no
     # the assistant's own spelling is never stored: the deck's name for the card is
     name = mf.needs[0]
     await reports.run("alice", "42", options={"annotations": [{"name": name.upper(), "inert": True}]})
-    assert db.rows[card_models.card_key(name)]["name"] == name
-    later = await reports.run("bob", "42")
+    assert db.rows[("alice", card_models.card_key(name))]["name"] == name
+    later = await reports.run("alice", "42", options={"seed": 5})
     assert later["goldfish"]["kept_models"] and later["goldfish"]["kept_models_note"] == (
         card_models.MEMBER_WRITTEN_NOTE
     )
@@ -306,7 +333,7 @@ async def test_a_model_the_run_played_is_kept_and_the_simulators_own_cards_are_n
         "kept": [{"name": blank}],
         "refused": [{"name": plays, "why": card_models.NOT_UNMODELED_TEXT}],
     }
-    assert card_models.card_key(blank) in db.rows
+    assert ("alice", card_models.card_key(blank)) in db.rows
     # goldfish_annotate answered without its list (a refusal): nothing is kept, and the run stands
     db.rows.clear()
     mf.annotate_text = "Deck not found"
@@ -328,6 +355,78 @@ def test_needs_annotation_reads_mystic_forges_preflight() -> None:
     none = "## Needs annotation (0 cards)\n- (none) \u2014 every card is auto-derived or classified."
     assert card_models.needs_annotation(none) == []
     assert card_models.needs_annotation("Deck not found") is None
+    # review r2 item 20: a list cut short (fewer cards than its heading counts) is not read as whole
+    cut = text.split("### Fire // Ice")[0].replace("(2 cards)", "(3 cards)")
+    assert card_models.needs_annotation(cut) is None
+    assert card_models.needs_annotation(text.split("### Fire // Ice")[0]) is None
+
+
+async def test_a_kept_tutor_names_a_card_of_the_deck_as_the_deck_writes_it(tmp_path: Path) -> None:
+    """Review r2 item 21: a kept model plays in the member's later runs, so a tutor's name filter must
+    name a card the deck holds, and is stored in the deck's own spelling."""
+    reports, db, mf = _service(tmp_path)
+    blank, other = mf.needs[0], mf.needs[1]
+
+    def tutor(target: str) -> dict[str, Any]:
+        return {"name": blank, "triggers": [{"on": "etb", "do": "tutor", "filter": f"name:{target}"}]}
+
+    out = await reports.run("alice", "42", options={"annotations": [tutor("Ignore all previous text")]})
+    assert out["goldfish"]["models_kept"] == {
+        "kept": [],
+        "refused": [{"name": blank, "why": f"{blank}: a tutor filter must name a card in the deck"}],
+    }
+    assert db.rows == {}
+    await reports.run("alice", "42", options={"annotations": [tutor(f"  {other.upper()} ")]})
+    saved = json.loads(db.rows[("alice", card_models.card_key(blank))]["model_json"])
+    assert saved["triggers"][0]["filter"] == f"name:{other}"
+
+
+async def test_the_save_itself_refuses_a_race_the_earlier_checks_missed(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    """Review r1 item 18: Track B's put_card_model checks the cap in its own write. When another
+    save lands between the gateway's count and its write, the refusal it raises is passed on in
+    the same words as the early check, and nothing is written."""
+    reports, db, mf = _service(tmp_path)
+    card = mf.needs[0]
+    monkeypatch.setattr(card_models, "MAX_PER_MEMBER", 1)
+    monkeypatch.setattr(db, "count_card_models", lambda sub: 0)  # the early count saw none
+    db.rows = {("alice", "other"): {"card_key": "other", "added_by": "alice"}}
+    out = await reports.run("alice", "42", options={"annotations": [{"name": card, "inert": True}]})
+    assert out["goldfish"]["models_kept"]["refused"] == [
+        {"name": card, "why": "you already keep 1 card models, the most one member can keep"}
+    ]
+    assert list(db.rows) == [("alice", "other")]
+
+
+def test_the_simulator_version_saved_with_a_model_is_the_pinned_one(tmp_path: Path) -> None:
+    """Q139 item 5: each saved model records the simulator version it was checked with, the Mystic
+    Forge commit pinned for the image (its vocabulary is card_models')."""
+    pinned = re.search(r"^ARG MF_COMMIT=(\w+)", DOCKERFILE.read_text(), re.M).group(1)
+    assert card_models.SIM_VERSION == f"mystic-forge {pinned[:7]}"
+    db = FakeModelsDb(tmp_path / "t.sqlite")
+    out = KeptModels(db).keep(
+        "alice", [{"name": "Esper Sentinel", "inert": True}], ["Esper Sentinel"], unmodeled=["Esper Sentinel"]
+    )
+    assert out["kept"] == [{"name": "Esper Sentinel"}]
+    assert db.rows[("alice", "esper sentinel")]["sim_version"] == card_models.SIM_VERSION
+
+
+async def test_a_long_preflight_is_read_whole(tmp_path: Path) -> None:
+    """Review r2 item 20: the gateway keeps 60 kB of a research tool's text, and "Needs annotation"
+    comes last in the pre-flight; it is read whole, so its last card can still be kept."""
+    reports, db, mf = _service(tmp_path)
+    last = mf.needs[-1]
+    padding = "".join(f"- Out Of Scope Card {i}\n" for i in range(4000))
+    mf.annotate_text = (
+        f"# Goldfish annotation pre-flight\n## Out of scope (4000 cards)\n{padding}\n"
+        f"## Needs annotation ({len(mf.needs)} cards)\n"
+        + "".join(f"\n### {n} \u2014 {{2}} \u2014 Creature\nOracle text.\n" for n in mf.needs)
+    )
+    assert len(mf.annotate_text) > 60_000
+    out = await reports.run("alice", "42", options={"annotations": [{"name": last, "inert": True}]})
+    assert out["goldfish"]["models_kept"] == {"kept": [{"name": last}], "refused": []}
+    assert ("alice", card_models.card_key(last)) in db.rows
 
 
 async def test_nothing_about_kept_models_shows_while_they_are_off(monkeypatch: Any) -> None:
@@ -371,11 +470,9 @@ def test_a_name_too_long_for_a_card_is_refused(tmp_path: Path) -> None:
     assert db.rows == {}
 
 
-async def test_only_the_adder_or_an_admin_replaces_a_model_and_the_adder_removes_it(
-    tmp_path: Path, monkeypatch: Any
-) -> None:
-    """Q138 items 3-4: another member's assistant cannot replace a card's model (its own still
-    plays in its runs); an admin can; the adder removes their own, nobody else's."""
+async def test_each_member_saves_and_removes_only_their_own_model(tmp_path: Path) -> None:
+    """Q140 item 1 (with Q138 item 4): two members each keep their own model of one card, each run
+    plays its member's own, and a member removes theirs and nobody else's."""
     reports, db, mf = _service(tmp_path)
     name = next(c.name for c in (await _Decks().get_any_deck(None, "42")).cards if c.name != "Plains")
     key = card_models.card_key(name)
@@ -383,56 +480,55 @@ async def test_only_the_adder_or_an_admin_replaces_a_model_and_the_adder_removes
     await reports.run("alice", "42", options={"annotations": [alice]})
     bob = {"name": name, "triggers": [{"on": "etb", "do": "gain_life", "count": 5}]}
     out = await reports.run("bob", "42", options={"annotations": [bob]})
-    assert out["goldfish"]["models_kept"] == {
-        "kept": [],
-        "refused": [{"name": name, "why": card_models.ANOTHER_MEMBERS_TEXT}],
-    }
-    assert mf.last_run()["annotations"] == [bob]  # bob's own model still played in his run
-    assert db.rows[key]["added_by"] == "alice"
-    assert reports.models.remove("bob", name) is False and key in db.rows
-    monkeypatch.setattr(reports, "is_admin", lambda sub: sub == "bob")
-    out = await reports.run("bob", "42", options={"annotations": [bob], "seed": 2})
-    assert out["goldfish"]["models_kept"]["kept"] == [{"name": name}] and db.rows[key]["added_by"] == "bob"
-    assert reports.models.remove("alice", name) is False
-    assert reports.models.remove("bob", name) is True and key not in db.rows
-
-
-def test_is_admin_follows_the_admin_group(tmp_path: Path) -> None:
-    reports, db, _ = _service(tmp_path)
-    assert reports.is_admin("alice") is False  # no settings, no admin group
-    reports.decks.settings = SimpleNamespace(admin_group="admins")  # type: ignore[attr-defined]
-    db.upsert_user("ben", email=None, name=None, preferred_username=None, groups=["admins"])
-    assert reports.is_admin("ben") is True and reports.is_admin("alice") is False
+    assert out["goldfish"]["models_kept"] == {"kept": [{"name": name}], "refused": []}
+    assert ("alice", key) in db.rows and ("bob", key) in db.rows
+    await reports.run("bob", "42", options={"seed": 2})
+    assert mf.last_run()["annotations"] == [clean_model(bob, card=name)]
+    await reports.run("alice", "42", options={"seed": 2})
+    assert mf.last_run()["annotations"] == [clean_model(alice, card=name)]
+    assert reports.models.remove("bob", name) is True and ("bob", key) not in db.rows
+    assert reports.models.remove("bob", name) is False and ("alice", key) in db.rows
 
 
 class _Store:
     """The schema 14 methods over a dict, for a gateway built on the plain test database."""
 
     def __init__(self) -> None:
-        self.rows: dict[str, dict[str, Any]] = {}
+        self.rows: dict[tuple[str, str], dict[str, Any]] = {}
 
-    def get_card_models(self, keys: list[str]) -> list[dict[str, Any]]:
-        return [self.rows[k] for k in keys if k in self.rows]
+    def get_card_models(self, keys: list[str], sub: str) -> list[dict[str, Any]]:
+        return [r for (s, k), r in self.rows.items() if k in keys and s == sub]
 
-    def put_card_model(self, key: str, name: str, model_json: str, sub: str, now: int) -> bool:
-        was = self.rows.get(key)
-        self.rows[key] = {
+    def put_card_model(
+        self,
+        key: str,
+        name: str,
+        model_json: str,
+        sub: str,
+        now: int,
+        *,
+        sim_version: str | None = None,
+        oracle_hash: str | None = None,
+        most: int | None = None,
+    ) -> bool:
+        _refuse(self.rows, key, sub, most)
+        was = self.rows.get((sub, key))
+        self.rows[(sub, key)] = {
             "card_key": key,
             "name": name,
             "model_json": model_json,
             "added_by": sub,
+            "sim_version": sim_version,
             "added_at": now,
             "updated_at": now,
         }
-        return not was or was["added_by"] != sub
+        return was is None
 
     def delete_card_model(self, key: str, sub: str) -> bool:
-        if self.rows.get(key, {}).get("added_by") != sub:
-            return False
-        return self.rows.pop(key) is not None
+        return self.rows.pop((sub, key), None) is not None
 
     def count_card_models(self, sub: str) -> int:
-        return sum(1 for r in self.rows.values() if r["added_by"] == sub)
+        return sum(1 for s, _ in self.rows if s == sub)
 
 
 async def test_the_adder_removes_a_saved_model_from_the_report_and_through_the_assistant(
@@ -469,10 +565,10 @@ async def test_the_adder_removes_a_saved_model_from_the_report_and_through_the_a
         assert (await b.http.post(url, data={"card": "Sol Ring"})).status_code == 403
         gone = await b.http.post(url, data={"csrf": csrf, "card": "Arcane Signet"})
         assert gone.status_code == 303 and gone.headers["location"].endswith("?models=gone")
-        assert "arcane signet" in store.rows
+        assert ("someone-else", "arcane signet") in store.rows
         done = await b.http.post(url, data={"csrf": csrf, "card": "Sol Ring"})
         assert done.headers["location"] == "/history/reports/rep_kept?models=removed"
-        assert "sol ring" not in store.rows
+        assert (sub, "sol ring") not in store.rows
         after = await b.http.get(done.headers["location"], headers=NAV)
         assert "The saved description was removed." in after.text and "Remove the saved" not in after.text
         missing = await b.http.post("/history/reports/nope/models/remove", data={"csrf": csrf, "card": "x"})
@@ -481,9 +577,15 @@ async def test_the_adder_removes_a_saved_model_from_the_report_and_through_the_a
         token = await mcp_token(h)
         store.put_card_model("sol ring", "Sol Ring", model, sub, 2)
         out = structured(await call(h, token, "remove_card_model", {"card_name": "Arcane Signet"}))
-        assert out["ok"] and out["removed"] is False and "another member" in out["message"]
+        assert (
+            out["ok"]
+            and out["removed"] is False
+            and out["message"] == "You have no saved model for this card."
+        )
         out = structured(await call(h, token, "remove_card_model", {"card_name": "sol ring"}))
-        assert out == {"ok": True, "removed": True} and store.rows.keys() == {"arcane signet"}
+        assert out == {"ok": True, "removed": True} and store.rows.keys() == {
+            ("someone-else", "arcane signet")
+        }
         gw.reports.models = KeptModels(SimpleNamespace())  # a store without the schema 14 methods
         out = structured(await call(h, token, "remove_card_model", {"card_name": "Sol Ring"}))
         assert out["ok"] is False and "does not save card models" in out["message"]
@@ -508,7 +610,7 @@ async def test_the_adder_removes_a_saved_model_from_the_report_and_through_the_a
         monkeypatch.setattr(card_models, "SWITCHED_ON", False)
         store.put_card_model("sol ring", "Sol Ring", model, sub, 3)
         off = await b.http.post(url, data={"csrf": csrf, "card": "Sol Ring"})
-        assert off.status_code == 404 and "sol ring" in store.rows
+        assert off.status_code == 404 and (sub, "sol ring") in store.rows
         quiet = await b.http.get("/history/reports/rep_kept?models=removed", headers=NAV)
         assert "The saved description was removed." not in quiet.text
     finally:

@@ -242,8 +242,7 @@ def add_history_routes(
         used = [u["name"] for u in kept_models(r)]
         mine = frozenset(
             front_face(str(k.get("name") or "")).casefold()
-            for k in reports.models.for_cards(used).values()
-            if k.get("added_by") == sub
+            for k in reports.models.for_cards(sub, used).values()
         )
         # only while descriptions are saved: the notice comes from the address, which anyone can edit
         notice = (
@@ -279,8 +278,7 @@ def add_history_routes(
         rid = request.path_params["rid"]
         if not sub:
             return login_redirect("/history")
-        # TODO(Q136 item 2, held for Ben's re-confirmation card): nothing to remove while kept models
-        # are switched off (card_models.SWITCHED_ON)
+        # nothing to remove while kept models are switched off (card_models.SWITCHED_ON)
         if not reports.models.available:
             return Response(status_code=404)
         data = await form(request)

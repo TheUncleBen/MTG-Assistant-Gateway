@@ -1571,19 +1571,17 @@ def _has_commander(deck: Deck) -> bool:
 
 
 def compare_forge_html(deck: Deck, other: Any, other_name: str, *, csrf: str | None, forge_on: bool) -> str:
-    """K6 (Q136): Forge games of both decks against the same three precons, picked for this
-    deck's bracket, from the Compare page (POST /decks/<id>/compare/forge). Only when Forge is set
-    up and both sides are Archidekt Commander decks: Forge plays nothing else, and a pasted list
-    has no report to keep its games."""
+    """K6 (Q136): Forge games of both decks against the same three precons, picked for the higher
+    of the two decks' brackets (Q140 item 3), from the Compare page (POST /decks/<id>/compare/forge).
+    Only when Forge is set up and both sides are Archidekt Commander decks: Forge plays nothing
+    else, and a pasted list has no report to keep its games."""
     if not (forge_on and csrf and isinstance(other, Deck) and _has_commander(deck) and _has_commander(other)):
         return ""
-    name = esc(deck.name or f"Deck {deck.id}")
-    # TODO(Q136 item 6, held for Ben's re-confirmation): which deck's bracket picks the opponents;
-    # this text follows the rule built today (forge.shared_opponents) and changes with it.
     return (
         "<section class='panel compareforge'><h3>Forge games against the same opponents</h3>"
-        f"<p class='muted small'>Forge plays each deck against the same three precons, picked for "
-        f"{name}'s bracket, or Archidekt's estimate from cards when none is set. Each deck gets its "
+        "<p class='muted small'>Forge plays each deck against the same three precons, picked for "
+        "the higher of the two decks' brackets: the bracket set on each deck, or Archidekt's estimate "
+        "from cards when none is set. Which deck you compare from doesn't change them. Each deck gets its "
         "own report on the <a href='/reports'>Reports</a> page (and in History) with the deck "
         "statistics, the legality check and the Forge games (no solo test). The games play in the "
         "background, one deck after the other. Compare the two decks' 95% intervals, not only their "

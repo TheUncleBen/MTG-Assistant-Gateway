@@ -318,6 +318,26 @@ def pick_opponents(
     }
 
 
+# Q140 item 3: the Compare page's "Test both in Forge" seats both decks against precons picked for
+# the higher of their brackets, so the order of the two decks doesn't matter.
+PAIR_LEAD = "Both decks on the Compare page meet opponents picked for the higher of their two brackets."
+
+
+def bracket_parts(value: Any) -> tuple[int | None, str | None, str | None, bool]:
+    """A run's stored bracket: [level, source] for the deck's own, or [level, source, deck, True]
+    for a Compare page run (``deck`` names the other deck when its bracket was the higher, else
+    is None)."""
+    parts = list(value) if isinstance(value, (list, tuple)) else []
+    parts += [None] * (4 - len(parts))
+    level, source, of_deck, pair = parts[:4]
+    return (
+        level if isinstance(level, int) and not isinstance(level, bool) else None,
+        source if isinstance(source, str) else None,
+        of_deck if isinstance(of_deck, str) and of_deck else None,
+        pair is True,
+    )
+
+
 def shared_opponents(
     precons: list[dict[str, Any]], shared: dict[str, Any]
 ) -> tuple[list[str] | None, dict[str, Any]]:
@@ -345,10 +365,12 @@ def shared_opponents(
             **({"opponent_brackets": brackets} if brackets else {}),
             "note": f"The same opponents as {deck}'s Forge games, so both decks met the same table.",
         }
-    # TODO(Q136 item 6, held for Ben's re-confirmation): seats opponents picked by the first deck's
-    # bracket (or Archidekt's estimate when none is set); finish or change only after his answer.
-    level, source = shared.get("bracket") or (None, None)
-    chosen, picked = pick_opponents(precons, level if isinstance(level, int) else None, source, deck=deck)
+    # its run has not started yet: picked as that run will pick them, for the bracket it waits
+    # with (the higher of the two decks' on the Compare page, Q140 item 3: then [n, source, deck])
+    level, source, of_deck, pair = bracket_parts(shared.get("bracket"))
+    chosen, picked = pick_opponents(precons, level, source, deck=of_deck or deck)
+    if pair:
+        picked = {**picked, "pair": True, "note": f"{PAIR_LEAD} {picked['note']}"}
     # how they were picked is pick_opponents' own note, true also with no bracket or unrated precons
     return chosen, {
         **picked,
@@ -368,6 +390,8 @@ async def start_run(
     seed: int | None = None,
     bracket: int | None = None,
     bracket_source: str | None = None,
+    bracket_deck: str | None = None,
+    pair: bool = False,
     parallel: int = 1,
     shared: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -375,6 +399,8 @@ async def start_run(
     ``forge`` section. ``shared`` (K6, Q136) seats the opponents of another report's run, so two
     decks meet the same table: its ``opponents`` (that run's precons) when it has them, else
     they are picked for its ``bracket``; ``report_id`` and ``deck_name`` say whose they were.
+    ``pair`` (Q140 item 3): the Compare page's run, whose ``bracket`` is the higher of the two
+    decks' (``bracket_deck`` names the other deck when it is that one's).
     Cards Forge lacks are removed from the run and named in ``not_played``; the run is refused
     only when the commander itself is missing. Every run is seeded: without a seed from the
     request the gateway picks one, so ``seed`` is always the one Forge used (``seed_source`` says
@@ -403,7 +429,9 @@ async def start_run(
         if chosen is None:
             return {"state": "failed", "error": choice["note"], "opponent_choice": choice}
     else:
-        chosen, choice = pick_opponents(precons, bracket, bracket_source)
+        chosen, choice = pick_opponents(precons, bracket, bracket_source, deck=bracket_deck)
+        if pair:
+            choice = {**choice, "pair": True, "note": f"{PAIR_LEAD} {choice['note']}"}
     if not chosen:
         return {"state": "failed", "error": "Forge has no opponent decks."}
     seats = [deck_name, *chosen]
