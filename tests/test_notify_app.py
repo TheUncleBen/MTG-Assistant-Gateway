@@ -17,6 +17,7 @@ import httpx
 import pytest
 
 from mtg_gateway import notify
+from mtg_gateway.db import Database
 from mtg_gateway.membership import Membership
 
 from .conftest import Stack, StackOptions, stack_with
@@ -459,6 +460,42 @@ async def test_the_card_in_the_app_connects_this_phone(stack: Stack) -> None:
         assert r.headers["location"] == "/account?ok=notify_off#notifications"
         page = (await b.http.get("/account")).text
         assert "startNotifications" not in page and "Send test" not in page
+    finally:
+        await b.aclose()
+
+
+def test_every_topic_from_before_the_upgrade_is_replaced_once(tmp_path) -> None:
+    """A topic a member typed in 0.7.26 can have the same form as one the gateway makes (mtg- and
+    22 characters), so it can't be told apart by its form: each one stored before the upgrade is
+    replaced, once, and a key made after it is kept."""
+    db = Database(tmp_path / "gw.sqlite")
+    try:
+        for sub in ("typed", "short"):
+            db.upsert_user(sub, email=None, name=None, preferred_username=None, groups=[])
+        typed = "mtg-" + "MyOwnTopicIsTwentyTwoC"  # typed by the member, in the new keys' form
+        assert notify.strong_topic(typed)
+        notify.save_prefs(db, "typed", ntfy_on=True, ntfy_topic=typed)
+        notify.save_prefs(db, "short", ntfy_topic="mtg-my-own-topic")
+        assert notify.replace_old_topics(db) == 2
+        after = {sub: notify.prefs(db, sub)["ntfy_topic"] for sub in ("typed", "short")}
+        assert typed not in after.values() and "mtg-my-own-topic" not in after.values()
+        assert all(notify.strong_topic(t) for t in after.values())
+        assert notify.prefs(db, "typed")["ntfy_on"] is True  # only the topic changes
+        # the next start: a key made after the upgrade, of the same form, stays
+        assert notify.replace_old_topics(db) == 0
+        assert {sub: notify.prefs(db, sub)["ntfy_topic"] for sub in ("typed", "short")} == after
+    finally:
+        db.close()
+
+
+async def test_a_key_made_after_the_upgrade_still_connects_after_a_restart(stack: Stack) -> None:
+    b, key = await _member(stack, app=True)
+    try:
+        assert notify.replace_old_topics(stack.h.db) == 0  # what the next start runs
+        assert notify.prefs(stack.h.db, "user-1")["ntfy_topic"] == key
+        s = await Stream(stack, key).start()
+        assert s.status == 200
+        await s.close()
     finally:
         await b.aclose()
 
