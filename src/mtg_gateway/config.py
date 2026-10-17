@@ -244,9 +244,10 @@ class Settings:
     # The Forge simulation service (docker/forge/); unset, reports run the goldfish only.
     forge_url: str | None = None
     # Games per Forge run: four-player Commander games are slow on a Pi, so runs stay short.
-    forge_games: int = 10
-    # Forge games played at the same time (O11). 1 is today's: the engine plays one game at a time.
-    forge_parallel_games: int = 1
+    forge_games: int = 4
+    # Forge games a report asks to play at the same time (1 to 4); the Forge service plays as many as
+    # its machine has places for, so the default asks for all of them.
+    forge_parallel_games: int = 4
     cimd_enabled: bool = True
     cimd_allowed_hosts: list[str] = field(default_factory=list)
     writes_enabled: bool = False
@@ -493,8 +494,8 @@ def load_settings() -> Settings:
         allowed_hosts=allowed_hosts,
         mystic_forge_url=(_env("MTG_MYSTIC_FORGE_URL", "") or None),
         forge_url=(_env("MTG_FORGE_URL", "") or None),
-        forge_games=_int_env("MTG_FORGE_GAMES", 10, lo=1, hi=50),
-        forge_parallel_games=_int_env("MTG_FORGE_PARALLEL_GAMES", 1, lo=1, hi=4),
+        forge_games=_int_env("MTG_FORGE_GAMES", 4, lo=1, hi=50),
+        forge_parallel_games=_int_env("MTG_FORGE_PARALLEL_GAMES", 4, lo=1, hi=4),
         cimd_enabled=_bool_env("MTG_CIMD_ENABLED", True),
         cimd_allowed_hosts=[
             h.strip() for h in (_env("MTG_CIMD_ALLOWED_HOSTS", "") or "").split(",") if h.strip()
@@ -749,8 +750,8 @@ MANAGED_SETTINGS: dict[str, SettingSpec] = {
             "backup_keep_days", "MTG_BACKUP_KEEP_DAYS", "int", 14, "backups", "B", lo=1, hi=3650, restart=True
         ),
         # simulation (Track C)
-        _spec("forge_games", "MTG_FORGE_GAMES", "int", 10, "simulation", "C", lo=1, hi=50),
-        _spec("forge_parallel_games", "MTG_FORGE_PARALLEL_GAMES", "int", 1, "simulation", "C", lo=1, hi=4),
+        _spec("forge_games", "MTG_FORGE_GAMES", "int", 4, "simulation", "C", lo=1, hi=50),
+        _spec("forge_parallel_games", "MTG_FORGE_PARALLEL_GAMES", "int", 4, "simulation", "C", lo=1, hi=4),
         # watchlists and prices
         _spec("watchlists_enabled", "MTG_WATCHLISTS_ENABLED", "bool", False, "watchlists", "B", restart=True),
         _spec("watch_max_cards", "MTG_WATCH_MAX_CARDS", "int", 200, "watchlists", "B", lo=0, hi=200),

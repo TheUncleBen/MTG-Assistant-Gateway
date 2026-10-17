@@ -258,6 +258,10 @@ def add_history_routes(
             else ""
         )
         kind = "notice error" if request.query_params.get("models") == "error" else "notice"
+        # Play more games that started nothing says why (the address holds a code, never the text)
+        refused = _more_notices().get(request.query_params.get("more") or "", "")
+        if refused:
+            notice, kind = _esc(refused), "notice warn"
         body = (f"<p class='{kind}'>{notice}</p>" if notice else "") + report_body_html(
             r,
             stats_html=stats_strip(r.get("stats")),
@@ -312,6 +316,55 @@ def add_history_routes(
         except StoreError:
             outcome = "error"
         return RedirectResponse(f"/history/reports/{_esc(rid)}?models={outcome}", status_code=303)
+
+    def _more_notices() -> dict[str, str]:
+        from . import reports as r
+
+        return {
+            "queue": r.MORE_QUEUE_FULL,
+            "full": r.MORE_FULL,
+            "ended": r.MORE_NOT_ENDED,
+            "none": r.MORE_NOT_THIS_ONE,
+            "noforge": r.MORE_NO_FORGE,
+            "pairwait": r.MORE_PAIR_WAIT,
+            "paircant": r.MORE_PAIR_CANT,
+            "pairqueue": r.MORE_PAIR_QUEUE,
+            "setup": r.PAIR_SETTING_UP,
+        }
+
+    @server.custom_route("/history/reports/{rid}/forge/more", methods=["POST"], include_in_schema=False)
+    async def report_more_games(request: Request) -> Response:
+        """Play more games: another round of Forge games against the same opponents, added to the
+        report's earlier ones. A press that starts nothing comes back to the report saying why."""
+        sub, sid = browser_session(state, request)
+        rid = request.path_params["rid"]
+        if not sub:
+            return login_redirect("/history")
+        data = await form(request)
+        if not check_csrf(sid, data):
+            return page(
+                "Report",
+                "<p class='notice error'>This form expired. Reload and try again.</p>",
+                sub=sub,
+                sid=sid,
+                status=403,
+            )
+        try:
+            await reports.play_more(sub, rid)
+        except DeckError as exc:
+            if exc.kind == "not_found":
+                return page(
+                    "Report",
+                    "<div class='card'><p>No such report for your account.</p></div>",
+                    sub=sub,
+                    sid=sid,
+                    status=404,
+                )
+            code = next((k for k, v in _more_notices().items() if v == str(exc)), "")
+            if not code:
+                raise
+            return RedirectResponse(f"/history/reports/{_esc(rid)}?more={code}", status_code=303)
+        return RedirectResponse(f"/history/reports/{_esc(rid)}", status_code=303)
 
     def _report_file(r: dict[str, Any], ext: str, body: str, media_type: str) -> Response:
         name = _filename(r.get("deck_name") or r["deck_id"])

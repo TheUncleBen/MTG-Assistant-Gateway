@@ -3,6 +3,7 @@ request checks, parsing, and how a job's games are cut into slices and played.""
 
 import os
 import queue
+import shutil
 import stat
 import sys
 import tempfile
@@ -100,16 +101,112 @@ class Output(unittest.TestCase):
         )
 
 
+class Places(unittest.TestCase):
+    def test_places_follow_the_machine(self):
+        gib = 2**30
+        self.assertEqual(fs.places_for(2, 1536 * 2**20), 1)  # the stack's default limits
+        self.assertEqual(fs.places_for(4, 8 * gib), 2)  # a Pi 4 or 5 with 8 GB, no limits
+        self.assertEqual(fs.places_for(4, 2 * gib), 1)  # memory decides
+        self.assertEqual(fs.places_for(16, 64 * gib), 4)  # never more than 4
+        self.assertEqual(fs.places_for(1, 16 * gib), 1)  # never fewer than 1
+        self.assertEqual(fs.places_for(8, None), 1)  # memory unknown: one at a time
+
+    def test_the_setting_wins_over_the_machine(self):
+        self.assertEqual(fs.max_parallel("3"), (3, "FORGE_MAX_PARALLEL"))
+        self.assertEqual(fs.max_parallel("9"), (4, "FORGE_MAX_PARALLEL"))
+        self.assertEqual(fs.max_parallel("0"), (1, "FORGE_MAX_PARALLEL"))
+        places, source = fs.max_parallel("")
+        self.assertEqual(source, "machine")
+        self.assertTrue(1 <= places <= 4)
+        self.assertEqual(fs.max_parallel(None)[1], "machine")
+
+    def test_the_container_limits_are_read(self):
+        reads = {
+            "/sys/fs/cgroup/cpu.max": "200000 100000",
+            "/sys/fs/cgroup/memory.max": str(1536 * 2**20),
+        }
+        saved, fs._read = fs._read, lambda path: reads.get(path, "")
+        try:
+            self.assertEqual(fs.machine_cpus(), 2.0)
+            self.assertEqual(fs.machine_memory(), 1536 * 2**20)
+            reads["/sys/fs/cgroup/cpu.max"] = "max 100000"  # no CPU limit: the machine's count
+            self.assertEqual(fs.machine_cpus(), float(os.cpu_count() or 1))
+            reads["/sys/fs/cgroup/memory.max"] = "max"
+            reads["/proc/meminfo"] = "MemTotal:        8000000 kB\nMemFree: 1 kB"
+            self.assertEqual(fs.machine_memory(), 8000000 * 1024)
+        finally:
+            fs._read = saved
+
+    def test_the_memory_budget_stands_in_for_a_missing_limit(self):
+        reads = {"/proc/meminfo": "MemTotal:        8000000 kB"}  # no memory.max: no cgroup limit
+        saved, fs._read = fs._read, lambda path: reads.get(path, "")
+        saved_budget = fs.MEMORY_BUDGET
+        try:
+            fs.MEMORY_BUDGET = "1536M"
+            self.assertEqual(fs.machine_memory(), 1536 * 2**20)
+            self.assertEqual(fs.places_for(2, fs.machine_memory()), 1)
+            reads["/sys/fs/cgroup/memory.max"] = str(3 * 2**30)  # a real limit wins over the budget
+            self.assertEqual(fs.machine_memory(), 3 * 2**30)
+            del reads["/sys/fs/cgroup/memory.max"]
+            fs.MEMORY_BUDGET = ""
+            self.assertEqual(fs.machine_memory(), 8000000 * 1024)
+        finally:
+            fs._read, fs.MEMORY_BUDGET = saved, saved_budget
+
+    def test_sizes(self):
+        self.assertEqual(fs.size_bytes("1536M"), 1536 * 2**20)
+        self.assertEqual(fs.size_bytes("2g"), 2 * 2**30)
+        self.assertEqual(fs.size_bytes("800000k"), 800000 * 2**10)
+        self.assertEqual(fs.size_bytes("1000"), 1000)
+        self.assertEqual(fs.size_bytes("1.5g"), int(1.5 * 2**30))
+        self.assertEqual(fs.size_bytes("1.5GB"), int(1.5 * 2**30))
+        self.assertIsNone(fs.size_bytes(""))
+        self.assertIsNone(fs.size_bytes("lots"))
+        self.assertIsNone(fs.size_bytes("1,5g"))
+
+    def test_a_budget_that_is_not_a_size_gives_one_place_not_the_whole_machine(self):
+        reads = {"/proc/meminfo": "MemTotal:        8000000 kB"}
+        saved, fs._read = fs._read, lambda path: reads.get(path, "")
+        saved_budget = fs.MEMORY_BUDGET
+        try:
+            fs.MEMORY_BUDGET = "1.5 gigs"
+            self.assertIsNone(fs.machine_memory())
+            self.assertEqual(fs.places_for(8, fs.machine_memory()), 1)
+            fs.MEMORY_BUDGET = "1.5g"
+            self.assertEqual(fs.machine_memory(), int(1.5 * 2**30))
+        finally:
+            fs._read, fs.MEMORY_BUDGET = saved, saved_budget
+
+    def test_out_of_memory_scores_forge_cannot_set_are_left_out(self):
+        self.assertEqual(fs.oom_score("1000"), (1000, ""))
+        self.assertEqual(fs.oom_score(" 500 "), (500, ""))
+        for text in ("0", "-500", "1001", "high", ""):
+            score, why = fs.oom_score(text)
+            self.assertEqual(score, 0, text)
+            self.assertIn("FORGE_OOM_SCORE_ADJ", why)
+
+
 class Slices(unittest.TestCase):
-    def test_cut_by_the_number_of_games_only(self):
+    def test_one_game_per_group(self):
+        self.assertEqual(fs.SLICE_GAMES, 1)
         self.assertEqual(fs.slices(1), [1])
-        self.assertEqual(fs.slices(5), [5])
-        self.assertEqual(fs.slices(7), [4, 3])
-        self.assertEqual(fs.slices(10), [5, 5])
-        self.assertEqual(fs.slices(12), [4, 4, 4])
-        self.assertEqual(fs.slices(50), [5] * 10)
+        self.assertEqual(fs.slices(4), [1, 1, 1, 1])
         for games in range(1, fs.MAX_GAMES + 1):
-            self.assertEqual(sum(fs.slices(games)), games)
+            self.assertEqual(fs.slices(games), [1] * games)
+
+    def test_cut_by_the_number_of_games_only(self):
+        saved, fs.SLICE_GAMES = fs.SLICE_GAMES, 5
+        try:
+            self.assertEqual(fs.slices(1), [1])
+            self.assertEqual(fs.slices(5), [5])
+            self.assertEqual(fs.slices(7), [4, 3])
+            self.assertEqual(fs.slices(10), [5, 5])
+            self.assertEqual(fs.slices(12), [4, 4, 4])
+            self.assertEqual(fs.slices(50), [5] * 10)
+            for games in range(1, fs.MAX_GAMES + 1):
+                self.assertEqual(sum(fs.slices(games)), games)
+        finally:
+            fs.SLICE_GAMES = saved
 
     def test_seeds(self):
         self.assertEqual(fs.slice_seed(42, 0), 42)  # one slice plays exactly as before slices
@@ -133,6 +230,9 @@ print("Ai(1)-D1 vs Ai(2)-D2 - %d games of Commander seed %s" % (n, seed), flush=
 log = os.path.join(os.environ["FAKE_LOG"], "start-%s-%s" % (seed, time.time()))
 given = [x[len("-Duser.home="):] for x in a if x.startswith("-Duser.home=")]
 open(log, "w").write(given[0] if given else pwd.getpwuid(os.getuid()).pw_dir)
+if os.environ.get("FAKE_FLAGS"):  # what the memory guards gave this Java
+    oom = open("/proc/self/oom_score_adj").read().strip()
+    open(os.environ["FAKE_FLAGS"], "w").write(" ".join([oom, *(x for x in a if x.startswith("-X"))]))
 time.sleep(float(os.environ.get("FAKE_SLOW", "0")))
 for g in range(1, n + 1):
     w = 1 + g % 2
@@ -161,9 +261,15 @@ class Run(unittest.TestCase):
         self.old = {k: os.environ.get(k) for k in [*self.env, "FAKE_SLOW"]}
         os.environ.update(self.env)
         self.home, fs.FORGE_HOME = fs.FORGE_HOME, self.tmp / "forge"
+        # one place unless a test sets more (the default follows the test machine), and groups of
+        # up to 5 games so these tests see how a job's games are cut and played in several groups
+        fs.MAX_PARALLEL = 1
+        fs.FREE_PLACES[:] = [0]
+        self.slice_games, fs.SLICE_GAMES = fs.SLICE_GAMES, 5
 
     def tearDown(self):
         fs.FORGE_HOME = self.home
+        fs.SLICE_GAMES = self.slice_games
         fs.MAX_PARALLEL = 1
         fs.FREE_PLACES[:] = [0]
         for k, v in self.old.items():
@@ -178,6 +284,17 @@ class Run(unittest.TestCase):
         fs.run_job(job)
         return job
 
+    def test_with_one_game_per_group_every_game_can_play_at_once(self):
+        fs.SLICE_GAMES = 1
+        fs.MAX_PARALLEL = 4
+        fs.FREE_PLACES[:] = [0, 1, 2, 3]
+        job = self.run_job(4, parallel=4)
+        view = job.view()
+        self.assertEqual(view["state"], "done")
+        self.assertEqual([s["games"] for s in view["slices"]], [1, 1, 1, 1])
+        self.assertEqual(view["parallel"], 4)
+        self.assertEqual(sorted(r["game"] for r in view["results"]), [1, 2, 3, 4])
+
     def test_same_seed_same_games_at_any_parallel_setting(self):
         one = self.run_job(12).view()
         fs.MAX_PARALLEL = 3
@@ -191,6 +308,31 @@ class Run(unittest.TestCase):
         self.assertIn("seed 42", one["header"])
         first = one["results"][0]
         self.assertEqual((first["turn"], first["lost"]), (6, {"1": "life total reached 0"}))
+
+    @unittest.skipUnless(shutil.which("choom"), "needs util-linux choom, as the image has")
+    def test_java_runs_with_its_memory_guards(self):
+        flags = self.tmp / "flags"
+        os.environ["FAKE_FLAGS"] = str(flags)
+        try:
+            self.assertEqual(self.run_job(1).view()["state"], "done")
+        finally:
+            os.environ.pop("FAKE_FLAGS")
+        oom, *java = flags.read_text().split()
+        self.assertEqual(oom, str(fs.OOM_SCORE_ADJ))  # the kernel's first pick when memory runs out
+        self.assertIn(f"-Xmx{fs.XMX}", java)
+        self.assertIn(f"-XX:MaxMetaspaceSize={fs.MAX_METASPACE}", java)
+
+    def test_java_starts_without_choom_when_the_score_is_off(self):
+        flags = self.tmp / "flags"
+        os.environ["FAKE_FLAGS"] = str(flags)
+        saved, fs.OOM_SCORE_ADJ = fs.OOM_SCORE_ADJ, fs.oom_score("-500")[0]
+        try:
+            self.assertEqual(self.run_job(1).view()["state"], "done")
+        finally:
+            os.environ.pop("FAKE_FLAGS")
+            fs.OOM_SCORE_ADJ = saved
+        oom = flags.read_text().split()[0]
+        self.assertNotEqual(oom, "1000")  # no choom: the score the service itself runs with
 
     def test_parallel_is_capped_and_extra_places_get_their_own_home(self):
         fs.MAX_PARALLEL = 2

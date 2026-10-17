@@ -7,9 +7,10 @@ Forge memory. Only the gateway reaches this service, over the stack's private ne
 A job's games are cut into fixed slices by their number alone (``slices``), each slice one Forge
 process with its own seed made from the job's seed, so the cut and the seeds are the same however
 many slices play at once (Forge does not always replay a game exactly from its seed, so the games
-themselves can still differ). A job asks for ``parallel`` slices at once. FORGE_MAX_PARALLEL
-(default 1) is the number of places, one Forge process each, shared by all jobs, because each
-process needs its own memory (FORGE_XMX) inside the container's limit. Jobs start in the order they
+themselves can still differ). A job asks for ``parallel`` slices at once. The number of places,
+one Forge process each, shared by all jobs, is FORGE_MAX_PARALLEL when set, else what the
+container's CPUs and memory fit (``max_parallel``), because each process needs its own CPU time and
+memory (FORGE_XMX) inside the container's limit. Jobs start in the order they
 came, each when a place is free, on the free places it asked for (fewer when fewer are free); so a
 job that leaves places unused (a comparison's first deck, say) lets the next one play beside it.
 
@@ -49,17 +50,110 @@ XMX = os.environ.get("FORGE_XMX", "1g")
 NICE = int(os.environ.get("FORGE_NICE", "10"))
 MAX_GAMES = int(os.environ.get("FORGE_MAX_GAMES", "50"))
 MAX_QUEUE = int(os.environ.get("FORGE_MAX_QUEUE", "4"))
-# Forge processes that may run at once, shared by all jobs in order. Each takes up to FORGE_XMX of
-# heap plus Java's own memory (one four-player game peaked near 790 MiB), so raise it only with the
-# container's limit.
-MAX_PARALLEL = max(1, min(4, int(os.environ.get("FORGE_MAX_PARALLEL", "1"))))
+# Where Docker can't cap memory (Raspberry Pi OS turns the kernel's memory controller off by
+# default, and Docker then drops a stack's memory limit), these keep Forge in bounds from inside
+# the container, with nothing to change on the machine; they are not a hard limit as the kernel's
+# memory controller is. FORGE_MEMORY_BUDGET (the stack passes FORGE_MEMORY_LIMIT) sizes the places
+# when no cgroup limit can be read. Each Java gets a ceiling on its class data on top of FORGE_XMX,
+# and is the kernel's first pick when the machine runs out of memory, so a Forge game is stopped
+# before the gateway or other services (raising oom_score_adj needs no privilege; lowering it does).
+MEMORY_BUDGET = os.environ.get("FORGE_MEMORY_BUDGET", "")
+MAX_METASPACE = os.environ.get("FORGE_MAX_METASPACE", "256m")
+
+
+def oom_score(text: str) -> tuple[int, str]:
+    """The out-of-memory score each Java runs with (0: none), and why none when it is not set.
+    Forge runs unprivileged, so choom can only raise the score, to at most 1000; any other value
+    would stop every Java from starting, so it is left out and the start log says why."""
+    try:
+        value = int(text.strip())
+    except ValueError:
+        return 0, f"FORGE_OOM_SCORE_ADJ={text!r} is not a whole number from 0 to 1000"
+    if value == 0:
+        return 0, "FORGE_OOM_SCORE_ADJ=0 turns it off"
+    if not 1 <= value <= 1000:
+        return 0, f"FORGE_OOM_SCORE_ADJ={value} is outside 1 to 1000 (Forge can only raise it)"
+    return value, ""
+
+
+OOM_SCORE_ADJ, OOM_SCORE_OFF = oom_score(os.environ.get("FORGE_OOM_SCORE_ADJ", "1000"))
+# What one Forge process needs to play a four-player game at a usable speed: about 2 CPUs and
+# 1.2 GB. Measured on GitHub's build machines with 1536M and 2 CPUs, one game per process: one game
+# peaked near 600 MiB and two at once near 1,050 MiB, but two at once were slower than one on x86
+# and three at once pushed games past the time limit, so 2 CPUs a game holds; 1.2 GB is kept as
+# the safe figure until a Pi has been measured.
+GAME_CPUS = 2.0
+GAME_MEMORY = 1.2e9
+
+
+def _read(path: str) -> str:
+    try:
+        return Path(path).read_text("utf-8").strip()
+    except OSError:
+        return ""
+
+
+def machine_cpus() -> float:
+    """The CPUs this container may use: its cgroup quota (a stack's ``cpus`` limit), else the
+    machine's count."""
+    quota = _read("/sys/fs/cgroup/cpu.max").split()  # cgroup v2: "200000 100000" or "max 100000"
+    if len(quota) == 2 and quota[0].isdigit() and quota[1].isdigit() and int(quota[1]) > 0:
+        return int(quota[0]) / int(quota[1])
+    v1, period = _read("/sys/fs/cgroup/cpu/cpu.cfs_quota_us"), _read("/sys/fs/cgroup/cpu/cpu.cfs_period_us")
+    if v1.isdigit() and period.isdigit() and int(period) > 0:
+        return int(v1) / int(period)
+    return float(os.cpu_count() or 1)
+
+
+def size_bytes(text: str) -> int | None:
+    """A size as Docker writes it ("1536M", "1.5g", "800000k" or plain bytes) in bytes; None if not one."""
+    m = re.fullmatch(r"\s*(\d+(?:\.\d+)?)\s*([kmg]?)b?\s*", text.lower())
+    if not m:
+        return None
+    return int(float(m.group(1)) * {"": 1, "k": 2**10, "m": 2**20, "g": 2**30}[m.group(2)])
+
+
+def machine_memory() -> int | None:
+    """The memory this container may use in bytes: its cgroup limit (a stack's ``memory`` limit),
+    else FORGE_MEMORY_BUDGET, else the machine's total; None when none can be read, or when a
+    budget is set but is not a size (then one place, and the start log says why: never the whole
+    machine's memory when the operator meant less)."""
+    for path in ("/sys/fs/cgroup/memory.max", "/sys/fs/cgroup/memory/memory.limit_in_bytes"):
+        value = _read(path)
+        if value.isdigit() and int(value) < 2**60:  # cgroup v1 writes a huge number for "no limit"
+            return int(value)
+    if MEMORY_BUDGET.strip():
+        return size_bytes(MEMORY_BUDGET) or None
+    for line in _read("/proc/meminfo").splitlines():
+        if line.startswith("MemTotal:") and line.split()[1].isdigit():
+            return int(line.split()[1]) * 1024
+    return None
+
+
+def places_for(cpus: float, memory: int | None) -> int:
+    """How many Forge processes fit: one per GAME_CPUS and GAME_MEMORY, from 1 to 4."""
+    by_memory = int(memory // GAME_MEMORY) if memory else 1
+    return max(1, min(4, int(cpus // GAME_CPUS), by_memory))
+
+
+def max_parallel(setting: str | None) -> tuple[int, str]:
+    """Forge processes that may run at once, shared by all jobs in order, and where the number
+    came from: FORGE_MAX_PARALLEL when set (1 to 4), else what the container's CPUs and memory fit
+    (places_for). Each process takes up to FORGE_XMX of heap plus Java's own memory."""
+    if setting and setting.strip():
+        return max(1, min(4, int(setting))), "FORGE_MAX_PARALLEL"
+    return places_for(machine_cpus(), machine_memory()), "machine"
+
+
+MAX_PARALLEL, PLACES_FROM = max_parallel(os.environ.get("FORGE_MAX_PARALLEL"))
 # A job's games are cut into slices of at most this many, the same way at any parallel setting:
-# groups of up to five (R-207; a smaller group size is on Ben's milestone card with R-215).
-SLICE_GAMES = 5
+# one game per group, so every game of a run can play at once when there are places for them.
+SLICE_GAMES = 1
 JOB_TIMEOUT = int(os.environ.get("FORGE_JOB_TIMEOUT", "7200"))
 # Forge's sim calls a game a draw after this many seconds (its -c flag; Forge's own default is 120,
-# too short for a four-player Commander game on a Raspberry Pi).
-GAME_SECONDS = int(os.environ.get("FORGE_GAME_SECONDS", "600"))
+# too short for most four-player Commander games). Four minutes keeps the slowest game inside a
+# five-minute report.
+GAME_SECONDS = int(os.environ.get("FORGE_GAME_SECONDS", "240"))
 # Forge reads each card's script only when a game needs it (its own LOAD_CARD_SCRIPTS_LAZILY
 # preference) instead of all ~35,000 at start-up: measured 7 s -> 3 s per Forge start on 4 CPUs,
 # with the same seeded game. FORGE_LAZY_CARDS=0 loads them all again.
@@ -144,7 +238,8 @@ def resolve(name: str) -> str | None:
 
 def slices(games: int) -> list[int]:
     """How a job of ``games`` games is cut: the fewest slices of at most SLICE_GAMES, as even as
-    possible, larger first (12 -> [4, 4, 4], 7 -> [4, 3]). It depends on the number of games only."""
+    possible, larger first (with groups of up to 5: 12 -> [4, 4, 4], 7 -> [4, 3]). It depends on
+    the number of games only."""
     count = max(1, -(-games // SLICE_GAMES))
     base, extra = divmod(games, count)
     return [base + (1 if i < extra else 0) for i in range(count)]
@@ -279,11 +374,13 @@ def run_slice(job: Job, index: int, work: Path, names: list[str], slot: int) -> 
     offset = sum(job.slices[:index])
     seed = slice_seed(job.seed, index)
     cmd = [
+        *(["choom", "-n", str(OOM_SCORE_ADJ), "--"] if OOM_SCORE_ADJ and shutil.which("choom") else []),
         "nice",
         "-n",
         str(NICE),
         "java",
         f"-Xmx{XMX}",
+        f"-XX:MaxMetaspaceSize={MAX_METASPACE}",
         "-Djava.awt.headless=true",
         # Java takes its home from the user account, never from $HOME, so without this every
         # place shared one preferences and log folder.
@@ -593,6 +690,8 @@ class Handler(BaseHTTPRequestHandler):
                     "busy": busy,
                     "queued": QUEUE.qsize() + len(HELD),
                     "max_parallel": MAX_PARALLEL,
+                    # "machine" when the number follows the container's CPUs and memory
+                    "max_parallel_from": PLACES_FROM,
                     # places no job holds now: the gateway starts a run on the copy with the most
                     "free_places": len(FREE_PLACES),
                 },
@@ -691,9 +790,16 @@ def main() -> None:
     server = ThreadingHTTPServer(("0.0.0.0", port), Handler)
     print(
         f"forge-service {VERSION}: {len(NAMES)} card names, Xmx {XMX}, "
-        f"up to {MAX_PARALLEL} at once, port {port}",
+        f"up to {MAX_PARALLEL} at once ({'from the machine' if PLACES_FROM == 'machine' else PLACES_FROM}), "
+        f"port {port}",
         flush=True,
     )
+    if MEMORY_BUDGET.strip() and not size_bytes(MEMORY_BUDGET):
+        print(f"FORGE_MEMORY_BUDGET={MEMORY_BUDGET!r} is not a size such as 1536M: one place", flush=True)
+    if OOM_SCORE_OFF:
+        print(f"no out-of-memory score for Forge's Java: {OOM_SCORE_OFF}", flush=True)
+    elif not shutil.which("choom"):
+        print("no out-of-memory score for Forge's Java: choom is missing", flush=True)
     server.serve_forever()
 
 

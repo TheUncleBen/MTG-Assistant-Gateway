@@ -34,9 +34,9 @@ env:
   IMAGE: ghcr.io/${{ github.repository_owner }}/mtg-assistant-forge
   DOCKERFILE: docker/forge/Dockerfile
   # "1" while the one-off games-at-once measurement is wanted (smoke-arm64), else "0"
-  MEASURE_PARALLEL: "1"
+  MEASURE_PARALLEL: "0"
   # "1" while the one-off card recognition figure is wanted (smoke-arm64), else "0"
-  MEASURE_RECOGNITION: "1"
+  MEASURE_RECOGNITION: "0"
 
 jobs:
   pin:
@@ -144,7 +144,7 @@ jobs:
       - name: Smoke test
         run: scripts/ci_smoke_forge.sh forge:ci-arm64
       # One-off measurement for the default of Forge games at once (0.7.30): time, peak memory and
-      # same-seed results with one, two and three games at once (15 games: three groups of five),
+      # same-seed results with one, two and three games at once (15 games, one game per group),
       # inside the deployment's limits (1536M, 2 CPUs). Numbers
       # only, never a gate; MEASURE_PARALLEL goes back to "0" once the figures are recorded, so later
       # Forge image pull requests don't spend the minutes.
