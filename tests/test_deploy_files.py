@@ -132,10 +132,8 @@ def test_example_env_files_leave_the_settings_page_its_settings(name: str):
         for value in re.findall(rf"^# {spec.env}=(.*)$", text, re.M):
             default = spec.default
             shown = str(default).lower() if isinstance(default, bool) else str(default)
-            assert value == shown or (value == "" and spec.env in ("MTG_SERVER_NAME", "MTG_CHATGPT_NAME")), (
-                spec.env,
-                value,
-            )
+            # every one, the gateway name too (review R12-3: "# MTG_SERVER_NAME=" passed before)
+            assert value == shown, (spec.env, value)
 
 
 @pytest.mark.parametrize(
