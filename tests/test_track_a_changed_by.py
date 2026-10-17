@@ -121,7 +121,9 @@ async def test_apply_all_lists_its_changes_with_held_and_changed_and_names_the_a
     assert rows[first["proposal_id"]].get("not_in_apply_all") is True
     assert not any(x.get("not_in_apply_all") for k, x in rows.items() if k != first["proposal_id"])
     # its own card says it of itself, and does not count itself among the left out
-    own = structured(await call(h, token, "get_proposal", {"proposal_id": first["proposal_id"]}))["deck_waiting"]
+    own = structured(await call(h, token, "get_proposal", {"proposal_id": first["proposal_id"]}))[
+        "deck_waiting"
+    ]
     assert own.get("this_left_out") is True and own["left_out"] == 0 and own["left_out_nos"] == [], own
 
 
