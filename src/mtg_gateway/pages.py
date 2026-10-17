@@ -19,13 +19,14 @@ from urllib.parse import parse_qs, quote
 from starlette.requests import Request
 from starlette.responses import RedirectResponse, Response
 
-from . import app_signin, link_disclosure, modes, notify, refusals
+from . import app_signin, link_disclosure, modes, notify
 from .archidekt import PATIENCE_SPENT
 from .auth_provider import BROWSER_COOKIE, LoginError, cookie_name
 from .avatars import initials_svg
 from .clickguard import form_stamp, guarded_form, submitted_too_soon
 from .decks import REVIEW_PAGE, DeckError, current_client, row_label, row_line, tag_change_text
 from .formatting import DOC_CSS, doc_html
+from .refusals import WRITES_OFF_KEPT
 from .theme import (
     LAYOUT_COOKIE,
     THEME_COOKIE,
@@ -897,7 +898,7 @@ ERR_MESSAGES = {
     "confirm_delete": "Nothing was deleted. Tick the box to confirm, then press Delete my data.",
     "mode_invalid": "That approval mode does not exist, or this gateway does not allow it. Nothing changed.",
     "failed": "This proposal could not be applied. Details are in the result below, if any.",
-    "writes_disabled": refusals.WRITES_OFF_KEPT,  # Q141 item 7A
+    "writes_disabled": WRITES_OFF_KEPT,  # Q141 item 7A
     "not_found": "No such proposal for your account.",
     "missing": "Something this proposal needs was not found on Archidekt: a card, a printing, a deck or "
     "a snapshot. Nothing more was changed. The result below names it.",
