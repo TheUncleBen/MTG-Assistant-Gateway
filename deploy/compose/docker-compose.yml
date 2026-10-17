@@ -251,6 +251,9 @@ services:
         max-file: "3"
     environment:
       FORGE_XMX: ${FORGE_XMX:-1g}
+      # The memory limit again, for Forge to keep to from inside where Docker can't cap memory
+      # (Raspberry Pi OS by default)
+      FORGE_MEMORY_BUDGET: ${FORGE_MEMORY_LIMIT:-1536M}
       FORGE_MAX_GAMES: ${FORGE_MAX_GAMES:-50}
       FORGE_GAME_SECONDS: ${FORGE_GAME_SECONDS:-240}
       # Forge games played at once at most (1 to 4); empty: as many as the container's CPUs and

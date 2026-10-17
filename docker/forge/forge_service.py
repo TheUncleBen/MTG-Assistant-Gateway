@@ -50,6 +50,16 @@ XMX = os.environ.get("FORGE_XMX", "1g")
 NICE = int(os.environ.get("FORGE_NICE", "10"))
 MAX_GAMES = int(os.environ.get("FORGE_MAX_GAMES", "50"))
 MAX_QUEUE = int(os.environ.get("FORGE_MAX_QUEUE", "4"))
+# Where Docker can't cap memory (Raspberry Pi OS turns the kernel's memory controller off by
+# default, and Docker then drops a stack's memory limit), these keep Forge in bounds from inside
+# the container, with nothing to change on the machine. FORGE_MEMORY_BUDGET (the stack passes
+# FORGE_MEMORY_LIMIT) sizes the places when no cgroup limit can be read. Each Java gets a ceiling
+# on its class data on top of FORGE_XMX, and is the kernel's first pick when the machine runs out
+# of memory, so the gateway and other services keep running (raising oom_score_adj needs no
+# privilege; lowering it does).
+MEMORY_BUDGET = os.environ.get("FORGE_MEMORY_BUDGET", "")
+MAX_METASPACE = os.environ.get("FORGE_MAX_METASPACE", "256m")
+OOM_SCORE_ADJ = int(os.environ.get("FORGE_OOM_SCORE_ADJ", "1000"))
 # What one Forge process needs to play a four-player game at a usable speed: about 2 CPUs and
 # 1.2 GB (measured on x86: one game peaked near 790 MiB, two at once near 1.25 GiB, three at once
 # were killed in 1.5 GiB).
@@ -76,13 +86,24 @@ def machine_cpus() -> float:
     return float(os.cpu_count() or 1)
 
 
+def size_bytes(text: str) -> int | None:
+    """A size as Docker writes it ("1536M", "2g", "800000k" or plain bytes) in bytes; None if not one."""
+    m = re.fullmatch(r"\s*(\d+)\s*([kmg]?)b?\s*", text.lower())
+    if not m:
+        return None
+    return int(m.group(1)) * {"": 1, "k": 2**10, "m": 2**20, "g": 2**30}[m.group(2)]
+
+
 def machine_memory() -> int | None:
     """The memory this container may use in bytes: its cgroup limit (a stack's ``memory`` limit),
-    else the machine's total; None when neither can be read."""
+    else FORGE_MEMORY_BUDGET, else the machine's total; None when none can be read."""
     for path in ("/sys/fs/cgroup/memory.max", "/sys/fs/cgroup/memory/memory.limit_in_bytes"):
         value = _read(path)
         if value.isdigit() and int(value) < 2**60:  # cgroup v1 writes a huge number for "no limit"
             return int(value)
+    budget = size_bytes(MEMORY_BUDGET)
+    if budget:
+        return budget
     for line in _read("/proc/meminfo").splitlines():
         if line.startswith("MemTotal:") and line.split()[1].isdigit():
             return int(line.split()[1]) * 1024
@@ -333,11 +354,13 @@ def run_slice(job: Job, index: int, work: Path, names: list[str], slot: int) -> 
     offset = sum(job.slices[:index])
     seed = slice_seed(job.seed, index)
     cmd = [
+        *(["choom", "-n", str(OOM_SCORE_ADJ), "--"] if OOM_SCORE_ADJ and shutil.which("choom") else []),
         "nice",
         "-n",
         str(NICE),
         "java",
         f"-Xmx{XMX}",
+        f"-XX:MaxMetaspaceSize={MAX_METASPACE}",
         "-Djava.awt.headless=true",
         # Java takes its home from the user account, never from $HOME, so without this every
         # place shared one preferences and log folder.
