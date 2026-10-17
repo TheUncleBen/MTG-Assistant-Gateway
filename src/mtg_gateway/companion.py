@@ -36,6 +36,7 @@ from .pages import (
     csrf_form_ok,
     read_limited,
 )
+from .settings_page import change_line
 from .theme import (
     ICON_DATA_URL,
     STYLESHEETS,
@@ -490,6 +491,9 @@ EVENT_LABELS = {
     "membership_unverifiable": "Membership could not be checked",
     "disabled_user_refused": "Request refused: account disabled",
     "not_in_group_refused": "Request refused: not in an allowed group",
+    "setting_changed": "Gateway setting changed",
+    "card_model_removed": "Card model removed",
+    "backup_trim_queued": "Older backup copies queued for deletion from Archidekt",
 }
 DETAIL_LABELS = {
     "proposal_id": "proposal",
@@ -501,13 +505,32 @@ DETAIL_LABELS = {
 }
 
 
+def card_model_line(detail: Any, added_by: str | None) -> str | None:
+    """A ``card_model_removed`` audit entry in words ("Sol Ring (added by alice)"); ``added_by``: the
+    adder's name now, None when that account is gone. None when it isn't such an entry. Plain text."""
+    if not isinstance(detail, dict) or not detail.get("card_key") or not detail.get("card"):
+        return None
+    return f"{detail['card']} (added by {added_by or 'a deleted account'})"
+
+
+def member_name(db: Any, sub: Any) -> str | None:
+    """The name an admin page shows for a member (username, else email), or None when gone."""
+    u = db.get_user(str(sub)) if sub else None
+    if u is None:
+        return None
+    return str(u.get("preferred_username") or u.get("email") or "") or "an account with no username or email"
+
+
 def event_label(event: str) -> str:
     return EVENT_LABELS.get(event) or event.replace("_", " ").capitalize()
 
 
-def event_detail_html(detail: dict[str, Any]) -> str:
-    """The details of an audit row in words: the deck and the proposal become links."""
+def event_detail_html(detail: dict[str, Any], *, added_by: str | None = None) -> str:
+    """The details of an audit row in words: the deck and the proposal become links. ``added_by``:
+    for a removed card model, the name of the member who added it."""
     bits = []
+    if said := change_line(detail) or card_model_line(detail, added_by):
+        bits.append(_esc(said))
     for k, label in DETAIL_LABELS.items():
         v = detail.get(k)
         if v in (None, ""):

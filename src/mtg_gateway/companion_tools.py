@@ -183,10 +183,12 @@ def add_deck_tool_routes(
             "<span class='count muted'>No changes yet</span>"
             + (
                 # D-02: the extra copy on Archidekt is the member's choice per save; the gateway's own
-                # snapshot (Restore under History) is always kept. Unticked until the member ticks it.
-                "<label class='backup'><input type='checkbox' name='archidekt_backup'>"
-                "Also keep a backup copy on Archidekt</label>"
-                if s.archidekt_backups
+                # snapshot (Restore under History) is always kept. Unticked unless the admin Settings
+                # page says otherwise (Q15, "Backup box ticked by default", off by default).
+                "<label class='backup'><input type='checkbox' name='archidekt_backup'"
+                + (" checked" if state.live.get("archidekt_backup_box_default") else "")
+                + ">Also keep a backup copy on Archidekt</label>"
+                if state.live.get("archidekt_backups")
                 else ""
             )
             + "<p class='status' role='status'></p></div>"

@@ -47,6 +47,11 @@ def test_plural_and_short_name_and_time() -> None:
 def test_event_sentences_and_actor_badges() -> None:
     assert companion.event_label("archidekt_linked") == "Archidekt account linked"
     assert companion.event_label("something_new") == "Something new"
+    # the backup trim says what it does in the approved words, not "Backup trim queued"
+    assert (
+        companion.event_label("backup_trim_queued")
+        == "Older backup copies queued for deletion from Archidekt"
+    )
     html = companion.event_detail_html(
         {"deck_id": "42", "deck_name": "Reap", "proposal_id": "p0123456789", "via": "x"}
     )
@@ -202,6 +207,30 @@ async def test_page_head_and_skip_link(stack: Stack) -> None:  # noqa: F811
         # the admin pages name their area in the tab
         assert "<title>Page not found · MTG Assistant Gateway</title>" in missing.text
     finally:
+        await b.aclose()
+
+
+async def test_the_account_page_names_archidekt_writes_in_plain_words(stack: Stack) -> None:  # noqa: F811
+    """Q141 item 7A: the Account page says "Archidekt writes", on or off, with Track A's words and
+    no variable name."""
+    import dataclasses
+
+    b = await linked_browser(stack)
+    decks = stack.h.app.state.gateway.decks
+    note = (
+        "<p class='muted small'>Archidekt writes are switched on or off for the whole gateway by the "
+        "person who runs it. While they are off, changes can be reviewed but not applied.</p>"
+    )
+    try:
+        page = (await b.http.get("/account", headers=NAV)).text
+        assert "<dt>Archidekt writes</dt><dd><span class='badge ok'>on</span></dd>" in page and note in page
+        decks.settings = dataclasses.replace(decks.settings, writes_enabled=False)
+        page = (await b.http.get("/account", headers=NAV)).text
+        assert "<dt>Archidekt writes</dt><dd><span class='badge'>off</span></dd>" in page and note in page
+        for old in ("Deck writes", "MTG_WRITES_ENABLED", "by its operator"):
+            assert old not in page, old
+    finally:
+        decks.settings = dataclasses.replace(decks.settings, writes_enabled=True)
         await b.aclose()
 
 

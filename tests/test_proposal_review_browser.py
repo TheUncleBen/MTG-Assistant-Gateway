@@ -138,3 +138,89 @@ def test_review_page_reads_in_both_themes_on_desktop_and_phone(server: Server) -
                     ctx.close()
         finally:
             browser.close()
+
+
+# Each change row's label (ADD, DESCRIPTION, DECK FORMAT...) stays inside its box: nothing it draws
+# is wider than the box, the box ends before the row's text starts, and that text keeps at least
+# half the row.
+LABEL_FITS = """() => [...document.querySelectorAll('ul.changes li')].map(li => {
+  const act = li.querySelector('.act'), name = li.querySelector('.name');
+  const a = act.getBoundingClientRect(), n = name.getBoundingClientRect(), r = li.getBoundingClientRect();
+  const whole = document.createRange();
+  whole.selectNodeContents(act);
+  // a word drawn on more than one line was split inside it
+  const text = act.firstChild, split = [];
+  for (const m of act.textContent.matchAll(/[^ ]+/g)) {
+    const word = document.createRange();
+    word.setStart(text, m.index);
+    word.setEnd(text, m.index + m[0].length);
+    if (new Set([...word.getClientRects()].map(q => Math.round(q.top))).size > 1) split.push(m[0]);
+  }
+  return {label: act.textContent, over: act.scrollWidth - act.clientWidth, room: n.width / r.width,
+          lines: whole.getClientRects().length, split: split,
+          inside: a.left >= r.left - 0.5 && a.right <= r.right + 0.5,
+          clear: a.right <= n.left + 0.5 || a.bottom <= n.top + 0.5};
+})"""
+
+
+def test_every_change_label_fits_its_box(server: Server, tmp_path: Path) -> None:
+    """The review page's labels on a details proposal (the longest: DESCRIPTION) fit their box on
+    desktop, the Fold and a phone, at the normal text size and at 200% text."""
+    from playwright.sync_api import sync_playwright
+
+    from .test_text_zoom_browser import ROOT_200, TEXT_200
+
+    exe = _chromium_path()
+    if exe == "missing":
+        pytest.skip("no Chromium available for Playwright")
+    sid = _link(server)
+    decks = server.app.state.gateway.decks
+    details = asyncio.run(
+        decks.propose_deck_details(
+            "user-1",
+            "42",
+            {
+                "name": "Renamed",
+                "description": "New.",
+                "deck_format": "commander",
+                "edh_bracket": 4,
+                "private": True,
+            },
+        )
+    )["proposal_id"]
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=exe) if exe else p.chromium.launch()
+        try:
+            for zoom in ("none", "root", "text"):
+                for vw, vh, phone in (
+                    (1280, 800, False),
+                    (673, 841, True),
+                    (390, 844, True),
+                    (344, 760, True),
+                    (320, 640, True),
+                ):
+                    ctx = browser.new_context(
+                        viewport={"width": vw, "height": vh}, is_mobile=phone, has_touch=phone
+                    )
+                    ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
+                    page = ctx.new_page()
+                    page.goto(f"{server.base}/proposals/{details}", wait_until="networkidle")
+                    if zoom != "none":
+                        page.evaluate(ROOT_200 if zoom == "root" else TEXT_200)
+                    got = page.evaluate(LABEL_FITS)
+                    assert any(g["label"] == "description" for g in got), got
+                    page.locator("ul.changes").screenshot(path=str(tmp_path / f"labels-{vw}-{zoom}.png"))
+                    # and the row's own text keeps most of the row (no word a letter a line)
+                    bad = [
+                        g
+                        for g in got
+                        if g["over"] > 0 or not g["inside"] or not g["clear"] or g["room"] < 0.5
+                    ]
+                    assert not bad, (vw, zoom, bad)
+                    if zoom == "none":  # at the normal text size every label is whole, on one line
+                        assert all(g["lines"] == 1 for g in got), (vw, got)
+                    # at any size a label breaks only between its words (review R4-5)
+                    assert all(not g["split"] for g in got), (vw, zoom, got)
+                    ctx.close()
+        finally:
+            browser.close()

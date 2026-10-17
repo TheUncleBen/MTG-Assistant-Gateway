@@ -25,6 +25,7 @@ from pydantic import Field
 from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
 
+from . import prefs
 from .approve import CARD_TOOL_META, proposal_tool_result
 from .archidekt import (
     COLLECTION_PAGE_SIZE,
@@ -49,7 +50,7 @@ from .pages import (
     read_limited,
 )
 from .schemas import CollectionAdd, CollectionRemove, card_aliases, dumped
-from .theme import display_name, icon, remember_view, render, stylesheet_link, view_choice
+from .theme import card_size_control, display_name, icon, render, stylesheet_link
 from .theme import esc as _esc
 
 if TYPE_CHECKING:
@@ -1355,7 +1356,7 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
             "invalid": "That was not a valid request.",
             "lookup": "Archidekt is not answering right now. Try again in a moment.",
             "link": "Link your Archidekt account on the Account page first.",
-            "writes": "Archidekt writes are switched off on this gateway, so nothing was changed.",
+            "writes": "Archidekt writes are switched off on this gateway, so nothing was sent to Archidekt.",
         }
         if not code or code not in msgs:
             return ""
@@ -1385,7 +1386,7 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
         qp = request.query_params
         q = _clean(qp.get("q"), 80)
         sort = qp.get("sort") if qp.get("sort") in SORTS else "added"
-        view, remember = view_choice(request, "collection", ("grid", "list"), "grid")
+        view, remember = prefs.view_choice(state.db, sub, request, "collection", ("grid", "list"), "grid")
         try:
             page_no = max(1, min(int(qp.get("page") or 1), 10_000))
         except ValueError:
@@ -1434,6 +1435,7 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
             f"<input id='q' type='search' name='q' value='{_esc(q)}' placeholder='Card name'>"
             f"<button type='submit' aria-label='Filter' title='Filter'>{icon('search')}</button></span></div>"
             + sel("view", {"grid": "Grid", "list": "List"}, view, "View as", "grid")
+            + (card_size_control() if view == "grid" else "")
             + sel("sort", SORTS, sort, "Sort by", "sort")
             + "<div class='field'><span class='lbl'>&nbsp;</span>"
             f"<a class='btn' href='/collection/export.csv'>{icon('download')} Export CSV</a></div>"
@@ -1539,7 +1541,9 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
             scripts=True,
         )
         if remember:
-            remember_view(resp, "collection", view, secure=s.public_url.startswith("https://"))
+            prefs.remember_view(
+                state.db, sub, resp, "collection", view, secure=s.public_url.startswith("https://")
+            )
         return resp
 
     @server.custom_route("/collection", methods=["POST"], include_in_schema=False)

@@ -21,7 +21,7 @@ import hashlib
 import html
 import re
 import time
-from collections.abc import Callable, Iterable
+from collections.abc import Callable
 from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
@@ -74,6 +74,8 @@ APP_UA_MARK = "MTGAssistant/"
 # The app's version follows the mark ("MTGAssistant/0.7.22"); the Account page shows it.
 _APP_VERSION_RE = re.compile(r"MTGAssistant/(\d{1,3}\.\d{1,3}\.\d{1,3})(?![\w.])")
 _app_version: ContextVar[str] = ContextVar("mtg_app_version", default="")
+# The signed-in member's card size (prefs.py), set by pages.browser_session for this request.
+_card_size: ContextVar[str] = ContextVar("mtg_card_size", default="m")
 
 # Archidekt's light set (body custom properties). Emitted twice: under prefers-color-scheme for
 # "system" and under [data-theme=light] for an explicit choice.
@@ -185,8 +187,22 @@ CSS = (
     + _LIGHT
     + """}
 *{box-sizing:border-box}
-html{font-size:14px;scroll-padding:60px 0 120px;-webkit-text-size-adjust:100%;min-width:320px;
-  font-family:Lato,"Helvetica Neue",Arial,Helvetica,sans-serif;line-height:1.15}
+/* --bar-room is the top bar's height plus 10 px (static/topbar.js). Without scripts: 60 px over the
+   one-row bar (50 px), and 9.5rem where the bar's links wrap, which covers it at every text size
+   from 100% to 200% (measured from 600 to 1920 px: at most 191 px at 200%
+   text, and at most about 8.7rem, 183 px, at 920 px and 150%). The links wrap when the bar is
+   narrower than 42.5em (600 to 899 px with a mouse) or 58em (900 px and wider; the container
+   queries below); the bar's em is the root's, so the test is in rem, with 20 px for a scroll bar.
+   At 600 to 899 px the links can also wrap within the one row a little above 42.5em (an admin's
+   eight links up to 625 px at the normal size), so there the large room lasts to 45rem.
+   clamp((T - 100vw) * 1000) is 0 above T and 9.5rem below it (9.5rem everywhere would leave
+   133 px over the one-row bar). */
+html{font-size:14px;scroll-padding:var(--bar-room,60px) 0 120px;-webkit-text-size-adjust:100%;
+  min-width:320px;font-family:Lato,"Helvetica Neue",Arial,Helvetica,sans-serif;line-height:1.15}
+@media (min-width:600px) and (max-width:899.98px) and (not ((pointer:coarse) or (hover:none))){
+  html{scroll-padding-top:var(--bar-room,max(60px,clamp(0px,(45rem + 20px - 100vw) * 1000,9.5rem)))} }
+@media (width >= 900px){
+  html{scroll-padding-top:var(--bar-room,max(60px,clamp(0px,(58rem + 20px - 100vw) * 1000,9.5rem)))} }
 body{margin:0;min-height:100vh;display:flex;flex-direction:column;background:var(--bg);color:var(--text);
   font:inherit;font-size:1rem;line-height:1.35;transition:background-color .25s ease-in}
 a{color:var(--link)} a:hover{color:var(--orange-text)}
@@ -261,7 +277,7 @@ details.dd .menu.left{left:0;right:auto}
   color:var(--text);text-decoration:none;font:inherit;font-weight:400;font-size:1rem;cursor:pointer;
   text-align:left;white-space:nowrap;justify-content:flex-start;height:auto}
 /* An item carrying a member's text (a category name) wraps inside the panel instead of widening
-   it past the window (gate R5-3 seed: a 51-character unbroken category name at 320 px). */
+   it past the window (a 51-character unbroken category name at 320 px, for one). */
 details.dd .menu a,details.dd .menu button{white-space:normal;overflow-wrap:anywhere;min-width:0}
 .menu a:hover,.menu button:hover,.menu a:focus-visible,.menu button:focus-visible,
 details.dd .menu a:hover,details.dd .menu button:hover,details.dd .menu a:focus-visible,
@@ -300,7 +316,7 @@ details.dd[open] > summary.dd-trigger{border-color:var(--orange)}
 .wrap{width:100%;max-width:52rem;margin:0 auto;padding:0 1rem}
 main.wrap{flex:1;padding:1rem 1rem 3rem}
 h1{font-size:2rem;font-weight:700;line-height:1.2;margin:.5rem 0 1rem;overflow-wrap:anywhere}
-h2{font-size:1.5rem;font-weight:700;margin:0 0 .6rem}
+h2{font-size:1.5rem;font-weight:700;margin:0 0 .6rem;overflow-wrap:anywhere}
 h2:not(:first-child){margin-top:1.25rem}
 h3{font-size:1.1rem;font-weight:700;margin:.5rem 0 .4rem}
 h4{font-size:1rem;font-weight:700;margin:0}
@@ -368,12 +384,14 @@ details.dd .menu .actions button.primary:hover,details.dd .menu .actions button.
   background:var(--orange);color:var(--on-orange);filter:brightness(1.08)}
 .msel-btn:active:not(:disabled){transform:none;filter:none}
 .msel-btn .msel-txt{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis}
-.msel-list{position:fixed;z-index:80;max-width:calc(100vw - 1rem);overflow:auto;overscroll-behavior:contain;
+/* above every panel or dialog a list can open from (the card search Filters panel is 80, the add
+   sheet 90): the sheet's dim background must cover the panel, or a tap above the sheet reaches it */
+.msel-list{position:fixed;z-index:200;max-width:calc(100vw - 1rem);overflow:auto;overscroll-behavior:contain;
   border:1px solid var(--border)}
 .msel-list [role=option]{min-height:40px;white-space:normal;overflow-wrap:anywhere;padding:.3rem 1rem}
 .msel-list [role=option][aria-selected=true]{background:var(--border);box-shadow:inset 3px 0 0 var(--orange)}
 .msel-list .head.title{padding:.6rem 1rem .4rem;font-size:.9rem}
-.msel-scrim{position:fixed;inset:0;z-index:79;background:var(--scrim)}
+.msel-scrim{position:fixed;inset:0;z-index:199;background:var(--scrim)}
 .msel-list.sheet{left:0;right:0;bottom:0;top:auto;width:auto;max-width:none;max-height:min(70vh,70dvh);
   min-width:0;border-radius:var(--radius-sheet) var(--radius-sheet) 0 0;border-bottom:0;
   padding:.5rem 0 calc(.5rem + env(safe-area-inset-bottom));animation:mselup .15s ease-out}
@@ -522,7 +540,7 @@ button.thumbbtn:focus-visible{outline:2px solid var(--accent);outline-offset:2px
 .suggest-list mark{background:none;color:inherit;font-weight:700;text-decoration:underline;
   text-decoration-color:var(--orange);text-underline-offset:.15em}
 /* the picker over a short list (static/suggest.js, data-suggest="list") reads as one: the select
-   chevron in the box, finger-sized rows (44 px, L9; roomier on a touch screen) */
+   chevron in the box, finger-sized rows (44 px; roomier on a touch screen) */
 .suggest > input[data-suggest=list]{padding-right:2.25rem;background-image:url(/static/chevron.svg);
   background-repeat:no-repeat;background-position:right .9rem center;background-size:10px 6px}
 .suggest-list.picklist li:not(.head){min-height:44px;padding-top:max(.55rem,calc((44px - 1.3em) / 2));
@@ -556,8 +574,9 @@ button.thumbbtn:focus-visible{outline:2px solid var(--accent);outline-offset:2px
 .notice.disclosure{font-weight:400;color:var(--text);border-left-color:var(--orange)}
 .disclosure h3{font-size:1rem;margin:.9rem 0 .3rem}
 .disclosure ul{margin:0 0 .4rem;padding-left:1.25rem}
-.disclosure li{margin:.2rem 0;line-height:1.45}
-.disclosure p{margin:0 0 .4rem}
+/* a long path such as /decks/{deck_id} breaks rather than widen the page (200% text on a phone) */
+.disclosure li{margin:.2rem 0;line-height:1.45;overflow-wrap:anywhere}
+.disclosure p{margin:0 0 .4rem;overflow-wrap:anywhere}
 details.disclosure{margin:.75rem 0 0;border-top:1px solid var(--border);padding-top:.6rem}
 details.disclosure > summary{cursor:pointer;font-weight:700;min-height:2rem;display:flex;align-items:center}
 /* the folded full detail inside the link-form disclosure (link_disclosure.form_html) */
@@ -586,6 +605,16 @@ details.disclosure[open] > summary::before{content:'\\25BE'}
 .plist .when{color:var(--text-muted);font-size:.86rem}
 .plist form{margin:0;display:inline}
 .plist form button{margin:0;height:35px;padding:0 .7rem;width:auto}
+/* Admin > Card models: the name and who added it on the left, every Remove button in one column,
+   44 px tall; a long name breaks between words.
+   Where the text has too little room (a phone at 200% text) Remove moves under it.
+   The text's basis is in em, so it grows with the text. */
+.plist.models li{flex-wrap:wrap}
+.plist.models .model{display:flex;flex-direction:column;gap:.15rem;flex:1 1 12em;min-width:0}
+.plist.models .name{flex:none;overflow-wrap:break-word;hyphens:auto;-webkit-hyphens:auto}
+.plist.models .model .small{overflow-wrap:anywhere}
+.plist.models form{flex:none;margin-left:auto}
+.plist.models form button{height:auto;min-height:44px}
 
 """
     + VIZ_CSS
@@ -597,12 +626,13 @@ details.disclosure[open] > summary::before{content:'\\25BE'}
 .summary .del{color:var(--red-text);border-color:var(--red);background:var(--red-tint)}
 .summary .chg{color:var(--orange-text);border-color:var(--orange);background:var(--orange-tint)}
 ul.changes{list-style:none;margin:0 0 .75rem;padding:0;border:1px solid var(--border);
-  border-radius:var(--radius-panel);overflow:hidden}
-.changes li{display:grid;grid-template-columns:5.6rem minmax(0,1fr) auto;align-items:center;gap:.6rem;
+  border-radius:var(--radius-panel);overflow:hidden;container-type:inline-size}
+.changes li{display:grid;grid-template-columns:6.8rem minmax(0,1fr) auto;align-items:center;gap:.6rem;
   padding:.5rem .75rem;border-bottom:1px solid var(--border-soft);border-left:5px solid var(--border)}
 .changes li:last-child{border-bottom:0}
 .changes .act{font-size:.78rem;font-weight:900;text-transform:uppercase;letter-spacing:.06em;
-  text-align:center;padding:.2rem .3rem;border-radius:3px;border:1px solid}
+  text-align:center;padding:.2rem .3rem;border-radius:3px;border:1px solid;min-width:0;
+  hyphens:auto;-webkit-hyphens:auto;overflow-wrap:anywhere}
 .changes .name{font-weight:700;font-size:1.05rem;overflow-wrap:anywhere}
 .changes .qty{font-weight:700;white-space:nowrap;text-align:right;font-variant-numeric:tabular-nums}
 .changes .qty .was{color:var(--text-muted);font-weight:400;text-decoration:line-through}
@@ -619,11 +649,21 @@ ul.changes{list-style:none;margin:0 0 .75rem;padding:0;border:1px solid var(--bo
 .changes blockquote.said{margin:0;padding:.4rem .6rem;border-left:3px solid var(--border);
   background:var(--surface);color:var(--text);font-weight:400;white-space:pre-wrap;overflow-wrap:anywhere}
 @media (max-width:420px){
-  .changes li{grid-template-columns:4.9rem minmax(0,1fr);gap:.35rem .6rem}
+  .changes li{grid-template-columns:6.8rem minmax(0,1fr);gap:.35rem .6rem}
   .changes .qty{grid-column:2;text-align:left}
   /* an add or remove count (+1, -1) is short: it stays on the card's line, one line a row */
-  .changes li.add,.changes li.del:not(.action){grid-template-columns:4.9rem minmax(0,1fr) auto}
+  .changes li.add,.changes li.del:not(.action){grid-template-columns:6.8rem minmax(0,1fr) auto}
   .changes li.add .qty,.changes li.del:not(.action) .qty{grid-column:auto;text-align:right}
+}
+/* a list too narrow for the label beside the change (a small phone, or large text): the label goes
+   above it, and the change has the whole row */
+@container (max-width:20em){
+  .changes li,.changes li.add,.changes li.del:not(.action){grid-template-columns:minmax(0,1fr) auto}
+  /* capitals spaced out don't fit a word like DESCRIPTION across a 320 px phone at 200% text */
+  .changes .act{grid-column:1/-1;justify-self:start;text-transform:capitalize;letter-spacing:0}
+  .changes .name{grid-column:1}
+  .changes .qty{grid-column:2;text-align:right}
+  .changes li.action .qty,.changes li.chg .qty{grid-column:1/-1;text-align:left}
 }
 details.raw{margin:.5rem 0 0} details.raw summary{cursor:pointer;color:var(--text-muted);font-size:.9rem}
 .apply{margin-top:1rem;padding:1rem;border:2px solid var(--orange);border-radius:var(--radius-panel);
@@ -650,20 +690,31 @@ details.raw{margin:.5rem 0 0} details.raw summary{cursor:pointer;color:var(--tex
 .wide .wrap{max-width:2300px}
 .wide main.wrap{padding-left:1rem;padding-right:1rem}
 
-@media (max-width:900px){ .topbar nav.site a{padding:0 .4rem;font-size:.93rem} .brand{margin-right:.25rem} }
-/* The proposal review's three choices sit at one height (gate D8), and the deck banner's
-   Comments link matches its Like and Bookmark buttons (gate D9). */
+/* below 1024 px the links sit closer and a little smaller, so the search box keeps room for its
+   whole placeholder beside an admin's eight links, in wide fonts too */
+@media (max-width:1023.98px){ .topbar nav.site a{padding:0 .4rem;font-size:.93rem}
+  .brand{margin-right:.25rem} }
+/* and with large text (a raised font size, a text zoom) from 1024 px, while the bar is narrower
+   than 68em: a font about 15% wider than Lato (DejaVu Sans, a monospace font) needs up to 65em
+   for an admin's one row with the full-size links, and at most 57.5em with these, so the row
+   fits until the links wrap at 58em (below; the wrapped rows keep the full size). 68em is 952 px
+   at the normal size, so there the 1024 px rule above still decides. */
+@media (width >= 1024px){ @container topbar (58em <= width < 68em){
+  body:not(.app) .topbar nav.site a{padding:0 .4rem;font-size:.93rem}
+  body:not(.app) .topbar .brand{margin-right:.25rem} } }
+/* The proposal review's three choices sit at one height, and the deck banner's
+   Comments link matches its Like and Bookmark buttons. */
 .choice button,.choice .btn{min-height:48px}
 .banner .social a.soc,.banner .social button.soc{height:34px;min-height:34px}
 /* A control that carries text a member typed (a username in Follow, a deck's category in the
    editor's chips, a folder's name) shrinks and ellipsises inside its row, with the whole text
-   in its title, instead of widening the page (gate R4-2: a 40-character username). */
+   in its title, instead of widening the page (a 40-character username, for one). */
 .soc,.btn.soc,.addbox button.tchip,.chips button{max-width:100%;min-width:0}
 .soc > span,.addbox button.tchip{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .social .confirm{max-width:100%;flex-wrap:wrap;min-width:0}
 .social .confirm > span{min-width:0;overflow-wrap:anywhere}
 /* Touch screens: every control at least 40 px tall (Material's minimum), including the small
-   ones a mouse never minds (gate D11): the editor's add-to chips, the deck page's category
+   ones a mouse never minds: the editor's add-to chips, the deck page's category
    button and odds form, folded Details, footer links, the brand mark, list links, crumbs. */
 @media (pointer:coarse){
   .addbox button.tchip,.popular a,.cardview .chip{min-height:40px}
@@ -671,7 +722,7 @@ details.raw{margin:.5rem 0 0} details.raw summary{cursor:pointer;color:var(--tex
   details > summary{min-height:40px;display:flex;align-items:center}
   details.dd > summary.icon-only{min-height:40px;min-width:40px}
   footer.site .links a{display:inline-flex;align-items:center;min-height:40px;padding:0 .5rem}
-  .brand{min-height:40px}
+  .brand{min-height:40px;--brand-line:max(40px,1.35em)}
   .hrow a.kind,.hrow a.name,.proposals a.name,.report .crumbs a,li > a.name{display:inline-block;
     padding:.6rem 0}
   .banner .social a.soc,.banner .social button.soc{height:40px;min-height:40px;border-radius:20px}
@@ -686,14 +737,59 @@ details.raw{margin:.5rem 0 0} details.raw summary{cursor:pointer;color:var(--tex
    button and the page needs no sideways scroll. The word returns above 800 px. */
 @media (min-width:600px) and (max-width:799.98px) and (hover:hover) and (pointer:fine){
   .topbar .brand .word{display:none} }
+/* Where the bar has no text links (a phone, the app): the brand takes the room the account side
+   leaves, and a long MTG_SERVER_NAME shortens the brand's word (an ellipsis). */
 .topbar .left{flex:1 1 0}
 .topbar nav.site{flex:none}
-/* the left side takes only the room the right side leaves: a long MTG_SERVER_NAME shortens the
-   brand's word (an ellipsis) rather than squeeze the search box and the account button past the
-   window's edge; the right side still gives way when even that is not enough (large text) */
 .topbar .right{flex:0 1 auto}
 .brand{min-width:0}
+/* Where it has them (600 px and wider, not the app): the brand, the links and the account side
+   are the bar's own flex items (.left only groups the brand and the links in the markup). The
+   links never shrink. When the row is short, the brand's word gives way first (an ellipsis), then
+   the search box, down to its 9rem; before even that is not enough, the links wrap (the container
+   queries below). With .left{flex:1 1 0} the left side could shrink below its links, which then
+   ran under the search box, so a click on History or Admin landed in the box. */
+@media (min-width:600px){
+  body:not(.app) .topbar .wrap{gap:.25rem}
+  body:not(.app) .topbar .left{display:contents}
+  body:not(.app) .topbar .brand{flex:0 1000 auto;min-width:25px}
+  body:not(.app) .topbar .right{min-width:auto;margin-left:auto;padding-left:.75rem} }
 .brand .word{overflow:hidden;text-overflow:ellipsis;min-width:0}
+/* Where the brand's word gives way, it shows at least 3em of it ("MTG…") or none: below that the
+   word wraps onto a second line inside the brand, 100px below the first, which the brand clips,
+   instead of showing a stub such as "M.". The brand keeps its one line's height (--brand-line;
+   40px on a touch screen), and the empty ::before holds the first line at that height, so the
+   mark stays in the middle with the word gone too. */
+@media (min-width:600px){
+  body:not(.app) .topbar .brand{flex-wrap:wrap;row-gap:100px;overflow:hidden;
+    height:var(--brand-line,max(25px,1.35em))}
+  body:not(.app) .topbar .brand::before{content:"";width:0;margin-right:-.5rem;
+    height:var(--brand-line,max(25px,1.35em))}
+  body:not(.app) .topbar .brand .word{flex:1 1 3em;max-width:max-content} }
+/* A font about 15% wider than Lato (DejaVu Sans) needs up to about 45em for an admin's links on
+   one row at 600 to 899 px, so a bar wider than 42.5em (where they wrap, below) could still be
+   too short for them. There the links wrap within the row (the bar grows) instead of running past
+   the window, but only as the last resort: when the row is short, the brand's word gives way
+   first, then the bar's right padding (the ::after, 2rem, as before, when the account button
+   could sit nearer the edge), and only then do the links. Any shrink of the links at all would
+   wrap them, so the brand's and the padding's shrink factors are large enough that the links'
+   share stays under a pixel's 1/64 while either can still give way. */
+@media (min-width:600px) and (max-width:899.98px) and (not ((pointer:coarse) or (hover:none))){
+  body:not(.app) .topbar .wrap{height:auto;min-height:50px;padding-right:0}
+  body:not(.app) .topbar .wrap::after{content:"";flex:0 1000000 2rem;min-width:0;margin-left:-.25rem}
+  body:not(.app) .topbar .brand{flex-shrink:100000000}
+  body:not(.app) .topbar nav.site{flex:0 1 auto;flex-wrap:wrap;min-width:0} }
+/* Large text with a mouse (a raised font size, a text-only zoom, 200% text): when the bar's text
+   links no longer fit on one row beside the brand and the account button, they wrap onto more
+   rows between them (_NAV_ROW_RULES), so the page never scrolls sideways and nothing runs under
+   the search box or the account button. The bar is a size container, so the test is in the bar's own em
+   (its text size): 42.5em is just under a 600 px window at the normal size, where the eight links
+   of an admin still fit on one row; with the search box (900 px and wider) one row needs 58em.
+   The rail and the phone layout (touch, the app) hide these links, so they are left as they are. */
+.topbar{container:topbar / inline-size}
+@media (min-width:600px) and (max-width:899.98px) and (not ((pointer:coarse) or (hover:none))){
+  @container topbar (width < 42.5em){ __NAVROW__ } }
+@media (width >= 900px){ @container topbar (width < 58em){ __NAVROW__ } }
 /* home dashboard: section tiles (Archidekt's landing cards) */
 .home .hero{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:1rem;
   margin:0 0 1rem}
@@ -727,7 +823,7 @@ details.raw{margin:.5rem 0 0} details.raw summary{cursor:pointer;color:var(--tex
 .home .panel-head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;
   gap:.5rem 1rem;margin:0 0 .75rem}
 .home .panel-head h2{margin:0}
-/* the deck list couldn't be read (Q64): the /decks notice inside the panel, over any covers read */
+/* the deck list couldn't be read: the /decks notice inside the panel, over any covers read */
 .home .decks-unreadable p{margin:0}
 .home .decks-unreadable .actions{margin-top:.75rem}
 .home .decks-unreadable .actions .btn{min-height:44px}
@@ -873,6 +969,98 @@ CSS = CSS.replace(
     + "body.app .topbar{padding-top:env(safe-area-inset-top)}\n"
     + "body.app .topbar .brand .word{display:inline}\n",
 )
+# The top bar's second row for large text with a mouse (the container queries above): the brand
+# mark and the account side share the first row, the text links wrap in the row under them.
+# The links wrap between the brand and the search box and account button, which sit at the foot of
+# the links' last row, so the bar reads, and Tab goes, brand, links, search, account at every text
+# size (milestone review M-1: with the links on a row of their own under the account side, Tab
+# went from the links' row back up to search and account).
+_NAV_ROW_RULES = (
+    "body:not(.app) .topbar .wrap{flex-wrap:wrap;height:auto;row-gap:0;column-gap:1rem;padding-bottom:.35rem;"
+    "padding-right:2rem}"
+    "body:not(.app) .topbar .wrap::after{display:none}"
+    "body:not(.app) .topbar .left{display:contents}"
+    "body:not(.app) .topbar .brand{min-height:50px;align-self:flex-start}"
+    "body:not(.app) .topbar .brand .word{display:none}"
+    "body:not(.app) .topbar nav.site{flex:1 1 12em;flex-wrap:wrap;min-width:0}"
+    "body:not(.app) .topbar .right{margin-left:auto;padding-left:0;min-height:50px;align-self:flex-end}"
+)
+CSS = CSS.replace("__NAVROW__", _NAV_ROW_RULES)
+
+# Card size S / M / L (0.7.29, Q22, QUESTIONS-2 B10, card Q135 item 7): M is exactly the size each
+# page had before; S is about 75% and L about 135% of its width. On a phone the deck page shows
+# 3, 2 or 1 cards across; on a wide screen My decks shows 6, 5 or 4 decks across. The choice
+# follows the account (prefs.py) and sits on <html data-card-size>, set when the page is drawn
+# (no flash) and by static/prefs.js when the S / M / L switch is pressed.
+CARD_SIZES = ("s", "m", "l")
+CSS += """
+/* the S / M / L switch, styled as card search's Grid / List switch */
+.sizeseg{display:inline-flex;border:1px solid var(--control-border);border-radius:var(--radius);
+  overflow:hidden;vertical-align:middle}
+.sizeseg button{margin:0;min-width:2.75rem;min-height:calc(var(--ctl) - 2px);height:auto;padding:0 .75rem;
+  border:0;border-radius:0;background:transparent;color:var(--text);font:inherit;font-weight:400;box-shadow:none}
+.sizeseg button + button{border-left:1px solid var(--control-border)}
+.sizeseg button[aria-pressed=true]{background:var(--orange-tint);font-weight:700}
+.sizeseg button:focus-visible{outline:2px solid var(--focus);outline-offset:-2px}
+@media (pointer:coarse){ .sizeseg button{min-height:44px;min-width:44px} }
+.field.cardsize .sizeseg{display:flex;width:max-content}
+.cs-head .cardsize{display:inline-flex;align-items:center;gap:.5rem}
+.cs-head .cardsize .lbl{font-weight:400;color:var(--text-muted)}
+@media (min-width:1000.02px){
+  .listbar .controls:has(.cardsize){
+    grid-template-columns:1fr minmax(140px,auto) auto minmax(140px,auto) auto} }
+/* card search switches Grid / List without a reload: the size switch goes with the Grid view */
+.cs-head:has(input[name=view][value=list]:checked) .cardsize{display:none}
+/* the deck page: stacks, grid and scroll */
+html[data-card-size=s] .deckview.stacks{grid-template-columns:repeat(auto-fill,minmax(150px,1fr))}
+html[data-card-size=l] .deckview.stacks{grid-template-columns:repeat(auto-fill,minmax(270px,1fr))}
+html[data-card-size=s] .deckview.grid .cards{grid-template-columns:repeat(auto-fill,minmax(128px,1fr))}
+html[data-card-size=l] .deckview.grid .cards{grid-template-columns:repeat(auto-fill,minmax(230px,1fr))}
+html[data-card-size=s] .deckview.scroll .c{flex-basis:clamp(105px,16.5vw,150px)}
+/* at S a stack's name gets its own line under the grip and menu, so a narrow stack still shows it
+   whole, and a tile without a picture starts its name below the 38 px quantity corner */
+html[data-card-size=s] .deckview.stacks .stackhead h2{flex-wrap:wrap;row-gap:0}
+html[data-card-size=s] .deckview.stacks .stackhead .title{
+  order:2;flex:1 0 100%;white-space:normal;overflow-wrap:anywhere;hyphens:auto;-webkit-hyphens:auto}
+html[data-card-size=s] .deckview .c .ph{padding-top:max(12%,34px)}
+html[data-card-size=l] .deckview.scroll .c{flex-basis:clamp(190px,30vw,270px)}
+/* My decks and the folders in it */
+html[data-card-size=s] ul.decklist.grid{grid-template-columns:repeat(6,minmax(0,1fr))}
+html[data-card-size=l] ul.decklist.grid{grid-template-columns:repeat(4,minmax(0,1fr))}
+html[data-card-size=s] ul.decklist .thumb{height:140px}
+html[data-card-size=l] ul.decklist .thumb{height:220px}
+html[data-card-size=s] ul.folderlist.grid{
+  grid-template-columns:repeat(auto-fill,minmax(min(100%,11.25rem),1fr))}
+html[data-card-size=l] ul.folderlist.grid{
+  grid-template-columns:repeat(auto-fill,minmax(min(100%,20.25rem),1fr))}
+/* card search, the collection and the printing picker */
+html[data-card-size=s] .cardgrid{grid-template-columns:repeat(auto-fill,minmax(min(100%,7.9rem),1fr))}
+html[data-card-size=l] .cardgrid{grid-template-columns:repeat(auto-fill,minmax(min(100%,14.2rem),1fr))}
+html[data-card-size=s] ul.collgrid{
+  grid-template-columns:repeat(auto-fill,minmax(min(100%,max(128px,9rem)),1fr))}
+html[data-card-size=l] ul.collgrid{
+  grid-template-columns:repeat(auto-fill,minmax(min(100%,max(230px,16.2rem)),1fr))}
+html[data-card-size=s] .printpick .ppgrid{grid-template-columns:repeat(auto-fill,minmax(112px,1fr))}
+html[data-card-size=l] .printpick .ppgrid{grid-template-columns:repeat(auto-fill,minmax(203px,1fr))}
+@media (max-width:1500px){
+  html[data-card-size=s] ul.decklist.grid{grid-template-columns:repeat(5,minmax(0,1fr))}
+  html[data-card-size=l] ul.decklist.grid{grid-template-columns:repeat(3,minmax(0,1fr))} }
+@media (max-width:1200px){
+  html[data-card-size=s] ul.decklist.grid{grid-template-columns:repeat(4,minmax(0,1fr))}
+  html[data-card-size=l] ul.decklist.grid{grid-template-columns:repeat(2,minmax(0,1fr))} }
+@media (max-width:1000px){
+  html[data-card-size=s] ul.decklist.grid{grid-template-columns:repeat(3,minmax(0,1fr))}
+  html[data-card-size=l] ul.decklist.grid{grid-template-columns:minmax(0,1fr)} }
+@media (max-width:700px){
+  html[data-card-size=s] .printpick .ppgrid{grid-template-columns:repeat(auto-fill,minmax(104px,1fr))}
+  html[data-card-size=l] .printpick .ppgrid{grid-template-columns:repeat(auto-fill,minmax(186px,1fr))} }
+@media (max-width:600px){
+  html[data-card-size=s] .deckview.grid .cards,
+  html[data-card-size=s] .deckview.stacks{grid-template-columns:repeat(3,minmax(0,1fr))}
+  html[data-card-size=l] .deckview.grid .cards,
+  html[data-card-size=l] .deckview.stacks{grid-template-columns:minmax(0,1fr)}
+  html[data-card-size=s] ul.decklist.grid{grid-template-columns:repeat(2,minmax(0,1fr))} }
+"""
 
 # The top bar's search box (cards and decks, static/suggest.js in its site mode): in the bar from
 # 900 px and on the touch rail (600 to 899 px); under 600 px folded behind the magnifier
@@ -1084,35 +1272,39 @@ def layout_from_cookie(value: str | None) -> str:
     return value if value in LAYOUTS else "auto"
 
 
-# "View as" on the deck page, the deck list and the collection is remembered per browser the same
-# way as the theme: a cookie, so the page that comes back renders the chosen view at once (no
-# flash of the default, no script). The page sets it whenever the view is picked in its address
-# (the toolbar's form puts it there); a visit without one renders the remembered view.
+# "View as" on the deck page, the deck list, card search and the collection follows the account
+# from 0.7.29 (prefs.py, G7). Before that it was a cookie per browser with these names; prefs.py
+# copies a cookie's value to the account once and removes the cookie.
 VIEW_COOKIE = "mtg_view_"
 VIEW_KINDS = ("deck", "decks", "collection", "cards")
 
 
-def view_choice(request: Any, kind: str, allowed: Iterable[str], default: str) -> tuple[str, bool]:
-    """The view to render for ``kind``: the address's ``view`` when it is a known one (and True:
-    remember it), else the remembered one, else ``default`` (and False)."""
-    allowed = tuple(allowed)
-    asked = request.query_params.get("view")
-    if asked in allowed:
-        return asked, asked != request.cookies.get(VIEW_COOKIE + kind)
-    saved = request.cookies.get(VIEW_COOKIE + kind)
-    return (saved if saved in allowed else default), False
-
-
-def remember_view(response: Any, kind: str, view: str, *, secure: bool) -> Any:
-    assert kind in VIEW_KINDS
-    response.set_cookie(
-        VIEW_COOKIE + kind, view, max_age=365 * 86400, path="/", secure=secure, httponly=True, samesite="lax"
-    )
-    return response
-
-
 def current_layout() -> str:
     return _layout.get()
+
+
+def set_card_size(size: object) -> None:
+    """The card size this request's page is drawn with (the account's, prefs.py)."""
+    _card_size.set(size if isinstance(size, str) and size in CARD_SIZES else "m")
+
+
+def current_card_size() -> str:
+    return _card_size.get()
+
+
+def card_size_control() -> str:
+    """The S / M / L switch next to "View as" (static/prefs.js presses it and saves the choice).
+    Draft wording (WORDING-AND-CALLS-2 W4)."""
+    size = current_card_size()
+    buttons = "".join(
+        f"<button type='button' data-card-size-set='{k}' aria-pressed='{'true' if k == size else 'false'}' "
+        f"aria-label='{label} cards' title='{label} cards'>{k.upper()}</button>"
+        for k, label in (("s", "Small"), ("m", "Medium"), ("l", "Large"))
+    )
+    return (
+        "<div class='field cardsize'><span class='lbl' aria-hidden='true'>Card size</span>"
+        f"<span class='sizeseg' role='group' aria-label='Card size'>{buttons}</span></div>"
+    )
 
 
 # The site navigation, in Archidekt's order of sections as far as the gateway has them: Home, then
@@ -1379,7 +1571,8 @@ def render(
     )
     description = f"{site}: a private gateway to your Magic: The Gathering decks on Archidekt."
     doc = (
-        f"<!doctype html><html lang='en'{f' data-theme={theme}' if theme != 'system' else ''}>"
+        f"<!doctype html><html lang='en'{f' data-theme={theme}' if theme != 'system' else ''}"
+        f"{f' data-card-size={current_card_size()}' if signed_in else ''}>"
         "<head><meta charset='utf-8'>"
         f"<meta name='viewport' content='{viewport}'>"
         "<meta name='referrer' content='no-referrer'>"
@@ -1398,7 +1591,14 @@ def render(
         "<link rel='icon' href='/static/gateway-icon.svg' type='image/svg+xml'>"
         "<link rel='apple-touch-icon' href='/apple-touch-icon.png'>"
         f"<title>{html.escape(title)} · {html.escape(site)}</title>"
-        f"{stylesheet_link('site.css')}{head_extra}</head>"
+        f"{stylesheet_link('site.css')}"
+        # static/prefs.js: the choices that follow the account (prefs.py), ready before any page
+        # script that reads them (deferred scripts run in document order; pages add theirs in
+        # head_extra)
+        + ("<script src='/static/prefs.js' defer></script>" if signed_in else "")
+        # static/topbar.js: the scroll room above a focused element follows the bar's height
+        + "<script src='/static/topbar.js' defer></script>"
+        + f"{head_extra}</head>"
         f"<body class='{classes}'{' data-watchlist' if WATCHLISTS else ''}>"
         f"<a class='skip' href='#main'>Skip to content</a>{SPRITE}"
         "<header class='topbar'><div class='wrap'><div class='left'>"
@@ -1480,9 +1680,11 @@ class ThemeMiddleware:
         ptoken = _path.set(path)
         atoken = _app.set(app)
         vtoken = _app_version.set(app_ver)
+        ctoken = _card_size.set("m")
         try:
             await self.app(scope, receive, send)
         finally:
+            _card_size.reset(ctoken)
             _theme.reset(token)
             _layout.reset(ltoken)
             _path.reset(ptoken)

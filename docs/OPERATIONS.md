@@ -88,10 +88,17 @@ project's newest release, and when that is newer, every page shows admins a noti
 overview (**Admin**, **Updates**) shows these steps with the version filled in. It never pulls an
 image or restarts itself. `MTG_UPDATE_CHECK=false` turns the check off.
 
-In Portainer: **Stacks** → `mtg` → **Update the stack**, with "Re-pull
-image" ticked. With `MTG_TAG=latest` that pulls the newest version; with a
-pinned version (for example `0.6.6`), change `MTG_TAG` first
-([VERSIONS.md](VERSIONS.md)). Or from the command line:
+Updating to 0.7.29 from an earlier version may need a step first: see
+[DEPLOY.md](DEPLOY.md#updating-to-0729-from-an-earlier-version) (Portainer) or
+[DEPLOY-COMPOSE.md](DEPLOY-COMPOSE.md#updating-to-0729-from-an-earlier-version)
+(Compose).
+
+In Portainer: **Stacks** → `mtg`. With a pinned version (for example
+`0.6.6`), change `MTG_TAG` first ([VERSIONS.md](VERSIONS.md)); with
+`MTG_TAG=latest` the update pulls the newest version. Then click **Update the
+stack** (if your stack uses the Repository build method, the button is called
+**Pull and redeploy**), and in the box that asks “Are you sure?” make sure **Re-pull image and redeploy** is on,
+then click **Update**. Or from the command line:
 
 ```bash
 docker service update --force mtg_mtg-assistant-gateway       # restart
@@ -802,6 +809,8 @@ What it shows:
   for one person from the Users page (`?sub=`).
 - **Metrics** (`/admin/metrics`): 30-day totals per counter (see
   [the metrics table](#the-metrics-table) below).
+- **Settings** (`/admin/settings`, since 0.7.29): the gateway's settings an
+  admin may change without a redeploy (see [the Settings page](#the-settings-page) below).
 
 The same data is at `/api/v1/admin/overview`, `/api/v1/admin/users` and
 `/api/v1/admin/metrics`, and the actions at `POST /api/v1/admin/users/<sub>`
@@ -825,6 +834,41 @@ counter in the metrics table. The person's own activity log shows the
 action too, as done by an administrator. The admin page never creates a user or changes a group: that
 stays in the identity provider. Disabling only refuses the account on this
 gateway; the account itself is untouched.
+
+### The Settings page
+
+Since 0.7.29 `/admin/settings` lists, by section, the settings an admin may
+change while the gateway runs: approvals, deck sync, backups, simulation,
+watchlists and prices, the gateway's name, Archidekt and Scryfall pacing, and
+card scanning (folded away). Each one shows its allowed range and where its
+value comes from: the gateway's default, a change made here (who and when),
+or your stack. When your stack sets any of them, a box at the top lists those
+settings, each with its variable and a link to its row.
+
+- **A value set in your stack wins.** When the stack's environment (Portainer's
+  variables or `.env`) sets one of these, the page shows it locked: greyed
+  out with its value, naming the variable to change or remove. The shipped stack and
+  Compose files pass the settings marked *stack* in
+  [DEPLOY.md](DEPLOY.md#environment-reference) through empty unless you set
+  them, and the example env files list those commented out (`# MTG_…=`) with
+  the default, so out of the box the page manages them. Remove the line from
+  your environment (or leave it empty) to manage one on the page. To lock one in
+  the stack, set it in your environment; for a setting the stack file doesn't
+  list, also add it under the gateway's `environment:`. Updating from an
+  earlier version: [DEPLOY.md](DEPLOY.md#updating-to-0729-from-an-earlier-version).
+- **Pacing only gets gentler here.** On the page the Archidekt and Scryfall
+  pacing can only be set to ask less often than the gateway's defaults. Only the
+  stack can make them ask more often, within the bounds in
+  [DEPLOY.md](DEPLOY.md#environment-reference).
+- **Some settings stay in the stack only**: sign-in, secrets, token and session
+  lifetimes, the membership check, `MTG_WRITES_ENABLED`, the backup folder's
+  name and the folders on disk.
+- Every change is in the activity log as "Gateway setting changed", with the
+  setting's name and its old and new value, under the admin's account. Three
+  ask for a tick first: turning Archidekt backup copies off (edits then have
+  no copy on Archidekt), and lowering the backup copies or the restore points
+  kept per deck (older ones are then deleted; backup copies made before 0.7.29
+  never are).
 
 ### The metrics table
 

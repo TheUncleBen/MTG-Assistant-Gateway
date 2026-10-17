@@ -227,8 +227,6 @@ async def test_the_backup_folder_stays_hidden_with_backups_switched_off(stack: S
     """Q21 (review L13): with MTG_ARCHIDEKT_BACKUPS off the gateway's backup folder still never
     shows on My decks or the Folders page, and a deck in it is handled as with backups on: kept
     out of My decks and listed as a backup copy."""
-    import dataclasses
-
     ark = stack.ark
     ark.folders["alice"] = [
         {"id": 501, "name": "Commander", "private": False},
@@ -237,7 +235,7 @@ async def test_the_backup_folder_stays_hidden_with_backups_switched_off(stack: S
     ark.decks[46] = dict(ark.decks[42], id=46, name="Copy in the backup folder")
     ark.deck_folder[46] = 503
     decks = stack.h.app.state.gateway.decks
-    decks.settings = dataclasses.replace(decks.settings, archidekt_backups=False)
+    stack.h.app.state.gateway.live.set("archidekt_backups", False, by="admin-1")
     b = await linked_browser(stack)
     try:
         top = (await b.http.get("/decks", headers=NAV)).text

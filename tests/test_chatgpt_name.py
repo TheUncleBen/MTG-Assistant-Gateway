@@ -42,8 +42,8 @@ def _install_warning(name: str) -> str:
 def _admin_warning(name: str) -> str:
     return (
         f"The ChatGPT connector name, “{name}”, is {len(name)} characters; ChatGPT refuses a plugin file "
-        "whose name is over 80 characters. Set MTG_CHATGPT_NAME to a name of 80 characters or fewer "
-        "(see docs/DEPLOY.md)."
+        "whose name is over 80 characters. Set a name of 80 characters or fewer under “Name in ChatGPT” "
+        "on the Settings page."
     )
 
 
@@ -299,8 +299,14 @@ def test_the_plugin_file_step_carries_the_warning_only_when_over_80() -> None:
 async def test_admin_warns_about_a_long_chatgpt_name(
     tmp_path: Path, idp: FakeIdP, site: str, gpt: str | None, shown: str | None
 ) -> None:
+    # the name as the Settings page leaves it: not set in the stack, so the warning links to the page
     settings = make_settings(
-        tmp_path, required_group="mtg-users", admin_group="mtg-admins", server_name=site, chatgpt_name=gpt
+        tmp_path,
+        required_group="mtg-users",
+        admin_group="mtg-admins",
+        server_name=site,
+        chatgpt_name=gpt,
+        env_set=frozenset(),
     )
     async with running(_with_admin(Harness(settings, idp))) as h:
         b = await admin_browser(h)
@@ -310,9 +316,11 @@ async def test_admin_warns_about_a_long_chatgpt_name(
             await b.aclose()
     assert r.status_code == 200
     if shown is None:
-        assert "MTG_CHATGPT_NAME" not in r.text
+        assert "ChatGPT connector name" not in r.text
     else:
-        assert f"<div class='notice warn'>{html.escape(_admin_warning(shown))}</div>" in r.text
+        said = _admin_warning(shown).removesuffix("Settings page.")
+        link = "<a href='/admin/settings#s-row-chatgpt_name'>Settings page</a>.</div>"
+        assert f"<div class='notice warn'>{html.escape(said)}{link}" in r.text
         assert '<b>"Deck"' not in r.text
 
 
@@ -385,3 +393,32 @@ async def test_admin_and_log_tell_the_owner_about_a_shortened_developer_name(
             lg.setLevel(lvl)
     logged = [r.getMessage() for r in caplog.records if r.name == "mtg_gateway.config"]
     assert logged == [text]
+
+
+async def test_a_long_chatgpt_name_set_in_the_stack_is_fixed_there(tmp_path: Path, idp: FakeIdP) -> None:
+    """Re-proofread issue 4: with MTG_CHATGPT_NAME set in the stack, "Name in ChatGPT" is locked, so
+    neither warning points at the page; both say to change the variable and redeploy."""
+    long = "z" * 81
+    settings = make_settings(
+        tmp_path,
+        required_group="mtg-users",
+        admin_group="mtg-admins",
+        chatgpt_name=long,
+        env_set=frozenset({"chatgpt_name"}),
+    )
+    async with running(_with_admin(Harness(settings, idp))) as h:
+        b = await admin_browser(h)
+        try:
+            admin = html.unescape((await b.http.get("/admin", headers=NAVIGATE)).text)
+            page = (await b.http.get("/admin/settings", headers=NAVIGATE)).text
+        finally:
+            await b.aclose()
+    fix = "Change MTG_CHATGPT_NAME in your stack to a name of 80 characters or fewer, then redeploy."
+    assert f"is 81 characters; ChatGPT refuses a plugin file whose name is over 80 characters. {fix}" in admin
+    assert "#s-row-chatgpt_name" not in admin
+    row = html.unescape(page.split("id='s-row-chatgpt_name'", 1)[1].split("id='s-row-", 1)[0])
+    assert (
+        "ChatGPT refuses a plugin file whose name is over 80 characters, so change MTG_CHATGPT_NAME in "
+        "your stack to a name of 80 characters or fewer, then redeploy." in row
+    )
+    assert "or fewer here" not in row

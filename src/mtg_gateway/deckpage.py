@@ -23,6 +23,7 @@ from typing import Any
 from urllib.parse import quote, urlencode
 
 from .archidekt import VOTE_UP, Deck, DeckCard, featured_scryfall_id, format_label, rich_text
+from .bracket_view import banner_bracket_html, checks_bracket_row, deck_card_bracket_text, stats_bracket_html
 from .deck_stats import (
     CURVE_BUCKETS,
     PRIMARY_TYPES,
@@ -40,7 +41,7 @@ from .deck_stats import (
 from .decks import mana_value_text, split_label
 from .export_formats import EDHPLAY_URL
 from .mana import mana_html as _mana_html
-from .theme import esc, icon, plural
+from .theme import card_size_control, esc, icon, plural
 from .views import cards_by_category
 
 _UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
@@ -54,6 +55,8 @@ VIEWS = {
     "scroll": "Scroll",
     "grid": "Grid",
 }
+# The views that show cards as pictures: the card size switch (0.7.29) sits next to View as in these.
+PICTURE_VIEWS = ("stacks", "scroll", "grid")
 GROUPS = {
     "category": "Categories",
     "type": "Type",
@@ -311,8 +314,6 @@ def banner_html(
     art = featured(deck)
     art_url = card_image(art, "art_crop") if art else None
     style = f" style=\"--art:url('{esc(art_url)}')\"" if art_url else ""
-    bracket = stats.get("bracket_estimate") or {}
-    bracket_names = {1: "Exhibition (1)", 2: "Core (2)", 3: "Upgraded (3)", 4: "Optimized (4)", 5: "cEDH (5)"}
     legality = legality_chip_html(deck, stats)
     privacy = (
         f"<span class='privacy' title='Private deck'>{icon('eye-off')}"
@@ -323,16 +324,7 @@ def banner_html(
         if deck.unlisted
         else ""
     )
-    est_bracket = (
-        f"<span>Est Bracket: {esc(bracket_names.get(bracket.get('bracket'), bracket.get('bracket')))}</span>"
-        if bracket.get("bracket")
-        else ""
-    )
-    own_bracket = (
-        f"<span>Bracket: {esc(bracket_names.get(deck.edh_bracket, deck.edh_bracket))}</span>"
-        if deck.edh_bracket
-        else ""
-    )
+    brackets = banner_bracket_html(deck, stats)  # bracket_view.py (S2)
     salt = stats.get("salt_total") if stats.get("salt_total") is not None else "–"
     tags = (
         "".join(f"<span class='pill'>{esc(t)}</span>" for t in deck.tags)
@@ -427,7 +419,7 @@ def banner_html(
         + (f"<span>{esc(ago(deck.updated_at))}</span>" if ago(deck.updated_at) else "")
         + f"<span>{plural(stats.get('distinct', 0), 'distinct card')}</span>"
         "</div><div class='row'>"
-        f"<span>{esc(format_label(deck.format))}</span>{legality}{own_bracket}{est_bracket}"
+        f"<span>{esc(format_label(deck.format))}</span>{legality}{brackets}"
         "</div><div class='row'>"
         f"<span>Size: {stats.get('card_count', sum(c.quantity for c in deck.main_cards))}</span>"
         f"<span>Est cost: <b class='orange'>{est_cost_html(stats)}</b> (Archidekt prices)</span>"
@@ -445,7 +437,7 @@ def banner_html(
 
 def social_html(deck: Deck, *, own: bool) -> str:
     """Like, Bookmark, Follow and Comments, as Archidekt's deck page offers them. The buttons are
-    the person's own clicks: deck.js asks for a confirmation and posts to /social/api; without
+    the person's own clicks: social.js asks for a confirmation and posts to /social/api; without
     script they are inert and the More menu's "Open on Archidekt" link is the way."""
     did = esc(deck.id)
     liked = deck.user_vote == VOTE_UP
@@ -479,7 +471,7 @@ def social_html(deck: Deck, *, own: bool) -> str:
 
 
 def comments_html(deck: Deck) -> str:
-    """The deck's comment thread (loaded by deck.js when the section scrolls into view) and the
+    """The deck's comment thread (loaded by social.js when the section scrolls into view) and the
     form to add one; a post is confirmed before it goes out, under the member's Archidekt name."""
     did = esc(deck.id)
     return (
@@ -498,6 +490,11 @@ def comments_html(deck: Deck) -> str:
         "confirm.</p>"
         "</form></section>"
     )
+
+
+# Track A's own deck page styles (S3): DECK_CSS ends with this, so A's rules for its parts of the
+# page (banner, social actions, the waiting changes strip) need no edit inside DECK_CSS.
+DECK_CSS_A = ""
 
 
 def _select(name: str, options: dict[str, str], current: str, label: str, ic: str) -> str:
@@ -531,6 +528,7 @@ def toolbar_html(deck: Deck, *, own: bool, view: str, group: str, sort: str, q: 
         f"{add}"
         f"<form method='get' action='/decks/{did}' class='views' id='viewform'>"
         + _select("view", VIEWS, view, "View as", "layers")
+        + (card_size_control() if view in PICTURE_VIEWS else "")
         + _select("group", GROUPS, group, "Group by", "grid")
         + _select("sort", SORTS, sort, "Sort by", "sort")
         + "<div class='field filter'><label for='q'>Local filter</label><span class='search'>"
@@ -992,21 +990,8 @@ def checks_panel_html(deck: Deck, stats: dict[str, Any] | None) -> str:
                     comp.get("ok", True),
                 )
             )
-        br = checks.get("bracket") or {}
-        if br.get("set"):
-            rows.append(
-                (
-                    "Bracket",
-                    f"set on the deck to {br['set']}"
-                    + (f", cards suggest {br['estimate']} (estimate)" if br.get("estimate") else "")
-                    + (
-                        " · not allowed there: " + esc("; ".join(br["mismatches"]))
-                        if br.get("mismatches")
-                        else ""
-                    ),
-                    br.get("ok", True),
-                )
-            )
+        if bracket_row := checks_bracket_row(checks):  # bracket_view.py (S2)
+            rows.append(bracket_row)
         uncat = checks.get("uncategorised") or []
         rows.append(
             (
@@ -1337,23 +1322,9 @@ def stats_panel_html(deck: Deck, stats: dict[str, Any] | None) -> str:
     problems_html = legality_panel_html(deck, stats)
     odds_html = _odds_html(cards)
     checks_html = checks_panel_html(deck, stats)
-    bracket = stats.get("bracket_estimate") or {}
-    basis = bracket.get("basis") or []
     avg_mv = stats.get("average_mana_value") if stats.get("average_mana_value") is not None else "–"
     no_types = "<tr><td class=muted>No type data</td></tr>"
-    bracket_html = (
-        "<div class='bracket'><h3>Commander bracket estimate</h3>"
-        f"<p><b class='orange'>Bracket {esc(bracket.get('bracket'))}</b>"
-        + (" · " + "; ".join(esc(b) for b in basis) if basis else "")
-        + "</p>"
-        f"<p class='small muted'>Game changers: {len(stats.get('game_changers') or [])} · Tutors: "
-        f"{stats.get('tutors', 0)} · Extra turns: {stats.get('extra_turns', 0)} · Mass land denial: "
-        f"{stats.get('mass_land_denial', 0)}. From Archidekt's card flags only; an estimate, not a "
-        "ruling.</p>"
-        "</div>"
-        if bracket.get("bracket")
-        else ""
-    )
+    bracket_html = stats_bracket_html(stats)  # bracket_view.py (S2)
     return (
         "<section class='panel stats' id='stats'><div class='head'><h2>Deck stats</h2></div>"
         "<div class='grid'><div>"
@@ -1413,7 +1384,9 @@ def deck_page_html(
     notice: str = "",
     owned: dict[str, int] | None = None,
     forge_on: bool = False,
+    waiting: list[dict[str, Any]] | None = None,
 ) -> str:
+    # ``waiting``: the "Waiting changes" strip's rows (waiting_strip.py, S4); not drawn yet
     view = view if view in VIEWS else "text"
     group = group if group in GROUPS else "category"
     sort = sort if sort in SORTS else "name"
@@ -1721,6 +1694,10 @@ GOLDFISH_CSS = """
 @media (prefers-reduced-motion:reduce){.gf-card{transition:none}}
 """
 
+# Track C's own deck page styles (S3): DECK_CSS ends with this, so C's rules for its parts of the
+# page (the bracket display, the simulator) need no edit inside DECK_CSS.
+DECK_CSS_C = ""
+
 
 # -- deck list ------------------------------------------------------------------------------------
 
@@ -1741,11 +1718,7 @@ def deck_card_html(
     fmt = format_label(d.get("format_name")) if d.get("format_name") else ""
     if not fmt and isinstance(d.get("format"), str):
         fmt = format_label(d["format"])
-    bracket = d.get("bracket")
-    bracket_names = {1: "Exhibition (1)", 2: "Core (2)", 3: "Upgraded (3)", 4: "Optimized (4)", 5: "cEDH (5)"}
-    line = fmt or "Custom"
-    if bracket:
-        line += f" - Bracket: {bracket_names.get(bracket, bracket)}"
+    line = (fmt or "Custom") + deck_card_bracket_text(d.get("bracket"))  # bracket_view.py (S2)
     tags = d.get("tags") or []
     tags_html = (
         "".join(f"<span class='pill'>{esc(t)}</span>" for t in tags[:6])
@@ -1886,6 +1859,7 @@ def deck_list_controls_html(
         + _select(
             "view", {"grid": "Grid", "list": "List"}, view, "View as", "list" if view == "list" else "grid"
         )
+        + (card_size_control() if view == "grid" else "")
         + _select("order", LIST_ORDERS, order, "Order by", "sort")
         + "<div class='field'><span class='lbl' id='decks-total'"
         + (" hidden" if total is None and not pending else "")
@@ -1897,7 +1871,8 @@ def deck_list_controls_html(
     )
 
 
-DECK_CSS = """
+DECK_CSS = (
+    """
 /* deck banner (cardBanner / deckHeaderInfo) */
 .banner{position:relative;margin:0 -1rem 1rem;color:#fff;isolation:isolate;z-index:2}
 /* the toolbar below is positioned too; while a banner menu is open the banner must win */
@@ -2040,6 +2015,9 @@ h3 .count{font-weight:400;color:var(--text-muted);font-size:.9rem}
 .toolbar .views{display:grid;grid-template-columns:repeat(3,minmax(0,1fr)) minmax(10rem,1.4fr);
   gap:.5rem 1rem;margin:0}
 .toolbar .views .field{margin:0}
+/* with the card size switch (0.7.29) next to View as: it takes only its own width */
+.toolbar .views:has(.cardsize){
+  grid-template-columns:minmax(0,1fr) auto repeat(2,minmax(0,1fr)) minmax(10rem,1.4fr)}
 .field .sel{position:relative;display:block}
 .field .sel > svg{position:absolute;left:.75rem;top:50%;transform:translateY(-50%);color:var(--orange);
   pointer-events:none}
@@ -2047,9 +2025,15 @@ h3 .count{font-weight:400;color:var(--text-muted);font-size:.9rem}
 .field .search{margin:0}
 .toolbar .apply{margin-top:.5rem}
 @media (max-width:1200px){ .toolbar .controls{grid-template-columns:1fr}
-  .toolbar .views{grid-template-columns:repeat(3,minmax(0,1fr))} .toolbar .filter{grid-column:1 / -1} }
+  .toolbar .views{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .toolbar .views:has(.cardsize){grid-template-columns:repeat(auto-fit,minmax(min(100%,10rem),1fr))}
+  .toolbar .views .field.cardsize .sizeseg{width:100%}
+  .toolbar .views .field.cardsize .sizeseg button{flex:1 1 0}
+  .toolbar .filter{grid-column:1 / -1} }
 @media (max-width:600px){ .toolbar{padding:.5rem .75rem .75rem}
-  .toolbar .views{grid-template-columns:1fr 1fr} .toolbar .views .field:nth-child(3){grid-column:1 / -1}
+  .toolbar .views{grid-template-columns:1fr 1fr}
+  .toolbar .views .field:nth-child(3){grid-column:1 / -1}
+  .toolbar .views:has(.cardsize) .field:nth-child(3){grid-column:auto}
   .toolbar .quickrow button span{display:none} .toolbar .quickrow button{width:var(--ctl);padding:0;
     justify-content:center} }
 
@@ -2362,7 +2346,10 @@ html.cardview-open{overflow:hidden}
 /* grid view: cards about 170 to 230 px wide, as many per row as fit (five in a 1366 px window) */
 .deckview.grid .cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:1rem}
 @media (max-width:600px){ .deckview.grid .cards{grid-template-columns:repeat(2,minmax(0,1fr))}
-  .deckview.stacks{grid-template-columns:1fr 1fr;gap:.75rem} }
+  .deckview.stacks{grid-template-columns:repeat(2,minmax(0,1fr));gap:.75rem} }
+/* a stack never widens its column past the window (its header's name ellipsises; 0.7.29 fix: at
+   360 px a stack's Options button sat 11 px outside the window) */
+.deckview.stacks .stack{min-width:0}
 
 /* deck stats panel */
 .stats .head{display:flex;justify-content:space-between;align-items:center;gap:1rem}
@@ -2713,6 +2700,10 @@ html.printpick-open{overflow:hidden}
 .printpick .ppsearch{display:flex;gap:.5rem;min-width:0}
 .printpick .ppsearch input{flex:1 1 auto;min-width:0;width:auto;margin:0}
 .printpick .ppfiltbtn{display:none;margin:0;flex:none}
+/* the card size switch (0.7.29) keeps its size; on a narrow phone it wraps under the search */
+.printpick .ppsearch{flex-wrap:wrap}
+.printpick .ppsearch input{flex-basis:10rem}
+.printpick .ppsearch .sizeseg{flex:none}
 .printpick .ppfilters{display:grid;grid-template-columns:repeat(4,minmax(0,1fr)) auto;gap:.5rem;
   align-items:center;min-width:0}
 .printpick .ppfilters select,.printpick .ppfilters .msel-btn{width:100%;min-width:0;margin:0}
@@ -2857,6 +2848,9 @@ ul.erows{container-type:inline-size}
 .editor{container-type:inline-size}
 @container (max-width:17rem){ .editbar{flex-wrap:wrap} .editbar .review{flex:1 1 auto} }
 """
+    + DECK_CSS_A
+    + DECK_CSS_C
+)
 
 __all__ = [
     "DECK_CSS",

@@ -53,6 +53,9 @@ services:
       - mtg_oidc_client_secret
       # - mtg_authentik_api_token
       # - mtg_ntfy_token
+    # A setting passed as ${MTG_X:-} (empty unless your env sets it) is one an admin changes on
+    # the gateway's Settings page (/admin/settings), which starts from the gateway's default. A
+    # value set in your env wins and locks the setting: the page shows it greyed out with its value.
     environment:
       MTG_PUBLIC_URL: ${MTG_PUBLIC_URL:?PUBLIC HTTPS URL REQUIRED e.g. https://mtg.example.com}
       MTG_OIDC_ISSUER: ${MTG_OIDC_ISSUER:?OIDC ISSUER URL REQUIRED}
@@ -82,43 +85,43 @@ services:
       MTG_NTFY_TOKEN_FILE: ${MTG_NTFY_TOKEN_FILE:-}
       # Watchlists and prices, off by default: with false the Watchlist pages, the price buttons,
       # the five watch tools and the daily price check are absent (stored watches are kept).
-      MTG_WATCHLISTS_ENABLED: ${MTG_WATCHLISTS_ENABLED:-false}
+      MTG_WATCHLISTS_ENABLED: ${MTG_WATCHLISTS_ENABLED:-}
       # Deck sync (read-only): minutes between checks of Archidekt for members with waiting
       # proposals; opening the app checks too. 0 turns it off.
-      MTG_DECK_SYNC_MINUTES: ${MTG_DECK_SYNC_MINUTES:-30}
+      MTG_DECK_SYNC_MINUTES: ${MTG_DECK_SYNC_MINUTES:-}
       # Watchlists: cards and decks per member, days of daily prices kept, and the hour (UTC) of
       # the daily price check. Nothing is asked of Scryfall while nobody watches anything.
-      MTG_WATCH_MAX_CARDS: ${MTG_WATCH_MAX_CARDS:-200}
-      MTG_WATCH_MAX_DECKS: ${MTG_WATCH_MAX_DECKS:-10}
-      MTG_PRICE_HISTORY_DAYS: ${MTG_PRICE_HISTORY_DAYS:-365}
-      MTG_PRICE_HOUR_UTC: ${MTG_PRICE_HOUR_UTC:-6}
+      MTG_WATCH_MAX_CARDS: ${MTG_WATCH_MAX_CARDS:-}
+      MTG_WATCH_MAX_DECKS: ${MTG_WATCH_MAX_DECKS:-}
+      MTG_PRICE_HISTORY_DAYS: ${MTG_PRICE_HISTORY_DAYS:-}
+      MTG_PRICE_HOUR_UTC: ${MTG_PRICE_HOUR_UTC:-}
       MTG_DATA_DIR: /data
       MTG_BACKUP_DIR: /backups
       # Copies every backup here too; off unless MTG_BACKUP_COPY_DIR names a host folder (below).
       MTG_BACKUP_COPY_DIR: /backup-copy
-      MTG_BACKUP_HOUR_UTC: ${MTG_BACKUP_HOUR_UTC:-3}
-      MTG_BACKUP_KEEP_DAYS: ${MTG_BACKUP_KEEP_DAYS:-14}
-      MTG_LOG_LEVEL: ${MTG_LOG_LEVEL:-INFO}
+      MTG_BACKUP_HOUR_UTC: ${MTG_BACKUP_HOUR_UTC:-}
+      MTG_BACKUP_KEEP_DAYS: ${MTG_BACKUP_KEEP_DAYS:-}
+      MTG_LOG_LEVEL: ${MTG_LOG_LEVEL:-}
       # Research tools are proxied from the Mystic Forge service in this stack.
       MTG_MYSTIC_FORGE_URL: ${MTG_MYSTIC_FORGE_URL-http://mtg-assistant-mysticforge:8000/mcp}
       # Forge simulations: empty (the default) leaves them off. To turn them on set FORGE_REPLICAS=1
       # and MTG_FORGE_URL=http://mtg-assistant-forge:8000 (docs/DEPLOY.md).
       MTG_FORGE_URL: ${MTG_FORGE_URL:-}
-      MTG_FORGE_GAMES: ${MTG_FORGE_GAMES:-10}
-      # Kill switch for deck edits on Archidekt. Keep false until you have tested
+      MTG_FORGE_GAMES: ${MTG_FORGE_GAMES:-}
+      # Kill switch for Archidekt writes. Keep false until you have tested
       # the proposal flow against a disposable deck.
       MTG_WRITES_ENABLED: ${MTG_WRITES_ENABLED:-false}
       # Approval modes (each member picks their own on the Account page): the mode of a
       # member who has not chosen (manual = ask every time), the highest mode they may
       # choose (auto = no cap), and the row limit of a low-risk edit in semi mode.
-      MTG_APPROVAL_MODE_DEFAULT: ${MTG_APPROVAL_MODE_DEFAULT:-manual}
-      MTG_APPROVAL_MODE_MAX: ${MTG_APPROVAL_MODE_MAX:-auto}
-      MTG_AUTO_APPLY_MAX_ROWS: ${MTG_AUTO_APPLY_MAX_ROWS:-5}
+      MTG_APPROVAL_MODE_DEFAULT: ${MTG_APPROVAL_MODE_DEFAULT:-}
+      MTG_APPROVAL_MODE_MAX: ${MTG_APPROVAL_MODE_MAX:-}
+      MTG_AUTO_APPLY_MAX_ROWS: ${MTG_AUTO_APPLY_MAX_ROWS:-}
       # The Approve/Reject card an AI app shows in the chat may apply with its one-time code
       # (the assistant never has the code). false leaves only the review page.
-      MTG_APPLY_IN_CHAT: ${MTG_APPLY_IN_CHAT:-true}
-      MTG_UPDATE_CHECK: ${MTG_UPDATE_CHECK:-true}
-      MTG_ARCHIDEKT_BACKUPS: ${MTG_ARCHIDEKT_BACKUPS:-true}
+      MTG_APPLY_IN_CHAT: ${MTG_APPLY_IN_CHAT:-}
+      MTG_UPDATE_CHECK: ${MTG_UPDATE_CHECK:-}
+      MTG_ARCHIDEKT_BACKUPS: ${MTG_ARCHIDEKT_BACKUPS:-}
       MTG_ARCHIDEKT_BACKUP_FOLDER: ${MTG_ARCHIDEKT_BACKUP_FOLDER:-MTG Gateway backups}
       # Token and session lifetimes, in seconds. Shorter is stricter.
       MTG_ACCESS_TOKEN_TTL: ${MTG_ACCESS_TOKEN_TTL:-3600}
@@ -126,13 +129,13 @@ services:
       MTG_BROWSER_SESSION_TTL: ${MTG_BROWSER_SESSION_TTL:-7200}
       MTG_REAUTH_INTERVAL: ${MTG_REAUTH_INTERVAL:-604800}
       MTG_MEMBERSHIP_CHECK_TTL: ${MTG_MEMBERSHIP_CHECK_TTL:-5}
-      MTG_ARCHIDEKT_CALLS_PER_10_MIN: ${MTG_ARCHIDEKT_CALLS_PER_10_MIN:-120}
-      MTG_ARCHIDEKT_MAX_PER_MINUTE: ${MTG_ARCHIDEKT_MAX_PER_MINUTE:-40}
-      MTG_ARCHIDEKT_MIN_INTERVAL: ${MTG_ARCHIDEKT_MIN_INTERVAL:-1.0}
-      MTG_ARCHIDEKT_RETRIES: ${MTG_ARCHIDEKT_RETRIES:-2}
-      MTG_ARCHIDEKT_BACKOFF_BASE: ${MTG_ARCHIDEKT_BACKOFF_BASE:-1.0}
-      MTG_ARCHIDEKT_CACHE_SECONDS: ${MTG_ARCHIDEKT_CACHE_SECONDS:-60}
-      MTG_ARCHIDEKT_CARD_CACHE_SECONDS: ${MTG_ARCHIDEKT_CARD_CACHE_SECONDS:-3600}
+      MTG_ARCHIDEKT_CALLS_PER_10_MIN: ${MTG_ARCHIDEKT_CALLS_PER_10_MIN:-}
+      MTG_ARCHIDEKT_MAX_PER_MINUTE: ${MTG_ARCHIDEKT_MAX_PER_MINUTE:-}
+      MTG_ARCHIDEKT_MIN_INTERVAL: ${MTG_ARCHIDEKT_MIN_INTERVAL:-}
+      MTG_ARCHIDEKT_RETRIES: ${MTG_ARCHIDEKT_RETRIES:-}
+      MTG_ARCHIDEKT_BACKOFF_BASE: ${MTG_ARCHIDEKT_BACKOFF_BASE:-}
+      MTG_ARCHIDEKT_CACHE_SECONDS: ${MTG_ARCHIDEKT_CACHE_SECONDS:-}
+      MTG_ARCHIDEKT_CARD_CACHE_SECONDS: ${MTG_ARCHIDEKT_CARD_CACHE_SECONDS:-}
       # Archidekt API base. Leave the default; the end-to-end tests point it at a local mock.
       MTG_ARCHIDEKT_BASE: ${MTG_ARCHIDEKT_BASE:-https://archidekt.com/api}
       # Peers allowed to set X-Forwarded-* (your reverse proxy). Empty = private networks.
@@ -145,7 +148,7 @@ services:
       # Hosts allowed to identify by Client ID Metadata Document URL. Empty = any https host.
       MTG_CIMD_ALLOWED_HOSTS: ${MTG_CIMD_ALLOWED_HOSTS:-}
       # Seconds between single-card Scryfall lookups made for card scanning (0.1 to 5).
-      MTG_SCRYFALL_LOOKUP_INTERVAL: ${MTG_SCRYFALL_LOOKUP_INTERVAL:-0.5}
+      MTG_SCRYFALL_LOOKUP_INTERVAL: ${MTG_SCRYFALL_LOOKUP_INTERVAL:-}
       PUID: ${PUID:?PUID REQUIRED}
       PGID: ${PGID:?PGID REQUIRED}
       TZ: ${TIMEZONE:-UTC}

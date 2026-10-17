@@ -20,7 +20,7 @@ from .test_suggest_browser import Server
 
 pytest.importorskip("playwright")
 
-WIDTHS = [360, 673]
+WIDTHS = [360, 673, 717]
 
 # The pages a member uses most, plus the ones with forms and tables.
 PAGES = [
@@ -93,6 +93,7 @@ def test_main_pages_hold_together_at_200_percent_text(server: Server, zoom: str)
         for path in [*PAGES, f"/proposals/{pending}"]:
             for w in WIDTHS:
                 ctx.clear_cookies(name=re.compile(r"^mtg_view_"))
+                server.db.delete_prefs("user-1", prefixes=("view.",))  # on the account from 0.7.29
                 page.set_viewport_size({"width": w, "height": 800})
                 r = page.goto(f"{server.base}{path}", wait_until="networkidle")
                 assert r is not None and r.status == 200, (path, r and r.status)
@@ -106,3 +107,62 @@ def test_main_pages_hold_together_at_200_percent_text(server: Server, zoom: str)
     assert errors == []
     more = f"\n… {len(problems)} in all" if len(problems) > 80 else ""
     assert problems == [], "\n".join(problems[:80]) + more
+
+
+# The Scan page's preview: the box keeps its 3:4 shape and the dashed card guide (with the card
+# name box at its top) stays inside it, in one column and in two, with and without a result.
+# Two columns start at a 700 px window at the normal text size, with a mouse or with touch,
+# and at 200% text only where the scan area has room for them.
+SCAN_PREVIEW = """
+() => {
+  const panel = document.querySelector('.scan .cam-panel'), cam = panel.querySelector('.camera');
+  const guide = cam.querySelector('.guide');
+  const out = [];
+  for (const result of [false, true]) {
+    panel.classList.toggle('has-result', result);
+    const c = cam.getBoundingClientRect(), g = guide.getBoundingClientRect();
+    out.push({result, cols: getComputedStyle(panel).display, ratio: c.width / c.height,
+              inside: g.top >= c.top - 1 && g.bottom <= c.bottom + 1 && g.left >= c.left - 1
+                      && g.right <= c.right + 1});
+  }
+  panel.classList.remove('has-result');
+  return out;
+}
+"""
+
+
+@pytest.mark.parametrize("touch", [True, False], ids=["touch", "mouse"])
+def test_the_scan_preview_keeps_its_shape_and_the_card_guide_inside_it(
+    server: Server,  # noqa: F811
+    touch: bool,
+) -> None:
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_path()
+    if exe == "missing":
+        pytest.skip("no Chromium available for Playwright")
+    sid, _ = _seed(server)
+    problems: list[str] = []
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+        ctx = browser.new_context(viewport={"width": 360, "height": 800}, has_touch=touch, is_mobile=touch)
+        ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
+        page = ctx.new_page()
+        for zoom in ("none", "root", "text"):
+            for w in (360, 620, 673, 699, 700, 717, 900, 1280):
+                page.set_viewport_size({"width": w, "height": 800})
+                page.goto(f"{server.base}/scan", wait_until="networkidle")
+                if zoom != "none":
+                    page.evaluate(ROOT_200 if zoom == "root" else TEXT_200)
+                page.wait_for_timeout(30)
+                two = w >= 700 if zoom == "none" else w >= 1280
+                for m in page.evaluate(SCAN_PREVIEW):
+                    where = f"{w}px {zoom} {'with' if m['result'] else 'without'} a result"
+                    if (m["cols"] == "grid") != two:
+                        problems.append(f"{where}: {m['cols']}, expected {'two' if two else 'one'} column(s)")
+                    if abs(m["ratio"] - 0.75) > 0.01:
+                        problems.append(f"{where}: preview ratio {m['ratio']:.2f}, not 3:4")
+                    if not m["inside"]:
+                        problems.append(f"{where}: the card guide runs outside the preview")
+        browser.close()
+    assert problems == [], "\n".join(problems)

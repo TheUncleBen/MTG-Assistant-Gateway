@@ -349,3 +349,24 @@ def test_a_condition_written_out_is_its_code(given: str, code: str) -> None:
     """A Condition cell with the condition's name is read as its code, not kept as Near Mint."""
     item = parse_collection_import(f"Quantity,Name,Condition\n1,Opt,{given}\n")[0]
     assert item["condition"] == code and "condition_given" not in item
+
+
+async def test_a_collection_edit_with_writes_switched_off_says_so_in_track_as_words(stack: Stack) -> None:
+    """Card Q141 item 7A (Track A's shared refusal words): the writes-off notice on the Collection
+    page reads as everywhere else and doesn't name the setting."""
+    import dataclasses
+
+    b = await linked(stack)
+    decks = stack.h.app.state.gateway.decks
+    decks.settings = dataclasses.replace(decks.settings, writes_enabled=False)
+    try:
+        csrf = await b.csrf("/collection")
+        before = dict(stack.ark.collections.get("alice", {}))
+        r = await b.http.post("/collection", data={"csrf": csrf, "action": "add", "name": "Sol Ring"})
+        assert r.headers["location"] == "/collection?err=writes", r.headers
+        page = (await b.http.get(r.headers["location"], headers=NAV)).text
+        assert "Archidekt writes are switched off on this gateway, so nothing was sent to Archidekt." in page
+        assert "MTG_WRITES_ENABLED" not in page
+        assert stack.ark.collections.get("alice", {}) == before
+    finally:
+        await b.aclose()

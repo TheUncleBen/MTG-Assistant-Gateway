@@ -154,8 +154,10 @@ registry, Custom, URL `ghcr.io`, with their GitHub login. The token is a
 secret: it goes into Portainer, not into this chat. The registry URL must be exactly
 `ghcr.io` (no path): Portainer only sends a registry's login when its URL
 equals the image's host, so a per-image entry like `ghcr.io/<owner>/mtg-assistant-gateway`
-is ignored and tasks end `rejected` with `No such image`. Later updates are
-then one click: Update the stack with Re-pull image on. A `docker login` on
+is ignored and tasks end `rejected` with `No such image`. Later updates:
+Update the stack (if the stack uses the Repository build method, the button is
+called Pull and redeploy), then in the box that asks “Are you sure?” make sure Re-pull image and redeploy is on and
+click Update. A `docker login` on
 the node does not fix Swarm pulls (docs/DEPLOY.md step 5).
 
 ### 6. Portainer stack (browser)

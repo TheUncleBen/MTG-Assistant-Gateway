@@ -148,6 +148,35 @@ def _chromium() -> None:
         pytest.skip("no Chromium available for Playwright")
 
 
+# What closed a themed list (static/select.js closes it on a pick, a pointerdown outside it, any
+# scroll outside it, a resize, Escape, Tab, or the focus leaving its button). A filter's list once
+# closed under the test in CI before its option was clicked and the cause could not be reproduced
+# (0.7.29); _choose shows this record if that happens again, so the next failure names its cause.
+WHY_CLOSED = """
+window.__mselLog = [];
+(() => {
+  const log = (...a) => {
+    window.__mselLog.push([Math.round(performance.now()), ...a]);
+    if (window.__mselLog.length > 60) window.__mselLog.shift();
+  };
+  const name = e => e === document ? 'document' : e === window ? 'window'
+    : !e || !e.tagName ? String(e)
+    : e.tagName + (e.id ? '#' + e.id : '')
+      + (typeof e.className === 'string' && e.className ? '.' + e.className.split(' ').join('.') : '');
+  document.addEventListener('scroll', e => log('scroll', name(e.target)), true);
+  window.addEventListener('resize', () => log('resize', innerWidth + 'x' + innerHeight));
+  document.addEventListener('pointerdown', e => log('pointerdown', name(e.target)), true);
+  document.addEventListener('focusin', e => log('focus', name(e.target)), true);
+  const remove = Node.prototype.removeChild;
+  Node.prototype.removeChild = function (c) {
+    if (c && c.classList && c.classList.contains('msel-list'))
+      log('list closed', (new Error()).stack.split(String.fromCharCode(10)).slice(2, 7).join(' < '));
+    return remove.call(this, c);
+  };
+})();
+"""
+
+
 def _page(
     p, server: Server, sid: str, width: int, *, theme: str = "light", height: int = 900, touch: bool = False
 ):
@@ -164,6 +193,7 @@ def _page(
         re.compile(r"https://cards\.scryfall\.io/.*"),
         lambda route: route.fulfill(status=200, content_type="image/png", body=PNG),
     )
+    ctx.add_init_script(WHY_CLOSED)
     page = ctx.new_page()
     errors: list[str] = []
     page.on("pageerror", lambda e: errors.append(str(e)))
@@ -201,7 +231,13 @@ def _choose(page, label: str, value: str) -> None:
     if not btn.is_visible():
         page.locator(".printpick .ppfiltbtn").click()
     btn.click()
-    page.locator(".msel-list [role=option]", has_text=value).first.click()
+    try:
+        page.locator(".msel-list [role=option]", has_text=value).first.click(timeout=10_000)
+    except Exception as exc:  # the list closed before the click: say what closed it
+        log = page.evaluate("() => window.__mselLog || []")
+        raise AssertionError(
+            f"{label} list closed before {value!r} was clicked:\n" + "\n".join(map(str, log))
+        ) from exc
     page.wait_for_timeout(150)
 
 
@@ -1011,3 +1047,73 @@ def test_saving_messages_and_picked_states_read_at_every_size(server: Server, wi
         check("editor-picked", TEXT)
         assert errors == []
         browser.close()
+
+
+# CI on 1ea9289: the Frame list closed 13 ms after it opened, on a scroll of the picker box. The
+# scroll had happened before the list opened (the box scrolled the filter button into view as it
+# took focus); its event only arrives on the next frame. Here the box scrolls and the button is
+# clicked in one go, so the scroll event lands after the list is open, as it did under load.
+STALE_SCROLL_THEN_OPEN = """
+() => {
+  const box = document.querySelector('.printpick .ppbox');
+  const btn = document.querySelector(".printpick .msel-btn[aria-label='Frame']");
+  // the box overflowed in CI (its fonts differ); a list that won't shrink stands in for that
+  box.querySelector('.ppmain').style.flex = 'none';
+  box.scrollTop += 6;
+  btn.click();
+  return box.scrollTop;
+}
+"""
+
+
+SCROLL_THE_BOX = """
+() => {
+  const box = document.querySelector('.printpick .ppbox');
+  // fewer prints are shown now: a spacer at the end keeps the box taller than it is
+  const spacer = document.createElement('div');
+  spacer.style.cssText = 'flex:none;height:600px';
+  box.appendChild(spacer);
+  const before = box.scrollTop;
+  box.scrollTop = before > 0 ? 0 : 40;
+  return [before, box.scrollTop];
+}
+"""
+
+
+def test_a_filter_list_stays_open_after_a_scroll_that_came_before_it(tmp_path: Path) -> None:
+    """A scroll event that arrives after the list opened, for a scroll that moved nothing since,
+    leaves the list open; a scroll that moves the button after the list opened still closes it."""
+    from playwright.sync_api import sync_playwright
+
+    s = _server(tmp_path, fillers=19, page_size=10)
+    try:
+        _chromium()
+        sid = s.sign_in_and_link()
+        s.app.state.gateway.scan.names.set_names(sorted({c["name"] for c in s.sf.cards}))
+        with sync_playwright() as p:
+            browser, page, errors = _page(p, s, sid, 1366)
+            page.goto(f"{s.base}/decks/42/edit", wait_until="networkidle")
+            box = page.locator("#addname")
+            box.click()
+            box.press_sequentially("sol r", delay=30)
+            page.locator(".addprints:visible .pptile").first.wait_for(timeout=5000)
+            page.locator(".addprints .allprints").click()
+            page.locator(".printpick .pptile").first.wait_for(timeout=5000)
+            if not page.locator(".printpick .msel-btn[aria-label='Frame']").is_visible():
+                page.locator(".printpick .ppfiltbtn").click()
+            assert page.evaluate(STALE_SCROLL_THEN_OPEN) > 0, "the picker box didn't scroll"
+            page.wait_for_timeout(300)  # several frames: the scroll event has arrived
+            assert page.locator(".msel-list").count() == 1, page.evaluate("() => window.__mselLog")
+            page.locator(".msel-list [role=option]", has_text="1993 frame").first.click()
+            assert page.locator(".msel-list").count() == 0
+            # a scroll after the list opened moves the button away from it: the list closes
+            page.locator(".printpick .msel-btn[aria-label='Frame']").click()
+            assert page.locator(".msel-list").count() == 1
+            moved = page.evaluate(SCROLL_THE_BOX)
+            assert moved[0] != moved[1], moved
+            page.wait_for_timeout(300)
+            assert page.locator(".msel-list").count() == 0
+            browser.close()
+            assert errors == []
+    finally:
+        s.stop()

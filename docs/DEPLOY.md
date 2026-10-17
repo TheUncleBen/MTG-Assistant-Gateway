@@ -242,8 +242,8 @@ Archidekt and signs in once more.
 
 The images live in GitHub Container Registry (GHCR) under `<owner>`. If the
 packages are private (the default for a private repository), Portainer
-needs a login to pull them. Set it up once like this and every later update
-is one click:
+needs a login to pull them. Set it up once like this and later updates need
+no new login:
 
 1. On GitHub, create a classic personal access token with only the
    `read:packages` scope.
@@ -256,7 +256,9 @@ is one click:
 3. Deploy (step 6). Portainer stores the login with each service, so
    whichever node runs it can pull. To update later, open the stack, change
    `MTG_TAG` if you're moving to a new release, and click **Update the
-   stack** with **Re-pull image** on.
+   stack** (if your stack uses the Repository build method, the button is
+   called **Pull and redeploy**). In the box that asks “Are you sure?”, make
+   sure **Re-pull image and redeploy** is on, then click **Update**.
 
 If tasks show `rejected` with `No such image: ghcr.io/<owner>/...`, check
 the image name and tag first, then the registry URL above. A `docker login`
@@ -312,6 +314,49 @@ If the packages are public you can skip this step.
 4. Click **Deploy the stack**. The gateway should go healthy within about
    30 seconds. Check from a manager with
    `docker service logs mtg_mtg-assistant-gateway`.
+
+### Updating to 0.7.29 from an earlier version
+
+0.7.29 adds the admin Settings page. A stack file from before 0.7.29 gives 24
+of the page's 47 settings a value of its own, so the page would show them
+locked (greyed out) even with no variable set.
+
+1. **If you pasted the stack file into Portainer's Web editor:** first note
+   your own edits to the old text: the optional secret lines you removed the
+   `# ` from (`mtg_authentik_api_token`, `mtg_ntfy_token`, each in two
+   places) and any line you added under `environment:`. Then, in
+   **Stacks** → `mtg` → **Editor**, replace the whole text with the new
+   [`deploy/portainer-stack.yml`](../deploy/portainer-stack.yml) and make
+   the same edits in it. Without the Authentik lines the removed-member
+   clean-up turns off (the admin page says so); without the ntfy lines the
+   gateway won't start. With the **Repository** build method and this
+   repository, the update brings the new file. If Portainer pulls your own
+   copy of the repository instead, bring that copy up to date first and keep
+   your edits in it.
+   **Without Portainer:** in your copy of the repository, keep a copy of your
+   edited file (`cp deploy/portainer-stack.yml
+   deploy/portainer-stack.old.local.yml`). Then run
+   `git checkout deploy/portainer-stack.yml` (this undoes your edits to it),
+   then `git pull`. Make the same edits in the new
+   `deploy/portainer-stack.yml` (your saved copy shows what they were).
+2. **Optional:** for each setting you want to change on the Settings page,
+   delete its variable. A variables file made from the older
+   `stack.env.example` sets 19 of them, such as `MTG_ARCHIDEKT_BACKUPS=true`
+   and `MTG_DECK_SYNC_MINUTES=30`. Any variable you keep stays locked: the
+   Settings page shows it greyed out with its value, and you change it in
+   the stack and redeploy.
+3. If `MTG_TAG` names a version, change it to `0.7.29` first (in the stack's
+   variables, or in `mtg.env` without Portainer); otherwise you redeploy the
+   old version with the new stack file. Click **Update the stack** (if your
+   stack uses the Repository build method, the button is called **Pull and
+   redeploy**). In the box that asks “Are you sure?”, make sure **Re-pull
+   image and redeploy** is on, then click **Update**. Without Portainer: open a new shell (a variable you
+   deleted from `mtg.env` stays set in the old one), go to your copy of the
+   repository (`cd` into it), and run the last two lines under “Without
+   Portainer” again.
+
+With Docker Compose, see
+[DEPLOY-COMPOSE.md](DEPLOY-COMPOSE.md#updating-to-0729-from-an-earlier-version).
 
 ### Without Portainer
 
@@ -726,6 +771,14 @@ itself:
 through the ones marked *stack*; for any other, add a line under the
 gateway's `environment:` in the stack file, or it has no effect.
 
+Since 0.7.29 most of the tuning settings below can also be changed by an
+admin on the gateway's Settings page (`/admin/settings`, see
+[OPERATIONS.md](OPERATIONS.md#the-settings-page)). The stack file passes those
+through empty unless your environment sets them, and `stack.env.example`
+lists them commented out with their default. A value you set in the
+environment wins and locks the setting: the page shows it greyed out with its
+value. Leave it out to manage it on the page.
+
 | Variable | Required | Default | What it does |
 | --- | --- | --- | --- |
 | `MTG_PUBLIC_URL` | yes, *stack* | | Public https URL, no path |
@@ -774,6 +827,9 @@ gateway's `environment:` in the stack file, or it has no effect.
 | `MTG_ARCHIDEKT_CACHE_SECONDS` | no, *stack* | `60` | How long anonymous public deck reads and deck searches are reused; cleared by any write the gateway sends (0 turns it off, up to 900). A member's deck page is also shown again from memory for up to 20 seconds (or this, if shorter) |
 | `MTG_ARCHIDEKT_CARD_CACHE_SECONDS` | no, *stack* | `3600` | How long card lookups are reused (0 to 86400) |
 | `MTG_ARCHIDEKT_BACKUPS` | no, *stack* | `true` | Before every applied edit or restore, copy the deck as a private deck into the user's backup folder on Archidekt (using Archidekt's own copy feature, so printings, finishes and categories are kept). If the copy fails, nothing changes and the proposal stays pending |
+| `MTG_ARCHIDEKT_BACKUP_COPIES` | no | `10` | Backup copies kept per deck in that folder (1 to 50). Older ones are deleted from Archidekt one at a time, at most one a minute, once that deck gets its next new backup copy; a copy the member changed or moved on Archidekt, or one the gateway couldn't delete, is kept and no longer counts toward this number. Copies made before 0.7.29 are never deleted and don't count toward it either. Also on the Settings page |
+| `MTG_ARCHIDEKT_BACKUP_BOX_DEFAULT` | no | `false` | Whether the deck editor's "Also keep a backup copy on Archidekt" box starts ticked. Also on the Settings page |
+| `MTG_SNAPSHOTS_PER_DECK` | no | `25` | Restore points kept per deck on the gateway (5 to 100), for History > Restore. One that records a backup copy the gateway may still delete is kept too. Also on the Settings page |
 | `MTG_ARCHIDEKT_BACKUP_FOLDER` | no, *stack* | `MTG Gateway backups` | Name of that folder (at most 100 characters), created in the account's root folder the first time. Decks in it are left out of the assistant's deck list |
 | `MTG_BROWSER_SESSION_TTL` | no, *stack* | `7200` | Browser session lifetime for `/account` and review pages, seconds (300 to 86400) |
 | `MTG_ARCHIDEKT_BASE` | no, *stack* | `https://archidekt.com/api` | Archidekt API base. Only the tests change it |

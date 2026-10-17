@@ -19,7 +19,7 @@ from urllib.parse import parse_qs, quote
 from starlette.requests import Request
 from starlette.responses import RedirectResponse, Response
 
-from . import app_signin, link_disclosure, modes, notify
+from . import app_signin, link_disclosure, modes, notify, prefs
 from .archidekt import PATIENCE_SPENT
 from .auth_provider import BROWSER_COOKIE, LoginError, cookie_name
 from .avatars import initials_svg
@@ -28,12 +28,15 @@ from .decks import REVIEW_PAGE, DeckError, current_client, row_label, row_line, 
 from .theme import (
     LAYOUT_COOKIE,
     THEME_COOKIE,
+    VIEW_COOKIE,
+    VIEW_KINDS,
     app_version,
     display_name,
     in_app,
     layout_from_cookie,
     plural,
     render,
+    set_card_size,
     theme_from_cookie,
     time_html,
 )
@@ -351,7 +354,9 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             # The only place a mode can be set: the member's own browser session, never an
             # assistant over MCP or the API (modes.py).
             mode = data.get("mode", "")
-            if not modes.valid_mode(mode) or modes.rank(mode) > modes.rank(s.approval_mode_max):
+            # the cap as it is now: the Settings page changes it without a restart (LiveSettings)
+            cap = str(state.live.get("approval_mode_max"))
+            if not modes.valid_mode(mode) or modes.rank(mode) > modes.rank(cap):
                 return RedirectResponse("/account?err=mode_invalid", status_code=303)
             before = state.decks.mode_of(sub)
             state.db.set_approval_mode(sub, mode)
@@ -362,6 +367,15 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
                 detail={"from": before, "to": mode, "by": "user"},
             )
             return RedirectResponse(f"/account?ok=mode_{mode}", status_code=303)
+        if action == "forget_choices":
+            if data.get("confirm") != "yes":
+                return RedirectResponse("/account?err=confirm_forget#choices", status_code=303)
+            n = prefs.forget(state.db, sub)
+            state.db.audit("view_choices_forgotten", sub=sub, client_id=BROWSER_CLIENT_ID, detail={"n": n})
+            resp = RedirectResponse("/account?ok=choices_forgotten#choices", status_code=303)
+            for kind in VIEW_KINDS:  # this browser's pre-0.7.29 view cookies, if any are left
+                resp.delete_cookie(VIEW_COOKIE + kind, path="/", secure=secure, httponly=True, samesite="lax")
+            return resp
         if action == "delete_data":
             if data.get("confirm") != "yes":
                 return RedirectResponse("/account?err=confirm_delete", status_code=303)
@@ -633,6 +647,7 @@ def browser_session(state: Any, request: Request) -> tuple[str | None, str | Non
     sync = state.sync
     if sync is not None:
         sync.opened(sub)  # opening the app checks the member's decks on Archidekt (sync.py)
+    set_card_size(state.db.get_pref(sub, prefs.CARD_SIZE))  # drawn on <html> (theme.render)
     return sub, sid
 
 
@@ -666,6 +681,7 @@ OK_MESSAGES = {
     "Its pending proposals were rejected.",
     "disconnected_all": "Every connected app was disconnected. Each has to be connected and approved again. "
     "Their pending proposals were rejected.",
+    "choices_forgotten": "Done. Every page starts with its usual view again, on all your devices.",
     "mode_manual": "Saved: your assistant asks you every time.",
     "mode_semi": "Saved: your assistant applies small, low-risk edits without asking and asks for "
     "everything else.",
@@ -675,6 +691,7 @@ OK_MESSAGES = {
 }
 ERR_MESSAGES = {
     "confirm_delete": "Nothing was deleted. Tick the box to confirm, then press Delete my data.",
+    "confirm_forget": "Nothing was forgotten. Tick the box to confirm, then press Forget my view choices.",
     "mode_invalid": "That approval mode does not exist, or this gateway does not allow it. Nothing changed.",
     "failed": "This proposal could not be applied. Details are in the result below, if any.",
     "writes_disabled": "Deck writes are switched off on this gateway. The proposal is kept for review; "
@@ -791,16 +808,15 @@ def _account_body(state: Any, sub: str, csrf: str | None, *, disclosure_read: bo
     who = html.escape(user.get("preferred_username") or user.get("email") or sub)
     csrf_in = f"<input type='hidden' name='csrf' value='{html.escape(csrf or '')}'>"
     writes = (
-        "<span class='badge ok'>enabled</span>"
-        if info["writes_enabled"]
-        else "<span class='badge'>disabled</span>"
+        "<span class='badge ok'>on</span>" if info["writes_enabled"] else "<span class='badge'>off</span>"
     )
     out = [
         "<div class='card'><dl class='meta'>"
         f"<dt>Signed in as</dt><dd><strong>{who}</strong></dd>"
-        f"<dt>Deck writes</dt><dd>{writes}</dd></dl>"
-        "<p class='muted small'>Deck writes are switched on or off for the whole gateway by its "
-        "operator. While they are off, proposals can be reviewed but not applied.</p>"
+        f"<dt>Archidekt writes</dt><dd>{writes}</dd></dl>"
+        # Q141 item 7A: the same words as Track A's writes-off texts, and no variable names
+        "<p class='muted small'>Archidekt writes are switched on or off for the whole gateway by the "
+        "person who runs it. While they are off, changes can be reviewed but not applied.</p>"
         f"{_identity_details(user)}"
         "<div class='form-actions'>"
         "<a class='btn' href='/install?for=skill'>Get the assistant skill for Claude or ChatGPT</a>"
@@ -853,6 +869,7 @@ def _account_body(state: Any, sub: str, csrf: str | None, *, disclosure_read: bo
             "<button class='primary'>Link account</button></form></div>"
         )
     s = state.settings
+    out.append(_forget_choices_card(csrf_in))
     out.append(_delete_card(csrf_in, s.backup_keep_days if s.backup_dir is not None else None))
     return "".join(out)
 
@@ -943,6 +960,20 @@ def _apps_card(state: Any, sub: str, csrf_in: str) -> str:
 
 def _short_id(client_id: str) -> str:
     return client_id if len(client_id) <= 40 else client_id[:37] + "..."
+
+
+def _forget_choices_card(csrf_in: str) -> str:
+    """B9: once view choices follow the account, signing out no longer resets them; this does.
+    Draft wording (WORDING-AND-CALLS-2 W3)."""
+    return (
+        "<div class='card' id='choices'><h2>Your view choices</h2>"
+        "<p>Your views, card size, stack orders, stats choices and dismissed tips follow your "
+        "account to every device. Light or dark mode stays on each device.</p>"
+        f"<form method='post'>{csrf_in}<input type='hidden' name='action' value='forget_choices'>"
+        "<label class='check'><input type='checkbox' name='confirm' value='yes' required> "
+        "Yes, forget my view choices on every device</label>"
+        "<button>Forget my view choices</button></form></div>"
+    )
 
 
 def _delete_card(csrf_in: str, backup_days: int | None = None) -> str:

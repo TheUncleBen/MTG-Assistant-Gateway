@@ -111,6 +111,13 @@ reaches the gateway if `docker-compose.yml` lists it under the gateway's
 `environment:`; for one that isn't there yet, add a line there as well as in
 `.env`.
 
+Lines in `.env` that start `# MTG_` (the approval modes, `MTG_APPLY_IN_CHAT`,
+`MTG_UPDATE_CHECK` and the other tuning settings) are left to the gateway's
+admin Settings page (`/admin/settings`, since 0.7.29), starting from the
+default shown. Remove the `# ` to lock one in `.env` instead; the page then
+shows it greyed out with its value, and you change it in `.env`
+([OPERATIONS.md](OPERATIONS.md#the-settings-page)).
+
 Create the folders and give them to `PUID:PGID`:
 
 ```bash
@@ -231,6 +238,30 @@ settings change. The gateway upgrades its database on start and records the
 schema version in the file. To go back to an older release, restore the backup
 you took before updating (see [OPERATIONS.md](OPERATIONS.md#backups)) and run
 the old image on that; don't run an old image on an upgraded database.
+
+### Updating to 0.7.29 from an earlier version
+
+Before the commands above, note your own edits to the old `docker-compose.yml`:
+the optional secret lines you removed the `# ` from (`mtg_authentik_api_token`,
+`mtg_ntfy_token`, each in two places) and any line you added under
+`environment:`. Then download the new file (if you cloned the repository, run
+`git checkout docker-compose.yml`, which undoes your edits to it, then
+`git pull`, instead):
+
+```bash
+base=https://raw.githubusercontent.com/TheUncleBen/MTG-Assistant-Gateway/main/deploy/compose
+curl -fsSLO "$base/docker-compose.yml"
+```
+
+This replaces your old file, so make the same edits in the new one. Without
+the Authentik lines the removed-member clean-up turns off (the admin page says
+so); without the ntfy lines the gateway won't start.
+
+The old file gives 24 of the Settings page's 47 settings a value of its own,
+which locks them on the page (greyed out with that value). An `.env` made
+from the older `.env.example` sets 17 of them. **Optional:** delete the lines
+of the ones you want to change on the Settings page. Any you keep stay
+locked: you change them in `.env`, then run `docker compose up -d`.
 
 ## Backups
 

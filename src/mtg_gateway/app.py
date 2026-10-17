@@ -82,7 +82,7 @@ from .chatgpt_plugin import add_chatgpt_plugin_route
 from .cimd import CimdFetcher
 from .collection import add_collection
 from .companion import add_companion_routes
-from .config import Settings
+from .config import LiveSettings, Settings, with_stored
 from .db import Database
 from .decks import (
     FULL_SCOPE,
@@ -102,6 +102,7 @@ from .notify import Notifier
 from .oidc import OIDCClient
 from .pages import SESSION_COOKIE, _csrf, add_browser_routes, browser_session
 from .plugin_page import CONNECTOR_ICON_PATH, CONNECTOR_ICON_PX, SERVER_DESCRIPTION, add_plugin_routes
+from .prefs import add_prefs_routes
 from .prices import DailyJobs, PriceService
 from .reports import ReportService
 from .scan import add_scan
@@ -146,6 +147,11 @@ class AppState:
     summaries: Summaries | None = None  # members' plain summaries (summary.py)
     app_signins: AppSignins = field(default_factory=AppSignins)  # the Android app's browser sign-in
     sync: DeckSync | None = None  # automatic Archidekt -> gateway deck sync (sync.py)
+
+    @property
+    def live(self) -> LiveSettings:
+        """The dashboard settings with a deployment value winning (config.LiveSettings)."""
+        return self.decks.live
 
 
 def _tool_error(exc: DeckError) -> dict[str, object]:
@@ -862,6 +868,7 @@ def build_mcp_server(state: AppState) -> MCPServer:
         forge_games=s.forge_games,
     )
     add_api_routes(server, state, state.reports)
+    add_prefs_routes(server, state)
     add_companion_routes(server, state, state.reports)
     add_admin_routes(server, state)
     # Notifications and summaries (notify.py, summary.py), and the watchlists and price history
@@ -937,9 +944,11 @@ def create_app(
     mf_proxy: MysticForgeProxy | None = None,
     cimd: CimdFetcher | None = None,
 ) -> Starlette:
+    db = db or Database(settings.db_path)
+    # Values saved on the admin Settings page, for every key the deployment left blank (0.7.29).
+    settings = with_stored(settings, db)
     theme.PUBLIC_URL = settings.public_url.rstrip("/")  # link previews point at the site's icon
     theme.WATCHLISTS = settings.watchlists_enabled  # the Watchlist links and price buttons
-    db = db or Database(settings.db_path)
     oidc = oidc or OIDCClient(
         settings.oidc_issuer,
         settings.oidc_client_id,
@@ -1004,6 +1013,8 @@ def create_app(
     _friendly_errors(app, state)
     app.add_middleware(ThemeMiddleware)
     app.state.gateway = state
+    # Restore points kept per deck follow the admin Settings page at once (0.7.29).
+    db.snapshots_source = lambda: state.live.get("snapshots_per_deck")
     _use_hashed_client_secrets(app, provider)
     if settings.cimd_enabled:
         _advertise_cimd(app, server)

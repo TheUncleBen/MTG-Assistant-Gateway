@@ -12,7 +12,7 @@ from urllib.parse import urlencode
 from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
 
-from . import deck_stats
+from . import deck_stats, prefs
 from .archidekt import format_label
 from .busy import busy_response
 from .companion import (
@@ -46,9 +46,8 @@ from .theme import (
 )
 from .theme import (
     icon,
-    remember_view,
-    view_choice,
 )
+from .waiting_strip import waiting_changes
 
 if TYPE_CHECKING:
     from mcp.server.mcpserver import MCPServer
@@ -91,7 +90,7 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
             decks.reread_deck_list(sub)
             rest = urlencode([(k, v) for k, v in qp.multi_items() if k != "reread"])
             return RedirectResponse("/decks" + (f"?{rest}" if rest else ""), 303)
-        chosen, remember = view_choice(request, "decks", LIST_VIEWS, "grid")
+        chosen, remember = prefs.view_choice(state.db, sub, request, "decks", LIST_VIEWS, "grid")
         q, order, view, folder = list_query(qp, chosen)
         rows, problem, failure = await my_decks(sub, wait=decks.deck_list_wait)
         if failure is not None and (busy := busy_response(failure, request, page, sub=sub, sid=sid)):
@@ -181,7 +180,7 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
             extra_scripts=("decks.js",),
             extra_css=FOLDER_CSS,
         )
-        return remember_view(resp, "decks", view, secure=secure) if remember else resp
+        return prefs.remember_view(state.db, sub, resp, "decks", view, secure=secure) if remember else resp
 
     @server.custom_route("/api/decks/mine", methods=["GET"], include_in_schema=False)
     async def my_decks_json(request: Request) -> Response:
@@ -401,7 +400,7 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
         # Archidekt marks each deck card with the copies the signed-in member owns ("owned" on the
         # card when the deck is read with their session); the gateway's green dot is that number.
         owned = {c.name.lower(): c.owned for c in deck.cards if c.owned} if link else None
-        view, remember = view_choice(request, "deck", VIEWS, "text")
+        view, remember = prefs.view_choice(state.db, sub, request, "deck", VIEWS, "text")
         body = deck_page_html(
             deck,
             stats,
@@ -415,7 +414,8 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
             sort=qp.get("sort") or "name",
             q=(qp.get("q") or "").strip()[:80],
             notice=notice,
-        )
+            waiting=waiting_changes(state.db, sub, deck.id, own=own),  # waiting_strip.py (S4)
+        ) + prefs.page_prefs(state.db, sub, f"{prefs.STACK}{deck.id}:", prefs.EDHPLAY_STEPS, prefs.DECKSTATS)
         resp = page(
             deck.name or f"Deck {deck.id}",
             body,
@@ -427,9 +427,10 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
             csp=DECK_CSP,
             heading=False,
             deck_css=True,
-            extra_scripts=("deckstats.js", "printpick.js"),
+            # social.js: the banner's like, bookmark and follow and the comments (Track A's file)
+            extra_scripts=("social.js", "deckstats.js", "printpick.js"),
         )
-        return remember_view(resp, "deck", view, secure=secure) if remember else resp
+        return prefs.remember_view(state.db, sub, resp, "deck", view, secure=secure) if remember else resp
 
     @server.custom_route("/decks/{deck_id}/clone", methods=["POST"], include_in_schema=False)
     async def clone_deck(request: Request) -> Response:

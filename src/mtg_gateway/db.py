@@ -11,16 +11,19 @@ from __future__ import annotations
 import datetime as _dt
 import hashlib
 import json
+import logging
 import sqlite3
 import threading
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
 from .cimd import site_of
+
+logger = logging.getLogger(__name__)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -163,6 +166,9 @@ APPLIED_PROPOSAL_RETENTION_SECONDS = 365 * 86400
 # Snapshots are whole decks taken before every edit. The newest SNAPSHOTS_KEEP_PER_DECK of each
 # member's deck are always kept (and any a pending restore still needs); older ones are deleted.
 SNAPSHOTS_KEEP_PER_DECK = 25
+# Rows deleted per transaction by the purge's plain deletes (leftover A8), so the lock is
+# released between batches.
+PURGE_BATCH = 500
 # Per-day usage counters and remembered deck covers are kept this long.
 METRICS_RETENTION_SECONDS = 400 * 86400
 DECK_COVER_RETENTION_SECONDS = 180 * 86400
@@ -171,6 +177,43 @@ DECK_COVER_RETENTION_SECONDS = 180 * 86400
 PRICE_RETENTION_DAYS = 365
 # How long a write waits for another connection (such as `mtg-gateway backup`) to finish.
 BUSY_TIMEOUT_MS = 5000
+# Remembered choices that follow the account (G7): how many one account may keep and how large
+# one may be, so a page script cannot grow the database without bound.
+MAX_PREFS_PER_ACCOUNT = 300
+MAX_PREF_BYTES = 4096
+MAX_PREF_NAME = 120
+# One simulator card model (card_models.model_json, schema 14): the shape Mystic Forge validated,
+# at most this many bytes as JSON.
+MAX_CARD_MODEL_BYTES = 4096
+# Card models read in one query (get_card_models), under SQLite's limit on bound values.
+_CARD_MODEL_BATCH = 500
+
+
+class CardModelRefused(Exception):
+    """put_card_model wrote nothing: ``why`` is "most" (the save would add a model and the member
+    already keeps ``most``)."""
+
+    def __init__(self, why: str) -> None:
+        super().__init__(why)
+        self.why = why
+
+
+# Earlier versions kept per waiting proposal (proposal_versions): past it an amend is refused, so an
+# app that keeps amending one note can't grow the database without bound (step 0 review, fix 3).
+MAX_PROPOSAL_VERSIONS = 50
+
+
+class ProposalVersionsFull(Exception):
+    """amend_proposal refused: the proposal already keeps MAX_PROPOSAL_VERSIONS earlier versions."""
+
+
+# Proposal states that end a proposal without applying it. ``withdrawn`` and ``replaced`` (0.7.29,
+# the assistant board) can be brought back while unexpired; all are deleted after
+# CLOSED_PROPOSAL_RETENTION_SECONDS.
+CLOSED_PROPOSAL_STATES = ("expired", "rejected", "failed", "withdrawn", "replaced")
+# Waiting statuses of a pending proposal (0.7.29 flexible approvals): None is plain waiting.
+PROPOSAL_STATUSES = ("updated", "needs_look", "held")
+PROPOSAL_LINK_KINDS = ("depends_on", "replaces")
 
 
 def _url_site(url: str) -> str:
@@ -392,6 +435,268 @@ def _step_12(conn: sqlite3.Connection) -> None:
     )
 
 
+def snapshot_summary(deck: Any) -> tuple[str, int | None, str | None]:
+    """What a snapshot list shows of a stored deck, worked out once when the snapshot is stored
+    (A1): its name, its card count (None when the deck has no card list) and the Archidekt
+    account that owned the deck then (None when not recorded)."""
+    if not isinstance(deck, dict):
+        return "", None, None
+    name = deck.get("name")
+    cards = deck.get("cards")
+    count: int | None = None
+    if isinstance(cards, list):
+        count = 0
+        for c in cards:
+            if isinstance(c, dict):
+                try:
+                    count += int(c.get("quantity", 0) or 0)
+                except (TypeError, ValueError):
+                    pass
+    owner = deck.get("owner")
+    owner_id = owner.get("id") if isinstance(owner, dict) else None
+    return (str(name) if name is not None else ""), count, (str(owner_id) if owner_id is not None else None)
+
+
+# Rows read at a time while schema 13 fills the new snapshot columns: a snapshot is a whole deck
+# (tens to hundreds of KB), so a large file is read a slice at a time, never all at once.
+_STEP_13_BATCH = 200
+
+
+def _step_13(conn: sqlite3.Connection) -> None:
+    """0.7.29, the one upgrade for settings and the new approvals (Q18, Q126 step 0).
+
+    - ``settings``: values the server owner sets on the admin Settings page (config.py
+      MANAGED_SETTINGS; a value set in the deployment always wins and is never stored here).
+    - ``account_prefs``: remembered choices that follow the account (G7), one row per account and
+      choice name, so a new choice needs no upgrade.
+    - proposals: a version, who amended it last and what that version changed, a waiting status
+      with its reason, a number on the deck's board, the Archidekt account it was made under
+      (Q127), past versions
+      (``proposal_versions``) and links between proposals (``proposal_links``: depends on,
+      replaces); and the ``(state, expires_at)`` index of the pending queries (A2).
+    - snapshots: the deck's name, card count and owner, stored when taken so lists don't parse
+      every stored deck (A1), and the Archidekt account it was taken under (Q127).
+    - ``backup_deletes``: the queued deletes of unused backup copies (Q77), moved out of
+      ``job_runs`` into a table of their own with the Archidekt account they belong to (Q127).
+    """
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS settings (
+            key TEXT PRIMARY KEY,
+            value_json TEXT NOT NULL,
+            updated_at INTEGER NOT NULL,
+            updated_by TEXT
+        )"""
+    )
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS account_prefs (
+            sub TEXT NOT NULL,
+            name TEXT NOT NULL,
+            value_json TEXT NOT NULL,
+            updated_at INTEGER NOT NULL,
+            PRIMARY KEY (sub, name)
+        )"""
+    )
+    for column, decl in (
+        ("version", "INTEGER NOT NULL DEFAULT 1"),
+        ("amended_at", "INTEGER"),
+        ("amended_by_client", "TEXT"),
+        ("version_note", "TEXT"),
+        ("status", "TEXT"),
+        ("status_reason", "TEXT"),
+        ("status_at", "INTEGER"),
+        ("board_no", "INTEGER"),
+        ("archidekt_user_id", "TEXT"),
+    ):
+        _add_column(conn, "proposals", column, decl)
+    conn.execute("CREATE INDEX IF NOT EXISTS proposals_state_expires ON proposals(state, expires_at)")
+    # The proposals waiting (or being applied) at the upgrade get their board numbers now, oldest
+    # first per member and deck, so the next new one follows them instead of starting at 1.
+    conn.execute(
+        """UPDATE proposals SET board_no = (
+             SELECT n FROM (
+               SELECT id, ROW_NUMBER() OVER (
+                 PARTITION BY owner_sub, deck_id ORDER BY created_at, rowid) AS n
+               FROM proposals WHERE state IN ('pending', 'applying')) AS numbered
+             WHERE numbered.id = proposals.id)
+           WHERE state IN ('pending', 'applying')"""
+    )
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS proposal_versions (
+            proposal_id TEXT NOT NULL REFERENCES proposals(id) ON DELETE CASCADE,
+            version INTEGER NOT NULL,
+            changes_json TEXT NOT NULL,
+            rows_json TEXT,
+            diff_text TEXT NOT NULL,
+            made_by_client TEXT,
+            made_at INTEGER NOT NULL,
+            what_changed TEXT,
+            PRIMARY KEY (proposal_id, version)
+        )"""
+    )
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS proposal_links (
+            proposal_id TEXT NOT NULL REFERENCES proposals(id) ON DELETE CASCADE,
+            kind TEXT NOT NULL CHECK (kind IN ('depends_on', 'replaces')),
+            other_id TEXT NOT NULL REFERENCES proposals(id) ON DELETE CASCADE,
+            created_at INTEGER NOT NULL,
+            PRIMARY KEY (proposal_id, kind, other_id)
+        )"""
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS proposal_links_other ON proposal_links(other_id, kind)")
+    for column, decl in (
+        ("deck_name", "TEXT"),
+        ("card_count", "INTEGER"),
+        ("deck_owner_id", "TEXT"),
+        ("archidekt_user_id", "TEXT"),
+    ):
+        _add_column(conn, "snapshots", column, decl)
+    # Fill the summary of every snapshot taken before this upgrade, a slice at a time (the whole
+    # step is one transaction, so an interrupted upgrade leaves nothing half done and runs again).
+    last = -1
+    while True:
+        rows = conn.execute(
+            "SELECT rowid, deck_json FROM snapshots WHERE rowid > ? ORDER BY rowid LIMIT ?",
+            (last, _STEP_13_BATCH),
+        ).fetchall()
+        if not rows:
+            break
+        last = rows[-1][0]
+        for rowid, deck_json in rows:
+            try:
+                deck = json.loads(deck_json)
+            except (TypeError, ValueError):
+                deck = None
+            name, count, owner_id = snapshot_summary(deck)
+            conn.execute(
+                "UPDATE snapshots SET deck_name = ?, card_count = ?, deck_owner_id = ? WHERE rowid = ?",
+                (name, count, owner_id, rowid),
+            )
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS backup_deletes (
+            snapshot_id TEXT PRIMARY KEY,
+            sub TEXT NOT NULL,
+            archidekt_user_id TEXT,
+            backup_deck_id TEXT NOT NULL,
+            deck_id TEXT NOT NULL,
+            proposal_id TEXT,
+            due_at INTEGER NOT NULL,
+            attempts INTEGER NOT NULL DEFAULT 0,
+            queued_at INTEGER NOT NULL,
+            expect_json TEXT
+        )"""
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS backup_deletes_due ON backup_deletes(due_at)")
+    conn.execute("CREATE INDEX IF NOT EXISTS backup_deletes_sub ON backup_deletes(sub)")
+    # Move the queued deletes kept in job_runs since 0.7.27. Every relink drops a member's queued
+    # deletes (decks.py _drop_backup_deletes_on_relink), so each one left belongs to the Archidekt
+    # account on the member's link row (active or not); empty where that row recorded none.
+    moved = conn.execute(
+        "SELECT name, at, detail_json FROM job_runs WHERE name LIKE ? ESCAPE '\\'",
+        (_like_prefix(BACKUP_DELETE_JOB),),
+    ).fetchall()
+    for name, at, detail_json in moved:
+        try:
+            d = json.loads(detail_json or "{}")
+        except ValueError:
+            d = {}
+        if not isinstance(d, dict):
+            d = {}
+        snapshot_id = str(d.get("snapshot_id") or name[len(BACKUP_DELETE_JOB) :])
+        sub = d.get("sub")
+        backup_deck_id = d.get("backup_deck_id")
+        if not sub or backup_deck_id is None:
+            continue  # unusable: the old code could not have deleted anything with it either
+        account = conn.execute(
+            "SELECT archidekt_user_id FROM archidekt_links WHERE sub = ?", (str(sub),)
+        ).fetchone()
+        try:
+            attempts = int(d.get("attempts") or 0)
+        except (TypeError, ValueError):
+            attempts = 0
+        try:
+            queued_at = int(d.get("queued_at") or at)
+        except (TypeError, ValueError):
+            queued_at = int(at)
+        conn.execute(
+            """INSERT OR IGNORE INTO backup_deletes (snapshot_id, sub, archidekt_user_id, backup_deck_id,
+               deck_id, proposal_id, due_at, attempts, queued_at, expect_json)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                snapshot_id,
+                str(sub),
+                account[0] if account else None,
+                str(backup_deck_id),
+                str(d.get("deck_id") or ""),
+                str(d["proposal_id"]) if d.get("proposal_id") is not None else None,
+                int(at),
+                attempts,
+                queued_at,
+                json.dumps(d["expect"]) if isinstance(d.get("expect"), dict) else None,
+            ),
+        )
+    conn.execute("DELETE FROM job_runs WHERE name LIKE ? ESCAPE '\\'", (_like_prefix(BACKUP_DELETE_JOB),))
+
+
+def _step_14(conn: sqlite3.Connection) -> None:
+    """0.7.30, the one small upgrade the simulator needs (Q128, Q136): ``card_models``, the models
+    members taught the simulator for cards it plays without their effect. Each member keeps their
+    own (card Q140 item 1): one model per card per member, keyed by the card's front face,
+    casefolded, and the member, and used only in that member's simulations.
+
+    ``sim_version`` is the simulator version the model was checked with (Q136 item 3, card Q139
+    item 5), so models checked with an older simulator can be found when it changes; ``oracle_hash``
+    is a spare column for a fingerprint of the card's rules text (Q139 item 5).
+
+    ``added_by`` is the member who keeps the model (never shown to other members). It has no
+    foreign key, like every member table but the proposals: a member's models go with their data
+    through MEMBER_TABLES (card Q138 item 5).
+    """
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS card_models (
+            card_key TEXT NOT NULL,
+            name TEXT NOT NULL,
+            model_json TEXT NOT NULL CHECK (length(CAST(model_json AS BLOB)) <= 4096),
+            sim_version TEXT,
+            oracle_hash TEXT,
+            added_by TEXT NOT NULL,
+            added_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            PRIMARY KEY (card_key, added_by)
+        )"""
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_card_models_added_by ON card_models(added_by)")
+
+
+def _card_models_need_repair(conn: sqlite3.Connection) -> bool:
+    """Whether ``card_models`` exists in the shape of an earlier build of schema 14 (no
+    ``sim_version``, or not keyed by the card and the member)."""
+    cols = {r[1]: r[5] for r in conn.execute("PRAGMA table_info(card_models)")}
+    return bool(cols) and not ("sim_version" in cols and cols.get("card_key") and cols.get("added_by"))
+
+
+def _repair_card_models(conn: sqlite3.Connection) -> bool:
+    """Bring a ``card_models`` table written by an earlier build of schema 14 to the shape
+    ``_step_14`` makes now. Step 14 changed in place before any release carried it (card Q140 item 1,
+    card Q139 item 5): those builds kept one model per card for the whole gateway (``card_key``
+    alone the key) and had no ``sim_version``, so a test database from them would fail every read
+    with "no such column". Each kept model stays, kept by the member who added it, with no simulator
+    version recorded. Runs at every start and does nothing once the table has the new shape, so the
+    schema number stays 14. Returns whether it changed the table."""
+    if not _card_models_need_repair(conn):
+        return False
+    conn.execute("ALTER TABLE card_models RENAME TO card_models_old")
+    conn.execute("DROP INDEX IF EXISTS idx_card_models_added_by")
+    _step_14(conn)
+    conn.execute(
+        """INSERT INTO card_models (card_key, name, model_json, sim_version, oracle_hash, added_by,
+               added_at, updated_at)
+           SELECT card_key, name, model_json, NULL, oracle_hash, added_by, added_at, updated_at
+           FROM card_models_old"""
+    )
+    conn.execute("DROP TABLE card_models_old")
+    return True
+
+
 # Applied in order; ``PRAGMA user_version`` records how many have run. Append, never edit.
 MIGRATIONS = [
     _step_1,
@@ -406,6 +711,8 @@ MIGRATIONS = [
     _step_10,
     _step_11,
     _step_12,
+    _step_13,
+    _step_14,
 ]
 SCHEMA_VERSION = len(MIGRATIONS)
 
@@ -421,12 +728,19 @@ def _like(search: str) -> str:
     return f"%{text}%"
 
 
+def _marks(values: tuple[Any, ...] | list[Any]) -> str:
+    return ",".join("?" * len(values))
+
+
 def _like_prefix(prefix: str) -> str:
     """A LIKE pattern matching what starts with ``prefix``, its wildcards escaped (ESCAPE '\\')."""
     return prefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
 
 
-# job_runs rows of the queued backup deletes (Q77): this prefix and the snapshot id
+# job_runs rows recording how each backup copy was made (record_backup_made), by the copy's id.
+BACKUP_MADE_JOB = "backup_made:"
+# job_runs rows of the queued backup deletes (Q77) before schema 13 moved them to backup_deletes:
+# this prefix and the snapshot id (read only by _step_13)
 BACKUP_DELETE_JOB = "backup_delete:"
 
 
@@ -438,6 +752,10 @@ class Database:
         self._lock = threading.RLock()
         self._anonymous_audit_inserts = 0
         self.price_days = PRICE_RETENTION_DAYS
+        # Snapshots kept per deck; None means SNAPSHOTS_KEEP_PER_DECK (the app wires the live
+        # setting in, snapshots_keep()).
+        self.snapshots_per_deck: int | None = None
+        self.snapshots_source: Callable[[], int] | None = None
         self._conn = sqlite3.connect(str(self.path), check_same_thread=False, isolation_level=None)
         self._conn.row_factory = sqlite3.Row
         with self._lock:
@@ -482,6 +800,16 @@ class Database:
                 self._conn.execute("ROLLBACK")
                 raise
             self._conn.execute("COMMIT")
+        # an earlier build of schema 14 (see _repair_card_models); its own transaction, as a step
+        if not _card_models_need_repair(self._conn):
+            return
+        self._conn.execute("BEGIN IMMEDIATE")
+        try:
+            _repair_card_models(self._conn)
+        except BaseException:
+            self._conn.execute("ROLLBACK")
+            raise
+        self._conn.execute("COMMIT")
 
     @property
     def schema_version(self) -> int:
@@ -601,6 +929,29 @@ class Database:
             for r in rows
         ]
 
+    def all_user_clients(self) -> dict[str, list[dict[str, Any]]]:
+        """user_clients for every member at once (the admin Users page, leftover A9): one query
+        for the tokens and one name lookup for all their apps, instead of one per member and app."""
+        with self._lock:
+            rows = self._conn.execute(
+                """SELECT sub, client_id, MAX(created_at) AS last_issued_at, COUNT(*) AS tokens FROM tokens
+                   WHERE revoked = 0 AND expires_at >= ?
+                   GROUP BY sub, client_id ORDER BY sub, last_issued_at DESC""",
+                (int(time.time()),),
+            ).fetchall()
+        names = self.client_names({r["client_id"] for r in rows})
+        out: dict[str, list[dict[str, Any]]] = {}
+        for r in rows:
+            out.setdefault(r["sub"], []).append(
+                {
+                    "client_id": r["client_id"],
+                    "name": names.get(r["client_id"]),
+                    "last_issued_at": r["last_issued_at"],
+                    "tokens": r["tokens"],
+                }
+            )
+        return out
+
     def revoke_client_for_user(self, sub: str, client_id: str | None = None) -> int:
         """Revoke the tokens ``sub`` gave one connected app (or every app when ``client_id`` is
         None). The person's own browser sessions are left alone."""
@@ -659,6 +1010,27 @@ class Database:
             info = json.loads(row["info_json"]) if row else None
         name = info.get("client_name") if isinstance(info, dict) else None
         return str(name)[:200] if name else None
+
+    def client_names(self, client_ids: Iterable[str | None]) -> dict[str, str]:
+        """client_name for many clients in a few queries (registered clients first, then cached
+        metadata documents, as client_name does). Unknown or nameless clients are left out."""
+        wanted = sorted({c for c in client_ids if c})
+        infos: dict[str, Any] = {}
+        for table in ("oauth_clients", "cimd_clients"):
+            left = [c for c in wanted if c not in infos]
+            for i in range(0, len(left), 500):
+                part = left[i : i + 500]
+                with self._lock:
+                    for row in self._conn.execute(
+                        f"SELECT client_id, info_json FROM {table} WHERE client_id IN ({_marks(part)})", part
+                    ):
+                        infos[row["client_id"]] = json.loads(row["info_json"])
+        out: dict[str, str] = {}
+        for cid, info in infos.items():
+            name = info.get("client_name") if isinstance(info, dict) else None
+            if name:
+                out[cid] = str(name)[:200]
+        return out
 
     # client id metadata documents (cached) ---------------------------------
     def save_cimd_client(self, client_id: str, info: dict[str, Any], ttl: int) -> None:
@@ -897,49 +1269,68 @@ class Database:
             ).rowcount
 
     def purge_expired(self) -> int:
+        """Delete what has expired and apply the retention caps.
+
+        Each step runs in its own short transaction, and the plain time-based deletes go in
+        batches of PURGE_BATCH rows, so a large purge never holds the lock (and every other
+        request) for its whole run (0.7.29, leftover A8). Every step is idempotent: a purge cut
+        short by an error or a restart is finished by the next one."""
         now = int(time.time())
+        n = self._delete_batched("tokens", "expires_at < ?", (now - 86400,))
+        n += self._delete_batched("auth_codes", "expires_at < ?", (now,))
+        n += self._delete_batched("login_sessions", "expires_at < ?", (now,))
+        n += self._delete_batched("browser_sessions", "expires_at < ?", (now,))
         with self.tx() as c:
-            n = c.execute("DELETE FROM tokens WHERE expires_at < ?", (now - 86400,)).rowcount
-            n += c.execute("DELETE FROM auth_codes WHERE expires_at < ?", (now,)).rowcount
-            n += c.execute("DELETE FROM login_sessions WHERE expires_at < ?", (now,)).rowcount
-            n += c.execute("DELETE FROM browser_sessions WHERE expires_at < ?", (now,)).rowcount
             n += self._purge_cimd_clients(c, now)
-            # Registration is open, so every client that registered and never finished a login,
-            # or whose tokens have all expired and been purged, is dropped after a week.
-            n += c.execute(
-                """DELETE FROM oauth_clients WHERE created_at < ?
-                   AND client_id NOT IN (SELECT client_id FROM tokens)
-                   AND client_id NOT IN (SELECT client_id FROM auth_codes)
-                   AND client_id NOT IN (SELECT client_id FROM login_sessions)""",
-                (now - UNUSED_CLIENT_TTL,),
-            ).rowcount
+        # Registration is open, so every client that registered and never finished a login,
+        # or whose tokens have all expired and been purged, is dropped after a week.
+        n += self._delete_batched(
+            "oauth_clients",
+            """created_at < ?
+               AND client_id NOT IN (SELECT client_id FROM tokens)
+               AND client_id NOT IN (SELECT client_id FROM auth_codes)
+               AND client_id NOT IN (SELECT client_id FROM login_sessions)""",
+            (now - UNUSED_CLIENT_TTL,),
+        )
+        n += self._delete_batched("audit_log", "at < ?", (now - AUDIT_RETENTION_SECONDS,))
+        with self.tx() as c:
             n += self._prune_caps(c, now)
-            n += self._prune_snapshots(c)
+        with self.tx() as c:
+            n += self._prune_snapshots(c, self.snapshots_keep())
+            # records of how backup copies were made, for copies no snapshot records any more
             n += c.execute(
-                "DELETE FROM metrics WHERE day < ?", (self._since_day(METRICS_RETENTION_SECONDS // 86400),)
+                """DELETE FROM job_runs WHERE name LIKE ? ESCAPE '\\'
+                   AND substr(name, ?) NOT IN
+                       (SELECT backup_deck_id FROM snapshots WHERE backup_deck_id IS NOT NULL)""",
+                (_like_prefix(BACKUP_MADE_JOB), len(BACKUP_MADE_JOB) + 1),
             ).rowcount
-            n += c.execute(
-                "DELETE FROM deck_covers WHERE updated_at < ?", (now - DECK_COVER_RETENTION_SECONDS,)
-            ).rowcount
-            oldest_day = self._since_day(self.price_days)
-            n += c.execute("DELETE FROM price_points WHERE day < ?", (oldest_day,)).rowcount
-            n += c.execute("DELETE FROM deck_values WHERE day < ?", (oldest_day,)).rowcount
+        n += self._delete_batched(
+            "metrics", "day < ?", (self._since_day(METRICS_RETENTION_SECONDS // 86400),)
+        )
+        n += self._delete_batched("deck_covers", "updated_at < ?", (now - DECK_COVER_RETENTION_SECONDS,))
+        oldest_day = self._since_day(self.price_days)
+        n += self._delete_batched("price_points", "day < ?", (oldest_day,))
+        n += self._delete_batched("deck_values", "day < ?", (oldest_day,))
+        with self.tx() as c:
             n += c.execute(
                 "UPDATE proposals SET state = 'expired' WHERE state = 'pending' AND expires_at < ?", (now,)
             ).rowcount
-            # Closed proposals carry nothing the user can act on: drop them after a month.
-            n += c.execute(
-                "DELETE FROM proposals WHERE state IN ('expired', 'rejected', 'failed') AND created_at < ?",
-                (now - CLOSED_PROPOSAL_RETENTION_SECONDS,),
-            ).rowcount
-            n += c.execute(
-                "DELETE FROM proposals WHERE state = 'applied' AND COALESCE(applied_at, created_at) < ?",
-                (now - APPLIED_PROPOSAL_RETENTION_SECONDS,),
-            ).rowcount
-            # A restart already fails every unfinished apply (fail_interrupted_applies); this is a
-            # backstop for one left behind otherwise. Applies run in the background and a large one
-            # under a busy pacer takes many minutes, so only one started six hours ago counts as
-            # stuck: mark it failed and point at the snapshot (and the created deck id).
+        # Closed proposals carry nothing the user can act on: drop them after a month.
+        n += self._delete_batched(
+            "proposals",
+            f"state IN ({_marks(CLOSED_PROPOSAL_STATES)}) AND created_at < ?",
+            (*CLOSED_PROPOSAL_STATES, now - CLOSED_PROPOSAL_RETENTION_SECONDS),
+        )
+        n += self._delete_batched(
+            "proposals",
+            "state = 'applied' AND COALESCE(applied_at, created_at) < ?",
+            (now - APPLIED_PROPOSAL_RETENTION_SECONDS,),
+        )
+        # A restart already fails every unfinished apply (fail_interrupted_applies); this is a
+        # backstop for one left behind otherwise. Applies run in the background and a large one
+        # under a busy pacer takes many minutes, so only one started six hours ago counts as
+        # stuck: mark it failed and point at the snapshot (and the created deck id).
+        with self.tx() as c:
             n += c.execute(
                 """UPDATE proposals SET state = 'failed',
                    result_json = COALESCE(result_json, json_object('error', 'interrupted',
@@ -950,15 +1341,39 @@ class Database:
             ).rowcount
         return n
 
+    def _delete_batched(self, table: str, where: str, args: tuple[Any, ...]) -> int:
+        """DELETE FROM ``table`` WHERE ``where``, PURGE_BATCH rows per transaction (the lock is
+        released between batches). ``table`` and ``where`` are fixed strings from this module."""
+        n = 0
+        while True:
+            with self.tx() as c:
+                done = c.execute(
+                    f"DELETE FROM {table} WHERE rowid IN (SELECT rowid FROM {table} WHERE {where} LIMIT ?)",
+                    (*args, PURGE_BATCH),
+                ).rowcount
+            n += done
+            if done < PURGE_BATCH:
+                return n
+
+    def snapshots_keep(self) -> int:
+        """Snapshots kept per member's deck: the live setting when one is wired in, else the
+        module default."""
+        if self.snapshots_source is not None:
+            try:
+                return int(self.snapshots_source())
+            except Exception:  # never let a settings problem stop the purge
+                logger.exception("snapshots per deck setting unreadable; the default applies")
+        return int(self.snapshots_per_deck or SNAPSHOTS_KEEP_PER_DECK)
+
     @staticmethod
     def _prune_caps(c: sqlite3.Connection, now: int) -> int:
-        """Age out the audit log and cap the tables anonymous requests can grow.
+        """Cap the tables anonymous requests can grow (the audit log's age limit runs in
+        purge_expired, in batches).
 
         A flood of /register or /authorize calls inside the normal expiry windows would
         otherwise grow the database without bound. The oldest rows go first.
         """
-        n = c.execute("DELETE FROM audit_log WHERE at < ?", (now - AUDIT_RETENTION_SECONDS,)).rowcount
-        n += Database._trim_anonymous_audit(c)
+        n = Database._trim_anonymous_audit(c)
         n += Database._trim_login_sessions(c, MAX_LOGIN_SESSIONS)
         n += Database._trim_cimd_clients(c, MAX_CIMD_CLIENTS)
         n += c.execute(
@@ -974,9 +1389,15 @@ class Database:
         return n
 
     @staticmethod
-    def _prune_snapshots(c: sqlite3.Connection) -> int:
-        """Keep the newest SNAPSHOTS_KEEP_PER_DECK snapshots of each member's deck, and any
-        snapshot a pending or running proposal (a restore) still points at; delete the rest."""
+    def _prune_snapshots(c: sqlite3.Connection, keep: int = SNAPSHOTS_KEEP_PER_DECK) -> int:
+        """Keep the newest ``keep`` snapshots of each member's deck, and any snapshot a pending or
+        running proposal (a restore) still points at; delete the rest. Also kept (QUESTIONS-2 B13):
+        the snapshot each recorded Archidekt backup copy was made with, and any snapshot with a
+        queued backup delete, so the gateway never loses its record of a copy it may delete (card
+        Q135 item 9, Ben's "Approve all" 10-16). Only a copy the gateway may still delete holds
+        one (card Q139 item 4): a copy the member changed on Archidekt is kept and no longer
+        counted (B11), and a copy made before 0.7.29 has no record and is never deleted (card Q140
+        item 4), so neither holds its snapshot past the newest ``keep``."""
         return c.execute(
             """DELETE FROM snapshots WHERE id IN (
                    SELECT id FROM (
@@ -986,8 +1407,16 @@ class Database:
                    WHERE n > ?)
                AND id NOT IN (SELECT json_extract(changes_json, '$.snapshot_id') FROM proposals
                               WHERE kind = 'restore' AND state IN ('pending', 'applying')
-                                AND json_extract(changes_json, '$.snapshot_id') IS NOT NULL)""",
-            (SNAPSHOTS_KEEP_PER_DECK,),
+                                AND json_extract(changes_json, '$.snapshot_id') IS NOT NULL)
+            AND id NOT IN (SELECT snapshot_id FROM backup_deletes)
+            AND id NOT IN (SELECT (SELECT s2.id FROM snapshots s2
+                                   WHERE s2.owner_sub = s.owner_sub AND s2.deck_id = s.deck_id
+                                     AND s2.backup_deck_id = s.backup_deck_id
+                                   ORDER BY s2.taken_at, s2.rowid LIMIT 1)
+                           FROM snapshots s WHERE s.backup_deck_id IS NOT NULL
+                             AND EXISTS (SELECT 1 FROM job_runs j WHERE j.name = ? || s.backup_deck_id
+                                         AND coalesce(json_extract(j.detail_json, '$.kept'), 0) != 1))""",
+            (keep, BACKUP_MADE_JOB),
         ).rowcount
 
     @staticmethod
@@ -1215,6 +1644,9 @@ class Database:
         ("watch_decks", "sub"),
         ("deck_values", "sub"),
         ("notify_prefs", "sub"),
+        ("account_prefs", "sub"),
+        ("card_models", "added_by"),  # card Q138 item 5: their simulator card models go too
+        ("backup_deletes", "sub"),  # their queued backup deletes (Q77) go with their snapshots
         ("users", "sub"),
     )
 
@@ -1247,15 +1679,24 @@ class Database:
                     "DELETE FROM deck_covers WHERE deck_id = ? AND owner_sub IS NULL", (deck_id,)
                 ).rowcount
             out["deck_covers"] = covers
+            # Review round 1, finding 5: the records of their backup copies (each holds the deck's
+            # name and URL) go now, not at the next hourly clean-up: those their snapshots name,
+            # and those recorded for them. Taken before the snapshots go.
+            out["backup_records"] = (
+                c.execute(
+                    """DELETE FROM job_runs WHERE substr(name, 1, ?) = ?
+                    AND (CASE WHEN json_valid(detail_json) THEN json_extract(detail_json, '$.sub') END = ?
+                         OR substr(name, ? + 1) IN (
+                             SELECT backup_deck_id FROM snapshots
+                             WHERE owner_sub = ? AND backup_deck_id IS NOT NULL))""",
+                    (len(BACKUP_MADE_JOB), BACKUP_MADE_JOB, sub, len(BACKUP_MADE_JOB), sub),
+                ).rowcount
+                if "snapshots" in present
+                else 0
+            )
             for table, column in self.MEMBER_TABLES:
                 if table in present:
                     out[table] = c.execute(f"DELETE FROM {table} WHERE {column} = ?", (sub,)).rowcount
-            if "job_runs" in present:  # their queued backup deletes (Q77) go with their snapshots
-                out["backup_deletes"] = c.execute(
-                    "DELETE FROM job_runs WHERE name LIKE ? ESCAPE '\\' "
-                    "AND json_extract(detail_json, '$.sub') = ?",
-                    (_like_prefix(BACKUP_DELETE_JOB), sub),
-                ).rowcount
             c.execute(
                 "INSERT INTO audit_log (at, sub, client_id, event, detail_json) VALUES (?, ?, NULL, ?, ?)",
                 (int(time.time()), sub, "member_data_deleted", json.dumps(out)),
@@ -1430,10 +1871,24 @@ class Database:
                 mine = self.count_pending_for_client(row["owner_sub"], row.get("created_by_client"), c=c)
                 if mine >= max_pending_per_client:
                     return False
+            # The number on the deck's board (0.7.29): one more than the highest of the owner's live
+            # waiting proposals on that deck, those being applied included (an apply can put one
+            # back to waiting), so a board that empties starts again at 1, and an amend keeps it.
+            # The Archidekt account is the one linked now (Q127), unless given.
+            account = (
+                "?"
+                if "archidekt_user_id" in row
+                else "(SELECT archidekt_user_id FROM archidekt_links WHERE sub = ? AND status = 'active')"
+            )
             c.execute(
-                """INSERT INTO proposals (id, owner_sub, kind, deck_id, deck_name, baseline_fingerprint,
-                   changes_json, diff_text, state, created_at, expires_at, created_by_client, rows_json)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)""",
+                f"""INSERT INTO proposals (id, owner_sub, kind, deck_id, deck_name, baseline_fingerprint,
+                   changes_json, diff_text, state, created_at, expires_at, created_by_client, rows_json,
+                   board_no, archidekt_user_id)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?,
+                     (SELECT COALESCE(MAX(board_no), 0) + 1 FROM proposals
+                      WHERE owner_sub = ? AND deck_id = ?
+                        AND (state = 'applying' OR (state = 'pending' AND expires_at >= ?))),
+                     {account})""",
                 (
                     row["id"],
                     row["owner_sub"],
@@ -1447,16 +1902,20 @@ class Database:
                     row["expires_at"],
                     row.get("created_by_client"),
                     json.dumps(row["rows"]) if row.get("rows") is not None else None,
+                    row["owner_sub"],
+                    row["deck_id"],
+                    now,
+                    row["archidekt_user_id"] if "archidekt_user_id" in row else row["owner_sub"],
                 ),
             )
             if max_closed is not None:
                 c.execute(
-                    """DELETE FROM proposals WHERE id IN (
+                    f"""DELETE FROM proposals WHERE id IN (
                            SELECT id FROM proposals WHERE owner_sub = ?
-                             AND (state IN ('expired', 'rejected', 'failed')
+                             AND (state IN ({_marks(CLOSED_PROPOSAL_STATES)})
                                   OR (state = 'pending' AND expires_at < ?))
                            ORDER BY created_at DESC, rowid DESC LIMIT -1 OFFSET ?)""",
-                    (row["owner_sub"], now, max_closed),
+                    (row["owner_sub"], *CLOSED_PROPOSAL_STATES, now, max_closed),
                 )
         return True
 
@@ -1582,7 +2041,7 @@ class Database:
         with self._lock:
             rows = self._conn.execute(
                 "SELECT deck_id, deck_name, created_at AS at FROM proposals WHERE owner_sub = ? "
-                "UNION ALL SELECT deck_id, json_extract(deck_json, '$.name'), taken_at FROM snapshots "
+                "UNION ALL SELECT deck_id, deck_name, taken_at FROM snapshots "
                 "WHERE owner_sub = ? ORDER BY at",
                 (owner_sub, owner_sub),
             ).fetchall()
@@ -1609,15 +2068,14 @@ class Database:
         ever linked. Every doubt leaves a deck out, so a deck is never called gone wrongly."""
         with self._lock:
             snaps = self._conn.execute(
-                "SELECT deck_id FROM snapshots WHERE owner_sub = ? "
-                "AND CAST(json_extract(deck_json, '$.owner.id') AS TEXT) = ?",
+                "SELECT deck_id FROM snapshots WHERE owner_sub = ? AND deck_owner_id = ?",
                 (owner_sub, str(account_id)),
             ).fetchall()
             props = self._conn.execute(
                 "SELECT deck_id, created_at FROM proposals WHERE owner_sub = ? "
                 "AND kind IN ('edit', 'details', 'restore', 'create_deck') "
                 "UNION ALL SELECT deck_id, taken_at FROM snapshots WHERE owner_sub = ? "
-                "AND json_extract(deck_json, '$.owner.id') IS NULL",
+                "AND deck_owner_id IS NULL",
                 (owner_sub, owner_sub),
             ).fetchall()
             links = self._conn.execute(
@@ -1687,6 +2145,239 @@ class Database:
             ).fetchone()
         return row is not None
 
+    # 0.7.29 flexible approvals and the assistant board (Track A builds on these) ----------------
+    def pending_board(self, owner_sub: str, deck_id: str | None = None) -> list[dict[str, Any]]:
+        """Every live waiting proposal of the owner (of one deck when ``deck_id``), oldest first,
+        with no cap: the deck's board (BOARD §2). Rows carry what a board line needs; the whole
+        proposal comes from get_proposal."""
+        sql = (
+            "SELECT id, kind, deck_id, deck_name, created_at, expires_at, created_by_client, diff_text, "
+            "version, amended_at, amended_by_client, version_note, status, status_reason, status_at, "
+            "board_no, archidekt_user_id FROM proposals "
+            "WHERE owner_sub = ? AND state = 'pending' AND expires_at >= ?"
+        )
+        args: list[Any] = [owner_sub, int(time.time())]
+        if deck_id is not None:
+            sql += " AND deck_id = ?"
+            args.append(str(deck_id))
+        with self._lock:
+            rows = self._conn.execute(sql + " ORDER BY created_at, rowid", args).fetchall()
+        return [dict(r) for r in rows]
+
+    def pending_count_by_deck(self, owner_sub: str) -> dict[str, int]:
+        """How many live waiting proposals each of the owner's decks has (the Home tile, Q27o's
+        soft 20)."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT deck_id, COUNT(*) AS n FROM proposals WHERE owner_sub = ? AND state = 'pending' "
+                "AND expires_at >= ? GROUP BY deck_id",
+                (owner_sub, int(time.time())),
+            ).fetchall()
+        return {str(r["deck_id"]): int(r["n"]) for r in rows}
+
+    def amend_proposal(
+        self,
+        proposal_id: str,
+        owner_sub: str,
+        *,
+        expect_version: int,
+        changes: Any,
+        rows: list[dict[str, Any]] | None,
+        diff_text: str,
+        by_client: str | None,
+        what_changed: str | None = None,
+        baseline_fingerprint: str | None = None,
+    ) -> int | None:
+        """Replace a waiting proposal's content with a new version, keeping its id, date and board
+        number (BOARD §2, §4). The version being replaced is kept in ``proposal_versions`` with
+        who made it. Only while it is pending, unexpired and still at ``expect_version`` (so two
+        amends, or an amend and an apply that claimed it first, cannot both win). Its waiting
+        status is cleared, except a hold that a rejected note it depends on put there (Q27j): that
+        stays until the link is gone, so the new version can't apply by itself. Returns the new
+        version, or None when it isn't waiting, has expired or is at another version. Raises
+        ProposalVersionsFull once it keeps MAX_PROPOSAL_VERSIONS earlier versions."""
+        now = int(time.time())
+        with self.tx() as c:
+            row = c.execute(
+                "SELECT version, changes_json, rows_json, diff_text, created_by_client, created_at, "
+                "amended_by_client, amended_at, version_note, status, status_reason FROM proposals "
+                "WHERE id = ? AND owner_sub = ? "
+                "AND state = 'pending' AND expires_at >= ? AND version = ?",
+                (proposal_id, owner_sub, now, int(expect_version)),
+            ).fetchone()
+            if row is None:
+                return None
+            (kept,) = c.execute(
+                "SELECT COUNT(*) FROM proposal_versions WHERE proposal_id = ?", (proposal_id,)
+            ).fetchone()
+            if kept >= MAX_PROPOSAL_VERSIONS:
+                raise ProposalVersionsFull(proposal_id)
+            held = (
+                row["status"] == "held"
+                and c.execute(
+                    "SELECT 1 FROM proposal_links l JOIN proposals o ON o.id = l.other_id "
+                    "WHERE l.proposal_id = ? AND l.kind = 'depends_on' AND o.state = 'rejected' LIMIT 1",
+                    (proposal_id,),
+                ).fetchone()
+                is not None
+            )
+            old = int(row["version"])
+            c.execute(
+                """INSERT INTO proposal_versions (proposal_id, version, changes_json, rows_json, diff_text,
+                   made_by_client, made_at, what_changed) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    proposal_id,
+                    old,
+                    row["changes_json"],
+                    row["rows_json"],
+                    row["diff_text"],
+                    row["amended_by_client"] if old > 1 else row["created_by_client"],
+                    row["amended_at"] if old > 1 and row["amended_at"] else row["created_at"],
+                    row["version_note"],
+                ),
+            )
+            c.execute(
+                "UPDATE proposals SET changes_json = ?, rows_json = ?, diff_text = ?, version = ?, "
+                "amended_at = ?, amended_by_client = ?, version_note = ?, status = ?, "
+                "status_reason = ?, status_at = ?, "
+                "baseline_fingerprint = COALESCE(?, baseline_fingerprint) WHERE id = ?",
+                (
+                    json.dumps(changes),
+                    json.dumps(rows) if rows is not None else None,
+                    diff_text,
+                    old + 1,
+                    now,
+                    by_client,
+                    what_changed,
+                    "held" if held else None,
+                    row["status_reason"] if held else None,
+                    now,
+                    baseline_fingerprint,
+                    proposal_id,
+                ),
+            )
+            return old + 1
+
+    def proposal_versions(self, proposal_id: str, owner_sub: str) -> list[dict[str, Any]]:
+        """The earlier versions of one of the owner's proposals, oldest first (the current one is
+        the proposal itself)."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT v.version, v.changes_json, v.rows_json, v.diff_text, v.made_by_client, v.made_at, "
+                "v.what_changed FROM proposal_versions v JOIN proposals p ON p.id = v.proposal_id "
+                "WHERE v.proposal_id = ? AND p.owner_sub = ? ORDER BY v.version",
+                (proposal_id, owner_sub),
+            ).fetchall()
+        out = []
+        for r in rows:
+            d = dict(r)
+            d["changes"] = json.loads(d.pop("changes_json"))
+            rows_json = d.pop("rows_json")
+            d["rows"] = json.loads(rows_json) if rows_json else None
+            out.append(d)
+        return out
+
+    def set_proposal_status(
+        self, proposal_id: str, owner_sub: str, status: str | None, reason: str | None = None
+    ) -> bool:
+        """Set a waiting proposal's status (None: plain waiting; PROPOSAL_STATUSES) and its
+        reason. Only while it is pending. True when it was changed."""
+        if status is not None and status not in PROPOSAL_STATUSES:
+            raise ValueError(f"unknown proposal status {status!r}")
+        with self.tx() as c:
+            return (
+                c.execute(
+                    "UPDATE proposals SET status = ?, status_reason = ?, status_at = ? "
+                    "WHERE id = ? AND owner_sub = ? AND state = 'pending'",
+                    (status, reason, int(time.time()), proposal_id, owner_sub),
+                ).rowcount
+                == 1
+            )
+
+    def close_proposal(
+        self, proposal_id: str, owner_sub: str, state: str, reason: str | None = None, *, by: Any = None
+    ) -> bool:
+        """Move a live waiting proposal to ``withdrawn`` or ``replaced`` with its reason (kept
+        visible and restorable while unexpired, BOARD §4). ``by`` is merged into its result as
+        ``closed_by``. True when it was changed."""
+        if state not in ("withdrawn", "replaced"):
+            raise ValueError(f"close_proposal does not set {state!r}")
+        patch = json.dumps({"closed_by": by}) if by is not None else None
+        now = int(time.time())
+        with self.tx() as c:
+            return (
+                c.execute(
+                    "UPDATE proposals SET state = ?, status_reason = ?, status_at = ?, result_json = CASE "
+                    "WHEN ? IS NULL THEN result_json ELSE json_patch(COALESCE(result_json, '{}'), ?) END "
+                    "WHERE id = ? AND owner_sub = ? AND state = 'pending' AND expires_at >= ?",
+                    (state, reason, now, patch, patch, proposal_id, owner_sub, now),
+                ).rowcount
+                == 1
+            )
+
+    def reopen_proposal(self, proposal_id: str, owner_sub: str, *, max_pending: int | None = None) -> bool:
+        """Bring a withdrawn or replaced proposal back to waiting while it is unexpired (Q27l: a
+        replaced note returns when its replacement is rejected). With ``max_pending``, refused when
+        the owner already has that many live waiting proposals, as save_proposal (Q129). True when
+        it was changed."""
+        now = int(time.time())
+        with self.tx() as c:
+            if max_pending is not None:
+                (pending,) = c.execute(
+                    "SELECT COUNT(*) FROM proposals "
+                    "WHERE owner_sub = ? AND state = 'pending' AND expires_at >= ?",
+                    (owner_sub, now),
+                ).fetchone()
+                if pending >= max_pending:
+                    return False
+            return (
+                c.execute(
+                    "UPDATE proposals SET state = 'pending', status = NULL, status_reason = NULL, "
+                    "status_at = ? WHERE id = ? AND owner_sub = ? AND state IN ('withdrawn', 'replaced') "
+                    "AND expires_at >= ?",
+                    (now, proposal_id, owner_sub, now),
+                ).rowcount
+                == 1
+            )
+
+    def link_proposals(self, proposal_id: str, owner_sub: str, kind: str, other_id: str) -> bool:
+        """Record that ``proposal_id`` depends on, or replaces, ``other_id`` (Q27j, BOARD §2). Both
+        must be the owner's and different. True when stored (a repeat is a no-op, still True)."""
+        if kind not in PROPOSAL_LINK_KINDS:
+            raise ValueError(f"unknown proposal link {kind!r}")
+        if proposal_id == other_id:
+            return False
+        with self.tx() as c:
+            (owned,) = c.execute(
+                "SELECT COUNT(*) FROM proposals WHERE owner_sub = ? AND id IN (?, ?)",
+                (owner_sub, proposal_id, other_id),
+            ).fetchone()
+            if owned != 2:
+                return False
+            c.execute(
+                "INSERT OR IGNORE INTO proposal_links (proposal_id, kind, other_id, created_at) "
+                "VALUES (?, ?, ?, ?)",
+                (proposal_id, kind, other_id, int(time.time())),
+            )
+            return True
+
+    def proposal_links(self, owner_sub: str, proposal_ids: list[str]) -> list[dict[str, Any]]:
+        """Every link from or to the given proposals of the owner: {proposal_id, kind, other_id,
+        created_at}, oldest first."""
+        ids = [str(i) for i in proposal_ids][:500]
+        if not ids:
+            return []
+        marks = _marks(ids)
+        with self._lock:
+            rows = self._conn.execute(
+                f"""SELECT l.proposal_id, l.kind, l.other_id, l.created_at FROM proposal_links l
+                    JOIN proposals p ON p.id = l.proposal_id AND p.owner_sub = ?
+                    WHERE l.proposal_id IN ({marks}) OR l.other_id IN ({marks})
+                    ORDER BY l.created_at, l.rowid""",
+                (owner_sub, *ids, *ids),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
     def claim_proposal(self, proposal_id: str, owner_sub: str) -> bool:
         """Move pending -> applying atomically; False if it was not pending (duplicate apply)."""
         with self.tx() as c:
@@ -1741,6 +2432,7 @@ class Database:
         """Store a snapshot. With ``while_applying``, only while ``proposal_id`` of ``owner_sub``
         is still being applied and the member still exists: an apply that outlives "Delete my
         data" stores nothing for the deleted member. False when nothing was stored."""
+        name, count, owner_id = snapshot_summary(deck)
         values = (
             snapshot_id,
             owner_sub,
@@ -1749,9 +2441,16 @@ class Database:
             int(time.time()),
             fingerprint,
             json.dumps(deck),
+            name,
+            count,
+            owner_id,
+            owner_sub,
         )
+        # The Archidekt account on the member's active link now (Q127), read in the same statement.
         sql = """INSERT INTO snapshots (id, owner_sub, deck_id, proposal_id, taken_at, fingerprint,
-                 deck_json) SELECT ?, ?, ?, ?, ?, ?, ?"""
+                 deck_json, deck_name, card_count, deck_owner_id, archidekt_user_id)
+                 SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                        (SELECT archidekt_user_id FROM archidekt_links WHERE sub = ? AND status = 'active')"""
         if while_applying:
             sql += """ WHERE EXISTS (SELECT 1 FROM users WHERE sub = ?)
                        AND EXISTS (SELECT 1 FROM proposals WHERE id = ? AND owner_sub = ?
@@ -1771,12 +2470,13 @@ class Database:
         until: int | None = None,
         offset: int = 0,
     ) -> list[dict[str, Any]]:
-        """Newest first. Each row carries the deck name and card count read from the stored deck,
-        never the deck itself (a snapshot is a whole deck; get_snapshot returns one). ``deck_id``,
-        ``search`` (on the stored deck's name) and a time window (``since`` inclusive, ``until``
-        exclusive, epoch seconds) narrow the list in SQL."""
+        """Newest first. Each row carries the deck name, card count and owner stored with the
+        snapshot (A1), never the deck itself (a snapshot is a whole deck; get_snapshot returns
+        one). ``deck_id``, ``search`` (on the deck's name) and a time window (``since`` inclusive,
+        ``until`` exclusive, epoch seconds) narrow the list in SQL."""
         sql = (
-            "SELECT id, deck_id, proposal_id, taken_at, deck_json, backup_deck_id, backup_url, "
+            "SELECT id, deck_id, proposal_id, taken_at, deck_name, card_count, deck_owner_id, "
+            "archidekt_user_id, backup_deck_id, backup_url, "
             # Taken for an apply that stopped before it changed anything (Q78): its proposal is
             # open again or was closed without being applied (only a pending one is rejected or
             # expires), or a later apply of it took another snapshot.
@@ -1790,7 +2490,7 @@ class Database:
             sql += " AND deck_id = ?"
             args.append(str(deck_id))
         if search:
-            sql += " AND json_extract(deck_json, '$.name') LIKE ? ESCAPE '\\'"
+            sql += " AND deck_name LIKE ? ESCAPE '\\'"
             args.append(_like(search))
         if since is not None:
             sql += " AND taken_at >= ?"
@@ -1802,30 +2502,24 @@ class Database:
         args += [max(0, int(limit)), max(0, int(offset))]
         with self._lock:
             rows = self._conn.execute(sql, args).fetchall()
-        out = []
-        for r in rows:
-            deck = json.loads(r["deck_json"])
-            cards = deck.get("cards") if isinstance(deck, dict) else None
-            owner = deck.get("owner") if isinstance(deck, dict) else None
-            owner_id = owner.get("id") if isinstance(owner, dict) else None
-            out.append(
-                {
-                    "snapshot_id": r["id"],
-                    "deck_id": r["deck_id"],
-                    "deck_name": str(deck.get("name", "")) if isinstance(deck, dict) else "",
-                    "proposal_id": r["proposal_id"],
-                    "taken_at": r["taken_at"],
-                    "backup_deck_id": r["backup_deck_id"],
-                    "backup_url": r["backup_url"],
-                    # the Archidekt account that owned the deck then (None when not recorded)
-                    "account_id": str(owner_id) if owner_id is not None else None,
-                    "card_count": sum(int(c.get("quantity", 0)) for c in cards if isinstance(c, dict))
-                    if isinstance(cards, list)
-                    else None,
-                    **({"stopped_attempt": True} if r["stopped_attempt"] else {}),
-                }
-            )
-        return out
+        return [
+            {
+                "snapshot_id": r["id"],
+                "deck_id": r["deck_id"],
+                "deck_name": r["deck_name"] or "",
+                "proposal_id": r["proposal_id"],
+                "taken_at": r["taken_at"],
+                "backup_deck_id": r["backup_deck_id"],
+                "backup_url": r["backup_url"],
+                # the Archidekt account that owned the deck then (None when not recorded)
+                "account_id": r["deck_owner_id"],
+                # the Archidekt account linked when it was taken (Q127; None before schema 13)
+                "linked_account_id": r["archidekt_user_id"],
+                "card_count": r["card_count"],
+                **({"stopped_attempt": True} if r["stopped_attempt"] else {}),
+            }
+            for r in rows
+        ]
 
     def backup_copies(self, owner_sub: str) -> dict[str, dict[str, Any]]:
         """The Archidekt deck copies the gateway made for a member, by the copy's deck id:
@@ -1845,12 +2539,28 @@ class Database:
             for r in rows
         }
 
-    def set_snapshot_backup(self, snapshot_id: str, *, backup_deck_id: str, backup_url: str) -> None:
+    def set_snapshot_backup(
+        self, snapshot_id: str, *, backup_deck_id: str, backup_url: str, made: dict[str, Any] | None = None
+    ) -> None:
+        """Record the backup copy on the snapshot. ``made``: a copy just made, whose record of how
+        it was made (record_backup_made) is written in the same transaction, so no restart or crash
+        leaves a snapshot naming a copy made by this version without its exact record (which would
+        make it look like a copy made before 0.7.29, which is never deleted)."""
         with self.tx() as c:
             c.execute(
                 "UPDATE snapshots SET backup_deck_id = ?, backup_url = ? WHERE id = ?",
                 (backup_deck_id, backup_url, snapshot_id),
             )
+            if made is not None:
+                c.execute(
+                    "INSERT OR REPLACE INTO job_runs (name, day, at, detail_json) VALUES (?, ?, ?, ?)",
+                    (
+                        BACKUP_MADE_JOB + str(backup_deck_id),
+                        self._since_day(0),
+                        int(time.time()),
+                        json.dumps(made),
+                    ),
+                )
 
     def clear_snapshot_backup(self, snapshot_id: str) -> None:
         """The snapshot's Archidekt backup copy was deleted (an apply that failed before it wrote)."""
@@ -1859,9 +2569,94 @@ class Database:
                 "UPDATE snapshots SET backup_deck_id = NULL, backup_url = NULL WHERE id = ?", (snapshot_id,)
             )
 
-    # Later deletes of unused backup copies (Q77). Kept in job_runs, one row per snapshot whose copy
-    # waits to be deleted (name BACKUP_DELETE_JOB + snapshot id, ``at`` the time it is due), so the
-    # queue outlives a restart and a re-apply of the proposal without a schema change.
+    def clear_backup_everywhere(self, owner_sub: str, backup_deck_id: str) -> int:
+        """A backup copy was deleted on Archidekt: every snapshot of the member that records it
+        forgets it (a copy can be shared by several snapshots, QUESTIONS-2 B14/B15/B16), and so
+        does the record of how it was made."""
+        with self.tx() as c:
+            n = c.execute(
+                "UPDATE snapshots SET backup_deck_id = NULL, backup_url = NULL "
+                "WHERE owner_sub = ? AND backup_deck_id = ?",
+                (owner_sub, str(backup_deck_id)),
+            ).rowcount
+            c.execute("DELETE FROM job_runs WHERE name = ?", (BACKUP_MADE_JOB + str(backup_deck_id),))
+        return n
+
+    def backup_users(self, owner_sub: str, backup_deck_id: str) -> int:
+        """How many of the member's snapshots record this backup copy."""
+        row = self._one(
+            "SELECT COUNT(*) AS n FROM snapshots WHERE owner_sub = ? AND backup_deck_id = ?",
+            (owner_sub, str(backup_deck_id)),
+        )
+        return int(row["n"]) if row else 0
+
+    def deck_backup_copies(self, owner_sub: str, deck_id: str) -> list[dict[str, Any]]:
+        """The backup copies the member's snapshots of ``deck_id`` record, newest first: one entry
+        per copy with its url, the snapshot it was made with (the oldest that records it) and
+        that snapshot's time."""
+        with self._lock:
+            rows = self._conn.execute(
+                """SELECT backup_deck_id, MAX(backup_url) AS backup_url, MIN(taken_at) AS made_at,
+                          (SELECT s2.id FROM snapshots s2
+                           WHERE s2.owner_sub = s.owner_sub AND s2.deck_id = s.deck_id
+                             AND s2.backup_deck_id = s.backup_deck_id
+                           ORDER BY s2.taken_at, s2.rowid LIMIT 1) AS snapshot_id
+                   FROM snapshots s WHERE owner_sub = ? AND deck_id = ? AND backup_deck_id IS NOT NULL
+                   GROUP BY backup_deck_id ORDER BY made_at DESC, backup_deck_id DESC""",
+                (owner_sub, str(deck_id)),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def record_backup_made(self, backup_deck_id: str, record: dict[str, Any]) -> None:
+        """How the gateway made a backup copy (name, description, folder, the time its writes took,
+        when, for whom): kept in the database so the checks before a later delete outlive a
+        restart (QUESTIONS-2 B12/B21). One job_runs row per copy; schema 13 is unchanged."""
+        now = int(time.time())
+        with self.tx() as c:
+            c.execute(
+                "INSERT OR REPLACE INTO job_runs (name, day, at, detail_json) VALUES (?, ?, ?, ?)",
+                (BACKUP_MADE_JOB + str(backup_deck_id), self._since_day(0), now, json.dumps(record)),
+            )
+
+    def backup_made(self, backup_deck_id: str) -> dict[str, Any] | None:
+        row = self._one(
+            "SELECT detail_json FROM job_runs WHERE name = ?", (BACKUP_MADE_JOB + str(backup_deck_id),)
+        )
+        if row is None or not row["detail_json"]:
+            return None
+        try:
+            out = json.loads(row["detail_json"])
+        except ValueError:
+            return None
+        return out if isinstance(out, dict) else None
+
+    # Later deletes of unused backup copies (Q77): one row per snapshot whose copy waits to be
+    # deleted (``due_at`` the time it is due), so the queue outlives a restart and a re-apply of
+    # the proposal. Each row records the Archidekt account linked when it was queued (Q127).
+    _BACKUP_DELETE_COLUMNS = (
+        "snapshot_id, sub, archidekt_user_id, backup_deck_id, deck_id, proposal_id, due_at, attempts, "
+        "queued_at, expect_json"
+    )
+
+    @staticmethod
+    def _backup_delete_row(r: sqlite3.Row) -> dict[str, Any]:
+        """A queued delete as the backup code reads it (the shape it had in job_runs, plus the
+        Archidekt account)."""
+        d: dict[str, Any] = {
+            "sub": r["sub"],
+            "snapshot_id": r["snapshot_id"],
+            "backup_deck_id": r["backup_deck_id"],
+            "deck_id": r["deck_id"],
+            "proposal_id": r["proposal_id"],
+            "attempts": r["attempts"],
+            "queued_at": r["queued_at"],
+            "archidekt_user_id": r["archidekt_user_id"],
+        }
+        if r["expect_json"]:
+            d["expect"] = json.loads(r["expect_json"])
+        d["due"] = r["due_at"]
+        return d
+
     def queue_backup_delete(
         self,
         snapshot_id: str,
@@ -1869,69 +2664,72 @@ class Database:
         sub: str,
         backup_deck_id: str,
         deck_id: str,
-        proposal_id: str,
+        proposal_id: str | None,
         due: int,
         expect: dict[str, Any] | None = None,
     ) -> None:
         """``expect``: the copy as the gateway made it (name, description, folder id), which the
-        later delete checks before it deletes (review D4); kept in the row's detail, so no schema
-        change."""
-        detail = {
-            "sub": sub,
-            "snapshot_id": snapshot_id,
-            "backup_deck_id": backup_deck_id,
-            "deck_id": deck_id,
-            "proposal_id": proposal_id,
-            "attempts": 0,
-            "queued_at": int(time.time()),
-            **({"expect": expect} if expect else {}),
-        }
+        later delete checks before it deletes (review D4). The Archidekt account is the one on the
+        member's active link now, read in the same transaction (Q127)."""
         with self.tx() as c:
             c.execute(
-                "INSERT OR REPLACE INTO job_runs (name, day, at, detail_json) VALUES (?, ?, ?, ?)",
+                f"""INSERT OR REPLACE INTO backup_deletes ({self._BACKUP_DELETE_COLUMNS})
+                   VALUES (?, ?, (SELECT archidekt_user_id FROM archidekt_links
+                                  WHERE sub = ? AND status = 'active'), ?, ?, ?, ?, 0, ?, ?)""",
                 (
-                    BACKUP_DELETE_JOB + snapshot_id,
-                    _dt.datetime.now(_dt.UTC).date().isoformat(),
+                    snapshot_id,
+                    sub,
+                    sub,
+                    str(backup_deck_id),
+                    str(deck_id),
+                    proposal_id,
                     int(due),
-                    json.dumps(detail),
+                    int(time.time()),
+                    json.dumps(expect) if expect else None,
                 ),
             )
 
     def next_backup_delete(self, now: int) -> dict[str, Any] | None:
         """The queued backup delete due first (at or before ``now``), or None."""
         row = self._one(
-            "SELECT at, detail_json FROM job_runs WHERE name LIKE ? ESCAPE '\\' AND at <= ? "
-            "ORDER BY at, name LIMIT 1",
-            (_like_prefix(BACKUP_DELETE_JOB), int(now)),
+            f"SELECT {self._BACKUP_DELETE_COLUMNS} FROM backup_deletes WHERE due_at <= ? "
+            "ORDER BY due_at, snapshot_id LIMIT 1",
+            (int(now),),
         )
-        return {**json.loads(row["detail_json"]), "due": row["at"]} if row else None
+        return self._backup_delete_row(row) if row else None
 
     def queued_backup_deletes(self) -> list[dict[str, Any]]:
         with self._lock:
             rows = self._conn.execute(
-                "SELECT at, detail_json FROM job_runs WHERE name LIKE ? ESCAPE '\\' ORDER BY at, name",
-                (_like_prefix(BACKUP_DELETE_JOB),),
+                f"SELECT {self._BACKUP_DELETE_COLUMNS} FROM backup_deletes ORDER BY due_at, snapshot_id"
             ).fetchall()
-        return [{**json.loads(r["detail_json"]), "due": r["at"]} for r in rows]
+        return [self._backup_delete_row(r) for r in rows]
 
     def reschedule_backup_delete(self, snapshot_id: str, *, due: int, attempts: int) -> None:
         with self.tx() as c:
             c.execute(
-                "UPDATE job_runs SET at = ?, detail_json = json_set(detail_json, '$.attempts', ?) "
-                "WHERE name = ?",
-                (int(due), int(attempts), BACKUP_DELETE_JOB + snapshot_id),
+                "UPDATE backup_deletes SET due_at = ?, attempts = ? WHERE snapshot_id = ?",
+                (int(due), int(attempts), snapshot_id),
             )
 
     def backup_delete_queued(self, snapshot_id: str) -> bool:
         """Whether the backup delete of ``snapshot_id`` is still queued (a relink or "Delete my
         data" drops it)."""
+        return self._one("SELECT 1 FROM backup_deletes WHERE snapshot_id = ?", (snapshot_id,)) is not None
+
+    def backup_copy_queued(self, owner_sub: str, backup_deck_id: str) -> bool:
+        """Whether a delete of this backup copy is queued for the member (from any snapshot)."""
         return (
-            self._one("SELECT 1 FROM job_runs WHERE name = ?", (BACKUP_DELETE_JOB + snapshot_id,)) is not None
+            self._one(
+                "SELECT 1 FROM backup_deletes WHERE sub = ? AND backup_deck_id = ?",
+                (owner_sub, str(backup_deck_id)),
+            )
+            is not None
         )
 
     def drop_backup_delete(self, snapshot_id: str) -> None:
         with self.tx() as c:
-            c.execute("DELETE FROM job_runs WHERE name = ?", (BACKUP_DELETE_JOB + snapshot_id,))
+            c.execute("DELETE FROM backup_deletes WHERE snapshot_id = ?", (snapshot_id,))
 
     def edit_proposal_result(
         self, proposal_id: str, owner_sub: str, edit: Callable[[Any], dict[str, Any] | None]
@@ -2040,3 +2838,241 @@ class Database:
             except OSError:
                 pass
         return total
+
+    # settings the server owner manages (config.LiveSettings, the admin Settings page) ------------
+    def stored_settings(self) -> dict[str, Any]:
+        """Every value stored from the admin Settings page, by key (config.MANAGED_SETTINGS). A
+        row that no longer parses is left out, so the code default applies."""
+        with self._lock:
+            rows = self._conn.execute("SELECT key, value_json FROM settings").fetchall()
+        out: dict[str, Any] = {}
+        for r in rows:
+            try:
+                out[str(r["key"])] = json.loads(r["value_json"])
+            except ValueError:
+                continue
+        return out
+
+    def save_setting(self, key: str, value: Any, *, by: str | None) -> None:
+        """Store one setting's value (already checked by config.LiveSettings) and who set it."""
+        with self.tx() as c:
+            c.execute(
+                "INSERT INTO settings (key, value_json, updated_at, updated_by) VALUES (?, ?, ?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json, "
+                "updated_at = excluded.updated_at, updated_by = excluded.updated_by",
+                (key, json.dumps(value), int(time.time()), by),
+            )
+
+    def clear_setting(self, key: str) -> bool:
+        """Forget a stored value, so the code default applies again. True when one was stored."""
+        with self.tx() as c:
+            return c.execute("DELETE FROM settings WHERE key = ?", (key,)).rowcount > 0
+
+    def setting_changes(self) -> dict[str, dict[str, Any]]:
+        """When each stored setting was last changed and by whom: {key: {updated_at, updated_by}}."""
+        with self._lock:
+            rows = self._conn.execute("SELECT key, updated_at, updated_by FROM settings").fetchall()
+        return {str(r["key"]): {"updated_at": r["updated_at"], "updated_by": r["updated_by"]} for r in rows}
+
+    # remembered choices that follow the account (G7) ----------------------------------------------
+    def get_prefs(self, sub: str) -> dict[str, Any]:
+        """Every remembered choice of one account, by name."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT name, value_json FROM account_prefs WHERE sub = ?", (sub,)
+            ).fetchall()
+        out: dict[str, Any] = {}
+        for r in rows:
+            try:
+                out[str(r["name"])] = json.loads(r["value_json"])
+            except ValueError:
+                continue
+        return out
+
+    def get_pref(self, sub: str, name: str, default: Any = None) -> Any:
+        row = self._one("SELECT value_json FROM account_prefs WHERE sub = ? AND name = ?", (sub, name))
+        if row is None:
+            return default
+        try:
+            return json.loads(row["value_json"])
+        except ValueError:
+            return default
+
+    def set_pref(
+        self, sub: str, name: str, value: Any, *, keep_newest: tuple[str, int] | None = None
+    ) -> bool:
+        """Remember one choice for the account. Refused (False) for a name that is empty or over
+        MAX_PREF_NAME characters, a value over MAX_PREF_BYTES as JSON, an account that is not a
+        known user, and a new name once the account keeps MAX_PREFS_PER_ACCOUNT choices.
+        ``keep_newest=(prefix, n)``: a new name starting with ``prefix`` first forgets the oldest
+        choices with that prefix so at most ``n`` remain with it (B8: stack orders)."""
+        name = str(name)
+        raw = json.dumps(value, separators=(",", ":"))
+        if not name or len(name) > MAX_PREF_NAME or len(raw.encode("utf-8")) > MAX_PREF_BYTES:
+            return False
+        with self.tx() as c:
+            if c.execute("SELECT 1 FROM users WHERE sub = ?", (sub,)).fetchone() is None:
+                return False
+            known = c.execute(
+                "SELECT 1 FROM account_prefs WHERE sub = ? AND name = ?", (sub, name)
+            ).fetchone()
+            if known is None and keep_newest is not None and name.startswith(keep_newest[0]):
+                prefix, n = keep_newest
+                c.execute(
+                    "DELETE FROM account_prefs WHERE sub = ? AND rowid IN (SELECT rowid FROM account_prefs "
+                    "WHERE sub = ? AND name LIKE ? ESCAPE '\\' ORDER BY updated_at DESC, rowid DESC "
+                    "LIMIT -1 OFFSET ?)",
+                    (sub, sub, _like_prefix(prefix), max(0, n - 1)),
+                )
+            if known is None:
+                (count,) = c.execute("SELECT COUNT(*) FROM account_prefs WHERE sub = ?", (sub,)).fetchone()
+                if count >= MAX_PREFS_PER_ACCOUNT:
+                    return False
+            c.execute(
+                "INSERT INTO account_prefs (sub, name, value_json, updated_at) VALUES (?, ?, ?, ?) "
+                "ON CONFLICT(sub, name) DO UPDATE SET value_json = excluded.value_json, "
+                "updated_at = excluded.updated_at",
+                (sub, name, raw, int(time.time())),
+            )
+        return True
+
+    def delete_prefs(self, sub: str, *, names: Iterable[str] = (), prefixes: Iterable[str] = ()) -> int:
+        """Forget the account's choices with these names or name prefixes. Returns how many."""
+        names, prefixes = list(names), list(prefixes)
+        where = ["name = ?"] * len(names) + ["name LIKE ? ESCAPE '\\'"] * len(prefixes)
+        if not where:
+            return 0
+        with self.tx() as c:
+            return c.execute(
+                f"DELETE FROM account_prefs WHERE sub = ? AND ({' OR '.join(where)})",
+                (sub, *names, *(_like_prefix(p) for p in prefixes)),
+            ).rowcount
+
+    def delete_pref(self, sub: str, name: str) -> bool:
+        with self.tx() as c:
+            return c.execute("DELETE FROM account_prefs WHERE sub = ? AND name = ?", (sub, name)).rowcount > 0
+
+    # -- simulator card models (schema 14, Track C) --------------------------------------------
+    # Decided: each member keeps their own models (card Q140 item 1); the member and an admin may
+    # remove one (delete_card_model, admin_delete_card_model; the admin list is list_card_models);
+    # a member's models go with their data (MEMBER_TABLES, card Q138 item 5). put_card_model
+    # enforces, when given ``most``, the cap of 200 per member in the same transaction as its write,
+    # so two saves at once can't both pass the check (Track C review r1 item 18). Each model records
+    # the simulator version it was checked with (``sim_version``, Q136 item 3, card Q139 item 5);
+    # ``oracle_hash`` is kept as a spare column.
+
+    def get_card_models(self, keys: list[str], sub: str) -> list[dict[str, Any]]:
+        """``sub``'s models for these card keys (front face, casefolded), in no particular order;
+        a key they keep no model for is simply absent."""
+        wanted = list(dict.fromkeys(str(k) for k in keys if k))
+        out: list[dict[str, Any]] = []
+        for i in range(0, len(wanted), _CARD_MODEL_BATCH):
+            part = wanted[i : i + _CARD_MODEL_BATCH]
+            with self._lock:
+                rows = self._conn.execute(
+                    "SELECT card_key, name, model_json, sim_version, oracle_hash, added_by, added_at, "
+                    f"updated_at FROM card_models WHERE added_by = ? AND card_key IN ({_marks(part)})",
+                    [sub, *part],
+                ).fetchall()
+            out += [dict(r) for r in rows]
+        return out
+
+    def put_card_model(
+        self,
+        card_key: str,
+        name: str,
+        model_json: str,
+        sub: str,
+        now: int,
+        *,
+        sim_version: str | None = None,
+        oracle_hash: str | None = None,
+        most: int | None = None,
+    ) -> bool:
+        """Keep ``model_json`` as ``sub``'s model of the card, replacing theirs if they keep one;
+        other members' models of the card are never touched. ``added_at`` stays that of their first
+        model of the card. True when a model was added (it now counts toward ``sub``), False when
+        theirs was replaced. ``sim_version`` (the simulator version the model was checked with) and
+        ``oracle_hash`` are written as given, so a save without them clears them.
+
+        With ``most``, a save that would add a model is refused once ``sub`` keeps that many,
+        checked in the write's own transaction, so two saves at once can't both pass. Raises
+        CardModelRefused when nothing is written, and ValueError for an empty key or member, or a
+        model over MAX_CARD_MODEL_BYTES."""
+        if not card_key or not sub:
+            raise ValueError("a card model needs a card key and a member")
+        if len(model_json.encode("utf-8")) > MAX_CARD_MODEL_BYTES:
+            raise ValueError(f"a card model is at most {MAX_CARD_MODEL_BYTES} bytes")
+        with self.tx() as c:
+            row = c.execute(
+                "SELECT 1 FROM card_models WHERE card_key = ? AND added_by = ?", (card_key, sub)
+            ).fetchone()
+            if row is None and most is not None:
+                (have,) = c.execute("SELECT COUNT(*) FROM card_models WHERE added_by = ?", (sub,)).fetchone()
+                if have >= most:
+                    raise CardModelRefused("most")
+            if row is None:
+                c.execute(
+                    "INSERT INTO card_models (card_key, name, model_json, sim_version, oracle_hash, "
+                    "added_by, added_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (card_key, name, model_json, sim_version, oracle_hash, sub, int(now), int(now)),
+                )
+                return True
+            c.execute(
+                "UPDATE card_models SET name = ?, model_json = ?, sim_version = ?, oracle_hash = ?, "
+                "updated_at = ? WHERE card_key = ? AND added_by = ?",
+                (name, model_json, sim_version, oracle_hash, int(now), card_key, sub),
+            )
+            return False
+
+    def delete_card_model(self, card_key: str, sub: str) -> bool:
+        """Delete ``sub``'s model of the card. True when a model was deleted."""
+        with self.tx() as c:
+            return (
+                c.execute(
+                    "DELETE FROM card_models WHERE card_key = ? AND added_by = ?", (card_key, sub)
+                ).rowcount
+                > 0
+            )
+
+    def admin_delete_card_model(self, card_key: str, added_by: str, *, by: str) -> bool:
+        """An admin removes any member's model (Q136 item 2): ``added_by``'s model of the card.
+        Audited as ``card_model_removed`` under the admin, with the card and whose model it was.
+        True when a model was deleted."""
+        with self.tx() as c:
+            row = c.execute(
+                "SELECT name, added_by FROM card_models WHERE card_key = ? AND added_by = ?",
+                (card_key, added_by),
+            ).fetchone()
+            if row is None:
+                return False
+            c.execute("DELETE FROM card_models WHERE card_key = ? AND added_by = ?", (card_key, added_by))
+        self.audit(
+            "card_model_removed",
+            sub=by,
+            detail={"card": str(row["name"]), "card_key": card_key, "added_by": str(row["added_by"])},
+        )
+        return True
+
+    def list_card_models(self, *, limit: int = 100, offset: int = 0) -> list[dict[str, Any]]:
+        """The kept models for the admin list (card Q138 item 4), the most recently changed first:
+        card_key, name, added_by, added_at, updated_at and size (bytes of model_json). Holds member
+        ids: only for an admin's page, never another member's."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT card_key, name, added_by, added_at, updated_at, "
+                "length(CAST(model_json AS BLOB)) AS size FROM card_models "
+                "ORDER BY updated_at DESC, card_key, added_by LIMIT ? OFFSET ?",
+                (max(0, int(limit)), max(0, int(offset))),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def count_all_card_models(self) -> int:
+        """How many models are kept, for everyone."""
+        row = self._one("SELECT COUNT(*) AS n FROM card_models", ())
+        return int(row["n"]) if row else 0
+
+    def count_card_models(self, sub: str) -> int:
+        """How many of the kept models are ``sub``'s."""
+        row = self._one("SELECT COUNT(*) AS n FROM card_models WHERE added_by = ?", (sub,))
+        return int(row["n"]) if row else 0

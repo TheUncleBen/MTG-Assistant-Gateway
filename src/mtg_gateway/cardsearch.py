@@ -27,10 +27,11 @@ from starlette.responses import JSONResponse, Response
 
 from . import cardquery as cq
 from . import cardsearch_view as cv
+from . import prefs
 from .pages import NO_STORE, _csrf, browser_session, login_redirect
 from .scan.service import ScanError
 from .theme import esc as _esc
-from .theme import icon, remember_view, render, stylesheet_link, view_choice
+from .theme import icon, render, stylesheet_link
 
 if TYPE_CHECKING:
     from mcp.server.mcpserver import MCPServer
@@ -413,8 +414,8 @@ def add_cardsearch_routes(server: MCPServer, state: AppState) -> None:
             "" if linked else "Link your Archidekt account on the Account page to add cards to a deck.",
         )
 
-    def view_of(request: Request) -> tuple[str, bool]:
-        return view_choice(request, "cards", cv.VIEWS, "grid")
+    def view_of(request: Request, sub: str) -> tuple[str, bool]:
+        return prefs.view_choice(state.db, sub, request, "cards", cv.VIEWS, "grid")
 
     @server.custom_route("/cards/api/search", methods=["GET"], include_in_schema=False)
     async def search_api(request: Request) -> Response:
@@ -425,7 +426,7 @@ def add_cardsearch_routes(server: MCPServer, state: AppState) -> None:
         if not sub:
             return JSONResponse({"ok": False, "error": "unauthenticated"}, 401, headers=NO_STORE)
         f = cq.parse(request.query_params)
-        view, remember = view_of(request)
+        view, remember = view_of(request, sub)
         try:
             page_no = max(1, min(int(request.query_params.get("page") or 1), SEARCH_PAGES))
         except ValueError:
@@ -470,7 +471,9 @@ def add_cardsearch_routes(server: MCPServer, state: AppState) -> None:
             headers=NO_STORE,
         )
         return (
-            remember_view(resp, "cards", view, secure=s.public_url.startswith("https://"))
+            prefs.remember_view(
+                state.db, sub, resp, "cards", view, secure=s.public_url.startswith("https://")
+            )
             if remember
             else resp
         )
@@ -508,7 +511,7 @@ def add_cardsearch_routes(server: MCPServer, state: AppState) -> None:
         if not sub:
             return login_redirect("/cards" + (f"?{request.url.query}" if request.url.query else ""))
         f = cq.parse(request.query_params)
-        view, remember = view_of(request)
+        view, remember = view_of(request, sub)
         linked, reason = add_reason(sub)
         body = f"<section class='panel cs-panel'>{cv.filters_html(f, view=view)}"
         if not linked:
@@ -559,7 +562,9 @@ def add_cardsearch_routes(server: MCPServer, state: AppState) -> None:
         )
         resp = page("Cards", body, sub=sub, sid=sid)
         return (
-            remember_view(resp, "cards", view, secure=s.public_url.startswith("https://"))
+            prefs.remember_view(
+                state.db, sub, resp, "cards", view, secure=s.public_url.startswith("https://")
+            )
             if remember
             else resp
         )
