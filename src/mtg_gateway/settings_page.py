@@ -96,8 +96,15 @@ TEXT: dict[str, tuple[str, str]] = {
     ),
     "backup_hour_utc": ("Nightly backup hour (UTC)", "When the gateway backs up its own database, 0 to 23."),
     "backup_keep_days": ("Days of nightly backups kept", "Older backup files are deleted."),
-    "forge_games": ("Forge games per report", "More games give steadier numbers and take longer."),
-    "forge_parallel_games": ("Forge games played at once", "Higher is faster but uses more memory and CPU."),
+    "forge_games": (
+        "Forge games per report",
+        "More games give steadier numbers and take longer. Play more games on a report adds this many again.",
+    ),
+    "forge_parallel_games": (
+        "Forge games played at once",
+        "The most one report asks Forge to play at the same time. Forge plays fewer when it has no room "
+        "for more.",
+    ),
     "watchlists_enabled": (
         "Watchlist and price features",
         "Shows the Watchlist page, the price buttons and the watch tools.",

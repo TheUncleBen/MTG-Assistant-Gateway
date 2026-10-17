@@ -537,7 +537,7 @@ def test_live_settings_default_stored_and_deployment_values(tmp_path: Path) -> N
         heard: list[str] = []
         live.on_change.append(heard.append)
         # code default, nothing stored
-        assert live.get("forge_parallel_games") == 1 and live.source("forge_parallel_games") == "default"
+        assert live.get("forge_parallel_games") == 4 and live.source("forge_parallel_games") == "default"
         assert live.set("forge_parallel_games", "3", by="admin-1") == 3
         assert live.get("forge_parallel_games") == 3 and live.source("forge_parallel_games") == "dashboard"
         assert heard == ["forge_parallel_games"]
@@ -561,14 +561,14 @@ def test_live_settings_default_stored_and_deployment_values(tmp_path: Path) -> N
         again = LiveSettings(settings, db)
         assert again.get("forge_parallel_games") == 3
         live.reset("forge_parallel_games", by="admin-1")
-        assert live.get("forge_parallel_games") == 1 and db.stored_settings() == {}
+        assert live.get("forge_parallel_games") == 4 and db.stored_settings() == {}
         assert heard == ["forge_parallel_games", "forge_parallel_games"]
         # each change is in the audit log, with who made it
         audit = [a for a in db.audit_recent(10) if a["event"] == "setting_changed"]
         details = [a["detail"] for a in reversed(audit)]
         assert details == [
-            {"key": "forge_parallel_games", "value": 3, "previous": 1},
-            {"key": "forge_parallel_games", "value": 1, "previous": 3},
+            {"key": "forge_parallel_games", "value": 3, "previous": 4},
+            {"key": "forge_parallel_games", "value": 4, "previous": 3},
         ]
         assert all(a["sub"] == "admin-1" for a in audit)
         with pytest.raises(SettingError):
@@ -630,7 +630,7 @@ def test_the_deployment_marks_what_it_set(tmp_path: Path, monkeypatch: pytest.Mo
     _env(tmp_path, monkeypatch)
     s = load_settings()
     assert s.env_set == frozenset()
-    assert (s.proposal_expiry_days, s.auto_big_edit_rows, s.forge_parallel_games) == (7, 20, 1)
+    assert (s.proposal_expiry_days, s.auto_big_edit_rows, s.forge_parallel_games) == (7, 20, 4)
     assert (s.archidekt_backup_copies, s.snapshots_per_deck, s.archidekt_backup_box_default) == (
         10,
         25,

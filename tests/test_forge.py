@@ -846,10 +846,10 @@ async def test_an_engine_busy_run_waits_and_is_retried(tmp_path: Path) -> None:
 
 
 def test_forge_games_default_and_win_rate_range() -> None:
-    """D15: ten Forge games a report by default, each win rate shown with its 95% range."""
+    """Four Forge games a report by default (more on request), each win rate shown with its 95% range."""
     from mtg_gateway.config import Settings
 
-    assert Settings.__dataclass_fields__["forge_games"].default == 10
+    assert Settings.__dataclass_fields__["forge_games"].default == 4
     lines = forge_lines(
         {
             "state": "done",
@@ -1209,7 +1209,9 @@ async def test_each_forge_game_shows_as_it_finishes(tmp_path: Path, monkeypatch:
     reports.forge_interval = 0.05
     saves: list[str] = []
     real_save = reports._save_forge
-    monkeypatch.setattr(reports, "_save_forge", lambda rid, s: saves.append(rid) or real_save(rid, s))
+    monkeypatch.setattr(
+        reports, "_save_forge", lambda rid, s, **kw: saves.append(rid) or real_save(rid, s, **kw)
+    )
     out = await reports.run("alice", "42", games=300, options={"seed": 7})
     jid, rid = out["forge"]["job_id"], out["report_id"]
     await asyncio.sleep(0.3)
