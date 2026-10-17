@@ -53,7 +53,7 @@ MAX_PARALLEL = max(1, min(4, int(os.environ.get("FORGE_MAX_PARALLEL", "1"))))
 # A job's games are cut into slices of at most this many, the same way at any parallel setting.
 # TODO(Q138 item 1, held for Ben's re-confirmation card): groups of up to five (R-207), which the
 # card recommends keeping; no replay promise rests on the groups.
-SLICE_GAMES = 5
+SLICE_GAMES = max(1, min(5, int(os.environ.get("FORGE_SLICE_GAMES", "5"))))
 JOB_TIMEOUT = int(os.environ.get("FORGE_JOB_TIMEOUT", "7200"))
 # Forge's sim calls a game a draw after this many seconds (its -c flag; Forge's own default is 120,
 # too short for a four-player Commander game on a Raspberry Pi).
@@ -246,6 +246,19 @@ def parse_result(line: str) -> dict[str, Any] | None:
     return out
 
 
+def slot_home(slot: int) -> Path:
+    """Forge's home for parallel place ``slot`` (its preferences and logs), with card scripts read
+    only when a game needs them (Forge's LOAD_CARD_SCRIPTS_LAZILY), which halves start-up."""
+    base = Path(os.environ.get("HOME", "/data"))
+    home = base / f"slot-{slot}" if slot else base
+    prefs = home / ".forge" / "preferences" / "forge.preferences"
+    if not prefs.exists():
+        prefs.parent.mkdir(parents=True, exist_ok=True)
+        if os.environ.get("FORGE_LAZY_CARDS", "1") == "1":
+            prefs.write_text("LOAD_CARD_SCRIPTS_LAZILY=true\n", "utf-8")
+    return home
+
+
 def run_slice(job: Job, index: int, work: Path, names: list[str], slot: int) -> int | None:
     """Play slice ``index`` in its own Forge process and add its games to the job, numbered after the
     slices before it. ``slot`` is which of the job's parallel places it uses: the first keeps the
@@ -259,6 +272,8 @@ def run_slice(job: Job, index: int, work: Path, names: list[str], slot: int) -> 
         "java",
         f"-Xmx{XMX}",
         "-Djava.awt.headless=true",
+        # Java takes its home from the user account, never $HOME, so each place names its own
+        f"-Duser.home={slot_home(slot)}",
         "-jar",
         str(forge_jar()),
         "sim",
@@ -276,10 +291,6 @@ def run_slice(job: Job, index: int, work: Path, names: list[str], slot: int) -> 
         "-q",
     ]
     env = None
-    if slot:
-        home = Path(os.environ.get("HOME", "/data")) / f"slot-{slot}"
-        home.mkdir(parents=True, exist_ok=True)
-        env = {**os.environ, "HOME": str(home)}
     with job.lock:
         if job.cancelled or job.timed_out:
             job.slice_state[index] = "cancelled"
