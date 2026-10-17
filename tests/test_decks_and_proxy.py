@@ -1703,4 +1703,4 @@ async def test_compare_advice_is_true_to_bracket_matched_forge(stack: Stack) -> 
     assert "like-for-like" in compare and "own bracket" in compare
     report = tools["run_deck_report"]
     assert "forge" in report["inputSchema"]["properties"] and "Preflight only" in report["description"]
-    assert "60-card deck's report never starts it" in report["description"]
+    assert "60-card deck's report, or one with no commander marked, never starts it" in report["description"]
