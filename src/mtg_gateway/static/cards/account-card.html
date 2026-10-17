@@ -50,8 +50,9 @@ ul.facts li b{font-weight:600;text-align:right;overflow-wrap:anywhere}
       if (!sc.linked) todo.push("link your Archidekt account");
     }
     if ("writes_enabled" in sc) {
-      fact(list, "Deck changes", sc.writes_enabled ? "on" : "off on this gateway", sc.writes_enabled ? "ok" : "warn");
-      if (!sc.writes_enabled) todo.push("ask whoever runs the gateway to turn deck writes on (MTG_WRITES_ENABLED)");
+      // one writes-off wording, no setting names (Q141 item 7A; wording draft, WORDING-6)
+      fact(list, "Archidekt writes", sc.writes_enabled ? "on" : "switched off on this gateway", sc.writes_enabled ? "ok" : "warn");
+      if (!sc.writes_enabled) todo.push("ask whoever runs the gateway to switch Archidekt writes on");
     }
     if (sc.approval_mode) fact(list, "Approval mode", MODES[sc.approval_mode] || String(sc.approval_mode));
     if (sc.gateway_version) fact(list, "Gateway", "version " + sc.gateway_version);
