@@ -122,8 +122,8 @@ One deck:
   Commander deck starts with its commander in the command zone; other decks
   have none. The page shows the library count and works with a mouse, a
   finger or the keyboard. Nothing is sent to Archidekt and nothing is kept.
-- **Run simulation** runs the statistics, the decklist validation and the
-  goldfish simulation (300 games) and opens the result, filed under
+- **Run full test** runs the statistics, the legality check and the
+  solo test (300 games, no opponents) and opens the result, filed under
   History. It is the same run the assistant's `run_deck_report` makes, so
   the numbers match whichever way it is started. A Commander deck is played
   from the command zone against 40 life. A deck without a commander and with
@@ -131,26 +131,33 @@ One deck:
   the like) is played as a 60-card game: seven-card London mulligan with no
   free one, 20 life, on the play, sideboard left out. A Commander-format
   deck without a card in its Commander category, or a smaller deck without
-  one, is not simulated and the report says why.
+  one, gets no solo test and the report says why.
 - When the gateway runs Forge, a Commander deck's report also has Forge
-  games against three precons. They are precons of the deck's bracket: the
-  bracket set on the deck in Archidekt, or else the gateway's estimate. Each
-  precon's bracket comes from the game changers it holds. When there are not
+  games against three precons. They are picked for the bracket set on the
+  deck in Archidekt, or, when none is set, for Archidekt's estimate from
+  cards. Each precon's bracket comes from the game changers it holds. When there are not
   enough precons of that bracket, the nearest bracket fills in, and an older
-  Forge image without precon brackets plays the newest precons; the report
+  version of Forge without precon brackets plays the newest precons; the report
   names the opponents, their brackets and why they were picked. Forge plays
-  10 games per report by default (`MTG_FORGE_GAMES`) and shows each win rate
-  with its 95% range. Forge does not run 60-card decks (its opponents are
-  Commander precons): their reports never start or queue a Forge run and say
-  why. When the Forge engine is busy
-  with other runs, a report waits in the queue and starts by itself. Because
-  each deck meets precons of its own bracket, two decks' Forge win rates are
-  not a like-for-like comparison; the paired goldfish A/B of `compare_decks`
-  is.
-- A report without Forge games (Forge not set up, a 60-card deck, or Forge
-  left out of the report) is labelled **Preflight only (no rules engine)**
-  where the Forge games would be. Each report shows its status: queued,
-  running, complete, partial (some part did not run) or failed.
+  10 games per report by default (your gateway's operator can change this)
+  and shows each win rate with its 95% interval. Forge does not run 60-card
+  decks (its opponents are Commander precons): their reports never start or
+  queue a Forge run and say why. When the Forge engine is busy
+  with other runs, a report waits in the queue and starts by itself. Unless you
+  use the Compare page's Forge button (or your assistant asks for the same
+  opponents), each deck meets precons picked for its own bracket (or
+  Archidekt's estimate when none is set), so two decks' Forge
+  win rates are not a like-for-like comparison; the paired goldfish A/B, which
+  your assistant can run for the two decks, is.
+- A report without Forge games (Forge not set up, a 60-card deck, a deck
+  with no commander marked, Forge left out of the report, or too many of
+  your reports already waiting for Forge) is labelled **Preflight only (no rules engine)**
+  where the Forge games would be. A Forge run that stops early (a group of
+  games failed, the run reached its time limit, the run was stopped, or the
+  gateway lost track of it) shows the games it did play, marked **stopped
+  early**, and the report is partial. Each report shows its status: queued,
+  running, complete, partial (some parts did not run or did not finish) or
+  failed.
 - A deck's report trends on its History page compare a simulation number
   only across reports run the same way (Commander or 60-card game, same last
   turn), and the table of numbers shows each report's settings.
@@ -179,7 +186,9 @@ One deck:
   the four-copies limit, restricted cards, companion, sideboard size, cards
   banned or not legal in the format, the bracket you set against the
   estimate, uncategorised cards; a deck with a banned card is never reported
-  fine), the bracket estimate and the description.
+  fine), the bracket set on the deck, Archidekt's estimate from cards with
+  Archidekt's notes (beside a bracket you set, labelled as Archidekt's
+  estimate; alone when none is set) and the description.
 - **Export** (More menu) shows the deck as Archidekt import text (every row
   with printing, finish, categories and labels; paste it into Archidekt's
   Import dialog or the gateway's New deck page), as a plain decklist and as
@@ -336,8 +345,16 @@ assistant applies what that mode allows, always with a snapshot.
   **Restore** puts a deck back exactly as a snapshot had it, cards and the
   deck's own name, description, format, bracket and privacy alike (another
   proposal you approve).
-- **Reports** store a deck's statistics, a legality check and a goldfish
-  simulation so you can follow how it develops.
+- **Reports** (under More) list your stored deck reports, newest first (the
+  gateway keeps the newest 200), with what Forge is playing now. Each holds
+  the deck's statistics, a legality check, and the solo test, the Forge games
+  or both, so you can follow how a deck develops.
+- **Compare** has **Test both in Forge against the same opponents** when
+  Forge is on and both decks have a commander: both decks play Forge games
+  against the same three precons, picked for the higher of the two decks'
+  brackets, so it doesn't matter which deck you compare from.
+- The **Goldfish** page's **How to play** guide walks a first game step by
+  step; you can hide it.
 
 ## Watchlist and prices
 

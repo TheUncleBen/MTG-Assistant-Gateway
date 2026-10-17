@@ -1,4 +1,4 @@
-# syntax=mirror.gcr.io/docker/dockerfile:1.7
+# syntax=mirror.gcr.io/docker/dockerfile:1.7@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e
 # Forge (https://github.com/Card-Forge/forge, GPL-3.0), unmodified, as the gateway's internal
 # simulation engine, plus a small job service (forge_service.py) that starts Forge's headless
 # `sim` mode and reports results. Build context: the repository root.
@@ -11,9 +11,9 @@ ARG FORGE_VERSION=2.0.15
 ARG FORGE_ASSET=forge-installer-2.0.15.tar.bz2
 ARG FORGE_SHA256=4468f182b60f6ca62d89697baa208981085af744f116781af751c611826db600
 # Bump when this image changes without a new Forge release. The image is tagged <FORGE_VERSION>-<FORGE_LOCAL>.
-ARG FORGE_LOCAL=mag2
+ARG FORGE_LOCAL=mag3
 
-FROM mirror.gcr.io/library/eclipse-temurin:17-jre AS source
+FROM mirror.gcr.io/library/eclipse-temurin:17-jre@sha256:a9b54b51aaa867507be76277a98c6b11b99515cac6330891b534d070f607214c AS source
 ARG FORGE_URL
 ARG FORGE_ASSET
 ARG FORGE_SHA256
@@ -31,7 +31,7 @@ COPY docker/forge/build_names.py docker/forge/filter_precons.py docker/forge/for
 RUN cd /tmp/fb && python3 build_names.py /opt/forge /opt/forge-index/names.txt scryfall-names.json \
  && python3 filter_precons.py precons.json /opt/forge-index/precons.json
 
-FROM mirror.gcr.io/library/eclipse-temurin:17-jre
+FROM mirror.gcr.io/library/eclipse-temurin:17-jre@sha256:a9b54b51aaa867507be76277a98c6b11b99515cac6330891b534d070f607214c
 ARG FORGE_VERSION
 ARG FORGE_LOCAL
 ARG FORGE_URL

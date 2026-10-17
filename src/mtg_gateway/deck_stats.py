@@ -181,52 +181,90 @@ def counts_of(cards: list[DeckCard], field_name: str) -> dict[str, int]:
     return dict(sorted(n.items(), key=lambda kv: (-kv[1], kv[0].casefold())))
 
 
-def bracket_estimate(cards: list[DeckCard], deck_format: str | None = None) -> dict[str, Any]:
-    """A Commander bracket estimate from Archidekt's own card flags only (game changers, mass
-    land denial, extra turns, tutors, two-card combos). Rules: any mass land denial, or two or
-    more extra-turn cards (chaining), means at least bracket 4; more than three game changers
-    means 4; one to three game changers means 3; a two-card combo shared by two cards in the
-    deck means at least 3; none of these means 2. Bracket 5 (cEDH) is a matter of intent, so it
-    is never estimated. ``basis`` lists what pushed the number; this is an estimate, not a
-    ruling."""
+def sideboard_rows(deck: Deck) -> list[DeckCard]:
+    """The deck's sideboard rows, the ones filed under "Sideboard" first (as deck_checks reads
+    them), which Archidekt's bracket rules count with the deck."""
+    return [c for c in deck.cards if c.categories and c.categories[0] == "Sideboard"]
+
+
+# Archidekt's own notes under its "Estimated Bracket" (its deck page script, read 2026-10-14;
+# planning BRACKET-ESTIMATE.md §3), shown with the estimate as Archidekt shows them (Q49, O14).
+ARCHIDEKT_COMBO_NOTE = "If this is a late-game combo, your deck may be a Bracket: Upgraded"
+ARCHIDEKT_TURNS_NOTE = "If your deck chains extra turns, your deck should be Optimized or cEDH"
+
+
+def bracket_estimate(
+    cards: list[DeckCard], deck_format: str | None = None, side: list[DeckCard] | None = None
+) -> dict[str, Any]:
+    """Archidekt's "Estimated Bracket" for a Commander deck, rule for rule as archidekt.com works it
+    out (its deck page script, read 2026-10-14; Q49 "Match Archidekt"), from Archidekt's own card
+    flags. It counts copies of game changers, mass land denial cards, extra-turn cards and combo
+    pieces (a card one of whose ``atomicCombos`` partners is also in the deck), over the
+    commanders, the main deck and the sideboard (``side``), the cards archidekt.com's bracket
+    mismatch check reads. Then: no game changer, no mass land denial, no combo piece and fewer than
+    two extra-turn cards give 1 for a deck of fewer than 30 different cards, else 2; fewer than
+    four game changers with no mass land denial and no combo piece give 3; anything else gives 4.
+    It never gives 5. ``notes`` are Archidekt's own notes for a combo and for two or more extra-turn
+    cards; ``basis`` lists what the number rests on. A bracket set on the deck is the deck's
+    bracket: this is only what the cards suggest."""
     if deck_format is not None and deck_format not in COMMANDER_FORMATS:
         return {"bracket": None, "kind": "estimate", "basis": [f"not a Commander deck ({deck_format})"]}
     if not cards:
         return {"bracket": None, "kind": "estimate", "basis": ["no cards"]}
-    changers = sorted({c.name for c in cards if c.game_changer})
-    mld = sorted({c.name for c in cards if c.mass_land_denial})
-    turns = sorted({c.name for c in cards if c.extra_turns})
-    tutors = sorted({c.name for c in cards if c.tutor})
-    combo_cards: dict[str, set[str]] = {}
-    for c in cards:
-        for combo in c.two_card_combo_ids:
-            combo_cards.setdefault(combo, set()).add(c.name)
-    combos = sorted(names for names in combo_cards.values() if len(names) >= 2)
+    pool = [*cards, *(side or [])]
+    ids = {c.oracle_id for c in pool if c.oracle_id}
 
-    bracket = 2
-    basis: list[str] = []
-    if changers:
-        bracket = 4 if len(changers) > 3 else 3
-        basis.append(f"{len(changers)} game changer(s): {', '.join(changers)}")
+    def copies(flagged: list[DeckCard]) -> int:
+        return sum(c.quantity for c in flagged)
+
+    changers = [c for c in pool if c.game_changer]
+    mld = [c for c in pool if c.mass_land_denial]
+    turns = [c for c in pool if c.extra_turns]
+    combo = [c for c in pool if any(i in ids for i in c.atomic_combos)]
+    tutors = [c for c in pool if c.tutor]
+    n_changers, n_mld, n_turns, n_combo = copies(changers), copies(mld), copies(turns), copies(combo)
+    distinct = len({c.name for c in pool})
+    if not n_changers and not n_mld and not n_combo and n_turns < 2:
+        bracket = 1 if distinct < 30 else 2
+    elif n_changers < 4 and not n_mld and not n_combo:
+        bracket = 3
     else:
-        basis.append("no game changers")
+        bracket = 4
+
+    def listed(flagged: list[DeckCard]) -> str:
+        return ", ".join(sorted({c.name for c in flagged}, key=str.casefold))
+
+    basis: list[str] = []
+    basis.append(f"{n_changers} game changer(s): {listed(changers)}" if changers else "no game changers")
     if mld:
-        bracket = max(bracket, 4)
-        basis.append(f"mass land denial: {', '.join(mld)}")
-    if len(turns) >= 2:
-        bracket = max(bracket, 4)
-        basis.append(f"extra-turn chaining possible: {', '.join(turns)}")
-    elif turns:
-        basis.append(f"one extra-turn card: {turns[0]}")
-    if combos:
-        bracket = max(bracket, 3)
-        basis.append(
-            f"{len(combos)} two-card combo(s) in the deck: "
-            + "; ".join(" + ".join(sorted(c)) for c in combos)
-        )
+        basis.append(f"mass land denial: {listed(mld)}")
+    if turns:
+        basis.append(f"{n_turns} extra-turn card(s): {listed(turns)}")
+    if combo:
+        basis.append(f"two-card combo pieces: {listed(combo)}")
+    if bracket == 1:
+        basis.append(f"fewer than 30 different cards ({distinct})")
     if tutors:
-        basis.append(f"{len(tutors)} tutor(s)")
-    return {"bracket": bracket, "kind": "estimate", "basis": basis}
+        basis.append(f"{copies(tutors)} tutor(s), which Archidekt's estimate does not count")
+    notes = []
+    if combo:
+        notes.append(ARCHIDEKT_COMBO_NOTE)
+    if n_turns >= 2:
+        notes.append(ARCHIDEKT_TURNS_NOTE)
+    return {
+        "bracket": bracket,
+        "kind": "estimate",
+        "source": "archidekt",
+        "basis": basis,
+        "notes": notes,
+        "counts": {
+            "game_changers": n_changers,
+            "mass_land_denial": n_mld,
+            "extra_turns": n_turns,
+            "combo_pieces": n_combo,
+            "different_cards": distinct,
+        },
+    }
 
 
 def compute(deck: Deck) -> dict[str, Any]:
@@ -308,7 +346,7 @@ def compute(deck: Deck) -> dict[str, Any]:
         "commanders": [c.name for c in commanders],
         "colour_identity": colour_identity(cards),
         "out_of_identity": out_of_identity(cards, commanders),
-        "bracket_estimate": bracket_estimate(cards, deck.format),
+        "bracket_estimate": bracket_estimate(cards, deck.format, sideboard_rows(deck)),
         "archidekt_bracket": deck.edh_bracket,
         "checks": checks,
     }

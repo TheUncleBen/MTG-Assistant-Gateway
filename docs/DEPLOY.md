@@ -660,10 +660,37 @@ default, and an install that leaves it off behaves exactly as before.
     `MTG_FORGE_URL=http://mtg-assistant-forge:8000`, then update the stack.
   - Docker Compose: start the `forge` profile (`COMPOSE_PROFILES=forge`) and set
     `MTG_FORGE_URL=http://forge:8000`.
-- **Load:** Java starts only while a simulation runs, one at a time, capped by `FORGE_MEMORY_LIMIT`
-  (default 1536M) and `FORGE_CPUS` (default 2). `MTG_FORGE_GAMES` (default 10) sets the games per
-  report. An idle Forge service holds no Java memory. `FORGE_GAME_SECONDS` (default 600) is how long
-  one game may run before Forge calls it a draw; such games are counted as draws in the report.
+- **Load:** Java starts only while Forge plays, capped by `FORGE_MEMORY_LIMIT` (default 1536M) and
+  `FORGE_CPUS` (default 2). `MTG_FORGE_GAMES` (default 10) sets the games per
+  report. An idle Forge service holds no Java memory.
+- **Games at once:** a run's games are cut into groups of at most five, the same way whatever the
+  setting, and each group starts from its own seed. The seed is kept with the report for the
+  record: Forge does not always replay a game exactly, so compare runs by their win rates and
+  95% intervals, not game by game. `MTG_FORGE_PARALLEL_GAMES` (default 1, or
+  the admin Settings page) asks for that many groups at once, and `FORGE_MAX_PARALLEL` on the Forge
+  service (default 1) is the most it allows, for all runs together: runs start in order, and a run
+  that uses fewer lets the next one play beside it (with 2 or more, a Compare's second deck plays
+  beside the first when a place is still free for it). Each group is its own Java process with up to `FORGE_XMX` of memory. One four-player game has used up to about 930 MiB in the measurements so
+  far, and two at once about 1780 MiB (simple test decks on a PC; real precons on a Pi are not
+  measured yet). That is more than the default `FORGE_MEMORY_LIMIT` of 1536M, so raise
+  `FORGE_MEMORY_LIMIT` before raising `FORGE_MAX_PARALLEL` above 1. `FORGE_GAME_SECONDS`
+  (default 600) is how long one game may run before Forge calls it a draw; such games are counted as
+  draws in the report. Forge reads a card's rules only when a game needs that card, which roughly
+  halves each Java start (measured 7 s to 3 s on a 4-CPU PC); `FORGE_LAZY_CARDS=0` makes it read
+  them all at start again.
+- **More than one machine** (optional; one copy is the default): the gateway can use several
+  copies of the Forge service, for example a Pi and an x86 PC, each playing whole runs.
+  `MTG_FORGE_URL` stays the same. The stack's Forge service uses `endpoint_mode: dnsrr`, so the
+  gateway sees each copy's address; it starts each run on the copy with the most free places and
+  keeps asking that copy about it. One run still plays on one copy, never split across machines.
+  Placement is your choice: instead of `node.hostname == ${FORGE_NODE}`, label each machine
+  (`docker node update --label-add mtg-forge=true <node>`), set the constraint to
+  `node.labels.mtg-forge == true`, add `max_replicas_per_node: 1` under `placement`, and set
+  `FORGE_REPLICAS` to the number of labelled machines. ARM and x86 machines can be mixed (the
+  image is built and tested for both). The CPU and memory limits apply to each copy, so size them
+  for the smallest machine. With Docker Compose, `docker compose up --scale forge=2` gives two
+  copies on one host. The gateway's handling of several copies is so far tested only with a
+  stand-in, not yet on real machines or on a mix of ARM and x86.
 - **No upkeep:** the image carries Forge's card scripts, an index of Scryfall's alternative printed
   names, and the newest Commander precons as opponents, each with a bracket estimated from the game
   changers it holds (Scryfall's list, read once when CI builds the image). The gateway seats the
@@ -813,6 +840,7 @@ value. Leave it out to manage it on the page.
 | `MTG_MYSTIC_FORGE_URL` | no, *stack* | empty (no research tools) | Internal Mystic Forge MCP URL; the stack sets `http://mtg-assistant-mysticforge:8000/mcp` |
 | `MTG_FORGE_URL` | no, *stack* | empty (Forge off) | Internal Forge runner URL; deck reports add real Forge games when set (see the Forge section above) |
 | `MTG_FORGE_GAMES` | no, *stack* | `10` | Forge games per deck report (1 to 50) |
+| `FORGE_REPLICAS`, `FORGE_NODE` | no, *stack* | `0`, empty | Copies of the Forge service, and the node they run on. `0` leaves Forge off; `1` with `FORGE_NODE` is the usual setup. For copies on several machines, place them by a node label instead of `FORGE_NODE` (see "More than one machine" in the Forge section above) |
 | `MTG_WRITES_ENABLED` | no, *stack* | `false` | `true` lets approved proposals be applied to Archidekt |
 | `MTG_APPROVAL_MODE_DEFAULT` | no, *stack* | `manual` | The approval mode of a member who has not chosen one on their Account page: `manual` (every change waits for their own press), `semi` (the assistant applies low-risk edits itself) or `auto` (the assistant applies everything). Members pick their own; see [OPERATIONS.md](OPERATIONS.md#approval-modes-when-the-assistant-may-apply-by-itself) |
 | `MTG_APPROVAL_MODE_MAX` | no, *stack* | `auto` | The highest mode members may choose; `auto` means no cap. A stored choice above the cap is read as the cap |

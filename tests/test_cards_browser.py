@@ -931,6 +931,29 @@ def test_compare_card_shows_each_side_and_the_differences_at_320px() -> None:
     _display_card("compare-card", {"structuredContent": COMPARE}, "#list .row", check)
 
 
+def test_stats_card_shows_archidekts_estimate_only_when_no_bracket_is_set() -> None:
+    """Q49 and O14: with no bracket set, the card names Archidekt's estimate from the cards with
+    Archidekt's own notes (kept as text)."""
+    stats = {
+        **STATS["stats"],
+        "archidekt_bracket": None,
+        "bracket_estimate": {
+            "bracket": 4,
+            "kind": "estimate",
+            "basis": ["two-card combo pieces: A, B"],
+            "notes": ["If this is a late-game combo, your deck may be a Bracket: Upgraded " + HOSTILE],
+        },
+        "checks": {"problems": [], "ok": True, "legal": True},
+    }
+
+    def check(page, card) -> None:
+        text = card.locator("#verdict").inner_text()
+        assert "Archidekt's estimate from cards: Optimized (4)." in text
+        assert ("may be a Bracket: Upgraded " + HOSTILE) in text and "set on the deck" not in text
+
+    _display_card("stats-card", {"structuredContent": {**STATS, "stats": stats}}, "#curve .col", check)
+
+
 def test_stats_card_draws_curve_colours_price_and_verdict_at_320px() -> None:
     def check(page, card) -> None:
         assert card.locator("#title").inner_text() == "Sample " + HOSTILE
@@ -941,7 +964,12 @@ def test_stats_card_draws_curve_colours_price_and_verdict_at_320px() -> None:
         facts = card.locator("#facts").inner_text()
         assert "$412.50" in facts and "3.12" in facts
         verdict = card.locator("#verdict")
-        assert "bad" in verdict.get_attribute("class") and "Bracket estimate 3" in verdict.inner_text()
+        # a bracket set on the deck is the deck's bracket; the estimate is not shown beside it (Q49)
+        assert (
+            "bad" in verdict.get_attribute("class")
+            and "Bracket: Core (2), set on the deck." in verdict.inner_text()
+        )
+        assert "Archidekt's estimate from cards" not in verdict.inner_text()
         assert ("Banned: " + HOSTILE) in verdict.inner_text()
         assert card.locator("#state").inner_text().lower() == "2 problems"
         assert _keyboard_open(page, card, "Open in the app") == "https://mtg.test/decks/42"

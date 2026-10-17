@@ -509,7 +509,7 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
         if isinstance(data, Response):
             return data
         games = data.get("games", 300)
-        forge = data.get("forge")
+        forge, share, pair = data.get("forge"), data.get("same_opponents_as"), data.get("compare_with")
         return ok(
             await reports.run(
                 who.sub,
@@ -518,6 +518,10 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
                 games=games if isinstance(games, int) else 300,
                 # Forge games apart from the goldfish ones; unset follows simulate
                 forge=forge if isinstance(forge, bool) else None,
+                # K6: seat another of the member's reports' Forge opponents
+                same_opponents_as=share if isinstance(share, str) else None,
+                # Q140 item 3: precons for the higher of this deck's and that deck's brackets
+                pair_with=str(pair) if isinstance(pair, (str, int)) and not isinstance(pair, bool) else None,
             ),
             201,
         )
@@ -525,6 +529,15 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
     @route("/reports/{rid}", "GET")
     async def get_report(request: Request, who: Caller) -> Response:
         return ok(reports.get(who.sub, request.path_params["rid"]))
+
+    @route("/reports/{rid}/forge", "GET")
+    async def report_forge_status(request: Request, who: Caller) -> Response:
+        """A report's Forge run alone, for a page or an app watching it play (A32): its state and
+        section, the report's status, and the Forge card and status as the report page draws them.
+        Reads the gateway's own database only; Archidekt is never asked."""
+        from .report_view import forge_status
+
+        return ok(forge_status(reports.get(who.sub, request.path_params["rid"])))
 
     @route("/reports/{rid}", "DELETE", write=True)
     async def delete_report(request: Request, who: Caller) -> Response:

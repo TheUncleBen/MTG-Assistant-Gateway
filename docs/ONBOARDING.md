@@ -242,7 +242,7 @@ Good to know:
 ## 7. What it can't do
 
 - Edit anyone else's deck.
-- Predict multiplayer win rates. Goldfish simulation plays your deck alone.
+- Predict multiplayer win rates. The solo test (goldfish simulation) plays your deck alone.
   A good report gives the seed, number of games, mulligan settings, what it
   couldn't simulate, and the confidence intervals.
 - Keep price watchlists or price history unless whoever runs the gateway has

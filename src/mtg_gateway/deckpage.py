@@ -1477,6 +1477,8 @@ def compare_page_html(
     result: dict[str, Any] | None,
     precons: dict[str, list[dict[str, Any]]],
     error: str = "",
+    csrf: str | None = None,
+    forge_on: bool = False,
 ) -> str:
     """The deck page's compare view: a form to pick the other deck (Archidekt's preconstructed
     decks are offered as suggestions, any deck id or link and a pasted list work too) and, once
@@ -1559,7 +1561,42 @@ def compare_page_html(
             "</table></section>"
         )
     return (
-        form + f"<section class='panel'><div class='tiles'>{tile_html}</div></section>" + lists + delta_html
+        form
+        + f"<section class='panel'><div class='tiles'>{tile_html}</div></section>"
+        + lists
+        + delta_html
+        + compare_forge_html(deck, other, other_name, csrf=csrf, forge_on=forge_on)
+    )
+
+
+def _has_commander(deck: Deck) -> bool:
+    return any(deck.in_deck(c) and deck.is_commander(c) for c in deck.cards)
+
+
+def compare_forge_html(deck: Deck, other: Any, other_name: str, *, csrf: str | None, forge_on: bool) -> str:
+    """K6 (Q136): Forge games of both decks against the same three precons, picked for the higher
+    of the two decks' brackets (Q140 item 3), from the Compare page (POST /decks/<id>/compare/forge).
+    Only when Forge is set up and both sides are Archidekt Commander decks: Forge plays nothing
+    else, and a pasted list has no report to keep its games."""
+    if not (forge_on and csrf and isinstance(other, Deck) and _has_commander(deck) and _has_commander(other)):
+        return ""
+    return (
+        "<section class='panel compareforge'><h3>Forge games against the same opponents</h3>"
+        "<p class='muted small'>Forge plays each deck against the same three precons, picked for "
+        "the higher of the two decks' brackets: the bracket set on each deck, or Archidekt's estimate "
+        "from cards when none is set. Which deck you compare from doesn't change them. Each deck gets its "
+        "own report on the <a href='/reports'>Reports</a> page (and in History) with the deck "
+        "statistics, the legality check and the Forge games (no solo test). The games play in the "
+        "background: both decks at once when Forge has room for two runs, otherwise one deck after the "
+        "other. Compare the two decks' 95% intervals, not only their win rates.</p>"
+        f"<form method='post' action='/decks/{esc(deck.id)}/compare/forge'>"
+        f"<input type='hidden' name='csrf' value='{esc(csrf)}'>"
+        f"<input type='hidden' name='with' value='{esc(other.id)}'>"
+        "<button type='submit' class='btn-primary' data-busy-label='Starting…' "
+        "title='Makes both reports and starts or queues their Forge games, then opens the second report'>"
+        f"{icon('stats')} Test both "
+        f"in Forge against the same opponents</button></form>"
+        "</section>"
     )
 
 
@@ -1610,10 +1647,61 @@ def goldfish_data(deck: Deck) -> dict[str, Any]:
     }
 
 
-def goldfish_page_html(deck: Deck) -> str:
+# The Goldfish page's own guide (G9): what a goldfish game is and its steps, in order. goldfish.js
+# marks the step the game is at; the member can hide the guide, and the choice follows the account
+# (account_prefs GOLDFISH_GUIDE_PREF).
+GOLDFISH_GUIDE_PREF = "goldfish_guide"
+GOLDFISH_GUIDE_INTRO = (
+    "A goldfish game is your deck played alone, with no opponent, to see how it draws and how fast "
+    "it gets going."
+)
+GOLDFISH_GUIDE_STEPS = (
+    ("hand", "Look at your seven cards. Press Keep hand, or Mulligan for seven new ones."),
+    (
+        "bottom",
+        "After a mulligan, press Keep hand. If the game asks for cards to go on the bottom, select them, "
+        "then press the Put … on the bottom button.",
+    ),
+    ("land", "Play a land: select it in your hand and choose Play to the battlefield."),
+    ("cast", "Tap lands for mana: select a land and choose Tap. Then play what you could pay for."),
+    ("next", "Press Next turn: everything untaps and you draw a card."),
+    ("again", "Keep going until the deck does what it was built to do. New game starts over."),
+)
+GOLDFISH_GUIDE_HIDE = "Hide the guide"
+GOLDFISH_GUIDE_SHOW = "How to play"
+# Phones show the step the game is at; this opens all six (Q138 item 8, "don't restrict")
+GOLDFISH_GUIDE_ALL = "Show all steps"
+GOLDFISH_GUIDE_CURRENT = "Show the current step only"
+
+
+def goldfish_guide_html(*, hidden: bool = False) -> str:
+    """The guide panel. Hidden (the member hid it) it stays in the page, so "How to play" brings
+    it back without a reload."""
+    steps = "".join(
+        f"<li data-step='{key}'><span class='gf-step-n' aria-hidden='true'>{i}</span>"
+        f"<span>{esc(text)}</span></li>"
+        for i, (key, text) in enumerate(GOLDFISH_GUIDE_STEPS, start=1)
+    )
+    return (
+        "<section class='panel gf-guide' id='gf-guide' aria-labelledby='gf-guide-h'"
+        f"{' hidden' if hidden else ''}>"
+        "<div class='gf-guide-head'><h2 id='gf-guide-h'>How to play</h2>"
+        "<span class='gf-guide-btns'>"
+        "<button type='button' class='btn small gf-allsteps' aria-expanded='false' aria-controls='gf-steps' "
+        f"data-all='{esc(GOLDFISH_GUIDE_ALL)}' data-current='{esc(GOLDFISH_GUIDE_CURRENT)}'>"
+        f"{esc(GOLDFISH_GUIDE_ALL)}</button>"
+        f"<button type='button' class='btn small' data-guide='hide'>{esc(GOLDFISH_GUIDE_HIDE)}</button>"
+        "</span></div>"
+        f"<p class='muted small'>{esc(GOLDFISH_GUIDE_INTRO)}</p>"
+        f"<ol class='gf-steps' id='gf-steps'>{steps}</ol>"
+        "</section>"
+    )
+
+
+def goldfish_page_html(deck: Deck, *, guide_hidden: bool = False) -> str:
     """Goldfish by hand: shuffle, an opening hand with London mulligans, then draw, play, tap and
     pass turns, all in the browser (static/goldfish.js) on the deck already read for the page.
-    Nothing is sent anywhere and nothing is kept."""
+    Nothing is sent anywhere and nothing is kept, except whether the member hid the guide."""
     did = esc(deck.id)
     name = esc(deck.name or f"Deck {deck.id}")
     data = goldfish_data(deck)
@@ -1646,10 +1734,13 @@ def goldfish_page_html(deck: Deck) -> str:
         "<button type='button' data-act='next' hidden>Next turn</button>"
         "<button type='button' data-act='untap' hidden>Untap all</button>"
         f"<button type='button' data-act='reset'>{icon('refresh')} New game</button>"
+        f"<button type='button' class='gf-guide-show' data-guide='show'{'' if guide_hidden else ' hidden'}>"
+        f"{icon('guide')} {esc(GOLDFISH_GUIDE_SHOW)}</button>"
         "</div>"
         "<p class='sr-only' id='gf-live' aria-live='polite'></p>"
         "<noscript><p class='notice error'>The goldfish needs JavaScript.</p></noscript>"
         "</section>"
+        + goldfish_guide_html(hidden=guide_hidden)
         + (zone.format(id="command", label="Command zone") if commander else "")
         + zone.format(id="battlefield", label="Battlefield")
         + zone.format(id="hand", label="Hand")
@@ -1692,6 +1783,28 @@ GOLDFISH_CSS = """
 .gf-card[aria-pressed=true]{outline:3px solid var(--orange-ctl);outline-offset:2px}
 .gf-card[aria-pressed=true]:focus-visible{outline-color:var(--focus)}
 @media (prefers-reduced-motion:reduce){.gf-card{transition:none}}
+/* the guide: the step the game is at stands out; numbers in circles, text beside them */
+.gf-guide[hidden],.gf-guide-show[hidden]{display:none}
+.gf-guide-head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:.5rem}
+.gf-guide h2{font-size:1.1rem;margin:0}
+.gf-guide > p{margin:.35rem 0 .6rem}
+.gf-steps{list-style:none;margin:0;padding:0;display:grid;gap:.4rem;
+  grid-template-columns:repeat(auto-fit,minmax(min(100%,15rem),1fr))}
+.gf-steps li{display:flex;gap:.6rem;align-items:flex-start;padding:.5rem .6rem;
+  border-radius:var(--radius-panel);border:1px solid var(--border-soft);background:var(--surface-2);
+  line-height:1.35}
+.gf-steps .gf-step-n{flex:none;display:inline-flex;align-items:center;justify-content:center;width:1.6rem;
+  height:1.6rem;border-radius:50%;background:var(--surface-3);color:var(--text);font-weight:700;font-size:.85rem}
+.gf-steps li[aria-current=step]{border-color:var(--orange-ctl);box-shadow:inset 3px 0 0 var(--orange-ctl)}
+.gf-steps li[aria-current=step] .gf-step-n{background:var(--orange);color:var(--on-orange)}
+.gf-steps li.done{color:var(--text-muted)}
+/* phones: only the step the game is at, so the hand stays near the top */
+.gf-guide-btns{display:flex;flex-wrap:wrap;gap:.4rem}
+.gf-allsteps{display:none}
+@media (max-width:600px){
+  .gf-allsteps{display:inline-flex}
+  .gf-steps:not(.all):has(li[aria-current=step]) li:not([aria-current=step]){display:none}
+}
 """
 
 # Track C's own deck page styles (S3): DECK_CSS ends with this, so C's rules for its parts of the
@@ -1914,12 +2027,13 @@ DECK_CSS = (
 .compareform .field input,.compareform .field textarea{font-weight:400}
 .compareform input,.compareform textarea{width:100%}
 .compareform button{justify-self:start}
-.comparecols{display:grid;grid-template-columns:repeat(auto-fit,minmax(18rem,1fr));gap:1rem;margin-top:1rem}
+/* min(18rem,100%): at 200% text 18rem is wider than a phone, so a column never exceeds the page */
+.comparecols{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(18rem,100%),1fr));gap:1rem;margin-top:1rem}
 .comparehead{margin-bottom:1rem}
 .comparecols .panel{margin:0}
 .comparelist{list-style:none;margin:0;padding:0}
-.comparelist li{display:flex;gap:.6rem;align-items:baseline;padding:.3rem 0;
-  border-bottom:1px solid var(--border)}
+.comparelist li{display:flex;gap:.6rem;align-items:baseline;padding:.3rem 0;min-width:0;
+  overflow-wrap:anywhere;border-bottom:1px solid var(--border)}
 .comparelist li:last-child{border-bottom:0}
 .comparelist b{flex:0 0 3.2rem;color:var(--text-muted);font-variant-numeric:tabular-nums}
 .cardlink{background:none;border:0;padding:0;margin:0;color:var(--link);cursor:pointer;font:inherit;text-align:left}

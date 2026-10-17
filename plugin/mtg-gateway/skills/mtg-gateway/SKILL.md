@@ -104,12 +104,15 @@ the ingest tool, never a private deck's id.
   value, `price_total`, legality problems for the deck's format, game
   changers, tutors, extra turns, mass land denial and `salt_total`. Prices,
   salt and those flags are Archidekt's figures; say so when you quote them.
-- **Bracket:** `stats.bracket_estimate` is an estimate from Archidekt's card
-  flags, and a floor: it counts only game changers, mass land denial, extra
-  turns, tutors and two-card combos, never bracket 5. Always call it an
-  estimate, not the deck's official bracket. `archidekt_bracket` is the
-  bracket set on the deck (the owner's setting), if any; call it that.
-  Explain the `basis` lines.
+- **Bracket:** `archidekt_bracket` is the bracket set on the deck (the
+  owner's setting). When it is set, it is the deck's bracket: never present
+  the estimate as a second bracket. `stats.bracket_estimate` is Archidekt's
+  own Estimated Bracket, worked out from Archidekt's card flags as
+  archidekt.com does (game changers, mass land denial, extra turns and
+  two-card combo pieces; never bracket 5). Call it "Archidekt's estimate from
+  cards", quote it when no bracket is set or the checks report a bracket
+  mismatch, and give its `notes` (Archidekt's own) and `basis` lines. It
+  says what the cards suggest, not how strong the deck plays.
 - **Testing:** `run_deck_report` reads the deck, keeps its statistics and,
   when the research service is up, a `validate_decklist` and a goldfish run
   (`games`, default 300), stored for the user. `list_deck_reports` (per deck
@@ -159,7 +162,9 @@ and legal (validate the resulting list if in doubt).
 
 ## Simulation (goldfish)
 
-Goldfish simulation plays the deck alone, against no opponent. It measures
+Goldfish simulation plays the deck alone, against no opponent. The gateway's
+pages call it the "solo test" ("Run full test" and "Solo test only" on the deck
+page); "Goldfish" there is the page where the member plays a hand. It measures
 modelled speed and consistency, such as "how often is the commander cast by
 turn 4". It does **not** predict a win rate in a real multiplayer game and it
 cannot value interaction, removal, politics or an opponent's deck.
@@ -201,7 +206,10 @@ When the gateway runs Forge, a report from `run_deck_report` also has a
 `forge` section: real games of the deck against Commander precons, played by
 Forge's rules engine with opponents, combat and the stack. It runs in the
 background, so `forge.state` is `queued` or `running` at first; read the
-report again with `get_deck_report` until it is `done`.
+report again with `get_deck_report` until it is `done`, or another final state
+(`failed`, `timeout`, `cancelled`, `lost`): then quote the games it did play
+(`games_done` of `games_requested`); when that is fewer than asked for, call it
+a run that stopped early.
 
 - Quote `forge.result`: games played, the deck's wins and `win_rate_95`, and
   the opponent decks (`forge.seats`). These are Forge AI games, not a
@@ -220,9 +228,14 @@ report again with `get_deck_report` until it is `done`.
   against precons of its own bracket, so two decks' Forge win rates (one
   `run_deck_report` each) are each against their own bracket's table, not the
   same opponents, even with the same `options.seed` (check `forge.seats`).
-- Forge plays Commander decks only: a 60-card deck's report has
-  `forge.state: "skipped"` with the reason. `forge=false` leaves Forge out for
-  a quick goldfish-only report. A report without Forge games says
+  For the same table, run the first deck's report with `compare_with` set to
+  the second deck (its precons are picked for the higher of the two decks'
+  brackets, so the order doesn't matter), then the second deck's report with
+  `same_opponents_as` set to the first report's id. The same seed does not always replay the same
+  Forge games, so compare Forge runs by win rate and 95% interval.
+- Forge plays only decks with a commander: a 60-card deck's report, or one
+  with no commander marked, has `forge.state: "skipped"` with the reason. `forge=false` leaves Forge out for
+  a quick solo-test-only report. A report without Forge games says
   `engine_label: "Preflight only (no rules engine)"`; say so.
 
 ## Changing or creating a deck: propose, review, apply

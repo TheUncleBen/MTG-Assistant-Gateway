@@ -431,7 +431,7 @@ async def test_report_page_and_exports(stack: Stack) -> None:
             "class='charts'",
             "<polyline class='s1'",
             "<rect class='col'",
-            "What the simulation could not model",
+            "What the solo test could not model",
             "32 of 98 cards (33% of the deck)",
             "Validation <span class='badge warn'>issues found</span>",
             "Deck statistics",
