@@ -1824,9 +1824,6 @@ class DeckService:
         self.live = LiveSettings(settings, db)
         # sub -> {matched card name (lower case): what the scan read}; set when scanning is on
         self.guessed_names: Callable[[str], dict[str, str]] | None = None
-        # (member, proposal id) for each proposal an assistant saves; set by app.py to notify the
-        # member when it waits for their approval (notify.py). Never stops the proposal.
-        self.on_proposal_saved: Callable[[str, str], None] | None = None
         # Set by collection.py: applies a ``collection`` proposal's stored changes against the
         # member's Archidekt Collection and returns the result rows (DeckService itself knows only
         # decks). None while the collection pages are not loaded.
@@ -2993,11 +2990,33 @@ class DeckService:
         if not saved:
             self._room_for_proposal(row["owner_sub"])
             raise DeckError("rate_limited", "Too many pending proposals; apply or reject some first.")
-        if self.on_proposal_saved and current_client.get() not in (None, BROWSER_CLIENT, ADMIN_CLIENT):
-            try:
-                self.on_proposal_saved(row["owner_sub"], row["id"])
-            except Exception:
-                logger.exception("proposal notification failed")
+
+    def waiting_by_deck(self, sub: str) -> dict[str, tuple[str, int, str]]:
+        """What waits for the member's own press, per deck: ``{deck_id: (deck name, count, the
+        newest one's id)}``, with new decks under ``"new"``. Counted: pending proposals an
+        assistant made that the member's mode does not let it apply itself (held, Updated and
+        Needs a look ones included). Made on the gateway's own pages, or by the gateway, they are
+        the member's own and not counted. Reads only; the member's notification messages follow
+        it (notify.py)."""
+        now = int(time.time())
+        out: dict[str, tuple[str, int, str]] = {}
+        listed = self.db.list_proposals(sub, limit=MAX_PENDING_PROPOSALS, states=("pending",))
+        for r in listed:
+            if r.get("created_by_client") in (None, BROWSER_CLIENT, ADMIN_CLIENT) or r["expires_at"] < now:
+                continue
+            deck_id = str(r.get("deck_id") or "")
+            if r.get("kind") == "create_deck":
+                deck_id = "new"  # every new deck under one key: it has no deck id yet
+            elif not deck_id.isdigit():
+                continue
+            row = self.db.get_proposal(r["id"], sub)
+            if row is None or row["state"] != "pending":
+                continue
+            if self._assistant_policy(sub, row)[3]:
+                continue
+            name, count, newest = out.get(deck_id, (str(r.get("deck_name") or ""), 0, r["id"]))
+            out[deck_id] = (name, count + 1, newest)
+        return out
 
     def list_proposals(self, sub: str, *, full: bool = False, **narrow: Any) -> list[dict[str, Any]]:
         """Newest first; ``narrow`` is passed to the database (deck_id, kinds, states, search,

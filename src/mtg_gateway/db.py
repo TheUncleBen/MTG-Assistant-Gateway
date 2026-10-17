@@ -903,6 +903,35 @@ class Database:
         with self.tx() as c:
             c.execute("UPDATE users SET last_seen_at = ? WHERE sub = ?", (int(time.time()), sub))
 
+    def watch_proposals(self, callback: Callable[[str, str | None], None]) -> None:
+        """Call ``callback(owner_sub, deck_id)`` whenever one of a member's proposals is saved,
+        removed, or changes state, status, expiry or content, and ``callback(sub, None)`` when
+        the member's approval mode changes. It runs inside the write, so it must only take note.
+        The triggers are TEMP: they live on this connection and nothing is written to the file."""
+
+        def changed(sub: Any, deck_id: Any) -> None:
+            try:
+                callback(str(sub), None if deck_id is None else str(deck_id))
+            except Exception:
+                logger.exception("proposal watch failed")
+
+        watched = "state, status, expires_at, version, rows_json, changes_json, amended_by_client"
+        with self._lock:
+            self._conn.create_function("mtg_proposal_changed", 2, changed)
+            for name, event, ref in (
+                ("added", "INSERT", "NEW"),
+                ("removed", "DELETE", "OLD"),
+                ("changed", f"UPDATE OF {watched}", "NEW"),
+            ):
+                self._conn.execute(
+                    f"CREATE TEMP TRIGGER IF NOT EXISTS mtg_proposal_{name} AFTER {event} ON proposals "
+                    f"BEGIN SELECT mtg_proposal_changed({ref}.owner_sub, {ref}.deck_id); END"
+                )
+            self._conn.execute(
+                "CREATE TEMP TRIGGER IF NOT EXISTS mtg_mode_changed AFTER UPDATE OF approval_mode ON users "
+                "BEGIN SELECT mtg_proposal_changed(NEW.sub, NULL); END"
+            )
+
     def set_approval_mode(self, sub: str, mode: str | None) -> bool:
         """Record the member's own approval mode (modes.py), or None to go back to the gateway's
         default. False if there is no such user. Only the Account page calls this: the mode is

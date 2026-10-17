@@ -64,7 +64,14 @@ class Handler(BaseHTTPRequestHandler):
         path, _, query = self.path.partition("?")
         if path == "/control/state":
             with lock:
-                self._json(200, {"connections": len(streams), "connects": state["connects"], "last_since": state["last_since"]})
+                self._json(
+                    200,
+                    {
+                        "connections": len(streams),
+                        "connects": state["connects"],
+                        "last_since": state["last_since"],
+                    },
+                )
             return
         if path != "/app/notifications/stream":
             raw = b"<!doctype html><title>Test gateway</title><p>Test gateway.</p>"
@@ -122,14 +129,26 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         body = self._body()
         if self.path == "/control/send":
-            ev = {"event": "message", "time": int(time.time()), "id": body["id"], "title": body.get("title", ""),
-                  "message": body.get("message", ""), "click": body.get("click", "")}
+            ev = {
+                "event": "message",
+                "time": int(time.time()),
+                "id": body["id"],
+                "title": body.get("title", ""),
+                "message": body.get("message", ""),
+                "click": body.get("click", ""),
+            }
             if body.get("sequence_id"):
                 ev["sequence_id"] = body["sequence_id"]
             _publish(ev)
         elif self.path == "/control/delete":
-            _publish({"event": "message_delete", "time": int(time.time()), "id": "del" + str(int(time.time() * 1000)),
-                      "sequence_id": body["sequence_id"]})
+            _publish(
+                {
+                    "event": "message_delete",
+                    "time": int(time.time()),
+                    "id": "del" + str(int(time.time() * 1000)),
+                    "sequence_id": body["sequence_id"],
+                }
+            )
         elif self.path == "/control/refuse":
             with lock:
                 state["refuse"] = body
