@@ -414,10 +414,9 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
         description=(
             "Make one proposal of several waiting deck edits on one deck (for example six small ones), "
             "their changes in order, oldest first. The old ones are kept, marked replaced, and come back "
-            "if the combined one is rejected. If another app made or changed one of them, that one stays "
-            "waiting until the user applies the combined one, and the combined one always waits for the "
-            "user's press. Card edits only, up to 40 changes in all, and one kind of "
-            "change per card. Changes nothing on Archidekt."
+            "if the combined one is rejected. Only your own app's waiting changes that no other app "
+            "changed, and none that is held: for the rest, ask the user or leave them apart. Card edits "
+            "only, up to 40 changes in all, and one kind of change per card. Changes nothing on Archidekt."
         ),
         annotations={"readOnlyHint": False, "destructiveHint": False, "openWorldHint": True},
         meta=card_meta,

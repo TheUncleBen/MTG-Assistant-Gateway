@@ -1,7 +1,7 @@
 """Release 0.7.29, approvals (review round 1): a second step never lands without its first, and a
 combined change keeps what its parts needed. An assistant does not apply a change while one it
-depends on still waits (Q27j, A9); a combined change keeps a part's hold and its links, and one
-that takes in another app's change waits for the member (G5); a change that depends on one closed
+depends on still waits (Q27j, A9); a held change, or another app's, is never combined (Q142 item
+2 A); a change that depends on one closed
 outside the apply paths (a restart mid-apply, expiry) is held (K6; expiry pending a card)."""
 
 from __future__ import annotations
@@ -54,7 +54,8 @@ async def test_full_auto_waits_while_the_first_step_still_waits(stack: Stack) ->
     assert (await _get(h, token, second["proposal_id"]))["assistant_may_apply"] is True
 
 
-async def test_a_combined_change_keeps_a_parts_hold_and_links(stack: Stack) -> None:
+async def test_a_held_change_is_not_combined(stack: Stack) -> None:
+    """Q142 item 2 A (Ben approved 10-17): a held change is never combined; nothing changes."""
     h = stack.h
     token = await linked_user(stack)
     await _set_mode(h, "manual")
@@ -67,16 +68,14 @@ async def test_a_combined_change_keeps_a_parts_hold_and_links(stack: Stack) -> N
             h, token, "combine_proposals", {"proposal_ids": [top["proposal_id"], other["proposal_id"]]}
         )
     )
-    assert comb["ok"], comb
-    row = h.db.get_proposal(comb["proposal_id"], SUB)
-    assert row["status"] == "held" and row["status_reason"].startswith(f"depends:{base['proposal_id']}:")
-    await _set_mode(h, "auto")
-    out = structured(await call(h, token, "apply_proposal", {"proposal_id": comb["proposal_id"]}))
-    assert out.get("state") != "applied", out
+    assert comb["ok"] is False and f"#{top['board_no']} is held, so it can't be combined" in comb["message"]
+    assert [h.db.get_proposal(x["proposal_id"], SUB)["state"] for x in (top, other)] == ["pending"] * 2
 
 
-async def test_a_combined_change_with_another_apps_part_waits_for_the_member(stack: Stack) -> None:
-    h, ark = stack.h, stack.ark
+async def test_another_apps_change_is_not_combined(stack: Stack) -> None:
+    """Q142 item 2 A: an assistant combines only its own app's waiting changes that no other app
+    changed; another app's, or one another app changed, is refused and nothing changes."""
+    h = stack.h
     await linked_user(stack)
     await _set_mode(h, "manual")
     a, _ = await _app_token(h, "Claude")
@@ -86,22 +85,35 @@ async def test_a_combined_change_with_another_apps_part_waits_for_the_member(sta
     comb = structured(
         await call(h, a, "combine_proposals", {"proposal_ids": [theirs["proposal_id"], mine["proposal_id"]]})
     )
-    assert comb["ok"], comb
-    await _set_mode(h, "auto")
-    got = await _get(h, a, comb["proposal_id"])
-    assert got["assistant_may_apply"] is False
-    assert got["press_reason"] == "includes or replaces a change another app made or changed"
-    out = structured(await call(h, a, "apply_proposal", {"proposal_id": comb["proposal_id"]}))
-    assert out.get("state") != "applied" and ark.patches == [], out
-    # ChatGPT's part stays waiting until the member applies the combined one (combine's description)
-    assert h.db.get_proposal(theirs["proposal_id"], SUB)["state"] == "pending"
-    assert h.db.get_proposal(mine["proposal_id"], SUB)["state"] == "replaced"
-    # the same app combining only its own changes is not stopped by this
-    one = await _propose(h, a, _add("Swamp"))
-    two = await _propose(h, a, _add("Island"))
-    own = structured(
-        await call(h, a, "combine_proposals", {"proposal_ids": [one["proposal_id"], two["proposal_id"]]})
+    assert comb["ok"] is False, comb
+    assert (
+        f"#{theirs['board_no']} was made or changed by another app, so it can't be combined"
+        in comb["message"]
     )
+    assert [h.db.get_proposal(x["proposal_id"], SUB)["state"] for x in (theirs, mine)] == ["pending"] * 2
+    # one of Claude's own that ChatGPT changed is refused too
+    row = h.db.get_proposal(mine["proposal_id"], SUB)
+    assert h.db.amend_proposal(
+        mine["proposal_id"],
+        SUB,
+        expect_version=int(row["version"]),
+        changes=row["changes"],
+        rows=row["rows"],
+        diff_text=row["diff_text"],
+        by_client=row["created_by_client"] + "-other",
+        what_changed="by ChatGPT",
+    )
+    other = await _propose(h, a, _add("Swamp"))
+    comb = structured(
+        await call(h, a, "combine_proposals", {"proposal_ids": [mine["proposal_id"], other["proposal_id"]]})
+    )
+    assert comb["ok"] is False and "changed by another app" in comb["message"], comb
+    # the same app combining only its own changes works as before
+    one = await _propose(h, a, _add("Island"))
+    own = structured(
+        await call(h, a, "combine_proposals", {"proposal_ids": [one["proposal_id"], other["proposal_id"]]})
+    )
+    assert own["ok"], own
     assert "press_reason" not in (await _get(h, a, own["proposal_id"]))
 
 
@@ -364,35 +376,6 @@ async def test_a_replaced_change_applied_outside_the_apply_paths_is_held_when_re
     assert h.db.get_proposal(new["proposal_id"], SUB)["status"] is None
     got = await _get(h, a, new["proposal_id"])
     assert got["status"] == "held" and "which was applied" in got["status_reason"], got
-
-
-async def test_a_combined_change_is_held_once_another_apps_part_is_applied(stack: Stack) -> None:
-    """Review round 3 probe: ChatGPT's part of a combined change is applied on its own; the
-    combined change is held at once (not only when the pre-send check marks it), and says why."""
-    h = stack.h
-    await linked_user(stack)
-    await _set_mode(h, "manual")
-    a, _ = await _app_token(h, "Claude")
-    b, _ = await _app_token(h, "ChatGPT")
-    theirs = await _propose(h, b, _add("Arcane Signet"))
-    mine = await _propose(h, a, _add("Delver of Secrets"))
-    comb = structured(
-        await call(h, a, "combine_proposals", {"proposal_ids": [theirs["proposal_id"], mine["proposal_id"]]})
-    )
-    assert comb["ok"], comb
-    decks = h.app.state.gateway.decks
-    reset = current_client.set(BROWSER_CLIENT)
-    try:
-        run = decks.apply_selection(SUB, [theirs["proposal_id"]], via="review_page")
-        await decks.batches.wait(run["batch_id"], 60)
-    finally:
-        current_client.reset(reset)
-    got = await _get(h, a, comb["proposal_id"])
-    assert got["status"] == "held", got
-    assert got["status_reason"] == f"It would replace #{theirs['board_no']}, which was applied."
-    assert got["press_reason"] == f"would replace #{theirs['board_no']}, which was applied"
-    await _set_mode(h, "auto")
-    assert (await _get(h, a, comb["proposal_id"]))["assistant_may_apply"] is False
 
 
 async def test_applying_a_change_its_own_app_replaced_names_the_replacement(stack: Stack) -> None:

@@ -184,8 +184,8 @@ MAX_PREF_NAME = 120
 MAX_PROPOSAL_VERSIONS = 50
 
 
-#: States of a note that hold the notes depending on it (K6, Q27j). "expired" holds them as the
-#: safe default until Ben answers (review round 1, finding 3; pending a card).
+#: States of a note that hold the notes depending on it (K6, Q27j). "expired" holds them too
+#: (Q142 item 1 A, Ben approved 10-17).
 HOLDING_STATES = ("rejected", "withdrawn", "failed", "expired")
 
 # A note's state as the member sees it: a waiting one past its expiry is "expired" even before
@@ -2298,8 +2298,8 @@ class Database:
             f"AND {_SEEN_STATE} IN {_HOLDING_SQL} ORDER BY l.created_at, l.rowid LIMIT 1"
         )
         reason = first.format("'depends:' || o.id || ':' || " + _SEEN_STATE)
-        # a waiting note whose replaced note was applied on its own (review round 3; safe default
-        # pending a card): applying it too would change the deck twice
+        # a waiting note whose replaced note was applied on its own (review round 3; Q142 item 11 A,
+        # Ben approved 10-17): applying it too would change the deck twice
         gone = (
             "SELECT {} FROM proposal_links l JOIN proposals o ON o.id = l.other_id "
             "WHERE l.proposal_id = proposals.id AND l.kind = 'replaces' AND o.state = 'applied' "

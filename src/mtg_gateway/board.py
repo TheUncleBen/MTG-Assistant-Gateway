@@ -142,7 +142,7 @@ def close_replaced_on_apply(svc: Any, sub: str, proposal_id: str) -> None:
 
 def hold_replacing(svc: Any, sub: str, proposal_id: str) -> None:
     """Once a note is applied on its own, a waiting note that would replace it is held (review
-    round 3; safe default pending a card): applying it too would change the deck twice. The
+    round 3; Q142 item 11 A, Ben approved 10-17): applying it too would change the deck twice. The
     member may still apply it (A8); no assistant does, in any mode."""
     db = svc.db
     for link in db.proposal_links(sub, [proposal_id]):

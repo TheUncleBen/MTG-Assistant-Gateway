@@ -645,8 +645,10 @@ def _overview_body(state: Any) -> str:
         + _stat("Simulation engine (Forge)", sysd["forge"])
         + _stat("Removed-member clean-up", _cleanup_text(sysd["member_cleanup"]))
         + _archidekt_stats(sysd.get("archidekt"))
-        + _stat("Default approval mode", state.settings.approval_mode_default)
-        + _stat("Highest approval mode allowed", state.settings.approval_mode_max)
+        + _stat(
+            "Default approval mode", str(state.decks.live.get("approval_mode_default"))
+        )  # Q142 item 8 A: live
+        + _stat("Highest approval mode allowed", str(state.decks.live.get("approval_mode_max")))
         + "</dl>"
         + (
             _err(f"The last nightly backup failed ({sysd['last_backup_error']}). Check the gateway's log.")

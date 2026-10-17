@@ -259,8 +259,8 @@ HELD_STEP = (
     "An assistant never applies it in any mode; the user may still apply it themselves, or it can be "
     "amended. "
 )
-# The same, for a proposal whose replaced proposal was applied on its own (review round 3; safe
-# default pending a card, WORDING-3-r3).
+# The same, for a proposal whose replaced proposal was applied on its own (review round 3; Q142
+# item 11 A, Ben approved 10-17; WORDING-3-r3).
 HELD_REPLACED_STEP = (
     "Held: the proposal this one would replace was applied on its own (status_reason says which), "
     "so applying this one too would change the deck twice. An assistant never applies it in any "
@@ -2487,9 +2487,10 @@ class DeckService:
     def press_reason(self, sub: str, row: dict[str, Any]) -> str | None:
         """Why this waiting note needs the member's own press in every mode, or None: a hold (K6;
         Q140 item 8 option A, Ben approved 10-17) and a first step not applied (Q134 item 9, the
-        same answer); and, safe defaults pending Ben's cards (review rounds 1 and 3, the Q142
-        check), another app's change taken in (G5, Q27m), a change that would replace this one,
-        and a replaced change applied on its own. The member may still press (A8)."""
+        same answer); another app's change taken in (G5, Q27m; a safe default from the Q142
+        check), a change that would replace this one (Q142 item 12 A) and a replaced change
+        applied on its own (Q142 item 11 A; both Ben approved 10-17). The member may still press
+        (A8)."""
         if row.get("state") != "pending":
             return None
         if row.get("status") == "held" and str(row.get("status_reason") or "").startswith("replaces:"):
@@ -4910,6 +4911,8 @@ class DeckService:
         ones are marked replaced by it (BOARD §2)."""
         if not isinstance(proposal_ids, list) or len(set(map(str, proposal_ids))) < 2:
             raise DeckError("invalid", "proposal_ids must name two or more waiting proposals")
+        self.db.hold_blocked(sub)  # a hold set when read (K6) counts here too
+        client = current_client.get()
         rows = []
         for pid in dict.fromkeys(str(x) for x in proposal_ids):
             row = self.db.get_proposal(pid, sub)
@@ -4917,6 +4920,20 @@ class DeckService:
                 raise DeckError("invalid", f"{pid} is not a waiting proposal of this user")
             if (row.get("kind") or "edit") != "edit":
                 raise DeckError("invalid", f"{pid} is not a deck edit; only card edits can be combined")
+            # Q142 item 2 A (Ben approved 10-17 02:29Z): only this app's own waiting changes that
+            # no other app changed, and never a held one (wording drafts, WORDING-5)
+            no = f"#{row['board_no']}" if row.get("board_no") else pid
+            if row.get("created_by_client") != client or self.rewritten_by_another_app(sub, row):
+                raise DeckError(
+                    "invalid",
+                    f"{no} was made or changed by another app, so it can't be combined. Ask the user "
+                    "to approve or reject it, or leave it apart.",
+                )
+            if row.get("status") == "held":
+                raise DeckError(
+                    "invalid",
+                    f"{no} is held, so it can't be combined. Ask the user about it, or leave it apart.",
+                )
             rows.append(row)
         if len({str(r["deck_id"]) for r in rows}) != 1:
             raise DeckError("invalid", "Only proposals for the same deck can be combined.")
