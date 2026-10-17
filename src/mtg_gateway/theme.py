@@ -538,7 +538,7 @@ button.thumbbtn:focus-visible{outline:2px solid var(--accent);outline-offset:2px
 .suggest-list mark{background:none;color:inherit;font-weight:700;text-decoration:underline;
   text-decoration-color:var(--orange);text-underline-offset:.15em}
 /* the picker over a short list (static/suggest.js, data-suggest="list") reads as one: the select
-   chevron in the box, finger-sized rows (44 px, L9; roomier on a touch screen) */
+   chevron in the box, finger-sized rows (44 px; roomier on a touch screen) */
 .suggest > input[data-suggest=list]{padding-right:2.25rem;background-image:url(/static/chevron.svg);
   background-repeat:no-repeat;background-position:right .9rem center;background-size:10px 6px}
 .suggest-list.picklist li:not(.head){min-height:44px;padding-top:max(.55rem,calc((44px - 1.3em) / 2));
