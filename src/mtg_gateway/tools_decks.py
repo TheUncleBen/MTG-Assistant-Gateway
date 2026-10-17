@@ -40,6 +40,24 @@ from .schemas import (
 from .views import deck_out
 
 
+def _shown_map(shown: Any, ids: list[str]) -> dict[str, dict[str, Any]]:
+    """The statuses a card showed for the changes it applies, kept only for those changes and
+    only in the expected shape (anything else is dropped, as if the card sent none)."""
+    out: dict[str, dict[str, Any]] = {}
+    if not isinstance(shown, dict):
+        return out
+    for pid in ids:
+        one = shown.get(pid)
+        if not isinstance(one, dict):
+            continue
+        at = one.get("status_at")
+        out[pid] = {
+            "status": str(one.get("status") or "")[:20],
+            "status_at": at if isinstance(at, int) and not isinstance(at, bool) else None,
+        }
+    return out
+
+
 def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
     """Register the deck, proposal and snapshot tools."""
     _closed_at = h._closed_at
@@ -476,7 +494,11 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
         },
         meta=dict(CONFIRM_TOOL_META),
     )
-    async def confirm_waiting(proposal_ids: list[str], approval: str) -> CallToolResult:
+    async def confirm_waiting(
+        proposal_ids: list[str], approval: str, shown: dict[str, Any] | None = None
+    ) -> CallToolResult:
+        # shown: proposal id -> {"status", "status_at"} as the card showed them. A change held
+        # since is left out and reported as not sent, the rest are applied.
         try:
             sub = _sub()
             if not s.apply_in_chat:
@@ -485,7 +507,7 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
                     "This gateway doesn't apply changes from the chat card. Use the Proposals page.",
                 )
             ids = state.decks.check_set_approval(sub, proposal_ids, approval)
-            run = state.decks.apply_selection(sub, ids, via="app")
+            run = state.decks.apply_selection(sub, ids, via="app", shown=_shown_map(shown, ids))
             await state.decks.batches.wait(run["batch_id"], APPLY_WAIT_SECONDS)
             return _card_result(state.decks.selection_result(run), None)
         except DeckError as exc:

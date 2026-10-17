@@ -275,6 +275,7 @@ def deck_waiting(data: dict[str, Any], *, decks: Any, sub: str) -> tuple[dict[st
         "summary",
         "status",
         "status_reason",
+        "status_at",
         "version",
         "changed_by",
         "changed_by_apps",

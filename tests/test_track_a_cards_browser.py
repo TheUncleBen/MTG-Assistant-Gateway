@@ -235,8 +235,13 @@ def test_apply_all_on_the_waiting_card_lists_the_order_then_sends_the_set() -> N
             _shot(page, "waiting-card-confirm-390")
             card.locator("#go:not([disabled])").click()
             card.locator("#result:not(.hidden)").wait_for()
+            # with the status each change showed: one held since is not sent
             assert _tool_calls(page, "confirm_waiting") == [
-                {"proposal_ids": ["p1", "p2"], "approval": "set-code"}
+                {
+                    "proposal_ids": ["p1", "p2"],
+                    "approval": "set-code",
+                    "shown": {"p1": {"status": ""}, "p2": {"status": "needs_look"}},
+                }
             ]
             assert card.locator("#status:focus").count() == 1
             assert card.locator("#status").inner_text() == "Applied 1. 1 not sent."
@@ -346,7 +351,11 @@ def test_the_proposal_card_names_the_others_and_applies_all(width: int, theme: s
             card.locator("#apply-all:not([disabled])", has_text="Apply 2 changes").click()
             card.locator("#status.ok").wait_for()
             assert _tool_calls(page, "confirm_waiting") == [
-                {"proposal_ids": ["p1", "p2"], "approval": "set-code"}
+                {
+                    "proposal_ids": ["p1", "p2"],
+                    "approval": "set-code",
+                    "shown": {"p1": {"status": "held"}, "p2": {"status": ""}},
+                }
             ]
             assert not _tool_calls(page, "confirm_proposal")
             assert card.locator("#status").inner_text() == "Applied 2."
@@ -714,6 +723,81 @@ def test_a_hold_set_after_the_card_was_drawn_is_shown_when_the_card_cannot_check
             assert _tool_calls(page, "confirm_proposal")[-1] == {
                 "proposal_id": "p2",
                 "approval": "code-2",
+                "decision": "approve",
+                "shown_status": "held",
+                "shown_status_at": NOW,
+            }
+        finally:
+            browser.close()
+    assert not errors, errors
+
+
+WAITING_NOW_HELD_TEXT = (
+    "This change is now held, so nothing was approved. Read why on its row, then press Approve "
+    "again if you still want it."
+)
+
+
+@pytest.mark.parametrize(
+    "width,theme,text",
+    [(344, "light", "200%"), (360, "dark", "100%"), (884, "dark", "200%"), (1280, "light", "100%")],
+)
+def test_approve_on_the_waiting_card_shows_a_hold_set_after_it_was_drawn(
+    width: int, theme: str, text: str
+) -> None:
+    """Approve on a row sends the status the row showed. The gateway refuses a change held since,
+    the row shows the hold with nothing approved, and the next press says it showed the hold."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_or_skip()
+    refused = {
+        "ok": False,
+        "error": "now_held",
+        "message": "This change is now held, so nothing was sent to Archidekt. It would replace #3, "
+        "which was applied. The user can read why on the card and still apply it there.",
+        "state": "pending",
+        "version": 1,
+        "status": "held",
+        "status_reason": "It would replace #3, which was applied.",
+        "status_at": NOW,
+    }
+    with sync_playwright() as p:
+        browser = _launch(p, exe)
+        try:
+            page = browser.new_page(viewport={"width": width, "height": 900})
+            errors: list[str] = []
+            page.on("pageerror", lambda e: errors.append(str(e)))
+            card = _open(
+                page,
+                cards_html("waiting-card"),
+                {"structuredContent": WAITING, "_meta": WAITING_META},
+                {"confirm_proposal": refused},
+                theme,
+            )
+            frame = page.frames[1]
+            frame.evaluate("(t) => { document.documentElement.style.fontSize = t; }", text)
+            card.locator("#row-p1 button.primary:not([disabled])").click()
+            card.locator("#status.err").wait_for()
+            assert _tool_calls(page, "confirm_proposal") == [
+                {"proposal_id": "p1", "approval": "code-1", "decision": "approve", "shown_status": ""}
+            ]
+            assert card.locator("#status").inner_text() == WAITING_NOW_HELD_TEXT
+            row = card.locator("#row-p1").inner_text()
+            assert "Held" in row and "It would replace #3, which was applied." in row, row
+            assert card.locator("#row-p1 .done").count() == 0  # still waiting: Approve stays
+            box = frame.evaluate(
+                "() => ({page: document.documentElement.clientWidth,"
+                " scroll: document.documentElement.scrollWidth})"
+            )
+            assert box["scroll"] <= box["page"], box
+            _shot(page, f"waiting-card-now-held-{width}-{theme}-{text.rstrip('%')}")
+            # the row shows the hold now: the member's next press says so, and it applies
+            page.evaluate("(r) => { window.replies.confirm_proposal = r; }", {"ok": True, "state": "applied"})
+            card.locator("#row-p1 button.primary:not([disabled])").click()
+            card.locator("#row-p1 .done.ok").wait_for()
+            assert _tool_calls(page, "confirm_proposal")[-1] == {
+                "proposal_id": "p1",
+                "approval": "code-1",
                 "decision": "approve",
                 "shown_status": "held",
                 "shown_status_at": NOW,

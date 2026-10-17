@@ -606,7 +606,15 @@ button.danger:disabled{color:var(--red)}
     if (ok) ok.disabled = true; if (no) no.disabled = true;
     setStatus("Applying to Archidekt…", "");
     $("status").focus();
-    request("tools/call", { name: "confirm_waiting", arguments: { proposal_ids: set.ids, approval: set.code } })
+    // the status each change showed on the confirm: a change held since is not sent
+    var shown = {}, lines = (proposal.deck_waiting && proposal.deck_waiting.set_lines) || [];
+    lines.forEach(function (x) {
+      var id = String(x.proposal_id);
+      if (set.ids.indexOf(id) < 0) return;
+      shown[id] = { status: String(x.status || "") };
+      if (typeof x.status_at === "number") shown[id].status_at = x.status_at;
+    });
+    request("tools/call", { name: "confirm_waiting", arguments: { proposal_ids: set.ids, approval: set.code, shown: shown } })
       .then(function (res) {
         busy = false;
         var sc = (res && res.structuredContent) || {};

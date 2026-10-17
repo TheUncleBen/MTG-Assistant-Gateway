@@ -3469,14 +3469,18 @@ class DeckService:
             await asyncio.gather(asyncio.shield(task), return_exceptions=True)
 
     def plan_selection(
-        self, sub: str, proposal_ids: list[str], versions: dict[str, int] | None = None
+        self,
+        sub: str,
+        proposal_ids: list[str],
+        versions: dict[str, int] | None = None,
+        shown: dict[str, dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """What applying these waiting changes together would do (batch.plan): the confirm.
         Refused when it holds a change and one that replaces it (another app's change, left
         waiting until its replacement is applied): the member picks one (the Q142 check)."""
         self.db.hold_blocked(sub)
         self._refuse_replaced_pairs(sub, [str(p) for p in proposal_ids][:MAX_SELECTION])
-        return batch.plan(self, sub, [str(p) for p in proposal_ids][:MAX_SELECTION], versions)
+        return batch.plan(self, sub, [str(p) for p in proposal_ids][:MAX_SELECTION], versions, shown)
 
     def _refuse_replaced_pairs(self, sub: str, picks: list[str]) -> None:
         chosen = set(picks)
@@ -3498,7 +3502,13 @@ class DeckService:
             )
 
     def apply_selection(
-        self, sub: str, proposal_ids: list[str], *, via: str, versions: dict[str, int] | None = None
+        self,
+        sub: str,
+        proposal_ids: list[str],
+        *,
+        via: str,
+        versions: dict[str, int] | None = None,
+        shown: dict[str, dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """Start applying a selection (batch.py), the member's one press: each deck in turn, its
         changes oldest first, each re-checked just before it is sent. Returns the run, whose
@@ -3508,7 +3518,7 @@ class DeckService:
                 "writes_disabled",
                 refusals.WRITES_OFF_KEPT if len(proposal_ids) == 1 else refusals.WRITES_OFF_KEPT_MANY,
             )  # Q141 item 7A
-        the_plan = self.plan_selection(sub, proposal_ids, versions)
+        the_plan = self.plan_selection(sub, proposal_ids, versions, shown)
         if not the_plan["count"]:
             only = the_plan["skipped"][0] if len(the_plan["skipped"]) == 1 else {}
             if only.get("replaced_by"):
