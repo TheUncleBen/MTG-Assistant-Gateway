@@ -413,7 +413,7 @@ def test_forge_results_fit_and_read(server: Server, width: int, scheme: str) -> 
         browser.close()
 
 
-@pytest.mark.parametrize("width", [320, 344, 717, 1366])
+@pytest.mark.parametrize("width", [320, 344, 600, 640, 717, 1366])
 @pytest.mark.parametrize("scheme", ["light", "dark"])
 def test_reports_page_fits_and_reads(server: Server, width: int, scheme: str) -> None:
     """K8 (Q136): the Reports page under More, with a Forge run playing, one waiting and a long deck
@@ -483,8 +483,9 @@ def test_reports_page_fits_and_reads(server: Server, width: int, scheme: str) ->
         assert state["checked"] > 10 and not state["low"], state["low"]
         assert state["rows"] == 3 and state["runs"] == 2
         assert min(state["targets"]) >= 44, state["targets"]
-        if width >= 600:
-            # review r2 item 19: on wider screens the Show button stays on the select's line
+        if width > 600:
+            # review r2 item 19: on wider screens the Show button stays on the select's line (at
+            # 600px and narrower the site's phone layout makes a form's button full width, below)
             tops = page.evaluate(
                 "() => ['.rp-filter .msel-btn', '.rp-filter .btn'].map(s =>"
                 " Math.round(document.querySelector(s).getBoundingClientRect().top))"
@@ -494,17 +495,31 @@ def test_reports_page_fits_and_reads(server: Server, width: int, scheme: str) ->
         # review r1 fix 1: the games played so far, as the report page counts them
         assert "Playing: 3 of 10 games" in text
         assert "Waiting: number 1 in line" in text
-        # review r1 fix 2: at 200% text the deck filter still fits (no sideways scroll). Not at 717:
-        # there the site's own top bar (theme.py's nav.site, on every page) runs 207px past the
-        # window at 200% text; reported to its owner.
+        # review r1 fix 2 and r3 item 3: at 200% text the deck filter still fits, inside the window
+        # and its panel, at every width. The whole page is measured too except from 600 to 768px,
+        # where the site's own top bar (theme.py's nav.site, Track B's) runs past the window at
+        # 200% text; that is with its owner.
         from .test_overflow_sweep_browser import MEASURE
         from .test_text_zoom_browser import ROOT_200, TEXT_200
 
-        for zoom in (ROOT_200, TEXT_200) if width != 717 else ():
+        for zoom in (ROOT_200, TEXT_200):
             page.reload(wait_until="networkidle")
             page.evaluate(zoom)
-            found = page.evaluate(MEASURE)
-            assert found == [], (zoom[:40], found)
+            fit = page.evaluate(
+                """() => {
+                  const panel = document.querySelector('.rp-all').getBoundingClientRect();
+                  return Array.from(document.querySelectorAll('.rp-filter, .rp-filter *'))
+                    .filter(e => e.getClientRects().length && !e.closest('.msel-native'))
+                    .map(e => [e.tagName + '.' + e.className, e.getBoundingClientRect()])
+                    .filter(([, r]) => r.width && (r.right > Math.min(window.innerWidth, panel.right) + 0.5
+                                                   || r.left < Math.max(0, panel.left) - 0.5))
+                    .map(([n, r]) => [n, Math.round(r.left), Math.round(r.right), window.innerWidth]);
+                }"""
+            )
+            assert fit == [], (zoom[:40], fit)
+            if not 600 <= width <= 768:
+                found = page.evaluate(MEASURE)
+                assert found == [], (zoom[:40], found)
             if shots:
                 page.screenshot(path=f"{shots}/reports-page-{width}-{scheme}-text200.png", full_page=True)
         page.select_option("#rp-deck", "43")

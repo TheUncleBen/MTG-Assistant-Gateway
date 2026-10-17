@@ -227,8 +227,10 @@ report again with `get_deck_report` until it is `done`, or another final state
   against precons of its own bracket, so two decks' Forge win rates (one
   `run_deck_report` each) are each against their own bracket's table, not the
   same opponents, even with the same `options.seed` (check `forge.seats`).
-  For the same table, run the second deck's report with `same_opponents_as`
-  set to the first report's id. The same seed does not always replay the same
+  For the same table, run the first deck's report with `compare_with` set to
+  the second deck (its precons are picked for the higher of the two decks'
+  brackets, so the order doesn't matter), then the second deck's report with
+  `same_opponents_as` set to the first report's id. The same seed does not always replay the same
   Forge games, so compare Forge runs by win rate and 95% interval.
 - Forge plays Commander decks only: a 60-card deck's report has
   `forge.state: "skipped"` with the reason. `forge=false` leaves Forge out for
