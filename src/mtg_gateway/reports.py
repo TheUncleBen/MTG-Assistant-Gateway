@@ -574,7 +574,8 @@ class ReportService:
         gets the same number of games as the other deck's report, so the two stay even, and
         nothing starts unless the queue has room for both. The report page's button, the
         assistants' play_more_games tool and the app's API all come here, so the rules are the
-        same everywhere; a refusal carries its ``reason`` code (MORE_REFUSALS)."""
+        same everywhere; a refusal carries its ``reason`` code (MORE_REFUSALS, or ``notfound`` for a
+        report that is not the member's)."""
         try:
             return await self._play_more(sub, report_id)
         except DeckError as exc:
@@ -590,7 +591,7 @@ class ReportService:
         async with self._forge_start_lock:
             mine = self._own_forge(sub, str(report_id))
             if mine is None:
-                raise DeckError("not_found", "No such report for your account.")
+                raise DeckError("not_found", "No such report for your account.", reason="notfound")
             rid, section = mine
             games, why, pair = self._more_for(sub, rid, section)
             if why:

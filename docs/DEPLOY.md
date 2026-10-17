@@ -662,7 +662,7 @@ default, and an install that leaves it off behaves exactly as before.
     `MTG_FORGE_URL=http://forge:8000`.
 - **The image tag:** the stack files name the Forge image by `FORGE_TAG` (default `2.0.15-mag3`).
   GitHub builds and publishes a new tag the first time `main` carries it (the Forge image
-  workflow, after its smoke games pass on arm64 and amd64), so pulling a new tag fails until that
+  workflow, after its test games pass on arm64 and amd64), so pulling a new tag fails until that
   run has finished. After an update that changes the tag, wait for the run, then update the stack.
 - **Load:** Java starts only while Forge plays, capped by `FORGE_MEMORY_LIMIT` (default 1536M) and
   `FORGE_CPUS` (default 2). `MTG_FORGE_GAMES` (default 4) sets the games per

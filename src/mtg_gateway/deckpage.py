@@ -1826,6 +1826,11 @@ GOLDFISH_CSS = """
 .gf-size{margin-top:.75rem}
 .gf-size .cardsize{display:flex;flex-direction:row;flex-wrap:wrap;align-items:center;gap:.25rem .5rem}
 .gf-size .cardsize .lbl{color:var(--text-muted)}
+/* at 200% text the three buttons' 2.75rem minimum is wider than a folded Fold leaves the switch:
+   let them shrink, down to 44px, instead of the switch cutting off L */
+.gf-size .sizeseg{max-width:100%}
+.gf-size .sizeseg button{flex:0 1 auto;min-width:min(2.75rem,44px)}
+@media (pointer:coarse){ .gf-size .sizeseg button{min-width:44px} }
 .gf-zone{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-panel);
   padding:.75rem;margin:0 0 1rem;min-width:0}
 .gf-zone h2{font-size:1.1rem;margin:0 0 .5rem}

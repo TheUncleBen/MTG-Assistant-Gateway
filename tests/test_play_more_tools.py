@@ -113,8 +113,9 @@ async def test_the_tool_and_the_api_add_games_with_the_buttons_rules(stack: Stac
     assert len(fake.started) == started
     # a report that isn't the member's, and a gateway without Forge
     gone = structured(await call(h, token, "play_more_games", {"report_id": "rep_nope"}))
-    assert gone["ok"] is False and gone["error"] == "not_found"
-    assert (await h.http.post("/api/v1/reports/rep_nope/forge/more", headers=auth)).status_code == 404
+    assert (gone["ok"], gone["error"], gone["reason"]) == (False, "not_found", "notfound")
+    api_gone = await h.http.post("/api/v1/reports/rep_nope/forge/more", headers=auth)
+    assert api_gone.status_code == 404 and api_gone.json()["reason"] == "notfound"
     reports.forge = None
     off = structured(await call(h, token, "play_more_games", {"report_id": rid}))
     assert off["reason"] == "noforge" and off["message"] == reports_module.MORE_NO_FORGE
