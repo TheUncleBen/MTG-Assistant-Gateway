@@ -482,3 +482,40 @@ def test_a_long_server_name_gives_way_before_the_search_box_and_the_links(server
         browser.close()
     assert problems == [], "\n".join(problems)
     assert at_1280["cut"] and at_1280["search"] >= FULL_SEARCH, at_1280  # the name is cut, not the box
+
+
+def test_without_scripts_the_scroll_room_is_large_only_where_the_bar_wraps(server: Server) -> None:
+    """Review R12-2: 60 px over the one-row bar, 9.5rem where its links wrap."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_path()
+    if exe == "missing":
+        pytest.skip("no Chromium available for Playwright")
+    sid = _admin(server)
+    seen = {}
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+        ctx = browser.new_context(viewport={"width": 1280, "height": 800}, java_script_enabled=False)
+        ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
+        page = ctx.new_page()
+        for width, zoom in ((390, "none"), (717, "none"), (1280, "none"), (920, "root-150"), (717, "text")):
+            page.set_viewport_size({"width": width, "height": 800})
+            page.goto(f"{server.base}/history", wait_until="networkidle")
+            _zoom(page, zoom)
+            seen[(width, zoom)] = page.evaluate(
+                "() => [getComputedStyle(document.documentElement).scrollPaddingTop,"
+                " document.querySelector('.topbar').offsetHeight,"
+                " parseFloat(getComputedStyle(document.documentElement).fontSize)]"
+            )
+        browser.close()
+    for (width, zoom), (room, bar, rem) in seen.items():
+        if bar == 50:
+            assert room == "60px", (width, zoom, room)
+        else:
+            assert abs(float(room[:-2]) - 9.5 * rem) < 0.5 and float(room[:-2]) >= bar + 1, (
+                width,
+                zoom,
+                room,
+                bar,
+            )
+    assert seen[(1280, "none")][1] == 50 and seen[(920, "root-150")][1] > 50  # both kinds were seen
