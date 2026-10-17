@@ -263,13 +263,13 @@ HELD_STEP = (
     "An assistant never applies it in any mode; the user may still apply it themselves, or it can be "
     "amended. "
 )
-# The same, for a proposal whose replaced proposal was applied on its own (review round 3; Q142
-# item 11 A, Ben approved 10-17; WORDING-3-r3).
 # the card's press reached a change that was held after the card showed it
 NOW_HELD = (
-    "This change is now held, so nothing was sent to Archidekt. {reason} The user can read why and "
-    "still apply it with another press."
+    "This change is now held, so nothing was sent to Archidekt. {reason} The user can read why on "
+    "the card and still apply it there."
 )
+# The same, for a proposal whose replaced proposal was applied on its own (review round 3; Q142
+# item 11 A, Ben approved 10-17; WORDING-3-r3).
 HELD_REPLACED_STEP = (
     "Held: the proposal this one would replace was applied on its own (status_reason says which), "
     "so applying this one too would change the deck twice. An assistant never applies it in any "
@@ -3433,15 +3433,21 @@ class DeckService:
 
     def _now_held(self, sub: str, row: dict[str, Any]) -> DeckError:
         """A press on a card that showed the change before it was held: nothing is sent, and the
-        reply carries the hold so the card can show it."""
-        info = self._status_fields(sub, row)
+        reply carries the hold and the other lines the card's note is drawn from, as they are now,
+        so the card shows no line the hold made untrue."""
+        now = self.describe(sub, row["id"])
         return DeckError(
             "now_held",
-            NOW_HELD.format(reason=info["status_reason"]).strip(),
+            NOW_HELD.format(reason=now.get("status_reason") or "").strip(),
             review_url=f"{self.settings.public_url}/proposals/{row['id']}",
             state="pending",
             version=int(row.get("version") or 1),
-            **info,
+            status=now.get("status"),
+            status_reason=now.get("status_reason") or "",
+            status_at=now.get("status_at"),
+            press_reason=now.get("press_reason") or "",
+            replace_note=now.get("replace_note") or "",
+            assistant_may_apply=bool(now.get("assistant_may_apply")),
         )
 
     async def wait_applied(self, proposal_id: str) -> None:

@@ -707,11 +707,14 @@ button.danger:disabled{color:var(--red)}
           var msg = sc.message || (res && res.content && res.content[0] && res.content[0].text) || "The gateway refused.";
           busy = false;
           if (sc.error === "now_held" && sc.status === "held") {
+            // the note is drawn again from the gateway's lines, so none the hold made untrue stays
             render({ structuredContent: Object.assign({}, proposal, {
-              status: sc.status, status_reason: sc.status_reason, status_at: sc.status_at
+              status: sc.status, status_reason: sc.status_reason, status_at: sc.status_at,
+              press_reason: sc.press_reason || "", replace_note: sc.replace_note || "",
+              assistant_may_apply: !!sc.assistant_may_apply
             }), _meta: codesMeta() });
             setStatus("This change is now held, so nothing was approved. Read the note above, then press Approve again if you still want it.", "err");
-            tellModel("The user pressed Approve on the proposal card for " + pid + ", but it is now held, so nothing was sent: " + msg);
+            tellModel("The user pressed Approve on the proposal card for " + pid + ", but the gateway answered: " + msg);
             return;
           }
           // No longer pending (rejected or applied elsewhere, expired): show that and drop the buttons.

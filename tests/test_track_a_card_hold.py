@@ -64,8 +64,14 @@ async def test_a_hold_set_after_the_card_was_drawn_is_refused_and_shown(stack: S
     assert got["status_reason"] == "It would replace #1, which was applied."
     assert got["message"] == (
         "This change is now held, so nothing was sent to Archidekt. It would replace #1, which was "
-        "applied. The user can read why and still apply it with another press."
+        "applied. The user can read why on the card and still apply it there."
     )
+    # the card's note is drawn again from these: as they are now, not as when it was drawn
+    now = structured(await call(h, a, "get_proposal", {"proposal_id": pid}))
+    print("replace_note now:", repr(now.get("replace_note")), "press_reason:", repr(now.get("press_reason")))
+    assert got["press_reason"] == (now.get("press_reason") or "")
+    assert got["replace_note"] == (now.get("replace_note") or "")
+    assert got["assistant_may_apply"] is False
     assert _qty(stack.ark, "Delver of Secrets") == before
     assert h.db.get_proposal(pid, SUB)["state"] == "pending"
     # the card now shows the hold: the member's press with that status applies it

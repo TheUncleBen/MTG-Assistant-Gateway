@@ -641,12 +641,24 @@ def test_a_hold_set_after_the_card_was_drawn_is_shown_when_the_card_cannot_check
     from playwright.sync_api import sync_playwright
 
     exe = _chromium_or_skip()
-    plain = {**PROPOSAL, "deck_waiting": None}
+    # drawn while the change it replaces still waited, in Semi-auto as a low-risk change
+    plain = {
+        **PROPOSAL,
+        "deck_waiting": None,
+        "replace_note": "This replaces #1, which still waits.",
+        "approval_mode": "semi",
+        "risk": "low",
+        "risk_reason": "adds 1 card",
+        "assistant_may_apply": True,
+    }
     refused = {
         "ok": False,
         "error": "now_held",
         "message": "This change is now held, so nothing was sent to Archidekt. It would replace #1, "
-        "which was applied. The user can read why and still apply it with another press.",
+        "which was applied. The user can read why on the card and still apply it there.",
+        "press_reason": "would replace #1, which was applied",
+        "replace_note": "",
+        "assistant_may_apply": False,
         "state": "pending",
         "version": 1,
         "status": "held",
@@ -675,7 +687,11 @@ def test_a_hold_set_after_the_card_was_drawn_is_shown_when_the_card_cannot_check
             card.locator("#approve:not([disabled])").click()
             card.locator("#status.err", has_text="now held").wait_for()
             assert card.locator("#status").inner_text() == NOW_HELD_TEXT
-            assert "Held. It would replace #1, which was applied." in card.locator("#card").inner_text()
+            text = card.locator("#card").inner_text()
+            assert "Held. It would replace #1, which was applied." in text
+            assert "This one would replace #1, which was applied, so it needs your press." in text
+            # no line the hold made untrue stays on the card
+            assert "still waits" not in text and "Low-risk change" not in text, text
             assert _tool_calls(page, "confirm_proposal") == [
                 {"proposal_id": "p2", "approval": "code-2", "decision": "approve", "shown_status": ""}
             ]
