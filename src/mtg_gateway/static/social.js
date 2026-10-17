@@ -394,6 +394,7 @@
       no.type = "button";
       bar.appendChild(yes); bar.appendChild(no);
       form.insertBefore(bar, form.querySelector("button[type=submit]"));
+      yes.focus(); // as every other confirm here: the answer is one key away
       no.addEventListener("click", function () { bar.remove(); textarea.focus(); });
       yes.addEventListener("click", function () {
         yes.disabled = true;

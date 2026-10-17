@@ -71,6 +71,12 @@ def no_longer_waiting_text(state: str) -> str:
     return f"Not sent: it is no longer waiting (it is {state})."
 
 
+# A change its own app replaced, picked (review round 3; wording drafts, WORDING-3-r3): its line
+# in a selection, and the refusal when it was picked on its own
+REPLACED_NOT_SENT = "Not sent: it was replaced by {new}. Apply {new} instead."
+REPLACED_ALONE = "{old} was replaced by {new}, so nothing was sent. Apply {new} instead."
+
+
 def older_waiting_text(n: int) -> str:
     if n <= 0:
         return ""
@@ -112,7 +118,9 @@ def plan(svc: Any, sub: str, picks: list[str], versions: dict[str, int] | None =
         if row is None:
             continue
         if row["state"] != "pending":
-            skipped.append(_line(svc, sub, row, no_longer_waiting_text(row["state"])))
+            new = _replaced_by(db, sub, pid) if row["state"] == "replaced" else None
+            why = REPLACED_NOT_SENT.format(new=new) if new else no_longer_waiting_text(row["state"])
+            skipped.append({**_line(svc, sub, row, why), **({"replaced_by": new} if new else {})})
             continue
         rows.append(row)
     by_deck: dict[str, list[dict[str, Any]]] = {}
@@ -156,6 +164,16 @@ def plan(svc: Any, sub: str, picks: list[str], versions: dict[str, int] | None =
         "count": sum(len(d["changes"]) for d in decks),
         "rows": sum(int(c.get("row_count") or 0) for d in decks for c in d["changes"]),
     }
+
+
+def _replaced_by(db: Any, sub: str, proposal_id: str) -> str | None:
+    """The board number ("#5") of the change that replaced ``proposal_id``, or None."""
+    for link in db.proposal_links(sub, [proposal_id]):
+        if link["other_id"] == proposal_id and link["kind"] == "replaces":
+            no = db.proposal_board_numbers(sub, [link["proposal_id"]]).get(link["proposal_id"])
+            if no:
+                return f"#{no}"
+    return None
 
 
 def _line(svc: Any, sub: str, row: dict[str, Any], why: str | None = None) -> dict[str, Any]:

@@ -211,6 +211,16 @@ def hold_reason(dep: dict[str, Any]) -> str:
     return f"depends:{dep['id']}:{dep['state']}"
 
 
+# replaced_hold_reason in SQL, for the lazy hold (hold_blocked)
+GONE_REASON_SQL = "'replaces:' || o.id || ':applied'"
+
+
+def replaced_hold_reason(proposal_id: str) -> str:
+    """The stored reason of a hold on a note whose replaced note was applied on its own:
+    ``replaces:<id>:applied`` (review round 3)."""
+    return f"replaces:{proposal_id}:applied"
+
+
 class ProposalVersionsFull(Exception):
     """amend_proposal refused: the proposal already keeps MAX_PROPOSAL_VERSIONS earlier versions."""
 
@@ -2288,13 +2298,32 @@ class Database:
             f"AND {_SEEN_STATE} IN {_HOLDING_SQL} ORDER BY l.created_at, l.rowid LIMIT 1"
         )
         reason = first.format("'depends:' || o.id || ':' || " + _SEEN_STATE)
+        # a waiting note whose replaced note was applied on its own (review round 3; safe default
+        # pending a card): applying it too would change the deck twice
+        gone = (
+            "SELECT {} FROM proposal_links l JOIN proposals o ON o.id = l.other_id "
+            "WHERE l.proposal_id = proposals.id AND l.kind = 'replaces' AND o.state = 'applied' "
+            "ORDER BY l.created_at, l.rowid LIMIT 1"
+        )
+        args = {"sub": owner_sub, "now": int(time.time())}
+        live = (
+            "WHERE owner_sub = :sub AND state = 'pending' AND expires_at >= :now "
+            "AND COALESCE(status, '') <> 'held' "
+        )
         with self.tx() as c:
-            return c.execute(
+            held = c.execute(
                 f"UPDATE proposals SET status = 'held', status_at = :now, status_reason = ({reason}) "
-                f"WHERE owner_sub = :sub AND state = 'pending' AND expires_at >= :now "
-                f"AND COALESCE(status, '') <> 'held' AND EXISTS ({first.format('1')})",
-                {"sub": owner_sub, "now": int(time.time())},
+                f"{live}AND EXISTS ({first.format('1')})",
+                args,
             ).rowcount
+            return (
+                held
+                + c.execute(
+                    "UPDATE proposals SET status = 'held', status_at = :now, status_reason = "
+                    f"({gone.format(GONE_REASON_SQL)}) {live}AND EXISTS ({gone.format('1')})",
+                    args,
+                ).rowcount
+            )
 
     def set_hold(self, proposal_id: str, owner_sub: str, reason: str | None) -> bool:
         """Hold a waiting proposal (``reason``) or lift its hold (None: back to plain waiting).

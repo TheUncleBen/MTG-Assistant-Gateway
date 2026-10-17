@@ -577,3 +577,45 @@ def test_the_cards_size_their_text_in_rem() -> None:
         sizes = _re.findall(r"font-size:([^;}]+)", html)
         assert sizes, "no font sizes found"
         assert [x for x in sizes if x.strip().endswith("px") and x.strip() != "14px"] == [], sizes
+
+
+def test_approve_says_when_it_could_not_check_and_waits_for_a_second_press() -> None:
+    """Review round 3: when Approve's re-read gets no answer (the host refuses it), nothing is
+    approved on that press and the card says so; the next press approves the change as shown."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_or_skip()
+    plain = {**PROPOSAL, "deck_waiting": None}
+    applied = {**plain, "state": "applied", "applied_at": NOW}
+    with sync_playwright() as p:
+        browser = _launch(p, exe)
+        try:
+            page = browser.new_page(viewport={"width": 390, "height": 900})
+            errors: list[str] = []
+            page.on("pageerror", lambda e: errors.append(str(e)))
+            page.route("https://api.scryfall.com/**", lambda r: r.abort())
+            # no get_proposal reply: the host refuses the card's read
+            card = _open(
+                page,
+                card_html(),
+                {"structuredContent": plain, "_meta": {APPROVAL_META_KEY: "code-2"}},
+                {"confirm_proposal": {"ok": True, **applied}},
+            )
+            card.locator("#approve:not([disabled])").click()
+            card.locator("#status.err").wait_for()
+            assert card.locator("#status").inner_text() == (
+                "This card could not check the change again, so nothing was approved yet. Press "
+                "Approve again to approve it as shown here, or use the review page."
+            )
+            assert not _tool_calls(page, "confirm_proposal")
+            card.locator("#approve:not([disabled])").click()
+            page.wait_for_function(
+                "() => window.log.some(m => m.method === 'tools/call'"
+                " && m.params.name === 'confirm_proposal')"
+            )
+            assert _tool_calls(page, "confirm_proposal") == [
+                {"proposal_id": "p2", "approval": "code-2", "decision": "approve"}
+            ]
+        finally:
+            browser.close()
+    assert not errors, errors
