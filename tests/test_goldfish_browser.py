@@ -366,6 +366,10 @@ SIZE_STATE = """() => {
   return {size: document.documentElement.getAttribute('data-card-size'),
     card: c.getBoundingClientRect().width,
     segInside: r.left >= -1 && r.right <= innerWidth + 1,
+    // every button whole inside the switch, none cut off by its edge and none narrower than its
+    // letter (join review J4-4: L was cut off on the folded Fold at 200% text)
+    whole: [...seg.querySelectorAll('button')].every(b => { const q = b.getBoundingClientRect();
+      return q.left >= r.left - 0.5 && q.right <= r.right + 0.5 && b.scrollWidth <= b.clientWidth + 1; }),
     // the label beside the buttons, and lined up with the game's buttons above (join review J1-7)
     row: lbl.top < r.bottom - 1 && r.top < lbl.bottom - 1 && lbl.right <= r.left + 1,
     lined: Math.abs(lbl.left - first.getBoundingClientRect().left) <= 2,
@@ -405,7 +409,8 @@ def test_goldfish_cards_follow_the_card_size(server: Server, width: int, scheme:
             for size in ("s", "m", "l"):
                 page.locator(f".gf-size [data-card-size-set={size}]").click()
                 got = page.evaluate(SIZE_STATE)
-                assert got["segInside"] and got["contrast"] >= 4.5, (size, zoom is not None, got)
+                assert got["segInside"] and got["whole"], (size, zoom is not None, got)
+                assert got["contrast"] >= 4.5, (size, zoom is not None, got)
                 assert got["lined"] and (got["row"] or zoom is not None), (size, zoom is not None, got)
                 assert _overflow(page) == 0, (size, zoom is not None)
             _contrast_ok(page)

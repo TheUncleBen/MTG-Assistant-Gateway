@@ -540,6 +540,14 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
 
         return ok(forge_status(reports.get(who.sub, request.path_params["rid"])))
 
+    @route("/reports/{rid}/forge/more", "POST", write=True)
+    async def report_more_games(request: Request, who: Caller) -> Response:
+        """Play more games, as the report page's button and the play_more_games tool do, with the
+        same rules (reports.play_more): the report as it now is, or a refusal with its reason.
+        Never asks Archidekt."""
+        report = await reports.play_more(who.sub, request.path_params["rid"])
+        return ok(report, 202)
+
     @route("/reports/{rid}", "DELETE", write=True)
     async def delete_report(request: Request, who: Caller) -> Response:
         # an app deletes only reports it ran; the member's browser any of theirs
