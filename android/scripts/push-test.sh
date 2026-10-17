@@ -56,6 +56,27 @@ mkdir -p "$OUT"
 FAILED=0
 ctl() { curl -sS --cacert "$CERTS/ca.pem" "https://localhost:$PORT/control/$1" "${@:2}"; }
 state() { ctl state | python3 -c "import json,sys; print(json.load(sys.stdin)['$1'])"; }
+hits() { ctl state | python3 -c "import json,sys; print(json.load(sys.stdin)['pages'].get('$1', 0))"; }
+top() { adb shell dumpsys activity activities 2>/dev/null | tr -d '\r' | grep -m1 -E 'topResumedActivity|mResumedActivity'; }
+# Tap the on-screen element whose text is $1 (the app's own views and its web page alike)
+tap_text() {
+  adb shell uiautomator dump /sdcard/ui.xml >/dev/null 2>&1
+  local at
+  at=$(adb shell cat /sdcard/ui.xml | tr -d '\r' | python3 -c '
+import re, sys
+want = sys.argv[1]
+for m in re.finditer(r"<node [^>]*>", sys.stdin.read()):
+    n = m.group(0)
+    t = re.search(r"text=\"([^\"]*)\"", n)
+    d = re.search(r"content-desc=\"([^\"]*)\"", n)
+    if want in ((t and t.group(1)) or "", (d and d.group(1)) or ""):
+        b = re.search(r"bounds=\"\[(\d+),(\d+)\]\[(\d+),(\d+)\]\"", n)
+        print("%d %d" % ((int(b[1]) + int(b[3])) // 2, (int(b[2]) + int(b[4])) // 2))
+        break' "$1")
+  [ -n "$at" ] || return 1
+  # shellcheck disable=SC2086
+  adb shell input tap $at
+}
 send() { ctl send -d "{\"id\":\"$1\",\"title\":\"$2\",\"message\":\"$3\",\"sequence_id\":\"${4:-}\",\"click\":\"https://localhost:$PORT/proposals\"}" >/dev/null; }
 notes() { adb shell dumpsys notification --noredact 2>/dev/null | tr -d '\r'; }
 result() { if [ "$2" = ok ]; then echo "PASS  $1"; else echo "FAIL  $1: $3"; FAILED=1; fi; }
@@ -71,7 +92,7 @@ boot() {
   adb reverse "tcp:$PORT" "tcp:$PORT"
 }
 
-PUSH_TEST_KEY="$KEY" PUSH_TEST_KEEPALIVE=5 python3 "$HERE/push_test_gateway.py" "$CERTS/leaf.pem" "$CERTS/leaf.key" "$PORT" \
+PUSH_TEST_KEY="$KEY" PUSH_TEST_KEEPALIVE=5 PUSH_TEST_STATIC="$ROOT/../src/mtg_gateway/static" python3 "$HERE/push_test_gateway.py" "$CERTS/leaf.pem" "$CERTS/leaf.key" "$PORT" \
   > "$OUT/gateway.log" 2>&1 &
 GW=$!
 trap 'kill $GW 2>/dev/null; adb logcat -d > "$OUT/logcat.txt" 2>/dev/null' EXIT
@@ -232,6 +253,25 @@ else
   result "stops when switched off" no "still running or key kept"
 fi
 shot 05-end
+
+# -- the page's App menu items (the account menu's App section, on a gateway page): each reaches the app
+adb shell pm grant "$PKG" android.permission.CAMERA
+app() { adb shell am start -W -n "$PKG/local.mtgassistantgateway.app.MainActivity" >/dev/null; sleep 4; }
+app
+before=$(hits /)
+if tap_text "Reload" && until_ok '[ "$(hits /)" -gt '"$before"' ]' 20; then result "menu: Reload" ok; else result "menu: Reload" no "no new page load"; fi
+sleep 2
+if tap_text "Open in browser" && until_ok '! top | grep -q "$PKG/"' 20; then result "menu: Open in browser" ok; else result "menu: Open in browser" no "the app stayed in front"; fi
+shot menu-open-in-browser
+app
+before=$(hits /scan)
+if tap_text "Scan with the app's camera" && until_ok '[ "$(hits /scan)" -gt '"$before"' ]' 20; then result "menu: Scan with the app's camera" ok; else result "menu: Scan with the app's camera" no "the scan page was not opened"; fi
+sleep 3
+shot menu-scan
+adb shell input keyevent KEYCODE_BACK; sleep 1
+adb shell am start -W -a android.intent.action.VIEW -d "https://localhost:$PORT/" "$PKG" >/dev/null; sleep 4
+if tap_text "Change gateway" && until_ok 'top | grep -q SetupActivity' 20; then result "menu: Change gateway" ok; else result "menu: Change gateway" no "the setup screen did not open"; fi
+shot menu-change-gateway
 
 echo "battery: a 24 hour battery test needs a real phone; not run here."
 exit "$FAILED"

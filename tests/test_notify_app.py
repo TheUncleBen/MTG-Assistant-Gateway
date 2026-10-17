@@ -210,6 +210,7 @@ async def test_the_stream_refuses_removed_members_too_many_connections_and_a_sil
         stack.ntfy.status = 500
         status, body = await _refusal(stack, key)
         assert (status, body["error"]) == (503, "unavailable")
+        assert stack.gw.notifier.streams(key) == 0  # a refused connection is not counted
     finally:
         await b.aclose()
 
@@ -306,6 +307,79 @@ async def test_a_change_made_elsewhere_ends_the_stream_at_the_next_check(stack: 
         s = await Stream(stack, key).start()
         notify.save_prefs(stack.h.db, "user-1", ntfy_on=False)  # another gateway process, a restore
         assert await s.ended()
+    finally:
+        await b.aclose()
+
+
+async def test_a_member_removed_at_the_identity_provider_is_cut_off_at_the_next_check(
+    stack: Stack, monkeypatch
+) -> None:
+    monkeypatch.setattr(notify, "STREAM_KEEPALIVE", 0.05)
+    monkeypatch.setattr(notify, "STREAM_RECHECK", 0.1)
+    b, key = await _member(stack)
+    try:
+        outcome = Membership.ALLOWED
+
+        async def check(sub: str) -> Membership:
+            return outcome
+
+        monkeypatch.setattr(stack.gw.membership, "check", check)
+        s = await Stream(stack, key).start()
+        assert s.status == 200
+        await asyncio.sleep(0.3)  # several checks while still allowed: still open
+        assert stack.gw.notifier.streams(key) == 1
+        outcome = Membership.UNAVAILABLE  # the identity provider not answering cuts nobody off
+        await asyncio.sleep(0.3)
+        assert stack.gw.notifier.streams(key) == 1
+        outcome = Membership.REVOKED
+        assert await s.ended()
+        assert stack.gw.notifier.streams(key) == 0
+    finally:
+        await b.aclose()
+
+
+async def test_connections_made_at_once_still_stop_at_the_cap(stack: Stack) -> None:
+    b, key = await _member(stack)
+    try:
+        many = [Stream(stack, key) for _ in range(notify.STREAM_MAX_PER_KEY + 2)]
+        statuses = sorted([(await s.start()).status for s in many])
+        assert statuses == [200] * notify.STREAM_MAX_PER_KEY + [429, 429]
+        assert stack.gw.notifier.streams(key) == notify.STREAM_MAX_PER_KEY
+        for s in many:
+            await s.close()
+        assert stack.gw.notifier.streams(key) == 0
+    finally:
+        await b.aclose()
+
+
+async def test_a_client_gone_before_the_stream_starts_frees_its_connection(stack: Stack) -> None:
+    b, key = await _member(stack)
+    try:
+        refused = Stream(stack, None)  # only for its request; refused at once without a key
+        await refused.close()
+        scope = {
+            **refused.scope,
+            "headers": [*refused.scope["headers"], (b"authorization", f"Bearer {key}".encode())],
+        }
+        stuck = asyncio.Event()
+        asked = False
+
+        async def receive() -> dict:
+            nonlocal asked
+            if not asked:
+                asked = True
+                return {"type": "http.request", "body": b"", "more_body": False}
+            await stuck.wait()  # the reply's start is being written...
+            return {"type": "http.disconnect"}  # ...when the phone goes away
+
+        async def send(msg: dict) -> None:
+            if msg["type"] == "http.response.start":
+                stuck.set()
+                await asyncio.sleep(3600)  # a socket that never takes the reply
+
+        task = asyncio.ensure_future(stack.h.app(scope, receive, send))
+        await asyncio.wait_for(asyncio.gather(task, return_exceptions=True), 5)
+        assert stack.gw.notifier.streams(key) == 0  # counted, then given back
     finally:
         await b.aclose()
 

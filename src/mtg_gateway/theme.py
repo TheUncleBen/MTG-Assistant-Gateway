@@ -496,6 +496,7 @@ button.thumbbtn:focus-visible{outline:2px solid var(--accent);outline-offset:2px
 @media (max-width:799.98px){ main .choice .btn{width:100%} }
 /* one row of equal-height buttons at the end of a form; on phones they stack full width */
 .form-actions{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem;margin-top:1rem}
+.form-actions[hidden]{display:none}
 .form-actions > button,.form-actions > .btn,.form-actions form > button{margin:0}
 .form-actions form{display:contents}
 .form-actions .status{margin:0 0 0 auto;color:var(--text-muted);font-size:.9rem}
