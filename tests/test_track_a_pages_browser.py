@@ -355,3 +355,85 @@ def test_reject_asks_first_on_the_list_and_the_deck_strip(server: Server) -> Non
             ctx.close()
         finally:
             browser.close()
+
+
+def test_the_full_test_buttons_fit_every_screen_and_text_size(tmp_path: Path) -> None:
+    """Track C's banner texts (C-W-281 to C-W-286, coordinator-approved ~05:24Z 10-17) on the deck
+    page: "Run full test" and More's "Solo test only" with their tooltips, at 344, 360 and 390 px,
+    on the Fold and on desktop, light and dark, 100% and 200% text. No sideways scroll, words
+    whole, labels readable (contrast at least 4.5:1), and the tooltips word for word."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_path()
+    if exe == "missing":
+        pytest.skip("no Chromium available for Playwright")
+    s = Server(tmp_path, writes_enabled=True, forge_url="http://127.0.0.1:9")
+    s.start()
+    shots = os.environ.get("MTG_SHOTS_DIR")
+    try:
+        sid = _link(s)
+        with sync_playwright() as p:
+            browser = p.chromium.launch(executable_path=exe) if exe else p.chromium.launch()
+            try:
+                for vw, vh, phone in (
+                    (344, 882, True),
+                    (360, 780, True),
+                    (390, 844, True),
+                    (673, 841, True),
+                    (1280, 800, False),
+                ):
+                    for scheme in ("light", "dark"):
+                        for text in ("100%", "200%"):
+                            where = f"{vw}-{scheme}-{text}"
+                            ctx = _context(browser, s, sid, vw, vh, phone, scheme)
+                            ctx.add_init_script(
+                                "document.addEventListener('DOMContentLoaded', () =>"
+                                f" {{ document.documentElement.style.fontSize = '{text}'; }});"
+                            )
+                            page = ctx.new_page()
+                            page.goto(f"{s.base}/decks/42", wait_until="networkidle")
+                            run = page.locator(
+                                "form[action='/decks/42/report'] button", has_text="Run full test"
+                            )
+                            assert run.is_visible(), where
+                            assert run.get_attribute("data-busy-label") == "Testing…", where
+                            assert run.get_attribute("title") == (
+                                "The solo test (300 games, no opponents), a legality check and the deck "
+                                "statistics, plus Forge games against precons when Forge is on and the deck "
+                                "has a commander; saved under History. The solo test takes up to a minute; "
+                                "the result page opens when the solo test is done."
+                            ), where
+                            page.locator("details.dd > summary", has_text="More").first.click()
+                            solo = page.locator("button", has_text="Solo test only")
+                            assert solo.is_visible(), where
+                            assert solo.get_attribute("data-busy-label") == "Testing…", where
+                            assert solo.get_attribute("title") == (
+                                "The same run without Forge games: the solo test, the legality check and "
+                                "the statistics"
+                            ), where
+                            for b in (run, solo):
+                                box = b.bounding_box()
+                                assert box and box["x"] >= 0 and box["x"] + box["width"] <= vw, (where, box)
+                                assert b.evaluate("e => e.scrollWidth <= e.clientWidth + 1"), where
+                            sel = "form[action='/decks/42/report'] button"
+                            assert page.evaluate(WORDS_BROKEN, sel) == [], (
+                                where,
+                                page.evaluate(WORDS_BROKEN, sel),
+                            )
+                            _readable(page, sel, where)
+                            # the banner itself never runs wider than the screen (the rest of the deck
+                            # page at 344 px and 200% text is reported separately, WORDING-8)
+                            banner = page.locator(".banner").first.bounding_box()
+                            assert banner and banner["x"] + banner["width"] <= vw + 0.5, (where, banner)
+                            assert page.evaluate(
+                                "() => [...document.querySelectorAll('.banner .controls *')]"
+                                ".every(e => e.getBoundingClientRect().right <= innerWidth + 0.5"
+                                " || !e.getClientRects().length || e.closest('details:not([open])'))"
+                            ), where
+                            if shots:
+                                page.screenshot(path=f"{shots}/a-full-test-{where.replace('%', '')}.png")
+                            ctx.close()
+            finally:
+                browser.close()
+    finally:
+        s.stop()
