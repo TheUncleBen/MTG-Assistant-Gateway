@@ -334,8 +334,8 @@ gateway's own address.
 2. If your stack's environment has `MTG_NTFY_URL` or `MTG_NTFY_TOKEN_FILE`
    with a value, delete those lines (empty is fine): the stack file now
    points the gateway at its own ntfy server. If you ran an ntfy server of
-   your own for the gateway, you can stop it after the update. It needs no
-   proxy host: delete the one you made for it.
+   your own for the gateway, you can stop it after the update, and delete
+   the proxy host you made for it: the new ntfy server needs none.
 3. Update the stack with the new file, as in the 0.7.29 steps below (your
    old `mtg_ntfy_token` lines, if you had them, are already in it).
 4. Tell the members: notifications now come in the gateway's own Android
@@ -344,8 +344,8 @@ gateway's own address.
    **Get notifications on this phone**. Their old subscriptions in the ntfy
    app stop getting messages and can be deleted. There are no notifications
    on iPhone.
-5. **Members on an app older than 0.7.12 must update the app:** the gateway
-   no longer serves the old app's hooks. They install the new app from the
+5. **Members on an app older than 0.7.12 must update the app:** in those
+   apps, sign-in no longer starts by itself. They install the new app from the
    gateway's Install page (uninstalling the old one first, since it was
    signed with a different key).
 
@@ -738,7 +738,7 @@ default, and an install that leaves it off behaves exactly as before.
 ## Notifications on members' phones
 
 Members can get a short message on their phone when an assistant leaves changes waiting for their
-press (one message per deck, such as "2 changes waiting for Atraxa", updated as the count changes
+press (one message per deck, such as "2 changes to Atraxa are waiting for you", updated as the count changes
 and removed when nothing waits), a deck report finishes (Forge runs that waited in the queue
 included), a watched card crosses a price alert they set, or their daily or weekly summary is
 ready. They come in the gateway's own Android app. There is no iPhone version, no Firebase or
@@ -763,12 +763,12 @@ yet picked up.
   the card that moved most. The token is read from the secret file, sent only in the
   `Authorization` header and never written to the log.
 - **Members** turn notifications on in the **Notifications** card of their Account page, in the
-  app: **Get notifications on this phone** asks once to allow notifications and once to let the
-  app run in the background, then the app shows a quiet "Connected" notification while it listens.
-  It reconnects after the phone restarts and after an app update. **Disconnect my phones** gives
+  app. **Get notifications on this phone** asks once to let the app run in the background, and on
+  Android 13 and later it first asks to allow notifications. Android then shows a quiet "Always
+  connected" notification while the app listens. It reconnects after the phone restarts and after an app update. **Disconnect my phones** gives
   the member a new topic, which signs out every phone; turning notifications off ends the stream
   too. **Send test** sends one message to check it, at most once a minute.
-- **Memory:** ntfy is limited to 128 MB (`NTFY_MEMORY_LIMIT`); it used about 15 MB in testing.
+- **Memory:** ntfy is limited to 128 MB (`NTFY_MEMORY_LIMIT`).
 
 ## Environment reference
 

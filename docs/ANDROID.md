@@ -193,7 +193,8 @@ on an Android 15 emulator against a small stand-in gateway
 (`android/scripts/push_test_gateway.py`). It covers a message, one message per
 deck replaced and withdrawn, swiping the app away from Recents, dismissing
 the ongoing notification, Doze, an app update, a reboot, a message missed
-while offline, Stop and opening the app again, and the gateway switching
+while offline, a force stop (`am force-stop`, the nearest adb step to
+Android's Stop button) and opening the app again, and the gateway switching
 notifications off. It also takes launcher screenshots at phone and Fold
 widths. The debug build it tests trusts a certificate made for that run
 only; a release build never does. A 24 hour battery test needs a real phone.
