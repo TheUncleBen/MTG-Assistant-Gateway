@@ -16,6 +16,7 @@ import logging
 import re
 import secrets
 import time
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from . import card_models, deck_stats
@@ -79,6 +80,9 @@ MAX_FORGE_WAITING = 2
 # Where a report keeps its run's settings: a key of the stored statistics (no column of its own),
 # taken out again when the report is read (``settings``).
 RUN_KEY = "_run"
+# What a member never sees of a Forge section: the start's own data, the copy it plays on (an
+# internal address) and how many copies there are, and since when that copy has not answered.
+NOT_SHOWN = frozenset({"start", "engine", "engine_copies", "unanswered_since"})
 # Why a report has no Forge games although the gateway runs Forge (a "skipped" section's note).
 FORGE_NOT_ASKED = "Forge was not asked for this report (solo test only)."
 FORGE_CONSTRUCTED = (
@@ -400,8 +404,9 @@ class ReportService:
             # Forge's own seed when given (A34), else the goldfish's, else one the gateway picks
             seed = options.get("forge_seed", options.get("seed"))
             bracket = _pair_bracket(deck, stats, other)
+            copies = await self.forge.copies()  # the name's lookup, kept out of the start lock
             async with self._forge_start_lock:
-                await self._start_or_queue_forge(sub, rid, deck, games, seed, bracket, shared)
+                await self._start_or_queue_forge(sub, rid, deck, games, seed, bracket, shared, copies)
         return self.get(sub, rid)
 
     async def pair_deck(self, sub: str, pair_with: str | Deck) -> Deck:
@@ -430,6 +435,7 @@ class ReportService:
         seed: Any,
         bracket: tuple[Any, ...],
         shared: dict[str, Any] | None = None,
+        copies: list[str] | None = None,
     ) -> None:
         text, seed = deck_to_text(deck), seed if isinstance(seed, int) else None
         if self._forge_running(sub, rid) and not self._side_by_side(sub, shared):
@@ -450,7 +456,7 @@ class ReportService:
             self._save_forge(rid, self._waiting_section(text, deck.name, games, seed, bracket, shared=shared))
             self._ensure_forge_refresher()
             return
-        await self._start_forge(rid, text, deck.name, games, seed, bracket, shared=shared)
+        await self._start_forge(rid, text, deck.name, games, seed, bracket, shared=shared, copies=copies)
 
     def _side_by_side(self, sub: str, shared: dict[str, Any] | None) -> bool:
         """Whether a comparison's second deck may start now, beside its first (R-215): the member's
@@ -569,6 +575,7 @@ class ReportService:
         bracket: Any = (None, None),
         busy_since: int | None = None,
         shared: dict[str, Any] | None = None,
+        copies: list[str] | None = None,
     ) -> None:
         assert self.forge is not None
         level, source, of_deck, pair = bracket_parts(bracket)
@@ -577,7 +584,7 @@ class ReportService:
                 shared = self._shared_now(self._owner(rid), shared)
             # several copies of the Forge service: the least busy one, kept with the run (engine)
             # so it is always asked about where it plays; one copy: as before, nothing kept
-            client, engine, copies = await self.forge.pick()
+            client, engine, how_many = await self.forge.pick(copies)
             section = await start_run(
                 client,
                 text,
@@ -592,7 +599,7 @@ class ReportService:
                 shared=shared,
             )
             if engine is not None and section.get("job_id"):
-                section.update(engine=engine, engine_copies=copies)
+                section.update(engine=engine, engine_copies=how_many)
         except ForgeError as exc:
             if exc.kind == "busy":
                 # The engine's own queue (FORGE_MAX_QUEUE, shared by the whole gateway) is full:
@@ -670,6 +677,7 @@ class ReportService:
                     "SELECT DISTINCT owner_sub FROM reports WHERE forge_state = 'queued'"
                 ).fetchall()
             ]
+        copies = await self.forge.copies() if subs and self.forge else None  # outside the lock
         for sub in subs:
             async with self._forge_start_lock:
                 runs = self._member_runs(sub)
@@ -689,6 +697,7 @@ class ReportService:
                     start.get("bracket") or (None, None),
                     busy_since=section.get("busy_since") if section.get("engine_busy") else None,
                     shared=start.get("shared") if isinstance(start.get("shared"), dict) else None,
+                    copies=copies,
                 )
 
     def measured_game_seconds(self) -> float | None:
@@ -710,7 +719,7 @@ class ReportService:
         """The Forge section as a reader sees it: without what starting it takes, and while it is
         unfinished, with its place in the member's queue (``position``, the report and job it waits
         for) and the expected time left, from the measured average game time when known."""
-        out = {k: v for k, v in section.items() if k != "start"}
+        out = {k: v for k, v in section.items() if k not in NOT_SHOWN}
         out["games_done"] = _done_games(out)
         if out.get("state") in FINAL_STATES:
             return out
@@ -802,6 +811,19 @@ class ReportService:
         pinned = self.forge.at(section.get("engine")) if section.get("engine") else None
         return pinned or self.forge
 
+    def _pinned_gone(self, section: dict[str, Any]) -> Callable[[], Awaitable[bool]] | None:
+        """For a run kept on one of several copies: asks whether that copy's address is gone from
+        the service's name (False when the name gives no answer now)."""
+        assert self.forge is not None
+        forge, url = self.forge, section.get("engine")
+        if not url or forge.at(url) is None:
+            return None
+
+        async def gone() -> bool:
+            return await forge.has_copy(url) is False
+
+        return gone
+
     def _ensure_forge_refresher(self) -> None:
         """Keep one background task refreshing unfinished Forge runs until none is left. Also
         started when a report with an unfinished run is read, so a gateway restart resumes it."""
@@ -829,7 +851,9 @@ class ReportService:
                     section = json.loads(row["forge_json"])
                     if _waiting(section):
                         continue  # no engine job yet; started below when its turn comes
-                    fresh = await refresh(self._engine(section), section)
+                    fresh = await refresh(
+                        self._engine(section), section, pinned_gone=self._pinned_gone(section)
+                    )
                     if fresh != section:  # written only when a game finished or the state moved
                         self._save_forge(row["id"], fresh)
                 except Exception:  # one bad row must not stop the others
