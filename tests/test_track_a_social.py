@@ -422,3 +422,30 @@ async def test_a_comment_just_posted_can_be_changed_and_deleted_on_a_long_thread
         assert all(c["id"] != cid for c in stack.ark.comments[ROOT])
     finally:
         await b.aclose()
+
+
+async def test_a_follow_the_gateway_could_not_check_says_so(stack: Stack, monkeypatch) -> None:
+    """Q141 item 4A: the member's following list is read only so far (gentle on Archidekt). When it
+    goes on past that and the person is not in the part read, the follow state is unknown: the page
+    is told so (it offers Follow and Unfollow), and the assistant's row says it could not check."""
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    stack.ark.private.discard(43)
+    client = h.app.state.gateway.social.client
+
+    async def endless(token: str, user_id: str, page: int = 1) -> dict[str, Any]:
+        rows = [{"id": 9000 + page, "username": f"someone{page}"}]
+        return {"count": 999, "next": f"page={page + 1}", "results": rows}
+
+    monkeypatch.setattr(client, "following", endless)
+    b = await linked(stack)
+    try:
+        got = (await b.http.get("/social/api/users/78/follow")).json()
+        assert got == {"ok": True, "self": False, "following": False, "unknown": True}, got
+        # someone in the part read is known
+        assert (await b.http.get("/social/api/users/9001/follow")).json()["following"] is True
+    finally:
+        await b.aclose()
+    p = structured(await call(h, token, "propose_deck_social", {"deck_id": "43", "action": "follow_owner"}))
+    assert p["rows"][0]["text"].endswith("(the gateway could not check whether you follow them already)"), p
+    assert ark.follows.get("alice", set()) == set()

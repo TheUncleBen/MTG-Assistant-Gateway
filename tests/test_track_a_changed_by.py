@@ -6,7 +6,7 @@ waits."""
 
 from __future__ import annotations
 
-from mtg_gateway.approve import APPROVAL_SET_META_KEY
+from mtg_gateway.approve import APPROVAL_SET_META_KEY, APPROVALS_META_KEY
 
 from .conftest import Stack
 from .test_approval_modes import _set_mode
@@ -71,24 +71,49 @@ async def test_apply_all_lists_its_changes_with_held_and_changed_and_names_the_a
     ids = res["_meta"][APPROVAL_SET_META_KEY]["ids"]
     lines = {x["proposal_id"]: x for x in info["set_lines"]}
     assert set(lines) == set(ids) and lines[first["proposal_id"]]["summary"]
-    # a held one and a changed one say so in the list the confirm draws
+    # a held one and one its own app changed say so in the list the confirm draws
+    maker = h.db.get_proposal(first["proposal_id"], SUB)["created_by_client"]
     assert h.db.set_hold(first["proposal_id"], SUB, "depends:none:rejected")
     _amend(
         h,
         first["proposal_id"],
         structured(await call(h, token, "get_proposal", {"proposal_id": first["proposal_id"]})),
-        by="another-app",
+        by=maker,
         what="Opt again",
     )
     res = await _propose(h, token, "Brainstorm")
-    lines = {x["proposal_id"]: x for x in structured(res)["deck_waiting"]["set_lines"]}
+    info = structured(res)["deck_waiting"]
+    lines = {x["proposal_id"]: x for x in info["set_lines"]}
     held = lines.get(first["proposal_id"])
     assert held is not None, lines
-    assert (
-        held["version"] == 2
-        and held["what_changed"] == "Opt again"
-        and held["changed_by"].startswith("app: ")
+    assert held["version"] == 2 and held["what_changed"] == "Opt again"
+    assert info["left_out"] == 0
+    # Q141 item 1B: one another app rewrote is left out of Apply all, and counted
+    _amend(
+        h,
+        first["proposal_id"],
+        structured(await call(h, token, "get_proposal", {"proposal_id": first["proposal_id"]})),
+        by="another-app",
+        what="Opt once more",
     )
+    res = await _propose(h, token, "Ponder")
+    info = structured(res)["deck_waiting"]
+    assert first["proposal_id"] not in res["_meta"][APPROVAL_SET_META_KEY]["ids"]
+    assert first["proposal_id"] not in {x["proposal_id"] for x in info["set_lines"]}
+    assert info["left_out"] == 1
+    # an amend back by its own app still leaves it out: another app wrote one of its versions
+    _amend(
+        h,
+        first["proposal_id"],
+        structured(await call(h, token, "get_proposal", {"proposal_id": first["proposal_id"]})),
+        by=maker,
+        what="Opt, by its maker",
+    )
+    board = await call(h, token, "show_waiting_changes", {"deck_id": "42"})
+    assert first["proposal_id"] not in board["_meta"][APPROVAL_SET_META_KEY]["ids"]
+    assert structured(board)["left_out"] == 1
+    # its own Approve still works on the card: it has its own code
+    assert first["proposal_id"] in board["_meta"][APPROVALS_META_KEY]
 
 
 async def test_a_review_page_apply_without_its_version_is_refused(stack: Stack) -> None:
@@ -123,7 +148,7 @@ async def test_the_guide_says_what_full_auto_still_waits_for(stack: Stack) -> No
     try:
         await b.login()
         page = (await b.http.get("/guide")).text
-        assert "a new deck and an edit of more than 25 rows" in page
+        assert "a new deck, an edit of more than 25 rows, making a deck public or unlisted" in page
         assert (
             "deleting a deck always wait for your press, and so does a held change, a change waiting for "
             "another change first, or one another app had a hand in" in page

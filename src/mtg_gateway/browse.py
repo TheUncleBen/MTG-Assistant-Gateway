@@ -125,6 +125,8 @@ BROWSE_CSS = """
   background:var(--surface-2);border-radius:17px;padding:.25rem .35rem .25rem .85rem;min-height:34px;
   max-width:100%;box-sizing:border-box;font-size:.9rem;font-weight:700}
 .profile .social .confirm button{margin:0;height:26px;padding:0 .7rem;border-radius:13px;font-size:.85rem}
+/* focus moves to Follow by script after a tap: always ring it, as the deck page's confirms do */
+.profile .social .confirm button:focus{outline:2px solid var(--focus);outline-offset:2px}
 .profile .social .note{flex-basis:100%;color:var(--text-muted);font-size:.9rem;margin:0}
 @media (max-width:600px){ .profile .social{margin-left:0;flex-basis:100%} }
 .popular{display:flex;flex-wrap:wrap;gap:.4rem;margin:.5rem 0 0}

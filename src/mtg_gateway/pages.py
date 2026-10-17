@@ -19,7 +19,7 @@ from urllib.parse import parse_qs, quote
 from starlette.requests import Request
 from starlette.responses import RedirectResponse, Response
 
-from . import app_signin, link_disclosure, modes, notify
+from . import app_signin, link_disclosure, modes, notify, refusals
 from .archidekt import PATIENCE_SPENT
 from .auth_provider import BROWSER_COOKIE, LoginError, cookie_name
 from .avatars import initials_svg
@@ -454,6 +454,16 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         if any(p not in versions for p in picks) and action == "apply":
             # G16: each checked change applies only as the version the list showed
             return RedirectResponse(_with_query(back, "err=changed_some"), status_code=303)
+        if action == "reject" and data.get("sure") != "1":
+            # Q141 item 8C: a short confirm first (the list's script asks in the bar itself)
+            return page(
+                "Reject changes",
+                _reject_confirm(picks, versions, back, _csrf(s, sid)),
+                sub=sub,
+                sid=sid,
+                current="/proposals",
+                head_extra=LIST_STYLE,
+            )
         if action == "reject":
             current_client.set(BROWSER_CLIENT_ID)
             for pid in picks:
@@ -875,6 +885,7 @@ OK_MESSAGES = {
     "everything else.",
     "mode_auto": "Saved: your assistant applies deck and collection changes without asking. Restoring a "
     "snapshot, a commander change, a new deck, an edit of more rows than Full auto applies by itself, "
+    "making a deck public or unlisted, a description edit that keeps its formatting, "
     "actions on your Archidekt account and deleting a deck still wait for you. When a change waits for "
     "your press, its card and review page say why. Each change keeps a snapshot you can restore from "
     "History.",
@@ -886,8 +897,7 @@ ERR_MESSAGES = {
     "confirm_delete": "Nothing was deleted. Tick the box to confirm, then press Delete my data.",
     "mode_invalid": "That approval mode does not exist, or this gateway does not allow it. Nothing changed.",
     "failed": "This proposal could not be applied. Details are in the result below, if any.",
-    "writes_disabled": "Deck writes are switched off on this gateway. The proposal is kept for review; "
-    "nothing was sent to Archidekt.",
+    "writes_disabled": refusals.WRITES_OFF_KEPT,  # Q141 item 7A
     "not_found": "No such proposal for your account.",
     "missing": "Something this proposal needs was not found on Archidekt: a card, a printing, a deck or "
     "a snapshot. Nothing more was changed. The result below names it.",
@@ -1757,6 +1767,34 @@ def _formatted_preview(r: dict[str, Any]) -> str:
 # Changes that are not edits to one of the member's decks (FLEX §3 "Not tied to one of your decks").
 _UNTIED_KINDS = ("create_deck", "clone", "collection")
 _DECK_ACTIONS = ("collaborator_add", "collaborator_remove", "delete_deck")
+
+
+# wording drafts (WORDING-4); static/proposals.js asks the same in the list's bar
+REJECT_NOTE = "Nothing is sent to Archidekt. A rejected change can't be brought back from this page."
+
+
+def reject_ask(n: int) -> str:
+    return "Reject this change?" if n == 1 else f"Reject {n} changes?"
+
+
+def _reject_confirm(picks: list[str], versions: dict[str, int], back: str, csrf: str) -> str:
+    """The short confirm before Reject on a waiting list (Q141 item 8C), for a browser without
+    the list's script: the same checked changes, posted again with ``sure``."""
+    hidden = "".join(
+        f"<input type='hidden' name='pick' value='{html.escape(p)}'>"
+        + (f"<input type='hidden' name='v_{html.escape(p)}' value='{versions[p]}'>" if p in versions else "")
+        for p in picks
+    )
+    return (
+        f"<h1>{html.escape(reject_ask(len(picks)))}</h1><p class='muted'>{REJECT_NOTE}</p>"
+        "<form method='post' action='/proposals/select' class='rejectconfirm'>"
+        f"<input type='hidden' name='csrf' value='{html.escape(csrf)}'>"
+        f"<input type='hidden' name='back' value='{html.escape(back)}'>"
+        "<input type='hidden' name='sure' value='1'>"
+        f"{hidden}<p class='actions'>"
+        f"<button type='submit' name='action' value='reject' class='danger'>Reject {len(picks)}</button> "
+        f"<a class='btn' href='{html.escape(back)}'>Back</a></p></form>"
+    )
 
 
 def _list_back(value: str | None) -> str:

@@ -72,8 +72,17 @@ async def test_reject_from_the_list_rejects_only_the_checked_rows(stack: Stack) 
         a = await _propose(h, token, _add("Opt"))
         c = await _propose(h, token, _add("Delver of Secrets"))
         csrf = await b.csrf("/proposals")
+        # Q141 item 8C: Reject asks first (without the list's script, on a page of its own)
         r = await b.http.post(
             "/proposals/select", data={"csrf": csrf, "action": "reject", "pick": a, "back": "/proposals"}
+        )
+        assert r.status_code == 200 and "Reject this change?" in r.text, r.text[:500]
+        assert "can&#x27;t be brought back" in r.text or "can't be brought back" in r.text
+        assert f"name='pick' value='{a}'" in r.text and "name='sure' value='1'" in r.text
+        assert h.db.get_proposal(a, SUB)["state"] == "pending"
+        r = await b.http.post(
+            "/proposals/select",
+            data={"csrf": csrf, "action": "reject", "pick": a, "back": "/proposals", "sure": "1"},
         )
         assert r.status_code == 303 and r.headers["location"] == "/proposals?ok=rejected_some"
         assert h.db.get_proposal(a, SUB)["state"] == "rejected"

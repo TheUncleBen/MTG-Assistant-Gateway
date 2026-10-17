@@ -23,7 +23,7 @@ from typing import Any
 from urllib.parse import quote, urlencode
 
 from . import waiting_strip
-from .archidekt import VOTE_UP, Deck, DeckCard, featured_scryfall_id, format_label, rich_text
+from .archidekt import VOTE_DOWN, VOTE_UP, Deck, DeckCard, featured_scryfall_id, format_label, rich_text
 from .bracket_view import banner_bracket_html, checks_bracket_row, deck_card_bracket_text, stats_bracket_html
 from .deck_stats import (
     CURVE_BUCKETS,
@@ -403,8 +403,7 @@ def banner_html(
         f"<div class='menu left'>{''.join(more_items)}</div></details>"
     )
     writes_note = (
-        "<p class='small notags'>Deck writes are switched off on this gateway; edits can be proposed "
-        "and reviewed but not applied.</p>"
+        f"<p class='small notags'>{WRITES_OFF_TITLE}; edits can be proposed and reviewed but not applied.</p>"
         if own and not writes_enabled
         else ""
     )
@@ -452,11 +451,22 @@ def social_html(deck: Deck, *, own: bool, writes_enabled: bool = True) -> str:
         return f" title='{text}'" if writes_enabled else f" disabled title='{WRITES_OFF_TITLE}'"
 
     liked = deck.user_vote == VOTE_UP
+    # Q141 item 5A: a down vote (cast through the assistant; the page has no down button) shows
+    # as such, and the button takes it back (wording draft, WORDING-4)
+    down = deck.user_vote == VOTE_DOWN
+    like_tip = (
+        "You voted this deck down"
+        if down
+        else "You like this deck"
+        if liked
+        else "Like this deck on Archidekt"
+    )
     like = (
         f"<button type='button' class='soc{' on' if liked else ''}' data-social='vote' "
         f"data-state='{deck.user_vote}' aria-pressed='{'true' if liked else 'false'}'"
-        f"{title('You like this deck' if liked else 'Like this deck on Archidekt')}>"
-        f"{icon('heart')}<b class='n'>{deck.points}</b><span>{'Liked' if liked else 'Like'}</span></button>"
+        f"{title(like_tip)}>"
+        f"{icon('heart')}<b class='n'>{deck.points}</b>"
+        f"<span>{'Voted down' if down else 'Liked' if liked else 'Like'}</span></button>"
     )
     marked = deck.bookmarked
     bookmark = (

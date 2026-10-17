@@ -373,6 +373,11 @@ button.danger:disabled{color:var(--red)}
       })
       .catch(function () { refreshing = false; });
   }
+  function leftOutText(n) {
+    return n === 1
+      ? "1 changed by another app is left out of Apply all: approve it on its own."
+      : n + " changed by another app are left out of Apply all: approve each on its own.";
+  }
   function moved(p, sc) {
     return ["status", "status_reason", "press_reason", "replace_note"].some(function (k) {
       return String(p[k] || "") !== String(sc[k] || "");
@@ -489,7 +494,7 @@ button.danger:disabled{color:var(--red)}
       open.onclick = function () { openLink(p.review_url); };
       a.appendChild(open);
     } else if (p.state === "pending" && !p.writes_enabled) {
-      a.appendChild(el("span", "foot", "Deck writes are switched off on this gateway; this is a preview only."));
+      a.appendChild(el("span", "foot", "Archidekt writes are switched off on this gateway; this is a preview only."));
     }
     if (p.result && p.result.deck_url) {
       var deck = el("a", "link", "Open the deck on Archidekt"); deck.href = "#";
@@ -524,6 +529,9 @@ button.danger:disabled{color:var(--red)}
       var who = o.app === "you" ? "your browser" : String(o.app);
       bits.push(Number(o.count) + " from " + who + " also " + (Number(o.count) === 1 ? "waits" : "wait") + ".");
     });
+    // Q141 item 1B: a change another app rewrote is approved on its own (wording draft, WORDING-4)
+    var out = Number(w.left_out || 0);
+    if (out) bits.push(leftOutText(out));
     var n = applySet ? applySet.ids.length : 0;
     $("also-text").textContent = confirming
       ? "Apply these " + n + " changes to this deck, oldest first? Each is checked against the deck just before it is sent; one that no longer fits stays waiting."
