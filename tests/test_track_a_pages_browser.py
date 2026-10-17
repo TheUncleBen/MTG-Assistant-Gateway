@@ -462,11 +462,23 @@ INSIDE_PANEL = """() => [...document.querySelectorAll(
   .map(e => `${e.tagName}.${e.getAttribute('class')} ${(e.textContent || '').trim().slice(0, 30)}`)"""
 
 
+VIEWS_COLUMNS = (
+    "() => getComputedStyle(document.querySelector('form.views')).gridTemplateColumns.split(' ').length"
+)
+
+CHECK_VALUES = """() => [...document.querySelectorAll('.checks li')].map(li => {
+  const b = li.querySelector('b').getBoundingClientRect();
+  const v = li.querySelector('span').getBoundingClientRect();
+  return Math.abs(b.top - v.top) < 4 ? 'beside' : 'under'; })"""
+
+
 def test_the_deck_page_never_scrolls_sideways(tmp_path: Path) -> None:
-    """The whole deck page, not only its banner: 344, 360 and 390 px, the Fold and desktop, light
-    and dark, 100% and 200% text, scripts on and off. At 344 px with 200% text a mana curve count
-    pushed the page 4 px wider than the screen (39 px with scripts off, from the Group by box), and
-    the Description and Comments headings and a long deck check ran past their panels."""
+    """The whole deck page, not only its banner: 320, 344, 360, 390, 430 and 600 px, the Fold and
+    desktop, light and dark, 100% and 200% text, scripts on and off. At 344 px with 200% text a mana
+    curve count pushed the page 4 px wider than the screen (39 px with scripts off, from the Group by
+    box), and the Description and Comments headings and a long deck check ran past their panels; at
+    320 px the probability form's hidden native select added 5 px. At 100% text the layout stays as
+    it was: two View/Group/Sort boxes a row on a phone, and each check's value beside its label."""
     from playwright.sync_api import sync_playwright
 
     exe = _chromium_path()
@@ -480,9 +492,12 @@ def test_the_deck_page_never_scrolls_sideways(tmp_path: Path) -> None:
             browser = p.chromium.launch(executable_path=exe) if exe else p.chromium.launch()
             try:
                 for vw, vh, phone in (
+                    (320, 640, True),
                     (344, 882, True),
                     (360, 780, True),
                     (390, 844, True),
+                    (430, 932, True),
+                    (600, 960, True),
                     (673, 841, True),
                     (1280, 800, False),
                 ):
@@ -517,6 +532,13 @@ def test_the_deck_page_never_scrolls_sideways(tmp_path: Path) -> None:
                                 width = page.evaluate("document.documentElement.scrollWidth")
                                 assert width <= vw, (where, width, page.evaluate(WIDENS_PAGE, vw))
                                 assert page.evaluate(INSIDE_PANEL) == [], where
+                                # at 100% text the layout is as before the fix: View as, Group by and
+                                # Sort by two a row on a phone (never three), and each deck check's
+                                # value beside its label
+                                if text == "100%":
+                                    cols = page.evaluate(VIEWS_COLUMNS)
+                                    assert vw > 600 or cols == 2, (where, cols)
+                                    assert set(page.evaluate(CHECK_VALUES)) == {"beside"}, where
                                 ctx.close()
             finally:
                 browser.close()
