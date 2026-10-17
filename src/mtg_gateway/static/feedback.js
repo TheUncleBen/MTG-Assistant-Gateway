@@ -226,7 +226,7 @@
     ph.className = (own ? own + " " : "") + "ph img-fallback";
     var name = img.getAttribute("alt") || img.getAttribute("title") || "";
     // a decorative picture (alt="": the card's name is already in its row) stays silent for
-    // screen readers when it fails too; one with a real alt keeps that name (review N8)
+    // screen readers when it fails too; one with a real alt keeps that name
     var decorative = img.hasAttribute("alt") && !img.getAttribute("alt").trim();
     ph.textContent = name || "Image unavailable";
     if (decorative) {

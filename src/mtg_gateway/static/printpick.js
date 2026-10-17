@@ -42,7 +42,7 @@
     return f === "foil" || f === "etched" ? f : "nonfoil";
   }
   function deckFinish(f) { return f === "nonfoil" ? "normal" : f; }
-  /* The finish a printing would be in when the card moves onto it (P6): the card's own finish
+  /* The finish a printing would be in when the card moves onto it: the card's own finish
      when the printing is made in it, else non-foil when it is (as the gateway's own fallback,
      archidekt.finish_modifier), else the printing's first finish. */
   function finishOn(p, current) {
@@ -99,7 +99,7 @@
     return pages[q];
   }
   // one printing by set and number: the card's own, when a card with more printings than a page
-  // hasn't listed it (N7)
+  // hasn't listed it
   function oneFor(oid, ref) {
     var q = "oracle_id=" + encodeURIComponent(oid) + "&set=" + encodeURIComponent(ref.set) + "&number=" + encodeURIComponent(ref.number);
     if (!pages[q]) {
@@ -108,7 +108,7 @@
     }
     return pages[q];
   }
-  // the default list (P2): released paper printings in English, newest first as Scryfall gives them
+  // the default list: released paper printings in English, newest first as Scryfall gives them
   function defaults(list) { return list.filter(function (p) { return english(p) && !preview(p) && !digital(p); }); }
 
   // -- one tile: the picture, the set's name, code and number, the year, finishes and price ----
@@ -239,7 +239,7 @@
   /* opts: {name, current: {set, number} | null (the deck's printing, marked Current), pending:
      {set, number} | null (a pick not saved yet, marked Picked), finish: the card's finish
      ("normal" / "foil" / "etched", or Archidekt's Normal...), pickLabel, onPick(printing, info)}
-     info: {finish: "normal" | "foil" | "etched", changed: bool (P6), from: the finish it had} */
+     info: {finish: "normal" | "foil" | "etched", changed: bool, from: the finish it had} */
   function open(opts) {
     if (!opts || !opts.name || typeof opts.onPick !== "function") return;
     ensure();
@@ -413,7 +413,7 @@
     st.more.removeAttribute("aria-busy");
     st.more.textContent = "Load more printings";
   }
-  /* The card's own printings (current and picked) always show (N7), whatever the filters, the
+  /* The card's own printings (current and picked) always show, whatever the filters, the
      typed search or the page: each one seen on any page is kept, and a card with more printings
      than a page that hasn't listed it asks for it once by set and number. */
   function mineRefs() { return [st.opts.current, st.opts.pending].filter(function (r) { return r && r.set && r.number; }); }
@@ -452,7 +452,7 @@
     st.list.forEach(function (c) { have[c.set + "#" + c.collector_number] = true; });
     return Object.keys(st.mine).filter(function (k) { return !have[k]; }).map(function (k) { return st.mine[k]; });
   }
-  // what the search and filters ask for; the card's own printings show either way (N7)
+  // what the search and filters ask for; the card's own printings show either way
   function matches(p) { return isMine(p) || wanted(p); }
   function wanted(p) {
     if (!english(p)) return false;

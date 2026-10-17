@@ -349,7 +349,7 @@
 
   // printing picker (static/printpick.js, shared with the deck page's card menu): a pick is queued
   // with the other changes until Save. When the printing is not made in the card's finish, the
-  // finish changes with it (P6) and the row's note says so. Picking the deck's own printing again
+  // finish changes with it and the row's note says so. Picking the deck's own printing again
   // takes a queued printing change back.
   function openPicker(r) {
     if (!window.MtgPrintPick) return;

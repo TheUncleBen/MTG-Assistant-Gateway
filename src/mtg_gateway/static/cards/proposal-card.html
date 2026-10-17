@@ -7,7 +7,7 @@
 <title>Deck change proposal</title>
 <style>
 /*@BASE@*/
-/* The proposal card's own look on top of the shared base (A10, 0.7.29). */
+/* The proposal card's own look on top of the shared base. */
 .card{max-width:720px}
 .badge.pending{background:var(--amber-bg);color:var(--amber)}
 .badge.applying{background:var(--amber-bg);color:var(--amber)}
@@ -99,7 +99,7 @@ button.danger:disabled{color:var(--red)}
   "use strict";
   // "Held: it depends on #3, …", as the Proposals page writes it (batch.held_text)
   function lowerFirst(t) { return t ? t.charAt(0).toLowerCase() + t.slice(1) : t; }
-  var B = Bridge; // the shared host protocol (_bridge.js), inlined by cards.card_html (A10)
+  var B = Bridge; // the shared host protocol (_bridge.js), inlined by cards.card_html
   var APPROVAL_KEY = "mtg/approval";
   var SET_KEY = "mtg/approval_set"; // "Apply all": this app's waiting changes on the deck
   var MAX_IMAGES = 24;   // Scryfall thumbnails at most, over the whole card
@@ -126,7 +126,7 @@ button.danger:disabled{color:var(--red)}
     return "“" + (t.length > 300 ? t.slice(0, 299) + "…" : t) + "”";
   }
   // An account action in words; a comment edit, delete or vote also quotes the comment it is about,
-  // as the review page does, so the right one is approved (social review, 0.7.29).
+  // as the review page does, so the right one is approved.
   function actionLine(r) {
     var t = String(r.text || "");
     var was = r.before_text ? excerpt(r.before_text, String(r.before_text).length) : "";
@@ -214,7 +214,7 @@ button.danger:disabled{color:var(--red)}
     if (rows.length > 1) head = rows.length + " rows: " + head;
     return head;
   }
-  // 0.7.29: a waiting change checked again against the deck as it is now, or held (Q27j).
+  // 0.7.29: a waiting change checked again against the deck as it is now, or held.
   function statusNote(p) {
     if (p.state !== "pending" || !p.status) return "";
     var head = { updated: "Updated.", needs_look: "Needs a look.", held: "Held." }[p.status] || "";
@@ -349,7 +349,7 @@ button.danger:disabled{color:var(--red)}
     return "";
   }
 
-  // Review B6: this press's apply failed (the gateway's answer says the proposal is failed now):
+  // This press's apply failed (the gateway's answer says the proposal is failed now):
   // its reason once, then where to see what happened, and to ask again unless the reason says so.
   function failedText(msg) {
     var text = msg.trim();
@@ -450,7 +450,7 @@ button.danger:disabled{color:var(--red)}
             setStatus("Applied. The deck on Archidekt matches this proposal.", "ok");
             tellModel("Proposal " + pid + " finished applying to Archidekt.");
           } else if (sc.state !== "applying") {
-            // failed: the same text as an Approve that failed at once (review F2, D1.2), from the
+            // failed: the same text as an Approve that failed at once, from the
             // reason the proposal stored, never the assistant's next_step
             setStatus(sc.state === "failed" ? failedText(String(r.detail || ""))
               : String(sc.next_step || ("Now " + sc.state)), "err");
@@ -677,7 +677,7 @@ button.danger:disabled{color:var(--red)}
     if (decision === "approve" && !checked && uncheckedOk) { uncheckedOk = false; checked = true; }
     if (decision === "approve" && !checked) {
       // Approve reads the change once more first: one held or waiting for another change since
-      // the card was drawn is shown, and applies only on a second press (review round 2)
+      // the card was drawn is shown, and applies only on a second press
       var shown = proposal;
       setStatus("Checking this change…", "");
       request("tools/call", { name: "get_proposal", arguments: { proposal_id: pid } })

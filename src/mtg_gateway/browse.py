@@ -106,7 +106,7 @@ BROWSE_CSS = """
 .pager .btn{margin:0}
 /* Avatar, name and the social row: the name block takes the room and wraps a long unbroken name;
    the social row keeps its own size (Follow ellipsises inside it) and drops under the name when the
-   two no longer fit side by side, so neither squeezes the other (gate R5-2: a 64-character name). */
+   two no longer fit side by side, so neither squeezes the other (a 64-character name). */
 .profile{display:flex;flex-wrap:wrap;align-items:center;gap:1rem;margin:0 0 1rem;min-width:0}
 .profile .who .uname{overflow-wrap:anywhere}
 .profile .social-off{flex-basis:100%;margin:0}
@@ -120,7 +120,7 @@ BROWSE_CSS = """
 .profile .social .soc.on{background:var(--orange);border-color:var(--orange);color:var(--on-orange)}
 .profile .social .soc.on:hover{color:var(--on-orange)}
 /* The follow question grows with its text: a long name wraps onto more lines and the Follow and
-   No buttons stay inside the chip instead of dropping under the link (gate R5-1). */
+   No buttons stay inside the chip instead of dropping under the link. */
 .profile .social .confirm{display:inline-flex;align-items:center;flex-wrap:wrap;gap:.4rem;
   background:var(--surface-2);border-radius:17px;padding:.25rem .35rem .25rem .85rem;min-height:34px;
   max-width:100%;box-sizing:border-box;font-size:.9rem;font-weight:700}

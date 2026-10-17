@@ -1,6 +1,6 @@
 /* The card search page (/cards, cardsearch.py and cardsearch_view.py).
 
-   Live results (Q4): every change to the filters asks /cards/api/search for the first page about
+   Live results: every change to the filters asks /cards/api/search for the first page about
    400 ms after the last keystroke or tap (one request in flight; a newer change cancels the older
    one), puts the HTML it answers in place and writes the filters into the address, so Back, a
    reload and a shared link show the same search. The next page loads by itself when the end of
@@ -712,7 +712,7 @@
       if (d.ok && d.categories) { cats[id] = d.categories; if (deckSel.value === id) fillCats(cats[id], id); }
     }).catch(function () { delete catLoads[id]; /* the default category still works */ });
   }
-  var cardPin = null;  // the printing shown on the tile, when the search is about printings (C2)
+  var cardPin = null;  // the printing shown on the tile, when the search is about printings
   function openSheet(name, pin) {
     if (!linked || !name) return;
     ensureSheet();
