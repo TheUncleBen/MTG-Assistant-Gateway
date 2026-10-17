@@ -246,9 +246,12 @@ form.guarded button.danger[aria-disabled=true]{color:var(--danger-text)}
   .pick .by{flex-basis:100%;padding-left:1.85rem}
   .wrow .review{padding:0 .4rem}
 }
-/* the bar sits above the phone's bottom tab bar and beside the touch rail, never under them */
+/* the bar sits above the phone's bottom tab bar and beside the touch rail, never under them. The
+   tab bar grows when large text wraps its labels: --tab-room is its real height (static/topbar.js),
+   and 4rem without scripts covers it at 200% text */
 @media (max-width:599.98px){
-  .has-tabbar .wbar:not(.inline){bottom:calc(56px + env(safe-area-inset-bottom));padding-bottom:.5rem}
+  .has-tabbar .wbar:not(.inline){bottom:var(--tab-room,calc(max(56px,4rem) + env(safe-area-inset-bottom)));
+    padding-bottom:.5rem}
   body.has-tabbar:has(.wbar:not(.inline)) main.wrap{padding-bottom:calc(12rem + env(safe-area-inset-bottom))}
 }
 @media (min-width:600px) and (max-width:700px) and ((pointer:coarse) or (hover:none)){

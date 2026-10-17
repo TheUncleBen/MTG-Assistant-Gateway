@@ -18,7 +18,7 @@ unchanged.
 - **Reports page** under More: your stored deck reports, newest first (the newest 200), with their status and what ran. It also shows what Forge is playing for you now and what waits, with the expected times. A deck filter narrows the list, and each report links to its deck's trend in History. Reports stay in History too.
 - **Same opponents in compares:**
   - The Compare page's **Test both in Forge against the same opponents** seats both decks at the same three precons, picked for the higher of the two decks' brackets (the bracket set on each deck, or Archidekt's estimate when none is set), so it doesn't matter which deck you compare from. Assistants and the app API do the same with `compare_with` on the first report and `same_opponents_as` on the second.
-- **Saved card descriptions:** each member keeps their own (up to 200), they play only in that member's solo tests, and the member or an admin removes them.
+- **Saved card descriptions:** each member keeps their own (up to 200), they play only in that member's solo tests and goldfish A/B comparisons, and the member or an admin removes them.
 - **Goldfish page guide:** "How to play" walks a first game step by step, and you can hide it (remembered for your account). Phones show the current step, with **Show all steps** to open all six.
 - **Forge results laid out:**
   - Tiles: games played, your deck's win rate with its 95% interval, median game time and length.
@@ -55,7 +55,7 @@ unchanged.
 
 ### Card models (schema 14, for the simulator work)
 - Database schema 14 adds one table, `card_models` (the simulator's card models). The upgrade is automatic and only adds the table; going back to an earlier version needs the backup taken before the upgrade, as for every schema step.
-- Each member keeps their own card models (the saved card descriptions above), one per card, used only in their own solo tests. Each records the simulator version it was checked with.
+- Each member keeps their own card models (the saved card descriptions above), one per card, used only in their own solo tests and goldfish A/B comparisons. Each records the simulator version it was checked with.
 - Admin > Card models lists every member's models, most recently changed first, with who added each (admins only) and Remove for any of them (audited as `card_model_removed`). "Delete my data" removes a member's models.
 
 ## [0.7.29] - Unreleased

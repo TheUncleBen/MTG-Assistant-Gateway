@@ -405,6 +405,10 @@ def test_apply_over_mcp_only_in_auto_mode(clients, env: Env):
         async with c.session() as s:
             create = await c.call(s, "get_proposal", {"proposal_id": STATE["create"]})
             assert create["state"] in ("applying", "applied"), create
+            # a second apply never starts it twice: it answers with the state the first one is in
+            # (a second press while it runs is covered in tests/test_background_apply.py)
+            again = await c.call(s, "apply_proposal", {"proposal_id": STATE["create"]})
+            assert again.get("state") in ("applying", "applied"), again
             deadline = time.monotonic() + 600
             while create["state"] == "applying" and time.monotonic() < deadline:
                 await asyncio.sleep(5)
