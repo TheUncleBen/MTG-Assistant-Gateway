@@ -464,28 +464,49 @@ async def test_the_card_in_the_app_connects_this_phone(stack: Stack) -> None:
         await b.aclose()
 
 
-def test_every_topic_from_before_the_upgrade_is_replaced_once(tmp_path) -> None:
+def test_every_topic_the_gateway_didnt_make_is_replaced(tmp_path) -> None:
     """A topic a member typed in 0.7.26 can have the same form as one the gateway makes (mtg- and
-    22 characters), so it can't be told apart by its form: each one stored before the upgrade is
-    replaced, once, and a key made after it is kept."""
+    22 characters), so the form can't tell them apart: only the gateway's mark can. Each one stored
+    before the upgrade is replaced, and a key made after it is kept."""
     db = Database(tmp_path / "gw.sqlite")
     try:
         for sub in ("typed", "short"):
             db.upsert_user(sub, email=None, name=None, preferred_username=None, groups=[])
         typed = "mtg-" + "MyOwnTopicIsTwentyTwoC"  # typed by the member, in the new keys' form
-        assert notify.strong_topic(typed)
+        assert notify.STRONG_TOPIC_RE.fullmatch(typed) and not notify.strong_topic(db, "typed", typed)
         notify.save_prefs(db, "typed", ntfy_on=True, ntfy_topic=typed)
         notify.save_prefs(db, "short", ntfy_topic="mtg-my-own-topic")
         assert notify.replace_old_topics(db) == 2
         after = {sub: notify.prefs(db, sub)["ntfy_topic"] for sub in ("typed", "short")}
         assert typed not in after.values() and "mtg-my-own-topic" not in after.values()
-        assert all(notify.strong_topic(t) for t in after.values())
+        assert all(notify.strong_topic(db, sub, t) for sub, t in after.items())
+        assert not notify.strong_topic(db, "short", after["typed"])  # the mark is each member's own
         assert notify.prefs(db, "typed")["ntfy_on"] is True  # only the topic changes
-        # the next start: a key made after the upgrade, of the same form, stays
+        # the next start: a key made after the upgrade stays
         assert notify.replace_old_topics(db) == 0
         assert {sub: notify.prefs(db, sub)["ntfy_topic"] for sub in ("typed", "short")} == after
     finally:
         db.close()
+
+
+async def test_a_topic_typed_while_an_older_version_ran_is_never_a_key(stack: Stack) -> None:
+    """Rolled back to 0.7.29 after the update, a member can type a topic of the keys' form again.
+    The stream refuses it at once, the Account page in the app doesn't hand it to the phone, and
+    the next start replaces it."""
+    b, key = await _member(stack, app=True)
+    try:
+        db = stack.h.db
+        typed = "mtg-" + "a" * 22
+        notify.save_prefs(db, "user-1", ntfy_on=True, ntfy_topic=typed)  # what 0.7.29's notify_save does
+        status, body = await _refusal(stack, typed)
+        assert (status, body["error"]) == (401, "unknown_key")
+        assert notify.replace_old_topics(db) == 1
+        new = notify.prefs(db, "user-1")["ntfy_topic"]
+        assert new not in (typed, key) and notify.strong_topic(db, "user-1", new)
+        page = (await b.http.get("/account")).text
+        assert typed not in page and f"data-native-arg='{new}'" in page
+    finally:
+        await b.aclose()
 
 
 async def test_a_key_made_after_the_upgrade_still_connects_after_a_restart(stack: Stack) -> None:

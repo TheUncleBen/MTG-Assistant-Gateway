@@ -8,6 +8,7 @@ import sqlite3
 import sys
 
 from .config import ConfigError, chatgpt_name_warning, load_settings
+from .notify import TopicRedactor
 from .plugin_page import developer_name_warning
 
 # Requests already running get this long on a stop; a background apply then gets up to 90 s more
@@ -37,6 +38,10 @@ def main(argv: list[str] | None = None) -> int:
         logging.getLogger("httpx").setLevel(logging.WARNING)
     # httpcore's DEBUG lines carry response headers (Set-Cookie among them): never log them.
     logging.getLogger("httpcore").setLevel(logging.WARNING)
+    # httpx's request lines to ntfy carry members' topics, which are keys: hide them.
+    httpx_log = logging.getLogger("httpx")
+    if not any(isinstance(f, TopicRedactor) for f in httpx_log.filters):
+        httpx_log.addFilter(TopicRedactor())
     if warning := chatgpt_name_warning(settings):
         logging.getLogger("mtg_gateway.config").warning(warning)
     if warning := developer_name_warning(settings.server_name):

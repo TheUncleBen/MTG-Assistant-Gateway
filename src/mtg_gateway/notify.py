@@ -2,7 +2,8 @@
 
 The stack runs ntfy next to the gateway on a private network (``MTG_NTFY_URL``, with the access
 token in the Docker secret file ``MTG_NTFY_TOKEN_FILE``); nothing else can reach it. Each member
-who turns notifications on gets a topic of their own: ``mtg-`` and 128 random bits, never shown.
+who turns notifications on gets a topic of their own: ``mtg-``, 96 random bits and a short mark
+that only this gateway can make (:func:`new_topic`), never shown.
 The gateway publishes to it, and the member's Android app reads it through the gateway's own
 address (:data:`STREAM_PATH`), holding the topic as its key: the gateway checks the key, then
 relays that one topic from ntfy. So phones need no ntfy app, no account on ntfy and no proxy
@@ -24,6 +25,9 @@ server is set up, since the notifications are how it is sent.
 from __future__ import annotations
 
 import asyncio
+import base64
+import hashlib
+import hmac
 import json
 import logging
 import re
@@ -72,6 +76,21 @@ TOPIC_RE = re.compile(r"^mtg-[A-Za-z0-9_-]{12,60}$")
 # A topic the gateway made (new_topic): the only kind an app may use as its key, since a topic is
 # all the app shows to read the member's notifications.
 STRONG_TOPIC_RE = re.compile(r"^mtg-[A-Za-z0-9_-]{22}$")
+# A topic in a request address (one path segment, never the host): what TopicRedactor hides.
+_TOPIC_IN_URL_RE = re.compile(r"(?<=[^/]/)mtg-[A-Za-z0-9_-]{12,60}")
+
+
+class TopicRedactor(logging.Filter):
+    """Hides members' topics in httpx's request lines, which are logged at DEBUG: a topic is the
+    key to a member's notifications, so it never reaches the log."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        line = record.getMessage()
+        if "mtg-" in line:
+            record.msg, record.args = _TOPIC_IN_URL_RE.sub("mtg-…", line), None
+        return True
+
+
 TIMEOUT = 10.0
 TEST_COOLDOWN = 60.0  # seconds between one member's Send test presses
 
@@ -110,9 +129,50 @@ def new_decks_title(count: int) -> str:
     return f"{count} new decks are waiting for you"
 
 
-def new_topic() -> str:
-    """A topic nobody can guess: 'mtg-' and 128 random bits."""
-    return "mtg-" + secrets.token_urlsafe(16)
+# The job_runs row holding this database's key for marking the topics the gateway makes (new_topic)
+TOPIC_KEY_JOB = "notify_topic_key"
+TOPIC_MARK_LEN = 6  # characters of the mark at the end of a topic
+
+
+def _topic_key(db: Database) -> bytes:
+    """This database's key for the topics' marks, made on first use. It lives in the database
+    rather than in a Docker secret so that rotating a secret never disconnects the members' phones,
+    and a member never sees it, so a topic they typed (before 0.7.30) can't carry a valid mark."""
+    with db.tx() as c:
+        row = c.execute("SELECT detail_json FROM job_runs WHERE name = ?", (TOPIC_KEY_JOB,)).fetchone()
+        if row is None:
+            now = int(time.time())
+            key = secrets.token_hex(32)
+            c.execute(
+                "INSERT INTO job_runs (name, day, at, detail_json) VALUES (?, ?, ?, ?)",
+                (TOPIC_KEY_JOB, time.strftime("%Y-%m-%d", time.gmtime(now)), now, json.dumps({"key": key})),
+            )
+        else:
+            key = json.loads(row["detail_json"])["key"]
+    return bytes.fromhex(key)
+
+
+def _topic_mark(key: bytes, sub: str, body: str) -> str:
+    digest = hmac.new(key, f"{sub}\n{body}".encode(), hashlib.sha256).digest()
+    return base64.urlsafe_b64encode(digest).decode()[:TOPIC_MARK_LEN]
+
+
+def _new_topic(key: bytes, sub: str) -> str:
+    body = secrets.token_urlsafe(12)
+    return f"mtg-{body}{_topic_mark(key, sub, body)}"
+
+
+def _marked(key: bytes, sub: str, topic: str | None) -> bool:
+    if not topic or STRONG_TOPIC_RE.fullmatch(topic) is None:
+        return False
+    body, mark = topic[4:-TOPIC_MARK_LEN], topic[-TOPIC_MARK_LEN:]
+    return hmac.compare_digest(mark, _topic_mark(key, sub, body))
+
+
+def new_topic(db: Database, sub: str) -> str:
+    """A topic nobody can guess for this member: 'mtg-', 96 random bits and the mark that says
+    the gateway made it (:func:`strong_topic`)."""
+    return _new_topic(_topic_key(db), sub)
 
 
 def prefs(db: Database, sub: str) -> dict[str, Any]:
@@ -164,36 +224,23 @@ def save_prefs(db: Database, sub: str, **values: Any) -> None:
             )
 
 
-# The job_runs row saying that every topic members had before 0.7.30 was replaced (replace_old_topics)
-OLD_TOPICS_REPLACED_JOB = "notify_old_topics_replaced"
-
-
 def replace_old_topics(db: Database) -> int:
-    """Give every member who had a topic before 0.7.30 a new one from :func:`new_topic`, once per
-    database, and return how many were replaced. A topic a member typed then can have the same form
-    as one the gateway makes, so the form can't tell them apart: the job_runs row records that this
-    ran, and every topic stored after it came from new_topic (members no longer choose one)."""
+    """Give every member whose topic the gateway didn't make (:func:`strong_topic`) a new one from
+    :func:`new_topic`, and return how many were replaced. Runs at every start: the first start
+    after the update replaces every topic from before 0.7.30, and a later one replaces a topic a
+    member typed while an older version ran on this database."""
     now = int(time.time())
+    key = _topic_key(db)
     with db.tx() as c:
-        if c.execute("SELECT 1 FROM job_runs WHERE name = ?", (OLD_TOPICS_REPLACED_JOB,)).fetchone():
-            return 0
-        subs = [r["sub"] for r in c.execute("SELECT sub FROM notify_prefs WHERE ntfy_topic IS NOT NULL")]
+        rows = c.execute("SELECT sub, ntfy_topic FROM notify_prefs WHERE ntfy_topic IS NOT NULL").fetchall()
+        subs = [r["sub"] for r in rows if not _marked(key, r["sub"], r["ntfy_topic"])]
         for sub in subs:
             c.execute(
                 "UPDATE notify_prefs SET ntfy_topic = ?, updated_at = ? WHERE sub = ?",
-                (new_topic(), now, sub),
+                (_new_topic(key, sub), now, sub),
             )
-        c.execute(
-            "INSERT INTO job_runs (name, day, at, detail_json) VALUES (?, ?, ?, ?)",
-            (
-                OLD_TOPICS_REPLACED_JOB,
-                time.strftime("%Y-%m-%d", time.gmtime(now)),
-                now,
-                json.dumps({"replaced": len(subs)}),
-            ),
-        )
     if subs:
-        logger.info("notifications: replaced %d topic(s) from before this version", len(subs))
+        logger.info("notifications: replaced %d topic(s) the gateway didn't make", len(subs))
     return len(subs)
 
 
@@ -643,7 +690,7 @@ def add_stream_route(state: AppState, server: Any) -> None:
             return _refuse(404, "not_set_up", "This gateway has no notification server.")
         key = _bearer(request)
         owner = topic_owner(state.db, key) if STRONG_TOPIC_RE.fullmatch(key) else None
-        if owner is None:
+        if owner is None or not strong_topic(state.db, owner[0], key):
             return _refuse(401, "unknown_key", "This phone's notification key is no longer valid.")
         sub, on = owner
         if not on:
@@ -748,9 +795,9 @@ def _summary_html(state: AppState, sub: str, p: dict[str, Any], csrf_in: str) ->
     )
 
 
-def strong_topic(topic: str | None) -> bool:
-    """A topic the gateway made (:func:`new_topic`): only those work as an app's key."""
-    return bool(topic) and STRONG_TOPIC_RE.fullmatch(topic or "") is not None
+def strong_topic(db: Database, sub: str, topic: str | None) -> bool:
+    """A topic the gateway made for this member (:func:`new_topic`): only those work as an app's key."""
+    return _marked(_topic_key(db), sub, topic)
 
 
 def _phone_html(state: AppState, sub: str, p: dict[str, Any]) -> str:
@@ -758,8 +805,8 @@ def _phone_html(state: AppState, sub: str, p: dict[str, Any]) -> str:
     button that connects it (which asks Android for the notification permission and for the
     app to keep running in the background). The app says which part applies (feedback.js)."""
     topic = p["ntfy_topic"]
-    if not strong_topic(topic):  # none yet, or not one new_topic made: give the account a key now
-        topic = new_topic()
+    if not strong_topic(state.db, sub, topic):  # none yet, or not one new_topic made: give one now
+        topic = new_topic(state.db, sub)
         save_prefs(state.db, sub, ntfy_topic=topic)
     key = _esc(topic)
     return (
@@ -853,7 +900,9 @@ async def account_action(state: AppState, sub: str, action: str, data: dict[str,
         on = data.get("ntfy_on") == "1"
         before = prefs(state.db, sub)
         current = before["ntfy_topic"]
-        topic = current if strong_topic(current) else (new_topic() if on else None)
+        topic = (
+            current if strong_topic(state.db, sub, current) else (new_topic(state.db, sub) if on else None)
+        )
         save_prefs(
             state.db,
             sub,
@@ -870,7 +919,7 @@ async def account_action(state: AppState, sub: str, action: str, data: dict[str,
         return "ok=notify_saved&connect=1" if in_app() else "ok=notify_saved"
     if action == "notify_new_topic":
         old = prefs(state.db, sub)["ntfy_topic"]
-        save_prefs(state.db, sub, ntfy_topic=new_topic())
+        save_prefs(state.db, sub, ntfy_topic=new_topic(state.db, sub))
         if state.notifier is not None:
             state.notifier.kick(old)
         return "ok=notify_topic"

@@ -87,6 +87,48 @@ def test_response_headers_are_never_logged(
             lg.setLevel(lvl)
 
 
+def test_debug_logs_never_carry_a_members_topic(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    import httpx
+
+    from mtg_gateway.__main__ import main
+    from mtg_gateway.notify import TopicRedactor
+
+    from .test_backup_and_config import _write_secrets
+
+    _write_secrets(tmp_path, monkeypatch)
+    monkeypatch.setenv("MTG_LOG_LEVEL", "DEBUG")
+    topic = "mtg-" + "Ab3_" * 5 + "xy"
+    httpx_log = logging.getLogger("httpx")
+    before = httpx_log.level
+    try:
+        assert main(["check-config"]) == 0
+        main(["check-config"])  # a second run adds no second filter
+        assert sum(isinstance(f, TopicRedactor) for f in httpx_log.filters) == 1
+        with caplog.at_level(logging.DEBUG, logger="httpx"):
+            # the lines httpx writes for a stream and a group delete
+            httpx_log.info(
+                'HTTP Request: %s %s "%s %d %s"',
+                "GET",
+                httpx.URL(f"http://ntfy:80/{topic}/json?since=1"),
+                "HTTP/1.1",
+                200,
+                "OK",
+            )
+            httpx_log.info(
+                "HTTP Request: %s %s", "DELETE", httpx.URL(f"http://mtg-ntfy-server:80/{topic}/abc123")
+            )
+        lines = [r.getMessage() for r in caplog.records if r.name == "httpx"]
+        assert len(lines) == 2 and not any(topic in line for line in lines)
+        assert "http://ntfy/mtg-…/json?since=1" in lines[0]
+        assert "http://mtg-ntfy-server/mtg-…/abc123" in lines[1]  # the host stays
+    finally:
+        httpx_log.setLevel(before)
+        for f in [f for f in httpx_log.filters if isinstance(f, TopicRedactor)]:
+            httpx_log.removeFilter(f)
+
+
 # -- linking --------------------------------------------------------------------------------------
 @pytest.mark.parametrize("what", ["disabled", "deleted"])
 async def test_an_account_disabled_or_deleted_while_signing_in_stores_nothing(

@@ -343,7 +343,7 @@ async def test_old_points_age_out_and_delete_my_data_removes_watches(stack: Stac
             db._conn.execute("SELECT COUNT(*) FROM price_points WHERE day = '2000-01-01'").fetchone()[0] == 0
         )
         assert db._conn.execute("SELECT COUNT(*) FROM price_points").fetchone()[0] == 1  # today's stays
-        notify.save_prefs(db, "user-1", ntfy_on=True, ntfy_topic=notify.new_topic())
+        notify.save_prefs(db, "user-1", ntfy_on=True, ntfy_topic=notify.new_topic(db, "user-1"))
         out = db.delete_member_data("user-1")
         assert out["watch_cards"] == 1 and out["notify_prefs"] == 1
     finally:
