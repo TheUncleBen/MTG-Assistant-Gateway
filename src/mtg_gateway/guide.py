@@ -338,8 +338,8 @@ def guide_body(
         "often the mana flows, how much damage goldfishing deals. A deck without a commander and with 60 "
         "or more cards plays a 60-card game instead (20 life, on the play).</p>"
         "<ol class='steps'>"
-        "<li><span>Open one of your decks and press <strong>Run simulation</strong>. The button says the "
-        "run takes up to a minute and shows “Simulating…” while it does.</span></li>"
+        "<li><span>Open one of your decks and press <strong>Run full test</strong>. The button says the "
+        "solo test takes up to a minute and shows “Testing…” while it does.</span></li>"
         "<li><span>The report opens: the deck, its commander, the games run and when; the headline numbers "
         "as tiles with their 95% intervals (the turn the commander lands, the chance of 40 damage or a "
         "lethal board by the last turn, mulligans, land drops); four small charts (milestones reached by "
@@ -799,7 +799,7 @@ def guide_body(
         "statistics, creating and editing decks, deck settings (folder, tags and cover included), "
         "cloning, restoring snapshots, collection changes, scan drafts; your path applies at once, the "
         "assistant's is a proposal under your mode. The goldfish simulation of one deck and the "
-        "comparison of two are both paths: Run simulation and Compare on the deck page for people, "
+        "comparison of two are both paths: Run full test and Compare on the deck page for people, "
         "<code>run_deck_report</code> and <code>compare_decks</code> for the assistant, same engine and "
         "settings.</p>"
     )
@@ -820,7 +820,7 @@ def guide_body(
             "<code>/decks/&lt;id&gt;</code>",
             "views, grouping, sorting, filter, the whole card on tap, the card menu, drag to move, Undo and "
             "Redo, "
-            "Quick add, Playtest, Goldfish, Play on EDHPlay, Run simulation, statistics with Probability "
+            "Quick add, Playtest, Goldfish, Play on EDHPlay, Run full test, statistics with Probability "
             "of draw and Deck "
             "checks, "
             "description, comments, like, bookmark, follow; More: Settings, Compare, Export, History, "
