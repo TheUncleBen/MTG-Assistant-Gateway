@@ -1,4 +1,4 @@
-"""Play more games for assistants and apps (Q147 item 4A): the play_more_games tool, shared by
+"""Play more games for assistants and apps: the play_more_games tool, shared by
 Claude and ChatGPT, and POST /api/v1/reports/{rid}/forge/more go through the same rules as the
 report page's button (reports.play_more), with the same refusals and a reason code for each."""
 

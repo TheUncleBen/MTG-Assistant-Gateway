@@ -48,7 +48,7 @@ if TYPE_CHECKING:
     from .app import AppState
     from .reports import ReportService
 
-# The Compare press when the deck lost its commander after the page loaded (proofread R5 finding 4)
+# The Compare press when the deck lost its commander after the page loaded
 COMPARE_NO_COMMANDER = (
     "Forge plays only decks with a commander, and the deck you are comparing from has none now, so no "
     "report was made."
@@ -184,7 +184,7 @@ def add_deck_tool_routes(
             + (
                 ""
                 if s.writes_enabled
-                # Q141 item 7A: the writes-off line reads as everywhere else (wording draft, WORDING-4)
+                # The writes-off line reads as everywhere else
                 else f"<p class='notice warn'>{refusals.WRITES_OFF_STATE}; "
                 "what you save stays waiting and can be applied once writes are switched on.</p>"
             )
@@ -198,9 +198,9 @@ def add_deck_tool_routes(
             f"{icon('redo')} <span class='bl'>Redo</span></button>"
             "<span class='count muted'>No changes yet</span>"
             + (
-                # D-02: the extra copy on Archidekt is the member's choice per save; the gateway's own
+                # The extra copy on Archidekt is the member's choice per save; the gateway's own
                 # snapshot (Restore under History) is always kept. Unticked unless the admin Settings
-                # page says otherwise (Q15, "Backup box ticked by default", off by default).
+                # page says otherwise ("Backup box ticked by default", off by default).
                 "<label class='backup'><input type='checkbox' name='archidekt_backup'"
                 + (" checked" if state.live.get("archidekt_backup_box_default") else "")
                 + ">Also keep a backup copy on Archidekt</label>"
@@ -210,7 +210,7 @@ def add_deck_tool_routes(
             + "<p class='status' role='status'></p></div>"
             "<details class='panel pendingbox'><summary>Pending changes <b class='n'>0</b></summary>"
             "<div class='pending'></div><p class='muted small limit'></p></details>"
-            # One search bar that adds (C-11, the "Search bar" option): chips pick where a card goes,
+            # One search bar that adds (the "Search bar" option): chips pick where a card goes,
             # Enter adds it, "3 sol ring" adds three, and the printings of the highlighted card show
             # beside the list on wide screens (static/companion.js).
             "<section class='panel addbox'><h2>Add a card</h2>" + picker + "<form class='addcard'>"
@@ -221,7 +221,7 @@ def add_deck_tool_routes(
                 f"<button type='button' class='tchip' data-cat='{_esc(c)}' data-zone='main' "
                 f"aria-pressed='false' title='The {_esc(c)} category'>{_esc(c)}</button>"
                 # the side zone's own category has the zone chip below, not a second chip of the
-                # same name (gate D10)
+                # same name
                 for c in categories
                 if c.casefold() != deck.side_category().casefold()
             )
@@ -558,8 +558,8 @@ def add_deck_tool_routes(
 
     @server.custom_route("/reports", methods=["GET"], include_in_schema=False)
     async def reports_page(request: Request) -> Response:
-        """Every stored report of the member, newest first, with what Forge plays for them now
-        (K8 in Q136; T-152). The gateway's own database only."""
+        """Every stored report of the member, newest first, with what Forge plays for them now.
+        The gateway's own database only."""
         sub, sid = browser_session(state, request)
         if not sub:
             return login_redirect("/reports")
@@ -619,7 +619,7 @@ def add_deck_tool_routes(
 
     @server.custom_route("/goldfish/guide", methods=["POST"], include_in_schema=False)
     async def goldfish_guide(request: Request) -> Response:
-        """Remember whether the member hid the Goldfish page's guide (G9), for their account on every
+        """Remember whether the member hid the Goldfish page's guide, for their account on every
         device. Browser session and its CSRF header only."""
         sub, sid = browser_session(state, request)
         if not sub or not csrf_header_ok(state.settings, sid, request):
@@ -641,8 +641,8 @@ def add_deck_tool_routes(
 
     @server.custom_route("/decks/{deck_id}/compare/forge", methods=["POST"], include_in_schema=False)
     async def compare_forge(request: Request) -> Response:
-        """K6 (Q136): both decks' Forge games against the same opponents. This deck's report runs
-        first, with precons picked for the higher of the two decks' brackets (Q140 item 3, so the
+        """Both decks' Forge games against the same opponents. This deck's report runs
+        first, with precons picked for the higher of the two decks' brackets (so the
         order doesn't matter); the other deck's seats them (``same_opponents_as``), as the
         assistants' run_deck_report does with compare_with. The other deck is read once, before
         either report is made, and both runs use that read. Both run without the solo test, so

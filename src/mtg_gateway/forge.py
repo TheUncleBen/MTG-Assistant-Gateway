@@ -413,14 +413,14 @@ def pick_opponents(
     newest = [p["name"] for p in precons][:DEFAULT_OPPONENTS]
     rated = [p for p in precons if isinstance(p.get("bracket"), int)]
     if bracket is None:
-        # a deck's name is never re-cased ("eldrazi tron" stays as its owner wrote it: review r1 item 13)
+        # a deck's name is never re-cased ("eldrazi tron" stays as its owner wrote it)
         lead = f"There is no bracket for {deck}" if deck else "The deck has no bracket"
         return newest, {
             "rule": "newest",
             "note": f"{lead} (none set in Archidekt and no estimate), so the newest precons play.",
         }
     why = _source_text(source, deck)
-    # Q49 / O14: an estimate is never called the deck's bracket
+    # an estimate is never called the deck's bracket
     lead = (
         f"{why[0].upper()}{why[1:]} is bracket {bracket}"
         if source == "estimate"
@@ -456,7 +456,7 @@ def pick_opponents(
     }
 
 
-# Q140 item 3: a Forge comparison (the Compare page's "Test both in Forge", or an assistant's
+# A Forge comparison (the Compare page's "Test both in Forge", or an assistant's
 # compare_with) seats both decks against precons picked for the higher of their brackets, so the
 # order of the two decks doesn't matter.
 PAIR_LEAD = "Opponents for this comparison are picked for the higher of the two decks' brackets."
@@ -490,7 +490,7 @@ def bracket_parts(value: Any) -> tuple[int | None, str | None, str | None, bool]
 def shared_opponents(
     precons: list[dict[str, Any]], shared: dict[str, Any]
 ) -> tuple[list[str] | None, dict[str, Any]]:
-    """K6 (Q136): the precons another report's run sat at the table, so both decks meet the same
+    """The precons another report's run sat at the table, so both decks meet the same
     table; (None, choice) when one of them is no longer in this Forge image. Without that run's
     precons (it never started), they are picked for its bracket, as its own run would."""
     deck = str(shared.get("deck_name") or "the other deck")
@@ -517,7 +517,7 @@ def shared_opponents(
             "note": f"The same opponents as {deck}'s Forge games{how} so both decks met the same table.",
         }
     # its run has not started yet: picked as that run will pick them, for the bracket it waits
-    # with (the higher of the two decks' in a comparison, Q140 item 3: then [n, source, deck])
+    # with (the higher of the two decks' in a comparison: then [n, source, deck])
     level, source, of_deck, pair = bracket_parts(shared.get("bracket"))
     chosen, picked = pick_opponents(precons, level, source, deck=of_deck or deck)
     if pair:
@@ -548,10 +548,10 @@ async def start_run(
     more: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Start a Forge run of the member's deck against bundled precons and return the report's
-    ``forge`` section. ``shared`` (K6, Q136) seats the opponents of another report's run, so two
+    ``forge`` section. ``shared`` seats the opponents of another report's run, so two
     decks meet the same table: its ``opponents`` (that run's precons) when it has them, else
     they are picked for its ``bracket``; ``report_id`` and ``deck_name`` say whose they were.
-    ``pair`` (Q140 item 3): a comparison's first run, whose ``bracket`` is the higher of the two
+    ``pair``: a comparison's first run, whose ``bracket`` is the higher of the two
     decks' (``bracket_deck`` names the other deck when it is that one's).
     ``more`` (Play more games): the ``opponents`` and ``choice`` of the report's earlier games, so
     the extra games seat the same table.

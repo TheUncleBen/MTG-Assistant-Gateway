@@ -1,7 +1,7 @@
 # Deploying with Docker Compose (one machine)
 
-This is the simplest way to run the gateway: one machine with Docker, two
-containers, a reverse proxy for HTTPS, and an OpenID Connect identity
+This is the simplest way to run the gateway: one machine with Docker, three
+containers (four with Forge), a reverse proxy for HTTPS, and an OpenID Connect identity
 provider for sign-in. No Swarm, no Portainer needed. (Portainer's **Stacks**
 page on a standalone Docker environment can run this Compose file too, but
 then set `MTG_DATA_DIR`, `MTG_BACKUP_DIR` and `MTG_SECRETS_DIR` to absolute
@@ -16,7 +16,8 @@ How the pieces fit is in [ARCHITECTURE.md](ARCHITECTURE.md).
 
 - A machine with **Docker Engine** and the **Compose plugin** 2.24 or newer
   (`docker compose version`). amd64 or arm64, so a Raspberry Pi 4 or 5 is
-  fine. About 800 MB of memory free for the two containers at their limits.
+  fine. About 900 MB of memory free for the three containers at their limits
+  (another 1.5 GB if you turn Forge on).
 - A **domain name** for the gateway, say `mtg.example.com`, pointing at a
   reverse proxy that can reach this machine.
 - An **OpenID Connect identity provider** you control: Authentik
@@ -150,8 +151,9 @@ and set `MTG_IMAGE=mtg-gateway`, `MTG_TAG=local`, `MF_IMAGE=mtg-mysticforge`,
 ### Hardening already in the Compose file
 
 - Every Linux capability is dropped except the four the start-up script
-  needs to switch to `PUID:PGID`, and `no-new-privileges` is on.
-- Each service may run at most 512 processes and threads
+  needs to switch to `PUID:PGID`, and `no-new-privileges` is on. ntfy runs
+  as `PUID:PGID` from the start, with no capabilities at all.
+- Each service may run at most 512 processes and threads (ntfy 128)
   (`deploy.resources.limits.pids`), so a runaway process can't exhaust the
   machine. The gateway normally needs a few dozen.
 - The root filesystem stays writable: when `PUID`/`PGID` differ from
@@ -170,7 +172,7 @@ Pick how HTTPS reaches the gateway ([REVERSE-PROXY.md](REVERSE-PROXY.md) has
 the details for each):
 
 **A proxy already on this machine** (nginx, Caddy, NPM with host
-networking): start the two containers, then point the proxy at
+networking): start the containers, then point the proxy at
 `http://127.0.0.1:8080`.
 
 ```bash
@@ -195,7 +197,7 @@ docker compose -f docker-compose.yml -f compose.caddy.yml up -d
 Then:
 
 ```bash
-docker compose ps        # both services "healthy" after about 30 seconds
+docker compose ps        # every service "healthy" after about 30 seconds
 docker compose logs -f gateway
 ```
 
@@ -246,9 +248,17 @@ the old image on that; don't run an old image on an upgraded database.
 `docker-compose.yml` as in the 0.7.29 steps below, and the new helper with
 `curl -fsSLO "$base/make-secrets.sh"` (same `base`). Then run
 `./make-secrets.sh` again before `docker compose up -d`: it adds
-`secrets/mtg_ntfy_token.txt` and leaves your other files alone. If your `.env`
+`secrets/mtg_ntfy_token.txt` and leaves your other files alone. If that file
+already exists (it held the token for an ntfy server of your own), delete it
+first so a new token is made, and revoke the old token on your old ntfy
+server. If your `.env`
 has `MTG_NTFY_URL` or `MTG_NTFY_TOKEN_FILE` with a value, delete those lines;
 an ntfy server you ran for the gateway can go, with its proxy host.
+If Forge is on, the new file pulls Forge image `2.0.15-mag3`, which GitHub
+publishes only after this release is on `main` and the **Forge image**
+workflow's run for it has finished: check the repository's **Actions** tab
+before you update. Then follow the 0.7.29 steps below, but skip the
+`mtg_ntfy_token` edits: the new file already has those lines.
 Notifications now come in the gateway's Android app (members press **Get
 notifications on this phone** on their Account page in the app), not the
 ntfy app, and members need app 0.7.30 to get them. **Members on an app older than 0.7.12 must

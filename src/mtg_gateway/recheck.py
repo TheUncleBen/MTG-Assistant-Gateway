@@ -1,5 +1,4 @@
-"""0.7.29 flexible approvals: a waiting change checked again against the deck as it is now
-(Q27g, FLEX §5, Track A call K1).
+"""0.7.29 flexible approvals: a waiting change checked again against the deck as it is now.
 
 A waiting change records the deck it was made from (its baseline fingerprint). Before 0.7.29 any
 change to that deck refused the apply. Now the change is worked out again on the live deck: when
@@ -108,8 +107,7 @@ def first_difference(was: list[dict[str, Any]], now: list[dict[str, Any]]) -> st
 
 def _line(row: dict[str, Any]) -> str:
     """A row's line, with who can see the deck for a private or unlisted row, so a change of
-    visibility alone does not read as two identical lines (delta review 2, E-3; wording draft,
-    WORDING-6)."""
+    visibility alone does not read as two identical lines."""
     line = d.row_line(row)
     before, after = row.get("seen_before"), row.get("seen_after")
     if not before or not after:

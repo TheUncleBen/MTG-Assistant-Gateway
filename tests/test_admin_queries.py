@@ -1,5 +1,5 @@
 """The admin Users and Activity pages read every member's apps in a fixed number of queries
-(0.7.29, leftover A9), with the same result as the per-member lookups they replace."""
+(0.7.29), with the same result as the per-member lookups they replace."""
 
 from __future__ import annotations
 

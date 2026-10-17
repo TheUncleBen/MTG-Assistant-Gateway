@@ -1,4 +1,4 @@
-"""L1: the deck page's edit answer says "stale" when Archidekt's re-read doesn't show a printing
+"""The deck page's edit answer says "stale" when Archidekt's re-read doesn't show a printing
 or finish change yet, so the page reads once more instead of drawing the old printing under
 "Saved"."""
 
@@ -30,7 +30,7 @@ def test_a_re_read_that_still_shows_the_old_printing_is_stale() -> None:
         [{"action": "set_printing", "card_name": "Sol Ring", "set_code": "sld", "collector_number": "1074"}]
     )
     assert printing_not_shown(ch, _deck(_sol("cmr", "472"))) == ["Sol Ring"]
-    assert printing_not_shown(ch, _deck(_sol("SLD", "1074", "Etched"))) == []  # P6 moved the finish
+    assert printing_not_shown(ch, _deck(_sol("SLD", "1074", "Etched"))) == []  # only the finish differs
     assert printing_not_shown(ch, _deck()) == ["Sol Ring"]
 
 

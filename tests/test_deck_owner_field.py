@@ -50,7 +50,7 @@ def test_ownership_by_id_or_username() -> None:
 
 
 def test_ids_decide_when_both_are_known_and_an_empty_username_never_matches() -> None:
-    """L2: someone who later takes a username the member gave up is not the member: with both
+    """Someone who later takes a username the member gave up is not the member: with both
     owner ids known the ids decide, in a deck read and in the deck list alike. The username
     decides only when an id is missing, and an empty one never matches."""
     assert owns_deck(_deck({"id": 8, "username": "alice"}), LINK) is False

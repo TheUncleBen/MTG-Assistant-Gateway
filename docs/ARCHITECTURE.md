@@ -19,9 +19,11 @@ flowchart LR
     subgraph net["Private Docker network"]
       gw["mtg-gateway<br/>:8080"]
       mf["Mystic Forge<br/>:8000, not published"]
+      ntfy["ntfy<br/>notifications, not published"]
+      forge["Forge<br/>simulations, optional, not published"]
     end
     data[("data/ (SQLite)<br/>backups/")]
-    secrets[["Docker secrets<br/>3 files"]]
+    secrets[["Docker secrets<br/>4 files"]]
   end
 
   idp["Your OIDC identity provider<br/>Authentik, Keycloak, ..."]
@@ -32,6 +34,8 @@ flowchart LR
   claude & chatgpt & android & browser -- HTTPS --> proxy
   proxy -- HTTP --> gw
   gw -- MCP --> mf
+  gw -- "members' messages" --> ntfy
+  gw -- "simulation jobs" --> forge
   gw --- data
   secrets -.-> gw
   gw -- "OIDC sign-in (browser redirect)" --> idp
@@ -51,7 +55,8 @@ Claude / ChatGPT / Android app / browser
         ▼
   mtg-gateway :8080 ──MCP──▶ Mystic Forge :8000 ──▶ Scryfall, EDHREC, Spellbook, rules
         │   ├─ SQLite in data/, nightly copies in backups/
-        │   ├─ 3 Docker secrets (encryption key, cookie key, OIDC client secret)
+        │   ├─ ntfy (members' notifications) and Forge (simulations, optional), both private
+        │   ├─ 4 Docker secrets (encryption key, cookie key, OIDC client secret, ntfy token)
         │   ├─ sign-in ──▶ your OIDC identity provider
         │   └─ deck reads and edits ──▶ archidekt.com (as the signed-in user)
 ```
@@ -62,12 +67,14 @@ Claude / ChatGPT / Android app / browser
 | --- | --- | --- |
 | **mtg-gateway** | The product. An MCP server at `/mcp`, its own OAuth 2.1 server for AI clients, the browser pages, the Archidekt connection, card scanning, and the database | No, this is the thing you're deploying |
 | **Mystic Forge** | Card search, prices, rules, EDHREC, Commander Spellbook, precons, goldfish simulation. Upstream open-source project, built from a pinned commit with small patches | Optional. Set `MTG_MYSTIC_FORGE_URL` to an empty value and remove the Mystic Forge service; the research tools disappear, deck tools, proposals and scanning still work |
+| **ntfy** | Holds each member's notifications until the gateway's Android app picks them up through the gateway's own address. Upstream open-source server, on a private network with no published port | Not separately: notifications need it, and the stack files run it for you |
+| **Forge** | The rules engine for deck simulations: plays real games of a deck against precons. Upstream open-source engine, unmodified, behind a small job service | Optional and off by default (`FORGE_REPLICAS=0`, or the Compose `forge` profile); without it reports have no Forge games |
 | **Reverse proxy** | Gives the gateway an `https://` address on your domain | Any proxy that forwards to an HTTP backend and keeps the `Host` header. See [REVERSE-PROXY.md](REVERSE-PROXY.md) |
 | **Identity provider** | Who may sign in. The gateway never sees passwords | Any OpenID Connect provider that can send group membership in a claim (`MTG_OIDC_GROUPS_CLAIM`), or any provider at all if it already admits only the right people and you set `MTG_ALLOW_ANY_IDP_USER=true`. Authentik is the documented one; see [IDP-OTHERS.md](IDP-OTHERS.md) for the rest |
-| **Docker host** | Runs the two containers | Docker Compose on one machine ([DEPLOY-COMPOSE.md](DEPLOY-COMPOSE.md)) or a Swarm, with or without Portainer ([DEPLOY.md](DEPLOY.md)) |
+| **Docker host** | Runs the containers | Docker Compose on one machine ([DEPLOY-COMPOSE.md](DEPLOY-COMPOSE.md)) or a Swarm, with or without Portainer ([DEPLOY.md](DEPLOY.md)) |
 
-Both images are multi-arch (`linux/amd64` and `linux/arm64`), so a
-Raspberry Pi 4 or 5 is fine. The gateway idles around 60 MB of memory and
+The project's images (the gateway, Mystic Forge and Forge) are multi-arch
+(`linux/amd64` and `linux/arm64`), so a Raspberry Pi 4 or 5 is fine. The gateway idles around 60 MB of memory and
 Mystic Forge around 115 to 170 MB, measured on test machines rather than a Pi.
 
 ## What's fixed, and why

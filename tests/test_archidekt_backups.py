@@ -39,7 +39,7 @@ async def test_folder_is_created_once_then_found() -> None:
 
 
 async def test_folder_differing_only_in_capitals_is_reused() -> None:
-    """QA F22: "MTG Gateway Backups" sat beside "MTG Gateway backups". The folder is matched
+    """Once "MTG Gateway Backups" sat beside "MTG Gateway backups". The folder is matched
     without regard to capitals, so an existing one is reused and no second one is made."""
     ark, client, token = await _client()
     ark.folders["alice"] = [{"id": 77, "name": BACKUP_FOLDER_NAME.upper(), "private": True}]

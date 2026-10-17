@@ -337,7 +337,8 @@ services:
 
   # Forge on the node named by FORGE_NODE: the rules engine for deck simulations (GPL-3.0,
   # unmodified). Off by default (FORGE_REPLICAS=0). It starts Java only while a simulation runs,
-  # under a CPU and memory cap, and is on a private network with no way out. dnsrr: the gateway
+  # under a CPU and memory limit (on Raspberry Pi OS its own memory guards, not a hard cap), and
+  # is on a private network with no way out. dnsrr: the gateway
   # sees each copy's address, so with more than one copy every run stays on the copy that started
   # it (one copy works the same either way). For several machines see DEPLOY.md.
   mtg-assistant-forge:

@@ -105,16 +105,16 @@ def _language_id(value: Any) -> int | None:
 # that is not JSON (its bundle and editor chunk, read 2026-10-14). So plain text from the gateway
 # is wrapped in a document before it is sent, and a document read back is shown as its text.
 #
-# What an assistant or a gateway form writes is plain text only (Q70): the gateway builds the
+# What an assistant or a gateway form writes is plain text only: the gateway builds the
 # document from the text itself and never sends a document a caller supplied, so a link, any
 # formatting or an embed the review page does not show can never be written. Only a snapshot
 # restore puts a stored document back as it was, by handing it over as a QuillDoc. A later
-# formatted-text feature (Q61) would make its own QuillDoc from checked input; nothing else changes.
+# formatted-text feature would make its own QuillDoc from checked input; nothing else changes.
 
 
 class QuillDoc(str):
     """A Quill document (JSON text) that ``rich_doc`` sends unchanged, formatting included. Only a
-    snapshot restore makes one, from the document Archidekt itself stored (Q70)."""
+    snapshot restore makes one, from the document Archidekt itself stored."""
 
 
 def _quill_ops(value: Any) -> list[Any] | None:
@@ -148,7 +148,7 @@ def rich_text(value: Any) -> str:
 
 
 def plain_text(value: str) -> str:
-    """Text an assistant or a form supplied, as the plain text that will be written (Q70): a Quill
+    """Text an assistant or a form supplied, as the plain text that will be written: a Quill
     document given as JSON text is reduced to its words (``rich_text``: links, formatting and
     embeds dropped, a card link kept as its card name); any other text is kept as it is. A
     document inside a document is reduced too, so the result is never a document and reducing it
@@ -186,7 +186,7 @@ def drops_formatting(value: Any) -> bool:
 def words_only_note(noun: str) -> str:
     """The note an assistant's tool reply carries when its description or comment was a Quill
     document that lost more than its words (``drops_formatting``), so the assistant does not
-    tell the user a link or formatting was added (Q90)."""
+    tell the user a link or formatting was added."""
     return (
         f"Only the words of this {noun} are saved: the gateway writes new text as plain text, so the "
         "links, formatting and embeds in what you sent were removed (formatting already on Archidekt "
@@ -203,7 +203,7 @@ def written_text(value: str) -> str:
 def rich_doc(value: str) -> str:
     """The rich-text value to send for ``value``. Plain text, whatever it holds (JSON included),
     becomes a one-insert document that ends with a line break, as the site's editor makes it, so
-    it shows on Archidekt exactly as written (Q70). Only a QuillDoc that holds a document (a
+    it shows on Archidekt exactly as written. Only a QuillDoc that holds a document (a
     snapshot restore) is sent as it is, keeping its formatting. "" stays "" (no text)."""
     if isinstance(value, QuillDoc) and _quill_ops(value) is not None:
         return str(value)
@@ -378,7 +378,7 @@ class ArchidektError(Exception):
         # been written, whatever the kind
         self.sent = sent
         # a 429's Retry-After in seconds as Archidekt sent it, before Pacer.MAX_RETRY_AFTER caps
-        # the shared pause (an apply stops rather than wait less than Archidekt asked, Q66)
+        # the shared pause (an apply stops rather than wait less than Archidekt asked)
         self.retry_after = retry_after
 
 
@@ -702,7 +702,7 @@ class DeckList(list):  # type: ignore[type-arg]
     back on two pages (the list shifted, so another may have been skipped), or when fewer decks
     came back than Archidekt's count. Only a complete list may say a deck is gone
     (DeckService.on_archidekt). ``unreadable`` counts the entries left out because their owner
-    field could not be read at all: My decks then says the list couldn't be read (Q64) instead of
+    field could not be read at all: My decks then says the list couldn't be read instead of
     showing it as whole."""
 
     def __init__(self, rows: Any = (), *, complete: bool = False, unreadable: int = 0) -> None:
@@ -825,7 +825,7 @@ class Pacer:
         return max(0.0, max(self._open_until, self._retry_until) - time.monotonic())
 
     def record(self, ok: bool, retry_after: float | None = None, *, breaker: bool = True) -> None:
-        """Note a call's outcome. ``breaker=False`` (a 429 met during a member's apply, Q62) sets
+        """Note a call's outcome. ``breaker=False`` (a 429 met during a member's apply) sets
         the Retry-After pause like any 429 but does not count towards the breaker, so an apply
         that waits out Archidekt's 429s never pauses the gateway for everyone."""
         if ok:
@@ -861,7 +861,7 @@ PATIENCE_SPENT = (
 
 
 class Patience:
-    """One member's apply's allowance for Archidekt's 429s (Q41, Q66): at most RATE_LIMIT_WAITS
+    """One member's apply's allowance for Archidekt's 429s: at most RATE_LIMIT_WAITS
     waits and RATE_LIMIT_WAIT_TOTAL seconds of waiting in all, across every request of the apply
     (not per request)."""
 
@@ -877,8 +877,8 @@ class Patience:
 # while a 429's Retry-After pause runs, is waited out and the same request sent again, so a long
 # apply (a 100-card new deck is a few hundred paced requests) slows down instead of failing halfway.
 # A 429 means Archidekt did not act on the request, so sending a write again after one cannot apply
-# it twice. The apply's 429s do not count towards the Pacer's breaker (Q62). Once the allowance is
-# used up, or Archidekt asks for a single wait longer than what is left of it (Q66), the request
+# it twice. The apply's 429s do not count towards the Pacer's breaker. Once the allowance is
+# used up, or Archidekt asks for a single wait longer than what is left of it, the request
 # fails at once as rate_limited with PATIENCE_SPENT; Archidekt's Retry-After is never cut short.
 # A task created inside an apply (asyncio.create_task copies the context) inherits this allowance.
 patient: contextvars.ContextVar[Patience | None] = contextvars.ContextVar("archidekt_patient", default=None)
@@ -888,7 +888,7 @@ wait_note: contextvars.ContextVar[dict[str, Any] | None] = contextvars.ContextVa
 )
 # Set around a member's apply (decks.py), to the apply's progress dict: every write ``_request``
 # sends inside the apply marks ``progress["deck_written"]`` once it succeeds or fails in a way that
-# may still have landed, so "the apply changed nothing" fails closed (review D1, D2, Q78): a write
+# may still have landed, so "the apply changed nothing" fails closed: a write
 # path that forgets to say it wrote can never send a proposal back to pending. Only the backup
 # copy's own writes (``backup_writes``) are not a change.
 apply_writes: contextvars.ContextVar[dict[str, Any] | None] = contextvars.ContextVar(
@@ -1176,7 +1176,7 @@ class ArchidektClient:
                 ) from exc
             if resp.status_code == 429:
                 asked = retry_after_seconds(resp.headers.get("Retry-After"))
-                # Q62: during a member's apply a 429 is waited out, not counted towards the breaker
+                # During a member's apply a 429 is waited out, not counted towards the breaker
                 self.pacer.record(False, asked, breaker=patient.get() is None)
                 raise ArchidektError(
                     "rate_limited",

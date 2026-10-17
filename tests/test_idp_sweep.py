@@ -401,7 +401,7 @@ async def test_the_loop_backs_off_after_failures_and_deletes_nothing(
     assert "nothing deleted: Authentik answered HTTP 502" in caplog.text
 
 
-# -- is it working? (T-120) -----------------------------------------------------------------------
+# -- is it working? -----------------------------------------------------------------------
 async def test_every_successful_round_logs_one_line_and_the_status_follows_it(
     db: Database, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
@@ -444,7 +444,7 @@ def test_status_when_off_gives_the_reason() -> None:
     assert AuthentikSweep(_settings(required_group=None), None, None).status()["cause"] == "no-group"
 
 
-# Every reason a round deletes nothing has its own next step for the admin overview (T-120).
+# Every reason a round deletes nothing has its own next step for the admin overview.
 NEXT_STEP_CASES = {
     "Authentik could not be reached (ConnectError)": "can reach Authentik's address",
     "Authentik answered HTTP 403": "Make a new token and Docker secret",

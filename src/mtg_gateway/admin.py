@@ -390,7 +390,7 @@ def add_admin_routes(server: MCPServer, state: AppState) -> None:
             return settings_page_response(sub, sid, outcome=outcome, notice=notice, focus=group, status=400)
         if outcome.unsaved:
             # Back to default with other edits in the section: say so and keep them in the form,
-            # rather than a redirect that would drop them (review round 1, finding 6).
+            # rather than a redirect that would drop them.
             notice = settings_page.changes_notice(outcome.changes) + settings_page.unsaved_notice(
                 outcome.unsaved, group
             )
@@ -567,7 +567,7 @@ def system_data(state: Any) -> dict[str, Any]:
 
 def _cleanup_warning(c: dict[str, Any]) -> str:
     """A notice when the removed-member clean-up was set up but its token can't be read, as after a
-    stack file was replaced without its uncommented secret lines (PROOFREAD-W3 H1): the one line in
+    stack file was replaced without its uncommented secret lines: the one line in
     the System list and one start-up warning are easy to miss."""
     if c.get("state") != "off" or c.get("cause") != "token-unreadable":
         return ""
@@ -602,7 +602,7 @@ def _chatgpt_name_warning(settings: Any) -> str:
                 f"<div class='notice warn'>{html.escape(text)}"
                 "<a href='/admin/settings#s-row-chatgpt_name'>Settings page</a>.</div>"
             )
-    # the plugin file's developer and author name: a long MTG_SERVER_NAME shortened (B4 b)
+    # the plugin file's developer and author name: a long MTG_SERVER_NAME shortened
     if cut := developer_name_warning(settings.server_name):
         out += f"<div class='notice warn'>{html.escape(cut)}</div>"
     return out
@@ -848,7 +848,7 @@ def _overview_body(state: Any) -> str:
         + _stat("Simulation engine (Forge)", sysd["forge"])
         + _stat("Removed-member clean-up", _cleanup_text(sysd["member_cleanup"]))
         + _archidekt_stats(sysd.get("archidekt"))
-        # Q142 item 8 A: the live settings; each by its name, with the setting's own word
+        # the live settings; each by its name, with the setting's own word
         + _stat("Default approval mode", _mode_name(state.decks.live.get("approval_mode_default")))
         + _stat("Highest approval mode allowed", _mode_name(state.decks.live.get("approval_mode_max")))
         + "</dl>"
@@ -886,7 +886,7 @@ MODELS_PER_PAGE = 100
 
 
 def _models_body(state: Any, csrf: str | None, page_no: int) -> str:
-    """The simulator's kept card models (card Q138 item 4): who added each (admins only), when, and
+    """The simulator's kept card models: who added each (admins only), when, and
     a Remove button per model."""
     total = state.db.count_all_card_models()
     intro = (

@@ -1,9 +1,9 @@
 """My decks by folder (0.7.28, ALIGNMENT §6): one level of the member's Archidekt folder tree at a
 time, its subfolders in a "Folders" area above the decks directly in it, with a breadcrumb back
-up. Folders are always A to Z (F1); a tile shows the name, how many decks and subfolders are
-directly inside, and a lock when the folder is private (F2); empty folders show (F5). The deck
-filter searches every deck from any level and says which folder each match is in (Q20). The
-gateway's backup folder, and anything inside it, never shows (Q21).
+up. Folders are always A to Z; a tile shows the name, how many decks and subfolders are
+directly inside, and a lock when the folder is private; empty folders show. The deck
+filter searches every deck from any level and says which folder each match is in. The
+gateway's backup folder, and anything inside it, never shows.
 
 The tree comes from decks.DeckService.folder_view (cached like the deck list); the deck rows carry
 their folder's id (archidekt.list_row ``folder_id``). A deck whose folder is not in the tree (the
@@ -136,7 +136,7 @@ def arrange(
     level.crumbs = [(None, "Decks")] + [
         (p["id"], p["name"]) for p in path(current["id"] if current else None)
     ]
-    if needle:  # Q20: every level, each match with the folder it is in
+    if needle:  # every level, each match with the folder it is in
         found = [f for f in shown if needle in f["name"].casefold()]
         level.folders = [tile(f, with_path=True) for f in sorted(found, key=_folder_key)]
         decks = []

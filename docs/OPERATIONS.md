@@ -8,6 +8,8 @@ manager unless it says otherwise. Service names assume the stack is called
 | --- | --- | --- |
 | Gateway | `mtg_mtg-assistant-gateway` | `gateway` |
 | Mystic Forge (internal research service) | `mtg_mtg-assistant-mysticforge` | `mysticforge` |
+| ntfy (notifications for the Android app) | `mtg_mtg-assistant-ntfy` | `ntfy` |
+| Forge (simulations, only when turned on) | `mtg_mtg-assistant-forge` | `forge` |
 
 **Running with Docker Compose?** The same things, from the folder with
 `docker-compose.yml`:
@@ -88,9 +90,10 @@ project's newest release, and when that is newer, every page shows admins a noti
 overview (**Admin**, **Updates**) shows these steps with the version filled in. It never pulls an
 image or restarts itself. `MTG_UPDATE_CHECK=false` turns the check off.
 
-Updating to 0.7.29 from an earlier version may need a step first: see
-[DEPLOY.md](DEPLOY.md#updating-to-0729-from-an-earlier-version) (Portainer) or
-[DEPLOY-COMPOSE.md](DEPLOY-COMPOSE.md#updating-to-0729-from-an-earlier-version)
+Updating to 0.7.30 from an earlier version needs a step first (the new
+`mtg_ntfy_token` secret), and from before 0.7.29 a few more: see
+[DEPLOY.md](DEPLOY.md#updating-to-0730-from-an-earlier-version) (Portainer) or
+[DEPLOY-COMPOSE.md](DEPLOY-COMPOSE.md#updating-to-0730-from-an-earlier-version)
 (Compose).
 
 In Portainer: **Stacks** → `mtg`. With a pinned version (for example
@@ -328,6 +331,7 @@ secret.
 | --- | --- |
 | `mtg_session_secret` | Safe any time. Sign-ins in progress fail once, and anyone with `/account` or a review page open has to reload it. |
 | `mtg_oidc_client_secret` | Rotate it together with the client secret on the Authentik provider. |
+| `mtg_ntfy_token` | Safe any time. The gateway and ntfy both use it and read it when they start, so point both services at the new secret in the same redeploy (Compose: `docker compose up -d --force-recreate gateway ntfy`). Restarting ntfy drops the messages phones haven't picked up yet. |
 | `mtg_fernet_key` | Every stored Archidekt session becomes unreadable, so everyone has to relink at `/account`. The identity-provider tokens kept for the live membership check become unreadable too, so everyone is signed out once on their next request and signs in again (their AI apps reconnect once). Proposals aren't affected. |
 
 ## Revoking access
@@ -527,13 +531,14 @@ Applying an edit or restore:
 - copies the deck into the user's "MTG Gateway backups" folder on Archidekt
   as a private deck (`MTG_ARCHIDEKT_BACKUPS`, on by default). If that copy
   fails, nothing changes and the proposal stays pending;
-- sends the change one card at a time, then reads the deck back to verify
+- sends the change one card at a time, then reads the deck back to check
   it;
 - refuses to apply the same proposal twice.
 
 Applying a new deck creates it (private unless the user asked otherwise),
-adds the cards and verifies the same way. Proposals expire after 24 hours.
-The gateway never deletes a deck. A proposal left in `applying` by a restart
+adds the cards and checks it the same way. A waiting proposal expires after
+`MTG_PROPOSAL_EXPIRY_DAYS` (7 days by default). The gateway deletes a deck only
+when its owner presses Delete on that proposal's review page. A proposal left in `applying` by a restart
 mid-apply is marked `failed` at startup, with the snapshot and deck ids in
 its result; one somehow still `applying` six hours after it started is marked
 the same way by the regular clean-up.
@@ -647,7 +652,7 @@ on what the review page would show, not on what the assistant says:
 |---|---|
 | Low | A small edit to an existing deck or to your collection: at most 5 card rows, each a card added or removed, or a new quantity, category, finish, printing, color tag or custom mana value, no more than 4 copies a row and never the commander; and a private copy of a deck (a clone), which changes nothing that exists. (The row limit is `MTG_AUTO_APPLY_MAX_ROWS`, default 5.) |
 | High | Everything else: more rows than that, a commander change, a new deck, restoring a snapshot, and the deck's details (name, format, bracket, description, visibility, folder, tags and cover). |
-| Consent, destructive (R-142) | Actions on your Archidekt account (likes, votes, bookmarks, follows, comments, new folders and collaborator changes) and deleting a deck are never applied by an assistant: each one waits for your own press, in every mode, on the card in the chat or on its review page (deleting a deck, and an edit of a comment that has formatting: on the review page only). |
+| Consent, destructive | Actions on your Archidekt account (likes, votes, bookmarks, follows, comments, new folders and collaborator changes) and deleting a deck are never applied by an assistant: each one waits for your own press, in every mode, on the card in the chat or on its review page (deleting a deck, and an edit of a comment that has formatting: on the review page only). |
 
 Every proposal result carries `approval_mode`, `risk`, `risk_reason` and
 `assistant_may_apply`, and `next_step` tells the assistant whether to call
@@ -976,7 +981,7 @@ For the SQL snippets on this page, put the query inside the
 
 | Table | What's in it |
 | --- | --- |
-| `proposals` | Each proposal: owner, kind (`edit`, `create_deck`, `restore`, `details`, `clone` or `collection`), deck (the new deck's id once a create is applied), change list, diff, state (`pending`, `applying`, `applied`, `failed`, `rejected`; shown as `expired` after 24 hours), result and timestamps |
+| `proposals` | Each proposal: owner, kind (`edit`, `create_deck`, `restore`, `details`, `clone` or `collection`), deck (the new deck's id once a create is applied), change list, diff, state (`pending`, `applying`, `applied`, `failed`, `rejected`, `withdrawn`, `replaced`, `expired`; a waiting one counts as `expired` once its expiry time passes), result and timestamps |
 | `snapshots` | The full deck as read from Archidekt just before a proposal was applied, plus `backup_deck_id` and `backup_url` for the private backup copy made in the user's Archidekt backup folder at the same moment. Users see theirs with `list_snapshots` and undo an edit with `propose_restore_snapshot`. `deck_json` is the raw deck |
 | `archidekt_links` | One row per user who linked Archidekt: Archidekt username, encrypted session, status and timestamps |
 | `reports` | Stored deck reports (`run_deck_report`, the "Run full test" button and `POST /api/v1/reports`): owner, deck, a fingerprint of the deck as read, the statistics, and the goldfish and validation results as JSON. The newest 200 per user are kept |

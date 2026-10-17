@@ -1,6 +1,6 @@
 """Release 0.7.29, approvals and proposals: a waiting change checked again against the deck as it
-is now (Q27g, K1, K2), what auto mode still asks about (O7, O8, G5, Q27j), and the card's
-approval code (Q8, G3, G16, T-151)."""
+is now, what auto mode still asks about, and the card's
+approval code."""
 
 from __future__ import annotations
 
@@ -41,7 +41,7 @@ async def _get(h, token: str, pid: str) -> dict:
     return structured(await call(h, token, "get_proposal", {"proposal_id": pid}))
 
 
-# -- K1: worked out again on the deck as it is now ---------------------------------------------------
+# -- worked out again on the deck as it is now -------------------------------------------------------
 
 
 async def test_a_change_elsewhere_that_leaves_the_rows_alone_still_applies(stack: Stack) -> None:
@@ -77,7 +77,7 @@ async def test_a_change_elsewhere_to_the_same_card_needs_a_look_and_sends_nothin
 
 
 async def test_an_apply_checks_the_decks_other_waiting_changes_at_no_cost(stack: Stack) -> None:
-    """K2: the verify read of an apply re-checks the deck's other waiting changes."""
+    """The verify read of an apply re-checks the deck's other waiting changes."""
     h, ark = stack.h, stack.ark
     token = await linked_user(stack)
     first = await _propose(h, token)
@@ -173,7 +173,7 @@ async def test_the_deck_sync_records_the_status_with_the_proposal(stack: Stack) 
     assert row["status"] == "needs_look" and row["status_reason"].startswith("rows:")
 
 
-# -- O7, O8, G5, Q27j: what an assistant may apply itself ----------------------------------------------
+# -- what an assistant may apply itself ---------------------------------------------------------------
 
 
 async def test_auto_mode_still_asks_about_restores_new_decks_commanders_and_big_edits(stack: Stack) -> None:
@@ -201,17 +201,17 @@ async def test_auto_mode_still_asks_about_restores_new_decks_commanders_and_big_
     details = structured(
         await call(h, token, "propose_deck_details", {"deck_id": "42", "details": {"name": "Auto name"}})
     )
-    assert details["risk"] == "high" and details["assistant_may_apply"] is True  # O7: applies in auto
+    assert details["risk"] == "high" and details["assistant_may_apply"] is True  # applies in auto
     clone = structured(await call(h, token, "propose_clone_deck", {"deck_id": "42"}))
     assert clone["assistant_may_apply"] is True
-    # the big-edit limit is the admin setting (O8)
+    # the big-edit limit is the admin setting
     h.app.state.gateway.decks.live.set("auto_big_edit_rows", 30, by="admin")
     again = await _get(h, token, big["proposal_id"])
     assert again["assistant_may_apply"] is True
 
 
 async def test_a_note_changed_by_another_app_is_never_applied_by_an_assistant(stack: Stack) -> None:
-    """G5, K7: whatever its rows, in every mode."""
+    """Whatever its rows, in every mode."""
     h = stack.h
     token = await linked_user(stack)
     p = await _propose(h, token)
@@ -232,7 +232,7 @@ async def test_a_note_changed_by_another_app_is_never_applied_by_an_assistant(st
 
 
 async def test_a_held_note_waits_for_the_member_who_may_still_apply_it(stack: Stack) -> None:
-    """Q27j, A8 (rec): an assistant never applies a held note; the member's press does."""
+    """An assistant never applies a held note; the member's press does."""
     h, ark = stack.h, stack.ark
     token = await linked_user(stack)
     base = await _propose(h, token, [{"action": "add", "card_name": "Arcane Signet"}])
@@ -255,7 +255,7 @@ async def test_a_held_note_waits_for_the_member_who_may_still_apply_it(stack: St
 
 
 async def test_the_card_draws_buttons_only_in_the_app_that_made_the_note(stack: Stack) -> None:
-    """Coordinator check 3: get_proposal in another app drew buttons that always failed with
+    """get_proposal in another app used to draw buttons that always failed with
     invalid_approval. Now that card has no code and sends the member to the review page."""
     h = stack.h
     await linked_user(stack)
@@ -271,7 +271,7 @@ async def test_the_card_draws_buttons_only_in_the_app_that_made_the_note(stack: 
 
 
 async def test_a_card_of_an_earlier_version_is_refused_as_replaced(stack: Stack) -> None:
-    """G16, K4: an amend makes the old card's code stop working, with the design's words."""
+    """An amend makes the old card's code stop working, with the design's words."""
     h, ark = stack.h, stack.ark
     token = await linked_user(stack)
     await _set_mode(h, "manual")
@@ -301,8 +301,8 @@ async def test_a_card_of_an_earlier_version_is_refused_as_replaced(stack: Stack)
 async def test_asking_the_assistant_to_apply_a_note_that_needs_a_press_answers_with_the_card(
     stack: Stack,
 ) -> None:
-    """T-151 (coordinator check 2): apply_proposal of a change the member must approve used to
-    answer only with a link. Now its answer is the proposal, with the card's code."""
+    """apply_proposal of a change the member must approve used to answer only with a link. Now its
+    answer is the proposal, with the card's code."""
     h = stack.h
     token = await linked_user(stack)
     big = [{"action": "add", "card_name": f"Card {i}"} for i in range(21)]
@@ -315,7 +315,7 @@ async def test_asking_the_assistant_to_apply_a_note_that_needs_a_press_answers_w
 
 
 async def test_social_actions_are_approved_on_the_card_and_never_by_the_assistant(stack: Stack) -> None:
-    """Q8, Q9, G3, K13: a like gets Approve on the card; the assistant's apply is refused; a deck
+    """A like gets Approve on the card; the assistant's apply is refused; a deck
     deletion keeps the review page only."""
     h, ark = stack.h, stack.ark
     ark.private.discard(43)  # amy's deck is public: someone else's deck to like
@@ -331,7 +331,7 @@ async def test_social_actions_are_approved_on_the_card_and_never_by_the_assistan
     assert not (res.get("_meta") or {}).get(APPROVAL_META_KEY)
 
 
-# -- Q130, A12: the expiry ------------------------------------------------------------------------------
+# -- the expiry ------------------------------------------------------------------------------------------
 
 
 async def test_a_new_note_waits_seven_days_by_default(stack: Stack) -> None:

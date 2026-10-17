@@ -235,7 +235,7 @@ WRITE_TOOLS = frozenset(
         "propose_deck_details",
         "propose_clone_deck",
         # the Archidekt account actions (actions.py): proposals too, even though none of them is
-        # ever applied by an assistant (R-142)
+        # ever applied by an assistant
         "propose_deck_social",
         "propose_comment",
         "propose_delete_deck",
@@ -244,7 +244,7 @@ WRITE_TOOLS = frozenset(
         "apply_proposal",
         "confirm_proposal",
         "reject_proposal",
-        # 0.7.29: tidying the waiting changes and "Apply all" on a card (Track A)
+        # 0.7.29: tidying the waiting changes and "Apply all" on a card
         "amend_proposal",
         "withdraw_proposal",
         "combine_proposals",
@@ -698,7 +698,7 @@ def build_mcp_server(state: AppState) -> MCPServer:
             )
         if state.sync is not None and state.sync.enabled:
             tasks.append(asyncio.create_task(state.sync.loop()))
-        # unused backup copies whose delete Archidekt refused for a while (Q77), one at a time,
+        # unused backup copies whose delete Archidekt refused for a while, one at a time,
         # in a context of its own (never inside a member's apply or slot)
         tasks.append(asyncio.create_task(state.decks.backup_delete_loop(), context=contextvars.Context()))
         updates = UpdateChecker(s.update_check)

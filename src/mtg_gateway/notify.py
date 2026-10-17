@@ -739,8 +739,8 @@ def _summary_html(state: AppState, sub: str, p: dict[str, Any], csrf_in: str) ->
     return (
         f"<div class='summary' id='summary'>{SUMMARY_CSS}<h3>Summary</h3>"
         f"<p>A plain summary of {what}, written by the gateway from its own data (no AI) and sent "
-        "through your notifications when they are on. Your assistant can read it with "
-        "<code>get_summary</code> and write you its own version on a schedule.</p>"
+        "through your notifications when they are on. Your assistant can read it too and write you "
+        "its own version on a schedule.</p>"
         f"<form method='post'>{csrf_in}<input type='hidden' name='action' value='summary_save'>"
         "<label for='s-every'>Send my summary</label>"
         f"<select id='s-every' name='summary_every'>{opts}</select>"

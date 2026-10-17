@@ -1,4 +1,4 @@
-"""The deck editor's add-a-card flow in headless Chromium (R-131): typed names show rich
+"""The deck editor's add-a-card flow in headless Chromium: typed names show rich
 suggestions (picture, mana cost, type line) from the gateway's catalog, Enter adds the card and
 keeps the box focused for the next one, the add form's controls share one row on desktop and
 fold cleanly on a phone, and the printing picker opens as a dialog. Skipped without Chromium."""
@@ -130,7 +130,7 @@ def test_add_a_card_with_rich_suggestions(server: Server, width: int) -> None:
         box.press_sequentially("oathsw", delay=30)
         page.locator("[role=option]").first.wait_for(timeout=3000)
         box.press("Enter")
-        # L18: the row's mana cost may come after the row itself (a pick made before the list's
+        # The row's mana cost may come after the row itself (a pick made before the list's
         # details arrived is filled in when they do): wait for it, not for a fixed time
         row = page.locator(".erow.new").first
         row.locator(".name .pip").first.wait_for(timeout=5000)
@@ -153,7 +153,7 @@ def test_add_a_card_with_rich_suggestions(server: Server, width: int) -> None:
 
 @pytest.mark.parametrize("width", [390, 1366])
 def test_a_card_picked_before_its_details_arrive_gets_them(server: Server, width: int) -> None:
-    """L18's cause: Enter on a name whose picture and mana cost had not come back yet added a row
+    """Before, Enter on a name whose picture and mana cost had not come back yet added a row
     without them, for good (the late answer only reached the closed list). The row now gets them
     when they arrive. The details are held here until after the pick, so this never races."""
     from playwright.sync_api import sync_playwright
@@ -256,7 +256,7 @@ def test_a_picture_that_fails_keeps_the_editor_rows_layout(server: Server, width
         tile = row.locator(".img-fallback").bounding_box()
         assert tile is not None and round(tile["width"]) == 40 and round(tile["height"]) == 56, tile
         # the row's picture was decorative (alt="", the name is in the row), so its stand-in is
-        # hidden from screen readers rather than read out as "Image unavailable" (review N8)
+        # hidden from screen readers rather than read out as "Image unavailable"
         fallback = row.locator(".img-fallback")
         assert fallback.get_attribute("aria-hidden") == "true"
         assert fallback.get_attribute("role") is None and fallback.get_attribute("aria-label") is None

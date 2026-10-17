@@ -1,6 +1,6 @@
-"""An apply that Archidekt's waits stopped before it changed anything (Q78): the proposal is
+"""An apply that Archidekt's waits stopped before it changed anything: the proposal is
 pending again. The unused backup copy whose delete Archidekt refused for a while is deleted
-later by the gateway itself (Q77): queued in the database, one delete per pass, never while the
+later by the gateway itself: queued in the database, one delete per pass, never while the
 client is paused, with a backoff and a limit, and only after the same safety checks as at once."""
 
 from __future__ import annotations
@@ -105,7 +105,7 @@ def _events(h, event: str) -> list[dict]:
 
 @pytest.mark.usefixtures("quick_waits")
 async def test_a_queued_delete_waits_for_the_pause_then_runs_once_it_ends(stack: Stack) -> None:
-    """Q77: queued for when the pause ends plus a margin; nothing is sent while the client is
+    """Queued for when the pause ends plus a margin; nothing is sent while the client is
     paused or before it is due; then the copy is deleted, the snapshot forgets it, the audit says
     it was deleted later, and the proposal's message no longer promises it."""
     h, ark = stack.h, stack.ark
@@ -163,7 +163,7 @@ async def test_each_pass_deletes_at_most_one_copy(stack: Stack) -> None:
 
 @pytest.mark.usefixtures("quick_waits")
 async def test_failed_later_deletes_back_off_then_give_up(stack: Stack) -> None:
-    """Q77: Archidekt answers 503: the next try waits 10, 20, then 40 minutes; the fourth failure
+    """Archidekt answers 503: the next try waits 10, 20, then 40 minutes; the fourth failure
     gives up. The copy stays, the audit says so, and the proposal's message goes back to the
     copy staying in the backup folder."""
     h, ark = stack.h, stack.ark
@@ -211,7 +211,7 @@ async def test_failed_later_deletes_back_off_then_give_up(stack: Stack) -> None:
 async def test_a_429_on_a_later_delete_waits_out_the_pause_and_counts_for_the_breaker(
     stack: Stack, monkeypatch
 ) -> None:
-    """Q62, Q77: outside an apply the later delete is a normal call: its 429 counts towards the
+    """Outside an apply the later delete is a normal call: its 429 counts towards the
     breaker, and the next try waits at least the pause Archidekt asked for (plus the margin)."""
     h, ark = stack.h, stack.ark
     svc = h.app.state.gateway.decks
@@ -232,7 +232,7 @@ async def test_a_429_on_a_later_delete_waits_out_the_pause_and_counts_for_the_br
     now = int(time.time())
     out = await svc.delete_one_queued_backup()
     assert out is not None and out["attempts"] == 1, out
-    assert svc.client.pacer._failures == failures + 1  # counted, as Q62 wants outside an apply
+    assert svc.client.pacer._failures == failures + 1  # counted, as it is outside an apply
     [job] = h.db.queued_backup_deletes()
     assert now + 100 + decks_mod.BACKUP_DELETE_MARGIN - 2 <= job["due"] <= now + 100 + 32, job
     assert await svc.delete_one_queued_backup() is None  # paused now: nothing is tried
@@ -278,7 +278,7 @@ async def test_not_found_is_done_and_forbidden_or_unlinked_give_up_at_once(stack
 
 @pytest.mark.usefixtures("quick_waits")
 async def test_the_safety_checks_refuse_a_mismatched_snapshot(stack: Stack) -> None:
-    """Q77: before it deletes, the pass checks the copy as the at-once delete does: the snapshot
+    """Before it deletes, the pass checks the copy as the at-once delete does: the snapshot
     must still record exactly that copy, and the id must never be the deck itself."""
     h, ark = stack.h, stack.ark
     svc = h.app.state.gateway.decks
@@ -300,7 +300,7 @@ async def test_the_safety_checks_refuse_a_mismatched_snapshot(stack: Stack) -> N
 
 @pytest.mark.usefixtures("quick_waits")
 async def test_the_queue_outlives_a_re_apply_of_the_proposal(stack: Stack) -> None:
-    """Q77, Q78: the stopped proposal is approved again later. The re-apply is re-checked, takes a
+    """The stopped proposal is approved again later. The re-apply is re-checked, takes a
     new snapshot and a new backup and applies; the old copy's queued delete is untouched by the
     rewritten result and still runs, and the new copy is kept. History tells the two apart."""
     h, ark = stack.h, stack.ark
@@ -335,7 +335,7 @@ async def test_the_queue_outlives_a_re_apply_of_the_proposal(stack: Stack) -> No
 
 @pytest.mark.usefixtures("quick_waits")
 async def test_a_stopped_proposal_is_never_applied_again_by_itself(stack: Stack) -> None:
-    """Q78: pending again, but nothing re-applies it: not the deck sync, not the later deletes,
+    """Pending again, but nothing re-applies it: not the deck sync, not the later deletes,
     and next_step never tells the assistant to apply it now (the stack's mode is automatic). It
     still expires as any pending proposal does."""
     h, ark = stack.h, stack.ark
@@ -361,7 +361,7 @@ async def test_a_stopped_proposal_is_never_applied_again_by_itself(stack: Stack)
 
 @pytest.mark.usefixtures("quick_waits")
 async def test_the_queue_outlives_a_restart(tmp_path, idp: FakeIdP, monkeypatch) -> None:
-    """Q77: the queued delete is kept in the database, so a new gateway on the same database
+    """The queued delete is kept in the database, so a new gateway on the same database
     (a restart) still deletes the copy."""
     ark = FakeArchidekt()
     settings = make_settings(
@@ -394,7 +394,7 @@ async def test_member_data_deletion_drops_their_queued_deletes(stack: Stack) -> 
 
 @pytest.mark.usefixtures("quick_waits")
 async def test_an_immediate_delete_that_meets_a_5xx_is_queued_and_a_403_keeps_the_copy(stack: Stack) -> None:
-    """Q77: a failed apply (here Archidekt refuses the card write outright) deletes its unused copy
+    """A failed apply (here Archidekt refuses the card write outright) deletes its unused copy
     at once; a transient refusal of that delete queues it, any other keeps today's sentence."""
     h, ark = stack.h, stack.ark
     token = await linked_user(stack)
@@ -423,7 +423,7 @@ async def test_an_immediate_delete_that_meets_a_5xx_is_queued_and_a_403_keeps_th
 async def test_a_collection_apply_stopped_after_a_record_was_added_stays_failed(
     tmp_path, idp: FakeIdP
 ) -> None:
-    """Q78: a collection proposal whose first card went in before Archidekt's waits ran out
+    """A collection proposal whose first card went in before Archidekt's waits ran out
     changed something, so it is not pending again (applying it again would add the card twice),
     and the message says your collection is partly changed."""
     async with open_stack(tmp_path, idp, COLLECTION) as cs:
@@ -466,9 +466,9 @@ def test_the_wording_is_the_approved_text() -> None:
 async def test_the_delete_at_once_never_waits_inside_the_apply(
     stack: Stack, quick_waits: list[float]
 ) -> None:
-    """Q77 ("no extra waiting in the apply"): when the delete just after a failed apply meets a
+    """No extra waiting in the apply: when the delete just after a failed apply meets a
     429, the apply does not wait it out; the delete is queued for later at once. As an apply's
-    429 it still does not count towards the gateway-wide breaker (Q62)."""
+    429 it still does not count towards the gateway-wide breaker."""
     h, ark = stack.h, stack.ark
     token = await linked_user(stack)
     orig = ark.transport.handler
@@ -511,7 +511,7 @@ def _kept(h, pid: str, snap_id: str, copy: int, ark: FakeArchidekt, error: str) 
 @pytest.mark.usefixtures("quick_waits")
 @pytest.mark.parametrize("who", ["amy", "alice"])
 async def test_a_relink_drops_the_members_queued_deletes_and_keeps_the_copies(stack: Stack, who: str) -> None:
-    """Review D3: a queued delete does not record which Archidekt account made the copy, so after a
+    """A queued delete does not record which Archidekt account made the copy, so after a
     relink (to another account, or the same one: any relink, the conservative choice) a 404 could
     no longer be read as "already gone". The relink drops the member's queued deletes; the copies
     stay in the backup folder, with the old sentence and an audit row."""
@@ -540,7 +540,7 @@ async def test_a_relink_drops_the_members_queued_deletes_and_keeps_the_copies(st
 @pytest.mark.usefixtures("quick_waits")
 @pytest.mark.parametrize("change", ["renamed", "described", "moved", "edited"])
 async def test_a_copy_changed_since_it_was_made_is_kept(stack: Stack, change: str) -> None:
-    """Review D4: the later delete reads the copy once first and deletes it only while it is still
+    """The later delete reads the copy once first and deletes it only while it is still
     in the backup folder with the name and description the gateway gave it, and Archidekt's
     updated time is no later than shortly after its delete was queued. Otherwise it gives up and
     keeps the copy."""
@@ -566,7 +566,7 @@ async def test_a_copy_changed_since_it_was_made_is_kept(stack: Stack, change: st
 
 @pytest.mark.usefixtures("quick_waits")
 async def test_an_unchanged_copy_is_read_once_then_deleted(stack: Stack) -> None:
-    """Review D4: one read of the copy (an ordinary call), then the delete."""
+    """One read of the copy (an ordinary call), then the delete."""
     h, ark = stack.h, stack.ark
     svc = h.app.state.gateway.decks
     token = await linked_user(stack)
@@ -588,7 +588,7 @@ async def test_an_unchanged_copy_is_read_once_then_deleted(stack: Stack) -> None
 
 @pytest.mark.usefixtures("quick_waits")
 async def test_an_unexpected_error_is_retried_on_the_backoff_then_given_up(stack: Stack, monkeypatch) -> None:
-    """Review D5: a queued delete whose try raises something unexpected is not left due (where it
+    """A queued delete whose try raises something unexpected is not left due (where it
     would hold up every other queued delete, one try a minute): it waits 10, 20, then 40 minutes
     like any failed try, and the fourth failure gives up and keeps the copy."""
     h, ark = stack.h, stack.ark
@@ -615,12 +615,12 @@ async def test_an_unexpected_error_is_retried_on_the_backoff_then_given_up(stack
     _kept(h, pid, snap_id, copy, ark, "internal")
 
 
-# -- review L1: the backup copy made before a deck delete is recorded like any apply's -------------
+# -- the backup copy made before a deck delete is recorded like any apply's ------------------------
 @pytest.mark.usefixtures("quick_waits")
 async def test_a_deck_delete_stopped_on_a_long_429_records_its_copy_and_never_leaves_one_behind(
     stack: Stack,
 ) -> None:
-    """Review L1 (Q77, Q78): the backup copy made before a delete-deck action is kept in the
+    """The backup copy made before a delete-deck action is kept in the
     apply's progress, as every other apply's is. A stop on Archidekt's waits before the deck was
     deleted is still back to pending with the approved sentence, and the copy's delete is queued.
     A second approval makes one new copy and deletes the deck; the first copy is deleted later,
@@ -671,7 +671,7 @@ async def test_a_deck_delete_stopped_on_a_long_429_records_its_copy_and_never_le
 async def test_a_deck_delete_whose_copy_post_timed_out_stays_pending_and_deletes_nothing(
     stack: Stack,
 ) -> None:
-    """Review L1: a backup POST that timed out may still have made the copy, but no id came back,
+    """A backup POST that timed out may still have made the copy, but no id came back,
     so there is nothing to record or delete. As for every apply (the existing backup_failed path),
     the deck is not deleted and the proposal is pending again; such a copy, if it was made, stays
     in the backup folder, and the gateway deletes nothing it cannot name."""
@@ -698,7 +698,7 @@ async def test_a_deck_delete_whose_copy_post_timed_out_stays_pending_and_deletes
     assert len(set(ark.decks) - before) == 1  # the unnamed copy stays in the backup folder
 
 
-# -- review L2, L3: the copy's own clock --------------------------------------------------------
+# -- the copy's own clock -----------------------------------------------------------------------
 def _at(value: str, seconds: float) -> str:
     when = datetime.datetime.fromisoformat(value.replace("Z", "+00:00"))
     return (when + datetime.timedelta(seconds=seconds)).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
@@ -716,11 +716,11 @@ def _at(value: str, seconds: float) -> str:
     ],
 )
 async def test_the_later_delete_reads_the_copys_own_clock(stack: Stack, case: str) -> None:
-    """Review L2: the copy is unchanged only while Archidekt's updatedAt is no later than its own
+    """The copy is unchanged only while Archidekt's updatedAt is no later than its own
     createdAt plus the time the gateway's own writes to it took (measured as it made the copy)
     plus BACKUP_UNCHANGED_SLACK: one clock, Archidekt's. An edit a minute after the copy was
     made is kept, though that is within two minutes of the delete being queued. A missing or
-    unreadable createdAt keeps the copy. Review L3: a time with no zone is unreadable."""
+    unreadable createdAt keeps the copy. A time with no zone is unreadable."""
     h, ark = stack.h, stack.ark
     svc = h.app.state.gateway.decks
     token = await linked_user(stack)
@@ -745,7 +745,7 @@ async def test_the_later_delete_reads_the_copys_own_clock(stack: Stack, case: st
 
 
 def test_backup_unchanged_uses_the_copys_created_time_and_the_measured_writes() -> None:
-    """Review L2: the bound is createdAt + the gateway's measured writes + the slack, inclusive;
+    """The bound is createdAt + the gateway's measured writes + the slack, inclusive;
     a second later is a change. Without the measured writes the copy is kept."""
     from mtg_gateway.archidekt import Deck
 
@@ -776,18 +776,18 @@ def test_backup_unchanged_uses_the_copys_created_time_and_the_measured_writes() 
 
 
 def test_a_time_without_a_zone_is_unreadable() -> None:
-    """Review L3."""
+    """A time with no zone is unreadable."""
     assert decks_mod._iso_time("2026-10-14T10:00:00") is None
     assert decks_mod._iso_time("2026-10-14T10:00:00.123456") is None
     assert decks_mod._iso_time("2026-10-14T10:00:00Z") == decks_mod._iso_time("2026-10-14T12:00:00+02:00")
     assert decks_mod._iso_time("2026-10-14T10:00:00.5Z") is not None
 
 
-# -- review L4: the copy's owner, and a relink inside the same second ---------------------------
+# -- the copy's owner, and a relink inside the same second --------------------------------------
 @pytest.mark.usefixtures("quick_waits")
 @pytest.mark.parametrize("case", ["other_account", "link_without_id", "copy_without_owner_id"])
 async def test_a_copy_not_owned_by_the_linked_account_is_kept(stack: Stack, monkeypatch, case: str) -> None:
-    """Review L4: the later delete deletes the copy only when its owner id is the linked account's
+    """The later delete deletes the copy only when its owner id is the linked account's
     Archidekt user id as stored on the link. Missing or different: it gives up and keeps it."""
     h, ark = stack.h, stack.ark
     svc = h.app.state.gateway.decks
@@ -818,7 +818,7 @@ async def test_a_copy_not_owned_by_the_linked_account_is_kept(stack: Stack, monk
 async def test_a_relink_in_the_same_second_as_the_read_still_stops_the_delete(
     stack: Stack, monkeypatch
 ) -> None:
-    """Review L4: a relink while the later delete reads the copy stops it, even when the new link's
+    """A relink while the later delete reads the copy stops it, even when the new link's
     created_at (whole seconds) equals the old one's: the relink dropped the queued delete, and
     the pass checks that it is still queued before it deletes."""
     h, ark = stack.h, stack.ark

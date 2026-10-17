@@ -334,8 +334,8 @@ PLACEHOLDER_ROOM = """() => {
 def test_collaborator_picker_fits_names_its_list_and_has_finger_sized_rows(
     server: Server, width: int, scheme: str
 ) -> None:
-    """L11: at 344 px (Fold cover) the placeholder "Pick someone you follow" shows whole, the box
-    and Add still on one row. L12: the list has an accessible name, its heading's words. L9: each
+    """At 344 px (Fold cover) the placeholder "Pick someone you follow" shows whole, the box
+    and Add still on one row. The list has an accessible name, its heading's words. Each
     person in it is at least 44 px tall."""
     from playwright.sync_api import sync_playwright
 

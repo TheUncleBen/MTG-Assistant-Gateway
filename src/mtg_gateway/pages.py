@@ -185,7 +185,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         resp.delete_cookie(session_cookie, path="/", secure=secure, httponly=True, samesite="lax")
         # Ask the browser to drop site storage (scan drafts and the like) too. Not "cache": every
         # gateway page is already Cache-Control: no-store, and clearing the browser's whole HTTP
-        # cache is what made sign-out take seconds in Chrome (owner test round T-015, 2026-10-09).
+        # cache is what made sign-out take seconds in Chrome.
         resp.headers["Clear-Site-Data"] = '"storage"'
         resp.set_cookie(
             fresh_cookie, "1", max_age=3600, path="/", secure=secure, httponly=True, samesite="lax"
@@ -221,7 +221,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
 
     @server.custom_route("/layout", methods=["POST"], include_in_schema=False)
     async def set_layout(request: Request) -> Response:
-        """ "Fit the screen" / "Desktop layout" from the account menu (T-046): a cookie read by
+        """ "Fit the screen" / "Desktop layout" from the account menu: a cookie read by
         theme.render, which then asks the device for a wide viewport like a browser's Desktop site
         switch. Signed-in members only, with the form token."""
         sub, sid = current(request)
@@ -467,10 +467,10 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         if not picks:
             return RedirectResponse(_with_query(back, "err=none_selected"), status_code=303)
         if any(p not in versions for p in picks) and action == "apply":
-            # G16: each checked change applies only as the version the list showed
+            # Each checked change applies only as the version the list showed
             return RedirectResponse(_with_query(back, "err=changed_some"), status_code=303)
         if action == "reject" and data.get("sure") != "1":
-            # Q141 item 8C: a short confirm first (the list's script asks in the bar itself)
+            # A short confirm first (the list's script asks in the bar itself)
             return page(
                 "Reject changes",
                 _reject_confirm(picks, versions, back, _csrf(s, sid)),
@@ -502,7 +502,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         )
 
     def _pick_one_page(exc: DeckError, back: str, sub: str, sid: str | None) -> Response:
-        """A selection with a change and its replacement: refused, the pair named (Q142 check)."""
+        """A selection with a change and its replacement: refused, the pair named."""
         if exc.kind != "pick_one":
             raise exc
         return page(
@@ -537,7 +537,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         picks = picks[:MAX_PICKS]
         versions = _picked_versions(data, picks)
         back = _list_back(data.get("back"))
-        if any(p not in versions for p in picks):  # G16, as on the list
+        if any(p not in versions for p in picks):  # a change not at the version shown, as on the list
             return RedirectResponse(_with_query(back, "err=changed_some"), status_code=303)
         if submitted_too_soon(s.session_secret, f"select:{sub}", data.get("shown")):
             # Faster than a person reads the confirm (or a stamp that is not ours): nothing is
@@ -737,11 +737,11 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
                 seen = data.get("version") or ""
                 row = state.db.get_proposal(pid, sub)
                 if not seen.isdigit() and row is not None and row.get("state") == "pending":
-                    # G16: Apply refuses a change that is not the version the page showed; a form
+                    # Apply refuses a change that is not the version the page showed; a form
                     # without one (an old page, or one made by hand) is refused the same way
                     return RedirectResponse(f"/proposals/{pid}?err=changed", status_code=303)
                 at = data.get("seen_status_at") or ""
-                result = await state.decks.apply(  # R-142: the one path
+                result = await state.decks.apply(  # the one path
                     sub,
                     pid,
                     via=REVIEW_PAGE,
@@ -932,8 +932,8 @@ ERR_MESSAGES = {
     "confirm_forget": "Nothing was forgotten. Tick the box to confirm, then press Forget my view choices.",
     "mode_invalid": "That approval mode does not exist, or this gateway does not allow it. Nothing changed.",
     "failed": "This proposal could not be applied. Details are in the result below, if any.",
-    "writes_disabled": WRITES_OFF_KEPT,  # Q141 item 7A
-    "writes_disabled_some": WRITES_OFF_KEPT_MANY,  # a list's selection (proofread of WORDING-4)
+    "writes_disabled": WRITES_OFF_KEPT,
+    "writes_disabled_some": WRITES_OFF_KEPT_MANY,  # a list's selection
     "not_found": "No such proposal for your account.",
     "missing": "Something this proposal needs was not found on Archidekt: a card, a printing, a deck or "
     "a snapshot. Nothing more was changed. The result below names it.",
@@ -1060,7 +1060,7 @@ def _account_body(state: Any, sub: str, csrf: str | None, *, disclosure_read: bo
         "<div class='card'><dl class='meta'>"
         f"<dt>Signed in as</dt><dd><strong>{who}</strong></dd>"
         f"<dt>Archidekt writes</dt><dd>{writes}</dd></dl>"
-        # Q141 item 7A: the same words as Track A's writes-off texts, and no variable names
+        # The same words as the deck page's writes-off texts, and no variable names
         "<p class='muted small'>Archidekt writes are switched on or off for the whole gateway by the "
         "person who runs it. While they are off, changes can be reviewed but not applied.</p>"
         f"{_identity_details(user)}"
@@ -1148,9 +1148,9 @@ def _sweep_on(state: Any) -> bool:
 def _mode_card(state: Any, sub: str, csrf_in: str) -> str:
     """The member's approval mode (modes.py): three radio choices, the current one checked,
     choices above the gateway's cap shown disabled, and the plain cost of the auto modes."""
-    live = state.decks.live  # the admin's Settings page values, read now (step 0)
+    live = state.decks.live  # the admin's Settings page values, read now
     current = state.decks.mode_of(sub)
-    big = int(live.get("auto_big_edit_rows"))  # O8
+    big = int(live.get("auto_big_edit_rows"))
     rows = int(live.get("auto_apply_max_rows"))
     choices = []
     for mode in modes.MODES:
@@ -1211,8 +1211,7 @@ def _short_id(client_id: str) -> str:
 
 
 def _forget_choices_card(csrf_in: str) -> str:
-    """B9: once view choices follow the account, signing out no longer resets them; this does.
-    Draft wording (WORDING-AND-CALLS-2 W3)."""
+    """Once view choices follow the account, signing out no longer resets them; this does."""
     return (
         "<div class='card' id='choices'><h2>Your view choices</h2>"
         "<p>Your views, card size, stack orders, stats choices and dismissed tips follow your "
@@ -1458,11 +1457,11 @@ FAILED_PLAIN_STEP = (
 
 
 def _failure_on_top(p: dict[str, Any], err: str | None) -> bool:
-    """Review B6: right after a failed Apply (?err=failed), a failure the page explains on its own
+    """Right after a failed Apply (?err=failed), a failure the page explains on its own
     (Archidekt's waits ran out, part of it reached Archidekt) is that one message, in the error
     box, instead of the general "could not be applied" box above the same message lower down.
     The same for an apply that Archidekt's waits stopped before it changed anything, which left
-    the proposal pending (Q78, Q79): its one message, with the Apply button below."""
+    the proposal pending: its one message, with the Apply button below."""
     if err != "failed":
         return False
     if p.get("state") == "pending":
@@ -1486,7 +1485,7 @@ def _page_step(p: dict[str, Any]) -> str:
         why = str(p.get("status_reason") or "").strip()
         return OUT_OF_DATE_PAGE + (f" Why: {why}" if why else "")
     if state == "pending" and result.get("error") == "rate_limited":
-        # Q78: Archidekt's waits stopped the last apply before it changed anything there
+        # Archidekt's waits stopped the last apply before it changed anything there
         kept = f" {result['backup_note']}" if result.get("backup_note") else ""
         return (
             f"{PATIENCE_SPENT} Nothing was changed on Archidekt.{kept} The proposal is still pending, "
@@ -1539,13 +1538,13 @@ def _page_step(p: dict[str, Any]) -> str:
         }.get(str(p.get("closed_by") or ""), "")
         return f"This proposal was rejected{by}. Nothing was changed."
     if state == "replaced" and p.get("replace_note"):
-        return str(p["replace_note"])  # "Replaced by #5." (Q27l)
+        return str(p["replace_note"])  # "Replaced by #5."
     return "This proposal can no longer be applied."
 
 
 def _rate_limited_step(p: dict[str, Any], result: dict[str, Any]) -> str:
     """The review page's one message for an apply that stopped because Archidekt asked the gateway
-    to wait longer than an apply may (Q41, Q66): why, how far it got, and to try again later."""
+    to wait longer than an apply may: why, how far it got, and to try again later."""
     again = "Try again in a few minutes: ask your assistant for a new proposal."
     where = "your collection" if p.get("kind") == "collection" else "the deck"
     undo = (
@@ -1646,7 +1645,7 @@ def _proposal_body(p: dict[str, Any], csrf: str | None, shown: str, *, step: boo
             else ""
         )
         + (f"<dt>Proposed by</dt><dd>{actor_html(p['created_by'])}</dd>" if p.get("created_by") else "")
-        + (  # G16, Q134 item 5: an amended change says who changed it and what
+        + (  # an amended change says who changed it and what
             f"<dt>Version</dt><dd>{int(p['version'])}, changed by {_changed_by_names(p)}"
             + (f". Last change: {html.escape(p['what_changed'])}" if p.get("what_changed") else "")
             + "</dd>"
@@ -1667,7 +1666,7 @@ def _proposal_body(p: dict[str, Any], csrf: str | None, shown: str, *, step: boo
             else ""
         )
         + (
-            # why it waits for the member's own press, and a replace that waits (WORDING-3-r2)
+            # why it waits for the member's own press, and a replace that waits
             "<dt>Waits for you</dt><dd>"
             + html.escape(
                 " ".join(
@@ -1741,7 +1740,7 @@ def _proposal_body(p: dict[str, Any], csrf: str | None, shown: str, *, step: boo
             # connected app must not get its own proposal applied by a double-click on a page it
             # controls that swaps this window in (clickguard.py).
             + guarded_form(
-                # G16: the version shown; an apply of a proposal amended since is refused
+                # The version shown; an apply of a proposal amended since is refused
                 hidden={
                     "csrf": csrf or "",
                     "shown": shown,
@@ -1809,16 +1808,16 @@ def _pretty(obj: Any) -> str:
 MAX_PICKS = 100  # one press may apply every change a member can have waiting (decks.MAX_SELECTION)
 BATCH_WAIT_SECONDS = 8.0  # the confirm's Apply waits this long for the result, then shows progress
 LIST_STYLE = f"<style>{LIST_CSS}</style>"
-# Q137: a document drawn with its formatting; the review page's toggles are 44 px tall (finding 13)
+# A document drawn with its formatting; the review page's toggles are 44 px tall
 DOC_STYLE = (
     f"<style>{DOC_CSS}main details > summary{{min-height:44px;padding:.6rem 0;cursor:pointer}}</style>"
 )
 
 
 def _formatted_preview(r: dict[str, Any]) -> str:
-    """Q137: a description or comment change that keeps formatting, drawn as it will look on
+    """A description or comment change that keeps formatting, drawn as it will look on
     Archidekt (bold, links with their sites, lists, card links, pictures as "[picture]")."""
-    if r.get("formatting_lost"):  # D-1, E-2: the edit keeps none of it (wording draft, WORDING-6)
+    if r.get("formatting_lost"):  # the edit keeps none of it
         lost = int(r.get("dropped_embeds") or 0)
         noun = "comment" if r.get("action") == "comment_edit" else "description"
         return (
@@ -1856,7 +1855,7 @@ _DECK_ACTIONS = ("collaborator_add", "collaborator_remove", "delete_deck")
 
 def _app_name(label: str) -> str:
     """An actor label as the cards write it: the app's name alone, no "app:" badge and no client
-    id (proofread of WORDING-4: "changed by app: ChatGPT: …" had two colons)."""
+    id ("changed by app: ChatGPT: …" would have two colons)."""
     m = re.fullmatch(r"app: (.+) \((.+)\)", label)
     if m:
         return m.group(1)
@@ -1866,12 +1865,12 @@ def _app_name(label: str) -> str:
 
 
 def _changed_by_names(p: dict[str, Any]) -> str:
-    """Every app that changed a note, in order (Q141 item 1B): "ChatGPT, then Claude"."""
+    """Every app that changed a note, in order: "ChatGPT, then Claude"."""
     apps = p.get("changed_by_apps") or [p["changed_by"]]
     return html.escape(", then ".join(_app_name(str(a)) for a in apps))
 
 
-# wording drafts (WORDING-4); static/proposals.js asks the same in the list's bar
+# static/proposals.js asks the same in the list's bar
 REJECT_NOTE = (
     "Nothing is sent to Archidekt. A rejected change can't be brought back: your assistant would have "
     "to propose it again."
@@ -1883,7 +1882,7 @@ def reject_ask(n: int) -> str:
 
 
 def _reject_confirm(picks: list[str], versions: dict[str, int], back: str, csrf: str) -> str:
-    """The short confirm before Reject on a waiting list (Q141 item 8C), for a browser without
+    """The short confirm before Reject on a waiting list, for a browser without
     the list's script: the same checked changes, posted again with ``sure``."""
     hidden = "".join(
         f"<input type='hidden' name='pick' value='{html.escape(p)}'>"
@@ -1914,7 +1913,7 @@ def _with_query(path: str, query: str) -> str:
 
 
 def _picked_versions(data: dict[str, str], picks: list[str]) -> dict[str, int]:
-    """The version of each checked change the member saw (G16): the apply refuses one amended since."""
+    """The version of each checked change the member saw: the apply refuses one amended since."""
     out = {}
     for pid in picks:
         v = data.get(f"v_{pid}") or ""
@@ -2073,7 +2072,7 @@ def _confirm_body(
         )
         return "".join(out) + "</div>"
     if not writes_enabled:
-        # several waiting: the plural (proofread of WORDING-6, 13), as after a refused apply
+        # several waiting: the plural, as after a refused apply
         off = WRITES_OFF_KEPT_MANY if plan["count"] > 1 else ERR_MESSAGES["writes_disabled"]
         out.append(f"<p>{html.escape(off)}</p>")
         return "".join(out) + "</div>"

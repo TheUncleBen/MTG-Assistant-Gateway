@@ -1,4 +1,4 @@
-"""R-094 / T-058: large text. With the text at twice its size (the root font size at 200%, and
+"""Large text. With the text at twice its size (the root font size at 200%, and
 every element's own font size doubled, as a phone's font scale or a browser's text-only zoom
 does it) the main pages at phone width (360 px) and on a Fold's inner screen (673 px) must not
 scroll sideways, clip a control or let two controls overlap, and every dropdown menu still opens

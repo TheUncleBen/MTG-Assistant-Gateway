@@ -1,4 +1,4 @@
-"""A50 C1, C3, C4, C6, C7: the collection CSV export writes Archidekt's own condition and language
+"""The collection CSV export writes Archidekt's own condition and language
 codes, the gateway's import reads a Language column and both code sets, and the Collection page
 says how to map the columns on archidekt.com (which does not read column names)."""
 

@@ -199,7 +199,7 @@ async def test_a_result_token_is_only_read_by_the_member_who_imported(stack: Sta
         await bob.aclose()
 
 
-# Review L8: a row's line is the physical line it starts on, so a quoted cell with a line break and
+# A row's line is the physical line it starts on, so a quoted cell with a line break and
 # blank lines at the top are counted, and a name with a line break is read with a space.
 def test_lines_count_quoted_line_breaks_and_leading_blank_lines() -> None:
     items = parse_collection_import('Quantity,Name,Language\n1,"Sol\nRing",EN\n1,Opt,XX\n')
@@ -216,8 +216,8 @@ def test_lines_count_quoted_line_breaks_and_leading_blank_lines() -> None:
         parse_collection_import('\nQuantity,Name\n1,"Sol\nRing"\n1,\n')
 
 
-# Review L9 (question 2, recommended option): a Condition the gateway does not know is imported as
-# NM and the result names its line, as a language Archidekt cannot store is kept as English.
+# A Condition the gateway does not know is imported as NM and the result names its line, as a
+# language Archidekt cannot store is kept as English.
 def test_an_unknown_condition_is_near_mint_and_named() -> None:
     items = parse_collection_import(
         "Quantity,Name,Condition\n1,Opt,NM\n1,Sol Ring,EX\n2,Forest,ex\n1,Island,D\n1,Swamp,Mint\n1,Foo,EX\n"
@@ -257,7 +257,7 @@ def test_an_unknown_condition_is_near_mint_and_named() -> None:
     ) in two
 
 
-# Review L10: a cell quoted in a refusal is cut, so a refusal kept for the page stays small.
+# A cell quoted in a refusal is cut, so a refusal kept for the page stays small.
 def test_a_quoted_cell_in_a_refusal_is_cut() -> None:
     with pytest.raises(CollectionError) as caught:
         parse_collection_import("Quantity,Name\n" + "x" * 131_000 + ",Opt\n")
@@ -267,7 +267,7 @@ def test_a_quoted_cell_in_a_refusal_is_cut() -> None:
 TOO_LONG = 'a cell is longer than 131,072 characters; check for a quotation mark (") that is not closed'
 
 
-# Review L11: a cell over the csv module's limit, or a quantity int() refuses, is a refusal with its
+# A cell over the csv module's limit, or a quantity int() refuses, is a refusal with its
 # line, not an exception the page turns into HTTP 500.
 @pytest.mark.parametrize(
     ("text", "reason"),
@@ -352,7 +352,7 @@ def test_a_condition_written_out_is_its_code(given: str, code: str) -> None:
 
 
 async def test_a_collection_edit_with_writes_switched_off_says_so_in_track_as_words(stack: Stack) -> None:
-    """Card Q141 item 7A (Track A's shared refusal words): the writes-off notice on the Collection
+    """The shared refusal words: the writes-off notice on the Collection
     page reads as everywhere else and doesn't name the setting."""
     import dataclasses
 

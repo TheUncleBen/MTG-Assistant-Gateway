@@ -113,7 +113,7 @@ async def test_bearer_tokens_cannot_apply_in_one_step(stack: Stack) -> None:  # 
 
 
 async def test_the_save_bar_tick_box_decides_the_extra_copy_on_archidekt(stack: Stack) -> None:  # noqa: F811
-    """D-02: the member chooses per save whether the extra backup copy goes to Archidekt; the
+    """The member chooses per save whether the extra backup copy goes to Archidekt; the
     gateway's own snapshot is taken either way, and the assistant's applies never skip the copy."""
     b = await linked(stack)
     db = stack.h.app.state.gateway.db
@@ -145,7 +145,7 @@ async def test_the_save_bar_tick_box_decides_the_extra_copy_on_archidekt(stack: 
 
 async def test_the_editor_backup_tick_box_follows_the_settings(stack: Stack) -> None:  # noqa: F811
     """The extra Archidekt copy is the member's choice per save: unticked until they tick it, ticked
-    at first when the admin Settings page says so (Q15), and gone with backups off."""
+    at first when the admin Settings page says so, and gone with backups off."""
     import re
 
     b = await linked(stack)

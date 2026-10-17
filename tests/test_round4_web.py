@@ -83,7 +83,7 @@ async def _finish_mcp_login(h: Harness, browser: httpx.AsyncClient, started: htt
     assert done.headers["location"].startswith("https://client.test/cb") and q.get("code"), done.headers
 
 
-# -- C-1: a flood of anonymous sign-in starts cannot push out other people's pending logins -----
+# -- a flood of anonymous sign-in starts cannot push out other people's pending logins -----
 
 
 async def test_flood_from_other_networks_does_not_evict_pending_sign_ins(
@@ -202,7 +202,7 @@ def _db_count(d: dbmod.Database, table: str = "login_sessions") -> int:
         return d._conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
 
 
-# -- C-2: the client metadata document cache is bounded ---------------------------------------
+# -- the client metadata document cache is bounded ---------------------------------------
 
 
 def test_metadata_document_record_is_bounded():
@@ -258,7 +258,7 @@ async def test_cimd_cache_is_capped_per_site_and_in_all(
         assert gw.db.cimd_client_known(CLIENT_URL)
 
 
-# -- C-3: the metadata fetcher is not a relay for GETs to other sites --------------------------
+# -- the metadata fetcher is not a relay for GETs to other sites --------------------------
 
 
 def test_client_id_with_query_string_is_refused():
@@ -332,7 +332,7 @@ async def test_known_client_still_signs_in_while_its_host_is_blocked(tmp_path: P
         assert r.status_code == 302, r.text
 
 
-# -- C-4: deeply nested JSON bodies are a 400, not a 500 ---------------------------------------
+# -- deeply nested JSON bodies are a 400, not a 500 ---------------------------------------
 
 
 async def test_deeply_nested_json_is_a_client_error(tmp_path: Path, idp: FakeIdP):
@@ -368,7 +368,7 @@ async def test_deeply_nested_metadata_document_is_rejected():
     await f.aclose()
 
 
-# -- C-5 / C-6: HSTS on every response, and no page can be framed -----------------------------
+# -- HSTS on every response, and no page can be framed -----------------------------
 
 
 async def test_every_response_carries_hsts_on_https(gw: Harness):

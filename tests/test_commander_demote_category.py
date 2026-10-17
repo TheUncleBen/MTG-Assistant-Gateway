@@ -1,4 +1,4 @@
-"""A50 M2: a commander that set_commander demotes, and whose only category was Commander, is
+"""A commander that set_commander demotes, and whose only category was Commander, is
 sent its default category (as archidekt.com never sends an empty list) when the gateway knows
 one; without one it is sent no category, as before. Its other categories are not this test's
 question."""

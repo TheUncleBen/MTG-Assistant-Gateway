@@ -635,8 +635,8 @@ def guide_body(
     how_app = (
         "<p>The <a href='/install?for=android'>Android app</a> shows these same pages as a "
         "native-feeling app with the phone "
-        "camera built in. Sign in once, then it opens on your home page. The app's own actions (scan with "
-        "the phone camera, reload, open in browser, change gateway) sit in the account menu at the top "
+        "camera built in. Sign in once, then it opens on your home page. The app's own actions (Scan with "
+        "the app's camera, Reload, Open in browser, Change gateway) sit in the account menu at the top "
         "right. Links to Archidekt or Scryfall open in your browser; gateway links shared from other apps "
         "open in the app.</p>"
         "<p>On a foldable, the folded screen has the tabs at the bottom and the unfolded screen moves them "
@@ -965,7 +965,7 @@ def guide_body(
         "screen every page is a tab on a rail down the left edge, with no More; a wider browser has the "
         "links in the top bar, Home first.</p>"
     )
-    # R-142, in every mode; since 0.7.29 (Q8) the card in the chat too, but never for a deck deletion
+    # in every mode; since 0.7.29 the card in the chat too, but never for a deck deletion
     on_review_page = (
         "<td>you press Approve on the card or Apply on its review page (deleting a deck, and an edit of a "
         "comment that has formatting: on its review page only)</td>"

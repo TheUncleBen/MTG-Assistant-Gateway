@@ -171,7 +171,7 @@ async def test_an_apply_waits_out_a_429_on_a_write_too(clock: list[float]) -> No
 
 
 async def test_an_apply_gives_up_after_a_bounded_number_of_waits(clock: list[float]) -> None:
-    """Q41 with Q62 (review M2): exactly RATE_LIMIT_WAITS (6) waits and 7 sends, then the plain
+    """Exactly RATE_LIMIT_WAITS (6) waits and 7 sends, then the plain
     rate-limit error; the breaker never cuts it short."""
     ark = FakeArchidekt()
     ark.inject = [(429, "1")] * (ark_mod.RATE_LIMIT_WAITS + 1)
@@ -191,7 +191,7 @@ async def test_an_apply_gives_up_after_a_bounded_number_of_waits(clock: list[flo
 async def test_an_apply_s_sixth_wait_is_reached_and_the_seventh_send_goes_through(
     clock: list[float],
 ) -> None:
-    """Review M2: six 429s in a row used to open the breaker after the fifth; the apply now waits
+    """Six 429s in a row used to open the breaker after the fifth; the apply now waits
     all six out and the seventh send gets its answer."""
     ark = FakeArchidekt()
     ark.inject = [(429, "1")] * ark_mod.RATE_LIMIT_WAITS
@@ -206,7 +206,7 @@ async def test_an_apply_s_sixth_wait_is_reached_and_the_seventh_send_goes_throug
 
 
 async def test_an_apply_s_429s_never_open_the_breaker_for_everyone(clock: list[float]) -> None:
-    """Q62 "Apply only": the apply's 429s set Archidekt's pause but do not count towards the
+    """The apply's 429s set Archidekt's pause but do not count towards the
     breaker, so once the apply has given up, other members' calls go through as soon as the pause
     is over."""
     ark = FakeArchidekt()
@@ -225,7 +225,7 @@ async def test_an_apply_s_429s_never_open_the_breaker_for_everyone(clock: list[f
 
 
 async def test_outside_an_apply_429s_still_count_towards_the_breaker(clock: list[float]) -> None:
-    """Q62: outside an apply nothing changes: five 429s in a row open the breaker."""
+    """Outside an apply nothing changes: five 429s in a row open the breaker."""
     ark = FakeArchidekt()
     ark.inject = [(429, "0")] * 5
     client = _client(ark)
@@ -241,7 +241,7 @@ async def test_outside_an_apply_429s_still_count_towards_the_breaker(clock: list
 
 
 async def test_the_wait_allowance_covers_the_whole_apply_not_each_request(clock: list[float]) -> None:
-    """Q66 "Per apply" (review M3): 300 s of waiting in all across every request of one apply. Three
+    """Per apply: 300 s of waiting in all across every request of one apply. Three
     requests each meeting two 429s (Retry-After 120) used to wait 720 s; now the first two waits
     use 240 s, and the next 429 asks for 120 s when 60 s are left, so the apply stops at once."""
     ark = FakeArchidekt()
@@ -261,7 +261,7 @@ async def test_the_wait_allowance_covers_the_whole_apply_not_each_request(clock:
 
 
 async def test_the_wait_count_covers_the_whole_apply_too(clock: list[float]) -> None:
-    """Q66: the six waits are the apply's, not each request's."""
+    """The six waits are the apply's, not each request's."""
     ark = FakeArchidekt()
     client = _client(ark)
     token = ark_mod.patient.set(ark_mod.Patience())
@@ -278,7 +278,7 @@ async def test_the_wait_count_covers_the_whole_apply_too(clock: list[float]) -> 
 
 
 async def test_a_retry_after_longer_than_what_is_left_stops_the_apply_at_once(clock: list[float]) -> None:
-    """Review M3 / Q66: Archidekt asks for an hour; the pacer caps the shared pause at 120 s, but an
+    """Archidekt asks for an hour; the pacer caps the shared pause at 120 s, but an
     apply must not send again after 120 s. It stops without waiting."""
     ark = FakeArchidekt()
     ark.inject = [(429, "3600")]
@@ -308,7 +308,7 @@ async def test_an_apply_waits_as_long_as_archidekt_asks_past_the_shared_cap(cloc
 
 
 async def test_a_call_the_pacer_refuses_is_marked_not_sent(clock: list[float]) -> None:
-    """A running Retry-After pause refuses a call before it is sent (review M1): the error says so,
+    """A running Retry-After pause refuses a call before it is sent: the error says so,
     so an apply can tell that nothing was written."""
     ark = FakeArchidekt()
     client = _client(ark)
@@ -492,12 +492,12 @@ async def test_an_apply_s_waits_never_add_up_past_the_total(monkeypatch: pytest.
     assert err.value.kind == "rate_limited"
     # 149 s + 1 s of jitter, then the second 149 s fits what is left only without its jitter
     assert waits == [150.0, 150.0] and sum(waits) == ark_mod.RATE_LIMIT_WAIT_TOTAL, waits
-    # nothing is left for the third 429's 149 s, so the apply stops there (Q66)
+    # nothing is left for the third 429's 149 s, so the apply stops there
     assert _reads(ark, "/api/decks/v3/") == 3
 
 
 async def test_an_apply_no_longer_meets_the_breaker_after_five_429s_in_a_row(clock: list[float]) -> None:
-    """Until Q62 each 429 of an apply also counted towards the breaker, so the fifth opened it (for
+    """Before, each 429 of an apply also counted towards the breaker, so the fifth opened it (for
     every member, a minute) and the apply stopped as "unavailable" after five waits. Now the
     apply's 429s leave the breaker's count alone and the apply ends on its own allowance."""
     ark = FakeArchidekt()
@@ -710,7 +710,7 @@ def test_entrypoint_chowns_only_a_real_copy_folder() -> None:
 
 
 async def test_a_403_says_archidekt_refused_and_never_asks_to_relink() -> None:
-    """T-151: a 403 is Archidekt refusing one request, with its own reason; only a 401 means the
+    """A 403 is Archidekt refusing one request, with its own reason; only a 401 means the
     stored session is bad."""
     ark = FakeArchidekt()
     client = _client(ark)

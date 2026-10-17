@@ -29,7 +29,7 @@ RETRY_AFTER_FAILURE = 600
 MAX_SUGGESTIONS = 20
 # Typing extends the text one letter at a time, and every name that contains "sol r" also
 # contains "sol ": the catalog positions matching the last few texts are kept, so the next
-# keystroke searches only those instead of all ~35,000 names (A12).
+# keystroke searches only those instead of all ~35,000 names.
 NARROW_KEEP = 64
 
 

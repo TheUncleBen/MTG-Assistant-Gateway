@@ -108,7 +108,7 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
             rows = await state.decks.list_decks(_sub())
         except DeckError as exc:
             return _tool_error(exc)
-        # entries Archidekt listed without a readable owner are left out (Q64): say so, in the
+        # entries Archidekt listed without a readable owner are left out: say so, in the
         # words My decks uses, so the assistant doesn't present a partial list as the whole one
         unreadable = int(getattr(rows, "unreadable", 0) or 0)
         note = decks_unreadable_text(some_shown=len(rows) > 0) if unreadable else None
@@ -610,7 +610,7 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
             "idempotentHint": True,
             "openWorldHint": True,
         },
-        # T-151: the answer is the proposal card, so asking to apply a change the user must
+        # The answer is the proposal card, so asking to apply a change the user must
         # approve shows the card with Approve and Reject, not only a link.
         meta={**APPLY_TOOL_META, **(card_meta or {})},
     )
@@ -627,14 +627,14 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
                     if done is not None:
                         return _proposal(with_words_note(done))
             # The service re-checks the mode and the risk itself, so there is no way around it.
-            # Q90: a proposal stored with a formatted document (0.7.26) is applied as its words
+            # A proposal stored with a formatted document (0.7.26) is applied as its words
             return _proposal(
                 with_words_note({"ok": True, **(await state.decks.apply(sub, proposal_id, via="mcp"))})
             )
         except DeckError as exc:
             out = _tool_error(exc)
             if exc.kind == "browser_required":
-                # T-151: the user's own press is needed. The answer carries the proposal itself,
+                # The user's own press is needed. The answer carries the proposal itself,
                 # so the chat draws its card (with Approve and Reject in the app that made it).
                 try:
                     out = {**_closed_at(state.decks.describe(_sub(), proposal_id)), **out}
@@ -696,7 +696,7 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
         except DeckError as exc:
             out = _tool_error(exc)
             if "state" not in out:
-                # Review B6: the card shows the proposal as it now is (failed after an apply that
+                # The card shows the proposal as it now is (failed after an apply that
                 # failed, pending after a refusal that left it so), never a stale Pending.
                 try:
                     out["state"] = state.decks.describe(_sub(), proposal_id)["state"]

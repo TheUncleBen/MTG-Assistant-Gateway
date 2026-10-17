@@ -89,7 +89,7 @@ def image_url(uid: str | None, size: str = "normal") -> str | None:
 
 
 def print_label(set_code: str | None, number: str | None) -> str:
-    """A printing as every screen writes it (N15): "SLD #1074"; the set code alone when the
+    """A printing as every screen writes it: "SLD #1074"; the set code alone when the
     number is not known."""
     code = (set_code or "").upper()
     return f"{code} #{number}" if code and number else code
@@ -325,7 +325,7 @@ def banner_html(
         if deck.unlisted
         else ""
     )
-    brackets = banner_bracket_html(deck, stats)  # bracket_view.py (S2)
+    brackets = banner_bracket_html(deck, stats)  # bracket_view.py
     salt = stats.get("salt_total") if stats.get("salt_total") is not None else "–"
     tags = (
         "".join(f"<span class='pill'>{esc(t)}</span>" for t in deck.tags)
@@ -345,7 +345,7 @@ def banner_html(
             f"<button type='submit' title='Copy this deck into your own Archidekt account as a new private "
             f"deck'>{icon('clone')} Clone deck</button></form>"
         )
-    # Archidekt's own playtester (draw, mulligan, play by hand) in its own tab (D-13, T-098): a frame
+    # Archidekt's own playtester (draw, mulligan, play by hand) in its own tab: a frame
     # inside the gateway never carries the person's Archidekt sign-in, so a private deck stayed empty
     # there. The app opens the link in the phone's browser, where that sign-in lives.
     primary += (
@@ -357,7 +357,7 @@ def banner_html(
         f"<a class='btn' href='/decks/{did}/goldfish' title='Shuffle, draw an opening hand and play "
         f"turns by hand, here on the gateway'>{icon('layers')} Goldfish</a>"
     )
-    # Play on EDHPlay (R-154, T-161): EDHPlay is the online table; it has no import by link, so the
+    # Play on EDHPlay: EDHPlay is the online table; it has no import by link, so the
     # button opens a short box whose Copy and Open EDHPlay.com copies the whole deck in its import
     # format and opens the site (deck.js). The box asks /decks/{id}/edhplay.json for the list when it
     # opens (companion_tools.py), so the page itself doesn't carry the whole list. Without script the
@@ -372,7 +372,7 @@ def banner_html(
         # The same run as the assistant's run_deck_report: statistics, validation and the solo
         # test on the research service, plus Forge games when Forge is on, stored under History.
         # "Solo test", not "goldfish": Goldfish is the button beside it, where the member plays by
-        # hand (D3). Texts: Track C's C-W-281 to C-W-283, coordinator-approved ~05:24Z 10-17.
+        # hand.
         primary += (
             f"<form method='post' action='/decks/{did}/report' class='inline'>{csrf_in}"
             "<button type='submit' data-busy-label='Testing…' title='The solo test (300 games, no "
@@ -383,8 +383,7 @@ def banner_html(
         )
     more_items = []
     if csrf and forge_on:
-        # D17: the same run without the Forge games, for a quick result (forge=0, companion_tools.py).
-        # Texts: Track C's C-W-284 to C-W-286, coordinator-approved ~05:24Z 10-17.
+        # The same run without the Forge games, for a quick result (forge=0, companion_tools.py).
         more_items.append(
             f"<form method='post' action='/decks/{did}/report'>{csrf_in}"
             "<input type='hidden' name='forge' value='0'>"
@@ -440,7 +439,7 @@ def banner_html(
 
 
 WRITES_OFF_TITLE = "Archidekt writes are switched off on this gateway"
-# shown under the greyed buttons too: a phone shows no tooltip (social review, Q141 check)
+# shown under the greyed buttons too: a phone shows no tooltip
 WRITES_OFF_LINE = "Archidekt writes are switched off on this gateway, so these buttons are off."
 WRITES_OFF_FOLLOW = "Archidekt writes are switched off on this gateway, so following can't be changed here."
 
@@ -457,8 +456,8 @@ def social_html(deck: Deck, *, own: bool, writes_enabled: bool = True) -> str:
         return f" title='{text}'" if writes_enabled else f" disabled title='{WRITES_OFF_TITLE}'"
 
     liked = deck.user_vote == VOTE_UP
-    # Q141 item 5A: a down vote (cast through the assistant; the page has no down button) shows
-    # as such, and the button takes it back (wording draft, WORDING-4)
+    # A down vote (cast through the assistant; the page has no down button) shows
+    # as such, and the button takes it back
     down = deck.user_vote == VOTE_DOWN
     like_tip = (
         "You voted this deck down"
@@ -534,11 +533,11 @@ def comments_html(deck: Deck, *, writes_enabled: bool = True) -> str:
     )
 
 
-# Track A's own deck page styles (S3): DECK_CSS ends with this, so A's rules for its parts of the
-# page (banner, social actions, the waiting changes strip) need no edit inside DECK_CSS.
+# The deck page's styles for the banner, social actions and the waiting changes strip: DECK_CSS
+# ends with this, so these rules need no edit inside DECK_CSS.
 DECK_CSS_A = (
-    waiting_strip.LIST_CSS  # the "Waiting changes" strip (Track A)
-    # the social review (G14/Q47): a long name wraps instead of running off a phone screen, replies
+    waiting_strip.LIST_CSS  # the "Waiting changes" strip
+    # comments and social actions: a long name wraps instead of running off a phone screen, replies
     # indent less on a phone, and a button disabled because writes are off says so by its cursor
     + """
 .banner .social .soc{height:auto;min-height:34px;max-width:100%}
@@ -1051,7 +1050,7 @@ def checks_panel_html(deck: Deck, stats: dict[str, Any] | None) -> str:
                     comp.get("ok", True),
                 )
             )
-        if bracket_row := checks_bracket_row(checks):  # bracket_view.py (S2)
+        if bracket_row := checks_bracket_row(checks):  # bracket_view.py
             rows.append(bracket_row)
         uncat = checks.get("uncategorised") or []
         rows.append(
@@ -1385,7 +1384,7 @@ def stats_panel_html(deck: Deck, stats: dict[str, Any] | None) -> str:
     checks_html = checks_panel_html(deck, stats)
     avg_mv = stats.get("average_mana_value") if stats.get("average_mana_value") is not None else "–"
     no_types = "<tr><td class=muted>No type data</td></tr>"
-    bracket_html = stats_bracket_html(stats)  # bracket_view.py (S2)
+    bracket_html = stats_bracket_html(stats)  # bracket_view.py
     return (
         "<section class='panel stats' id='stats'><div class='head'><h2>Deck stats</h2></div>"
         "<div class='grid'><div>"
@@ -1447,8 +1446,8 @@ def deck_page_html(
     forge_on: bool = False,
     waiting: list[dict[str, Any]] | None = None,
 ) -> str:
-    # ``waiting``: the "Waiting changes" strip's rows (waiting_strip.py, S4), drawn at the top under
-    # the banner (Q134 A2)
+    # ``waiting``: the "Waiting changes" strip's rows (waiting_strip.py), drawn at the top under
+    # the banner
     view = view if view in VIEWS else "text"
     group = group if group in GROUPS else "category"
     sort = sort if sort in SORTS else "name"
@@ -1637,8 +1636,8 @@ def _has_commander(deck: Deck) -> bool:
 
 
 def compare_forge_html(deck: Deck, other: Any, other_name: str, *, csrf: str | None, forge_on: bool) -> str:
-    """K6 (Q136): Forge games of both decks against the same three precons, picked for the higher
-    of the two decks' brackets (Q140 item 3), from the Compare page (POST /decks/<id>/compare/forge).
+    """Forge games of both decks against the same three precons, picked for the higher
+    of the two decks' brackets, from the Compare page (POST /decks/<id>/compare/forge).
     Only when Forge is set up and both sides are Archidekt Commander decks: Forge plays nothing
     else, and a pasted list has no report to keep its games."""
     if not (forge_on and csrf and isinstance(other, Deck) and _has_commander(deck) and _has_commander(other)):
@@ -1710,7 +1709,7 @@ def goldfish_data(deck: Deck) -> dict[str, Any]:
     }
 
 
-# The Goldfish page's own guide (G9): what a goldfish game is and its steps, in order. goldfish.js
+# The Goldfish page's own guide: what a goldfish game is and its steps, in order. goldfish.js
 # marks the step the game is at; the member can hide the guide, and the choice follows the account
 # (account_prefs GOLDFISH_GUIDE_PREF).
 GOLDFISH_GUIDE_PREF = "goldfish_guide"
@@ -1732,7 +1731,7 @@ GOLDFISH_GUIDE_STEPS = (
 )
 GOLDFISH_GUIDE_HIDE = "Hide the guide"
 GOLDFISH_GUIDE_SHOW = "How to play"
-# Phones show the step the game is at; this opens all six (Q138 item 8, "don't restrict")
+# Phones show the step the game is at; this opens all six
 GOLDFISH_GUIDE_ALL = "Show all steps"
 GOLDFISH_GUIDE_CURRENT = "Show the current step only"
 
@@ -1882,8 +1881,8 @@ html[data-card-size=l] .gf-card{--w:clamp(88px,28vw,180px)}
 }
 """
 
-# Track C's own deck page styles (S3): DECK_CSS ends with this, so C's rules for its parts of the
-# page (the bracket display, the simulator) need no edit inside DECK_CSS.
+# The deck page's styles for the bracket display and the simulator: DECK_CSS ends with this, so
+# these rules need no edit inside DECK_CSS.
 DECK_CSS_C = ""
 
 
@@ -1906,7 +1905,7 @@ def deck_card_html(
     fmt = format_label(d.get("format_name")) if d.get("format_name") else ""
     if not fmt and isinstance(d.get("format"), str):
         fmt = format_label(d["format"])
-    line = (fmt or "Custom") + deck_card_bracket_text(d.get("bracket"))  # bracket_view.py (S2)
+    line = (fmt or "Custom") + deck_card_bracket_text(d.get("bracket"))  # bracket_view.py
     tags = d.get("tags") or []
     tags_html = (
         "".join(f"<span class='pill'>{esc(t)}</span>" for t in tags[:6])
@@ -1987,10 +1986,10 @@ def deck_list_html(
     return f"<ul class='plain decklist {esc(view)}'>{items}</ul>"
 
 
-# Q64: Archidekt's deck list came back with entries whose owner couldn't be read, so they were
+# Archidekt's deck list came back with entries whose owner couldn't be read, so they were
 # left out. Shown like the gateway's other "couldn't load" answers (busy.busy_body): the reason in
 # a panel and a Try again button that loads the page again with reread=1, which reads the list
-# again (a list like this is otherwise kept for a minute: decks.DECK_LIST_PARTIAL, review N10).
+# again (a list like this is otherwise kept for a minute: decks.DECK_LIST_PARTIAL).
 DECKS_UNREADABLE = "Your deck list couldn't be read from Archidekt. Try again in a moment."
 DECKS_PARTLY_UNREADABLE = (
     "Part of your deck list couldn't be read from Archidekt, so some decks may be missing here. "
@@ -1999,7 +1998,8 @@ DECKS_PARTLY_UNREADABLE = (
 
 
 def decks_unreadable_text(*, some_shown: bool) -> str:
-    """The Q64 notice's words: none of the list read, or only part of it."""
+    """The words of the notice that the deck list couldn't be read: none of the list read, or only
+    part of it."""
     return DECKS_PARTLY_UNREADABLE if some_shown else DECKS_UNREADABLE
 
 
@@ -2007,15 +2007,15 @@ REREAD_KEEPS = ("q", "order", "view", "folder")  # the deck list's own query, ke
 
 
 def reread_href(path: str, query: Any = ()) -> str:
-    """Where Try again on the Q64 notice goes: ``path`` with the list's own query (REREAD_KEEPS,
-    from ``query``) and ``reread=1``. The page reads the list again and sends the browser back to
-    the address without ``reread``."""
+    """Where Try again on the notice that the deck list couldn't be read goes: ``path`` with the
+    list's own query (REREAD_KEEPS, from ``query``) and ``reread=1``. The page reads the list again
+    and sends the browser back to the address without ``reread``."""
     kept = [(k, v) for k, v in dict(query).items() if k in REREAD_KEEPS and v]
     return f"{path}?{urlencode([*kept, ('reread', '1')])}"
 
 
 def decks_unreadable_html(*, some_shown: bool, panel: bool = True, again: str = "") -> str:
-    """The notice over (or instead of) the deck list when entries couldn't be read (Q64);
+    """The notice over (or instead of) the deck list when entries couldn't be read;
     ``panel=False`` for a notice inside a panel already (the home page's My decks). ``again``:
     the Try again link (``reread_href``); empty loads the same address again."""
     text = decks_unreadable_text(some_shown=some_shown)
@@ -2036,8 +2036,8 @@ def deck_list_controls_html(
 ) -> str:
     """The toolbar over the deck list. ``folder``: the open folder's id ("" at the top level),
     kept when the toolbar is sent so Order by and View as stay in that folder (the name filter
-    searches every folder, Q20). ``pending``: the list is still being read (the total is left
-    blank; decks.js fills it). ``total`` None: the list couldn't be read (Q64), so no count."""
+    searches every folder). ``pending``: the list is still being read (the total is left
+    blank; decks.js fills it). ``total`` None: the list couldn't be read, so no count."""
     return (
         "<section class='panel listbar'><form method='get' action='/decks' class='controls' id='listform'>"
         + (f"<input type='hidden' name='folder' value='{esc(folder)}'>" if folder else "")

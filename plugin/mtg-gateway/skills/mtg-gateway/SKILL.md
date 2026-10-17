@@ -364,7 +364,8 @@ own linked account. Follow every step, in order.
 - The approval mode is the user's own setting on their account page. Never
   ask them to loosen it so you can apply something; if they want to, they
   change it there themselves.
-- A proposal expires after 24 hours and can be applied only once.
+- A proposal expires after 7 days (unless the gateway's owner changed that)
+  and can be applied only once.
 - Edits change the deck proper unless a change says `"zone": "side"` (then
   the maybeboard and sideboard rows: `add`, `remove`, `set_quantity` and
   `set_category` only, counted apart from the deck). A `set_category` into a category the
@@ -386,9 +387,10 @@ own linked account. Follow every step, in order.
   an ordinary proposal: show its diff and review link, wait for the user's
   OK, then `apply_proposal`. A restore puts every deck row back as the
   snapshot recorded it: the same printing, foil or etched finish, quantity
-  and categories, so the commander, sideboard and maybeboard too. It does
-  not change the deck's name, description, format or the settings of its
-  custom categories. Deleting a deck is `propose_delete_deck`, which only
+  and categories, so the commander, sideboard and maybeboard too. It also
+  puts back the deck's name, description, format, bracket and privacy if they
+  changed; folder, tags, cover and the settings of its custom categories stay
+  as they are. Deleting a deck is `propose_delete_deck`, which only
   the user's own press applies.
 
 ### When a tool says no
@@ -407,7 +409,7 @@ flagged as an error too: say the lookup failed. Act on the code:
 | `invalid_approval` / `in_chat_disabled` | Answers of `confirm_proposal`, the card's own tool. Never call it; the card does. |
 | `writes_disabled` | The owner has switched applying off. The proposal is kept. Give the user the review link and stop; do not retry. |
 | `not_linked` | No Archidekt link, or Archidekt no longer accepts it. Send the user to the account page to link or relink. |
-| `stale` | The deck changed on Archidekt after the proposal was made. Nothing was sent. Load the deck again, explain what changed, and propose again if the user still wants it. A pending proposal can say so before anyone applies it: `out_of_date: true` in `get_proposal` / `list_my_proposals` (the gateway's background deck sync saw the deck change). Don't apply it; tell the user and propose again from the current deck if they still want it. |
+| `stale` | The deck changed on Archidekt and the proposal would no longer do what was reviewed. Nothing was sent; it is still waiting, marked Needs a look (`status: needs_look`). Load the deck again, explain what changed, then `amend_proposal` it if the user still wants the change, or let them reject it. A waiting proposal can say so before anyone applies it: `out_of_date: true` in `get_proposal` / `list_my_proposals`. Don't apply it; tell the user and amend it from the current deck if they still want it. |
 | `already_applied` | It was applied before. Nothing was sent again. Report that and stop. |
 | `other_client` | Another connected app (or the browser) made this proposal, so it can't be applied or rejected from here. Nothing was sent. Give the user the `review_url` and stop. |
 | `not_pending` | The proposal failed, expired or was rejected by the user earlier. Propose again if wanted. |

@@ -1,10 +1,10 @@
 """Waiting changes as rows with checkboxes: the Proposals page's deck groups, the deck page's
-"Waiting changes" strip and the Home tile's line (PROPOSALS-FLEXIBLE-FLOWS.md §3; Q134 A2).
+"Waiting changes" strip and the Home tile's line.
 Owned by the approvals work.
 
 The deck route (companion_decks.py) asks ``waiting_changes`` for the strip's data and hands it to
 ``deckpage.deck_page_html`` as ``waiting``, which draws it with ``strip_html`` at the top of the
-page, under the banner (A2): folded to one line on a phone ("3 waiting changes · oldest 2 h ·
+page, under the banner: folded to one line on a phone ("3 waiting changes · oldest 2 h ·
 Review"), open on a computer. Every list posts to /proposals/select (pages.py): Apply opens a
 confirm that lists the order, Reject rejects the checked rows at once (nothing changes on
 Archidekt).
@@ -68,7 +68,7 @@ def line_for(db: Any, sub: str, row: dict[str, Any]) -> dict[str, Any]:
 def waiting_changes(db: Any, sub: str, deck_id: int | str, *, own: bool) -> list[dict[str, Any]]:
     """The strip's rows for this member and deck, oldest first: their own waiting changes to
     the deck (on someone else's deck, their waiting likes, comments or follows)."""
-    if db is None:  # no database to ask (the step 0 seam's contract): nothing waits
+    if db is None:  # no database to ask: nothing waits
         return []
     return [line_for(db, sub, r) for r in db.pending_board(sub, str(deck_id))]
 
@@ -143,7 +143,7 @@ def action_bar(*, inline: bool = False) -> str:
 
 
 def strip_html(lines: list[dict[str, Any]], *, csrf: str | None, deck_id: str) -> str:
-    """The deck page's strip, at the top under the banner (Q134 A2). Empty without waiting
+    """The deck page's strip, at the top under the banner. Empty without waiting
     changes, and without a session (nothing to approve with)."""
     if not lines or not csrf:
         return ""

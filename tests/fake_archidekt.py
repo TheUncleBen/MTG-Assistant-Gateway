@@ -157,7 +157,7 @@ class FakeArchidekt:
         self.votes: dict[tuple[str, int], int] = {}
         self.vote_calls: list[dict[str, Any]] = []  # path and body of each vote PUT
         self.comments: dict[int, list[dict[str, Any]]] = {}  # thread root -> flat list of comments
-        self.comment_page_size = 0  # 0: a thread comes on one page; else paged by points (A29)
+        self.comment_page_size = 0  # 0: a thread comes on one page; else paged by points
         self.next_comment_id = 800000
         # Hand actions added 2026-10-07: global deck tags (id -> name), each deck's tag relations
         # (deck id -> [{id, tag, name, position}]), deleted deck ids and massUpdate bodies.

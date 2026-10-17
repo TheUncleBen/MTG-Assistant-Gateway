@@ -1,4 +1,4 @@
-"""0.7.29 upgrade (PROOFREAD-W3 H1): a stack file replaced without its uncommented Authentik secret
+"""0.7.29 upgrade: a stack file replaced without its uncommented Authentik secret
 lines leaves the removed-member clean-up off. The admin overview says so in a notice, not only in
 its System list and one start-up warning."""
 

@@ -50,7 +50,7 @@ async def test_theme_cookie_and_shell(stack: Stack) -> None:
         # no token: nothing is set
         r = await b.http.post("/theme", data={"theme": "dark"})
         assert r.status_code == 303 and "set-cookie" not in r.headers
-        # T-046: "Desktop layout" is a cookie too; it asks the device for a wide viewport (as a
+        # "Desktop layout" is a cookie too; it asks the device for a wide viewport (as a
         # browser's Desktop site switch would) so the width queries pick the top bar, and the app's
         # forced rail is dropped. "Fit the screen" clears it.
         assert "Site layout" in page.text and "action='/layout'" in page.text
@@ -94,7 +94,7 @@ async def test_deck_list_controls_and_views(stack: Stack) -> None:
         deck = await b.http.get("/decks/42", headers=NAV)
         assert deck.status_code == 200
         assert "class='banner'" in deck.text and "Quick add" in deck.text and "Clone deck" in deck.text
-        # Archidekt's own playtester in its own tab (D-13); the simulation (the same run as
+        # Archidekt's own playtester in its own tab; the simulation (the same run as
         # run_deck_report) is one click; the compare view is under More
         assert "href='https://archidekt.com/playtester-v2/42' target='_blank'" in deck.text
         assert "Run full test" in deck.text
@@ -547,7 +547,7 @@ async def test_set_label_puts_and_takes_off_a_colour_tag(stack: Stack) -> None:
     before = len(ark.patches)
     a = structured(await call(h, token, "apply_proposal", {"proposal_id": off["proposal_id"]}))
     assert a["ok"] and a["result"]["verified"] is True, a
-    # sent as archidekt.com's own empty tag, no name and the default grey (Q58)
+    # sent as archidekt.com's own empty tag, no name and the default grey
     sent = [e for patch in ark.patches[before:] for e in patch.get("cards", [patch])]
     assert [e["modifications"]["label"] for e in sent] == [",#656565"], sent
     row = next(c for c in ark.decks[42]["cards"] if c["card"]["oracleCard"]["name"] == "Sol Ring")
@@ -555,7 +555,7 @@ async def test_set_label_puts_and_takes_off_a_colour_tag(stack: Stack) -> None:
 
 
 async def test_every_modify_sends_the_colour_tag_as_the_site_does(stack: Stack) -> None:
-    """Q58: archidekt.com sends a row's colour tag with every modify, ",#656565" for a row with no
+    """Archidekt.com sends a row's colour tag with every modify, ",#656565" for a row with no
     tag; the gateway does the same, so a quantity change on an untagged row carries it too."""
     h, ark = stack.h, stack.ark
     token = await linked_user(stack)
@@ -739,7 +739,7 @@ async def test_card_notes_and_custom_mana_value_are_shown_read_only(stack: Stack
 
 
 async def test_only_a_commander_deck_has_a_bracket(stack: Stack) -> None:
-    """Q56: as on archidekt.com, moving a deck off Commander clears its bracket, a bracket for a
+    """As on archidekt.com, moving a deck off Commander clears its bracket, a bracket for a
     deck of another format is refused, and the settings form sends none for another format."""
     h, ark = stack.h, stack.ark
     token = await linked_user(stack)
@@ -785,14 +785,15 @@ async def test_only_a_commander_deck_has_a_bracket(stack: Stack) -> None:
 
 
 async def test_a_snapshot_of_a_non_commander_deck_with_a_bracket_restores(stack: Stack) -> None:
-    """Follow-up N2: an older release could leave a bracket on a deck of another format. Restoring a
-    snapshot of such a deck is not refused by the Q56 check: the snapshot's bracket is left out,
-    the other details go back, and the restore's format, as any details change naming a format
-    that isn't Commander, clears the bracket (Q56), shown on the review first."""
+    """An older release could leave a bracket on a deck of another format. Restoring a
+    snapshot of such a deck is not refused by the check that only a Commander deck has a bracket:
+    the snapshot's bracket is left out, the other details go back, and the restore's format, as
+    any details change naming a format that isn't Commander, clears the bracket, shown on the
+    review first."""
     h, ark = stack.h, stack.ark
     token = await linked_user(stack)
     ark.decks[42]["deckFormat"] = 2  # Modern
-    ark.decks[42]["edhBracket"] = 2  # left from before Q56
+    ark.decks[42]["edhBracket"] = 2  # left from before that check
     rename = {"deck_id": "42", "details": {"name": "New"}}
     p = structured(await call(h, token, "propose_deck_details", rename))
     assert p["ok"], p

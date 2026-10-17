@@ -1,5 +1,5 @@
 """The proposal review page (/proposals/<id>) in headless Chromium, light and dark, desktop and
-phone (R-181): the locked Apply and Reject labels read at 4.5:1, a tag change says what it adds and takes
+phone: the locked Apply and Reject labels read at 4.5:1, a tag change says what it adds and takes
 off, a cover change names the cover it replaces, and an add or remove row is one line on a
 phone. Skipped without a Chromium build."""
 
@@ -219,7 +219,7 @@ def test_every_change_label_fits_its_box(server: Server, tmp_path: Path) -> None
                     assert not bad, (vw, zoom, bad)
                     if zoom == "none":  # at the normal text size every label is whole, on one line
                         assert all(g["lines"] == 1 for g in got), (vw, got)
-                    # at any size a label breaks only between its words (review R4-5)
+                    # at any size a label breaks only between its words
                     assert all(not g["split"] for g in got), (vw, zoom, got)
                     ctx.close()
         finally:

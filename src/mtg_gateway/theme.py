@@ -981,7 +981,7 @@ CSS = CSS.replace(
 # mark and the account side share the first row, the text links wrap in the row under them.
 # The links wrap between the brand and the search box and account button, which sit at the foot of
 # the links' last row, so the bar reads, and Tab goes, brand, links, search, account at every text
-# size (milestone review M-1: with the links on a row of their own under the account side, Tab
+# size (with the links on a row of their own under the account side, Tab
 # went from the links' row back up to search and account).
 _NAV_ROW_RULES = (
     "body:not(.app) .topbar .wrap{flex-wrap:wrap;height:auto;row-gap:0;column-gap:1rem;padding-bottom:.35rem;"
@@ -995,7 +995,7 @@ _NAV_ROW_RULES = (
 )
 CSS = CSS.replace("__NAVROW__", _NAV_ROW_RULES)
 
-# Card size S / M / L (0.7.29, Q22, QUESTIONS-2 B10, card Q135 item 7): M is exactly the size each
+# Card size S / M / L (0.7.29): M is exactly the size each
 # page had before; S is about 75% and L about 135% of its width. On a phone the deck page shows
 # 3, 2 or 1 cards across; on a wide screen My decks shows 6, 5 or 4 decks across. The choice
 # follows the account (prefs.py) and sits on <html data-card-size>, set when the page is drawn
@@ -1281,7 +1281,7 @@ def layout_from_cookie(value: str | None) -> str:
 
 
 # "View as" on the deck page, the deck list, card search and the collection follows the account
-# from 0.7.29 (prefs.py, G7). Before that it was a cookie per browser with these names; prefs.py
+# from 0.7.29 (prefs.py). Before that it was a cookie per browser with these names; prefs.py
 # copies a cookie's value to the account once and removes the cookie.
 VIEW_COOKIE = "mtg_view_"
 VIEW_KINDS = ("deck", "decks", "collection", "cards")
@@ -1301,8 +1301,7 @@ def current_card_size() -> str:
 
 
 def card_size_control() -> str:
-    """The S / M / L switch next to "View as" (static/prefs.js presses it and saves the choice).
-    Draft wording (WORDING-AND-CALLS-2 W4)."""
+    """The S / M / L switch next to "View as" (static/prefs.js presses it and saves the choice)."""
     size = current_card_size()
     buttons = "".join(
         f"<button type='button' data-card-size-set='{k}' aria-pressed='{'true' if k == size else 'false'}' "
@@ -1427,7 +1426,7 @@ def render(
     member's name for the account menu's "Signed in as" line."""
     theme = current_theme()
     app = in_app()
-    # "Use desktop layout" (T-046): a wide fixed viewport, as a browser's "Desktop site" switch
+    # "Use desktop layout": a wide fixed viewport, as a browser's "Desktop site" switch
     # would give, so the width-based media queries pick the computer layout and the device zooms out;
     # the app's forced rail is dropped too.
     desktop = current_layout() == "desktop"

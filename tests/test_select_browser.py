@@ -1,4 +1,4 @@
-"""The site's own dropdown lists in headless Chromium (static/select.js, R-131): every single-value
+"""The site's own dropdown lists in headless Chromium (static/select.js): every single-value
 select keeps its native control for the form but opens a themed listbox; a pick sets the native
 select's value and fires its change handler (the Decks filter form re-submits); the list works
 from the keyboard alone; at phone width it is a bottom sheet with finger-sized rows; the deck
@@ -218,7 +218,7 @@ def test_editor_rows_are_enhanced_as_they_appear(server: Server) -> None:
         assert row_selects.count() >= rows.count()  # category and finish per row (a side row: finish only)
         assert all(n["btn"] and n["hidden"] == "true" and n["tab"] == "-1" for n in natives), natives
         assert page.locator("#msel-list").count() == 0
-        # the row's category label is not clipped (D4): the text fits inside the trigger
+        # the row's category label is not clipped: the text fits inside the trigger
         clipped = page.evaluate(
             "() => [...document.querySelectorAll('.erow .sel .msel-btn .msel-txt')]"
             ".filter(t => t.scrollWidth > t.clientWidth + 1).length"
@@ -259,7 +259,7 @@ def test_editor_rows_are_enhanced_as_they_appear(server: Server) -> None:
         assert new_sel.evaluate("s => s.value") == "Land"
         assert new_row.locator(".msel-btn").inner_text().strip() == "Land"
         assert page.locator(".pendingbox .n").inner_text() == "2"
-        # one Maybeboard chip, the zone's (the category of the same name has no chip of its own, D10)
+        # one Maybeboard chip, the zone's (the category of the same name has no chip of its own)
         names = page.evaluate(
             "() => [...document.querySelectorAll('.targets .tchip')].map(b => b.textContent.trim())"
         )
@@ -318,7 +318,7 @@ def test_natives_stay_and_triggers_take_the_focus(server: Server) -> None:
 
 @pytest.mark.parametrize("width", [360, 720])
 def test_a_tap_outside_the_touch_sheet_only_closes_it(server: Server, width: int) -> None:
-    """Re-gate R2-1: on a touch screen the tap that closes the bottom sheet must not also land on
+    """On a touch screen the tap that closes the bottom sheet must not also land on
     what is under the finger (here the brand link, which would leave the page)."""
     from playwright.sync_api import sync_playwright
 
@@ -361,7 +361,7 @@ def test_a_tap_outside_the_touch_sheet_only_closes_it(server: Server, width: int
 
 @pytest.mark.parametrize("width", [360, 720, 1366])
 def test_a_collection_cards_details_menu_stays_on_screen(server: Server, width: int) -> None:
-    """Re-gate R2-3: in the grid view the first card's Details menu hung off the left edge of the
+    """In the grid view the first card's Details menu hung off the left edge of the
     window, cutting its Finish, Condition and Language fields; feedback.js shifts a panel back
     inside the window when it opens."""
     from playwright.sync_api import sync_playwright

@@ -1,4 +1,4 @@
-"""The deck page's direct edits in headless Chromium (static/deck.js, T-040): a right-click on a
+"""The deck page's direct edits in headless Chromium (static/deck.js): a right-click on a
 card opens the gateway's own themed menu and the browser's image menu is prevented; Quantity +
 sends one set_quantity change to the page's edit endpoint and the count, the stack total, the
 Legality chip and the Deck checks panel redraw in place without a navigation; the drag between
@@ -216,7 +216,7 @@ def test_right_click_menu_and_quantity_plus_redraw_in_place(server: Server, widt
             timeout=8000,
         )
         assert page.url == url
-        # the menu stays open for more steps (0.7.27, T-159), showing the saved count
+        # the menu stays open for more steps (0.7.27), showing the saved count
         assert page.locator(".ctxmenu").count() == 1 and menu.locator(".qtyrow .n").inner_text() == "2"
         page.keyboard.press("Escape")
         assert "Saved. Snapshot kept under History" in page.locator(".deck-toast .msg").inner_text()
@@ -362,7 +362,7 @@ def test_viewer_quantity_buttons_and_remove(server: Server) -> None:
 
 def test_drag_between_stacks_saves_set_category_with_the_zone(server: Server) -> None:
     """Text view, where the Maybeboard and Commander stacks share the window: Chromium's own drag
-    and drop moves the row and saves it at once (D4, no "Save moves" bar any more): one
+    and drop moves the row and saves it at once (no "Save moves" bar any more): one
     set_category change with ``category`` and the side zone through the page's endpoint."""
     from playwright.sync_api import sync_playwright
 
@@ -546,7 +546,7 @@ def _edits(page) -> list[list[dict]]:
 
 
 def test_drag_saves_at_once_with_undo_and_redo_buttons_and_keys(server: Server) -> None:
-    """D4: a drag between categories saves at once, as the card menu's Move to does, and the
+    """A drag between categories saves at once, as the card menu's Move to does, and the
     page's one history undoes and redoes it with the Undo and Redo buttons, the toast's Undo and
     the editor's keys (Ctrl+Z, Ctrl+Shift+Z, Ctrl+Y); the keys do nothing while typing in a field."""
     from playwright.sync_api import sync_playwright
@@ -671,7 +671,7 @@ def test_undo_of_a_remove_restores_every_category_and_a_note_is_warned_about(ser
 
 
 def test_undo_of_a_move_files_a_card_back_under_every_category(server: Server) -> None:
-    """A23: Move to of a card filed under several categories has an Undo, as a single-category
+    """Move to of a card filed under several categories has an Undo, as a single-category
     move does; the Undo's set_category names every category it had, the primary first. Redo
     moves it again."""
     from playwright.sync_api import sync_playwright
@@ -720,7 +720,7 @@ def test_undo_of_a_move_files_a_card_back_under_every_category(server: Server) -
 
 
 def test_drag_onto_the_stack_directly_below_in_the_stacks_view(server: Server) -> None:
-    """A57: in the stacks view the cards after the one under the pointer fan out downwards, past
+    """In the stacks view the cards after the one under the pointer fan out downwards, past
     the bottom of their stack and over the top of the stack directly below. A native drag kept
     that fan open, so a drop on the lower stack's head landed on the dragged card's own stack and
     did nothing. While a card is dragged the fan stays closed: the drop reaches the lower stack."""
@@ -758,7 +758,7 @@ def test_drag_onto_the_stack_directly_below_in_the_stacks_view(server: Server) -
 
 
 def test_a_late_refresh_that_takes_a_card_off_closes_its_menu(server: Server) -> None:
-    """Review 2 N3: a save whose re-read was stale reads the deck once more a moment later; when
+    """A save whose re-read was stale reads the deck once more a moment later; when
     that read no longer has the card the menu is open on, the menu closes with it (it would
     otherwise act on a card that is gone from the page)."""
     from playwright.sync_api import sync_playwright

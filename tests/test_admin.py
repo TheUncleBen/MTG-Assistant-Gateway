@@ -160,7 +160,7 @@ async def test_the_overview_shows_whether_the_removed_member_clean_up_works(gw: 
     try:
         r = await b.http.get("/admin", headers=NAVIGATE)
         assert "Removed-member clean-up" in r.text
-        # Each state says what to do next, in plain words (T-120).
+        # Each state says what to do next, in plain words.
         assert (
             "Off. This optional hourly check deletes the saved Archidekt sign-in of people who no "
             "longer have access. To turn it on, follow docs/IDP-AUTHENTIK.md section 12." in r.text
@@ -249,7 +249,7 @@ _AT = "<time datetime='2027-01-15T08:00:00Z'>2027-01-15 08:00 UTC</time>"
     ],
 )
 def test_each_clean_up_state_reads_as_one_plain_line(status: dict, text: str) -> None:
-    """Every state of the admin page's clean-up row, word for word (T-120)."""
+    """Every state of the admin page's clean-up row, word for word."""
     from mtg_gateway.admin import _cleanup_text
 
     assert html.unescape(_cleanup_text(status)) == text  # the HTML lines escape quotes

@@ -1,5 +1,4 @@
-"""Release 0.7.29, approvals and proposals: the pin board the assistant reads and tidies (BOARD
-design; Q27j-Q27m, O9, G6, K5, K10, A1, A4, A5, A12)."""
+"""Release 0.7.29, approvals and proposals: the pin board the assistant reads and tidies."""
 
 from __future__ import annotations
 
@@ -40,13 +39,13 @@ async def test_the_board_lists_every_waiting_note_oldest_first_with_its_number(s
     made = [await _propose(h, token, _change(f"Card {i}")) for i in range(22)]
     assert made[-1]["board_no"] == 22
     out = structured(await call(h, token, "list_my_proposals", {"pending_only": True, "oldest_first": True}))
-    assert [p["board_no"] for p in out["proposals"]] == list(range(1, 23))  # K10: no cap of 20
+    assert [p["board_no"] for p in out["proposals"]] == list(range(1, 23))  # no cap of 20
     first = out["proposals"][0]
     assert first["own"] is True and first["version"] == 1 and first["cards"] == ["Card 0"]
     assert first["status"] is None and first["links"] == []
     newest = structured(await call(h, token, "list_my_proposals", {"pending_only": True}))["proposals"]
     assert newest[0]["board_no"] == 22
-    # G6: from 20 on the deck, a hint to tidy up, never a refusal
+    # From 20 on the deck, a hint to tidy up, never a refusal
     assert "hint" in made[-1] and "22 changes waiting" in made[-1]["hint"]
     assert "hint" not in made[17]
     other_deck = structured(
@@ -67,7 +66,7 @@ async def test_a_new_request_is_told_where_it_overlaps_a_waiting_note(stack: Sta
 
 
 async def test_an_exact_repeat_from_the_same_app_returns_the_waiting_note(stack: Stack) -> None:
-    """Q27k, A5 (rec): only exact duplicates, and only against the same app's notes."""
+    """Only exact duplicates, and only against the same app's notes."""
     h = stack.h
     await linked_user(stack)
     await _mode(h, "manual")
@@ -131,7 +130,7 @@ async def test_amend_keeps_the_number_writes_what_changed_and_restarts_the_expir
 
 
 async def test_amend_at_the_version_cap_tells_the_assistant_to_replace(stack: Stack, monkeypatch) -> None:
-    """K5, C12: the cap refuses with versions_full; the assistant makes a new linked note."""
+    """The cap refuses with versions_full; the assistant makes a new linked note."""
     from mtg_gateway import db as db_module
 
     monkeypatch.setattr(db_module, "MAX_PROPOSAL_VERSIONS", 1)
@@ -149,7 +148,7 @@ async def test_amend_at_the_version_cap_tells_the_assistant_to_replace(stack: St
 
 
 async def test_a_replaced_note_comes_back_when_its_replacement_is_rejected(stack: Stack) -> None:
-    """Q27l "Keep linked"."""
+    """A replaced note comes back when its replacement is rejected."""
     h = stack.h
     token = await linked_user(stack)
     await _mode(h, "manual")
@@ -165,7 +164,8 @@ async def test_a_replaced_note_comes_back_when_its_replacement_is_rejected(stack
 
 
 async def test_withdraw_only_the_apps_own_note_and_its_dependents_are_held(stack: Stack) -> None:
-    """O9 (only its own), Q27j and K6 (a hold, lifted when the note comes back)."""
+    """An app withdraws only its own note; the note's dependents are held, and the hold is lifted
+    when the note comes back."""
     h = stack.h
     await linked_user(stack)
     await _mode(h, "manual")
@@ -254,13 +254,13 @@ async def test_approval_settings_changed_on_the_settings_page_apply_at_once(stac
     token = await linked_user(stack)
     await _set_mode(h, "auto")
     decks = h.app.state.gateway.decks
-    # the stack's own values count as the deployment's (R-208 lock); this test stands for a stack
+    # the stack's own values count as the deployment's (locked); this test stands for a stack
     # that leaves the approval settings to the Settings page
     decks.live.settings = dataclasses.replace(decks.live.settings, env_set=frozenset())
     two = [{"action": "add", "card_name": "Opt"}, {"action": "add", "card_name": "Swamp"}]
     p = structured(await call(h, token, "propose_deck_changes", {"deck_id": "42", "changes": two}))
     assert p["assistant_may_apply"] is True, p
-    decks.live.set("auto_big_edit_rows", 1, by="admin-test")  # O8: more than 1 row waits in auto
+    decks.live.set("auto_big_edit_rows", 1, by="admin-test")  # more than 1 row waits in auto
     p = structured(await call(h, token, "get_proposal", {"proposal_id": p["proposal_id"]}))
     assert p["assistant_may_apply"] is False and "changes 2 rows" in p["risk_reason"], p
     decks.live.set("approval_mode_max", "semi", by="admin-test")  # the cap, read now

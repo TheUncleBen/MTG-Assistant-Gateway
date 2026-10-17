@@ -16,10 +16,12 @@ connecting an assistant in [CONNECT.md](CONNECT.md#if-sign-in-fails).
 | What you see | Cause and fix |
 | --- | --- |
 | Log: `configuration error: ...` and the container exits | A setting is missing or out of range; the message names it. Common ones: `MTG_REQUIRED_GROUP is empty` (set your group, or `MTG_ALLOW_ANY_IDP_USER=true`; see [IDP-OTHERS.md](IDP-OTHERS.md#about-the-group-check)); `MTG_PUBLIC_URL` must be `https://` with no path; `MTG_OIDC_ISSUER` must be `https://`; the session secret must be at least 32 characters; the Fernet key must be a valid key (regenerate it with the command in the deploy guide) |
-| Log mentions a `*_FILE` path that can't be read | The secret file isn't mounted or isn't readable by `PUID`. Compose: check `secrets/*.txt` exist and `chown` them to `PUID:PGID`. Swarm: check the three secrets exist with exactly the names in the stack (`docker secret ls`) |
+| Log mentions a `*_FILE` path that can't be read | The secret file isn't mounted or isn't readable by `PUID`. Compose: check `secrets/*.txt` exist and `chown` them to `PUID:PGID`. Swarm: check the four secrets exist with exactly the names in the stack (`docker secret ls`) |
 | `Permission denied` on `/data` or `/backups` | The host folders aren't owned by `PUID:PGID`. `sudo chown -R <PUID>:<PGID>` them |
 | Compose: `required variable ... is missing a value` | A REQUIRED line in `.env` is empty |
 | Swarm: `network "..." is declared as external, but could not be found` | Create the overlay network first, or set `MTG_NETWORK_NAME` to your existing network's exact name (it's case-sensitive) |
+| Swarm: the deploy stops with `secret not found: mtg_ntfy_token` | Since 0.7.30 the stack needs that secret. Create it ([DEPLOY.md](DEPLOY.md) step 4) and deploy again |
+| Swarm or Compose: the Forge image can't be pulled (`No such image` or `manifest unknown` for `mtg-assistant-forge`) | A new Forge tag is published only after the release is on `main` and the **Forge image** workflow's run has finished. Wait for it, then update again ([VERSIONS.md](VERSIONS.md)) |
 | Swarm: tasks stay `pending` with `no suitable node` | `MTG_NODE` or `MF_NODE` doesn't match a node's hostname. `docker node ls` shows them |
 | Swarm: tasks `rejected` with `bind source path does not exist` | A host folder the stack mounts is missing on the node, or its name is misspelled: `MTG_DATA_DIR` or `MTG_BACKUP_DIR` must exist on the node named by `MTG_NODE`, exactly as written. Create it there (`sudo mkdir -p <folder>` and `sudo chown <PUID>:<PGID> <folder>`) or fix the variable, then update the stack |
 | Swarm: tasks `rejected` with `No such image` | Wrong image or tag, or private images without a registry login. See [DEPLOY.md](DEPLOY.md#5-registry-login-in-portainer) |

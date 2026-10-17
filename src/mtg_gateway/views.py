@@ -25,7 +25,7 @@ def card_out(deck: Deck, c: DeckCard) -> dict[str, Any]:
     }
     if not c.categories:
         # No category of the member's own: archidekt.com shows the card under its auto category
-        # (else its type), and deck_stats counts it there, so the row says which (B3, F27).
+        # (else its type), and deck_stats counts it there, so the row says which.
         out["shown_under"] = deck_stats.primary_category(c)
     # Oracle fields are optional on the model (older fixtures and the fake server may lack them).
     for key in (

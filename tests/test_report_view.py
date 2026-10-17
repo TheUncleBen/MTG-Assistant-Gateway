@@ -284,7 +284,7 @@ def test_no_causal_claim_and_one_coverage_figure() -> None:
 
 
 def test_preflight_only_label_and_overall_status() -> None:
-    """D16: a report without Forge games (Forge off, or left out of this report) says "Preflight only
+    """A report without Forge games (Forge off, or left out of this report) says "Preflight only
     (no rules engine)" where the Forge games would be. QA-010: its overall status is in the head."""
     html = rv.report_body_html(report(status="complete"))  # Forge was not set up
     assert "<h2>Preflight only (no rules engine)</h2>" in html and "was not set up" in html
@@ -309,7 +309,7 @@ def test_preflight_only_label_and_overall_status() -> None:
 
 
 def test_copies_and_sixty_card_coverage_come_from_the_kept_quantities() -> None:
-    """A31: the cards played without their effect show their copies; A30: a 60-card game kept with
+    """The cards played without their effect show their copies; a 60-card game kept with
     its quantities gets a coverage figure counted in copies (none without them, as before)."""
     g0 = rv.parse_goldfish({"ok": True, "text": GOLDFISH})
     name = g0["honesty"]["unrecognized"][0]["name"]
@@ -347,7 +347,7 @@ def test_ask_button_only_on_the_signed_in_page() -> None:
 
 
 def test_left_out_groups_count_copies_as_their_heading_does() -> None:
-    """Review r1 item 10: a group under "Left out on purpose" counts copies, like the heading."""
+    """A group under "Left out on purpose" counts copies, like the heading."""
     g = {
         "deck_size": 60,
         "honesty": {

@@ -1,6 +1,6 @@
 """Release 0.7.29, the shared first step: the schema 13 upgrade (settings, remembered choices, the
 approvals' new columns and tables, snapshot summaries, the queued backup deletes' own table and the
-Archidekt account on each, Q127), the settings registry with its live reads (a deployment value
+Archidekt account on each), the settings registry with its live reads (a deployment value
 wins), and the seams the next steps build on (social.js, the bracket display, the CSS hooks, the
 waiting changes data and the folder helpers)."""
 
@@ -135,7 +135,7 @@ def test_a_large_0_7_28_database_is_upgraded_to_13_and_keeps_every_row(
         assert missing == 1  # only the snapshot whose stored deck is not JSON
         row = c.execute("SELECT * FROM snapshots WHERE id = 's00007'").fetchone()
         assert (row["deck_name"], row["card_count"], row["deck_owner_id"]) == ("Deck 7", 67, "78")
-        # Q127 / F3: nothing recorded which account took an old snapshot, so none is made up
+        # Nothing recorded which account took an old snapshot, so none is made up
         assert (
             c.execute("SELECT COUNT(*) FROM snapshots WHERE archidekt_user_id IS NOT NULL").fetchone()[0] == 0
         )
@@ -223,7 +223,7 @@ def test_a_0_7_28_image_refuses_a_13_database(tmp_path: Path, monkeypatch: pytes
 
 
 def test_the_pending_queries_use_the_state_and_expiry_index(tmp_path: Path) -> None:
-    """A2: the expiry sweep no longer scans every proposal."""
+    """The expiry sweep no longer scans every proposal."""
     db = Database(tmp_path / "x.sqlite")
     try:
         plan = " ".join(
@@ -407,7 +407,7 @@ def test_status_close_reopen_and_links(tmp_path: Path) -> None:
             db.close_proposal("b", "m1", "applied")
         p = db.get_proposal("a", "m1")
         assert p["state"] == "replaced" and p["status_reason"] == "replaced by c"
-        assert db.reopen_proposal("a", "m1")  # c rejected: a comes back (Q27l)
+        assert db.reopen_proposal("a", "m1")  # c rejected: a comes back
         p = db.get_proposal("a", "m1")
         assert p["state"] == "pending" and p["status_reason"] is None
         assert not db.reopen_proposal("a", "m1")  # already waiting
@@ -485,13 +485,13 @@ def test_every_registered_setting_is_a_deployment_setting_with_sane_bounds() -> 
         assert spec.parse(spec.default) == spec.default or key == "chatgpt_name", key
         if spec.lo is not None:
             assert spec.lo <= spec.default <= spec.hi, key
-    # Q17 / F10: what stays in the deployment only
+    # What stays in the deployment only
     for key in ("membership_check_ttl", "archidekt_backup_folder", "writes_enabled", "public_url"):
         assert key not in MANAGED_SETTINGS
 
 
 def test_pacing_can_only_be_made_gentler_from_the_page() -> None:
-    """R-123 (be gentle on Archidekt), G13: the page can't make the gateway call Archidekt or
+    """Be gentle on Archidekt: the page can't make the gateway call Archidekt or
     Scryfall faster than today."""
     faster_when_higher = (
         "archidekt_calls_per_10_min",
@@ -518,8 +518,8 @@ def test_pacing_can_only_be_made_gentler_from_the_page() -> None:
     for key in faster_when_lower:
         spec = MANAGED_SETTINGS[key]
         assert spec.lo == spec.default, key
-    assert MANAGED_SETTINGS["archidekt_calls_per_10_min"].default == 120  # G13
-    # deck sync: 0 turns it off; anything else is every 30 minutes or less often (review fix 2)
+    assert MANAGED_SETTINGS["archidekt_calls_per_10_min"].default == 120
+    # deck sync: 0 turns it off; anything else is every 30 minutes or less often
     sync = MANAGED_SETTINGS["deck_sync_minutes"]
     assert sync.parse("0") == 0 and sync.parse(30) == 30 and sync.parse(1440) == 1440
     for faster in (1, 29):
@@ -639,7 +639,7 @@ def test_the_deployment_marks_what_it_set(tmp_path: Path, monkeypatch: pytest.Mo
     monkeypatch.setenv("MTG_PROPOSAL_EXPIRY_DAYS", "3")
     monkeypatch.setenv("MTG_FORGE_PARALLEL_GAMES", "2")
     monkeypatch.setenv("MTG_ARCHIDEKT_CALLS_PER_10_MIN", "600")  # the deployment may go past the page
-    monkeypatch.setenv("MTG_SERVER_NAME", "")  # blank: left to the page (Q17)
+    monkeypatch.setenv("MTG_SERVER_NAME", "")  # blank: left to the page
     monkeypatch.setenv("MTG_CHATGPT_NAME", "   ")  # only spaces: blank too
     s = load_settings()
     assert s.env_set == {"proposal_expiry_days", "forge_parallel_games", "archidekt_calls_per_10_min"}
@@ -655,7 +655,7 @@ def test_the_deployment_marks_what_it_set(tmp_path: Path, monkeypatch: pytest.Mo
 def test_a_setting_of_only_spaces_is_unset_at_start_up_too(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """0.7.29 proofread: only spaces counted as unset for the page's lock but not at start-up, so
+    """Before, only spaces counted as unset for the page's lock but not at start-up, so
     every number setting stopped the gateway, four on/off settings read Off and a log level of
     spaces broke logging. Now start-up reads it as unset, and spaces around a value are dropped."""
     _env(tmp_path, monkeypatch)
@@ -688,7 +688,7 @@ async def test_the_gateway_shares_one_live_settings(stack: Stack) -> None:
 
 
 async def test_social_actions_load_on_the_deck_page_and_the_user_page_only(stack: Stack) -> None:
-    """S1: the social actions moved to static/social.js; it loads after deck.js where social
+    """The social actions moved to static/social.js; it loads after deck.js where social
     controls are drawn (the deck page and an Archidekt user page), not on Search or Precons."""
     b = await linked_browser(stack)
     try:
@@ -713,7 +713,7 @@ async def test_social_actions_load_on_the_deck_page_and_the_user_page_only(stack
 async def test_the_deck_page_asks_for_its_waiting_changes(
     stack: Stack, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """S4: the deck route hands the strip's data to the page; empty until the strip is built."""
+    """The deck route hands the strip's data to the page; empty until the strip is built."""
     asked: list[tuple] = []
 
     def spy(db, sub, deck_id, *, own):
@@ -733,7 +733,7 @@ async def test_the_deck_page_asks_for_its_waiting_changes(
 
 
 def test_the_folder_helpers_keep_their_frozen_interfaces() -> None:
-    """S5: the folder and deck actions build on these three as they are."""
+    """The folder and deck actions build on these three as they are."""
     assert str(inspect.signature(decks_module.DeckService._not_the_backup_name)) == (
         "(self, name: 'str', depth: 'int') -> 'None'"
     )
@@ -755,13 +755,13 @@ def test_the_folder_helpers_keep_their_frozen_interfaces() -> None:
     assert err.kind == "invalid" and "Your folders: Mine" in str(err)
 
 
-# -- step 0 review, round 1 -------------------------------------------------------------------------
+# -- waiting notes: board numbers, limits and versions ---------------------------------------------
 
 
 def test_waiting_changes_at_the_upgrade_get_their_board_numbers(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Review fix 1: proposals waiting (or being applied) when schema 13 arrives are numbered per
+    """Proposals waiting (or being applied) when schema 13 arrives are numbered per
     member and deck, oldest first, and a new one follows them."""
     path = tmp_path / "old.sqlite"
     old = _schema_12(path, monkeypatch)
@@ -797,7 +797,7 @@ def test_waiting_changes_at_the_upgrade_get_their_board_numbers(
 
 
 def test_a_note_being_applied_keeps_its_board_number(tmp_path: Path) -> None:
-    """Review fix 4: a note saved while another is being applied doesn't take its number, so the
+    """A note saved while another is being applied doesn't take its number, so the
     board never shows two #1s when that apply goes back to waiting."""
     db = Database(tmp_path / "x.sqlite")
     try:
@@ -805,14 +805,14 @@ def test_a_note_being_applied_keeps_its_board_number(tmp_path: Path) -> None:
         assert _proposal(db, "a")
         assert db.claim_proposal("a", "m1")
         assert _proposal(db, "b")
-        db.finish_proposal("a", state="pending")  # nothing changed (Q78): back to waiting
+        db.finish_proposal("a", state="pending")  # nothing changed: back to waiting
         assert [(r["id"], r["board_no"]) for r in db.pending_board("m1", "1")] == [("a", 1), ("b", 2)]
     finally:
         db.close()
 
 
 def test_restoring_a_note_keeps_the_per_account_limit(tmp_path: Path) -> None:
-    """Review fix 5: Q129 keeps 100 waiting per account; restoring a withdrawn note counts too."""
+    """An account keeps at most 100 waiting; restoring a withdrawn note counts too."""
     db = Database(tmp_path / "x.sqlite")
     try:
         _member(db)
@@ -831,7 +831,7 @@ def test_restoring_a_note_keeps_the_per_account_limit(tmp_path: Path) -> None:
 def test_a_waiting_note_keeps_a_limited_number_of_versions(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Review fix 3: an app that keeps amending one note can't grow the database without bound."""
+    """An app that keeps amending one note can't grow the database without bound."""
     assert db_module.MAX_PROPOSAL_VERSIONS == 50
     monkeypatch.setattr(db_module, "MAX_PROPOSAL_VERSIONS", 3)
     db = Database(tmp_path / "x.sqlite")
@@ -868,12 +868,12 @@ def test_a_waiting_note_keeps_a_limited_number_of_versions(
         db.close()
 
 
-# -- step 0 follow-up (coordinator's checks of 0c1e347) ---------------------------------------------
+# -- an amend keeps its hold; settings refusals -----------------------------------------------------
 
 
 def test_an_amend_keeps_the_hold_of_a_rejected_dependency(tmp_path: Path) -> None:
-    """Q27j: a note held because a note it depends on was rejected stays held when an app amends
-    it, so the new version can't apply by itself in semi or auto (G5). Any other status clears."""
+    """A note held because a note it depends on was rejected stays held when an app amends
+    it, so the new version can't apply by itself in semi or auto. Any other status clears."""
     db = Database(tmp_path / "x.sqlite")
     try:
         _member(db)

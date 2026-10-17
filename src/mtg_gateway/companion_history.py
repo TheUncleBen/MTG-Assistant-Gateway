@@ -138,7 +138,7 @@ def add_history_routes(
             if listed
             else set(),
         )
-        # The backup copies the gateway made on Archidekt (D-03): kept out of Home and My decks,
+        # The backup copies the gateway made on Archidekt: kept out of Home and My decks,
         # listed here on the first, unfiltered page (and on a deck's own history).
         copies_panel = ""
         if (
@@ -242,7 +242,7 @@ def add_history_routes(
             f"<textarea id='rep-md' class='sr-only' readonly aria-label='The report as Markdown'>{_esc(md)}"
             "</textarea>"
         )
-        # the saved descriptions this run played that are still the member's own (Q138 item 4);
+        # the saved descriptions this run played that are still the member's own;
         # imported here so the module's shared import block stays as it is (ownership table)
         from .report_view import MODEL_NOTICES, front_face, kept_models
 
@@ -283,7 +283,7 @@ def add_history_routes(
 
     @server.custom_route("/history/reports/{rid}/models/remove", methods=["POST"], include_in_schema=False)
     async def report_model_remove(request: Request) -> Response:
-        """The adder removes a saved card description from a report it played in (Q138 item 4).
+        """The adder removes a saved card description from a report it played in.
         Only the member's own goes; the report itself keeps its record of what it played."""
         sub, sid = browser_session(state, request)
         rid = request.path_params["rid"]
