@@ -932,6 +932,17 @@ class Database:
                 "BEGIN SELECT mtg_proposal_changed(NEW.sub, NULL); END"
             )
 
+    def pending_proposal_decks(self) -> list[tuple[str, str]]:
+        """(owner_sub, deck_id) of every pending proposal not yet expired, one row per pair: the
+        decks whose waiting count an approval setting can change."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT DISTINCT owner_sub, deck_id FROM proposals"
+                " WHERE state = 'pending' AND expires_at >= ?",
+                (int(time.time()),),
+            ).fetchall()
+        return [(str(r[0]), str(r[1])) for r in rows]
+
     def set_approval_mode(self, sub: str, mode: str | None) -> bool:
         """Record the member's own approval mode (modes.py), or None to go back to the gateway's
         default. False if there is no such user. Only the Account page calls this: the mode is
