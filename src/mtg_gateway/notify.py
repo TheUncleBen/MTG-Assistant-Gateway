@@ -193,7 +193,7 @@ def replace_old_topics(db: Database) -> int:
             ),
         )
     if subs:
-        logger.info("notifications: replaced %d topic(s) chosen before this version", len(subs))
+        logger.info("notifications: replaced %d topic(s) from before this version", len(subs))
     return len(subs)
 
 
