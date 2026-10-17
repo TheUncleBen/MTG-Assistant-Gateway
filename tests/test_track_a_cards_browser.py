@@ -710,11 +710,13 @@ def test_a_hold_set_after_the_card_was_drawn_is_shown_when_the_card_cannot_check
             card.locator("#status.err", has_text="could not check").wait_for()
             card.locator("#approve:not([disabled])").click()
             card.locator("#status.ok").wait_for()
+            # with the time the hold it now shows was set, from the refusal
             assert _tool_calls(page, "confirm_proposal")[-1] == {
                 "proposal_id": "p2",
                 "approval": "code-2",
                 "decision": "approve",
                 "shown_status": "held",
+                "shown_status_at": NOW,
             }
         finally:
             browser.close()
