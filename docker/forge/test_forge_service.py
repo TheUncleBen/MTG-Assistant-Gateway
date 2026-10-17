@@ -2,6 +2,7 @@
 request checks, parsing, and how a job's games are cut into slices and played."""
 
 import os
+import queue
 import stat
 import sys
 import tempfile
@@ -164,6 +165,7 @@ class Run(unittest.TestCase):
     def tearDown(self):
         fs.FORGE_HOME = self.home
         fs.MAX_PARALLEL = 1
+        fs.FREE_PLACES[:] = [0]
         for k, v in self.old.items():
             if v is None:
                 os.environ.pop(k, None)
@@ -226,6 +228,72 @@ class Run(unittest.TestCase):
             fs.LAZY_CARDS = True
         self.assertEqual(slot.read_text("utf-8"), "LOAD_CARD_SCRIPTS_LAZILY=false\n")
 
+    def worker_with(self, places):
+        """A worker of its own on a fresh queue, with ``places`` places shared by its jobs."""
+        fs.MAX_PARALLEL = places
+        fs.FREE_PLACES[:] = list(range(places))
+        fs.QUEUE = queue.Queue()
+        threading.Thread(target=fs.worker, daemon=True).start()
+        return fs.QUEUE
+
+    def wait_done(self, jobs, seconds=20):
+        end = time.time() + seconds
+        while time.time() < end and any(j.finished is None for j in jobs):
+            time.sleep(0.05)
+        self.assertTrue(all(j.finished is not None for j in jobs), [j.state for j in jobs])
+
+    def test_jobs_share_the_places_in_order(self):
+        # speed fix 5: a job that leaves places free (a comparison's first deck) lets the next job
+        # play beside it, never more processes than places, and never out of order
+        old = fs.QUEUE
+        try:
+            os.environ["FAKE_SLOW"] = "0.6"
+            deck = {"commander": ["Liesa, Forgotten Archangel"], "main": [[99, "Forest"]]}
+            q = self.worker_with(2)
+            jobs = [fs.Job([deck, deck], 5, "Commander", seed, 1) for seed in (1, 2, 3)]
+            for job in jobs:
+                q.put(job)
+            self.wait_done(jobs)
+            self.assertEqual([j.state for j in jobs], ["done"] * 3)
+            # the first two started together on their own places; the third waited for one
+            self.assertLess(abs(jobs[1].started - jobs[0].started), 0.4)
+            self.assertGreater(jobs[2].started - jobs[0].started, 0.5)
+            homes = {p.read_text() for p in (self.tmp / "log").iterdir()}
+            self.assertEqual(homes, {str(self.tmp / "home"), str(self.tmp / "home" / "slot-1")})
+            self.assertEqual(sorted(fs.FREE_PLACES), [0, 1])  # every place given back
+            # one place: the second job waits for the whole first one, as before
+            for p in (self.tmp / "log").iterdir():
+                p.unlink()
+            q = self.worker_with(1)
+            two = [fs.Job([deck, deck], 10, "Commander", seed, 1) for seed in (4, 5)]
+            for job in two:
+                q.put(job)
+            self.wait_done(two)
+            self.assertGreaterEqual(two[1].started, two[0].finished - 0.05)
+            self.assertEqual(fs.FREE_PLACES, [0])
+        finally:
+            fs.QUEUE = old
+
+    def test_a_job_cancelled_while_waiting_for_a_place_never_starts(self):
+        old = fs.QUEUE
+        try:
+            os.environ["FAKE_SLOW"] = "1.5"
+            deck = {"commander": ["Liesa, Forgotten Archangel"], "main": [[99, "Forest"]]}
+            q = self.worker_with(1)
+            first, second = (fs.Job([deck, deck], 5, "Commander", s, 1) for s in (1, 2))
+            q.put(first)
+            q.put(second)
+            time.sleep(0.3)
+            self.assertEqual(len(fs.HELD), 1)  # the second waits for the place, counted as queued
+            second.cancelled, second.state = True, "cancelled"
+            self.wait_done([first])
+            time.sleep(0.3)
+            self.assertIsNone(second.started)
+            self.assertEqual(len(list((self.tmp / "log").iterdir())), 1)
+            self.assertEqual(fs.FREE_PLACES, [0])
+        finally:
+            fs.QUEUE = old
+
     def test_one_slice_is_one_process_as_before(self):
         job = self.run_job(5, parallel=4)
         self.assertEqual((job.parallel, len(job.slices)), (1, 1))
@@ -239,8 +307,10 @@ class Run(unittest.TestCase):
         job = fs.Job([deck, deck], 20, "Commander", 1, 2)
         t = threading.Thread(target=fs.run_job, args=(job,))
         t.start()
-        for _ in range(100):
-            if len(job.procs) == 2:
+        # both slices playing: each fake Forge has logged its start (a loaded machine can take
+        # longer than the process start itself, so the kill came before the log: a flaky count)
+        for _ in range(200):
+            if len(job.procs) == 2 and len(list((self.tmp / "log").iterdir())) == 2:
                 break
             time.sleep(0.05)
         job.cancelled = True

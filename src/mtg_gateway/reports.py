@@ -70,10 +70,11 @@ TREND_METRICS = (
     ("kill_pct", "Games dealing lethal damage by the last simulated turn", "%"),
 )
 TREND_LIMIT = 60
-# A member's Forge runs go one at a time (the engine plays one game at a time for the whole
-# gateway). A report made while one of theirs is unfinished waits for it: its Forge section is
-# "queued" with no engine job yet, and starts by itself when the runs ahead of it end, the queue
-# kept in the reports table so a gateway restart carries on with it. At most this many wait.
+# A member's Forge runs go one at a time, so nobody fills the engine's shared queue. A report made
+# while one of theirs is unfinished waits for it: its Forge section is "queued" with no engine job
+# yet, and starts by itself when the runs ahead of it end, the queue kept in the reports table so a
+# gateway restart carries on with it. At most this many wait. One exception (speed fix 5, R-215):
+# a comparison's second deck starts beside its first when the engine has places for two runs.
 MAX_FORGE_WAITING = 2
 # Where a report keeps its run's settings: a key of the stored statistics (no column of its own),
 # taken out again when the report is read (``settings``).
@@ -120,7 +121,9 @@ class ReportService:
         self.models = card_models.KeptModels(db)
         self.forge = forge
         self._forge_games = forge_games
-        self.forge_interval = 15.0  # seconds between refreshes of unfinished Forge runs
+        # Seconds between refreshes of unfinished Forge runs: each game shows within this of
+        # finishing (R-215; was 15). A refresh is one small request to the engine per running run.
+        self.forge_interval = 3.0
         self._forge_task: asyncio.Task[None] | None = None
         self._forge_cancels: set[asyncio.Task[None]] = set()  # held so a pending cancel is not collected
         # Held from the one-run-per-member check until the new run is saved (one gateway process).
@@ -429,7 +432,7 @@ class ReportService:
         shared: dict[str, Any] | None = None,
     ) -> None:
         text, seed = deck_to_text(deck), seed if isinstance(seed, int) else None
-        if self._forge_running(sub, rid):
+        if self._forge_running(sub, rid) and not self._side_by_side(sub, shared):
             # One unfinished Forge run per member, so nobody can fill the shared engine's queue:
             # this one waits for theirs (MAX_FORGE_WAITING at most).
             waiting = sum(1 for _, _, s in self._member_runs(sub) if _waiting(s))
@@ -448,6 +451,26 @@ class ReportService:
             self._ensure_forge_refresher()
             return
         await self._start_forge(rid, text, deck.name, games, seed, bracket, shared=shared)
+
+    def _side_by_side(self, sub: str, shared: dict[str, Any] | None) -> bool:
+        """Whether a comparison's second deck may start now, beside its first (R-215): the member's
+        one unfinished run is the first deck's, started with compare_with, and the engine has
+        places for two runs. Then the pair plays in about the time of one run, still inside the
+        engine's CPU and memory limit (FORGE_MAX_PARALLEL places, each one Forge process)."""
+        if shared is None:
+            return False
+        runs = self._member_runs(sub)
+        if len(runs) != 1 or runs[0][0] != shared.get("report_id"):
+            return False
+        first = runs[0][2]
+        places = first.get("max_parallel")
+        return (
+            bool(first.get("job_id"))
+            and not _waiting(first)
+            and bool((first.get("opponent_choice") or {}).get("pair"))
+            and isinstance(places, int)
+            and places >= 2
+        )
 
     def _waiting_section(
         self,
@@ -694,8 +717,11 @@ class ReportService:
         if not (_number(per_game) and per_game > 0):
             per_game = self.measured_game_seconds()
         left = 0
-        for _, _, s in runs[:mine]:
-            left += _games_left(s)
+        if out.get("state") == "queued":
+            # only a run that has not started waits for the ones ahead (a comparison's second deck
+            # may be playing beside its first)
+            for _, _, s in runs[:mine]:
+                left += _games_left(s)
         if _waiting(out):
             waiting = [r for r in runs if _waiting(r[2])]
             out["position"] = 1 + next((i for i, r in enumerate(waiting) if r[0] == rid), len(waiting))
@@ -792,7 +818,9 @@ class ReportService:
                     section = json.loads(row["forge_json"])
                     if _waiting(section):
                         continue  # no engine job yet; started below when its turn comes
-                    self._save_forge(row["id"], await refresh(self.forge, section))
+                    fresh = await refresh(self.forge, section)
+                    if fresh != section:  # written only when a game finished or the state moved
+                        self._save_forge(row["id"], fresh)
                 except Exception:  # one bad row must not stop the others
                     logger.exception("forge refresh failed for %s", row["id"])
             try:
