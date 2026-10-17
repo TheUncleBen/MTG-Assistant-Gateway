@@ -1590,7 +1590,8 @@ def compare_forge_html(deck: Deck, other: Any, other_name: str, *, csrf: str | N
         f"<input type='hidden' name='csrf' value='{esc(csrf)}'>"
         f"<input type='hidden' name='with' value='{esc(other.id)}'>"
         "<button type='submit' class='btn-primary' data-busy-label='Starting…' "
-        f"title='Starts both reports; the second opens when both have started'>{icon('stats')} Test both "
+        "title='Makes both reports and starts or queues their Forge games, then opens the second report'>"
+        f"{icon('stats')} Test both "
         f"in Forge against the same opponents</button></form>"
         "</section>"
     )
@@ -1779,7 +1780,7 @@ GOLDFISH_CSS = """
 .gf-card[aria-pressed=true]{outline:3px solid var(--orange-ctl);outline-offset:2px}
 .gf-card[aria-pressed=true]:focus-visible{outline-color:var(--focus)}
 @media (prefers-reduced-motion:reduce){.gf-card{transition:none}}
-/* the guide (G9): the step the game is at stands out; numbers in circles, text beside them */
+/* the guide: the step the game is at stands out; numbers in circles, text beside them */
 .gf-guide[hidden],.gf-guide-show[hidden]{display:none}
 .gf-guide-head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:.5rem}
 .gf-guide h2{font-size:1.1rem;margin:0}

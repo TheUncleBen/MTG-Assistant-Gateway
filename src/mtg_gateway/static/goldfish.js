@@ -181,7 +181,7 @@
     }
   }
 
-  // -- the guide (G9): the step the game is at, and hiding it for the account ----------------------
+  // -- the guide: the step the game is at, and hiding it for the account ---------------------------
   function guideStep() {
     var steps = $$("#gf-guide .gf-steps li");
     if (!steps.length) return;
@@ -219,7 +219,7 @@
       body: JSON.stringify({ hidden: hidden })
     }).catch(function () { /* offline: shown or hidden for this page only */ });
   }
-  // phones: the step the game is at, or all six (Q138 item 8)
+  // phones: the step the game is at, or all six
   var allBtn = $("#gf-guide .gf-allsteps"), stepList = $("#gf-steps");
   if (allBtn && stepList) {
     allBtn.addEventListener("click", function () {

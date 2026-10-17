@@ -110,7 +110,7 @@ ul.facts li b{font-weight:600;text-align:right;overflow-wrap:anywhere}
     else if (problems.length) { head = "Not legal" + (fmt ? " in " + fmt : "") + " yet."; v.className = "verdict bad"; }
     else { head = fmt ? "Checked for " + fmt + "." : "No format set, so legality was not checked."; v.className = "verdict info"; }
     // The bracket set on the deck is the deck's bracket; Archidekt's estimate from the cards shows
-    // only when none is set, with Archidekt's own notes (Q49, O14; bracket_view.py on the pages).
+    // only when none is set, with Archidekt's own notes (as bracket_view.py does on the pages).
     var br = st.bracket_estimate || {};
     if (st.archidekt_bracket != null) lines.push("Bracket: " + bracketName(st.archidekt_bracket) + ", set on the deck.");
     else if (br.bracket != null) {

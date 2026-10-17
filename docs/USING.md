@@ -147,8 +147,8 @@ One deck:
   use the Compare page's Forge button (or your assistant asks for the same
   opponents), each deck meets precons picked for its own bracket (or
   Archidekt's estimate when none is set), so two decks' Forge
-  win rates are not a like-for-like comparison; the paired goldfish A/B of
-  `compare_decks` is.
+  win rates are not a like-for-like comparison; the paired goldfish A/B, which
+  your assistant can run for the two decks, is.
 - A report without Forge games (Forge not set up, a 60-card deck, a deck
   with no commander marked, Forge left out of the report, or too many of
   your reports already waiting for Forge) is labelled **Preflight only (no rules engine)**
