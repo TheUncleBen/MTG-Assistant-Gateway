@@ -204,7 +204,7 @@ The app shows the gateway's pages: home, account, proposals, scan, and whatever
 else your gateway serves. A few things are native:
 
 - **The App section of the account menu** (the person icon, top right):
-  *Scan with phone camera*, *Reload*, *Open in browser*, *Change gateway*.
+  *Scan with the app's camera*, *Reload*, *Open in browser*, *Change gateway*.
   *Open a copied link* and *Check for app updates* are on the Account page's
   **App** card and in the round button's menu.
   The same actions sit on a round button at the bottom right while a
@@ -295,7 +295,7 @@ The gateway's `/scan` page already reads cards from a photo (see
 [SCANNING.md](SCANNING.md)). The app's camera screen just takes a better photo
 than a browser can, then hands it to that page, which keeps running underneath:
 
-1. Menu, **Scan with phone camera**, or the **Phone camera** button the scan
+1. Menu, **Scan with the app's camera**, or the **Phone camera** button the scan
    page shows when it runs inside the app. The app opens `/scan` if you aren't
    on it.
 2. Fill the dashed card outline with the card. Controls, each shown only when

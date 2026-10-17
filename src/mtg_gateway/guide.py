@@ -576,7 +576,7 @@ def guide_body(
         "<a href='/collection'>collection</a>, add them to one of your decks, start a new deck from them, "
         "or save the scan for later (your assistant can pick it up too).</span></li></ol>"
         "<p>You can also type or paste names instead of using the camera, and earlier scans are listed "
-        "under <strong>Sessions</strong>. On the Android app the <strong>Scan with phone camera</strong> "
+        "under <strong>Sessions</strong>. On the Android app the <strong>Scan with the app's camera</strong> "
         "button in the account menu uses the app's own camera panel.</p>"
         "<p>A scan is a draft that stays here as long as you like, up to a whole deck: fix misread cards, "
         "printings and quantities first, then send it to your collection or a deck, which removes the "
