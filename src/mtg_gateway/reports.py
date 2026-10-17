@@ -84,7 +84,7 @@ TREND_LIMIT = 60
 # A member's Forge runs go one at a time, so nobody fills the engine's shared queue. A report made
 # while one of theirs is unfinished waits for it: its Forge section is "queued" with no engine job
 # yet, and starts by itself when the runs ahead of it end, the queue kept in the reports table so a
-# gateway restart carries on with it. At most this many wait. One exception (speed fix 5, R-215):
+# gateway restart carries on with it. At most this many wait. One exception:
 # a comparison's second deck starts beside its first when the engine has places for two runs.
 MAX_FORGE_WAITING = 2
 # Where a report keeps its run's settings: a key of the stored statistics (no column of its own),
@@ -150,7 +150,7 @@ class ReportService:
         self.forge = forge
         self._forge_games = forge_games
         # Seconds between refreshes of unfinished Forge runs: each game shows within this of
-        # finishing (R-215; was 15). A refresh is one small request to the engine per running run.
+        # finishing (was 15). A refresh is one small request to the engine per running run.
         self.forge_interval = 3.0
         self._forge_task: asyncio.Task[None] | None = None
         self._forge_cancels: set[asyncio.Task[None]] = set()  # held so a pending cancel is not collected
@@ -765,7 +765,7 @@ class ReportService:
         return sum(h.left for h in self._pair_holds.get(sub, []) if h is not mine)
 
     def _side_by_side(self, sub: str, shared: dict[str, Any] | None) -> bool:
-        """Whether a comparison's second deck may start now, beside its first (R-215): the member's
+        """Whether a comparison's second deck may start now, beside its first: the member's
         one unfinished run is the first deck's, started with compare_with, and the engine has
         places for two runs. Then the pair plays in about the time of one run, still inside the
         engine's CPU and memory limit (FORGE_MAX_PARALLEL places, each one Forge process)."""
@@ -1234,7 +1234,7 @@ class ReportService:
                     ):
                         continue
                     if fresh.get("state") == "lost" and fresh.get("error") == forge_module.FORGE_SILENT:
-                        # given up while the job may still be on the copy: stop it there (L6)
+                        # given up while the job may still be on the copy: stop it there
                         self._cancel_forge(section, keep_asking=True)
                 except Exception:  # one bad row must not stop the others
                     logger.exception("forge refresh failed for %s", row["id"])
