@@ -333,7 +333,7 @@ async def test_forge_comparison_reads_the_other_deck_first_on_every_path(stack: 
     from mtg_gateway.decks import RateBudget
     from mtg_gateway.forge import PAIR_LEAD, bracket_parts
     from mtg_gateway.reports import BOTH_PAIRINGS, PAIR_NO_FORGE, PAIR_UNREAD
-    from mtg_gateway.tools_reports import NOT_A_PAIR
+    from mtg_gateway.tools_reports import NOT_DECK_OR_SNAPSHOT
 
     from .test_forge import BRACKETED, FakeForge
 
@@ -403,7 +403,23 @@ async def test_forge_comparison_reads_the_other_deck_first_on_every_path(stack: 
         odd = structured(
             await call(h, token, "run_deck_report", {"deck_ref": "42", "forge": True, "compare_with": "x y"})
         )
-        assert odd["ok"] is False and odd["message"] == f"{PAIR_UNREAD} {NOT_A_PAIR}" and stored() == []
+        assert (
+            odd["ok"] is False
+            and odd["message"] == f"{PAIR_UNREAD} {NOT_DECK_OR_SNAPSHOT}"
+            and stored() == []
+        )
+        # review r4 L2: an unknown (or another member's) snapshot id is refused naming snapshots too
+        for args in (
+            {"deck_ref": "snap_nothere"},
+            {"deck_ref": "42", "forge": True, "compare_with": "snap_nothere"},
+        ):
+            unknown = structured(await call(h, token, "run_deck_report", args))
+            assert unknown["ok"] is False and unknown["message"].endswith(NOT_DECK_OR_SNAPSHOT), unknown
+        stats_unknown = structured(await call(h, token, "deck_stats", {"deck_ref": "snap_nothere"}))
+        assert stats_unknown["ok"] is False and stats_unknown["message"] == NOT_DECK_OR_SNAPSHOT, (
+            stats_unknown
+        )
+        assert stored() == []
         # no Forge games: refused rather than ignored (pending Ben's call), nothing kept
         off = structured(
             await call(

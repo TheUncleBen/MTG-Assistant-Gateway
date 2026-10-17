@@ -633,6 +633,28 @@ class _SixtyCardDecks:
         return parse_deck(raw)
 
 
+async def test_compare_with_is_refused_whenever_no_forge_games_run(tmp_path: Path) -> None:
+    """Review r4 L1 (pending Ben, safe default): a comparison's other deck with no Forge games to
+    play is refused, not ignored, and keeps no report: forge=False, no Forge on the gateway, and a
+    60-card deck."""
+    from mtg_gateway.decks import DeckError
+    from mtg_gateway.reports import PAIR_NO_FORGE
+
+    db = Database(tmp_path / "t.sqlite")
+    db.upsert_user("alice", email=None, name=None, preferred_username=None, groups=[])
+    sixty = ReportService(db, _SixtyCardDecks(), None, forge=FakeForge().client(), forge_games=4)  # type: ignore[arg-type]
+    cases = [
+        (sixty, {}),  # a 60-card deck
+        (ReportService(db, _Decks(), None, forge=None, forge_games=4), {}),  # type: ignore[arg-type]
+        (ReportService(db, _Decks(), None, forge=FakeForge().client(), forge_games=4), {"forge": False}),  # type: ignore[arg-type]
+    ]
+    for service, kw in cases:
+        with pytest.raises(DeckError) as refused:
+            await service.run("alice", "42", simulate=False, pair_with="43", **kw)
+        assert refused.value.kind == "invalid" and str(refused.value) == PAIR_NO_FORGE
+    assert db._conn.execute("SELECT COUNT(*) FROM reports").fetchone()[0] == 0
+
+
 async def test_a_sixty_card_report_never_starts_or_queues_forge(tmp_path: Path) -> None:
     """Consolidation bug 2: every 60-card report started a Forge run bound to fail, which could take
     a waiting place. Now it never reaches the engine, takes no place, and says why."""
