@@ -206,6 +206,8 @@ class NotifyService : Service() {
             .setStyle(Notification.BigTextStyle().bigText(m.text))
             .setContentIntent(tap)
             .setAutoCancel(true)
+            // A deck's message updated while it still shows (its count changed) doesn't sound again.
+            .setOnlyAlertOnce(true)
             .setCategory(Notification.CATEGORY_MESSAGE)
             .build()
     }

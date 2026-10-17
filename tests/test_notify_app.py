@@ -397,3 +397,28 @@ async def test_the_token_is_never_on_the_page(stack: Stack, app: bool) -> None:
         assert TOKEN not in page and "ntfy.test" not in page
     finally:
         await b.aclose()
+
+
+async def test_one_message_per_deck_follows_its_waiting_count(stack: Stack) -> None:
+    b, key = await _member(stack)
+    try:
+        n = stack.gw.notifier
+        n.deck_waiting("user-1", "42", "Atraxa, Grand  Unifier", 1, "/decks/42")
+        await n.drain()
+        msg = stack.ntfy.published[-1]
+        assert msg["title"] == "1 change waiting for Atraxa, Grand Unifier"
+        assert msg["sequence_id"] == "deck-42" and msg["click"] == "https://mtg.test/decks/42"
+        assert msg["message"] == notify.WAITING_TEXT
+        n.deck_waiting("user-1", "42", "Atraxa, Grand Unifier", 1, "/decks/42")  # no change: nothing sent
+        n.deck_waiting("user-1", "42", "Atraxa, Grand Unifier", 2, "/decks/42")
+        await n.drain()
+        assert len(stack.ntfy.published) == 2 and stack.ntfy.published[-1]["title"].startswith("2 changes")
+        n.deck_waiting("user-1", "42", "Atraxa, Grand Unifier", 0, "/decks/42")
+        await n.drain()
+        assert stack.ntfy.deleted == [f"/{key}/deck-42"]
+        n.deck_waiting("user-1", "x", "Odd", 3, "/decks/x")  # not a deck id: nothing
+        await n.drain()
+        assert len(stack.ntfy.published) == 2
+        assert notify.waiting_title(3, "") == "3 changes waiting for your deck"
+    finally:
+        await b.aclose()
