@@ -526,6 +526,10 @@ DECK_CSS_A = (
     # indent less on a phone, and a button disabled because writes are off says so by its cursor
     + """
 .banner .social .soc{height:auto;min-height:34px;max-width:100%}
+/* focus moves to Yes by script after a click, which :focus-visible may not mark: always ring it
+   (review rounds 2 and 3: the banner's chips, a comment's vote, edit and delete, and posting) */
+.banner .social .confirm button:focus,.comments .confirm button:focus,.comments .confirmbar button:focus{
+  outline:2px solid var(--focus);outline-offset:2px}
 .banner .social .soc span{min-width:0;overflow-wrap:anywhere;line-height:1.2;padding:.35rem 0}
 .banner .social[data-writes=off] .soc[disabled]{cursor:not-allowed}
 .banner .social-off{display:inline-block;margin:.5rem 0 0;padding:.3rem .65rem;border-radius:6px;
@@ -2003,10 +2007,6 @@ h3 .count{font-weight:400;color:var(--text-muted);font-size:.9rem}
 .comments .cmt .acts .confirm{display:inline-flex;flex-wrap:wrap;gap:.4rem;align-items:center;min-width:0;
   font-size:.85rem}
 .comments .cmt .acts .confirm > span{min-width:0;overflow-wrap:anywhere}
-/* focus moves to Yes by script after a click, which :focus-visible may not mark: always ring it */
-.comments .cmt .acts .confirm button:focus,.comments .confirmbar button:focus,
-.banner .social .confirm button:focus{
-  outline:2px solid var(--focus);outline-offset:2px}
 .comments .cmt .acts .notice{flex-basis:100%;margin:.25rem 0 0}
 .comments form.newcomment{display:flex;flex-direction:column;gap:.5rem}
 .comments form.newcomment textarea{width:100%;resize:vertical;min-height:4.5rem}

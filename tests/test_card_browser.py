@@ -46,8 +46,8 @@ HOST = """<!DOCTYPE html><html><body>
 <script>
 window.log = [];
 window.confirmReply = null;  // set by the test: the structuredContent confirm_proposal answers with
-// get_proposal's structuredContent; null: the host refuses the call (as a host may refuse a card's
-// tools/call), so the card keeps what it drew
+// get_proposal's structuredContent; null: the gateway answers with what the card drew (the change
+// is as shown); "refuse": the host refuses the call, as a host may refuse a card's tools/call
 window.getReply = null;
 var frame = document.getElementById("f");
 window.addEventListener("message", (ev) => {
@@ -64,8 +64,8 @@ window.addEventListener("message", (ev) => {
   } else if (m.method === "ui/notifications/initialized") {
     send({jsonrpc: "2.0", method: "ui/notifications/tool-result", params: window.toolResult});
   } else if (m.method === "tools/call" && m.params.name === "get_proposal") {
-    const sc = window.getReply;
-    if (sc === null) send({jsonrpc: "2.0", id: m.id, error: {code: -32000, message: "blocked"}});
+    const sc = window.getReply === null ? (window.toolResult || {}).structuredContent : window.getReply;
+    if (sc === "refuse") send({jsonrpc: "2.0", id: m.id, error: {code: -32000, message: "blocked"}});
     else send({jsonrpc: "2.0", id: m.id,
                result: {content: [{type: "text", text: JSON.stringify(sc)}], structuredContent: sc}});
   } else if (m.method === "tools/call") {

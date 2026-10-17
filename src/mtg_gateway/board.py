@@ -17,7 +17,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from .db import HOLDING_STATES, hold_reason
+from .db import HOLDING_STATES, hold_reason, replaced_hold_reason
 
 logger = logging.getLogger(__name__)
 
@@ -113,6 +113,7 @@ def settle(svc: Any, sub: str, proposal_id: str, state: str) -> None:
         elif state in ("applied", "pending"):
             if state == "applied":
                 close_replaced_on_apply(svc, sub, proposal_id)
+                hold_replacing(svc, sub, proposal_id)
             for dep in db.dependents(sub, proposal_id):
                 row = db.get_proposal(dep, sub)
                 if row and row.get("status") == "held" and not _still_blocked(db, sub, dep):
@@ -137,6 +138,19 @@ def close_replaced_on_apply(svc: Any, sub: str, proposal_id: str) -> None:
             and db.close_proposal(old["id"], sub, "replaced", f"replaced by #{no}" if no else "replaced")
         ):
             settle(svc, sub, old["id"], "withdrawn")
+
+
+def hold_replacing(svc: Any, sub: str, proposal_id: str) -> None:
+    """Once a note is applied on its own, a waiting note that would replace it is held (review
+    round 3; safe default pending a card): applying it too would change the deck twice. The
+    member may still apply it (A8); no assistant does, in any mode."""
+    db = svc.db
+    for link in db.proposal_links(sub, [proposal_id]):
+        if link["other_id"] != proposal_id or link["kind"] != "replaces":
+            continue
+        new = db.get_proposal(link["proposal_id"], sub)
+        if new is not None and new["state"] == "pending" and new.get("status") != "held":
+            db.set_hold(new["id"], sub, replaced_hold_reason(proposal_id))
 
 
 # What the member reads about a replace (proofread A2, finding 2; WORDING-3-r2 item 2).
@@ -230,6 +244,10 @@ def status_text(db: Any, sub: str, row: dict[str, Any]) -> str:
         }
         which = f"#{no}" if no else "another proposal"
         return f"It depends on {which}, which {words.get(closed, closed)}."
+    if status == "held" and reason.startswith("replaces:"):
+        other = reason.split(":", 2)[1] if reason.count(":") >= 1 else ""
+        no = db.proposal_board_numbers(sub, [other]).get(other)
+        return f"It would replace {f'#{no}' if no else 'a change'}, which was applied."
     if status == "updated":
         return "The deck changed since this was made; it still does exactly what was reviewed."
     return recheck.reason_text(reason)

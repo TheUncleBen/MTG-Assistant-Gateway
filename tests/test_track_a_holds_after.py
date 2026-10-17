@@ -305,3 +305,120 @@ async def test_the_pages_show_why_a_change_waits_and_what_replaces_it(stack: Sta
         assert "<dt>Waits for you</dt>" not in plain
     finally:
         await br.aclose()
+
+
+async def test_applying_a_replaced_change_on_its_own_holds_its_replacement(stack: Stack) -> None:
+    """Review round 3 (safe default pending a card): ChatGPT's +Arcane Signet is #1, Claude's
+    +Delver replacing it is #2. The member applies #1 on its own; #2 is then held, says why, and
+    no assistant applies it in any mode. The member may still apply it."""
+    h, ark = stack.h, stack.ark
+    await linked_user(stack)
+    await _set_mode(h, "manual")
+    a, _ = await _app_token(h, "Claude")
+    b, _ = await _app_token(h, "ChatGPT")
+    theirs = await _propose(h, b, _add("Arcane Signet"))
+    new = await _propose(h, a, _add("Delver of Secrets"), replaces=[theirs["proposal_id"]])
+    decks = h.app.state.gateway.decks
+    reset = current_client.set(BROWSER_CLIENT)
+    try:
+        run = decks.apply_selection(SUB, [theirs["proposal_id"]], via="review_page")
+        await decks.batches.wait(run["batch_id"], 60)
+    finally:
+        current_client.reset(reset)
+    assert h.db.get_proposal(theirs["proposal_id"], SUB)["state"] == "applied"
+    got = await _get(h, a, new["proposal_id"])
+    assert got["status"] == "held", got
+    assert got["status_reason"] == f"It would replace #{theirs['board_no']}, which was applied.", got
+    assert got["press_reason"] == f"would replace #{theirs['board_no']}, which was applied"
+    assert got["next_step"].startswith("Held: the proposal this one would replace was applied on its own")
+    assert "still does exactly what was reviewed" not in str(got)
+    for mode in ("semi", "auto"):
+        await _set_mode(h, mode)
+        assert (await _get(h, a, new["proposal_id"]))["assistant_may_apply"] is False
+        out = structured(await call(h, a, "apply_proposal", {"proposal_id": new["proposal_id"]}))
+        assert out.get("state") != "applied", out
+    assert h.db.get_proposal(new["proposal_id"], SUB)["state"] == "pending"
+    sent = len(ark.patches)
+    # the member may still apply it (A8)
+    reset = current_client.set(BROWSER_CLIENT)
+    try:
+        run = decks.apply_selection(SUB, [new["proposal_id"]], via="review_page")
+        await decks.batches.wait(run["batch_id"], 60)
+    finally:
+        current_client.reset(reset)
+    assert [x["proposal_id"] for x in run["applied"]] == [new["proposal_id"]], run
+    assert len(ark.patches) > sent
+
+
+async def test_a_replaced_change_applied_outside_the_apply_paths_is_held_when_read(stack: Stack) -> None:
+    """The same hold, set lazily when the board is read (a row closed as applied without settle)."""
+    h = stack.h
+    await linked_user(stack)
+    await _set_mode(h, "manual")
+    a, _ = await _app_token(h, "Claude")
+    b, _ = await _app_token(h, "ChatGPT")
+    theirs = await _propose(h, b, _add("Arcane Signet"))
+    new = await _propose(h, a, _add("Delver of Secrets"), replaces=[theirs["proposal_id"]])
+    with h.db.tx() as c:
+        c.execute("UPDATE proposals SET state = 'applied' WHERE id = ?", (theirs["proposal_id"],))
+    assert h.db.get_proposal(new["proposal_id"], SUB)["status"] is None
+    got = await _get(h, a, new["proposal_id"])
+    assert got["status"] == "held" and "which was applied" in got["status_reason"], got
+
+
+async def test_a_combined_change_is_held_once_another_apps_part_is_applied(stack: Stack) -> None:
+    """Review round 3 probe: ChatGPT's part of a combined change is applied on its own; the
+    combined change is held at once (not only when the pre-send check marks it), and says why."""
+    h = stack.h
+    await linked_user(stack)
+    await _set_mode(h, "manual")
+    a, _ = await _app_token(h, "Claude")
+    b, _ = await _app_token(h, "ChatGPT")
+    theirs = await _propose(h, b, _add("Arcane Signet"))
+    mine = await _propose(h, a, _add("Delver of Secrets"))
+    comb = structured(
+        await call(h, a, "combine_proposals", {"proposal_ids": [theirs["proposal_id"], mine["proposal_id"]]})
+    )
+    assert comb["ok"], comb
+    decks = h.app.state.gateway.decks
+    reset = current_client.set(BROWSER_CLIENT)
+    try:
+        run = decks.apply_selection(SUB, [theirs["proposal_id"]], via="review_page")
+        await decks.batches.wait(run["batch_id"], 60)
+    finally:
+        current_client.reset(reset)
+    got = await _get(h, a, comb["proposal_id"])
+    assert got["status"] == "held", got
+    assert got["status_reason"] == f"It would replace #{theirs['board_no']}, which was applied."
+    assert got["press_reason"] == f"would replace #{theirs['board_no']}, which was applied"
+    await _set_mode(h, "auto")
+    assert (await _get(h, a, comb["proposal_id"]))["assistant_may_apply"] is False
+
+
+async def test_applying_a_change_its_own_app_replaced_names_the_replacement(stack: Stack) -> None:
+    """Review round 3, Low: the refusal says the change was replaced, and by which."""
+    from mtg_gateway.decks import DeckError
+
+    h = stack.h
+    await linked_user(stack)
+    await _set_mode(h, "manual")
+    a, _ = await _app_token(h, "Claude")
+    old = await _propose(h, a, _add("Opt"))
+    new = await _propose(h, a, _add("Delver of Secrets"), replaces=[old["proposal_id"]])
+    decks = h.app.state.gateway.decks
+    reset = current_client.set(BROWSER_CLIENT)
+    try:
+        try:
+            decks.apply_selection(SUB, [old["proposal_id"]], via="review_page")
+            raise AssertionError("a replaced change was started")
+        except DeckError as exc:
+            assert str(exc) == (
+                f"#{old['board_no']} was replaced by #{new['board_no']}, so nothing was sent. "
+                f"Apply #{new['board_no']} instead."
+            ), str(exc)
+    finally:
+        current_client.reset(reset)
+    line = decks.plan_selection(SUB, [old["proposal_id"]])["skipped"][0]
+    assert (
+        line["why"] == f"Not sent: it was replaced by #{new['board_no']}. Apply #{new['board_no']} instead."
+    )

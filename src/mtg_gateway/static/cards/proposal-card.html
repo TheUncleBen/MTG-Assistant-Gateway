@@ -250,6 +250,7 @@ button.danger:disabled{color:var(--red)}
   }
 
   function render(result) {
+    uncheckedOk = false; // a new drawing is checked afresh
     var sc = result.structuredContent || {};
     var meta = result._meta || {};
     approval = typeof meta[APPROVAL_KEY] === "string" ? meta[APPROVAL_KEY] : null;
@@ -628,12 +629,23 @@ button.danger:disabled{color:var(--red)}
   $("reject-go").onclick = function () { var why = String($("reason").value || "").trim(); askWhy(false); decide("reject", why); };
   $("reject-cancel").onclick = function () { askWhy(false); };
 
+  // Approve's re-read did not answer (a host may refuse a card's read): nothing is approved on
+  // this press, the card says so, and the next press approves the change as the card shows it,
+  // so a host that never lets the card read can't lock Approve (review round 3; WORDING-3-r3)
+  var uncheckedOk = false;
+  function notChecked() {
+    var ok = $("approve"), no = $("reject");
+    if (ok) ok.disabled = false; if (no) no.disabled = false;
+    uncheckedOk = true;
+    setStatus("This card could not check the change again, so nothing was approved yet. Press Approve again to approve it as shown here, or use the review page.", "err");
+  }
   function decide(decision, why, checked) {
     if (!proposal || !approval || !armed || busy) return;
     busy = true;
     var ok = $("approve"), no = $("reject");
     if (ok) ok.disabled = true; if (no) no.disabled = true;
     var pid = proposal.proposal_id;
+    if (decision === "approve" && !checked && uncheckedOk) { uncheckedOk = false; checked = true; }
     if (decision === "approve" && !checked) {
       // Approve reads the change once more first: one held or waiting for another change since
       // the card was drawn is shown, and applies only on a second press (review round 2)
@@ -643,6 +655,7 @@ button.danger:disabled{color:var(--red)}
         .then(function (res) {
           var sc = (res && res.structuredContent) || {};
           busy = false;
+          if (sc.ok === false || (res && res.isError) || !sc.state) { notChecked(); return; }
           if (sc.state === "pending" && proposal === shown && moved(shown, sc) && (sc.status === "held" || sc.press_reason)) {
             render({ structuredContent: Object.assign({}, shown, sc), _meta: codesMeta() });
             setStatus("This change has changed status since the card was drawn. Read the note above, then press Approve again if you still want it.", "err");
@@ -650,7 +663,7 @@ button.danger:disabled{color:var(--red)}
           }
           decide(decision, why, true);
         })
-        .catch(function () { busy = false; decide(decision, why, true); });
+        .catch(function () { busy = false; notChecked(); });
       return;
     }
     setStatus(decision === "approve" ? "Applying to Archidekt…" : "Rejecting…", "");

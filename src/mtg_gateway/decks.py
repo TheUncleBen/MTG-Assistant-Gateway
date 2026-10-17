@@ -259,6 +259,13 @@ HELD_STEP = (
     "An assistant never applies it in any mode; the user may still apply it themselves, or it can be "
     "amended. "
 )
+# The same, for a proposal whose replaced proposal was applied on its own (review round 3; safe
+# default pending a card, WORDING-3-r3).
+HELD_REPLACED_STEP = (
+    "Held: the proposal this one would replace was applied on its own (status_reason says which), "
+    "so applying this one too would change the deck twice. An assistant never applies it in any "
+    "mode; the user may still apply it themselves, or it can be amended or withdrawn. "
+)
 # Archidekt work one member may start per ARCHIDEKT_BUDGET_WINDOW seconds (each deck read,
 # proposal, apply or proxied archidekt_* research call counts once), on top of the concurrency
 # cap above: a looping assistant cannot keep a steady stream of requests going on the member's
@@ -2478,6 +2485,10 @@ class DeckService:
         not applied (Q134 item 9, Q140 item 8 option A). The member may still press (A8)."""
         if row.get("state") != "pending":
             return None
+        if row.get("status") == "held" and str(row.get("status_reason") or "").startswith("replaces:"):
+            other = str(row["status_reason"]).split(":", 2)[1]
+            no = self.db.proposal_board_numbers(sub, [other]).get(other)
+            return f"would replace {f'#{no}' if no else 'a change'}, which was applied"
         if self._takes_over_another_app(sub, row):
             return "includes or replaces a change another app made or changed"
         later = self._replaced_by_waiting(sub, row["id"])
@@ -2821,7 +2832,15 @@ class DeckService:
             "board_no": row.get("board_no"),
             **status_info,
             "next_step": (OUT_OF_DATE_STEP + status_info["status_reason"] + " " if out_of_date else "")
-            + (HELD_STEP if status == "held" else "")
+            + (
+                (
+                    HELD_REPLACED_STEP
+                    if str(row.get("status_reason") or "").startswith("replaces:")
+                    else HELD_STEP
+                )
+                if status == "held"
+                else ""
+            )
             + (
                 # an apply that stopped at the backup (possibly after its caller had its answer)
                 "The last attempt to apply this stopped before anything changed: the backup copy "
@@ -3388,6 +3407,11 @@ class DeckService:
             raise DeckError("writes_disabled", "Deck writes are disabled on this gateway.")
         the_plan = self.plan_selection(sub, proposal_ids, versions)
         if not the_plan["count"]:
+            only = the_plan["skipped"][0] if len(the_plan["skipped"]) == 1 else {}
+            if only.get("replaced_by"):
+                # one change its own app replaced: say by which (review round 3; WORDING-3-r3)
+                old = f"#{only['board_no']}" if only.get("board_no") else "This change"
+                raise DeckError("invalid", batch.REPLACED_ALONE.format(old=old, new=only["replaced_by"]))
             raise DeckError("invalid", "None of the selected changes can be applied together.")
         return self.batches.start(self, sub, the_plan, via=via)
 
