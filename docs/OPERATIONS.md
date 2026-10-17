@@ -842,7 +842,8 @@ change while the gateway runs: approvals, deck sync, backups, simulation,
 watchlists and prices, the gateway's name, Archidekt and Scryfall pacing, and
 card scanning (folded away). Each one shows its allowed range and where its
 value comes from: the gateway's default, a change made here (who and when),
-or your stack.
+or your stack. When your stack sets any of them, a box at the top lists those
+settings, each with its variable and a link to its row.
 
 - **A value set in your stack wins.** When the stack's environment (Portainer's
   variables or `.env`) sets one of these, the page shows it locked: greyed
@@ -866,7 +867,8 @@ or your stack.
   setting's name and its old and new value, under the admin's account. Three
   ask for a tick first: turning Archidekt backup copies off (edits then have
   no copy on Archidekt), and lowering the backup copies or the restore points
-  kept per deck (older ones are then deleted).
+  kept per deck (older ones are then deleted; backup copies made before 0.7.29
+  never are).
 
 ### The metrics table
 

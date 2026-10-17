@@ -1356,7 +1356,7 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
             "invalid": "That was not a valid request.",
             "lookup": "Archidekt is not answering right now. Try again in a moment.",
             "link": "Link your Archidekt account on the Account page first.",
-            "writes": "Archidekt writes are switched off on this gateway, so nothing was changed.",
+            "writes": "Archidekt writes are switched off on this gateway, so nothing was sent to Archidekt.",
         }
         if not code or code not in msgs:
             return ""

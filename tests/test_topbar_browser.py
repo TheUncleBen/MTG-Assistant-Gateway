@@ -173,3 +173,83 @@ def test_home_is_never_under_more(server: Server, where: str) -> None:
     if where.startswith("phone"):  # the bar: Home, Decks, Scan, Collection and More
         assert got["tabs"] == ["/", "/decks", "/scan", "/collection"], got
         assert got["moreShown"] and "/proposals" in got["moreItems"], got
+
+
+# The top bar with large text (review note, 0.7.29): with a mouse, the eight text links of an
+# admin used to run to 1036 px at 200% text, past a 717 px window and under the account button.
+# Now they keep one row while they fit and otherwise wrap in a row of their own under the brand
+# and the account side. /reports is Track C's page (0.7.30) and is not on this branch yet.
+NAV_FIT = """() => {
+  const box = e => e.getBoundingClientRect();
+  const shown = [...document.querySelectorAll('.topbar nav.site a')]
+    .filter(a => getComputedStyle(a).display !== 'none');
+  const right = box(document.querySelector('.topbar .right'));
+  const hit = (a, b) => a.left < b.right - 1 && b.left < a.right - 1 && a.top < b.bottom - 1
+    && b.top < a.bottom - 1;
+  const lum = c => { const [r, g, b] = c.match(/\\d+(\\.\\d+)?/g).slice(0, 3).map(v => {
+      v = v / 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; });
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
+  const ratio = (a, b) => { const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p);
+    return (x + 0.05) / (y + 0.05); };
+  const bar = getComputedStyle(document.querySelector('.topbar')).backgroundColor;
+  return {doc: document.documentElement.scrollWidth, win: innerWidth, links: shown.length,
+    outside: shown.filter(a => box(a).left < -1 || box(a).right > innerWidth + 1).map(a => a.textContent),
+    underRight: shown.filter(a => hit(box(a), right)).map(a => a.textContent),
+    overlap: shown.some((a, i) => shown.slice(i + 1).some(b => hit(box(a), box(b)))),
+    rows: new Set(shown.map(a => Math.round(box(a).top))).size,
+    contrast: Math.min(...shown.map(a => ratio(getComputedStyle(a).color, bar))),
+    height: document.querySelector('.topbar').offsetHeight};
+}"""
+
+
+@pytest.mark.parametrize("theme", ["light", "dark"])
+def test_the_top_bar_links_fit_at_every_width_and_text_size(server: Server, theme: str) -> None:
+    from playwright.sync_api import sync_playwright
+
+    from .test_text_zoom_browser import ROOT_200, TEXT_200
+
+    exe = _chromium_path()
+    if exe == "missing":
+        pytest.skip("no Chromium available for Playwright")
+    sid = _admin(server)  # eight links: the most the bar carries
+    problems: list[str] = []
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+        for touch in (False, True):
+            kw = {"has_touch": True, "is_mobile": True} if touch else {}
+            ctx = browser.new_context(viewport={"width": 717, "height": 800}, **kw)
+            ctx.add_cookies(
+                [
+                    {"name": "mtg_session", "value": sid, "url": server.base},
+                    {"name": "mtg_theme", "value": theme, "url": server.base},
+                ]
+            )
+            page = ctx.new_page()
+            for path in ("/history", "/decks"):
+                for width in (344, 360, 599, 600, 673, 717, 800, 899, 900, 1000, 1280, 1440):
+                    for zoom in ("none", "root", "text"):
+                        page.set_viewport_size({"width": width, "height": 800})
+                        page.goto(f"{server.base}{path}", wait_until="networkidle")
+                        if zoom != "none":
+                            page.evaluate(ROOT_200 if zoom == "root" else TEXT_200)
+                        page.wait_for_timeout(30)
+                        g = page.evaluate(NAV_FIT)
+                        where = f"{path} @{width}px {'touch' if touch else 'mouse'} {zoom}: {g}"
+                        if g["doc"] != g["win"] or g["outside"] or g["underRight"] or g["overlap"]:
+                            problems.append(where)
+                        if g["links"] and g["contrast"] < 4.5:
+                            problems.append(f"contrast {where}")
+                        # a mouse from 600 px shows the links; at the normal size on one row in
+                        # the 50 px bar, as before
+                        if not touch and width >= 600 and g["links"] != 8:
+                            problems.append(f"links {where}")
+                        if (
+                            not touch
+                            and width >= 600
+                            and zoom == "none"
+                            and (g["rows"], g["height"]) != (1, 50)
+                        ):
+                            problems.append(f"one row {where}")
+            ctx.close()
+        browser.close()
+    assert problems == [], "\n".join(problems)

@@ -103,10 +103,12 @@ async def test_the_top_line_names_what_the_stack_sets(tmp_path: Path, idp: FakeI
             r = await b.http.get("/admin/settings", headers=NAVIGATE)
             top = r.text.split("<div class='set-stack' role='note'>", 1)[1].split("</div>", 1)[0]
             assert _words(top).startswith(
-                "Your stack sets 2 of these settings, so they can only be changed there. To manage one "
-                "on this page instead, remove its variable from your stack, then redeploy."
+                "Your stack sets 2 of the settings on this page, so they can only be changed there. To "
+                "manage one here instead, remove its variable from your stack, then redeploy."
             )
-            assert "<a href='#s-row-forge_games'><code>MTG_<wbr>FORGE_<wbr>GAMES</code></a>" in top
+            forge = html.escape(settings_page.label("forge_games"))
+            assert f"<a href='#s-row-forge_games'>{forge} (<code>MTG_<wbr>FORGE_<wbr>GAMES</code>)</a>" in top
+            assert "role='list' aria-label='Settings your stack sets'" in top
             assert "href='?open=scan#s-row-scan_ambiguity_margin'" in top
             assert r.text.index("class='set-stack'") < r.text.index("class='set-nav'")
             # the scan group starts folded, and opens for that link
@@ -114,6 +116,26 @@ async def test_the_top_line_names_what_the_stack_sets(tmp_path: Path, idp: FakeI
             r = await b.http.get("/admin/settings?open=scan", headers=NAVIGATE)
             assert "<details open><summary>Card scanning (advanced)</summary>" in r.text
             r = await b.http.get("/admin/settings?open=general", headers=NAVIGATE)
+            assert r.status_code == 200 and "<details open>" not in r.text
+        finally:
+            await b.aclose()
+    # with one setting: "it", both times (PROOFREAD-r10 fix 2)
+    settings = make_settings(
+        tmp_path,
+        required_group="mtg-users",
+        admin_group="mtg-admins",
+        env_set=frozenset({"forge_games"}),
+        forge_games=12,
+    )
+    async with running(_with_admin(Harness(settings, idp))) as h:
+        b = await admin_browser(h)
+        try:
+            r = await b.http.get("/admin/settings", headers=NAVIGATE)
+            top = r.text.split("<div class='set-stack' role='note'>", 1)[1].split("</div>", 1)[0]
+            assert _words(top).startswith(
+                "Your stack sets 1 of the settings on this page, so it can only be changed there. To "
+                "manage it here instead, remove its variable from your stack, then redeploy."
+            )
             assert r.status_code == 200 and "<details open>" not in r.text
         finally:
             await b.aclose()

@@ -84,6 +84,85 @@ def test_each_member_keeps_their_own_model_of_a_card(tmp_path: Path) -> None:
         db.close()
 
 
+def test_a_member_replacing_their_model_leaves_an_earlier_members_alone(tmp_path: Path) -> None:
+    """Review round 8 (R8-2): the other member saves first, so a save or a replacement that lost
+    its member condition would find, or overwrite, their row."""
+    db = Database(tmp_path / "g.sqlite")
+    try:
+        assert db.put_card_model(
+            "sol ring", "Sol Ring", MODEL, "u2", 100, sim_version="1.0", oracle_hash="h2"
+        )
+        before = db.get_card_models(["sol ring"], "u2")
+        one, two = MODEL.replace("1", "3"), MODEL.replace("1", "4")
+        assert db.put_card_model("sol ring", "Sol Ring", one, "u1", 200, sim_version="1.1") is True
+        assert db.put_card_model("sol ring", "Sol Ring", two, "u1", 300, sim_version="1.2") is False
+        assert db.get_card_models(["sol ring"], "u2") == before
+        assert before[0]["model_json"] == MODEL and before[0]["updated_at"] == 100
+        (mine,) = db.get_card_models(["sol ring"], "u1")
+        assert (mine["model_json"], mine["added_at"], mine["updated_at"]) == (two, 200, 300)
+        assert (db.count_card_models("u1"), db.count_card_models("u2")) == (1, 1)
+    finally:
+        db.close()
+
+
+# card_models as builds before ccb56f6 made it (2870a24 and earlier): one model per card for the
+# whole gateway and no simulator version. Copied from that build's _step_14.
+EARLIER_14 = """CREATE TABLE IF NOT EXISTS card_models (
+            card_key TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            model_json TEXT NOT NULL CHECK (length(CAST(model_json AS BLOB)) <= 4096),
+            oracle_hash TEXT,
+            added_by TEXT NOT NULL,
+            added_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL
+        )"""
+
+
+def test_a_database_from_an_earlier_schema_14_build_is_brought_to_the_new_shape(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Review round 8 (R8-1): step 14 changed in place, so a database an earlier build already
+    took to 14 is repaired at start, without a new schema number, and keeps its models."""
+    path = tmp_path / "earlier14.sqlite"
+    monkeypatch.setattr(db_module, "MIGRATIONS", db_module.MIGRATIONS[:13])
+    Database(path).close()
+    monkeypatch.undo()
+    conn = sqlite3.connect(path)
+    conn.execute(EARLIER_14)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_card_models_added_by ON card_models(added_by)")
+    conn.execute("INSERT INTO card_models VALUES ('sol ring', 'Sol Ring', ?, 'h1', 'u1', 100, 150)", (MODEL,))
+    conn.execute("PRAGMA user_version = 14")
+    conn.commit()
+    conn.close()
+    for _ in range(2):  # the second start finds nothing to do
+        db = Database(path)
+        try:
+            assert db.schema_version == 14
+            (kept,) = db.get_card_models(["sol ring"], "u1")
+            assert kept == {
+                "card_key": "sol ring",
+                "name": "Sol Ring",
+                "model_json": MODEL,
+                "sim_version": None,
+                "oracle_hash": "h1",
+                "added_by": "u1",
+                "added_at": 100,
+                "updated_at": 150,
+            }
+            pk = sorted((r[5], r[1]) for r in db._conn.execute("PRAGMA table_info(card_models)") if r[5])
+            assert pk == [(1, "card_key"), (2, "added_by")]
+            names = {r[0] for r in db._conn.execute("SELECT name FROM sqlite_master")}
+            assert "idx_card_models_added_by" in names and "card_models_old" not in names
+        finally:
+            db.close()
+    db = Database(path)
+    try:  # and the new shape works: another member keeps their own model of the same card
+        assert db.put_card_model("sol ring", "Sol Ring", MODEL, "u2", 200, sim_version="1.0") is True
+        assert (db.count_card_models("u1"), db.count_card_models("u2")) == (1, 1)
+    finally:
+        db.close()
+
+
 def test_many_keys_are_read_in_slices(tmp_path: Path) -> None:
     db = Database(tmp_path / "g.sqlite")
     try:

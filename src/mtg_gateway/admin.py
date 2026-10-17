@@ -897,7 +897,8 @@ def _models_body(state: Any, csrf: str | None, page_no: int) -> str:
     for r in rows:
         adder = str(r["added_by"])
         if adder not in people:
-            people[adder] = _who(state.db.get_user(adder) or {"sub": adder})
+            # an account with neither name reads as the Activity log says it, not as its raw id
+            people[adder] = html.escape(member_name(state.db, adder) or adder)
         items.append(
             f"<li><div class='model'><span class='name'>{html.escape(str(r['name']))}</span>"
             f"<span class='muted small'>added by {people[adder]}, {_when(r['added_at'])}"

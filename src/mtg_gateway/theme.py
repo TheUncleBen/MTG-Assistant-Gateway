@@ -719,6 +719,17 @@ details.raw{margin:.5rem 0 0} details.raw summary{cursor:pointer;color:var(--tex
 .topbar .right{flex:0 1 auto}
 .brand{min-width:0}
 .brand .word{overflow:hidden;text-overflow:ellipsis;min-width:0}
+/* Large text with a mouse (a raised font size, a text-only zoom, 200% text): when the bar's text
+   links no longer fit beside the brand and the account button, they move to a row of their own
+   under them and wrap there, so the page never scrolls sideways and nothing runs under the search
+   box or the account button. The bar is a size container, so the test is in the bar's own em
+   (its text size): 42.5em is just under a 600 px window at the normal size, where the eight links
+   of an admin still fit on one row; with the search box (900 px and wider) one row needs 58em.
+   The rail and the phone layout (touch, the app) hide these links, so they are left as they are. */
+.topbar{container:topbar / inline-size}
+@media (min-width:600px) and (max-width:899.98px) and (not ((pointer:coarse) or (hover:none))){
+  @container topbar (width < 42.5em){ __NAVROW__ } }
+@media (width >= 900px){ @container topbar (width < 58em){ __NAVROW__ } }
 /* home dashboard: section tiles (Archidekt's landing cards) */
 .home .hero{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:1rem;
   margin:0 0 1rem}
@@ -898,6 +909,17 @@ CSS = CSS.replace(
     + "body.app .topbar{padding-top:env(safe-area-inset-top)}\n"
     + "body.app .topbar .brand .word{display:inline}\n",
 )
+# The top bar's second row for large text with a mouse (the container queries above): the brand
+# mark and the account side share the first row, the text links wrap in the row under them.
+_NAV_ROW_RULES = (
+    "body:not(.app) .topbar .wrap{flex-wrap:wrap;height:auto;row-gap:0;padding-bottom:.35rem}"
+    "body:not(.app) .topbar .left{display:contents}"
+    "body:not(.app) .topbar .brand{order:0;min-height:50px}"
+    "body:not(.app) .topbar .brand .word{display:none}"
+    "body:not(.app) .topbar .right{order:1;margin-left:auto;min-height:50px}"
+    "body:not(.app) .topbar nav.site{order:2;flex:1 0 100%;flex-wrap:wrap;min-width:0}"
+)
+CSS = CSS.replace("__NAVROW__", _NAV_ROW_RULES)
 
 # Card size S / M / L (0.7.29, Q22, QUESTIONS-2 B10, card Q135 item 7): M is exactly the size each
 # page had before; S is about 75% and L about 135% of its width. On a phone the deck page shows
