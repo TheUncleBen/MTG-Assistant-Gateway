@@ -568,3 +568,18 @@ async def test_each_decks_message_follows_its_proposals(stack: Stack) -> None:
         assert stack.gw.decks.waiting_by_deck("user-1") == {}
     finally:
         await b.aclose()
+
+
+async def test_drain_returns_when_a_send_finished_in_the_same_turn() -> None:
+    """A finished task leaves the set only in its done callback, a loop turn later: drain called
+    right then must still return (it spun for ever, at shutdown too)."""
+    n = notify.Notifier(None, None, None, "https://mtg.test")  # type: ignore[arg-type]
+
+    async def done_now() -> None:
+        return None
+
+    n._background(done_now())
+    await asyncio.sleep(0)  # the task runs and finishes; its done callback is only scheduled
+    assert n._tasks and all(t.done() for t in n._tasks)
+    await asyncio.wait_for(n.drain(), 2)
+    assert not n._tasks
