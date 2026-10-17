@@ -187,7 +187,7 @@ CSS = (
     + _LIGHT
     + """}
 *{box-sizing:border-box}
-html{font-size:14px;scroll-padding:var(--bar-room,60px) 0 120px;-webkit-text-size-adjust:100%;min-width:320px;
+html{font-size:14px;scroll-padding:var(--bar-room,max(60px,5.5rem)) 0 120px;-webkit-text-size-adjust:100%;min-width:320px;
   font-family:Lato,"Helvetica Neue",Arial,Helvetica,sans-serif;line-height:1.15}
 body{margin:0;min-height:100vh;display:flex;flex-direction:column;background:var(--bg);color:var(--text);
   font:inherit;font-size:1rem;line-height:1.35;transition:background-color .25s ease-in}
