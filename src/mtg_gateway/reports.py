@@ -478,22 +478,31 @@ class ReportService:
             # One unfinished Forge run per member, so nobody can fill the shared engine's queue:
             # this one waits for theirs (MAX_FORGE_WAITING at most, counting the places another
             # comparison has reserved).
-            waiting = sum(1 for _, _, s in self._member_runs(sub) if _waiting(s))
-            reserved = self._reserved(sub, hold)
-            if waiting + reserved >= MAX_FORGE_WAITING:
-                error = (
-                    PAIR_SETTING_UP_SKIP  # places another comparison keeps: its reports are not made yet
-                    if reserved
-                    else f"You already have a Forge run going and {waiting} reports waiting for "
-                    "theirs, the most the gateway keeps; this report has no Forge games. Run the "
-                    "report again once one of them has finished."
-                )
-                self._save_forge(rid, {"state": "skipped", "error": error})
+            full = self._queue_full(sub, rid, hold)
+            if full:
+                self._save_forge(rid, {"state": "skipped", "error": full})
                 return
             self._save_forge(rid, self._waiting_section(text, deck.name, games, seed, bracket, shared=shared))
             self._ensure_forge_refresher()
             return
-        await self._start_forge(rid, text, deck.name, games, seed, bracket, shared=shared, copies=copies)
+        await self._start_forge(
+            rid, text, deck.name, games, seed, bracket, shared=shared, copies=copies, new_for=(sub, hold)
+        )
+
+    def _queue_full(self, sub: str, rid: str, hold: PairHold | None) -> str | None:
+        """Why the member's queue can't take one more waiting run (report rid's), or None when it
+        can: MAX_FORGE_WAITING at most, counting the places another comparison has reserved."""
+        waiting = sum(1 for r, _, s in self._member_runs(sub) if r != rid and _waiting(s))
+        reserved = self._reserved(sub, hold)
+        if waiting + reserved < MAX_FORGE_WAITING:
+            return None
+        if reserved:  # places another comparison keeps: its reports are not made yet
+            return PAIR_SETTING_UP_SKIP
+        return (
+            f"You already have {waiting} reports waiting for Forge, and each member can have at most "
+            f"{MAX_FORGE_WAITING} waiting, so this report has no Forge games. Run the report again once "
+            f"fewer than {MAX_FORGE_WAITING} of your reports are waiting."
+        )
 
     def pair_room(self, sub: str) -> str | None:
         """Why the member's Forge queue can't take both decks of a comparison now, or None when it
@@ -512,7 +521,7 @@ class ReportService:
             if waiting == 1
             else f"{waiting} reports waiting for their games"
         )
-        have = f"{playing} Forge run{'' if playing == 1 else 's'} playing and {queued}" if playing else queued
+        have = f"{playing} Forge run{'' if playing == 1 else 's'} going and {queued}" if playing else queued
         return (
             f"You already have {have}. Comparing two decks needs room for 2 more, and each member can "
             f"have at most {MAX_FORGE_WAITING} reports waiting, so nothing was started. Try again when "
@@ -660,7 +669,10 @@ class ReportService:
         busy_since: int | None = None,
         shared: dict[str, Any] | None = None,
         copies: list[str] | None = None,
+        new_for: tuple[str, PairHold | None] | None = None,
     ) -> None:
+        """Start a Forge run for report rid. new_for (member, their comparison's hold) marks a new
+        run: if the engine is busy it would wait, so it must fit the member's queue."""
         assert self.forge is not None
         level, source, of_deck, pair = bracket_parts(bracket)
         try:
@@ -690,8 +702,11 @@ class ReportService:
                 # the run waits in the gateway's queue instead of failing, and the refresher asks
                 # again on its next round (forge_interval) until GIVE_UP_SECONDS after the first try.
                 since = busy_since if isinstance(busy_since, int) else int(time.time())
+                full = self._queue_full(new_for[0], rid, new_for[1]) if new_for else None
                 if time.time() - since > GIVE_UP_SECONDS:
                     section = {"state": "failed", "error": FORGE_BUSY_GAVE_UP}
+                elif full:  # waiting now would pass the member's limit (a comparison holds places)
+                    section = {"state": "skipped", "error": full}
                 else:
                     section = self._waiting_section(
                         text,
