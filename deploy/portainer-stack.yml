@@ -1,8 +1,8 @@
-# MTG Assistant Gateway: Portainer / Docker Swarm stack (gateway + Mystic Forge).
+# MTG Assistant Gateway: Portainer / Docker Swarm stack (gateway + Mystic Forge + ntfy).
 #
 # Paste this whole file into Portainer's stack web editor as is. Everything you
 # change lives in the stack's environment variables: start from
-# deploy/stack.env.example. Create the three external secrets below before you
+# deploy/stack.env.example. Create the four external secrets below before you
 # deploy (docs/DEPLOY.md, step 4) and the overlay network (step 1).
 
 version: "3.8"
@@ -19,11 +19,10 @@ secrets:
   # remove the "# " from the next two lines and from "# - mtg_authentik_api_token" below.
   # mtg_authentik_api_token:
   #   external: true
-  # Optional: the access token the gateway publishes notifications with, for an ntfy server with
-  # access control (docs/DEPLOY.md, "Optional: notifications through ntfy"). After creating it,
-  # remove the "# " from the next two lines and from "# - mtg_ntfy_token" below.
-  # mtg_ntfy_token:
-  #   external: true
+  # The token the gateway uses with the stack's own ntfy server (the members' notifications);
+  # ntfy lets nothing else in. docs/DEPLOY.md, step 4, has the command that makes it.
+  mtg_ntfy_token:
+    external: true
 
 services:
   # The gateway's SQLite database lives on the node named by MTG_NODE.
@@ -51,8 +50,11 @@ services:
       - mtg_fernet_key
       - mtg_session_secret
       - mtg_oidc_client_secret
+      - mtg_ntfy_token
       # - mtg_authentik_api_token
-      # - mtg_ntfy_token
+    # A setting passed as ${MTG_X:-} (empty unless your env sets it) is one an admin changes on
+    # the gateway's Settings page (/admin/settings), which starts from the gateway's default. A
+    # value set in your env wins and locks the setting: the page shows it greyed out with its value.
     environment:
       MTG_PUBLIC_URL: ${MTG_PUBLIC_URL:?PUBLIC HTTPS URL REQUIRED e.g. https://mtg.example.com}
       MTG_OIDC_ISSUER: ${MTG_OIDC_ISSUER:?OIDC ISSUER URL REQUIRED}
@@ -71,53 +73,54 @@ services:
       MTG_OIDC_SCOPES: ${MTG_OIDC_SCOPES:-openid profile email offline_access}
       MTG_OIDC_TOKEN_AUTH_METHOD: ${MTG_OIDC_TOKEN_AUTH_METHOD:-}
       MTG_SERVER_NAME: ${MTG_SERVER_NAME:-}
+      MTG_CHATGPT_NAME: ${MTG_CHATGPT_NAME:-}
       # Optional removed-member clean-up: /run/secrets/mtg_authentik_api_token once that secret
       # is created and listed above. Empty = off. The API URL defaults to the issuer's address.
       MTG_AUTHENTIK_API_TOKEN_FILE: ${MTG_AUTHENTIK_API_TOKEN_FILE:-}
       MTG_AUTHENTIK_API_URL: ${MTG_AUTHENTIK_API_URL:-}
-      # Optional notifications through an ntfy server (empty = off), and its token file:
-      # /run/secrets/mtg_ntfy_token once that secret is listed above (docs/DEPLOY.md).
-      MTG_NTFY_URL: ${MTG_NTFY_URL:-}
-      MTG_NTFY_TOKEN_FILE: ${MTG_NTFY_TOKEN_FILE:-}
+      # Notifications to the members' Android app go through the stack's own ntfy server
+      # (mtg-assistant-ntfy below); the phones reach it through the gateway's own address.
+      MTG_NTFY_URL: ${MTG_NTFY_URL:-http://mtg-assistant-ntfy:8080}
+      MTG_NTFY_TOKEN_FILE: ${MTG_NTFY_TOKEN_FILE:-/run/secrets/mtg_ntfy_token}
       # Watchlists and prices, off by default: with false the Watchlist pages, the price buttons,
       # the five watch tools and the daily price check are absent (stored watches are kept).
-      MTG_WATCHLISTS_ENABLED: ${MTG_WATCHLISTS_ENABLED:-false}
+      MTG_WATCHLISTS_ENABLED: ${MTG_WATCHLISTS_ENABLED:-}
       # Deck sync (read-only): minutes between checks of Archidekt for members with waiting
       # proposals; opening the app checks too. 0 turns it off.
-      MTG_DECK_SYNC_MINUTES: ${MTG_DECK_SYNC_MINUTES:-30}
+      MTG_DECK_SYNC_MINUTES: ${MTG_DECK_SYNC_MINUTES:-}
       # Watchlists: cards and decks per member, days of daily prices kept, and the hour (UTC) of
       # the daily price check. Nothing is asked of Scryfall while nobody watches anything.
-      MTG_WATCH_MAX_CARDS: ${MTG_WATCH_MAX_CARDS:-200}
-      MTG_WATCH_MAX_DECKS: ${MTG_WATCH_MAX_DECKS:-10}
-      MTG_PRICE_HISTORY_DAYS: ${MTG_PRICE_HISTORY_DAYS:-365}
-      MTG_PRICE_HOUR_UTC: ${MTG_PRICE_HOUR_UTC:-6}
+      MTG_WATCH_MAX_CARDS: ${MTG_WATCH_MAX_CARDS:-}
+      MTG_WATCH_MAX_DECKS: ${MTG_WATCH_MAX_DECKS:-}
+      MTG_PRICE_HISTORY_DAYS: ${MTG_PRICE_HISTORY_DAYS:-}
+      MTG_PRICE_HOUR_UTC: ${MTG_PRICE_HOUR_UTC:-}
       MTG_DATA_DIR: /data
       MTG_BACKUP_DIR: /backups
       # Copies every backup here too; off unless MTG_BACKUP_COPY_DIR names a host folder (below).
       MTG_BACKUP_COPY_DIR: /backup-copy
-      MTG_BACKUP_HOUR_UTC: ${MTG_BACKUP_HOUR_UTC:-3}
-      MTG_BACKUP_KEEP_DAYS: ${MTG_BACKUP_KEEP_DAYS:-14}
-      MTG_LOG_LEVEL: ${MTG_LOG_LEVEL:-INFO}
+      MTG_BACKUP_HOUR_UTC: ${MTG_BACKUP_HOUR_UTC:-}
+      MTG_BACKUP_KEEP_DAYS: ${MTG_BACKUP_KEEP_DAYS:-}
+      MTG_LOG_LEVEL: ${MTG_LOG_LEVEL:-}
       # Research tools are proxied from the Mystic Forge service in this stack.
       MTG_MYSTIC_FORGE_URL: ${MTG_MYSTIC_FORGE_URL-http://mtg-assistant-mysticforge:8000/mcp}
       # Forge simulations: empty (the default) leaves them off. To turn them on set FORGE_REPLICAS=1
       # and MTG_FORGE_URL=http://mtg-assistant-forge:8000 (docs/DEPLOY.md).
       MTG_FORGE_URL: ${MTG_FORGE_URL:-}
-      MTG_FORGE_GAMES: ${MTG_FORGE_GAMES:-10}
-      # Kill switch for deck edits on Archidekt. Keep false until you have tested
+      MTG_FORGE_GAMES: ${MTG_FORGE_GAMES:-}
+      # Kill switch for Archidekt writes. Keep false until you have tested
       # the proposal flow against a disposable deck.
       MTG_WRITES_ENABLED: ${MTG_WRITES_ENABLED:-false}
       # Approval modes (each member picks their own on the Account page): the mode of a
       # member who has not chosen (manual = ask every time), the highest mode they may
       # choose (auto = no cap), and the row limit of a low-risk edit in semi mode.
-      MTG_APPROVAL_MODE_DEFAULT: ${MTG_APPROVAL_MODE_DEFAULT:-manual}
-      MTG_APPROVAL_MODE_MAX: ${MTG_APPROVAL_MODE_MAX:-auto}
-      MTG_AUTO_APPLY_MAX_ROWS: ${MTG_AUTO_APPLY_MAX_ROWS:-5}
+      MTG_APPROVAL_MODE_DEFAULT: ${MTG_APPROVAL_MODE_DEFAULT:-}
+      MTG_APPROVAL_MODE_MAX: ${MTG_APPROVAL_MODE_MAX:-}
+      MTG_AUTO_APPLY_MAX_ROWS: ${MTG_AUTO_APPLY_MAX_ROWS:-}
       # The Approve/Reject card an AI app shows in the chat may apply with its one-time code
       # (the assistant never has the code). false leaves only the review page.
-      MTG_APPLY_IN_CHAT: ${MTG_APPLY_IN_CHAT:-true}
-      MTG_UPDATE_CHECK: ${MTG_UPDATE_CHECK:-true}
-      MTG_ARCHIDEKT_BACKUPS: ${MTG_ARCHIDEKT_BACKUPS:-true}
+      MTG_APPLY_IN_CHAT: ${MTG_APPLY_IN_CHAT:-}
+      MTG_UPDATE_CHECK: ${MTG_UPDATE_CHECK:-}
+      MTG_ARCHIDEKT_BACKUPS: ${MTG_ARCHIDEKT_BACKUPS:-}
       MTG_ARCHIDEKT_BACKUP_FOLDER: ${MTG_ARCHIDEKT_BACKUP_FOLDER:-MTG Gateway backups}
       # Token and session lifetimes, in seconds. Shorter is stricter.
       MTG_ACCESS_TOKEN_TTL: ${MTG_ACCESS_TOKEN_TTL:-3600}
@@ -125,13 +128,13 @@ services:
       MTG_BROWSER_SESSION_TTL: ${MTG_BROWSER_SESSION_TTL:-7200}
       MTG_REAUTH_INTERVAL: ${MTG_REAUTH_INTERVAL:-604800}
       MTG_MEMBERSHIP_CHECK_TTL: ${MTG_MEMBERSHIP_CHECK_TTL:-5}
-      MTG_ARCHIDEKT_CALLS_PER_10_MIN: ${MTG_ARCHIDEKT_CALLS_PER_10_MIN:-120}
-      MTG_ARCHIDEKT_MAX_PER_MINUTE: ${MTG_ARCHIDEKT_MAX_PER_MINUTE:-40}
-      MTG_ARCHIDEKT_MIN_INTERVAL: ${MTG_ARCHIDEKT_MIN_INTERVAL:-1.0}
-      MTG_ARCHIDEKT_RETRIES: ${MTG_ARCHIDEKT_RETRIES:-2}
-      MTG_ARCHIDEKT_BACKOFF_BASE: ${MTG_ARCHIDEKT_BACKOFF_BASE:-1.0}
-      MTG_ARCHIDEKT_CACHE_SECONDS: ${MTG_ARCHIDEKT_CACHE_SECONDS:-60}
-      MTG_ARCHIDEKT_CARD_CACHE_SECONDS: ${MTG_ARCHIDEKT_CARD_CACHE_SECONDS:-3600}
+      MTG_ARCHIDEKT_CALLS_PER_10_MIN: ${MTG_ARCHIDEKT_CALLS_PER_10_MIN:-}
+      MTG_ARCHIDEKT_MAX_PER_MINUTE: ${MTG_ARCHIDEKT_MAX_PER_MINUTE:-}
+      MTG_ARCHIDEKT_MIN_INTERVAL: ${MTG_ARCHIDEKT_MIN_INTERVAL:-}
+      MTG_ARCHIDEKT_RETRIES: ${MTG_ARCHIDEKT_RETRIES:-}
+      MTG_ARCHIDEKT_BACKOFF_BASE: ${MTG_ARCHIDEKT_BACKOFF_BASE:-}
+      MTG_ARCHIDEKT_CACHE_SECONDS: ${MTG_ARCHIDEKT_CACHE_SECONDS:-}
+      MTG_ARCHIDEKT_CARD_CACHE_SECONDS: ${MTG_ARCHIDEKT_CARD_CACHE_SECONDS:-}
       # Archidekt API base. Leave the default; the end-to-end tests point it at a local mock.
       MTG_ARCHIDEKT_BASE: ${MTG_ARCHIDEKT_BASE:-https://archidekt.com/api}
       # Peers allowed to set X-Forwarded-* (your reverse proxy). Empty = private networks.
@@ -144,7 +147,7 @@ services:
       # Hosts allowed to identify by Client ID Metadata Document URL. Empty = any https host.
       MTG_CIMD_ALLOWED_HOSTS: ${MTG_CIMD_ALLOWED_HOSTS:-}
       # Seconds between single-card Scryfall lookups made for card scanning (0.1 to 5).
-      MTG_SCRYFALL_LOOKUP_INTERVAL: ${MTG_SCRYFALL_LOOKUP_INTERVAL:-0.5}
+      MTG_SCRYFALL_LOOKUP_INTERVAL: ${MTG_SCRYFALL_LOOKUP_INTERVAL:-}
       PUID: ${PUID:?PUID REQUIRED}
       PGID: ${PGID:?PGID REQUIRED}
       TZ: ${TIMEZONE:-UTC}
@@ -163,11 +166,12 @@ services:
       - SETUID
       - SETGID
     networks:
-      # mtgnet: shared with the reverse proxy. mysticforge: private to this stack, the only
-      # way to reach Mystic Forge.
+      # mtgnet: shared with the reverse proxy. mysticforge, forge and ntfy: private to this
+      # stack, the only way to reach those services.
       - mtgnet
       - mysticforge
       - forge
+      - ntfy
     volumes:
       - type: bind
         source: ${MTG_DATA_DIR:?GATEWAY DATA DIRECTORY REQUIRED}
@@ -262,11 +266,82 @@ services:
         constraints:
           - node.hostname == ${MF_NODE:?set MF_NODE to the Swarm node that runs Mystic Forge}
 
+  # ntfy on the gateway's node: holds the members' notifications until their Android app picks
+  # them up (it keeps them for 12 hours, in memory, for a phone that was offline). The gateway
+  # is its only user: it publishes with the mtg_ntfy_token secret and relays each member's own
+  # topic to their app at /app/notifications/stream, on the gateway's address. ntfy is on this
+  # stack's private ntfy network with no published port; do not add an NPM proxy host for it.
+  # Every other request is refused (deny-all), and its web app is off.
+  mtg-assistant-ntfy:
+    image: ${NTFY_IMAGE:-binwiederhier/ntfy:v2.31.1@sha256:91bb7fa607b02006c119bb4a31032923b414a713a032ecb40f0c5d6bfd5b7e40}
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    # The gateway's only user is made at each start from the secret (a random password nobody
+    # knows, the token, and read-write on the members' mtg- topics); the token goes in the
+    # environment of ntfy alone, never on its command line. "$$" is a "$" for the shell.
+    entrypoint:
+      - sh
+      - -c
+      - |
+        set -eu
+        pw=$$(head -c 32 /dev/urandom | base64)
+        hash=$$(printf '%s\n%s\n' "$$pw" "$$pw" | ntfy user hash 2>/dev/null | tr ' ' '\n' | grep '^\$$2')
+        NTFY_AUTH_USERS="mtg-gateway:$$hash:user"
+        NTFY_AUTH_TOKENS="mtg-gateway:$$(cat /run/secrets/mtg_ntfy_token):gateway"
+        export NTFY_AUTH_USERS NTFY_AUTH_TOKENS
+        unset pw hash
+        exec ntfy serve
+    environment:
+      NTFY_LISTEN_HTTP: ":8080"
+      NTFY_AUTH_FILE: /tmp/ntfy-auth.db
+      NTFY_AUTH_DEFAULT_ACCESS: deny-all
+      NTFY_AUTH_ACCESS: "mtg-gateway:mtg-*:rw"
+      NTFY_WEB_ROOT: disable
+      NTFY_CACHE_DURATION: 12h
+      TZ: ${TIMEZONE:-UTC}
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - wget -q -O /dev/null http://127.0.0.1:8080/v1/health
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    secrets:
+      - mtg_ntfy_token
+    # Not root, and no capabilities at all: it listens on 8080 and writes only to /tmp.
+    user: "${PUID:?PUID REQUIRED}:${PGID:?PGID REQUIRED}"
+    cap_drop:
+      - ALL
+    networks:
+      - ntfy
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          memory: ${NTFY_MEMORY_LIMIT:-128M}
+        reservations:
+          memory: 16M
+      restart_policy:
+        condition: any
+      update_config:
+        order: stop-first
+      rollback_config:
+        order: stop-first
+      placement:
+        constraints:
+          - node.hostname == ${MTG_NODE:?set MTG_NODE to the Swarm node that keeps the gateway data}
+
   # Forge on the node named by FORGE_NODE: the rules engine for deck simulations (GPL-3.0,
   # unmodified). Off by default (FORGE_REPLICAS=0). It starts Java only while a simulation runs,
-  # one at a time, under a CPU and memory cap, and is on a private network with no way out.
+  # under a CPU and memory cap, and is on a private network with no way out. dnsrr: the gateway
+  # sees each copy's address, so with more than one copy every run stays on the copy that started
+  # it (one copy works the same either way). For several machines see DEPLOY.md.
   mtg-assistant-forge:
-    image: ${FORGE_IMAGE:-ghcr.io/theuncleben/mtg-assistant-forge}:${FORGE_TAG:-2.0.15-mag2}
+    image: ${FORGE_IMAGE:-ghcr.io/theuncleben/mtg-assistant-forge}:${FORGE_TAG:-2.0.15-mag3}
     logging:
       driver: json-file
       options:
@@ -274,8 +349,14 @@ services:
         max-file: "3"
     environment:
       FORGE_XMX: ${FORGE_XMX:-1g}
+      # The memory limit again, which sizes Forge's games at once where Docker can't cap memory
+      # (Raspberry Pi OS by default); not a hard limit as Docker's is
+      FORGE_MEMORY_BUDGET: ${FORGE_MEMORY_LIMIT:-1536M}
       FORGE_MAX_GAMES: ${FORGE_MAX_GAMES:-50}
-      FORGE_GAME_SECONDS: ${FORGE_GAME_SECONDS:-600}
+      FORGE_GAME_SECONDS: ${FORGE_GAME_SECONDS:-240}
+      # Forge games played at once at most (1 to 4); empty: as many as the container's CPUs and
+      # memory fit (about 2 CPUs and 1.2 GB a game), so 1 inside the default limits
+      FORGE_MAX_PARALLEL: ${FORGE_MAX_PARALLEL:-}
       PUID: ${PUID:?PUID REQUIRED}
       PGID: ${PGID:?PGID REQUIRED}
       TZ: ${TIMEZONE:-UTC}
@@ -291,6 +372,7 @@ services:
       - forge
     deploy:
       replicas: ${FORGE_REPLICAS:-0}
+      endpoint_mode: dnsrr
       resources:
         limits:
           memory: ${FORGE_MEMORY_LIMIT:-1536M}
@@ -318,5 +400,10 @@ networks:
     driver: overlay
   # Created by the stack. Internal: Forge needs no internet, and only the gateway can reach it.
   forge:
+    driver: overlay
+    internal: true
+  # Created by the stack. Internal: ntfy needs no internet (phones never reach it directly), and
+  # only the gateway can reach it.
+  ntfy:
     driver: overlay
     internal: true

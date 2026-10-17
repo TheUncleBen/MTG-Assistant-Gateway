@@ -18,31 +18,22 @@ from mtg_gateway.archidekt import ArchidektError, parse_deck
 from mtg_gateway.db import Database
 from mtg_gateway.mf_proxy import MysticForgeProxy
 
-from .conftest import FakeIdP, Harness, make_settings, running
+from .conftest import AUTO, FakeIdP, Harness, Stack, make_settings, open_stack, running
 from .fake_archidekt import FakeArchidekt
-from .test_decks_and_proxy import Browser, Stack, _client, call, linked_user, structured
+from .test_decks_and_proxy import Browser, _client, call, linked_user, structured
+from .track_a_helpers import apply_any
 
 ROOT = Path(__file__).resolve().parent.parent
 
 
-@pytest.fixture
-async def stack(tmp_path: Path, idp: FakeIdP):
-    ark = FakeArchidekt()
-    settings = make_settings(
-        tmp_path, writes_enabled=True, approval_mode_default="auto", archidekt_base="https://ark.test/api"
-    )
-    async with running(Harness(settings, idp, archidekt=_client(settings, ark))) as h:
-        yield Stack(h, ark)
+# ``stack`` is the shared AUTO stack (tests/conftest.py): writes on, applies allowed over MCP.
 
 
 @pytest.fixture
 async def stack_browser_only(tmp_path: Path, idp: FakeIdP):
-    ark = FakeArchidekt()
-    settings = make_settings(
-        tmp_path, writes_enabled=True, approval_mode_default="manual", archidekt_base="https://ark.test/api"
-    )
-    async with running(Harness(settings, idp, archidekt=_client(settings, ark))) as h:
-        yield Stack(h, ark)
+    manual = AUTO.but(settings={"writes_enabled": True, "approval_mode_default": "manual"})
+    async with open_stack(tmp_path, idp, manual) as st:
+        yield st
 
 
 async def _app_token(h: Harness, name: str, scope: str = "mtg") -> tuple[str, str]:
@@ -191,7 +182,7 @@ async def test_new_deck_proposal_is_bound_to_its_archidekt_account(stack: Stack)
     decks_before = set(ark.decks)
     r = await b.link("amy", "pw-amy")
     assert r.status_code == 303
-    out = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
+    out = await apply_any(h, token, p["proposal_id"])
     assert not out["ok"] and out["error"] == "other_account", out
     assert set(ark.decks) == decks_before
     await b.aclose()
@@ -373,7 +364,7 @@ async def test_set_category_to_maybeboard_is_shown_as_removal(stack_browser_only
     page = (await b.http.get(url)).text
     summary = re.search(r"<div class='summary'>(.*?)</div>", page).group(1)
     assert f"{len(victims)} removed" in summary and f"Net -{gone} cards" in summary, summary
-    await b.http.post(url, data={"csrf": await b.csrf(url), "action": "apply"})
+    await b.http.post(url, data={**await b.review_form(url), "action": "apply"})
     await b.aclose()
     # verify agrees with the review: the cards left the deck proper, so the apply succeeded
     assert h.db.get_proposal(p["proposal_id"], "user-1")["state"] == "applied"
@@ -452,7 +443,7 @@ async def test_proposals_name_their_app_and_close_on_disconnect(stack_browser_on
     r = await b.http.post("/account", data={"csrf": csrf, "action": "disconnect", "client_id": client_id})
     assert r.status_code == 303
     assert h.db.get_proposal(p["proposal_id"], "user-1")["state"] == "rejected"
-    r = await b.http.post(url, data={"csrf": await b.csrf(url), "action": "apply"})
+    r = await b.http.post(url, data={**await b.review_form(url), "action": "apply"})
     assert "err=not_pending" in r.headers["location"]
     assert any(e["event"] == "proposal_rejected" for e in h.db.audit_for_user("user-1", 50))
     await b.aclose()
@@ -546,19 +537,21 @@ def test_budget_refills_over_time(monkeypatch: pytest.MonkeyPatch) -> None:
     assert budget.retry_after("u") == 1 and budget.take("u")
 
 
-# -- E-7: per-app pending cap; report deletes from apps are limited to their own reports --------
-async def test_one_app_cannot_fill_every_pending_slot(stack: Stack, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(decks_module, "MAX_PENDING_PER_CLIENT", 2)
+# -- E-7: apps delete only their own reports; Q129 (0.7.29): no pending limit per app ----------
+async def test_one_app_may_use_every_pending_slot(stack: Stack, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Q129: the 30-per-app limit is gone; only the member's 100 waiting proposals are counted."""
+    monkeypatch.setattr(decks_module, "MAX_PENDING_PROPOSALS", 3)
     h = stack.h
     await linked_user(stack)
     noisy, _ = await _app_token(h, "noisy")
     quiet, _ = await _app_token(h, "quiet")
-    change = {"deck_id": "42", "changes": [{"action": "add", "card_name": "Opt"}]}
-    assert structured(await call(h, noisy, "propose_deck_changes", change))["ok"]
-    assert structured(await call(h, noisy, "propose_deck_changes", change))["ok"]
-    refused = structured(await call(h, noisy, "propose_deck_changes", change))
-    assert refused["error"] == "rate_limited", refused
-    assert structured(await call(h, quiet, "propose_deck_changes", change))["ok"]
+    assert not hasattr(decks_module, "MAX_PENDING_PER_CLIENT")
+    for card in ("Opt", "Ponder", "Brainstorm"):
+        change = {"deck_id": "42", "changes": [{"action": "add", "card_name": card}]}
+        assert structured(await call(h, noisy, "propose_deck_changes", change))["ok"]
+    change = {"deck_id": "42", "changes": [{"action": "add", "card_name": "Preordain"}]}
+    refused = structured(await call(h, quiet, "propose_deck_changes", change))
+    assert refused["error"] == "rate_limited" and "3 pending proposals" in refused["message"], refused
 
 
 async def test_apps_delete_only_their_own_reports(stack: Stack) -> None:

@@ -21,7 +21,7 @@ pytest.importorskip("playwright")
 
 @pytest.fixture
 def server(tmp_path: Path):
-    s = Server(tmp_path)
+    s = Server(tmp_path, writes_enabled=True)  # one test adds to the collection by hand
     s.ark.add_side_row(42, "Sol Ring")
     s.start()
     try:
@@ -204,7 +204,7 @@ def test_editor_rows_are_enhanced_as_they_appear(server: Server) -> None:
     from playwright.sync_api import sync_playwright
 
     sf = server.sf
-    sf.catalog = sorted({c["name"] for c in sf.cards}) + [f"Filler Card {i}" for i in range(1200)]
+    sf.catalog = sf.names_catalog()
     server.app.state.gateway.scan.names.set_names(sf.catalog)
     sid = _link(server)
     exe = _exe()

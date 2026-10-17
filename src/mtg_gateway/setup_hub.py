@@ -27,9 +27,12 @@ from starlette.responses import PlainTextResponse, Response
 from .app_page import APK_NAME, RELEASES_URL, android_facts
 from .pages import _csrf, browser_session, login_redirect
 from .plugin_page import (
+    CHATGPT_NAME_MAX,
     CONNECTOR_ICON_PATH,
     SERVER_DESCRIPTION,
     SETUP_SKILL,
+    chatgpt_label,
+    chatgpt_name_too_long,
     chatgpt_zip_name,
     claude_connect_link,
     plugin_slug,
@@ -97,6 +100,7 @@ class Step:
     text: str
     copy: Copy | None = None
     link: Link | None = None
+    warn: str | None = None  # a warning under the step's box (a notice on the page)
 
 
 @dataclass(frozen=True)
@@ -112,6 +116,7 @@ class Block:
     # The page's own content (live facts, a long box to copy); not install text.
     page: str = ""
     link: Link | None = None
+    warn: str | None = None  # a warning under the block's text (a notice on the page)
 
 
 @dataclass(frozen=True)
@@ -126,6 +131,7 @@ class Context:
     public_url: str
     site: str
     gpt_text: str | None = None  # the ChatGPT project instructions (skill_page.chatgpt_text)
+    gpt_name: str | None = None  # the owner's MTG_CHATGPT_NAME: the name ChatGPT shows, when set
     app: dict[str, Any] | None = None  # app_page.android_facts, or None when no APK is shipped
     page: bool = True  # False for the public Markdown
 
@@ -189,6 +195,8 @@ def block_html(block: Block, heading: str | None, ctx: Context) -> str:
     h = block.title or heading
     out = [f"<div class='card'>{f'<h2>{html.escape(h)}</h2>' if h else ''}"]
     out += [f"<p>{inline_html(p, ctx.public_url)}</p>" for p in block.paras]
+    if block.warn:
+        out.append(f"<p class='notice warn stepnote'>{inline_html(block.warn, ctx.public_url)}</p>")
     out.append(block.page)
     if block.link:
         out.append(_link_html(block.link, ctx.public_url))
@@ -198,6 +206,8 @@ def block_html(block: Block, heading: str | None, ctx: Context) -> str:
             out.append(f"<li>{inline_html(s.text, ctx.public_url)}")
             if s.copy:
                 out.append(copy_field(s.copy.key, s.copy.label, s.copy.value, s.copy.rows))
+            if s.warn:
+                out.append(f"<p class='notice warn stepnote'>{inline_html(s.warn, ctx.public_url)}</p>")
             if s.link:
                 out.append(_link_html(s.link, ctx.public_url))
             out.append("</li>")
@@ -219,6 +229,8 @@ def _step_md(n: int, s: Step, public_url: str) -> str:
         line += " " + (s.copy.md if s.copy.md is not None else f"{s.copy.label}: `{s.copy.value}`")
     if s.link:
         line += f" [{s.link.label}]({_abs(s.link.href, public_url)})"
+    if s.warn:
+        line += f"\n   {s.warn}"
     return line
 
 
@@ -228,6 +240,8 @@ def section_md(section: Section, ctx: Context) -> str:
         if b.title:
             parts.append(f"**{b.title}**")
         parts += list(b.paras)
+        if b.warn:
+            parts.append(b.warn)
         if b.link:
             parts.append(f"[{b.link.label}]({_abs(b.link.href, ctx.public_url)})")
         parts += list(b.agent)
@@ -341,27 +355,40 @@ def section(key: str, ctx: Context) -> Section:
                     notes=(
                         "If sign-in fails with the published identity, remove the connector, add it again "
                         "choosing **Register automatically**, and tell the owner. Claude shows a plain "
-                        "tile for custom connectors, not their own icon (reported by developers, not in "
-                        "Anthropic's documentation), so there is no icon to set.",
+                        "tile for custom connectors rather than their own icon, so there is no icon to "
+                        "set.",
                     ),
                 ),
             ),
         )
     if key == "chatgpt":
+        # The name to type: the owner's MTG_CHATGPT_NAME (filtered as the plugin file writes it)
+        # when set, else the site's name as it is.
+        gpt_name = chatgpt_label(site, ctx.gpt_name) if ctx.gpt_name else site
+        long = chatgpt_name_too_long(site, ctx.gpt_name)
+        plugin_warn = (
+            f"This gateway's ChatGPT connector name, “{long[0]}”, is {long[1]} characters, and ChatGPT "
+            f"refuses a plugin file whose name is over {CHATGPT_NAME_MAX} characters. Add the connector by "
+            "hand with the steps above instead, or ask the gateway's owner to shorten the name."
+            if long
+            else None
+        )
         return Section(
             key,
             CLIENTS[key],
             (
                 Block(
                     paras=(
-                        "**Works on:** chatgpt.com in a computer's web browser, on Plus, Pro, Business, "
-                        "Enterprise or Edu, with Developer mode on (OpenAI's pages). Checked with this "
-                        "gateway on the Pro plan on 2026-10-10: ChatGPT used every tool, deck proposals "
-                        "included. Write tools may be blocked on Plus (reported).",
-                        '**Does not work on:** the ChatGPT iPhone and Android apps ("web only"), or the '
-                        f"Free plan (no Developer mode). Use [Claude]({pub}/install?for=claude) there "
-                        "instead, whose phone apps work. ChatGPT in a phone's browser or the desktop app is "
-                        "not documented: set it up on chatgpt.com on a computer.",
+                        "**You need:** a ChatGPT Plus, Pro, Business, Enterprise or Edu plan, and a "
+                        "computer. Set it up on chatgpt.com in the computer's web browser, not in a "
+                        "phone's browser or the ChatGPT desktop app.",
+                        "**Works on:** chatgpt.com in a computer's web browser, with Developer mode on "
+                        "(step 3 below). In our testing on Pro every tool worked there, deck proposals "
+                        "included. On some plans, Plus especially, ChatGPT may block the tools that "
+                        "change things: see **If ChatGPT blocks write tools** below.",
+                        "**Does not work on:** the ChatGPT iPhone and Android apps, or the Free plan, "
+                        f"which has no Developer mode. Use [Claude]({pub}/install?for=claude) there "
+                        "instead: its phone apps work.",
                     ),
                     agent=(
                         "If the person is in a ChatGPT phone app or on the Free plan, do not attempt the "
@@ -370,10 +397,16 @@ def section(key: str, ctx: Context) -> Section:
                 ),
                 Block(
                     "Add the connector",
+                    paras=(
+                        "ChatGPT shows the name and description you type when you add the connector. "
+                        f"Use “{gpt_name}” and the description below.",
+                        "OpenAI's instructions say ChatGPT takes an app's icon from its plugin file or an "
+                        "upload, so the gateway's icon may not show for a connector added by hand.",
+                    ),
                     steps=(
                         Step("On a computer, open chatgpt.com and sign in."),
                         Step(
-                            "Download the connector icon. It is a PNG under 10 KB, ChatGPT's limit.",
+                            "Download the connector icon (a small PNG).",
                             link=Link(
                                 "Download the icon (PNG)",
                                 CONNECTOR_ICON_PATH,
@@ -391,16 +424,15 @@ def section(key: str, ctx: Context) -> Section:
                             "In the sidebar, open **Plugins** (older menus: Apps) and press **+** (or "
                             "Create)."
                         ),
-                        Step("Paste the name.", Copy("gpt-name", "Name", site)),
+                        Step("Paste the name.", Copy("gpt-name", "Name", gpt_name)),
                         Step(
                             "Paste the description.",
                             Copy("gpt-desc", "Description", SERVER_DESCRIPTION, rows=3),
                         ),
                         Step("Paste the MCP server URL.", Copy("gpt-url", "Connector URL", mcp)),
                         Step(
-                            "Icon: choose the file from step 2. Do it now: ChatGPT reportedly lets you set "
-                            "the icon only while creating the connector (a user report, not OpenAI's "
-                            "documentation)."
+                            "Icon: choose the file from step 2. Do it now: you may not be able to add the "
+                            "icon after the connector is created."
                         ),
                         Step("Authentication: choose **OAuth**. Leave client ID and client secret empty."),
                         Step("Accept the risk notice and create the connector."),
@@ -424,17 +456,17 @@ def section(key: str, ctx: Context) -> Section:
                             "Open the project's menu, then **Project settings**, and paste them into the "
                             "instructions."
                         ),
-                        Step(f"Chat inside that project with the {site} connector on."),
+                        Step(f"Chat inside that project with the {gpt_name} connector on."),
                     ),
                 ),
                 Block(
                     "ChatGPT plugin file (Business/Enterprise admins only)",
                     paras=(
                         "The connector and the MTG skill in one file, for ChatGPT Business and Enterprise "
-                        "workspace owners and admins only: OpenAI's help pages say they upload it under "
-                        "Plugins in the admin console (reported, not yet tested with this gateway). Plus "
-                        "and Pro accounts have no plugin upload (checked on a Pro account, 2026-10-11): "
-                        "they use the connector, as above.",
+                        "workspace owners and admins only: it should upload under **Plugins** in the admin "
+                        "console. If the upload does not work, add the connector as above instead. Plus "
+                        "and Pro accounts likely have no plugin upload (Pro had none in our testing): use "
+                        "the connector, as above.",
                     ),
                     link=Link(
                         "Download the ChatGPT plugin (ZIP)",
@@ -442,11 +474,12 @@ def section(key: str, ctx: Context) -> Section:
                         primary=False,
                         icon="download",
                     ),
+                    warn=plugin_warn,
                 ),
                 Block(
                     "If ChatGPT blocks write tools",
                     paras=(
-                        "OpenAI's pages report this may happen on Plus and Pro. Research, simulation, "
+                        "This may happen on Plus and Pro. Research, simulation, "
                         "reading decks, scanning and deck proposals still work. To apply a proposal, open "
                         "its review "
                         f"link or your [proposals]({pub}/proposals) and press Apply. To save scans, use "
@@ -461,7 +494,6 @@ def section(key: str, ctx: Context) -> Section:
             CLIENTS[key],
             (
                 Block(
-                    paras=("As documented by OpenAI (not yet tested with this gateway).",),
                     steps=(
                         Step(
                             "In a terminal, run this command.",
@@ -526,7 +558,10 @@ def section(key: str, ctx: Context) -> Section:
                             if gpt or not ctx.page
                             else None,
                         ),
-                        Step(f"Chat inside that project with the {site} connector on."),
+                        Step(
+                            f"Chat inside that project with the "
+                            f"{chatgpt_label(site, ctx.gpt_name) if ctx.gpt_name else site} connector on."
+                        ),
                     ),
                     notes=(
                         "ChatGPT supports custom connectors on the web only, not in its phone apps.",
@@ -725,6 +760,7 @@ INSTALL_CSS = (
     "font-family:ui-monospace,SFMono-Regular,Menlo,monospace;"
     "font-size:.85rem}"
     ".copyline .btn{flex:none;margin:0}"
+    ".notice.stepnote{margin:.5rem 0 0;overflow-wrap:anywhere}"
 )
 
 
@@ -738,7 +774,9 @@ def _context(state: AppState, *, page: bool) -> Context:
 
         base = skill_dir()
         gpt = chatgpt_text(base) if base is not None else None
-    return Context(s.public_url, s.server_name, gpt_text=gpt, app=android_facts(), page=page)
+    return Context(
+        s.public_url, s.server_name, gpt_text=gpt, gpt_name=s.chatgpt_name, app=android_facts(), page=page
+    )
 
 
 def add_setup_routes(server: MCPServer, state: AppState) -> None:
@@ -791,7 +829,7 @@ def add_setup_routes(server: MCPServer, state: AppState) -> None:
                 f"<div class='actions'>{picker}</div>"
                 "<p class='muted small'>On a phone? Claude's iPhone and Android apps work once the "
                 "connector is added on claude.ai or in the desktop app. ChatGPT's phone apps do not "
-                "support custom connectors, according to OpenAI.</p>"
+                "support custom connectors: set ChatGPT up on chatgpt.com on a computer.</p>"
                 + copy_field("mcp-url", "Connector URL", s.mcp_url)
                 + "</div>"
             )

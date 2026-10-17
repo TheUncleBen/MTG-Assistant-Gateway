@@ -7,6 +7,432 @@ Notable changes for people who run or use the gateway. The format follows
 with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 (`release/1.2.3`); `latest` is always the newest.
 
+## [0.7.30] - Unreleased
+
+The simulator release: a Reports page under More, Forge games of two decks against the same
+opponents, laid-out Forge results, a guide on the Goldfish page and quicker Forge runs. Forge stays
+off by default. The database moves to schema 14, which only adds one table. Members can now get
+their notifications in the gateway's own Android app, from a notification server that runs in the
+stack.
+
+### Added
+- **Reports page** under More: your stored deck reports, newest first (the newest 200), with their status and what ran. It also shows what Forge is playing for you now and what waits, with the expected times. A deck filter narrows the list, and each report links to its deck's trend in History. Reports stay in History too.
+- **Same opponents in compares:**
+  - The Compare page's **Test both in Forge against the same opponents** seats both decks at the same three precons, picked for the higher of the two decks' brackets (the bracket set on each deck, or Archidekt's estimate when none is set), so it doesn't matter which deck you compare from. Assistants and the app API do the same with `compare_with` on the first report and `same_opponents_as` on the second.
+- **Saved card descriptions:** each member keeps their own (up to 200), they play only in that member's solo tests and goldfish A/B comparisons, and the member or an admin removes them.
+- **Goldfish page guide:** "How to play" walks a first game step by step, and you can hide it (remembered for your account). Phones show the current step, with **Show all steps** to open all six.
+- **Forge results laid out:**
+  - Tiles: games played, your deck's win rate with its 95% interval, median game time and length.
+  - A table of the decks at the table, with how each lost.
+  - How the games ended, and each game.
+  - Phones get a stacked layout.
+- **Live Forge card:** while the games play, the report page asks a small status route (`GET /api/v1/reports/{rid}/forge`) instead of reloading the page.
+- `options.forge_seed`: the Forge games' own seed.
+- **Play more games** on a report whose Forge games have finished: plays more games against the same opponents and adds them to the results, so the win rates and their 95% intervals count every game (up to 50 games a report). On a comparison both decks get the same number, so the two stay even. The button is on the report page, and assistants and apps that use the JSON API can ask for it too, with the same rules (`play_more_games`, `POST /api/v1/reports/{rid}/forge/more`).
+- `MTG_FORGE_PARALLEL_GAMES` (also on the admin Settings page, default 4): how many of a report's Forge games the gateway asks Forge to play at once. `FORGE_MAX_PARALLEL` (Forge service): the most games Forge plays at once for all runs together; left empty (the default), Forge works it out from its container's CPUs and memory, which is 1 inside the default limits. With more than one place, a Compare's second deck can start before the first deck's run has ended.
+- **Forge on more than one machine** (optional): the gateway can use several copies of the Forge service, for example on a Pi and a PC. Each run plays on one copy, the one with the most free places, and stays there. One copy is still the usual setup. So far this is tested only with a stand-in, not on real machines.
+- `scripts/measure_recognition.py` and a one-off CI step: for the precons and test decks, the share of cards played with their effect and the share known (played with their effect or left out on purpose).
+- The Goldfish page has the card size switch too, and its cards follow it.
+- **Notifications in the Android app.** Members can get their notifications in the gateway's own Android app instead of a separate notification app. There is no Google push service and no iPhone version. On the Account page in the app, **Get notifications on this phone** asks once to let the app run in the background, and on Android 13 and later it first asks to allow notifications. Android then shows a quiet "Always connected" notification while the app listens.
+- **Disconnect my phones** on the Account page stops every connected phone.
+- The stack runs its own ntfy server (`mtg-assistant-ntfy`; `ntfy` with Docker Compose) on a private network with no published port. Phones reach it through the gateway's own address.
+
+### Changed
+- **Names:**
+  - The 300 automatic games are the **solo test**.
+  - The deck page's buttons read **Run full test** and **Solo test only**.
+  - The report's sections read "Solo test (N games, no opponents)" and "Forge games (against precons)".
+  - "Goldfish" on the website names the page where you play a hand; the automatic games are the solo test (the paired A/B of two decks keeps its "goldfish A/B" name).
+- **Bracket:**
+  - A bracket set on the deck is the deck's bracket.
+  - The estimate follows Archidekt's own Estimated Bracket rules and is labelled "Archidekt's estimate from cards". The deck banner, the Reports page and the chat card show it only when no bracket is set; the Deck checks row names it only when the checks find a mismatch; the deck page's statistics box shows it beside a set bracket, labelled as Archidekt's estimate with Archidekt's notes, and never flags it; a report's statistics show the set bracket, or the estimate when none is set, with the estimate's basis line under them.
+- **Played without their effect:**
+  - Reports call the simulator's "unrecognized" cards "Played without their effect" (not "Not recognized"), count copies, and offer "Copy a request for your assistant".
+- **Forge runs:**
+  - Each game of a run has its own seed, and a run's games play at once as far as Forge has room. The seed is kept for the record only: every report with Forge games and a recorded seed says Forge does not always replay the same games from the same seed, so compare runs by their win rates and 95% intervals.
+  - A report plays 4 Forge games by default (`MTG_FORGE_GAMES`, was 10); **Play more games** adds more.
+  - A game still going after four minutes stops and counts as a draw (`FORGE_GAME_SECONDS`, default 240, was 600). A stack env file copied from the old example still sets `FORGE_GAME_SECONDS=600` and `FORGE_MAX_PARALLEL=1`: remove those two lines to get the new defaults.
+- **Forge memory:** where Docker can't cap memory (Raspberry Pi OS by default), Forge guards its own memory from inside the container, with nothing to change on the machine: `FORGE_MEMORY_LIMIT` sizes the games at once, each Java has a ceiling on its class data, and the kernel stops a Forge game first if the machine runs out of memory (`FORGE_MAX_METASPACE`, `FORGE_OOM_SCORE_ADJ`). This is not a hard limit as Docker's is.
+- **Forge speed:** each Forge game's result shows on the report within a few seconds of the game ending. Forge reads a card's rules only when a game needs that card, so each game starts faster. With more than one Forge place, a Compare's second deck can start before the first deck's run has ended.
+- **Forge image:** 2.0.15-mag3. Build pins are by digest (Dockerfile frontend and base, buildkit, binfmt).
+- **Report wording:** "Out of scope" reads "Left out on purpose", and "Modeled but never mattered" reads "Played with their effect but never mattered". The report adds a second coverage figure, the cards known to the solo test (played with their effect or left out on purpose).
+
+- The Notifications card no longer shows a server or topic, and members no longer choose a topic. When the gateway first starts after the update, every member who had a topic gets a new random one.
+- **Check for app updates** says at once that it is checking.
+- The Android app's menu entry **Scan with phone camera** is now **Scan with the app's camera**, and the launcher shortcut **Scan cards** is now **Scan page**.
+- The build images (Dockerfile, the Mystic Forge Dockerfile and the BuildKit and binfmt images in CI) are pinned by digest, and so are pip and wheel. The image installs only the wheels it built.
+
+### Fixed
+- A pasted or Archidekt list's copies are counted in the report's shares (they were counted once per name).
+- The bracket estimate now follows archidekt.com's own rule for combos and extra turns; it followed an older, reversed rule.
+- The Android app's colour strips under the status and navigation bars kept their full colour when Android faded the window.
+
+### Removed
+- The old `/decks/{id}/playtest` address. The deck page's Playtest opens Archidekt's own playtester directly.
+- The sign-in fallback for Android apps older than 0.7.12.
+
+### Card models (schema 14, for the simulator work)
+- Database schema 14 adds one table, `card_models` (the simulator's card models). The upgrade is automatic and only adds the table; going back to an earlier version needs the backup taken before the upgrade, as for every schema step.
+- Each member keeps their own card models (the saved card descriptions above), one per card, used only in their own solo tests and goldfish A/B comparisons. Each records the simulator version it was checked with.
+- Admin > Card models lists every member's models, most recently changed first, with who added each (admins only) and Remove for any of them (audited as `card_model_removed`). "Delete my data" removes a member's models.
+
+### Deployment
+- **Create the `mtg_ntfy_token` secret before updating** (DEPLOY.md step 4, or `./make-secrets.sh` for Compose). Delete any `MTG_NTFY_URL` or `MTG_NTFY_TOKEN_FILE` value from the stack's environment. An ntfy server you ran for the gateway, and its proxy host, can go.
+- **Members need app 0.7.30 to get notifications. Members on an app older than 0.7.12 must update the app first.**
+- Members who used the ntfy app connect again in the gateway's Android app; there are no notifications on iPhone. Their old ntfy subscriptions get nothing more.
+
+## [0.7.29] - Unreleased
+
+Changes that wait can be amended, combined and approved in the chat, account actions are approved
+on the card, an admin Settings page manages most of the gateway's tuning settings, view choices
+follow your account, and the gateway deletes its older backup copies past a set number per deck
+(copies from earlier versions stay). The database moves to schema 13 in one upgrade step. The
+Android app is unchanged.
+
+### Added
+- **Approve account actions on the card in the chat.** These are likes, bookmarks, follows,
+  comments, folders and collaborators.
+  - Each needs the member's own press, in every mode; an assistant never applies one.
+  - Deleting a deck stays on its review page.
+- **Full auto still waits for some changes.** Restores, new decks, commander changes, and deck or
+  collection edits of more rows than Full auto applies by itself (20 by default) wait for a press.
+  Smaller collection edits apply by themselves in Full auto.
+- **A second step waits for its first.** An assistant never applies a
+  change while a change it depends on is not applied, in any mode.
+- **Another app's change needs the member's press.** A change that replaces a change another app
+  made waits for a press, and the other app's change stays waiting until that press applies the
+  new one; only then is it marked replaced. An assistant can't combine another app's change or a
+  held one. A change that another app's waiting change would replace waits for a press too.
+- **Flexible proposals.**
+  - Amend a waiting change: it keeps its number, gets a new version, the gateway writes what
+    changed, and its expiry starts again. Withdraw, combine and replace are also new.
+  - Earlier versions are kept, up to 50; when they are full, the assistant starts a new linked
+    change.
+  - "There is a newer version of this change": an apply of an older version sends nothing.
+  - Each change is compared again with the deck as it is now: Updated / Needs a look / Held,
+    with the reason.
+- **The assistant board.** Each change on a deck has a number, and `list_my_proposals` lines
+  carry its status, version and who changed it.
+- **The waiting changes card** (`show_waiting_changes`). It approves or rejects each change,
+  and "Apply all N" applies the same app's changes, oldest first, after a confirmation
+  (`confirm_waiting`, `get_apply_result`).
+  - The proposal card names the other waiting changes ("1 from ChatGPT also waits", Review all).
+- **Pages.** "Waiting changes" strip on the deck page; check several on the Proposals page and Apply
+  them in order; Undo of a batch from its result page.
+- **Keep formatting.**
+  - When the description or a comment is edited, the bold text, links and pictures already there
+    stay where their words did not change, and new words are plain.
+  - Such a change is approved on its review page, which draws how it will look.
+  - An edit that removes all of a description's or a comment's formatting is approved on its
+    review page too, which says how many pictures or card links go.
+- **Comments on every page of a deck's thread.** The website has "Show more comments";
+  votes, replies, edits and deletes work on any page; the assistant reads and acts by page.
+- **More approval and social changes.** A change another app rewrote is approved on its own, never
+  in Apply all. Full auto waits for making a deck public or unlisted and for any edit of a
+  description that has formatting, such as bold text, links or pictures. A follow the gateway could
+  not confirm offers Follow and Unfollow. A deck down vote shows "Voted down" and can be taken
+  back. The assistant can follow or unfollow someone by username, with the member's press. One
+  wording per refusal. Reject on the lists asks first.
+- An admin Settings page (Admin > Settings). Settings are grouped (approvals, deck sync, backups, simulation, watchlists and prices, general, Archidekt and Scryfall pacing; card scanning folded under "Advanced"). Each shows its range and where its value comes from. Each section saves on its own, and one refused field saves nothing in that section. A setting set in the stack is shown where it would be changed, greyed out with its value, and can't be changed until the stack changes. Turning backup copies off, or lowering copies or restore points per deck, needs a confirm tick. "Back to default" keeps the section's other unsaved values in the form and names them. Settings marked "After a restart" take effect when the gateway restarts. Every change is in the activity log, written as "Setting: before → after". The page warns when the name ChatGPT gets is over 80 characters.
+- When your stack sets any of the Settings page's settings, a box at the top of the page lists them, each with its variable and a link to its row.
+- Card size S / M / L next to "View as" on the deck page, My decks, the collection and card search, and in the printing picker. M is the size every page had before.
+- "Forget my view choices" on the Account page. A device not used since can't bring them back.
+
+### Changed
+- Database schema 13, one upgrade step. It adds:
+  - a store for admin settings and one for each account's remembered choices;
+  - versions, statuses, board numbers and links for waiting changes;
+  - the Archidekt account number on new waiting changes, snapshots and queued backup deletes;
+  - a deck name, card count and owner stored with each snapshot, so lists no longer read every stored deck;
+  - queued deletes of unused backup copies moved into a table of their own;
+  - an index for the expiry sweep.
+  An older image refuses a schema 13 database. Take a backup before upgrading.
+- Each setting the admin Settings page manages has an allowed range. A value set in your stack always wins and is shown locked. On the page, Archidekt and Scryfall pacing can only be made gentler than the gateway's defaults.
+- New deployment settings, each also on the Settings page: `MTG_PROPOSAL_EXPIRY_DAYS` (7), `MTG_AUTO_BIG_EDIT_ROWS` (20) and `MTG_FORGE_PARALLEL_GAMES` (1).
+- A restore point of a deck that had no name is now listed in History by the deck's number, and assistants get an empty name instead. Before, both showed "None".
+- **Live settings.** Approval settings are read live (approval mode default and limit, auto rows,
+  big-edit rows, expiry), so a dashboard change applies without a restart.
+- **The proposal card uses the shared card template.**
+- **The history page** shows the bracket set on the deck, and the estimate only when none is set.
+- **A comment vote costs 2 Archidekt calls instead of 3.**
+- **Social actions and comments.**
+  - Editing a comment on the website asks first.
+  - The card quotes the comment an action is about.
+  - Errors say what happened.
+  - With writes switched off, the social buttons and the comment thread are read-only.
+  - Long names wrap on phones.
+- **Assistant wording.** Tool descriptions and the guide describe the card or review-page
+  approval, Full auto's exceptions, Apply all and Undo.
+- View choices follow your account to every device: "View as", card size, stack orders, the stats panel's choices and the dismissed EDHPlay steps and scan intro. A device's earlier choices are copied to the account once. Light or dark mode, the last deck in "Add to deck", the last set per deck in the printing picker and a scan in progress stay on each device.
+- Your account keeps your newest 150 stack orders; one more forgets the oldest.
+- Backup copies on Archidekt: the newest 10 per deck are kept (the Settings page can change this) and older ones are deleted from the backup folder, one a minute, only while writes are on, and only a copy still in the backup folder as the gateway made it. Copies made before 0.7.29 are never deleted and don't count toward that number; remove them by hand on Archidekt if you want them gone. A copy you changed or moved out of the backup folder on Archidekt is never deleted. A copy the gateway can't delete (for example after relinking another Archidekt account) is left alone and no longer counted or retried.
+- Edits within 15 minutes of a deck's last backup copy, or with the deck unchanged since it, share that copy instead of making another. Each edit still keeps its own restore point.
+- A restore point past the newest 25 is kept while it records a backup copy the gateway may still delete.
+- The record of how each backup copy was made is kept in the database, so a restart no longer loses it. "Delete my data" removes these records at once.
+- The watchlist limits, backups on or off, the editor's backup box and restore points per deck take effect at once when changed on the Settings page. The watchlist limit message says how many to remove ("You watch 12 decks; this gateway lets each member watch at most 10. Remove 3 to add another.").
+- The admin page's ChatGPT name warning points to the Settings page, or to `MTG_CHATGPT_NAME` when your stack sets it.
+- The hourly clean-up deletes in short batches (at most 500 rows per step), so it never holds the database for long.
+- The admin Users and Activity pages read every member's apps in a fixed number of queries.
+
+### Fixed
+- **Comments on a long thread.** Changing or deleting a comment you had just
+  posted failed on a thread of 3 or more pages.
+- **History page.** It showed "bracket about N" although a bracket was set.
+- **Deck list read.** A page that shared the deck sync's failed read of the deck list showed the
+  error without trying again.
+- **Comment reply.** A reply's failed thread read was reported as "not in this deck's thread".
+- **Comment count.** It counted replies.
+- **A new comment.** It could show vote buttons instead of Edit and Delete.
+- **Refusal text.** A refusal with no stored reason had a double space.
+- **Chat cards at a larger text size.** Card text now follows your text size setting.
+- **The deck page at 200% text on a narrow phone.** It no longer scrolls sideways, with or without
+  scripts: the mana curve, the deck checks, the View as, Group by and Sort by boxes and the Description
+  and Comments headings fit their panels. On a phone, Card search keeps its name for screen readers,
+  and "No mana data" is no longer dimmed below 4.5:1.
+- The deck page's Stacks view scrolled sideways by a few pixels on a 360 px phone (a stack's Options button sat outside the window).
+- A setting set to only spaces in the stack is treated as unset (before, a number setting stopped the gateway from starting).
+- With large text and a mouse, the top bar's links wrap onto more rows instead of running past the edge of the window, and the bar doesn't cover the link or button you move to with the Tab key.
+
+### Deployment
+- The stack and Compose files pass the 24 settings the Settings page manages that they used to set (each with its default) as empty unless your environment sets them, so the page can change them. The example env files list every setting the stack passes, commented out with the default. A value you set in your environment still wins and is shown locked.
+- **Upgrade note for existing deployments (DEPLOY.md and DEPLOY-COMPOSE.md "Updating to 0.7.29 from an earlier version"):** a stack or Compose file from before 0.7.29 gives 24 of the page's 47 settings a value of its own, so they show locked. Before replacing the file, note your own edits to it (the uncommented Authentik and ntfy secret lines, lines added under `environment:`) and redo them in the new one. Portainer: paste the new stack file if it was pasted into the Web editor before (the Repository method brings it). Without Portainer: `git checkout deploy/portainer-stack.yml`, then `git pull`. Compose: download the new docker-compose.yml (in a clone, `git checkout docker-compose.yml` then `git pull`). Optionally delete the variables you want to manage on the page (an older Portainer variables file sets 19, an older .env 17). Any variable kept stays locked. Then update with re-pull (if `MTG_TAG` names a version, change it to `0.7.30` first; without Portainer: from a new shell in your copy of the repository, load `mtg.env` and run `docker stack deploy` again).
+- New variables: `MTG_ARCHIDEKT_BACKUP_COPIES` (10), `MTG_ARCHIDEKT_BACKUP_BOX_DEFAULT` (false), `MTG_SNAPSHOTS_PER_DECK` (25). DEPLOY.md's environment table describes them; OPERATIONS.md "The Settings page" describes the page.
+
+## [0.7.28] - Unreleased
+
+Card search with every Scryfall filter, My decks by folder, a printing picker on the deck page and
+in the editor, a clearer collection import, and leftover fixes. The database stays at schema 12,
+so going back to 0.7.27 is a plain image swap. The Android app is unchanged.
+
+### Added
+- Card search (`/cards`) has every field of Scryfall's advanced search, paper cards by default:
+  the main filters on top, the rest under More filters, a full-screen panel on phones. Results
+  update as you change a filter, the address keeps the search, grid or list view, Scryfall's sorts,
+  and the next cards load as you scroll.
+- My decks shows your Archidekt folders: open a folder into its own view, go back with the
+  breadcrumb, and filter by name across every folder (each match says which folder it is in).
+  The gateway's backup folder never shows, here or on the Folders page. The Folders button is now
+  Manage folders.
+- Change printing… in the deck page's card menu (right-click, or press and hold on a phone) opens
+  a printing picker: search by set name or code, filter by finish, frame and border, sort newest,
+  oldest or cheapest, and see the whole card before you pick. Digital-only and preview printings
+  are hidden until you ask for them, and only English printings are listed. The change saves at
+  once with Undo; when the new printing isn't made in the card's finish, the picker says so first
+  and the card takes a finish that printing has.
+- The deck editor uses the same picker: Change printing on a card's row, and All printings… next
+  to the small printings when adding a card.
+- The Collection page explains how to import its Export CSV on archidekt.com: the column type to
+  pick for each column, and what each condition and language code means.
+- After a collection import the page says how many cards went in and names each line it could not
+  take as given: a language Archidekt's collection doesn't store (kept as English), a condition
+  Archidekt's collection doesn't store, such as EX (kept as Near Mint), a copy added to a card you
+  already have in another language, and cards not found. A refused import says why and which line.
+- The collection import reads a Language column, in the gateway's codes, Archidekt's codes or
+  the language's English name. Assistants can give a language when they add to the collection.
+  A condition may be written out (Near Mint, Lightly Played, Moderately Played, Heavily Played,
+  Damaged) as well as given as its code.
+- `MTG_CHATGPT_NAME` (optional) gives the ChatGPT connector its own name: the name in the ChatGPT
+  plugin file and the name the ChatGPT install steps tell people to type. Empty keeps
+  `MTG_SERVER_NAME`. Per OpenAI's plugin docs, ChatGPT refuses a plugin file whose name is over
+  80 characters, so the gateway warns about a longer name in the log, on the admin page and on
+  the install page's plugin-file step, and still starts. A `MTG_SERVER_NAME` over 120 characters
+  is shortened in the plugin file, where OpenAI's plugin check allows at most 120 characters for
+  the developer and author names, and the log and the admin page say so.
+
+### Changed
+- The collection CSV export writes condition and language in Archidekt's own codes (D for
+  Damaged; JP, KR, SP, CS, CT for Japanese, Korean, Spanish and Chinese), so archidekt.com reads
+  them. The gateway's own import reads both.
+- Set as commander keeps the card's other categories, with Commander first, as archidekt.com's
+  "Set Commander as primary" does. A commander that is replaced and had no other category gets
+  its default category, as archidekt.com does.
+- ChatGPT: the plugin's short description is "MTG decks and research", the server instructions
+  put the safety rules first, and the install page says that ChatGPT shows the name and
+  description you type and may not show the gateway's icon for a connector added by hand.
+- The ChatGPT install step no longer calls 10 KB ChatGPT's limit for the icon.
+- Prices over a thousand read with a separator ($3,500.00) in the printing picker, the card
+  viewer and the editor. The card viewer, the deck page and the editor write a printing as
+  SET #number.
+- The admin page's clean-up row says each state in plain words.
+- CI also checks that the code compiles and imports on Python 3.11, the oldest version the
+  package allows, and a release waits for that check.
+
+### Fixed
+- Changing a companion or a double-faced card set to show its back (its printing, category,
+  quantity, label or mana value) no longer clears that setting on Archidekt, and the deck page's
+  Undo of its removal puts the setting back.
+- Card-name suggestions answer faster while typing; a card Scryfall doesn't know is remembered.
+- The assistant's printing list respects its limit for the set list too.
+- Undo of a move on the deck page files a card back under every category it had.
+- In the stacks view a card can be dragged onto the stack directly below it.
+- The deck editor's save bar sits under the top bar instead of over it.
+- Home, Goldfish and Compare load only the scripts they use, and the deck page's card filter is
+  quicker on big decks.
+- Every guarded form needs its render stamp, so a form can't be sent before it was shown.
+- A collection import with a cell longer than 131,072 characters, or a quantity thousands of
+  digits long, is refused with its line number instead of failing with an error page. A CSV whose
+  name column is called Card is read as a CSV.
+- A card search too long to send is refused with "This search is too long. Remove some filters or
+  words." instead of being cut, which could drop its last filters (paper only among them).
+- After Set as commander, the check that Archidekt saved the change also looks at the card's first
+  category, so a commander Archidekt didn't put first is reported.
+- A folder can't be renamed or made with the backup folder's name through the gateway. Such a
+  folder was taken for the backup folder and hidden from My decks.
+- A long server name shortens in the top bar instead of pushing the search box and the account
+  button out of a narrow window.
+
+## [0.7.27] - 2026-10-14
+
+Bug fixes and small fixes from the owner's checks of 0.7.26, a check of every Archidekt write
+call against archidekt.com's own site code, and the fixes from an independent review. The database
+stays at schema 12, so going back to 0.7.26 is a plain image swap. The Android app changes too
+(it reloads by itself when the phone is back online), so it is rebuilt with this release.
+
+### Fixed
+- A long apply (a new 100-card deck, a big edit) no longer fails halfway when Archidekt asks the
+  gateway to slow down: it waits out the pause Archidekt asks for and carries on by itself, up to
+  6 waits and 5 minutes of waiting for the whole apply. If Archidekt asks for a longer wait than is
+  left, the apply stops at once with a plain message saying what had changed; the assistant and
+  the review page give the same account, and a deck or tag already written is never reported as
+  nothing changed. The review page says when it is waiting. An apply's waits no longer pause the gateway for everyone. Outside an apply
+  nothing changed: a 429 still pauses every call and is not retried. A wait Archidekt gives as a
+  date is now read as that date instead of a fixed 30 seconds.
+- When Archidekt refuses a request (HTTP 403), the message now says so, with Archidekt's own
+  reason, instead of "relink your account" or "this deck belongs to another Archidekt account".
+  Likes, bookmarks, follows and Collection edits no longer report a refusal as a sign-in problem.
+- Deck tags come from Archidekt's own tag list: archidekt.com never creates a new tag, so the
+  gateway no longer tries to. A name Archidekt doesn't have is refused when the proposal is made,
+  with close matches.
+- Write requests now match what archidekt.com itself sends (checked against its site code, not yet
+  tried live): liking a deck uses the deck's own vote, taking back a down vote is sent as a down
+  vote, the cover uses Archidekt's own image address, a new tag goes after the deck's other tags,
+  and moving a deck to a folder sends the same request as Archidekt's folder page.
+- Deck descriptions and comments written in the gateway are sent in Archidekt's rich-text format,
+  so they show on archidekt.com. Text from an assistant or a gateway form is always sent as plain
+  text, so a hidden link or formatting can never go out unseen; restoring a snapshot keeps
+  Archidekt's formatting. Descriptions and comments written on Archidekt show as readable
+  text in the gateway instead of raw code, and saving the settings without touching the
+  description no longer replaces Archidekt's formatting.
+- When an assistant sends a description or comment in Archidekt's rich-text format and its links,
+  formatting or embeds are removed, the gateway now tells the assistant so in its reply, so it
+  doesn't tell you a link was added. This includes applying a proposal made before this release.
+- Collection condition and language are saved as Archidekt expects and shown as codes (for
+  example "MP" instead of "3"). Phyrexian, which Archidekt does not have, is no longer offered. A
+  new record is English and Near Mint when nothing is picked, as on archidekt.com, and editing a
+  record never fails on a stored value the gateway doesn't know.
+- When an apply fails before it changed the deck, the backup copy it had just made on Archidekt is
+  deleted again. When part of the change landed (a tag, cover or folder change included), the copy
+  is kept as the way back. Only that apply's own copy is ever deleted. The gateway's own snapshot
+  is always kept.
+- History's deck filter lists your decks by their current Archidekt names. Decks that are no
+  longer on Archidekt are listed under "No longer on Archidekt", below the others. Nothing is put
+  there when Archidekt's deck list can't be fully trusted (owner details missing, a list cut short,
+  changing while it was read, a deck seen twice or fewer decks than Archidekt counts), and a report
+  on someone else's deck, or a deck of an Archidekt account you were linked to before, is never put
+  there.
+- A deck whose owner Archidekt doesn't name is no longer said to belong to "None". Ownership is
+  decided by Archidekt account id whenever both ids are known.
+- My decks says when your deck list couldn't be read from Archidekt, with Try again, instead of
+  showing an empty list.
+- The deck page's card menu no longer freezes while Archidekt saves. Mana value, Quantity, Move to
+  and Remove from deck show the change at once and save in the background; quick Quantity presses
+  are sent as one save. If a save fails, the card goes back to what Archidekt has and a note says
+  why, also when several edits to the same card fail, and says when a later move or mana value for
+  that card was not sent.
+- Grouped by Mana value, a card whose mana value you change moves to its new stack at once, and the
+  Table view's MV column shows the new value. The card menu's Move to list no longer shows all the
+  time, and undoing the removal of a card with no category no longer brings it back under a blank
+  heading.
+- Play on EDHPlay no longer makes the first card of a deck with no commander set into the commander
+  on EDHPlay. Lands come first among the candidates, a list with only a sideboard no longer starts
+  with a blank line, and a companion filed in a main-deck category goes to the sideboard.
+- The "You're offline" page loads the page again by itself once the connection is back. When the
+  browser knows it is offline the page shows at once; otherwise a page load keeps trying for about
+  5 seconds first, so a short drop or a gateway restart no longer shows it at all. A page that
+  keeps failing while the gateway answers is reloaded by itself at most 3 times, then waits for
+  Try again.
+- A tag named twice in one proposal is added once, a deck already liked isn't liked again, and a
+  new tag after tags starting with Z still sorts last.
+- Picking a card in the deck editor before its details had loaded no longer leaves the new row
+  without its picture, mana cost and type.
+- A card picture that fails to load keeps the deck editor's rows in shape (and is not read out
+  again where the row already names the card), and a card suggestion no longer shows a gap inside
+  the typed part of its name.
+- Restoring a snapshot of a deck in another format than Commander is no longer refused because of
+  a bracket stored with it.
+- Try again on My decks reads the deck list from Archidekt again instead of showing the same
+  partly read list.
+- After an Approve whose apply failed, the chat card shows Failed with the reason once and no
+  Approve or Reject buttons, and the review page shows the failure once instead of twice.
+- A Collection change that stopped partway now says how many of its changes reached Archidekt,
+  instead of saying nothing was changed.
+- The Home page's My decks panel and the assistant's deck list say when the deck list couldn't be
+  read from Archidekt, as My decks does.
+- The deck card in ChatGPT no longer says "No connection to the gateway": the deck now comes with
+  the answer, so the card can show it without reaching the gateway (not yet tried in ChatGPT).
+- Proposal cards and review pages are easier to read: the footer names the app that proposed,
+  tag changes say which tags are added and removed, a cover change names the cover it replaces,
+  rows without a picture leave no gap, rows are shorter on phones (a long change such as a move to
+  another board wraps beside its label instead of over it), the locked Apply and Reject
+  buttons are readable in dark mode, and a chat app that cannot show the card gets a plain summary
+  instead of raw data.
+- Deck settings forms (cover, tags, folder, collaborators) show their result next to the form you
+  used, and on phones each box keeps its button on the same row.
+- The Guide's search lists the matching sections right under the box, with a short snippet and a
+  link to each. Enter goes to the first match, and on phones the contents drawer folds away.
+- Easier to use by touch and keyboard: the EDHPlay box's close button and "How to import", and the
+  collaborator list's rows, are finger-sized; the collaborator list has a name for screen readers
+  and its box shows its whole hint on a Fold's cover screen; the Guide's search results can be
+  walked with the arrow keys; the chat cards' locked buttons and the deck card's mana curve
+  numbers are readable in light and dark.
+
+### Changed
+- When Archidekt's waits stop an apply before anything changed on Archidekt, the proposal stays
+  pending instead of failing, so you can approve it again in a few minutes without asking for a new
+  proposal. It is checked against the deck again when applied, with a new snapshot and backup.
+  Nothing applies it again by itself. The chat card keeps Pending with working buttons, the review
+  page shows the one message with its Apply button, and History marks the snapshot of the stopped
+  try as taken before an apply that changed nothing. If any part of the change had reached
+  Archidekt, the proposal still fails as before. That includes a copy of a deck already made (the
+  message gives the copy's number, so it is never copied twice) and a collaborator, comment or
+  folder change already sent.
+- When the backup copy an apply made can't be deleted right away because Archidekt asked the
+  gateway to wait (or answered with a server or network error), the gateway deletes it later by
+  itself: one copy at a time, never while Archidekt's pause runs, first once the pause is over,
+  then waiting 10, 20 and 40 minutes between tries, and giving up after 4 failed tries (the copy
+  then stays in the backup folder, as before). The messages say so until it is done. Waiting
+  deletes are kept in the database, so a restart doesn't lose them. Before it deletes a copy, the
+  gateway reads it once and keeps it if it was moved out of the backup folder, renamed, given
+  another description or changed since it was made, or if it isn't owned by the Archidekt account
+  you're linked to. Linking an Archidekt account again cancels your waiting
+  deletes, and those copies stay.
+- Only a Commander deck has a bracket, as on archidekt.com: moving a deck to another format clears
+  its bracket, and a bracket for another format is refused.
+- A hand-set mana value is a whole number from 0 to 15, the range archidekt.com offers.
+- Every card change sends the card's colour tag, as archidekt.com does.
+- The Android app reloads a page that failed to load as soon as the phone's connection comes back.
+  For this it now asks for the network state (`ACCESS_NETWORK_STATE`), granted at install without
+  a prompt.
+- Home is always in the navigation: left of Decks in the top bar and the phone's tab bar, and first
+  in the side rail on an unfolded foldable, a tablet and the Android app from 600 px wide. The rail
+  lists every page and has no More menu. On phones, Proposals moves into More.
+- Play on EDHPlay opens a short box on every press. Its "Copy and Open EDHPlay.com" copies the deck
+  and opens EDHPlay's My Decks. The import steps (My Decks, Add Deck, open the deck, Import, paste,
+  Import & Replace) show the first time on a device and stay folded under "How to import" after
+  that. The box says when to choose the commander or set the companion on EDHPlay, and gets the
+  deck list when it opens instead of with every deck page. A failed load shows only "The deck list
+  couldn't be loaded." with Try again; when you're signed out it says to reload the page, without
+  Try again. The first-use tip is gone.
+- The deck editor's "Also keep a backup copy on Archidekt" box is unticked by default.
+- With `MTG_WRITES_ENABLED` false, likes, bookmarks, follows, comments, collaborators and
+  Collection edits made by hand are refused too, and nothing is sent to Archidekt.
+- Adding a collaborator opens a list of the people you follow on Archidekt, which narrows as you
+  type. Someone you don't follow gets one message under the box with a button to open their
+  Archidekt profile.
+- The "Add a tag" box suggests Archidekt's own tags as you type.
+- The setup page (`/install`) and the Guide give plain instructions without research notes or test
+  dates, and say where a detail is untested or may vary by plan.
+
 ## [0.7.26] - 2026-10-12
 
 Clean-up release before the next deployment: old, unused and half-removed code is gone, the two

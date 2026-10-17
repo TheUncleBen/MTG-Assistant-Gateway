@@ -6,8 +6,8 @@ native apps do (RFC 8252): the sign-in runs in the phone's browser (a Custom Tab
 and autofill work, and the browser hands the result back to the app.
 
 1. ``/login`` asked by the app (its user agent carries ``MTGAssistant/``) shows a small page that
-   asks the app to sign in with the browser (``MtgNative.signInWithBrowser``). An app too old to
-   know that call is sent on to the in-app sign-in, as before.
+   asks the app to sign in with the browser (``MtgNative.signInWithBrowser``), with a link to
+   sign in inside the app instead.
 2. The app makes a random verifier, keeps it, and opens
    ``/login?next=...&app_challenge=<SHA-256 of the verifier>`` in the browser.
 3. After the identity provider, ``/auth/callback`` sets no cookie in the browser. It keeps a
@@ -108,12 +108,12 @@ def intent_url(code: str, package: str) -> str:
 
 def handoff_body(next_path: str, fresh: bool) -> str:
     """The page ``/login`` shows inside the app: app-signin.js asks the app to sign in with the
-    browser, or, in an app too old for that, follows the in-app sign-in link."""
+    browser; the link signs in inside the app instead."""
     fresh_q = "&fresh=1" if fresh else ""
     inapp = f"/login?next={quote(next_path, safe='/')}&inapp=1{fresh_q}"
     return (
         f"<div class='card' id='app-signin' data-next='{html.escape(next_path)}' "
-        f"data-fresh='{'1' if fresh else '0'}' data-inapp='{html.escape(inapp)}'>"
+        f"data-fresh='{'1' if fresh else '0'}'>"
         "<p>Sign-in opens in your phone's browser, where your passkey and password manager work. "
         "When you're done there, tap <b>Open the MTG Assistant Gateway app</b> and you're back "
         "here, signed in.</p>"

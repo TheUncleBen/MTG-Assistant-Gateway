@@ -10,7 +10,15 @@ from typing import TYPE_CHECKING
 from starlette.requests import Request
 from starlette.responses import FileResponse, JSONResponse, Response
 
-from .companion import ICON_HEADERS, OFFLINE_PAGE, SHORTCUT_ICON, STATIC_DIR, _static_payload, short_name
+from .companion import (
+    ICON_HEADERS,
+    OFFLINE_PAGE,
+    OFFLINE_SCRIPT,
+    SHORTCUT_ICON,
+    STATIC_DIR,
+    _static_payload,
+    short_name,
+)
 from .theme import (
     STYLESHEETS,
     static_version,
@@ -68,7 +76,7 @@ def add_shell_routes(server: MCPServer, h: SimpleNamespace) -> None:
             ],
             "shortcuts": [
                 {"name": "My decks", "url": "/decks", "icons": [SHORTCUT_ICON]},
-                {"name": "Scan cards", "url": "/scan", "icons": [SHORTCUT_ICON]},
+                {"name": "Scan page", "url": "/scan", "icons": [SHORTCUT_ICON]},
                 {"name": "Proposals", "url": "/proposals", "icons": [SHORTCUT_ICON]},
             ],
         }
@@ -88,10 +96,14 @@ def add_shell_routes(server: MCPServer, h: SimpleNamespace) -> None:
     @server.custom_route("/sw.js", methods=["GET"], include_in_schema=False)
     async def service_worker(_request: Request) -> Response:
         # Network only: the pages are private and must never be served from a cache. A page load
-        # that fails at the network level is tried twice more (after 0.3 s and 1 s) before the
-        # plain offline page built here answers instead of the browser's own error screen, so one
-        # dropped connection on the way in doesn't show "offline". GET navigations only. The page
-        # follows the member's chosen theme (the mtg_theme cookie, read through the Cookie Store
+        # that fails at the network level is tried four more times, 0.5, 1, 1.5 and 2 s apart
+        # (about 5 s in all, Q63), before the plain offline page built here answers instead of the
+        # browser's own error screen, so a dropped connection or a gateway restart on the way in
+        # doesn't show "offline". When the browser already says it is offline (navigator.onLine
+        # false), the offline page answers at once instead (review N7). GET navigations only. The
+        # offline page's one script (static/offline.js: it loads the page again once the
+        # connection is back) is answered from here too, so it loads with the gateway unreachable.
+        # The page follows the member's chosen theme (the mtg_theme cookie, read through the Cookie Store
         # where the browser has it). The X-MTG-Offline header tells the Android app this is the
         # gateway's own offline answer. Navigation preload: the browser asks for the page while the
         # worker is still starting (a browser stops an idle worker after a short while, and starting
@@ -101,10 +113,11 @@ def add_shell_routes(server: MCPServer, h: SimpleNamespace) -> None:
             "self.addEventListener('install',()=>self.skipWaiting());"
             "self.addEventListener('activate',e=>e.waitUntil(Promise.all([self.clients.claim(),"
             "self.registration.navigationPreload?self.registration.navigationPreload.enable():null])));"
-            "const RETRY=[300,1000];"
+            "const RETRY=[500,1000,1500,2000];"
             "const wait=ms=>new Promise(r=>setTimeout(r,ms));"
             "const tryFetch=(req,i)=>fetch(req).catch(err=>"
-            "i<RETRY.length?wait(RETRY[i]).then(()=>tryFetch(req,i+1)):Promise.reject(err));"
+            "i<RETRY.length&&self.navigator.onLine!==false?wait(RETRY[i]).then(()=>tryFetch(req,i+1))"
+            ":Promise.reject(err));"
             "const PAGE=" + json.dumps(OFFLINE_PAGE) + ";"
             "const theme=()=>(self.cookieStore?self.cookieStore.get('mtg_theme'):Promise.resolve(null))"
             ".then(c=>c&&(c.value==='light'||c.value==='dark')?c.value:'').catch(()=>'');"
@@ -112,9 +125,13 @@ def add_shell_routes(server: MCPServer, h: SimpleNamespace) -> None:
             "t?`<html lang='en' data-theme='${t}'>`:\"<html lang='en'>\"),"
             "{status:503,headers:{'Content-Type':'text/html; charset=utf-8',"
             "'Cache-Control':'no-store','X-MTG-Offline':'1',"
-            "'Content-Security-Policy':\"default-src 'none'; style-src 'unsafe-inline'; img-src data:; "
-            "base-uri 'none'; frame-ancestors 'none'\"}});"
+            "'Content-Security-Policy':\"default-src 'none'; script-src 'self'; connect-src 'self'; "
+            "style-src 'unsafe-inline'; img-src data:; base-uri 'none'; frame-ancestors 'none'\"}});"
+            "const OFFLINE_JS=" + json.dumps(OFFLINE_SCRIPT) + ";"
             "self.addEventListener('fetch',e=>{"
+            "if(e.request.method==='GET'&&e.request.url===self.location.origin+'/static/offline.js'){"
+            "e.respondWith(new Response(OFFLINE_JS,{headers:{'Content-Type':'text/javascript; charset=utf-8',"
+            "'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}}));return;}"
             "if(e.request.mode!=='navigate'||e.request.method!=='GET')return;"
             "e.respondWith(Promise.resolve(e.preloadResponse).catch(()=>null)"
             ".then(r=>r||tryFetch(e.request,0)).catch(()=>theme().then(offline)));"

@@ -54,7 +54,7 @@ secret**. The secret only goes into a file in the next step.
 
 ## 2. Secrets
 
-The gateway reads three secrets from files, never from environment
+The gateway reads four secrets from files, never from environment
 variables:
 
 | File in `secrets/` | What's in it |
@@ -62,6 +62,7 @@ variables:
 | `mtg_fernet_key.txt` | Encryption key for linked Archidekt sessions and the identity provider's tokens the gateway keeps. **Keep a copy**: lose it and everyone has to relink Archidekt (and sign in once more) |
 | `mtg_session_secret.txt` | Random key that signs browser cookies. No need to keep a copy |
 | `mtg_oidc_client_secret.txt` | The client secret from step 1 |
+| `mtg_ntfy_token.txt` | Random token the gateway uses with the stack's own notification server. You don't need to keep a copy. |
 
 Run the helper as the user in `PUID` (see step 3), or with `sudo`, in which
 case it hands the files to `PUID:PGID` from `.env`:
@@ -70,7 +71,7 @@ case it hands the files to `PUID:PGID` from `.env`:
 ./make-secrets.sh
 ```
 
-It generates the two random values, prints the Fernet key once so you can
+It generates the three random values, prints the Fernet key once so you can
 save it in your password manager, and asks for the client secret at a
 hidden prompt. It never overwrites a file that's already there. Clear your
 terminal afterwards.
@@ -100,7 +101,7 @@ Worth a look:
 | `MTG_HTTP_BIND`, `MTG_HTTP_PORT` | `127.0.0.1`, `8080` | Where the gateway listens on this machine, for a proxy on the same machine. A proxy container on the gateway's network doesn't need it (the proxy overrides remove it) |
 | `MTG_DATA_DIR`, `MTG_BACKUP_DIR` | `./data`, `./backups` | Local disk only, not NFS or SMB |
 | `MTG_WRITES_ENABLED` | `true` | `false` keeps everything review-only: proposals work, nothing is ever applied to Archidekt. If the line is missing, the gateway's own default is `false` |
-| `MTG_APPROVAL_MODE_DEFAULT` | `manual` | Same as the code default: a person who has not chosen an approval mode has every change wait for their own press, on the card in the chat or the Apply button on the review page. Each person picks their own mode (`manual`, `semi`: small low-risk edits apply without asking, `auto`: every change) on their Account page |
+| `MTG_APPROVAL_MODE_DEFAULT` | `manual` | Same as the code default: a person who has not chosen an approval mode has every change wait for their own press, on the card in the chat or the Apply button on the review page. Each person picks their own mode (`manual`, `semi`: low-risk changes, such as a small edit or a private copy of a deck, apply without asking, `auto`: most changes apply without asking, but some still wait for the member) on their Account page |
 | `MTG_APPROVAL_MODE_MAX` | `auto` | No cap on what people may choose; `semi` or `manual` caps it. `MTG_AUTO_APPLY_MAX_ROWS` (`5`) is the row limit of a low-risk edit |
 | `MTG_APPLY_IN_CHAT` | `true` | The Approve/Reject card Claude and ChatGPT show next to a proposal (only its one-time code can apply) and the other cards in the chat: printings, recognised cards, a deck, the account, comparisons, statistics, deck lists, scans. `false` removes them all, leaving the review page |
 | `MTG_UPDATE_CHECK` | `true` | Admins see a notice when a newer release is out, with the update steps on the admin overview. The gateway never updates itself. `false` turns the check off |
@@ -110,6 +111,13 @@ Every other variable is explained in `.env` and in the
 reaches the gateway if `docker-compose.yml` lists it under the gateway's
 `environment:`; for one that isn't there yet, add a line there as well as in
 `.env`.
+
+Lines in `.env` that start `# MTG_` (the approval modes, `MTG_APPLY_IN_CHAT`,
+`MTG_UPDATE_CHECK` and the other tuning settings) are left to the gateway's
+admin Settings page (`/admin/settings`, since 0.7.29), starting from the
+default shown. Remove the `# ` to lock one in `.env` instead; the page then
+shows it greyed out with its value, and you change it in `.env`
+([OPERATIONS.md](OPERATIONS.md#the-settings-page)).
 
 Create the folders and give them to `PUID:PGID`:
 
@@ -232,6 +240,44 @@ schema version in the file. To go back to an older release, restore the backup
 you took before updating (see [OPERATIONS.md](OPERATIONS.md#backups)) and run
 the old image on that; don't run an old image on an upgraded database.
 
+### Updating to 0.7.30 from an earlier version
+
+0.7.30 adds the stack's own notification server (ntfy). Get the new
+`docker-compose.yml` as in the 0.7.29 steps below, and the new helper with
+`curl -fsSLO "$base/make-secrets.sh"` (same `base`). Then run
+`./make-secrets.sh` again before `docker compose up -d`: it adds
+`secrets/mtg_ntfy_token.txt` and leaves your other files alone. If your `.env`
+has `MTG_NTFY_URL` or `MTG_NTFY_TOKEN_FILE` with a value, delete those lines;
+an ntfy server you ran for the gateway can go, with its proxy host.
+Notifications now come in the gateway's Android app (members press **Get
+notifications on this phone** on their Account page in the app), not the
+ntfy app, and members need app 0.7.30 to get them. **Members on an app older than 0.7.12 must
+update the app.**
+
+### Updating to 0.7.29 from an earlier version
+
+Before the commands above, note your own edits to the old `docker-compose.yml`:
+the optional secret lines you removed the `# ` from (`mtg_authentik_api_token`,
+`mtg_ntfy_token`, each in two places) and any line you added under
+`environment:`. Then download the new file (if you cloned the repository, run
+`git checkout docker-compose.yml`, which undoes your edits to it, then
+`git pull`, instead):
+
+```bash
+base=https://raw.githubusercontent.com/TheUncleBen/MTG-Assistant-Gateway/main/deploy/compose
+curl -fsSLO "$base/docker-compose.yml"
+```
+
+This replaces your old file, so make the same edits in the new one. Without
+the Authentik lines the removed-member clean-up turns off (the admin page says
+so); without the ntfy lines the gateway won't start.
+
+The old file gives 24 of the Settings page's 47 settings a value of its own,
+which locks them on the page (greyed out with that value). An `.env` made
+from the older `.env.example` sets 17 of them. **Optional:** delete the lines
+of the ones you want to change on the Settings page. Any you keep stay
+locked: you change them in `.env`, then run `docker compose up -d`.
+
 ## Backups
 
 - The gateway copies its database into `backups/` every night at
@@ -257,6 +303,6 @@ start.
 ## Moving to Swarm later
 
 The Swarm stack ([DEPLOY.md](DEPLOY.md)) uses the same images and variables.
-Create the three Swarm secrets from your three files
+Create the four Swarm secrets from your four files
 (`docker secret create mtg_fernet_key secrets/mtg_fernet_key.txt`, and so on),
 copy `data/` to the node in `MTG_NODE`, and deploy the stack.

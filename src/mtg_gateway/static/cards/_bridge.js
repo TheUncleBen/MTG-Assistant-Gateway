@@ -148,7 +148,8 @@ var Bridge = (function () {
       notify("ui/notifications/initialized", {});
       reportSize();
     }).catch(function () {
-      setStatus("This card could not connect to the chat. The same information is in the assistant's message.", "err");
+      setStatus((opts && opts.connectError) ||
+        "This card could not connect to the chat. The same information is in the assistant's message.", "err");
     });
   }
 

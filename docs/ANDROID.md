@@ -25,6 +25,7 @@ still the owner's test to report.
 - [1. Getting the app](#1-getting-the-app)
   - [Updates](#updates)
   - [Adding the app to a gateway](#adding-the-app-to-a-gateway)
+  - [Notifications](#notifications)
 - [2. Using it](#2-using-it)
 - [3. Scanning with the phone camera](#3-scanning-with-the-phone-camera)
 - [4. Foldables and large screens](#4-foldables-and-large-screens)
@@ -169,13 +170,42 @@ For operators whose image has no app, or who build their own:
 Requirements: Android 10 or later. A camera is optional; without one the app
 still works, it just can't scan.
 
+### Notifications
+
+From 0.7.30 the app shows the member's notifications itself. There is no
+Google push service and no separate notification app. On the Account page in
+the app, **Get notifications on this phone** asks Android to allow
+notifications (Android 13 and later ask; older versions allow them by
+default) and, once, to let the app run in the background. The app then runs
+a foreground service that holds one connection to the gateway's own address
+(`/app/notifications/stream`). Android shows its quiet **Always connected**
+notification while the service runs, as it does for every foreground
+service. The service starts again after the phone restarts, after an app
+update and whenever the app is opened. It stops when the gateway says the
+phone's key is no longer valid or notifications are off, and when the app is
+set up for another gateway. A connection that fails is tried again after 5
+seconds, then after longer waits up to 5 minutes, and at once when the
+phone's network comes back.
+
+**Push test on an emulator.** The `Android push test` workflow
+(`.github/workflows/android-push-test.yml`) runs `android/scripts/push-test.sh`
+on an Android 15 emulator against a small stand-in gateway
+(`android/scripts/push_test_gateway.py`). It covers a message, one message per
+deck replaced and withdrawn, swiping the app away from Recents, dismissing
+the ongoing notification, Doze, an app update, a reboot, a message missed
+while offline, a force stop (`am force-stop`, the nearest adb step to
+Android's Stop button) and opening the app again, and the gateway switching
+notifications off. It also takes launcher screenshots at phone and Fold
+widths. The debug build it tests trusts a certificate made for that run
+only; a release build never does. A 24 hour battery test needs a real phone.
+
 ## 2. Using it
 
 The app shows the gateway's pages: home, account, proposals, scan, and whatever
 else your gateway serves. A few things are native:
 
 - **The App section of the account menu** (the person icon, top right):
-  *Scan with phone camera*, *Reload*, *Open in browser*, *Change gateway*.
+  *Scan with the app's camera*, *Reload*, *Open in browser*, *Change gateway*.
   *Open a copied link* and *Check for app updates* are on the Account page's
   **App** card and in the round button's menu.
   The same actions sit on a round button at the bottom right while a
@@ -187,7 +217,7 @@ else your gateway serves. A few things are native:
   website footer. Navigation follows Android's window size classes: under
   600 px wide (a phone, a folded foldable) the bottom tab bar; from 600 px (an
   unfolded foldable, a tablet, a wide split-screen pane) a navigation rail
-  down the left edge with the same five sections. The rules track the live
+  down the left edge with every page on it (Home first) and no More menu. The rules track the live
   window, so folding, rotating, split screen and pop-up windows re-flow at
   once without a reload.
 - **Back** goes back a page; on the first page it leaves the app.
@@ -255,6 +285,10 @@ else your gateway serves. A few things are native:
   screen offers **Change gateway** next to **Retry**, so another address can
   be typed without clearing the app's data. **Back** on the address screen
   returns to the page when a gateway was already set.
+- **Back online.** When a page could not load because the phone was offline
+  (or the gateway could not be reached), the app loads it again by itself as
+  soon as the phone's connection comes back, once; **Retry** still works at any
+  time. A page that loaded is never reloaded for this.
 
 ## 3. Scanning with the phone camera
 
@@ -262,7 +296,7 @@ The gateway's `/scan` page already reads cards from a photo (see
 [SCANNING.md](SCANNING.md)). The app's camera screen just takes a better photo
 than a browser can, then hands it to that page, which keeps running underneath:
 
-1. Menu, **Scan with phone camera**, or the **Phone camera** button the scan
+1. Menu, **Scan with the app's camera**, or the **Phone camera** button the scan
    page shows when it runs inside the app. The app opens `/scan` if you aren't
    on it.
 2. Fill the dashed card outline with the card. Controls, each shown only when
@@ -626,9 +660,10 @@ screen is shown without a prefill, so a link can't pick your gateway for you.
   address and when it last looked for an update. It asks for internet and
   camera, and for the two permissions that let it install its own updates
   (`REQUEST_INSTALL_PACKAGES`, which Android grants only after you allow
-  installs from this app, and `UPDATE_PACKAGES_WITHOUT_USER_ACTION`); the
-  network-state permission one of its libraries declares is removed from the
-  manifest. The update check talks to the app's own gateway only ([Updates](#updates)). Sign-in cookies live in the system WebView's cookie store
+  installs from this app, and `UPDATE_PACKAGES_WITHOUT_USER_ACTION`), and for
+  the network state (`ACCESS_NETWORK_STATE`, granted at install without asking),
+  only to notice the connection coming back while a page has failed to load.
+  The update check talks to the app's own gateway only ([Updates](#updates)). Sign-in cookies live in the system WebView's cookie store
   for this app only. None of it is backed up or copied to a new phone: backup
   is off, and from Android 12 the data-extraction rules also exclude everything
   from cloud backup and device-to-device transfer, so a new phone signs in

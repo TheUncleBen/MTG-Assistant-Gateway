@@ -9,13 +9,16 @@ import io
 import pytest
 
 from mtg_gateway import modes
+from mtg_gateway.archidekt import rich_text
 from mtg_gateway.decks import DeckError, parse_changes, split_label
 from mtg_gateway.scan.scryfall import ScryfallClient
 
+from .conftest import AUTO_PROXY, Stack, stack_with
 from .fake_scryfall import FakeScryfall
-from .test_decks_and_proxy import Browser, Stack, call, linked_user, stack, structured
+from .test_decks_and_proxy import Browser, call, linked_user, structured
+from .track_a_helpers import apply_any
 
-__all__ = ["stack"]
+stack_options = stack_with(AUTO_PROXY)
 
 NAV = {"Sec-Fetch-Mode": "navigate", "Accept": "text/html"}
 
@@ -33,13 +36,13 @@ async def test_theme_cookie_and_shell(stack: Stack) -> None:
     try:
         csrf = await b.csrf()
         page = await b.http.get("/decks", headers=NAV)
-        assert "<html lang='en'>" in page.text
+        assert "<html lang='en' data-card-size=m>" in page.text
         assert "class='tabbar'" in page.text and "Site theme" in page.text
         r = await b.http.post("/theme", data={"csrf": csrf, "theme": "light", "next": "/decks"})
         assert r.status_code == 303 and r.headers["location"] == "/decks"
         assert "mtg_theme=light" in r.headers["set-cookie"]
         page = await b.http.get("/decks", headers=NAV)
-        assert "<html lang='en' data-theme=light>" in page.text
+        assert "<html lang='en' data-theme=light data-card-size=m>" in page.text
         # an unknown theme falls back to system (cookie cleared), an off-site next is ignored
         r = await b.http.post("/theme", data={"csrf": csrf, "theme": "neon", "next": "https://evil.test/"})
         assert r.status_code == 303 and r.headers["location"] == "/account"
@@ -86,7 +89,7 @@ async def test_deck_list_controls_and_views(stack: Stack) -> None:
         rows = await b.http.get("/decks?view=list&order=name&q=sample", headers=NAV)
         assert rows.status_code == 200 and "decklist list'" in rows.text
         none = await b.http.get("/decks?q=zzz", headers=NAV)
-        assert none.status_code == 200 and "No decks yet matching" in none.text
+        assert none.status_code == 200 and "No decks matching “zzz” in any folder." in none.text
         # the deck page: text, stacks and grid views; grouping and sorting; the local filter
         deck = await b.http.get("/decks/42", headers=NAV)
         assert deck.status_code == 200
@@ -94,7 +97,7 @@ async def test_deck_list_controls_and_views(stack: Stack) -> None:
         # Archidekt's own playtester in its own tab (D-13); the simulation (the same run as
         # run_deck_report) is one click; the compare view is under More
         assert "href='https://archidekt.com/playtester-v2/42' target='_blank'" in deck.text
-        assert "Run simulation" in deck.text
+        assert "Run full test" in deck.text
         assert "href='/decks/42/compare'" in deck.text and "Run deck report" not in deck.text
         assert "/decks/42/settings" in deck.text and "Deck stats" in deck.text
         assert "cards.scryfall.io" in deck.headers["content-security-policy"]
@@ -506,7 +509,7 @@ async def test_settings_for_a_deck_without_a_format_keep_it_unset(stack: Stack) 
         )
         assert r.status_code == 303 and r.headers["location"] == "/decks/42?ok=saved", r.text
         assert ark.decks[42]["deckFormat"] is None
-        assert ark.decks[42]["description"] == "Only the description changes."
+        assert rich_text(ark.decks[42]["description"]) == "Only the description changes."
     finally:
         await b.aclose()
 
@@ -541,10 +544,32 @@ async def test_set_label_puts_and_takes_off_a_colour_tag(stack: Stack) -> None:
     # an empty label takes the tag off
     off = await propose({"action": "set_label", "name": "Sol Ring", "label": ""})
     assert off["ok"] and "Have (#37d67a) -> no tag" in off["diff"], off
+    before = len(ark.patches)
     a = structured(await call(h, token, "apply_proposal", {"proposal_id": off["proposal_id"]}))
     assert a["ok"] and a["result"]["verified"] is True, a
+    # sent as archidekt.com's own empty tag, no name and the default grey (Q58)
+    sent = [e for patch in ark.patches[before:] for e in patch.get("cards", [patch])]
+    assert [e["modifications"]["label"] for e in sent] == [",#656565"], sent
+    row = next(c for c in ark.decks[42]["cards"] if c["card"]["oracleCard"]["name"] == "Sol Ring")
+    assert row["label"] == ",#656565"
+
+
+async def test_every_modify_sends_the_colour_tag_as_the_site_does(stack: Stack) -> None:
+    """Q58: archidekt.com sends a row's colour tag with every modify, ",#656565" for a row with no
+    tag; the gateway does the same, so a quantity change on an untagged row carries it too."""
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
     row = next(c for c in ark.decks[42]["cards"] if c["card"]["oracleCard"]["name"] == "Sol Ring")
     assert not row.get("label")
+    args = {"deck_id": "42", "changes": [{"action": "set_quantity", "name": "Sol Ring", "quantity": 2}]}
+    p = structured(await call(h, token, "propose_deck_changes", args))
+    assert p["ok"], p
+    before = len(ark.patches)
+    a = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
+    assert a["ok"] and a["result"]["verified"] is True, a
+    sent = [e for patch in ark.patches[before:] for e in patch.get("cards", [patch])]
+    modifies = [e for e in sent if e["action"] == "modify"]
+    assert modifies and all(e["modifications"]["label"] == ",#656565" for e in modifies), sent
 
 
 @pytest.mark.parametrize(
@@ -662,11 +687,11 @@ async def test_set_mana_value_sets_and_clears_the_custom_mana_value(stack: Stack
 @pytest.mark.parametrize(
     ("change", "message"),
     [
-        ({"mana_value": -1}, "0 to 20"),
-        ({"mana_value": 21}, "0 to 20"),
-        ({"mana_value": 2.5}, "0 to 20"),
-        ({"mana_value": "x"}, "0 to 20"),
-        ({"mana_value": True}, "0 to 20"),
+        ({"mana_value": -1}, "0 to 15"),
+        ({"mana_value": 16}, "0 to 15"),
+        ({"mana_value": 2.5}, "0 to 15"),
+        ({"mana_value": "x"}, "0 to 15"),
+        ({"mana_value": True}, "0 to 15"),
         ({}, "needs mana_value"),
         ({"mana_value": 2, "quantity": 2}, "takes only"),
     ],
@@ -711,3 +736,73 @@ async def test_card_notes_and_custom_mana_value_are_shown_read_only(stack: Stack
         assert "data-mv='0'" in page.text
     finally:
         await b.aclose()
+
+
+async def test_only_a_commander_deck_has_a_bracket(stack: Stack) -> None:
+    """Q56: as on archidekt.com, moving a deck off Commander clears its bracket, a bracket for a
+    deck of another format is refused, and the settings form sends none for another format."""
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    ark.decks[42]["edhBracket"] = 3
+
+    async def propose(details: dict) -> dict:
+        return structured(await call(h, token, "propose_deck_details", {"deck_id": "42", "details": details}))
+
+    bad = await propose({"deck_format": "modern", "edh_bracket": 2})
+    assert not bad["ok"] and "only a Commander deck has a bracket" in bad["message"], bad
+    p = await propose({"deck_format": "modern"})
+    assert p["ok"], p
+    assert "bracket: 3 -> none" in p["diff"], p["diff"]
+    a = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
+    assert a["ok"] and a["result"]["verified"] is True, a
+    assert ark.decks[42]["deckFormat"] == 2 and ark.decks[42]["edhBracket"] is None
+    bad = await propose({"edh_bracket": 4})  # the deck is Modern now
+    assert not bad["ok"] and "only a Commander deck has a bracket" in bad["message"], bad
+
+    # the settings form: a bracket left picked is dropped for another format, kept for Commander
+    b = await _linked_browser(stack)
+    try:
+        csrf = await b.csrf()
+        page = await b.http.get("/decks/42/settings", headers=NAV)
+        assert "for Commander decks only: changing the format clears it" in page.text
+        form = {
+            "csrf": csrf,
+            "name": "Sample Commander Deck",
+            "deck_format": "modern",
+            "edh_bracket": "3",
+            "description": "",
+            "private": "",
+            "unlisted": "",
+        }
+        r = await b.http.post("/decks/42/settings", data={**form, "description": "Modern now."})
+        assert r.status_code == 303, r.status_code
+        assert ark.decks[42]["edhBracket"] is None
+        r = await b.http.post("/decks/42/settings", data={**form, "deck_format": "commander"})
+        assert r.status_code == 303, r.status_code
+        assert ark.decks[42]["deckFormat"] == 3 and ark.decks[42]["edhBracket"] == 3
+    finally:
+        await b.aclose()
+
+
+async def test_a_snapshot_of_a_non_commander_deck_with_a_bracket_restores(stack: Stack) -> None:
+    """Follow-up N2: an older release could leave a bracket on a deck of another format. Restoring a
+    snapshot of such a deck is not refused by the Q56 check: the snapshot's bracket is left out,
+    the other details go back, and the restore's format, as any details change naming a format
+    that isn't Commander, clears the bracket (Q56), shown on the review first."""
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    ark.decks[42]["deckFormat"] = 2  # Modern
+    ark.decks[42]["edhBracket"] = 2  # left from before Q56
+    rename = {"deck_id": "42", "details": {"name": "New"}}
+    p = structured(await call(h, token, "propose_deck_details", rename))
+    assert p["ok"], p
+    a = await apply_any(h, token, p["proposal_id"])
+    assert a["ok"] and a["snapshot_id"], a
+    r = structured(await call(h, token, "propose_restore_snapshot", {"snapshot_id": a["snapshot_id"]}))
+    assert r["ok"], r
+    assert 'name: "New" -> "Sample Commander Deck"' in r["diff"], r["diff"]
+    assert "bracket: 2 -> none" in r["diff"], r["diff"]
+    done = await apply_any(h, token, r["proposal_id"])
+    assert done["ok"] and done["result"]["verified"] is True, done
+    assert ark.decks[42]["name"] == "Sample Commander Deck" and ark.decks[42]["deckFormat"] == 2
+    assert ark.decks[42]["edhBracket"] is None

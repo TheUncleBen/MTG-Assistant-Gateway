@@ -27,7 +27,7 @@ SHOTS = os.environ.get("MTG_SHOTS")
 
 @pytest.fixture
 def server(tmp_path: Path):
-    s = Server(tmp_path)
+    s = Server(tmp_path, writes_enabled=True)  # a comment vote is a write (the writes switch)
     s.ark.private.discard(43)  # amy's deck is public: someone else's comments to vote on
     s.ark.comments[300043] = [
         {
@@ -219,5 +219,40 @@ def test_editor_redo(server: Server, width: int) -> None:
         )
         assert bar == [0, True], bar
         _shot(page, f"editor-redo-{width}")
+        assert errors == []
+        browser.close()
+
+
+@pytest.mark.parametrize(
+    ("width", "scheme"), [(374, "dark"), (390, "light"), (673, "dark"), (1366, "light"), (1366, "dark")]
+)
+def test_editor_save_bar_never_covers_the_top_bar(server: Server, width: int, scheme: str) -> None:
+    """A24: scrolled down, the deck editor's save bar sticks under the site's top bar, not over it
+    (on a phone it sits at the bottom, over the tab bar): the top bar's middle is the top bar's own,
+    and the save bar is still on screen."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_path()
+    if exe == "missing":
+        pytest.skip("no Chromium available for Playwright")
+    sid = _link(server)
+    with sync_playwright() as p:
+        browser, ctx = _context(p, exe, server, sid, width, scheme)
+        page = ctx.new_page()
+        errors: list[str] = []
+        page.on("pageerror", lambda e: errors.append(str(e)))
+        page.goto(f"{server.base}/decks/42/edit", wait_until="networkidle")
+        page.evaluate("() => window.scrollTo(0, 1200)")
+        page.wait_for_timeout(150)
+        got = page.evaluate(
+            "() => { const top = document.querySelector('.topbar').getBoundingClientRect();"
+            " const bar = document.querySelector('.editbar').getBoundingClientRect();"
+            " const hit = document.elementFromPoint(top.left + top.width / 2, top.top + top.height / 2);"
+            " return {scrolled: scrollY > 0, onTop: !!hit && !!hit.closest('.topbar'), topBottom: top.bottom,"
+            " barTop: bar.top, barBottom: bar.bottom, h: innerHeight}; }"
+        )
+        assert got["scrolled"] and got["onTop"], got
+        assert got["barTop"] >= got["topBottom"] - 0.5 and got["barBottom"] <= got["h"], got  # no overlap
+        _shot(page, f"editor-savebar-{width}-{scheme}")
         assert errors == []
         browser.close()

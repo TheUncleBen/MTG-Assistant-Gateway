@@ -38,9 +38,13 @@ from typing import Any
 
 from mcp.server.apps import Apps, ResourceCsp
 
+from .archidekt import drops_formatting, words_only_note
+
 CARD_URI = "ui://mtg-assistant-gateway/proposal-card"
-CARD_PATH = Path(__file__).parent / "static" / "proposal-card.html"
+CARD_PATH = Path(__file__).parent / "static" / "cards" / "proposal-card.html"
 APPROVAL_META_KEY = "mtg/approval"  # tool-result _meta key the card reads the code from
+APPROVAL_SET_META_KEY = "mtg/approval_set"  # "Apply all": {"ids": [...], "code": ...} (0.7.29)
+APPROVALS_META_KEY = "mtg/approvals"  # the waiting-changes card: {proposal id: its code}
 # Hosts that render the card load each change's small card image straight from Scryfall.
 CARD_IMAGE_HOSTS = ["https://api.scryfall.com", "https://cards.scryfall.io"]
 APPROVE_DECISIONS = ("approve", "reject")
@@ -64,40 +68,227 @@ CONFIRM_TOOL_META: dict[str, Any] = {
 APPLY_TOOL_META: dict[str, Any] = {"anthropic/requiresUserInteraction": True}
 
 
+def card_approval(data: dict[str, Any], *, decks: Any, sub: str, in_chat: bool) -> tuple[str | None, bool]:
+    """(code, other_app) for a waiting proposal's card: the one-time approval code when the
+    member decides it in this chat, and whether it was made in another app (whose card alone can
+    approve it, decks.check_approval; this card then sends the member to the review page). A
+    deck deletion never has a code (R-142: its review page only); since 0.7.29 every other account
+    action has one (Q8, G3). A proposal the assistant may apply itself has no buttons to press."""
+    from .decks import current_client
+
+    if not (
+        in_chat
+        and data.get("state") == "pending"
+        and data.get("proposal_id")
+        and (data.get("ok") or data.get("error") == "browser_required")
+        and not data.get("assistant_may_apply")
+    ):
+        return None, False
+    row = decks.db.get_proposal(str(data["proposal_id"]), sub)
+    if row is None or not decks.card_may_approve(row):
+        return None, False
+    creator = row.get("created_by_client")
+    if not creator or creator != current_client.get():
+        return None, True
+    return decks.approval_for(sub, row), False
+
+
 def proposal_tool_result(data: dict[str, Any], *, decks: Any, sub: str, in_chat: bool) -> Any:
     """A propose_* tool's result: the JSON as text and structured content, plus, for a pending
     proposal the member decides on, the in-chat card's one-time approval code in ``_meta`` (kept
-    out of the text and structured content, so not in the model's context)."""
-    import pydantic_core
+    out of the text and structured content, so not in the model's context). The code is drawn
+    only in the app that made the proposal (the only one whose press check_approval accepts); in
+    another app the card says where to approve it instead (``card_other_app``)."""
     from mcp_types import CallToolResult, TextContent
 
-    approval = None
-    if (
-        in_chat
-        and data.get("ok")
-        and data.get("state") == "pending"
-        and data.get("proposal_id")
-        and not data.get("assistant_may_apply")  # the assistant applies it: no buttons to press
-    ):
-        row = decks.db.get_proposal(str(data["proposal_id"]), sub)
-        # R-142: an Archidekt account action is approved only on the review page, so its card gets
-        # no code and shows "Approve on the review page" instead of Approve and Reject
-        if row is not None and row.get("kind") != "action":
-            approval = decks.approval_for(sub, row)
-    meta = {APPROVAL_META_KEY: approval} if approval else None
+    approval, other_app = card_approval(data, decks=decks, sub=sub, in_chat=in_chat)
+    if other_app:
+        data = {**data, "card_other_app": True}
+    meta: dict[str, Any] | None = {APPROVAL_META_KEY: approval} if approval else None
+    if in_chat and data.get("state") == "pending":
+        info, apply_all = deck_waiting(data, decks=decks, sub=sub)
+        if info:
+            data = {**data, "deck_waiting": info}
+        if apply_all and approval:
+            meta = {**(meta or {}), APPROVAL_SET_META_KEY: apply_all}
+    data = with_words_note(data)
     return CallToolResult(
-        content=[TextContent(type="text", text=pydantic_core.to_json(data, fallback=str, indent=2).decode())],
+        content=[TextContent(type="text", text=proposal_text(data))],
         structured_content=data,
         _meta=meta,
     )
 
 
-def approval_code(secret: str, *, proposal_id: str, sub: str, client_id: str, created_at: int) -> str:
+# The comment actions whose text is written (actions.py).
+_COMMENT_WRITES = ("comment_post", "comment_edit")
+
+
+def stored_words_note(p: dict[str, Any]) -> str | None:
+    """``words_only_note`` for a proposal whose STORED description or comment is a Quill document
+    that its apply reduces to its words with formatting lost (Q90). Only a proposal stored before
+    0.7.27 holds one (0.7.26 kept the text as given): since then the plain text is stored. None
+    for a proposal that was rejected or expired, since nothing of it is saved."""
+    if p.get("state") in ("rejected", "expired"):
+        return None
+    changes = p.get("changes") if isinstance(p.get("changes"), dict) else {}
+    if p.get("kind") == "details" and drops_formatting(changes.get("description")):
+        return words_only_note("description")
+    if (
+        p.get("kind") == "action"
+        and changes.get("action") in _COMMENT_WRITES
+        and drops_formatting(changes.get("text"))
+    ):
+        return words_only_note("comment")
+    return None
+
+
+def with_words_note(data: dict[str, Any], note: str | None = None) -> dict[str, Any]:
+    """An assistant's proposal reply with ``note`` set (Q90) when its description or comment lost
+    links, formatting or embeds: ``note`` when the caller knows (the text it was given), else what
+    the stored proposal shows (``stored_words_note``). A refusal (ok false) gets none."""
+    note = note or stored_words_note(data)
+    if note and data.get("ok") is not False:
+        return {**data, "note": note}
+    return data
+
+
+# Left out of the text: the review rows and the stored edit, which the diff lines already say.
+_TEXT_SKIP = ("rows", "changes", "diff")
+
+
+def proposal_text(data: dict[str, Any]) -> str:
+    """A proposal result as plain text, not JSON: what a chat app shows when it does not draw the
+    card, and what an MCP Apps host gives the model (the structured content is for the card). A
+    few sentences, the diff lines, then every other field as ``name: value`` on its own line,
+    under the same names as the structured content, so the assistant reads all it did before."""
+    import pydantic_core
+
+    def one_line(v: Any) -> str:
+        if isinstance(v, bool):
+            return "true" if v else "false"
+        if isinstance(v, (dict, list)):
+            return pydantic_core.to_json(v, fallback=str).decode()
+        return " ".join(str(v).split())
+
+    lines: list[str] = []
+    skip = set(_TEXT_SKIP)
+    if data.get("ok") is False:
+        lines.append(
+            "Not done: " + one_line(data.get("message") or data.get("error") or "the gateway refused.")
+        )
+        skip.add("message")
+    elif data.get("proposal_id"):
+        deck = one_line(data.get("deck_name") or data.get("deck_id"))
+        head = f"Proposal {one_line(data['proposal_id'])} for {deck}: {one_line(data.get('state'))}"
+        if data.get("risk"):
+            head += f", {one_line(data['risk'])} risk"
+            if data.get("risk_reason"):
+                head += f" ({one_line(data['risk_reason'])})"
+        if data.get("press_reason"):
+            head += f"; it waits for the user's own press: it {one_line(data['press_reason'])}"
+        lines.append(head + ".")
+        if data.get("review_url"):
+            lines.append("review_url: " + one_line(data["review_url"]))
+            skip.add("review_url")
+    diff = [ln for ln in str(data.get("diff") or "").splitlines() if ln.strip()]
+    if diff:
+        lines += ["", "Changes:", *("  " + ln for ln in diff)]
+    rest = [f"{k}: {one_line(v)}" for k, v in data.items() if k not in skip and v not in (None, "", [], {})]
+    if rest:
+        lines += ["", "Details:", *rest]
+    return "\n".join(lines)
+
+
+def approval_code(
+    secret: str, *, proposal_id: str, sub: str, client_id: str, created_at: int, version: int = 1
+) -> str:
     """The one-time code for one proposal: 192 bits of HMAC-SHA256 over the proposal, its owner,
-    the app that made it and when, keyed with the gateway's session secret."""
-    msg = "\x00".join(("mtg-approval", proposal_id, sub, client_id or "", str(int(created_at)))).encode()
+    the app that made it, when, and (from its second version on, G16, K4) its version, keyed with
+    the gateway's session secret. A card drawn for an earlier version no longer matches."""
+    parts = ["mtg-approval", proposal_id, sub, client_id or "", str(int(created_at))]
+    if int(version or 1) > 1:
+        parts.append(f"v{int(version)}")
+    msg = "\x00".join(parts).encode()
     digest = hmac.new(secret.encode(), msg, hashlib.sha256).digest()[:24]
     return base64.urlsafe_b64encode(digest).decode().rstrip("=")
+
+
+def approval_set_code(secret: str, *, sub: str, client_id: str, items: list[tuple[str, int]]) -> str:
+    """The one-time code for "Apply all" on a card (FLEX §6, G16): 192 bits of HMAC-SHA256 over
+    the member, the app and every proposal of the set with its version, so a card drawn before
+    one of them was amended no longer matches. The set's proposals are each still applied (or
+    not) on their own, as the member's one press (batch.py)."""
+    parts = ["mtg-approval-set", sub, client_id or ""]
+    parts += [f"{pid}:{int(v)}" for pid, v in sorted((str(p), int(v or 1)) for p, v in items)]
+    msg = "\x00".join(parts).encode()
+    digest = hmac.new(secret.encode(), msg, hashlib.sha256).digest()[:24]
+    return base64.urlsafe_b64encode(digest).decode().rstrip("=")
+
+
+def deck_waiting(data: dict[str, Any], *, decks: Any, sub: str) -> tuple[dict[str, Any] | None, Any]:
+    """For a waiting proposal's card (FLEX flow A step 2; Q134 A3): the other changes waiting on
+    its deck, as data the card and the assistant may both see ("2 earlier changes to this deck
+    are waiting", "1 from ChatGPT also waits"), and the "Apply all" set for _meta: this app's
+    waiting changes on the deck, this one included, when there are at least two."""
+    from .decks import current_client
+
+    pid, deck_id = data.get("proposal_id"), data.get("deck_id")
+    if data.get("state") != "pending" or not pid or not str(deck_id or "").isdigit():
+        return None, None
+    client = current_client.get()
+    rows = [r for r in decks.db.pending_board(sub, str(deck_id))]
+    others = [r for r in rows if r["id"] != pid]
+    if not others:
+        return None, None
+    mine = [r for r in rows if client and r.get("created_by_client") == client]
+    apps: dict[str, int] = {}
+    for r in others:
+        if r.get("created_by_client") != client:
+            label = decks._creator_label(r.get("created_by_client"))
+            name = label[5:].rsplit(" (", 1)[0] if label.startswith("app: ") else "you"
+            apps[name] = apps.get(name, 0) + 1
+    info: dict[str, Any] = {
+        "earlier": len(others),
+        "same_app": len(mine),
+        "other_apps": [{"app": a, "count": n} for a, n in sorted(apps.items())],
+        "review_all_url": f"{decks.settings.public_url}/proposals#deck-{deck_id}",
+        # the app asking, so the card names it ("2 more from Claude"): the count is per app
+        **({"this_app": decks._creator_label(client)} if client else {}),
+    }
+    full = [decks.db.get_proposal(r["id"], sub) or {} for r in mine]
+    # Q141 item 1B: a change another app rewrote is approved on its own, never in "Apply all"
+    items = [(r["id"], int(r.get("version") or 1)) for r in full if r and decks.in_apply_all(sub, r)]
+    if len(items) < 2 or not client:
+        return info, None
+    # said only where an Apply all is offered, without the card's own change, by number
+    # (proofread of WORDING-4); the card of such a change says so of itself
+    out = [r for r in full if r and decks.card_may_approve(r) and not decks.in_apply_all(sub, r)]
+    info["left_out"] = sum(1 for r in out if r["id"] != pid)
+    info["left_out_nos"] = [r["board_no"] for r in out if r["id"] != pid and r.get("board_no")]
+    if any(r["id"] == pid for r in out):
+        info["this_left_out"] = True
+    # what "Apply all" would apply, listed on its confirm before the press (Q134 item 8: a held
+    # one says so; G16: an amended one says who changed it and what)
+    keys = (
+        "proposal_id",
+        "board_no",
+        "summary",
+        "status",
+        "status_reason",
+        "status_at",
+        "version",
+        "changed_by",
+        "changed_by_apps",
+        "what_changed",
+    )
+    in_set = {pid for pid, _v in items}
+    info["set_lines"] = [
+        {k: x[k] for k in keys if k in x}
+        for x in decks.board_lines(sub, str(deck_id))
+        if x["proposal_id"] in in_set
+    ]
+    code = approval_set_code(decks.settings.session_secret, sub=sub, client_id=client, items=items)
+    return info, {"ids": [i for i, _v in items], "code": code}
 
 
 def approval_matches(expected: str, given: Any) -> bool:
@@ -108,7 +299,10 @@ def approval_matches(expected: str, given: Any) -> bool:
 
 
 def card_html() -> str:
-    return CARD_PATH.read_text(encoding="utf-8")
+    """The proposal card with the shared bridge and base styles inlined (A10, 0.7.29)."""
+    from .cards import card_html as inline  # cards imports this module
+
+    return inline("proposal-card")
 
 
 def apps_extension(public_url: str | None = None) -> Apps:

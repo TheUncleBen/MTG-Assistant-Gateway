@@ -42,6 +42,7 @@ code and a human `message`:
 | `browser_required` | 403 | the member's approval mode wants their own press for this proposal (review page or in-chat card); nothing was sent (`review_url` is included) |
 | `browser_pending` | 409 | MCP only: the client opened the review page for the user (URL elicitation) but the proposal is still pending |
 | `invalid_approval` | 403 | MCP only: `confirm_proposal` was called without the card's one-time code for this proposal, app and member; audited as `approval_refused` |
+| `now_held` | 409 | MCP only: Approve on the card reached a change held for a reason that came up after the card showed it; nothing was sent, and the reply carries the hold (`status`, `status_reason`) so the card shows it |
 | `in_chat_disabled` | 403 | MCP only: `MTG_APPLY_IN_CHAT` is off, so the card cannot apply; use the review page |
 | `insufficient_scope` | 403 | the bearer token is read-only (`mtg.read`) and the route writes |
 | `other_account` | 409 | a new-deck proposal was made for another Archidekt account than the one linked now |
@@ -69,13 +70,15 @@ Request bodies are JSON objects of at most 2 MB.
 | `GET /api/v1/proposals?state=` | The user's proposals, optionally filtered by state |
 | `POST /api/v1/proposals` | Create a proposal (see kinds below). Answers `201` with the proposal, its `diff` and `review_url`. The browser session may add `apply: true` and `archidekt_backup: false` (skip the extra backup copy on Archidekt for that save; the gateway's own snapshot is always kept) |
 | `GET /api/v1/proposals/{pid}` | One proposal with `state`, `diff`, `changes`, `snapshot_id`, `result`, `next_step` |
-| `POST /api/v1/proposals/{pid}/apply` | Apply it: snapshot, Archidekt backup copy, write, re-read verification. A bearer caller applies only what the member's approval mode allows (`manual`: nothing, `browser_required`; `semi`: low-risk proposals; `auto`: everything), judged inside the apply; the in-chat card uses the `confirm_proposal` MCP tool instead, not this route. An Archidekt account action (a proposal of kind `action`) is never applied here, with a bearer token or the browser session: `403 browser_required` with its `review_url` and `risk` (R-142: only the review page's own form applies one) |
+| `POST /api/v1/proposals/{pid}/apply` | Apply it: snapshot, Archidekt backup copy, write, re-read verification. A bearer caller applies only what the member's approval mode allows (`manual`: nothing, `browser_required`; `semi`: low-risk proposals; `auto`: everything except what Full auto still leaves to the member, listed in OPERATIONS.md under Approval modes), judged inside the apply; the in-chat card uses the `confirm_proposal` MCP tool instead, not this route. An Archidekt account action (a proposal of kind `action`) is never applied here, with a bearer token or the browser session: `403 browser_required` with its `review_url` and `risk` (R-142: only the review page's own form applies one) |
 | `POST /api/v1/proposals/{pid}/reject` | Mark a pending proposal rejected. A bearer caller can reject only proposals its own app made; others answer `other_client` |
 | `GET /api/v1/snapshots?deck_id=` | Deck snapshots taken before applies (and on demand) |
 | `GET /api/v1/snapshots/{sid}` | One snapshot with the full deck as it was |
 | `GET /api/v1/reports?deck_id=` | Stored deck reports, newest first, with their trend `metrics` |
-| `POST /api/v1/reports` | Run a report: `{"deck_id": "...", "simulate": true, "games": 300}`. Stats always; validation and goldfish simulation when Mystic Forge is configured. `"forge": false` leaves the Forge games out (default: as `simulate`); a 60-card deck never runs Forge. An unchanged deck within ten minutes returns the existing report with `reused: true`. A report has `status` (`queued`, `running`, `complete`, `partial`, `failed`), `engine_label` and its run `settings` |
+| `POST /api/v1/reports` | Run a report: `{"deck_id": "...", "simulate": true, "games": 300}`. Stats always; validation and goldfish simulation when Mystic Forge is configured. `"forge": false` leaves the Forge games out (default: as `simulate`); a 60-card deck, or one with no commander marked, never runs Forge. `"same_opponents_as": "<report id>"` seats another of your reports' Forge opponents; `"compare_with": "<deck id>"` picks the precons for the higher of this deck's and that deck's brackets (use it on the first of two reports, then `same_opponents_as` on the second; with `"forge": false`, no Forge on the gateway, or a deck with no commander, the report is refused; the other deck is read first, and if it can't be read no report is made). Give `compare_with` or `same_opponents_as`, not both. An unchanged deck within ten minutes returns the existing report with `reused: true`. A report has `status` (`queued`, `running`, `complete`, `partial`, `failed`), `engine_label` and its run `settings` |
 | `GET /api/v1/reports/{rid}` | One report with `stats`, `goldfish`, `validation` |
+| `GET /api/v1/reports/{rid}/forge` | A report's Forge run alone while it plays: its state, games done of games asked for, the report's status. Reads the gateway only |
+| `POST /api/v1/reports/{rid}/forge/more` | Play more games, as the report page's button and the `play_more_games` tool do, with the same rules: once the report's Forge games have finished, the games-per-report number again against the same opponents, up to 50 Forge games a report; it queues like any report and starts nothing when 2 of your reports already wait (on a comparison, which needs room for 2, when any already waits); on a comparison the other deck's report gets the same number. `202` with the report as it now is (`forge.more_note` when the games did not start); a refusal is `400` with `message` and `reason` (`queue`, `full`, `ended`, `none`, `noforge`, `pairwait`, `paircant`, `pairqueue`, `setup`), and a report that is not yours is `404` with `reason` `notfound`. Never asks Archidekt; a read-only (`mtg.read`) token gets `403` `insufficient_scope` |
 | `DELETE /api/v1/reports/{rid}` | Delete a report. With a bearer token only a report that same app ran; the browser session may delete any of the member's reports |
 | `GET /api/v1/activity?limit=50` | The user's own audit trail |
 
@@ -132,14 +135,15 @@ a bearer token. They answer `401` without a browser session, and `404` to signed
   (`categories`: every category the new row goes in, the first one being `category`; the deck page's
   Undo of a removal sends it),
   `{"action": "remove", "card_name"}`, `{"action": "set_quantity", "card_name", "quantity"}`,
-  `{"action": "set_category", "card_name", "category"}`, `{"action": "set_commander", "card_name"}`,
+  `{"action": "set_category", "card_name", "category", "categories"?}` (`categories` as for add: the
+  row goes under exactly those; the deck page's Undo of a move sends it), `{"action": "set_commander", "card_name"}`,
   `{"action": "set_finish", "card_name", "finish"}` (normal, foil or etched, for the copies already in
   the deck) or `{"action": "set_printing", "card_name", "set_code", "collector_number", "finish"?}`
   (swap every copy for that printing, keeping quantity and categories), or
   `{"action": "set_label", "card_name", "label", "color"?, "zone"?}` (Archidekt's colour tag on every
   row of the card; `color` is `#rrggbb`, an empty `label` takes the tag off), or
   `{"action": "set_mana_value", "card_name", "mana_value", "zone"?}` (Archidekt's custom mana value,
-  0 to 20, on every row of the card; `null` takes it off).
+  0 to 15, on every row of the card; `null` takes it off).
   At most 40 changes; one card takes one kind of change (count, category or printing) per proposal.
 - `new_deck`: `{"name", "format"?, "cards"? | "decklist_text"? | "csv_text"?, "private"?}`.
 - `restore`: `{"snapshot_id"}` puts a deck back exactly as a snapshot recorded it.

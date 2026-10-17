@@ -161,32 +161,98 @@ async def test_the_overview_shows_whether_the_removed_member_clean_up_works(gw: 
         r = await b.http.get("/admin", headers=NAVIGATE)
         assert "Removed-member clean-up" in r.text
         # Each state says what to do next, in plain words (T-120).
-        assert "Off. It is optional; to turn it on, follow docs/IDP-AUTHENTIK.md section 12." in r.text
+        assert (
+            "Off. This optional hourly check deletes the saved Archidekt sign-in of people who no "
+            "longer have access. To turn it on, follow docs/IDP-AUTHENTIK.md section 12." in r.text
+        )
         o = (await b.http.get("/api/v1/admin/overview")).json()
         assert o["system"]["member_cleanup"]["state"] == "off"
 
         sweep._token, sweep.api = "tok-marker-xyz", "https://auth.example.com"  # as if configured
         r = await b.http.get("/admin", headers=NAVIGATE)
-        assert "On. The first check runs 2 minutes after start; reload this page then." in r.text
+        assert "On. The first check runs 2 minutes after the gateway starts; reload this page then." in r.text
         sweep.last.update(ok=True, at=1_800_000_000, removed=1, allowed=4, error=None)
         r = await b.http.get("/admin", headers=NAVIGATE)
         assert (
             "Working. Last check at <time datetime='2027-01-15T08:00:00Z'>2027-01-15 08:00 UTC</time>: "
             in r.text
         )
-        assert "4 allowed members, 1 stored Archidekt session removed. Nothing to do." in r.text
+        assert (
+            "4 members with access; deleted the saved Archidekt sign-in of 1 person who lost access. "
+            "Nothing for you to do." in r.text
+        )
         assert "&lt;time" not in r.text  # times are markup, never escaped into the text
         err = "group 'mtg-users' found 0 times (is the name right, and may the token view that group?)"
         sweep.last.update(ok=False, at=1_800_003_600, error=err)
         r = await b.http.get("/admin", headers=NAVIGATE)
-        assert "2027-01-15 09:00 UTC</time> FAILED, nothing deleted: " + html.escape(err) in r.text
-        assert "Next: Check that MTG_REQUIRED_GROUP and MTG_ADMIN_GROUP match the Authentik group" in r.text
+        assert "Not working. The last check at <time datetime='2027-01-15T09:00:00Z'>" in r.text
+        assert "2027-01-15 09:00 UTC</time> failed and deleted nothing: " + html.escape(err) in r.text
+        assert "To fix: Check that MTG_REQUIRED_GROUP and MTG_ADMIN_GROUP match the Authentik group" in r.text
         assert "&lt;time" not in r.text
         o = (await b.http.get("/api/v1/admin/overview")).json()
         assert o["system"]["member_cleanup"] == {"state": "failed", "at": 1_800_003_600, "error": err}
         assert "tok-marker-xyz" not in r.text and "tok-marker-xyz" not in json.dumps(o)
     finally:
         await b.aclose()
+
+
+_AT = "<time datetime='2027-01-15T08:00:00Z'>2027-01-15 08:00 UTC</time>"
+
+
+@pytest.mark.parametrize(
+    ("status", "text"),
+    [
+        (
+            {"state": "off", "cause": "no-token", "reason": "x"},
+            "Off. This optional hourly check deletes the saved Archidekt sign-in of people who no longer "
+            "have access. To turn it on, follow docs/IDP-AUTHENTIK.md section 12.",
+        ),
+        (
+            {
+                "state": "off",
+                "cause": "token-unreadable",
+                "reason": "removed-member clean-up is off: the Authentik API token can't be read "
+                "(file is empty); it is optional (docs/IDP-AUTHENTIK.md)",
+            },
+            "Off: the Authentik API token can't be read (file is empty). Check the "
+            "mtg_authentik_api_token Docker secret and MTG_AUTHENTIK_API_TOKEN_FILE, then redeploy "
+            "(docs/IDP-AUTHENTIK.md section 12, steps 6 and 7).",
+        ),
+        (
+            {"state": "off", "cause": "no-group", "reason": "x"},
+            "Off: it needs MTG_REQUIRED_GROUP. Set it in the stack and redeploy.",
+        ),
+        (
+            {"state": "waiting", "first_after_seconds": 120},
+            "On. The first check runs 2 minutes after the gateway starts; reload this page then.",
+        ),
+        (
+            {"state": "ok", "at": 1_800_000_000, "removed": 0, "allowed": 1},
+            f"Working. Last check at {_AT}: 1 member with access; no one lost access. Nothing for you to do.",
+        ),
+        (
+            {"state": "ok", "at": 1_800_000_000, "removed": 2, "allowed": 5},
+            f"Working. Last check at {_AT}: 5 members with access; deleted the saved Archidekt sign-in "
+            "of 2 people who lost access. Nothing for you to do.",
+        ),
+        (
+            {
+                "state": "failed",
+                "at": 1_800_000_000,
+                "error": "Authentik could not be reached (ConnectError)",
+            },
+            f"Not working. The last check at {_AT} failed and deleted nothing: Authentik could not be "
+            "reached (ConnectError). To fix: Check that the gateway can reach Authentik's address "
+            "(MTG_AUTHENTIK_API_URL, or the issuer's when that is empty). It tries again by itself.",
+        ),
+        ({"state": "not started"}, "Not started yet. Reload this page in a minute."),
+    ],
+)
+def test_each_clean_up_state_reads_as_one_plain_line(status: dict, text: str) -> None:
+    """Every state of the admin page's clean-up row, word for word (T-120)."""
+    from mtg_gateway.admin import _cleanup_text
+
+    assert html.unescape(_cleanup_text(status)) == text  # the HTML lines escape quotes
 
 
 # -- actions --------------------------------------------------------------------------
@@ -398,7 +464,7 @@ def test_v010_database_upgrades_in_place(tmp_path: Path) -> None:
 
     db = Database(path)
     try:
-        assert db.schema_version == dbmod.SCHEMA_VERSION == 12
+        assert db.schema_version == dbmod.SCHEMA_VERSION == 14
         user = db.get_user("u1")
         assert user["disabled_at"] is None and user["last_seen_at"] == 200 and user["groups"] == ["g"]
         assert db.list_snapshots("u1")[0]["backup_url"] is None

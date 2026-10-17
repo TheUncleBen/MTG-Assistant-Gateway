@@ -3,29 +3,20 @@ set_commander change actions, through the MCP tools and the browser review page.
 
 from __future__ import annotations
 
-from pathlib import Path
+import json
 
 import pytest
 
-from mtg_gateway.archidekt import DeckCard
+from mtg_gateway.archidekt import DeckCard, rich_doc
 from mtg_gateway.decks import Change, DeckError, parse_changes, parse_details
 
-from .conftest import GATEWAY, FakeIdP, Harness, make_settings, running
-from .fake_archidekt import FakeArchidekt
-from .test_decks_and_proxy import Browser, Stack, _client, call, linked_user, structured
+from .conftest import GATEWAY, Harness, Stack
+from .test_decks_and_proxy import Browser, call, linked_user, structured
+from .track_a_helpers import apply_any
 
 AMY = {"sub": "user-2", "email": "amy@example.test", "name": "Amy", "preferred_username": "amy", "groups": []}
 
-
-@pytest.fixture
-async def stack(tmp_path: Path, idp: FakeIdP):
-    """Writes on, applies allowed over MCP (as test_decks_and_proxy.stack, without the proxy)."""
-    ark = FakeArchidekt()
-    settings = make_settings(
-        tmp_path, writes_enabled=True, approval_mode_default="auto", archidekt_base="https://ark.test/api"
-    )
-    async with running(Harness(settings, idp, archidekt=_client(settings, ark))) as h:
-        yield Stack(h, ark)
+# ``stack`` is the shared AUTO stack (tests/conftest.py): writes on, applies allowed over MCP.
 
 
 def _rows(ark, deck_id: int) -> dict[str, dict]:
@@ -36,13 +27,13 @@ def _rows(ark, deck_id: int) -> dict[str, dict]:
 async def test_propose_details_then_apply_changes_and_verifies(stack: Stack) -> None:
     h, ark = stack.h, stack.ark
     token = await linked_user(stack)
-    details = {"name": "Aesi Lands", "deck_format": "modern", "edh_bracket": 3, "private": True}
+    details = {"name": "Aesi Lands", "deck_format": "commander", "edh_bracket": 3, "private": True}
     p = structured(await call(h, token, "propose_deck_details", {"deck_id": "42", "details": details}))
     assert p["ok"] and p["state"] == "pending" and p["kind"] == "details", p
     assert p["deck_id"] == "42" and p["deck_name"] == "Sample Commander Deck"
     assert set(p["diff"].splitlines()) == {
         'name: "Sample Commander Deck" -> "Aesi Lands"',
-        "format: unknown -> modern",
+        "format: unknown -> commander",
         "bracket: none -> 3",
         "private: no -> yes",
     }, p["diff"]
@@ -58,13 +49,13 @@ async def test_propose_details_then_apply_changes_and_verifies(stack: Stack) -> 
     assert ark.patches == []  # no card rows were touched
     # One update for the deck itself; the other PATCH names the backup copy made first.
     assert [u for u in ark.updates if u["deck_id"] == 42] == [
-        {"deck_id": 42, "name": "Aesi Lands", "deckFormat": 2, "edhBracket": 3, "private": True}
+        {"deck_id": 42, "name": "Aesi Lands", "deckFormat": 3, "edhBracket": 3, "private": True}
     ]
     backup_id = int(a["result"]["backup_deck_id"])
     assert ark.decks[backup_id]["name"].startswith("Sample Commander Deck (backup ")
     assert [u["deck_id"] for u in ark.updates] == [backup_id, 42]  # backup before the change
     deck = ark.decks[42]
-    assert deck["name"] == "Aesi Lands" and deck["deckFormat"] == 2 and deck["edhBracket"] == 3
+    assert deck["name"] == "Aesi Lands" and deck["deckFormat"] == 3 and deck["edhBracket"] == 3
     assert deck["private"] is True and 42 in ark.private
     snap = h.db.get_snapshot(a["snapshot_id"], "user-1")
     assert snap and snap["deck"]["name"] == "Sample Commander Deck"  # pre-change state kept
@@ -87,9 +78,11 @@ async def test_propose_details_then_apply_changes_and_verifies(stack: Stack) -> 
         "private: yes -> no",
         'description: (changed, 120 chars) "' + "x" * 120 + '"',
     }
-    a2 = structured(await call(h, token, "apply_proposal", {"proposal_id": p2["proposal_id"]}))
+    # Q141 item 3B: making a deck public waits for the member's press even in Full auto
+    assert p2["assistant_may_apply"] is False and p2["risk_reason"] == "makes the deck public", p2
+    a2 = await apply_any(h, token, p2["proposal_id"])
     assert a2["ok"] and a2["result"]["verified"] is True, a2
-    assert ark.decks[42]["edhBracket"] is None and ark.decks[42]["description"] == "x" * 120
+    assert ark.decks[42]["edhBracket"] is None and ark.decks[42]["description"] == rich_doc("x" * 120)
     assert 42 not in ark.private
 
 
@@ -193,7 +186,8 @@ async def test_details_proposal_shows_on_the_review_page_and_only_to_its_owner(s
     assert "Apply these changes to Archidekt" in page.text
 
     # Applying from the review page works as for a card edit.
-    r = await b.http.post(f"/proposals/{p['proposal_id']}", data={"csrf": await b.csrf(), "action": "apply"})
+    url = f"/proposals/{p['proposal_id']}"
+    r = await b.http.post(url, data={**await b.review_form(url), "action": "apply"})
     assert r.status_code == 303 and "ok=" in r.headers["location"], r.headers
     assert ark.decks[42]["name"] == "Aesi <Lands>" and ark.decks[42]["unlisted"] is True
     await b.aclose()
@@ -207,6 +201,186 @@ async def test_details_proposal_shows_on_the_review_page_and_only_to_its_owner(s
     await b2.login()
     assert (await b2.http.get(f"/proposals/{p['proposal_id']}")).status_code == 404
     await b2.aclose()
+
+
+PHISH = json.dumps(
+    {
+        "ops": [
+            {"insert": "See my primer", "attributes": {"link": "https://evil.example/login"}},
+            {"insert": "\n"},
+        ]
+    }
+)
+
+
+async def test_an_assistant_description_is_written_as_plain_text_only(stack: Stack) -> None:
+    """M4/Q70, the reviewer's scenario: an assistant proposes a description as a Quill document
+    with a hidden link. The review page, the chat card's rows and the proposal text show "See my
+    primer", and that plain text is exactly what is written: the link never reaches Archidekt."""
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    res = await call(h, token, "propose_deck_details", {"deck_id": "42", "details": {"description": PHISH}})
+    p = structured(res)
+    assert p["ok"], p
+    assert p["changes"] == {"description": "See my primer"}
+    (row,) = [r for r in p["rows"] if r["kind"] == "description"]
+    assert row["after_text"] == "See my primer"
+    assert all("evil" not in str(c.get("text", "")) for c in res["content"])  # the proposal text
+    assert "See my primer" in res["content"][0]["text"]
+    b = Browser(h)
+    await b.login()
+    page = await b.http.get(f"/proposals/{p['proposal_id']}")
+    assert "See my primer" in page.text and "evil" not in page.text
+    url = f"/proposals/{p['proposal_id']}"
+    r = await b.http.post(url, data={**await b.review_form(url), "action": "apply"})
+    assert r.status_code == 303 and "ok=" in r.headers["location"], r.headers
+    await b.aclose()
+    sent = [u for u in ark.updates if u["deck_id"] == 42]
+    assert sent == [{"deck_id": 42, "description": rich_doc("See my primer")}], sent
+    assert "evil" not in ark.decks[42]["description"]
+
+
+async def test_the_settings_form_writes_a_typed_document_as_plain_text(stack: Stack) -> None:
+    """Q70: text typed (or pasted) in the gateway's deck settings form is plain text too."""
+    h, ark = stack.h, stack.ark
+    await linked_user(stack)
+    b = Browser(h)
+    await b.login()
+    r = await b.http.post(
+        "/decks/42/settings",
+        data={"csrf": await b.csrf("/decks"), "name": ark.decks[42]["name"], "description": PHISH},
+    )
+    assert r.status_code == 303, r.text[:300]
+    page = await b.http.get(r.headers["location"])
+    assert "See my primer" in page.text and "evil" not in page.text, page.text[:500]
+    await b.aclose()  # the form applies the change at once (the member's own press)
+    assert ark.decks[42]["description"] == rich_doc("See my primer")
+
+
+async def test_a_restore_puts_the_formatted_description_back(stack: Stack) -> None:
+    """Q70: only a snapshot restore writes a Quill document as it is: the deck's own formatted
+    description (a link the member made on Archidekt included) comes back unchanged."""
+    h, ark = stack.h, stack.ark
+    formatted = json.dumps(
+        {
+            "ops": [
+                {"insert": "Primer", "attributes": {"link": "https://example.com/primer"}},
+                {"insert": " and "},
+                {"insert": "notes", "attributes": {"bold": True}},
+                {"insert": "\n"},
+            ]
+        }
+    )
+    ark.decks[42]["description"] = formatted
+    token = await linked_user(stack)
+    p = structured(
+        await call(h, token, "propose_deck_details", {"deck_id": "42", "details": {"description": "new"}})
+    )
+    a = await apply_any(h, token, p["proposal_id"])
+    assert a["ok"] and ark.decks[42]["description"] == rich_doc("new"), a
+    r = structured(await call(h, token, "propose_restore_snapshot", {"snapshot_id": a["snapshot_id"]}))
+    assert r["ok"], r
+    (row,) = [x for x in r["rows"] if x["kind"] == "description"]
+    assert row["after_text"] == "Primer and notes"
+    done = await apply_any(h, token, r["proposal_id"])
+    assert done["ok"] and done["result"]["verified"] is True, done
+    assert ark.decks[42]["description"] == formatted
+
+
+# Q90: the note an assistant's reply carries when its description lost links, formatting or embeds
+DESCRIPTION_NOTE = (
+    "Only the words of this description are saved: the gateway writes new text as plain text, so the "
+    "links, formatting and embeds in what you sent were removed (formatting already on Archidekt "
+    "stays where its words did not change). Don't tell the user a link or formatting was added."
+)
+# Texts that lose nothing visible: plain text, Markdown (written as typed) and a words-only document
+NO_LOSS = (
+    "Ramp first, then draw.",
+    "**Primer**: [my guide](https://example.com/guide)",
+    json.dumps({"ops": [{"insert": "Ramp first.\nThen draw.\n"}]}),
+)
+
+
+async def test_the_assistant_is_told_when_a_description_loses_its_link(stack: Stack) -> None:
+    """Q90: a description proposed as a Quill document with a link is saved as its words, and the
+    proposal reply says so (structured content and the text the model reads), so the assistant
+    does not claim the link was added."""
+    h = stack.h
+    token = await linked_user(stack)
+    res = await call(h, token, "propose_deck_details", {"deck_id": "42", "details": {"description": PHISH}})
+    p = structured(res)
+    assert p["ok"] and p["note"] == DESCRIPTION_NOTE, p
+    assert "note: " + DESCRIPTION_NOTE in res["content"][0]["text"]
+    assert p["changes"] == {"description": "See my primer"}  # the same text is written as before
+    # a later get_proposal and apply of this proposal (stored as plain text) add none
+    got = structured(await call(h, token, "get_proposal", {"proposal_id": p["proposal_id"]}))
+    assert got["ok"] and "note" not in got, got
+    a = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
+    assert a["ok"] and a["state"] == "applied" and "note" not in a, a
+
+
+@pytest.mark.parametrize("text", NO_LOSS)
+async def test_a_description_that_loses_nothing_gets_no_note(stack: Stack, text: str) -> None:
+    """Q90: plain text, Markdown and a document of words only lose nothing: no note."""
+    token = await linked_user(stack)
+    res = await call(
+        stack.h, token, "propose_deck_details", {"deck_id": "42", "details": {"description": text}}
+    )
+    p = structured(res)
+    assert p["ok"] and "note" not in p, p
+    assert "note:" not in res["content"][0]["text"]
+
+
+def _as_stored_by_0726(h: Harness, pid: str, changes: dict) -> None:
+    """Make a pending proposal hold its text as 0.7.26 stored it: as given, a document included."""
+    h.db._conn.execute("UPDATE proposals SET changes_json = ? WHERE id = ?", (json.dumps(changes), pid))
+
+
+async def _stored_0726(stack: Stack, token: str, text: str) -> str:
+    p = structured(
+        await call(stack.h, token, "propose_deck_details", {"deck_id": "42", "details": {"description": "x"}})
+    )
+    _as_stored_by_0726(stack.h, p["proposal_id"], {"description": text})
+    return p["proposal_id"]
+
+
+async def test_a_description_stored_by_0726_is_applied_as_words_and_the_reply_says_so(stack: Stack) -> None:
+    """Q90: a details proposal stored by 0.7.26 with a formatted document is converted when it is
+    applied; get_proposal and the apply reply tell the assistant so."""
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    pid = await _stored_0726(stack, token, PHISH)
+    got = structured(await call(h, token, "get_proposal", {"proposal_id": pid}))
+    assert got["note"] == DESCRIPTION_NOTE, got
+    a = structured(await call(h, token, "apply_proposal", {"proposal_id": pid}))
+    assert a["ok"] and a["state"] == "applied" and a["note"] == DESCRIPTION_NOTE, a
+    assert ark.decks[42]["description"] == rich_doc("See my primer")
+
+
+async def test_the_cards_apply_of_a_0726_description_says_so_too(stack: Stack) -> None:
+    """Q90: the in-chat card's apply (confirm_proposal) of such a proposal carries the note."""
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    pid = await _stored_0726(stack, token, PHISH)
+    code = h.app.state.gateway.decks.approval_for("user-1", h.db.get_proposal(pid, "user-1"))
+    done = structured(await call(h, token, "confirm_proposal", {"proposal_id": pid, "approval": code}))
+    assert done["ok"] and done["state"] == "applied" and done["note"] == DESCRIPTION_NOTE, done
+    assert ark.decks[42]["description"] == rich_doc("See my primer")
+
+
+async def test_a_0726_description_that_loses_nothing_or_was_rejected_gets_no_note(stack: Stack) -> None:
+    """Q90: a stored words-only document or Markdown loses nothing; a rejected proposal saves nothing."""
+    h = stack.h
+    token = await linked_user(stack)
+    for text in NO_LOSS[1:]:
+        pid = await _stored_0726(stack, token, text)
+        got = structured(await call(h, token, "get_proposal", {"proposal_id": pid}))
+        assert got["ok"] and "note" not in got, got
+        await call(h, token, "reject_proposal", {"proposal_id": pid})
+    pid = await _stored_0726(stack, token, PHISH)
+    await call(h, token, "reject_proposal", {"proposal_id": pid})
+    got = structured(await call(h, token, "get_proposal", {"proposal_id": pid}))
+    assert got["state"] == "rejected" and "note" not in got, got
 
 
 def test_parse_details_normalises_the_format() -> None:
@@ -246,7 +420,7 @@ async def test_set_category_and_set_commander_proposed_applied_and_verified(stac
     assert "<span class='act'>Commander</span><span class='name'>Rampant Growth</span>" in page.text
     await b.aclose()
 
-    a = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
+    a = await apply_any(h, token, p["proposal_id"])
     assert a["ok"] and a["state"] == "applied" and a["result"]["verified"] is True, a
     assert a["result"]["sent_entries"] == 3
     sent = [patch["cards"][0] for patch in ark.patches]
@@ -281,7 +455,7 @@ async def test_set_category_and_set_commander_proposed_applied_and_verified(stac
     )
     assert p2["ok"], p2
     assert p2["diff"] == "Commander: Rampant Growth -> Acidic Slime, Sol Ring"
-    a2 = structured(await call(h, token, "apply_proposal", {"proposal_id": p2["proposal_id"]}))
+    a2 = await apply_any(h, token, p2["proposal_id"])
     assert a2["ok"] and a2["result"]["verified"] is True, a2
     after = _rows(ark, 42)
     commanders = sorted(n for n, c in after.items() if "Commander" in (c["categories"] or []))
@@ -455,14 +629,17 @@ async def test_restoring_a_snapshot_puts_the_deck_details_back(stack: Stack) -> 
     # The fixture deck has no format; give it one first so the restore has a format to go back to.
     p0 = structured(
         await call(
-            h, token, "propose_deck_details", {"deck_id": "42", "details": {"deck_format": "commander"}}
+            h,
+            token,
+            "propose_deck_details",
+            {"deck_id": "42", "details": {"deck_format": "commander", "edh_bracket": 3}},
         )
     )
-    assert structured(await call(h, token, "apply_proposal", {"proposal_id": p0["proposal_id"]}))["ok"]
-    details = {"name": "Aesi Lands", "description": "new text", "deck_format": "modern", "edh_bracket": 3}
-    details["private"] = True
+    assert (await apply_any(h, token, p0["proposal_id"]))["ok"]
+    # moving the deck to Modern also clears its bracket, as on archidekt.com (Q56)
+    details = {"name": "Aesi Lands", "description": "new text", "deck_format": "modern", "private": True}
     p = structured(await call(h, token, "propose_deck_details", {"deck_id": "42", "details": details}))
-    a = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
+    a = await apply_any(h, token, p["proposal_id"])
     assert a["ok"] and a["result"]["verified"] is True, a
     assert ark.decks[42]["name"] == "Aesi Lands" and ark.decks[42]["private"] is True
 
@@ -474,18 +651,18 @@ async def test_restoring_a_snapshot_puts_the_deck_details_back(stack: Stack) -> 
         'name: "Aesi Lands" -> "Sample Commander Deck"',
         "description: (cleared)",
         "format: modern -> commander",
-        "bracket: 3 -> none",
+        "bracket: none -> 3",
         "private: yes -> no",
     }, lines
     assert r["changes"]["details"] == {
         "name": "Sample Commander Deck",
         "description": "",
         "deck_format": "commander",
-        "edh_bracket": None,
+        "edh_bracket": 3,
         "private": False,
     }
     before = len(ark.updates)
-    a2 = structured(await call(h, token, "apply_proposal", {"proposal_id": r["proposal_id"]}))
+    a2 = await apply_any(h, token, r["proposal_id"])
     assert a2["ok"] and a2["state"] == "applied" and a2["result"]["verified"] is True, a2
     assert a2["result"]["restored_details"] == [
         "deck_format",
@@ -502,12 +679,12 @@ async def test_restoring_a_snapshot_puts_the_deck_details_back(stack: Stack) -> 
             "name": "Sample Commander Deck",
             "description": "",
             "deckFormat": 3,
-            "edhBracket": None,
+            "edhBracket": 3,
             "private": False,
         }
     ], sent
     deck = ark.decks[42]
-    assert deck["name"] == "Sample Commander Deck" and deck["edhBracket"] is None
+    assert deck["name"] == "Sample Commander Deck" and deck["edhBracket"] == 3
     assert (
         deck["deckFormat"] == 3
         and deck["private"] is False
@@ -526,7 +703,7 @@ async def test_restoring_the_snapshot_undoes_a_details_change(stack: Stack) -> N
     token = await linked_user(stack)
     details = {"name": "Renamed by test", "description": "test text", "private": True}
     p = structured(await call(h, token, "propose_deck_details", {"deck_id": "42", "details": details}))
-    a = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
+    a = await apply_any(h, token, p["proposal_id"])
     assert a["ok"] and a["state"] == "applied", a
     assert ark.decks[42]["name"] == "Renamed by test" and ark.decks[42]["private"] is True
     patches_before = len(ark.patches)
@@ -534,7 +711,7 @@ async def test_restoring_the_snapshot_undoes_a_details_change(stack: Stack) -> N
     assert r["ok"], r
     assert 'name: "Renamed by test" -> "Sample Commander Deck"' in r["diff"], r["diff"]
     assert "private: yes -> no" in r["diff"], r["diff"]
-    done = structured(await call(h, token, "apply_proposal", {"proposal_id": r["proposal_id"]}))
+    done = await apply_any(h, token, r["proposal_id"])
     assert done["ok"] and done["state"] == "applied", done
     assert done["result"]["verified"] is True
     assert done["result"]["restored_details"] == ["description", "name", "private"], done["result"]

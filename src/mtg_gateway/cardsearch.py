@@ -20,12 +20,14 @@ import re
 import time
 from collections import OrderedDict
 from typing import TYPE_CHECKING, Any
-from urllib.parse import parse_qs, urlencode, urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
-from .deckpage import mana_html
+from . import cardquery as cq
+from . import cardsearch_view as cv
+from . import prefs
 from .pages import NO_STORE, _csrf, browser_session, login_redirect
 from .scan.service import ScanError
 from .theme import esc as _esc
@@ -44,68 +46,12 @@ CARDS_CSP = (
     "img-src 'self' https://cards.scryfall.io; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
 )
 MAX_QUERY = 100
-CARDS_CSS = """
-.cardsearch form.row{display:flex;flex-wrap:wrap;align-items:end;gap:.75rem 1rem;margin:0}
-.cardsearch form.row .field{margin:0;flex:1 1 18rem;min-width:0}
-.cardsearch form.row .search{margin:0}
-.cardsearch form.row .search .suggest{flex:1 1 auto;min-width:0}
-.cardsearch form.row .search .suggest > input{border-radius:var(--radius) 0 0 var(--radius);border-right:0}
-.cardsearch form.row .search button{height:var(--ctl);min-height:var(--ctl);padding:0 .9rem}
-.cardsearch form.row > .btn{margin:0;height:var(--ctl);white-space:nowrap}
-.cardsearch .readonly{margin:.9rem 0 0;display:flex;flex-wrap:wrap;align-items:center;gap:.4rem .75rem;
-  color:var(--text-muted);font-size:.93rem}
-.cardsearch .readonly a{font-weight:700}
-@media (max-width:600px){ .cardsearch form.row > .btn{width:100%} }
-.cardgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,10.5rem),1fr));gap:1rem .9rem;
-  list-style:none;margin:0 0 1rem;padding:0}
-.cardgrid .cc{display:flex;flex-direction:column;gap:.5rem;min-width:0}
-.cardgrid .pic{all:unset;display:block;cursor:pointer;position:relative;aspect-ratio:5/7;border-radius:4.5%;
-  overflow:hidden;background:var(--surface-2);border:2px solid var(--card-border);box-sizing:border-box}
-.cardgrid .pic:focus-visible{outline:3px solid var(--orange);outline-offset:2px}
-.cardgrid .pic img{width:100%;height:100%;display:block;object-fit:cover}
-.cardgrid .pic .ph{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
-  padding:.75rem;text-align:center;font-weight:700;color:var(--text-muted);overflow-wrap:anywhere}
-.cardgrid .meta{display:flex;flex-direction:column;gap:.15rem;min-width:0}
-.cardgrid .nm{display:flex;flex-wrap:wrap;align-items:center;gap:.2rem .4rem;font-weight:700;line-height:1.25;
-  overflow-wrap:anywhere;min-width:0}
-.cardgrid .ty{font-size:.86rem;color:var(--text-muted);overflow-wrap:anywhere}
-.cardgrid .add{margin:0;width:100%;min-width:0}
-.cardgrid .add > span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-/* Add to deck: a small dialog over the page (a bottom sheet on phones), themed like the card viewer */
-.addsheet{position:fixed;inset:0;z-index:70;display:none;align-items:center;justify-content:center;
-  background:var(--scrim-strong,rgba(0,0,0,.72));padding:1rem}
-.addsheet.open{display:flex}
-.addsheet .box{width:min(100%,27rem);max-height:100%;overflow:auto;overscroll-behavior:contain;
-  background:var(--surface);color:var(--text);border:1px solid var(--border);
-  border-radius:var(--radius-panel);padding:1.25rem;box-shadow:0 12px 40px rgba(0,0,0,.5);
-  display:flex;flex-direction:column;gap:.9rem}
-.addsheet .head{display:flex;align-items:flex-start;justify-content:space-between;gap:.75rem;min-width:0}
-.addsheet h3{margin:0;font-size:1.25rem;line-height:1.25;overflow-wrap:anywhere;min-width:0;display:flex;
-  flex-wrap:wrap;align-items:center;gap:.4rem .5rem}
-.addsheet .close{flex:none;margin:0;width:2.4rem;min-height:2.4rem;height:2.4rem;font-size:1.5rem;
-  line-height:1;font-weight:400;border-radius:50%}
-.addsheet .field{margin:0}
-.addsheet .field > label{margin:0}
-.addsheet .two{display:grid;grid-template-columns:6rem minmax(0,1fr);gap:.9rem}
-.addsheet .msg{margin:0;font-size:.93rem;color:var(--text-muted);min-height:1.2em}
-.addsheet .msg.err{color:var(--red-text);font-weight:700}
-.addsheet .acts{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:.5rem;margin-top:.25rem}
-.addsheet .acts button{margin:0}
-@media (max-width:600px){
-  .addsheet{padding:0;align-items:flex-end}
-  .addsheet .box{width:100%;max-height:94vh;max-height:94dvh;border-bottom:0;
-    border-radius:var(--radius-panel) var(--radius-panel) 0 0;
-    padding-bottom:calc(1.25rem + env(safe-area-inset-bottom))}
-  .addsheet .acts button{flex:1 1 auto} }
-.toast.cards-toast{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem .75rem;z-index:75}
-.toast.cards-toast .msg{flex:1 1 12rem;min-width:0;overflow-wrap:anywhere}
-.toast.cards-toast .btn,.toast.cards-toast button{margin:0}
-.toast.cards-toast .close{width:2rem;min-height:2rem;height:2rem;padding:0;border-radius:50%;font-size:1.2rem}
-"""
+SEARCH_PAGES = 200  # result pages a search can be read to; past it there is no "more"
 
 
 TEXT_TTL = 6 * 3600  # seconds a card's text is kept
 TEXT_MAX = 500  # cards kept at most (each a few hundred bytes)
+ABSENT_TTL = 1800  # seconds a name Scryfall does not know is remembered as unknown
 
 
 def _face(f: dict[str, Any]) -> dict[str, str]:
@@ -197,6 +143,7 @@ class TextCache:
         self.max_items = max_items
         self._items: OrderedDict[str, tuple[float, dict[str, Any]]] = OrderedDict()
         self._inflight: dict[str, asyncio.Future[dict[str, Any]]] = {}
+        self._absent: OrderedDict[str, tuple[float, str]] = OrderedDict()  # names Scryfall does not know
 
     @staticmethod
     def key(name: str) -> str:
@@ -223,14 +170,45 @@ class TextCache:
     def __len__(self) -> int:
         return len(self._items)
 
+    def _missing(self, k: str) -> ScanError | None:
+        hit = self._absent.get(k)
+        if hit is None:
+            return None
+        if hit[0] < time.monotonic():
+            self._absent.pop(k, None)
+            return None
+        return ScanError("not_found", hit[1])
+
     async def fetch(self, name: str, source: Any) -> dict[str, Any]:
         """The text for ``name``: from the cache, from a fetch already in flight for it, or from
-        one new ``await source(name)`` (the whole card) that every concurrent caller shares."""
-        if (hit := self.get(name)) is not None:
-            return hit
+        one new ``await source(name)`` (the whole card) that every concurrent caller shares. A
+        name Scryfall does not know is remembered for a while too, so asking again costs no
+        request (A15). When the caller whose fetch others are waiting on goes away (its page was
+        closed), the fetch is cancelled with it; a waiter that is still wanted then starts its own
+        instead of failing as if it had been cancelled itself (A16). Likewise a ``busy`` answer
+        belongs to the caller whose lookup slot ran the fetch (its own other lookups were still
+        running): a waiter, maybe another member, starts its own fetch in its own slot instead
+        of taking that answer as its own."""
         k = self.key(name)
-        if (waiting := self._inflight.get(k)) is not None:
-            return await asyncio.shield(waiting)
+        while True:
+            if (hit := self.get(name)) is not None:
+                return hit
+            if (missing := self._missing(k)) is not None:
+                raise missing
+            waiting = self._inflight.get(k)
+            if waiting is None:
+                break
+            try:
+                return await asyncio.shield(waiting)
+            except ScanError as exc:
+                if exc.kind == "busy":
+                    continue  # the fetch's own caller was busy, not this one: ask in this one's slot
+                raise
+            except asyncio.CancelledError:
+                task = asyncio.current_task()
+                if waiting.cancelled() and not (task is not None and task.cancelling()):
+                    continue  # the shared fetch went away with its caller; this one is still wanted
+                raise
         fut: asyncio.Future[dict[str, Any]] = asyncio.get_running_loop().create_future()
         self._inflight[k] = fut
         try:
@@ -238,7 +216,14 @@ class TextCache:
             self.put(name, text)
             fut.set_result(text)
             return text
+        except asyncio.CancelledError:
+            fut.cancel()
+            raise
         except BaseException as exc:
+            if isinstance(exc, ScanError) and exc.kind == "not_found":
+                self._absent[k] = (time.monotonic() + ABSENT_TTL, str(exc))
+                while len(self._absent) > self.max_items:
+                    self._absent.popitem(last=False)
             fut.set_exception(exc)
             raise
         finally:
@@ -279,53 +264,16 @@ def clean_query(raw: str | None) -> str:
     return " ".join((raw or "").split())[:MAX_QUERY]
 
 
-def card_tile_html(card: dict[str, Any], *, can_add: bool, reason: str) -> str:
-    """One result: the picture (a button that opens the card viewer, carrying the data attributes
-    cardview.js reads), name with mana pips, type line and the Add to deck button."""
-    name = str(card.get("name") or "")
-    img = card.get("image_normal") or card.get("image_small") or ""
-    set_code = str(card.get("set") or "").upper()
-    printing = f"{set_code} {card.get('collector_number') or ''}".strip()
-    legal = "commander" if card.get("legal_commander") == "legal" else ""
-    attrs = (
-        f" data-card='{_esc(name)}'"
-        + (f" data-img='{_esc(img)}'" if img else "")
-        + f" data-set='{_esc(printing)}'"
-        f" data-type='{_esc(card.get('type_line') or '')}'"
-        f" data-mana='{_esc(card.get('mana_cost') or '')}'"
-        + (f" data-rarity='{_esc(card['rarity'])}'" if card.get("rarity") else "")
-        + (f" data-legal='{legal}'" if legal else "")
-        + (f" data-scry='{_esc(card['scryfall_uri'])}'" if card.get("scryfall_uri") else "")
-    )
-    body = (
-        f"<img src='{_esc(img)}' alt='' loading='lazy' decoding='async'>"
-        if img
-        else f"<span class='ph'>{_esc(name)}</span>"
-    )
-    add = (
-        f"<button type='button' class='btn add' data-add='{_esc(name)}'"
-        + ("" if can_add else f" disabled title='{_esc(reason)}'")
-        + f">{icon('plus')}<span>Add to deck</span></button>"
-    )
-    return (
-        f"<li class='cc'><button type='button' class='pic'{attrs} aria-label='{_esc(name)}: show the card'>"
-        f"{body}</button><div class='meta'><span class='nm'><span>{_esc(name)}</span>"
-        f"{mana_html(str(card.get('mana_cost') or ''))}</span>"
-        f"<span class='ty'>{_esc(card.get('type_line') or '')}</span></div>{add}</li>"
-    )
-
-
-def search_box_html(q: str) -> str:
-    deck_link = "/search" + ("?" + urlencode({"name": q}) if q else "")
-    return (
-        "<form method='get' action='/cards' class='row' role='search'>"
-        "<div class='field'><label for='c-q'>Card name</label><span class='search'>"
-        f"<input id='c-q' type='search' name='q' value='{_esc(q)}' maxlength='{MAX_QUERY}' "
-        "placeholder='Any part of a card name' data-suggest='cards' data-suggest-rich "
-        "data-suggest-submit autocomplete='off' enterkeyhint='search'>"
-        f"<button type='submit' aria-label='Search cards'>{icon('search')}</button></span></div>"
-        f"<a class='btn' href='{deck_link}'>{icon('decks')} Search decks instead</a></form>"
-    )
+START_HTML = (
+    "<section class='panel'><h2>Find a card</h2><p class='muted'>Type part of a card name, or pick "
+    "any filter: the cards that match show here as you go. Every field of Scryfall's advanced search "
+    "is under Filters and More filters. Paper cards only, unless you pick Arena or Magic Online under "
+    "Games.</p></section>"
+)
+NO_MATCH_HTML = (
+    "<section class='panel'><p class='muted'>No card matches these filters. Check the spelling, or "
+    "take a filter away.</p></section>"
+)
 
 
 def add_cardsearch_routes(server: MCPServer, state: AppState) -> None:
@@ -428,7 +376,7 @@ def add_cardsearch_routes(server: MCPServer, state: AppState) -> None:
             current="/search",
             head_extra=(
                 # deck.css carries the card viewer's own styles (the dialog, its bottom sheet on phones)
-                f"{stylesheet_link('deck.css')}<style>{CARDS_CSS}</style>"
+                f"{stylesheet_link('deck.css')}<style>{cv.CARDS_CSS}</style>"
                 "<script src='/static/cardview.js' defer></script>"
                 "<script src='/static/cardsearch.js' defer></script>"
             ),
@@ -436,59 +384,187 @@ def add_cardsearch_routes(server: MCPServer, state: AppState) -> None:
         resp.headers["Content-Security-Policy"] = CARDS_CSP
         return resp
 
+    def problem_text(exc: ScanError) -> str:
+        return {
+            "rate_limited": "Scryfall asked us to wait a moment. Try again shortly.",
+            "unavailable": "Scryfall is not answering right now. Try again in a moment.",
+            "busy": "Your other card lookups are still running. Try again in a moment.",
+            "invalid": f"Scryfall could not read that search: {exc}",
+            "too_long": "This search is too long. Remove some filters or words.",
+            "off": str(exc),
+        }.get(exc.kind, f"The cards could not be looked up: {exc}")
+
+    async def run_search(f: cq.Filters, page_no: int, sub: str) -> dict[str, Any]:
+        scan = state.scan
+        if scan is None:
+            raise ScanError("off", "Card lookup is switched off on this gateway.")
+        query = cq.scryfall_query(f)
+        if len(query) > cq.MAX_QUERY:
+            # refused whole: a cut search would lose its last filters (paper only among them)
+            raise ScanError("too_long", f"the search is {len(query)} characters, over {cq.MAX_QUERY}")
+        out = await scan.search_cards(query, order=f.order, direction=f.dir, page=page_no, owner=sub)
+        if page_no >= SEARCH_PAGES:
+            out = {**out, "has_more": False}  # the page number stops here, so no page follows
+        return out
+
+    def add_reason(sub: str) -> tuple[bool, str]:
+        linked = decks.status(sub)["linked"]
+        return (
+            linked,
+            "" if linked else "Link your Archidekt account on the Account page to add cards to a deck.",
+        )
+
+    def view_of(request: Request, sub: str) -> tuple[str, bool]:
+        return prefs.view_choice(state.db, sub, request, "cards", cv.VIEWS, "grid")
+
+    @server.custom_route("/cards/api/search", methods=["GET"], include_in_schema=False)
+    async def search_api(request: Request) -> Response:
+        """One page of results for the filters in the address, drawn as the page draws them
+        (cardsearch_view.py): ``{ok, html, total, has_more, page, query}``. ``items_only`` (any
+        page after the first) leaves out the list around the rows, so the page appends them."""
+        sub, _sid = browser_session(state, request)
+        if not sub:
+            return JSONResponse({"ok": False, "error": "unauthenticated"}, 401, headers=NO_STORE)
+        f = cq.parse(request.query_params)
+        view, remember = view_of(request, sub)
+        try:
+            page_no = max(1, min(int(request.query_params.get("page") or 1), SEARCH_PAGES))
+        except ValueError:
+            page_no = 1
+        if not f.chosen():
+            return JSONResponse(
+                {"ok": True, "html": "", "total": 0, "has_more": False, "page": 1, "empty": True},
+                headers=NO_STORE,
+            )
+        try:
+            out = await run_search(f, page_no, sub)
+        except ScanError as exc:
+            status = {"rate_limited": 429, "busy": 429, "invalid": 400, "too_long": 400}.get(exc.kind, 503)
+            return JSONResponse(
+                {"ok": False, "error": exc.kind, "message": problem_text(exc)}, status, headers=NO_STORE
+            )
+        linked, reason = add_reason(sub)
+        printing = f.shows_printings()
+        if page_no > 1:
+            html_out = cv.results_items_html(
+                out["cards"], view=view, can_add=linked, reason=reason, printing=printing
+            )
+        else:
+            html_out = (
+                cv.results_list_html(
+                    out["cards"], view=view, can_add=linked, reason=reason, printing=printing, linked=linked
+                )
+                if out["cards"]
+                else NO_MATCH_HTML
+            )
+        resp = JSONResponse(
+            {
+                "ok": True,
+                "html": html_out,
+                "total": out.get("total_cards"),
+                "has_more": out.get("has_more", False),
+                "page": page_no,
+                "count": len(out["cards"]),
+                "warnings": out.get("warnings", []),
+                "query": cq.scryfall_query(f),
+            },
+            headers=NO_STORE,
+        )
+        return (
+            prefs.remember_view(
+                state.db, sub, resp, "cards", view, secure=s.public_url.startswith("https://")
+            )
+            if remember
+            else resp
+        )
+
+    @server.custom_route("/cards/api/options", methods=["GET"], include_in_schema=False)
+    async def options_api(request: Request) -> Response:
+        """The pickers' lists (sets, blocks, types from Scryfall, a day at a time; the criteria
+        are Scryfall's fixed list), read when a picker is first opened."""
+        sub, _sid = browser_session(state, request)
+        if not sub:
+            return JSONResponse({"ok": False, "error": "unauthenticated"}, 401, headers=NO_STORE)
+        scan = state.scan
+        if scan is None:
+            return JSONResponse(
+                {"ok": False, "error": "unavailable", "message": "Card lookup is switched off."},
+                503,
+                headers=NO_STORE,
+            )
+        try:
+            out = await scan.search_options(owner=sub)
+        except ScanError as exc:
+            status = {"rate_limited": 429, "busy": 429}.get(exc.kind, 503)
+            return JSONResponse(
+                {"ok": False, "error": exc.kind, "message": problem_text(exc)}, status, headers=NO_STORE
+            )
+        out["criteria"] = [{"code": v, "name": label} for v, label in cq.CRITERIA]
+        cache = "no-store" if out.get("partial") else "private, max-age=3600"
+        return JSONResponse(
+            {"ok": True, **out}, headers={"Cache-Control": cache, "X-Content-Type-Options": "nosniff"}
+        )
+
     @server.custom_route("/cards", methods=["GET"], include_in_schema=False)
     async def cards_page(request: Request) -> Response:
         sub, sid = browser_session(state, request)
         if not sub:
             return login_redirect("/cards" + (f"?{request.url.query}" if request.url.query else ""))
-        q = clean_query(request.query_params.get("q"))
-        linked = decks.status(sub)["linked"]
-        reason = "" if linked else "Link your Archidekt account on the Account page to add cards to a deck."
-        body = f"<section class='panel cardsearch'>{search_box_html(q)}"
+        f = cq.parse(request.query_params)
+        view, remember = view_of(request, sub)
+        linked, reason = add_reason(sub)
+        body = f"<section class='panel cs-panel'>{cv.filters_html(f, view=view)}"
         if not linked:
             body += (
                 f"<p class='readonly'>{icon('link')}<span>Cards can be read but not added: no Archidekt "
                 "account is linked.</span><a href='/account'>Link it on the Account page</a></p>"
             )
         body += "</section>"
-        if len(q) < 2:
-            body += (
-                "<section class='panel'><h2>Find a card</h2><p class='muted'>Type part of a card name: "
-                "the gateway matches it against every card Scryfall knows, shows the picture, cost and "
-                "type of each match, and adds one to any of your decks in a tap. The box at the top of "
-                "every page does the same, and finds decks too.</p></section>"
-            )
-            return page("Cards", body, sub=sub, sid=sid)
-        scan = state.scan
-        cards: list[dict[str, Any]] = []
-        problem = ""
-        if scan is None:
-            problem = "Card lookup is switched off on this gateway."
-        else:
+        results = ""
+        total: int | None = None
+        has_more = False
+        status_html = ""
+        if f.chosen():
             try:
-                names = await scan.suggest(q, owner=sub)
-                cards = await scan.peek(names, owner=sub) if names else []
+                out = await run_search(f, 1, sub)
             except ScanError as exc:
-                problem = {
-                    "rate_limited": "Scryfall asked us to wait a moment. Try again shortly.",
-                    "unavailable": "Scryfall is not answering right now. Try again in a moment.",
-                }.get(exc.kind, f"The cards could not be looked up: {exc}")
-        count = len(cards)
-        body += (
-            f"<div class='results-head'><h2>Cards matching “{_esc(q)}”</h2>"
-            f"<p class='muted'>{count} card{'' if count == 1 else 's'}</p></div>"
-        )
-        if problem:
-            body += f"<p class='notice error'>{_esc(problem)}</p>"
-        elif not cards:
-            body += (
-                "<section class='panel'><p class='muted'>No card is named like that. Check the spelling, or "
-                "type fewer letters.</p></section>"
-            )
+                status_html = f"<p class='notice error'>{_esc(problem_text(exc))}</p>"
+            else:
+                total = out.get("total_cards")
+                has_more = bool(out.get("has_more"))
+                results = (
+                    cv.results_list_html(
+                        out["cards"],
+                        view=view,
+                        can_add=linked,
+                        reason=reason,
+                        printing=f.shows_printings(),
+                        linked=linked,
+                    )
+                    if out["cards"]
+                    else NO_MATCH_HTML
+                )
         else:
-            body += (
-                f"<ul class='cardgrid' id='cardgrid'{' data-linked' if linked else ''}>"
-                + "".join(card_tile_html(c, can_add=linked, reason=reason) for c in cards)
-                + "</ul>"
+            results = START_HTML
+        more = (
+            "<div class='cs-more-wrap' id='cs-more'"
+            + ("" if has_more else " hidden")
+            + "><button type='button' class='btn' data-more>Load more cards</button></div>"
+        )
+        body += (
+            "<section class='cs-out'>"
+            + cv.results_head_html(f, view=view, total=total, shown=f.chosen())
+            + f"<div id='cs-status' class='cs-status' role='status'>{status_html}</div>"
+            + f"<div id='cs-results' class='cs-results' data-linked='{'1' if linked else ''}'>{results}</div>"
+            + more
+            + f"<template id='cs-start'>{START_HTML}</template>"
+            + "</section>"
+        )
+        resp = page("Cards", body, sub=sub, sid=sid)
+        return (
+            prefs.remember_view(
+                state.db, sub, resp, "cards", view, secure=s.public_url.startswith("https://")
             )
-        return page("Cards", body, sub=sub, sid=sid)
+            if remember
+            else resp
+        )

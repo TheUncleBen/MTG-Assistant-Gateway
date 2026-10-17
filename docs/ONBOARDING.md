@@ -174,18 +174,22 @@ so:
      row limit, 5 card rows by default, each a card added or removed, or a
      new quantity, category, finish, printing, color tag or custom mana
      value, no more than 4 copies a row, never the commander, and private
-     copies of a deck) or Full auto (the deck and collection changes it
-     proposes). Then the assistant applies what your mode allows and tells
+     copies of a deck) or Full auto (the rest too, except a restore, a
+     commander change, a new deck, an edit of more than 20 rows, making
+     a deck public or unlisted, and any edit of a description that has formatting,
+     such as bold text, links or pictures, which still wait for your press; so
+     does a held change, a change waiting for another change first, one
+     another app had a hand in, one that replaces another app's change,
+     or one that another app's waiting change would replace). Then the assistant applies what your mode allows and tells
      you what it did. Actions on your Archidekt account (likes, votes,
      bookmarks, follows, comments, new folders and collaborator changes) and
-     deleting a deck are never applied by an assistant: each one waits for
-     your own press on its review page, in every mode. Be aware that an assistant can be tricked by text it
+     deleting a deck are never applied by an assistant: each one waits for your own press, in every mode, on the card in the chat or on its review page (deleting a deck, and an edit of a comment that has formatting: on the review page only). Be aware that an assistant can be tricked by text it
      reads into proposing a change you did not ask for; in an auto mode
      that change lands without your press. Every change keeps a snapshot
      you can restore from the History page.
 
-   Either way, for an edit the gateway first checks the deck hasn't changed
-   since the proposal, saves a copy of it (a snapshot), and puts a private
+   Either way, for an edit the gateway first checks the change still fits
+   the deck as it is now, saves a copy of it (a snapshot), and puts a private
    backup copy in a folder called "MTG Gateway backups" in your Archidekt
    account (unless the owner switched backups off). Then it makes the change and reads the deck back to confirm it
    matches. The assistant should tell you it was verified, give you the
@@ -242,7 +246,7 @@ Good to know:
 ## 7. What it can't do
 
 - Edit anyone else's deck.
-- Predict multiplayer win rates. Goldfish simulation plays your deck alone.
+- Predict multiplayer win rates. The solo test (goldfish simulation) plays your deck alone.
   A good report gives the seed, number of games, mulligan settings, what it
   couldn't simulate, and the confidence intervals.
 - Keep price watchlists or price history unless whoever runs the gateway has

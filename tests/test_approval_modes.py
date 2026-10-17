@@ -8,34 +8,24 @@ import pytest
 from mtg_gateway import modes
 from mtg_gateway.approve import APPROVAL_META_KEY
 
-from .conftest import FakeIdP, Harness, make_settings, running, sse_json
-from .fake_archidekt import FakeArchidekt
-from .test_decks_and_proxy import Browser, Stack, _client, call, linked_user, structured
+from .conftest import FakeIdP, Harness, Stack, StackOptions, open_stack, sse_json, stack_with
+from .test_decks_and_proxy import Browser, call, linked_user, structured
 
 AMY = {"sub": "user-2", "email": "amy@example.com", "name": "Amy", "preferred_username": "amy"}
 ALICE = {"sub": "user-1", "email": "alice@example.com", "name": "Alice", "preferred_username": "alice"}
 NAMES = ["Arcane Signet", "Rampant Growth", "Sol Ring", "Forest", "Island", "Opt", "Swamp"]
 
 
-def _stack_with(tmp_path, idp: FakeIdP, **over):
-    ark = FakeArchidekt()
-    settings = make_settings(tmp_path, writes_enabled=True, archidekt_base="https://ark.test/api", **over)
-    return Harness(settings, idp, archidekt=_client(settings, ark)), ark
-
-
-@pytest.fixture
-async def stack(tmp_path, idp: FakeIdP):
-    """The shipped defaults: manual for everyone who has not chosen, no cap."""
-    h, ark = _stack_with(tmp_path, idp)
-    async with running(h):
-        yield Stack(h, ark)
+# The shipped defaults: manual for everyone who has not chosen, no cap.
+SHIPPED = StackOptions(settings={"writes_enabled": True})
+stack_options = stack_with(SHIPPED)
 
 
 @pytest.fixture
 async def capped(tmp_path, idp: FakeIdP):
-    h, ark = _stack_with(tmp_path, idp, approval_mode_default="auto", approval_mode_max="semi")
-    async with running(h):
-        yield Stack(h, ark)
+    settings = {"writes_enabled": True, "approval_mode_default": "auto", "approval_mode_max": "semi"}
+    async with open_stack(tmp_path, idp, SHIPPED.but(settings=settings)) as st:
+        yield st
 
 
 async def _set_mode(h: Harness, mode: str, *, user: dict | None = None) -> str:
@@ -157,13 +147,43 @@ async def test_no_tool_or_api_route_sets_the_mode(stack: Stack) -> None:
     token = await linked_user(stack)
     r = await h.mcp(token, "tools/list", {}, rid=3)
     names = {t["name"] for t in sse_json(r)["result"]["tools"]}
-    assert not {n for n in names if "mode" in n or "approval" in n and n != "confirm_proposal"}
+    # "mode" as a word, so remove_card_model (a card model, not the approval mode) is not caught
+    assert not {n for n in names if "mode" in n.split("_") or "approval" in n and n != "confirm_proposal"}
     for path in ("/api/v1/me", "/api/v1/account", "/api/v1/me/approval_mode"):
         r = await h.http.post(
             path, json={"approval_mode": "auto"}, headers={"Authorization": f"Bearer {token}"}
         )
         assert r.status_code in (404, 405), (path, r.status_code)
     assert h.db.get_user("user-1")["approval_mode"] is None
+
+
+async def test_a_cap_changed_on_the_settings_page_applies_at_once(stack: Stack) -> None:
+    """An admin lowers the cap on the Settings page: the Account page refuses a mode above it
+    from then on, with no restart."""
+    h = stack.h
+    await linked_user(stack)
+    h.app.state.gateway.live.set("approval_mode_max", "semi", by="admin-1")
+    assert await _set_mode(h, "auto") == "/account?err=mode_invalid"
+    assert h.db.get_user("user-1")["approval_mode"] is None
+    assert await _set_mode(h, "semi") == "/account?ok=mode_semi"
+
+
+async def test_a_lowered_cap_and_row_limit_apply_at_once_to_a_member_who_chose_more(stack: Stack) -> None:
+    """The join of Track A's live mode reading and Track B's Settings page: a member who already
+    chose Full auto is read as Semi-auto as soon as an admin lowers the cap, with no restart, and a
+    lowered row limit makes a 3-row edit high risk at once."""
+    h = stack.h
+    token = await linked_user(stack)
+    assert await _set_mode(h, "auto") == "/account?ok=mode_auto"
+    assert structured(await call(h, token, "account_status"))["approval_mode"] == "auto"
+    h.app.state.gateway.live.set("approval_mode_max", "semi", by="admin-1")
+    assert h.db.get_user("user-1")["approval_mode"] == "auto"  # the stored choice is kept
+    assert structured(await call(h, token, "account_status"))["approval_mode"] == "semi"
+    p = structured(await _adds(h, token, 3))
+    assert p["approval_mode"] == "semi" and p["risk"] == "low" and p["assistant_may_apply"] is True
+    h.app.state.gateway.live.set("auto_apply_max_rows", 2, by="admin-1")
+    p = structured(await _adds(h, token, 3))
+    assert p["approval_mode"] == "semi" and p["risk"] == "high" and p["assistant_may_apply"] is False
 
 
 async def test_the_cap_limits_what_members_may_choose(capped: Stack) -> None:
@@ -482,3 +502,83 @@ def test_docs_quote_the_one_wording(doc: str, low: bool, member_only: bool) -> N
     if member_only:
         assert modes.MEMBER_ONLY_TEXT in text
     assert modes.LOW_RISK_CHANGES in text
+
+
+def test_the_semi_auto_notice_names_what_semi_auto_applies() -> None:
+    """The Account page's notice after choosing Semi-auto names both kinds of change Semi-auto applies
+    by itself (a clone is low risk too), in the words PROOFREAD-WORDING-10 gave."""
+    from mtg_gateway.pages import OK_MESSAGES
+
+    assert OK_MESSAGES["mode_semi"] == (
+        "Saved: your assistant applies low-risk changes without asking (a small deck or collection edit, "
+        "or a private copy of a deck) and asks for everything else."
+    )
+    assert "a private copy of a deck" in modes.mode_help("semi")
+
+
+AESI = "Aesi, Tyrant of Gyre Strait"  # deck 42's commander
+COMMANDER_MOVES = {
+    "card into Commander": [{"action": "set_category", "card_name": "Sol Ring", "category": "Commander"}],
+    "commander out of Commander": [{"action": "set_category", "card_name": AESI, "category": "Creatures"}],
+    "commander removed": [{"action": "remove", "card_name": AESI}],
+    "card added under Commander": [{"action": "add", "card_name": "Opt", "category": "Commander"}],
+}
+
+
+def _commanders(ark) -> list[str]:
+    return [
+        c["card"]["oracleCard"]["name"]
+        for c in ark.decks[42]["cards"]
+        if "Commander" in (c.get("categories") or [])
+    ]
+
+
+@pytest.mark.parametrize("shape", list(COMMANDER_MOVES))
+@pytest.mark.parametrize("mode", ["auto", "semi"])
+async def test_every_commander_change_waits_for_the_members_press(
+    stack: Stack, mode: str, shape: str
+) -> None:
+    """Not only set_commander: moving a card into or out of Commander, removing the commander and
+    adding a card under Commander change the commanders too, so they wait in Full auto and
+    Semi-auto on every assistant path (the tool and the API), and the member can still apply them."""
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    await _set_mode(h, mode)
+    before = _commanders(ark)
+    p = structured(
+        await call(h, token, "propose_deck_changes", {"deck_id": "42", "changes": COMMANDER_MOVES[shape]})
+    )
+    assert p["ok"] and p["state"] == "pending", p
+    assert "commander" in [r.get("kind") for r in p["rows"]]
+    assert p["risk"] == "high" and p["assistant_may_apply"] is False
+    out = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
+    assert out["ok"] is False and out["error"] == "browser_required"
+    r = await h.http.post(
+        f"/api/v1/proposals/{p['proposal_id']}/apply", headers={"Authorization": f"Bearer {token}"}
+    )
+    assert r.status_code == 403 and r.json()["error"] == "browser_required"
+    assert ark.patches == [] and _commanders(ark) == before
+    # the member's own press applies it
+    b = Browser(h)
+    try:
+        await b.login()
+        r = await b.http.post(
+            f"/api/v1/proposals/{p['proposal_id']}/apply", headers={"X-CSRF-Token": await b.csrf()}
+        )
+        assert r.status_code == 200 and r.json()["state"] == "applied", r.text
+    finally:
+        await b.aclose()
+    assert _commanders(ark) != before
+
+
+async def test_a_category_move_that_leaves_the_commanders_alone_still_applies_in_auto(stack: Stack) -> None:
+    h = stack.h
+    token = await linked_user(stack)
+    await _set_mode(h, "auto")
+    changes = [
+        {"action": "set_category", "card_name": "Sol Ring", "category": "Ramp"},
+        {"action": "add", "card_name": AESI, "category": "Commander"},  # one more copy, still the commander
+    ]
+    p = structured(await call(h, token, "propose_deck_changes", {"deck_id": "42", "changes": changes}))
+    assert "commander" not in [r.get("kind") for r in p["rows"]]
+    assert p["assistant_may_apply"] is True

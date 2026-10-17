@@ -9,13 +9,21 @@ from typing import TYPE_CHECKING, Any
 from starlette.requests import Request
 from starlette.responses import RedirectResponse, Response
 
-from .companion import DECKS_JSON_TIMEOUT, _filename, event_detail_html, event_label, stats_strip
+from .companion import (
+    DECKS_JSON_TIMEOUT,
+    _filename,
+    event_detail_html,
+    event_label,
+    member_name,
+    stats_strip,
+)
 from .decks import DeckError, actor_label, current_client, mark_gone
 from .history_view import (
     HISTORY_CSS,
     PAGE,
     backup_copies_html,
     build_events,
+    deck_filter_groups,
     events_html,
     filter_bar_html,
     is_filtered,
@@ -101,22 +109,35 @@ def add_history_routes(
             reps = reports.list(sub, deck_id, limit=fetch, search=query["q"] or None, since=since)
         client_ids = {r.get("created_by_client") for r in reps if r.get("created_by_client")}
         names = {cid: state.db.client_name(cid) for cid in client_ids if not cid.startswith("__")}
+        # The member's Archidekt deck list, the one the backup copies panel reads too (cached; no
+        # request per snapshot or deck): a deck or a backup copy deleted on Archidekt is marked, a
+        # deleted deck's snapshots offer no Restore, and the deck filter shows live names.
+        try:
+            listed = await asyncio.wait_for(
+                decks.on_archidekt(sub, wait=decks.deck_list_wait), DECKS_JSON_TIMEOUT
+            )
+            live = await asyncio.wait_for(decks.list_decks_quick(sub, wait=0), DECKS_JSON_TIMEOUT)
+        except (DeckError, TimeoutError):
+            listed, live = None, None  # not linked, or Archidekt unavailable: shown as recorded
         if snapshots:
-            # Reconciled with the member's Archidekt deck list, the one the backup copies panel
-            # reads too (cached; no request per snapshot): a deck or a backup copy deleted on
-            # Archidekt is marked, and a deleted deck's snapshots offer no Restore.
-            try:
-                listed = await asyncio.wait_for(
-                    decks.on_archidekt(sub, wait=decks.deck_list_wait), DECKS_JSON_TIMEOUT
-                )
-            except (DeckError, TimeoutError):
-                listed = None  # not linked, or Archidekt unavailable: shown as recorded
             mark_gone(snapshots, listed)
         csrf_in = f"<input type='hidden' name='csrf' value='{_esc(_csrf(s, sid))}'>"
         events = build_events(proposals, snapshots, reps, csrf_input=csrf_in, client_names=names)
         has_more = len(events) > query["offset"] + PAGE
         shown = events[query["offset"] : query["offset"] + PAGE]
-        seen = {**state.db.history_decks(sub), **reports.decks_seen(sub)}
+        current, gone = deck_filter_groups(
+            {**reports.decks_seen(sub), **state.db.history_decks(sub)},
+            live,
+            listed=listed["ids"] if listed else None,
+            own=state.db.own_history_deck_ids(
+                sub,
+                account_id=listed["account_id"],
+                username=listed["username"],
+                linked_at=listed["linked_at"],
+            )
+            if listed
+            else set(),
+        )
         # The backup copies the gateway made on Archidekt (D-03): kept out of Home and My decks,
         # listed here on the first, unfiltered page (and on a deck's own history).
         copies_panel = ""
@@ -153,7 +174,7 @@ def add_history_routes(
                 "<div class='card'><p>Nothing yet. Changes you or the assistant propose, the snapshots taken "
                 "before a change is applied and deck reports appear here.</p></div>"
             )
-        bar = filter_bar_html(query, seen, shown=len(shown), total_hint=hint)
+        bar = filter_bar_html(query, current, shown=len(shown), total_hint=hint, gone=gone)
         body = head + trend + bar + listing + copies_panel
         return page(
             "History" if not deck_id else "Deck history",
@@ -221,11 +242,33 @@ def add_history_routes(
             f"<textarea id='rep-md' class='sr-only' readonly aria-label='The report as Markdown'>{_esc(md)}"
             "</textarea>"
         )
-        body = report_body_html(
+        # the saved descriptions this run played that are still the member's own (Q138 item 4);
+        # imported here so the module's shared import block stays as it is (ownership table)
+        from .report_view import MODEL_NOTICES, front_face, kept_models
+
+        used = [u["name"] for u in kept_models(r)]
+        mine = frozenset(
+            front_face(str(k.get("name") or "")).casefold()
+            for k in reports.models.for_cards(sub, used).values()
+        )
+        # only while descriptions are saved: the notice comes from the address, which anyone can edit
+        notice = (
+            MODEL_NOTICES.get(request.query_params.get("models") or "", "")
+            if reports.models.available
+            else ""
+        )
+        kind = "notice error" if request.query_params.get("models") == "error" else "notice"
+        # Play more games that started nothing says why (the address holds a code, never the text)
+        refused = _more_notices().get(request.query_params.get("more") or "", "")
+        if refused:
+            notice, kind = _esc(refused), "notice warn"
+        body = (f"<p class='{kind}'>{notice}</p>" if notice else "") + report_body_html(
             r,
             stats_html=stats_strip(r.get("stats")),
             actions_html=actions,
             reused=request.query_params.get("reused") == "1",
+            removable=mine,
+            csrf=_csrf(s, sid) or "",
         )
         return page(
             f"Report: {r['deck_name']}",
@@ -237,6 +280,81 @@ def add_history_routes(
             extra_scripts=("export.js", "forge-live.js"),
             extra_css=REPORT_CSS,
         )
+
+    @server.custom_route("/history/reports/{rid}/models/remove", methods=["POST"], include_in_schema=False)
+    async def report_model_remove(request: Request) -> Response:
+        """The adder removes a saved card description from a report it played in (Q138 item 4).
+        Only the member's own goes; the report itself keeps its record of what it played."""
+        sub, sid = browser_session(state, request)
+        rid = request.path_params["rid"]
+        if not sub:
+            return login_redirect("/history")
+        # nothing to remove while kept models are switched off (card_models.SWITCHED_ON)
+        if not reports.models.available:
+            return Response(status_code=404)
+        data = await form(request)
+        if not check_csrf(sid, data):
+            return page(
+                "Report",
+                "<p class='notice error'>This form expired. Reload and try again.</p>",
+                sub=sub,
+                sid=sid,
+                status=403,
+            )
+        if _report_or_404(sub, rid) is None:
+            return page(
+                "Report",
+                "<div class='card'><p>No such report for your account.</p></div>",
+                sub=sub,
+                sid=sid,
+                status=404,
+            )
+        from .card_models import StoreError
+
+        try:
+            outcome = "removed" if reports.models.remove(sub, str(data.get("card") or "")) else "gone"
+        except StoreError:
+            outcome = "error"
+        return RedirectResponse(f"/history/reports/{_esc(rid)}?models={outcome}", status_code=303)
+
+    def _more_notices() -> dict[str, str]:
+        from .reports import MORE_REFUSALS
+
+        return MORE_REFUSALS
+
+    @server.custom_route("/history/reports/{rid}/forge/more", methods=["POST"], include_in_schema=False)
+    async def report_more_games(request: Request) -> Response:
+        """Play more games: another round of Forge games against the same opponents, added to the
+        report's earlier ones. A press that starts nothing comes back to the report saying why."""
+        sub, sid = browser_session(state, request)
+        rid = request.path_params["rid"]
+        if not sub:
+            return login_redirect("/history")
+        data = await form(request)
+        if not check_csrf(sid, data):
+            return page(
+                "Report",
+                "<p class='notice error'>This form expired. Reload and try again.</p>",
+                sub=sub,
+                sid=sid,
+                status=403,
+            )
+        try:
+            await reports.play_more(sub, rid)
+        except DeckError as exc:
+            if exc.kind == "not_found":
+                return page(
+                    "Report",
+                    "<div class='card'><p>No such report for your account.</p></div>",
+                    sub=sub,
+                    sid=sid,
+                    status=404,
+                )
+            code = next((k for k, v in _more_notices().items() if v == str(exc)), "")
+            if not code:
+                raise
+            return RedirectResponse(f"/history/reports/{_esc(rid)}?more={code}", status_code=303)
+        return RedirectResponse(f"/history/reports/{_esc(rid)}", status_code=303)
 
     def _report_file(r: dict[str, Any], ext: str, body: str, media_type: str) -> Response:
         name = _filename(r.get("deck_name") or r["deck_id"])
@@ -289,10 +407,12 @@ def add_history_routes(
             detail = r.get("detail") if isinstance(r.get("detail"), dict) else {}
             # browser or app is decided by the client id, never by the app's chosen name
             who = actor_label(r.get("client_id"), detail.get("client_name"))
+            removed_model = r["event"] == "card_model_removed"
+            adder = member_name(state.db, detail.get("added_by")) if removed_model else None
             items.append(
                 f"<li><span class='name'>{_esc(event_label(r['event']))}</span>"
                 + actor_html(who)
-                + f"<span class='muted small'>{event_detail_html(detail)}</span>"
+                + f"<span class='muted small'>{event_detail_html(detail, added_by=adder)}</span>"
                 f"<span class='when'>{_when(r['at'])}</span></li>"
             )
         body = (

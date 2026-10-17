@@ -17,7 +17,7 @@ from mtg_gateway.auth_provider import LoginStartLimiter, login_source
 from mtg_gateway.cimd import CimdError, CimdThrottled, is_cimd_client_id, validate_document
 from mtg_gateway.oidc import pkce_pair
 from mtg_gateway.theme import NoSniffMiddleware, render
-from tests.conftest import GATEWAY, FakeIdP, Harness, make_settings, running
+from tests.conftest import GATEWAY, FakeIdP, Harness, consent_stamp, make_settings, running
 from tests.test_admin import _with_admin, admin_browser
 from tests.test_cimd import CLIENT_URL, DocHost, document, start
 from tests.test_decks_and_proxy import Browser
@@ -69,7 +69,10 @@ async def _finish_mcp_login(h: Harness, browser: httpx.AsyncClient, started: htt
     page = await browser.get("/authorize/confirm", params={"state": login_id})
     assert page.status_code == 200, page.text
     csrf = re.search(r"name='csrf' value='([0-9a-f]+)'", page.text).group(1)  # type: ignore[union-attr]
-    go = await browser.post("/authorize/confirm", data={"state": login_id, "csrf": csrf, "action": "approve"})
+    shown = consent_stamp(h.settings, login_id)
+    go = await browser.post(
+        "/authorize/confirm", data={"state": login_id, "csrf": csrf, "action": "approve", "shown": shown}
+    )
     assert go.status_code == 303, go.text
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=h.idp.app)) as c:
         r = await c.get(go.headers["location"])

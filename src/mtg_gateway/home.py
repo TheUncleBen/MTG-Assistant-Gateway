@@ -15,13 +15,14 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from starlette.requests import Request
-from starlette.responses import Response
+from starlette.responses import RedirectResponse, Response
 
 from .companion import DECK_CSP
-from .deckpage import covers_for, image_url
+from .deckpage import covers_for, decks_unreadable_html, image_url, reread_href
 from .decks import DeckError
 from .pages import _csrf, browser_session, login_redirect
 from .theme import display_name, icon, render
+from .waiting_strip import waiting_line
 
 if TYPE_CHECKING:
     from mcp.server.mcpserver import MCPServer
@@ -63,14 +64,27 @@ async def recent_decks(state: AppState, sub: str, *, wait: float | None) -> list
     return rows
 
 
-def recent_panel_inner(decks: list[dict[str, Any]] | None, covers: dict[str, dict[str, Any]]) -> str:
+def recent_panel_inner(
+    decks: list[dict[str, Any]] | None, covers: dict[str, dict[str, Any]], *, unreadable: bool = False
+) -> str:
     """The inside of the home page's My decks panel: the newest covers, or why there are none.
-    /api/decks/mine?shape=recent answers with the same markup for the placeholder to swap in."""
+    /api/decks/mine?shape=recent answers with the same markup for the placeholder to swap in.
+    ``unreadable``: Archidekt left entries of the list unreadable, so the panel says so with the
+    /decks notice and Try again (Q64), over the covers it did read, never "No decks yet"."""
+    note = (
+        decks_unreadable_html(some_shown=bool(decks), panel=False, again=reread_href("/"))
+        if unreadable
+        else ""
+    )
     if decks:
         return (
             "<div class='panel-head'><h2>My decks</h2>"
-            f"<a class='btn' href='/decks'>All decks ({len(decks)})</a></div>" + recent_html(decks, covers)
+            f"<a class='btn' href='/decks'>All decks ({len(decks)})</a></div>"
+            + note
+            + recent_html(decks, covers)
         )
+    if note:  # nothing read: the notice, never "No decks yet"
+        return "<div class='panel-head'><h2>My decks</h2></div>" + note
     if decks is None:
         return (
             "<h2>My decks</h2><p class='muted'>Archidekt did not answer in time. "
@@ -111,6 +125,9 @@ def add_home_routes(server: MCPServer, state: AppState) -> None:
         sub, sid = browser_session(state, request)
         if sub is None:
             return login_redirect("/")
+        if request.query_params.get("reread"):  # Try again on the Q64 notice: read the list again
+            state.decks.reread_deck_list(sub)
+            return RedirectResponse("/", 303)
         user = state.db.get_user(sub) or {}
         admin = bool(s.admin_group and s.admin_group in (user.get("groups") or []))
         who = user.get("preferred_username") or user.get("email") or "there"
@@ -152,7 +169,12 @@ def add_home_routes(server: MCPServer, state: AppState) -> None:
             )
         elif link["linked"]:
             assert not isinstance(decks, str)
-            recent = "<section class='panel'>" + recent_panel_inner(decks, covers) + "</section>"
+            unreadable = bool(getattr(decks, "unreadable", 0))  # Q64, as on /decks
+            recent = (
+                "<section class='panel'>"
+                + recent_panel_inner(decks, covers, unreadable=unreadable)
+                + "</section>"
+            )
         else:
             recent = ""
         search = (
@@ -194,7 +216,9 @@ def add_home_routes(server: MCPServer, state: AppState) -> None:
                         "/proposals",
                         "proposals",
                         "Proposals",
-                        "Deck changes waiting for your approval." if pending else "Every change is reviewed.",
+                        waiting_line(pending, state.db.pending_count_by_deck(sub))
+                        if pending
+                        else "Every change is reviewed.",
                         number=pending,
                         cta=bool(pending),
                     ),
@@ -232,8 +256,8 @@ def add_home_routes(server: MCPServer, state: AppState) -> None:
             current="/",
             heading=False,
             body_class="home",
-            head_extra="<script src='/static/deck.js' defer></script>"
-            "<script src='/static/decks.js' defer></script>",
+            # decks.js fills the recent-decks panel; Home has none of deck.js's hooks (AUDIT F1)
+            head_extra="<script src='/static/decks.js' defer></script>",
         )
         resp.headers["Content-Security-Policy"] = DECK_CSP  # deck covers come from Scryfall
         return resp

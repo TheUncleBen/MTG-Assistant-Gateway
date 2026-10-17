@@ -23,14 +23,10 @@ from starlette.routing import Route
 
 from mtg_gateway import db as db_module
 from mtg_gateway import notify, prices
-from mtg_gateway.archidekt import ArchidektClient, Pacer
 from mtg_gateway.config import ConfigError, load_settings
 from mtg_gateway.db import Database
-from mtg_gateway.scan.scryfall import ScryfallClient
 
-from .conftest import FakeIdP, Harness, make_settings, running
-from .fake_archidekt import FakeArchidekt
-from .fake_scryfall import FakeScryfall
+from .conftest import FakeIdP, Stack, StackOptions, build_stack, open_stack, run_stack, stack_with
 from .test_decks_and_proxy import Browser, call, mcp_token, structured
 
 SOL_RING = "Sol Ring"  # frc 21 in the fixtures: $1.28, €1.13, non-foil only
@@ -69,46 +65,31 @@ class Clock:
         return prices.day_of(self.t)
 
 
-class Stack:
-    def __init__(self, h: Harness, ark: FakeArchidekt, sf: FakeScryfall, ntfy: FakeNtfy):
-        self.h, self.ark, self.sf, self.ntfy = h, ark, sf, ntfy
-
-    @property
-    def gw(self):
-        return self.h.app.state.gateway
-
-
-def _harness(tmp_path: Path, idp: FakeIdP, ark: FakeArchidekt, **over: object) -> Harness:
-    over.setdefault("watchlists_enabled", True)  # off by default (MTG_WATCHLISTS_ENABLED); see below
-    settings = make_settings(tmp_path, writes_enabled=True, archidekt_base="https://ark.test/api", **over)
-    client = ArchidektClient(settings.archidekt_base, "test-agent", Pacer(0.0), http=ark.client())
-    return Harness(settings, idp, archidekt=client)
+def _with_ntfy(st: Stack) -> None:
+    """The gateway's notifier posts to a FakeNtfy (``stack.ntfy``)."""
+    st.ntfy = FakeNtfy()
+    st.gw.notifier._http = httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=st.ntfy.app), base_url="https://ntfy.test"
+    )
 
 
-async def _stack(h: Harness, ark: FakeArchidekt):
-    sf, ntfy = FakeScryfall(), FakeNtfy()
-    async with running(h):
-        gw = h.app.state.gateway
-        gw.scan.scryfall = ScryfallClient("https://scryfall.test", min_interval=0.0, http=sf.client())
-        gw.notifier._http = httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=ntfy.app), base_url="https://ntfy.test"
-        )
-        yield Stack(h, ark, sf, ntfy)
+def _options(**over: object) -> StackOptions:
+    """Writes on with the shipped approval mode, watchlists on (off by default,
+    MTG_WATCHLISTS_ENABLED; see below), a fake Scryfall and ntfy; ``over`` changes settings."""
+    return StackOptions(
+        settings={"writes_enabled": True, "watchlists_enabled": True, **over},
+        scryfall=True,
+        started=_with_ntfy,
+    )
 
 
-@pytest.fixture
-async def stack(tmp_path: Path, idp: FakeIdP):
-    ark = FakeArchidekt()
-    h = _harness(tmp_path, idp, ark, ntfy_url="https://ntfy.test", ntfy_token=TOKEN)
-    async for st in _stack(h, ark):
-        yield st
+stack_options = stack_with(_options(ntfy_url="https://ntfy.test", ntfy_token=TOKEN))
 
 
 @pytest.fixture
 async def plain(tmp_path: Path, idp: FakeIdP):
     """A gateway as a self-hoster runs it without setting anything new: no ntfy server."""
-    ark = FakeArchidekt()
-    async for st in _stack(_harness(tmp_path, idp, ark), ark):
+    async with open_stack(tmp_path, idp, _options()) as st:
         yield st
 
 
@@ -142,7 +123,7 @@ def test_a_0_7_22_database_is_upgraded_and_keeps_its_rows(tmp_path: Path, monkey
     monkeypatch.undo()
     new = Database(path)
     try:
-        assert new.schema_version == db_module.SCHEMA_VERSION == 12
+        assert new.schema_version == db_module.SCHEMA_VERSION == 14
         assert new.get_user("u1") is not None
         tables = {r[0] for r in new._conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
         assert {
@@ -259,8 +240,8 @@ async def test_a_scryfall_429_stops_the_check_and_it_runs_again_later(stack: Sta
 
 async def test_watch_refusals_limits_and_unknown_cards(tmp_path: Path, idp: FakeIdP, monkeypatch) -> None:
     Clock(monkeypatch)
-    ark = FakeArchidekt()
-    async for st in _stack(_harness(tmp_path, idp, ark, watch_max_cards=1), ark):
+    async with open_stack(tmp_path, idp, _options()) as st:
+        st.gw.live.set("watch_max_cards", 1, by="admin-1")  # the admin Settings page's limit
         b = await _browser(st)
         try:
             r = await _watch(b, name="No Such Card Anywhere")
@@ -271,7 +252,19 @@ async def test_watch_refusals_limits_and_unknown_cards(tmp_path: Path, idp: Fake
             assert r.status_code == 400 and "goes with a set code" in r.text
             assert (await _watch(b, name="Sol Ring")).status_code == 303
             r = await _watch(b, name="Command Tower")
-            assert r.status_code == 429 and "the most this gateway keeps per member" in r.text
+            assert r.status_code == 429
+            said = "You watch 1 card; this gateway lets each member watch at most 1. Remove 1 to add another."
+            assert said in r.text
+            # 0.7.29: the admin Settings page's limit applies at once, raised or lowered
+            st.gw.live.set("watch_max_cards", 2, by="admin-1")
+            assert (await _watch(b, name="Command Tower")).status_code == 303
+            st.gw.live.set("watch_max_cards", 1, by="admin-1")
+            r = await _watch(b, name="Cultivate")
+            assert r.status_code == 429
+            said = (
+                "You watch 2 cards; this gateway lets each member watch at most 1. Remove 2 to add another."
+            )
+            assert said in r.text
             # no form token: refused
             r = await b.http.post("/watchlist", data={"action": "add_card", "name": "Opt"})
             assert r.status_code == 403
@@ -376,7 +369,7 @@ async def test_notifications_are_off_and_harmless_without_a_server(plain: Stack)
         assert r.headers["location"] == "/account?err=summary_off#summary"
         assert notify.prefs(plain.h.db, "user-1")["summary_every"] == "off"
         assert plain.gw.notifier.enabled is False
-        assert plain.gw.decks.on_proposal_saved is None  # nothing hooked
+        assert plain.gw.notifier._count is None  # nothing hooked
     finally:
         await b.aclose()
 
@@ -390,7 +383,9 @@ async def test_opt_in_topic_test_button_and_the_token_never_logged(stack: Stack,
         topic = notify.prefs(stack.h.db, "user-1")["ntfy_topic"]
         assert re.fullmatch(r"mtg-[A-Za-z0-9_-]{22}", topic)
         page = (await b.http.get("/account")).text
-        assert topic in page and "https://ntfy.test" in page and "Send test" in page
+        # in a browser: no topic or server on show (the app is the only way to read them), Send test
+        assert topic not in page and "https://ntfy.test" not in page and "Send test" in page
+        assert "data-native='startNotifications'" not in page and "/install?for=android" in page
         assert TOKEN not in page
         r = await _post(b, "/account", {"action": "notify_test"})
         assert r.headers["location"] == "/account?ok=notify_test_sent#notifications"
@@ -410,15 +405,20 @@ async def test_opt_in_topic_test_button_and_the_token_never_logged(stack: Stack,
         assert "ntfy publish refused: HTTP 403" in caplog.text
         assert TOKEN not in caplog.text
         assert TOKEN not in repr(stack.gw.settings) and TOKEN not in repr(stack.gw.notifier)
-        # a chosen topic must be long enough and nobody else's
-        r = await _opt_in(b, ntfy_topic="short")
-        assert r.headers["location"].startswith("/account?err=notify_topic_invalid")
-        r = await _opt_in(b, ntfy_topic="my-own-topic-1234")  # no mtg- prefix
-        assert r.headers["location"].startswith("/account?err=notify_topic_invalid")
+        # a topic sent with the form is ignored: the gateway makes every topic
         r = await _opt_in(b, ntfy_topic="mtg-my-own-topic-1234")
-        assert notify.prefs(stack.h.db, "user-1")["ntfy_topic"] == "mtg-my-own-topic-1234"
+        assert notify.prefs(stack.h.db, "user-1")["ntfy_topic"] == topic
+        # Disconnect my phones: a new topic
         r = await _post(b, "/account", {"action": "notify_new_topic"})
-        assert notify.prefs(stack.h.db, "user-1")["ntfy_topic"] != "mtg-my-own-topic-1234"
+        assert r.headers["location"] == "/account?ok=notify_topic#notifications"
+        assert notify.prefs(stack.h.db, "user-1")["ntfy_topic"] != topic
+        # off keeps the topic; on again keeps it too
+        kept = notify.prefs(stack.h.db, "user-1")["ntfy_topic"]
+        r = await _post(b, "/account", {"action": "notify_save"})
+        assert r.headers["location"] == "/account?ok=notify_off#notifications"
+        assert "Send test" not in (await b.http.get("/account")).text
+        await _opt_in(b)
+        assert notify.prefs(stack.h.db, "user-1")["ntfy_topic"] == kept
     finally:
         await b.aclose()
 
@@ -442,9 +442,10 @@ async def test_a_proposal_waiting_for_the_member_and_a_finished_report_notify(st
     assert p["state"] == "pending" and p["assistant_may_apply"] is False  # manual mode: it waits
     await stack.gw.notifier.drain()
     msg = stack.ntfy.messages[-1]
-    assert msg["title"] == "A proposal waits for you"
+    assert msg["title"] == notify.waiting_title(1, p["deck_name"])
+    assert msg["sequence_id"] == "deck-42"
     assert msg["click"] == f"https://mtg.test/proposals/{p['proposal_id']}"
-    assert "Arcane Signet" not in json.dumps(msg) and "Sample Commander" not in json.dumps(msg)
+    assert "Arcane Signet" not in json.dumps(msg)
     rep = structured(await call(h, token, "run_deck_report", {"deck_ref": "42", "simulate": False}))
     await stack.gw.notifier.drain()
     msg = stack.ntfy.messages[-1]
@@ -652,15 +653,15 @@ async def test_watchlists_off_hide_the_page_links_tools_and_daily_job(
     tmp_path: Path, idp: FakeIdP, monkeypatch
 ) -> None:
     made = _record_daily_jobs(monkeypatch)
-    ark = FakeArchidekt()
-    h = _harness(tmp_path, idp, ark, watchlists_enabled=False)
+    built = build_stack(tmp_path, idp, _options(watchlists_enabled=False))
+    h = built.h
     # a member's watch from when the switch was on stays in the database
     h.db.upsert_user("user-1", email="u@example.test", name="U", preferred_username="u", groups=[])
     with h.db.tx() as c:
         c.execute(
             "INSERT INTO watch_cards (id, sub, name, created_at) VALUES ('w1', 'user-1', 'Sol Ring', 0)"
         )
-    async for st in _stack(h, ark):
+    async with run_stack(built) as st:
         assert st.gw.prices is None and made == []  # no price service, no daily job
         b = await _browser(st)
         try:
@@ -688,9 +689,9 @@ async def test_watchlists_off_with_ntfy_keep_the_summary_without_prices(
 ) -> None:
     clock = Clock(monkeypatch)
     made = _record_daily_jobs(monkeypatch)
-    ark = FakeArchidekt()
-    h = _harness(tmp_path, idp, ark, watchlists_enabled=False, ntfy_url="https://ntfy.test")
-    async for st in _stack(h, ark):
+    async with open_stack(
+        tmp_path, idp, _options(watchlists_enabled=False, ntfy_url="https://ntfy.test")
+    ) as st:
         assert [p for p, _s in made] == [None]  # the daily job runs the summaries only
         b = await _browser(st)
         try:
@@ -728,8 +729,7 @@ async def test_watchlists_on_show_the_links_and_tools(stack: Stack) -> None:
 
 async def test_watchlists_on_start_the_daily_job(tmp_path: Path, idp: FakeIdP, monkeypatch) -> None:
     made = _record_daily_jobs(monkeypatch)
-    ark = FakeArchidekt()
-    async for st in _stack(_harness(tmp_path, idp, ark), ark):
+    async with open_stack(tmp_path, idp, _options()) as st:
         assert len(made) == 1 and made[0][0] is st.gw.prices
         assert st.gw.prices is not None
 
@@ -747,3 +747,23 @@ async def test_each_deck_value_names_its_price_source(stack: Stack, monkeypatch)
         assert "(Archidekt prices)</span>" in deck and "<span>Est cost (Archidekt)</span>" in deck
     finally:
         await b.aclose()
+
+
+@pytest.mark.parametrize(("watched", "remove"), [(["1"], "Remove 1"), (["1", "2", "3"], "Remove 3")])
+def test_the_deck_limit_says_how_many_to_remove(watched: list[str], remove: str) -> None:
+    """0.7.29 (W2): a lowered limit can leave a member several over, so the refusal counts them."""
+    from types import SimpleNamespace
+
+    from mtg_gateway.decks import DeckError
+
+    svc = object.__new__(prices.PriceService)
+    svc.settings, svc.decks = SimpleNamespace(watch_max_decks=1), SimpleNamespace()
+    svc._rows = lambda sql, args: [{"deck_id": d} for d in watched]
+    with pytest.raises(DeckError) as refused:
+        svc._check_deck_limit("user-1", "99")
+    noun = "deck" if len(watched) == 1 else "decks"
+    assert str(refused.value) == (
+        f"You watch {len(watched)} {noun}; this gateway lets each member watch at most 1. "
+        f"{remove} to add another."
+    )
+    svc._check_deck_limit("user-1", "1")  # a deck already watched is never refused

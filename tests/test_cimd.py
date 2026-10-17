@@ -20,7 +20,7 @@ from mtg_gateway.cimd import (
     validate_document,
 )
 from mtg_gateway.oidc import pkce_pair
-from tests.conftest import FakeIdP, Harness, make_settings, running, sse_json
+from tests.conftest import FakeIdP, Harness, consent_stamp, make_settings, running, sse_json
 
 CLIENT_URL = "https://client.example/oauth/client.json"
 REDIRECT = "https://client.example/cb"
@@ -241,7 +241,10 @@ async def test_cimd_login_end_to_end(gw: Harness, docs: DocHost):
     assert (
         await gw.http.post("/authorize/confirm", data={"state": login_id, "csrf": "x"})
     ).status_code == 403
-    go = await gw.http.post("/authorize/confirm", data={"state": login_id, "csrf": csrf, "action": "approve"})
+    shown = consent_stamp(gw.settings, login_id)
+    go = await gw.http.post(
+        "/authorize/confirm", data={"state": login_id, "csrf": csrf, "action": "approve", "shown": shown}
+    )
     assert go.status_code == 303, go.text
     assert go.headers["location"].startswith("https://idp.test/")
     cb = await gw.idp_leg(go)
@@ -371,7 +374,10 @@ async def test_cimd_deny_invalidates_the_login(gw: Harness, docs: DocHost):
     csrf = re.search(r"name='csrf' value='([0-9a-f]+)'", page.text).group(1)
     assert "value='deny'" in page.text
 
-    deny = await gw.http.post("/authorize/confirm", data={"state": login_id, "csrf": csrf, "action": "deny"})
+    shown = consent_stamp(gw.settings, login_id)
+    deny = await gw.http.post(
+        "/authorize/confirm", data={"state": login_id, "csrf": csrf, "action": "deny", "shown": shown}
+    )
     assert deny.status_code == 303, deny.text
     back = urlparse(deny.headers["location"])
     assert f"{back.scheme}://{back.netloc}{back.path}" == REDIRECT
@@ -381,7 +387,7 @@ async def test_cimd_deny_invalidates_the_login(gw: Harness, docs: DocHost):
     # The pending login is gone: neither the page nor Approve work any more.
     assert (await gw.http.get("/authorize/confirm", params={"state": login_id})).status_code == 400
     again = await gw.http.post(
-        "/authorize/confirm", data={"state": login_id, "csrf": csrf, "action": "approve"}
+        "/authorize/confirm", data={"state": login_id, "csrf": csrf, "action": "approve", "shown": shown}
     )
     assert again.status_code == 400
     with gw.db.tx() as c:

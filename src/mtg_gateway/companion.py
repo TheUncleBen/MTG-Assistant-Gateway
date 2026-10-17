@@ -36,6 +36,7 @@ from .pages import (
     csrf_form_ok,
     read_limited,
 )
+from .settings_page import change_line
 from .theme import (
     ICON_DATA_URL,
     STYLESHEETS,
@@ -132,7 +133,13 @@ def stats_strip(stats: dict[str, Any] | None) -> str:
         ("Lands", _num(stats.get("land_count"), 0)),
         ("Avg MV", _num(stats.get("average_mana_value"))),
         ("Price", money(stats.get("price_total")) if stats.get("price_total") is not None else "–"),
-        ("Bracket", f"~{bracket.get('bracket')}" if bracket.get("bracket") else "–"),
+        # the bracket set on the deck is the deck's bracket; else Archidekt's estimate (Q49, O14)
+        (
+            "Bracket" if stats.get("archidekt_bracket") else "Archidekt's estimate",
+            _num(stats.get("archidekt_bracket"), 0)
+            if stats.get("archidekt_bracket")
+            else (f"~{bracket.get('bracket')}" if bracket.get("bracket") else "–"),
+        ),
         ("Game changers", _num(len(stats.get("game_changers") or []), 0)),
     ]
     tile_html = "".join(f"<div class='tile'><b>{_esc(v)}</b><span>{_esc(k)}</span></div>" for k, v in tiles)
@@ -157,7 +164,7 @@ def stats_strip(stats: dict[str, Any] | None) -> str:
         )
     if bracket.get("basis"):
         out.append(
-            "<p class='muted small'>Bracket estimate from Archidekt's card flags only: "
+            "<p class='muted small'>Archidekt's estimate from cards (its own card flags): "
             + "; ".join(_esc(b) for b in bracket["basis"])
             + ".</p>"
         )
@@ -241,6 +248,7 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         csp: str | None = None,
         current: str | None = None,
         scripts: bool = False,
+        viewer_only: bool = False,
         heading: bool = True,
         deck_css: bool = False,
         extra_scripts: tuple[str, ...] = (),
@@ -262,12 +270,10 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
             heading=heading,
             head_extra=(stylesheet_link("deck.css") if deck_css else "")
             + (f"<style>{extra_css}</style>" if extra_css else "")
-            + (
-                "<script src='/static/cardview.js' defer></script>"
-                "<script src='/static/deck.js' defer></script>"
-                if scripts
-                else ""
-            )
+            # ``viewer_only``: a page that shows cards but none of the deck page's own hooks
+            # (Goldfish, Compare) loads the card viewer without deck.js (AUDIT F2)
+            + ("<script src='/static/cardview.js' defer></script>" if scripts or viewer_only else "")
+            + ("<script src='/static/deck.js' defer></script>" if scripts and not viewer_only else "")
             + "".join(f"<script src='/static/{name}' defer></script>" for name in extra_scripts),
         )
         if csp:
@@ -419,7 +425,9 @@ def short_name(name: str, limit: int = 12) -> str:
 
 def offline_page(site: str) -> str:
     """The service worker's offline page: the site's name and icon, the chosen theme (the
-    worker sets data-theme from the mtg_theme cookie; otherwise the system's), one button."""
+    worker sets data-theme from the mtg_theme cookie; otherwise the system's), one button.
+    static/offline.js (answered by the worker itself) loads the page again once the connection
+    is back (Q63)."""
     title = html.escape(f"You're offline · {site}")
     return (
         "<!doctype html><html lang='en'><head><meta charset='utf-8'>"
@@ -441,11 +449,13 @@ def offline_page(site: str) -> str:
         f"<img src='{ICON_DATA_URL}' alt=''><p class='site'>{html.escape(site)}</p>"
         "<h1>You're offline</h1><p>The gateway can't be reached right now. If you just pressed a button, "
         "nothing was sent. Check your connection, then try again.</p>"
-        "<a href=''>Try again</a></main></body></html>"
+        "<a href=''>Try again</a></main><script src='/static/offline.js'></script></body></html>"
     )
 
 
 OFFLINE_PAGE = offline_page("MTG Assistant Gateway")
+# The offline page's script, which the service worker answers itself (companion_shell, /sw.js).
+OFFLINE_SCRIPT = (STATIC_DIR / "offline.js").read_text(encoding="utf-8")
 
 
 # Audit event names as sentences for the member's activity page (anything unlisted is shown
@@ -479,6 +489,7 @@ EVENT_LABELS = {
     "deck_commented": "Commented on a deck",
     "user_followed": "Followed a user",
     "report_created": "Deck simulation run",
+    "report_more_games": "Asked for more Forge games for a report",
     "scan_session_saved": "Scan saved",
     "scan_session_deleted": "Scan deleted",
     "folder_created": "Folder created",
@@ -487,6 +498,9 @@ EVENT_LABELS = {
     "membership_unverifiable": "Membership could not be checked",
     "disabled_user_refused": "Request refused: account disabled",
     "not_in_group_refused": "Request refused: not in an allowed group",
+    "setting_changed": "Gateway setting changed",
+    "card_model_removed": "Card model removed",
+    "backup_trim_queued": "Older backup copies queued for deletion from Archidekt",
 }
 DETAIL_LABELS = {
     "proposal_id": "proposal",
@@ -498,13 +512,32 @@ DETAIL_LABELS = {
 }
 
 
+def card_model_line(detail: Any, added_by: str | None) -> str | None:
+    """A ``card_model_removed`` audit entry in words ("Sol Ring (added by alice)"); ``added_by``: the
+    adder's name now, None when that account is gone. None when it isn't such an entry. Plain text."""
+    if not isinstance(detail, dict) or not detail.get("card_key") or not detail.get("card"):
+        return None
+    return f"{detail['card']} (added by {added_by or 'a deleted account'})"
+
+
+def member_name(db: Any, sub: Any) -> str | None:
+    """The name an admin page shows for a member (username, else email), or None when gone."""
+    u = db.get_user(str(sub)) if sub else None
+    if u is None:
+        return None
+    return str(u.get("preferred_username") or u.get("email") or "") or "an account with no username or email"
+
+
 def event_label(event: str) -> str:
     return EVENT_LABELS.get(event) or event.replace("_", " ").capitalize()
 
 
-def event_detail_html(detail: dict[str, Any]) -> str:
-    """The details of an audit row in words: the deck and the proposal become links."""
+def event_detail_html(detail: dict[str, Any], *, added_by: str | None = None) -> str:
+    """The details of an audit row in words: the deck and the proposal become links. ``added_by``:
+    for a removed card model, the name of the member who added it."""
     bits = []
+    if said := change_line(detail) or card_model_line(detail, added_by):
+        bits.append(_esc(said))
     for k, label in DETAIL_LABELS.items():
         v = detail.get(k)
         if v in (None, ""):

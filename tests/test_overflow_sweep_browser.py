@@ -60,7 +60,8 @@ LONG_CATS = [
 
 @pytest.fixture
 def server(tmp_path: Path):
-    s = Server(tmp_path, watchlists_enabled=True)  # the sweep covers the Watchlist page too
+    # the sweep covers the Watchlist page too; writes on, so the seed can add to the collection
+    s = Server(tmp_path, watchlists_enabled=True, writes_enabled=True)
     long_cards = ((9801, CARDS[-2]), (9802, CARDS[-1]))
     for cid, name in long_cards:
         FA.CARD_DB.setdefault(name.lower(), {"id": cid, "oracleCard": {"name": name}})
@@ -384,6 +385,7 @@ def test_no_page_scrolls_sideways_or_clips_a_control(server: Server, touch: bool
             # a remembered View as (the mtg_view_* cookies) would carry one address's view into the
             # next: each address is swept in the view it names, or the default
             ctx.clear_cookies(name=re.compile(r"^mtg_view_"))
+            server.db.delete_prefs("user-1", prefixes=("view.",))  # on the account from 0.7.29
             r = page.goto(f"{server.base}{path}", wait_until="networkidle")
             assert r is not None and r.status == 200, (path, r and r.status)
             for w in WIDTHS:

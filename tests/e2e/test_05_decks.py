@@ -230,7 +230,7 @@ def test_propose_changes_is_review_only_while_writes_are_off(clients):
             assert p["ok"] and p["state"] == "pending" and p["kind"] == "edit", p
             assert p["review_url"] == f"{PUBLIC_URL}/proposals/{p['proposal_id']}"
             assert "Arcane Signet" in p["diff"] and "Rampant Growth" in p["diff"], p["diff"]
-            assert p["writes_enabled"] is False and "disabled" in p["next_step"]
+            assert p["writes_enabled"] is False and "switched off" in p["next_step"]
             STATE["edit"] = p["proposal_id"]
             refused = await c.call(s, "apply_proposal", {"proposal_id": p["proposal_id"]})
             assert refused["ok"] is False and refused["error"] == "writes_disabled", refused
@@ -344,13 +344,13 @@ def test_stale_deck_is_refused_on_the_review_page(clients, env: Env):
     async def go():
         c = clients["alice-test"]
         async with c.session() as s:
+            # The mock's bump adds a copy of the deck's first card (Acidic Slime), so a removal of
+            # that card would now do something other than what was reviewed. A change to other
+            # cards still applies after a bump (the unit tests cover that).
             p = await c.call(
                 s,
                 "propose_deck_changes",
-                {
-                    "deck_id": "42",
-                    "changes": [{"action": "add", "card_name": "Rampant Growth", "quantity": 1}],
-                },
+                {"deck_id": "42", "changes": [{"action": "remove", "card_name": "Acidic Slime"}]},
             )
             assert p["ok"] and p["state"] == "pending", p
         mock("/__e2e/bump/42", method="POST")  # someone edits the deck on Archidekt meanwhile
@@ -358,18 +358,19 @@ def test_stale_deck_is_refused_on_the_review_page(clients, env: Env):
         async with browser_page() as page:
             await gateway_browser_sign_in(page, env, "alice-test", f"/proposals/{p['proposal_id']}")
             await click_guarded(page, "form.guarded button[value=apply]")
-            await page.wait_for_url(lambda u: "err=" in u, timeout=60_000)
+            await page.wait_for_url(lambda u: "err=stale" in u, timeout=60_000)
             text = await page.inner_text("body")
-            assert "changed on Archidekt since this proposal was made" in text, text
+            assert "this change would now do something different from what you reviewed" in text, text
         async with c.session() as s:
             after = await c.call(s, "get_proposal", {"proposal_id": p["proposal_id"]})
-            assert after["state"] == "failed" and after["result"]["error"] == "stale", after
+            assert after["state"] == "pending" and after["status"] == "needs_look", after
+            await c.call(s, "reject_proposal", {"proposal_id": p["proposal_id"]})
         assert mock("/__e2e/patches") == before, "a stale proposal must send nothing"
 
     run(go())
 
 
-def test_apply_over_mcp_only_in_auto_mode(clients):
+def test_apply_over_mcp_only_in_auto_mode(clients, env: Env):
     set_switches(writes="true", mode="auto")
 
     async def go():
@@ -388,17 +389,26 @@ def test_apply_over_mcp_only_in_auto_mode(clients):
             assert p["approval_mode"] == "auto" and p["assistant_may_apply"] is True, p
             applied = await c.call(s, "apply_proposal", {"proposal_id": p["proposal_id"]})
             assert applied["ok"] and applied["state"] == "applied" and applied["result"]["verified"], applied
-            # The CSV deck (72 rows) is created in full: every printing it names exists on the mock
-            # (its decks' printings count as known cards), each row goes as one paced request, and
-            # the deck is read back and checked by name, count, printing and finish. At the default
-            # pacing (one second apart, 40 a minute) that takes a few minutes, so the call answers
-            # "applying" with its progress and the apply finishes in the background.
-            create = await c.call(s, "apply_proposal", {"proposal_id": STATE["create"]})
-            assert create["ok"] is True and create["state"] in ("applying", "applied"), create
-            if create["state"] == "applying":
-                assert create["progress"]["of_cards"] == 72, create
+            # A new deck waits for the member's press in every mode, auto included.
+            held = await c.call(s, "apply_proposal", {"proposal_id": STATE["create"]})
+            assert held["ok"] is False and held["error"] == "browser_required", held
+            assert held["review_url"] == f"{PUBLIC_URL}/proposals/{STATE['create']}", held
+        # The CSV deck (72 rows) is created in full from the review page: every printing it names
+        # exists on the mock (its decks' printings count as known cards), each row goes as one paced
+        # request, and the deck is read back and checked by name, count, printing and finish. At the
+        # default pacing (one second apart, 40 a minute) that takes a few minutes, so the page
+        # answers "applying" and the apply finishes in the background.
+        async with browser_page() as page:
+            await gateway_browser_sign_in(page, env, "alice-test", f"/proposals/{STATE['create']}")
+            await click_guarded(page, "form.guarded button[value=apply]")
+            await page.wait_for_url(lambda u: "ok=" in u, timeout=60_000)
+        async with c.session() as s:
+            create = await c.call(s, "get_proposal", {"proposal_id": STATE["create"]})
+            assert create["state"] in ("applying", "applied"), create
+            # a second apply never starts it twice: it answers with the state the first one is in
+            # (a second press while it runs is covered in tests/test_background_apply.py)
             again = await c.call(s, "apply_proposal", {"proposal_id": STATE["create"]})
-            assert again["state"] in ("applying", "applied"), again  # never started twice
+            assert again.get("state") in ("applying", "applied"), again
             deadline = time.monotonic() + 600
             while create["state"] == "applying" and time.monotonic() < deadline:
                 await asyncio.sleep(5)
@@ -422,7 +432,7 @@ def test_apply_over_mcp_only_in_auto_mode(clients):
         '"via": "mcp"' in d for (d,) in applied
     ), applied
     events = {row[0] for row in db.execute("SELECT DISTINCT event FROM audit_log")}
-    assert {"archidekt_linked", "proposal_created", "proposal_failed"} <= events, events
+    assert {"archidekt_linked", "proposal_created", "proposal_apply_stopped"} <= events, events
     db.close()
     raw = copy.read_bytes()
     assert b"pw-alice" not in raw and b"tok-alice" not in raw, (

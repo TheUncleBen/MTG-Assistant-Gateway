@@ -6,41 +6,21 @@ from __future__ import annotations
 import html
 import json
 import re
-from pathlib import Path
 
-import pytest
-from mcp import Client
-
-from mtg_gateway.archidekt import ArchidektClient, Pacer
-from mtg_gateway.mf_proxy import MysticForgeProxy
-
-from .conftest import FakeIdP, Harness, make_settings, running, sse_json
-from .fake_archidekt import FakeArchidekt
-from .test_decks_and_proxy import Browser, call, fake_mystic_forge, mcp_token, structured
+from .conftest import AUTO_PROXY, FakeIdP, Stack, sse_json, stack_with
+from .test_decks_and_proxy import Browser, call, mcp_token, structured
+from .track_a_helpers import apply_any
 
 NAV = {"Sec-Fetch-Mode": "navigate", "Accept": "text/html"}
 
 
-class Stack:
-    def __init__(self, h: Harness, ark: FakeArchidekt):
-        self.h = h
-        self.ark = ark
-
-
-@pytest.fixture
-async def stack(tmp_path: Path, idp: FakeIdP):
-    ark = FakeArchidekt()
-    settings = make_settings(
-        tmp_path,
-        writes_enabled=True,
-        approval_mode_default="auto",
-        archidekt_base="https://ark.test/api",
-        android_assetlinks='[{"relation": ["delegate_permission/common.handle_all_urls"]}]',
-    )
-    client = ArchidektClient(settings.archidekt_base, "test-agent", Pacer(0.0), http=ark.client())
-    proxy = MysticForgeProxy("http://mf.test/mcp", client_factory=lambda: Client(fake_mystic_forge()))
-    async with running(Harness(settings, idp, archidekt=client, mf_proxy=proxy)) as h:
-        yield Stack(h, ark)
+COMPANION = AUTO_PROXY.but(
+    settings={
+        **AUTO_PROXY.settings,
+        "android_assetlinks": '[{"relation": ["delegate_permission/common.handle_all_urls"]}]',
+    }
+)
+stack_options = stack_with(COMPANION)
 
 
 async def linked_browser(stack: Stack) -> Browser:
@@ -185,6 +165,14 @@ async def test_reports_are_stored_and_listed(stack: Stack) -> None:
         assert listed.status_code == 200 and len(listed.json()["reports"]) == 1
         one = await h.http.get(f"/api/v1/reports/{rep['report_id']}", headers=auth)
         assert one.status_code == 200 and one.json()["deck_id"] == "42"
+        # A32: the Forge run alone, for a page or app watching it (no Forge here: preflight only)
+        forge = await h.http.get(f"/api/v1/reports/{rep['report_id']}/forge", headers=auth)
+        body = forge.json()
+        assert forge.status_code == 200 and body["ok"] and body["report_id"] == rep["report_id"], body
+        assert body["live"] is False and "Preflight only" in body["forge_html"] and body["status_html"]
+        missing = await h.http.get("/api/v1/reports/rep_nope/forge", headers=auth)
+        assert missing.status_code == 404
+        assert (await h.http.get(f"/api/v1/reports/{rep['report_id']}/forge")).status_code == 401
         bad = await h.http.post("/api/v1/reports", json={"deck_id": "42", "games": 5}, headers=auth)
         assert bad.status_code == 400
         # the same via MCP tools
@@ -197,7 +185,7 @@ async def test_reports_are_stored_and_listed(stack: Stack) -> None:
         # the history timeline shows the report as a row of its own (history_view), not a "Report:" line
         assert page.status_code == 200 and "k-report" in page.text and "Open the report" in page.text
         detail = await b.http.get(f"/history/reports/{rep['report_id']}", headers=NAV)
-        assert detail.status_code == 200 and "Goldfish simulation" in detail.text
+        assert detail.status_code == 200 and "Solo test (" in detail.text
         gone = await h.http.delete(f"/api/v1/reports/{rep['report_id']}", headers=auth)
         assert gone.status_code == 200
         assert (await h.http.get(f"/api/v1/reports/{rep['report_id']}", headers=auth)).status_code == 404
@@ -231,6 +219,488 @@ async def test_the_rest_and_page_routes_can_leave_forge_out(stack: Stack) -> Non
         assert seen == [False, None, False, None]
     finally:
         reports.run = real_run
+        await b.aclose()
+
+
+async def test_compare_page_tests_both_decks_against_the_same_forge_opponents(stack: Stack) -> None:
+    """K6 (Q136): with Forge set up, the Compare page of two Commander decks offers Forge games of
+    both against the same opponents: this deck's report first, then the other's seated with its
+    opponents (same_opponents_as), both without the solo test; the second report opens. The REST
+    route and run_deck_report take the same same_opponents_as."""
+    from .test_forge import BRACKETED, FakeForge
+
+    h = stack.h
+    b = await linked_browser(stack)
+    reports = h.app.state.gateway.reports
+    real_run, seen = reports.run, []
+    fake = FakeForge(brackets=BRACKETED)
+
+    async def recording(*args, **kwargs):
+        seen.append((args[1], kwargs.get("simulate"), kwargs.get("forge"), kwargs.get("same_opponents_as")))
+        return await real_run(*args, **kwargs)
+
+    reports.run, reports.forge = recording, fake.client()
+    stack.ark.private.discard(43)  # Amy's deck, public for this test
+    try:
+        off = await b.http.get("/decks/42/compare?with=43", headers=NAV)
+        assert "Test both in Forge against the same opponents" in off.text
+        pasted = await b.http.get("/decks/42/compare", params={"paste": "1 Sol Ring\n"}, headers=NAV)
+        assert "Test both in Forge" not in pasted.text  # a pasted list keeps no report
+        csrf = re.search(r"name='csrf' value='([^']+)'", off.text).group(1)
+        assert (await b.http.post("/decks/42/compare/forge", data={"with": "43"})).status_code == 403
+        r = await b.http.post("/decks/42/compare/forge", data={"csrf": csrf, "with": "43"})
+        assert r.status_code == 303, r.text
+        assert [s[:3] for s in seen] == [("42", False, True), ("43", False, True)] and seen[0][3] is None
+        first_id = seen[1][3]
+        assert r.headers["location"].startswith("/history/reports/rep_") and first_id
+        shown = await b.http.get(r.headers["location"], headers=NAV)
+        assert f"href='/history/reports/{first_id}'>Open Sample Commander Deck's report" in shown.text
+        assert [d["precon"] for d in fake.started[0]["decks"][1:]] == ["New 2", "Older 2", "New 3"]
+        bad = await b.http.post("/decks/42/compare/forge", data={"csrf": csrf, "with": "nope"})
+        assert bad.status_code == 400 and "Pick the other deck" in bad.text
+        # the REST route and the tool pass the same option
+        auth = {"Authorization": f"Bearer {await mcp_token(h)}"}
+        api = await h.http.post(
+            "/api/v1/reports", json={"deck_id": "43", "same_opponents_as": first_id}, headers=auth
+        )
+        assert api.status_code == 201 and seen[-1][3] == first_id
+        token = await mcp_token(h)
+        tool = structured(
+            await call(h, token, "run_deck_report", {"deck_ref": "43", "same_opponents_as": first_id})
+        )
+        assert tool["ok"] and seen[-1][3] == first_id
+        listed = structured(
+            await call(
+                h, token, "run_deck_report", {"deck_ref": "1 Sol Ring\n", "same_opponents_as": first_id}
+            )
+        )
+        assert listed["ok"] is False and "pasted list gets no Forge games" in listed["message"]
+        # Q140 item 3: the higher of the two decks' set brackets picks them, whichever page it ran
+        # from (the runs wait behind the member's first one, so each keeps the bracket it waits with)
+        from mtg_gateway.forge import PAIR_LEAD, bracket_parts, shared_opponents
+
+        stack.ark.decks[43]["edhBracket"] = 4
+        precons = [{"name": n, "bracket": v} for n, v in BRACKETED.items()]
+        for here, there in (("42", "43"), ("43", "42")):
+            reports.db._conn.execute("DELETE FROM reports")  # an empty Forge queue for each press
+            again = await b.http.post(f"/decks/{here}/compare/forge", data={"csrf": csrf, "with": there})
+            assert again.status_code == 303, again.text
+            rows = reports.db._conn.execute(
+                "SELECT deck_id, forge_json FROM reports ORDER BY rowid DESC LIMIT 2"
+            ).fetchall()
+            second, first = (json.loads(r["forge_json"]) for r in rows)
+            assert [r["deck_id"] for r in rows] == [there, here]
+            if "start" in first:  # waiting behind the member's earlier run
+                assert bracket_parts(first["start"]["bracket"])[:2] == (4, "archidekt")
+                shared = {"deck_name": "x", "bracket": first["start"]["bracket"]}
+                chosen, choice = shared_opponents(precons, shared)
+            else:
+                choice = first["opponent_choice"]
+                chosen = [d["precon"] for d in fake.started[-1]["decks"][1:]]
+            assert chosen == ["Old 4", "New 3", "Mid 3"], (first, chosen)
+            assert PAIR_LEAD in choice["note"] and "Bracket 4 (the bracket set on" in choice["note"]
+            if "opponent_choice" in second:  # it started: it seats the same table
+                assert [d["precon"] for d in fake.started[-1]["decks"][1:]] == chosen
+                assert second["opponent_choice"]["rule"] == "shared"
+                # proofread R4 fix 3: the second report says how the shared table was picked
+                assert (
+                    "Forge games, picked for the higher of the two decks' brackets, so both decks met"
+                    in (second["opponent_choice"]["note"])
+                ), second
+            else:
+                assert "start" in second and second["start"]["shared"]["report_id"], second
+        stack.ark.decks[43]["edhBracket"] = None
+        # the first deck gets no Forge games: the page names that deck, not "that report"
+        reports.forge = None
+        h.app.state.gateway.db._conn.execute("DELETE FROM reports")  # nothing to reuse
+        none = await b.http.post("/decks/42/compare/forge", data={"csrf": csrf, "with": "43"})
+        assert none.status_code == 409, none.text
+        assert "Forge could not start games for Sample Commander Deck, so" in none.text, none.text
+        assert "That report" not in none.text and "the first deck" not in none.text
+        assert "If your Forge queue is full, wait for a run to finish" in none.text
+        assert re.search(r"href='/history/reports/rep_[^']+'>Its report</a>", none.text)
+    finally:
+        reports.run, reports.forge = real_run, None
+        if reports._forge_task:
+            reports._forge_task.cancel()
+        await b.aclose()
+
+
+async def test_compare_press_starts_or_queues_both_decks_or_neither(stack: Stack) -> None:
+    """Proofread R13 O1: with one Forge run playing and one report waiting, the Compare press queued
+    the first deck and left the second without Forge games (the queue keeps at most two waiting),
+    though the button says both decks' games are started or queued. The press is now refused
+    before either report is made; with room for both, both wait their turn."""
+    from mtg_gateway.reports import MAX_FORGE_WAITING
+
+    from .test_forge import BRACKETED, FakeForge
+
+    h = stack.h
+    b = await linked_browser(stack)
+    reports = h.app.state.gateway.reports
+    db = h.app.state.gateway.db._conn
+    stack.ark.private.discard(43)
+    try:
+        csrf = await b.csrf("/account")
+        await b.http.post("/decks/42/report", data={"csrf": csrf, "forge": "0"})
+        sub = db.execute("SELECT owner_sub FROM reports").fetchone()[0]
+        db.execute("DELETE FROM reports")
+        reports.forge = FakeForge(brackets=BRACKETED).client()
+        await reports.run(sub, "42", simulate=False, forge=True, options={"seed": 1})  # playing
+        await reports.run(sub, "42", simulate=False, forge=True, options={"seed": 2})  # waiting
+        assert MAX_FORGE_WAITING == 2
+
+        def states() -> list[str]:
+            rows = db.execute("SELECT forge_json FROM reports ORDER BY rowid").fetchall()
+            return [json.loads(r["forge_json"])["state"] for r in rows]
+
+        assert states() == ["running", "queued"]
+        full = await b.http.post("/decks/42/compare/forge", data={"csrf": csrf, "with": "43"})
+        assert full.status_code == 409, full.text
+        assert (
+            "You already have 1 Forge run going and 1 report waiting for its games. Comparing two "
+            "decks needs room for 2 more, and each member can have at most 2 reports waiting, so "
+            "nothing was started. Try again when none of your reports is waiting for its games."
+        ) in html.unescape(full.text)
+        assert "href='/decks/42/compare?with=43'>Back to the comparison</a>" in full.text
+        assert states() == ["running", "queued"]  # no report made for either deck
+        await reports.run(sub, "42", simulate=False, forge=True, options={"seed": 3})  # 2 waiting
+        fuller = await b.http.post("/decks/42/compare/forge", data={"csrf": csrf, "with": "43"})
+        assert fuller.status_code == 409 and (
+            "You already have 1 Forge run going and 2 reports waiting for their games."
+            in html.unescape(fuller.text)
+        ), fuller.text
+        assert states() == ["running", "queued", "queued"]
+
+        # one run playing, none waiting: both decks wait their turn, neither is skipped
+        db.execute("DELETE FROM reports WHERE rowid > (SELECT MIN(rowid) FROM reports)")
+        ok = await b.http.post("/decks/42/compare/forge", data={"csrf": csrf, "with": "43"})
+        assert ok.status_code == 303, ok.text
+        assert states() == ["running", "queued", "queued"]
+    finally:
+        reports.forge = None
+        if reports._forge_task:
+            reports._forge_task.cancel()
+        await b.aclose()
+
+
+async def test_compare_presses_at_once_never_pass_the_member_limit(stack: Stack) -> None:
+    """Review L7: the room check reserved nothing, so two presses at once (two tabs) both passed
+    while the other deck was read, and each pair lost its second deck's Forge games; so did a
+    press beside an assistant's report. The room is now kept from the check until both runs are
+    saved: one press goes through whole, the other is refused, and no pair loses a deck."""
+    import asyncio
+
+    from .test_forge import BRACKETED, FakeForge
+
+    h = stack.h
+    b = await linked_browser(stack)
+    reports = h.app.state.gateway.reports
+    db = h.app.state.gateway.db._conn
+    stack.ark.private.discard(43)
+    real_pair = reports.pair_deck
+
+    async def slow_pair(sub, other):  # the other deck's Archidekt read, slow enough to overlap
+        await asyncio.sleep(0.3)
+        return await real_pair(sub, other)
+
+    def states() -> list[str]:
+        rows = db.execute("SELECT forge_json FROM reports ORDER BY rowid").fetchall()
+        return [json.loads(r["forge_json"])["state"] for r in rows]
+
+    reports.pair_deck = slow_pair
+    try:
+        csrf = await b.csrf("/account")
+        await b.http.post("/decks/42/report", data={"csrf": csrf, "forge": "0"})
+        sub = db.execute("SELECT owner_sub FROM reports").fetchone()[0]
+        db.execute("DELETE FROM reports")
+        reports.forge = FakeForge(brackets=BRACKETED).client()
+        await reports.run(sub, "42", simulate=False, forge=True, options={"seed": 1})  # playing
+
+        def press():
+            return b.http.post("/decks/42/compare/forge", data={"csrf": csrf, "with": "43"})
+
+        one, two = await asyncio.gather(press(), press())
+        assert sorted([one.status_code, two.status_code]) == [303, 409], (one.text, two.text)
+        refused = one if one.status_code == 409 else two
+        assert (
+            "Another comparison of yours is still being set up, so nothing was started. Try again once "
+            "it is set up and none of your reports is waiting for its games."
+        ) in html.unescape(refused.text)
+        assert states() == ["running", "queued", "queued"]  # one whole pair waits, nothing skipped
+        assert not reports._pair_holds  # every hold given back
+
+        # a press beside an assistant's report: the pair keeps both decks; the report, arriving
+        # while the pair's room is kept, waits only if the limit allows
+        db.execute("DELETE FROM reports WHERE rowid > (SELECT MIN(rowid) FROM reports)")
+        later = asyncio.create_task(press())
+        await asyncio.sleep(0.1)  # the press holds its room and is reading the other deck
+        solo = await reports.run(sub, "43", simulate=False, forge=True, options={"seed": 5})
+        assert (await later).status_code == 303
+        assert solo["forge"]["state"] == "skipped", solo["forge"]
+        assert solo["forge"]["error"] == (
+            "Another comparison of yours is still being set up and needs the rest of your Forge "
+            "queue, so this report has no Forge games. Run the report again once that comparison is "
+            "set up and fewer than 2 of your reports are waiting."
+        )
+        assert states() == ["running", "skipped", "queued", "queued"]
+        assert not reports._pair_holds
+
+        # a press that fails after its check gives its room back
+        db.execute("DELETE FROM reports WHERE rowid > (SELECT MIN(rowid) FROM reports)")
+        bad = await b.http.post("/decks/42/compare/forge", data={"csrf": csrf, "with": "99999"})
+        assert bad.status_code == 404 and not reports._pair_holds
+        assert (await press()).status_code == 303
+    finally:
+        reports.pair_deck = real_pair
+        reports.forge = None
+        if reports._forge_task:
+            reports._forge_task.cancel()
+        await b.aclose()
+
+
+async def test_forge_comparison_reads_the_other_deck_first_on_every_path(stack: Stack) -> None:
+    """Review r3 items 1 and 2 (Q140 item 3): the website's Compare press, run_deck_report's
+    compare_with and the REST route's compare_with all pick the precons for the higher of the two
+    decks' brackets. The other deck is read before anything is stored: a deck that can't be read
+    leaves no report and says so. A press reads each deck once."""
+    from mtg_gateway.decks import RateBudget
+    from mtg_gateway.forge import PAIR_LEAD, bracket_parts
+    from mtg_gateway.reports import BOTH_PAIRINGS, PAIR_NO_FORGE, PAIR_UNREAD
+    from mtg_gateway.tools_reports import NOT_DECK_OR_SNAPSHOT
+
+    from .test_forge import BRACKETED, FakeForge
+
+    h = stack.h
+    b = await linked_browser(stack)
+    reports = h.app.state.gateway.reports
+    fake = FakeForge(brackets=BRACKETED)
+    reports.forge = fake.client()
+    stack.ark.private.discard(43)  # Amy's deck, public for this test
+    stack.ark.decks[43]["edhBracket"] = 4
+    db = reports.db._conn
+
+    def stored() -> list[object]:
+        return db.execute("SELECT deck_id, forge_json FROM reports ORDER BY rowid").fetchall()
+
+    def paired_on_4(row: object) -> None:
+        section = json.loads(row["forge_json"])
+        if "start" in section:  # waiting behind the member's earlier run, with its bracket
+            assert bracket_parts(section["start"]["bracket"])[:2] == (4, "archidekt"), section
+        else:
+            assert "opponent_choice" in section, section
+            note = section["opponent_choice"]["note"]
+            assert PAIR_LEAD in note and "Bracket 4 (the bracket set on" in note, section
+
+    try:
+        page = await b.http.get("/decks/42/compare?with=43", headers=NAV)
+        csrf = re.search(r"name='csrf' value='([^']+)'", page.text).group(1)
+        # the website: one read of each deck per press
+        db.execute("DELETE FROM reports")
+        calls = len(stack.ark.calls)
+        r = await b.http.post("/decks/42/compare/forge", data={"csrf": csrf, "with": "43"})
+        assert r.status_code == 303, r.text
+        reads = [p for m, p in stack.ark.calls[calls:] if m == "GET" and p.startswith("/api/decks/")]
+        assert sorted(reads) == ["/api/decks/42/", "/api/decks/43/"], reads
+        paired_on_4(stored()[0])
+        # a deck that can't be read: nothing is kept, and the page says so
+        db.execute("DELETE FROM reports")
+        bad = await b.http.post("/decks/42/compare/forge", data={"csrf": csrf, "with": "99999"})
+        unread = f"{PAIR_UNREAD} Archidekt could not find that deck."  # the reason as its own sentence
+        assert bad.status_code == 404 and unread in html.unescape(bad.text), bad.text
+        assert stored() == []
+        # run_deck_report's compare_with, either order
+        token = await mcp_token(h)
+        for here, there in (("42", "43"), ("43", "42")):
+            db.execute("DELETE FROM reports")
+            tool = structured(
+                await call(
+                    h,
+                    token,
+                    "run_deck_report",
+                    {"deck_ref": here, "simulate": False, "forge": True, "compare_with": there},
+                )
+            )
+            assert tool["ok"], tool
+            assert [r["deck_id"] for r in stored()] == [here]
+            paired_on_4(stored()[0])
+        db.execute("DELETE FROM reports")
+        gone = structured(
+            await call(
+                h,
+                token,
+                "run_deck_report",
+                {"deck_ref": "42", "simulate": False, "forge": True, "compare_with": "99999"},
+            )
+        )
+        assert gone["ok"] is False and gone["message"] == unread and stored() == [], gone
+        odd = structured(
+            await call(h, token, "run_deck_report", {"deck_ref": "42", "forge": True, "compare_with": "x y"})
+        )
+        assert (
+            odd["ok"] is False
+            and odd["message"] == f"{PAIR_UNREAD} {NOT_DECK_OR_SNAPSHOT}"
+            and stored() == []
+        )
+        # review r4 L2: an unknown (or another member's) snapshot id is refused naming snapshots too
+        for args in (
+            {"deck_ref": "snap_nothere"},
+            {"deck_ref": "42", "forge": True, "compare_with": "snap_nothere"},
+        ):
+            unknown = structured(await call(h, token, "run_deck_report", args))
+            assert unknown["ok"] is False and unknown["message"].endswith(NOT_DECK_OR_SNAPSHOT), unknown
+        # proofread R5 finding 1: another site's link on compare_with reads as on deck_ref
+        elsewhere = structured(
+            await call(
+                h,
+                token,
+                "run_deck_report",
+                {"deck_ref": "42", "forge": True, "compare_with": "https://moxfield.com/decks/x"},
+            )
+        )
+        assert elsewhere["message"] == f"{PAIR_UNREAD} Only archidekt.com deck links are accepted.", elsewhere
+        # proofread R5 finding 6: compare_decks gives the same refusal, per side
+        cmp_unknown = structured(await call(h, token, "compare_decks", {"a": "snap_nothere", "b": "42"}))
+        assert cmp_unknown["ok"] is False and cmp_unknown["message"] == (
+            f"Deck a: {NOT_DECK_OR_SNAPSHOT} A pasted list goes in a_list."
+        ), cmp_unknown
+        # proofread R6 finding 1: another site's link reads as on deck_ref and compare_with, per side
+        cmp_elsewhere = structured(
+            await call(h, token, "compare_decks", {"a": "42", "b": "https://moxfield.com/decks/x"})
+        )
+        assert cmp_elsewhere["message"] == (
+            "Deck b: Only archidekt.com deck links are accepted. A pasted list goes in b_list."
+        ), cmp_elsewhere
+        stats_unknown = structured(await call(h, token, "deck_stats", {"deck_ref": "snap_nothere"}))
+        assert stats_unknown["ok"] is False and stats_unknown["message"] == NOT_DECK_OR_SNAPSHOT, (
+            stats_unknown
+        )
+        assert stored() == []
+        # no Forge games: refused rather than ignored (pending Ben's call), nothing kept
+        off = structured(
+            await call(
+                h,
+                token,
+                "run_deck_report",
+                {"deck_ref": "42", "simulate": False, "forge": False, "compare_with": "43"},
+            )
+        )
+        assert off["ok"] is False and off["message"] == PAIR_NO_FORGE and stored() == [], off
+        both = structured(
+            await call(
+                h,
+                token,
+                "run_deck_report",
+                {"deck_ref": "42", "compare_with": "43", "same_opponents_as": "rep_x"},
+            )
+        )
+        assert both["ok"] is False and both["message"] == BOTH_PAIRINGS
+        listed = structured(
+            await call(h, token, "run_deck_report", {"deck_ref": "1 Sol Ring\n", "compare_with": "43"})
+        )
+        assert listed["ok"] is False and listed["message"] == (
+            "A pasted list gets no Forge games, so compare_with works only when deck_ref is a deck id, URL "
+            "or snapshot id."
+        )
+        # the REST route's compare_with
+        auth = {"Authorization": f"Bearer {await mcp_token(h)}"}
+        for here, there in (("43", "42"), ("42", 43)):
+            db.execute("DELETE FROM reports")
+            api = await h.http.post(
+                "/api/v1/reports",
+                json={"deck_id": here, "simulate": False, "forge": True, "compare_with": there},
+                headers=auth,
+            )
+            assert api.status_code == 201, api.text
+            paired_on_4(stored()[0])
+        db.execute("DELETE FROM reports")
+        missing = await h.http.post(
+            "/api/v1/reports",
+            json={"deck_id": "42", "simulate": False, "forge": True, "compare_with": "99999"},
+            headers=auth,
+        )
+        assert missing.status_code == 404 and missing.json()["message"] == unread and stored() == []
+        no_forge = await h.http.post(
+            "/api/v1/reports",
+            json={"deck_id": "42", "simulate": False, "forge": False, "compare_with": "43"},
+            headers=auth,
+        )
+        assert no_forge.status_code == 400 and no_forge.json()["message"] == PAIR_NO_FORGE and stored() == []
+        # proofread R5 finding 4: the deck lost its commander after the page loaded: plain words for
+        # the member, never the assistant's parameter names, and nothing kept
+        from mtg_gateway.companion_tools import COMPARE_NO_COMMANDER
+
+        db.execute("DELETE FROM reports")
+        saved = json.loads(json.dumps(stack.ark.decks[42]))
+        for row in stack.ark.decks[42]["cards"]:
+            row["categories"] = [c for c in (row.get("categories") or []) if c != "Commander"]
+        stack.ark.decks[42]["updatedAt"] = "2026-10-03T00:00:00Z"
+        lost = await b.http.post("/decks/42/compare/forge", data={"csrf": csrf, "with": "43"})
+        stack.ark.decks[42] = saved
+        assert lost.status_code == 400 and COMPARE_NO_COMMANDER in html.unescape(lost.text), lost.text
+        assert "compare_with" not in lost.text and "forge is false" not in lost.text and stored() == []
+        # Archidekt busy during a press: the shared busy page, whose Try again opens the Compare
+        # page (the press itself answers POST only, so the same URL would be a 405)
+        reports.decks.archidekt_budget = RateBudget(per_window=1, window=600)
+        busy = None
+        for _ in range(3):
+            busy = await b.http.post("/decks/42/compare/forge", data={"csrf": csrf, "with": "43"})
+            if busy.status_code == 429:
+                break
+        assert busy is not None and busy.status_code == 429, busy.text
+        assert "<a class='btn btn-primary' href='/decks/42/compare?with=43'>Try again</a>" in busy.text
+        assert busy.headers["cache-control"] == "no-store" and int(busy.headers["retry-after"]) >= 1
+        again = await b.http.get("/decks/42/compare?with=43", headers=NAV)
+        assert again.status_code in (200, 429), again.status_code  # a page, never 405
+    finally:
+        stack.ark.decks[43]["edhBracket"] = None
+        reports.forge = None
+        if reports._forge_task:
+            reports._forge_task.cancel()
+        await b.aclose()
+
+
+async def test_reports_page_lists_every_report_and_what_forge_plays(stack: Stack) -> None:
+    """K8 (Q136, T-152): /reports lists the member's reports newest first with their status, what
+    ran and a link to the deck's trend in History; a deck filter; and the Forge runs playing or
+    waiting, with their place. Signed out, it asks to sign in."""
+    from .test_forge import FakeForge
+
+    h = stack.h
+    b = await linked_browser(stack)
+    reports = h.app.state.gateway.reports
+    fake = FakeForge()
+    try:
+        empty = await b.http.get("/reports", headers=NAV)
+        assert empty.status_code == 200 and "No reports yet" in empty.text and "Run full test" in empty.text
+        assert "Forge now" not in empty.text
+        csrf = await b.csrf("/account")
+        await b.http.post("/decks/42/report", data={"csrf": csrf, "forge": "0"})
+        listed = await b.http.get("/reports", headers=NAV)
+        assert "class='rp-deck' href='/history/reports/rep_" in listed.text
+        assert (
+            "Sample Commander Deck" in listed.text and "/history?deck_id=42&amp;type=reports" in listed.text
+        )
+        assert "<option value='42'" in listed.text and "<p class='rp-meta'>" in listed.text
+        none = await b.http.get("/reports?deck_id=999", headers=NAV)
+        assert "No reports for this deck yet" in none.text
+        reports.forge = fake.client()
+        sub = h.app.state.gateway.db._conn.execute("SELECT owner_sub FROM reports").fetchone()[0]
+        first = await reports.run(sub, "42", simulate=False, forge=True, options={"seed": 1})
+        await reports.run(sub, "42", simulate=False, forge=True, options={"seed": 2})
+        queued = await b.http.get("/reports", headers=NAV)
+        assert (
+            "Forge now" in queued.text
+            and "Playing: 0 of" in queued.text
+            and "Waiting: number 1 in line" in queued.text
+        )
+        assert f"href='/history/reports/{first['report_id']}'" in queued.text
+        out = await stack.h.http.get("/reports")
+        assert out.status_code in (302, 303)
+    finally:
+        reports.forge = None
+        if reports._forge_task:
+            reports._forge_task.cancel()
         await b.aclose()
 
 
@@ -306,7 +776,7 @@ async def test_deck_pages(stack: Stack) -> None:
         assert "target='_blank'" not in lst.text.split("<main")[1].split("Open on Archidekt")[0]
         deck = await b.http.get("/decks/42", headers=NAV)
         assert deck.status_code == 200
-        assert "Mana curve" in deck.text and "Run simulation" in deck.text and "Edit deck" in deck.text
+        assert "Mana curve" in deck.text and "Run full test" in deck.text and "Edit deck" in deck.text
         assert "Open on Archidekt" in deck.text  # the one external link may open a new tab
         missing = await b.http.get("/decks/999999", headers=NAV)
         assert missing.status_code == 404
@@ -322,7 +792,7 @@ async def test_deck_pages(stack: Stack) -> None:
         ran = await b.http.post("/decks/42/report", data={"csrf": csrf})
         assert ran.status_code == 303 and ran.headers["location"].startswith("/history/reports/")
         shown = await b.http.get(ran.headers["location"], headers=NAV)
-        assert shown.status_code == 200 and "Goldfish simulation" in shown.text and "## Metrics" in shown.text
+        assert shown.status_code == 200 and "Solo test (" in shown.text and "## Metrics" in shown.text
         # the page speaks to a person: no assistant tool names, exports in one row of buttons
         assert "goldfish_" not in shown.text and "run_deck_report" not in shown.text
         assert (
@@ -346,8 +816,12 @@ async def test_app_shell_routes(stack: Stack) -> None:
     assert m.headers["content-type"].startswith("application/manifest+json")
     sw = await h.http.get("/sw.js")
     assert sw.status_code == 200 and "fetch" in sw.text and sw.headers["cache-control"] == "no-store"
-    # one dropped connection doesn't show the offline page: two retries first, GET navigations only
-    assert "RETRY=[300,1000]" in sw.text and "e.request.method!=='GET'" in sw.text
+    # a dropped connection or a gateway restart doesn't show the offline page: about 5 s of
+    # retries first (Q63), GET navigations only
+    assert "RETRY=[500,1000,1500,2000]" in sw.text and "e.request.method!=='GET'" in sw.text
+    # the offline page's script is answered by the worker itself, so it loads while offline
+    assert "const OFFLINE_JS=" in sw.text and "/static/offline.js" in sw.text
+    assert "script-src 'self'; connect-src 'self';" in sw.text
     links = await h.http.get("/.well-known/assetlinks.json")
     assert links.status_code == 200
     assert links.json()[0]["relation"] == ["delegate_permission/common.handle_all_urls"]
@@ -412,7 +886,7 @@ async def test_deck_editor_page(stack: Stack) -> None:
 async def test_playtest_goes_to_archidekts_own_playtester(stack: Stack) -> None:
     """Playtest opens Archidekt's playtester in its own tab (D-13): a frame on a gateway page never
     carried the person's Archidekt sign-in, so a private deck stayed empty there (T-098). Old links
-    to the gateway's playtest page are sent on; nothing is framed any more."""
+    to the gateway's old playtest page are gone; nothing is framed any more."""
     b = await linked_browser(stack)
     try:
         deck = await b.http.get("/decks/42", headers=NAV)
@@ -422,9 +896,7 @@ async def test_playtest_goes_to_archidekts_own_playtester(stack: Stack) -> None:
         )
         assert "<iframe" not in deck.text
         r = await b.http.get("/decks/42/playtest", headers=NAV)
-        assert r.status_code == 303 and r.headers["location"] == "https://archidekt.com/playtester-v2/42"
-        odd = await b.http.get("/decks/evil/playtest", headers=NAV)
-        assert odd.status_code == 303 and odd.headers["location"] == "/decks"
+        assert r.status_code == 404
     finally:
         await b.aclose()
 
@@ -501,7 +973,7 @@ async def test_export_import_round_trip_keeps_every_card_finish_and_commander(st
             )
         )
         assert p["ok"], p
-        assert structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))["ok"]
+        assert (await apply_any(h, token, p["proposal_id"]))["ok"]
         ark.add_side_row(42, "Opt", 2)
 
         def shape(deck: dict) -> set[tuple]:
@@ -527,7 +999,7 @@ async def test_export_import_round_trip_keeps_every_card_finish_and_commander(st
                 await call(h, token, "propose_new_deck", {"name": f"Round trip {label}", field: text})
             )
             assert made["ok"], (label, made)
-            applied = structured(await call(h, token, "apply_proposal", {"proposal_id": made["proposal_id"]}))
+            applied = await apply_any(h, token, made["proposal_id"])
             assert applied["ok"] and applied["result"]["verified"], (label, applied)
             copy = structured(
                 await call(h, token, "get_deck", {"deck_ref": applied["result"]["deck_id"], "view": "cards"})
@@ -814,3 +1286,40 @@ async def test_every_page_that_links_the_manifest_lets_the_browser_load_it(stack
                 assert "manifest-src 'self'" in r.headers["content-security-policy"], path
     finally:
         await b.aclose()
+
+
+async def test_goldfish_guide_choice_is_kept_for_the_account(stack: Stack) -> None:
+    """G9: hiding the Goldfish guide is remembered for the account (account_prefs), only from the
+    member's own browser session with its CSRF header, and showing it again forgets the choice."""
+    b = await linked_browser(stack)
+    try:
+        assert (await b.http.post("/goldfish/guide", json={"hidden": True})).status_code == 403
+        csrf = await b.csrf("/account")
+        bad = await b.http.post("/goldfish/guide", json={"hidden": "yes"}, headers={"X-CSRF-Token": csrf})
+        assert bad.status_code == 400
+        ok = await b.http.post("/goldfish/guide", json={"hidden": True}, headers={"X-CSRF-Token": csrf})
+        assert ok.status_code == 200 and ok.json() == {"ok": True, "hidden": True}
+        page = (await b.http.get("/decks/42/goldfish")).text
+        assert "id='gf-guide' aria-labelledby='gf-guide-h' hidden>" in page
+        assert "data-guide='show'>" in page  # How to play shows, not hidden
+        again = await b.http.post("/goldfish/guide", json={"hidden": False}, headers={"X-CSRF-Token": csrf})
+        assert again.json()["hidden"] is False
+        page = (await b.http.get("/decks/42/goldfish")).text
+        assert "aria-labelledby='gf-guide-h'>" in page and "data-guide='show' hidden>" in page
+        # nobody signed in: refused
+        assert (await stack.h.http.post("/goldfish/guide", json={"hidden": True})).status_code == 403
+    finally:
+        await b.aclose()
+
+
+def test_reports_page_row_shows_the_set_bracket_over_the_estimate() -> None:
+    """Q49, O14: a bracket set on the deck is THE bracket; Archidekt's estimate shows, labelled,
+    only when none is set."""
+    from mtg_gateway.reports_page import row_html
+
+    base = {"report_id": "rep_1", "deck_id": "42", "deck_name": "Aesi", "status": "complete"}
+    both = row_html({**base, "bracket_set": 4, "bracket_estimate": 2})
+    assert "Bracket: Optimized (4)" in both and "Core (2)" not in both and "estimate" not in both
+    est = row_html({**base, "bracket_set": None, "bracket_estimate": 2})
+    assert "Archidekt's estimate from cards: Core (2)" in est and "Bracket:" not in est
+    assert "racket" not in row_html(base)

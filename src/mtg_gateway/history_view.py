@@ -169,7 +169,10 @@ def build_events(
         )
         count = x.get("card_count")
         summary = f"{count} cards as the deck stood" if count is not None else "The whole deck as it stood"
-        summary += " just before a change was applied." if x.get("proposal_id") else "."
+        if x.get("stopped_attempt"):  # Q78: taken for an apply that changed nothing
+            summary += " just before an apply that stopped before it changed anything."
+        else:
+            summary += " just before a change was applied." if x.get("proposal_id") else "."
         if x.get("deck_gone"):
             # A restore rewrites the deck itself; with the deck deleted on Archidekt it cannot work.
             summary += " The deck is no longer on Archidekt."
@@ -210,8 +213,11 @@ def build_events(
         if m.get("average_mana_value") is not None:
             bits.append(f"average mana value {float(m['average_mana_value']):.1f}")
         if m.get("price_total") is not None:
-            bits.append(f"${float(m['price_total']):.0f}")
-        if r.get("bracket_estimate"):
+            bits.append(f"${float(m['price_total']):,.0f}")
+        # the bracket set on the deck is THE bracket (Q49/O14); the estimate only when none is set
+        if r.get("bracket_set"):
+            bits.append(f"bracket {r['bracket_set']}")
+        elif r.get("bracket_estimate"):
             bits.append(f"bracket about {r['bracket_estimate']}")
         sim = "with a goldfish simulation" if r.get("has_goldfish") else "statistics only"
         client = r.get("created_by_client")
@@ -351,25 +357,79 @@ def _by_deck_html(events: list[dict[str, Any]], query: dict[str, Any]) -> str:
     return "".join(out)
 
 
-def filter_bar_html(query: dict[str, Any], decks: dict[str, str], *, shown: int, total_hint: str = "") -> str:
+COLLECTION_ID = "collection"  # decks.Decks.COLLECTION_TARGET: collection proposals file under it
+COLLECTION_LABEL = "Your Archidekt collection"
+
+
+def deck_filter_groups(
+    seen: dict[str, str],
+    live: list[dict[str, Any]] | None,
+    *,
+    listed: set[str] | None,
+    own: set[str],
+) -> tuple[dict[str, str], dict[str, str]]:
+    """The History deck filter's two groups from the decks that have history here (``seen``: id ->
+    the name recorded then): current decks, under their live names from the member's Archidekt
+    deck list (``live``, backup copies left out; None when it can't be read), and the decks no
+    longer on Archidekt. A deck is gone only when all of these hold: ``listed`` (the ids of a
+    complete deck list, ``DeckService.on_archidekt``) is known and lacks it, and the member's
+    history shows it as their own (``own``, ``db.own_history_deck_ids``: a report or a copy may be
+    of anyone's deck, which is never in the member's list). Anything else is unknown, and an
+    unknown deck stays with the current decks under its recorded name. The placeholder of a
+    new-deck proposal never applied ("new") is not a deck and is left out."""
+    names = {str(d["id"]): str(d.get("name") or "") for d in live or []}
+    current: dict[str, str] = {}
+    gone: dict[str, str] = {}
+    for did, recorded in seen.items():
+        if did == "new":
+            continue
+        if did == COLLECTION_ID:
+            current[did] = COLLECTION_LABEL
+        elif did in names:
+            current[did] = names[did] or recorded
+        elif listed is not None and did not in listed and did in own:
+            gone[did] = recorded
+        else:
+            current[did] = recorded
+    return current, gone
+
+
+def filter_bar_html(
+    query: dict[str, Any],
+    decks: dict[str, str],
+    *,
+    shown: int,
+    total_hint: str = "",
+    gone: dict[str, str] | None = None,
+) -> str:
     def options(items: list[tuple[str, str]], chosen: str) -> str:
         return "".join(
             f"<option value='{_esc(v)}'{' selected' if v == chosen else ''}>{_esc(label)}</option>"
             for v, label in items
         )
 
-    deck_items = [("", "All decks")] + [
-        (did, f"{name or did}")
-        for did, name in sorted(decks.items(), key=lambda kv: (kv[1] or kv[0]).lower())
-    ]
-    if query["deck_id"] and query["deck_id"] not in decks:
+    def by_name(group: dict[str, str]) -> list[tuple[str, str]]:
+        return [
+            (did, name or did) for did, name in sorted(group.items(), key=lambda kv: (kv[1] or kv[0]).lower())
+        ]
+
+    gone = gone or {}
+    deck_items = [("", "All decks"), *by_name(decks)]
+    if query["deck_id"] and query["deck_id"] not in decks and query["deck_id"] not in gone:
         deck_items.append((query["deck_id"], query["deck_id"]))
+    deck_options = options(deck_items, query["deck_id"])
+    if gone:
+        deck_options += (
+            "<optgroup label='No longer on Archidekt'>"
+            + options(by_name(gone), query["deck_id"])
+            + "</optgroup>"
+        )
     status = f"{shown} shown" + (f" · {total_hint}" if total_hint else "")
     return (
         "<form method='get' action='/history' class='card filterbar' role='search'>"
         "<div class='controls'>"
         f"<div class='field'><label for='h-deck'>Deck</label><span class='sel'>{icon('decks')}"
-        f"<select id='h-deck' name='deck_id'>{options(deck_items, query['deck_id'])}</select></span></div>"
+        f"<select id='h-deck' name='deck_id'>{deck_options}</select></span></div>"
         f"<div class='field'><label for='h-type'>Type</label><span class='sel'>{icon('filter')}"
         f"<select id='h-type' name='type'>{options(list(TYPES), query['type'])}</select></span></div>"
         f"<div class='field'><label for='h-state'>State</label><span class='sel'>{icon('proposals')}"
@@ -438,6 +498,10 @@ def pager_html(query: dict[str, Any], *, has_more: bool) -> str:
         parts.append(f"<a class='btn' href='/history{query_string(query, offset=offset + PAGE)}'>Older →</a>")
     parts.append("</nav>")
     return "".join(parts)
+
+
+# Track A's own History page styles (S3): HISTORY_CSS ends with this.
+HISTORY_CSS_A = ""
 
 
 def _trend_value(value: Any, unit: str) -> str:
@@ -585,7 +649,12 @@ def trend_html(trend: dict[str, Any] | None) -> str:
     )
 
 
-HISTORY_CSS = """
+# Track C's own History page styles (the trends; S3): HISTORY_CSS ends with this.
+HISTORY_CSS_C = ""
+
+
+HISTORY_CSS = (
+    """
 .filterbar .controls{display:grid;gap:.6rem 1rem;align-items:end;
   grid-template-columns:repeat(auto-fit,minmax(min(100%,11rem),1fr))}
 .filterbar .field label{margin:0 0 .3rem}
@@ -644,6 +713,9 @@ HISTORY_CSS = """
 .backups .copies li{display:flex;flex-wrap:wrap;gap:.25rem .5rem;align-items:baseline;overflow-wrap:anywhere}
 .backups time{font-size:.86rem;font-variant-numeric:tabular-nums}
 """
+    + HISTORY_CSS_A
+    + HISTORY_CSS_C
+)
 
 __all__ = [
     "HISTORY_CSS",
@@ -651,6 +723,7 @@ __all__ = [
     "backup_copies_html",
     "build_events",
     "events_html",
+    "deck_filter_groups",
     "filter_bar_html",
     "is_filtered",
     "pager_html",

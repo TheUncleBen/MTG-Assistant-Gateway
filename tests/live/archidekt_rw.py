@@ -50,7 +50,7 @@ import httpx
 
 from mtg_gateway.archidekt import ArchidektClient, Pacer
 from mtg_gateway.decks import DeckError, _clean_deck_id
-from tests.conftest import GATEWAY, FakeIdP, Harness, make_settings, running, sse_json
+from tests.conftest import GATEWAY, FakeIdP, Harness, make_settings, proposal_stamp, running, sse_json
 
 PREFIX = "MAG-TEST"
 # Real decks no live check may ever write to, on top of the name-prefix rule below:
@@ -141,7 +141,11 @@ class Run:
 
     async def review_page(self, pid: str, action: str) -> httpx.Response:
         csrf = await self.csrf(f"/proposals/{pid}")
-        return await self.browser.post(f"/proposals/{pid}", data={"csrf": csrf, "action": action})
+        # The click guard needs the page's render stamp, aged past its minimum as after a read.
+        shown = proposal_stamp(self.h, self.browser, pid)
+        return await self.browser.post(
+            f"/proposals/{pid}", data={"csrf": csrf, "action": action, "shown": shown}
+        )
 
     async def apply(self, pid: str) -> dict[str, Any]:
         """Apply the way this run is configured: the review page, or apply_proposal over MCP.

@@ -206,8 +206,8 @@ class DeckChange(_Card):
     mana_value: StrictInt | None = Field(
         default=None,
         ge=0,
-        le=20,
-        description="For set_mana_value: the card's custom mana value, 0 to 20; null takes it off.",
+        le=15,  # Q57: the range the tool enforces
+        description="For set_mana_value: the card's custom mana value, 0 to 15; null takes it off.",
     )
 
 
@@ -232,6 +232,10 @@ class CollectionAdd(_Card):
     finish: Finish | None = Field(default=None, description="nonfoil (default), foil or etched.")
     condition: Annotated[Literal["NM", "LP", "MP", "HP", "DMG"], BeforeValidator(_upper)] | None = Field(
         default=None, description="Card condition."
+    )
+    language: str | None = Field(
+        default=None,
+        description="The card's language code: EN (default), ES, FR, DE, IT, PT, JA, KO, RU, ZHS or ZHT.",
     )
 
 
@@ -262,7 +266,10 @@ class DeckDetails(BaseModel):
         default=None,
         description='Move the deck into this existing folder (its name; "" or "top" for the top level).',
     )
-    add_tags: list[str] | None = Field(default=None, description="Tags to put on the deck (names).")
+    add_tags: list[str] | None = Field(
+        default=None,
+        description="Tags to put on the deck: names from Archidekt's own tag list (it has no custom tags).",
+    )
     remove_tags: list[str] | None = Field(default=None, description="Tags to take off the deck (names).")
     cover: str | None = Field(default=None, description="A card in the deck whose art becomes the cover.")
 
@@ -303,6 +310,11 @@ class _SimShared(BaseModel):
 class RunOptions(_SimShared):
     opponents: StrictInt | None = Field(
         default=None, ge=1, le=5, description="Goldfish opponents (default 1)."
+    )
+    forge_seed: StrictInt | None = Field(
+        default=None,
+        description="Seed for the Forge games only. Without it Forge uses seed; without either, the "
+        "gateway picks one and the report records it.",
     )
     mulligan: Mulligan | None = Field(default=None, description="Mulligan rules.")
 

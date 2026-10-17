@@ -244,11 +244,13 @@ each a card added or removed, or a new quantity, category, finish,
 printing, color tag or custom mana value, no more than 4 copies a row,
 never the commander; it also makes a private copy of a deck; a new deck,
 a restore, the deck's details and bigger edits still ask you) or *Full
-auto* (it applies the deck and collection changes it proposes).
+auto* (it applies the rest too, except a restore, a commander change, a new deck, an edit of more
+than 20 rows, making a deck public or unlisted, and any edit of a description that has formatting, such as bold text, links or pictures, which still wait for your press; so does a held change, a change waiting for
+another change first, one another app had a hand in, one that replaces another app's change, or one
+that another app's waiting change would replace).
 Actions on your Archidekt account (likes, votes, bookmarks, follows,
 comments, new folders and collaborator changes) and deleting a deck are
-never applied by an assistant: each one waits for your own press on its
-review page, in every mode. It is your own setting:
+never applied by an assistant: each one waits for your own press, in every mode, on the card in the chat or on its review page (deleting a deck, and an edit of a comment that has formatting: on the review page only). It is your own setting:
 it covers only your account, your decks and the apps you connected, and
 only you can change it, in your browser. In either auto mode the assistant
 applies what the mode allows with `apply_proposal` and tells you; the card
@@ -291,7 +293,9 @@ buttons for the name, description and URL, and the icon to download.
 4. Open **Plugins** in the sidebar and press **+** (reported, OpenAI
    developer docs seen 2026-10-05; older pages call this Apps, then Create).
 5. Name: the gateway's name as the owner set it (`MTG Assistant Gateway`
-   unless they changed it; the install page shows the right one).
+   unless they changed it; the install page shows the right one). An owner
+   can set `MTG_CHATGPT_NAME` to give the ChatGPT connector a different name
+   from `MTG_SERVER_NAME` ([DEPLOY.md](DEPLOY.md)).
 6. Description: `Magic: The Gathering deck research, goldfish testing and
    safe Archidekt deck edits, from a self-hosted gateway.` This is the
    description the gateway also gives apps itself.
@@ -315,8 +319,10 @@ buttons for the name, description and URL, and the icon to download.
 
 **Download the ChatGPT plugin (ZIP)** from the ChatGPT section of the
 gateway's setup hub, or directly at
-`https://mtg.example.com/plugin/mtg-gateway-chatgpt.zip` (the name follows
-the owner's `MTG_SERVER_NAME`, as the Claude plugin's does). It holds the
+`https://mtg.example.com/plugin/mtg-gateway-chatgpt.zip` (the file name
+follows the owner's `MTG_SERVER_NAME`, as the Claude plugin's does; the
+connector name inside it is their `MTG_CHATGPT_NAME` when set, otherwise
+their `MTG_SERVER_NAME`). It holds the
 connector (this gateway's address) and the MTG skill in one file, in the
 Agent Plugins format that OpenAI's plugins use. It needs no sign-in to
 download: it holds nothing secret.
@@ -362,7 +368,7 @@ card lookups for scanning, and making deck proposals. For the write tools
   chose an auto approval mode on your Account page, the assistant applies
   what the mode allows itself.
 - `reject_proposal`: press **Reject this proposal** on the review page.
-- `run_deck_report`: press **Run simulation** on the deck's page under
+- `run_deck_report`: press **Run full test** on the deck's page under
   **Decks** on the gateway.
 - `save_scan_session`: scan on the gateway's `/scan` page in your browser
   instead.

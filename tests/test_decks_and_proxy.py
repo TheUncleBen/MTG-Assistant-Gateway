@@ -13,135 +13,39 @@ import httpx
 import pytest
 from mcp import Client
 from mcp.server.mcpserver import MCPServer
-from pydantic import BaseModel, ConfigDict, Field
 
 from mtg_gateway.archidekt import ArchidektClient, Pacer
+from mtg_gateway.decklist import parse_decklist
 from mtg_gateway.mf_proxy import MysticForgeProxy
 
-from .conftest import GATEWAY, FakeIdP, Harness, make_settings, running, sse_json
+from .conftest import (
+    AUTO_PROXY,
+    GATEWAY,
+    FakeIdP,
+    Harness,
+    Stack,
+    StackOptions,
+    open_stack,
+    proposal_stamp,
+    sse_json,
+    stack_with,
+)
 from .fake_archidekt import FakeArchidekt
-
-
-class _GoldfishRunInput(BaseModel):
-    """The shape of Mystic Forge's goldfish_run input (server.py GoldfishRunInput, extra forbidden):
-    one ``params`` object. A flat call fails validation exactly as it does against the real service."""
-
-    model_config = ConfigDict(extra="forbid")
-    deck: str = Field(min_length=1)
-    n: int = Field(default=300, ge=1, le=5000)
-    seed: int | None = None
-    until_turn: int = Field(default=10, ge=1, le=30)
-    opponents: int = Field(default=1, ge=1, le=5)
-    mulligan: dict[str, object] | None = None
-    annotations: list[dict[str, object]] | None = None
-    combos: list[object] | None = None
-    constructed: bool = False
-
-
-class _GoldfishAbInput(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    deck_a: str = Field(min_length=1)
-    deck_b: str = Field(min_length=1)
-    n: int = Field(default=300, ge=1, le=5000)
-    seed: int | None = None
-    until_turn: int = Field(default=10, ge=1, le=30)
-    annotations: list[dict[str, object]] | None = None
-    annotations_a: list[dict[str, object]] | None = None
-    annotations_b: list[dict[str, object]] | None = None
-    combos: list[object] | None = None
-    allow_different_commanders: bool = False
-    constructed: bool = False
-
-
-class _ValidateDecklistInput(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    decklist: str = Field(min_length=1)
-    commander: str | None = None
-
-
-# The simulator calls the fake received, (tool, params), for tests that check what was sent.
-SIM_CALLS: list[tuple[str, dict[str, object]]] = []
-
-
-def fake_mystic_forge() -> MCPServer:
-    mf = MCPServer(name="mystic-forge-fake")
-
-    @mf.tool(name="scryfall_named", description="Look up a card by name")
-    async def scryfall_named(name: str) -> dict[str, object]:
-        return {"name": name, "oracle_text": "fake oracle text"}
-
-    # The simulators, with Mystic Forge's one-model signature and its renderers' headings. A
-    # commander the fake does not know is answered the way Mystic Forge does: a sentence, not an
-    # error.
-    @mf.tool(name="goldfish_run", description="goldfish simulation")
-    async def goldfish_run(params: _GoldfishRunInput) -> str:
-        SIM_CALLS.append(("goldfish_run", params.model_dump()))
-        first = params.deck.strip().splitlines()[0]
-        if params.constructed:
-            # Mystic Forge's header for a 60-card game (patch 0007)
-            size = sum(int(line.split()[0]) for line in params.deck.strip().splitlines())
-            return (
-                f"# Goldfish run\nDeck: {size} cards | Format: 60-card (no commander, 20 life, on the "
-                f"play) | {params.n} games\n\n## Metrics\n```json\n{{}}\n```"
-            )
-        if "Unknown" in first:
-            return f"Commander '{first}' was not recognized by Scryfall; fix the name and rerun."
-        return f"# Goldfish run\nCommander: {first} | {params.n} games\n\n## Metrics\n```json\n{{}}\n```"
-
-    @mf.tool(name="goldfish_ab", description="paired goldfish A/B")
-    async def goldfish_ab(params: _GoldfishAbInput) -> str:
-        SIM_CALLS.append(("goldfish_ab", params.model_dump()))
-        return f"# Goldfish A/B\n{params.n} paired games\n\n## Deltas (A − B)\n(none)"
-
-    @mf.tool(name="validate_decklist", description="validate a decklist")
-    async def validate_decklist(params: _ValidateDecklistInput) -> str:
-        # Like Mystic Forge, which reads names through Scryfall's collection lookup: a
-        # double-faced card named with both faces is "not found".
-        both = [line for line in params.decklist.splitlines() if " // " in line]
-        if both:
-            return "# Validation: ISSUES FOUND\n\n**not found on Scryfall:**\n" + "\n".join(both)
-        return f"Validated {len(params.decklist.splitlines())} lines"
-
-    @mf.tool(name="watchlist_list", description="stateful, must stay hidden")
-    async def watchlist_list() -> list[str]:
-        return ["secret"]
-
-    @mf.tool(name="unknown_future_tool", description="not on either list")
-    async def unknown_future_tool() -> str:
-        return "hidden"
-
-    return mf
+from .fake_mystic_forge import SIM_CALLS, _ValidateDecklistInput, fake_mystic_forge
+from .track_a_helpers import apply_any
 
 
 def _client(settings, ark: FakeArchidekt) -> ArchidektClient:
     return ArchidektClient(settings.archidekt_base, "test-agent", Pacer(0.0), http=ark.client())
 
 
-class Stack:
-    def __init__(self, h: Harness, ark: FakeArchidekt):
-        self.h = h
-        self.ark = ark
-
-
-@pytest.fixture
-async def stack(tmp_path: Path, idp: FakeIdP):
-    ark = FakeArchidekt()
-    settings = make_settings(
-        tmp_path, writes_enabled=True, approval_mode_default="auto", archidekt_base="https://ark.test/api"
-    )
-    client = _client(settings, ark)
-    proxy = MysticForgeProxy("http://mf.test/mcp", client_factory=lambda: Client(fake_mystic_forge()))
-    async with running(Harness(settings, idp, archidekt=client, mf_proxy=proxy)) as h:
-        yield Stack(h, ark)
+stack_options = stack_with(AUTO_PROXY)
 
 
 @pytest.fixture
 async def stack_ro(tmp_path: Path, idp: FakeIdP):
-    ark = FakeArchidekt()
-    settings = make_settings(tmp_path, writes_enabled=False, archidekt_base="https://ark.test/api")
-    client = _client(settings, ark)
-    async with running(Harness(settings, idp, archidekt=client)) as h:
-        yield Stack(h, ark)
+    async with open_stack(tmp_path, idp, StackOptions(settings={"writes_enabled": False})) as st:
+        yield st
 
 
 # -- helpers -----------------------------------------------------------------
@@ -185,6 +89,25 @@ class Browser:
         m = re.search(r"name='csrf' value='([0-9a-f]+)'", r.text)
         assert m, r.text
         return m.group(1)
+
+    async def review_form(self, url: str) -> dict[str, str]:
+        """The hidden fields of the review page ``url`` (``/proposals/<pid>``) as a person sends
+        them: the CSRF token, a render stamp old enough for the click guard and the version the
+        page showed (G16: an Apply without it is refused)."""
+        form = {
+            "csrf": await self.csrf(url),
+            "shown": proposal_stamp(self.h, self.http, url.rsplit("/", 1)[1]),
+        }
+        text = (await self.http.get(url)).text
+        shown = re.search(r"name='version' value='(\d+)'", text)
+        if shown:
+            form["version"] = shown.group(1)
+        # the status the page showed, and when it was set: a change held since is refused
+        for key in ("seen_status", "seen_status_at"):
+            got = re.search(rf"name='{key}' value='([^']*)'", text)
+            if got:
+                form[key] = got.group(1)
+        return form
 
     async def link(self, login: str, password: str, *, csrf: str | None = None) -> httpx.Response:
         csrf = csrf if csrf is not None else await self.csrf()
@@ -364,6 +287,32 @@ async def test_propose_then_apply_happy_path(stack: Stack) -> None:
 
 
 async def test_apply_rejects_stale_deck(stack: Stack) -> None:
+    """0.7.29 (K1): a change made elsewhere to a card the proposal touches means it would no longer
+    do what was reviewed: nothing is sent and the proposal waits again, marked Needs a look."""
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    first = ark.decks[42]["cards"][0]["card"]["oracleCard"]["name"]
+    p = structured(
+        await call(
+            h,
+            token,
+            "propose_deck_changes",
+            {"deck_id": "42", "changes": [{"action": "remove", "card_name": first}]},
+        )
+    )
+    ark.bump(42)  # one more copy of that same card, added on Archidekt
+    a = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
+    assert a["ok"] is False and a["error"] == "stale", a
+    assert a["state"] == "pending" and a["status"] == "needs_look", a
+    assert ark.patches == []
+    got = structured(await call(h, token, "get_proposal", {"proposal_id": p["proposal_id"]}))
+    assert got["state"] == "pending" and got["status"] == "needs_look", got
+    assert got["assistant_may_apply"] is False
+
+
+async def test_an_unrelated_change_elsewhere_still_applies(stack: Stack) -> None:
+    """0.7.29 (K1, K2): a change elsewhere that leaves the proposal's rows as reviewed only moves
+    its baseline ("Updated"), so it still applies."""
     h, ark = stack.h, stack.ark
     token = await linked_user(stack)
     p = structured(
@@ -374,14 +323,10 @@ async def test_apply_rejects_stale_deck(stack: Stack) -> None:
             {"deck_id": "42", "changes": [{"action": "add", "card_name": "Arcane Signet"}]},
         )
     )
-    ark.bump(42)
+    ark.bump(42)  # another card's count changed on Archidekt
     a = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
-    assert a["ok"] is False and a["error"] == "stale"
-    assert ark.patches == []
-    assert (
-        structured(await call(h, token, "get_proposal", {"proposal_id": p["proposal_id"]}))["state"]
-        == "failed"
-    )
+    assert a["ok"] and a["state"] == "applied", a
+    assert len(ark.patches) == 1
 
 
 async def test_apply_reports_verify_mismatch_and_keeps_snapshot(stack: Stack) -> None:
@@ -448,7 +393,7 @@ async def test_writes_disabled_blocks_apply_but_allows_proposals(stack_ro: Stack
             {"deck_id": "42", "changes": [{"action": "add", "card_name": "Arcane Signet"}]},
         )
     )
-    assert p["ok"] and "disabled" in p["next_step"]
+    assert p["ok"] and "switched off" in p["next_step"]
     a = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
     assert a["ok"] is False and a["error"] == "writes_disabled"
     assert ark.patches == []
@@ -480,7 +425,7 @@ async def test_browser_apply_with_csrf(stack: Stack) -> None:
     assert "Apply these changes" in page.text
     r = await b.http.post(url, data={"csrf": "nope", "action": "apply"})
     assert r.status_code == 403 and ark.patches == []
-    r = await b.http.post(url, data={"csrf": await b.csrf(url), "action": "apply"})
+    r = await b.http.post(url, data={**await b.review_form(url), "action": "apply"})
     assert r.status_code == 303 and r.headers["location"].endswith("?ok=applied")
     assert len(ark.patches) == 1  # one card added
     page = await b.http.get(url + "?ok=applied")
@@ -506,7 +451,7 @@ async def test_browser_reject_closes_a_pending_proposal(stack: Stack) -> None:
     assert "Reject this proposal" in page.text
     r = await b.http.post(url, data={"csrf": "nope", "action": "reject"})
     assert r.status_code == 403
-    r = await b.http.post(url, data={"csrf": await b.csrf(url), "action": "reject"})
+    r = await b.http.post(url, data={**await b.review_form(url), "action": "reject"})
     assert r.status_code == 303 and r.headers["location"].endswith("?ok=rejected")
     page = await b.http.get(url + "?ok=rejected")
     assert "Rejected." in page.text and ">rejected<" in page.text and "Reject this proposal" not in page.text
@@ -515,9 +460,9 @@ async def test_browser_reject_closes_a_pending_proposal(stack: Stack) -> None:
     got = structured(await call(h, token, "get_proposal", {"proposal_id": p["proposal_id"]}))
     assert got["state"] == "rejected" and "Rejected by the user on the review page" in got["next_step"]
     assert got["closed_by"] == "review_page" and "closed_by_app" not in got
-    r = await b.http.post(url, data={"csrf": await b.csrf(url), "action": "apply"})
+    r = await b.http.post(url, data={**await b.review_form(url), "action": "apply"})
     assert r.status_code == 303 and "err=" in r.headers["location"] and ark.patches == []
-    r = await b.http.post(url, data={"csrf": await b.csrf(url), "action": "reject"})
+    r = await b.http.post(url, data={**await b.review_form(url), "action": "reject"})
     assert r.status_code == 303 and "err=" in r.headers["location"]
     await b.aclose()
 
@@ -792,7 +737,7 @@ async def test_propose_new_deck_from_decklist_and_apply(stack: Stack) -> None:
     )
     assert "+1 Sol Ring [Ramp]" in p["diff"] and "+1 Island [Sideboard]" in p["diff"]
     assert len(ark.decks) == 2  # nothing created yet
-    a = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
+    a = await apply_any(h, token, p["proposal_id"])
     assert a["ok"], a
     assert a["state"] == "applied" and a["result"]["verified"] is True
     new_id = int(a["result"]["deck_id"])
@@ -823,7 +768,7 @@ async def test_new_deck_apply_reads_deck_back_when_create_returns_no_cards(stack
             h, token, "propose_new_deck", {"name": "Short reply", "decklist_text": "1 Sol Ring\n2 Forest"}
         )
     )
-    a = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
+    a = await apply_any(h, token, p["proposal_id"])
     assert a["ok"] and a["state"] == "applied" and a["result"]["verified"] is True, a
     new_id = int(a["result"]["deck_id"])
     assert ("GET", f"/api/decks/{new_id}/") in ark.calls  # verified by reading it back
@@ -839,7 +784,7 @@ async def test_new_deck_id_is_kept_when_read_back_fails(stack: Stack) -> None:
     p = structured(
         await call(h, token, "propose_new_deck", {"name": "No read", "decklist_text": "1 Sol Ring"})
     )
-    a = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
+    a = await apply_any(h, token, p["proposal_id"])
     assert a["ok"] is False
     got = structured(await call(h, token, "get_proposal", {"proposal_id": p["proposal_id"]}))
     assert got["state"] == "failed" and got["deck_id"] == str(ark.next_deck_id), got
@@ -917,11 +862,8 @@ async def test_propose_refuses_decks_the_linked_account_does_not_own(stack: Stac
 
 @pytest.fixture
 async def stack_browser_only(tmp_path: Path, idp: FakeIdP):
-    ark = FakeArchidekt()
-    settings = make_settings(tmp_path, writes_enabled=True, archidekt_base="https://ark.test/api")
-    client = _client(settings, ark)
-    async with running(Harness(settings, idp, archidekt=client)) as h:
-        yield Stack(h, ark)
+    async with open_stack(tmp_path, idp, StackOptions(settings={"writes_enabled": True})) as st:
+        yield st
 
 
 async def test_apply_over_mcp_is_refused_by_default(stack_browser_only: Stack) -> None:
@@ -943,7 +885,7 @@ async def test_apply_over_mcp_is_refused_by_default(stack_browser_only: Stack) -
     b = Browser(h)
     await b.login()
     url = f"/proposals/{p['proposal_id']}"
-    r = await b.http.post(url, data={"csrf": await b.csrf(url), "action": "apply"})
+    r = await b.http.post(url, data={**await b.review_form(url), "action": "apply"})
     assert r.status_code == 303 and len(ark.patches) == 1
     await b.aclose()
 
@@ -966,12 +908,12 @@ async def test_verification_ignores_name_case(stack: Stack) -> None:
         )
     )
     assert p["ok"], p
-    a = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
+    a = await apply_any(h, token, p["proposal_id"])
     assert a["ok"] and a["state"] == "applied", a
     p2 = structured(
         await call(h, token, "propose_new_deck", {"name": "lower", "decklist_text": "1 sol ring\n2 forest\n"})
     )
-    a2 = structured(await call(h, token, "apply_proposal", {"proposal_id": p2["proposal_id"]}))
+    a2 = await apply_any(h, token, p2["proposal_id"])
     assert a2["ok"] and a2["state"] == "applied" and a2["result"]["verified"], a2
     # 42, 43, the new deck; the edit's backup copy sits in the backup folder
     assert len([d for d in ark.decks if d not in ark.deck_folder]) == 3
@@ -1028,17 +970,9 @@ async def test_an_app_revoking_its_token_keeps_browser_sessions(stack: Stack) ->
 
 @pytest.fixture
 async def stack_manual(tmp_path: Path, idp: FakeIdP):
-    ark = FakeArchidekt()
-    settings = make_settings(
-        tmp_path,
-        writes_enabled=True,
-        approval_mode_default="manual",
-        archidekt_base="https://ark.test/api",
-    )
-    client = _client(settings, ark)
-    proxy = MysticForgeProxy("http://mf.test/mcp", client_factory=lambda: Client(fake_mystic_forge()))
-    async with running(Harness(settings, idp, archidekt=client, mf_proxy=proxy)) as h:
-        yield Stack(h, ark)
+    manual = AUTO_PROXY.but(settings={"writes_enabled": True, "approval_mode_default": "manual"})
+    async with open_stack(tmp_path, idp, manual) as st:
+        yield st
 
 
 async def test_manual_mode_needs_the_users_own_press(stack_manual: Stack) -> None:
@@ -1066,7 +1000,7 @@ async def test_manual_mode_needs_the_users_own_press(stack_manual: Stack) -> Non
     b = Browser(h)
     await b.login()
     url = f"/proposals/{p['proposal_id']}"
-    r = await b.http.post(url, data={"csrf": await b.csrf(url), "action": "apply"})
+    r = await b.http.post(url, data={**await b.review_form(url), "action": "apply"})
     assert r.status_code == 303 and len(ark.patches) == 1
     await b.aclose()
 
@@ -1188,7 +1122,7 @@ async def test_snapshots_list_and_restore_through_a_proposal(stack: Stack) -> No
         {"action": "set_quantity", "card_name": "Forest", "quantity": 14},
     ]
     p = structured(await call(h, token, "propose_deck_changes", {"deck_id": "42", "changes": changes}))
-    a = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
+    a = await apply_any(h, token, p["proposal_id"])
     assert a["ok"] and a["state"] == "applied", a
     # Meanwhile the user also changed a finish and the commander's category by hand on Archidekt.
     aesi = next(c for c in ark.decks[42]["cards"] if c["card"]["oracleCard"]["name"].startswith("Aesi"))
@@ -1223,7 +1157,7 @@ async def test_snapshots_list_and_restore_through_a_proposal(stack: Stack) -> No
     }, lines
     assert len(ark.patches) == 3  # proposing wrote nothing
 
-    a2 = structured(await call(h, token, "apply_proposal", {"proposal_id": r["proposal_id"]}))
+    a2 = await apply_any(h, token, r["proposal_id"])
     assert a2["ok"] and a2["state"] == "applied" and a2["result"]["verified"] is True, a2
     assert a2["result"]["restored_snapshot_id"] == a["snapshot_id"]
     rows = {c["card"]["oracleCard"]["name"]: c for c in ark.decks[42]["cards"]}
@@ -1303,7 +1237,10 @@ async def test_apply_keeps_a_backup_copy_on_archidekt_first(stack: Stack) -> Non
     a2 = structured(await call(h, token, "apply_proposal", {"proposal_id": p2["proposal_id"]}))
     assert a2["ok"], a2
     assert [f["name"] for f in ark.folders["alice"]] == ["MTG Gateway backups", "Brews"]
-    assert a2["result"]["backup_deck_id"] != a["result"]["backup_deck_id"]
+    # Q14/B15: within 15 minutes of the first copy, the second edit shares it (its own snapshot
+    # still holds the exact deck before it); tests/test_backup_limits.py covers the rest.
+    assert a2["result"]["backup_deck_id"] == a["result"]["backup_deck_id"]
+    assert a2["result"]["backup_reused"] is True and a2["snapshot_id"] != a["snapshot_id"]
 
 
 async def test_apply_refuses_to_edit_when_the_backup_fails(stack: Stack) -> None:
@@ -1480,7 +1417,7 @@ async def test_new_deck_says_when_a_listed_printing_was_not_found(stack: Stack) 
         )
     )
     assert p["ok"], p
-    a = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
+    a = await apply_any(h, token, p["proposal_id"])
     assert a["ok"] and a["result"]["verified"], a
     sent = {e["cardid"] for e in (pt["cards"][0] for pt in ark.patches)}
     assert {91043, 9008, 9004} <= sent  # CMR 472 pinned; Swamp and Forest by name
@@ -1500,7 +1437,7 @@ async def test_new_deck_verify_fails_when_a_finish_or_printing_is_lost(stack: St
     async def create() -> dict:
         p = structured(await call(h, token, "propose_new_deck", {"name": "Finishes", "decklist_text": text}))
         assert p["ok"], p
-        return structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
+        return await apply_any(h, token, p["proposal_id"])
 
     good = await create()
     assert good["ok"] and good["result"]["verified"] is True, good
@@ -1523,9 +1460,17 @@ async def test_simulation_calls_take_the_shape_mystic_forge_accepts(stack: Stack
     h = stack.h
     token = await linked_user(stack)
     rep = structured(
-        await call(h, token, "run_deck_report", {"deck_ref": "42", "games": 20, "options": {"seed": 1}})
+        await call(
+            h,
+            token,
+            "run_deck_report",
+            {"deck_ref": "42", "games": 20, "options": {"seed": 1, "forge_seed": 2}},
+        )
     )
     assert rep["ok"], rep
+    # forge_seed is the gateway's own (A34): the simulator gets seed only
+    ((_, sent),) = [c for c in SIM_CALLS if c[0] == "goldfish_run"][-1:]
+    assert sent["seed"] == 1 and "forge_seed" not in sent, sent
     gf, val = rep["goldfish"], rep["validation"]
     assert gf["ok"] is True and "## Metrics" in gf["text"] and "validation error" not in gf["text"], gf
     assert val["ok"] is True and val["text"].startswith("Validated"), val
@@ -1590,6 +1535,10 @@ async def test_sixty_card_decks_are_simulated_as_sixty_card_games(stack: Stack) 
     # the stored report reads back as a 60-card game
     got = structured(await call(h, token, "get_deck_report", {"report_id": rep["report_id"]}))
     assert "Format: 60-card" in got["goldfish"]["text"], got
+    # the copies of each main-deck card are kept with the run (A30, A31); the sideboard card is not
+    kept = got["goldfish"]["quantities"]
+    sent_total = sum(c.quantity for c in parse_decklist(sent["deck"]) if c.zone == "main")
+    assert sum(kept.values()) == sent_total and sideboard_name.split(" // ")[0] not in kept, kept
     # The same deck under the Commander format, without a commander: refused, not guessed.
     ark.decks[44]["deckFormat"] = 3
     ark.decks[44]["updatedAt"] = "2026-10-03T00:00:00Z"
@@ -1791,4 +1740,4 @@ async def test_compare_advice_is_true_to_bracket_matched_forge(stack: Stack) -> 
     assert "like-for-like" in compare and "own bracket" in compare
     report = tools["run_deck_report"]
     assert "forge" in report["inputSchema"]["properties"] and "Preflight only" in report["description"]
-    assert "60-card deck's report never starts it" in report["description"]
+    assert "60-card deck's report, or one with no commander marked, never starts it" in report["description"]

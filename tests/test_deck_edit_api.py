@@ -10,8 +10,11 @@ import pytest
 
 from mtg_gateway import api as api_module
 
-from .test_browse_collection import Stack, api, linked, stack  # noqa: F401 - fixture
+from .conftest import COLLECTION, Stack, stack_with
+from .test_browse_collection import api, linked
 from .test_round4_data import _app_token
+
+stack_options = stack_with(COLLECTION)
 
 
 def _deck_card(st: Stack, name: str, *, zone: str | None = None) -> list[dict]:
@@ -57,11 +60,17 @@ async def test_quantity_remove_and_category_edits_answer_with_fresh_rows_and_che
                 "categories": d["rows"][0]["categories"],
                 "relation_id": d["rows"][0]["relation_id"],
                 "finish": "Normal",
-                "label": "",
+                "label": ",#656565",  # archidekt.com's empty tag, sent with every modify (Q58)
                 "mana_value": None,
                 "notes": "",
+                # the row's printing, so a printing change redraws the picture (Change printing…)
+                "set_code": d["rows"][0]["set_code"],
+                "collector_number": d["rows"][0]["collector_number"],
+                "image": d["rows"][0]["image"],
+                "price": d["rows"][0]["price"],
             }
         ]
+        assert d["rows"][0]["set_code"] and d["rows"][0]["collector_number"]
         assert _deck_card(stack, "Cultivate")[0]["quantity"] == 2
         # the checks are computed from the re-read deck: 101 cards now, so the deck size check fails
         st = d["stats"]
@@ -105,11 +114,17 @@ async def test_quantity_remove_and_category_edits_answer_with_fresh_rows_and_che
                 "categories": ["Removal"],
                 "relation_id": d["rows"][0]["relation_id"],
                 "finish": "Normal",
-                "label": "",
+                "label": ",#656565",
                 "mana_value": None,
                 "notes": "",
+                # the row's printing, so a printing change redraws the picture (Change printing…)
+                "set_code": d["rows"][0]["set_code"],
+                "collector_number": d["rows"][0]["collector_number"],
+                "image": d["rows"][0]["image"],
+                "price": d["rows"][0]["price"],
             }
         ]
+        assert d["rows"][0]["set_code"] and d["rows"][0]["collector_number"]
         assert _deck_card(stack, "Acidic Slime")[0]["categories"] == ["Removal"]
     finally:
         await b.aclose()
@@ -146,6 +161,96 @@ async def test_an_add_puts_a_card_back_under_every_category(stack: Stack) -> Non
             assert r.status_code == 400 and r.json()["error"] == "invalid", (bad, r.text)
     finally:
         await b.aclose()
+
+
+async def test_a_move_puts_a_card_back_under_every_category(stack: Stack) -> None:  # noqa: F811
+    """A23: the deck page's Undo of a move of a card filed under several categories is a
+    set_category with every category it had, the primary first; it files the row under all of
+    them. Only set_category and add take categories, and the first is the category."""
+    row = _deck_card(stack, "Cultivate")[0]
+    row.update(categories=["Ramp", "Value"])
+    b = await linked(stack)
+    try:
+        r = await api(b, "POST", "/api/v1/decks/42/edit", {"changes": [{"action": "set_category",
+                      "card_name": "Cultivate", "category": "Lands"}]})  # fmt: skip
+        assert r.status_code == 201 and _deck_card(stack, "Cultivate")[0]["categories"] == ["Lands"], r.text
+        back = {"action": "set_category", "card_name": "Cultivate", "category": "Ramp",
+                "categories": ["Ramp", "Value"]}  # fmt: skip
+        r = await api(b, "POST", "/api/v1/decks/42/edit", {"changes": [back]})
+        assert r.status_code == 201, r.text
+        assert [x["categories"] for x in r.json()["rows"]] == [["Ramp", "Value"]]
+        assert _deck_card(stack, "Cultivate")[0]["categories"] == ["Ramp", "Value"]
+        for bad in (
+            {
+                "action": "set_category",
+                "card_name": "Cultivate",
+                "category": "Value",
+                "categories": ["Ramp", "Value"],
+            },
+            {"action": "set_commander", "card_name": "Cultivate", "categories": ["Commander", "Ramp"]},
+            {"action": "set_category", "card_name": "Cultivate", "categories": "Ramp"},
+        ):
+            r = await api(b, "POST", "/api/v1/decks/42/edit", {"changes": [bad]})
+            assert r.status_code == 400 and r.json()["error"] == "invalid", (bad, r.text)
+    finally:
+        await b.aclose()
+
+
+def test_set_category_categories_round_trip_through_the_stored_proposal() -> None:
+    from mtg_gateway.decks import parse_changes
+
+    ch = parse_changes([{"action": "set_category", "card_name": "Opt", "categories": ["Draw", "Cantrip"]}])[0]
+    assert ch.category == "Draw" and ch.categories == ("Draw", "Cantrip")
+    assert parse_changes([ch.as_dict()]) == [ch]
+    one = parse_changes([{"action": "set_category", "card_name": "Opt", "category": "Draw"}])[0]
+    assert "categories" not in one.as_dict()
+
+
+async def test_an_add_puts_back_the_companion_and_flip_flags(stack: Stack) -> None:  # noqa: F811
+    """The deck page's Undo of a removal names the row's companion and "flipped by default"
+    flags; the add puts them back, as a printing change and a restore already do (M2)."""
+    row = _deck_card(stack, "Cultivate")[0]
+    row.update(companion=True, flippedDefault=True)
+    b = await linked(stack)
+    try:
+        r = await api(
+            b, "POST", "/api/v1/decks/42/edit", {"changes": [{"action": "remove", "card_name": "Cultivate"}]}
+        )
+        assert r.status_code == 201 and _deck_card(stack, "Cultivate") == [], r.text
+        add = {"action": "add", "card_name": "Cultivate", "quantity": 1, "category": "Ramp",
+               "companion": True, "flipped_default": True}  # fmt: skip
+        r = await api(b, "POST", "/api/v1/decks/42/edit", {"changes": [add]})
+        assert r.status_code == 201, r.text
+        back = _deck_card(stack, "Cultivate")
+        assert [(x["companion"], x["flippedDefault"]) for x in back] == [(True, True)]
+        # an add without them stays as before; they go with an add only, as true or false
+        r = await api(
+            b, "POST", "/api/v1/decks/42/edit", {"changes": [{"action": "add", "card_name": "Opt"}]}
+        )
+        assert r.status_code == 201 and _deck_card(stack, "Opt")[0]["companion"] is False, r.text
+        for bad in (
+            {"action": "set_quantity", "card_name": "Cultivate", "quantity": 2, "companion": True},
+            {"action": "add", "card_name": "Opt", "flipped_default": "yes"},
+        ):
+            r = await api(b, "POST", "/api/v1/decks/42/edit", {"changes": [bad]})
+            assert r.status_code == 400 and r.json()["error"] == "invalid", (bad, r.text)
+    finally:
+        await b.aclose()
+
+
+def test_add_flags_round_trip_through_the_stored_proposal() -> None:
+    from mtg_gateway.decks import parse_changes
+
+    ch = parse_changes(
+        [{"action": "add", "card_name": "Lurrus", "companion": True, "flipped_default": True}], row_flags=True
+    )[0]
+    assert ch.companion and ch.flipped_default
+    assert parse_changes([ch.as_dict()], row_flags=True) == [ch]
+    # only the deck page's own edit reads them (review 2 N1); every other caller drops them
+    dropped = parse_changes([ch.as_dict()])[0]
+    assert not dropped.companion and not dropped.flipped_default
+    plain = parse_changes([{"action": "add", "card_name": "Opt"}])[0].as_dict()
+    assert "companion" not in plain and "flipped_default" not in plain
 
 
 def test_add_categories_round_trip_through_the_stored_proposal() -> None:
