@@ -38,7 +38,9 @@ CARDS_CSS = """
   align-items:start}
 .cs-grid > .field,.cs-grid > fieldset{margin:0;min-width:0}
 /* the rows of three or two controls need two columns' room where there are two */
-@media (min-width:600px){.cs-grid > .rowset{grid-column:span 2}}
+/* the whole row, not two columns: at a large text size the grid has one column, and a span of two
+   would add an empty second one beside it */
+@media (min-width:600px){.cs-grid > .rowset{grid-column:1 / -1}}
 .cs .row3 .msel-btn,.cs .row2 .msel-btn{min-width:0;width:100%}
 .cs fieldset{border:0;padding:0;margin:0;min-width:0}
 .cs legend,.cs .lbl{display:block;font-weight:700;margin:0 0 .35rem;padding:0}
@@ -56,9 +58,10 @@ CARDS_CSS = """
 .cs .tog:has(input:focus-visible){outline:2px solid var(--focus);outline-offset:2px}
 .cs .tog:hover{border-color:var(--text-muted)}
 .cs .inline{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem}
-.cs .inline select,.cs .inline input{width:auto;flex:1 1 7rem;min-width:0}
+.cs .inline select,.cs .inline input,.cs .inline .msel-btn{width:auto;flex:1 1 7rem;min-width:0}
 .cs .range{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);gap:.5rem;align-items:center}
 .cs .range span{color:var(--text-muted)}
+.cs .range input{width:100%;min-width:0}
 .cs .rows{display:flex;flex-direction:column;gap:.5rem}
 .cs .row3{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr) minmax(0,.8fr) auto;gap:.4rem;
   align-items:center}
@@ -186,7 +189,9 @@ details.cs-more > .cs-grid{margin:.5rem 0 0}
   .cs-open{display:inline-flex}
   .cs-top > .btn.decks{display:none}
   .cs-top .field{flex-basis:100%}
-  .cs-top{flex-wrap:nowrap}
+  /* the search box and Filters share a row; at a large text size Filters drops below it */
+  .cs-top{flex-wrap:wrap;gap:.5rem}
+  .cs-top .field{flex:1 1 12rem}
   .cs-top .cs-open{flex:none}
   .cs-filters{display:none;position:fixed;inset:0;z-index:80;margin:0;background:var(--bg);overflow:auto;
     overscroll-behavior:contain;padding:0 1rem calc(5.5rem + env(safe-area-inset-bottom))}

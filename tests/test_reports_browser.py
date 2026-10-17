@@ -511,7 +511,7 @@ def test_reports_page_fits_and_reads(server: Server, width: int, scheme: str) ->
             assert tops[0] == tops[1], tops
         text = page.locator(".rp-queue").inner_text()
         # The games played so far, as the report page counts them
-        assert "Playing: 3 of 10 games" in text
+        assert "Going: 3 of 10 games" in text
         assert "Waiting: number 1 in line" in text
         # At 200% text the deck filter still fits, inside the window
         # and its panel, at every width, and the whole page fits the window too.

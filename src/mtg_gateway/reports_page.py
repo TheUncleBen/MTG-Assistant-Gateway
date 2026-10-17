@@ -15,7 +15,7 @@ PAGE = 25
 # A report's overall status (reports.report_status) as the badge shows it.
 STATUS_BADGE = {
     "complete": ("ok", "Complete"),
-    "running": ("info", "Forge playing"),
+    "running": ("info", "Forge going"),
     "queued": ("info", "Forge waiting"),
     "partial": ("warn", "Partial"),
     "failed": ("danger", "Failed"),
@@ -62,7 +62,7 @@ def queue_html(runs: list[dict[str, Any]]) -> str:
                 what = "Waiting for Forge, which is busy with other members' games"
         else:
             left = _minutes(f.get("expected_seconds"))
-            what = f"Playing: {esc(done)} of {esc(total)} games" + (f"; done in {left}" if left else "")
+            what = f"Going: {esc(done)} of {esc(total)} games" + (f"; done in {left}" if left else "")
         items.append(f"<li>{link}<span class='muted'>{what}</span></li>")
     return (
         "<section class='card rp-queue' aria-labelledby='rp-queue-h'>"

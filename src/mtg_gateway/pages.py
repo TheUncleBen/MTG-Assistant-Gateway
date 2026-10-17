@@ -1730,8 +1730,8 @@ def _proposal_body(p: dict[str, Any], csrf: str | None, shown: str, *, step: boo
                 "<div class='apply'><h2>Apply to Archidekt?</h2>"
                 "<p><strong>Applying writes these changes to your deck on Archidekt.</strong></p>"
                 "<p class='small'>The gateway re-checks that the deck is unchanged, keeps a snapshot of it "
-                "from just before the edit, then applies and verifies the result. Nothing happens until "
-                "you tap Apply.</p>"
+                "from just before the edit, then applies the change and reads the deck back. Nothing happens "
+                "until you tap Apply.</p>"
             )
             apply_button = ("apply", "Apply these changes to Archidekt", "primary btn-lg")
         body += (
