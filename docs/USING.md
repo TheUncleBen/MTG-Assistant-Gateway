@@ -151,8 +151,11 @@ One deck:
   `compare_decks` is.
 - A report without Forge games (Forge not set up, a 60-card deck, or Forge
   left out of the report) is labelled **Preflight only (no rules engine)**
-  where the Forge games would be. Each report shows its status: queued,
-  running, complete, partial (some part did not run) or failed.
+  where the Forge games would be. A Forge run that stops early (a group of
+  games failed, the run reached its time limit, or the gateway lost track of
+  it) shows the games it did play, marked **stopped early**, and the report is
+  partial. Each report shows its status: queued, running, complete, partial
+  (some part did not run or stopped early) or failed.
 - A deck's report trends on its History page compare a simulation number
   only across reports run the same way (Commander or 60-card game, same last
   turn), and the table of numbers shows each report's settings.

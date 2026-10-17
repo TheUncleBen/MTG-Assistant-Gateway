@@ -418,11 +418,43 @@ def test_report_page_and_markdown_show_forge_results() -> None:
     assert "<table class='qty seats stack'>" in page
     for state, why in (("timeout", "reached its time limit"), ("cancelled", "was stopped")):
         assert why in forge_html({**part, "state": state})
+    # proofread 6 P7-P9: every game played, a lost run, one game, no total recorded
+    full = {**part, "games_requested": 5, "result": {**part["result"], "games_requested": 5}}
+    page = forge_html(full)
+    assert "Forge played all 5 games, but the run did not end cleanly. The results below count all 5." in page
+    assert "stopped early" not in page and "not run" not in page
+    lost = forge_html({**part, "state": "lost", "error": "Forge stopped answering about this run."})
+    assert (
+        "The gateway lost track of this run after 5 of 10 games. The results below count only those 5 "
+        "games. Forge stopped answering about this run." in lost
+    )
+    one = {"state": "timeout", "result": {"games": 1}}
+    assert (
+        "Forge stopped after 1 game, because the run reached its time limit. The results below count "
+        "only that one game." in forge_html(one)
+    )
+    assert "Games played: 1." in report_markdown(
+        {"deck_name": "L", "deck_id": "4", "stats": {}, "forge": one}
+    )
     md = report_markdown({"deck_name": "Liesa", "deck_id": "42", "stats": {}, "forge": part})
     assert "Forge stopped after 5 of 10 games" in md and "could not run" not in md
     from mtg_gateway.reports import report_status
 
     assert report_status(None, None, part) == "partial"
+    # proofread 6 P2: the Reports page, History and the assistant count its games as Forge games
+    from mtg_gateway.reports import ReportService, run_settings
+    from mtg_gateway.reports_page import engines_text
+
+    row = {"id": "rep_x", "deck_id": "42", "deck_name": "Liesa", "taken_at": 1, "fingerprint": "f"}
+    summary = ReportService._summary({**row, "forge_json": json.dumps(part)})
+    assert summary["engine"] == "forge" and summary["settings"]["engines"] == ["forge"]
+    assert "Forge games" in engines_text(summary)
+    none = ReportService._summary(
+        {**row, "forge_json": json.dumps({"state": "failed", "result": {"games": 0}})}
+    )
+    assert (
+        none["engine"] == "preflight_only" and run_settings({}, None, {"state": "timeout"})["engines"] == []
+    )
     assert report_status(None, None, {"state": "failed", "result": {"games": 0}}) == "failed"
     # review r1 item 11: a run still playing shows its count once, and no "won" figure worked out
     # from an older run's totals (the games not yet finished are not wins)

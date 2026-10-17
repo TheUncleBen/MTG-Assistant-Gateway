@@ -25,7 +25,7 @@ from .decklist import DecklistError, front_faces, parse_decklist, to_text
 from .decks import DeckError, DeckService, _clean_deck_id, current_client, deck_to_text
 from .forge import FINAL_STATES, GIVE_UP_SECONDS, ForgeClient, ForgeError, refresh, start_run
 from .mf_proxy import FULL_REPORT, MysticForgeProxy, busy_retry_after, is_busy
-from .report_view import PREFLIGHT_ONLY, goldfish_settings, parse_goldfish, speed_numbers
+from .report_view import PREFLIGHT_ONLY, goldfish_settings, speed_numbers
 
 logger = logging.getLogger(__name__)
 
@@ -823,8 +823,8 @@ class ReportService:
         """The solo test (Mystic Forge's goldfish_run) with the kept models of the deck's cards
         (K1). The report records which kept models played (``kept_models``); once the run went
         through, the valid models the assistant passed are kept (``models_kept``), only when
-        ``keep`` (a stored deck, whose names are Archidekt's own) and only for cards this run
-        played without their effect."""
+        ``keep`` (a stored deck, whose names are Archidekt's own) and only for cards the simulator
+        plays without their effect (goldfish_annotate on the same deck text)."""
         opts, used = card_models.merge(sub, self.models, names, _goldfish(options))
         goldfish = await self._mf(sub, "goldfish_run", _run_args(text, games, opts, mode))
         if used:
@@ -834,12 +834,21 @@ class ReportService:
             goldfish["models_saved"] = True  # the report may say descriptions are saved (Q136 K1)
         own = [a for a in options.get("annotations") or [] if isinstance(a, dict)]
         if own and keep and goldfish.get("ok") and self.models.available:
-            parsed = parse_goldfish(goldfish) or {}
-            blank = [c["name"] for c in (parsed.get("honesty") or {}).get("unrecognized") or []]
             goldfish["models_kept"] = self.models.keep(
-                sub, own, names, admin=self.is_admin(sub), unmodeled=blank
+                sub, own, names, admin=self.is_admin(sub), unmodeled=await self._unmodeled(sub, text, mode)
             )
         return goldfish
+
+    async def _unmodeled(self, sub: str, text: str, mode: str) -> list[str] | None:
+        """The deck's cards the simulator plays without their effect, from goldfish_annotate on
+        the run's own deck text; None when that could not be read (then nothing is kept). The
+        run's "unrecognized" list cannot say: an annotated card counts as modelled there."""
+        args = {"deck": text, **({"constructed": True} if mode == "constructed" else {})}
+        try:
+            out = await self._mf(sub, "goldfish_annotate", args)
+        except DeckError:
+            return None  # past the member's research cap: the run itself still stands
+        return card_models.needs_annotation(str(out.get("text") or "")) if out.get("ok") else None
 
     async def _mf(self, sub: str, tool: str, arguments: dict[str, Any]) -> dict[str, Any]:
         """One Mystic Forge call, recorded as it came back: structured content when the tool
@@ -1069,7 +1078,7 @@ class ReportService:
         forge = json.loads(d["forge_json"]) if d.get("forge_json") else None
         forge = forge if isinstance(forge, dict) else None
         # No rules-engine games came or will come: not run, skipped, or the Forge run ended without games.
-        preflight = forge is None or forge.get("state") in _FORGE_NONE
+        preflight = forge is None or not _forge_played(forge)
         return {
             "report_id": d["id"],
             "deck_id": d["deck_id"],
@@ -1104,8 +1113,13 @@ def _number(value: Any) -> bool:
 GOLDFISH_TREND_KEYS = ("commander_cast_median_turn", "kill_median_turn", "kill_pct")
 # The settings settings_changes compares between consecutive reports.
 SETTING_KEYS = ("mode", "games", "seed", "until_turn", "engines")
-# Forge states that mean no rules-engine games came or will come.
+# Forge states that can end without rules-engine games.
 _FORGE_NONE = ("skipped", "failed", "timeout", "cancelled", "lost")
+
+
+def _forge_played(forge: dict[str, Any]) -> bool:
+    """Forge games came or will come: a run that stopped early counts by the games it played."""
+    return forge.get("state") not in _FORGE_NONE or _done_games(forge) > 0
 
 
 def run_settings(stats: dict[str, Any], goldfish: Any, forge: Any) -> dict[str, Any]:
@@ -1121,7 +1135,7 @@ def run_settings(stats: dict[str, Any], goldfish: Any, forge: Any) -> dict[str, 
     engines = []
     if isinstance(goldfish, dict) and goldfish.get("ok"):
         engines.append("goldfish")
-    if isinstance(forge, dict) and forge.get("state") not in _FORGE_NONE:
+    if isinstance(forge, dict) and _forge_played(forge):
         engines.append("forge")
     out = {
         "mode": mode if mode in SIM_MODES else None,

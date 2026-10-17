@@ -125,21 +125,36 @@ class FakeModelsDb(Database):
 
 
 class FakeMF:
-    """goldfish_run answers with its results marker, listing ``unrecognized`` among the cards it
-    played without their effect; the arguments are recorded."""
+    """Mystic Forge's shape for the solo test: ``needs`` are the cards the simulator plays without
+    their effect. goldfish_annotate lists them under "Needs annotation"; goldfish_run lists among
+    its unrecognized cards those of them the run was not given an annotation for, as Mystic Forge
+    files an annotated card as modelled. The arguments are recorded."""
 
-    def __init__(self, unrecognized: list[str] | None = None) -> None:
+    def __init__(self, needs: list[str] | None = None) -> None:
         self.calls: list[tuple[str, dict[str, Any]]] = []
-        self.unrecognized = unrecognized or []
+        self.needs = needs or []
+        self.annotate_text: str | None = None  # a goldfish_annotate answer to give instead
+
+    def last_run(self) -> dict[str, Any]:
+        return next(p for t, p in reversed(self.calls) if t in ("goldfish_run", "goldfish_ab"))
 
     async def call(self, tool: str, args: dict[str, Any], **_: Any) -> Any:
-        self.calls.append((tool, args["params"]))
-        blank = "".join(json.dumps({"name": n}) + ", " for n in self.unrecognized)
-        text = (
-            GOLDFISH.replace('"unrecognized": [', '"unrecognized": [' + blank, 1)
-            if tool == "goldfish_run"
-            else "ok"
-        )
+        params = args["params"]
+        self.calls.append((tool, params))
+        if tool == "goldfish_run":
+            annotated = {card_models.card_key(a["name"]) for a in params.get("annotations") or []}
+            left = [n for n in self.needs if card_models.card_key(n) not in annotated]
+            blank = "".join(json.dumps({"name": n}) + ", " for n in left)
+            text = GOLDFISH.replace('"unrecognized": [', '"unrecognized": [' + blank, 1)
+        elif tool == "goldfish_annotate":
+            text = self.annotate_text or (
+                "# Goldfish annotation pre-flight\n\n## Auto-derived (1 card)\n- Sol Ring \u2014 mana\n\n"
+                f"## Needs annotation ({len(self.needs)} cards)\n"
+                + "".join(f"\n### {n} \u2014 {{2}} \u2014 Creature\nOracle text.\n" for n in self.needs)
+                + "\n### Registry cheat-sheet (unknown names are rejected)\n- verbs (do): draw"
+            )
+        else:
+            text = "ok"
         return SimpleNamespace(
             is_error=False,
             content=[SimpleNamespace(type="text", text=text)],
@@ -171,7 +186,7 @@ async def test_a_kept_model_plays_in_every_members_later_runs(tmp_path: Path) ->
     assert json.loads(db.rows[card_models.card_key(name)]["model_json"]) == clean_model(model, card=name)
     # bob's website run (no options) plays alice's model, and his report never names her
     second = await reports.run("bob", "42")
-    sent = mf.calls[-1][1]
+    sent = mf.last_run()
     assert sent["annotations"] == [clean_model(model, card=name)]
     used = second["goldfish"]["kept_models"]
     assert second["goldfish"]["models_saved"] is True
@@ -190,7 +205,7 @@ async def test_a_kept_model_plays_in_every_members_later_runs(tmp_path: Path) ->
     assert mine["goldfish"]["kept_models"][0]["yours"] is True
     own = {"name": name, "triggers": [{"on": "etb", "do": "gain_life", "count": 3}]}
     await reports.run("alice", "42", options={"annotations": [own]})
-    assert mf.calls[-1][1]["annotations"] == [own]
+    assert mf.last_run()["annotations"] == [own]
 
 
 async def test_each_member_keeps_at_most_the_cap(tmp_path: Path, monkeypatch: Any) -> None:
@@ -256,20 +271,63 @@ async def test_models_are_kept_only_from_stored_decks_for_cards_the_run_could_no
     assert "models_kept" not in out["goldfish"] and "models_saved" not in out["goldfish"]
     assert db.rows == {}
     # a stored deck: a card this run played with its effect is not kept
-    played = mf.unrecognized.pop()
+    played = mf.needs.pop()
     first = await reports.run("alice", "42", options={"annotations": [{"name": played, "inert": True}]})
     assert first["goldfish"]["models_kept"] == {
         "kept": [],
         "refused": [{"name": played, "why": card_models.NOT_UNMODELED_TEXT}],
     }
     # the assistant's own spelling is never stored: the deck's name for the card is
-    name = mf.unrecognized[0]
+    name = mf.needs[0]
     await reports.run("alice", "42", options={"annotations": [{"name": name.upper(), "inert": True}]})
     assert db.rows[card_models.card_key(name)]["name"] == name
     later = await reports.run("bob", "42")
     assert later["goldfish"]["kept_models"] and later["goldfish"]["kept_models_note"] == (
         card_models.MEMBER_WRITTEN_NOTE
     )
+
+
+async def test_a_model_the_run_played_is_kept_and_the_simulators_own_cards_are_not(
+    tmp_path: Path,
+) -> None:
+    """Proofread 6 P1: Mystic Forge files an annotated card as modelled, so the run that played the
+    assistant's model never lists that card as unrecognized. Which cards may be kept comes from
+    goldfish_annotate on the same deck text; when that cannot be read, nothing is kept."""
+    reports, db, mf = _service(tmp_path)
+    plays = mf.needs.pop()  # the simulator plays this card on its own
+    blank = mf.needs[0]
+    models = [{"name": blank, "inert": True}, {"name": plays, "inert": True}]
+    out = await reports.run("alice", "42", options={"annotations": models})
+    ran = next(p for t, p in mf.calls if t == "goldfish_run")
+    assert blank in [a["name"] for a in ran["annotations"]]
+    assert blank not in out["goldfish"]["text"]  # the run itself counts the card as modelled
+    assert ("goldfish_annotate", {"deck": ran["deck"]}) in mf.calls
+    assert out["goldfish"]["models_kept"] == {
+        "kept": [{"name": blank}],
+        "refused": [{"name": plays, "why": card_models.NOT_UNMODELED_TEXT}],
+    }
+    assert card_models.card_key(blank) in db.rows
+    # goldfish_annotate answered without its list (a refusal): nothing is kept, and the run stands
+    db.rows.clear()
+    mf.annotate_text = "Deck not found"
+    out = await reports.run("alice", "42", options={"annotations": models, "seed": 2})
+    assert out["goldfish"]["ok"] and out["goldfish"]["models_kept"]["kept"] == []
+    assert {r["why"] for r in out["goldfish"]["models_kept"]["refused"]} == {card_models.UNCHECKED_TEXT}
+    assert db.rows == {}
+
+
+def test_needs_annotation_reads_mystic_forges_preflight() -> None:
+    text = (
+        "# Goldfish annotation pre-flight\n## Auto-derived (1 card)\n- Sol Ring \u2014 adds {C}\n"
+        "## Out of scope (1 card)\n- Cyclonic Rift\n## Needs annotation (2 cards)\nWrite a JSON...\n\n"
+        "### Esper Sentinel \u2014 {W} \u2014 Artifact Creature\nWhenever...\n\n"
+        "### Fire // Ice \u2014 {1}{R} \u2014 Instant\n...\n\n"
+        "### Registry cheat-sheet (unknown names are rejected)\n"
+    )
+    assert card_models.needs_annotation(text) == ["Esper Sentinel", "Fire // Ice"]
+    none = "## Needs annotation (0 cards)\n- (none) \u2014 every card is auto-derived or classified."
+    assert card_models.needs_annotation(none) == []
+    assert card_models.needs_annotation("Deck not found") is None
 
 
 async def test_nothing_about_kept_models_shows_while_they_are_off(monkeypatch: Any) -> None:
@@ -329,7 +387,7 @@ async def test_only_the_adder_or_an_admin_replaces_a_model_and_the_adder_removes
         "kept": [],
         "refused": [{"name": name, "why": card_models.ANOTHER_MEMBERS_TEXT}],
     }
-    assert mf.calls[-1][1]["annotations"] == [bob]  # bob's own model still played in his run
+    assert mf.last_run()["annotations"] == [bob]  # bob's own model still played in his run
     assert db.rows[key]["added_by"] == "alice"
     assert reports.models.remove("bob", name) is False and key in db.rows
     monkeypatch.setattr(reports, "is_admin", lambda sub: sub == "bob")
