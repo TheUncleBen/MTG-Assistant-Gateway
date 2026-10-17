@@ -98,9 +98,15 @@ class Browser:
             "csrf": await self.csrf(url),
             "shown": proposal_stamp(self.h, self.http, url.rsplit("/", 1)[1]),
         }
-        shown = re.search(r"name='version' value='(\d+)'", (await self.http.get(url)).text)
+        text = (await self.http.get(url)).text
+        shown = re.search(r"name='version' value='(\d+)'", text)
         if shown:
             form["version"] = shown.group(1)
+        # the status the page showed, and when it was set: a change held since is refused
+        for key in ("seen_status", "seen_status_at"):
+            got = re.search(rf"name='{key}' value='([^']*)'", text)
+            if got:
+                form[key] = got.group(1)
         return form
 
     async def link(self, login: str, password: str, *, csrf: str | None = None) -> httpx.Response:

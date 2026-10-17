@@ -563,7 +563,9 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             )
         current_client.set(BROWSER_CLIENT_ID)
         try:
-            run = state.decks.apply_selection(sub, picks, via=REVIEW_PAGE, versions=versions)
+            run = state.decks.apply_selection(
+                sub, picks, via=REVIEW_PAGE, versions=versions, shown=_picked_shown(data, picks)
+            )
         except DeckError as exc:
             if exc.kind == "pick_one":
                 return _pick_one_page(exc, back, sub, sid)
@@ -738,8 +740,15 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
                     # G16: Apply refuses a change that is not the version the page showed; a form
                     # without one (an old page, or one made by hand) is refused the same way
                     return RedirectResponse(f"/proposals/{pid}?err=changed", status_code=303)
+                at = data.get("seen_status_at") or ""
                 result = await state.decks.apply(  # R-142: the one path
-                    sub, pid, via=REVIEW_PAGE, version=int(seen) if seen.isdigit() else None
+                    sub,
+                    pid,
+                    via=REVIEW_PAGE,
+                    version=int(seen) if seen.isdigit() else None,
+                    # a page drawn before the status field was added sends none: as before
+                    shown_status=str(data["seen_status"])[:20] if "seen_status" in data else None,
+                    shown_status_at=int(at) if at.isdigit() and len(at) < 16 else None,
                 )
         except DeckError as exc:
             # Only a code goes in the URL; _notice maps it to fixed text, so a crafted link cannot
@@ -935,6 +944,8 @@ ERR_MESSAGES = {
     "review it again, then apply or reject it, or ask your assistant to amend it.",
     "changed": "A newer version of this change was made since you opened it. Nothing was sent. Review "
     "the new version below.",
+    "now_held": "This change is held for a reason that came up after you opened this page, so nothing "
+    "was sent. The page now says why under Held. Apply it again if you still want it.",
     "changed_some": "One of the checked changes is not the version this page showed, so nothing was "
     "sent. Look over the list again below.",
     "none_selected": "Check at least one waiting change first. Nothing was done.",
@@ -1650,6 +1661,12 @@ def _proposal_body(p: dict[str, Any], csrf: str | None, shown: str, *, step: boo
             else ""
         )
         + (
+            # every cause it is held for, as the card's "Held." note says them
+            f"<dt>Held</dt><dd>{html.escape(str(p['status_reason']))}</dd>"
+            if p.get("state") == "pending" and p.get("status") == "held" and p.get("status_reason")
+            else ""
+        )
+        + (
             # why it waits for the member's own press, and a replace that waits (WORDING-3-r2)
             "<dt>Waits for you</dt><dd>"
             + html.escape(
@@ -1657,7 +1674,12 @@ def _proposal_body(p: dict[str, Any], csrf: str | None, shown: str, *, step: boo
                     x
                     for x in (
                         p.get("replace_note") if p.get("state") == "pending" else "",
-                        f"This one {p['press_reason']}, so it needs your press."
+                        # the Held row above already says why: said once
+                        "It needs your press."
+                        if p.get("press_reason")
+                        and p.get("status") == "held"
+                        and _held_repeat(p["press_reason"])
+                        else f"This one {p['press_reason']}, so it needs your press."
                         if p.get("press_reason")
                         else "",
                     )
@@ -1720,7 +1742,14 @@ def _proposal_body(p: dict[str, Any], csrf: str | None, shown: str, *, step: boo
             # controls that swaps this window in (clickguard.py).
             + guarded_form(
                 # G16: the version shown; an apply of a proposal amended since is refused
-                hidden={"csrf": csrf or "", "shown": shown, "version": str(p.get("version") or 1)},
+                hidden={
+                    "csrf": csrf or "",
+                    "shown": shown,
+                    "version": str(p.get("version") or 1),
+                    # the status this page showed: a change held since is refused, nothing sent
+                    "seen_status": str(p.get("status") or ""),
+                    "seen_status_at": str(p.get("status_at") or ""),
+                },
                 buttons=[
                     apply_button,
                     ("reject", "Reject this proposal", "btn" if destroy else "danger"),
@@ -1894,6 +1923,26 @@ def _picked_versions(data: dict[str, str], picks: list[str]) -> dict[str, int]:
     return out
 
 
+def _held_repeat(press_reason: str) -> bool:
+    """A press reason that only says again why the change is held."""
+    return bool(re.match(r"(would replace .*, which was applied|is held because)", str(press_reason)))
+
+
+def _picked_shown(data: dict[str, str], picks: list[str]) -> dict[str, dict[str, Any]]:
+    """The status each change on the confirm showed, and when it was set (a confirm drawn before
+    these fields were added sends none: as before)."""
+    out: dict[str, dict[str, Any]] = {}
+    for pid in picks:
+        if f"s_{pid}" not in data:
+            continue
+        at = data.get(f"t_{pid}") or ""
+        out[pid] = {
+            "status": str(data[f"s_{pid}"])[:20],
+            "status_at": int(at) if at.isdigit() and len(at) < 16 else None,
+        }
+    return out
+
+
 def _untied(state: Any, sub: str, row: dict[str, Any]) -> bool:
     if row.get("kind") in _UNTIED_KINDS or not str(row.get("deck_id") or "").isdigit():
         return True
@@ -2031,6 +2080,10 @@ def _confirm_body(
     picks = [c["proposal_id"] for d in plan["decks"] for c in d["changes"]]
     hidden = {"csrf": csrf or "", "shown": shown, "picks": ",".join(picks), "back": back}
     hidden.update({f"v_{p}": str(versions[p]) for p in picks if p in versions})
+    # the status each line showed: a change held since is not sent (it is reported)
+    for c in (c for d in plan["decks"] for c in d["changes"]):
+        hidden[f"s_{c['proposal_id']}"] = str(c.get("status") or "")
+        hidden[f"t_{c['proposal_id']}"] = str(c.get("status_at") or "")
     n = plan["count"]
     out.append(
         guarded_form(

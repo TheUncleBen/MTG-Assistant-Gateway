@@ -2505,9 +2505,10 @@ class Database:
 
     def hold_blocked(self, owner_sub: str) -> int:
         """Hold each live waiting note of the owner that depends on a rejected, withdrawn, failed
-        or expired note and is not held yet (K6). The apply paths settle their own links; this
-        catches the ones that close a note without them: a restart mid-apply, a shutdown cancel,
-        the six-hour backstop and expiry (review round 1, finding 3). Returns how many it held."""
+        or expired note (K6), adding the cause to one held already. The apply paths settle their
+        own links; this catches the ones that close a note without them: a restart mid-apply, a
+        shutdown cancel, the six-hour backstop and expiry (review round 1, finding 3). Returns how
+        many it held."""
         first = (
             f"SELECT {{}} FROM proposal_links l JOIN proposals o ON o.id = l.other_id "
             f"WHERE l.proposal_id = proposals.id AND l.kind = 'depends_on' "
@@ -2526,20 +2527,31 @@ class Database:
             "WHERE owner_sub = :sub AND state = 'pending' AND expires_at >= :now "
             "AND COALESCE(status, '') <> 'held' "
         )
+        # one held already gets the new cause added to the ones it records (board.add_hold), so
+        # the member sees it and status_at moves, by at least a second even within the same one
+        again = "WHERE owner_sub = :sub AND state = 'pending' AND expires_at >= :now AND status = 'held' "
+
+        def added(cause: str) -> str:
+            return (
+                "UPDATE proposals SET status_at = MAX(:now, COALESCE(status_at, 0) + 1), "
+                f"status_reason = status_reason || '|' || ({cause}) "
+                f"{again}AND instr('|' || COALESCE(status_reason, '') || '|', '|' || ({cause}) || '|') = 0 "
+            )
+
         with self.tx() as c:
             held = c.execute(
                 f"UPDATE proposals SET status = 'held', status_at = :now, status_reason = ({reason}) "
                 f"{live}AND EXISTS ({first.format('1')})",
                 args,
             ).rowcount
-            return (
-                held
-                + c.execute(
-                    "UPDATE proposals SET status = 'held', status_at = :now, status_reason = "
-                    f"({gone.format(GONE_REASON_SQL)}) {live}AND EXISTS ({gone.format('1')})",
-                    args,
-                ).rowcount
-            )
+            held += c.execute(
+                "UPDATE proposals SET status = 'held', status_at = :now, status_reason = "
+                f"({gone.format(GONE_REASON_SQL)}) {live}AND EXISTS ({gone.format('1')})",
+                args,
+            ).rowcount
+            c.execute(f"{added(reason)}AND EXISTS ({first.format('1')})", args)
+            c.execute(f"{added(gone.format(GONE_REASON_SQL))}AND EXISTS ({gone.format('1')})", args)
+            return held
 
     def set_hold(self, proposal_id: str, owner_sub: str, reason: str | None) -> bool:
         """Hold a waiting proposal (``reason``) or lift its hold (None: back to plain waiting).
@@ -2553,8 +2565,11 @@ class Database:
                     (now, proposal_id, owner_sub),
                 )
             else:
+                # a new hold, or a new cause of one, always moves status_at forward (a press that
+                # showed the earlier hold in the same second still counts as not having seen it)
                 cur = c.execute(
-                    "UPDATE proposals SET status = 'held', status_reason = ?, status_at = ? "
+                    "UPDATE proposals SET status = 'held', status_reason = ?, "
+                    "status_at = MAX(?, COALESCE(status_at, 0) + 1) "
                     "WHERE id = ? AND owner_sub = ? AND state = 'pending'",
                     (reason, now, proposal_id, owner_sub),
                 )
