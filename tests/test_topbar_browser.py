@@ -269,8 +269,11 @@ FOCUSED = """() => {
 }"""
 
 
+@pytest.mark.parametrize("script", [True, False])
 @pytest.mark.parametrize("zoom", ["none", "root", "text"])
-def test_a_focused_control_is_never_hidden_under_the_top_bar(server: Server, zoom: str) -> None:
+def test_a_focused_control_is_never_hidden_under_the_top_bar(server: Server, zoom: str, script: bool) -> None:
+    """With scripts off, the stylesheet's own room (5.5rem, at least 60 px) covers the two-row bar
+    at 200% text (review round 10)."""
     from playwright.sync_api import sync_playwright
 
     from .test_text_zoom_browser import ROOT_200, TEXT_200
@@ -283,7 +286,7 @@ def test_a_focused_control_is_never_hidden_under_the_top_bar(server: Server, zoo
     with sync_playwright() as p:
         browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
         for width, height in ((1000, 700), (717, 700), (1280, 800)):
-            ctx = browser.new_context(viewport={"width": width, "height": height})
+            ctx = browser.new_context(viewport={"width": width, "height": height}, java_script_enabled=script)
             ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
             page = ctx.new_page()
             for path in ("/admin/settings", "/history"):
