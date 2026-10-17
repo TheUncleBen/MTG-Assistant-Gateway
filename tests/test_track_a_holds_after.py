@@ -41,7 +41,10 @@ async def test_full_auto_waits_while_the_first_step_still_waits(stack: Stack) ->
     await _set_mode(h, "auto")
     got = await _get(h, token, second["proposal_id"])
     assert got["assistant_may_apply"] is False
-    assert f"depends on #{first['board_no']}, which has not been applied yet" in got["risk_reason"]
+    assert got["press_reason"] == f"waits for #{first['board_no']}, which is not applied"
+    assert (
+        got["risk"] == "low" and "waits for the user's own press in every approval mode" in got["next_step"]
+    )
     out = structured(await call(h, token, "apply_proposal", {"proposal_id": second["proposal_id"]}))
     assert out.get("state") != "applied", out
     assert ark.patches == [] and h.db.get_proposal(second["proposal_id"], SUB)["state"] == "pending"
@@ -87,16 +90,19 @@ async def test_a_combined_change_with_another_apps_part_waits_for_the_member(sta
     await _set_mode(h, "auto")
     got = await _get(h, a, comb["proposal_id"])
     assert got["assistant_may_apply"] is False
-    assert "combines or replaces a change another app made" in got["risk_reason"]
+    assert got["press_reason"] == "includes or replaces a change another app made or changed"
     out = structured(await call(h, a, "apply_proposal", {"proposal_id": comb["proposal_id"]}))
     assert out.get("state") != "applied" and ark.patches == [], out
+    # ChatGPT's part stays waiting until the member applies the combined one (combine's description)
+    assert h.db.get_proposal(theirs["proposal_id"], SUB)["state"] == "pending"
+    assert h.db.get_proposal(mine["proposal_id"], SUB)["state"] == "replaced"
     # the same app combining only its own changes is not stopped by this
     one = await _propose(h, a, _add("Swamp"))
     two = await _propose(h, a, _add("Island"))
     own = structured(
         await call(h, a, "combine_proposals", {"proposal_ids": [one["proposal_id"], two["proposal_id"]]})
     )
-    assert "another app" not in (await _get(h, a, own["proposal_id"])).get("risk_reason", "")
+    assert "press_reason" not in (await _get(h, a, own["proposal_id"]))
 
 
 async def test_a_restart_mid_apply_holds_the_dependents(stack: Stack) -> None:
@@ -157,7 +163,13 @@ async def test_a_change_that_replaces_another_apps_change_waits_for_the_member(s
     assert "replaced" not in new and new.get("replaces_when_applied") == [theirs["proposal_id"]], new
     assert h.db.get_proposal(theirs["proposal_id"], SUB)["state"] == "pending"
     assert new["assistant_may_apply"] is False
-    assert "combines or replaces a change another app made" in new["risk_reason"]
+    assert new["press_reason"] == "includes or replaces a change another app made or changed"
+    assert new["replace_note"] == f"This replaces #{theirs['board_no']}, which still waits."
+    old = await _get(h, b, theirs["proposal_id"])
+    assert old["replace_note"] == f"#{new['board_no']} would replace this. Apply one of them, not both."
+    # ChatGPT can't apply its own change by itself while a replacement waits (finding 2)
+    assert old["assistant_may_apply"] is False
+    assert old["press_reason"] == f"would be replaced by #{new['board_no']}, which also waits"
     out = structured(await call(h, a, "apply_proposal", {"proposal_id": new["proposal_id"]}))
     assert out.get("state") != "applied" and ark.patches == [], out
     assert h.db.get_proposal(theirs["proposal_id"], SUB)["state"] == "pending"
@@ -174,12 +186,14 @@ async def test_a_change_that_replaces_another_apps_change_waits_for_the_member(s
     ]
     gone = h.db.get_proposal(theirs["proposal_id"], SUB)
     assert gone["state"] == "replaced" and gone["status_reason"] == f"replaced by #{new['board_no']}", gone
+    shown = await _get(h, b, theirs["proposal_id"])
+    assert shown["replace_note"] == f"Replaced by #{new['board_no']}."
     # replacing its own app's change is not stopped by this
     await _set_mode(h, "manual")
     own = await _propose(h, a, _add("Island"))
     await _set_mode(h, "auto")
     again = await _propose(h, a, _add("Swamp"), replaces=[own["proposal_id"]])
-    assert "another app" not in again.get("risk_reason", ""), again
+    assert "press_reason" not in again, again
     assert again["replaced"] == [own["proposal_id"]] and "replaces_when_applied" not in again
 
 
@@ -247,3 +261,47 @@ async def test_a_change_and_its_replacement_ticked_together_are_refused_by_name(
     # either one alone goes to the confirm
     plan = decks.plan_selection(SUB, [theirs["proposal_id"]])
     assert plan["count"] == 1
+
+
+async def test_the_pages_show_why_a_change_waits_and_what_replaces_it(stack: Stack) -> None:
+    """Proofread A2 findings 2 and 5: the member sees the replace pair and the second-step wait on
+    the Proposals list and the review page, and the assistant's next step in Full auto says why."""
+    import html
+
+    from .test_decks_and_proxy import Browser
+
+    h = stack.h
+    await linked_user(stack)
+    await _set_mode(h, "manual")
+    a, _ = await _app_token(h, "Claude")
+    b, _ = await _app_token(h, "ChatGPT")
+    theirs = await _propose(h, b, _add("Opt"))
+    new = await _propose(h, a, _add("Delver of Secrets"), replaces=[theirs["proposal_id"]])
+    first = await _propose(h, a, _add("Island"))
+    second = await _propose(h, a, _add("Swamp"), depends_on=[first["proposal_id"]])
+    await _set_mode(h, "auto")
+    step = (await _get(h, a, second["proposal_id"]))["next_step"]
+    assert f"it waits for #{first['board_no']}, which is not applied, so it waits for the user's own" in step
+    assert "Do not call apply_proposal." in step and "asks them every time" not in step
+    br = Browser(h)
+    try:
+        await br.login()
+        listing = html.unescape((await br.http.get("/proposals")).text)
+        assert f"#{new['board_no']} would replace this. Apply one of them, not both." in listing
+        assert f"This replaces #{theirs['board_no']}, which still waits." in listing
+        assert f"Waits for #{first['board_no']}, which is not applied." in listing
+        review = html.unescape((await br.http.get(f"/proposals/{new['proposal_id']}")).text)
+        assert "<dt>Waits for you</dt>" in review
+        assert (
+            f"This replaces #{theirs['board_no']}, which still waits. This one includes or replaces a "
+            "change another app made or changed, so it needs your press." in review
+        )
+        review = html.unescape((await br.http.get(f"/proposals/{second['proposal_id']}")).text)
+        assert (
+            f"This one waits for #{first['board_no']}, which is not applied, so it needs your press."
+            in review
+        )
+        plain = html.unescape((await br.http.get(f"/proposals/{first['proposal_id']}")).text)
+        assert "<dt>Waits for you</dt>" not in plain
+    finally:
+        await br.aclose()

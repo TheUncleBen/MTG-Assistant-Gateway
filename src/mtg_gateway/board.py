@@ -139,6 +139,78 @@ def close_replaced_on_apply(svc: Any, sub: str, proposal_id: str) -> None:
             settle(svc, sub, old["id"], "withdrawn")
 
 
+# What the member reads about a replace (proofread A2, finding 2; WORDING-3-r2 item 2).
+REPLACED_BY_WAITING = "{new} would replace this. Apply one of them, not both."
+REPLACES_WAITING = "This replaces {old}, which still waits."
+REPLACED_BY = "Replaced by {new}."
+
+
+def number(row: dict[str, Any]) -> str:
+    """A note's board number ("#3"), or "another change" when it has none."""
+    return f"#{row['board_no']}" if row.get("board_no") else "another change"
+
+
+def replaced_by_waiting(db: Any, sub: str, proposal_id: str) -> dict[str, Any] | None:
+    """A waiting note that replaces ``proposal_id`` (another app's replace, closed only when the
+    new one is applied), or None."""
+    for link in db.proposal_links(sub, [proposal_id]):
+        if link["other_id"] == proposal_id and link["kind"] == "replaces":
+            other = db.get_proposal(link["proposal_id"], sub)
+            if other is not None and other["state"] == "pending":
+                return other
+    return None
+
+
+def replace_note(db: Any, sub: str, row: dict[str, Any]) -> str | None:
+    """On a waiting note: the change that would replace it, or the waiting changes it replaces;
+    on a replaced one: which change replaced it (Q27l)."""
+    pid = row["id"]
+    if row.get("state") == "pending":
+        later = replaced_by_waiting(db, sub, pid)
+        if later is not None:
+            return REPLACED_BY_WAITING.format(new=number(later))
+        olds = [
+            db.get_proposal(lk["other_id"], sub) or {}
+            for lk in db.proposal_links(sub, [pid])
+            if lk["proposal_id"] == pid and lk["kind"] == "replaces"
+        ]
+        olds = [o for o in olds if o.get("state") == "pending"]
+        if olds:
+            return REPLACES_WAITING.format(old=", ".join(number(o) for o in olds))
+    elif row.get("state") == "replaced":
+        for lk in db.proposal_links(sub, [pid]):
+            if lk["other_id"] == pid and lk["kind"] == "replaces":
+                new = db.get_proposal(lk["proposal_id"], sub)
+                if new is not None:
+                    return REPLACED_BY.format(new=number(new))
+    return None
+
+
+WAITS_FOR = "Waits for {first}, which is not applied."
+
+
+def first_step_not_applied(db: Any, sub: str, proposal_id: str) -> dict[str, Any] | None:
+    """The first note ``proposal_id`` depends on that is not applied (its row), or None."""
+    for link in db.proposal_links(sub, [proposal_id]):
+        if link["proposal_id"] == proposal_id and link["kind"] == "depends_on":
+            other = db.get_proposal(link["other_id"], sub)
+            if other is not None and other["state"] != "applied":
+                return other
+    return None
+
+
+def link_note(db: Any, sub: str, row: dict[str, Any]) -> str:
+    """A waiting note's link in words for the lists and cards: a replace that waits (Q27l), or
+    the change it waits for (Q27j "depends on #1", Q134 item 9 "waits for #1")."""
+    note = replace_note(db, sub, {**row, "state": "pending"})
+    if note:
+        return note
+    if row.get("status") == "held":
+        return ""  # the Held line already says which change and why
+    first = first_step_not_applied(db, sub, row["id"])
+    return WAITS_FOR.format(first=number(first)) if first is not None else ""
+
+
 def status_text(db: Any, sub: str, row: dict[str, Any]) -> str:
     """A waiting note's status in words, for the pages, the card and the assistant: why it is
     "held" (Q27j; Q134 A8 "which you rejected"), what "updated" means, or why it "needs a look"

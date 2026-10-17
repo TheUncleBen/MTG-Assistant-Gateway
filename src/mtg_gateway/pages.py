@@ -453,7 +453,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             return RedirectResponse(_with_query(back, "err=none_selected"), status_code=303)
         if any(p not in versions for p in picks) and action == "apply":
             # G16: each checked change applies only as the version the list showed
-            return RedirectResponse(_with_query(back, "err=changed"), status_code=303)
+            return RedirectResponse(_with_query(back, "err=changed_some"), status_code=303)
         if action == "reject":
             current_client.set(BROWSER_CLIENT_ID)
             for pid in picks:
@@ -513,7 +513,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         versions = _picked_versions(data, picks)
         back = _list_back(data.get("back"))
         if any(p not in versions for p in picks):  # G16, as on the list
-            return RedirectResponse(_with_query(back, "err=changed"), status_code=303)
+            return RedirectResponse(_with_query(back, "err=changed_some"), status_code=303)
         if submitted_too_soon(s.session_secret, f"select:{sub}", data.get("shown")):
             # Faster than a person reads the confirm (or a stamp that is not ours): nothing is
             # applied and the same confirm is shown again, as the single review page does.
@@ -607,7 +607,16 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             try:
                 done = await state.decks.undo(sub, snapshot_id, seen=data.get("deck_seen") or "")
             except DeckError as exc:
-                return page("Undo", _err(str(exc)), status=409, sub=sub, sid=sid, current="/proposals")
+                return page(
+                    "Undo",
+                    "<div class='card'>"
+                    + _err(str(exc))
+                    + "<p><a class='btn' href='/proposals'>Back to Proposals</a></p></div>",
+                    status=409,
+                    sub=sub,
+                    sid=sid,
+                    current="/proposals",
+                )
             return RedirectResponse(f"/proposals/{done['proposal_id']}?ok=undone", status_code=303)
         try:
             look = await state.decks.undo_preview(sub, snapshot_id, applied=applied, after_at=after_at)
@@ -865,8 +874,10 @@ OK_MESSAGES = {
     "mode_semi": "Saved: your assistant applies small, low-risk edits without asking and asks for "
     "everything else.",
     "mode_auto": "Saved: your assistant applies deck and collection changes without asking. Restoring a "
-    "snapshot, a commander change, a new deck, a big edit, actions on your Archidekt account and "
-    "deleting a deck still wait for you. Each change keeps a snapshot you can restore from History.",
+    "snapshot, a commander change, a new deck, an edit of more rows than Full auto applies by itself, "
+    "actions on your Archidekt account and deleting a deck still wait for you. When a change waits for "
+    "your press, its card and review page say why. Each change keeps a snapshot you can restore from "
+    "History.",
     # 0.7.29: several waiting changes applied with one press (batch.py), and Undo
     "rejected_some": "Rejected. Nothing was sent to Archidekt.",
     "undone": "Undone. The deck is back as it was before that change.",
@@ -886,6 +897,8 @@ ERR_MESSAGES = {
     "different from what you reviewed. Nothing was sent. It is still waiting, marked Needs a look: "
     "check it again, then apply or reject it, or ask your assistant to amend it.",
     "changed": "This proposal changed since you opened it. Nothing was sent. Review the new version below.",
+    "changed_some": "One of the checked changes is not the version this page showed, so nothing was "
+    "sent. Check the list again below.",
     "none_selected": "Check at least one waiting change first. Nothing was done.",
     "backup_failed": "The backup copy of the deck could not be made on Archidekt, so nothing was "
     "changed. The proposal is still pending; try again once Archidekt answers.",
@@ -1462,6 +1475,8 @@ def _page_step(p: dict[str, Any]) -> str:
             "disconnected": " when you disconnected the app that made it",
         }.get(str(p.get("closed_by") or ""), "")
         return f"This proposal was rejected{by}. Nothing was changed."
+    if state == "replaced" and p.get("replace_note"):
+        return str(p["replace_note"])  # "Replaced by #5." (Q27l)
     return "This proposal can no longer be applied."
 
 
@@ -1580,6 +1595,25 @@ def _proposal_body(p: dict[str, Any], csrf: str | None, shown: str, *, step: boo
             f"{html.escape(p['risk'])}</span> <span class='small muted'>"
             f"{html.escape(p['risk_reason'])}</span></dd>"
             if p.get("risk")
+            else ""
+        )
+        + (
+            # why it waits for the member's own press, and a replace that waits (WORDING-3-r2)
+            "<dt>Waits for you</dt><dd>"
+            + html.escape(
+                " ".join(
+                    x
+                    for x in (
+                        p.get("replace_note") if p.get("state") == "pending" else "",
+                        f"This one {p['press_reason']}, so it needs your press."
+                        if p.get("press_reason")
+                        else "",
+                    )
+                    if x
+                )
+            )
+            + "</dd>"
+            if p.get("state") == "pending" and (p.get("press_reason") or p.get("replace_note"))
             else ""
         )
         + f"<dt>Created</dt><dd>{_when(p['created_at'])}</dd>"
@@ -1844,10 +1878,11 @@ def _confirm_body(
     if plan["count"]:
         n, rows = plan["count"], plan["rows"]
         out.append(
-            f"<p><strong>{n} change{'s' if n != 1 else ''}, {rows} row{'s' if rows != 1 else ''} in "
+            f"<p><strong>{n} change{'s' if n != 1 else ''}, {rows} card line{'s' if rows != 1 else ''} in "
             "all.</strong> They run in this order, each checked against the deck just before it is "
             "sent. A snapshot of each deck is kept first, so Undo can put its cards and details back. "
-            "Likes, follows, comments, collection edits, new decks and copies have no Undo.</p>"
+            "Only deck edits, details changes and restores have Undo: account actions (likes, follows, "
+            "comments and the like), collection edits, new decks and copies don't.</p>"
         )
     for deck in plan["decks"]:
         out.append(f"<h2>{html.escape(deck['deck_name'])}</h2><ol class='order'>")
@@ -1886,6 +1921,7 @@ def _confirm_body(
             buttons=[("apply", f"Apply {n} change{'s' if n != 1 else ''}", "primary btn-lg")],
             action="/proposals/apply",
             extra=f"<a class='btn' href='{html.escape(back)}'>Not now</a>",
+            tab_reachable=True,
         )
     )
     return "".join(out) + "</div>"
@@ -1963,6 +1999,7 @@ def _undo_body(look: dict[str, Any], csrf: str | None, shown: str, applied: list
             buttons=[("undo", "Undo: put the deck back", "primary")],
             action="/proposals/undo",
             extra="<a class='btn' href='/proposals'>Not now</a>",
+            tab_reachable=True,
         )
     )
     return "".join(out) + "</div>"

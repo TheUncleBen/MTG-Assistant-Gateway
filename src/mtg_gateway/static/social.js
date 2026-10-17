@@ -93,7 +93,7 @@
             $(".n", likeBtn).textContent = d.points;
             setLabel(likeBtn, d.vote === 1 ? "Liked" : "Like");
             if (noteEl) noteEl.remove();
-          }).catch(function () { busy(likeBtn, false); note("No connection."); });
+          }).catch(function () { busy(likeBtn, false); note("No connection; the like was not changed."); });
         });
       });
     }
@@ -111,7 +111,7 @@
             markBtn.setAttribute("aria-pressed", d.bookmarked ? "true" : "false");
             setLabel(markBtn, d.bookmarked ? "Bookmarked" : "Bookmark");
             if (noteEl) noteEl.remove();
-          }).catch(function () { busy(markBtn, false); note("No connection."); });
+          }).catch(function () { busy(markBtn, false); note("No connection; the bookmark was not changed."); });
         });
       });
     }
@@ -149,7 +149,7 @@
           paint(d.following);
           var old = holder.querySelector(".note");
           if (old) old.remove();
-        }).catch(function () { btn.disabled = false; say("No connection."); });
+        }).catch(function () { btn.disabled = false; say("No connection; the follow was not changed."); });
       });
     });
   });

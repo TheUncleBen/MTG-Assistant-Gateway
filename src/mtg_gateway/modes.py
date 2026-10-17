@@ -111,7 +111,8 @@ def auto_waits_text(big_rows: int = DEFAULT_BIG_EDIT_ROWS) -> str:
     """What still waits for a press in auto mode (O7, O8), as one sentence."""
     return (
         "Restoring a snapshot, a commander change, a new deck and an edit of more than "
-        f"{_rows(big_rows)} still wait for your press on the card."
+        f"{_rows(big_rows)} still wait for your press on the card, and so does a held change, a "
+        "change waiting for another change first, or one another app had a hand in."
     )
 
 
@@ -187,7 +188,7 @@ def risk_of(
     if kind not in ("edit", "collection"):
         return "high", "not a plain deck or collection edit"
     if rows is None:  # stored before review rows existed: nothing to judge it by
-        return "high", "has no review rows"
+        return "high", "has no list of rows to check"
     kinds = [str(r.get("kind")) for r in rows]
     if any(k == "commander" for k in kinds):
         return "high", "changes the commander"
@@ -268,11 +269,11 @@ def auto_waits(
         return "creates a new deck"
     if kind in ("edit", "collection"):
         if rows is None:
-            return "has no review rows"
+            return "has no list of rows to check"
         if any(str(r.get("kind")) == "commander" for r in rows):
             return "changes the commander"
         if len(rows) > big_rows:
-            return f"changes {len(rows)} rows, more than the {big_rows} auto mode applies by itself"
+            return f"changes {len(rows)} rows, more than the {big_rows} Full auto applies by itself"
         return None
     if kind in ("details", "clone"):
         return None

@@ -19,6 +19,7 @@ import asyncio
 import contextvars
 import dataclasses
 import datetime
+import hashlib
 import json
 import logging
 import math
@@ -238,13 +239,25 @@ def _made_by_another_app(row: dict[str, Any], client: str | None) -> bool:
 
 # Undo refused: the deck changed after its preview was shown (wording draft, WORDING-3 item 4).
 UNDO_CHANGED = (
-    "The deck changed since this Undo was shown, so nothing was sent. Go back to Proposals and "
-    "open Undo again to see what it would put back now."
+    "The deck changed after you opened this Undo, so nothing was sent. Open the change again and "
+    "press Undo to see what it would put back now."
 )
+
+
+def undo_seen(deck: Deck) -> str:
+    """What an Undo preview was drawn against: the deck's cards and details, without its updated
+    time, which a backup copy or another action may bump without changing what Undo puts back."""
+    blob = json.dumps(
+        {"rows": deck.rows_fingerprint(), "details": snapshot_details(deck)}, sort_keys=True, default=str
+    )
+    return hashlib.sha256(blob.encode()).hexdigest()
+
+
 # Said first in a held proposal's next_step (Q27j, A8).
 HELD_STEP = (
-    "Held: a proposal this one depends on was rejected, withdrawn, failed or expired. An assistant never "
-    "applies it in any mode; the user may still apply it themselves, or it can be amended. "
+    "Held: a proposal this one depends on was closed without being applied (status_reason says how). "
+    "An assistant never applies it in any mode; the user may still apply it themselves, or it can be "
+    "amended. "
 )
 # Archidekt work one member may start per ARCHIDEKT_BUDGET_WINDOW seconds (each deck read,
 # proposal, apply or proxied archidekt_* research call counts once), on top of the concurrency
@@ -2449,27 +2462,43 @@ class DeckService:
         creator, amender = row.get("created_by_client"), row.get("amended_by_client")
         if risk not in modes.MEMBER_ONLY and amender and amender != creator:
             return "high", "was changed by another app after it was made", mode, False
-        if risk not in modes.MEMBER_ONLY and self._takes_over_another_app(sub, row):
-            # G5 through combine or replace: another app's waiting work, now in this note, still
-            # needs the member's own press (until Ben decides on cross-app combine, Q141 check)
-            return "high", "combines or replaces a change another app made", mode, False
-        if risk not in modes.MEMBER_ONLY and row.get("status") == "held" and row.get("state") == "pending":
-            return (
-                "high",
-                "is held: a proposal it depends on was rejected, withdrawn, failed or expired",
-                mode,
-                False,
-            )
-        first = self._first_step_not_applied(sub, row["id"]) if risk not in modes.MEMBER_ONLY else None
-        if first is not None:
-            # Q134 item 9, Q140 item 8: a second step never lands without its first; the member's
-            # own press still may (A8), as for a held one
-            which = f"#{first['board_no']}" if first.get("board_no") else "another proposal"
-            return "high", f"depends on {which}, which has not been applied yet", mode, False
+        if risk not in modes.MEMBER_ONLY and self.press_reason(sub, row):
+            # it waits for the member's own press whatever the mode; its risk tier stays what it
+            # is (proofread A2, finding 5), and press_reason says why
+            return risk, why, mode, False
         wait = modes.auto_waits(kind, row.get("rows"), big_rows=int(self.live.get("auto_big_edit_rows")))
         if mode == "auto" and wait and risk not in modes.MEMBER_ONLY:
             why = wait  # what the assistant is told: why auto mode still waits for the user
         return risk, why, mode, modes.assistant_may_apply(mode, risk, auto_wait=wait)
+
+    def press_reason(self, sub: str, row: dict[str, Any]) -> str | None:
+        """Why this waiting note needs the member's own press in every mode, or None. Safe
+        defaults pending Ben's cards (review round 1; the Q142 check): another app's change
+        taken in (G5, Q27m), a change that would replace this one, a hold (K6), and a first step
+        not applied (Q134 item 9, Q140 item 8 option A). The member may still press (A8)."""
+        if row.get("state") != "pending":
+            return None
+        if self._takes_over_another_app(sub, row):
+            return "includes or replaces a change another app made or changed"
+        later = self._replaced_by_waiting(sub, row["id"])
+        if later is not None:
+            return f"would be replaced by {board.number(later)}, which also waits"
+        if row.get("status") == "held":
+            return "is held because a change it depends on didn't go through"
+        first = self._first_step_not_applied(sub, row["id"])
+        if first is not None:
+            if first.get("board_no"):
+                return f"waits for #{first['board_no']}, which is not applied"
+            return "waits for a change it depends on, which is not applied"
+        return None
+
+    def _replaced_by_waiting(self, sub: str, proposal_id: str) -> dict[str, Any] | None:
+        return board.replaced_by_waiting(self.db, sub, proposal_id)
+
+    def replace_links(self, sub: str, row: dict[str, Any]) -> dict[str, Any]:
+        """What the member reads about a replace that waits (Q27l; proofread A2, finding 2)."""
+        note = board.replace_note(self.db, sub, row)
+        return {"replace_note": note} if note else {}
 
     def _takes_over_another_app(self, sub: str, row: dict[str, Any]) -> bool:
         """Whether this note replaces (or was combined from) a note that another app made or
@@ -2482,13 +2511,7 @@ class DeckService:
         return False
 
     def _first_step_not_applied(self, sub: str, proposal_id: str) -> dict[str, Any] | None:
-        """The first note ``proposal_id`` depends on that is not applied (its row), or None."""
-        for link in self.db.proposal_links(sub, [proposal_id]):
-            if link["proposal_id"] == proposal_id and link["kind"] == "depends_on":
-                other = self.db.get_proposal(link["other_id"], sub)
-                if other is not None and other["state"] != "applied":
-                    return other
-        return None
+        return board.first_step_not_applied(self.db, sub, proposal_id)
 
     def _status_fields(self, sub: str, row: dict[str, Any]) -> dict[str, Any]:
         """A waiting proposal's status and its reason in words: "updated" (re-checked, still the
@@ -2707,6 +2730,7 @@ class DeckService:
             state = "expired"
         kind = row.get("kind", "edit")
         risk, why, mode, allowed = self._assistant_policy(sub, row)
+        press = self.press_reason(sub, row) if risk not in modes.MEMBER_ONLY else None
         # "May apply now": the member's mode allows it for this risk AND the proposal is still
         # pending (risk, approval_mode and risk_reason keep the policy side either way).
         # A proposal that needs a look would be refused as it stands: the assistant amends it.
@@ -2777,6 +2801,10 @@ class DeckService:
             "risk": risk,
             "risk_reason": why,
             "assistant_may_apply": may_apply,
+            # why it waits for the member's own press in every mode (shown on the card and the
+            # review page, and told to the assistant), when it does
+            **({"press_reason": press} if press and state == "pending" else {}),
+            **self.replace_links(sub, {**row, "state": state}),
             **({"out_of_date": True, "out_of_date_since": out_of_date} if out_of_date else {}),
             # 0.7.29: every note has a version (an amend makes the next one) and a number on its
             # deck's board; a waiting one may be "updated", "needs_look" or "held" (with why).
@@ -2813,6 +2841,8 @@ class DeckService:
                 partial=bool((row["result"] or {}).get("sent_entries")),
                 kind=kind,
                 card_may_approve=self.card_may_approve(row),
+                press_reason=press or "",
+                policy_allows=allowed,
                 opens_first=formatting_review_only(row) if formatting.keeps_formatting(row) else "",
                 rate_limited=(
                     _rate_limited_note(
@@ -3257,6 +3287,7 @@ class DeckService:
             # for an account action it is display only (what the assistant is told), because the
             # check above has already refused every caller but the review page.
             risk, why, mode, allowed = self._assistant_policy(sub, row)
+            press = self.press_reason(sub, row) if risk not in modes.MEMBER_ONLY else None
             if not allowed:
                 self._audit(
                     "apply_needs_user",
@@ -3270,7 +3301,7 @@ class DeckService:
                 )
                 raise DeckError(
                     "browser_required",
-                    _needs_user_message(mode, why),
+                    _needs_press_message(press) if press else _needs_user_message(mode, why),
                     review_url=f"{self.settings.public_url}/proposals/{proposal_id}",
                     state=row["state"],
                     approval_mode=mode,
@@ -3392,7 +3423,7 @@ class DeckService:
             "outside": outside,
             "warning": undo_warning(len(later), outside),
             # the press is refused if the deck is no longer the one this showed (G16 for Undo)
-            "fingerprint": deck.fingerprint(),
+            "fingerprint": undo_seen(deck),
         }
 
     async def undo(self, sub: str, snapshot_id: str, *, seen: str | None = None) -> dict[str, Any]:
@@ -3403,7 +3434,7 @@ class DeckService:
         if seen is not None:
             snap = self.snapshot(sub, str(snapshot_id))
             deck = await self.get_own_deck(sub, snap["deck_id"])
-            if deck.fingerprint() != seen:
+            if undo_seen(deck) != seen:
                 raise DeckError("changed", UNDO_CHANGED)
         made = await self.propose_restore(sub, snapshot_id)
         return await self.apply(sub, made["proposal_id"], via="browser")
@@ -4575,6 +4606,8 @@ class DeckService:
                         :60
                     ],
                     "links": board.links_text(self.db, sub, line["id"]),
+                    # the same link in the member's words, for the cards (Q27j, Q27l)
+                    "link_note": board.link_note(self.db, sub, line),
                     "review_url": f"{self.settings.public_url}/proposals/{line['id']}",
                     # a deck deletion, or a change that keeps formatting (Q137): never on a card
                     "review_page_only": not self.card_may_approve(row) if row else False,
@@ -6239,6 +6272,13 @@ def _clean_deck_id(deck_id: Any) -> str:
     return raw
 
 
+def _needs_press_message(press: str) -> str:
+    return (
+        f"This proposal {press}, so it needs the user's own press on the proposal card or the review "
+        "page, in every approval mode. Nothing was sent to Archidekt; do not retry."
+    )
+
+
 def _needs_user_message(mode: str, why: str) -> str:
     if mode == "auto":
         return (
@@ -6281,6 +6321,8 @@ def _next_step(
     closed_by_app: str | None = None,
     rate_limited: str = "",
     card_may_approve: bool = True,
+    press_reason: str = "",
+    policy_allows: bool = False,
     opens_first: str = "",
 ) -> str:
     """What the assistant should do next with a proposal in ``state``. ``rate_limited``: for an
@@ -6324,7 +6366,18 @@ def _next_step(
             "they approve it themselves, in every approval mode, on the proposal card in the chat "
             "(where your app shows it) or on the review page. Do not call apply_proposal."
         )
-    if state == "pending" and mode == "semi":
+    if state == "pending" and press_reason:
+        return (
+            f"{card} the user {what} and the review link: it {press_reason}, so it waits for the "
+            "user's own press in every approval mode (they confirm on the card or the review page). "
+            "Do not call apply_proposal."
+        )
+    if state == "pending" and mode == "auto" and not policy_allows and risk_reason:
+        return (
+            f"The user's Full auto mode still waits for their own press on this one, because it "
+            f"{risk_reason}. {card} the user {what} and the review link. Do not call apply_proposal."
+        )
+    if state == "pending" and mode == "semi" and not policy_allows:
         return (
             f"This proposal is high risk (it {risk_reason}), so the user's semi-automatic mode needs "
             f"their own press. {card} the user {what} and the review link: they confirm on the "
@@ -6333,7 +6386,8 @@ def _next_step(
     if state == "pending":
         return (
             f"{card} the user {what} and the review link: they confirm on the review page (Apply). "
-            "Do not call apply_proposal: the user's approval mode asks them every time."
+            "Do not call apply_proposal"
+            + (": the user's approval mode asks them every time." if mode == "manual" else ".")
         )
     if state == "applying":
         return (

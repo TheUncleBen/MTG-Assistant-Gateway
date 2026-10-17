@@ -174,18 +174,36 @@ def test_proposals_page_strip_and_formatting_review_in_the_browser(server: Serve
             page.locator("button[name=action][value=apply]").first.click()
             page.wait_for_selector("text=Apply 2 changes")
             button = page.locator("form.guarded button[value=apply]")
-            assert button.is_disabled()  # locked until the page was seen (click guard)
-            page.mouse.move(20, 20)
-            page.mouse.move(200, 160, steps=5)
+            # locked until the page was seen (click guard), but still in the Tab order, so a fast
+            # keyboard user does not skip past it (review round 2)
+            assert button.get_attribute("aria-disabled") == "true" and not button.evaluate("e => e.disabled")
+            locked = button.evaluate(CONTRAST)
+            assert locked["ratio"] >= 4.5 and locked["opacity"] == 1, locked
+            reached = False
+            for _ in range(40):
+                page.keyboard.press("Tab")
+                if button.evaluate("e => e === document.activeElement"):
+                    reached = True
+                    break
+            assert reached, "Tab never reached Apply"
+            if button.get_attribute("aria-disabled") == "true":
+                # pressed while locked: refused, nothing sent
+                page.keyboard.press("Enter")
+                page.wait_for_timeout(300)
+                assert "/proposals/applied/" not in page.url and server.ark.patches == []
             page.wait_for_function(
-                "() => !document.querySelector('form.guarded button[value=apply]').disabled",
+                "() => !document.querySelector('form.guarded button[value=apply]')"
+                ".hasAttribute('aria-disabled')",
                 timeout=10000,
             )
+            page.wait_for_timeout(400)  # the unlocked colours fade in over 0.2 s
             got = button.evaluate(CONTRAST)
             assert got["ratio"] >= 4.5 and got["opacity"] == 1, got
+            ring = button.evaluate("e => getComputedStyle(e).outlineStyle")
+            assert ring != "none", ring  # focused from the keyboard: the focus ring shows
             if shots:
                 page.screenshot(path=f"{shots}/a-confirm-desktop-dark.png")
-            button.click()
+            page.keyboard.press("Enter")
             page.wait_for_url("**/proposals/applied/**")
             page.wait_for_function(
                 "() => !document.querySelector(\"meta[http-equiv='refresh']\")", timeout=20000

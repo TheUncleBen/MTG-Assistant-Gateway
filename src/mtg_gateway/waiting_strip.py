@@ -61,6 +61,7 @@ def line_for(db: Any, sub: str, row: dict[str, Any]) -> dict[str, Any]:
         "version": int(row.get("version") or 1),
         "status": row.get("status"),
         "status_text": board.status_text(db, sub, row) if row.get("status") else "",
+        "link_note": board.link_note(db, sub, row),
     }
 
 
@@ -88,7 +89,7 @@ def chips_html(line: dict[str, Any], now: float | None = None) -> str:
     if 0 < left < 2 * 86400:
         out += f"<span class='st exp'>Expires in {_age(left)}</span>"
     if int(line.get("version") or 1) > 1:
-        out += f"<span class='st ver'>version {int(line['version'])}</span>"
+        out += f"<span class='st ver'>Version {int(line['version'])}</span>"
     return out
 
 
@@ -110,6 +111,8 @@ def row_html(line: dict[str, Any], *, now: float | None = None, group: str = "")
         if line.get("status") in ("needs_look", "held") and line.get("status_text")
         else ""
     )
+    if line.get("link_note"):
+        why += f"<span class='why'>{html.escape(line['link_note'])}</span>"
     who = _who(line.get("created_by") or "")  # empty when no app was recorded (older changes)
     return (
         f"<li class='wrow'><label class='pick'><input type='checkbox' name='pick' value='{pid}'"
@@ -171,6 +174,12 @@ def strip_html(lines: list[dict[str, Any]], *, csrf: str | None, deck_id: str) -
 # Shared by the Proposals page, the strip and the confirm and result pages. Colours are the theme's
 # tokens (theme.py), each pair at least 4.5:1 in light and dark; rows are at least 44 px high.
 LIST_CSS = """
+/* the confirm's and Undo's locked buttons stay in the Tab order (click guard data-tab): outlined in
+   their colour, not faded, as the review page's locked ones are */
+form.guarded button[data-guard][aria-disabled=true]{opacity:1;background:transparent;
+  border:1px dashed currentColor;cursor:default}
+form.guarded button.primary[aria-disabled=true]{color:var(--orange-text)}
+form.guarded button.danger[aria-disabled=true]{color:var(--danger-text)}
 .wlist{list-style:none;margin:0;padding:0}
 .wrow{display:flex;flex-wrap:wrap;align-items:stretch;column-gap:.5rem;border-top:1px solid var(--surface-2)}
 .wrow:first-child{border-top:0}

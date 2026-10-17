@@ -12,20 +12,20 @@
 .wl li:first-child{border-top:0}
 .wl .what{flex:1 1 220px;min-width:0}
 .wl .what .name{display:block;font-weight:600;overflow-wrap:anywhere}
-.wl .what .sub{display:block;font-size:12px;color:var(--muted);overflow-wrap:anywhere}
-.wl .what .why{display:block;font-size:12px;color:var(--amber);overflow-wrap:anywhere;margin-top:2px}
+.wl .what .sub{display:block;font-size:.75rem;color:var(--muted);overflow-wrap:anywhere}
+.wl .what .why{display:block;font-size:.75rem;color:var(--amber);overflow-wrap:anywhere;margin-top:2px}
 .wl .btns{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
 .wl .btns button{min-height:44px}
-.wl .done{font-size:13px;font-weight:600;color:var(--muted)}
+.wl .done{font-size:.8125rem;font-weight:600;color:var(--muted)}
 .wl .done.ok{color:var(--green)} .wl .done.err{color:var(--red)}
-.order{margin:8px 0 0;padding-left:22px;font-size:13px}
+.order{margin:8px 0 0;padding-left:22px;font-size:.8125rem}
 .order li{margin:3px 0;overflow-wrap:anywhere}
-.order .why{display:block;font-size:12px;color:var(--muted)}
+.order .why{display:block;font-size:.75rem;color:var(--muted)}
 .confirm{margin-top:12px;padding:10px 12px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg2)}
-.confirm p{margin:0;font-size:13px}
-.res{margin:8px 0 0;padding-left:18px;font-size:13px}
+.confirm p{margin:0;font-size:.8125rem}
+.res{margin:8px 0 0;padding-left:18px;font-size:.8125rem}
 .res li{margin:3px 0;overflow-wrap:anywhere}
-h2.dh{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin:12px 0 4px}
+h2.dh{font-size:.6875rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin:12px 0 4px}
 /* Locked (the 700 ms after drawing, and while a press is out), a button keeps a label that reads
    (R-181, as the proposal card) */
 button:disabled{opacity:1;background:transparent;border:1px dashed currentColor;color:var(--text)}
@@ -58,6 +58,8 @@ button.danger:disabled{color:var(--red)}
 /*@BRIDGE@*/
 (function () {
   "use strict";
+  // "Held: it depends on #3, …", as the Proposals page writes it (batch.held_text)
+  function lowerFirst(t) { return t ? t.charAt(0).toLowerCase() + t.slice(1) : t; }
   // The waiting changes as a card (show_waiting_changes; Q134 A6). Each of this app's own waiting
   // changes has Approve and Reject (confirm_proposal, with the per-proposal code in _meta);
   // another app's has its review link only (O9). "Apply all N" applies this app's own together,
@@ -108,13 +110,14 @@ button.danger:disabled{color:var(--red)}
       var what = el("span", "what");
       what.appendChild(el("span", "name", label(x)));
       var sub = [statusWord(x), "by " + creator(x.created_by), ago(x.created_at)];
-      if (Number(x.version) > 1 && !x.changed_by) sub.push("version " + Number(x.version));
+      if (Number(x.version) > 1 && !x.changed_by) sub.push("Version " + Number(x.version));
       if (!data.deck_id && x.deck_name) sub.unshift(String(x.deck_name));
       what.appendChild(el("span", "sub", sub.join(" · ")));
       // the why: status_text on a page's line, status_reason on the board's (show_waiting_changes)
       var why = x.status_text || x.status_reason;
       if ((x.status === "needs_look" || x.status === "held") && why) what.appendChild(el("span", "why", String(why)));
       if (changeNote(x)) what.appendChild(el("span", "why", changeNote(x)));
+      if (x.link_note) what.appendChild(el("span", "why", String(x.link_note)));
       if (x.review_page_only && x.own) what.appendChild(el("span", "why", "Approve it on its review page."));
       li.appendChild(what);
       var btns = el("span", "btns");
@@ -141,7 +144,7 @@ button.danger:disabled{color:var(--red)}
     var notes = [];
     if (n > rows.length) notes.push((n - rows.length) + " more on the Proposals page.");
     (data.other_apps || []).forEach(function (o) {
-      notes.push(o.count + " from " + (o.app === "you" ? "you, in your browser," : o.app) + " also " + (o.count === 1 ? "waits" : "wait") + ". Approve " + (o.count === 1 ? "it" : "them") + " on the Proposals page.");
+      notes.push(o.count + " from " + (o.app === "you" ? "your browser" : o.app) + " also " + (o.count === 1 ? "waits" : "wait") + ". Approve " + (o.count === 1 ? "it" : "them") + " on the Proposals page.");
     });
     if (n && !data.writes_enabled) notes.push("Deck writes are switched off on this gateway; this is a preview only.");
     $("note").textContent = notes.join(" "); $("note").className = notes.length ? "note" : "note hidden";
@@ -177,7 +180,7 @@ button.danger:disabled{color:var(--red)}
       var x = byId[id];
       var li = el("li", "", x ? (data.deck_id ? "" : String(x.deck_name || "") + ": ") + label(x) : id);
       var why = x && (x.status_text || x.status_reason);
-      if (x && x.status === "held" && why) li.appendChild(el("span", "why", "Held: " + String(why)));
+      if (x && x.status === "held" && why) li.appendChild(el("span", "why", "Held: " + lowerFirst(String(why))));
       if (x && changeNote(x)) li.appendChild(el("span", "why", changeNote(x)));
       ol.appendChild(li);
     });
@@ -215,7 +218,7 @@ button.danger:disabled{color:var(--red)}
       })
       .catch(function (err) {
         busy = false; $("cancel").disabled = false;
-        B.setStatus("Could not reach the gateway: " + ((err && err.message) || "unknown error") + ". Use the Proposals page instead.", "err");
+        B.setStatus("Could not reach the gateway, so this card can't tell what happened. Check the Proposals page.", "err");
         draw();
       });
   };
@@ -284,7 +287,7 @@ button.danger:disabled{color:var(--red)}
       })
       .catch(function (err) {
         busy = false; draw();
-        B.setStatus("Could not reach the gateway: " + ((err && err.message) || "unknown error") + ". Use the review page instead.", "err");
+        B.setStatus("Could not reach the gateway, so this card can't tell what happened. Check the review page.", "err");
       });
   }
 
@@ -304,7 +307,9 @@ button.danger:disabled{color:var(--red)}
     draw();
     setTimeout(function () { armed = true; if (!busy) draw(); }, ARM_DELAY_MS);
   }
-  B.start("MTG Assistant Gateway waiting changes card", load, {});
+  B.start("MTG Assistant Gateway waiting changes card", load, {
+    connectError: "This card could not connect to the chat. Approve or reject on the Proposals page in your browser."
+  });
 })();
 </script>
 </body>

@@ -2003,6 +2003,10 @@ h3 .count{font-weight:400;color:var(--text-muted);font-size:.9rem}
 .comments .cmt .acts .confirm{display:inline-flex;flex-wrap:wrap;gap:.4rem;align-items:center;min-width:0;
   font-size:.85rem}
 .comments .cmt .acts .confirm > span{min-width:0;overflow-wrap:anywhere}
+/* focus moves to Yes by script after a click, which :focus-visible may not mark: always ring it */
+.comments .cmt .acts .confirm button:focus,.comments .confirmbar button:focus,
+.banner .social .confirm button:focus{
+  outline:2px solid var(--focus);outline-offset:2px}
 .comments .cmt .acts .notice{flex-basis:100%;margin:.25rem 0 0}
 .comments form.newcomment{display:flex;flex-direction:column;gap:.5rem}
 .comments form.newcomment textarea{width:100%;resize:vertical;min-height:4.5rem}

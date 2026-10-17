@@ -22,11 +22,11 @@ ul.changes li.change,ul.changes li.category,ul.changes li.finish,ul.changes li.p
 ul.changes li.detail,ul.changes li.description{border-left-color:var(--blue)}
 /* A row with no picture (a setting, or a picture that did not load) leaves no empty column. */
 ul.changes li.nopic{grid-template-columns:minmax(0,1fr) auto}
-.act{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);display:block}
+.act{font-size:.6875rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);display:block}
 li.add .act{color:var(--green)} li.remove .act{color:var(--red)}
 .name{display:block;overflow-wrap:anywhere}
-.name .sub{display:block;font-size:12px;color:var(--muted);margin-top:1px}
-.qty{font-variant-numeric:tabular-nums;font-weight:600;white-space:nowrap;font-size:13px;color:var(--muted)}
+.name .sub{display:block;font-size:.75rem;color:var(--muted);margin-top:1px}
+.qty{font-variant-numeric:tabular-nums;font-weight:600;white-space:nowrap;font-size:.8125rem;color:var(--muted)}
 /* A change's text (Main → Maybeboard) may wrap, so on a narrow card it never squeezes the card name to a letter a line. */
 ul.changes li .qty{white-space:normal;text-align:right;overflow-wrap:anywhere;max-width:min(20em,32vw)}
 /* On a narrow card the count or change sits on the action's line, so a row takes two lines, not three. */
@@ -41,7 +41,7 @@ ul.changes li .qty{white-space:normal;text-align:right;overflow-wrap:anywhere;ma
   ul.changes li .name{grid-area:name} ul.changes li .qty{grid-area:qty;align-self:end;max-width:none;justify-self:end}
 }
 li.add .qty{color:var(--green)} li.remove .qty{color:var(--red)}
-ul.changes li.group{display:block;padding:5px 10px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;
+ul.changes li.group{display:block;padding:5px 10px;font-size:.6875rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;
   color:var(--muted);background:var(--bg2);border-left-color:var(--border)}
 ul.changes li.more-row{display:block;padding:0;border-left-color:var(--border)}
 /* The state and risk badges stay whole: on a narrow card the risk badge moves under the state one. */
@@ -54,17 +54,17 @@ ul.changes li.more-row{display:block;padding:0;border-left-color:var(--border)}
 button:disabled{opacity:1;cursor:default;background:transparent;border:1px dashed currentColor;color:var(--text)}
 button.danger:disabled{color:var(--red)}
 .why{margin-top:10px;padding:10px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg2)}
-.why label{display:block;font-size:13px;margin-bottom:6px}
+.why label{display:block;font-size:.8125rem;margin-bottom:6px}
 .why textarea{font:inherit;color:var(--text);background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);
   width:100%;min-height:64px;padding:8px 10px;resize:vertical}
 .why .actions{margin-top:8px}
 /* The other changes waiting on this deck (Q134 A3): one line, Apply all and Review all. */
 .also{margin-top:12px;padding:10px 12px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg2)}
-.also p{margin:0;font-size:13px;overflow-wrap:anywhere}
+.also p{margin:0;font-size:.8125rem;overflow-wrap:anywhere}
 .also .actions{margin-top:8px}
-.also ol{margin:6px 0 0;padding-left:22px;font-size:13px}
+.also ol{margin:6px 0 0;padding-left:22px;font-size:.8125rem}
 .also ol li{margin:3px 0;overflow-wrap:anywhere}
-.also ol .why{display:block;font-size:12px;color:var(--muted)}
+.also ol .why{display:block;font-size:.75rem;color:var(--muted)}
 </style>
 </head>
 <body>
@@ -91,6 +91,8 @@ button.danger:disabled{color:var(--red)}
 /*@BRIDGE@*/
 (function () {
   "use strict";
+  // "Held: it depends on #3, …", as the Proposals page writes it (batch.held_text)
+  function lowerFirst(t) { return t ? t.charAt(0).toLowerCase() + t.slice(1) : t; }
   var B = Bridge; // the shared host protocol (_bridge.js), inlined by cards.card_html (A10)
   var APPROVAL_KEY = "mtg/approval";
   var SET_KEY = "mtg/approval_set"; // "Apply all": this app's waiting changes on the deck (Q134 A3)
@@ -222,8 +224,15 @@ button.danger:disabled{color:var(--red)}
     if (p.card_other_app) {
       var maker = creator(p.created_by);
       return p.created_by === "browser"
-        ? "This change was made in your browser, so only its review page can approve it."
-        : maker + " made this change, so only " + maker + "'s card or its review page can approve it.";
+        ? "This change was made in your browser, so this card can't approve it. Approve it in your browser."
+        : maker + " made this change, so this card can't approve it. Approve it on " + maker + "'s card or in your browser.";
+    }
+    if (p.press_reason) {
+      // it waits for the member's own press in every mode: say why (safe defaults, WORDING-3-r2)
+      var first = /^waits for (#\d+)/.exec(String(p.press_reason));
+      return "This one " + p.press_reason + ", so it needs your press" +
+        (p.approval_mode === "auto" ? " even in Full auto" : "") + "." +
+        (first ? " Apply " + first[1] + " first unless you want this one on its own." : "");
     }
     // Q137: a change that keeps formatting is approved on the review page, which shows it
     var keeps = (p.rows || []).some(function (r) { return r && r.after_doc; });
@@ -236,7 +245,7 @@ button.danger:disabled{color:var(--red)}
     if (p.risk === "destructive") return "This deletes the deck from your Archidekt account. Only you can approve it, on the review page, in every approval mode.";
     if (p.risk === "consent") return "This acts on your Archidekt account under your name. Only you can approve it, every time, in every approval mode.";
     if (p.approval_mode === "semi" && p.risk === "high") return "High risk (" + (p.risk_reason || "") + "), so this one needs your approval.";
-    if (p.approval_mode === "auto" && p.risk_reason) return "This one " + p.risk_reason + ", so it needs your approval even in automatic mode.";
+    if (p.approval_mode === "auto" && p.risk_reason) return "This one " + p.risk_reason + ", so it needs your press even in Full auto.";
     return "";
   }
 
@@ -278,12 +287,12 @@ button.danger:disabled{color:var(--red)}
     var RISK_TEXT = { consent: "Needs your approval", destructive: "Destructive: deletes a deck" };
     if (sc.risk) { risk.textContent = RISK_TEXT[sc.risk] || sc.risk + " risk"; risk.className = "badge risk " + sc.risk; }
     else risk.className = "badge risk hidden";
-    var note = [changeNote(sc), statusNote(sc), modeNote(sc)].filter(Boolean).join(" ");
+    var note = [changeNote(sc), statusNote(sc), sc.state === "pending" ? sc.replace_note : "", modeNote(sc)].filter(Boolean).join(" ");
     $("note").textContent = note; $("note").className = "note" + (note ? "" : " hidden");
     renderRows(list, rows, rows.length > COLLAPSE_AT ? COLLAPSE_AT : rows.length);
     var foot = [];
     if (sc.created_by) foot.push("Proposed by " + creator(sc.created_by));
-    if (Number(sc.version) > 1 && !sc.changed_by) foot.push("version " + Number(sc.version));
+    if (Number(sc.version) > 1 && !sc.changed_by) foot.push("Version " + Number(sc.version));
     if (sc.state === "pending" && sc.expires_at) {
       var mins = Math.max(0, Math.round((Number(sc.expires_at) * 1000 - Date.now()) / 60000));
       foot.push("expires in " + (mins >= 120 ? Math.round(mins / 60) + " h" : mins + " min"));
@@ -322,6 +331,7 @@ button.danger:disabled{color:var(--red)}
     if (p.state === "expired") return "This proposal expired" + when(p.closed_at || p.expires_at) + " without a decision." + again;
     if (p.state === "failed") return "Applying this failed" + at + ". The review page shows what happened. Ask the assistant for a new proposal if you still want this change.";
     if (p.state === "applied") return "Already applied" + at + ". The deck on Archidekt matches this proposal.";
+    if (p.state === "replaced" && p.replace_note) return p.replace_note + " Nothing was sent to Archidekt from this one.";
     return "";
   }
 
@@ -349,11 +359,29 @@ button.danger:disabled{color:var(--red)}
         refreshing = false;
         var sc = (res && res.structuredContent) || {};
         if (sc.ok === false || (res && res.isError) || !sc.state) return;
-        if (busy || proposal !== p || sc.proposal_id !== p.proposal_id || sc.state === "pending") return;
+        if (busy || proposal !== p || sc.proposal_id !== p.proposal_id) return;
+        if (sc.state === "pending") {
+          // still waiting, but held, waiting for another change or linked to a replace since the
+          // card was drawn (a restart, another app): draw that, keeping this card's codes
+          if (!moved(p, sc)) return;
+          render({ structuredContent: Object.assign({}, p, sc), _meta: codesMeta() });
+          return;
+        }
         approval = null;
         render({ structuredContent: sc, _meta: {} });
       })
       .catch(function () { refreshing = false; });
+  }
+  function moved(p, sc) {
+    return ["status", "status_reason", "press_reason", "replace_note"].some(function (k) {
+      return String(p[k] || "") !== String(sc[k] || "");
+    });
+  }
+  function codesMeta() {
+    var meta = {};
+    if (approval) meta[APPROVAL_KEY] = approval;
+    if (applySet) meta[SET_KEY] = { ids: applySet.ids, code: applySet.code };
+    return meta;
   }
   document.addEventListener("visibilitychange", function () {
     if (document.visibilityState === "visible") refresh();
@@ -507,7 +535,7 @@ button.danger:disabled{color:var(--red)}
       applySet.ids.forEach(function (id) {
         var x = byId[id] || {};
         var li = el("li", "", (x.board_no ? "#" + x.board_no + " " : "") + String(x.summary || id));
-        if (x.status === "held" && x.status_reason) li.appendChild(el("span", "why", "Held: " + String(x.status_reason)));
+        if (x.status === "held" && x.status_reason) li.appendChild(el("span", "why", "Held: " + lowerFirst(String(x.status_reason))));
         var ch = changeNote(x);
         if (ch) li.appendChild(el("span", "why", ch));
         ol.appendChild(li);
@@ -587,7 +615,7 @@ button.danger:disabled{color:var(--red)}
         busy = false;
         if (ok) ok.disabled = false; if (no) no.disabled = false;
         renderAlso();
-        setStatus("Could not reach the gateway: " + ((err && err.message) || "unknown error") + ". Use the Proposals page instead.", "err");
+        setStatus("Could not reach the gateway, so this card can't tell what happened. Check the Proposals page.", "err");
       });
   }
 
@@ -600,13 +628,32 @@ button.danger:disabled{color:var(--red)}
   $("reject-go").onclick = function () { var why = String($("reason").value || "").trim(); askWhy(false); decide("reject", why); };
   $("reject-cancel").onclick = function () { askWhy(false); };
 
-  function decide(decision, why) {
+  function decide(decision, why, checked) {
     if (!proposal || !approval || !armed || busy) return;
     busy = true;
     var ok = $("approve"), no = $("reject");
     if (ok) ok.disabled = true; if (no) no.disabled = true;
-    setStatus(decision === "approve" ? "Applying to Archidekt…" : "Rejecting…", "");
     var pid = proposal.proposal_id;
+    if (decision === "approve" && !checked) {
+      // Approve reads the change once more first: one held or waiting for another change since
+      // the card was drawn is shown, and applies only on a second press (review round 2)
+      var shown = proposal;
+      setStatus("Checking this change…", "");
+      request("tools/call", { name: "get_proposal", arguments: { proposal_id: pid } })
+        .then(function (res) {
+          var sc = (res && res.structuredContent) || {};
+          busy = false;
+          if (sc.state === "pending" && proposal === shown && moved(shown, sc) && (sc.status === "held" || sc.press_reason)) {
+            render({ structuredContent: Object.assign({}, shown, sc), _meta: codesMeta() });
+            setStatus("This change has changed status since the card was drawn. Read the note above, then press Approve again if you still want it.", "err");
+            return;
+          }
+          decide(decision, why, true);
+        })
+        .catch(function () { busy = false; decide(decision, why, true); });
+      return;
+    }
+    setStatus(decision === "approve" ? "Applying to Archidekt…" : "Rejecting…", "");
     request("tools/call", { name: "confirm_proposal", arguments: { proposal_id: pid, approval: approval, decision: decision } })
       .then(function (res) {
         var sc = (res && res.structuredContent) || {};
@@ -641,13 +688,13 @@ button.danger:disabled{color:var(--red)}
       .catch(function (err) {
         busy = false;
         if (ok) ok.disabled = false; if (no) no.disabled = false;
-        setStatus("Could not reach the gateway: " + ((err && err.message) || "unknown error") + ". Use the review page instead.", "err");
+        setStatus("Could not reach the gateway, so this card can't tell what happened. Check the review page.", "err");
       });
   }
 
   // no project name in the app's name: the file is public
   B.start("Proposal card", function (params) { render(params); refresh(); }, {
-    connectError: "This app could not connect to the chat. Use the review page in your browser."
+    connectError: "This card could not connect to the chat. Use the review page in your browser."
   });
 })();
 </script>

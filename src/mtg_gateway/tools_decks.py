@@ -279,9 +279,12 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
             "The result lists the deck's other waiting proposals (waiting_on_deck) and, card by card, "
             "where this one overlaps them (overlaps): tidy up in the same turn with amend_proposal, "
             "replaces, withdraw_proposal or combine_proposals rather than stacking proposals. "
-            "replaces: ids of waiting proposals on this deck this one replaces (they are kept, marked "
-            "replaced, and come back if this one is rejected). depends_on: ids of waiting proposals this "
-            "one needs first (it is held if one of them is rejected). An exact repeat of your own "
+            "replaces: ids of waiting proposals on this deck this one replaces. Your own app's are kept, "
+            "marked replaced, and come back if this one is rejected. Another app's stay waiting (listed "
+            "in replaces_when_applied) and are marked replaced only when the user applies this one, "
+            "which always waits for the user's press. depends_on: ids of waiting proposals this one "
+            "needs first: no assistant applies it until they are applied, and it is held if one of "
+            "them is closed without being applied. An exact repeat of your own "
             "waiting proposal returns that one (duplicate_of). zone side means the maybeboard and "
             "sideboard rows (add, remove, set_quantity and set_category only). scan_session (id or "
             "name) adds every resolved card of that scan session; warnings lists scan cards matched "
@@ -411,7 +414,9 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
         description=(
             "Make one proposal of several waiting deck edits on one deck (for example six small ones), "
             "their changes in order, oldest first. The old ones are kept, marked replaced, and come back "
-            "if the combined one is rejected. Card edits only, up to 40 changes in all, and one kind of "
+            "if the combined one is rejected. If another app made or changed one of them, that one stays "
+            "waiting until the user applies the combined one, and the combined one always waits for the "
+            "user's press. Card edits only, up to 40 changes in all, and one kind of "
             "change per card. Changes nothing on Archidekt."
         ),
         annotations={"readOnlyHint": False, "destructiveHint": False, "openWorldHint": True},
