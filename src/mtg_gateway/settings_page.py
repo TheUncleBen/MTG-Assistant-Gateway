@@ -309,6 +309,24 @@ def label(key: str) -> str:
     return TEXT.get(key, (key, ""))[0]
 
 
+# The summary box's link text where the row's name only reads right beside its value box ("Check
+# Archidekt for deck changes every [30] minutes"). A link has no value after it, so these five say
+# the whole thing (SUMMARY-LINK-TEXTS-r3.md option a, approved 10-17 03:16Z, R-216). The rows, the
+# save notices and the Activity log keep the row's name.
+LINK_TEXT = {
+    "deck_sync_minutes": "How often to check Archidekt for deck changes",
+    "archidekt_cache_seconds": "How long public deck reads are reused",
+    "archidekt_card_cache_seconds": "How long Archidekt card lookups are reused",
+    "scan_ambiguity_margin": "Name similarity lead over the next match",
+    "scan_art_gallery_idle_days": "Days without a scan before a card's printings are forgotten",
+}
+
+
+def link_text(key: str) -> str:
+    """A setting's name in the summary box: its row's name, or the whole wording in LINK_TEXT."""
+    return LINK_TEXT.get(key) or label(key)
+
+
 def shown(spec: SettingSpec, value: Any) -> str:
     """A value as the page writes it (plain text, not escaped)."""
     if spec.kind == "bool":
@@ -467,15 +485,15 @@ def settings_body(
 
 def _stack_summary(live: LiveSettings) -> str:
     """Card Q139 item 3: one line at the top naming every setting the stack sets, by its name on
-    the page and its variable, each a link to its row (a folded group opens), so the operator can
-    see which lines to remove from the stack to manage those settings here. Nothing when the stack
-    sets none."""
+    the page (for five, the whole wording in LINK_TEXT) and its variable, each a link to its row
+    (a folded group opens), so the operator can see which lines to remove from the stack to manage
+    those settings here. Nothing when the stack sets none."""
     locked = [spec for spec in MANAGED_SETTINGS.values() if live.locked(spec.key)]
     if not locked:
         return ""
     links = "".join(
         f"<li><a href='{f'?open={spec.group}' if spec.group in FOLDED else ''}#s-row-{spec.key}'>"
-        f"{html.escape(label(spec.key))} (<code>{html.escape(spec.env).replace('_', '_<wbr>')}</code>)"
+        f"{html.escape(link_text(spec.key))} (<code>{html.escape(spec.env).replace('_', '_<wbr>')}</code>)"
         "</a></li>"
         for spec in locked
     )
