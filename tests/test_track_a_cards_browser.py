@@ -879,7 +879,7 @@ def test_apply_all_on_the_proposal_card_lists_what_it_did_not_send_and_why(width
     assert not errors, errors
 
 
-@pytest.mark.parametrize("decision", ["approve", "reject"])
+@pytest.mark.parametrize("decision", ["approve", "reject", "failed", "expired", "read_again"])
 def test_the_proposal_cards_not_sent_list_goes_when_its_own_change_is_decided(decision: str) -> None:
     """Apply all left out the card's own change; the member then approves or rejects it on the
     card: the list that said it is still waiting goes."""
@@ -896,7 +896,13 @@ def test_the_proposal_cards_not_sent_list_goes_when_its_own_change_is_decided(de
         "applied": [{"proposal_id": "p1", "board_no": 1, "summary": "+1 Opt"}],
         "not_sent": [{"proposal_id": "p2", "board_no": 2, "summary": "+1 Delver of Secrets", "why": why}],
     }
-    state = "applied" if decision == "approve" else "rejected"
+    state = {
+        "approve": "applied",
+        "reject": "rejected",
+        "failed": "failed",
+        "expired": "expired",
+        "read_again": "rejected",
+    }[decision]
     with sync_playwright() as p:
         browser = _launch(p, exe)
         try:
@@ -923,11 +929,23 @@ def test_the_proposal_cards_not_sent_list_goes_when_its_own_change_is_decided(de
             card.locator("#apply-all:not([disabled])", has_text="Apply 2 changes").click()
             card.locator("#status.ok").wait_for()
             assert card.locator("#not-sent li").all_inner_texts() == ["#2 +1 Delver of Secrets: " + why]
+            reply = {**PROPOSAL, "deck_waiting": None, "ok": True, "state": state}
+            if decision in ("failed", "expired"):
+                # the press is refused because the change closed (its apply failed, or it expired)
+                reply = {"ok": False, "error": decision, "message": "Not applied.", "state": state}
             page.evaluate(
-                "(r) => { window.replies.confirm_proposal = r; window.replies.get_proposal = r; }",
-                {**PROPOSAL, "deck_waiting": None, "ok": True, "state": state},
+                "(r) => { window.replies.confirm_proposal = r; }",
+                reply,
             )
-            if decision == "approve":
+            if decision == "read_again":
+                # the chat app hands the card the change again, now closed elsewhere
+                page.evaluate(
+                    "(r) => document.getElementById('f').contentWindow.postMessage("
+                    "{jsonrpc: '2.0', method: 'ui/notifications/tool-result',"
+                    " params: {structuredContent: r}}, '*')",
+                    {**PROPOSAL, "deck_waiting": None, "state": state},
+                )
+            elif decision in ("approve", "failed", "expired"):
                 card.locator("#approve:not([disabled])").click()
             else:
                 card.locator("#reject:not([disabled])").click()

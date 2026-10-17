@@ -270,6 +270,7 @@ button.danger:disabled{color:var(--red)}
   function render(result) {
     uncheckedOk = false; // a new drawing is checked afresh
     var sc = result.structuredContent || {};
+    if (sc.state && sc.state !== "pending") clearNotSent();
     var meta = result._meta || {};
     approval = typeof meta[APPROVAL_KEY] === "string" ? meta[APPROVAL_KEY] : null;
     var st0 = meta[SET_KEY];
@@ -690,6 +691,11 @@ button.danger:disabled{color:var(--red)}
     uncheckedOk = true;
     setStatus("This card could not check the change again, so nothing was approved yet. Press Approve again to approve it as shown here, or use the review page.", "err");
   }
+  // this change is no longer waiting (decided, failed, expired, or read again so): an earlier
+  // Apply all's "not sent" list no longer fits it
+  function clearNotSent() {
+    var ns = $("not-sent"); ns.replaceChildren(); ns.className = "notsent hidden";
+  }
   function decide(decision, why, checked) {
     if (!proposal || !approval || !armed || busy) return;
     busy = true;
@@ -758,8 +764,6 @@ button.danger:disabled{color:var(--red)}
         }
         heldCode = sc.state === "applying" ? approval : null;
         approval = null; busy = false;
-        // this change was decided: an earlier Apply all's "not sent" list no longer fits it
-        var ns = $("not-sent"); ns.replaceChildren(); ns.className = "notsent hidden";
         render({ structuredContent: Object.assign({}, proposal, sc), _meta: {} });
         if (sc.state === "applying") {
           tellModel("The user pressed Approve on the proposal card; proposal " + pid + " is still being applied to Archidekt (large change). The card shows its progress.");
