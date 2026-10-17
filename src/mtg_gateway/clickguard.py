@@ -74,13 +74,16 @@ def guarded_form(
     buttons: list[tuple[str, str, str]],
     action: str | None = None,
     extra: str = "",
+    tab_reachable: bool = False,
 ) -> str:
     """HTML for a form whose submit buttons start disabled until ``clickguard.js`` enables them,
     plus a ``<noscript>`` copy with working buttons for browsers without JavaScript.
 
     ``buttons`` are (value, label, class) of ``<button name='action'>``; ``extra`` is markup
     appended inside the button row (a plain link, for instance). Values must already be safe;
-    ``hidden`` values and labels are escaped here.
+    ``hidden`` values and labels are escaped here. With ``tab_reachable`` the locked buttons are
+    marked ``aria-disabled`` instead of ``disabled``, so a fast keyboard user can still Tab to
+    them; the script refuses their press until they unlock, as it does for a disabled one.
     """
     act = f" action='{html.escape(action)}'" if action else ""
     fields = "".join(
@@ -88,7 +91,8 @@ def guarded_form(
     )
 
     def row(disabled: bool) -> str:
-        attrs = " disabled data-guard" if disabled else ""
+        locked = " aria-disabled='true'" if tab_reachable else " disabled"
+        attrs = f"{locked} data-guard" if disabled else ""
         return "".join(
             f"<button type='submit' name='action' value='{html.escape(value)}' "
             f"class='{html.escape(cls)}'{attrs}>{html.escape(label)}</button>"
@@ -96,7 +100,8 @@ def guarded_form(
         )
 
     return (
-        f"<form method='post'{act} class='guarded' data-dwell='{GUARD_DWELL_MS}' "
+        f"<form method='post'{act} class='guarded'{' data-tab' if tab_reachable else ''} "
+        f"data-dwell='{GUARD_DWELL_MS}' "
         f"data-settle='{GUARD_SETTLE_MS}'>{fields}"
         f"<div class='choice'>{row(True)}{extra}</div>"
         "<p class='muted small guard-hint'>The buttons unlock a moment after this page opens, once "

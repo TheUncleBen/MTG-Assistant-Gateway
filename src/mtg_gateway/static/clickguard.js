@@ -23,8 +23,26 @@
     return document.visibilityState === "visible" && document.hasFocus();
   }
 
+  // A form marked data-tab keeps its locked buttons in the Tab order (aria-disabled), so a fast
+  // keyboard user does not skip past them; their press is refused below until they unlock.
+  function tabbed(b) {
+    var f = b.closest("form.guarded");
+    return !!f && f.hasAttribute("data-tab");
+  }
+
+  function locked(b) {
+    return tabbed(b) ? b.getAttribute("aria-disabled") === "true" : b.disabled;
+  }
+
   function set(enabled) {
-    for (var i = 0; i < buttons.length; i++) buttons[i].disabled = !enabled;
+    for (var i = 0; i < buttons.length; i++) {
+      if (tabbed(buttons[i])) {
+        if (enabled) buttons[i].removeAttribute("aria-disabled");
+        else buttons[i].setAttribute("aria-disabled", "true");
+      } else {
+        buttons[i].disabled = !enabled;
+      }
+    }
     for (var j = 0; j < hints.length; j++) hints[j].hidden = enabled;
   }
 
@@ -69,12 +87,29 @@
   document.addEventListener(
     "click",
     function (e) {
-      if (swallowSeq < 0 || swallowSeq !== touchSeq) return;
       var button = e.target instanceof Element ? e.target.closest("form.guarded button[data-guard]") : null;
+      if (button && locked(button)) {
+        // a locked button that stays in the Tab order: refused, as a disabled one would be
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        return;
+      }
+      if (swallowSeq < 0 || swallowSeq !== touchSeq) return;
       if (!button) return;
       swallowSeq = -1;
       e.preventDefault();
       e.stopImmediatePropagation();
+    },
+    true
+  );
+  // Enter in a field submits through the first button without a click on it: refused while locked.
+  document.addEventListener(
+    "submit",
+    function (e) {
+      var form = e.target;
+      if (!(form instanceof HTMLFormElement) || !form.matches("form.guarded[data-tab]")) return;
+      var by = e.submitter || form.querySelector("button[data-guard]");
+      if (by && locked(by)) e.preventDefault();
     },
     true
   );

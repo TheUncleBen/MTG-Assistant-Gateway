@@ -184,6 +184,8 @@ def proposal_text(data: dict[str, Any]) -> str:
             head += f", {one_line(data['risk'])} risk"
             if data.get("risk_reason"):
                 head += f" ({one_line(data['risk_reason'])})"
+        if data.get("press_reason"):
+            head += f"; it waits for the user's own press: it {one_line(data['press_reason'])}"
         lines.append(head + ".")
         if data.get("review_url"):
             lines.append("review_url: " + one_line(data["review_url"]))

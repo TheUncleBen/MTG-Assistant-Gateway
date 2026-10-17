@@ -430,7 +430,11 @@ def test_the_card_says_who_changed_a_change_and_where_to_approve_another_apps(wi
         try:
             for data, want in (
                 (amended, "Version 3, changed by ChatGPT: Added Delver of Secrets."),
-                (other, "Claude made this change, so only Claude's card or its review page can approve it."),
+                (
+                    other,
+                    "Claude made this change, so this card can't approve it. Approve it on Claude's card "
+                    "or in your browser.",
+                ),
             ):
                 page = browser.new_page(viewport={"width": width, "height": 900})
                 errors: list[str] = []
@@ -508,3 +512,68 @@ def test_a_change_decided_on_the_waiting_card_is_not_reported_as_not_sent() -> N
         finally:
             browser.close()
     assert not errors, errors
+
+
+@pytest.mark.parametrize("width,theme", [(360, "dark"), (1280, "light")])
+def test_approve_reads_the_change_again_and_shows_a_new_wait_first(width: int, theme: str) -> None:
+    """Review round 2: a card drawn before the change was held (a restart, another app's step)
+    shows the hold when Approve is pressed, and applies only on a second press."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_or_skip()
+    plain = {**PROPOSAL, "deck_waiting": None}
+    now_held = {
+        **plain,
+        "status": "held",
+        "status_reason": "It depends on #1, which failed.",
+        "press_reason": "is held because a change it depends on didn't go through",
+    }
+    applied = {**plain, "state": "applied", "applied_at": NOW}
+    with sync_playwright() as p:
+        browser = _launch(p, exe)
+        try:
+            page = browser.new_page(viewport={"width": width, "height": 900})
+            errors: list[str] = []
+            page.on("pageerror", lambda e: errors.append(str(e)))
+            page.route("https://api.scryfall.com/**", lambda r: r.abort())
+            card = _open(
+                page,
+                card_html(),
+                {"structuredContent": plain, "_meta": {APPROVAL_META_KEY: "code-2"}},
+                {"get_proposal": plain, "confirm_proposal": {"ok": True, **applied}},
+                theme,
+            )
+            card.locator("#approve:not([disabled])").wait_for()
+            # held after the card was drawn (its first step failed in a restart)
+            page.evaluate("(r) => { window.replies.get_proposal = r; }", now_held)
+            card.locator("#approve:not([disabled])").click()
+            card.locator("#status.err").wait_for()
+            assert card.locator("#status").inner_text() == (
+                "This change has changed status since the card was drawn. Read the note above, then "
+                "press Approve again if you still want it."
+            )
+            note = card.locator("#note").inner_text()
+            assert "is held because a change it depends on didn't go through, so it needs your press" in note
+            assert not _tool_calls(page, "confirm_proposal")
+            _shot(page, f"proposal-card-newly-held-{width}-{theme}")
+            card.locator("#approve:not([disabled])").click()
+            page.wait_for_function(
+                "() => window.log.some(m => m.method === 'tools/call'"
+                " && m.params.name === 'confirm_proposal')"
+            )
+            assert _tool_calls(page, "confirm_proposal") == [
+                {"proposal_id": "p2", "approval": "code-2", "decision": "approve"}
+            ]
+        finally:
+            browser.close()
+    assert not errors, errors
+
+
+def test_the_cards_size_their_text_in_rem() -> None:
+    """Review round 2: the chat cards follow a larger text size (200%), so no text is sized in px."""
+    import re as _re
+
+    for html in (card_html(), cards_html("waiting-card")):
+        sizes = _re.findall(r"font-size:([^;}]+)", html)
+        assert sizes, "no font sizes found"
+        assert [x for x in sizes if x.strip().endswith("px") and x.strip() != "14px"] == [], sizes

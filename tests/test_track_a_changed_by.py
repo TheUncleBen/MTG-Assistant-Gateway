@@ -125,8 +125,8 @@ async def test_the_guide_says_what_full_auto_still_waits_for(stack: Stack) -> No
         page = (await b.http.get("/guide")).text
         assert "a new deck and an edit of more than 25 rows" in page
         assert (
-            "deleting a deck always wait for your press, and so does a held change or one another app changed"
-            in page
+            "deleting a deck always wait for your press, and so does a held change, a change waiting for "
+            "another change first, or one another app had a hand in" in page
         )
         assert "applies the rest too" not in page
     finally:

@@ -103,7 +103,7 @@ async def test_apply_confirms_the_order_then_applies_and_offers_undo(stack: Stac
         )
         assert r.status_code == 200, r.text
         confirm = r.text
-        assert "2 changes, 2 rows in all." in confirm
+        assert "2 changes, 2 card lines in all." in confirm
         assert confirm.index("+1 Opt") < confirm.index("+1 Delver of Secrets")  # oldest first
         assert "1 older change to this deck stays waiting." in confirm
         assert "Apply 2 changes" in confirm and "action='/proposals/apply'" in confirm
@@ -117,7 +117,7 @@ async def test_apply_confirms_the_order_then_applies_and_offers_undo(stack: Stac
             "/proposals/apply",
             data={"csrf": csrf, "action": "apply", "picks": picks, "shown": "1.x", "back": "/proposals"},
         )
-        assert r.headers["location"] == "/proposals?err=changed" and _qty(ark, "Opt") == 0
+        assert r.headers["location"] == "/proposals?err=changed_some" and _qty(ark, "Opt") == 0
         # a press faster than a person reads is refused (click guard)
         r = await b.http.post(
             "/proposals/apply",
@@ -158,15 +158,23 @@ async def test_apply_confirms_the_order_then_applies_and_offers_undo(stack: Stac
         seen = re.search(r"name='deck_seen' value='([0-9a-f]{64})'", r.text)
         assert seen, r.text
         shown = aged_stamp(h.settings, f"undo:{SUB}:{form['snapshot']}")
-        # the deck changed on Archidekt after the preview: refused, nothing sent (finding 11)
+        # only the deck's updated time moved (a backup copy can do that): the same preview, so the
+        # Undo would not be refused for it (proofread A2, M8)
         ark.decks[42]["updatedAt"] = "2026-10-15T09:00:00Z"
+        again = await b.http.post("/proposals/undo", data={"csrf": csrf, "action": "preview", **form})
+        assert f"name='deck_seen' value='{seen.group(1)}'" in again.text, again.text
+        # the deck's cards changed on Archidekt after the preview: refused, nothing sent (finding 11)
+        for c in ark.decks[42]["cards"]:
+            if c["card"]["oracleCard"]["name"] == "Opt":
+                c["quantity"] = 2
         sent = len(ark.patches)
         r = await b.http.post(
             "/proposals/undo",
             data={"csrf": csrf, "action": "undo", "shown": shown, "deck_seen": seen.group(1), **form},
         )
-        assert r.status_code == 409 and "The deck changed since this Undo was shown" in r.text, r.text
-        assert len(ark.patches) == sent and _qty(ark, "Opt") == 1
+        assert r.status_code == 409 and "The deck changed after you opened this Undo" in r.text, r.text
+        assert "href='/proposals'>Back to Proposals</a>" in r.text
+        assert len(ark.patches) == sent and _qty(ark, "Opt") == 2
         # a form without it is refused the same way
         r = await b.http.post(
             "/proposals/undo", data={"csrf": csrf, "action": "undo", "shown": shown, **form}
