@@ -34,7 +34,11 @@ async def test_category_of_an_add_is_in_the_diff_and_capped(stack: Stack) -> Non
     h = stack.h
     token = await linked_user(stack)
     p = await _propose(h, token, [{"action": "add", "card_name": "Arcane Signet", "category": "Commander"}])
-    assert p["ok"] and p["diff"] == "+1 Arcane Signet [Commander]", p
+    # filed under Commander, it is a second commander too, so the commander row says so
+    assert p["ok"] and p["diff"].splitlines() == [
+        "+1 Arcane Signet [Commander]",
+        "Commander: Aesi, Tyrant of Gyre Strait -> Aesi, Tyrant of Gyre Strait, Arcane Signet",
+    ], p
     b = Browser(h)
     await b.login()
     r = await b.http.get(f"/proposals/{p['proposal_id']}")

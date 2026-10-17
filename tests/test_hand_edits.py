@@ -55,7 +55,12 @@ async def test_big_removal_asks_first_and_applies_on_confirm(stack: Stack) -> No
     b = await linked(stack)
     try:
         deck = stack.ark.decks[42]
-        names = [c["card"]["oracleCard"]["name"] for c in deck["cards"]][:9]
+        # nine cards that are not the commander (removing it is a commander change, asked as such)
+        names = [
+            c["card"]["oracleCard"]["name"]
+            for c in deck["cards"]
+            if "Commander" not in (c["categories"] or [])
+        ][:9]
         changes = [{"action": "remove", "card_name": n} for n in names]
         before = len(stack.ark.patches)
         r = await api(
