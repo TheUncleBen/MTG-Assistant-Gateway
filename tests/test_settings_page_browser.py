@@ -443,6 +443,17 @@ WORDED = {
 }
 
 
+# The five link texts as approved (PROOFREAD-SUMMARY-LINKS-r3.md READY; SUMMARY-LINK-TEXTS-r3.md
+# L1 to L5), written out here so a changed word in LINK_TEXT fails (milestone review M-3).
+APPROVED_LINKS = {
+    "deck_sync_minutes": "How often to check Archidekt for deck changes",
+    "archidekt_cache_seconds": "How long public deck reads are reused",
+    "archidekt_card_cache_seconds": "How long Archidekt card lookups are reused",
+    "scan_ambiguity_margin": "Name similarity lead over the next match",
+    "scan_art_gallery_idle_days": "Days without a scan before a card's printings are forgotten",
+}
+
+
 @pytest.fixture
 def worded_server(tmp_path: Path):
     s = Server(tmp_path, admin_group="mtg-admins", env_set=frozenset(WORDED), **WORDED)
@@ -469,7 +480,8 @@ def test_the_summary_box_says_the_whole_name_where_a_row_name_needs_its_value(
         page.wait_for_timeout(30)
         links = page.locator(".set-stack a")
         order = [k for k in MANAGED_SETTINGS if k in WORDED]
-        assert links.all_inner_texts() == [f"{LINK_TEXT[k]} ({MANAGED_SETTINGS[k].env})" for k in order]
+        assert set(LINK_TEXT) == set(APPROVED_LINKS) == set(order)
+        assert links.all_inner_texts() == [f"{APPROVED_LINKS[k]} ({MANAGED_SETTINGS[k].env})" for k in order]
         # the rows keep the names Ben approved
         for k in order:
             assert page.locator(f"#s-row-{k}").inner_text().startswith(label(k)), k
