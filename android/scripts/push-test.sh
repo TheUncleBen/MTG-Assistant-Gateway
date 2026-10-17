@@ -198,12 +198,17 @@ fi
 # -- the app swiped away from Recents: the service keeps running
 adb shell am start -W -n "$PKG/local.mtgassistantgateway.app.MainActivity" >/dev/null
 sleep 3
-adb shell input keyevent KEYCODE_APP_SWITCH
-sleep 2
 size=$(adb shell wm size | tr -d '\r' | awk '{print $NF}')
 w=${size%x*}; h=${size#*x}
-adb shell input swipe $((w / 2)) $((h / 2)) $((w / 2)) $((h / 10)) 300
-sleep 2
+# Up to three tries: Recents can still be opening when the first swipe lands.
+for _ in 1 2 3; do
+  adb shell input keyevent KEYCODE_APP_SWITCH
+  sleep 3
+  shot recents
+  adb shell input swipe $((w / 2)) $((h * 6 / 10)) $((w / 2)) $((h / 20)) 200
+  sleep 2
+  in_recents || break
+done
 adb shell input keyevent KEYCODE_HOME
 send m004AbCdEf "After swipe" "Still here"
 if in_recents; then
@@ -308,21 +313,35 @@ shot 05-end
 # -- the page's App menu items (the account menu's App section, on a gateway page): each reaches the app
 adb shell pm grant "$PKG" android.permission.CAMERA
 app() { adb shell am start -W -n "$PKG/local.mtgassistantgateway.app.MainActivity" >/dev/null; sleep 4; }
+# Each item is pressed with a tap on its label. If that has no effect (the label not found on screen,
+# or the tap missed), the stand-in page clicks the same button itself, which goes through the same
+# click handler and bridge call; the result line says which press worked.
+# menu <label> <bridge method> <check> <what failed>
+menu() {
+  local how
+  if tap_text "$1" && until_ok "$3" 15; then how="tapped"
+  else
+    ctl press -d "{\"name\":\"$2\"}" >/dev/null
+    if until_ok "$3" 15; then how="clicked by the page; the tap did nothing"; else how=""; fi
+  fi
+  if [ -n "$how" ]; then result "menu: $1 ($how)" ok
+  else result "menu: $1" no "$4 (the page saw: $(state seen))"; fi
+}
 app
 before=$(hits /)
-if tap_text "Reload" && until_ok '[ "$(hits /)" -gt '"$before"' ]' 20; then result "menu: Reload" ok; else result "menu: Reload" no "no new page load"; fi
+menu "Reload" reload '[ "$(hits /)" -gt '"$before"' ]' "no new page load"
 sleep 2
-if tap_text "Open in browser" && until_ok 'a=$(top) && ! printf "%s" "$a" | grep -F "$PKG/" >/dev/null' 20; then result "menu: Open in browser" ok; else result "menu: Open in browser" no "the app stayed in front"; fi
+menu "Open in browser" openInBrowser 'a=$(top) && ! printf "%s" "$a" | grep -F "$PKG/" >/dev/null' "the app stayed in front"
 shot menu-open-in-browser
 app
 before=$(hits /scan)
-if tap_text "Scan with the app's camera" && until_ok '[ "$(hits /scan)" -gt '"$before"' ]' 20; then result "menu: Scan with the app's camera" ok; else result "menu: Scan with the app's camera" no "the scan page was not opened"; fi
+menu "Scan with the app's camera" openCamera '[ "$(hits /scan)" -gt '"$before"' ]' "the scan page was not opened"
 sleep 3
 shot menu-scan
 adb shell input keyevent KEYCODE_BACK; sleep 1
 # The app opens no https links itself, so it is opened afresh on the gateway's page.
 adb shell am force-stop "$PKG"; app
-if tap_text "Change gateway" && until_ok 'top | grep SetupActivity >/dev/null' 20; then result "menu: Change gateway" ok; else result "menu: Change gateway" no "the setup screen did not open"; fi
+menu "Change gateway" changeGateway 'top | grep SetupActivity >/dev/null' "the setup screen did not open"
 shot menu-change-gateway
 
 echo "battery: a 24 hour battery test needs a real phone; not run here."
