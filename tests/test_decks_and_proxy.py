@@ -386,7 +386,7 @@ async def test_writes_disabled_blocks_apply_but_allows_proposals(stack_ro: Stack
             {"deck_id": "42", "changes": [{"action": "add", "card_name": "Arcane Signet"}]},
         )
     )
-    assert p["ok"] and "disabled" in p["next_step"]
+    assert p["ok"] and "switched off" in p["next_step"]
     a = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
     assert a["ok"] is False and a["error"] == "writes_disabled"
     assert ark.patches == []
