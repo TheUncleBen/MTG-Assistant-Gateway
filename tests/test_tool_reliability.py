@@ -615,7 +615,11 @@ async def test_folder_tags_and_cover_go_through_a_details_proposal(stack: Stack)
         b = Browser(stack.h)
         await b.login()
         csrf = await b.csrf("/proposals")
-        r = await b.http.post(f"/api/v1/proposals/{p['proposal_id']}/apply", headers={"X-CSRF-Token": csrf})
+        r = await b.http.post(
+            f"/api/v1/proposals/{p['proposal_id']}/apply",
+            headers={"X-CSRF-Token": csrf},
+            json={"version": p["version"]},
+        )
         a = r.json()
         await b.aclose()
     assert a.get("state") == "applied", a
@@ -669,7 +673,11 @@ async def test_one_tag_named_twice_is_added_once(stack: Stack) -> None:
         b = Browser(stack.h)
         await b.login()
         csrf = await b.csrf("/proposals")
-        r = await b.http.post(f"/api/v1/proposals/{p['proposal_id']}/apply", headers={"X-CSRF-Token": csrf})
+        r = await b.http.post(
+            f"/api/v1/proposals/{p['proposal_id']}/apply",
+            headers={"X-CSRF-Token": csrf},
+            json={"version": p["version"]},
+        )
         a = r.json()
         await b.aclose()
     assert a.get("state") == "applied", a

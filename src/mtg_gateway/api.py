@@ -467,8 +467,20 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
         # A bearer token applies under the member's approval mode, exactly like apply_proposal
         # over MCP (decks.apply decides); the browser session is the member's own press. An
         # account action is refused inside decks.apply for both (R-142: only the review page's
-        # own form applies one), with browser_required (403) and its review_url.
-        return ok(await decks.apply(who.sub, pid, via="browser" if who.via == "browser" else "mcp"))
+        # own form applies one), with browser_required (403) and its review_url. The browser
+        # sends the version it showed ({"version": n}), so a proposal another app amended since
+        # is refused with ``changed`` and nothing sent; a bearer caller may send it too.
+        data = await json_body(request)
+        if isinstance(data, Response):
+            return data
+        version = data.get("version")
+        if version is not None and (isinstance(version, bool) or not isinstance(version, int)):
+            raise DeckError("invalid", "version must be a whole number")
+        if version is None and who.via == "browser":
+            decks.describe(who.sub, pid)  # nobody's proposal but the member's: not_found first
+            raise DeckError("invalid", "Send the version of the proposal the page showed.")
+        via = "browser" if who.via == "browser" else "mcp"
+        return ok(await decks.apply(who.sub, pid, via=via, version=version))
 
     @route("/proposals/{pid}/reject", "POST", write=True)
     async def reject(request: Request, who: Caller) -> Response:

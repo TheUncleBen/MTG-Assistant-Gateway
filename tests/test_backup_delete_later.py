@@ -443,7 +443,11 @@ async def test_a_collection_apply_stopped_after_a_record_was_added_stays_failed(
 
             ark.transport.handler = second_add_429
             csrf = await b.csrf("/collection")
-            await b.http.post(f"/api/v1/proposals/{p['proposal_id']}/apply", headers={"X-CSRF-Token": csrf})
+            await b.http.post(
+                f"/api/v1/proposals/{p['proposal_id']}/apply",
+                headers={"X-CSRF-Token": csrf},
+                json={"version": p["version"]},
+            )
             row = await _finished(h, p["proposal_id"])
         finally:
             await b.aclose()

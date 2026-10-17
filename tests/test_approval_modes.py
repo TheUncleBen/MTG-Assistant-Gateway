@@ -350,6 +350,33 @@ async def test_changing_the_mode_later_governs_pending_proposals(stack: Stack) -
     )
 
 
+async def test_a_change_between_the_assistants_apply_and_its_claim_still_stops_it(
+    stack: Stack, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The apply runs as its own task, so the member's mode can change (or a change can be held)
+    after apply_proposal's own check: the policy is decided again just before the claim."""
+    from contextlib import asynccontextmanager
+
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    await _set_mode(h, "auto")
+    p = structured(await _adds(h, token, 1))
+    assert p["assistant_may_apply"] is True
+    decks = h.app.state.gateway.decks
+    real = decks.archidekt_slot
+
+    @asynccontextmanager
+    async def slot(sub):
+        h.db.set_approval_mode(sub, "manual")  # the member's press on the Account page lands now
+        async with real(sub):
+            yield
+
+    monkeypatch.setattr(decks, "archidekt_slot", slot)
+    out = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
+    assert out["ok"] is False and out["error"] == "browser_required" and ark.patches == []
+    assert h.db.get_proposal(p["proposal_id"], "user-1")["state"] == "pending"
+
+
 # -- isolation: one member's mode never reaches another ------------------------------------------
 async def test_one_members_mode_never_applies_to_another(stack: Stack) -> None:
     h, ark = stack.h, stack.ark
@@ -563,7 +590,9 @@ async def test_every_commander_change_waits_for_the_members_press(
     try:
         await b.login()
         r = await b.http.post(
-            f"/api/v1/proposals/{p['proposal_id']}/apply", headers={"X-CSRF-Token": await b.csrf()}
+            f"/api/v1/proposals/{p['proposal_id']}/apply",
+            headers={"X-CSRF-Token": await b.csrf()},
+            json={"version": p["version"]},
         )
         assert r.status_code == 200 and r.json()["state"] == "applied", r.text
     finally:

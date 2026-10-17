@@ -3442,30 +3442,7 @@ class DeckService:
             # REST API. This is the one check that decides it, for every route.
             raise self._review_page_only(sub, row)
         if via == "mcp":
-            # The risk tier (L1) decides only the assistant's own applies of ordinary proposals:
-            # for an account action it is display only (what the assistant is told), because the
-            # check above has already refused every caller but the review page.
-            risk, why, mode, allowed = self._assistant_policy(sub, row)
-            press = self.press_reason(sub, row) if risk not in modes.MEMBER_ONLY else None
-            if not allowed:
-                self._audit(
-                    "apply_needs_user",
-                    sub=sub,
-                    detail={
-                        "proposal_id": proposal_id,
-                        "deck_id": row["deck_id"],
-                        "mode": mode,
-                        "risk": risk,
-                    },
-                )
-                raise DeckError(
-                    "browser_required",
-                    _needs_press_message(press) if press else _needs_user_message(mode, why),
-                    review_url=f"{self.settings.public_url}/proposals/{proposal_id}",
-                    state=row["state"],
-                    approval_mode=mode,
-                    risk=risk,
-                )
+            self._assistant_may_apply(sub, row)
         if via in ("mcp", "app") and (not creator or creator != current_client.get()):
             # Only the assistant that proposed (and showed the user this diff) may apply it over
             # MCP; a proposal left pending cannot be picked up by another connected client.
@@ -3509,6 +3486,29 @@ class DeckService:
             return await asyncio.wait_for(asyncio.shield(task), timeout=APPLY_WAIT_SECONDS)
         except TimeoutError:
             return self.describe(sub, proposal_id)
+
+    def _assistant_may_apply(self, sub: str, row: dict[str, Any]) -> None:
+        """Refuse (browser_required) the assistant's own apply of a proposal its member's mode
+        doesn't let it apply. The risk tier (L1) decides only the assistant's own applies of
+        ordinary proposals: for an account action it is display only (what the assistant is
+        told), because apply has already refused every caller but the review page."""
+        risk, why, mode, allowed = self._assistant_policy(sub, row)
+        if allowed:
+            return
+        press = self.press_reason(sub, row) if risk not in modes.MEMBER_ONLY else None
+        self._audit(
+            "apply_needs_user",
+            sub=sub,
+            detail={"proposal_id": row["id"], "deck_id": row["deck_id"], "mode": mode, "risk": risk},
+        )
+        raise DeckError(
+            "browser_required",
+            _needs_press_message(press) if press else _needs_user_message(mode, why),
+            review_url=f"{self.settings.public_url}/proposals/{row['id']}",
+            state=row["state"],
+            approval_mode=mode,
+            risk=risk,
+        )
 
     def _now_held(self, sub: str, row: dict[str, Any]) -> DeckError:
         """A press on a card that showed the change before it was held: nothing is sent, and the
@@ -3682,6 +3682,13 @@ class DeckService:
             )
             if held and (shown_status != "held" or moved):
                 raise self._now_held(sub, now)
+        if via == "mcp":
+            # The policy is decided again just before the claim, with nothing awaited in between:
+            # a hold, a mode change or another app's amend since apply's own check still stops it.
+            self.db.hold_blocked(sub)
+            now = self.db.get_proposal(proposal_id, sub)
+            if now is not None and now["state"] == "pending":
+                self._assistant_may_apply(sub, now)
         if not self.db.claim_proposal(proposal_id, sub, expect_version=version):
             now = self.db.get_proposal(proposal_id, sub)
             if now is not None and now["state"] == "pending" and version is not None:

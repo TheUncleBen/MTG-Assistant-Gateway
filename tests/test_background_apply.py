@@ -504,7 +504,11 @@ async def test_a_details_step_whose_re_read_fails_after_the_write_keeps_the_back
         b = Browser(h)
         await b.login()
         csrf = await b.csrf("/proposals")
-        r = await b.http.post(f"/api/v1/proposals/{p['proposal_id']}/apply", headers={"X-CSRF-Token": csrf})
+        r = await b.http.post(
+            f"/api/v1/proposals/{p['proposal_id']}/apply",
+            headers={"X-CSRF-Token": csrf},
+            json={"version": p["version"]},
+        )
         out = r.json()
         await b.aclose()
     assert out.get("ok") is False and out.get("error") == "forbidden", out

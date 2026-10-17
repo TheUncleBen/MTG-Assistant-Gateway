@@ -804,7 +804,11 @@ async def test_the_json_api_does_not_apply_an_account_action(stack: Stack) -> No
     try:
         await b.login()
         csrf = await b.csrf()
-        r = await b.http.post(f"/api/v1/proposals/{p['proposal_id']}/apply", headers={"X-CSRF-Token": csrf})
+        r = await b.http.post(
+            f"/api/v1/proposals/{p['proposal_id']}/apply",
+            headers={"X-CSRF-Token": csrf},
+            json={"version": p["version"]},
+        )
         assert r.json()["error"] == "browser_required" and ark.votes == {}, r.text
     finally:
         await b.aclose()
@@ -1020,7 +1024,9 @@ async def test_the_rest_apply_refuses_an_account_action_in_every_mode(stack: Sta
             await b.login()
             csrf = await b.csrf()
             r = await b.http.post(
-                f"/api/v1/proposals/{p['proposal_id']}/apply", headers={"X-CSRF-Token": csrf}
+                f"/api/v1/proposals/{p['proposal_id']}/apply",
+                headers={"X-CSRF-Token": csrf},
+                json={"version": p["version"]},
             )
             assert r.status_code == 403 and r.json()["error"] == "browser_required", r.text
         finally:
