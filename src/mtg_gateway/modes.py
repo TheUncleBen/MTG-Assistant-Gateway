@@ -77,7 +77,7 @@ ACCOUNT_ACTIONS_TEXT = "likes, votes, bookmarks, follows, comments, new folders 
 # What each mode means, in the member's words, for the Account page and the docs.
 MODE_LABELS = {
     "manual": "Ask me every time",
-    "semi": "Apply small, low-risk edits without asking",
+    "semi": "Apply low-risk changes without asking",
     "auto": "Apply deck and collection changes without asking",
 }
 # Each mode's name, as the Guide and the Account page write it (wording draft, WORDING-6)

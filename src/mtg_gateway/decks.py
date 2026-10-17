@@ -6484,7 +6484,7 @@ def _next_step(
         chose = (
             "to apply deck and collection changes without asking"
             if mode == "auto"
-            else f"to apply low-risk edits without asking, and this one is low risk ({risk_reason})"
+            else f"to apply low-risk changes without asking, and this one is low risk ({risk_reason})"
         )
         return (
             f"The user chose {chose}: tell them {what} in one line and call apply_proposal now. "

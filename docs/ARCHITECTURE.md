@@ -158,7 +158,7 @@ The assistant never changes a deck directly:
 2. The person approves it: with **Approve** on the card the AI app shows
    next to the proposal (an MCP App, see below) or on the review page with
    **Apply**. A person who chose a looser **approval mode** on their Account
-   page (see below) lets the assistant apply low-risk edits, or most changes,
+   page (see below) lets the assistant apply low-risk changes, or most changes,
    itself; the gateway tells the assistant which in every proposal result.
 3. The gateway checks the change still fits the deck as it is now, saves a
    snapshot, makes
