@@ -88,6 +88,15 @@ SINCE_RE = re.compile(r"^(?:[A-Za-z0-9]{8,24}|\d{9,11})$")
 GROUP_RE = re.compile(r"^deck-\d{1,12}$")
 
 
+WAITING_TEXT = "Open it to look at the changes, then apply or reject them."
+
+
+def waiting_title(count: int, deck_name: str) -> str:
+    """The title of a deck's message: "1 change waiting for Atraxa", "2 changes waiting for ..."."""
+    name = " ".join(str(deck_name or "").split())[:80] or "your deck"
+    return f"{count} change{'' if count == 1 else 's'} waiting for {name}"
+
+
 def new_topic() -> str:
     """A topic nobody can guess: 'mtg-' and 128 random bits."""
     return "mtg-" + secrets.token_urlsafe(16)
@@ -192,6 +201,7 @@ class Notifier:
         self._tasks: set[asyncio.Task[Any]] = set()  # held so a pending send is not collected
         self.sent = 0
         self._last_test: dict[str, float] = {}
+        self._waiting: dict[tuple[str, str], int] = {}  # the count each deck's message last said
         self._streams: dict[str, int] = {}  # open app connections per key
         self._kicks: dict[str, asyncio.Event] = {}  # set to end a key's connections now
         self._closing: asyncio.Event | None = None  # set when the gateway stops
@@ -304,6 +314,26 @@ class Notifier:
         """:meth:`withdraw` in the background."""
         if self.enabled:
             self._background(self.withdraw(sub, group))
+
+    def deck_waiting(self, sub: str, deck_id: str, deck_name: str, count: int, path: str) -> None:
+        """The member's one message for a deck: how many assistant changes wait for their press
+        there (``count``), replaced on the phone each time the count changes and removed when it
+        reaches 0. A count the phone already shows sends nothing."""
+        if not self.enabled or not str(deck_id).isdigit():
+            return
+        group = f"deck-{int(deck_id)}"
+        key = (sub, group)
+        if self._waiting.get(key, 0) == count:
+            return
+        if count > 0:
+            self._waiting[key] = count
+            self.soon(sub, "proposals", waiting_title(count, deck_name), WAITING_TEXT, path, group)
+        else:
+            self._waiting.pop(key, None)
+            self.withdraw_soon(sub, group)
+        if len(self._waiting) > 5000:  # a long-running gateway: forget the oldest decks
+            for k in list(self._waiting)[:1000]:
+                self._waiting.pop(k, None)
 
     async def drain(self) -> None:
         """Wait for background sends (tests, shutdown)."""
