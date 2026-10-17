@@ -242,7 +242,7 @@ def status_text(db: Any, sub: str, row: dict[str, Any]) -> str:
             "failed": "failed",
             "expired": "expired",
         }
-        which = f"#{no}" if no else "another proposal"
+        which = f"#{no}" if no else "another change"
         return f"It depends on {which}, which {words.get(closed, closed)}."
     if status == "held" and reason.startswith("replaces:"):
         other = reason.split(":", 2)[1] if reason.count(":") >= 1 else ""

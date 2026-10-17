@@ -292,7 +292,7 @@ async def test_a_card_of_an_earlier_version_is_refused_as_replaced(stack: Stack)
     assert (
         out["ok"] is False
         and out["error"] == "changed"
-        and out["message"].startswith("Replaced by a newer version.")
+        and out["message"].startswith("There is a newer version of this change")
     ), out
     assert ark.patches == []
     assert (await press_approve(h, token, p["proposal_id"]))["state"] == "applied"

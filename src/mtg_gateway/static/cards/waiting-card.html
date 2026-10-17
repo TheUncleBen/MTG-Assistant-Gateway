@@ -90,7 +90,7 @@ button.danger:disabled{color:var(--red)}
     var what = String(x.what_changed || "").trim();
     var apps = (x.changed_by_apps && x.changed_by_apps.length ? x.changed_by_apps : [x.changed_by]).map(creator);
     // Q141 1B in Ben's approved form, "Changed by ChatGPT" (coordinator 03:19Z 10-17)
-    return "Changed by " + apps.join(", then ") + (what ? ": " + what : "") + (/[.!?]$/.test(what) ? "" : ".");
+    return "Changed by " + apps.join(", then ") + (what ? ". Last change: " + what : "") + (/[.!?]$/.test(what) ? "" : ".");
   }
   function statusWord(x) {
     return { updated: "Updated", needs_look: "Needs a look", held: "Held" }[x.status] || "Waiting";

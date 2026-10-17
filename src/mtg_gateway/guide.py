@@ -221,9 +221,9 @@ def guide_body(
         "Edits are switched on here: what you save in the app goes to Archidekt at once, and an "
         "approved proposal from your assistant is applied for you."
         if writes_enabled
-        else "Archidekt writes are switched off on this gateway for now: what you save and what your "
-        "assistant proposes stays waiting, and can be applied once the person who runs the gateway "
-        "switches writes on."
+        else "Archidekt writes are switched off on this gateway for now: what you save in the app and "
+        "what your assistant proposes stay waiting, and can be applied once the person who runs the "
+        "gateway switches writes on."
     )
     backup_box = (
         "The save bar has a tick box, <strong>Also keep a backup copy on Archidekt</strong>, off by "
@@ -448,10 +448,11 @@ def guide_body(
         "(the assistant applies small, low-risk edits itself and asks about the rest) or Full auto (it "
         "also applies bigger deck and collection edits and changes to a deck's details, except a "
         f"restore, a commander change, a new deck, an edit of more than {int(big_rows)} rows, making a "
-        "deck public or unlisted, and a description edit that keeps or removes bold text or links). "
+        "deck public or unlisted, and any edit of a description that has bold text, links or pictures). "
         "Actions on your Archidekt account (likes, follows, comments and the like) and deleting a deck "
         "always wait for your press, and so does a held change, a change waiting for another change "
-        "first, one another app had a hand in, or one that another app's waiting change would replace. "
+        "first, one another app had a hand in, one that replaces another app's change, or one that "
+        "another app's waiting change would replace. "
         "When a change waits for your press, its card and "
         "review page say why. "
         "Every deck change keeps a snapshot either way; <a href='#ref-approval'>Approval modes and risk "
@@ -763,7 +764,7 @@ def guide_body(
             "<code>amend_proposal</code>, <code>withdraw_proposal</code>, <code>combine_proposals</code>",
             "apply writes",
             "<code>apply_proposal</code> succeeds only when the mode allows; one that would now do "
-            "something else than what was reviewed is not sent and waits as Needs a look",
+            "something other than what was reviewed is not sent and waits as Needs a look",
         ),
     ]
     if watchlists:
@@ -931,15 +932,15 @@ def guide_body(
         f"<tr><td><strong>Full auto</strong>: {_esc(modes.MODE_LABELS['auto'])}</td>"
         "<td>the assistant applies it</td><td>the assistant applies it, except a restore, a commander "
         f"change, a new deck, an edit of more than {big_rows} rows, making a deck public or unlisted, "
-        "and a description edit that keeps or removes bold text or links: you press</td>"
+        "and any edit of a description that has bold text, links or pictures: you press</td>"
         f"{on_review_page}</tr>"
         "</tbody></table></div>"
         f"<p><strong>Low risk:</strong> {_esc(modes.low_risk_text(max_rows))} "
         f"<strong>High risk:</strong> {_esc(modes.HIGH_RISK_TEXT)} "
         f"<strong>Always your own press:</strong> {_esc(modes.MEMBER_ONLY_TEXT)} "
         "<strong>In every mode:</strong> a held change, a change waiting for another change first, one "
-        "another app had a hand in, or one that another app's waiting change would replace waits for "
-        "your press; its card and review page say why. "
+        "another app had a hand in, one that replaces another app's change, or one that another app's "
+        "waiting change would replace waits for your press; its card and review page say why. "
         "Every applied proposal keeps a snapshot first and is read back to verify.</p>"
         f"<p class='tip'>{_esc(modes.AUTO_WARNING)}</p>"
         f"{_h4('ref-approval-hand', 'Your own saves')}"
@@ -1041,10 +1042,10 @@ def guide_body(
         "with Approve and Reject. Whether the assistant may then apply the proposal itself depends only on "
         "your approval mode and the proposal's risk level (<a href='#ref-approval'>the reference</a> has "
         "the rules), except that a held change, a change waiting for another change first, one another "
-        "app had a hand in, or one that another app's waiting change would replace always waits for "
-        "your press; your own saves count as approved by "
+        "app had a hand in, one that replaces another app's change, or one that another app's waiting "
+        "change would replace always waits for your press; your own saves count as approved by "
         "the press. Before anything is applied the "
-        "gateway checks the deck has not changed in the meantime, and after the write it reads the deck "
+        "gateway checks the change still fits the deck as it is now, and after the write it reads the deck "
         "back to confirm what landed.</p>"
         f"{_h4('exp-approvals-snapshot', 'Snapshots and the backup copy')}"
         "<p>Every apply takes a <strong>snapshot</strong> first: the deck as it was, cards and the deck's "

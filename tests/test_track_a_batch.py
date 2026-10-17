@@ -204,7 +204,8 @@ async def test_a_change_amended_after_it_was_seen_is_not_sent(stack: Stack) -> N
     )
     assert out["ok"], out
     run = await _apply(h, [pid], versions={pid: 1})
-    assert run["applied"] == [] and run["not_sent"][0]["why"].startswith("Replaced by a newer version"), run
+    why = run["not_sent"][0]["why"]
+    assert run["applied"] == [] and why.startswith("There is a newer version of this change"), run
     assert _qty(ark, "Opt") == 0 and _qty(ark, "Delver of Secrets") == 0
 
 

@@ -891,7 +891,7 @@ OK_MESSAGES = {
     "everything else.",
     "mode_auto": "Saved: your assistant applies deck and collection changes without asking. Restoring a "
     "snapshot, a commander change, a new deck, an edit of more rows than Full auto applies by itself, "
-    "making a deck public or unlisted, a description edit that keeps or removes bold text or links, "
+    "making a deck public or unlisted, any edit of a description that has bold text, links or pictures, "
     "actions on your Archidekt account and deleting a deck still wait for you. When a change waits for "
     "your press, its card and review page say why. Each change keeps a snapshot you can restore from "
     "History.",
@@ -910,10 +910,11 @@ ERR_MESSAGES = {
     "a snapshot. Nothing more was changed. The result below names it.",
     "already_applied": "This proposal was already applied; nothing was sent again.",
     "not_pending": "This proposal is no longer pending, so nothing was done.",
-    "stale": "Not applied: the deck changed on Archidekt, and this proposal would now do something "
+    "stale": "Not applied: the deck changed on Archidekt, and this change would now do something "
     "different from what you reviewed. Nothing was sent. It is still waiting, marked Needs a look: "
     "check it again, then apply or reject it, or ask your assistant to amend it.",
-    "changed": "This proposal changed since you opened it. Nothing was sent. Review the new version below.",
+    "changed": "A newer version of this change was made since you opened it. Nothing was sent. Review "
+    "the new version below.",
     "changed_some": "One of the checked changes is not the version this page showed, so nothing was "
     "sent. Check the list again below.",
     "none_selected": "Check at least one waiting change first. Nothing was done.",
@@ -1401,8 +1402,8 @@ def _detail_rows(rows: list[dict[str, Any]] | None, diff: str) -> tuple[str, int
 # The review page's words for a proposal the re-check (recheck.py) marked Needs a look: the deck
 # changed after it was made and the change no longer fits. The reason follows when known.
 OUT_OF_DATE_PAGE = (
-    "Needs a look: this deck changed after the proposal was made and the change no longer fits, so "
-    "Apply will be refused and nothing will be sent. Ask your assistant to update it, or reject it."
+    "Needs a look: the deck changed after this change was made and it no longer fits, so Apply will "
+    "be refused and nothing will be sent. Ask your assistant to update it, or reject it."
 )
 
 
@@ -1602,7 +1603,7 @@ def _proposal_body(p: dict[str, Any], csrf: str | None, shown: str, *, step: boo
         + (f"<dt>Proposed by</dt><dd>{actor_html(p['created_by'])}</dd>" if p.get("created_by") else "")
         + (  # G16, Q134 item 5: an amended change says who changed it and what
             f"<dt>Version</dt><dd>{int(p['version'])}, changed by {_changed_by_names(p)}"
-            + (f": {html.escape(p['what_changed'])}" if p.get("what_changed") else "")
+            + (f". Last change: {html.escape(p['what_changed'])}" if p.get("what_changed") else "")
             + "</dd>"
             if p.get("changed_by")
             else ""
@@ -1988,7 +1989,9 @@ def _confirm_body(
         )
         return "".join(out) + "</div>"
     if not writes_enabled:
-        out.append(f"<p>{html.escape(ERR_MESSAGES['writes_disabled'])}</p>")
+        # several waiting: the plural (proofread of WORDING-6, 13), as after a refused apply
+        off = WRITES_OFF_KEPT_MANY if plan["count"] > 1 else ERR_MESSAGES["writes_disabled"]
+        out.append(f"<p>{html.escape(off)}</p>")
         return "".join(out) + "</div>"
     picks = [c["proposal_id"] for d in plan["decks"] for c in d["changes"]]
     hidden = {"csrf": csrf or "", "shown": shown, "picks": ",".join(picks), "back": back}

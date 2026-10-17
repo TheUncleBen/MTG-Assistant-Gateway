@@ -270,7 +270,7 @@ async def test_full_auto_waits_for_a_formatted_description_and_for_making_a_deck
     assert kept["assistant_may_apply"] is False, kept
     assert (
         kept["risk_reason"]
-        == "keeps bold text or links in the description, so you see how it will look first"
+        == "keeps bold text, links or pictures in the description, so you see how it will look first"
     )
     out = structured(await call(h, token, "apply_proposal", {"proposal_id": kept["proposal_id"]}))
     assert out.get("state") != "applied", out

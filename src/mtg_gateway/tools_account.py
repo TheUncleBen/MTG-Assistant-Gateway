@@ -134,7 +134,7 @@ def add_account_tools(state: AppState, h: SimpleNamespace) -> None:
             "'like', 'vote_down' or 'clear_vote' (the deck's like), 'bookmark' or 'unbookmark', "
             "'follow_owner' or 'unfollow_owner' (Archidekt follows people, not decks: this follows the "
             "deck's owner), or 'follow_user' or 'unfollow_user' with username instead of deck_id (the "
-            "person is found through their public decks, so someone with none can't be followed this "
+            "person is found through their public decks, so someone with none can't be found this "
             "way). Returns a proposal (kind 'action', risk 'consent') that only the user applies, "
             "with their press on the card in the chat or on its review page, in every approval mode: never "
             "call apply_proposal for it. "

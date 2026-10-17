@@ -61,7 +61,7 @@ _CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 MAX_PAGE = 1000
 ROOT_TTL = 600.0
 ROOT_MAX = 2000
-NOT_IN_THREAD = "that comment is not in this deck's thread (or no longer on the page it was shown on)"
+NOT_IN_THREAD = "That comment is not in this deck's thread, or no longer on the page it was shown on."
 
 
 def comment_text(text: str) -> str:

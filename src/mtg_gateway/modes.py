@@ -114,10 +114,10 @@ def auto_waits_text(big_rows: int = DEFAULT_BIG_EDIT_ROWS) -> str:
     """What still waits for a press in auto mode (O7, O8), as one sentence."""
     return (
         "Restoring a snapshot, a commander change, a new deck, an edit of more than "
-        f"{_rows(big_rows)}, making a deck public or unlisted, and a description edit that keeps or "
-        "removes bold text or links still wait for your press. So does a held change, a change "
-        "waiting for another change first, one another app had a hand in, and one that another app's "
-        "waiting change would replace."
+        f"{_rows(big_rows)}, making a deck public or unlisted, and any edit of a description that has "
+        "bold text, links or pictures still wait for your press. So does a held change, a change "
+        "waiting for another change first, one another app had a hand in, one that replaces another "
+        "app's change, or one that another app's waiting change would replace."
     )
 
 
@@ -308,7 +308,7 @@ def auto_waits(
         elif wanted.get("unlisted") is True:
             return "makes the deck unlisted"
         if any(isinstance(r, dict) and r.get("after_doc") for r in rows or []):
-            return "keeps bold text or links in the description, so you see how it will look first"
+            return "keeps bold text, links or pictures in the description, so you see how it will look first"
         if any(isinstance(r, dict) and r.get("formatting_lost") for r in rows or []):
             return "removes all the bold text, links and pictures from the description"
         return None

@@ -126,7 +126,8 @@ async def test_amend_keeps_the_number_writes_what_changed_and_restarts_the_expir
             {"proposal_id": p["proposal_id"], "version": 1, "changes": _change("Opt")},
         )
     )
-    assert stale["error"] == "changed" and stale["message"].startswith("Replaced by a newer version")
+    assert stale["error"] == "changed"
+    assert stale["message"].startswith("There is a newer version of this change")
 
 
 async def test_amend_at_the_version_cap_tells_the_assistant_to_replace(stack: Stack, monkeypatch) -> None:

@@ -173,7 +173,7 @@ def add_deck_tool_routes(
                 if s.writes_enabled
                 # Q141 item 7A: the writes-off line reads as everywhere else (wording draft, WORDING-4)
                 else f"<p class='notice warn'>{refusals.WRITES_OFF_STATE}; "
-                "your changes are kept as a proposal to apply once they are switched on.</p>"
+                "what you save stays waiting and can be applied once writes are switched on.</p>"
             )
             + "</section>"
             "<div class='editbar' role='region' aria-label='Pending changes'>"
