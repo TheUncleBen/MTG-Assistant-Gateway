@@ -167,6 +167,24 @@ async def test_a_cap_changed_on_the_settings_page_applies_at_once(stack: Stack) 
     assert await _set_mode(h, "semi") == "/account?ok=mode_semi"
 
 
+async def test_a_lowered_cap_and_row_limit_apply_at_once_to_a_member_who_chose_more(stack: Stack) -> None:
+    """The join of Track A's live mode reading and Track B's Settings page: a member who already
+    chose Full auto is read as Semi-auto as soon as an admin lowers the cap, with no restart, and a
+    lowered row limit makes a 3-row edit high risk at once."""
+    h = stack.h
+    token = await linked_user(stack)
+    assert await _set_mode(h, "auto") == "/account?ok=mode_auto"
+    assert structured(await call(h, token, "account_status"))["approval_mode"] == "auto"
+    h.app.state.gateway.live.set("approval_mode_max", "semi", by="admin-1")
+    assert h.db.get_user("user-1")["approval_mode"] == "auto"  # the stored choice is kept
+    assert structured(await call(h, token, "account_status"))["approval_mode"] == "semi"
+    p = structured(await _adds(h, token, 3))
+    assert p["approval_mode"] == "semi" and p["risk"] == "low" and p["assistant_may_apply"] is True
+    h.app.state.gateway.live.set("auto_apply_max_rows", 2, by="admin-1")
+    p = structured(await _adds(h, token, 3))
+    assert p["approval_mode"] == "semi" and p["risk"] == "high" and p["assistant_may_apply"] is False
+
+
 async def test_the_cap_limits_what_members_may_choose(capped: Stack) -> None:
     """MTG_APPROVAL_MODE_MAX=semi: the operator's auto default is read as semi, auto cannot be
     chosen, and the Account page shows the auto choice disabled."""

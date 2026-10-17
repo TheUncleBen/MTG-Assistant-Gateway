@@ -338,3 +338,71 @@ def test_goldfish_guide_walks_a_first_game_and_can_be_hidden(server: Server, wid
         assert page.locator("#gf-guide").is_visible()
         assert errors == []
         browser.close()
+
+
+# The card size (Ben's answer: wherever card pictures show) on the Goldfish page: the same S / M / L
+# switch as the deck page, saved to the account, at phone, Fold and desktop widths, light and dark,
+# at normal and 200% text, with nothing wider than the window and the switch's text readable.
+SIZE_STATE = """() => {
+  const c = document.querySelector('#gf-hand .gf-card');
+  const seg = document.querySelector('.gf-size .sizeseg');
+  const lum = s => { const [r, g, b] = s.match(/[\\d.]+/g).slice(0, 3).map(v => {
+      v = v / 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; });
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
+  // the background as drawn: see-through layers (the pressed button's tint) over what is under them
+  const bg = e => { const layers = [];
+    for (; e; e = e.parentElement) { const m = getComputedStyle(e).backgroundColor.match(/[\\d.]+/g);
+      const a = m.length > 3 ? +m[3] : 1; if (a > 0) layers.push([+m[0], +m[1], +m[2], a]);
+      if (a >= 1) break; }
+    let c = [255, 255, 255];
+    for (const [r, g, b, a] of layers.reverse())
+      c = [r * a + c[0] * (1 - a), g * a + c[1] * (1 - a), b * a + c[2] * (1 - a)];
+    return 'rgb(' + c.join(', ') + ')'; };
+  const ratio = e => { const a = lum(getComputedStyle(e).color), b = lum(bg(e));
+    return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05); };
+  const r = seg.getBoundingClientRect();
+  return {size: document.documentElement.getAttribute('data-card-size'),
+    card: c.getBoundingClientRect().width,
+    segInside: r.left >= -1 && r.right <= innerWidth + 1,
+    contrast: Math.min(...[...seg.querySelectorAll('button')].map(ratio))};
+}"""
+
+
+@pytest.mark.parametrize("width", [344, 390, 673, 1366])
+@pytest.mark.parametrize("scheme", ["light", "dark"])
+def test_goldfish_cards_follow_the_card_size(server: Server, width: int, scheme: str) -> None:
+    from playwright.sync_api import sync_playwright
+
+    from .test_text_zoom_browser import TEXT_200
+
+    _chromium()
+    sid = server.sign_in_and_link()
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, width, color_scheme=scheme)
+        page.goto(f"{server.base}/decks/42/goldfish", wait_until="networkidle")
+        seen = {"m": page.evaluate(SIZE_STATE)}
+        assert seen["m"]["size"] == "m", seen
+        for size in ("s", "l"):
+            with page.expect_response("**/api/v1/prefs") as saved:
+                page.locator(f".gf-size [data-card-size-set={size}]").click()
+            assert saved.value.ok
+            seen[size] = page.evaluate(SIZE_STATE)
+            assert seen[size]["size"] == size, seen
+            assert page.get_attribute(f".gf-size [data-card-size-set={size}]", "aria-pressed") == "true"
+        assert seen["s"]["card"] < seen["m"]["card"] < seen["l"]["card"], seen
+        assert server.db.get_pref("user-1", "card.size") == "l"
+        # the account keeps it: the next visit draws the cards large
+        page.reload(wait_until="networkidle")
+        assert page.evaluate(SIZE_STATE)["size"] == "l"
+        for zoom in (None, TEXT_200):
+            if zoom:
+                page.evaluate(zoom)
+            for size in ("s", "m", "l"):
+                page.locator(f".gf-size [data-card-size-set={size}]").click()
+                got = page.evaluate(SIZE_STATE)
+                assert got["segInside"] and got["contrast"] >= 4.5, (size, zoom is not None, got)
+                assert _overflow(page) == 0, (size, zoom is not None)
+            _contrast_ok(page)
+        _shot(page, f"goldfish-size-{width}-{scheme}")
+        browser.close()
+    assert errors == []

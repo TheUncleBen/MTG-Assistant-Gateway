@@ -514,9 +514,7 @@ def test_reports_page_fits_and_reads(server: Server, width: int, scheme: str) ->
         assert "Playing: 3 of 10 games" in text
         assert "Waiting: number 1 in line" in text
         # review r1 fix 2 and r3 item 3: at 200% text the deck filter still fits, inside the window
-        # and its panel, at every width. The whole page is measured too except from 600 to 768px,
-        # where the site's own top bar (theme.py's nav.site, Track B's) runs past the window at
-        # 200% text; that is with its owner.
+        # and its panel, at every width, and the whole page fits the window too.
         from .test_overflow_sweep_browser import MEASURE
         from .test_text_zoom_browser import ROOT_200, TEXT_200
 
@@ -535,9 +533,8 @@ def test_reports_page_fits_and_reads(server: Server, width: int, scheme: str) ->
                 }"""
             )
             assert fit == [], (zoom[:40], fit)
-            if not 600 <= width <= 768:
-                found = page.evaluate(MEASURE)
-                assert found == [], (zoom[:40], found)
+            found = page.evaluate(MEASURE)
+            assert found == [], (zoom[:40], found)
             if shots:
                 page.screenshot(path=f"{shots}/reports-page-{width}-{scheme}-text200.png", full_page=True)
         page.select_option("#rp-deck", "43")
@@ -645,8 +642,7 @@ def test_compare_page_never_scrolls_sideways_at_200_percent_text(
     """Review r5 M2: the Compare page's two columns were at least 18rem wide, wider than a phone
     at 200% text (532 px of page at 390 px). At 100% and 200% text (root size and text-only), on
     a phone, a Fold folded and open, and a desktop, in light and dark, nothing is outside the
-    window and the page does not scroll sideways (the whole page except from 600 to 768px, where
-    the site's own top bar, Track B's, runs past the window at 200% text on this branch)."""
+    window and the page does not scroll sideways."""
     from playwright.sync_api import sync_playwright
 
     from .test_text_zoom_browser import ROOT_200, TEXT_200
@@ -678,6 +674,5 @@ def test_compare_page_never_scrolls_sideways_at_200_percent_text(
             label = "none" if zoom == "none" else ("root" if zoom == ROOT_200 else "text")
             _shot(page, f"compare-{width}-{scheme}-{label}")
             assert not state["out"], (label, state)
-            if zoom == "none" or not 600 <= width <= 768:
-                assert state["sw"] <= state["vw"], (label, state)
+            assert state["sw"] <= state["vw"], (label, state)
         browser.close()

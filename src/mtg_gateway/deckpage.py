@@ -1800,6 +1800,8 @@ def goldfish_page_html(deck: Deck, *, guide_hidden: bool = False) -> str:
         f"<button type='button' class='gf-guide-show' data-guide='show'{'' if guide_hidden else ' hidden'}>"
         f"{icon('guide')} {esc(GOLDFISH_GUIDE_SHOW)}</button>"
         "</div>"
+        # the card size every page with card pictures follows (theme.card_size_control, prefs.js)
+        f"<div class='gf-size'>{card_size_control()}</div>"
         "<p class='sr-only' id='gf-live' aria-live='polite'></p>"
         "<noscript><p class='notice error'>The goldfish needs JavaScript.</p></noscript>"
         "</section>"
@@ -1821,6 +1823,9 @@ GOLDFISH_CSS = """
 .gf-hint{margin:0 0 .75rem;min-height:1.4em}
 .gf-controls{display:flex;flex-wrap:wrap;gap:.5rem}
 .gf-controls [hidden]{display:none}
+.gf-size{margin-top:.75rem}
+.gf-size .cardsize{display:flex;flex-wrap:wrap;align-items:center;gap:.25rem .5rem}
+.gf-size .cardsize .lbl{color:var(--text-muted)}
 .gf-zone{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-panel);
   padding:.75rem;margin:0 0 1rem;min-width:0}
 .gf-zone h2{font-size:1.1rem;margin:0 0 .5rem}
@@ -1834,6 +1839,8 @@ GOLDFISH_CSS = """
   min-height:0;padding:0;border:1px solid var(--card-border);border-radius:calc(var(--w)*.05);
   background:var(--surface-2);color:var(--text);overflow:hidden;display:block;cursor:pointer;
   transition:transform .15s}
+html[data-card-size=s] .gf-card{--w:clamp(52px,15vw,96px)}
+html[data-card-size=l] .gf-card{--w:clamp(88px,28vw,180px)}
 .gf-card img{width:100%;height:100%;object-fit:cover;display:block}
 .gf-card .ph{display:flex;flex-direction:column;justify-content:space-between;height:100%;padding:.35rem;
   font-size:.78rem;text-align:left;line-height:1.2}

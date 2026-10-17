@@ -1334,6 +1334,7 @@ TAB_LINKS = [
 MORE_LINKS = [
     ("/proposals", "Proposals", "proposals"),
     ("/history", "History", "history"),
+    ("/reports", "Reports", "report"),
     ("/watchlist", "Watchlist", "stats"),
     ("/guide", "Guide", "guide"),
     ("/account", "Account", "account"),
