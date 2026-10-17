@@ -1,7 +1,7 @@
-"""Schema 14 (0.7.30, Q128, Q136 and card Q138): the simulator's card models, one per card for the
-whole gateway. The member who added a model and an admin may remove it, the admin list shows
-who added each, and a member's models go with their data. The cap per member and who may replace
-a model are Track C's caller's to enforce."""
+"""Schema 14 (0.7.30, Q128, Q136, cards Q138, Q139 and Q140): the simulator's card models. Each
+member keeps their own (Q140 item 1), with the simulator version each was checked with (Q139 item
+5). The member and an admin may remove one, the admin list shows who added each, a member's models
+go with their data, and the cap per member is checked in the write's own transaction."""
 
 from __future__ import annotations
 
@@ -36,43 +36,50 @@ def test_a_schema_13_database_gets_the_table_and_keeps_its_rows(
             "card_key",
             "name",
             "model_json",
+            "sim_version",
             "oracle_hash",
             "added_by",
             "added_at",
             "updated_at",
         ]
+        # one model per card per member
+        pk = sorted((r[5], r[1]) for r in new._conn.execute("PRAGMA table_info(card_models)") if r[5])
+        assert pk == [(1, "card_key"), (2, "added_by")]
         indexes = {r[0] for r in new._conn.execute("SELECT name FROM sqlite_master WHERE type = 'index'")}
         assert "idx_card_models_added_by" in indexes
     finally:
         new.close()
 
 
-def test_one_model_per_card_and_the_newest_wins(tmp_path: Path) -> None:
+def test_each_member_keeps_their_own_model_of_a_card(tmp_path: Path) -> None:
+    """Card Q140 item 1: one member's model never replaces or changes another's."""
     db = Database(tmp_path / "g.sqlite")
     try:
-        assert db.put_card_model("sol ring", "Sol Ring", MODEL, "u1", 100, oracle_hash="h1") is True
-        # the same member again: kept, and it already counted toward them
-        assert db.put_card_model("sol ring", "Sol Ring", MODEL.replace("1", "2"), "u1", 150) is False
-        assert db.count_card_models("u1") == 1
-        # another member can't replace it; an admin's save does, and it now counts toward them
-        with pytest.raises(CardModelRefused) as refused:
-            db.put_card_model("sol ring", "Sol Ring", MODEL, "u2", 180)
-        assert refused.value.why == "another_member"
         assert (
-            db.put_card_model("sol ring", "Sol Ring", MODEL, "u2", 200, oracle_hash="h2", admin=True) is True
+            db.put_card_model("sol ring", "Sol Ring", MODEL, "u1", 100, sim_version="1.0", oracle_hash="h1")
+            is True
         )
-        assert (db.count_card_models("u1"), db.count_card_models("u2")) == (0, 1)
-        (row,) = db.get_card_models(["sol ring", "no such card"])
-        assert row == {
+        # the same member again: their model is replaced, and it already counted toward them
+        two = MODEL.replace("1", "2")
+        assert db.put_card_model("sol ring", "Sol Ring", two, "u1", 150, sim_version="1.1") is False
+        # another member saves their own model of the same card
+        assert db.put_card_model("sol ring", "Sol Ring", MODEL, "u2", 200, sim_version="1.0") is True
+        assert (db.count_card_models("u1"), db.count_card_models("u2")) == (1, 1)
+        (mine,) = db.get_card_models(["sol ring", "no such card"], "u1")
+        assert mine == {
             "card_key": "sol ring",
             "name": "Sol Ring",
-            "model_json": MODEL,
-            "oracle_hash": "h2",
-            "added_by": "u2",
-            "added_at": 100,  # from the first model
-            "updated_at": 200,
+            "model_json": two,
+            "sim_version": "1.1",
+            "oracle_hash": None,  # a save without it clears it
+            "added_by": "u1",
+            "added_at": 100,  # from their first model
+            "updated_at": 150,
         }
-        assert db.get_card_models([]) == []
+        (theirs,) = db.get_card_models(["sol ring"], "u2")
+        assert theirs["model_json"] == MODEL and theirs["added_by"] == "u2"
+        assert db.get_card_models(["sol ring"], "u3") == []
+        assert db.get_card_models([], "u1") == []
     finally:
         db.close()
 
@@ -83,7 +90,7 @@ def test_many_keys_are_read_in_slices(tmp_path: Path) -> None:
         keys = [f"card {i}" for i in range(db_module._CARD_MODEL_BATCH * 2 + 7)]
         for i, key in enumerate(keys):
             db.put_card_model(key, key.title(), MODEL, "u1", i)
-        got = db.get_card_models([*keys, keys[0]])  # a repeated key is read once
+        got = db.get_card_models([*keys, keys[0]], "u1")  # a repeated key is read once
         assert sorted(r["card_key"] for r in got) == sorted(keys)
         assert db.count_card_models("u1") == len(keys)
     finally:
@@ -105,19 +112,21 @@ def test_a_model_over_the_size_limit_or_without_a_key_is_refused(tmp_path: Path)
                 "VALUES ('x', 'X', ?, 'u1', 1, 1)",
                 (big,),
             )
-        assert db.get_card_models(["sol ring", "x"]) == []
+        assert db.get_card_models(["sol ring", "x"], "u1") == []
     finally:
         db.close()
 
 
-def test_delete_takes_only_the_members_own_model_for_now(tmp_path: Path) -> None:
+def test_a_member_deletes_only_their_own_model(tmp_path: Path) -> None:
     db = Database(tmp_path / "g.sqlite")
     try:
         db.put_card_model("sol ring", "Sol Ring", MODEL, "u1", 1)
-        assert db.delete_card_model("sol ring", "u2") is False
+        db.put_card_model("sol ring", "Sol Ring", MODEL, "u2", 1)
+        assert db.delete_card_model("sol ring", "u3") is False
         assert db.delete_card_model("sol ring", "u1") is True
         assert db.delete_card_model("sol ring", "u1") is False
-        assert db.get_card_models(["sol ring"]) == []
+        assert db.get_card_models(["sol ring"], "u1") == []
+        assert len(db.get_card_models(["sol ring"], "u2")) == 1
     finally:
         db.close()
 
@@ -127,9 +136,11 @@ def test_an_admin_removes_any_members_model_and_it_is_audited(tmp_path: Path) ->
     db = Database(tmp_path / "g.sqlite")
     try:
         db.put_card_model("sol ring", "Sol Ring", MODEL, "u1", 1)
-        assert db.admin_delete_card_model("sol ring", by="admin-1") is True
-        assert db.admin_delete_card_model("sol ring", by="admin-1") is False
-        assert db.get_card_models(["sol ring"]) == [] and db.count_card_models("u1") == 0
+        db.put_card_model("sol ring", "Sol Ring", MODEL, "u2", 1)
+        assert db.admin_delete_card_model("sol ring", "u1", by="admin-1") is True
+        assert db.admin_delete_card_model("sol ring", "u1", by="admin-1") is False
+        assert db.get_card_models(["sol ring"], "u1") == [] and db.count_card_models("u1") == 0
+        assert db.count_card_models("u2") == 1  # only the one model named
         (row,) = [e for e in db.audit_recent(5, sub="admin-1") if e["event"] == "card_model_removed"]
         assert row["detail"] == {"card": "Sol Ring", "card_key": "sol ring", "added_by": "u1"}
     finally:
@@ -179,33 +190,32 @@ def test_the_cap_counts_only_a_save_that_newly_counts(tmp_path: Path) -> None:
         db.close()
 
 
-def test_two_members_saving_the_same_new_card_at_once_keep_one(tmp_path: Path) -> None:
-    """Track C review r1 item 18: the check and the write are one transaction, so of two saves of
-    the same new card at the same moment one keeps it and the other is refused (before, both could
-    pass a separate check and the second overwrote the first)."""
+def test_two_saves_at_once_never_pass_the_cap_together(tmp_path: Path) -> None:
+    """Track C review r1 item 18: the cap check and the write are one transaction, so of two new
+    cards a member saves at the same moment with one place left, one is kept and the other is
+    refused (before, both could pass a separate count and the member went over the cap)."""
     import threading
 
     db = Database(tmp_path / "g.sqlite")
     try:
         for round_ in range(20):
-            key = f"card {round_}"
+            sub = f"u{round_}"
             start = threading.Barrier(2)
             got: dict[str, object] = {}
 
-            def save(sub: str, key: str = key, start: threading.Barrier = start, got: dict = got) -> None:
+            def save(key: str, sub: str = sub, start: threading.Barrier = start, got: dict = got) -> None:
                 start.wait()
                 try:
-                    got[sub] = db.put_card_model(key, key.title(), MODEL, sub, 1)
+                    got[key] = db.put_card_model(key, key.title(), MODEL, sub, 1, most=1)
                 except CardModelRefused as exc:
-                    got[sub] = exc.why
+                    got[key] = exc.why
 
-            threads = [threading.Thread(target=save, args=(sub,)) for sub in ("u1", "u2")]
+            threads = [threading.Thread(target=save, args=(key,)) for key in ("opt", "ponder")]
             for t in threads:
                 t.start()
             for t in threads:
                 t.join()
-            assert sorted(map(str, got.values())) == ["True", "another_member"], got
-            (row,) = db.get_card_models([key])
-            assert got[row["added_by"]] is True
+            assert sorted(map(str, got.values())) == ["True", "most"], got
+            assert db.count_card_models(sub) == 1
     finally:
         db.close()

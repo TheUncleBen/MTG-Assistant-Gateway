@@ -81,7 +81,7 @@ TEXT: dict[str, tuple[str, str]] = {
         "Backup copies kept per deck",
         "Older copies are deleted from the backup folder on Archidekt, one at a time, once that deck gets "
         "its next new backup copy. A copy the member changed or moved, or one the gateway couldn't "
-        "delete, is kept.",
+        "delete, is kept. Copies made before 0.7.29 are never deleted and don't count toward this number.",
     ),
     "archidekt_backup_box_default": (
         "Backup box ticked by default",
@@ -179,7 +179,7 @@ CONFIRM: dict[str, tuple[str, str]] = {
         "lower",
         "I understand that each deck's copies past the new number are deleted from the backup folder on "
         "Archidekt, one at a time, once that deck gets its next new backup copy. Copies a member changed "
-        "or moved are kept.",
+        "or moved are kept. Copies made before 0.7.29 are never deleted and don't count toward the number.",
     ),
     "snapshots_per_deck": (
         "lower",
@@ -204,6 +204,17 @@ SETTINGS_CSS = """
   border-radius:999px;color:var(--text);text-decoration:none;background:var(--surface);font-size:.95rem}
 .set-nav a:hover{background:var(--surface-2)}
 .set-nav a:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+.set-stack{margin:.75rem 0 0;padding:.75rem 1rem;border:1px solid var(--border);
+  border-radius:var(--radius-lg);background:var(--surface)}
+.set-stack p{margin:0}
+.set-stack-list{display:flex;flex-wrap:wrap;gap:.4rem;list-style:none;margin:.6rem 0 0;padding:0}
+.set-stack-list a{display:inline-flex;align-items:center;min-height:var(--ctl);padding:0 .7rem;
+  border:1px solid var(--border);border-radius:var(--radius-lg);color:var(--text);text-decoration:none;
+  background:var(--surface-2);max-width:100%}
+.set-stack-list a:hover{border-color:var(--text)}
+.set-stack-list a:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+.set-stack-list code{overflow-wrap:break-word;min-width:0;background:none;padding:0}
+@media (pointer:coarse){ .set-stack-list a{min-height:44px} }
 .set-group{scroll-margin-top:4.5rem}
 .set-group h2{margin:0 0 .25rem;font-size:1.2rem}
 .set-group > .intro,.set-group details > .intro{margin:0 0 .75rem}
@@ -418,6 +429,7 @@ def settings_body(
     parts = [
         "<p class='muted'>Settings for the whole gateway. A setting your stack sets is shown greyed out "
         "with its value, and can only be changed in the stack.</p>",
+        _stack_summary(live),
         notice,
         f"<nav class='set-nav' aria-label='Setting groups'>{nav}</nav>",
     ]
@@ -449,6 +461,27 @@ def settings_body(
             f"{inner}</section>"
         )
     return "".join(parts)
+
+
+def _stack_summary(live: LiveSettings) -> str:
+    """Card Q139 item 3: one line at the top naming every setting the stack sets, by variable,
+    each a link to its row (a folded group opens), so the operator can see which lines to remove
+    from the stack to manage those settings here. Nothing when the stack sets none."""
+    locked = [spec for spec in MANAGED_SETTINGS.values() if live.locked(spec.key)]
+    if not locked:
+        return ""
+    links = "".join(
+        f"<li><a href='{f'?open={spec.group}' if spec.group in FOLDED else ''}#s-row-{spec.key}'>"
+        f"<code>{html.escape(spec.env).replace('_', '_<wbr>')}</code></a></li>"
+        for spec in locked
+    )
+    n = len(locked)
+    return (
+        "<div class='set-stack' role='note'>"
+        f"<p>Your stack sets {n} of these settings, so {'it' if n == 1 else 'they'} can only be changed "
+        "there. To manage one on this page instead, remove its variable from your stack, then redeploy."
+        f"</p><ul class='set-stack-list' aria-label='Settings your stack sets'>{links}</ul></div>"
+    )
 
 
 def chatgpt_name_warning(live: LiveSettings) -> str:

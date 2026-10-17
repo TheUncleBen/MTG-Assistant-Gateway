@@ -284,8 +284,8 @@ def add_admin_routes(server: MCPServer, state: AppState) -> None:
                 sid=sid,
                 sid_sub=admin_sub,
             )
-        key = str(data.get("card_key") or "")
-        removed = bool(key) and state.db.admin_delete_card_model(key, by=admin_sub)
+        key, owner = str(data.get("card_key") or ""), str(data.get("added_by") or "")
+        removed = bool(key and owner) and state.db.admin_delete_card_model(key, owner, by=admin_sub)
         back = f"&page={quote(str(data.get('page') or '1'), safe='')}"
         return RedirectResponse(
             f"/admin/models?{'ok=model_removed' if removed else 'err=model_gone'}{back}", status_code=303
@@ -344,6 +344,8 @@ def add_admin_routes(server: MCPServer, state: AppState) -> None:
         sub, sid = who
         q = request.query_params
         notice, focus = "", None
+        if q.get("open") in settings_page.FOLDED:  # a link to a setting in a folded group
+            focus = q.get("open")
         group = q.get("saved")
         if group in {g for g, _t, _i in settings_page.GROUPS}:
             focus = group
@@ -881,7 +883,8 @@ def _models_body(state: Any, csrf: str | None, page_no: int) -> str:
     total = state.db.count_all_card_models()
     intro = (
         "<p class='muted small'>The card models the simulator keeps, most recently changed first. "
-        "Each model is used for every member. Only admins see who added it.</p>"
+        "Each member keeps their own models, and a model is used only in that member's "
+        "simulations. Only admins see who added it.</p>"
     )
     if not total:
         return f"<div class='card'>{intro}<p>No card models are kept yet.</p></div>"
@@ -902,9 +905,10 @@ def _models_body(state: Any, csrf: str | None, page_no: int) -> str:
             + "</span></div>"
             f"<form method='post' action='/admin/models'>{csrf_in}"
             f"<input type='hidden' name='card_key' value='{html.escape(str(r['card_key']))}'>"
+            f"<input type='hidden' name='added_by' value='{html.escape(adder)}'>"
             f"<input type='hidden' name='page' value='{page_no}'>"
-            f"<button class='danger' aria-label='Remove the model of {html.escape(str(r['name']))}'>Remove"
-            "</button></form></li>"
+            f"<button class='danger' aria-label='Remove the model of {html.escape(str(r['name']))} "
+            f"added by {people[adder]}'>Remove</button></form></li>"
         )
     pager = ""
     if pages > 1:

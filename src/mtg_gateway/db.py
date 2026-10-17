@@ -190,8 +190,8 @@ _CARD_MODEL_BATCH = 500
 
 
 class CardModelRefused(Exception):
-    """put_card_model wrote nothing: ``why`` is "another_member" (the card's model is another
-    member's and the save isn't an admin's) or "most" (the member already keeps ``most``)."""
+    """put_card_model wrote nothing: ``why`` is "most" (the save would add a model and the member
+    already keeps ``most``)."""
 
     def __init__(self, why: str) -> None:
         super().__init__(why)
@@ -639,22 +639,29 @@ def _step_13(conn: sqlite3.Connection) -> None:
 
 def _step_14(conn: sqlite3.Connection) -> None:
     """0.7.30, the one small upgrade the simulator needs (Q128, Q136): ``card_models``, the models
-    members taught the simulator for cards it plays without their effect. One model per card for
-    the whole gateway, keyed by the card's front face, casefolded.
+    members taught the simulator for cards it plays without their effect. Each member keeps their
+    own (card Q140 item 1): one model per card per member, keyed by the card's front face,
+    casefolded, and the member, and used only in that member's simulations.
 
-    ``added_by`` is the member whose model is kept now (never shown to other members). It has no
-    foreign key on purpose: whether a deleted member's models go with them is still Ben's to decide
-    (TODO, Track C's card), and a cascade here would decide it in the schema.
+    ``sim_version`` is the simulator version the model was checked with (Q136 item 3, card Q139
+    item 5), so models checked with an older simulator can be found when it changes; ``oracle_hash``
+    is a spare column for a fingerprint of the card's rules text (Q139 item 5).
+
+    ``added_by`` is the member who keeps the model (never shown to other members). It has no
+    foreign key, like every member table but the proposals: a member's models go with their data
+    through MEMBER_TABLES (card Q138 item 5).
     """
     conn.execute(
         """CREATE TABLE IF NOT EXISTS card_models (
-            card_key TEXT PRIMARY KEY,
+            card_key TEXT NOT NULL,
             name TEXT NOT NULL,
             model_json TEXT NOT NULL CHECK (length(CAST(model_json AS BLOB)) <= 4096),
+            sim_version TEXT,
             oracle_hash TEXT,
             added_by TEXT NOT NULL,
             added_at INTEGER NOT NULL,
-            updated_at INTEGER NOT NULL
+            updated_at INTEGER NOT NULL,
+            PRIMARY KEY (card_key, added_by)
         )"""
     )
     conn.execute("CREATE INDEX IF NOT EXISTS idx_card_models_added_by ON card_models(added_by)")
@@ -1347,8 +1354,10 @@ class Database:
         running proposal (a restore) still points at; delete the rest. Also kept (QUESTIONS-2 B13):
         the snapshot each recorded Archidekt backup copy was made with, and any snapshot with a
         queued backup delete, so the gateway never loses its record of a copy it may delete (card
-        Q135 item 9, Ben's "Approve all" 10-16). A copy the member changed on Archidekt is kept
-        and no longer counted (B11), so its snapshot is not held past the newest ``keep``."""
+        Q135 item 9, Ben's "Approve all" 10-16). Only a copy the gateway may still delete holds
+        one (card Q139 item 4): a copy the member changed on Archidekt is kept and no longer
+        counted (B11), and a copy made before 0.7.29 has no record and is never deleted (card Q140
+        item 4), so neither holds its snapshot past the newest ``keep``."""
         return c.execute(
             """DELETE FROM snapshots WHERE id IN (
                    SELECT id FROM (
@@ -1365,8 +1374,8 @@ class Database:
                                      AND s2.backup_deck_id = s.backup_deck_id
                                    ORDER BY s2.taken_at, s2.rowid LIMIT 1)
                            FROM snapshots s WHERE s.backup_deck_id IS NOT NULL
-                             AND NOT EXISTS (SELECT 1 FROM job_runs j WHERE j.name = ? || s.backup_deck_id
-                                             AND json_extract(j.detail_json, '$.kept') = 1))""",
+                             AND EXISTS (SELECT 1 FROM job_runs j WHERE j.name = ? || s.backup_deck_id
+                                         AND coalesce(json_extract(j.detail_json, '$.kept'), 0) != 1))""",
             (keep, BACKUP_MADE_JOB),
         ).rowcount
 
@@ -2496,7 +2505,7 @@ class Database:
         """Record the backup copy on the snapshot. ``made``: a copy just made, whose record of how
         it was made (record_backup_made) is written in the same transaction, so no restart or crash
         leaves a snapshot naming a copy made by this version without its exact record (which would
-        put it under the rule for copies made before 0.7.29)."""
+        make it look like a copy made before 0.7.29, which is never deleted)."""
         with self.tx() as c:
             c.execute(
                 "UPDATE snapshots SET backup_deck_id = ?, backup_url = ? WHERE id = ?",
@@ -2904,26 +2913,26 @@ class Database:
             return c.execute("DELETE FROM account_prefs WHERE sub = ? AND name = ?", (sub, name)).rowcount > 0
 
     # -- simulator card models (schema 14, Track C) --------------------------------------------
-    # Decided (Q136 item 2, card Q138 items 2-5): the member who added a model and an admin may
-    # remove it (delete_card_model, admin_delete_card_model; the admin list is list_card_models);
-    # a member's models go with their data (MEMBER_TABLES). put_card_model enforces "only the adder
-    # or an admin replaces a model" and, when given ``most``, the cap of 200 per member, in the same
-    # transaction as its write, so two saves at once can't both pass the check (Track C review r1
-    # item 18). Still on card Q139 item 5: the "simulator version" column Q136 item 3 approved
-    # (built as oracle_hash).
+    # Decided: each member keeps their own models (card Q140 item 1); the member and an admin may
+    # remove one (delete_card_model, admin_delete_card_model; the admin list is list_card_models);
+    # a member's models go with their data (MEMBER_TABLES, card Q138 item 5). put_card_model
+    # enforces, when given ``most``, the cap of 200 per member in the same transaction as its write,
+    # so two saves at once can't both pass the check (Track C review r1 item 18). Each model records
+    # the simulator version it was checked with (``sim_version``, Q136 item 3, card Q139 item 5);
+    # ``oracle_hash`` is kept as a spare column.
 
-    def get_card_models(self, keys: list[str]) -> list[dict[str, Any]]:
-        """The models kept for these card keys (front face, casefolded), in no particular order;
-        a key with no model is simply absent."""
+    def get_card_models(self, keys: list[str], sub: str) -> list[dict[str, Any]]:
+        """``sub``'s models for these card keys (front face, casefolded), in no particular order;
+        a key they keep no model for is simply absent."""
         wanted = list(dict.fromkeys(str(k) for k in keys if k))
         out: list[dict[str, Any]] = []
         for i in range(0, len(wanted), _CARD_MODEL_BATCH):
             part = wanted[i : i + _CARD_MODEL_BATCH]
             with self._lock:
                 rows = self._conn.execute(
-                    "SELECT card_key, name, model_json, oracle_hash, added_by, added_at, updated_at "
-                    f"FROM card_models WHERE card_key IN ({_marks(part)})",
-                    part,
+                    "SELECT card_key, name, model_json, sim_version, oracle_hash, added_by, added_at, "
+                    f"updated_at FROM card_models WHERE added_by = ? AND card_key IN ({_marks(part)})",
+                    [sub, *part],
                 ).fetchall()
             out += [dict(r) for r in rows]
         return out
@@ -2936,48 +2945,48 @@ class Database:
         sub: str,
         now: int,
         *,
+        sim_version: str | None = None,
         oracle_hash: str | None = None,
-        admin: bool = False,
         most: int | None = None,
     ) -> bool:
-        """Keep ``model_json`` as the card's one model, made by ``sub``. ``added_at`` stays that of
-        the card's first model. True when the model now counts toward ``sub`` and didn't before: a
-        new card, or a card another member's model was kept for (an admin's save).
+        """Keep ``model_json`` as ``sub``'s model of the card, replacing theirs if they keep one;
+        other members' models of the card are never touched. ``added_at`` stays that of their first
+        model of the card. True when a model was added (it now counts toward ``sub``), False when
+        theirs was replaced. ``sim_version`` (the simulator version the model was checked with) and
+        ``oracle_hash`` are written as given, so a save without them clears them.
 
-        Only the member who added the card's model replaces it, or an admin (``admin``); with
-        ``most``, a save that would newly count toward ``sub`` is refused once they keep that many.
-        Both are checked in the write's own transaction, so two saves at once can't both pass.
-        Raises CardModelRefused when nothing is written, and ValueError for an empty key or a model
-        over MAX_CARD_MODEL_BYTES."""
+        With ``most``, a save that would add a model is refused once ``sub`` keeps that many,
+        checked in the write's own transaction, so two saves at once can't both pass. Raises
+        CardModelRefused when nothing is written, and ValueError for an empty key or member, or a
+        model over MAX_CARD_MODEL_BYTES."""
         if not card_key or not sub:
             raise ValueError("a card model needs a card key and a member")
         if len(model_json.encode("utf-8")) > MAX_CARD_MODEL_BYTES:
             raise ValueError(f"a card model is at most {MAX_CARD_MODEL_BYTES} bytes")
         with self.tx() as c:
-            row = c.execute("SELECT added_by FROM card_models WHERE card_key = ?", (card_key,)).fetchone()
-            if row is not None and str(row["added_by"]) != sub and not admin:
-                raise CardModelRefused("another_member")
-            if most is not None and (row is None or str(row["added_by"]) != sub):
+            row = c.execute(
+                "SELECT 1 FROM card_models WHERE card_key = ? AND added_by = ?", (card_key, sub)
+            ).fetchone()
+            if row is None and most is not None:
                 (have,) = c.execute("SELECT COUNT(*) FROM card_models WHERE added_by = ?", (sub,)).fetchone()
                 if have >= most:
                     raise CardModelRefused("most")
             if row is None:
                 c.execute(
-                    "INSERT INTO card_models (card_key, name, model_json, oracle_hash, added_by, added_at, "
-                    "updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    (card_key, name, model_json, oracle_hash, sub, int(now), int(now)),
+                    "INSERT INTO card_models (card_key, name, model_json, sim_version, oracle_hash, "
+                    "added_by, added_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (card_key, name, model_json, sim_version, oracle_hash, sub, int(now), int(now)),
                 )
                 return True
             c.execute(
-                "UPDATE card_models SET name = ?, model_json = ?, oracle_hash = ?, added_by = ?, "
-                "updated_at = ? WHERE card_key = ?",
-                (name, model_json, oracle_hash, sub, int(now), card_key),
+                "UPDATE card_models SET name = ?, model_json = ?, sim_version = ?, oracle_hash = ?, "
+                "updated_at = ? WHERE card_key = ? AND added_by = ?",
+                (name, model_json, sim_version, oracle_hash, int(now), card_key, sub),
             )
-            return str(row["added_by"]) != sub
+            return False
 
     def delete_card_model(self, card_key: str, sub: str) -> bool:
-        """Delete the card's model when ``sub``'s is the one kept (Q136 item 2: the member who
-        added it). True when a model was deleted."""
+        """Delete ``sub``'s model of the card. True when a model was deleted."""
         with self.tx() as c:
             return (
                 c.execute(
@@ -2986,16 +2995,18 @@ class Database:
                 > 0
             )
 
-    def admin_delete_card_model(self, card_key: str, *, by: str) -> bool:
-        """An admin removes any member's model (Q136 item 2). Audited as ``card_model_removed``
-        under the admin, with the card and whose model it was. True when a model was deleted."""
+    def admin_delete_card_model(self, card_key: str, added_by: str, *, by: str) -> bool:
+        """An admin removes any member's model (Q136 item 2): ``added_by``'s model of the card.
+        Audited as ``card_model_removed`` under the admin, with the card and whose model it was.
+        True when a model was deleted."""
         with self.tx() as c:
             row = c.execute(
-                "SELECT name, added_by FROM card_models WHERE card_key = ?", (card_key,)
+                "SELECT name, added_by FROM card_models WHERE card_key = ? AND added_by = ?",
+                (card_key, added_by),
             ).fetchone()
             if row is None:
                 return False
-            c.execute("DELETE FROM card_models WHERE card_key = ?", (card_key,))
+            c.execute("DELETE FROM card_models WHERE card_key = ? AND added_by = ?", (card_key, added_by))
         self.audit(
             "card_model_removed",
             sub=by,
@@ -3011,7 +3022,7 @@ class Database:
             rows = self._conn.execute(
                 "SELECT card_key, name, added_by, added_at, updated_at, "
                 "length(CAST(model_json AS BLOB)) AS size FROM card_models "
-                "ORDER BY updated_at DESC, card_key LIMIT ? OFFSET ?",
+                "ORDER BY updated_at DESC, card_key, added_by LIMIT ? OFFSET ?",
                 (max(0, int(limit)), max(0, int(offset))),
             ).fetchall()
         return [dict(r) for r in rows]

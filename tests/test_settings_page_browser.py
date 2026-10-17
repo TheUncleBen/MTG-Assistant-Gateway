@@ -10,6 +10,8 @@ from pathlib import Path
 
 import pytest
 
+from mtg_gateway.config import MANAGED_SETTINGS
+
 from .test_card_search_filters_browser import CONTRAST
 from .test_cardsearch_browser import SIZES, _chromium, _page
 from .test_overflow_sweep_browser import MEASURE
@@ -22,14 +24,14 @@ SHOTS = os.environ.get("MTG_SETTINGS_SHOTS")
 TEXT = (
     ".set-group h2, .set-group summary, .set-label, .set-help, .set-src, .set-err, .range, .unit, "
     ".set-seg label, .set-choices label, .set-confirm, .set-nav a, .set-save button, .reset, .notice, "
-    ".notice li, .set-warn, code"
+    ".notice li, .set-warn, .set-stack p, .set-stack-list a, code"
 )
 
 # Every visible control at least as tall as the site's standard control (--ctl, 39 px).
 TAPS = """
 () => [...document.querySelectorAll(
     '.set-group:not(#g-scan) input[type=number], .set-group:not(#g-scan) .msel-btn,'
-    + ' .set-seg label, .set-choices label, .set-save button, .set-nav a, .reset')]
+    + ' .set-seg label, .set-choices label, .set-save button, .set-nav a, .set-stack-list a, .reset')]
   .filter(e => e.getBoundingClientRect().width)
   .filter(e => e.getBoundingClientRect().height < 38.5)
   .map(e => (e.id || e.textContent.trim()).slice(0, 30) + ' ' + Math.round(e.getBoundingClientRect().height))
@@ -304,6 +306,21 @@ def test_a_setting_the_stack_sets_shows_greyed_out_and_cannot_be_changed(
         assert rows["server_name"]["shown"] == ["Our Table"]
         assert "WARNING" in rows["log_level"]["shown"]
         assert rows["deck_sync_minutes"]["shown"] == ["60"]
+        # card Q139 item 3: the line at the top names every one, in the page's order, each a link
+        summary = page.locator(".set-stack")
+        assert summary.locator("p").inner_text().startswith("Your stack sets 6 of these settings, so they")
+        links = summary.locator("a")
+        names = links.all_inner_texts()
+        order = [k for k in MANAGED_SETTINGS if k in LOCKED]
+        assert names == [MANAGED_SETTINGS[k].env for k in order]
+        assert summary.evaluate("e => e.getBoundingClientRect().top") < page.locator(".set-nav").evaluate(
+            "e => e.getBoundingClientRect().top"
+        )
+        links.last.click()
+        page.wait_for_function(f"() => location.hash === '#s-row-{order[-1]}'")
+        row_top = page.locator(f"#s-row-{order[-1]}").evaluate("e => e.getBoundingClientRect().top")
+        assert 0 <= row_top < page.viewport_size["height"]
+        page.evaluate("scrollTo(0, 0)")
         # the keyboard never lands on a locked control
         landed = set()
         for _ in range(150):
@@ -324,7 +341,7 @@ def test_a_setting_the_stack_sets_shows_greyed_out_and_cannot_be_changed(
 
 # Where a locked row's variable name breaks onto a new line: each break must follow an underscore.
 MIDWORD_BREAKS = """
-() => [...document.querySelectorAll('.set-lock code')].flatMap(c => {
+() => [...document.querySelectorAll('.set-lock code, .set-stack code')].flatMap(c => {
   const text = c.textContent, out = [];
   const walker = document.createTreeWalker(c, NodeFilter.SHOW_TEXT);
   const chars = [];

@@ -57,7 +57,6 @@ from .archidekt import (
     backup_writes,
     finish_modifier,
     front_face,
-    is_backup_name,
     jwt_exp,
     no_retry,
     parse_deck,
@@ -171,9 +170,6 @@ BACKUPS_REMEMBERED = 256  # backup copies made recently whose name and descripti
 # making another when the deck is unchanged since that copy, or the copy is under this many
 # seconds old (Ben's 15 minutes). Every edit still takes its own snapshot.
 BACKUP_SHARE_SECONDS = 15 * 60
-# A copy made before 0.7.29 has no stored record of how it was made (B12, card Q135 item 8): it
-# counts as unchanged when Archidekt's updatedAt is within this many seconds of its createdAt.
-BACKUP_LEGACY_SLACK = 120
 BROWSER_CLIENT = "__browser__"  # the same value as pages.BROWSER_CLIENT_ID
 # An administrator acting on a member's account from the admin pages (unlink): recorded in the
 # member's own activity log as done by an administrator, never as the member's browser.
@@ -3483,7 +3479,7 @@ class DeckService:
             user_id = str(link.get("archidekt_user_id") or "")
             if not user_id or not copy.owner_id or str(copy.owner_id) != user_id:
                 return self._give_up_backup_delete(job, attempts, "not_owner")
-            if not _backup_as_made(copy, job, snapshot_id=sid):
+            if not _backup_as_made(copy, job):
                 if trim:  # the member changed it: kept, and no longer counted (B11)
                     self.db.record_backup_made(
                         backup_id, {**(self.db.backup_made(backup_id) or {}), "kept": True}
@@ -3689,7 +3685,9 @@ class DeckService:
         Q13; B11): the newest are kept, the rest go through the later-delete queue, one a minute
         for everyone, with its checks (writes switch, owner, the copy as made). A copy the member
         changed on Archidekt is kept and not counted. Only copies the gateway recorded on its own
-        snapshots are ever considered. Returns the copies queued."""
+        snapshots, with its record of how it made them, are ever considered: a copy made before
+        0.7.29 has no such record and is left alone, not counted (card Q140 item 4). Returns the
+        copies queued."""
         keep = int(self.live.get("archidekt_backup_copies"))
         queued: list[str] = []
         counted = 0
@@ -3697,20 +3695,15 @@ class DeckService:
             (c, self.db.backup_made(str(c["backup_deck_id"])) or {})
             for c in self.db.deck_backup_copies(sub, deck_id)
         ]
-        # Card Q135 item 8: a copy is deleted only while it is in the backup folder. A copy made
-        # before 0.7.29 has no record of its folder, so it must be in the folder the newest
-        # recorded copy was made in (review round 1, finding 1); with none recorded it is kept.
-        folder = next((str(m["folder_id"]) for _c, m in copies if m.get("folder_id")), "")
         for c, made in copies:
             backup_id, sid = str(c["backup_deck_id"]), str(c["snapshot_id"] or "")
-            if made.get("kept"):
+            if not made or made.get("kept"):
                 continue
             counted += 1
             if counted <= keep or not backup_id.isdigit() or backup_id == str(deck_id) or not sid:
                 continue
             if self.db.backup_delete_queued(sid):
                 continue
-            expect = {**made, "trim": True} if made else {"trim": True, "legacy": True, "folder_id": folder}
             self.db.queue_backup_delete(
                 sid,
                 sub=sub,
@@ -3718,7 +3711,7 @@ class DeckService:
                 deck_id=str(deck_id),
                 proposal_id=None,
                 due=int(time.time()) + BACKUP_DELETE_MARGIN,
-                expect=expect,
+                expect={**made, "trim": True},
             )
             queued.append(backup_id)
         if queued:
@@ -3732,7 +3725,7 @@ class DeckService:
         counted = 0
         for c in self.db.deck_backup_copies(sub, deck_id):
             made = self.db.backup_made(str(c["backup_deck_id"])) or {}
-            if made.get("kept"):
+            if not made or made.get("kept"):
                 continue
             counted += 1
             if str(c["backup_deck_id"]) == str(backup_id):
@@ -5169,7 +5162,7 @@ def _content_key(deck: Deck) -> str:
     return hashlib.sha256(blob.encode()).hexdigest()
 
 
-def _backup_as_made(copy: Deck, job: dict[str, Any], *, snapshot_id: str = "") -> bool:
+def _backup_as_made(copy: Deck, job: dict[str, Any]) -> bool:
     """Whether a queued backup copy is still as the gateway made it (review D4): in the backup
     folder it was made in, with the name and description it was given, and with Archidekt's
     updatedAt no later than the copy's own createdAt plus the time the gateway's writes to it
@@ -5180,20 +5173,6 @@ def _backup_as_made(copy: Deck, job: dict[str, Any], *, snapshot_id: str = "") -
         return False
     updated = _iso_time(copy.updated_at)
     created = _iso_time(copy.created_at)
-    if expect.get("legacy"):
-        # A copy made before 0.7.29, with no stored record (card Q135 item 8): in the backup folder
-        # (the one _trim_backups found), a backup-style name, the description naming this
-        # snapshot, and updated within BACKUP_LEGACY_SLACK of created.
-        return (
-            bool(snapshot_id)
-            and bool(expect.get("folder_id"))
-            and str(copy.parent_folder) == str(expect.get("folder_id"))
-            and is_backup_name(copy.name or "")
-            and f"Gateway snapshot {snapshot_id}." in rich_text(copy.description)
-            and updated is not None
-            and created is not None
-            and updated <= created + BACKUP_LEGACY_SLACK
-        )
     within = expect.get("written_within")
     return (
         str(copy.parent_folder) == str(expect.get("folder_id"))

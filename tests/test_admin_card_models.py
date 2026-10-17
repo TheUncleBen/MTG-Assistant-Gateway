@@ -1,5 +1,6 @@
 """The admin list of the simulator's card models (card Q138 item 4): admins only, who added each
-model, and Remove for any model, with the form token and an audit entry."""
+model, and Remove for any model, with the form token and an audit entry. Each member keeps their
+own models (card Q140 item 1), so Remove names the card and the member."""
 
 from __future__ import annotations
 
@@ -31,14 +32,20 @@ async def test_admins_see_who_added_each_model_and_can_remove_any(gw: Harness) -
         assert "href='/admin/models'>Card models</a>" in r.text
         gw.db.put_card_model("sol ring", "Sol Ring", MODEL, "user-9", 100)
         gw.db.put_card_model("<b>x", "<b>Bad name", MODEL, "user-9", 200)
+        gw.db.put_card_model("sol ring", "Sol Ring", MODEL, "admin-1", 50)  # the admin's own
         r = await b.http.get("/admin/models", headers=NAVIGATE)
         text = html.unescape(r.text)
-        assert "2 card models kept." in text and "added by bram" in text
+        assert "3 card models kept." in text and "added by bram" in text
+        assert "Each member keeps their own models" in text
+        assert "aria-label='Remove the model of Sol Ring added by bram'" in text
         assert "<b>Bad name" not in r.text and "&lt;b&gt;Bad name" in r.text
         csrf = await b.csrf("/admin/models")
-        r = await b.http.post("/admin/models", data={"csrf": csrf, "card_key": "sol ring", "page": "1"})
+        one = {"csrf": csrf, "card_key": "sol ring", "added_by": "user-9"}
+        r = await b.http.post("/admin/models", data={**one, "page": "1"})
         assert r.status_code == 303 and r.headers["location"] == "/admin/models?ok=model_removed&page=1"
-        assert [m["card_key"] for m in gw.db.list_card_models()] == ["<b>x"]
+        # only bram's model of the card goes; the admin's own stays
+        left = [(m["card_key"], m["added_by"]) for m in gw.db.list_card_models()]
+        assert left == [("<b>x", "user-9"), ("sol ring", "admin-1")]
         audit = [a for a in gw.db.audit_recent(5, sub="admin-1") if a["event"] == "card_model_removed"]
         removed = {"card": "Sol Ring", "card_key": "sol ring", "added_by": "user-9"}
         assert audit and audit[0]["detail"] == removed
@@ -47,13 +54,13 @@ async def test_admins_see_who_added_each_model_and_can_remove_any(gw: Harness) -
             text = html.unescape((await b.http.get(path, headers=NAVIGATE)).text)
             assert "Sol Ring (added by bram)" in text and '"card_key"' not in text, path
         assert "Card model removed" in html.unescape((await b.http.get("/activity", headers=NAVIGATE)).text)
-        r = await b.http.post("/admin/models", data={"csrf": csrf, "card_key": "sol ring"})
+        r = await b.http.post("/admin/models", data=one)
         assert r.headers["location"].startswith("/admin/models?err=model_gone")
         shown = await b.http.get(r.headers["location"], headers=NAVIGATE)
         assert "That card model was already removed." in html.unescape(shown.text)
         # no form token: nothing removed
-        r = await b.http.post("/admin/models", data={"card_key": "<b>x"})
-        assert r.status_code == 403 and gw.db.count_all_card_models() == 1
+        r = await b.http.post("/admin/models", data={"card_key": "<b>x", "added_by": "user-9"})
+        assert r.status_code == 403 and gw.db.count_all_card_models() == 2
     finally:
         await b.aclose()
 
@@ -65,7 +72,7 @@ async def test_members_cannot_see_or_use_the_list(gw: Harness) -> None:
     await member.login("/account")
     try:
         assert (await member.http.get("/admin/models", headers=NAVIGATE)).status_code == 404
-        r = await member.http.post("/admin/models", data={"card_key": "opt"})
+        r = await member.http.post("/admin/models", data={"card_key": "opt", "added_by": "user-9"})
         assert r.status_code == 404 and gw.db.count_all_card_models() == 1
     finally:
         await member.aclose()
@@ -73,7 +80,7 @@ async def test_members_cannot_see_or_use_the_list(gw: Harness) -> None:
 
 async def test_the_log_line_survives_the_adders_account_being_deleted(gw: Harness) -> None:
     gw.db.put_card_model("opt", "Opt", MODEL, "user-9", 100)
-    assert gw.db.admin_delete_card_model("opt", by="admin-1")
+    assert gw.db.admin_delete_card_model("opt", "user-9", by="admin-1")
     gw.db.delete_member_data("user-9")
     b = await admin_browser(gw)
     try:
@@ -99,7 +106,7 @@ async def test_an_account_without_a_name_is_not_called_deleted(gw: Harness) -> N
     """PROOFREAD-W3 L4: "a deleted account" only when the account is gone."""
     gw.db.upsert_user("user-8", email=None, name=None, preferred_username=None, groups=[])
     gw.db.put_card_model("opt", "Opt", MODEL, "user-8", 100)
-    assert gw.db.admin_delete_card_model("opt", by="admin-1")
+    assert gw.db.admin_delete_card_model("opt", "user-8", by="admin-1")
     b = await admin_browser(gw)
     try:
         text = html.unescape((await b.http.get("/admin/activity", headers=NAVIGATE)).text)
