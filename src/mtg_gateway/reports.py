@@ -459,6 +459,28 @@ class ReportService:
             return
         await self._start_forge(rid, text, deck.name, games, seed, bracket, shared=shared, copies=copies)
 
+    def pair_room(self, sub: str) -> str | None:
+        """Why the member's Forge queue can't take both decks of a comparison now, or None when it
+        can. Each deck's run is started or waits its turn; with one of theirs unfinished both wait,
+        and at most MAX_FORGE_WAITING do. Asked before either report is made, so a comparison
+        never makes one deck's report with Forge games and the other's without."""
+        runs = self._member_runs(sub)
+        waiting = sum(1 for _, _, s in runs if _waiting(s))
+        if not runs or waiting + 2 <= MAX_FORGE_WAITING:
+            return None
+        playing = len(runs) - waiting
+        queued = (
+            f"{waiting} report waiting for its games"
+            if waiting == 1
+            else f"{waiting} reports waiting for their games"
+        )
+        have = f"{playing} Forge run{'' if playing == 1 else 's'} playing and {queued}" if playing else queued
+        return (
+            f"You already have {have}. Comparing two decks needs room for 2 more, and each member can "
+            f"have at most {MAX_FORGE_WAITING} reports waiting, so nothing was started. Try again once "
+            "one of them has finished."
+        )
+
     def _side_by_side(self, sub: str, shared: dict[str, Any] | None) -> bool:
         """Whether a comparison's second deck may start now, beside its first (R-215): the member's
         one unfinished run is the first deck's, started with compare_with, and the engine has
