@@ -113,17 +113,28 @@ key_stored() { prefs | grep -F "<string name=\"push_key\">$KEY</string>" >/dev/n
 # it is shown. A task marked hidden, excluded or not in Recents is left out, since the launcher
 # doesn't show it and no gesture can remove it.
 recents_tasks() {
+  # Each "* Recent #" task ends at the next line indented no deeper than its own header, so a
+  # task never takes in what dumpsys prints after it (such as the launcher's fallback home task).
   adb shell dumpsys activity recents 2>/dev/null | tr -d '\r' | python3 -c '
 import re, sys
 pkg = sys.argv[1]
-blocks = re.split(r"\n(?=\s*\* Recent #)", sys.stdin.read())
-for b in blocks:
-    if not re.search(r"realActivity=\{?" + re.escape(pkg) + "/", b):
+tasks, cur, depth = [], None, 0
+for line in sys.stdin.read().splitlines():
+    indent = len(line) - len(line.lstrip())
+    if re.match(r"\s*\* Recent #", line):
+        cur, depth = [line], indent
+        tasks.append(cur)
+    elif cur is not None and line.strip() and indent > depth:
+        cur.append(line)
+    elif line.strip():
+        cur = None
+for t in tasks:
+    own = "\n".join(t)
+    hit = next((l.strip() for l in t if re.search(r"realActivity=\{?" + re.escape(pkg) + "/", l)), None)
+    if hit is None or re.search(r"inRecents=false|isAvailable=false|excludeFromRecents|mHidden=true|hidden=true", own):
         continue
-    if re.search(r"inRecents=false|isAvailable=false|excludeFromRecents|mHidden=true|hidden=true", b):
-        continue
-    flags = " ".join(sorted(set(re.findall(r"\b(?:inRecents|isAvailable|mHidden|hidden)=\w+", b))))
-    print(b.strip().splitlines()[0].strip() + ("  [" + flags + "]" if flags else ""))' "$PKG"
+    flags = " ".join(sorted(set(re.findall(r"\b(?:inRecents|isAvailable|mHidden|hidden)=\w+", own))))
+    print(t[0].strip() + ("  [" + flags + "]" if flags else "") + "  matched: " + hit)' "$PKG"
 }
 in_recents() { [ -n "$(recents_tasks)" ]; }
 connected() { [ "$(state connections)" -ge 1 ]; }
