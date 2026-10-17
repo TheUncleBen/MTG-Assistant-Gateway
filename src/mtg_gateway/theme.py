@@ -714,13 +714,17 @@ details.raw{margin:.5rem 0 0} details.raw summary{cursor:pointer;color:var(--tex
    button and the page needs no sideways scroll. The word returns above 800 px. */
 @media (min-width:600px) and (max-width:799.98px) and (hover:hover) and (pointer:fine){
   .topbar .brand .word{display:none} }
-.topbar .left{flex:1 1 0}
+/* The brand, the links and the account side are the bar's own flex items (.left only groups the
+   brand and the links in the markup). The links never shrink. When the row is short, the brand's
+   word gives way first (an ellipsis, for a long MTG_SERVER_NAME), then the search box, down to its
+   9rem; before even that is not enough, the links wrap (the container queries below). Review
+   R12-1: with .left{flex:1 1 0} the left side could shrink below its links, which then ran under
+   the search box, so a click on History or Admin landed in the box. */
+.topbar .wrap{gap:.25rem}
+.topbar .left{display:contents}
 .topbar nav.site{flex:none}
-/* the left side takes only the room the right side leaves: a long MTG_SERVER_NAME shortens the
-   brand's word (an ellipsis) rather than squeeze the search box and the account button past the
-   window's edge; the right side still gives way when even that is not enough (large text) */
-.topbar .right{flex:0 1 auto}
-.brand{min-width:0}
+.topbar .brand{flex:0 1000 auto;min-width:25px}
+.topbar .right{flex:0 1 auto;min-width:auto;margin-left:auto;padding-left:.75rem}
 .brand .word{overflow:hidden;text-overflow:ellipsis;min-width:0}
 /* Large text with a mouse (a raised font size, a text-only zoom, 200% text): when the bar's text
    links no longer fit on one row beside the brand and the account button, they wrap onto more
@@ -919,12 +923,12 @@ CSS = CSS.replace(
 # size (milestone review M-1: with the links on a row of their own under the account side, Tab
 # went from the links' row back up to search and account).
 _NAV_ROW_RULES = (
-    "body:not(.app) .topbar .wrap{flex-wrap:wrap;height:auto;row-gap:0;padding-bottom:.35rem}"
+    "body:not(.app) .topbar .wrap{flex-wrap:wrap;height:auto;row-gap:0;column-gap:1rem;padding-bottom:.35rem}"
     "body:not(.app) .topbar .left{display:contents}"
     "body:not(.app) .topbar .brand{min-height:50px;align-self:flex-start}"
     "body:not(.app) .topbar .brand .word{display:none}"
     "body:not(.app) .topbar nav.site{flex:1 1 12em;flex-wrap:wrap;min-width:0}"
-    "body:not(.app) .topbar .right{margin-left:auto;min-height:50px;align-self:flex-end}"
+    "body:not(.app) .topbar .right{margin-left:auto;padding-left:0;min-height:50px;align-self:flex-end}"
 )
 CSS = CSS.replace("__NAVROW__", _NAV_ROW_RULES)
 

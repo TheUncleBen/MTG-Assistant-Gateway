@@ -387,3 +387,98 @@ def test_tab_goes_through_the_top_bar_in_the_order_it_reads(server: Server, zoom
                     problems.append(f"{where}: {a['what']} then {b['what']}")
         browser.close()
     assert problems == [], "\n".join(problems)
+
+
+# Review R12-1: with a mouse, where the bar keeps one row beside the search box, the last links
+# (History, Admin) ran under the search box, so a click there landed in the box. Nothing in the
+# bar may sit over anything else, at any width or text size, for a member or an admin.
+BAR_OVERLAP = """() => {
+  const shown = e => e.getClientRects().length > 0 && getComputedStyle(e).visibility !== 'hidden';
+  const parts = [...document.querySelectorAll(
+    '.topbar .brand .mark, .topbar nav.site a, .topbar .topsearch, .topbar nav.user > *')]
+    .filter(shown).map(e => ({what: (e.textContent || e.className || e.tagName).trim().slice(0, 20),
+                              box: e.getBoundingClientRect()}));
+  const hit = (a, b) => a.left < b.right - 1 && b.left < a.right - 1 && a.top < b.bottom - 1
+    && b.top < a.bottom - 1;
+  const out = [];
+  parts.forEach((p, i) => parts.slice(i + 1).forEach(q => {
+    if (hit(p.box, q.box)) out.push(`${p.what} / ${q.what}`); }));
+  const outside = parts.filter(p => p.box.left < -1 || p.box.right > innerWidth + 1).map(p => p.what);
+  return {overlap: out, outside, doc: document.documentElement.scrollWidth, win: innerWidth,
+          links: document.querySelectorAll('.topbar nav.site a').length};
+}"""
+
+
+@pytest.mark.parametrize("script", [True, False])
+@pytest.mark.parametrize("role", ["member", "admin"])
+def test_nothing_in_the_top_bar_sits_over_anything_else(server: Server, role: str, script: bool) -> None:
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_path()
+    if exe == "missing":
+        pytest.skip("no Chromium available for Playwright")
+    sid = _admin(server) if role == "admin" else server.sign_in()
+    problems: list[str] = []
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+        ctx = browser.new_context(viewport={"width": 1000, "height": 800}, java_script_enabled=script)
+        ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
+        page = ctx.new_page()
+        widths = (344, 390, 600, 673, 717, 800, 899, 900, 920, 960, 1000, 1100, 1200, 1280, 1440, 1600, 1920)
+        for width in widths:
+            for zoom in [*ZOOMS, "root-110", "text-110"]:
+                page.set_viewport_size({"width": width, "height": 800})
+                page.goto(f"{server.base}/history", wait_until="networkidle")
+                _zoom(page, zoom)
+                page.wait_for_timeout(20)
+                g = page.evaluate(BAR_OVERLAP)
+                if g["overlap"] or g["outside"] or g["doc"] != g["win"]:
+                    problems.append(f"@{width}px {zoom}: {g}")
+        browser.close()
+    assert problems == [], "\n".join(problems[:40]) + f"\n… {len(problems)} in all"
+
+
+LONG_NAME = "The Very Long Name Of Our Friends' Deck Gateway"
+FULL_SEARCH = 18.8  # rem: the search box measured 18.86 to 18.98rem with room to spare (flex-basis 20rem)
+BRAND_AND_SEARCH = """() => {
+  const word = document.querySelector('.topbar .brand .word');
+  const search = document.querySelector('.topbar .topsearch');
+  const rem = parseFloat(getComputedStyle(document.documentElement).fontSize);
+  return {cut: word.scrollWidth > word.clientWidth + 1, search: search.getBoundingClientRect().width / rem};
+}"""
+
+
+def test_a_long_server_name_gives_way_before_the_search_box_and_the_links(server: Server) -> None:
+    """The order the one-row bar gives up room in (review R12-1, 83ec5a7): the brand's word first
+    (an ellipsis), then the search box down to 9rem; the links never."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_path()
+    if exe == "missing":
+        pytest.skip("no Chromium available for Playwright")
+    sid = _admin(server)
+    object.__setattr__(server.app.state.gateway.settings, "server_name", LONG_NAME)
+    problems: list[str] = []
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+        ctx = browser.new_context(viewport={"width": 1280, "height": 800})
+        ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
+        page = ctx.new_page()
+        for width in (900, 960, 1000, 1100, 1280, 1440, 1920):
+            for zoom in ("none", "root-110", "root-125", "text-125"):
+                page.set_viewport_size({"width": width, "height": 800})
+                page.goto(f"{server.base}/history", wait_until="networkidle")
+                _zoom(page, zoom)
+                page.wait_for_timeout(20)
+                g = page.evaluate(BAR_OVERLAP)
+                if g["overlap"] or g["outside"] or g["doc"] != g["win"]:
+                    problems.append(f"@{width}px {zoom}: {g}")
+                b = page.evaluate(BRAND_AND_SEARCH)
+                if b["search"] < 9 - 0.05 or (b["search"] < FULL_SEARCH and not b["cut"]):
+                    problems.append(f"@{width}px {zoom}: search box shrank first: {b}")
+        page.set_viewport_size({"width": 1280, "height": 800})
+        page.goto(f"{server.base}/history", wait_until="networkidle")
+        at_1280 = page.evaluate(BRAND_AND_SEARCH)
+        browser.close()
+    assert problems == [], "\n".join(problems)
+    assert at_1280["cut"] and at_1280["search"] >= FULL_SEARCH, at_1280  # the name is cut, not the box
