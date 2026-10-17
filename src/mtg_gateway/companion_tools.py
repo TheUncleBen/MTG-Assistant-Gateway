@@ -668,11 +668,14 @@ def add_deck_tool_routes(
         query = f"?with={other}" if other.isdigit() else ""
         back = f"<a class='btn' href='/decks/{_esc(deck_id)}/compare{query}'>Back to the comparison</a>"
         current_client.set(BROWSER_CLIENT_ID)
+        hold = None
         try:
             if not other.isdigit():
                 raise DeckError("invalid", "Pick the other deck on the Compare page first.")
-            if reports.forge is not None and (full := reports.pair_room(sub)) is not None:
-                # refused before either report is made: both decks' games start or wait, or neither
+            # both decks' games start or wait, or neither: the room for both is checked and kept in
+            # one step, before either deck is read, so presses at once can't both take it
+            hold, full = reports.reserve_pair(sub) if reports.forge is not None else (None, None)
+            if full is not None:
                 return page(
                     "Compare",
                     f"<div class='panel'><p class='notice error'>{_esc(full)}</p>{back}</div>",
@@ -684,7 +687,9 @@ def add_deck_tool_routes(
             # without Forge on the gateway no pair is asked for: the first report says why it has no
             # Forge games and the page below names that deck (compare_with is refused then)
             pair = other_deck if reports.forge is not None else None
-            first = await reports.run(sub, deck_id, simulate=False, forge=True, pair_with=pair)
+            first = await reports.run(
+                sub, deck_id, simulate=False, forge=True, pair_with=pair, pair_hold=hold
+            )
             try:
                 second = await reports.run(
                     sub,
@@ -693,6 +698,7 @@ def add_deck_tool_routes(
                     forge=True,
                     deck=other_deck,
                     same_opponents_as=first["report_id"],
+                    pair_hold=hold,
                 )
             except DeckError as exc:
                 if str(exc) != NO_FORGE_TO_SHARE:
@@ -727,6 +733,8 @@ def add_deck_tool_routes(
                 sid=sid,
                 status=404 if exc.kind == "not_found" else 400,
             )
+        finally:
+            reports.release_pair(sub, hold)
         return RedirectResponse(f"/history/reports/{_esc(second['report_id'])}", status_code=303)
 
     @server.custom_route("/decks/{deck_id}/compare", methods=["GET"], include_in_schema=False)
