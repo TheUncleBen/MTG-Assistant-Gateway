@@ -479,13 +479,18 @@ def run_job(job: Job, slots: list[int] | None = None) -> None:
         codes: list[int | None] = [None] * len(job.slices)
         pending = list(range(len(job.slices)))
         pending_lock = threading.Lock()
+        holding = [len(slots)]  # places this job still plays on
 
         def place(slot: int) -> None:
             # Each parallel place takes the next slice in order until none is left, then lets go.
+            # While another job waits for a place, a job on more than one place gives one back
+            # after its group ends, so one run never holds every place until its last game.
             try:
                 while True:
                     with pending_lock:
                         if not pending or job.cancelled or time.time() >= deadline:
+                            return
+                        if holding[0] > 1 and waiting():
                             return
                         index = pending.pop(0)
                     try:
@@ -495,6 +500,8 @@ def run_job(job: Job, slots: list[int] | None = None) -> None:
                             job.slice_state[index] = "failed"
                             job.tail.append(f"service error: {exc!r}"[:300])
             finally:
+                with pending_lock:
+                    holding[0] -= 1
                 release_place(slot)
 
         try:
@@ -535,6 +542,11 @@ def release_place(slot: int) -> None:
             FREE_PLACES.append(slot)
             FREE_PLACES.sort()
         PLACES.notify_all()
+
+
+def waiting() -> bool:
+    """Whether a job is waiting for a place (the one the worker holds)."""
+    return any(j.state == "queued" for j in list(HELD))
 
 
 def take_places(job: Job) -> list[int] | None:

@@ -759,6 +759,40 @@ class _BusyForge(FakeForge):
         return super().handler(request)
 
 
+async def test_runs_waiting_on_a_busy_forge_ask_again_first_come_first_served(tmp_path: Path) -> None:
+    """Security review S-10: with Forge's queue full, each round asked again for each member's
+    waiting run in no particular order, so a later run could take the room an earlier one waited
+    for. The member whose run joined the queue first now asks first."""
+    db = Database(tmp_path / "t.sqlite")
+    for sub in ("zed", "amy"):
+        db.upsert_user(sub, email=None, name=None, preferred_username=None, groups=[])
+    fake = _BusyForge()
+    asked: list[int] = []
+    handler = fake.handler
+
+    def recording(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/jobs" and request.method == "POST":
+            asked.append(json.loads(request.content)["seed"])
+        return handler(request)
+
+    fake.handler = recording  # type: ignore[method-assign]
+    reports = ReportService(db, _Decks(), None, forge=fake.client(), forge_games=4)  # type: ignore[arg-type]
+    reports.forge_interval = 3600  # this test asks again itself
+    zed = await reports.run("zed", "42", games=300, options={"seed": 1})
+    amy = await reports.run("amy", "42", games=300, options={"seed": 2})
+    reports._forge_task.cancel()
+    for rid, joined in ((zed["report_id"], 2000), (amy["report_id"], 1000)):  # Amy's run joined first
+        section = reports.get("zed" if rid == zed["report_id"] else "amy", rid)["forge"]
+        assert section["state"] == "queued" and section["engine_busy"] is True
+        db._conn.execute(
+            "UPDATE reports SET forge_json = json_set(forge_json, '$.queued_at', ?) WHERE id = ?",
+            (joined, rid),
+        )
+    asked.clear()
+    await reports._start_waiting_runs()
+    assert asked == [2, 1]
+
+
 async def test_a_report_made_while_forge_is_busy_never_splits_a_comparison(tmp_path: Path) -> None:
     """Review L9: a report made while the member had nothing unfinished went straight to Forge; with
     Forge's own queue full it became a waiting run without counting a Compare press's held places,

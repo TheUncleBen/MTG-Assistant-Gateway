@@ -1038,7 +1038,14 @@ class ReportService:
                 ).fetchall()
             ]
         copies = await self.forge.copies() if subs and self.forge else None  # outside the lock
-        for sub in subs:
+
+        def joined(sub: str) -> int:
+            runs = self._member_runs(sub)
+            return _number_or_zero(runs[0][2].get("queued_at")) if runs else 0
+
+        # first come, first served across members: the member whose next run joined first asks
+        # Forge first, so a full Forge queue never lets a later run overtake an earlier one
+        for sub in sorted(subs, key=joined):
             async with self._forge_start_lock:
                 runs = self._member_runs(sub)
                 if not runs or not _waiting(runs[0][2]):
