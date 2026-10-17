@@ -53,13 +53,13 @@ RESTORE_ALONE = (
 )
 DELETE_ALONE = "Not sent: deleting a deck is approved only on its own review page. It is still waiting."
 FORMATTING_ALONE = (
-    "Not sent: it keeps the bold text, links or pictures already there, so it is approved on its own "
-    "review page, which shows how it will look. It is still waiting."
+    "Not sent: it keeps the formatting already there, such as bold text, links or pictures, so it is "
+    "approved on its own review page, which shows how it will look. It is still waiting."
 )
 # D-1, E-2 (wording draft, WORDING-6)
 FORMATTING_LOST_ALONE = (
-    "Not sent: it removes all the bold text, links and pictures already there, so it is approved on "
-    "its own review page, which says what goes. It is still waiting."
+    "Not sent: it removes all the formatting already there, such as bold text, links and pictures, so "
+    "it is approved on its own review page, which says what goes. It is still waiting."
 )
 EARLIER_FAILED = (
     "Not sent: an earlier change to this deck in this selection failed after part of it reached "

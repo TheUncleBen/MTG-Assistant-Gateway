@@ -320,18 +320,21 @@ assistant applies what that mode allows, always with a snapshot.
 
 - **Proposals** lists what is waiting. Open one to read the diff and press
   **Apply** or **Reject**.
-- Before an edit is applied, the gateway checks the deck has not changed in
-  the meantime, saves a **snapshot** and puts a backup copy of the deck in
+- Before an edit is applied, the gateway checks the change still fits the
+  deck as it is now, saves a **snapshot** and puts a backup copy of the deck in
   an "MTG Gateway backups" folder on your Archidekt account, then reads the
   deck back to confirm.
-- **Out of date**: Archidekt is the master copy of your decks. When you open
-  the app, and every 30 minutes while proposals are waiting, the gateway
-  checks your decks on Archidekt (it only reads). If a deck changed after a
-  proposal for it was made, on archidekt.com, in another app or by another
-  change applied here, the proposal is marked **out of date** at once: Apply
-  would be refused and nothing sent, so reject it and ask for a new one.
-  The check never changes a deck, a proposal, a snapshot or your undo
-  history, and it waits while you or your assistant are working.
+- **Updated** and **Needs a look**: Archidekt is the master copy of your
+  decks. When you open the app, and every 30 minutes while changes are
+  waiting, the gateway checks your decks on Archidekt (it only reads). If a
+  deck changed after a change for it was made, on archidekt.com, in another
+  app or by another change applied here, the gateway works that change out
+  again on the deck as it is now. If it still does exactly what you
+  reviewed, it shows **Updated** and can be applied as before. If it would
+  now do something else, it shows **Needs a look** with the reason, and
+  Apply sends nothing: ask your assistant to update it, or reject it. The
+  check never changes a deck, a snapshot or your undo history, and it waits
+  while you or your assistant are working.
 - **History** shows proposals, snapshots and deck reports over time.
   **Restore** puts a deck back exactly as a snapshot had it, cards and the
   deck's own name, description, format, bracket and privacy alike (another

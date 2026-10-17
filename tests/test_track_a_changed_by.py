@@ -162,7 +162,7 @@ async def test_the_guide_says_what_full_auto_still_waits_for(stack: Stack) -> No
         page = (await b.http.get("/guide")).text
         assert (
             "a new deck, an edit of more than 25 rows, making a deck public or unlisted, and any edit of a "
-            "description that has bold text, links or pictures" in page
+            "description that has formatting, such as bold text, links or pictures" in page
         )
         assert (
             "deleting a deck always wait for your press, and so does a held change, a change waiting for "

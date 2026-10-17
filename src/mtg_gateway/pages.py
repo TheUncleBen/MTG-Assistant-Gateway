@@ -891,8 +891,11 @@ OK_MESSAGES = {
     "everything else.",
     "mode_auto": "Saved: your assistant applies deck and collection changes without asking. Restoring a "
     "snapshot, a commander change, a new deck, an edit of more rows than Full auto applies by itself, "
-    "making a deck public or unlisted, any edit of a description that has bold text, links or pictures, "
-    "actions on your Archidekt account and deleting a deck still wait for you. When a change waits for "
+    "making a deck public or unlisted, any edit of a description that has formatting, such as bold text, "
+    "links or pictures, actions on your Archidekt account and deleting a deck still wait for you. So "
+    "does a held change, a change waiting for another change first, one another app had a hand in, one "
+    "that replaces another app's change, or one that another app's waiting change would replace. When "
+    "a change waits for "
     "your press, its card and review page say why. Each change keeps a snapshot you can restore from "
     "History.",
     # 0.7.29: several waiting changes applied with one press (batch.py), and Undo
@@ -912,11 +915,11 @@ ERR_MESSAGES = {
     "not_pending": "This proposal is no longer pending, so nothing was done.",
     "stale": "Not applied: the deck changed on Archidekt, and this change would now do something "
     "different from what you reviewed. Nothing was sent. It is still waiting, marked Needs a look: "
-    "check it again, then apply or reject it, or ask your assistant to amend it.",
+    "review it again, then apply or reject it, or ask your assistant to amend it.",
     "changed": "A newer version of this change was made since you opened it. Nothing was sent. Review "
     "the new version below.",
     "changed_some": "One of the checked changes is not the version this page showed, so nothing was "
-    "sent. Check the list again below.",
+    "sent. Look over the list again below.",
     "none_selected": "Check at least one waiting change first. Nothing was done.",
     "backup_failed": "The backup copy of the deck could not be made on Archidekt, so nothing was "
     "changed. The proposal is still pending; try again once Archidekt answers.",
@@ -1759,8 +1762,8 @@ def _formatted_preview(r: dict[str, Any]) -> str:
         lost = int(r.get("dropped_embeds") or 0)
         noun = "comment" if r.get("action") == "comment_edit" else "description"
         return (
-            "<p class='notice warn'>This edit removes all the bold text, links and pictures from the "
-            f"{noun}: it is written as plain text."
+            f"<p class='notice warn'>This edit removes all the formatting from the {noun}, such as bold "
+            "text, links and pictures: it is written as plain text."
             + (
                 f" {lost} picture{'s' if lost != 1 else ''} or card link{'s' if lost != 1 else ''} "
                 "will be removed with it."

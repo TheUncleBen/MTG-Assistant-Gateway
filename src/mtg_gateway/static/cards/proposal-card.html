@@ -245,8 +245,8 @@ button.danger:disabled{color:var(--red)}
     var keeps = (p.rows || []).some(function (r) { return r && r.after_doc; });
     var loses = (p.rows || []).some(function (r) { return r && r.formatting_lost; });
     // D-1, E-2 (wording draft, WORDING-6): approved on its review page, which says what goes
-    if (loses && !p.assistant_may_apply) return "This removes all the bold text, links and pictures already there. Open it to see what goes, and approve it there.";
-    if (keeps && !p.assistant_may_apply) return "This keeps the bold text, links or pictures already there. Open it to see how it will look, and approve it there.";
+    if (loses && !p.assistant_may_apply) return "This removes all the formatting already there, such as bold text, links and pictures. Open it to see what goes, and approve it there.";
+    if (keeps && !p.assistant_may_apply) return "This keeps the formatting already there, such as bold text, links or pictures. Open it to see how it will look, and approve it there.";
     if (p.assistant_may_apply) {
       return p.approval_mode === "auto"
         ? "Your approval mode lets your assistant apply this itself, without asking."

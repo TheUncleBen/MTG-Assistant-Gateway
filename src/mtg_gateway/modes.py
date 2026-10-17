@@ -106,7 +106,8 @@ HIGH_RISK_TEXT = (
 MEMBER_ONLY_TEXT = (
     f"Actions on your Archidekt account ({ACCOUNT_ACTIONS_TEXT}) and deleting a deck are never "
     "applied by an assistant: each one waits for your own press, in every mode, on the card in the "
-    "chat or on its review page (deleting a deck: on the review page only)."
+    "chat or on its review page (deleting a deck, and an edit of a comment that has formatting: on the "
+    "review page only)."
 )
 
 
@@ -115,9 +116,9 @@ def auto_waits_text(big_rows: int = DEFAULT_BIG_EDIT_ROWS) -> str:
     return (
         "Restoring a snapshot, a commander change, a new deck, an edit of more than "
         f"{_rows(big_rows)}, making a deck public or unlisted, and any edit of a description that has "
-        "bold text, links or pictures still wait for your press. So does a held change, a change "
-        "waiting for another change first, one another app had a hand in, one that replaces another "
-        "app's change, or one that another app's waiting change would replace."
+        "formatting, such as bold text, links or pictures, still wait for your press. So does a held "
+        "change, a change waiting for another change first, one another app had a hand in, one that "
+        "replaces another app's change, or one that another app's waiting change would replace."
     )
 
 
@@ -126,8 +127,8 @@ def mode_help(mode: str, *, max_rows: int = DEFAULT_MAX_ROWS, big_rows: int = DE
     if mode == "manual":
         return (
             "Every change waits for your own press on the card in the chat or on the review page, "
-            "actions on your Archidekt account too (deleting a deck: on the review page only). The "
-            "safest choice, and the default."
+            "actions on your Archidekt account too (deleting a deck, and any edit of a description or "
+            "comment that has formatting: on the review page only). The safest choice, and the default."
         )
     if mode == "semi":
         return (
@@ -308,9 +309,12 @@ def auto_waits(
         elif wanted.get("unlisted") is True:
             return "makes the deck unlisted"
         if any(isinstance(r, dict) and r.get("after_doc") for r in rows or []):
-            return "keeps bold text, links or pictures in the description, so you see how it will look first"
+            return (
+                "keeps the description's formatting, such as bold text, links or pictures, so you see how "
+                "it will look first"
+            )
         if any(isinstance(r, dict) and r.get("formatting_lost") for r in rows or []):
-            return "removes all the bold text, links and pictures from the description"
+            return "removes all of the description's formatting, such as bold text, links and pictures"
         return None
     if kind == "clone":
         return None
