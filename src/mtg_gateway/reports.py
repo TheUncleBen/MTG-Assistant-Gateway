@@ -1110,15 +1110,22 @@ class ReportService:
         """At startup: carry on refreshing runs a restart left unfinished."""
         self._ensure_forge_refresher()
 
-    def _save_forge(self, rid: str, section: dict[str, Any]) -> bool:
-        """Store the report's Forge section; False when the report no longer exists. A section
-        that reaches a final state (done, failed, skipped...) finishes its report."""
+    def _save_forge(
+        self, rid: str, section: dict[str, Any], *, unless_changed_from: str | None = None
+    ) -> bool:
+        """Store the report's Forge section; False when the report no longer exists, or, with
+        ``unless_changed_from`` (the stored text the caller read), when something else saved the
+        section since (an undo or more games while the refresher waited on Forge): then the
+        newer section stays. A section that reaches a final state (done, failed, skipped...)
+        finishes its report."""
         final = section.get("state") in FINAL_STATES
+        same = "" if unless_changed_from is None else " AND forge_json = ?"
+        args = () if unless_changed_from is None else (unless_changed_from,)
         with self.db.tx() as c:
             was = c.execute("SELECT forge_state FROM reports WHERE id = ?", (rid,)).fetchone()
             cur = c.execute(
-                "UPDATE reports SET forge_json = ?, forge_state = ? WHERE id = ?",
-                (json.dumps(section), section.get("state"), rid),
+                f"UPDATE reports SET forge_json = ?, forge_state = ? WHERE id = ?{same}",
+                (json.dumps(section), section.get("state"), rid, *args),
             )
         if cur.rowcount > 0 and final and (was is None or was[0] not in FINAL_STATES):
             self._finished(rid)
@@ -1220,8 +1227,12 @@ class ReportService:
                     fresh = await refresh(
                         self._engine(section), section, pinned_gone=self._pinned_gone(section)
                     )
-                    if fresh != section:  # written only when a game finished or the state moved
-                        self._save_forge(row["id"], fresh)
+                    # written only when a game finished or the state moved, and only over the
+                    # section read above: a newer one saved meanwhile is read again next round
+                    if fresh == section or not self._save_forge(
+                        row["id"], fresh, unless_changed_from=row["forge_json"]
+                    ):
+                        continue
                     if fresh.get("state") == "lost" and fresh.get("error") == forge_module.FORGE_SILENT:
                         # given up while the job may still be on the copy: stop it there (L6)
                         self._cancel_forge(section, keep_asking=True)

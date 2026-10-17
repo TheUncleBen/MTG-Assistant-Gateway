@@ -52,17 +52,36 @@ MAX_GAMES = int(os.environ.get("FORGE_MAX_GAMES", "50"))
 MAX_QUEUE = int(os.environ.get("FORGE_MAX_QUEUE", "4"))
 # Where Docker can't cap memory (Raspberry Pi OS turns the kernel's memory controller off by
 # default, and Docker then drops a stack's memory limit), these keep Forge in bounds from inside
-# the container, with nothing to change on the machine. FORGE_MEMORY_BUDGET (the stack passes
-# FORGE_MEMORY_LIMIT) sizes the places when no cgroup limit can be read. Each Java gets a ceiling
-# on its class data on top of FORGE_XMX, and is the kernel's first pick when the machine runs out
-# of memory, so the gateway and other services keep running (raising oom_score_adj needs no
-# privilege; lowering it does).
+# the container, with nothing to change on the machine; they are not a hard limit as the kernel's
+# memory controller is. FORGE_MEMORY_BUDGET (the stack passes FORGE_MEMORY_LIMIT) sizes the places
+# when no cgroup limit can be read. Each Java gets a ceiling on its class data on top of FORGE_XMX,
+# and is the kernel's first pick when the machine runs out of memory, so a Forge game is stopped
+# before the gateway or other services (raising oom_score_adj needs no privilege; lowering it does).
 MEMORY_BUDGET = os.environ.get("FORGE_MEMORY_BUDGET", "")
 MAX_METASPACE = os.environ.get("FORGE_MAX_METASPACE", "256m")
-OOM_SCORE_ADJ = int(os.environ.get("FORGE_OOM_SCORE_ADJ", "1000"))
+
+
+def oom_score(text: str) -> tuple[int, str]:
+    """The out-of-memory score each Java runs with (0: none), and why none when it is not set.
+    Forge runs unprivileged, so choom can only raise the score, to at most 1000; any other value
+    would stop every Java from starting, so it is left out and the start log says why."""
+    try:
+        value = int(text.strip())
+    except ValueError:
+        return 0, f"FORGE_OOM_SCORE_ADJ={text!r} is not a whole number from 0 to 1000"
+    if value == 0:
+        return 0, "FORGE_OOM_SCORE_ADJ=0 turns it off"
+    if not 1 <= value <= 1000:
+        return 0, f"FORGE_OOM_SCORE_ADJ={value} is outside 1 to 1000 (Forge can only raise it)"
+    return value, ""
+
+
+OOM_SCORE_ADJ, OOM_SCORE_OFF = oom_score(os.environ.get("FORGE_OOM_SCORE_ADJ", "1000"))
 # What one Forge process needs to play a four-player game at a usable speed: about 2 CPUs and
-# 1.2 GB (measured on x86: one game peaked near 790 MiB, two at once near 1.25 GiB, three at once
-# were killed in 1.5 GiB).
+# 1.2 GB. Measured on GitHub's build machines with 1536M and 2 CPUs, one game per process: one game
+# peaked near 600 MiB and two at once near 1,050 MiB, but two at once were slower than one on x86
+# and three at once pushed games past the time limit, so 2 CPUs a game holds; 1.2 GB is kept as
+# the safe figure until a Pi has been measured.
 GAME_CPUS = 2.0
 GAME_MEMORY = 1.2e9
 
@@ -87,23 +106,24 @@ def machine_cpus() -> float:
 
 
 def size_bytes(text: str) -> int | None:
-    """A size as Docker writes it ("1536M", "2g", "800000k" or plain bytes) in bytes; None if not one."""
-    m = re.fullmatch(r"\s*(\d+)\s*([kmg]?)b?\s*", text.lower())
+    """A size as Docker writes it ("1536M", "1.5g", "800000k" or plain bytes) in bytes; None if not one."""
+    m = re.fullmatch(r"\s*(\d+(?:\.\d+)?)\s*([kmg]?)b?\s*", text.lower())
     if not m:
         return None
-    return int(m.group(1)) * {"": 1, "k": 2**10, "m": 2**20, "g": 2**30}[m.group(2)]
+    return int(float(m.group(1)) * {"": 1, "k": 2**10, "m": 2**20, "g": 2**30}[m.group(2)])
 
 
 def machine_memory() -> int | None:
     """The memory this container may use in bytes: its cgroup limit (a stack's ``memory`` limit),
-    else FORGE_MEMORY_BUDGET, else the machine's total; None when none can be read."""
+    else FORGE_MEMORY_BUDGET, else the machine's total; None when none can be read, or when a
+    budget is set but is not a size (then one place, and the start log says why: never the whole
+    machine's memory when the operator meant less)."""
     for path in ("/sys/fs/cgroup/memory.max", "/sys/fs/cgroup/memory/memory.limit_in_bytes"):
         value = _read(path)
         if value.isdigit() and int(value) < 2**60:  # cgroup v1 writes a huge number for "no limit"
             return int(value)
-    budget = size_bytes(MEMORY_BUDGET)
-    if budget:
-        return budget
+    if MEMORY_BUDGET.strip():
+        return size_bytes(MEMORY_BUDGET) or None
     for line in _read("/proc/meminfo").splitlines():
         if line.startswith("MemTotal:") and line.split()[1].isdigit():
             return int(line.split()[1]) * 1024
@@ -774,6 +794,12 @@ def main() -> None:
         f"port {port}",
         flush=True,
     )
+    if MEMORY_BUDGET.strip() and not size_bytes(MEMORY_BUDGET):
+        print(f"FORGE_MEMORY_BUDGET={MEMORY_BUDGET!r} is not a size such as 1536M: one place", flush=True)
+    if OOM_SCORE_OFF:
+        print(f"no out-of-memory score for Forge's Java: {OOM_SCORE_OFF}", flush=True)
+    elif not shutil.which("choom"):
+        print("no out-of-memory score for Forge's Java: choom is missing", flush=True)
     server.serve_forever()
 
 

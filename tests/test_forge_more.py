@@ -306,7 +306,7 @@ async def test_a_comparison_whose_other_report_is_gone_or_full(tmp_path: Path) -
 
 
 async def test_a_later_report_at_the_same_table_never_replaces_the_partner(tmp_path: Path) -> None:
-    """Review L10: the partner is recorded when the comparison is made, so a later report seating
+    """The partner is recorded when the comparison is made, so a later report seating
     the first deck's opponents is a report of its own, not the new partner."""
     db = Database(tmp_path / "t.sqlite")
     db.upsert_user("alice", email=None, name=None, preferred_username=None, groups=[])
@@ -331,7 +331,7 @@ async def test_a_later_report_at_the_same_table_never_replaces_the_partner(tmp_p
 async def test_the_first_deck_is_taken_back_when_the_second_does_not_start(
     tmp_path: Path, monkeypatch: Any
 ) -> None:
-    """Review L12: the second deck's extra games failing to start (here when its turn comes, after
+    """The second deck's extra games failing to start (here when its turn comes, after
     the first deck's) takes the first deck's back too, so the two stay even."""
     db = Database(tmp_path / "t.sqlite")
     db.upsert_user("alice", email=None, name=None, preferred_username=None, groups=[])
@@ -359,7 +359,7 @@ async def test_the_first_deck_is_taken_back_when_the_second_does_not_start(
 
 
 async def test_a_retry_on_a_busy_forge_keeps_the_runs_place(tmp_path: Path) -> None:
-    """Review L11: each retry against a busy Forge gave the waiting run a new queue time, so the
+    """Each retry against a busy Forge gave the waiting run a new queue time, so the
     member's waiting runs could swap places. It keeps the first one."""
     from .test_forge import _BusyForge
 
@@ -380,3 +380,32 @@ async def test_a_retry_on_a_busy_forge_keeps_the_runs_place(tmp_path: Path) -> N
     again = json.loads(db._one("SELECT forge_json FROM reports WHERE id = ?", (rid,))["forge_json"])
     assert again["engine_busy"] is True and again["queued_at"] == 1000
     reports._forge_task.cancel()
+
+
+async def test_an_undo_while_the_refresher_waits_on_forge_is_not_overwritten(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    """The refresher reads a run, then waits on Forge; an undo saved meanwhile stays, and the
+    refresher does not put the taken-back games' run over it."""
+    fake = FakeForge()
+    db, reports = _service(tmp_path, fake)
+    rid = await _finished_report(reports, fake, [1, 2, 1, 1])
+    before = reports._own_forge("alice", rid)[1]
+    playing = (await reports.play_more("alice", rid))["forge"]
+    real, undone = reports_module.refresh, []
+
+    async def slow_refresh(forge: Any, section: dict[str, Any], **kw: Any) -> dict[str, Any]:
+        fresh = await real(forge, section, **kw)
+        if section.get("job_id") == playing["job_id"] and not undone:
+            reports._undo_more("alice", rid, before, "taken back")  # lands while Forge answered
+            undone.append(True)
+        return {**fresh, "state": "running", "progress_marker": True}
+
+    monkeypatch.setattr(reports_module, "refresh", slow_refresh)
+    reports._ensure_forge_refresher()
+    await _until(lambda: undone)
+    await asyncio.sleep(0.2)  # a few more refresher rounds
+    stored = reports._own_forge("alice", rid)[1]
+    assert stored["more_note"] == "taken back" and stored["state"] == "done"
+    assert "progress_marker" not in stored
+    assert stored["job_id"] == before["job_id"]
