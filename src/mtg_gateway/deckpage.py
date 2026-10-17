@@ -2022,12 +2022,13 @@ DECK_CSS = (
 .compareform .field input,.compareform .field textarea{font-weight:400}
 .compareform input,.compareform textarea{width:100%}
 .compareform button{justify-self:start}
-.comparecols{display:grid;grid-template-columns:repeat(auto-fit,minmax(18rem,1fr));gap:1rem;margin-top:1rem}
+/* min(18rem,100%): at 200% text 18rem is wider than a phone, so a column never exceeds the page */
+.comparecols{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(18rem,100%),1fr));gap:1rem;margin-top:1rem}
 .comparehead{margin-bottom:1rem}
 .comparecols .panel{margin:0}
 .comparelist{list-style:none;margin:0;padding:0}
-.comparelist li{display:flex;gap:.6rem;align-items:baseline;padding:.3rem 0;
-  border-bottom:1px solid var(--border)}
+.comparelist li{display:flex;gap:.6rem;align-items:baseline;padding:.3rem 0;min-width:0;
+  overflow-wrap:anywhere;border-bottom:1px solid var(--border)}
 .comparelist li:last-child{border-bottom:0}
 .comparelist b{flex:0 0 3.2rem;color:var(--text-muted);font-variant-numeric:tabular-nums}
 .cardlink{background:none;border:0;padding:0;margin:0;color:var(--link);cursor:pointer;font:inherit;text-align:left}

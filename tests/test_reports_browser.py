@@ -617,3 +617,49 @@ def test_saved_descriptions_and_remove_fit_and_read(
         assert page.locator(".report .kept button").count() == 0
         assert not errors, errors
         browser.close()
+
+
+@pytest.mark.parametrize("width", [344, 390, 673, 1280])
+@pytest.mark.parametrize("scheme", ["light", "dark"])
+def test_compare_page_never_scrolls_sideways_at_200_percent_text(
+    server: Server, width: int, scheme: str
+) -> None:
+    """Review r5 M2: the Compare page's two columns were at least 18rem wide, wider than a phone
+    at 200% text (532 px of page at 390 px). At 100% and 200% text (root size and text-only), on
+    a phone, a Fold folded and open, and a desktop, in light and dark, nothing is outside the
+    window and the page does not scroll sideways (the whole page except from 600 to 768px, where
+    the site's own top bar, Track B's, runs past the window at 200% text on this branch)."""
+    from playwright.sync_api import sync_playwright
+
+    from .test_text_zoom_browser import ROOT_200, TEXT_200
+
+    exe = _chromium_path()
+    if exe == "missing":
+        pytest.skip("no Chromium available for Playwright")
+    sid = server.sign_in_and_link()
+    server.ark.private.discard(43)
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+        ctx = browser.new_context(viewport={"width": width, "height": 900}, color_scheme=scheme)
+        ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
+        page = ctx.new_page()
+        for zoom in ("none", ROOT_200, TEXT_200):
+            page.goto(f"{server.base}/decks/42/compare?with=43", wait_until="networkidle")
+            assert page.locator(".comparecols .panel").count() >= 2  # both decks' columns
+            if zoom != "none":
+                page.evaluate(zoom)
+            state = page.evaluate(
+                """() => {
+                  const vw = document.documentElement.clientWidth;
+                  const out = Array.from(document.querySelectorAll('.comparecols, .comparecols *'))
+                    .filter(e => e.getClientRects().length && e.getBoundingClientRect().right > vw + 1);
+                  return {sw: document.documentElement.scrollWidth, vw,
+                          out: out.slice(0, 3).map(e => e.tagName + ' ' + e.textContent.trim().slice(0, 30))};
+                }"""
+            )
+            label = "none" if zoom == "none" else ("root" if zoom == ROOT_200 else "text")
+            _shot(page, f"compare-{width}-{scheme}-{label}")
+            assert not state["out"], (label, state)
+            if zoom == "none" or not 600 <= width <= 768:
+                assert state["sw"] <= state["vw"], (label, state)
+        browser.close()
