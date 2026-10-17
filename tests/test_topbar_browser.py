@@ -5,6 +5,8 @@ scroll (gate B-2). Skipped without a Chromium build."""
 
 from __future__ import annotations
 
+from contextlib import contextmanager
+
 import pytest
 
 from .test_scan_browser import _chromium_path
@@ -14,6 +16,55 @@ from .test_suggest_browser import server as _server
 pytest.importorskip("playwright")
 
 server = _server  # the fixture, under its own name
+
+
+@pytest.fixture(scope="module")
+def chromium():
+    """One headless Chromium for the whole file; each test opens its own contexts and pages."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_path()
+    if exe == "missing":
+        pytest.skip("no Chromium available for Playwright")
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+        yield browser
+        browser.close()
+
+
+@contextmanager
+def _session(browser):
+    """The shared browser for one test; the test's contexts close when it ends, pass or fail."""
+    try:
+        yield browser
+    finally:
+        for ctx in list(browser.contexts):
+            ctx.close()
+
+
+# After the load event: these pages fetch nothing more that changes the layout (only the
+# favicon), so instead of waiting out 500 ms of network quiet on every load, wait for the fonts
+# and two frames, the frame topbar.js's ResizeObserver sets --bar-room in and one more. Without
+# scripts there is no observer and no frame to wait for (a frame callback never runs), so reading
+# the layout is enough.
+SETTLE = """async () => {
+  await document.fonts.ready;
+  await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+}"""
+SCRIPTS_RAN = "() => !!document.documentElement.style.getPropertyValue('--bar-room')"
+
+
+def _settle(page) -> None:
+    if page.evaluate(SCRIPTS_RAN):
+        page.evaluate(SETTLE)
+    else:
+        page.evaluate("() => document.body.getBoundingClientRect().height")
+
+
+def _open(page, url: str) -> None:
+    page.goto(url, wait_until="load")
+    _settle(page)
+
 
 GEOMETRY = """() => {
   const r = e => { const b = e.getBoundingClientRect(); return [Math.round(b.left), Math.round(b.right)]; };
@@ -67,15 +118,9 @@ def _zoom(page, zoom: str) -> None:
 
 
 @pytest.mark.parametrize("theme", ["light", "dark"])
-def test_account_menu_links_use_the_menu_colours(server: Server, theme: str) -> None:
-    from playwright.sync_api import sync_playwright
-
-    exe = _chromium_path()
-    if exe == "missing":
-        pytest.skip("no Chromium available for Playwright")
+def test_account_menu_links_use_the_menu_colours(chromium, server: Server, theme: str) -> None:
     sid = server.sign_in()
-    with sync_playwright() as p:
-        browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+    with _session(chromium) as browser:
         ctx = browser.new_context(viewport={"width": 1366, "height": 800})
         ctx.add_cookies(
             [
@@ -84,9 +129,8 @@ def test_account_menu_links_use_the_menu_colours(server: Server, theme: str) -> 
             ]
         )
         page = ctx.new_page()
-        page.goto(f"{server.base}/decks", wait_until="networkidle")
+        _open(page, f"{server.base}/decks")
         got = page.evaluate(MENU_LINK)
-        browser.close()
     # the menu's text colour, not the bar's white, and the menu's regular weight, not the bar's bold
     assert got["color"] == _hex_to_rgb(got["text"]), got
     assert got["color"] != _hex_to_rgb(got["bar"]), got
@@ -94,20 +138,15 @@ def test_account_menu_links_use_the_menu_colours(server: Server, theme: str) -> 
 
 
 def test_a_narrow_window_with_a_mouse_keeps_the_links_clear_of_the_account_button(
+    chromium,
     server: Server,
 ) -> None:
-    from playwright.sync_api import sync_playwright
-
-    exe = _chromium_path()
-    if exe == "missing":
-        pytest.skip("no Chromium available for Playwright")
     sid = _admin(server)  # eight links: Home, the six sections and Admin
-    with sync_playwright() as p:
-        browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+    with _session(chromium) as browser:
         ctx = browser.new_context(viewport={"width": 1000, "height": 700})
         ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
         page = ctx.new_page()
-        page.goto(f"{server.base}/decks", wait_until="networkidle")
+        _open(page, f"{server.base}/decks")
         seen = {}
         for width in (1000, 800, 760, 720, 705, 683, 673, 640, 600):
             page.set_viewport_size({"width": width, "height": 700})
@@ -116,7 +155,6 @@ def test_a_narrow_window_with_a_mouse_keeps_the_links_clear_of_the_account_butto
         page.set_viewport_size({"width": 599, "height": 700})
         page.wait_for_timeout(50)
         phone = page.evaluate(GEOMETRY)
-        browser.close()
     for width, g in seen.items():
         assert g["links"] == 8, (width, g)
         assert g["doc"] == g["win"] == width, (width, g)  # no sideways scroll
@@ -147,15 +185,10 @@ HOME_PLACE = """() => {
     "where",
     ["desktop", "phone", "phone-app", "fold-unfolded", "fold-unfolded-app", "fold-landscape-app"],
 )
-def test_home_is_never_under_more(server: Server, where: str) -> None:
+def test_home_is_never_under_more(chromium, server: Server, where: str) -> None:
     """Home sits left of Decks in the top bar and the phone tab bar and above Decks in the rail,
     never under More; the rail (an unfolded Fold, the app from 600 px) shows every page as a tab
     and has no More."""
-    from playwright.sync_api import sync_playwright
-
-    exe = _chromium_path()
-    if exe == "missing":
-        pytest.skip("no Chromium available for Playwright")
     width, height, touch, app = {
         "desktop": (1280, 800, False, False),
         "phone": (390, 844, True, False),
@@ -165,17 +198,15 @@ def test_home_is_never_under_more(server: Server, where: str) -> None:
         "fold-landscape-app": (1104, 820, True, True),
     }[where]
     sid = server.sign_in()
-    with sync_playwright() as p:
-        browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+    with _session(chromium) as browser:
         extra = {"user_agent": "Mozilla/5.0 (Linux; Android 14) MTGAssistant/0.7.27"} if app else {}
         ctx = browser.new_context(
             viewport={"width": width, "height": height}, has_touch=touch, is_mobile=touch, **extra
         )
         ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
         page = ctx.new_page()
-        page.goto(f"{server.base}/decks", wait_until="networkidle")
+        _open(page, f"{server.base}/decks")
         got = page.evaluate(HOME_PLACE)
-        browser.close()
     assert got["home"] and got["decks"], got
     assert not got["homeInMore"], got
     assert got["doc"] == got["win"], got  # no sideways scroll
@@ -222,18 +253,12 @@ NAV_FIT = """() => {
 
 
 @pytest.mark.parametrize("theme", ["light", "dark"])
-def test_the_top_bar_links_fit_at_every_width_and_text_size(server: Server, theme: str) -> None:
-    from playwright.sync_api import sync_playwright
-
+def test_the_top_bar_links_fit_at_every_width_and_text_size(chromium, server: Server, theme: str) -> None:
     from .test_text_zoom_browser import ROOT_200, TEXT_200
 
-    exe = _chromium_path()
-    if exe == "missing":
-        pytest.skip("no Chromium available for Playwright")
     sid = _admin(server)  # eight links: the most the bar carries
     problems: list[str] = []
-    with sync_playwright() as p:
-        browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+    with _session(chromium) as browser:
         for touch in (False, True):
             kw = {"has_touch": True, "is_mobile": True} if touch else {}
             ctx = browser.new_context(viewport={"width": 717, "height": 800}, **kw)
@@ -248,10 +273,10 @@ def test_the_top_bar_links_fit_at_every_width_and_text_size(server: Server, them
                 for width in (344, 360, 599, 600, 673, 717, 800, 899, 900, 1000, 1280, 1440):
                     for zoom in ("none", "root", "text"):
                         page.set_viewport_size({"width": width, "height": 800})
-                        page.goto(f"{server.base}{path}", wait_until="networkidle")
+                        _open(page, f"{server.base}{path}")
                         if zoom != "none":
                             page.evaluate(ROOT_200 if zoom == "root" else TEXT_200)
-                        page.wait_for_timeout(30)
+                        _settle(page)
                         g = page.evaluate(NAV_FIT)
                         where = f"{path} @{width}px {'touch' if touch else 'mouse'} {zoom}: {g}"
                         if g["doc"] != g["win"] or g["outside"] or g["underRight"] or g["overlap"]:
@@ -270,7 +295,6 @@ def test_the_top_bar_links_fit_at_every_width_and_text_size(server: Server, them
                         ):
                             problems.append(f"one row {where}")
             ctx.close()
-        browser.close()
     assert problems == [], "\n".join(problems)
 
 
@@ -293,38 +317,34 @@ ZOOMS = ["none", "root-125", "root-150", "root-175", "root", "text-125", "text-1
 
 @pytest.mark.parametrize("script", [True, False])
 @pytest.mark.parametrize("zoom", ZOOMS)
-def test_a_focused_control_is_never_hidden_under_the_top_bar(server: Server, zoom: str, script: bool) -> None:
+def test_a_focused_control_is_never_hidden_under_the_top_bar(
+    chromium, server: Server, zoom: str, script: bool
+) -> None:
     """With scripts off, the stylesheet's own room covers the bar at every text size from 100% to
     200% (review round 10; milestone review M-2: 5.5rem fell short between 125% and 175%). 920 px
     at 150% text is where the bar is tallest for its text size (183 px, about 8.7rem)."""
-    from playwright.sync_api import sync_playwright
-
-    exe = _chromium_path()
-    if exe == "missing":
-        pytest.skip("no Chromium available for Playwright")
     sid = _admin(server)
     hidden: list[str] = []
-    with sync_playwright() as p:
-        browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+    with _session(chromium) as browser:
         for width, height in ((1000, 700), (920, 700), (717, 700), (600, 700), (1280, 800)):
             ctx = browser.new_context(viewport={"width": width, "height": height}, java_script_enabled=script)
             ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
             page = ctx.new_page()
             for path in ("/admin/settings", "/history"):
-                page.goto(f"{server.base}{path}", wait_until="networkidle")
+                _open(page, f"{server.base}{path}")
                 _zoom(page, zoom)
-                page.wait_for_timeout(50)
+                _settle(page)
                 seen = 0
                 # forwards from the top, then backwards from the bottom
                 for key, start in (("Tab", "Home"), ("Shift+Tab", "End")):
                     page.evaluate("document.activeElement && document.activeElement.blur()")
-                    page.keyboard.press(start)
-                    page.wait_for_timeout(50)
+                    # at once, not with the Home or End key: that scroll is animated, and a
+                    # control measured while it runs would read as hidden
+                    page.evaluate(SCROLL_TO, start)
                     if key == "Shift+Tab":
                         page.evaluate("document.querySelector('footer.site a:last-of-type')?.focus()")
                     for _ in range(40):
                         page.keyboard.press(key)
-                        page.wait_for_timeout(30)
                         g = page.evaluate(FOCUSED)
                         if g is None:
                             continue
@@ -335,8 +355,11 @@ def test_a_focused_control_is_never_hidden_under_the_top_bar(server: Server, zoo
                             hidden.append(f"{path} @{width}px {zoom} {key}: {g}")
                 assert seen > 20, (path, width, zoom, seen)
             ctx.close()
-        browser.close()
     assert hidden == [], "\n".join(hidden[:20])
+
+
+SCROLL_TO = """edge => window.scrollTo({top: edge === 'Home' ? 0 : document.documentElement.scrollHeight,
+                                     behavior: 'instant'})"""
 
 
 # Milestone review M-1: Tab goes through the top bar in the order it reads, left to right and top
@@ -352,24 +375,18 @@ TAB_STOP = """() => {
 
 
 @pytest.mark.parametrize("zoom", ZOOMS)
-def test_tab_goes_through_the_top_bar_in_the_order_it_reads(server: Server, zoom: str) -> None:
-    from playwright.sync_api import sync_playwright
-
-    exe = _chromium_path()
-    if exe == "missing":
-        pytest.skip("no Chromium available for Playwright")
+def test_tab_goes_through_the_top_bar_in_the_order_it_reads(chromium, server: Server, zoom: str) -> None:
     sid = _admin(server)
     problems: list[str] = []
-    with sync_playwright() as p:
-        browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+    with _session(chromium) as browser:
         ctx = browser.new_context(viewport={"width": 1000, "height": 800})
         ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
         page = ctx.new_page()
         for width in (600, 673, 717, 800, 899, 900, 920, 1000, 1280, 1440):
             page.set_viewport_size({"width": width, "height": 800})
-            page.goto(f"{server.base}/history", wait_until="networkidle")
+            _open(page, f"{server.base}/history")
             _zoom(page, zoom)
-            page.wait_for_timeout(30)
+            _settle(page)
             stops = []
             for _ in range(20):
                 page.keyboard.press("Tab")
@@ -385,7 +402,6 @@ def test_tab_goes_through_the_top_bar_in_the_order_it_reads(server: Server, zoom
                 row = b["top"] < a["bottom"] - 1 and a["top"] < b["bottom"] - 1
                 if b["bottom"] <= a["top"] + 1 or (row and b["right"] <= a["left"] + 1):
                     problems.append(f"{where}: {a['what']} then {b['what']}")
-        browser.close()
     assert problems == [], "\n".join(problems)
 
 
@@ -411,16 +427,12 @@ BAR_OVERLAP = """() => {
 
 @pytest.mark.parametrize("script", [True, False])
 @pytest.mark.parametrize("role", ["member", "admin"])
-def test_nothing_in_the_top_bar_sits_over_anything_else(server: Server, role: str, script: bool) -> None:
-    from playwright.sync_api import sync_playwright
-
-    exe = _chromium_path()
-    if exe == "missing":
-        pytest.skip("no Chromium available for Playwright")
+def test_nothing_in_the_top_bar_sits_over_anything_else(
+    chromium, server: Server, role: str, script: bool
+) -> None:
     sid = _admin(server) if role == "admin" else server.sign_in()
     problems: list[str] = []
-    with sync_playwright() as p:
-        browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+    with _session(chromium) as browser:
         ctx = browser.new_context(viewport={"width": 1000, "height": 800}, java_script_enabled=script)
         ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
         page = ctx.new_page()
@@ -428,13 +440,12 @@ def test_nothing_in_the_top_bar_sits_over_anything_else(server: Server, role: st
         for width in widths:
             for zoom in [*ZOOMS, "root-110", "text-110"]:
                 page.set_viewport_size({"width": width, "height": 800})
-                page.goto(f"{server.base}/history", wait_until="networkidle")
+                _open(page, f"{server.base}/history")
                 _zoom(page, zoom)
-                page.wait_for_timeout(20)
+                _settle(page)
                 g = page.evaluate(BAR_OVERLAP)
                 if g["overlap"] or g["outside"] or g["doc"] != g["win"]:
                     problems.append(f"@{width}px {zoom}: {g}")
-        browser.close()
     assert problems == [], "\n".join(problems[:40]) + f"\n… {len(problems)} in all"
 
 
@@ -447,20 +458,14 @@ BRAND_AND_SEARCH = """() => {
 }"""
 
 
-def test_a_long_server_name_gives_way_before_the_search_box_and_the_links(server: Server) -> None:
+def test_a_long_server_name_gives_way_before_the_search_box_and_the_links(chromium, server: Server) -> None:
     """The order the one-row bar gives up room in (review R12-1, 83ec5a7): the brand's word first
     (an ellipsis), then the search box down to 9rem; the links never."""
-    from playwright.sync_api import sync_playwright
-
-    exe = _chromium_path()
-    if exe == "missing":
-        pytest.skip("no Chromium available for Playwright")
     sid = _admin(server)
     settings = server.app.state.gateway.settings
     short_name = settings.server_name
     problems: list[str] = []
-    with sync_playwright() as p:
-        browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+    with _session(chromium) as browser:
         ctx = browser.new_context(viewport={"width": 1280, "height": 800})
         ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
         page = ctx.new_page()
@@ -468,9 +473,9 @@ def test_a_long_server_name_gives_way_before_the_search_box_and_the_links(server
         def measure(name: str, width: int, zoom: str) -> dict:
             object.__setattr__(settings, "server_name", name)
             page.set_viewport_size({"width": width, "height": 800})
-            page.goto(f"{server.base}/history", wait_until="networkidle")
+            _open(page, f"{server.base}/history")
             _zoom(page, zoom)
-            page.wait_for_timeout(20)
+            _settle(page)
             g = page.evaluate(BAR_OVERLAP)
             if g["overlap"] or g["outside"] or g["doc"] != g["win"]:
                 problems.append(f"@{width}px {zoom} {name!r}: {g}")
@@ -489,35 +494,27 @@ def test_a_long_server_name_gives_way_before_the_search_box_and_the_links(server
             at_1280 = measure(LONG_NAME, 1280, "none")
         finally:
             object.__setattr__(settings, "server_name", short_name)
-            browser.close()
     assert problems == [], "\n".join(problems)
     assert at_1280["cut"] and at_1280["search"] >= full_1280 - 0.05, (at_1280, full_1280)  # name cut, not box
 
 
-def test_without_scripts_the_scroll_room_is_large_only_where_the_bar_wraps(server: Server) -> None:
+def test_without_scripts_the_scroll_room_is_large_only_where_the_bar_wraps(chromium, server: Server) -> None:
     """Review R12-2: 60 px over the one-row bar, 9.5rem where its links wrap."""
-    from playwright.sync_api import sync_playwright
-
-    exe = _chromium_path()
-    if exe == "missing":
-        pytest.skip("no Chromium available for Playwright")
     sid = _admin(server)
     seen = {}
-    with sync_playwright() as p:
-        browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+    with _session(chromium) as browser:
         ctx = browser.new_context(viewport={"width": 1280, "height": 800}, java_script_enabled=False)
         ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
         page = ctx.new_page()
         for width, zoom in ((390, "none"), (717, "none"), (1280, "none"), (920, "root-150"), (717, "text")):
             page.set_viewport_size({"width": width, "height": 800})
-            page.goto(f"{server.base}/history", wait_until="networkidle")
+            _open(page, f"{server.base}/history")
             _zoom(page, zoom)
             seen[(width, zoom)] = page.evaluate(
                 "() => [getComputedStyle(document.documentElement).scrollPaddingTop,"
                 " document.querySelector('.topbar').offsetHeight,"
                 " parseFloat(getComputedStyle(document.documentElement).fontSize)]"
             )
-        browser.close()
     for (width, zoom), (room, bar, rem) in seen.items():
         if bar == 50:
             assert room == "60px", (width, zoom, room)
@@ -545,41 +542,30 @@ PLACEHOLDER_FIT = """() => {
 
 
 @pytest.mark.parametrize("role", ["member", "admin"])
-def test_the_search_placeholder_fits_beside_the_links_at_normal_size(server: Server, role: str) -> None:
-    from playwright.sync_api import sync_playwright
-
-    exe = _chromium_path()
-    if exe == "missing":
-        pytest.skip("no Chromium available for Playwright")
+def test_the_search_placeholder_fits_beside_the_links_at_normal_size(
+    chromium, server: Server, role: str
+) -> None:
     sid = _admin(server) if role == "admin" else server.sign_in()
     problems: list[str] = []
-    with sync_playwright() as p:
-        browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+    with _session(chromium) as browser:
         ctx = browser.new_context(viewport={"width": 1280, "height": 800})
         ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
         page = ctx.new_page()
         for width in (900, 920, 940, 960, 980, 1000, 1010, 1023, 1024, 1040, 1100, 1280, 1920):
             page.set_viewport_size({"width": width, "height": 800})
-            page.goto(f"{server.base}/history", wait_until="networkidle")
+            _open(page, f"{server.base}/history")
             m = page.evaluate(PLACEHOLDER_FIT)
             if m["text"] > m["room"] + 0.5 or m["bar"] != 50:
                 problems.append(f"@{width}px: {m}")
-        browser.close()
     assert problems == [], "\n".join(problems)
 
 
 # The app has no text links in its bar, so the one-row rules for the links leave it alone (review
 # R13-2: at 344 px, the Fold's cover screen, they cut the gateway's name one letter earlier).
 @pytest.mark.parametrize("width", [344, 360, 412, 884])
-def test_the_app_bar_keeps_its_own_spacing(server: Server, width: int) -> None:
-    from playwright.sync_api import sync_playwright
-
-    exe = _chromium_path()
-    if exe == "missing":
-        pytest.skip("no Chromium available for Playwright")
+def test_the_app_bar_keeps_its_own_spacing(chromium, server: Server, width: int) -> None:
     sid = server.sign_in()
-    with sync_playwright() as p:
-        browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+    with _session(chromium) as browser:
         ctx = browser.new_context(
             viewport={"width": width, "height": 800},
             has_touch=True,
@@ -588,14 +574,13 @@ def test_the_app_bar_keeps_its_own_spacing(server: Server, width: int) -> None:
         )
         ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
         page = ctx.new_page()
-        page.goto(f"{server.base}/decks", wait_until="networkidle")
+        _open(page, f"{server.base}/decks")
         got = page.evaluate(
             "() => { const s = q => getComputedStyle(document.querySelector(q)); return {"
             " app: document.body.classList.contains('app'), left: s('.topbar .left').display,"
             " pad: s('.topbar .right').paddingLeft, word: s('.topbar .brand .word').display,"
             " doc: document.documentElement.scrollWidth, win: innerWidth}; }"
         )
-        browser.close()
     assert got["app"] and got["word"] != "none", got
     assert got["left"] == "flex" and got["pad"] == "0px", got  # the brand gets the room the old way
     assert got["doc"] == got["win"], got
@@ -606,16 +591,10 @@ def test_the_app_bar_keeps_its_own_spacing(server: Server, width: int) -> None:
 # were the link disclosure's "/decks/{deck_id}" (shown open without scripts) and the
 # "Notifications" heading at 320 px; both now break instead.
 @pytest.mark.parametrize("script", [True, False], ids=["script", "no-script"])
-def test_the_account_page_fits_a_phone_at_200_percent_text(server: Server, script: bool) -> None:
-    from playwright.sync_api import sync_playwright
-
-    exe = _chromium_path()
-    if exe == "missing":
-        pytest.skip("no Chromium available for Playwright")
+def test_the_account_page_fits_a_phone_at_200_percent_text(chromium, server: Server, script: bool) -> None:
     sid = server.sign_in()
     problems: list[str] = []
-    with sync_playwright() as p:
-        browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+    with _session(chromium) as browser:
         for width in (320, 344, 360):
             for zoom in ("root", "text"):
                 ctx = browser.new_context(
@@ -623,9 +602,9 @@ def test_the_account_page_fits_a_phone_at_200_percent_text(server: Server, scrip
                 )
                 ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
                 page = ctx.new_page()
-                page.goto(f"{server.base}/account", wait_until="networkidle")
+                _open(page, f"{server.base}/account")
                 _zoom(page, zoom)
-                page.wait_for_timeout(50)
+                _settle(page)
                 got = page.evaluate(
                     "() => ({doc: document.documentElement.scrollWidth,"
                     " win: document.documentElement.clientWidth,"
@@ -635,5 +614,4 @@ def test_the_account_page_fits_a_phone_at_200_percent_text(server: Server, scrip
                 if got["doc"] > got["win"] or got["tabbar"] > got["win"] + 0.5 or not got["disclosure"]:
                     problems.append(f"@{width}px {zoom}: {got}")
                 ctx.close()
-        browser.close()
     assert problems == [], "\n".join(problems)

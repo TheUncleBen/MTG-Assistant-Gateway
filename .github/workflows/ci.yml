@@ -137,8 +137,9 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
-    # the suite takes about 25 minutes; a hung browser test fails the job instead of holding it 6 hours
-    timeout-minutes: 60
+    # the suite's pytest step took about 57 minutes on a runner during 0.7.29; 90 leaves room for a
+    # slow runner, and a hung browser test still fails the job instead of holding it 6 hours
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
