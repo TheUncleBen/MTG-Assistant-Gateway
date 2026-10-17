@@ -84,6 +84,9 @@ shot() { adb exec-out screencap -p > "$OUT/$1.png" 2>/dev/null || true; }
 until_ok() { local t=0; while ! eval "$1" >/dev/null 2>&1; do sleep 2; t=$((t + 2)); [ "$t" -ge "$2" ] && return 1; done; }
 shows() { notes | grep -qF "$1"; }
 running() { adb shell dumpsys activity services "$PKG" 2>/dev/null | grep -q NotifyService; }
+prefs() { adb shell run-as "$PKG" cat shared_prefs/mtgassistant.xml 2>/dev/null | tr -d '\r'; }
+key_stored() { prefs | grep -qF "<string name=\"push_key\">$KEY</string>"; }
+in_recents() { adb shell dumpsys activity recents 2>/dev/null | grep -q "realActivity=.*$PKG/"; }
 connected() { [ "$(state connections)" -ge 1 ]; }
 boot() {
   adb wait-for-device
@@ -135,7 +138,12 @@ adb shell "run-as $PKG sh -c 'mkdir -p shared_prefs && cat > shared_prefs/mtgass
     <string name="push_key">$KEY</string>
 </map>
 XML
-adb shell run-as "$PKG" cat shared_prefs/mtgassistant.xml | grep -q push_key || echo "note: the member's key was not written"
+if key_stored && prefs | grep -qF "<string name=\"gateway_origin\">https://localhost:$PORT</string>"; then
+  result "set up with the key and the gateway address" ok
+else
+  result "set up with the key and the gateway address" no "the app's settings file was not written"
+  echo "stopping: every scenario after this needs them"; exit 1
+fi
 # The service isn't exported, so adb can't start it; opening the app starts it, as on a phone.
 adb shell am start -W -n "$PKG/local.mtgassistantgateway.app.MainActivity" >/dev/null; sleep 3
 adb shell input keyevent KEYCODE_HOME
@@ -166,16 +174,23 @@ shot 02-message
 
 # -- one message per deck: replaced as the count changes, removed when nothing waits
 send m002AbCdEf "1 change to Atraxa is waiting for you" "Open it." deck-42
-until_ok 'shows "1 change to Atraxa is waiting for you"' 30
-send m003AbCdEf "2 changes to Atraxa are waiting for you" "Open it." deck-42
-if until_ok 'shows "2 changes to Atraxa are waiting for you"' 30 && ! shows "1 change to Atraxa is waiting for you"; then
-  result "a deck's message is replaced" ok
+if ! until_ok 'shows "1 change to Atraxa is waiting for you"' 30; then
+  result "a deck's message is replaced" no "the deck's first message never showed"
 else
-  result "a deck's message is replaced" no "both or neither in dumpsys"
+  send m003AbCdEf "2 changes to Atraxa are waiting for you" "Open it." deck-42
+  if until_ok 'shows "2 changes to Atraxa are waiting for you"' 30 && ! shows "1 change to Atraxa is waiting for you"; then
+    result "a deck's message is replaced" ok
+  else
+    result "a deck's message is replaced" no "both or neither in dumpsys"
+  fi
 fi
 shot 03-grouped
-ctl delete -d '{"sequence_id":"deck-42"}' >/dev/null
-if until_ok '! shows "2 changes to Atraxa are waiting for you"' 30; then result "a withdrawn message goes" ok; else result "a withdrawn message goes" no "still shown"; fi
+if ! shows "2 changes to Atraxa are waiting for you"; then
+  result "a withdrawn message goes" no "the deck's message was not shown to begin with"
+else
+  ctl delete -d '{"sequence_id":"deck-42"}' >/dev/null
+  if until_ok '! shows "2 changes to Atraxa are waiting for you"' 30; then result "a withdrawn message goes" ok; else result "a withdrawn message goes" no "still shown"; fi
+fi
 
 # -- the app swiped away from Recents: the service keeps running
 adb shell am start -W -n "$PKG/local.mtgassistantgateway.app.MainActivity" >/dev/null
@@ -188,7 +203,13 @@ adb shell input swipe $((w / 2)) $((h / 2)) $((w / 2)) $((h / 10)) 300
 sleep 2
 adb shell input keyevent KEYCODE_HOME
 send m004AbCdEf "After swipe" "Still here"
-if running && until_ok 'shows "After swipe"' 30; then result "swiped away from Recents" ok; else result "swiped away from Recents" no "service gone or message missing"; fi
+if in_recents; then
+  result "swiped away from Recents" no "the app was still in Recents after the swipe"
+elif running && until_ok 'shows "After swipe"' 30; then
+  result "swiped away from Recents" ok
+else
+  result "swiped away from Recents" no "service gone or message missing"
+fi
 
 # -- the ongoing notification dismissed (Android 14+ lets people swipe it away): messages still arrive
 adb shell cmd statusbar expand-notifications
@@ -205,7 +226,9 @@ if [ -n "$bounds" ]; then
 fi
 adb shell cmd statusbar collapse
 send m005AbCdEf "After dismiss" "Still here"
-if running && until_ok 'shows "After dismiss"' 30; then
+if [ -z "$bounds" ]; then
+  result "ongoing notification dismissed" no "the Always connected notification was not found to swipe away"
+elif running && until_ok 'shows "After dismiss"' 30; then
   result "ongoing notification dismissed" ok
 else
   result "ongoing notification dismissed" no "service gone or message missing (swipe target found: ${bounds:-no})"
@@ -214,8 +237,12 @@ fi
 # -- Doze: the phone unplugged and idle; the app is allowed to run in the background
 adb shell dumpsys battery unplug
 adb shell dumpsys deviceidle force-idle >/dev/null
-send m006AbCdEf "In Doze" "Arrived while idle"
-if until_ok 'shows "In Doze"' 60; then result "Doze" ok; else result "Doze" no "not delivered while idle"; fi
+if [ "$(adb shell dumpsys deviceidle get deep | tr -d '\r')" != IDLE ]; then
+  result "Doze" no "the phone did not go idle"
+else
+  send m006AbCdEf "In Doze" "Arrived while idle"
+  if until_ok 'shows "In Doze"' 60; then result "Doze" ok; else result "Doze" no "not delivered while idle"; fi
+fi
 adb shell dumpsys deviceidle unforce >/dev/null
 adb shell dumpsys battery reset
 
@@ -224,33 +251,51 @@ before=$(state connects)
 adb install -r "$APK" >/dev/null
 if until_ok '[ "$(state connects)" -gt '"$before"' ] && connected' 90; then result "after an app update" ok; else result "after an app update" no "no new connection"; fi
 send m007AbCdEf "After update" "Still here"
-until_ok 'shows "After update"' 30 || result "message after an update" no "missing"
+if until_ok 'shows "After update"' 30; then result "message after an update" ok; else result "message after an update" no "missing"; fi
 
 # -- a restart of the phone
+before=$(state connects)
 adb reboot
 boot
-if until_ok connected 180; then result "after a reboot" ok; else result "after a reboot" no "no connection after boot"; fi
+if until_ok '[ "$(state connects)" -gt '"$before"' ] && connected' 180; then result "after a reboot" ok; else result "after a reboot" no "no connection after boot"; fi
 send m008AbCdEf "After reboot" "Still here"
 if until_ok 'shows "After reboot"' 30; then result "message after a reboot" ok; else result "message after a reboot" no "missing"; fi
 shot 04-after-reboot
 
-# -- missed while offline: since= brings it back once
+# -- missed while offline: since= brings it back once. The emulator reaches the stand-in through adb
+# reverse, not its network, so the test cuts that and ends the stream as well as turning the network off.
 adb shell svc wifi disable; adb shell svc data disable
-sleep 5
-send m009AbCdEf "While offline" "Missed"
-adb shell svc wifi enable; adb shell svc data enable
-if until_ok 'shows "While offline"' 120; then result "missed while offline" ok; else result "missed while offline" no "not caught up"; fi
+adb reverse --remove "tcp:$PORT"
+ctl drop -d '{}' >/dev/null
+if ! until_ok '[ "$(state connections)" -eq 0 ]' 30; then
+  result "missed while offline" no "the app stayed connected"
+else
+  send m009AbCdEf "While offline" "Missed"
+  adb reverse "tcp:$PORT" "tcp:$PORT"
+  adb shell svc wifi enable; adb shell svc data enable
+  if until_ok 'shows "While offline"' 120 && [ "$(state last_since)" != None ]; then
+    result "missed while offline" ok
+  else
+    result "missed while offline" no "not caught up"
+  fi
+fi
+adb reverse "tcp:$PORT" "tcp:$PORT" 2>/dev/null
 
 # -- Stop (force stop, as Android's task manager does): stays stopped until the app is opened
+until_ok connected 60
+was_running=no; running && connected && was_running=yes
 adb shell am force-stop "$PKG"
 sleep 5
-if ! running && until_ok '[ "$(state connections)" -eq 0 ]' 30; then result "stopped stays stopped" ok; else result "stopped stays stopped" no "still running"; fi
+if [ "$was_running" = no ]; then
+  result "stopped stays stopped" no "the service was not running and connected before Stop"
+elif ! running && until_ok '[ "$(state connections)" -eq 0 ]' 30; then result "stopped stays stopped" ok; else result "stopped stays stopped" no "still running"; fi
 adb shell am start -W -n "$PKG/local.mtgassistantgateway.app.MainActivity" >/dev/null
 if until_ok connected 60; then result "opening the app starts it again" ok; else result "opening the app starts it again" no "no connection"; fi
 
 # -- the gateway says notifications are off: the app stops and forgets the key
-ctl refuse -d '{"status":403,"error":"off"}' >/dev/null
-if until_ok '! running' 120 && ! adb shell run-as "$PKG" cat shared_prefs/mtgassistant.xml | grep -q push_key; then
+if ! key_stored || ! running; then
+  result "stops when switched off" no "the key was not stored or the service not running before the switch-off"
+elif ctl refuse -d '{"status":403,"error":"off"}' >/dev/null && until_ok '! running' 120 && ! key_stored; then
   result "stops when switched off" ok
 else
   result "stops when switched off" no "still running or key kept"
@@ -272,7 +317,8 @@ if tap_text "Scan with the app's camera" && until_ok '[ "$(hits /scan)" -gt '"$b
 sleep 3
 shot menu-scan
 adb shell input keyevent KEYCODE_BACK; sleep 1
-adb shell am start -W -a android.intent.action.VIEW -d "https://localhost:$PORT/" "$PKG" >/dev/null; sleep 4
+# The app opens no https links itself, so it is opened afresh on the gateway's page.
+adb shell am force-stop "$PKG"; app
 if tap_text "Change gateway" && until_ok 'top | grep -q SetupActivity' 20; then result "menu: Change gateway" ok; else result "menu: Change gateway" no "the setup screen did not open"; fi
 shot menu-change-gateway
 
