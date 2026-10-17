@@ -299,12 +299,13 @@ class RateBudget:
         self.window = float(window)
         self._buckets: dict[str, tuple[float, float]] = {}
 
-    def take(self, key: str) -> bool:
-        """Spend one call for ``key``; False (and nothing spent) when its bucket is empty."""
+    def take(self, key: str, *, keep: int = 0) -> bool:
+        """Spend one call for ``key``; False (and nothing spent) when its bucket is empty, or when
+        spending would leave fewer than ``keep`` calls in it."""
         now = time.monotonic()
         tokens, at = self._buckets.get(key, (float(self.per_window), now))
         tokens = min(float(self.per_window), tokens + (now - at) * self.per_window / self.window)
-        if tokens < 1:
+        if tokens < 1 + keep:
             self._buckets[key] = (tokens, now)
             return False
         self._buckets[key] = (tokens - 1, now)
@@ -1960,6 +1961,13 @@ class DeckService:
             f"the last {ARCHIDEKT_BUDGET_WINDOW // 60} minutes; wait a few minutes and try again."
         )
 
+    def _sync_spend(self, sub: str) -> None:
+        """Spend one unit of the member's Archidekt budget for a deck sync read, only while at
+        least a quarter of the budget stays for the member's own actions; DeckError("budget")
+        otherwise, which ends that member's check until the next one."""
+        if not self.archidekt_budget.take(sub, keep=self.archidekt_budget.per_window // 4):
+            raise DeckError("budget", "The deck sync waits while the member's Archidekt budget is low.")
+
     # -- account links --------------------------------------------------------
     async def _link_attempt(self, sub: str, login: str, password: str) -> dict[str, Any]:
         """One Archidekt sign-in for ``link``, refused past MAX_LINK_FAILURES recent failures."""
@@ -2448,11 +2456,13 @@ class DeckService:
     async def sync_deck_list(self, sub: str, *, wait: float = 120.0) -> list[dict[str, Any]] | None:
         """The member's deck list for the deck sync: the cached one while it is fresh, else one
         listing request (shared with a page's read already under way). Read-only, outside the
-        member's own Archidekt slot and budget, and not counted as the member using their link.
-        None when the read takes longer than ``wait`` (it carries on and fills the cache)."""
+        member's own Archidekt slot, and not counted as the member using their link; it spends
+        from their budget (:meth:`_sync_spend`). None when the read takes longer than ``wait`` (it
+        carries on and fills the cache)."""
         value, state = self.deck_lists.peek(sub)
         if state == "fresh":
             return [dict(d) for d in value]
+        self._sync_spend(sub)
         _token, row = self._token(sub)
         folder = self.settings.archidekt_backup_folder  # with backups on or off (Q21)
 
@@ -2472,8 +2482,10 @@ class DeckService:
 
     async def sync_read_deck(self, sub: str, deck_id: str) -> Deck:
         """One live read of the member's deck for the deck sync (never cached, like every read
-        with the member's session); outside their slot and budget, like sync_deck_list."""
+        with the member's session); outside their slot, spending from their budget, like
+        sync_deck_list."""
         deck_id = _clean_deck_id(deck_id)
+        self._sync_spend(sub)
         deck: Deck = await self._call_unslotted(sub, self.client.get_deck, deck_id, background=True)
         return deck
 
@@ -2481,18 +2493,22 @@ class DeckService:
         """``sync_read_deck`` for a deck that is not the member's own (the source of a waiting
         copy, A10): read as ``get_any_deck`` reads it (the member's session first, else
         anonymously), so it compares with the deck the proposal was made from; outside the
-        member's slot and budget."""
+        member's slot, spending from their budget. Each request is sent once, never retried."""
         deck_id = _clean_deck_id(deck_id)
+        self._sync_spend(sub)
         try:
             deck: Deck = await self._call_unslotted(sub, self.client.get_deck, deck_id, background=True)
             return deck
         except DeckError as exc:
             if exc.kind not in ("not_found", "auth", "forbidden", "not_linked"):
                 raise
+        quiet = no_retry.set(True)
         try:
             return await self.client.get_deck(None, deck_id, fresh=True)
         except ArchidektError as exc:
             raise DeckError(exc.kind, str(exc)) from exc
+        finally:
+            no_retry.reset(quiet)
 
     def _assistant_policy(self, sub: str, row: dict[str, Any]) -> tuple[str, str, str, bool]:
         """(risk, why, mode, allowed): the proposal's risk tier and reason, the member's approval

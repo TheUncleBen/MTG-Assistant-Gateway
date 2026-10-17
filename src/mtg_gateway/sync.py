@@ -8,7 +8,8 @@ already reads, with each deck's ``updatedAt``; one request per 50 decks, at most
 plus a full read of a deck only when it has a waiting proposal and its ``updatedAt`` moved since
 the last check (at most MAX_DECK_READS per check). Only the member's own decks are in that list;
 a waiting proposal on someone else's deck (a copy of a public deck) has no such signal, so that
-deck is read in full on each check, inside the same cap (0.7.29, leftover A4, Track A call A10).
+deck is read in full, inside the same cap, at most once per OTHER_GAP; one that Archidekt says is
+gone or private is left alone for GONE_GAP (0.7.29, leftover A4, Track A call A10).
 The fresh list lands in the member's deck-list cache, so the app shows the current decks.
 
 What it does with a changed deck (0.7.29, K1): each waiting proposal on it is worked out again on
@@ -26,7 +27,9 @@ Rules it keeps (COMPARISON.md section 7, R1-R5):
   every member's Archidekt work, every apply and the shared pacer to be idle, and skips the rest
   of the check (until the next one) rather than queue behind them; a member arriving while one
   of its requests is in the pacer waits for that one request. All checks share one lock, so at
-  most one background request is ever in the pacer. It uses no member's Archidekt slot or budget.
+  most one background request is ever in the pacer. It uses no member's Archidekt slot; each read
+  spends from the member's own budget, and the check stops while less than a quarter of that
+  budget is left, so the member's own actions always have room.
 - A deck with an apply or restore running is left alone until that ends.
 - Fails quietly: every request is sent once, never retried, and nothing is sent while the
   pacer's breaker or a Retry-After pause is on. Any error ends that member's check, and Archidekt
@@ -57,6 +60,8 @@ OPEN_GAP = 5 * 60.0  # an app open checks again once the member's last check is 
 IDLE_WAIT = 10.0  # how long a step waits for members' Archidekt work to end before skipping
 IDLE_POLL = 0.5
 MAX_DECK_READS = 5  # full deck reads one member's check may make; the rest wait for the next
+OTHER_GAP = 30 * 60.0  # a deck the member doesn't own is read again once its last read is this old
+GONE_GAP = 6 * 3600.0  # ... and once this old after Archidekt said it is gone or private
 START_DELAY = 120.0  # the first timed round after a start
 MAX_SEEN = 20_000
 
@@ -71,6 +76,8 @@ class DeckSync:
         self._tasks: dict[str, asyncio.Task[Any]] = {}  # sub -> the app-open check under way
         # (sub, deck id) -> the deck list's updatedAt when its waiting proposals were last compared
         self._seen: dict[tuple[str, str], str] = {}
+        # (sub, deck id) of a deck the member doesn't own -> when it may be read again (monotonic)
+        self._next_read: dict[tuple[str, str], float] = {}
 
     @property
     def enabled(self) -> bool:
@@ -163,6 +170,8 @@ class DeckSync:
     async def _check(self, sub: str) -> dict[str, Any]:
         if len(self._seen) >= MAX_SEEN:
             self._seen.clear()
+        if len(self._next_read) >= MAX_SEEN:
+            self._next_read.clear()
         if not await self._idle():
             return {"skipped": "busy"}
         rows = await self.decks.sync_deck_list(sub)
@@ -181,6 +190,8 @@ class DeckSync:
             own = deck_id in listed
             if own and listed[deck_id] and self._seen.get(key) == listed[deck_id]:
                 continue  # unchanged on Archidekt since its proposals were last compared
+            if not own and time.monotonic() < self._next_read.get(key, 0.0):
+                continue  # read lately, or gone: no updatedAt to tell, so not on every check
             if reads >= MAX_DECK_READS:
                 skipped = "read_cap"
                 break
@@ -189,11 +200,18 @@ class DeckSync:
             if not await self._idle():
                 skipped = "busy"
                 break
-            deck = await (
-                self.decks.sync_read_deck(sub, deck_id)
-                if own
-                else self.decks.sync_read_any_deck(sub, deck_id)
-            )
+            if own:
+                deck = await self.decks.sync_read_deck(sub, deck_id)
+            else:
+                self._next_read[key] = time.monotonic() + OTHER_GAP
+                try:
+                    deck = await self.decks.sync_read_any_deck(sub, deck_id)
+                except DeckError as exc:
+                    if exc.kind not in ("not_found", "auth", "forbidden", "not_linked"):
+                        raise
+                    reads += 1  # gone or private: Apply says so when pressed
+                    self._next_read[key] = time.monotonic() + GONE_GAP
+                    continue
             reads += 1
             if self.decks.deck_busy(sub, deck_id):
                 continue  # an apply started meanwhile: what was read may be halfway through it

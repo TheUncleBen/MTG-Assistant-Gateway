@@ -28,6 +28,7 @@ class _Decks:
         self.busy_after_read: set[str] = set()
         self.list_answer: Any = "list"
         self.list_error: dict[str, str] = {}  # sub -> DeckError kind raised by the list read
+        self.gone: set[str] = set()  # decks someone else owns that Archidekt says are gone
         self.client = SimpleNamespace(pacer=SimpleNamespace(paused=lambda: self.paused))
         self.db = SimpleNamespace(
             pending_baselines=self._baselines,
@@ -61,6 +62,8 @@ class _Decks:
 
     async def sync_read_any_deck(self, sub: str, deck_id: str) -> Any:
         self.calls.append(("read_any", deck_id))
+        if deck_id in self.gone:
+            raise DeckError("not_found", "Deck not found")
         return SimpleNamespace(id=deck_id)
 
     def recheck_waiting(self, sub: str, deck: Any) -> dict[str, str]:
@@ -115,14 +118,41 @@ async def test_a_deck_being_written_is_left_for_a_later_check() -> None:
     assert {c[1] for c in decks.calls if c[0] == "recheck"} == {"1", "2"}
 
 
-async def test_someone_elses_deck_is_read_on_every_check() -> None:
+async def test_someone_elses_deck_is_read_again_only_after_a_gap(monkeypatch) -> None:
+    now = [1000.0]
+    monkeypatch.setattr(sync_mod.time, "monotonic", lambda: now[0])
     decks = _Decks({"u": ["1", "99"]}, {"u": {"1": "t1"}})
     sync = _sync(decks)
     await sync.check("u")
+    assert ("read_any", "99") in decks.calls
+    # a page opened a few minutes later: its own deck is unchanged (same updatedAt), and the copy
+    # of a public deck, which has no such signal, was read lately
+    decks.calls.clear()
+    now[0] += sync_mod.OPEN_GAP
+    await sync.check("u")
+    assert [c for c in decks.calls if c[0].startswith("read")] == []
+    now[0] += sync_mod.OTHER_GAP
+    await sync.check("u")
+    assert [c for c in decks.calls if c[0].startswith("read")] == [("read_any", "99")]
+
+
+async def test_someone_elses_deck_that_is_gone_is_left_alone_for_a_while(monkeypatch) -> None:
+    now = [1000.0]
+    monkeypatch.setattr(sync_mod.time, "monotonic", lambda: now[0])
+    decks = _Decks({"u": ["98", "99"]}, {"u": {}})
+    decks.gone = {"98"}
+    sync = _sync(decks)
+    out = await sync.check("u")
+    # the gone deck doesn't end the check: the next one is still compared
+    assert "error" not in out and ("recheck", "99") in decks.calls and ("recheck", "98") not in decks.calls
+    now[0] += sync_mod.OTHER_GAP
     decks.calls.clear()
     await sync.check("u")
-    # its own deck is unchanged (same updatedAt); the copy of a public deck has no such signal
     assert [c for c in decks.calls if c[0].startswith("read")] == [("read_any", "99")]
+    now[0] += sync_mod.GONE_GAP
+    decks.calls.clear()
+    await sync.check("u")
+    assert ("read_any", "98") in decks.calls
 
 
 @pytest.mark.parametrize("kind", ["unavailable", "rate_limited"])
