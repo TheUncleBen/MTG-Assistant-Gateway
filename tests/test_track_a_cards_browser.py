@@ -701,3 +701,47 @@ def test_the_no_press_badge_fits_a_phone_at_any_text_size(width: int, text: str)
             _shot(page, f"proposal-card-nopress-{width}-{text.rstrip('%')}")
         finally:
             browser.close()
+
+
+@pytest.mark.parametrize("width,theme", [(380, "light"), (380, "dark"), (700, "light"), (700, "dark")])
+def test_a_low_risk_copy_is_called_a_change_not_an_edit(width: int, theme: str) -> None:
+    """A private copy of a deck that Semi-auto may apply reads "Low-risk change (copies a deck …)":
+    a copy edits nothing, so "edit" was wrong. The note stays inside the card."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_or_skip()
+    clone = {
+        **PROPOSAL,
+        "kind": "clone",
+        "deck_waiting": None,
+        "risk": "low",
+        "risk_reason": "copies a deck and changes nothing that exists",
+        "approval_mode": "semi",
+        "assistant_may_apply": True,
+    }
+    with sync_playwright() as p:
+        browser = _launch(p, exe)
+        try:
+            page = browser.new_page(viewport={"width": width, "height": 900})
+            errors: list[str] = []
+            page.on("pageerror", lambda e: errors.append(str(e)))
+            page.route("https://api.scryfall.com/**", lambda r: r.abort())
+            card = _open(page, card_html(), {"structuredContent": clone, "_meta": {}}, {}, theme)
+            card.locator("#note:not(.hidden)").wait_for()
+            note = card.locator("#note").inner_text()
+            assert (
+                "Low-risk change (copies a deck and changes nothing that exists): your approval mode lets "
+                "your assistant apply it without asking." in note
+            ), note
+            assert "Low-risk edit" not in note
+            frame = page.frames[1]
+            fit = frame.evaluate(
+                "() => { const n = document.getElementById('note').getBoundingClientRect();"
+                " return {right: n.right, page: document.documentElement.clientWidth,"
+                " scroll: document.documentElement.scrollWidth}; }"
+            )
+            assert fit["right"] <= fit["page"] + 0.5 and fit["scroll"] <= fit["page"], fit
+            _shot(page, f"proposal-card-clone-{width}-{theme}")
+            assert not errors, errors
+        finally:
+            browser.close()
