@@ -561,8 +561,9 @@ def test_approve_reads_the_change_again_and_shows_a_new_wait_first(width: int, t
                 "() => window.log.some(m => m.method === 'tools/call'"
                 " && m.params.name === 'confirm_proposal')"
             )
+            # the press says the card showed the hold, so the gateway applies it
             assert _tool_calls(page, "confirm_proposal") == [
-                {"proposal_id": "p2", "approval": "code-2", "decision": "approve"}
+                {"proposal_id": "p2", "approval": "code-2", "decision": "approve", "shown_status": "held"}
             ]
         finally:
             browser.close()
@@ -614,8 +615,91 @@ def test_approve_says_when_it_could_not_check_and_waits_for_a_second_press() -> 
                 " && m.params.name === 'confirm_proposal')"
             )
             assert _tool_calls(page, "confirm_proposal") == [
-                {"proposal_id": "p2", "approval": "code-2", "decision": "approve"}
+                {"proposal_id": "p2", "approval": "code-2", "decision": "approve", "shown_status": ""}
             ]
+        finally:
+            browser.close()
+    assert not errors, errors
+
+
+NOW_HELD_TEXT = (
+    "This change is now held, so nothing was approved. Read the note above, then press Approve "
+    "again if you still want it."
+)
+
+
+@pytest.mark.parametrize(
+    "width,theme,text",
+    [(344, "light", "200%"), (360, "dark", "100%"), (884, "dark", "200%"), (1280, "light", "100%")],
+)
+def test_a_hold_set_after_the_card_was_drawn_is_shown_when_the_card_cannot_check(
+    width: int, theme: str, text: str
+) -> None:
+    """The host refuses the card's read, so the second press
+    sends the status the card showed. The gateway refuses a change held since, the card shows the
+    hold with nothing approved, and a press after that (the card now shows "Held") applies it."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_or_skip()
+    plain = {**PROPOSAL, "deck_waiting": None}
+    refused = {
+        "ok": False,
+        "error": "now_held",
+        "message": "This change is now held, so nothing was sent to Archidekt. It would replace #1, "
+        "which was applied. The user can read why and still apply it with another press.",
+        "state": "pending",
+        "version": 1,
+        "status": "held",
+        "status_reason": "It would replace #1, which was applied.",
+        "status_at": NOW,
+    }
+    with sync_playwright() as p:
+        browser = _launch(p, exe)
+        try:
+            page = browser.new_page(viewport={"width": width, "height": 900})
+            errors: list[str] = []
+            page.on("pageerror", lambda e: errors.append(str(e)))
+            page.route("https://api.scryfall.com/**", lambda r: r.abort())
+            # no get_proposal reply: the host refuses the card's read
+            card = _open(
+                page,
+                card_html(),
+                {"structuredContent": plain, "_meta": {APPROVAL_META_KEY: "code-2"}},
+                {"confirm_proposal": refused},
+                theme,
+            )
+            frame = page.frames[1]
+            frame.evaluate("(t) => { document.documentElement.style.fontSize = t; }", text)
+            card.locator("#approve:not([disabled])").click()
+            card.locator("#status.err").wait_for()
+            card.locator("#approve:not([disabled])").click()
+            card.locator("#status.err", has_text="now held").wait_for()
+            assert card.locator("#status").inner_text() == NOW_HELD_TEXT
+            assert "Held. It would replace #1, which was applied." in card.locator("#card").inner_text()
+            assert _tool_calls(page, "confirm_proposal") == [
+                {"proposal_id": "p2", "approval": "code-2", "decision": "approve", "shown_status": ""}
+            ]
+            box = frame.evaluate(
+                "() => ({page: document.documentElement.clientWidth,"
+                " scroll: document.documentElement.scrollWidth})"
+            )
+            assert box["scroll"] <= box["page"], box
+            _shot(page, f"proposal-card-now-held-{width}-{theme}-{text.rstrip('%')}")
+            # the card shows the hold now, so the member's next press (read refused again, then
+            # once more) says so to the gateway, which applies it
+            page.evaluate(
+                "(r) => { window.replies.confirm_proposal = r; }", {**plain, "ok": True, "state": "applied"}
+            )
+            card.locator("#approve:not([disabled])").click()
+            card.locator("#status.err", has_text="could not check").wait_for()
+            card.locator("#approve:not([disabled])").click()
+            card.locator("#status.ok").wait_for()
+            assert _tool_calls(page, "confirm_proposal")[-1] == {
+                "proposal_id": "p2",
+                "approval": "code-2",
+                "decision": "approve",
+                "shown_status": "held",
+            }
         finally:
             browser.close()
     assert not errors, errors

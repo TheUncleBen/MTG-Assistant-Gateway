@@ -180,6 +180,29 @@ async def test_formatting_changed_on_archidekt_since_review_needs_a_look(stack: 
     assert h.db.get_proposal(p["proposal_id"], SUB)["state"] == "pending"
 
 
+@pytest.mark.parametrize("formatted", [True, False])
+async def test_words_changed_on_archidekt_since_review_are_not_written_over(
+    stack: Stack, formatted: bool
+) -> None:
+    """An edit that removes all the formatting, or a plain description's edit: the description's
+    words changed on archidekt.com after the change was made, so it needs a look and nothing is
+    sent (it used to write over the new words)."""
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    await _set_mode(h, "manual")
+    ark.decks[42]["description"] = FORMATTED if formatted else _doc({"insert": "Plain one\n"})
+    details = {"deck_id": "42", "details": {"description": "Brand new words"}}
+    p = structured(await call(h, token, "propose_deck_details", details))
+    assert any(r.get("formatting_lost") for r in p["rows"]) is formatted
+    edited = FORMATTED.replace("Great", "Lovely") if formatted else _doc({"insert": "Plain edited on site\n"})
+    ark.decks[42]["description"] = edited
+    out = await _browser_apply(h, p["proposal_id"])
+    assert out.get("ok") is False and out.get("error") in ("stale", "needs_look"), out
+    assert ark.decks[42]["description"] == edited
+    row = h.db.get_proposal(p["proposal_id"], SUB)
+    assert row["state"] == "pending" and row["status"] == "needs_look", row
+
+
 async def test_a_plain_description_is_still_approved_on_the_card(stack: Stack) -> None:
     h, ark = stack.h, stack.ark
     token = await linked_user(stack)
