@@ -12,6 +12,7 @@ from typing import Any
 import httpx
 import pytest
 
+from mtg_gateway import forge as forge_module
 from mtg_gateway import reports as reports_module
 from mtg_gateway.archidekt import parse_deck
 from mtg_gateway.db import Database
@@ -1191,12 +1192,15 @@ class _TwoCopies:
         self.copies = {"10.0.9.1": FakeForge(), "10.0.9.2": FakeForge()}
         self.free = dict(zip(self.copies, free, strict=True))
         self.turn = 0
+        self.silent: set[str] = set()  # copies that are listed but do not answer
 
     def handler(self, request: httpx.Request) -> httpx.Response:
         host = request.url.host
+        if host in self.silent or (host != "forge.test" and host not in self.copies):
+            raise httpx.ConnectError("no answer", request=request)  # a copy gone, or hung
         if host not in self.copies:
             self.turn += 1
-            host = list(self.copies)[self.turn % 2]
+            host = list(self.copies)[self.turn % len(self.copies)]
         if request.url.path == "/health":
             return httpx.Response(
                 200, json={"status": "ok", "busy": False, "queued": 0, "free_places": self.free[host]}
@@ -1213,6 +1217,13 @@ class _TwoCopies:
             transport=httpx.MockTransport(self.handler),
             resolver=addresses if resolve else None,
         )
+
+
+def _section(db: Database, rid: str) -> dict[str, Any]:
+    """A report's Forge section as stored (members see it without the copy it plays on)."""
+    with db._lock:
+        row = db._conn.execute("SELECT forge_json FROM reports WHERE id = ?", (rid,)).fetchone()
+    return json.loads(row["forge_json"])
 
 
 async def test_runs_stay_with_the_forge_copy_that_started_them(tmp_path: Path) -> None:
@@ -1238,10 +1249,14 @@ async def test_runs_stay_with_the_forge_copy_that_started_them(tmp_path: Path) -
     reports = ReportService(db, _Decks(), None, forge=two.client(resolve=True), forge_games=4)  # type: ignore[arg-type]
     reports.forge_interval = 0.05
     a = await reports.run("alice", "42", games=300, options={"seed": 2})
-    assert a["forge"]["engine"] == "http://10.0.9.2:8000" and a["forge"]["engine_copies"] == 2
+    stored = _section(db, a["report_id"])
+    assert stored["engine"] == "http://10.0.9.2:8000" and stored["engine_copies"] == 2
+    # the copy's internal address is not shown to the member (review r5 L3)
+    assert not {"engine", "engine_copies"} & set(a["forge"])
+    assert not {"engine", "engine_copies"} & set(reports.get("alice", a["report_id"])["forge_status"])
     two.free = {"10.0.9.1": 1, "10.0.9.2": 0}  # the second copy is now playing alice's run
     b = await reports.run("bob", "42", games=300, options={"seed": 3})
-    assert b["forge"]["engine"] == "http://10.0.9.1:8000"  # bob's run plays on the other machine
+    assert _section(db, b["report_id"])["engine"] == "http://10.0.9.1:8000"  # bob's: the other machine
     assert [len(c.started) for c in two.copies.values()] == [1, 1]
     for copy in two.copies.values():
         for jid in copy.jobs:
@@ -1261,20 +1276,77 @@ async def test_runs_stay_with_the_forge_copy_that_started_them(tmp_path: Path) -
     reports.forge_interval = 0.05
     deck = await _Decks().get_any_deck("alice", "42")
     first = await reports.run("alice", "42", games=300, options={"seed": 4}, pair_with=deck)
-    two.free[first["forge"]["engine"].split("//")[1].split(":")[0]] = 0
+    first_engine = _section(db, first["report_id"])["engine"]
+    two.free[first_engine.split("//")[1].split(":")[0]] = 0
     second = await reports.run(
         "alice", "42", games=300, options={"seed": 5}, deck=deck, same_opponents_as=first["report_id"]
     )
-    assert second["forge"]["state"] == "running" and second["forge"]["engine"] != first["forge"]["engine"]
+    assert second["forge"]["state"] == "running"
+    assert _section(db, second["report_id"])["engine"] != first_engine
     for copy in two.copies.values():
         for jid in copy.jobs:
             copy.finish(jid, [1])
     await asyncio.wait_for(reports._forge_task, timeout=20)
 
 
-async def test_one_forge_address_changes_nothing(tmp_path: Path) -> None:
+async def test_a_run_whose_forge_copy_restarted_elsewhere_is_marked_lost(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    """Review r5 M1: a copy that restarts comes back on a new address, and its old one never
+    answers. The run kept on it is marked lost at once, as a single copy's restart is, and the
+    member's next run starts; a copy still listed but silent is given up after
+    PINNED_SILENCE_SECONDS. Neither stays "running" for GIVE_UP_SECONDS."""
+    db = Database(tmp_path / "t.sqlite")
+    db.upsert_user("alice", email=None, name=None, preferred_username=None, groups=[])
+    two = _TwoCopies(free=(0, 1))
+    reports = ReportService(db, _Decks(), None, forge=two.client(resolve=True), forge_games=4)  # type: ignore[arg-type]
+    reports.forge_interval = 0.05
+    first = await reports.run("alice", "42", games=300, options={"seed": 1})
+    assert _section(db, first["report_id"])["engine"] == "http://10.0.9.2:8000"
+    second = await reports.run("alice", "42", games=300, options={"seed": 2})
+    assert second["forge"]["state"] == "queued"  # waits for alice's first run
+
+    # the copy on 10.0.9.2 restarts as 10.0.9.3 (a new container, an empty job list)
+    del two.copies["10.0.9.2"]
+    two.copies["10.0.9.3"] = FakeForge()
+    two.free = {"10.0.9.1": 1, "10.0.9.3": 1}
+    for _ in range(200):
+        if reports.get("alice", first["report_id"])["forge"]["state"] == "lost":
+            break
+        await asyncio.sleep(0.05)
+    lost = reports.get("alice", first["report_id"])["forge"]
+    assert lost["state"] == "lost" and lost["error"] == "Forge restarted before this run finished."
+    for _ in range(200):  # the member's queue is free again: the waiting run starts
+        if reports.get("alice", second["report_id"])["forge"]["state"] == "running":
+            break
+        await asyncio.sleep(0.05)
+    assert reports.get("alice", second["report_id"])["forge"]["state"] == "running"
+
+    # a copy still listed but not answering: given up after the silence limit, not four hours
+    playing = _section(db, second["report_id"])["engine"].split("//")[1].split(":")[0]
+    two.silent.add(playing)
+    for _ in range(10):
+        await asyncio.sleep(0.05)
+    assert reports.get("alice", second["report_id"])["forge"]["state"] == "running"  # within the limit
+    assert "unanswered_since" in _section(db, second["report_id"])
+    assert "unanswered_since" not in reports.get("alice", second["report_id"])["forge"]
+    monkeypatch.setattr(forge_module, "PINNED_SILENCE_SECONDS", 0.0)
+    await asyncio.wait_for(reports._forge_task, timeout=20)
+    silent = reports.get("alice", second["report_id"])["forge"]
+    assert silent["state"] == "lost" and silent["error"] == "Forge stopped answering about this run."
+
+    # one copy (nothing pinned): a refused connection stays a wait, as before
+    one = await refresh(
+        ForgeClient("http://10.0.9.2:8000", transport=httpx.MockTransport(two.handler)),
+        {"state": "running", "job_id": "j", "started_at": int(time.time())},
+    )
+    assert one["state"] == "running" and "unanswered_since" not in one
+
+
+async def test_one_forge_address_changes_nothing(tmp_path: Path, monkeypatch: Any) -> None:
     """A single copy (one address, an address given directly, "localhost", or a name that can't be
-    looked up): no copy is picked or stored, every call goes to the one URL."""
+    looked up in time): no copy is picked or stored, every call goes to the one URL."""
+    monkeypatch.setattr(forge_module, "LOOKUP_DEADLINE_SECONDS", 0.2)
 
     async def one(host: str, port: int) -> list[str]:
         return ["10.0.9.7"]
@@ -1285,11 +1357,16 @@ async def test_one_forge_address_changes_nothing(tmp_path: Path) -> None:
     async def broken(host: str, port: int) -> list[str]:
         raise OSError("no such host")
 
+    async def slow(host: str, port: int) -> list[str]:
+        await asyncio.sleep(30)
+        return ["10.0.9.7", "10.0.9.8"]
+
     fake = FakeForge()
     for url, resolver in (
         ("http://forge.test:8000", one),
         ("http://localhost:8000", loopback),
         ("http://forge.test:8000", broken),
+        ("http://forge.test:8000", slow),  # no answer within the lookup's time limit (review r5 L4)
         ("http://10.0.9.7:8000", one),
     ):
         client = ForgeClient(url, transport=httpx.MockTransport(fake.handler), resolver=resolver)

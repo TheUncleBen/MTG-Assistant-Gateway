@@ -36,6 +36,13 @@ GIVE_UP_SECONDS = 4 * 3600
 HEALTH_DEADLINE_SECONDS = 3.0
 HEALTH_CACHE_SECONDS = 30.0
 HEALTH_DOWN_CACHE_SECONDS = 5.0
+# Looking up the copies of the service (several addresses behind one name) gets this long; no
+# answer in time counts as one copy, so a slow resolver never holds up a run's start.
+LOOKUP_DEADLINE_SECONDS = 3.0
+# A run kept on one of several copies is given up once that copy has not answered this long, or at
+# once when its address is no longer the service's: a restarted or moved copy has a new address,
+# and its old one never answers about the run again (one copy answers "not found" instead).
+PINNED_SILENCE_SECONDS = 120.0
 
 
 class ForgeError(Exception):
@@ -164,6 +171,10 @@ def summarise(job: dict[str, Any], seats: list[str]) -> dict[str, Any]:
     return out
 
 
+FORGE_RESTARTED = "Forge restarted before this run finished."
+FORGE_SILENT = "Forge stopped answering about this run."
+
+
 async def _addresses(host: str, port: int) -> list[str]:
     """Every address ``host`` resolves to (one per copy of a service in Swarm's dnsrr endpoint mode
     or Docker Compose, one in Swarm's default virtual-IP mode)."""
@@ -202,24 +213,41 @@ class ForgeClient:
         host = f"[{address}]" if ":" in address else address
         return f"{self._scheme}://{host}:{self._port}"
 
-    async def copies(self) -> list[str]:
-        """The base URL of each copy behind ``base_url``, or [] when there is only one (one address,
-        an address given directly, or a name that can't be looked up now)."""
+    async def _lookup(self) -> list[str] | None:
+        """Every address the service's name has now, or None when that can't be told: no resolver,
+        an address given directly, or no answer within LOOKUP_DEADLINE_SECONDS."""
         if self._resolver is None:
-            return []
+            return None
         try:
             ipaddress.ip_address(self._host)
-            return []  # an address, not a name: one copy
+            return None  # an address, not a name: one copy
         except ValueError:
             pass
         try:
-            found = sorted(set(await self._resolver(self._host, self._port)))
-        except Exception as exc:  # no answer now: the one service, as before
+            found = await asyncio.wait_for(self._resolver(self._host, self._port), LOOKUP_DEADLINE_SECONDS)
+        except Exception as exc:  # no answer now (a timeout included): the one service, as before
             logger.info("looking up Forge's copies failed: %s", type(exc).__name__)
+            return None
+        return sorted(set(found))
+
+    async def copies(self) -> list[str]:
+        """The base URL of each copy behind ``base_url``, or [] when there is only one (one address,
+        an address given directly, or a name that can't be looked up now)."""
+        found = await self._lookup()
+        if not found:
             return []
         if all(ipaddress.ip_address(a.split("%")[0]).is_loopback for a in found):
             return []  # "localhost" as 127.0.0.1 and ::1 is one service, not two copies
         return [self._copy_url(a) for a in found] if len(found) > 1 else []
+
+    async def has_copy(self, url: Any) -> bool | None:
+        """Whether a run's stored copy (``engine``) is still one of the service's addresses, or None
+        when that can't be told now (the name gave no answer)."""
+        found = await self._lookup()
+        if found is None:
+            return None
+        pinned = self.at(url)
+        return pinned is not None and pinned.base_url in {self._copy_url(a) for a in found}
 
     def at(self, url: Any) -> ForgeClient | None:
         """The client for one copy, from a run's stored ``engine``: only an address URL on this
@@ -242,11 +270,12 @@ class ForgeClient:
             self._copies[clean] = ForgeClient(clean, timeout=self._timeout, transport=self._transport)
         return self._copies[clean]
 
-    async def pick(self) -> tuple[ForgeClient, str | None, int]:
+    async def pick(self, urls: list[str] | None = None) -> tuple[ForgeClient, str | None, int]:
         """Where a new run starts: (client, that copy's URL to store with the run, number of copies).
         With one copy: (this client, None, 1). Otherwise the copy with the most free places, then
-        the shortest queue; a copy that does not answer is passed over."""
-        urls = await self.copies()
+        the shortest queue; a copy that does not answer is passed over. ``urls``: the copies
+        already looked up (``copies``), so a caller can do the lookup outside a lock."""
+        urls = await self.copies() if urls is None else urls
         if not urls:
             return self, None, 1
 
@@ -578,8 +607,15 @@ async def start_run(
     }
 
 
-async def refresh(client: ForgeClient, section: dict[str, Any]) -> dict[str, Any]:
-    """The ``forge`` section updated from its job; unchanged once the run has ended."""
+async def refresh(
+    client: ForgeClient,
+    section: dict[str, Any],
+    *,
+    pinned_gone: Callable[[], Awaitable[bool]] | None = None,
+) -> dict[str, Any]:
+    """The ``forge`` section updated from its job; unchanged once the run has ended.
+    ``pinned_gone``, for a run kept on one of several copies: whether that copy's address is no
+    longer the service's (asked only when the copy does not answer)."""
     if section.get("state") in FINAL_STATES or not section.get("job_id"):
         return section
     try:
@@ -587,21 +623,24 @@ async def refresh(client: ForgeClient, section: dict[str, Any]) -> dict[str, Any
         if not isinstance(job, dict) or job.get("state") not in {"queued", "running", *FINAL_STATES}:
             raise ForgeError("invalid", "Forge gave an unexpected answer.")
     except ForgeError as exc:
-        if time.time() - section.get("started_at", time.time()) > GIVE_UP_SECONDS:
-            return {
-                **section,
-                "state": "lost",
-                "error": "Forge stopped answering about this run.",
-            }
+        now = time.time()
+        if now - section.get("started_at", now) > GIVE_UP_SECONDS:
+            return {**section, "state": "lost", "error": FORGE_SILENT}
         if exc.kind == "not_found":
             # The Forge service restarted and the job is gone.
-            return {
-                **section,
-                "state": "lost",
-                "error": "Forge restarted before this run finished.",
-            }
+            return {**section, "state": "lost", "error": FORGE_RESTARTED}
+        if pinned_gone is not None and exc.kind == "unavailable":
+            # A copy that restarted or moved has a new address: as lost as a single copy's restart.
+            if await pinned_gone():
+                return {**section, "state": "lost", "error": FORGE_RESTARTED}
+            since = section.get("unanswered_since")
+            since = since if isinstance(since, (int, float)) else int(now)
+            if now - since >= PINNED_SILENCE_SECONDS:
+                return {**section, "state": "lost", "error": FORGE_SILENT}
+            return {**section, "unanswered_since": since}
         return section
     out = {**section, "state": job["state"], "result": summarise(job, section.get("seats") or [])}
+    out.pop("unanswered_since", None)
     if job.get("load_problems"):
         out["load_problems"] = job["load_problems"]
     if job["state"] in ("failed", "timeout"):
