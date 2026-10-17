@@ -1,6 +1,7 @@
 package local.mtgassistantgateway.app
 
 import android.graphics.Canvas
+import android.graphics.Color
 import android.graphics.ColorFilter
 import android.graphics.Paint
 import android.graphics.PixelFormat
@@ -50,6 +51,7 @@ object Insets {
         private var top = 0
         private var bottom = 0
         private val paint = Paint()
+        private var level = 255 // setAlpha's value; Paint.color resets the paint's own alpha
 
         fun set(top: Int, bottom: Int) {
             if (this.top == top && this.bottom == bottom) return
@@ -63,22 +65,33 @@ object Insets {
             base.bounds = b
             base.draw(canvas)
             if (top > 0) {
-                paint.color = topColor
+                colour(topColor)
                 canvas.drawRect(b.left.toFloat(), b.top.toFloat(), b.right.toFloat(), (b.top + top).toFloat(), paint)
             }
             if (bottom > 0) {
-                paint.color = bottomColor
+                colour(bottomColor)
                 canvas.drawRect(b.left.toFloat(), (b.bottom - bottom).toFloat(), b.right.toFloat(), b.bottom.toFloat(), paint)
             }
         }
 
-        override fun setAlpha(alpha: Int) {
-            base.alpha = alpha
-            paint.alpha = alpha
+        /** [color] with the drawable's alpha on top of the colour's own. */
+        private fun colour(color: Int) {
+            paint.color = color
+            paint.alpha = Color.alpha(color) * level / 255
         }
+
+        override fun setAlpha(alpha: Int) {
+            level = alpha.coerceIn(0, 255)
+            base.alpha = alpha
+            invalidateSelf()
+        }
+
+        override fun getAlpha(): Int = level
 
         override fun setColorFilter(colorFilter: ColorFilter?) {
             base.colorFilter = colorFilter
+            paint.colorFilter = colorFilter
+            invalidateSelf()
         }
 
         @Deprecated("Deprecated in Java")
