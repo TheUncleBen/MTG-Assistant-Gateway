@@ -508,8 +508,9 @@ class ReportService:
             out["opponents"] = seats[1:]
         elif isinstance(section, dict) and (section.get("start") or {}).get("bracket"):
             out["bracket"] = section["start"]["bracket"]
-        if isinstance(section, dict) and (section.get("opponent_choice") or {}).get("pair"):
-            out["pair"] = True  # a comparison's run: its table was picked for the higher bracket
+        choice = (section.get("opponent_choice") or {}) if isinstance(section, dict) else {}
+        if choice.get("pair") and choice.get("rule") != "newest":
+            out["pair"] = True  # a comparison's run whose table the higher bracket picked
         return out
 
     # -- Forge runs (background) ----------------------------------------------
@@ -1136,7 +1137,7 @@ NO_FORGE_TO_SHARE = (
 PAIR_UNREAD = "The gateway could not read the other deck, so no report was made."
 PAIR_NO_FORGE = (
     "compare_with needs Forge games, and this report has none (forge is false, Forge isn't set up on "
-    "this gateway, or the deck isn't a Commander deck)."
+    "this gateway, or the deck has no commander)."
 )
 BOTH_PAIRINGS = (
     "compare_with and same_opponents_as each pick the opponents: use compare_with on the first deck's "

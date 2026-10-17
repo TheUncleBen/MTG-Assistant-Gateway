@@ -31,7 +31,7 @@ from .pages import (
     login_redirect,
     read_limited,
 )
-from .reports import NO_FORGE_TO_SHARE
+from .reports import NO_FORGE_TO_SHARE, PAIR_NO_FORGE
 from .reports_page import PAGE as REPORTS_PAGE
 from .reports_page import REPORTS_PAGE_CSS, reports_page_html
 from .theme import (
@@ -47,6 +47,12 @@ if TYPE_CHECKING:
 
     from .app import AppState
     from .reports import ReportService
+
+# The Compare press when the deck lost its commander after the page loaded (proofread R5 finding 4)
+COMPARE_NO_COMMANDER = (
+    "Forge plays only decks with a commander, and the deck you are comparing from has none now, so no "
+    "report was made."
+)
 
 
 def add_deck_tool_routes(
@@ -703,9 +709,11 @@ def add_deck_tool_routes(
                 busy = page(plan.title, busy_body(plan, compare_url), sub=sub, sid=sid, status=plan.status)
                 busy.headers.update(_headers(plan))
                 return busy
+            # the deck lost its commander after the page loaded: plain words, not the assistant's
+            text = COMPARE_NO_COMMANDER if str(exc) == PAIR_NO_FORGE else str(exc)
             return page(
                 "Compare",
-                f"<div class='panel'><p class='notice error'>{_esc(exc)}</p>{back}</div>",
+                f"<div class='panel'><p class='notice error'>{_esc(text)}</p>{back}</div>",
                 sub=sub,
                 sid=sid,
                 status=404 if exc.kind == "not_found" else 400,
