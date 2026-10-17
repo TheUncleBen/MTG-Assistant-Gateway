@@ -1413,7 +1413,39 @@ def plan_zones(
     lines.extend(cat_lines)
     if not lines:
         raise DeckError("invalid", "these changes would leave the deck exactly as it is")
+    # A commander change waits for the member's press in every mode (modes.risk_of, auto_waits).
+    # set_commander writes its own row; a card moved into or out of Commander, the commander
+    # removed or a card added under Commander changes the commanders as well, so the whole list's
+    # commanders before and after are compared and the difference gets a commander row too.
+    if not any(r.get("kind") == "commander" for r in lines):
+        was, now = _commanders_before_after(deck, changes, cats_want, {"main": after, "side": after_side})
+        if [n.lower() for n in was] != [n.lower() for n in now]:
+            lines.append(
+                _row("commander", before=", ".join(was) or "(none)", after=", ".join(now) or "(none)")
+            )
     return before, after, lines, before_side, after_side
+
+
+def _commanders_before_after(
+    deck: Deck, changes: list[Change], cats_want: dict[int, list[str]], after: dict[str, dict[str, int]]
+) -> tuple[list[str], list[str]]:
+    """The deck's commanders (cards with a Commander row) now and once ``changes`` are applied:
+    rows ``cats_want`` (``category_plan_rows``) moves into or out of Commander, cards whose copies
+    all go (``after``, per zone), and adds that make a row under Commander."""
+    was: dict[str, str] = {}
+    now: dict[str, str] = {}
+    for zone in ZONES:
+        left = {n.lower() for n, q in after[zone].items() if q > 0}
+        for c in deck.cards_in(zone):
+            if COMMANDER in c.categories:
+                was[c.name.lower()] = c.name
+            cats = cats_want.get(c.relation_id, c.categories) if c.relation_id is not None else c.categories
+            if COMMANDER in cats and c.name.lower() in left:
+                now[c.name.lower()] = c.name
+    for ch in changes:
+        if ch.action == "add" and COMMANDER in _all_categories([ch]):
+            now.setdefault(ch.card_name.lower(), ch.card_name)
+    return sorted(was.values(), key=str.lower), sorted(now.values(), key=str.lower)
 
 
 MAX_RESTORE_ENTRIES = 150
