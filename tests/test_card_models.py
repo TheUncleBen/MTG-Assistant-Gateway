@@ -39,14 +39,14 @@ GOOD = {
 
 @pytest.fixture(autouse=True)
 def _switched_on(monkeypatch: Any) -> None:
-    """Kept models are built but off until Ben's re-confirmation card (card_models.SWITCHED_ON);
-    these tests switch them on to test what is built."""
+    """Kept models are on (card_models.SWITCHED_ON); a test that turns them off says so."""
     monkeypatch.setattr(card_models, "SWITCHED_ON", True)
 
 
-def test_kept_models_stay_off_until_ben_answers(tmp_path: Path, monkeypatch: Any) -> None:
-    """Q136 item 2 is held: with every schema 14 method there, nothing is kept or used while the
-    switch is off."""
+def test_kept_models_are_on_and_the_switch_turns_them_off(tmp_path: Path, monkeypatch: Any) -> None:
+    """Kept models ship switched on (Q140 item 1); with every schema 14 method there, nothing is
+    kept or used once the switch is off."""
+    assert card_models.SWITCHED_ON is True
     monkeypatch.setattr(card_models, "SWITCHED_ON", False)
     db = FakeModelsDb(tmp_path / "t.sqlite")
     assert KeptModels(db).available is False
@@ -677,7 +677,7 @@ async def test_the_adder_removes_a_saved_model_from_the_report_and_through_the_a
         assert out["ok"] is False and "could not remove" in out["message"]
         monkeypatch.undo()
         monkeypatch.setattr(card_models, "SWITCHED_ON", True)
-        # switched off (Q140 item 1 held): the Remove route removes nothing and no notice shows
+        # switched off: the Remove route removes nothing and no notice shows
         monkeypatch.setattr(card_models, "SWITCHED_ON", False)
         store.put_card_model("sol ring", "Sol Ring", model, sub, 3)
         off = await b.http.post(url, data={"csrf": csrf, "card": "Sol Ring"})

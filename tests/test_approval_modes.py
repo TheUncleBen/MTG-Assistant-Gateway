@@ -147,7 +147,8 @@ async def test_no_tool_or_api_route_sets_the_mode(stack: Stack) -> None:
     token = await linked_user(stack)
     r = await h.mcp(token, "tools/list", {}, rid=3)
     names = {t["name"] for t in sse_json(r)["result"]["tools"]}
-    assert not {n for n in names if "mode" in n or "approval" in n and n != "confirm_proposal"}
+    # "mode" as a word, so remove_card_model (a card model, not the approval mode) is not caught
+    assert not {n for n in names if "mode" in n.split("_") or "approval" in n and n != "confirm_proposal"}
     for path in ("/api/v1/me", "/api/v1/account", "/api/v1/me/approval_mode"):
         r = await h.http.post(
             path, json={"approval_mode": "auto"}, headers={"Authorization": f"Bearer {token}"}

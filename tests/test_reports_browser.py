@@ -568,7 +568,7 @@ def test_saved_descriptions_and_remove_fit_and_read(
     if exe == "missing":
         pytest.skip("no Chromium available for Playwright")
     sid = server.sign_in_and_link()
-    monkeypatch.setattr(card_models, "SWITCHED_ON", True)  # built, off until Ben's answer
+    monkeypatch.setattr(card_models, "SWITCHED_ON", True)
     store = _Store()
     reports = server.app.state.gateway.reports
     reports.models = KeptModels(store)
