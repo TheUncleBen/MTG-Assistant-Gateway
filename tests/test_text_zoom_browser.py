@@ -20,7 +20,7 @@ from .test_suggest_browser import Server
 
 pytest.importorskip("playwright")
 
-WIDTHS = [360, 673]
+WIDTHS = [360, 673, 717]
 
 # The pages a member uses most, plus the ones with forms and tables.
 PAGES = [

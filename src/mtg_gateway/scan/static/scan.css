@@ -23,7 +23,9 @@
   --tap:2.75rem; /* 44px at 16px, 38.5px at the shell's 14px root: min-height below is in px */
 }
 main.wrap:has(.scan){max-width:64rem}
-.scan{display:flex;flex-direction:column;gap:.75rem}
+/* The camera panel's one or two columns follow the scan area's own width in its own text size
+   (a container query), not the window's: at 200% text a 717 px window has no room for two. */
+.scan{display:flex;flex-direction:column;gap:.75rem;container-type:inline-size}
 .scan .row{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}
 .scan .grow{flex:1 1 auto}
 .scan button,.scan .btn{margin-top:0;min-height:44px;min-width:44px;width:auto}
@@ -166,7 +168,7 @@ body.picker-open{overflow:hidden}
 .scan .camera video{width:100%;height:100%;object-fit:cover;display:block}
 /* once there is a match to confirm, the preview gives up room so the result shows above the controls */
 /* Shrinking by width keeps the 3:4 box and the guide's 78% width, which scan.js relies on for the crop. */
-@media (max-width:699px){
+@container (width < 42.25em){
   .scan .cam-panel.has-result .camera{width:min(100%,calc(30vh * 3 / 4));max-height:30vh}
   .scan .cam-panel.has-result .camera .hint{display:none}
 }
@@ -253,7 +255,7 @@ body.picker-open{overflow:hidden}
 .scan .cam-ctl input[type=range]:focus-visible{outline:2px solid var(--s-accent);outline-offset:2px}
 @media (max-width:420px){ .scan .cam-ctl .ctl{grid-template-columns:auto minmax(0,1fr) 3.4rem 44px} .scan .cam-ctl .lbl{display:none} }
 /* on phones the sliders must fit between the preview and the sticky control bar */
-@media (max-width:699px){
+@container (width < 42.25em){
   .scan .cam-panel:has(.cam-ctl:not([hidden])) .camera{max-height:40vh;width:min(100%,calc(40vh * 3 / 4))}
   .scan .cam-panel:has(.cam-ctl:not([hidden])) .camera .hint{display:none}
   /* while Auto scanning the preview shrinks so the add toast and Undo sit clear of the shutter bar */
@@ -261,8 +263,9 @@ body.picker-open{overflow:hidden}
   .scan .cam-panel:has(#auto-switch[aria-checked=true]) .camera .hint{display:none}
 }
 
-/* two columns from an unfolded foldable up: camera left, status and result right */
-@media (min-width:700px){
+/* two columns from an unfolded foldable up (a 700 px window at the normal text size): camera
+   left, status and result right */
+@container (width >= 42.25em){
   .scan .cam-panel{display:grid;grid-template-columns:minmax(0,22rem) minmax(0,1fr);grid-template-areas:
     "camera opts" "camera status" "camera unid" "camera result" "ctl result" "controls result";align-items:start;column-gap:1.25rem}
   .scan .unid{grid-area:unid;align-items:flex-start}

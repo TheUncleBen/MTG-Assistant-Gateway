@@ -93,11 +93,12 @@ Updating to 0.7.29 from an earlier version may need a step first: see
 [DEPLOY-COMPOSE.md](DEPLOY-COMPOSE.md#updating-to-0729-from-an-earlier-version)
 (Compose).
 
-In Portainer: **Stacks** → `mtg` → **Update the stack**, and in the box that
-asks "Are you sure?" make sure **Re-pull image and redeploy** is on, then
-click **Update**. With `MTG_TAG=latest` that pulls the newest version; with a
-pinned version (for example `0.6.6`), change `MTG_TAG` first
-([VERSIONS.md](VERSIONS.md)). Or from the command line:
+In Portainer: **Stacks** → `mtg`. With a pinned version (for example
+`0.6.6`), change `MTG_TAG` first ([VERSIONS.md](VERSIONS.md)); with
+`MTG_TAG=latest` the update pulls the newest version. Then click **Update the
+stack** (with the Repository build method, **Pull and redeploy**), and in the
+box that asks "Are you sure?" make sure **Re-pull image and redeploy** is on,
+then click **Update**. Or from the command line:
 
 ```bash
 docker service update --force mtg_mtg-assistant-gateway       # restart

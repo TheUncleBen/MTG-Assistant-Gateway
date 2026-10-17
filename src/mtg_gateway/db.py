@@ -187,6 +187,17 @@ MAX_PREF_NAME = 120
 MAX_CARD_MODEL_BYTES = 4096
 # Card models read in one query (get_card_models), under SQLite's limit on bound values.
 _CARD_MODEL_BATCH = 500
+
+
+class CardModelRefused(Exception):
+    """put_card_model wrote nothing: ``why`` is "another_member" (the card's model is another
+    member's and the save isn't an admin's) or "most" (the member already keeps ``most``)."""
+
+    def __init__(self, why: str) -> None:
+        super().__init__(why)
+        self.why = why
+
+
 # Earlier versions kept per waiting proposal (proposal_versions): past it an amend is refused, so an
 # app that keeps amending one note can't grow the database without bound (step 0 review, fix 3).
 MAX_PROPOSAL_VERSIONS = 50
@@ -2895,10 +2906,11 @@ class Database:
     # -- simulator card models (schema 14, Track C) --------------------------------------------
     # Decided (Q136 item 2, card Q138 items 2-5): the member who added a model and an admin may
     # remove it (delete_card_model, admin_delete_card_model; the admin list is list_card_models);
-    # a member's models go with their data (MEMBER_TABLES). Track C's caller enforces the cap of
-    # 200 per member (count_card_models) and "only the adder or an admin replaces a model" before
-    # put_card_model, which itself keeps the newest. Still on card Q139 item 5: the "simulator
-    # version" column Q136 item 3 approved (built as oracle_hash).
+    # a member's models go with their data (MEMBER_TABLES). put_card_model enforces "only the adder
+    # or an admin replaces a model" and, when given ``most``, the cap of 200 per member, in the same
+    # transaction as its write, so two saves at once can't both pass the check (Track C review r1
+    # item 18). Still on card Q139 item 5: the "simulator version" column Q136 item 3 approved
+    # (built as oracle_hash).
 
     def get_card_models(self, keys: list[str]) -> list[dict[str, Any]]:
         """The models kept for these card keys (front face, casefolded), in no particular order;
@@ -2917,18 +2929,38 @@ class Database:
         return out
 
     def put_card_model(
-        self, card_key: str, name: str, model_json: str, sub: str, now: int, *, oracle_hash: str | None = None
+        self,
+        card_key: str,
+        name: str,
+        model_json: str,
+        sub: str,
+        now: int,
+        *,
+        oracle_hash: str | None = None,
+        admin: bool = False,
+        most: int | None = None,
     ) -> bool:
-        """Keep ``model_json`` as the card's one model, made by ``sub`` (the newest model wins).
-        ``added_at`` stays that of the card's first model. True when the model now counts toward
-        ``sub`` and didn't before: a new card, or a card another member's model was kept for.
-        Raises ValueError for an empty key or a model over MAX_CARD_MODEL_BYTES."""
+        """Keep ``model_json`` as the card's one model, made by ``sub``. ``added_at`` stays that of
+        the card's first model. True when the model now counts toward ``sub`` and didn't before: a
+        new card, or a card another member's model was kept for (an admin's save).
+
+        Only the member who added the card's model replaces it, or an admin (``admin``); with
+        ``most``, a save that would newly count toward ``sub`` is refused once they keep that many.
+        Both are checked in the write's own transaction, so two saves at once can't both pass.
+        Raises CardModelRefused when nothing is written, and ValueError for an empty key or a model
+        over MAX_CARD_MODEL_BYTES."""
         if not card_key or not sub:
             raise ValueError("a card model needs a card key and a member")
         if len(model_json.encode("utf-8")) > MAX_CARD_MODEL_BYTES:
             raise ValueError(f"a card model is at most {MAX_CARD_MODEL_BYTES} bytes")
         with self.tx() as c:
             row = c.execute("SELECT added_by FROM card_models WHERE card_key = ?", (card_key,)).fetchone()
+            if row is not None and str(row["added_by"]) != sub and not admin:
+                raise CardModelRefused("another_member")
+            if most is not None and (row is None or str(row["added_by"]) != sub):
+                (have,) = c.execute("SELECT COUNT(*) FROM card_models WHERE added_by = ?", (sub,)).fetchone()
+                if have >= most:
+                    raise CardModelRefused("most")
             if row is None:
                 c.execute(
                     "INSERT INTO card_models (card_key, name, model_json, oracle_hash, added_by, added_at, "

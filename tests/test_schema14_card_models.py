@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from mtg_gateway import db as db_module
-from mtg_gateway.db import MAX_CARD_MODEL_BYTES, Database
+from mtg_gateway.db import MAX_CARD_MODEL_BYTES, CardModelRefused, Database
 
 MODEL = '{"effects":[{"kind":"draw","count":1}]}'
 
@@ -54,8 +54,13 @@ def test_one_model_per_card_and_the_newest_wins(tmp_path: Path) -> None:
         # the same member again: kept, and it already counted toward them
         assert db.put_card_model("sol ring", "Sol Ring", MODEL.replace("1", "2"), "u1", 150) is False
         assert db.count_card_models("u1") == 1
-        # another member's model replaces it and now counts toward them, not the first
-        assert db.put_card_model("sol ring", "Sol Ring", MODEL, "u2", 200, oracle_hash="h2") is True
+        # another member can't replace it; an admin's save does, and it now counts toward them
+        with pytest.raises(CardModelRefused) as refused:
+            db.put_card_model("sol ring", "Sol Ring", MODEL, "u2", 180)
+        assert refused.value.why == "another_member"
+        assert (
+            db.put_card_model("sol ring", "Sol Ring", MODEL, "u2", 200, oracle_hash="h2", admin=True) is True
+        )
         assert (db.count_card_models("u1"), db.count_card_models("u2")) == (0, 1)
         (row,) = db.get_card_models(["sol ring", "no such card"])
         assert row == {
@@ -155,5 +160,52 @@ def test_the_admin_list_and_delete_my_data(tmp_path: Path) -> None:
         out = db.delete_member_data("u1")
         assert out["card_models"] == 2
         assert [m["card_key"] for m in db.list_card_models()] == ["opt"]
+    finally:
+        db.close()
+
+
+def test_the_cap_counts_only_a_save_that_newly_counts(tmp_path: Path) -> None:
+    db = Database(tmp_path / "g.sqlite")
+    try:
+        assert db.put_card_model("opt", "Opt", MODEL, "u1", 1, most=2) is True
+        assert db.put_card_model("ponder", "Ponder", MODEL, "u1", 2, most=2) is True
+        with pytest.raises(CardModelRefused) as refused:
+            db.put_card_model("brainstorm", "Brainstorm", MODEL, "u1", 3, most=2)
+        assert refused.value.why == "most"
+        # replacing one they already keep is never refused
+        assert db.put_card_model("opt", "Opt", MODEL.replace("1", "2"), "u1", 4, most=2) is False
+        assert db.count_card_models("u1") == 2
+    finally:
+        db.close()
+
+
+def test_two_members_saving_the_same_new_card_at_once_keep_one(tmp_path: Path) -> None:
+    """Track C review r1 item 18: the check and the write are one transaction, so of two saves of
+    the same new card at the same moment one keeps it and the other is refused (before, both could
+    pass a separate check and the second overwrote the first)."""
+    import threading
+
+    db = Database(tmp_path / "g.sqlite")
+    try:
+        for round_ in range(20):
+            key = f"card {round_}"
+            start = threading.Barrier(2)
+            got: dict[str, object] = {}
+
+            def save(sub: str, key: str = key, start: threading.Barrier = start, got: dict = got) -> None:
+                start.wait()
+                try:
+                    got[sub] = db.put_card_model(key, key.title(), MODEL, sub, 1)
+                except CardModelRefused as exc:
+                    got[sub] = exc.why
+
+            threads = [threading.Thread(target=save, args=(sub,)) for sub in ("u1", "u2")]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+            assert sorted(map(str, got.values())) == ["True", "another_member"], got
+            (row,) = db.get_card_models([key])
+            assert got[row["added_by"]] is True
     finally:
         db.close()
