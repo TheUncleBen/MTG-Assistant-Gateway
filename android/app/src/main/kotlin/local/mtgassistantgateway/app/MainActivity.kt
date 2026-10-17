@@ -12,9 +12,11 @@ import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Message
+import android.os.PowerManager
 import android.os.SystemClock
 import android.provider.MediaStore
 import android.util.Log
@@ -59,6 +61,9 @@ import java.io.ByteArrayInputStream
  * - file pickers (photo and CSV import) and downloads (CSV export, skill zip);
  * - a floating menu: scan, reload, open in browser, open a copied link, change gateway, check for
  *   app updates;
+ * - the member's notifications while the app is closed ([NotifyService]): the Account page's Get
+ *   notifications on this phone asks for the notification permission, starts the service and asks
+ *   once to let the app run in the background;
  * - the app's own updates from the gateway it is set up for ([Updater]): a bar offers a newer
  *   version, one tap installs it over this one. Checked at each cold launch and just after a
  *   sign-in (at most once an hour), on returning to the app (at most twice a day) and on request.
@@ -192,6 +197,7 @@ class MainActivity : ComponentActivity() {
         fab.visibility = View.GONE // shown by syncFab over pages that are not the gateway's
         setUpUpdates()
         if (savedInstanceState == null) updater.checkAtSetPoint() // a cold launch, not a theme switch's recreate
+        NotifyService.start(this) // back after Stop in Android's task manager, or never stopped: a no-op then
         configureWebView()
         // A link is consumed once: after a restore the saved page wins, not the old intent.
         val signInCode = takeSignInCode(intent)
@@ -348,11 +354,78 @@ class MainActivity : ComponentActivity() {
                 R.id.menu_browser -> openExternal(Uri.parse(web.url ?: origin))
                 R.id.menu_paste -> pasteLink()
                 R.id.menu_gateway -> changeGateway()
-                R.id.menu_update -> updater.check(manual = true)
+                R.id.menu_update -> checkForUpdates()
             }
             true
         }
         menu.show()
+    }
+
+    /** "Check for app updates", pressed: says it is checking at once, then the answer ([Updater]). */
+    private fun checkForUpdates() {
+        Toast.makeText(this, getString(R.string.update_checking), Toast.LENGTH_SHORT).show()
+        updater.check(manual = true)
+    }
+
+    // -- notifications ([NotifyService]) ----------------------------------------------------
+
+    /** The key Get notifications on this phone was pressed with, while Android is asked. */
+    private var pendingPushKey: String? = null
+
+    /**
+     * Get notifications on this phone: the notification permission (asked once by Android), then
+     * the service, then (once) the request to run in the background. The page is reloaded after,
+     * so its part about this phone shows the new state ([notificationsState]).
+     */
+    private fun startNotifications(key: String) {
+        if (!Push.isKey(key)) return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            pendingPushKey = key
+            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), REQ_PERM_NOTIFY)
+            return
+        }
+        if (!NotifyService.canPost(this)) { // turned off in Android's settings: the page says how
+            web.reload()
+            return
+        }
+        if (prefs.pushKey != key) {
+            NotifyService.stop(this) // another account's key on this phone, or none
+            prefs.pushKey = key
+        }
+        NotifyService.start(this)
+        askToRunInBackground()
+        web.reload()
+    }
+
+    /**
+     * Android's battery saving would cut the connection while the phone sleeps: ask once to leave
+     * the app out of it. Asked at most once; the member can change it later in Android's settings.
+     */
+    private fun askToRunInBackground() {
+        if (prefs.batteryAsked) return
+        val power = getSystemService(PowerManager::class.java) ?: return
+        if (power.isIgnoringBatteryOptimizations(packageName)) return
+        prefs.batteryAsked = true
+        try {
+            @android.annotation.SuppressLint("BatteryLife") // self-hosted push without Google's services
+            val ask = Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.fromParts("package", packageName, null))
+            startActivity(ask)
+        } catch (e: ActivityNotFoundException) {
+            Log.w(TAG, "no battery settings screen") // a phone without it: the connection still runs while it can
+        }
+    }
+
+    /**
+     * This phone's notification state for the page: `connected` (on with [key] and Android lets the
+     * app post), `blocked` (Android has notifications off for the app) or `off`.
+     */
+    private fun notificationsState(key: String): String = when {
+        !NotifyService.canPost(this) &&
+            (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU || prefs.notifyAsked) -> "blocked"
+        prefs.pushKey == key && Push.isKey(key) && NotifyService.canPost(this) -> "connected"
+        else -> "off"
     }
 
     /** The setup screen, to type another gateway address; this screen goes (Back there returns to a fresh one). */
@@ -556,6 +629,17 @@ class MainActivity : ComponentActivity() {
                 pendingCameraPermission = null
                 if (req == null) return
                 if (granted) req.grant(arrayOf(PermissionRequest.RESOURCE_VIDEO_CAPTURE)) else req.deny()
+            }
+            REQ_PERM_NOTIFY -> {
+                prefs.notifyAsked = true
+                val key = pendingPushKey
+                pendingPushKey = null
+                if (key != null && granted) {
+                    startNotifications(key)
+                } else {
+                    if (key != null) Toast.makeText(this, getString(R.string.notify_permission_denied), Toast.LENGTH_LONG).show()
+                    web.reload()
+                }
             }
             REQ_PERM_NATIVE_CAMERA -> {
                 if (granted && pendingCamera) {
@@ -1066,7 +1150,16 @@ class MainActivity : ComponentActivity() {
         fun openInBrowser() = onGatewayPage { openExternal(Uri.parse(web.url ?: origin)) }
 
         @JavascriptInterface
-        fun checkForUpdates() = onGatewayPage { updater.check(manual = true) }
+        fun checkForUpdates() = onGatewayPage { this@MainActivity.checkForUpdates() }
+
+        /** The Account page's Get notifications on this phone, with the member's key. */
+        @JavascriptInterface
+        fun startNotifications(key: String?) = onGatewayPage { if (key != null) this@MainActivity.startNotifications(key) }
+
+        /** Which part of the Account page's phone box applies: connected, blocked or off. */
+        @JavascriptInterface
+        fun notificationsState(key: String?): String =
+            if (gatewayPage && key != null) this@MainActivity.notificationsState(key) else ""
 
         /** "Open a copied link" on the gateway's pages: the clipboard's gateway or archidekt.com deck link. */
         @JavascriptInterface
@@ -1095,5 +1188,6 @@ class MainActivity : ComponentActivity() {
         private const val REQ_FILE = 2
         private const val REQ_PERM_WEB_CAMERA = 3
         private const val REQ_PERM_NATIVE_CAMERA = 4
+        private const val REQ_PERM_NOTIFY = 5
     }
 }

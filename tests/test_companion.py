@@ -886,7 +886,7 @@ async def test_deck_editor_page(stack: Stack) -> None:
 async def test_playtest_goes_to_archidekts_own_playtester(stack: Stack) -> None:
     """Playtest opens Archidekt's playtester in its own tab (D-13): a frame on a gateway page never
     carried the person's Archidekt sign-in, so a private deck stayed empty there (T-098). Old links
-    to the gateway's playtest page are sent on; nothing is framed any more."""
+    to the gateway's old playtest page are gone; nothing is framed any more."""
     b = await linked_browser(stack)
     try:
         deck = await b.http.get("/decks/42", headers=NAV)
@@ -896,9 +896,7 @@ async def test_playtest_goes_to_archidekts_own_playtester(stack: Stack) -> None:
         )
         assert "<iframe" not in deck.text
         r = await b.http.get("/decks/42/playtest", headers=NAV)
-        assert r.status_code == 303 and r.headers["location"] == "https://archidekt.com/playtester-v2/42"
-        odd = await b.http.get("/decks/evil/playtest", headers=NAV)
-        assert odd.status_code == 303 and odd.headers["location"] == "/decks"
+        assert r.status_code == 404
     finally:
         await b.aclose()
 

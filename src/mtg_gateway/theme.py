@@ -496,6 +496,7 @@ button.thumbbtn:focus-visible{outline:2px solid var(--accent);outline-offset:2px
 @media (max-width:799.98px){ main .choice .btn{width:100%} }
 /* one row of equal-height buttons at the end of a form; on phones they stack full width */
 .form-actions{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem;margin-top:1rem}
+.form-actions[hidden]{display:none}
 .form-actions > button,.form-actions > .btn,.form-actions form > button{margin:0}
 .form-actions form{display:contents}
 .form-actions .status{margin:0 0 0 auto;color:var(--text-muted);font-size:.9rem}
@@ -1475,7 +1476,7 @@ def render(
                 # feedback.js calls window.MtgNative for each data-native button. Open a copied link
                 # and Check for app updates live in the app's own menu and the Account page's App card.
                 "<div class='sep'></div><div class='head'>App</div>"
-                f"<button type='button' data-native='openCamera'>{icon('camera')}Scan with phone camera"
+                f"<button type='button' data-native='openCamera'>{icon('camera')}Scan with the app's camera"
                 "</button>"
                 f"<button type='button' data-native='reload'>{icon('refresh')}Reload</button>"
                 f"<button type='button' data-native='openInBrowser'>{icon('link')}Open in browser</button>"

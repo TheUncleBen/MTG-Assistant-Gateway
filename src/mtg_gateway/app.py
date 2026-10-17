@@ -98,7 +98,7 @@ from .idp_sweep import AuthentikSweep
 from .membership import Membership, MembershipChecker
 from .metrics import Metrics
 from .mf_proxy import ALLOWED_TOOLS, BUSY_PREFIX, MysticForgeProxy
-from .notify import Notifier
+from .notify import Notifier, add_stream_route
 from .oidc import OIDCClient
 from .pages import SESSION_COOKIE, _csrf, add_browser_routes, browser_session
 from .plugin_page import CONNECTOR_ICON_PATH, CONNECTOR_ICON_PX, SERVER_DESCRIPTION, add_plugin_routes
@@ -660,6 +660,8 @@ def build_mcp_server(state: AppState) -> MCPServer:
 
     @contextlib.asynccontextmanager
     async def lifespan(_server: MCPServer) -> AsyncIterator[None]:
+        if state.notifier is not None:
+            state.notifier.start()  # changes made on worker threads are counted on this loop
         interrupted = await asyncio.to_thread(state.db.fail_interrupted_applies)
         if interrupted:
             logger.warning("%d deck change(s) cut off by the last shutdown were marked failed", interrupted)
@@ -905,30 +907,20 @@ def build_mcp_server(state: AppState) -> MCPServer:
         tool.parameters = compact_schema(inline_refs(tool.parameters))
 
     add_gateway_routes(state, h)
+    add_stream_route(state, server)  # the Android app's notifications (notify.py)
 
     return server
 
 
 def _notify_events(state: AppState) -> None:
-    """Hook the member's notifications (notify.py) to the events they may ask for: a proposal an
-    assistant made that waits for their own approval, and a deck report that finished."""
+    """Hook the member's notifications (notify.py) to the events they may ask for: one message per
+    deck while an assistant's changes wait there for their own press, kept in step with every
+    change to their proposals, and a deck report that finished."""
     notifier = state.notifier
     if notifier is None or not notifier.enabled:
         return
-
-    def proposal_saved(sub: str, proposal_id: str) -> None:
-        try:
-            p = state.decks.describe(sub, proposal_id)
-        except DeckError:
-            return
-        if p["state"] == "pending" and not p["assistant_may_apply"]:
-            notifier.soon(
-                sub,
-                "proposals",
-                "A proposal waits for you",
-                "Your assistant proposed a change. Open it to review, then apply or reject it.",
-                f"/proposals/{proposal_id}",
-            )
+    notifier.watch_waiting(state.decks.waiting_by_deck)
+    state.db.watch_proposals(notifier.proposals_changed)
 
     def report_finished(sub: str, report_id: str) -> None:
         notifier.soon(
@@ -939,7 +931,6 @@ def _notify_events(state: AppState) -> None:
             f"/history/reports/{report_id}",
         )
 
-    state.decks.on_proposal_saved = proposal_saved  # type: ignore[attr-defined]
     if state.reports is not None:
         state.reports.on_finished = report_finished
 

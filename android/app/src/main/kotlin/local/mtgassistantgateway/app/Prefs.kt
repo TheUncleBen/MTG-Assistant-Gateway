@@ -5,8 +5,9 @@ import android.content.SharedPreferences
 
 /**
  * What the app keeps: which gateway to open, the sign-in origin that gateway advertised, the
- * verifier of a browser sign-in in progress ([BrowserSignIn]), and when it last looked for an app
- * update ([Updater]).
+ * verifier of a browser sign-in in progress ([BrowserSignIn]), when it last looked for an app
+ * update ([Updater]), and the member's notification key with the messages already shown
+ * ([NotifyService]).
  */
 class Prefs(context: Context) {
     private val p: SharedPreferences = context.getSharedPreferences("mtgassistant", Context.MODE_PRIVATE)
@@ -50,6 +51,43 @@ class Prefs(context: Context) {
             p.edit().putLong(KEY_UPDATE_CHECK, value).apply()
         }
 
+    /** The member's notification key (their topic) once they connected this phone, else null. */
+    var pushKey: String?
+        get() = p.getString(KEY_PUSH, null)
+        set(value) {
+            p.edit().apply {
+                if (value == null) remove(KEY_PUSH).remove(KEY_PUSH_LAST).remove(KEY_PUSH_SEEN) else putString(KEY_PUSH, value)
+            }.apply()
+        }
+
+    /** The id of the last message the stream brought, the next connection's `since`. */
+    var pushLastId: String?
+        get() = p.getString(KEY_PUSH_LAST, null)
+        set(value) {
+            p.edit().putString(KEY_PUSH_LAST, value).apply()
+        }
+
+    /** The ids of the messages already shown ([Push.Seen]). */
+    var pushSeen: String?
+        get() = p.getString(KEY_PUSH_SEEN, null)
+        set(value) {
+            p.edit().putString(KEY_PUSH_SEEN, value).apply()
+        }
+
+    /** True once the app asked Android to let it run in the background (asked once only). */
+    var batteryAsked: Boolean
+        get() = p.getBoolean(KEY_BATTERY_ASKED, false)
+        set(value) {
+            p.edit().putBoolean(KEY_BATTERY_ASKED, value).apply()
+        }
+
+    /** True once Android was asked for the notification permission (an answer since is final). */
+    var notifyAsked: Boolean
+        get() = p.getBoolean(KEY_NOTIFY_ASKED, false)
+        set(value) {
+            p.edit().putBoolean(KEY_NOTIFY_ASKED, value).apply()
+        }
+
     companion object {
         private const val KEY_ORIGIN = "gateway_origin"
         private const val KEY_PROVIDER = "idp_origin"
@@ -58,5 +96,10 @@ class Prefs(context: Context) {
         private const val KEY_SIGNIN_VERIFIER = "signin_verifier"
         private const val KEY_SIGNIN_AT = "signin_started_at"
         private const val KEY_UPDATE_CHECK = "update_checked_at"
+        private const val KEY_PUSH = "push_key"
+        private const val KEY_PUSH_LAST = "push_last_id"
+        private const val KEY_PUSH_SEEN = "push_seen"
+        private const val KEY_BATTERY_ASKED = "battery_asked"
+        private const val KEY_NOTIFY_ASKED = "notify_asked"
     }
 }

@@ -369,7 +369,7 @@ async def test_notifications_are_off_and_harmless_without_a_server(plain: Stack)
         assert r.headers["location"] == "/account?err=summary_off#summary"
         assert notify.prefs(plain.h.db, "user-1")["summary_every"] == "off"
         assert plain.gw.notifier.enabled is False
-        assert plain.gw.decks.on_proposal_saved is None  # nothing hooked
+        assert plain.gw.notifier._count is None  # nothing hooked
     finally:
         await b.aclose()
 
@@ -383,7 +383,9 @@ async def test_opt_in_topic_test_button_and_the_token_never_logged(stack: Stack,
         topic = notify.prefs(stack.h.db, "user-1")["ntfy_topic"]
         assert re.fullmatch(r"mtg-[A-Za-z0-9_-]{22}", topic)
         page = (await b.http.get("/account")).text
-        assert topic in page and "https://ntfy.test" in page and "Send test" in page
+        # in a browser: no topic or server on show (the app is the only way to read them), Send test
+        assert topic not in page and "https://ntfy.test" not in page and "Send test" in page
+        assert "data-native='startNotifications'" not in page and "/install?for=android" in page
         assert TOKEN not in page
         r = await _post(b, "/account", {"action": "notify_test"})
         assert r.headers["location"] == "/account?ok=notify_test_sent#notifications"
@@ -403,15 +405,20 @@ async def test_opt_in_topic_test_button_and_the_token_never_logged(stack: Stack,
         assert "ntfy publish refused: HTTP 403" in caplog.text
         assert TOKEN not in caplog.text
         assert TOKEN not in repr(stack.gw.settings) and TOKEN not in repr(stack.gw.notifier)
-        # a chosen topic must be long enough and nobody else's
-        r = await _opt_in(b, ntfy_topic="short")
-        assert r.headers["location"].startswith("/account?err=notify_topic_invalid")
-        r = await _opt_in(b, ntfy_topic="my-own-topic-1234")  # no mtg- prefix
-        assert r.headers["location"].startswith("/account?err=notify_topic_invalid")
+        # a topic sent with the form is ignored: the gateway makes every topic
         r = await _opt_in(b, ntfy_topic="mtg-my-own-topic-1234")
-        assert notify.prefs(stack.h.db, "user-1")["ntfy_topic"] == "mtg-my-own-topic-1234"
+        assert notify.prefs(stack.h.db, "user-1")["ntfy_topic"] == topic
+        # Disconnect my phones: a new topic
         r = await _post(b, "/account", {"action": "notify_new_topic"})
-        assert notify.prefs(stack.h.db, "user-1")["ntfy_topic"] != "mtg-my-own-topic-1234"
+        assert r.headers["location"] == "/account?ok=notify_topic#notifications"
+        assert notify.prefs(stack.h.db, "user-1")["ntfy_topic"] != topic
+        # off keeps the topic; on again keeps it too
+        kept = notify.prefs(stack.h.db, "user-1")["ntfy_topic"]
+        r = await _post(b, "/account", {"action": "notify_save"})
+        assert r.headers["location"] == "/account?ok=notify_off#notifications"
+        assert "Send test" not in (await b.http.get("/account")).text
+        await _opt_in(b)
+        assert notify.prefs(stack.h.db, "user-1")["ntfy_topic"] == kept
     finally:
         await b.aclose()
 
@@ -435,9 +442,10 @@ async def test_a_proposal_waiting_for_the_member_and_a_finished_report_notify(st
     assert p["state"] == "pending" and p["assistant_may_apply"] is False  # manual mode: it waits
     await stack.gw.notifier.drain()
     msg = stack.ntfy.messages[-1]
-    assert msg["title"] == "A proposal waits for you"
+    assert msg["title"] == notify.waiting_title(1, p["deck_name"])
+    assert msg["sequence_id"] == "deck-42"
     assert msg["click"] == f"https://mtg.test/proposals/{p['proposal_id']}"
-    assert "Arcane Signet" not in json.dumps(msg) and "Sample Commander" not in json.dumps(msg)
+    assert "Arcane Signet" not in json.dumps(msg)
     rep = structured(await call(h, token, "run_deck_report", {"deck_ref": "42", "simulate": False}))
     await stack.gw.notifier.drain()
     msg = stack.ntfy.messages[-1]

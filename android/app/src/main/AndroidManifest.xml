@@ -14,6 +14,17 @@
     <!-- The app reloads a page that failed to load once the phone's network comes back (Q63,
          MainActivity.watchNetwork). A normal permission: granted at install, never asked. -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- Notifications (NotifyService): the member's messages, the foreground service that keeps the
+         connection to the gateway open while the app is closed, starting it again after a restart,
+         a wake lock while a message is posted, and asking once to run in the background so Android's
+         battery saving doesn't cut the connection. POST_NOTIFICATIONS is asked when the member presses
+         Get notifications on this phone; the others are granted at install. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <!-- Without this the CAMERA permission would imply a required camera and hide the app from
          devices without one. The app works without a camera; scanning just isn't offered. -->
@@ -75,6 +86,27 @@
             android:name="local.mtgassistantgateway.app.SetupActivity"
             android:exported="false"
             android:windowSoftInputMode="adjustResize" />
+
+        <!-- The member's notifications while the app is closed: one connection to the gateway's own
+             address, no Google push service. specialUse: none of Android's other service types fits
+             a connection to a self-hosted server that receives notifications. -->
+        <service
+            android:name="local.mtgassistantgateway.app.NotifyService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Keeps a connection open to the self-hosted gateway the person signs in to, so they receive its notifications without Google push services." />
+        </service>
+        <!-- Starts NotifyService again after the phone restarts and after the app is updated. -->
+        <receiver
+            android:name="local.mtgassistantgateway.app.NotifyService$Restart"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
 
         <!-- PackageInstaller's answer to an update (Updater.kt). Not exported: only the install
              session's own PendingIntent reaches it. -->

@@ -394,20 +394,21 @@ Archidekt, so it needs no proposal.
 
 ## Notifications and summaries
 
-When the operator has set up a notification server (ntfy), the
-**Notifications** card on your Account page can send a short message to
-your phone when a proposal waits for your approval, a deck report finishes
-(Forge runs that waited in the queue included), or a watched card crosses
-your price alert. Tick **Send me notifications**, choose which of these you
-want, and save: you get a topic of your own that nobody can guess (or type
-your own). Install the ntfy app, add the server shown there and subscribe to
-your topic; if the operator protects the server, sign in in the app with
-the user they gave you (check your app for where). **Send test** checks it.
-Messages say only what happened and link to the page here; they never list
-a deck's cards.
+The **Notifications** card on your Account page can send you a short message
+in the gateway's Android app when an assistant leaves changes waiting for
+your press (one message per deck, such as "2 changes to Atraxa are waiting
+for you"), a deck report finishes (Forge runs that waited in the queue
+included), or a watched card crosses your price alert. There are no
+notifications on iPhone. Open your Account page in the app, tick **Send me
+notifications**, choose which of these you want, and save, then press
+**Get notifications on this phone**. On Android 13 and later the app asks
+you to allow notifications, and it asks once to run in the background.
+Android then shows a quiet "Always connected" notification while the app
+listens. **Send test** checks it, and
+**Disconnect my phones** stops every phone you connected. Messages say only
+what happened and link to the page here; they never list a deck's cards.
 
-The summary is part of the **Notifications** card, so it is there only when
-the operator has set up ntfy. Choose **Every day** or **Every week
+The summary is part of the **Notifications** card. Choose **Every day** or **Every week
 (Mondays)** and the card shows a plain summary of today or the last 7 days
 (watched prices that moved and your watched decks' values when watchlists
 are on, deck reports finished, and proposals waiting and applied), and it is
@@ -416,11 +417,11 @@ own data. It does not write an AI summary itself: that would need a paid AI
 model service, and the gateway uses only free ones.
 
 For a summary in your assistant's own words, use the assistant you already
-have. Its `get_summary` tool returns the same summary (with `period` day or
-week), with or without ntfy. Claude and ChatGPT can both run a prompt on a schedule (check your
-app for scheduled tasks); a prompt such as "Every Monday morning, call
-get_summary from my MTG gateway and tell me in a few lines what changed and
-what needs me" does it. The tool is read-only.
+have. It can read the same summary, for a day or a week, with or without
+notifications, and reading it changes nothing. Claude and ChatGPT can both
+run a prompt on a schedule (check your app for scheduled tasks); a prompt
+such as "Every Monday morning, get my weekly summary from my MTG gateway and
+tell me in a few lines what changed and what needs me" does it.
 
 ## With an AI assistant
 
