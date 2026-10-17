@@ -11,8 +11,8 @@ with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 
 The simulator release: a Reports page under More, Forge games of two decks against the same
 opponents, laid-out Forge results, a guide on the Goldfish page and quicker Forge runs. Forge stays
-off by default. The database moves to schema 14, which only adds one table. The Android app is
-unchanged.
+off by default. The database moves to schema 14, which only adds one table. Notifications move into
+the gateway's own Android app, from the stack's own notification server.
 
 ### Added
 - **Reports page** under More: your stored deck reports, newest first (the newest 200), with their status and what ran. It also shows what Forge is playing for you now and what waits, with the expected times. A deck filter narrows the list, and each report links to its deck's trend in History. Reports stay in History too.
@@ -32,6 +32,9 @@ unchanged.
 - **Forge on more than one machine** (optional): the gateway can use several copies of the Forge service, for example on a Pi and a PC. Each run plays on one copy, the one with the most free places, and stays there. One copy is still the usual setup. So far this is tested only with a stand-in, not on real machines.
 - `scripts/measure_recognition.py` and a one-off CI step: for the precons and test decks, the share of cards played with their effect and the share known (played with their effect or left out on purpose).
 - The Goldfish page has the card size switch too, and its cards follow it.
+- **Notifications in the Android app.** Members can get their notifications in the gateway's own Android app instead of a separate notification app. There is no Google push service and no iPhone version. On the Account page in the app, **Get notifications on this phone** asks Android to allow notifications and to let the app run in the background. Android then shows a quiet notification while the app listens.
+- **Disconnect my phones** on the Account page stops every connected phone.
+- The stack runs its own ntfy server (`mtg-assistant-ntfy`) on a private network with no published port. Phones reach it through the gateway's own address.
 
 ### Changed
 - **Names:**
@@ -53,14 +56,29 @@ unchanged.
 - **Forge image:** 2.0.15-mag3. Build pins are by digest (Dockerfile frontend and base, buildkit, binfmt).
 - **Report wording:** "Out of scope" reads "Left out on purpose", and "Modeled but never mattered" reads "Played with their effect but never mattered". The report adds a second coverage figure, the cards known to the solo test (played with their effect or left out on purpose).
 
+- The Notifications card no longer shows a server or topic, and members no longer choose a topic. A topic chosen before is replaced by a random one the first time the card opens in the app.
+- **Check for app updates** says at once that it is checking.
+- The Android app's menu entry **Scan with phone camera** is now **Scan with the app's camera**, and the launcher shortcut **Scan cards** is now **Scan page**.
+- The build images (Dockerfile, the Mystic Forge Dockerfile and the BuildKit and binfmt images in CI) are pinned by digest, and so are pip and wheel. The image installs only the wheels it built.
+
 ### Fixed
 - A pasted or Archidekt list's copies are counted in the report's shares (they were counted once per name).
 - The bracket estimate now follows archidekt.com's own rule for combos and extra turns; it followed an older, reversed rule.
+- The Android app's colour strips under the status and navigation bars kept their full colour when Android faded the window.
+
+### Removed
+- The old `/decks/{id}/playtest` address. The deck page's Playtest opens Archidekt's own playtester directly.
+- The sign-in fallback for Android apps older than 0.7.12.
 
 ### Card models (schema 14, for the simulator work)
 - Database schema 14 adds one table, `card_models` (the simulator's card models). The upgrade is automatic and only adds the table; going back to an earlier version needs the backup taken before the upgrade, as for every schema step.
 - Each member keeps their own card models (the saved card descriptions above), one per card, used only in their own solo tests and goldfish A/B comparisons. Each records the simulator version it was checked with.
 - Admin > Card models lists every member's models, most recently changed first, with who added each (admins only) and Remove for any of them (audited as `card_model_removed`). "Delete my data" removes a member's models.
+
+### Deployment
+- **Create the `mtg_ntfy_token` secret before updating** (DEPLOY.md step 4, or `./make-secrets.sh` for Compose). Delete any `MTG_NTFY_URL` or `MTG_NTFY_TOKEN_FILE` value from the stack's environment. An ntfy server you ran for the gateway, and its proxy host, can go.
+- **Members need app 0.7.30 to get notifications. Members on an app older than 0.7.12 must update the app first.**
+- Members who used the ntfy app connect again in the gateway's app. Their old ntfy subscriptions get nothing more.
 
 ## [0.7.29] - Unreleased
 
