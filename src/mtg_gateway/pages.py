@@ -944,8 +944,8 @@ ERR_MESSAGES = {
     "review it again, then apply or reject it, or ask your assistant to amend it.",
     "changed": "A newer version of this change was made since you opened it. Nothing was sent. Review "
     "the new version below.",
-    "now_held": "This change was held after you opened this page, so nothing was sent. The page now "
-    "says why under Held. Apply it again if you still want it.",
+    "now_held": "This change is held for a reason that came up after you opened this page, so nothing "
+    "was sent. The page now says why under Held. Apply it again if you still want it.",
     "changed_some": "One of the checked changes is not the version this page showed, so nothing was "
     "sent. Look over the list again below.",
     "none_selected": "Check at least one waiting change first. Nothing was done.",
@@ -1674,7 +1674,12 @@ def _proposal_body(p: dict[str, Any], csrf: str | None, shown: str, *, step: boo
                     x
                     for x in (
                         p.get("replace_note") if p.get("state") == "pending" else "",
-                        f"This one {p['press_reason']}, so it needs your press."
+                        # the Held row above already says why: said once
+                        "It needs your press."
+                        if p.get("press_reason")
+                        and p.get("status") == "held"
+                        and _held_repeat(p["press_reason"])
+                        else f"This one {p['press_reason']}, so it needs your press."
                         if p.get("press_reason")
                         else "",
                     )
@@ -1916,6 +1921,11 @@ def _picked_versions(data: dict[str, str], picks: list[str]) -> dict[str, int]:
         if v.isdigit() and 0 < int(v) < 10_000:
             out[pid] = int(v)
     return out
+
+
+def _held_repeat(press_reason: str) -> bool:
+    """A press reason that only says again why the change is held."""
+    return bool(re.match(r"(would replace .*, which was applied|is held because)", str(press_reason)))
 
 
 def _picked_shown(data: dict[str, str], picks: list[str]) -> dict[str, dict[str, Any]]:

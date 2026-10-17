@@ -62,7 +62,7 @@ FORMATTING_LOST_ALONE = (
     "it is approved on its own review page, which says what goes. It is still waiting."
 )
 # a change held after the list Apply all was pressed on was drawn: left out, as on the card
-HELD_SINCE = "Not sent: it was held after this list was shown. {reason} It is still waiting."
+HELD_SINCE = "Not sent: it is held for a reason that came up after you saw it. {reason} It is still waiting."
 EARLIER_FAILED = (
     "Not sent: an earlier change to this deck in this selection failed after part of it reached "
     "Archidekt. It is still waiting: open it to check it against the deck as it is now."
