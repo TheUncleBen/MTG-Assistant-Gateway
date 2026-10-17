@@ -422,7 +422,10 @@ async def test_compare_presses_at_once_never_pass_the_member_limit(stack: Stack)
         one, two = await asyncio.gather(press(), press())
         assert sorted([one.status_code, two.status_code]) == [303, 409], (one.text, two.text)
         refused = one if one.status_code == 409 else two
-        assert "Comparing two decks needs room for 2 more" in html.unescape(refused.text)
+        assert (
+            "Another comparison of yours is still being set up, so nothing was started. Try again once "
+            "it is set up and none of your reports is waiting for its games."
+        ) in html.unescape(refused.text)
         assert states() == ["running", "queued", "queued"]  # one whole pair waits, nothing skipped
         assert not reports._pair_holds  # every hold given back
 

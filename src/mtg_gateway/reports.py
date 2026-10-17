@@ -503,10 +503,11 @@ class ReportService:
         never makes one deck's report with Forge games and the other's without."""
         runs = self._member_runs(sub)
         playing = sum(1 for _, _, s in runs if not _waiting(s))
-        # a comparison already pressed but not saved yet counts as the reports it will make
-        waiting = len(runs) - playing + self._reserved(sub)
-        if (not runs and not waiting) or waiting + 2 <= MAX_FORGE_WAITING:
+        waiting, reserved = len(runs) - playing, self._reserved(sub)
+        if (not runs and not reserved) or waiting + reserved + 2 <= MAX_FORGE_WAITING:
             return None
+        if reserved:  # places another comparison keeps: its reports are not made yet
+            return PAIR_SETTING_UP
         queued = (
             f"{waiting} report waiting for its games"
             if waiting == 1
@@ -1291,6 +1292,10 @@ class ReportService:
         }
 
 
+PAIR_SETTING_UP = (
+    "Another comparison of yours is still being set up, so nothing was started. Try again once it "
+    "is set up and none of your reports is waiting for its games."
+)
 NO_FORGE_TO_SHARE = (
     "That report has no Forge games, so there are no opponents to share. Run it again with Forge, then "
     "compare."
