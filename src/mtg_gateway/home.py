@@ -22,6 +22,7 @@ from .deckpage import covers_for, decks_unreadable_html, image_url, reread_href
 from .decks import DeckError
 from .pages import _csrf, browser_session, login_redirect
 from .theme import display_name, icon, render
+from .waiting_strip import waiting_line
 
 if TYPE_CHECKING:
     from mcp.server.mcpserver import MCPServer
@@ -215,7 +216,9 @@ def add_home_routes(server: MCPServer, state: AppState) -> None:
                         "/proposals",
                         "proposals",
                         "Proposals",
-                        "Deck changes waiting for your approval." if pending else "Every change is reviewed.",
+                        waiting_line(pending, state.db.pending_count_by_deck(sub))
+                        if pending
+                        else "Every change is reviewed.",
                         number=pending,
                         cta=bool(pending),
                     ),

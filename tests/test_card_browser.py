@@ -46,8 +46,8 @@ HOST = """<!DOCTYPE html><html><body>
 <script>
 window.log = [];
 window.confirmReply = null;  // set by the test: the structuredContent confirm_proposal answers with
-// get_proposal's structuredContent; null: the host refuses the call (as a host may refuse a card's
-// tools/call), so the card keeps what it drew
+// get_proposal's structuredContent; null: the gateway answers with what the card drew (the change
+// is as shown); "refuse": the host refuses the call, as a host may refuse a card's tools/call
 window.getReply = null;
 var frame = document.getElementById("f");
 window.addEventListener("message", (ev) => {
@@ -64,8 +64,8 @@ window.addEventListener("message", (ev) => {
   } else if (m.method === "ui/notifications/initialized") {
     send({jsonrpc: "2.0", method: "ui/notifications/tool-result", params: window.toolResult});
   } else if (m.method === "tools/call" && m.params.name === "get_proposal") {
-    const sc = window.getReply;
-    if (sc === null) send({jsonrpc: "2.0", id: m.id, error: {code: -32000, message: "blocked"}});
+    const sc = window.getReply === null ? (window.toolResult || {}).structuredContent : window.getReply;
+    if (sc === "refuse") send({jsonrpc: "2.0", id: m.id, error: {code: -32000, message: "blocked"}});
     else send({jsonrpc: "2.0", id: m.id,
                result: {content: [{type: "text", text: JSON.stringify(sc)}], structuredContent: sc}});
   } else if (m.method === "tools/call") {
@@ -242,7 +242,7 @@ def test_big_edit_shows_a_summary_first_and_the_auto_modes_hide_the_buttons() ->
             card = _open(page, {"structuredContent": auto})
             card.locator("#title").wait_for()
             page.wait_for_timeout(900)
-            assert "assistant applies this itself" in card.locator("#note").inner_text()
+            assert "lets your assistant apply this itself" in card.locator("#note").inner_text()
             assert card.locator("button:visible").count() == 0
             assert card.locator("a.link", has_text="Open in the app or browser").count() == 1
             assert not errors, errors
@@ -304,7 +304,8 @@ def test_card_without_a_code_only_offers_the_review_page() -> None:
 
 
 def test_narrow_card_keeps_badges_whole_and_names_readable() -> None:
-    """At phone widths the state and risk badges stay one line each and clear of the title, and a
+    """At phone widths the state and risk badges stay one line each and clear of the title (beside
+    it, or under it when the title would get less than 10rem, review M-1 of Track A), and a
     long change ("Main → Maybeboard (leaves the deck, −1)") wraps beside its action label, never over
     it, instead of squeezing the card name to a letter a line."""
     from playwright.sync_api import sync_playwright
@@ -343,15 +344,18 @@ def test_narrow_card_keeps_badges_whole_and_names_readable() -> None:
   const a = ink('ul.changes li.category .act');
   const q = ink('ul.changes li.category .qty');
   const apart = a.right <= q.left || q.right <= a.left || a.bottom <= q.top || q.bottom <= a.top;
-  return {titleRight: h.right, badges: b.map(r => [r.left, r.height]), nameWidth: n.width,
+  return {titleRight: h.right, titleBottom: h.bottom, badges: b.map(r => [r.left, r.height, r.top]),
+          nameWidth: n.width,
           actQtyApart: apart, act: [a.left, a.right, a.top, a.bottom],
           qty: [q.left, q.right, q.top, q.bottom]};
 }"""
                 )
                 # the action label and the change beside it never overlap (seen at 390 px)
                 assert geo["actQtyApart"], (width, geo)
-                assert all(h <= 26 for _, h in geo["badges"]), (width, geo)
-                assert all(left >= geo["titleRight"] for left, _ in geo["badges"]), (width, geo)
+                assert all(h <= 26 for _, h, _ in geo["badges"]), (width, geo)
+                assert all(
+                    left >= geo["titleRight"] or top >= geo["titleBottom"] for left, _, top in geo["badges"]
+                ), (width, geo)
                 assert geo["nameWidth"] > 80, (width, geo)
                 page.close()
         finally:

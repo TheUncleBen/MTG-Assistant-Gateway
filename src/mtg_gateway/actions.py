@@ -2,9 +2,9 @@
 it, follow its owner, post, edit, delete or vote on a comment, delete a deck and create a
 folder; 0.7.20 adds and removes a deck's collaborators. Each is a proposal of kind ``action``
 with one review row, so it goes through the same approval flow as every other write, but (R-142)
-only the member's press on the signed-in review page applies one: never the assistant, whatever
-the approval mode (modes.py), and not the in-chat card, which only opens the review page for
-these. The work itself is the code the gateway's own pages already use (the deck page's social
+only the member's own press applies one: on the in-chat card (0.7.29, Q8) or on the signed-in
+review page (a deck deletion: the review page only), never the assistant, whatever the approval
+mode (modes.py). The work itself is the code the gateway's own pages already use (the deck page's social
 buttons in social.py, the delete and folder pages in decks.py), so a proposal does exactly what
 the matching button does, with the same checks again at apply time."""
 
@@ -14,9 +14,10 @@ import secrets
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
+from . import formatting, refusals
 from .archidekt import VOTE_DOWN, VOTE_NONE, VOTE_UP, drops_formatting, words_only_note
 from .decklist import clean_text
-from .decks import DeckError, _clean_deck_id, _row
+from .decks import DeckError, _clean_deck_id, _row, needs_look_error
 from .social import FOLLOWING_PAGES
 
 if TYPE_CHECKING:
@@ -24,6 +25,11 @@ if TYPE_CHECKING:
 
 ACCOUNT_TARGET = "account"  # deck_id of a proposal that is about the account, not one deck
 ACCOUNT_NAME = "Your Archidekt account"
+# A comment edit that keeps formatting (Q137) whose comment changed since its review: its
+# "needs a look" reason, in words (recheck.reason_text shows any other text as it is)
+COMMENT_CHANGED = (
+    "The comment changed on Archidekt since this was reviewed, so it would not look as reviewed."
+)
 
 # What each action is called on the review page and the in-chat card.
 LABELS = {
@@ -75,9 +81,9 @@ def _comment_text(text: Any) -> str:
 
     clean = comment_text(str(text or ""))
     if not clean:
-        raise DeckError("invalid", "text is required: write the comment first")
+        raise DeckError("invalid", refusals.EMPTY_COMMENT)  # Q141 item 7A
     if len(clean) > MAX_COMMENT:
-        raise DeckError("invalid", f"a comment can be at most {MAX_COMMENT} characters")
+        raise DeckError("invalid", refusals.comment_too_long(MAX_COMMENT))
     return clean
 
 
@@ -91,16 +97,22 @@ def _owner(deck: Any) -> str:
     return clean_text(str(getattr(deck, "owner", "") or "")) or "its owner"
 
 
-async def _thread_comment(decks: DeckService, sub: str, deck_id: str, comment_id: Any) -> dict[str, Any]:
-    from .social import _find
-
+async def _thread_comment(
+    decks: DeckService, sub: str, deck_id: str, comment_id: Any, *, keep_doc: bool = False, page: int = 1
+) -> dict[str, Any]:
     if not isinstance(comment_id, int) or isinstance(comment_id, bool) or comment_id <= 0:
         raise DeckError("invalid", "comment_id must be a comment's number (get_deck_comments lists them)")
-    thread = await _social(decks).comments(sub, deck_id)
-    found = _find(thread["comments"], comment_id)
-    if found is None:
-        raise DeckError("not_found", "that comment is not in this deck's thread (or not on its first page)")
-    return {**found, "_me": thread.get("me")}
+    found, thread = await _social(decks).find_comment(sub, deck_id, comment_id, page, keep_doc=keep_doc)
+    return {**found, "_me": thread.get("me"), "_page": thread["page"]}
+
+
+def _page(value: Any) -> int:
+    """The page of the comment thread a comment was read from (get_deck_comments' page)."""
+    if value is None:
+        return 1
+    if not isinstance(value, int) or isinstance(value, bool) or not 1 <= value <= 1000:
+        raise DeckError("invalid", "page must be the thread page get_deck_comments read (1 or more)")
+    return value
 
 
 def profile_url(username: str) -> str:
@@ -147,6 +159,27 @@ async def collaborator_target(
     return found["user_id"], found["username"]
 
 
+async def follow_target(decks: DeckService, sub: str, username: Any) -> tuple[int, str]:
+    """(user id, username) of the person to follow by name (Q141 item 6A): one Archidekt read,
+    through their public decks, which is the only lookup the gateway has, so someone with no
+    public decks is not found."""
+    want = clean_text(str(username or "")).lstrip("@")
+    if not want:
+        raise DeckError("invalid", "Give the person's Archidekt username.")
+    found = await decks.user_profile(sub, want)
+    name = clean_text(str((found or {}).get("username") or ""))
+    if not found or not str(found.get("id") or "").isdigit() or name.casefold() != want.casefold():
+        # wording draft (WORDING-6): one text for follow and unfollow
+        raise DeckError(
+            "not_found",
+            f"No Archidekt user called {want} with public decks was found. Check the spelling. The "
+            "gateway finds people only through their public decks, so someone with none can't be "
+            f"found from here: go to their page on Archidekt instead ({profile_url(want)}).",
+            follow_url=profile_url(want),
+        )
+    return int(found["id"]), name
+
+
 async def collaborator_by_hand(
     decks: DeckService, sub: str, deck_id: str, action: str, username: Any
 ) -> dict[str, Any]:
@@ -158,11 +191,7 @@ async def collaborator_by_hand(
         raise DeckError("invalid", "Pick add or remove.")
     # Before 0.7.24 this form made a proposal, which the writes switch held back; keep it so.
     if not decks.settings.writes_enabled:
-        raise DeckError(
-            "writes_disabled",
-            "Deck writes are switched off on this gateway (MTG_WRITES_ENABLED is false); nothing was "
-            "sent to Archidekt.",
-        )
+        raise DeckError("writes_disabled", refusals.WRITES_OFF)  # Q141 item 7A
     social = _social(decks)
     social._me(sub)
     deck = await decks.get_own_deck(sub, _clean_deck_id(str(deck_id or "")))
@@ -186,7 +215,9 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
     changes: dict[str, Any] = {"action": action}
     row: dict[str, Any] = {"action": action, "label": LABELS[action]}
     deck = None
-    if action != "create_folder":
+    # Q141 item 6A: follow or unfollow someone by username, not through one of their decks
+    by_name = action == "follow" and params.get("username") is not None and not params.get("deck_id")
+    if action != "create_folder" and not by_name:
         deck_id = _clean_deck_id(str(params.get("deck_id") or ""))
         deck = (
             await decks.get_own_deck(sub, deck_id)
@@ -194,6 +225,8 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
             else await decks.get_any_deck(sub, deck_id)
         )
         changes["deck_id"] = deck.id
+        if social is not None:
+            social.note_root(sub, deck)
         # the deck's name is on the card's title and the page's Deck line; it is left out of this
         # sentence so a name written to read like more of it cannot change what the sentence says
         where = f"by {_owner(deck)}"
@@ -211,43 +244,57 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
         on = params.get("on") is not False
         changes["on"] = on
         row["text"] = ("Bookmark" if on else "Remove your bookmark from") + f" the deck {where}"
+        if deck is not None and deck.bookmarked == on:
+            row["text"] += " (already the case; applying changes nothing)"
     elif action == "follow":
         on = params.get("on") is not False
-        owner_id = int(deck.owner_id) if deck and str(deck.owner_id or "").isdigit() else None
+        if by_name:
+            owner_id, who = await follow_target(decks, sub, params.get("username"))
+        else:
+            owner_id = int(deck.owner_id) if deck and str(deck.owner_id or "").isdigit() else None
+            who = _owner(deck)
         if owner_id is None:
             raise DeckError(
                 "unavailable", "Archidekt does not say who owns this deck, so there is no one to follow"
             )
         state = await social.follow_state(sub, owner_id)
         if state["self"]:
-            raise DeckError("invalid", "that is your own deck: you cannot follow yourself")
+            raise DeckError("invalid", refusals.FOLLOW_SELF)  # Q141 item 7A
         changes.update(user_id=owner_id, on=on)
-        row["text"] = ("Follow " if on else "Stop following ") + f"{_owner(deck)} on Archidekt"
-        if state["following"] == on:
+        if by_name:
+            changes["username"] = who
+        row["text"] = ("Follow " if on else "Stop following ") + f"{who} on Archidekt"
+        if state.get("unknown"):
+            # Q141 item 4A (wording draft, WORDING-4)
+            row["text"] += " (the gateway could not check whether you already follow them)"
+        elif state["following"] == on:
             row["text"] += " (already the case; applying changes nothing)"
     elif action == "comment_post":
         text = _comment_text(params.get("text"))
-        thread = await social.comments(sub, deck.id)
-        if thread["root"] is None:
+        if deck.comment_root is None:
             raise DeckError("unavailable", "Archidekt reports no comment thread for this deck")
         parent = params.get("reply_to")
         if parent is not None:
-            found = await _thread_comment(decks, sub, deck.id, parent)
+            found = await _thread_comment(decks, sub, deck.id, parent, page=_page(params.get("page")))
+            changes["page"] = found["_page"]
             row["text"] = f"Reply publicly to {found['owner']['username'] or 'a comment'} on the deck {where}"
         else:
             row["text"] = f"Post a public comment on the deck {where}"
         changes.update(text=text, parent=parent)
         row["after_text"] = text
     elif action in ("comment_edit", "comment_delete", "comment_vote"):
-        found = await _thread_comment(decks, sub, deck.id, params.get("comment_id"))
+        found = await _thread_comment(
+            decks, sub, deck.id, params.get("comment_id"), keep_doc=True, page=_page(params.get("page"))
+        )
         own = found["_me"] is not None and found["owner"]["id"] == found["_me"]
         changes["comment_id"] = found["id"]
+        changes["page"] = found["_page"]
         row["before_text"] = found["text"]
         if action == "comment_vote":
             if own:
-                raise DeckError("invalid", "that is your own comment")
+                raise DeckError("invalid", refusals.OWN_COMMENT_VOTE)  # Q141 item 7A
             if found.get("archived"):
-                raise DeckError("invalid", "that comment is archived on Archidekt and takes no votes")
+                raise DeckError("invalid", refusals.ARCHIVED_COMMENT)
             vote = _vote(params.get("vote"))
             changes["vote"] = vote
             row["text"] = {
@@ -257,11 +304,20 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
             }[vote] + f" {found['owner']['username'] or 'a'}'s comment on the deck {where}"
         else:
             if not own:
-                raise DeckError("forbidden", "only your own comments can be edited or deleted")
+                raise DeckError("forbidden", refusals.NOT_OWN_COMMENT)  # Q141 item 7A
             if action == "comment_edit":
                 text = _comment_text(params.get("text"))
                 changes["text"] = text
                 row["after_text"] = text
+                # Q137: its bold text, links and pictures stay where their words did not change;
+                # the review page draws the result, and the edit is approved there
+                kept = formatting.keep_formatting(found.get("_doc"), text)
+                if kept is not None:
+                    row["after_doc"], row["dropped_embeds"] = kept
+                elif text and formatting.is_formatted(found.get("_doc")):
+                    # E-2 for comments (review M-2): a rewrite that keeps none of it says what goes
+                    row["formatting_lost"] = True
+                    row["dropped_embeds"] = formatting.embeds(found.get("_doc"))
                 row["text"] = f"Change your comment on the deck {where}"
             else:
                 row["text"] = f"Delete your comment on the deck {where}"
@@ -271,7 +327,7 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
         row["text"] = f"Delete your deck '{deck.name}' ({cards} cards) from your Archidekt account"
         row["note"] = (
             "Archidekt itself has no undo for a deleted deck. The gateway keeps a snapshot first"
-            + (" and a backup copy on Archidekt" if decks.settings.archidekt_backups else "")
+            + (" and a backup copy on Archidekt" if decks.live.get("archidekt_backups") else "")
             + "."
         )
     elif action == "create_folder":
@@ -348,24 +404,38 @@ async def apply(
     elif action == "follow":
         result = await _social(decks).follow(sub, int(c["user_id"]), bool(c["on"]))
     elif action == "comment_post":
-        out = await _social(decks).comment(sub, deck_id, str(c["text"]), c.get("parent"))
+        out = await _social(decks).comment(
+            sub, deck_id, str(c["text"]), c.get("parent"), int(c.get("page") or 1)
+        )
         result = {"comment_id": out["comment"]["id"], "parent": out["parent"]}
     elif action == "comment_edit":
-        out = await _social(decks).edit_comment(sub, deck_id, int(c["comment_id"]), str(c["text"]))
+        # Q137: the comment's formatting is kept as the review showed it (after_doc), or not sent
+        reviewed = next((r for r in row.get("rows") or [] if r.get("kind") == "action"), {})
+        try:
+            out = await _social(decks).edit_comment(
+                sub,
+                deck_id,
+                int(c["comment_id"]),
+                str(c["text"]),
+                expect_doc=str(reviewed.get("after_doc") or ""),
+                page=int(c.get("page") or 1),
+            )
+        except DeckError as exc:
+            if exc.kind == "stale":
+                raise needs_look_error(COMMENT_CHANGED) from exc
+            raise
         result = {"comment_id": out["comment"]["id"], "verified": True}
     elif action == "comment_delete":
-        out = await _social(decks).delete_comment(sub, deck_id, int(c["comment_id"]))
+        out = await _social(decks).delete_comment(sub, deck_id, int(c["comment_id"]), int(c.get("page") or 1))
         result = {"deleted": out["deleted"], "verified": True}
     elif action == "comment_vote":
-        result = await _social(decks).vote_comment(sub, deck_id, int(c["comment_id"]), int(c["vote"]))
+        result = await _social(decks).vote_comment(
+            sub, deck_id, int(c["comment_id"]), int(c["vote"]), int(c.get("page") or 1)
+        )
     elif action == "delete_deck":
         deck = await decks.get_own_deck(sub, deck_id)
         if deck.fingerprint() != row["baseline_fingerprint"]:
-            raise DeckError(
-                "stale",
-                "The deck changed on Archidekt since this proposal was made, so it was not deleted. "
-                "Ask for a new proposal if you still want it gone.",
-            )
+            raise needs_look_error(None)  # a deck deletion stays strict (K1): any change stops it
         try:
             # progress: the snapshot and the backup copy are recorded as every apply's are (review
             # L1), so a stop that changed nothing deletes the copy or queues its delete (Q77)

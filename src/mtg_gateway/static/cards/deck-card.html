@@ -56,7 +56,7 @@
     var curve = d.curve || {}, keys = ["0", "1", "2", "3", "4", "5", "6", "7+"], max = 1;
     keys.forEach(function (k) { max = Math.max(max, Number(curve[k]) || 0); });
     var cv = el("span", "curve"); cv.setAttribute("aria-label", "Mana curve");
-    // a column per mana value: its bar, and under it the label, on the card rather than in the bar (L14)
+    // a column per mana value: its bar, and under it the label, on the card rather than in the bar
     keys.forEach(function (k) { var col = el("span"), bar = el("b"); bar.style.height = Math.max(2, Math.round(28 * (Number(curve[k]) || 0) / max)) + "px"; col.title = k + ": " + (curve[k] || 0); col.appendChild(bar); col.appendChild(el("i", "", k)); cv.appendChild(col); });
     s.appendChild(cv);
   }

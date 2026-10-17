@@ -37,7 +37,7 @@ the gateway's user.
 - [Rotating secrets](#rotating-secrets)
 - [Revoking access](#revoking-access)
 - [Archidekt links and relinking](#archidekt-links-and-relinking)
-- [Deck writes and the kill switch](#deck-writes-and-the-kill-switch)
+- [Archidekt writes and the kill switch](#archidekt-writes-and-the-kill-switch)
 - [The admin page](#the-admin-page)
 - [Watchlists, prices and notifications](#watchlists-prices-and-notifications)
 - [Looking at proposals, snapshots, links and the audit log](#looking-at-proposals-snapshots-links-and-the-audit-log)
@@ -260,7 +260,7 @@ purpose. Keep your copy of the key with your other credentials.
 
 Separately, every applied edit also leaves a private backup copy of the deck
 in the user's own Archidekt account (see
-[Deck writes](#deck-writes-and-the-kill-switch)). Those live on Archidekt,
+[Archidekt writes](#archidekt-writes-and-the-kill-switch)). Those live on Archidekt,
 not in your backups.
 
 - **Nightly:** at `MTG_BACKUP_HOUR_UTC` the gateway writes
@@ -500,7 +500,9 @@ to its member inside the encryption, so a session copied to another member's
 row opens nothing. A session stored by 0.7.6 or earlier carries no owner, so
 the first start of 0.7.7 seals it to whichever member's row holds it then. Only that first start does: an unsealed session found at a later start (copied in from an old disk image, or written by an older version after a rollback) is deleted, with an `archidekt_link_unsealed` audit row, and that member links again.
 
-## Deck writes and the kill switch
+<a id="deck-writes-and-the-kill-switch"></a>
+
+## Archidekt writes and the kill switch
 
 The gateway only writes to someone's Archidekt account in two steps:
 
@@ -510,12 +512,17 @@ The gateway only writes to someone's Archidekt account in two steps:
 2. The user approves it: with Approve on the card their AI app shows next
    to the proposal (Claude, ChatGPT; `MTG_APPLY_IN_CHAT`) or with the Apply
    button on `/proposals/<id>`. A user who chose a looser approval mode on
-   their Account page lets the assistant apply low-risk edits (semi) or
-   everything (auto) itself with `apply_proposal`; see below.
+   their Account page lets the assistant apply low-risk changes (semi) or
+   nearly everything (auto) itself with `apply_proposal`; see below. On
+   `/proposals` the member can also check several waiting changes and apply
+   them together (one deck at a time, oldest first, one snapshot per deck),
+   and in the chat the `show_waiting_changes` card offers Apply all for the
+   app's own; the result page offers Undo.
 
 Applying an edit or restore:
 
-- re-reads the deck and refuses if it changed since the proposal;
+- re-reads the deck and checks the change still fits it; one that would now
+  do something else is not sent and is marked Needs a look;
 - saves a snapshot in the gateway's database;
 - copies the deck into the user's "MTG Gateway backups" folder on Archidekt
   as a private deck (`MTG_ARCHIDEKT_BACKUPS`, on by default). If that copy
@@ -552,10 +559,11 @@ can be applied. The code default is off; the example env files
   0.7.27). Nothing is sent to Archidekt for any of them.
 
 With writes off, people can still sign in, link Archidekt, use research
-tools, and make and review proposals. Applying returns "Deck writes are
-switched off on this gateway" and nothing reaches Archidekt. A proposal made
-while writes were off can be applied once you turn them back on, as long as
-it hasn't expired and the deck hasn't changed.
+tools, and make and review proposals. Applying answers "Archidekt writes are
+switched off on this gateway, so nothing was sent to Archidekt." and nothing
+reaches Archidekt. A proposal made while writes were off can be applied once
+you turn them back on, as long as it hasn't expired and it still fits the
+deck.
 
 ### Approving on the card in the chat
 
@@ -622,7 +630,7 @@ of mode is in the audit log as `approval_mode_set`.
 |---|---|
 | `manual` (default) | Nothing. Every proposal waits for the member's press on the card or the review page; `apply_proposal` answers `browser_required`. |
 | `semi` | Low-risk proposals only (small deck or collection edits and clones; see below). High-risk ones wait for the member's press as in manual. |
-| `auto` | Every proposal. |
+| `auto` | Every proposal except those that wait for the member's press on the card or the review page: a restore, a new deck, a commander change, a big edit (more rows than `MTG_AUTO_BIG_EDIT_ROWS`, default 20, also on the admin Settings page), making a deck public or unlisted, and any edit of a description that has formatting, such as bold text, links or pictures. In every mode an assistant never applies a proposal that is held (one it depends on was rejected, withdrawn, failed or expired, or the one it would replace was already applied), one waiting for a proposal it depends on, one another app changed after it was made, one that replaces another app's proposal, or one that another app's waiting proposal would replace. |
 
 The risk of a proposal comes from its stored review rows, so it is judged
 on what the review page would show, not on what the assistant says:
@@ -631,7 +639,7 @@ on what the review page would show, not on what the assistant says:
 |---|---|
 | Low | A small edit to an existing deck or to your collection: at most 5 card rows, each a card added or removed, or a new quantity, category, finish, printing, color tag or custom mana value, no more than 4 copies a row and never the commander; and a private copy of a deck (a clone), which changes nothing that exists. (The row limit is `MTG_AUTO_APPLY_MAX_ROWS`, default 5.) |
 | High | Everything else: more rows than that, a commander change, a new deck, restoring a snapshot, and the deck's details (name, format, bracket, description, visibility, folder, tags and cover). |
-| Consent, destructive (R-142) | Actions on your Archidekt account (likes, votes, bookmarks, follows, comments, new folders and collaborator changes) and deleting a deck are never applied by an assistant: each one waits for your own press on its review page, in every mode. |
+| Consent, destructive (R-142) | Actions on your Archidekt account (likes, votes, bookmarks, follows, comments, new folders and collaborator changes) and deleting a deck are never applied by an assistant: each one waits for your own press, in every mode, on the card in the chat or on its review page (deleting a deck, and an edit of a comment that has formatting: on the review page only). |
 
 Every proposal result carries `approval_mode`, `risk`, `risk_reason` and
 `assistant_may_apply`, and `next_step` tells the assistant whether to call
@@ -741,13 +749,16 @@ app (any signed-in page) starts a check for them at most once in 5 minutes.
 A check reads the member's deck list (one request per 50 decks, at most four);
 a deck is read only when it has a waiting proposal and its "updated" time on
 Archidekt moved, at most five per check. Only the member's own decks are in
-that list, so a proposal on someone else's deck (a clone of a public deck, a
-collaborator's deck) is not marked; Apply still checks it.
-A waiting proposal whose deck no longer matches is marked **out of date** on
-its review page, in the Proposals list and in `get_proposal` /
-`list_my_proposals`. The sync only reads: it never writes to Archidekt and
-never changes, applies, rejects or deletes a proposal or snapshot (Apply
-still re-reads the deck and decides for itself). Before each request it
+that list, so a deck of someone else's with a waiting proposal (a clone of a
+public deck, a collaborator's deck) is read in full on each check, within the
+same five. A waiting proposal on a deck that changed is worked out again on
+the deck as it is now: it is marked **Updated** when it still does what was
+reviewed, or **Needs a look** with the reason when it would now do something
+else, on its review page, in the Proposals list, on the chat cards and in
+`get_proposal` / `list_my_proposals`. The sync never writes to Archidekt and
+never applies, rejects or deletes a proposal or snapshot; it only records a
+waiting proposal's status and moves the baseline of one that still fits
+(Apply still re-reads the deck and decides for itself). Before each request it
 waits until no member's Archidekt work is running or queued and gives up
 until the next check if that takes more than 10 seconds; a deck being
 applied or restored is left alone; it uses none of the member limits below;
@@ -757,11 +768,10 @@ Retry-After pause is on, and Archidekt failing or asking us to slow down ends
 the whole round, so a round adds at most one failure to the breaker. A session
 Archidekt rejects ends the check without unlinking (the member's own next
 request decides); a token refresh it needs is stored and logged as the deck
-sync's. The out-of-date marks live in memory and
-are rebuilt by the first checks after a restart (two minutes after start).
-Not yet confirmed live: whether Archidekt moves a deck's "updated" time on
+sync's. The Updated and Needs a look marks are kept with the proposal, so a
+restart keeps them. Not yet confirmed live: whether Archidekt moves a deck's "updated" time on
 every card change. If it doesn't, a change can go unmarked, and Apply still
-refuses the proposal as before.
+checks the change against the deck as it is now before sending anything.
 
 Each member also has their own limits, so one looping assistant can't keep
 Archidekt busy for everyone:

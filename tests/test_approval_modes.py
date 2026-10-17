@@ -483,3 +483,15 @@ def test_docs_quote_the_one_wording(doc: str, low: bool, member_only: bool) -> N
     if member_only:
         assert modes.MEMBER_ONLY_TEXT in text
     assert modes.LOW_RISK_CHANGES in text
+
+
+def test_the_semi_auto_notice_names_what_semi_auto_applies() -> None:
+    """The Account page's notice after choosing Semi-auto names both kinds of change Semi-auto applies
+    by itself (a clone is low risk too), in the words PROOFREAD-WORDING-10 gave."""
+    from mtg_gateway.pages import OK_MESSAGES
+
+    assert OK_MESSAGES["mode_semi"] == (
+        "Saved: your assistant applies low-risk changes without asking (a small deck or collection edit, "
+        "or a private copy of a deck) and asks for everything else."
+    )
+    assert "a private copy of a deck" in modes.mode_help("semi")

@@ -12,6 +12,7 @@ from mtg_gateway.decks import Change, DeckError, parse_changes, parse_details
 
 from .conftest import GATEWAY, Harness, Stack
 from .test_decks_and_proxy import Browser, call, linked_user, structured
+from .track_a_helpers import apply_any
 
 AMY = {"sub": "user-2", "email": "amy@example.test", "name": "Amy", "preferred_username": "amy", "groups": []}
 
@@ -77,7 +78,9 @@ async def test_propose_details_then_apply_changes_and_verifies(stack: Stack) -> 
         "private: yes -> no",
         'description: (changed, 120 chars) "' + "x" * 120 + '"',
     }
-    a2 = structured(await call(h, token, "apply_proposal", {"proposal_id": p2["proposal_id"]}))
+    # Q141 item 3B: making a deck public waits for the member's press even in Full auto
+    assert p2["assistant_may_apply"] is False and p2["risk_reason"] == "makes the deck public", p2
+    a2 = await apply_any(h, token, p2["proposal_id"])
     assert a2["ok"] and a2["result"]["verified"] is True, a2
     assert ark.decks[42]["edhBracket"] is None and ark.decks[42]["description"] == rich_doc("x" * 120)
     assert 42 not in ark.private
@@ -273,21 +276,22 @@ async def test_a_restore_puts_the_formatted_description_back(stack: Stack) -> No
     p = structured(
         await call(h, token, "propose_deck_details", {"deck_id": "42", "details": {"description": "new"}})
     )
-    a = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
+    a = await apply_any(h, token, p["proposal_id"])
     assert a["ok"] and ark.decks[42]["description"] == rich_doc("new"), a
     r = structured(await call(h, token, "propose_restore_snapshot", {"snapshot_id": a["snapshot_id"]}))
     assert r["ok"], r
     (row,) = [x for x in r["rows"] if x["kind"] == "description"]
     assert row["after_text"] == "Primer and notes"
-    done = structured(await call(h, token, "apply_proposal", {"proposal_id": r["proposal_id"]}))
+    done = await apply_any(h, token, r["proposal_id"])
     assert done["ok"] and done["result"]["verified"] is True, done
     assert ark.decks[42]["description"] == formatted
 
 
 # Q90: the note an assistant's reply carries when its description lost links, formatting or embeds
 DESCRIPTION_NOTE = (
-    "Only the words of this description are saved: the gateway writes plain text, so the links, "
-    "formatting and embeds in it were removed. Don't tell the user a link or formatting was added."
+    "Only the words of this description are saved: the gateway writes new text as plain text, so the "
+    "links, formatting and embeds in what you sent were removed (formatting already on Archidekt "
+    "stays where its words did not change). Don't tell the user a link or formatting was added."
 )
 # Texts that lose nothing visible: plain text, Markdown (written as typed) and a words-only document
 NO_LOSS = (
@@ -416,7 +420,7 @@ async def test_set_category_and_set_commander_proposed_applied_and_verified(stac
     assert "<span class='act'>Commander</span><span class='name'>Rampant Growth</span>" in page.text
     await b.aclose()
 
-    a = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
+    a = await apply_any(h, token, p["proposal_id"])
     assert a["ok"] and a["state"] == "applied" and a["result"]["verified"] is True, a
     assert a["result"]["sent_entries"] == 3
     sent = [patch["cards"][0] for patch in ark.patches]
@@ -451,7 +455,7 @@ async def test_set_category_and_set_commander_proposed_applied_and_verified(stac
     )
     assert p2["ok"], p2
     assert p2["diff"] == "Commander: Rampant Growth -> Acidic Slime, Sol Ring"
-    a2 = structured(await call(h, token, "apply_proposal", {"proposal_id": p2["proposal_id"]}))
+    a2 = await apply_any(h, token, p2["proposal_id"])
     assert a2["ok"] and a2["result"]["verified"] is True, a2
     after = _rows(ark, 42)
     commanders = sorted(n for n, c in after.items() if "Commander" in (c["categories"] or []))
@@ -631,11 +635,11 @@ async def test_restoring_a_snapshot_puts_the_deck_details_back(stack: Stack) -> 
             {"deck_id": "42", "details": {"deck_format": "commander", "edh_bracket": 3}},
         )
     )
-    assert structured(await call(h, token, "apply_proposal", {"proposal_id": p0["proposal_id"]}))["ok"]
+    assert (await apply_any(h, token, p0["proposal_id"]))["ok"]
     # moving the deck to Modern also clears its bracket, as on archidekt.com (Q56)
     details = {"name": "Aesi Lands", "description": "new text", "deck_format": "modern", "private": True}
     p = structured(await call(h, token, "propose_deck_details", {"deck_id": "42", "details": details}))
-    a = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
+    a = await apply_any(h, token, p["proposal_id"])
     assert a["ok"] and a["result"]["verified"] is True, a
     assert ark.decks[42]["name"] == "Aesi Lands" and ark.decks[42]["private"] is True
 
@@ -658,7 +662,7 @@ async def test_restoring_a_snapshot_puts_the_deck_details_back(stack: Stack) -> 
         "private": False,
     }
     before = len(ark.updates)
-    a2 = structured(await call(h, token, "apply_proposal", {"proposal_id": r["proposal_id"]}))
+    a2 = await apply_any(h, token, r["proposal_id"])
     assert a2["ok"] and a2["state"] == "applied" and a2["result"]["verified"] is True, a2
     assert a2["result"]["restored_details"] == [
         "deck_format",
@@ -699,7 +703,7 @@ async def test_restoring_the_snapshot_undoes_a_details_change(stack: Stack) -> N
     token = await linked_user(stack)
     details = {"name": "Renamed by test", "description": "test text", "private": True}
     p = structured(await call(h, token, "propose_deck_details", {"deck_id": "42", "details": details}))
-    a = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
+    a = await apply_any(h, token, p["proposal_id"])
     assert a["ok"] and a["state"] == "applied", a
     assert ark.decks[42]["name"] == "Renamed by test" and ark.decks[42]["private"] is True
     patches_before = len(ark.patches)
@@ -707,7 +711,7 @@ async def test_restoring_the_snapshot_undoes_a_details_change(stack: Stack) -> N
     assert r["ok"], r
     assert 'name: "Renamed by test" -> "Sample Commander Deck"' in r["diff"], r["diff"]
     assert "private: yes -> no" in r["diff"], r["diff"]
-    done = structured(await call(h, token, "apply_proposal", {"proposal_id": r["proposal_id"]}))
+    done = await apply_any(h, token, r["proposal_id"])
     assert done["ok"] and done["state"] == "applied", done
     assert done["result"]["verified"] is True
     assert done["result"]["restored_details"] == ["description", "name", "private"], done["result"]

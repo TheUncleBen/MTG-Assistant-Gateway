@@ -158,9 +158,10 @@ The assistant never changes a deck directly:
 2. The person approves it: with **Approve** on the card the AI app shows
    next to the proposal (an MCP App, see below) or on the review page with
    **Apply**. A person who chose a looser **approval mode** on their Account
-   page (see below) lets the assistant apply low-risk edits, or everything,
+   page (see below) lets the assistant apply low-risk changes, or most changes,
    itself; the gateway tells the assistant which in every proposal result.
-3. The gateway checks the deck hasn't changed since, saves a snapshot, makes
+3. The gateway checks the change still fits the deck as it is now, saves a
+   snapshot, makes
    a private backup copy of the deck on Archidekt, applies the change, and
    reads the deck back to confirm it.
 4. Every step lands in the audit log. Any snapshot can be restored the same
@@ -266,8 +267,10 @@ For the exact devices and plans tested, see
   itself: at most `MTG_AUTO_APPLY_MAX_ROWS` review rows of card adds,
   removes, quantity, category, finish, printing, color tag or custom mana
   value changes of at most four copies each, never the commander; or a
-  clone) or `auto` (the assistant may apply every deck and collection
-  change). No mode lets an assistant apply an Archidekt account action
+  clone) or `auto` (the assistant may apply deck and collection changes,
+  except those Full auto still leaves to the member, `modes.auto_waits`, and
+  those that wait in every mode, `DeckService.press_reason` and
+  `rewritten_by_another_app`). No mode lets an assistant apply an Archidekt account action
   (likes, votes, bookmarks, follows, comments, new folders and collaborator
   changes) or a deck deletion (R-142). The wording every page and doc uses
   for the modes comes from `modes.py`.

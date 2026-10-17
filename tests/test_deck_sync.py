@@ -46,8 +46,11 @@ def _reads(ark: FakeArchidekt, deck_id: int = 42) -> int:
 
 
 def _edit_elsewhere(ark: FakeArchidekt, when: str = "2026-10-05T00:00:00Z") -> None:
-    """A change made on archidekt.com (or in another app), as Archidekt would report it."""
-    ark.decks[42]["cards"][0]["quantity"] += 1
+    """A change made on archidekt.com (or in another app), as Archidekt would report it: to the
+    Forest row the waiting proposals change, so they no longer do what was reviewed (0.7.29, K1:
+    a change to another card leaves them "updated", test_track_a_recheck)."""
+    forest = next(c for c in ark.decks[42]["cards"] if c["card"]["oracleCard"]["name"] == "Forest")
+    forest["quantity"] += 1
     ark.decks[42]["updatedAt"] = when
 
 
@@ -98,7 +101,7 @@ async def test_an_outside_change_flags_the_waiting_proposal_at_once(stack: Stack
     assert out["flagged"] == [pid], out
     got = structured(await call(h, token, "get_proposal", {"proposal_id": pid}))
     assert got["state"] == "pending" and got["out_of_date"] is True and got["out_of_date_since"]
-    assert got["next_step"].startswith("Out of date: the deck changed after this proposal was made")
+    assert got["next_step"].startswith("Needs a look: the deck changed after this proposal was made")
     listed = structured(await call(h, token, "list_my_proposals"))["proposals"]
     assert next(p for p in listed if p["id"] == pid)["out_of_date"] is True
 
@@ -106,8 +109,8 @@ async def test_an_outside_change_flags_the_waiting_proposal_at_once(stack: Stack
     try:
         await b.login()
         page = await b.http.get(f"/proposals/{pid}")
-        assert "Out of date: this deck changed after the proposal was made" in page.text
-        assert "out of date</span>" in (await b.http.get("/proposals")).text
+        assert "Needs a look: the deck changed after this change was made" in page.text
+        assert "Needs a look</span>" in (await b.http.get("/proposals")).text
     finally:
         await b.aclose()
 
@@ -135,7 +138,8 @@ async def test_an_unchanged_deck_costs_one_list_request_and_no_deck_read(stack: 
 
 
 async def test_the_check_is_read_only_and_never_touches_proposals_or_snapshots(stack: Stack) -> None:
-    """R1: only GETs go out; proposals, snapshots and the undo history stay exactly as they were."""
+    """R1: only GETs go out; proposals (but for the status of a waiting one, 0.7.29), snapshots
+    and the undo history stay exactly as they were."""
     h, ark = stack.h, stack.ark
     sync = _sync(stack)
     token = await linked_user(stack)
@@ -146,7 +150,7 @@ async def test_the_check_is_read_only_and_never_touches_proposals_or_snapshots(s
             h,
             token,
             "propose_deck_changes",
-            {"deck_id": "42", "changes": [{"action": "set_quantity", "card_name": "Island", "quantity": 2}]},
+            {"deck_id": "42", "changes": [{"action": "set_quantity", "card_name": "Forest", "quantity": 2}]},
         )
     )["proposal_id"]
     before_props = {p["id"]: p["state"] for p in h.db.list_proposals(SUB)}
@@ -239,12 +243,14 @@ async def test_restore_and_details_proposals_are_flagged_too(stack: Stack) -> No
     _edit_elsewhere(ark)
     _later(stack)
     out = await sync.check(SUB)
-    assert sorted(out["flagged"]) == sorted([restore["proposal_id"], details["proposal_id"]]), out
+    # 0.7.29 (K1): the restore would now put Forest back from 4, not 3; the rename still fits
+    assert out["flagged"] == [restore["proposal_id"]] and out["updated"] == [details["proposal_id"]], out
 
 
-async def test_the_gateways_own_apply_makes_another_waiting_proposal_out_of_date(stack: Stack) -> None:
-    """Two proposals for one deck: applying the first changes the deck, so Apply would refuse the
-    second; the next check says so before anyone presses it. The applied one is not flagged."""
+async def test_the_gateways_own_apply_checks_another_waiting_proposal(stack: Stack) -> None:
+    """Two proposals for one deck: applying the first changes the deck. Its verify read checks
+    the second at once (0.7.29, K2): it still does what was reviewed, so it is "updated", and the
+    next check has nothing to say. The applied one is not flagged."""
     h, ark = stack.h, stack.ark
     sync = _sync(stack)
     token = await linked_user(stack)
@@ -268,10 +274,11 @@ async def test_the_gateways_own_apply_makes_another_waiting_proposal_out_of_date
     ark.apply_patch = patch_and_bump  # type: ignore[method-assign]
     ark.decks[42]["updatedAt"] = "2026-10-01T10:00:00Z"
     assert structured(await call(h, token, "apply_proposal", {"proposal_id": first}))["state"] == "applied"
+    assert h.db.get_proposal(second, SUB)["status"] == "updated"
     _later(stack)
     out = await sync.check(SUB)
-    assert out["flagged"] == [second], out
-    assert sync.out_of_date(first) is None
+    assert out["flagged"] == [] and out["updated"] == [], out
+    assert sync.out_of_date(first) is None and sync.out_of_date(second) is None
 
 
 async def test_a_failed_check_is_quiet_and_the_member_carries_on(stack: Stack) -> None:
@@ -399,7 +406,7 @@ async def test_the_timed_round_checks_only_members_with_waiting_proposals(stack:
     assert sync.out_of_date(pid) is not None
 
 
-async def test_flags_of_closed_proposals_are_forgotten(stack: Stack) -> None:
+async def test_a_closed_proposal_is_never_out_of_date(stack: Stack) -> None:
     h, ark = stack.h, stack.ark
     sync = _sync(stack)
     token = await linked_user(stack)

@@ -1123,24 +1123,38 @@ def test_list_rows_come_from_one_builder() -> None:
     assert TABLE_HEAD + table in page
 
 
-def test_the_simulation_button_says_simulated_games() -> None:
-    """D3: the manual page keeps the name Goldfish; the simulation's tooltip says simulated games."""
+def test_the_full_test_button_has_the_approved_texts() -> None:
+    """D3 and Track C's banner texts C-W-281 to C-W-283 (coordinator-approved ~05:24Z 10-17), word
+    for word: the manual page keeps the name Goldfish; the run is "Run full test"."""
     from mtg_gateway.deckpage import banner_html
 
     html = banner_html(deck([card("Opt")]), {}, own=True, csrf="t", writes_enabled=True)
-    assert "300 simulated games" in html and "goldfish games" not in html
+    assert (
+        "<button type='submit' data-busy-label='Testing…' title='The solo test (300 games, no opponents), "
+        "a legality check and the deck statistics, plus Forge games against precons when Forge is on and "
+        "the deck has a commander; saved under History. The solo test takes up to a minute; the result "
+        "page opens when the solo test is done.'>" in html
+    )
+    assert " Run full test</button>" in html
+    assert "Run simulation" not in html and "Simulating" not in html and "goldfish games" not in html
     assert " Goldfish</a>" in html and "Playtest</a>" in html  # names kept
 
 
-def test_quick_simulation_without_forge_is_offered_only_when_forge_is_on() -> None:
-    """D17: with Forge set up, More offers the same run without Forge games (forge=0)."""
+def test_the_solo_test_only_run_is_offered_only_when_forge_is_on() -> None:
+    """D17: with Forge set up, More offers the same run without Forge games (forge=0), with Track C's
+    texts C-W-284 to C-W-286 word for word."""
     from mtg_gateway.deckpage import banner_html
 
     off = banner_html(deck([card("Opt")]), {}, own=True, csrf="t", writes_enabled=True)
     on = banner_html(deck([card("Opt")]), {}, own=True, csrf="t", writes_enabled=True, forge_on=True)
-    assert "Quick simulation (no Forge)" not in off
-    assert "Quick simulation (no Forge)" in on and "name='forge' value='0'" in on
+    assert "Solo test only" not in off
+    assert "name='forge' value='0'" in on
+    assert (
+        "<button type='submit' data-busy-label='Testing…' title='The same run without Forge games: the "
+        "solo test, the legality check and the statistics'>" in on
+    )
+    assert " Solo test only</button>" in on and "Quick simulation" not in on
     signed_out = banner_html(
         deck([card("Opt")]), {}, own=False, csrf=None, writes_enabled=True, forge_on=True
     )
-    assert "Quick simulation" not in signed_out
+    assert "Solo test only" not in signed_out and "Run full test" not in signed_out
