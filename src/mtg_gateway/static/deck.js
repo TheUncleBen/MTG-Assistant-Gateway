@@ -102,7 +102,7 @@
   var cards = $("#cards");
   if (q && cards) {
     // the cards and each stack's cards are collected once, and again only after the view changed
-    // (a save redraws cards in place), not on every keystroke (AUDIT F7)
+    // (a save redraws cards in place), not on every keystroke
     var items = null, stacks = null;
     var collect = function () {
       items = $$("[data-name]", cards);
@@ -256,7 +256,7 @@
     toast((err && err.message) || "No connection; nothing was changed.", { error: true });
   }
 
-  // -- saves in the background (T-159): the card's edits from its menu, viewer and drags --------
+  // -- saves in the background: the card's edits from its menu, viewer and drags --------
   // The edit is drawn on the page at once and Archidekt saves it behind, one save at a time in
   // the order they were made: a Saving note until it answers, then Saved with Undo (applyAnswer).
   // A save that does not go through puts the card back as it was and says why in a red note. A
@@ -277,7 +277,7 @@
   // the Saving note; one that already says this stays as it is (no flicker, no second
   // announcement). later: a save whose turn came, which leaves an error or a question up.
   // card, what: whose note it is, so a save that finds nothing to send can take its own note
-  // down (M6) and never another card's, an error or a question.
+  // down and never another card's, an error or a question.
   var savingFor = null;  // {el, card, what}
   function savingNote(text, later, card, what) {
     if (toastEl && $(".msg", toastEl).textContent === text && !toastEl.classList.contains("error")) {
@@ -290,7 +290,7 @@
   function dropSavingNote(card, what) {
     if (savingFor && toastEl && savingFor.el === toastEl && savingFor.card === card && savingFor.what === what) dismissToast();
   }
-  // M7: what Archidekt last confirmed for a card, per kind of edit ("Move", "Mana value"), while
+  // What Archidekt last confirmed for a card, per kind of edit ("Move", "Mana value"), while
   // edits of that kind wait or save. A refused save puts the card back to that state, not to the
   // unsaved one the edit was made over, and drops the card's later edits of that kind still
   // waiting their turn (made over a state Archidekt never took).
@@ -309,7 +309,7 @@
     var i = confirmed.indexOf(c);
     if (i >= 0) confirmed.splice(i, 1);
   }
-  // N5 (review question 1, provisional): a refused edit's note says when later edits of the same
+  // A refused edit's note says when later edits of the same
   // kind were dropped with it. c.queued counts this kind's own edits still to finish (a Removal
   // holds the card's Move state too, but is always sent); the refused one is among them here.
   function droppedNote(c, one, many) {
@@ -327,7 +327,7 @@
     bgQueue = bgQueue.then(idle).then(function () {
       bgCards.splice(bgCards.indexOf(job.card), 1);
       var plan = job.start();
-      // nothing left to send (+ then − before the save went): its Saving note goes too (M6)
+      // nothing left to send (+ then − before the save went): its Saving note goes too
       if (!plan) { dropSavingNote(job.card, job.what); return null; }
       savingNote(plan.saying, true, job.card, job.what);
       return saveEdit(plan.changes, plan.inverse, { note: plan.note }).then(function () { if (job.saved) job.saved(); }, function (err) {
@@ -940,7 +940,7 @@
       var s = stepOf(card);
       if (s) { clearTimeout(s.timer); s.timer = 0; s.gone = true; }
       // where Archidekt has the card filed, kept through any move of it still waiting or saving
-      // (M7): a refused move files it back there, and so does a refused removal
+      // a refused move files it back there, and so does a refused removal
       var filed = holdConfirmed(card, "Move", function () { return { spot: spotOf(card), cat: byCategory ? stackOf(card) : catOf(card) }; });
       var near = card.closest(".stack");
       var saying = "Removing " + name + "…";
@@ -1019,7 +1019,7 @@
 
   // -- Change printing… (the shared picker, static/printpick.js): a pick shows at once and saves
   // in the background like the menu's other edits, as one set_printing change; Undo puts the old
-  // printing back, and the old finish when the new printing is not made in it (P6).
+  // printing back, and the old finish when the new printing is not made in it.
   // The card's printing as the page shows it: data-set ("CMR 472"), the picture, the price and
   // the finish badge; pr: {set, img, price, finish}, each left as it is when not given.
   function showPrinting(card, pr) {
@@ -1027,7 +1027,7 @@
     if (pr.set) {
       card.setAttribute("data-set", pr.set);
       $$(".set", card).forEach(function (s) {
-        // the Text view shows the set code, the Table view the code and number ("SLD #1074", N15)
+        // the Text view shows the set code, the Table view the code and number ("SLD #1074")
         s.textContent = s.textContent.indexOf(" ") >= 0 ? printLabel(pr.set) : pr.set.split(" ")[0];
         s.title = printLabel(pr.set);
       });
@@ -1088,7 +1088,7 @@
     showPrinting(card, now);
     refreshStacks();
     savingNote(saying, false, card, "Printing");
-    // P6: the Saved message says when the finish changed with the printing
+    // the Saved message says when the finish changed with the printing
     var note = "Saved. " + name + " is now " + said +
       (info.changed ? ", " + FINISH_WORDS[info.finish] + ": that printing is not made in " + FINISH_WORDS[info.from] : "") +
       ". Snapshot kept under History.";
@@ -2047,7 +2047,7 @@
   })();
 })();
 
-/* Play on EDHPlay (R-154, T-161): every press opens a small confirmation box; its "Copy and Open
+/* Play on EDHPlay: every press opens a small confirmation box; its "Copy and Open
    EDHPlay.com" copies the whole deck in EDHPlay's import format and opens edhplay.com (in the
    Android app, the phone's browser). The box asks the gateway for the list as it opens (the
    button's data-src, made by export_formats.to_edhplay) and the button turns on once it is here,
@@ -2114,8 +2114,8 @@
     if (!kind) setTimeout(function () { t.remove(); }, 8000);
   }
   // the list for the deck: {list, left_out, left_count}, or an Error whose message is shown.
-  // The box shows only the three approved messages (Q53, Q67): the gateway's own reason goes to
-  // the console, never on screen. Signed out, retrying can't help (Q69): err.signedOut.
+  // The box shows only the three approved messages: the gateway's own reason goes to
+  // the console, never on screen. Signed out, retrying can't help: err.signedOut.
   function fetchList(src) {
     return fetch(src, { credentials: "same-origin", headers: { Accept: "application/json" } }).then(function (r) {
       return r.json().catch(function () { return {}; }).then(function (d) {
@@ -2154,7 +2154,7 @@
   }
   function open(link) {
     close();
-    // a note left from an earlier launch would sit above the box (L10): the box says it all again
+    // a note left from an earlier launch would sit above the box: the box says it all again
     var old = document.querySelector(".edhplay-toast");
     if (old) old.remove();
     back = link;
@@ -2214,11 +2214,11 @@
           spot.appendChild(make("p", "notice warn", cutLine(d.left_count, d.left_out)));
           spot.hidden = false;
         }
-        if (d.no_commander) {  // nothing is marked, so EDHPlay sets no commander (Ben, Q55)
+        if (d.no_commander) {  // nothing is marked, so EDHPlay sets no commander
           spot.appendChild(make("p", "notice", "Choose your commander on EDHPlay."));
           spot.hidden = false;
         }
-        if (d.companion) {  // EDHPlay's import never sets a companion (Ben, Q54)
+        if (d.companion) {  // EDHPlay's import never sets a companion
           spot.appendChild(make("p", "notice", "Set your companion on EDHPlay."));
           spot.hidden = false;
         }

@@ -78,7 +78,7 @@ identity provider you control (Authentik, Keycloak, Authelia, ...).
    you through the same steps and generates the secrets for you. See
    [docs/PLUGIN.md](docs/PLUGIN.md#for-the-operator).
 3. Keep [docs/OPERATIONS.md](docs/OPERATIONS.md) handy for running it:
-   updates, backups, adding and removing people, and turning deck writes on
+   updates, backups, adding and removing people, and turning Archidekt writes on
    or off.
 4. To invite someone, give them an account in your identity provider, then
    send them your gateway's address and [docs/ONBOARDING.md](docs/ONBOARDING.md).
@@ -111,7 +111,7 @@ identity provider you control (Authentik, Keycloak, Authelia, ...).
 | [IDP-AUTHENTIK.md](docs/IDP-AUTHENTIK.md) | Operators | Authentik, field by field: group, provider, application, binding, adding people, checks and troubleshooting |
 | [IDP-OTHERS.md](docs/IDP-OTHERS.md) | Operators | The identity provider checklist, and notes for Keycloak, Authelia, Zitadel, Pocket ID, Kanidm, Entra ID and Google |
 | [VERSIONS.md](docs/VERSIONS.md) | Operators | Following `latest` or staying on one version, what the version numbers mean, and how every update to `main` becomes a release |
-| [OPERATIONS.md](docs/OPERATIONS.md) | Operators | Logs, updates, people, which AI clients may connect, backups, rotating secrets, revoking access, deck writes, the audit log |
+| [OPERATIONS.md](docs/OPERATIONS.md) | Operators | Logs, updates, people, which AI clients may connect, backups, rotating secrets, revoking access, Archidekt writes, the audit log |
 | [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Operators | Symptoms and fixes, from a container that won't start to a sign-in that fails |
 | [THIRD-PARTY-NOTICES.md](docs/THIRD-PARTY-NOTICES.md) | Everyone | Licences of the components the gateway is built on |
 | [tests/e2e/README.md](tests/e2e/README.md) | Contributors | The end-to-end test setup: a real Swarm stack, Authentik and a scripted client |

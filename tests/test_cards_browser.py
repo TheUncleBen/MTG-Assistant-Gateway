@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 
 from mtg_gateway.cards import card_html
+from mtg_gateway.modes import MODE_LABELS
 
 from .test_consent_browser import _chromium_or_skip, _launch
 
@@ -574,6 +575,7 @@ def test_account_card_points_at_what_is_missing() -> None:
                 "writes_enabled": True,
                 "account_page": "https://mtg.test/account",
                 "approval_mode": "manual",
+                "approval_mode_label": MODE_LABELS["manual"],
                 "approval_mode_note": "Every change waits for your press. Change it on the account page.",
             }
             card = _open(page, "account-card", {"structuredContent": status})
@@ -595,6 +597,28 @@ def test_account_card_points_at_what_is_missing() -> None:
                 and "Alice" in card.locator("#facts").inner_text()
             )
             assert card.locator("#open").inner_text() == "Open the Account page"
+            # the mode's label is account_status's, the words the Account page and the Guide use
+            semi = {
+                **ready,
+                "approval_mode": "semi",
+                "approval_mode_label": MODE_LABELS["semi"],
+                "approval_mode_note": None,
+            }
+            for width, theme in ((380, "light"), (380, "dark"), (700, "light"), (700, "dark")):
+                card = _open(page, "account-card", {"structuredContent": semi}, width=width, theme=theme)
+                card.locator("#open").wait_for()
+                assert "Apply low-risk changes without asking" in card.locator("#facts").inner_text()
+                fit = page.frames[1].evaluate(
+                    "() => [document.documentElement.scrollWidth, document.documentElement.clientWidth]"
+                )
+                assert fit[0] <= fit[1], (width, theme, fit)
+                _shot(page, f"account-semi-{theme}-{width}")
+            # writes off: the 7A wording, no setting name (Track A, WORDING-6)
+            card = _open(page, "account-card", {"structuredContent": {**ready, "writes_enabled": False}})
+            card.locator("#open").wait_for()
+            assert "Archidekt writes" in card.locator("#facts").inner_text()
+            text = card.locator("#summary").inner_text()
+            assert "switch Archidekt writes on" in text and "MTG_" not in text, text
             # whoami's shape works too (a name, the version and the account page; nothing else).
             who = {
                 "signed_in": True,

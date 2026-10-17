@@ -22,7 +22,8 @@ from collections import Counter
 from typing import Any
 from urllib.parse import quote, urlencode
 
-from .archidekt import VOTE_UP, Deck, DeckCard, featured_scryfall_id, format_label, rich_text
+from . import waiting_strip
+from .archidekt import VOTE_DOWN, VOTE_UP, Deck, DeckCard, featured_scryfall_id, format_label, rich_text
 from .bracket_view import banner_bracket_html, checks_bracket_row, deck_card_bracket_text, stats_bracket_html
 from .deck_stats import (
     CURVE_BUCKETS,
@@ -368,24 +369,28 @@ def banner_html(
         f"{icon('play')} Play on EDHPlay</a>"
     )
     if csrf:
-        # The same run as the assistant's run_deck_report: statistics, validation and 300
-        # simulated games on the research service, stored under History. "Simulated", not
-        # "goldfish": Goldfish is the button beside it, where the member plays by hand (D3).
+        # The same run as the assistant's run_deck_report: statistics, validation and the solo
+        # test on the research service, plus Forge games when Forge is on, stored under History.
+        # "Solo test", not "goldfish": Goldfish is the button beside it, where the member plays by
+        # hand (D3). Texts: Track C's C-W-281 to C-W-283, coordinator-approved ~05:24Z 10-17.
         primary += (
             f"<form method='post' action='/decks/{did}/report' class='inline'>{csrf_in}"
-            "<button type='submit' data-busy-label='Simulating…' title='300 simulated games, a decklist "
-            "check and the deck statistics, saved under History. The run takes up to a minute; the result "
-            f"page opens when it is done.'>{icon('stats')} Run simulation</button></form>"
+            "<button type='submit' data-busy-label='Testing…' title='The solo test (300 games, no "
+            "opponents), a legality check and the deck statistics, plus Forge games against precons when "
+            "Forge is on and the deck has a commander; saved under History. The solo test takes up to a "
+            f"minute; the result page opens when the solo test is done.'>{icon('stats')} Run full test"
+            "</button></form>"
         )
     more_items = []
     if csrf and forge_on:
         # D17: the same run without the Forge games, for a quick result (forge=0, companion_tools.py).
+        # Texts: Track C's C-W-284 to C-W-286, coordinator-approved ~05:24Z 10-17.
         more_items.append(
             f"<form method='post' action='/decks/{did}/report'>{csrf_in}"
             "<input type='hidden' name='forge' value='0'>"
-            "<button type='submit' data-busy-label='Simulating…' title='The same run without Forge games: "
-            f"300 simulated games, the decklist check and the statistics'>{icon('stats')} "
-            "Quick simulation (no Forge)</button></form>"
+            "<button type='submit' data-busy-label='Testing…' title='The same run without Forge games: "
+            f"the solo test, the legality check and the statistics'>{icon('stats')} "
+            "Solo test only</button></form>"
         )
     if own and csrf:
         more_items.append(f"<a href='/decks/{did}/settings'>{icon('settings')} Deck settings</a>")
@@ -404,8 +409,7 @@ def banner_html(
         f"<div class='menu left'>{''.join(more_items)}</div></details>"
     )
     writes_note = (
-        "<p class='small notags'>Deck writes are switched off on this gateway; edits can be proposed "
-        "and reviewed but not applied.</p>"
+        f"<p class='small notags'>{WRITES_OFF_TITLE}; edits can be proposed and reviewed but not applied.</p>"
         if own and not writes_enabled
         else ""
     )
@@ -427,7 +431,7 @@ def banner_html(
         "</div>"
         f"<div class='tags'>{icon('tag')} {tags}</div>"
         f"<div class='controls'><div class='primary'>{primary}{more}</div></div>{writes_note}"
-        f"{social_html(deck, own=own) if csrf else ''}"
+        f"{social_html(deck, own=own, writes_enabled=writes_enabled) if csrf else ''}"
         "</div>"
         f"<a class='owner' href='/users/{esc(deck.owner)}' title='{esc(deck.owner)}: public decks'>"
         f"{avatar_html(deck.owner)}<span class='uname'>{esc(deck.owner or 'unknown')}</span></a>"
@@ -435,28 +439,52 @@ def banner_html(
     )
 
 
-def social_html(deck: Deck, *, own: bool) -> str:
+WRITES_OFF_TITLE = "Archidekt writes are switched off on this gateway"
+# shown under the greyed buttons too: a phone shows no tooltip (social review, Q141 check)
+WRITES_OFF_LINE = "Archidekt writes are switched off on this gateway, so these buttons are off."
+WRITES_OFF_FOLLOW = "Archidekt writes are switched off on this gateway, so following can't be changed here."
+
+
+def social_html(deck: Deck, *, own: bool, writes_enabled: bool = True) -> str:
     """Like, Bookmark, Follow and Comments, as Archidekt's deck page offers them. The buttons are
     the person's own clicks: social.js asks for a confirmation and posts to /social/api; without
-    script they are inert and the More menu's "Open on Archidekt" link is the way."""
+    script they are inert and the More menu's "Open on Archidekt" link is the way. With Archidekt
+    writes switched off they show their state but are disabled, saying why (social review)."""
     did = esc(deck.id)
+
+    def title(text: str) -> str:
+        # writes switched off: the button shows its state but is disabled, and says why
+        return f" title='{text}'" if writes_enabled else f" disabled title='{WRITES_OFF_TITLE}'"
+
     liked = deck.user_vote == VOTE_UP
+    # Q141 item 5A: a down vote (cast through the assistant; the page has no down button) shows
+    # as such, and the button takes it back (wording draft, WORDING-4)
+    down = deck.user_vote == VOTE_DOWN
+    like_tip = (
+        "You voted this deck down"
+        if down
+        else "You like this deck"
+        if liked
+        else "Like this deck on Archidekt"
+    )
     like = (
         f"<button type='button' class='soc{' on' if liked else ''}' data-social='vote' "
-        f"data-state='{deck.user_vote}' aria-pressed='{'true' if liked else 'false'}' "
-        f"title='{'You like this deck' if liked else 'Like this deck on Archidekt'}'>"
-        f"{icon('heart')}<b class='n'>{deck.points}</b><span>{'Liked' if liked else 'Like'}</span></button>"
+        f"data-state='{deck.user_vote}' aria-pressed='{'true' if liked else 'false'}'"
+        f"{title(like_tip)}>"
+        f"{icon('heart')}<b class='n'>{deck.points}</b>"
+        f"<span>{'Voted down' if down else 'Liked' if liked else 'Like'}</span></button>"
     )
     marked = deck.bookmarked
     bookmark = (
         f"<button type='button' class='soc{' on' if marked else ''}' data-social='bookmark' "
-        f"data-state='{1 if marked else 0}' aria-pressed='{'true' if marked else 'false'}' "
-        f"title='{'Bookmarked on Archidekt' if marked else 'Bookmark this deck on Archidekt'}'>"
+        f"data-state='{1 if marked else 0}' aria-pressed='{'true' if marked else 'false'}'"
+        f"{title('Bookmarked on Archidekt' if marked else 'Bookmark this deck on Archidekt')}>"
         f"{icon('bookmark')}<span>{'Bookmarked' if marked else 'Bookmark'}</span></button>"
     )
     follow = (
         f"<button type='button' class='soc' data-social='follow' data-user='{esc(deck.owner_id)}' "
-        f"data-name='{esc(deck.owner)}' data-state='unknown' title='Follow {esc(deck.owner)} on Archidekt'>"
+        f"data-name='{esc(deck.owner)}' data-state='unknown'"
+        f"{title('Follow ' + esc(deck.owner) + ' on Archidekt')}>"
         f"{icon('follow')}<span>Follow {esc(deck.owner)}</span></button>"
         if deck.owner_id and not own
         else ""
@@ -464,23 +492,24 @@ def social_html(deck: Deck, *, own: bool) -> str:
     comments = (
         f"<a class='soc' href='#comments' data-social='comments'>{icon('comment')}<span>Comments</span></a>"
     )
+    off = "" if writes_enabled else " data-writes='off' aria-describedby='social-off'"
     return (
-        f"<div class='social' data-deck='{did}' aria-label='Archidekt actions'>"
+        f"<div class='social' role='group' data-deck='{did}' aria-label='Archidekt actions'{off}>"
         f"{like}{bookmark}{follow}{comments}</div>"
+        + (
+            ""
+            if writes_enabled
+            else f"<p class='social-off muted small' id='social-off'>{WRITES_OFF_LINE}</p>"
+        )
     )
 
 
-def comments_html(deck: Deck) -> str:
+def comments_html(deck: Deck, *, writes_enabled: bool = True) -> str:
     """The deck's comment thread (loaded by social.js when the section scrolls into view) and the
-    form to add one; a post is confirmed before it goes out, under the member's Archidekt name."""
+    form to add one; a post is confirmed before it goes out, under the member's Archidekt name.
+    With Archidekt writes switched off the thread is read-only: no form, no Reply, votes or edits."""
     did = esc(deck.id)
-    return (
-        f"<section class='panel comments' id='comments' data-deck='{did}' "
-        f"data-root='{esc(deck.comment_root or '')}'>"
-        f"<div class='panel-head'><h2>Comments</h2><span class='muted small' data-count></span></div>"
-        f"<div class='thread' data-src='/social/api/decks/{did}/comments'><p class='muted'>Comments from "
-        f"Archidekt appear here. <a href='https://archidekt.com/decks/{did}' target='_blank' "
-        "rel='noreferrer noopener'>Read the thread on Archidekt</a>.</p></div>"
+    form = (
         "<form class='newcomment'><label for='ctext'>Add a comment</label>"
         "<textarea id='ctext' name='text' rows='3' maxlength='2000' "
         "placeholder='Say something about this deck…'></textarea>"
@@ -488,13 +517,44 @@ def comments_html(deck: Deck) -> str:
         f"<button type='submit' class='btn'>{icon('comment')} Post comment</button>"
         "<p class='muted small'>Posted publicly on Archidekt under your Archidekt name, after you "
         "confirm.</p>"
-        "</form></section>"
+        "</form>"
+        if writes_enabled
+        else f"<p class='muted small'>{WRITES_OFF_TITLE}, so comments can be read here but not "
+        "posted, changed or voted on.</p>"
+    )
+    return (
+        f"<section class='panel comments' id='comments' data-deck='{did}' "
+        f"data-writes='{'on' if writes_enabled else 'off'}' "
+        f"data-root='{esc(deck.comment_root or '')}'>"
+        f"<div class='panel-head'><h2>Comments</h2><span class='muted small' data-count></span></div>"
+        f"<div class='thread' data-src='/social/api/decks/{did}/comments'><p class='muted'>Comments from "
+        f"Archidekt appear here. <a href='https://archidekt.com/decks/{did}' target='_blank' "
+        "rel='noreferrer noopener'>Read the thread on Archidekt</a>.</p></div>"
+        f"{form}</section>"
     )
 
 
 # Track A's own deck page styles (S3): DECK_CSS ends with this, so A's rules for its parts of the
 # page (banner, social actions, the waiting changes strip) need no edit inside DECK_CSS.
-DECK_CSS_A = ""
+DECK_CSS_A = (
+    waiting_strip.LIST_CSS  # the "Waiting changes" strip (Track A)
+    # the social review (G14/Q47): a long name wraps instead of running off a phone screen, replies
+    # indent less on a phone, and a button disabled because writes are off says so by its cursor
+    + """
+.banner .social .soc{height:auto;min-height:34px;max-width:100%}
+/* focus moves to Yes by script after a click, which :focus-visible may not mark: always ring it
+   (the banner's chips, a comment's vote, edit and delete, and posting) */
+.banner .social .confirm button:focus,.comments .confirm button:focus,.comments .confirmbar button:focus{
+  outline:2px solid var(--focus);outline-offset:2px}
+.banner .social .soc span{min-width:0;overflow-wrap:anywhere;line-height:1.2;padding:.35rem 0}
+.banner .social[data-writes=off] .soc[disabled]{cursor:not-allowed}
+.banner .social-off{display:inline-block;margin:.5rem 0 0;padding:.3rem .65rem;border-radius:6px;
+  background:rgba(0,0,0,.72);color:#fff;font-size:.85rem;overflow-wrap:anywhere}
+.comments .cmt .who{flex-wrap:wrap}
+.comments .cmt .who b{overflow-wrap:anywhere}
+@media (max-width:600px){.comments .cmt .replies{margin-left:.35rem;padding-left:.5rem}}
+"""
+)
 
 
 def _select(name: str, options: dict[str, str], current: str, label: str, ic: str) -> str:
@@ -518,7 +578,8 @@ def toolbar_html(deck: Deck, *, own: bool, view: str, group: str, sort: str, q: 
         "<label for='quick'>Add card</label><div class='quickrow'>"
         "<input id='quick' type='text' name='add' placeholder='Quick add (card name)' data-suggest='cards' "
         "autocomplete='off'>"
-        f"<button type='submit' class='primary'>{icon('search')} "
+        # on a phone the label is hidden and only the icon shows: the name stays the same
+        f"<button type='submit' class='primary' aria-label='Card search'>{icon('search')} "
         "<span>Card search</span></button></div></form>"
         if own
         else ""
@@ -1386,18 +1447,20 @@ def deck_page_html(
     forge_on: bool = False,
     waiting: list[dict[str, Any]] | None = None,
 ) -> str:
-    # ``waiting``: the "Waiting changes" strip's rows (waiting_strip.py, S4); not drawn yet
+    # ``waiting``: the "Waiting changes" strip's rows (waiting_strip.py, S4), drawn at the top under
+    # the banner (Q134 A2)
     view = view if view in VIEWS else "text"
     group = group if group in GROUPS else "category"
     sort = sort if sort in SORTS else "name"
     return (
         banner_html(deck, stats, own=own, csrf=csrf, writes_enabled=writes_enabled, forge_on=forge_on)
+        + waiting_strip.strip_html(waiting or [], csrf=csrf, deck_id=str(deck.id))
         + notice
         + toolbar_html(deck, own=own, view=view, group=group, sort=sort, q=q)
         + cards_html(deck, view=view, group=group, sort=sort, q=q, own=own, owned=owned)
         + stats_panel_html(deck, stats)
         + description_html(deck)
-        + (comments_html(deck) if csrf else "")
+        + (comments_html(deck, writes_enabled=writes_enabled) if csrf else "")
     )
 
 
@@ -2059,8 +2122,20 @@ h3 .count{font-weight:400;color:var(--text-muted);font-size:.9rem}
 .banner .social .confirm button{margin:0;height:26px;padding:0 .7rem;border-radius:13px;font-size:.85rem}
 .banner .social .note{flex-basis:100%;color:#ffd9b3;font-size:.9rem}
 .banner .social .note a{color:#fff}
-.comments .panel-head{display:flex;align-items:baseline;justify-content:space-between;gap:1rem}
+.comments .panel-head{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;
+  gap:0 1rem}
+.comments .panel-head [data-count]:empty{display:none}
 .comments .panel-head h2{margin:0}
+/* one-word headings can't wrap whole: with large text on a narrow phone they stop growing at 8% of the
+   screen width (min(), so 100% text and wider screens are unchanged); a longer word still breaks */
+.panel.description > h2,.comments .panel-head h2{min-width:0;overflow-wrap:anywhere;font-size:min(1.5rem,8vw)}
+/* the View as / Group by / Sort by boxes on a phone: two a row as before (each column at least half
+   the row, so never three), one a row when large text makes a box wider than half the row (scripts
+   off, the longest choice used to push the page 39 px wide) */
+@media (max-width:600px){
+  .toolbar form.views{
+    grid-template-columns:repeat(auto-fit,minmax(min(100%,max(7.5rem,calc(50% - .5rem))),1fr))} }
+.toolbar form.views .field,.toolbar form.views .sel,.toolbar form.views select{min-width:0}
 .comments .thread{margin:.75rem 0 1rem}
 .comments .cmt{border-top:1px solid var(--border);padding:.6rem 0 .4rem}
 .comments .cmt .who{display:flex;gap:.5rem;align-items:center;font-size:.85rem;color:var(--text-muted)}
@@ -2109,12 +2184,14 @@ h3 .count{font-weight:400;color:var(--text-muted);font-size:.9rem}
   .banner .owner{flex-direction:row;justify-content:flex-end;max-width:none;padding:.5rem 1rem 0;order:-1}
   .banner .owner .avatar{width:80px;height:80px;font-size:2rem;margin-right:auto;margin-top:0;
     border-width:3px;border-color:var(--bg)}
-  /* phones: the actions in two columns instead of five full-width rows */
-  .banner .controls .primary{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.5rem}
+  /* phones: the actions in two columns instead of five full-width rows; a column is at least 9rem,
+     so at large text sizes they go one a row, and a long label wraps whole instead of being cut */
+  .banner .controls .primary{display:grid;width:100%;gap:.5rem;
+    grid-template-columns:repeat(auto-fill,minmax(min(100%,9rem),1fr))}
   .banner .controls .primary .btn,.banner .controls .primary button,.banner .controls details.dd{width:100%;
     min-width:0}
   .banner .controls .primary .btn,.banner .controls .primary button{padding-left:.5rem;padding-right:.5rem;
-    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    white-space:normal;overflow-wrap:normal;text-align:center}
   .banner .controls .primary form.inline{display:contents}
   .banner .controls details.dd > summary.btn{width:100%}
 }
@@ -2438,7 +2515,7 @@ html.cardview-open{overflow:hidden}
 .picker.edhplay-dialog .pickbox{width:min(100%,30rem);max-height:100%;overflow:auto;padding:1rem 1.15rem;
   border-radius:var(--radius-panel);border-bottom:1px solid var(--border)}
 .edhplay-dialog details.disclosure{margin:0;padding-top:.15rem}
-/* finger-sized (44 px): the fold's summary and the box's x (L9) */
+/* finger-sized (44 px): the fold's summary and the box's x */
 .edhplay-dialog details.disclosure > summary{min-height:44px}
 .picker.edhplay-dialog .pickbox .close{width:44px;min-height:44px;height:44px;margin:-.2rem -.35rem 0 0}
 .edhplay-dialog .steps{margin:.15rem 0 .2rem;padding-left:1.4rem;display:flex;flex-direction:column;gap:.4rem}
@@ -2471,7 +2548,7 @@ html.cardview-open{overflow:hidden}
 .stats .lbl{font-weight:700;margin:.75rem 0 .25rem}
 .cbar{display:flex;height:36px;border-radius:3px;overflow:hidden;background:var(--surface-2);gap:2px}
 .cbar .seg{display:block;height:100%;clip-path:polygon(0 0,100% 0,calc(100% - 7px) 100%,0 100%);min-width:6px}
-.cbar.empty{opacity:.7;align-items:center;justify-content:center;font-size:.8rem;color:var(--text-muted)}
+.cbar.empty{align-items:center;justify-content:center;font-size:.8rem;color:var(--text-muted)}
 .seg-W{background:#f8f6d8} .seg-U{background:#92c5de} .seg-B{background:#8a8a8a} .seg-R{background:#e6948a}
 .seg-G{background:#a6d8a0} .seg-C{background:#cbc2bf}
 .ccards{display:grid;grid-template-columns:repeat(auto-fill,minmax(14rem,1fr));gap:1rem;margin-top:1rem}
@@ -2485,10 +2562,10 @@ html.cardview-open{overflow:hidden}
   border:1px solid var(--border)}
 .ccard .sub{font-size:.8rem;color:var(--text-muted);text-align:center;margin-top:.2rem}
 .stats .avg{margin:1rem 0 .25rem}
-.curve{display:flex;align-items:flex-end;gap:.5rem;height:9rem;padding:.25rem 0;
+.curve{display:flex;align-items:flex-end;gap:min(.5rem,2.1vw);height:9rem;padding:.25rem 0;
   border-bottom:1px solid var(--border)}
-.curve .bar{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;
-  font-size:.75rem}
+.curve .bar{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;
+  justify-content:flex-end;height:100%;font-size:min(.75rem,3.5vw)}
 .curve .bar .col{display:flex;flex-direction:column-reverse;width:70%;gap:2px;border-radius:2px 2px 0 0;
   overflow:hidden}
 .curve .bar b{font-variant-numeric:tabular-nums;margin-bottom:.15rem}
@@ -2505,9 +2582,11 @@ html.cardview-open{overflow:hidden}
 .sg{display:block;flex:1 1 0;min-height:2px;background:var(--orange);cursor:pointer}
 .k1{background:#3987e5} .k2{background:#eb6834} .k3{background:#1baf7a} .k4{background:#eda100}
 .k5{background:#e87ba4} .k6{background:#9085e9} .k7{background:#e34948} .k0{background:#8a8a8a}
-.curveaxis{display:flex;gap:.5rem}
+/* the counts and the axis can't wrap: with large text on a narrow phone their gaps and type stop
+   growing at a share of the screen width (min(), so 100% text is unchanged) */
+.curveaxis{display:flex;gap:min(.5rem,2.1vw)}
 .curveaxis .mv{flex:1;min-width:0;min-height:28px;padding:0;border:0;background:none;font-weight:700;
-  font-size:.8rem;color:var(--text)}
+  font-size:min(.8rem,3.8vw);color:var(--text)}
 .curveaxis .mv:hover:not(:disabled),.slegend button:hover,.rowbtn:hover{background:var(--surface-2)}
 .slegend{list-style:none;display:flex;flex-wrap:wrap;gap:.25rem .5rem;margin:.5rem 0 0;padding:0}
 .slegend button{min-height:28px;padding:0 .4rem;border:0;background:none;font-size:.85rem;gap:.35rem;
@@ -2545,9 +2624,13 @@ table.qty td:last-child{text-align:right;font-variant-numeric:tabular-nums;font-
 .odds{margin-top:1.25rem} .odds h3{margin:0 0 .4rem}
 .odds .oddsform{display:flex;flex-wrap:wrap;gap:.4rem;align-items:center;font-size:.9rem;
   color:var(--text-muted)}
-.odds .oddsform select,.odds .oddsform .msel-btn,.odds .oddsform input{height:2rem;padding:0 .4rem;
+.odds .oddsform select:not(.msel-native),.odds .oddsform .msel-btn,.odds .oddsform input{height:2rem;
+  padding:0 .4rem;
   font-size:.9rem;width:auto;min-width:6rem;flex:none}
 .odds .oddsform .msel-btn{padding-right:1.5rem;background-position:right .5rem center}
+/* a long choice (Group by) never runs past the panel on a narrow phone with large text; the hidden
+   native select behind a script-drawn one keeps the theme's 1 px size (it used to get 6rem here) */
+.odds .oddsform select:not(.msel-native),.odds .oddsform .msel,.odds .oddsform .msel-btn{max-width:100%}
 .odds .oddsform input{width:4rem;min-width:4rem}
 .odds .oddstable{margin-top:.5rem;max-height:16rem;overflow:auto;display:block;width:100%}
 .odds .oddstable td:nth-child(2),.odds .oddstable td:nth-child(3){text-align:right;white-space:nowrap}
@@ -2557,7 +2640,13 @@ table.qty td:last-child{text-align:right;font-variant-numeric:tabular-nums;font-
 .checks ul{list-style:none;margin:.25rem 0 0;padding:0} .checks li{display:flex;gap:.4rem;
   align-items:baseline;
   padding:.2rem 0;border-top:1px solid var(--border)} .checks li:first-child{border-top:0}
-.checks li b{flex:none} .checks li span{color:var(--text-muted);overflow-wrap:anywhere}
+.checks li b{flex:none} .checks li span{color:var(--text-muted);overflow-wrap:anywhere;min-width:0}
+/* large text on a narrow phone: the value goes under its label instead of past the panel, and the
+   label stays beside its icon (it breaks inside a word only if that word alone is too wide). The
+   value keeps its place beside the label, wrapping inside it, while at least 6rem is left there */
+.checks li{flex-wrap:wrap;column-gap:min(.4rem,2vw)} .checks li svg{flex:none}
+.checks li span{flex:1 1 6rem}
+.checks li b{flex:0 1 auto;min-width:0;overflow-wrap:anywhere}
 .checks li.ok svg{color:var(--green-text)} .checks li.bad svg{color:var(--red-text,#d33)}
 @media (max-width:1000px){ .stats .grid{grid-template-columns:minmax(0,1fr)} }
 
@@ -2575,7 +2664,7 @@ table.qty td:last-child{text-align:right;font-variant-numeric:tabular-nums;font-
     align-items:center}
   .listbar .field:last-of-type .lbl{margin-right:auto} .listbar .field.grow{min-width:0} }
 @media (max-width:600px){ .listbar .controls{grid-template-columns:minmax(0,1fr)} }
-/* the list couldn't be read (Q64): the reason and Try again, a full-size touch target */
+/* the list couldn't be read: the reason and Try again, a full-size touch target */
 .decks-unreadable p{margin:0}
 .decks-unreadable .actions .btn{min-height:44px}
 /* minmax(0,1fr), never 1fr: a long deck name (the "Copy of - …" names the app itself makes) must shrink
@@ -2730,7 +2819,7 @@ ul.plain.taglist{display:flex;flex-wrap:wrap;gap:.5rem;margin:0 0 1rem}
 /* (main form > button is full width on a phone; here the button keeps its own width) */
 main .panel form.addtag > button,main .panel form.moveform > button{flex:none;width:auto}
 /* the Fold's cover screen (under 360px): the buttons drop their icon, so the box keeps room for its
-   whole placeholder ("Pick someone you follow", L11) and the two still share a row */
+   whole placeholder ("Pick someone you follow") and the two still share a row */
 @media (max-width:359.98px){ main .panel form.addtag > button svg,
   main .panel form.moveform > button svg{display:none} }
 .tagbox .notice,.collabbox .notice,.folderbox .notice,.coverbox .notice{margin:.75rem 0 0}

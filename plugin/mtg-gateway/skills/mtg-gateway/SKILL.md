@@ -71,7 +71,7 @@ in `unread_lines`: tell the user they were skipped.
 | **Photos of physical cards** | Read every card title you can see and call `resolve_cards` with the names (add set code and collector number from the bottom of the card when legible). Ask about every result whose `status` is not `exact` or `printing`; never silently keep a `fuzzy` correction the user did not confirm. In an app that shows cards, the user ticks and picks on the picker card and their choice reaches you as text: wait for it. For an exact printing, `card_printings` shows the pictures and the tap reaches you as text too. |
 | "Find decks for this commander", "show me X's decks", "what are people playing in Y" | `search_decks` (by `commander`, `name`, `owner`, `format`, `colors`; `limit` for how many), then `get_deck` on the ones worth a closer look. Say the results are Archidekt's public decks and give each deck's `url`. For one person's public decks give `owner` with `order_by: "-updatedAt"`. A partial commander name is looked up: `commander_matched` names the commander searched, `commander_suggestions` asks you to pick one and search again. |
 | "Which of these do I own?", "add these to my collection", "what's in my collection?" | `list_collection` (filter with `query`) and `propose_collection_changes` (`add` from names, a pasted list or a `scan_session`, `remove` by id or name). The collection is the user's Collection on Archidekt, so the change is a proposal the user approves (their approval mode applies, like deck edits). Compare a deck's cards with `list_collection` to say what the user still needs. |
-| "Like this deck", "bookmark it", "follow its owner", "comment on it", "vote on that comment", "delete my deck", "make a folder", "add or remove a collaborator" | `propose_deck_social`, `propose_comment` (comment ids from `get_deck_comments`), `propose_delete_deck`, `propose_create_folder`, `propose_collaborator` (current ones from `get_deck_collaborators`). Each is a proposal only the user applies: their own press on the review page (give them `review_url`; the in-chat card only opens it), every time, whatever their approval mode. Never call `apply_proposal` for these. Comments are public under the user's Archidekt name: post only words the user asked for, and quote them back. |
+| "Like this deck", "bookmark it", "follow its owner", "follow someone by name", "comment on it", "vote on that comment", "delete my deck", "make a folder", "add or remove a collaborator" | `propose_deck_social`, `propose_comment` (comment ids from `get_deck_comments`), `propose_delete_deck`, `propose_create_folder`, `propose_collaborator` (current ones from `get_deck_collaborators`). Each is a proposal only the user applies: their own press on the card in the chat or on the review page (give them `review_url`; deleting a deck, and an edit of a comment that has formatting: review page only), every time, whatever their approval mode. Never call `apply_proposal` for these. Comments are public under the user's Archidekt name: post only words the user asked for, and quote them back. |
 | "I scanned my cards" (on the gateway's `/scan` phone page) | `list_scan_sessions`, then `get_scan_session` with the name or id. Items without a `card` were not recognised; ask the user for them. Its `decklist_text` feeds `propose_new_deck`, its `changes` feed `propose_deck_changes`; or pass the session's id or name as `scan_session` to either tool and skip the copy. |
 
 After loading a deck, say how many cards it has and name the commander, so
@@ -283,7 +283,15 @@ own linked account. Follow every step, in order.
    every proposal waits for their own press on the card or the review
    page; `semi` lets you apply a low-risk edit yourself (`risk` is `low`:
    a few card rows, no commander change, or a clone); `auto` lets you apply
-   everything. `assistant_may_apply` is the gateway's answer for this
+   most changes, but some still wait for the user's press (a restore, a
+   commander change, a new deck, a big edit, making a deck public or
+   unlisted, any edit of a description that has formatting, such as bold
+   text, links or pictures, actions on their Archidekt account, and
+   deleting a deck; in every mode also a held
+   change, a change waiting for another change first, one another app had
+   a hand in, one that replaces another app's change, and one that another
+   app's waiting change would replace); the answer says why one waits.
+   `assistant_may_apply` is the gateway's answer for this
    proposal; never argue with it or work around it.
    **If your app shows the proposal as a card with Approve and Reject
    buttons** (Claude on the web, desktop and phones; ChatGPT), the user

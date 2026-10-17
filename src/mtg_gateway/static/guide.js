@@ -147,7 +147,7 @@
     });
     input.addEventListener("search", apply); // the box's own clear button
   }
-  // In the list of matches (L13): Down and Up move through it (Up from the first goes back to the
+  // In the list of matches: Down and Up move through it (Up from the first goes back to the
   // box), Home and End go to its ends, Escape goes back to the box with the search kept.
   if (input && results) {
     results.addEventListener("keydown", function (e) {

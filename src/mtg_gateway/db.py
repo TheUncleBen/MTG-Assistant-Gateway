@@ -203,6 +203,43 @@ class CardModelRefused(Exception):
 MAX_PROPOSAL_VERSIONS = 50
 
 
+#: States of a note that hold the notes depending on it (K6, Q27j). "expired" holds them too
+#: (Q142 item 1 A, Ben approved 10-17).
+HOLDING_STATES = ("rejected", "withdrawn", "failed", "expired")
+
+# A note's state as the member sees it: a waiting one past its expiry is "expired" even before
+# the prune marks it so (the ``o`` alias, with the time as ``:now``).
+_SEEN_STATE = "(CASE WHEN o.state = 'pending' AND o.expires_at < :now THEN 'expired' ELSE o.state END)"
+_HOLDING_SQL = "(" + ", ".join(f"'{s}'" for s in HOLDING_STATES) + ")"
+
+
+def _blocking_dependency(c: sqlite3.Connection, proposal_id: str) -> dict[str, Any] | None:
+    """The first note ``proposal_id`` depends on that is rejected, withdrawn, failed or expired
+    (its id, board number and state), or None."""
+    row = c.execute(
+        f"SELECT o.id, o.board_no, {_SEEN_STATE} AS state FROM proposal_links l "
+        f"JOIN proposals o ON o.id = l.other_id WHERE l.proposal_id = :pid AND l.kind = 'depends_on' "
+        f"AND {_SEEN_STATE} IN {_HOLDING_SQL} ORDER BY l.created_at, l.rowid LIMIT 1",
+        {"pid": proposal_id, "now": int(time.time())},
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def hold_reason(dep: dict[str, Any]) -> str:
+    """The stored reason of a hold: ``depends:<id>:<state>``, worded when shown."""
+    return f"depends:{dep['id']}:{dep['state']}"
+
+
+# replaced_hold_reason in SQL, for the lazy hold (hold_blocked)
+GONE_REASON_SQL = "'replaces:' || o.id || ':applied'"
+
+
+def replaced_hold_reason(proposal_id: str) -> str:
+    """The stored reason of a hold on a note whose replaced note was applied on its own:
+    ``replaces:<id>:applied`` (review round 3)."""
+    return f"replaces:{proposal_id}:applied"
+
+
 class ProposalVersionsFull(Exception):
     """amend_proposal refused: the proposal already keeps MAX_PROPOSAL_VERSIONS earlier versions."""
 
@@ -1996,7 +2033,8 @@ class Database:
         so a deck with many proposals keeps its older ones on its own page."""
         sql = (
             "SELECT id, kind, deck_id, deck_name, state, created_at, expires_at, applied_at, "
-            "created_by_client, diff_text FROM proposals WHERE owner_sub = ?"
+            "created_by_client, diff_text, version, board_no, status, status_reason, status_at, "
+            "amended_by_client FROM proposals WHERE owner_sub = ?"
         )
         args: list[Any] = [owner_sub]
         if deck_id:
@@ -2156,6 +2194,7 @@ class Database:
             "board_no, archidekt_user_id FROM proposals "
             "WHERE owner_sub = ? AND state = 'pending' AND expires_at >= ?"
         )
+        self.hold_blocked(owner_sub)
         args: list[Any] = [owner_sub, int(time.time())]
         if deck_id is not None:
             sql += " AND deck_id = ?"
@@ -2212,15 +2251,8 @@ class Database:
             ).fetchone()
             if kept >= MAX_PROPOSAL_VERSIONS:
                 raise ProposalVersionsFull(proposal_id)
-            held = (
-                row["status"] == "held"
-                and c.execute(
-                    "SELECT 1 FROM proposal_links l JOIN proposals o ON o.id = l.other_id "
-                    "WHERE l.proposal_id = ? AND l.kind = 'depends_on' AND o.state = 'rejected' LIMIT 1",
-                    (proposal_id,),
-                ).fetchone()
-                is not None
-            )
+            # A hold stays while a note it depends on is still rejected, withdrawn or failed (K6).
+            held = row["status"] == "held" and _blocking_dependency(c, proposal_id) is not None
             old = int(row["version"])
             c.execute(
                 """INSERT INTO proposal_versions (proposal_id, version, changes_json, rows_json, diff_text,
@@ -2330,15 +2362,41 @@ class Database:
                 ).fetchone()
                 if pending >= max_pending:
                     return False
-            return (
+            # A note it depends on that is still rejected, withdrawn or failed holds it again (K6).
+            blocking = _blocking_dependency(c, proposal_id)
+            changed = (
                 c.execute(
-                    "UPDATE proposals SET state = 'pending', status = NULL, status_reason = NULL, "
+                    "UPDATE proposals SET state = 'pending', status = ?, status_reason = ?, "
                     "status_at = ? WHERE id = ? AND owner_sub = ? AND state IN ('withdrawn', 'replaced') "
                     "AND expires_at >= ?",
-                    (now, proposal_id, owner_sub, now),
+                    (
+                        "held" if blocking else None,
+                        hold_reason(blocking) if blocking else None,
+                        now,
+                        proposal_id,
+                        owner_sub,
+                        now,
+                    ),
                 ).rowcount
                 == 1
             )
+            if changed:
+                # Its board number stays unless another live note on the deck took it meanwhile;
+                # then it gets the next free one, so a board never shows one number twice (A1).
+                c.execute(
+                    """UPDATE proposals SET board_no = (
+                         SELECT COALESCE(MAX(o.board_no), 0) + 1 FROM proposals o
+                         WHERE o.owner_sub = proposals.owner_sub AND o.deck_id = proposals.deck_id
+                           AND o.id != proposals.id
+                           AND (o.state = 'applying' OR (o.state = 'pending' AND o.expires_at >= ?)))
+                       WHERE id = ? AND (board_no IS NULL OR EXISTS (
+                         SELECT 1 FROM proposals o WHERE o.owner_sub = proposals.owner_sub
+                           AND o.deck_id = proposals.deck_id AND o.id != proposals.id
+                           AND o.board_no = proposals.board_no
+                           AND (o.state = 'applying' OR (o.state = 'pending' AND o.expires_at >= ?))))""",
+                    (now, proposal_id, now),
+                )
+            return changed
 
     def link_proposals(self, proposal_id: str, owner_sub: str, kind: str, other_id: str) -> bool:
         """Record that ``proposal_id`` depends on, or replaces, ``other_id`` (Q27j, BOARD §2). Both
@@ -2378,17 +2436,178 @@ class Database:
             ).fetchall()
         return [dict(r) for r in rows]
 
-    def claim_proposal(self, proposal_id: str, owner_sub: str) -> bool:
-        """Move pending -> applying atomically; False if it was not pending (duplicate apply)."""
+    def claim_proposal(self, proposal_id: str, owner_sub: str, *, expect_version: int | None = None) -> bool:
+        """Move pending -> applying atomically; False if it was not pending (duplicate apply), or
+        with ``expect_version`` when it is at another version now (amended since it was read: the
+        apply then reads its content again after a successful claim, G16)."""
         with self.tx() as c:
             now = int(time.time())
             # applied_at marks when the apply started; finish_proposal overwrites it when it ends.
-            cur = c.execute(
+            sql = (
                 "UPDATE proposals SET state = 'applying', applied_at = ? WHERE id = ? AND owner_sub = ? "
-                "AND state = 'pending' AND expires_at >= ?",
-                (now, proposal_id, owner_sub, now),
+                "AND state = 'pending' AND expires_at >= ?"
             )
+            args: tuple[Any, ...] = (now, proposal_id, owner_sub, now)
+            if expect_version is not None:
+                sql += " AND version = ?"
+                args += (int(expect_version),)
+            cur = c.execute(sql, args)
             return cur.rowcount == 1
+
+    def rebase_proposal(
+        self,
+        proposal_id: str,
+        owner_sub: str,
+        *,
+        was: str,
+        fingerprint: str,
+        status: str | None,
+        reason: str | None = None,
+        version: int | None = None,
+    ) -> bool:
+        """Record that a waiting proposal was checked against the deck as it is now (fingerprint):
+        it still does what was reviewed ("updated": its baseline moves to that deck) or it would
+        now do something else ("needs_look" with the reason; the baseline stays). Only while it is
+        pending, still has the baseline ``was`` (and ``version``), and is not held (a hold stays
+        until its dependency is settled). True when it was changed."""
+        if status is not None and status not in PROPOSAL_STATUSES:
+            raise ValueError(f"unknown proposal status {status!r}")
+        sql = (
+            "UPDATE proposals SET baseline_fingerprint = ?, status = ?, status_reason = ?, status_at = ? "
+            "WHERE id = ? AND owner_sub = ? AND state = 'pending' AND baseline_fingerprint = ? "
+            "AND COALESCE(status, '') != 'held'"
+        )
+        args: tuple[Any, ...] = (
+            fingerprint if status == "updated" else was,
+            status,
+            reason,
+            int(time.time()),
+            proposal_id,
+            owner_sub,
+            was,
+        )
+        if version is not None:
+            sql += " AND version = ?"
+            args += (int(version),)
+        with self.tx() as c:
+            return c.execute(sql, args).rowcount == 1
+
+    def dependents(self, owner_sub: str, proposal_id: str) -> list[str]:
+        """The owner's live waiting proposals that depend on ``proposal_id`` (Q27j)."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT p.id FROM proposal_links l JOIN proposals p ON p.id = l.proposal_id "
+                "WHERE l.other_id = ? AND l.kind = 'depends_on' AND p.owner_sub = ? "
+                "AND p.state = 'pending' AND p.expires_at >= ? ORDER BY p.created_at, p.rowid",
+                (proposal_id, owner_sub, int(time.time())),
+            ).fetchall()
+        return [str(r[0]) for r in rows]
+
+    def hold_blocked(self, owner_sub: str) -> int:
+        """Hold each live waiting note of the owner that depends on a rejected, withdrawn, failed
+        or expired note and is not held yet (K6). The apply paths settle their own links; this
+        catches the ones that close a note without them: a restart mid-apply, a shutdown cancel,
+        the six-hour backstop and expiry (review round 1, finding 3). Returns how many it held."""
+        first = (
+            f"SELECT {{}} FROM proposal_links l JOIN proposals o ON o.id = l.other_id "
+            f"WHERE l.proposal_id = proposals.id AND l.kind = 'depends_on' "
+            f"AND {_SEEN_STATE} IN {_HOLDING_SQL} ORDER BY l.created_at, l.rowid LIMIT 1"
+        )
+        reason = first.format("'depends:' || o.id || ':' || " + _SEEN_STATE)
+        # a waiting note whose replaced note was applied on its own (review round 3; Q142 item 11 A,
+        # Ben approved 10-17): applying it too would change the deck twice
+        gone = (
+            "SELECT {} FROM proposal_links l JOIN proposals o ON o.id = l.other_id "
+            "WHERE l.proposal_id = proposals.id AND l.kind = 'replaces' AND o.state = 'applied' "
+            "ORDER BY l.created_at, l.rowid LIMIT 1"
+        )
+        args = {"sub": owner_sub, "now": int(time.time())}
+        live = (
+            "WHERE owner_sub = :sub AND state = 'pending' AND expires_at >= :now "
+            "AND COALESCE(status, '') <> 'held' "
+        )
+        with self.tx() as c:
+            held = c.execute(
+                f"UPDATE proposals SET status = 'held', status_at = :now, status_reason = ({reason}) "
+                f"{live}AND EXISTS ({first.format('1')})",
+                args,
+            ).rowcount
+            return (
+                held
+                + c.execute(
+                    "UPDATE proposals SET status = 'held', status_at = :now, status_reason = "
+                    f"({gone.format(GONE_REASON_SQL)}) {live}AND EXISTS ({gone.format('1')})",
+                    args,
+                ).rowcount
+            )
+
+    def set_hold(self, proposal_id: str, owner_sub: str, reason: str | None) -> bool:
+        """Hold a waiting proposal (``reason``) or lift its hold (None: back to plain waiting).
+        Lifting touches only a held one, so another status is never cleared by it."""
+        now = int(time.time())
+        with self.tx() as c:
+            if reason is None:
+                cur = c.execute(
+                    "UPDATE proposals SET status = NULL, status_reason = NULL, status_at = ? "
+                    "WHERE id = ? AND owner_sub = ? AND state = 'pending' AND status = 'held'",
+                    (now, proposal_id, owner_sub),
+                )
+            else:
+                cur = c.execute(
+                    "UPDATE proposals SET status = 'held', status_reason = ?, status_at = ? "
+                    "WHERE id = ? AND owner_sub = ? AND state = 'pending'",
+                    (reason, now, proposal_id, owner_sub),
+                )
+            return cur.rowcount == 1
+
+    def find_duplicate(
+        self, owner_sub: str, *, deck_id: str, kind: str, changes: Any, client: str | None
+    ) -> str | None:
+        """A live waiting proposal of the owner, made by the same app, on the same deck, of the
+        same kind and with exactly these stored changes (Q27k: only exact duplicates are skipped).
+        One marked "needs a look" is not: it no longer does what was reviewed, and asking again is
+        how the assistant makes it fresh from the deck as it is now."""
+        row = self._one(
+            "SELECT id FROM proposals WHERE owner_sub = ? AND deck_id = ? AND kind = ? "
+            "AND changes_json = ? AND created_by_client IS ? AND state = 'pending' AND expires_at >= ? "
+            "AND (status IS NULL OR status != 'needs_look') "
+            "ORDER BY created_at, rowid LIMIT 1",
+            (owner_sub, str(deck_id), kind, json.dumps(changes), client, int(time.time())),
+        )
+        return str(row[0]) if row else None
+
+    def restart_expiry(self, proposal_id: str, owner_sub: str, expires_at: int) -> bool:
+        """A waiting proposal's expiry starts again (an amend, A12). Only while it is pending."""
+        with self.tx() as c:
+            return (
+                c.execute(
+                    "UPDATE proposals SET expires_at = ? "
+                    "WHERE id = ? AND owner_sub = ? AND state = 'pending'",
+                    (int(expires_at), proposal_id, owner_sub),
+                ).rowcount
+                == 1
+            )
+
+    def needs_look_since(self, proposal_id: str) -> int | None:
+        """When a live waiting proposal was marked "needs a look"; None otherwise."""
+        row = self._one(
+            "SELECT status_at FROM proposals WHERE id = ? AND state = 'pending' AND expires_at >= ? "
+            "AND status = 'needs_look'",
+            (proposal_id, int(time.time())),
+        )
+        return int(row[0] or 0) or None if row else None
+
+    def proposal_board_numbers(self, owner_sub: str, ids: list[str]) -> dict[str, int | None]:
+        """id -> board number, for the owner's proposals among ``ids``."""
+        ids = [str(i) for i in ids][:500]
+        if not ids:
+            return {}
+        with self._lock:
+            rows = self._conn.execute(
+                f"SELECT id, board_no FROM proposals WHERE owner_sub = ? AND id IN ({_marks(ids)})",
+                (owner_sub, *ids),
+            ).fetchall()
+        return {str(r[0]): r[1] for r in rows}
 
     def finish_proposal(
         self,

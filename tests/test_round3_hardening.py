@@ -193,10 +193,13 @@ async def test_pending_proposals_are_capped_per_member(stack: Stack, monkeypatch
     h = stack.h
     token = await linked_user(stack)
     monkeypatch.setattr(decks_mod, "MAX_PENDING_PROPOSALS", 3)
-    args = {"name": "x", "cards": [{"card_name": "Sol Ring", "quantity": 1}]}
-    for _ in range(3):
-        assert structured(await call(h, token, "propose_new_deck", args))["ok"]
-    out = structured(await call(h, token, "propose_new_deck", args))
+
+    def args(i: int) -> dict:  # 0.7.29 (A5): an exact repeat would return the waiting one
+        return {"name": f"x{i}", "cards": [{"card_name": "Sol Ring", "quantity": 1}]}
+
+    for i in range(3):
+        assert structured(await call(h, token, "propose_new_deck", args(i)))["ok"]
+    out = structured(await call(h, token, "propose_new_deck", args(3)))
     assert out["ok"] is False and out["error"] == "rate_limited" and "pending proposals" in out["message"]
 
 
