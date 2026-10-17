@@ -676,3 +676,100 @@ def test_compare_page_never_scrolls_sideways_at_200_percent_text(
             assert not state["out"], (label, state)
             assert state["sw"] <= state["vw"], (label, state)
         browser.close()
+
+
+# phone, a folded Fold's cover screen, an unfolded Fold, a laptop
+@pytest.mark.parametrize("width", [320, 344, 717, 1366])
+@pytest.mark.parametrize("scheme", ["light", "dark"])
+def test_play_more_games_fits_reads_and_starts(server: Server, width: int, scheme: str) -> None:
+    """Q146 item 10: the Play more games button under the Forge card, at 100% and 200% text, in
+    light and dark: inside the window, a 44px target, 4.5:1 text. Pressing it starts more games at
+    the same table; a refusal comes back to the report saying why."""
+    import json
+
+    import httpx
+    from playwright.sync_api import sync_playwright
+
+    from .test_editor_leave_browser import CONTRAST
+    from .test_forge import DECK_TEXT, FakeForge
+    from .test_text_zoom_browser import ROOT_200, TEXT_200
+
+    exe = _chromium_path()
+    if exe == "missing":
+        pytest.skip("no Chromium available for Playwright")
+    fake = FakeForge()
+    server.app.state.gateway.reports.forge = fake.client()
+    sid = server.sign_in_and_link()
+    store_report(server.db, "user-1", "rep_more")
+    seats = ["Immortal Reckoning", "Precon 1", "Precon 2", "Precon 3"]
+    played = [{"game": i, "ms": 60000, "winner": 1 + i % 4, "draw": False} for i in range(1, 5)]
+    section = {
+        **FORGE_DONE,
+        "seats": seats,
+        "result": {
+            **FORGE_DONE["result"],
+            "seats": [{**s, "deck": n} for s, n in zip(FORGE_DONE["result"]["seats"], seats, strict=True)],
+        },
+        "played": played,
+        "deck_text": DECK_TEXT,
+    }
+    with server.db.tx() as c:
+        c.execute(
+            "UPDATE reports SET forge_json = ?, forge_state = 'done' WHERE id = 'rep_more'",
+            (json.dumps(section),),
+        )
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+        ctx = browser.new_context(viewport={"width": width, "height": 900}, color_scheme=scheme)
+        ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
+        page = ctx.new_page()
+        errors: list[str] = []
+        page.on("pageerror", lambda e: errors.append(str(e)))
+        for zoom in ("none", ROOT_200, TEXT_200):
+            page.goto(f"{server.base}/history/reports/rep_more", wait_until="networkidle")
+            if zoom != "none":
+                page.evaluate(zoom)
+            box = page.locator("#forge-more")
+            box.scroll_into_view_if_needed()
+            label = "none" if zoom == "none" else ("root" if zoom == ROOT_200 else "text")
+            if SCRATCH.is_dir():
+                box.screenshot(path=str(SCRATCH / f"forge-more-{width}-{scheme}-{label}.png"))
+            state = page.evaluate(
+                """(contrast) => {
+                  const ratio = eval(contrast);
+                  const box = document.getElementById('forge-more');
+                  const vw = document.documentElement.clientWidth;
+                  const texts = Array.from(box.querySelectorAll('*'))
+                    .filter(e => Array.from(e.childNodes)
+                      .some(n => n.nodeType === 3 && n.textContent.trim()));
+                  const button = box.querySelector('button').getBoundingClientRect();
+                  const out = Array.from(box.querySelectorAll('*'))
+                    .filter(e => e.getClientRects().length && e.getBoundingClientRect().right > vw + 1);
+                  return {sw: document.documentElement.scrollWidth, vw, buttonHeight: button.height,
+                          low: texts.map(e => [e.textContent.trim().slice(0, 30), ratio(e)])
+                            .filter(([, r]) => r < 4.5),
+                          out: out.map(e => e.tagName), checked: texts.length};
+                }""",
+                CONTRAST,
+            )
+            assert state["sw"] <= state["vw"] and not state["out"], (label, state)
+            assert state["buttonHeight"] >= 44 and state["checked"] >= 2 and not state["low"], (label, state)
+        page.goto(f"{server.base}/history/reports/rep_more", wait_until="networkidle")
+        page.locator("#forge-more button").click()
+        page.wait_for_load_state("networkidle")
+        assert page.url.endswith("/history/reports/rep_more")
+        assert len(fake.started) == 1 and fake.started[0]["games"] == 4
+        assert [d.get("precon") for d in fake.started[0]["decks"][1:]] == seats[1:]
+        assert page.locator("#forge-more button").count() == 0  # none while the games play
+        # a refusal, shown from its code
+        page.goto(f"{server.base}/history/reports/rep_more?more=queue", wait_until="networkidle")
+        notice = page.locator("p.notice.warn").first.inner_text()
+        assert notice.startswith("Your Forge queue has no room for more games now")
+        assert not errors, errors
+        browser.close()
+    with httpx.Client(base_url=server.base, cookies={"mtg_session": sid}) as h:
+        assert h.post("/history/reports/rep_more/forge/more", data={}).status_code == 403
+        csrf = h.get("/history/reports/rep_more").text.split("name='csrf' value='", 1)[1].split("'", 1)[0]
+        ended = h.post("/history/reports/rep_more/forge/more", data={"csrf": csrf})
+        assert ended.status_code == 303 and ended.headers["location"].endswith("?more=ended")
+        assert h.post("/history/reports/nope/forge/more", data={"csrf": csrf}).status_code == 404

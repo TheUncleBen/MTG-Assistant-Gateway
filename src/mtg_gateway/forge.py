@@ -176,6 +176,10 @@ def summarise(job: dict[str, Any], seats: list[str]) -> dict[str, Any]:
 
 
 FORGE_RESTARTED = "Forge restarted before this run finished."
+MORE_GONE = (
+    "Some of this report's opponents are no longer in this Forge ({gone}), so more games can't be "
+    "played at the same table. Run the report again."
+)
 FORGE_SILENT = "Forge stopped answering about this run."
 
 
@@ -541,6 +545,7 @@ async def start_run(
     pair: bool = False,
     parallel: int = 1,
     shared: dict[str, Any] | None = None,
+    more: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Start a Forge run of the member's deck against bundled precons and return the report's
     ``forge`` section. ``shared`` (K6, Q136) seats the opponents of another report's run, so two
@@ -548,6 +553,8 @@ async def start_run(
     they are picked for its ``bracket``; ``report_id`` and ``deck_name`` say whose they were.
     ``pair`` (Q140 item 3): a comparison's first run, whose ``bracket`` is the higher of the two
     decks' (``bracket_deck`` names the other deck when it is that one's).
+    ``more`` (Play more games): the ``opponents`` and ``choice`` of the report's earlier games, so
+    the extra games seat the same table.
     Cards Forge lacks are removed from the run and named in ``not_played``; the run is refused
     only when the commander itself is missing. Every run is seeded: without a seed from the
     request the gateway picks one, so ``seed`` is always the one Forge used (``seed_source`` says
@@ -571,7 +578,12 @@ async def start_run(
         }
     deck["main"] = [[n, name] for n, name in deck["main"] if resolved.get(name)]
     precons = [p for p in await client.precons() if isinstance(p, dict) and isinstance(p.get("name"), str)]
-    if shared is not None:
+    if more is not None:
+        chosen, choice = list(more.get("opponents") or []), dict(more.get("choice") or {})
+        gone = [o for o in chosen if o not in {p["name"] for p in precons}]
+        if gone:
+            return {"state": "failed", "error": MORE_GONE.format(gone=", ".join(gone))}
+    elif shared is not None:
         chosen, choice = shared_opponents(precons, shared)
         if chosen is None:
             return {"state": "failed", "error": choice["note"], "opponent_choice": choice}
@@ -603,6 +615,8 @@ async def start_run(
         "not_played": not_played,
         "games_requested": games,
         "forge_version": job.get("forge_version"),
+        # the deck as Forge played it, so Play more games can seat it again (never shown)
+        "deck_text": deck_text,
         # how many games the engine plays at once (its own ceiling may lower what was asked)
         **({"parallel": job["parallel"]} if isinstance(job.get("parallel"), int) else {}),
         # its places for all runs together: two or more let a comparison's decks play side by side
@@ -643,7 +657,21 @@ async def refresh(
                 return {**section, "state": "lost", "error": FORGE_SILENT}
             return {**section, "unanswered_since": since}
         return section
-    out = {**section, "state": job["state"], "result": summarise(job, section.get("seats") or [])}
+    # Play more games: the report's earlier games come first, and these are numbered after them
+    earlier = [r for r in section.get("earlier") or [] if isinstance(r, dict)]
+    offset = max([0, *(r["game"] for r in earlier if isinstance(r.get("game"), int))])
+    played = earlier + [
+        {**r, "game": offset + r["game"]} if isinstance(r.get("game"), int) else r
+        for r in job.get("results") or []
+        if isinstance(r, dict)
+    ]
+    asked = section.get("games_requested") if earlier else job.get("games_requested")
+    out = {
+        **section,
+        "state": job["state"],
+        "result": summarise({**job, "results": played, "games_requested": asked}, section.get("seats") or []),
+        "played": played,
+    }
     out.pop("unanswered_since", None)
     if job.get("load_problems"):
         out["load_problems"] = job["load_problems"]

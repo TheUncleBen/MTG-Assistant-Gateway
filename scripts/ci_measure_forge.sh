@@ -2,8 +2,8 @@
 # Measures Forge games played one, two and three at once (Q136 item 5), inside the deployment's own limits
 # (FORGE_MEMORY_LIMIT 1536M, FORGE_CPUS 2): run time, peak memory, whether the kernel killed a process for
 # memory, and whether the same seed gave the same results each way. A run plays as many groups at once as
-# it has groups (forge_service.py: groups of at most five), so three at once needs at least 11 games; the
-# default 15 is three full groups.
+# it has groups (forge_service.py: one game each), so three at once needs at least 3 games; the default 15
+# matches the figures first recorded with groups of five.
 # Each run gets a fresh container, so a memory kill, a run cut off at the time limit or memory left
 # behind never carries into the next run. The container gets no swap (--memory-swap equal to --memory):
 # a run that needs more than 1536 MiB is killed instead of swapping, so the peak cannot hide memory that
@@ -19,7 +19,7 @@
 set -u
 image="$1"
 games="${2:-15}"
-if [ "$games" -lt 11 ]; then echo "need at least 11 games for three groups at once" >&2; exit 0; fi
+if [ "$games" -lt 3 ]; then echo "need at least 3 games for three groups at once" >&2; exit 0; fi
 # the longest one run may take before it is stopped and reported as unfinished (seconds; 50 minutes)
 run_limit="${MEASURE_RUN_LIMIT:-3000}"
 summary="${GITHUB_STEP_SUMMARY:-/dev/stdout}"
