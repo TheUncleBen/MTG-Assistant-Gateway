@@ -482,8 +482,7 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
             if not s.apply_in_chat:
                 raise DeckError(
                     "in_chat_disabled",
-                    "This gateway does not apply proposals from the chat card (MTG_APPLY_IN_CHAT is "
-                    "off). Use the Proposals page.",
+                    "This gateway doesn't apply changes from the chat card. Use the Proposals page.",
                 )
             ids = state.decks.check_set_approval(sub, proposal_ids, approval)
             run = state.decks.apply_selection(sub, ids, via="app")

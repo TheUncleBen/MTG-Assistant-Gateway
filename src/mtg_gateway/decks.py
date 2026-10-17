@@ -2466,8 +2466,9 @@ class DeckService:
         kind = row.get("kind", "edit")
         risk, why = modes.risk_of(kind, row.get("rows"), max_rows=int(self.live.get("auto_apply_max_rows")))
         mode = self.mode_of(sub)
-        creator, amender = row.get("created_by_client"), row.get("amended_by_client")
-        if risk not in modes.MEMBER_ONLY and amender and amender != creator:
+        # G5: any version another app wrote, not only the last (proofread of WORDING-4: one that
+        # ChatGPT rewrote and Claude changed again still had another app's hand in it)
+        if risk not in modes.MEMBER_ONLY and self.rewritten_by_another_app(sub, row):
             return "high", "was changed by another app after it was made", mode, False
         if risk not in modes.MEMBER_ONLY and self.press_reason(sub, row):
             # it waits for the member's own press whatever the mode; its risk tier stays what it
@@ -2830,6 +2831,7 @@ class DeckService:
             **(
                 {
                     "changed_by": self._creator_label(row["amended_by_client"]),
+                    "changed_by_apps": self.changed_by_apps(sub, row),
                     "what_changed": str(row.get("version_note") or ""),
                 }
                 if int(row.get("version") or 1) > 1 and row.get("amended_by_client")
@@ -3083,6 +3085,23 @@ class DeckService:
         }
         return any(a and a != maker for a in apps)
 
+    def changed_by_apps(self, sub: str, row: dict[str, Any]) -> list[str]:
+        """The apps that changed this note after it was made, in order, each once (actor labels;
+        Q141 item 1B: the line names every one, "changed by ChatGPT, then Claude")."""
+        if int(row.get("version") or 1) <= 1:
+            return []
+        makers = [
+            v.get("made_by_client")
+            for v in self.db.proposal_versions(row["id"], sub)
+            if int(v["version"]) > 1
+        ]
+        out: list[str] = []
+        for c in [*makers, row.get("amended_by_client")]:
+            label = self._creator_label(c) if c else ""
+            if label and label not in out:
+                out.append(label)
+        return out
+
     def in_apply_all(self, sub: str, row: dict[str, Any]) -> bool:
         """Whether a card's "Apply all" may include this note: one the card may approve, and not
         rewritten by another app (Q141 item 1B)."""
@@ -3243,8 +3262,16 @@ class DeckService:
             in_set = [
                 pid for pid in codes if self.in_apply_all(sub, self.db.get_proposal(pid, sub) or {"id": pid})
             ]
-            data["left_out"] = len(codes) - len(in_set)
             if len(in_set) >= 2:
+                # said only where an Apply all is offered (proofread of WORDING-4), by number
+                out = [pid for pid in codes if pid not in in_set]
+                data["left_out"] = len(out)
+                data["left_out_nos"] = [
+                    x["board_no"] for x in lines if x["proposal_id"] in out and x.get("board_no")
+                ]
+                for x in lines:
+                    if x["proposal_id"] in out:
+                        x["not_in_apply_all"] = True
                 meta[approve.APPROVAL_SET_META_KEY] = {
                     "ids": in_set,
                     "code": self.set_approval_for(sub, in_set),
@@ -3427,7 +3454,10 @@ class DeckService:
         changes oldest first, each re-checked just before it is sent. Returns the run, whose
         ``state`` is "applying" until every change has been tried."""
         if not self.settings.writes_enabled:
-            raise DeckError("writes_disabled", refusals.WRITES_OFF_KEPT)  # Q141 item 7A
+            raise DeckError(
+                "writes_disabled",
+                refusals.WRITES_OFF_KEPT if len(proposal_ids) == 1 else refusals.WRITES_OFF_KEPT_MANY,
+            )  # Q141 item 7A
         the_plan = self.plan_selection(sub, proposal_ids, versions)
         if not the_plan["count"]:
             only = the_plan["skipped"][0] if len(the_plan["skipped"]) == 1 else {}
@@ -4641,6 +4671,7 @@ class DeckService:
                     **(
                         {
                             "changed_by": self._creator_label(amender),
+                            "changed_by_apps": self.changed_by_apps(sub, row or line),
                             "changed_at": line.get("amended_at"),
                             "what_changed": line.get("version_note"),
                         }
@@ -5802,9 +5833,21 @@ def details_rows(deck: Deck, wanted: dict[str, Any]) -> tuple[dict[str, Any], li
                     field=key,
                     before=_detail_label(key, _current_detail(deck, key)),
                     after=_detail_label(key, value),
+                    # who can see the deck before and after, from both flags (review of 4103450:
+                    # Full auto waits for any move toward more visible, modes.auto_waits)
+                    seen_before=visibility(bool(deck.private), bool(deck.unlisted)),
+                    seen_after=visibility(
+                        bool(wanted.get("private", deck.private)), bool(wanted.get("unlisted", deck.unlisted))
+                    ),
                 )
             )
     return changes, lines
+
+
+def visibility(private: bool, unlisted: bool) -> str:
+    """Who can see a deck: "private" (only its owner; taken to win over unlisted, not checked on
+    Archidekt), "unlisted" (anyone with the link) or "public"."""
+    return "private" if private else "unlisted" if unlisted else "public"
 
 
 # A description edit that keeps formatting (Q137) whose description changed since its review: its

@@ -95,7 +95,7 @@
             $(".n", likeBtn).textContent = d.points;
             setLabel(likeBtn, d.vote === 1 ? "Liked" : d.vote === 2 ? "Voted down" : "Like");
             if (noteEl) noteEl.remove();
-          }).catch(function () { busy(likeBtn, false); note("No connection; the like was not changed."); });
+          }).catch(function () { busy(likeBtn, false); note(down ? "No connection; your vote was not changed." : "No connection; the like was not changed."); });
         });
       });
     }
@@ -127,6 +127,7 @@
       var old = holder.querySelector(".note");
       if (old) old.remove();
       var p = el("p", "note");
+      p.setAttribute("role", "status"); // announced when it appears (proofread of WORDING-4)
       if (typeof content === "string") p.textContent = content; else p.appendChild(content);
       holder.appendChild(p);
     };
@@ -147,6 +148,7 @@
         paint(d.following);
         var old = holder.querySelector(".note");
         if (old) old.remove();
+        btn.focus(); // the confirm and an Unfollow it came from are gone: focus stays on the page's button
       }).catch(function () { b.disabled = false; say("No connection; the follow was not changed."); });
     };
     socialRequest("GET", "/social/api/users/" + encodeURIComponent(user) + "/follow").then(function (d) {
@@ -160,6 +162,13 @@
         extra.type = "button";
         extra.setAttribute("data-social", "unfollow");
         extra.appendChild(el("span", "", "Unfollow " + name));
+        if (btn.disabled) {
+          // writes switched off: off like Follow, with the same reason (the server refuses it too)
+          extra.disabled = true;
+          ["title", "aria-describedby"].forEach(function (k) {
+            if (btn.hasAttribute(k)) extra.setAttribute(k, btn.getAttribute(k));
+          });
+        }
         btn.parentNode.insertBefore(extra, btn.nextSibling);
         extra.addEventListener("click", function () {
           confirmChip(extra, "Stop following " + name + "?", "Unfollow", function () { send(extra, false); });
@@ -275,7 +284,8 @@
           f.addEventListener("submit", function (ev) {
             ev.preventDefault();
             var text = ta.value.trim();
-            if (!text) { ta.focus(); return; }
+            // one wording with the assistant's (Q141 item 7A, refusals.EMPTY_COMMENT)
+            if (!text) { note.textContent = "The comment is empty: write it first."; ta.focus(); return; }
             // asked first, like every other write (social review, 0.7.29)
             confirmChip(save, "Change your public comment on Archidekt?", "Change", function () {
               save.disabled = true; note.textContent = "Saving…";
@@ -404,7 +414,15 @@
     if (form) form.addEventListener("submit", function (e) {
       e.preventDefault();
       var text = textarea.value.trim();
-      if (!text) { textarea.focus(); return; }
+      if (!text) {
+        // one wording with the assistant's (Q141 item 7A, refusals.EMPTY_COMMENT)
+        var was = $(".notice", form); if (was) was.remove();
+        var empty = el("p", "notice error", "The comment is empty: write it first.");
+        empty.setAttribute("role", "alert");
+        form.insertBefore(empty, form.firstChild);
+        textarea.focus();
+        return;
+      }
       var old = $(".confirmbar", form);
       if (old) old.remove();
       var bar = el("div", "confirmbar");

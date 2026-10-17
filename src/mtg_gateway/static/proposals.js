@@ -92,10 +92,11 @@
         asking.setAttribute("role", "group");
         var q = document.createElement("span");
         q.textContent = n === 1 ? "Reject this change?" : "Reject " + n + " changes?";
+        asking.setAttribute("aria-label", q.textContent); // named as the deck page's confirms are
         var yes = document.createElement("button");
         yes.type = "button";
         yes.className = "danger";
-        yes.textContent = "Reject " + n;
+        yes.textContent = n === 1 ? "Reject" : "Reject " + n;
         var no = document.createElement("button");
         no.type = "button";
         no.className = "btn";

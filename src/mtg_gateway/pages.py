@@ -26,7 +26,7 @@ from .avatars import initials_svg
 from .clickguard import form_stamp, guarded_form, submitted_too_soon
 from .decks import REVIEW_PAGE, DeckError, current_client, row_label, row_line, tag_change_text
 from .formatting import DOC_CSS, doc_html
-from .refusals import WRITES_OFF_KEPT
+from .refusals import WRITES_OFF_KEPT, WRITES_OFF_KEPT_MANY
 from .theme import (
     LAYOUT_COOKIE,
     THEME_COOKIE,
@@ -553,7 +553,12 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         except DeckError as exc:
             if exc.kind == "pick_one":
                 return _pick_one_page(exc, back, sub, sid)
-            return RedirectResponse(_with_query(back, f"err={_err_code(exc.kind)}"), status_code=303)
+            code = (
+                "writes_disabled_some"
+                if exc.kind == "writes_disabled" and len(picks) > 1
+                else _err_code(exc.kind)
+            )
+            return RedirectResponse(_with_query(back, f"err={code}"), status_code=303)
         await state.decks.batches.wait(run["batch_id"], BATCH_WAIT_SECONDS)
         return RedirectResponse(f"/proposals/applied/{run['batch_id']}", status_code=303)
 
@@ -886,7 +891,7 @@ OK_MESSAGES = {
     "everything else.",
     "mode_auto": "Saved: your assistant applies deck and collection changes without asking. Restoring a "
     "snapshot, a commander change, a new deck, an edit of more rows than Full auto applies by itself, "
-    "making a deck public or unlisted, a description edit that keeps its formatting, "
+    "making a deck public (or unlisted, from private), a description edit that keeps bold text or links, "
     "actions on your Archidekt account and deleting a deck still wait for you. When a change waits for "
     "your press, its card and review page say why. Each change keeps a snapshot you can restore from "
     "History.",
@@ -899,6 +904,7 @@ ERR_MESSAGES = {
     "mode_invalid": "That approval mode does not exist, or this gateway does not allow it. Nothing changed.",
     "failed": "This proposal could not be applied. Details are in the result below, if any.",
     "writes_disabled": WRITES_OFF_KEPT,  # Q141 item 7A
+    "writes_disabled_some": WRITES_OFF_KEPT_MANY,  # a list's selection (proofread of WORDING-4)
     "not_found": "No such proposal for your account.",
     "missing": "Something this proposal needs was not found on Archidekt: a card, a printing, a deck or "
     "a snapshot. Nothing more was changed. The result below names it.",
@@ -1595,7 +1601,7 @@ def _proposal_body(p: dict[str, Any], csrf: str | None, shown: str, *, step: boo
         )
         + (f"<dt>Proposed by</dt><dd>{actor_html(p['created_by'])}</dd>" if p.get("created_by") else "")
         + (  # G16, Q134 item 5: an amended change says who changed it and what
-            f"<dt>Version</dt><dd>{int(p['version'])}, changed by {actor_html(p['changed_by'])}"
+            f"<dt>Version</dt><dd>{int(p['version'])}, changed by {_changed_by_names(p)}"
             + (f": {html.escape(p['what_changed'])}" if p.get("what_changed") else "")
             + "</dd>"
             if p.get("changed_by")
@@ -1770,8 +1776,28 @@ _UNTIED_KINDS = ("create_deck", "clone", "collection")
 _DECK_ACTIONS = ("collaborator_add", "collaborator_remove", "delete_deck")
 
 
+def _app_name(label: str) -> str:
+    """An actor label as the cards write it: the app's name alone, no "app:" badge and no client
+    id (proofread of WORDING-4: "changed by app: ChatGPT: …" had two colons)."""
+    m = re.fullmatch(r"app: (.+) \((.+)\)", label)
+    if m:
+        return m.group(1)
+    if label.startswith("app: "):
+        return "an assistant"
+    return "you, in your browser" if label == "browser" else label
+
+
+def _changed_by_names(p: dict[str, Any]) -> str:
+    """Every app that changed a note, in order (Q141 item 1B): "ChatGPT, then Claude"."""
+    apps = p.get("changed_by_apps") or [p["changed_by"]]
+    return html.escape(", then ".join(_app_name(str(a)) for a in apps))
+
+
 # wording drafts (WORDING-4); static/proposals.js asks the same in the list's bar
-REJECT_NOTE = "Nothing is sent to Archidekt. A rejected change can't be brought back from this page."
+REJECT_NOTE = (
+    "Nothing is sent to Archidekt. A rejected change can't be brought back: your assistant would have "
+    "to propose it again."
+)
 
 
 def reject_ask(n: int) -> str:
@@ -1793,8 +1819,9 @@ def _reject_confirm(picks: list[str], versions: dict[str, int], back: str, csrf:
         f"<input type='hidden' name='back' value='{html.escape(back)}'>"
         "<input type='hidden' name='sure' value='1'>"
         f"{hidden}<p class='actions'>"
-        f"<button type='submit' name='action' value='reject' class='danger'>Reject {len(picks)}</button> "
-        f"<a class='btn' href='{html.escape(back)}'>Back</a></p></form>"
+        f"<button type='submit' name='action' value='reject' class='danger'>"
+        f"{'Reject' if len(picks) == 1 else f'Reject {len(picks)}'}</button> "
+        f"<a class='btn' href='{html.escape(back)}'>Cancel</a></p></form>"
     )
 
 

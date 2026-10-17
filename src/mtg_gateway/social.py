@@ -204,7 +204,7 @@ class SocialService:
         if str(found["owner"]["id"]) == uid:
             raise DeckError("invalid", refusals.OWN_COMMENT_VOTE)  # Q141 item 7A
         if found["archived"]:
-            raise DeckError("invalid", "that comment is archived on Archidekt")
+            raise DeckError("invalid", refusals.ARCHIVED_COMMENT)
         if found["user_vote"] == want:  # already so: nothing is sent (Archidekt might toggle it)
             return {"comment": comment_id, "vote": want, "points": found["points"]}
         if want == VOTE_NONE:
@@ -438,7 +438,7 @@ class SocialService:
         if not text:
             raise DeckError("invalid", refusals.EMPTY_COMMENT)
         if len(text) > MAX_COMMENT:
-            raise DeckError("invalid", f"a comment can be at most {MAX_COMMENT} characters")
+            raise DeckError("invalid", refusals.comment_too_long(MAX_COMMENT))
         found, thread = await self.find_comment(sub, deck_id, comment_id, page, keep_doc=True)
         self._own_comment(sub, found)
         kept = formatting.keep_formatting(found.get("_doc"), text)
@@ -491,7 +491,7 @@ class SocialService:
         if not text:
             raise DeckError("invalid", refusals.EMPTY_COMMENT)
         if len(text) > MAX_COMMENT:
-            raise DeckError("invalid", f"a comment can be at most {MAX_COMMENT} characters")
+            raise DeckError("invalid", refusals.comment_too_long(MAX_COMMENT))
         if parent is None:
             root = await self._root(sub, deck_id, reuse=True)
             if root is None:
