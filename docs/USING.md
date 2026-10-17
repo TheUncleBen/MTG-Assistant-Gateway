@@ -122,7 +122,7 @@ One deck:
   Commander deck starts with its commander in the command zone; other decks
   have none. The page shows the library count and works with a mouse, a
   finger or the keyboard. Nothing is sent to Archidekt and nothing is kept.
-- **Run full test** runs the statistics, the decklist validation and the
+- **Run full test** runs the statistics, the legality check and the
   solo test (300 games, no opponents) and opens the result, filed under
   History. It is the same run the assistant's `run_deck_report` makes, so
   the numbers match whichever way it is started. A Commander deck is played
@@ -149,8 +149,8 @@ One deck:
   Archidekt's estimate when none is set), so two decks' Forge
   win rates are not a like-for-like comparison; the paired goldfish A/B of
   `compare_decks` is.
-- A report without Forge games (Forge not set up, a 60-card deck, or Forge
-  left out of the report) is labelled **Preflight only (no rules engine)**
+- A report without Forge games (Forge not set up, a 60-card deck, a deck
+  with no commander marked, or Forge left out of the report) is labelled **Preflight only (no rules engine)**
   where the Forge games would be. A Forge run that stops early (a group of
   games failed, the run reached its time limit, the run was stopped, or the
   gateway lost track of it) shows the games it did play, marked **stopped

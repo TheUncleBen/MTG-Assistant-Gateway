@@ -49,8 +49,9 @@ XMX = os.environ.get("FORGE_XMX", "1g")
 NICE = int(os.environ.get("FORGE_NICE", "10"))
 MAX_GAMES = int(os.environ.get("FORGE_MAX_GAMES", "50"))
 MAX_QUEUE = int(os.environ.get("FORGE_MAX_QUEUE", "4"))
-# Forge processes one job may run at once. Each takes up to FORGE_XMX of heap plus Java's own
-# memory (one four-player game peaked near 790 MiB), so raise it only with the container's limit.
+# Forge processes that may run at once, shared by all jobs in order. Each takes up to FORGE_XMX of
+# heap plus Java's own memory (one four-player game peaked near 790 MiB), so raise it only with the
+# container's limit.
 MAX_PARALLEL = max(1, min(4, int(os.environ.get("FORGE_MAX_PARALLEL", "1"))))
 # A job's games are cut into slices of at most this many, the same way at any parallel setting:
 # groups of up to five (R-207; a smaller group size is on Ben's milestone card with R-215).
