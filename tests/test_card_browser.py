@@ -304,7 +304,8 @@ def test_card_without_a_code_only_offers_the_review_page() -> None:
 
 
 def test_narrow_card_keeps_badges_whole_and_names_readable() -> None:
-    """At phone widths the state and risk badges stay one line each and clear of the title, and a
+    """At phone widths the state and risk badges stay one line each and clear of the title (beside
+    it, or under it when the title would get less than 10rem, review M-1 of Track A), and a
     long change ("Main → Maybeboard (leaves the deck, −1)") wraps beside its action label, never over
     it, instead of squeezing the card name to a letter a line."""
     from playwright.sync_api import sync_playwright
@@ -343,15 +344,18 @@ def test_narrow_card_keeps_badges_whole_and_names_readable() -> None:
   const a = ink('ul.changes li.category .act');
   const q = ink('ul.changes li.category .qty');
   const apart = a.right <= q.left || q.right <= a.left || a.bottom <= q.top || q.bottom <= a.top;
-  return {titleRight: h.right, badges: b.map(r => [r.left, r.height]), nameWidth: n.width,
+  return {titleRight: h.right, titleBottom: h.bottom, badges: b.map(r => [r.left, r.height, r.top]),
+          nameWidth: n.width,
           actQtyApart: apart, act: [a.left, a.right, a.top, a.bottom],
           qty: [q.left, q.right, q.top, q.bottom]};
 }"""
                 )
                 # the action label and the change beside it never overlap (seen at 390 px)
                 assert geo["actQtyApart"], (width, geo)
-                assert all(h <= 26 for _, h in geo["badges"]), (width, geo)
-                assert all(left >= geo["titleRight"] for left, _ in geo["badges"]), (width, geo)
+                assert all(h <= 26 for _, h, _ in geo["badges"]), (width, geo)
+                assert all(
+                    left >= geo["titleRight"] or top >= geo["titleBottom"] for left, _, top in geo["badges"]
+                ), (width, geo)
                 assert geo["nameWidth"] > 80, (width, geo)
                 page.close()
         finally:
