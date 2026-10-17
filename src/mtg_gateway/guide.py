@@ -327,17 +327,18 @@ def guide_body(
         f"<p class='tip'>{_esc(writes)}</p>"
     )
     tut_first_sim = (
-        "<p>A simulation tells you how the deck plays on its own: how fast the commander lands, how "
-        "often the mana flows, how much damage goldfishing deals. A deck without a commander and with 60 "
-        "or more cards plays a 60-card game instead (20 life, on the play).</p>"
+        "<p>The solo test tells you how the deck plays on its own: how fast the commander lands, how "
+        "often the mana flows, how much damage it would deal to an opponent who does nothing. A deck "
+        "without a commander "
+        "and with 60 or more cards plays a 60-card game instead (20 life, on the play).</p>"
         "<ol class='steps'>"
-        "<li><span>Open one of your decks and press <strong>Run simulation</strong>. The button says the "
-        "run takes up to a minute and shows “Simulating…” while it does.</span></li>"
+        "<li><span>Open one of your decks and press <strong>Run full test</strong>. The button says the "
+        "solo test takes up to a minute and shows “Testing…” while it does.</span></li>"
         "<li><span>The report opens: the deck, its commander, the games run and when; the headline numbers "
         "as tiles with their 95% intervals (the turn the commander lands, the chance of 40 damage or a "
         "lethal board by the last turn, mulligans, land drops); four small charts (milestones reached by "
         "turn, the turn the commander was cast, mana available and damage per turn); in plain words what "
-        "the simulation could not model, with each group's share of the deck; and the validation verdict "
+        "the solo test could not model, with each group's share of the deck; and the validation verdict "
         "as a badge with the problems listed. The raw output stays, folded away at the end.</span></li>"
         "<li><span>Keep it: the buttons download the report as <strong>Markdown</strong> or as a "
         "self-contained <strong>HTML page</strong> (light and dark, no scripts) and <strong>Copy as "
@@ -345,7 +346,7 @@ def guide_body(
         "<li><span>Find it again under <a href='/history'>History</a> (filter by type: Reports). A report "
         "reused because the deck had not changed says so.</span></li></ol>"
         "<p>It is the same run the assistant makes for “goldfish this deck”: the statistics, the "
-        "validation and the goldfish simulation (300 games), so the numbers match whichever way it is "
+        "validation and the solo test (300 games), so the numbers match whichever way it is "
         "started.</p>"
     )
 

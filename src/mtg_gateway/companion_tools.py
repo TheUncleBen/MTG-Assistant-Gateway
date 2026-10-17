@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
@@ -10,11 +11,12 @@ from starlette.responses import JSONResponse, RedirectResponse, Response
 
 from . import deck_stats
 from .archidekt import Deck
-from .busy import busy_json_response, busy_response, busy_text_response
+from .busy import _headers, busy_body, busy_json_response, busy_plan, busy_response, busy_text_response
 from .companion import DECK_CSP, DECK_ERR_MESSAGES, EDITOR_CSP, TEXT_PLAIN, _filename, _json_for_html
 from .decklist import DecklistError, parse_decklist
 from .deckpage import (
     GOLDFISH_CSS,
+    GOLDFISH_GUIDE_PREF,
     card_image,
     compare_page_html,
     goldfish_page_html,
@@ -25,8 +27,13 @@ from .pages import (
     BROWSER_CLIENT_ID,
     _csrf,
     browser_session,
+    csrf_header_ok,
     login_redirect,
+    read_limited,
 )
+from .reports import NO_FORGE_TO_SHARE, PAIR_NO_FORGE
+from .reports_page import PAGE as REPORTS_PAGE
+from .reports_page import REPORTS_PAGE_CSS, reports_page_html
 from .theme import (
     esc as _esc,
 )
@@ -40,6 +47,12 @@ if TYPE_CHECKING:
 
     from .app import AppState
     from .reports import ReportService
+
+# The Compare press when the deck lost its commander after the page loaded (proofread R5 finding 4)
+COMPARE_NO_COMMANDER = (
+    "Forge plays only decks with a commander, and the deck you are comparing from has none now, so no "
+    "report was made."
+)
 
 
 def add_deck_tool_routes(
@@ -540,6 +553,30 @@ def add_deck_tool_routes(
         reused = "?reused=1" if report.get("reused") else ""
         return RedirectResponse(f"/history/reports/{_esc(report['report_id'])}{reused}", status_code=303)
 
+    @server.custom_route("/reports", methods=["GET"], include_in_schema=False)
+    async def reports_page(request: Request) -> Response:
+        """Every stored report of the member, newest first, with what Forge plays for them now
+        (K8 in Q136; T-152). The gateway's own database only."""
+        sub, sid = browser_session(state, request)
+        if not sub:
+            return login_redirect("/reports")
+        qp = request.query_params
+        deck_id = (qp.get("deck_id") or "").strip()[:40]
+        try:
+            offset = max(0, min(int(qp.get("offset") or 0), 2000))
+        except ValueError:
+            offset = 0
+        rows = reports.list(sub, deck_id or None, limit=REPORTS_PAGE + 1, offset=offset)
+        body = reports_page_html(
+            rows[:REPORTS_PAGE],
+            runs=reports.forge_queue(sub),
+            decks=reports.decks_seen(sub),
+            deck_id=deck_id,
+            offset=offset,
+            has_more=len(rows) > REPORTS_PAGE,
+        )
+        return page("Reports", body, sub=sub, sid=sid, current="/reports", extra_css=REPORTS_PAGE_CSS)
+
     @server.custom_route("/decks/{deck_id}/playtest", methods=["GET"], include_in_schema=False)
     async def playtest_page(request: Request) -> Response:
         """Old links to the gateway's framed playtester go straight to Archidekt's own (D-13): a frame
@@ -573,7 +610,7 @@ def add_deck_tool_routes(
             )
         return page(
             f"Goldfish: {deck.name or deck.id}",
-            goldfish_page_html(deck),
+            goldfish_page_html(deck, guide_hidden=state.db.get_pref(sub, GOLDFISH_GUIDE_PREF) == "hidden"),
             sub=sub,
             sid=sid,
             two_pane=True,
@@ -585,6 +622,122 @@ def add_deck_tool_routes(
             extra_css=GOLDFISH_CSS,
             extra_scripts=("goldfish.js",),
         )
+
+    @server.custom_route("/goldfish/guide", methods=["POST"], include_in_schema=False)
+    async def goldfish_guide(request: Request) -> Response:
+        """Remember whether the member hid the Goldfish page's guide (G9), for their account on every
+        device. Browser session and its CSRF header only."""
+        sub, sid = browser_session(state, request)
+        if not sub or not csrf_header_ok(state.settings, sid, request):
+            return JSONResponse({"ok": False, "error": "forbidden", "message": "Sign in again."}, 403)
+        try:
+            data = json.loads(await read_limited(request, 1024) or b"{}")
+        except (ValueError, TypeError):
+            data = None
+        if not isinstance(data, dict) or not isinstance(data.get("hidden"), bool):
+            return JSONResponse(
+                {"ok": False, "error": "invalid", "message": "hidden must be true or false."}, 400
+            )
+        if data["hidden"]:
+            saved = state.db.set_pref(sub, GOLDFISH_GUIDE_PREF, "hidden")
+        else:
+            state.db.delete_pref(sub, GOLDFISH_GUIDE_PREF)
+            saved = True
+        return JSONResponse({"ok": saved, "hidden": data["hidden"]}, 200 if saved else 409)
+
+    @server.custom_route("/decks/{deck_id}/compare/forge", methods=["POST"], include_in_schema=False)
+    async def compare_forge(request: Request) -> Response:
+        """K6 (Q136): both decks' Forge games against the same opponents. This deck's report runs
+        first, with precons picked for the higher of the two decks' brackets (Q140 item 3, so the
+        order doesn't matter); the other deck's seats them (``same_opponents_as``), as the
+        assistants' run_deck_report does with compare_with. The other deck is read once, before
+        either report is made, and both runs use that read. Both run without the solo test, so
+        starting them is quick; the second report opens and links the first."""
+        deck_id = request.path_params["deck_id"]
+        sub, sid = browser_session(state, request)
+        if not sub:
+            return login_redirect(f"/decks/{deck_id}/compare")
+        data = await form(request)
+        if not check_csrf(sid, data):
+            return page(
+                "Compare",
+                "<p class='notice error'>This form expired. Reload and try again.</p>",
+                sub=sub,
+                sid=sid,
+                status=403,
+            )
+        other = str(data.get("with") or "").strip()
+        query = f"?with={other}" if other.isdigit() else ""
+        back = f"<a class='btn' href='/decks/{_esc(deck_id)}/compare{query}'>Back to the comparison</a>"
+        current_client.set(BROWSER_CLIENT_ID)
+        hold = None
+        try:
+            if not other.isdigit():
+                raise DeckError("invalid", "Pick the other deck on the Compare page first.")
+            # both decks' games start or wait, or neither: the room for both is checked and kept in
+            # one step, before either deck is read, so presses at once can't both take it
+            hold, full = reports.reserve_pair(sub) if reports.forge is not None else (None, None)
+            if full is not None:
+                return page(
+                    "Compare",
+                    f"<div class='panel'><p class='notice error'>{_esc(full)}</p>{back}</div>",
+                    sub=sub,
+                    sid=sid,
+                    status=409,
+                )
+            other_deck = await reports.pair_deck(sub, other)
+            # without Forge on the gateway no pair is asked for: the first report says why it has no
+            # Forge games and the page below names that deck (compare_with is refused then)
+            pair = other_deck if reports.forge is not None else None
+            first = await reports.run(
+                sub, deck_id, simulate=False, forge=True, pair_with=pair, pair_hold=hold
+            )
+            try:
+                second = await reports.run(
+                    sub,
+                    other,
+                    simulate=False,
+                    forge=True,
+                    deck=other_deck,
+                    same_opponents_as=first["report_id"],
+                    pair_hold=hold,
+                )
+            except DeckError as exc:
+                if str(exc) != NO_FORGE_TO_SHARE:
+                    raise
+                # the member picked no report here: say which deck got no Forge games, and why it may be
+                name = first.get("deck_name") or "the first deck"
+                return page(
+                    "Compare",
+                    "<div class='panel'><p class='notice error'>"
+                    f"Forge could not start games for {_esc(name)}, so there are no opponents to share. "
+                    f"<a href='/history/reports/{_esc(first['report_id'])}'>Its report</a> is on the "
+                    "<a href='/reports'>Reports</a> page. If your Forge queue is full, wait for a run to "
+                    "finish, then try again."
+                    f"</p>{back}</div>",
+                    sub=sub,
+                    sid=sid,
+                    status=409,
+                )
+        except DeckError as exc:
+            if (plan := busy_plan(exc)) is not None:
+                # the shared busy page, but Try again opens the Compare page: this route takes POST only
+                compare_url = f"/decks/{deck_id}/compare{query}"
+                busy = page(plan.title, busy_body(plan, compare_url), sub=sub, sid=sid, status=plan.status)
+                busy.headers.update(_headers(plan))
+                return busy
+            # the deck lost its commander after the page loaded: plain words, not the assistant's
+            text = COMPARE_NO_COMMANDER if str(exc) == PAIR_NO_FORGE else str(exc)
+            return page(
+                "Compare",
+                f"<div class='panel'><p class='notice error'>{_esc(text)}</p>{back}</div>",
+                sub=sub,
+                sid=sid,
+                status=404 if exc.kind == "not_found" else 400,
+            )
+        finally:
+            reports.release_pair(sub, hold)
+        return RedirectResponse(f"/history/reports/{_esc(second['report_id'])}", status_code=303)
 
     @server.custom_route("/decks/{deck_id}/compare", methods=["GET"], include_in_schema=False)
     async def compare_page(request: Request) -> Response:
@@ -648,6 +801,8 @@ def add_deck_tool_routes(
             result=result,
             precons=precons,
             error=error,
+            csrf=_csrf(s, sid),
+            forge_on=reports.forge is not None,
         )
         return page(
             f"Compare: {deck.name or deck.id}",

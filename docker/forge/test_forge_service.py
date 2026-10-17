@@ -1,8 +1,13 @@
-"""Offline tests of the Forge job service (no Java needed): name matching, request checks, parsing."""
+"""Offline tests of the Forge job service (no Java needed; a stand-in plays the games): name matching,
+request checks, parsing, and how a job's games are cut into slices and played."""
 
 import os
+import queue
+import stat
 import sys
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
 
@@ -78,6 +83,252 @@ class Output(unittest.TestCase):
         self.assertEqual((draw["game"], draw["ms"], draw["winner"], draw["draw"]), (1, 600012, None, True))
         self.assertIn("unparsed", fs.parse_result("Game 2 ended in 5 ms. something else"))
         self.assertIsNone(fs.parse_result("Turn 4 (Ai(1)-D1)"))
+
+    def test_outcome_lines(self):
+        # Lines as Forge 2.0.15 printed them in the arm64 smoke test (forge-image run 38156582933).
+        self.assertEqual(fs.OUTCOME_TURN.search("Game Outcome: Turn 18").group("turn"), "18")
+        lost = fs.OUTCOME_LOST.search(
+            "Game Outcome: Ai(2)-D2 has lost due to accumulation of 21 damage from generals"
+        )
+        self.assertEqual(
+            (lost.group("seat"), lost.group("why")), ("2", "accumulation of 21 damage from generals")
+        )
+        lost = fs.OUTCOME_LOST.search("Game Outcome: Ai(1)-D1 has lost because life total reached 0")
+        self.assertEqual((lost.group("seat"), lost.group("why")), ("1", "life total reached 0"))
+        self.assertIsNone(
+            fs.OUTCOME_LOST.search("Game Outcome: Ai(4)-D4 has won because all opponents have lost")
+        )
+
+
+class Slices(unittest.TestCase):
+    def test_cut_by_the_number_of_games_only(self):
+        self.assertEqual(fs.slices(1), [1])
+        self.assertEqual(fs.slices(5), [5])
+        self.assertEqual(fs.slices(7), [4, 3])
+        self.assertEqual(fs.slices(10), [5, 5])
+        self.assertEqual(fs.slices(12), [4, 4, 4])
+        self.assertEqual(fs.slices(50), [5] * 10)
+        for games in range(1, fs.MAX_GAMES + 1):
+            self.assertEqual(sum(fs.slices(games)), games)
+
+    def test_seeds(self):
+        self.assertEqual(fs.slice_seed(42, 0), 42)  # one slice plays exactly as before slices
+        self.assertIsNone(fs.slice_seed(None, 3))
+        seeds = [fs.slice_seed(42, i) for i in range(10)]
+        self.assertEqual(len(set(seeds)), 10)
+        self.assertTrue(all(0 <= s < 2**63 for s in seeds))
+        self.assertEqual(seeds, [fs.slice_seed(42, i) for i in range(10)])
+
+
+# A stand-in for `java`: prints one result line per game with the seed it was given, so the tests
+# see which slice played which game. FAKE_SLOW makes a slice wait (to see slices overlap). It logs
+# the home a real Java would use: -Duser.home when given, else the user account's, never $HOME
+# (checked on Java 21: HOME=/tmp/x still gives user.home=/root).
+FAKE_JAVA = """#!/usr/bin/env python3
+import os, pwd, sys, time
+a = sys.argv
+n = int(a[a.index("-n") + 1])
+seed = a[a.index("-s") + 1] if "-s" in a else "none"
+print("Ai(1)-D1 vs Ai(2)-D2 - %d games of Commander seed %s" % (n, seed), flush=True)
+log = os.path.join(os.environ["FAKE_LOG"], "start-%s-%s" % (seed, time.time()))
+given = [x[len("-Duser.home="):] for x in a if x.startswith("-Duser.home=")]
+open(log, "w").write(given[0] if given else pwd.getpwuid(os.getuid()).pw_dir)
+time.sleep(float(os.environ.get("FAKE_SLOW", "0")))
+for g in range(1, n + 1):
+    w = 1 + g % 2
+    print("Game Outcome: Turn %d" % (5 + g), flush=True)
+    print("Game Outcome: Ai(%d)-D%d has lost because life total reached 0" % (3 - w, 3 - w), flush=True)
+    print("Game Result: Game %d ended in %d ms. Ai(%d)-D%d has won!" % (g, 1000 + g, w, w), flush=True)
+"""
+
+
+class Run(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        (self.tmp / "bin").mkdir()
+        java = self.tmp / "bin" / "java"
+        java.write_text(FAKE_JAVA, "utf-8")
+        java.chmod(java.stat().st_mode | stat.S_IEXEC)
+        (self.tmp / "forge").mkdir()
+        (self.tmp / "forge" / "forge-gui-desktop-2.0.15-jar-with-dependencies.jar").write_text("")
+        (self.tmp / "log").mkdir()
+        (self.tmp / "home").mkdir()
+        self.env = {
+            "PATH": f"{self.tmp / 'bin'}{os.pathsep}{os.environ['PATH']}",
+            "FAKE_LOG": str(self.tmp / "log"),
+            "HOME": str(self.tmp / "home"),
+        }
+        self.old = {k: os.environ.get(k) for k in [*self.env, "FAKE_SLOW"]}
+        os.environ.update(self.env)
+        self.home, fs.FORGE_HOME = fs.FORGE_HOME, self.tmp / "forge"
+
+    def tearDown(self):
+        fs.FORGE_HOME = self.home
+        fs.MAX_PARALLEL = 1
+        fs.FREE_PLACES[:] = [0]
+        for k, v in self.old.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+    def run_job(self, games, seed=42, parallel=1):
+        deck = {"commander": ["Liesa, Forgotten Archangel"], "main": [[99, "Forest"]]}
+        job = fs.Job([deck, deck], games, "Commander", seed, parallel)
+        fs.run_job(job)
+        return job
+
+    def test_same_seed_same_games_at_any_parallel_setting(self):
+        one = self.run_job(12).view()
+        fs.MAX_PARALLEL = 3
+        three = self.run_job(12, parallel=3).view()
+        self.assertEqual((one["state"], three["state"]), ("done", "done"))
+        self.assertEqual((one["parallel"], three["parallel"]), (1, 3))
+        self.assertEqual([r["game"] for r in one["results"]], list(range(1, 13)))
+        self.assertEqual(one["results"], three["results"])
+        self.assertEqual([s["seed"] for s in one["slices"]], [42, fs.slice_seed(42, 1), fs.slice_seed(42, 2)])
+        self.assertEqual([s["state"] for s in three["slices"]], ["done"] * 3)
+        self.assertIn("seed 42", one["header"])
+        first = one["results"][0]
+        self.assertEqual((first["turn"], first["lost"]), (6, {"1": "life total reached 0"}))
+
+    def test_parallel_is_capped_and_extra_places_get_their_own_home(self):
+        fs.MAX_PARALLEL = 2
+        os.environ["FAKE_SLOW"] = "0.5"
+        job = self.run_job(15, parallel=4)
+        self.assertEqual(job.parallel, 2)
+        homes = sorted(p.read_text() for p in (self.tmp / "log").iterdir())
+        self.assertEqual(len(homes), 3)
+        self.assertIn(str(self.tmp / "home"), homes)
+        self.assertIn(str(self.tmp / "home" / "slot-1"), homes)
+        self.assertEqual(job.view()["games_done"], 15)
+        starts = sorted(float(p.name.split("-")[-1]) for p in (self.tmp / "log").iterdir())
+        self.assertLess(starts[1] - starts[0], 0.4)  # the first two slices played at once
+
+    def test_each_place_has_its_own_forge_home_with_lazy_card_loading(self):
+        # Speed findings C1, C2: parallel Forge processes shared the account's home folder, as
+        # Java ignores $HOME; each place now names its own, and Forge loads card scripts lazily.
+        fs.MAX_PARALLEL = 2
+        os.environ["FAKE_SLOW"] = "0.3"
+        home = self.tmp / "home"
+        prefs = home / ".forge" / "preferences" / "forge.preferences"
+        prefs.parent.mkdir(parents=True)
+        prefs.write_text("UI_THEME=Default\nLOAD_CARD_SCRIPTS_LAZILY=false\n", "utf-8")
+        self.run_job(10, parallel=2)
+        homes = sorted(p.read_text() for p in (self.tmp / "log").iterdir())
+        self.assertEqual(homes, [str(home), str(home / "slot-1")])
+        # an existing preferences file keeps its other lines; the one setting is replaced
+        self.assertEqual(prefs.read_text("utf-8"), "UI_THEME=Default\nLOAD_CARD_SCRIPTS_LAZILY=true\n")
+        slot = home / "slot-1" / ".forge" / "preferences" / "forge.preferences"
+        self.assertEqual(slot.read_text("utf-8"), "LOAD_CARD_SCRIPTS_LAZILY=true\n")
+        fs.LAZY_CARDS = False
+        try:
+            self.assertEqual(fs.place_home(1), home / "slot-1")
+        finally:
+            fs.LAZY_CARDS = True
+        self.assertEqual(slot.read_text("utf-8"), "LOAD_CARD_SCRIPTS_LAZILY=false\n")
+
+    def worker_with(self, places):
+        """A worker of its own on a fresh queue, with ``places`` places shared by its jobs."""
+        fs.MAX_PARALLEL = places
+        fs.FREE_PLACES[:] = list(range(places))
+        fs.QUEUE = queue.Queue()
+        threading.Thread(target=fs.worker, daemon=True).start()
+        return fs.QUEUE
+
+    def wait_done(self, jobs, seconds=20):
+        end = time.time() + seconds
+        while time.time() < end and any(j.finished is None for j in jobs):
+            time.sleep(0.05)
+        self.assertTrue(all(j.finished is not None for j in jobs), [j.state for j in jobs])
+
+    def test_jobs_share_the_places_in_order(self):
+        # speed fix 5: a job that leaves places free (a comparison's first deck) lets the next job
+        # play beside it, never more processes than places, and never out of order
+        old = fs.QUEUE
+        try:
+            os.environ["FAKE_SLOW"] = "0.6"
+            deck = {"commander": ["Liesa, Forgotten Archangel"], "main": [[99, "Forest"]]}
+            q = self.worker_with(2)
+            jobs = [fs.Job([deck, deck], 5, "Commander", seed, 1) for seed in (1, 2, 3)]
+            for job in jobs:
+                q.put(job)
+            self.wait_done(jobs)
+            self.assertEqual([j.state for j in jobs], ["done"] * 3)
+            # the first two started together on their own places; the third waited for one
+            self.assertLess(abs(jobs[1].started - jobs[0].started), 0.4)
+            self.assertGreater(jobs[2].started - jobs[0].started, 0.5)
+            homes = {p.read_text() for p in (self.tmp / "log").iterdir()}
+            self.assertEqual(homes, {str(self.tmp / "home"), str(self.tmp / "home" / "slot-1")})
+            self.assertEqual(sorted(fs.FREE_PLACES), [0, 1])  # every place given back
+            # one place: the second job waits for the whole first one, as before
+            for p in (self.tmp / "log").iterdir():
+                p.unlink()
+            q = self.worker_with(1)
+            two = [fs.Job([deck, deck], 10, "Commander", seed, 1) for seed in (4, 5)]
+            for job in two:
+                q.put(job)
+            self.wait_done(two)
+            self.assertGreaterEqual(two[1].started, two[0].finished - 0.05)
+            self.assertEqual(fs.FREE_PLACES, [0])
+        finally:
+            fs.QUEUE = old
+
+    def test_a_job_cancelled_while_waiting_for_a_place_never_starts(self):
+        old = fs.QUEUE
+        try:
+            os.environ["FAKE_SLOW"] = "1.5"
+            deck = {"commander": ["Liesa, Forgotten Archangel"], "main": [[99, "Forest"]]}
+            q = self.worker_with(1)
+            first, second = (fs.Job([deck, deck], 5, "Commander", s, 1) for s in (1, 2))
+            q.put(first)
+            q.put(second)
+            time.sleep(0.3)
+            self.assertEqual(len(fs.HELD), 1)  # the second waits for the place, counted as queued
+            second.cancelled, second.state = True, "cancelled"
+            self.wait_done([first])
+            time.sleep(0.3)
+            self.assertIsNone(second.started)
+            self.assertEqual(len(list((self.tmp / "log").iterdir())), 1)
+            self.assertEqual(fs.FREE_PLACES, [0])
+        finally:
+            fs.QUEUE = old
+
+    def test_one_slice_is_one_process_as_before(self):
+        job = self.run_job(5, parallel=4)
+        self.assertEqual((job.parallel, len(job.slices)), (1, 1))
+        self.assertEqual(len(list((self.tmp / "log").iterdir())), 1)
+        self.assertNotIn("[slice", " ".join(job.tail))
+
+    def test_cancel_stops_every_slice(self):
+        fs.MAX_PARALLEL = 2
+        os.environ["FAKE_SLOW"] = "30"
+        deck = {"commander": ["Liesa, Forgotten Archangel"], "main": [[99, "Forest"]]}
+        job = fs.Job([deck, deck], 20, "Commander", 1, 2)
+        t = threading.Thread(target=fs.run_job, args=(job,))
+        t.start()
+        # both slices playing: each fake Forge has logged its start (a loaded machine can take
+        # longer than the process start itself, so the kill came before the log: a flaky count)
+        for _ in range(200):
+            if len(job.procs) == 2 and len(list((self.tmp / "log").iterdir())) == 2:
+                break
+            time.sleep(0.05)
+        job.cancelled = True
+        fs._kill(job)
+        t.join(10)
+        self.assertFalse(t.is_alive())
+        self.assertEqual(job.state, "cancelled")
+        self.assertEqual(len(list((self.tmp / "log").iterdir())), 2)  # no further slice started
+
+    def test_no_group_starts_after_the_time_limit(self):
+        # review r1 item 16: a group picked up just as the timer fires never starts its process
+        deck = {"commander": ["Liesa, Forgotten Archangel"], "main": [[99, "Forest"]]}
+        job = fs.Job([deck, deck], 10, "Commander", 1, 1)
+        fs._time_out(job)
+        self.assertTrue(job.timed_out)
+        self.assertIsNone(fs.run_slice(job, 1, self.tmp, ["D1", "D2"], 0))
+        self.assertEqual(job.slice_state[1], "cancelled")
+        self.assertEqual(list((self.tmp / "log").iterdir()), [])
 
 
 if __name__ == "__main__":

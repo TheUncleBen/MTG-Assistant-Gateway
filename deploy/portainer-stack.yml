@@ -268,9 +268,11 @@ services:
 
   # Forge on the node named by FORGE_NODE: the rules engine for deck simulations (GPL-3.0,
   # unmodified). Off by default (FORGE_REPLICAS=0). It starts Java only while a simulation runs,
-  # one at a time, under a CPU and memory cap, and is on a private network with no way out.
+  # under a CPU and memory cap, and is on a private network with no way out. dnsrr: the gateway
+  # sees each copy's address, so with more than one copy every run stays on the copy that started
+  # it (one copy works the same either way). For several machines see DEPLOY.md.
   mtg-assistant-forge:
-    image: ${FORGE_IMAGE:-ghcr.io/theuncleben/mtg-assistant-forge}:${FORGE_TAG:-2.0.15-mag2}
+    image: ${FORGE_IMAGE:-ghcr.io/theuncleben/mtg-assistant-forge}:${FORGE_TAG:-2.0.15-mag3}
     logging:
       driver: json-file
       options:
@@ -280,6 +282,8 @@ services:
       FORGE_XMX: ${FORGE_XMX:-1g}
       FORGE_MAX_GAMES: ${FORGE_MAX_GAMES:-50}
       FORGE_GAME_SECONDS: ${FORGE_GAME_SECONDS:-600}
+      # Forge games played at once at most; each needs up to FORGE_XMX inside FORGE_MEMORY_LIMIT
+      FORGE_MAX_PARALLEL: ${FORGE_MAX_PARALLEL:-1}
       PUID: ${PUID:?PUID REQUIRED}
       PGID: ${PGID:?PGID REQUIRED}
       TZ: ${TIMEZONE:-UTC}
@@ -295,6 +299,7 @@ services:
       - forge
     deploy:
       replicas: ${FORGE_REPLICAS:-0}
+      endpoint_mode: dnsrr
       resources:
         limits:
           memory: ${FORGE_MEMORY_LIMIT:-1536M}

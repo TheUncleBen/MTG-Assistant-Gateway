@@ -15,6 +15,7 @@ from mcp import Client
 from mcp.server.mcpserver import MCPServer
 
 from mtg_gateway.archidekt import ArchidektClient, Pacer
+from mtg_gateway.decklist import parse_decklist
 from mtg_gateway.mf_proxy import MysticForgeProxy
 
 from .conftest import (
@@ -1425,9 +1426,17 @@ async def test_simulation_calls_take_the_shape_mystic_forge_accepts(stack: Stack
     h = stack.h
     token = await linked_user(stack)
     rep = structured(
-        await call(h, token, "run_deck_report", {"deck_ref": "42", "games": 20, "options": {"seed": 1}})
+        await call(
+            h,
+            token,
+            "run_deck_report",
+            {"deck_ref": "42", "games": 20, "options": {"seed": 1, "forge_seed": 2}},
+        )
     )
     assert rep["ok"], rep
+    # forge_seed is the gateway's own (A34): the simulator gets seed only
+    ((_, sent),) = [c for c in SIM_CALLS if c[0] == "goldfish_run"][-1:]
+    assert sent["seed"] == 1 and "forge_seed" not in sent, sent
     gf, val = rep["goldfish"], rep["validation"]
     assert gf["ok"] is True and "## Metrics" in gf["text"] and "validation error" not in gf["text"], gf
     assert val["ok"] is True and val["text"].startswith("Validated"), val
@@ -1492,6 +1501,10 @@ async def test_sixty_card_decks_are_simulated_as_sixty_card_games(stack: Stack) 
     # the stored report reads back as a 60-card game
     got = structured(await call(h, token, "get_deck_report", {"report_id": rep["report_id"]}))
     assert "Format: 60-card" in got["goldfish"]["text"], got
+    # the copies of each main-deck card are kept with the run (A30, A31); the sideboard card is not
+    kept = got["goldfish"]["quantities"]
+    sent_total = sum(c.quantity for c in parse_decklist(sent["deck"]) if c.zone == "main")
+    assert sum(kept.values()) == sent_total and sideboard_name.split(" // ")[0] not in kept, kept
     # The same deck under the Commander format, without a commander: refused, not guessed.
     ark.decks[44]["deckFormat"] = 3
     ark.decks[44]["updatedAt"] = "2026-10-03T00:00:00Z"
@@ -1693,4 +1706,4 @@ async def test_compare_advice_is_true_to_bracket_matched_forge(stack: Stack) -> 
     assert "like-for-like" in compare and "own bracket" in compare
     report = tools["run_deck_report"]
     assert "forge" in report["inputSchema"]["properties"] and "Preflight only" in report["description"]
-    assert "60-card deck's report never starts it" in report["description"]
+    assert "60-card deck's report, or one with no commander marked, never starts it" in report["description"]
