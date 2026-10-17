@@ -599,6 +599,11 @@ def test_a_stored_value_outside_newer_bounds_falls_back_to_the_default(tmp_path:
         live = LiveSettings(make_settings(tmp_path), db)
         assert live.get("archidekt_calls_per_10_min") == 120
         assert live.source("archidekt_calls_per_10_min") == "default"
+        # an unknown key is a programming error; its message reads right in a background job's log
+        with pytest.raises(
+            SettingError, match="^not_a_setting_any_more isn't one of the Settings page's settings$"
+        ):
+            live.get("not_a_setting_any_more")
     finally:
         db.close()
 
