@@ -1,8 +1,8 @@
-# MTG Assistant Gateway: Portainer / Docker Swarm stack (gateway + Mystic Forge).
+# MTG Assistant Gateway: Portainer / Docker Swarm stack (gateway + Mystic Forge + ntfy).
 #
 # Paste this whole file into Portainer's stack web editor as is. Everything you
 # change lives in the stack's environment variables: start from
-# deploy/stack.env.example. Create the three external secrets below before you
+# deploy/stack.env.example. Create the four external secrets below before you
 # deploy (docs/DEPLOY.md, step 4) and the overlay network (step 1).
 
 version: "3.8"
@@ -19,11 +19,10 @@ secrets:
   # remove the "# " from the next two lines and from "# - mtg_authentik_api_token" below.
   # mtg_authentik_api_token:
   #   external: true
-  # Optional: the access token the gateway publishes notifications with, for an ntfy server with
-  # access control (docs/DEPLOY.md, "Optional: notifications through ntfy"). After creating it,
-  # remove the "# " from the next two lines and from "# - mtg_ntfy_token" below.
-  # mtg_ntfy_token:
-  #   external: true
+  # The token the gateway uses with the stack's own ntfy server (the members' notifications);
+  # ntfy lets nothing else in. docs/DEPLOY.md, step 4, has the command that makes it.
+  mtg_ntfy_token:
+    external: true
 
 services:
   # The gateway's SQLite database lives on the node named by MTG_NODE.
@@ -51,8 +50,8 @@ services:
       - mtg_fernet_key
       - mtg_session_secret
       - mtg_oidc_client_secret
+      - mtg_ntfy_token
       # - mtg_authentik_api_token
-      # - mtg_ntfy_token
     # A setting passed as ${MTG_X:-} (empty unless your env sets it) is one an admin changes on
     # the gateway's Settings page (/admin/settings), which starts from the gateway's default. A
     # value set in your env wins and locks the setting: the page shows it greyed out with its value.
@@ -79,10 +78,10 @@ services:
       # is created and listed above. Empty = off. The API URL defaults to the issuer's address.
       MTG_AUTHENTIK_API_TOKEN_FILE: ${MTG_AUTHENTIK_API_TOKEN_FILE:-}
       MTG_AUTHENTIK_API_URL: ${MTG_AUTHENTIK_API_URL:-}
-      # Optional notifications through an ntfy server (empty = off), and its token file:
-      # /run/secrets/mtg_ntfy_token once that secret is listed above (docs/DEPLOY.md).
-      MTG_NTFY_URL: ${MTG_NTFY_URL:-}
-      MTG_NTFY_TOKEN_FILE: ${MTG_NTFY_TOKEN_FILE:-}
+      # Notifications to the members' Android app go through the stack's own ntfy server
+      # (mtg-assistant-ntfy below); the phones reach it through the gateway's own address.
+      MTG_NTFY_URL: ${MTG_NTFY_URL:-http://mtg-assistant-ntfy:8080}
+      MTG_NTFY_TOKEN_FILE: ${MTG_NTFY_TOKEN_FILE:-/run/secrets/mtg_ntfy_token}
       # Watchlists and prices, off by default: with false the Watchlist pages, the price buttons,
       # the five watch tools and the daily price check are absent (stored watches are kept).
       MTG_WATCHLISTS_ENABLED: ${MTG_WATCHLISTS_ENABLED:-}
@@ -167,11 +166,12 @@ services:
       - SETUID
       - SETGID
     networks:
-      # mtgnet: shared with the reverse proxy. mysticforge: private to this stack, the only
-      # way to reach Mystic Forge.
+      # mtgnet: shared with the reverse proxy. mysticforge, forge and ntfy: private to this
+      # stack, the only way to reach those services.
       - mtgnet
       - mysticforge
       - forge
+      - ntfy
     volumes:
       - type: bind
         source: ${MTG_DATA_DIR:?GATEWAY DATA DIRECTORY REQUIRED}
@@ -266,6 +266,75 @@ services:
         constraints:
           - node.hostname == ${MF_NODE:?set MF_NODE to the Swarm node that runs Mystic Forge}
 
+  # ntfy on the gateway's node: holds the members' notifications until their Android app picks
+  # them up (it keeps them for 12 hours, in memory, for a phone that was offline). The gateway
+  # is its only user: it publishes with the mtg_ntfy_token secret and relays each member's own
+  # topic to their app at /app/notifications/stream, on the gateway's address. ntfy is on this
+  # stack's private ntfy network with no published port; do not add an NPM proxy host for it.
+  # Every other request is refused (deny-all), and its web app is off.
+  mtg-assistant-ntfy:
+    image: ${NTFY_IMAGE:-binwiederhier/ntfy:v2.31.1@sha256:91bb7fa607b02006c119bb4a31032923b414a713a032ecb40f0c5d6bfd5b7e40}
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    # The gateway's only user is made at each start from the secret (a random password nobody
+    # knows, the token, and read-write on the members' mtg- topics); the token goes in the
+    # environment of ntfy alone, never on its command line. "$$" is a "$" for the shell.
+    entrypoint:
+      - sh
+      - -c
+      - |
+        set -eu
+        pw=$$(head -c 32 /dev/urandom | base64)
+        hash=$$(printf '%s\n%s\n' "$$pw" "$$pw" | ntfy user hash 2>/dev/null | tr ' ' '\n' | grep '^\$$2')
+        NTFY_AUTH_USERS="mtg-gateway:$$hash:user"
+        NTFY_AUTH_TOKENS="mtg-gateway:$$(cat /run/secrets/mtg_ntfy_token):gateway"
+        export NTFY_AUTH_USERS NTFY_AUTH_TOKENS
+        unset pw hash
+        exec ntfy serve
+    environment:
+      NTFY_LISTEN_HTTP: ":8080"
+      NTFY_AUTH_FILE: /tmp/ntfy-auth.db
+      NTFY_AUTH_DEFAULT_ACCESS: deny-all
+      NTFY_AUTH_ACCESS: "mtg-gateway:mtg-*:rw"
+      NTFY_WEB_ROOT: disable
+      NTFY_CACHE_DURATION: 12h
+      TZ: ${TIMEZONE:-UTC}
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - wget -q -O /dev/null http://127.0.0.1:8080/v1/health
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    secrets:
+      - mtg_ntfy_token
+    # Not root, and no capabilities at all: it listens on 8080 and writes only to /tmp.
+    user: "${PUID:?PUID REQUIRED}:${PGID:?PGID REQUIRED}"
+    cap_drop:
+      - ALL
+    networks:
+      - ntfy
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          memory: ${NTFY_MEMORY_LIMIT:-128M}
+        reservations:
+          memory: 16M
+      restart_policy:
+        condition: any
+      update_config:
+        order: stop-first
+      rollback_config:
+        order: stop-first
+      placement:
+        constraints:
+          - node.hostname == ${MTG_NODE:?set MTG_NODE to the Swarm node that keeps the gateway data}
+
   # Forge on the node named by FORGE_NODE: the rules engine for deck simulations (GPL-3.0,
   # unmodified). Off by default (FORGE_REPLICAS=0). It starts Java only while a simulation runs,
   # under a CPU and memory cap, and is on a private network with no way out. dnsrr: the gateway
@@ -331,5 +400,10 @@ networks:
     driver: overlay
   # Created by the stack. Internal: Forge needs no internet, and only the gateway can reach it.
   forge:
+    driver: overlay
+    internal: true
+  # Created by the stack. Internal: ntfy needs no internet (phones never reach it directly), and
+  # only the gateway can reach it.
+  ntfy:
     driver: overlay
     internal: true

@@ -155,18 +155,45 @@
   // Inside the Android app: the account menu's App section calls the app through window.MtgNative
   // (the server renders those buttons from the app's user agent; the class is also set here in
   // case a proxy rewrote the user agent).
+  // The app's methods are called on window.MtgNative itself: Android's bridge refuses a method
+  // called on anything else (a copy in a variable called on its own does nothing at all).
+  // data-native-arg, when present, is passed as the one argument.
   if (window.MtgNative) {
+    var nativeApp = window.MtgNative;
+    var callNative = function (name, el) {
+      var arg = el.getAttribute("data-native-arg");
+      return arg === null ? nativeApp[name]() : nativeApp[name](arg);
+    };
     document.body.classList.add("app");
     // An app older than this page has no such action: leave its button out rather than show a dead one.
     var actions = document.querySelectorAll("[data-native]");
     for (var k = 0; k < actions.length; k++) {
-      if (typeof window.MtgNative[actions[k].getAttribute("data-native")] !== "function") actions[k].setAttribute("hidden", "");
+      if (typeof nativeApp[actions[k].getAttribute("data-native")] !== "function") actions[k].setAttribute("hidden", "");
+    }
+    // A box whose parts depend on the app's state (the Notifications card's "this phone" part):
+    // data-native-state names the method that returns it; only the children whose
+    // data-native-show matches are shown.
+    var stateBoxes = document.querySelectorAll("[data-native-state]");
+    for (var q = 0; q < stateBoxes.length; q++) {
+      var box = stateBoxes[q], method = box.getAttribute("data-native-state"), now = "";
+      if (typeof nativeApp[method] === "function") { try { now = String(callNative(method, box)); } catch (err) { now = ""; } }
+      var parts = box.querySelectorAll("[data-native-show]");
+      for (var p = 0; p < parts.length; p++) {
+        if (parts[p].getAttribute("data-native-show").split(" ").indexOf(now) < 0) parts[p].setAttribute("hidden", "");
+        else parts[p].removeAttribute("hidden");
+      }
+      // Just saved with notifications on (?connect=1): press the connect button once for the person.
+      var auto = box.querySelector("[data-native-auto]");
+      if (auto && !auto.closest("[hidden]") && /[?&]connect=1(&|$)/.test(location.search)) {
+        try { history.replaceState(null, "", location.pathname + location.search.replace(/([?&])connect=1(&|$)/, "$1").replace(/[?&]$/, "") + location.hash); } catch (err) { /* keep the address */ }
+        try { callNative(auto.getAttribute("data-native"), auto); } catch (err) { /* older app */ }
+      }
     }
     document.addEventListener("click", function (e) {
       var b = e.target instanceof Element ? e.target.closest("[data-native]") : null;
       if (!b) return;
-      var fn = window.MtgNative[b.getAttribute("data-native")];
-      if (typeof fn === "function") { e.preventDefault(); closeMenus(null); try { fn(); } catch (err) { /* older app */ } }
+      var name = b.getAttribute("data-native");
+      if (typeof nativeApp[name] === "function") { e.preventDefault(); closeMenus(null); try { callNative(name, b); } catch (err) { /* older app */ } }
     });
   } else {
     var nativeOnly = document.querySelectorAll("[data-native]");

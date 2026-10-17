@@ -100,7 +100,7 @@ deleting a deck asks for its name.
 | Proposals | review page with Approve, Apply, Reject; the in-chat card opens the same proposal |
 | History | proposals, snapshots (Restore), reports (open one in full) |
 | Watchlist | watch cards (name, or set and number, finish) and decks; today's price and the change over 1, 7 and 30 days; a chart and a table of each price over time; price alerts; remove. The card viewer's Price history and Watch this card reach the same. Only when watchlists are on (off by default) |
-| Account | link or unlink Archidekt, approval mode, hand-edit confirmation, notifications through ntfy (on or off, which events, topic, Send test, and the summary: off, daily, weekly, the latest shown in the card; only when the operator set up a server), theme, sign out, delete my data |
+| Account | link or unlink Archidekt, approval mode, hand-edit confirmation, notifications in the Android app (on or off, which events, Get notifications on this phone, Disconnect my phones, Send test, and the summary: Off, Every day or Every week, with the latest one shown in the card), theme, sign out, delete my data |
 | Admin (admin group only) | members (disable, revoke, unlink, delete data), activity, metrics; System card with the newest backup and backup copy and the research service's state |
 | Guide | tutorials, how-to guides, reference (this map in the user's words) and explanation, with a contents rail and a search box |
 

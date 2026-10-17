@@ -1,6 +1,6 @@
 // Signing in to the Android app through the phone's browser (app_signin.py).
-// On /login inside the app: ask the app to open the sign-in in the browser, or, in an app too old
-// to know window.MtgNative.signInWithBrowser, follow the in-app sign-in link as before.
+// On /login inside the app: ask the app to open the sign-in in the browser. The page's own link
+// signs in inside the app instead.
 // The browser's last page has no script: its button to the app waits for a tap.
 (function () {
   "use strict";
@@ -12,10 +12,7 @@
       n.signInWithBrowser(box.getAttribute("data-next") || "/", box.getAttribute("data-fresh") === "1");
       return true;
     };
-    if (!go()) {
-      location.replace(box.getAttribute("data-inapp"));
-      return;
-    }
+    go();
     document.getElementById("app-signin-go").addEventListener("click", go);
   }
 })();
