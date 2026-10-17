@@ -437,7 +437,11 @@ async def test_compare_presses_at_once_never_pass_the_member_limit(stack: Stack)
         solo = await reports.run(sub, "43", simulate=False, forge=True, options={"seed": 5})
         assert (await later).status_code == 303
         assert solo["forge"]["state"] == "skipped", solo["forge"]
-        assert "2 reports waiting" in solo["forge"]["error"]
+        assert solo["forge"]["error"] == (
+            "Another comparison of yours is still being set up and needs the rest of your Forge "
+            "queue, so this report has no Forge games. Run the report again once that comparison is "
+            "set up and fewer than 2 of your reports are waiting."
+        )
         assert states() == ["running", "skipped", "queued", "queued"]
         assert not reports._pair_holds
 
