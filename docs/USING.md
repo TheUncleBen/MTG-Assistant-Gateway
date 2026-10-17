@@ -150,7 +150,8 @@ One deck:
   win rates are not a like-for-like comparison; the paired goldfish A/B of
   `compare_decks` is.
 - A report without Forge games (Forge not set up, a 60-card deck, a deck
-  with no commander marked, or Forge left out of the report) is labelled **Preflight only (no rules engine)**
+  with no commander marked, Forge left out of the report, or too many of
+  your reports already waiting for Forge) is labelled **Preflight only (no rules engine)**
   where the Forge games would be. A Forge run that stops early (a group of
   games failed, the run reached its time limit, the run was stopped, or the
   gateway lost track of it) shows the games it did play, marked **stopped
