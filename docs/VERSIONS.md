@@ -17,9 +17,10 @@ Every update to `main` is a new version of the gateway. Each one gets:
 Set `MTG_TAG=latest` (the default in `deploy/stack.env.example` and the Compose
 `.env.example`). To update, redeploy with the image pulled again:
 
-- Portainer: **Stacks** → your stack → **Update the stack**, then in the box
-  that asks "Are you sure?" make sure **Re-pull image and redeploy** is on and
-  click **Update**.
+- Portainer: **Stacks** → your stack → **Update the stack** (with the
+  Repository build method, **Pull and redeploy**), then in the box that asks
+  "Are you sure?" make sure **Re-pull image and redeploy** is on and click
+  **Update**.
 - Compose: `docker compose pull && docker compose up -d`.
 
 Read the [CHANGELOG](../CHANGELOG.md) entry first. A major version (see below)

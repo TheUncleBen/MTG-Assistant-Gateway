@@ -242,8 +242,8 @@ Archidekt and signs in once more.
 
 The images live in GitHub Container Registry (GHCR) under `<owner>`. If the
 packages are private (the default for a private repository), Portainer
-needs a login to pull them. Set it up once like this and every later update
-is one click:
+needs a login to pull them. Set it up once like this and later updates need
+no new login:
 
 1. On GitHub, create a classic personal access token with only the
    `read:packages` scope.
@@ -256,8 +256,9 @@ is one click:
 3. Deploy (step 6). Portainer stores the login with each service, so
    whichever node runs it can pull. To update later, open the stack, change
    `MTG_TAG` if you're moving to a new release, and click **Update the
-   stack**. In the box that asks "Are you sure?", make sure **Re-pull image
-   and redeploy** is on, then click **Update**.
+   stack** (with the Repository build method, **Pull and redeploy**). In the
+   box that asks "Are you sure?", make sure **Re-pull image and redeploy** is
+   on, then click **Update**.
 
 If tasks show `rejected` with `No such image: ghcr.io/<owner>/...`, check
 the image name and tag first, then the registry URL above. A `docker login`
@@ -337,7 +338,7 @@ locked (greyed out) even with no variable set.
    deploy/portainer-stack.old.local.yml`). Then run
    `git checkout deploy/portainer-stack.yml` (this undoes your edits to it),
    then `git pull`. Make the same edits in the new
-   `deploy/portainer-stack.yml`.
+   `deploy/portainer-stack.yml` (your saved copy shows what they were).
 2. **Optional:** for each setting you want to change on the Settings page,
    delete its variable. A variables file made from the older
    `stack.env.example` sets 19 of them, such as `MTG_ARCHIDEKT_BACKUPS=true`
@@ -826,9 +827,9 @@ value. Leave it out to manage it on the page.
 | `MTG_ARCHIDEKT_CACHE_SECONDS` | no, *stack* | `60` | How long anonymous public deck reads and deck searches are reused; cleared by any write the gateway sends (0 turns it off, up to 900). A member's deck page is also shown again from memory for up to 20 seconds (or this, if shorter) |
 | `MTG_ARCHIDEKT_CARD_CACHE_SECONDS` | no, *stack* | `3600` | How long card lookups are reused (0 to 86400) |
 | `MTG_ARCHIDEKT_BACKUPS` | no, *stack* | `true` | Before every applied edit or restore, copy the deck as a private deck into the user's backup folder on Archidekt (using Archidekt's own copy feature, so printings, finishes and categories are kept). If the copy fails, nothing changes and the proposal stays pending |
-| `MTG_ARCHIDEKT_BACKUP_COPIES` | no | `10` | Backup copies kept per deck in that folder (1 to 50). Older ones are deleted from Archidekt one at a time, at most one a minute; a copy the member changed on Archidekt is never deleted. Also on the Settings page |
+| `MTG_ARCHIDEKT_BACKUP_COPIES` | no | `10` | Backup copies kept per deck in that folder (1 to 50). Older ones are deleted from Archidekt one at a time, at most one a minute, once that deck gets its next new backup copy; a copy the member changed or moved on Archidekt is never deleted. Also on the Settings page |
 | `MTG_ARCHIDEKT_BACKUP_BOX_DEFAULT` | no | `false` | Whether the deck editor's "Also keep a backup copy on Archidekt" box starts ticked. Also on the Settings page |
-| `MTG_SNAPSHOTS_PER_DECK` | no | `25` | Restore points kept per deck on the gateway (5 to 100), for History > Restore. One that records a backup copy still kept on Archidekt is kept too. Also on the Settings page |
+| `MTG_SNAPSHOTS_PER_DECK` | no | `25` | Restore points kept per deck on the gateway (5 to 100), for History > Restore. One that records a backup copy the gateway may still delete is kept too. Also on the Settings page |
 | `MTG_ARCHIDEKT_BACKUP_FOLDER` | no, *stack* | `MTG Gateway backups` | Name of that folder (at most 100 characters), created in the account's root folder the first time. Decks in it are left out of the assistant's deck list |
 | `MTG_BROWSER_SESSION_TTL` | no, *stack* | `7200` | Browser session lifetime for `/account` and review pages, seconds (300 to 86400) |
 | `MTG_ARCHIDEKT_BASE` | no, *stack* | `https://archidekt.com/api` | Archidekt API base. Only the tests change it |
