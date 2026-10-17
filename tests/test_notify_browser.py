@@ -76,11 +76,19 @@ def test_each_app_button_reaches_the_app() -> None:
         (None, False, "Update the app"),  # an app from before 0.7.30
     ],
 )
-def test_the_phone_part_shows_only_what_applies(state: str | None, button: bool, shown: str) -> None:
+def test_the_phone_part_shows_only_what_applies(
+    state: str | None, button: bool, shown: str, tmp_path: Path
+) -> None:
+    from types import SimpleNamespace
+
     from playwright.sync_api import sync_playwright
 
-    key = notify.new_topic()
-    html = notify._phone_html(None, "user-1", {"ntfy_topic": key})  # type: ignore[arg-type]
+    from mtg_gateway.db import Database
+
+    db = Database(tmp_path / "gw.sqlite")
+    key = notify.new_topic(db, "user-1")
+    html = notify._phone_html(SimpleNamespace(db=db), "user-1", {"ntfy_topic": key})  # type: ignore[arg-type]
+    db.close()
     exe = _chromium_or_skip()
     with sync_playwright() as p:
         browser, page = _page(p, exe, html, state)
