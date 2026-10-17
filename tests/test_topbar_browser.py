@@ -253,3 +253,64 @@ def test_the_top_bar_links_fit_at_every_width_and_text_size(server: Server, them
             ctx.close()
         browser.close()
     assert problems == [], "\n".join(problems)
+
+
+# Review round 9 (R9-1): the bar is sticky, so a control that Tab or Shift+Tab reaches must not
+# end up under it; at 200% text with a mouse the bar has two rows and is about 147 px tall, and a
+# fixed 60 px of scroll room hid 10 of the Settings page's controls (WCAG 2.4.11). The scroll room
+# now follows the bar's height (static/topbar.js).
+FOCUSED = """() => {
+  const el = document.activeElement, bar = document.querySelector('.topbar').getBoundingClientRect();
+  if (!el || el === document.body || el.closest('.topbar') || el.matches('a.skip')) return null;
+  const r = el.getBoundingClientRect();
+  if (!r.width && !r.height) return null;
+  return {what: (el.outerHTML || '').slice(0, 80), top: r.top, bottom: r.bottom, bar: bar.bottom,
+          win: innerHeight};
+}"""
+
+
+@pytest.mark.parametrize("zoom", ["none", "root", "text"])
+def test_a_focused_control_is_never_hidden_under_the_top_bar(server: Server, zoom: str) -> None:
+    from playwright.sync_api import sync_playwright
+
+    from .test_text_zoom_browser import ROOT_200, TEXT_200
+
+    exe = _chromium_path()
+    if exe == "missing":
+        pytest.skip("no Chromium available for Playwright")
+    sid = _admin(server)
+    hidden: list[str] = []
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+        for width, height in ((1000, 700), (717, 700), (1280, 800)):
+            ctx = browser.new_context(viewport={"width": width, "height": height})
+            ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
+            page = ctx.new_page()
+            for path in ("/admin/settings", "/history"):
+                page.goto(f"{server.base}{path}", wait_until="networkidle")
+                if zoom != "none":
+                    page.evaluate(ROOT_200 if zoom == "root" else TEXT_200)
+                page.wait_for_timeout(50)
+                seen = 0
+                # forwards from the top, then backwards from the bottom
+                for key, start in (("Tab", "Home"), ("Shift+Tab", "End")):
+                    page.evaluate("document.activeElement && document.activeElement.blur()")
+                    page.keyboard.press(start)
+                    page.wait_for_timeout(50)
+                    if key == "Shift+Tab":
+                        page.evaluate("document.querySelector('footer.site a:last-of-type')?.focus()")
+                    for _ in range(40):
+                        page.keyboard.press(key)
+                        page.wait_for_timeout(30)
+                        g = page.evaluate(FOCUSED)
+                        if g is None:
+                            continue
+                        seen += 1
+                        # some of it shows below the bar; a control taller than the room left is
+                        # allowed to run past the window's foot
+                        if g["bottom"] <= g["bar"] + 1 or g["top"] < g["bar"] - 1:
+                            hidden.append(f"{path} @{width}px {zoom} {key}: {g}")
+                assert seen > 20, (path, width, zoom, seen)
+            ctx.close()
+        browser.close()
+    assert hidden == [], "\n".join(hidden[:20])
