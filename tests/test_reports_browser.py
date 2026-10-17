@@ -221,7 +221,11 @@ def test_forge_section_refreshes_itself_until_the_run_ends(server: Server) -> No
         assert page.locator(".card.forge[aria-live=polite]").count() == 1
         assert page.evaluate("window.__same_page === true")
         assert page.locator("#rep-status").inner_text().startswith("complete")  # follows the run
-        assert "Games played: 2 of 2." in page.locator("#rep-md").input_value()  # Copy as Markdown too
+        # Copy as Markdown too: read from the page by a second request once the card has ended, so
+        # it may land after the card swap (asserting at once failed under load)
+        page.wait_for_function(
+            "() => document.getElementById('rep-md').value.includes('Games played: 2 of 2.')", timeout=10000
+        )
         assert not errors, errors
         browser.close()
 
