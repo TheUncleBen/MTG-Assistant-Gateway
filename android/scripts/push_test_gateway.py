@@ -8,10 +8,11 @@ then the messages the test sends. The test drives it on the same port:
   POST /control/send     {"id", "title", "message", "sequence_id"?}  a message to every connection
   POST /control/delete   {"sequence_id"}                             withdraw a deck's message
   POST /control/refuse   {"status", "error"}                         refuse from now on, end streams
-  GET  /control/state    {"connections", "connects", "last_since"}
+  GET  /control/state    {"connections", "connects", "last_since", "pages": {path: requests}}
 
-Only the key in PUSH_TEST_KEY is accepted. Every other path answers a small page, so the app's own
-screen has something to show. Standard library only.
+Only the key in PUSH_TEST_KEY is accepted. Every other path answers a small page with the account
+menu's App buttons and the gateway's own feedback.js (from PUSH_TEST_STATIC, the gateway's static
+folder), so the test can press each one inside the app. Standard library only.
 """
 
 from __future__ import annotations
@@ -27,10 +28,23 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 KEY = os.environ.get("PUSH_TEST_KEY", "")
 KEEPALIVE = float(os.environ.get("PUSH_TEST_KEEPALIVE", "5"))
+STATIC = os.environ.get("PUSH_TEST_STATIC", "")
+# The App section of the gateway's account menu (theme.py), as the app's buttons
+PAGE = (
+    "<!doctype html><meta name='viewport' content='width=device-width'><title>Test gateway</title>"
+    "<style>button{display:block;font-size:20px;margin:16px;padding:12px}[hidden]{display:none}</style>"
+    "<p>Test gateway.</p>"
+    "<button type='button' data-native='openCamera'>Scan with the app's camera</button>"
+    "<button type='button' data-native='reload'>Reload</button>"
+    "<button type='button' data-native='openInBrowser'>Open in browser</button>"
+    "<button type='button' data-native='changeGateway'>Change gateway</button>"
+    "<script src='/static/feedback.js'></script>"
+).encode()
 
 lock = threading.Lock()
 streams: list[queue.Queue] = []
 state = {"connects": 0, "last_since": None, "refuse": None}
+pages: dict[str, int] = {}
 history: list[dict] = []  # sent messages, for since=
 
 
@@ -70,11 +84,23 @@ class Handler(BaseHTTPRequestHandler):
                         "connections": len(streams),
                         "connects": state["connects"],
                         "last_since": state["last_since"],
+                        "pages": dict(pages),
                     },
                 )
             return
+        if path == "/static/feedback.js" and STATIC:
+            with open(os.path.join(STATIC, "feedback.js"), "rb") as f:
+                raw = f.read()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/javascript")
+            self.send_header("Content-Length", str(len(raw)))
+            self.end_headers()
+            self.wfile.write(raw)
+            return
         if path != "/app/notifications/stream":
-            raw = b"<!doctype html><title>Test gateway</title><p>Test gateway.</p>"
+            with lock:
+                pages[path] = pages.get(path, 0) + 1
+            raw = PAGE
             self.send_response(200)
             self.send_header("Content-Type", "text/html")
             self.send_header("Content-Length", str(len(raw)))

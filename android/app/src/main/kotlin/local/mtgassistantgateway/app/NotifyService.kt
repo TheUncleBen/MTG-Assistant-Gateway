@@ -31,7 +31,7 @@ import kotlin.random.Random
 /**
  * The member's notifications while the app is closed: a foreground service that keeps one
  * connection open to the gateway's own address ([Push.PATH]) and shows each message the gateway
- * relays. No Google push service, no other app. Android shows its quiet "Connected" notification
+ * relays. No Google push service, no other app. Android shows its quiet "Always connected" notification
  * while it runs, as it must for a foreground service.
  *
  * It runs while the member has pressed Get notifications on this phone ([Prefs.pushKey] set), and
@@ -58,12 +58,9 @@ class NotifyService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val key = prefs.pushKey
-        val origin = prefs.gatewayOrigin
-        if (!Push.isKey(key) || origin == null) {
-            stopSelf()
-            return START_NOT_STICKY
-        }
+        // Into the foreground first, whatever follows: a service started with
+        // startForegroundService must call startForeground in time even when it then stops at once
+        // (its key was cleared while it was being started).
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
                 startForeground(ONGOING_ID, ongoing(), ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
@@ -72,6 +69,13 @@ class NotifyService : Service() {
             }
         } catch (e: RuntimeException) { // Android refused a start from the background
             Log.w(TAG, "not started: ${e.javaClass.simpleName}")
+            stopSelf()
+            return START_NOT_STICKY
+        }
+        val key = prefs.pushKey
+        val origin = prefs.gatewayOrigin
+        if (!Push.isKey(key) || origin == null) {
+            stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf()
             return START_NOT_STICKY
         }
@@ -271,7 +275,7 @@ class NotifyService : Service() {
         const val CHANNEL_MESSAGES = "messages"
         const val CHANNEL_CONNECTION = "connection"
 
-        /** The channels: the members' messages (normal), and the quiet "Connected" notification. */
+        /** The channels: the members' messages (normal), and the quiet "Always connected" notification. */
         fun channels(context: Context) {
             val nm = context.getSystemService(NotificationManager::class.java) ?: return
             nm.createNotificationChannel(

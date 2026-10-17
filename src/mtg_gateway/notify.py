@@ -30,9 +30,10 @@ import re
 import secrets
 import threading
 import time
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
+import anyio
 import httpx
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response, StreamingResponse
@@ -485,19 +486,23 @@ class Notifier:
         return r
 
     async def relay(
-        self, topic: str, upstream: httpx.Response, still_valid: Callable[[], bool]
+        self,
+        topic: str,
+        upstream: httpx.Response,
+        still_valid: Callable[[], Awaitable[bool]],
+        finish: Callable[[], Awaitable[None]],
     ) -> AsyncIterator[bytes]:
         """The app's side of one connection: ntfy's lines for ``topic``, filtered (:func:`_for_app`),
         with a keepalive whenever ntfy is quiet for :data:`STREAM_KEEPALIVE` seconds. Ends when
         ntfy ends or goes quiet for :data:`STREAM_STALE` seconds, when :func:`still_valid` turns
         false (checked every :data:`STREAM_RECHECK` seconds), on :meth:`kick` and on
-        :meth:`close_streams`."""
+        :meth:`close_streams`. The connection was counted by :meth:`claim`; ``finish`` closes
+        ntfy's side and releases it, once, whether or not this ever started."""
         if self._closing is None:
             self.start()
         assert self._closing is not None
         closing = self._closing
         kick = self._kicks.setdefault(topic, asyncio.Event())
-        self._streams[topic] = self._streams.get(topic, 0) + 1
         lines = upstream.aiter_lines().__aiter__()
         pending: asyncio.Future[str] | None = None
         stops = [asyncio.ensure_future(closing.wait()), asyncio.ensure_future(kick.wait())]
@@ -534,22 +539,37 @@ class Notifier:
                     yield (json.dumps({"event": "keepalive", "time": int(time.time())}) + "\n").encode()
                 if now - last_check >= STREAM_RECHECK:
                     last_check = now
-                    if not still_valid():
+                    if not await still_valid():
                         break
         finally:
             for f in (pending, *stops):
                 if f is not None:
                     f.cancel()
-            await upstream.aclose()
-            client = upstream.extensions.get("mtg_client")
-            if client is not None:
-                await client.aclose()
-            left = self._streams.get(topic, 1) - 1
-            if left > 0:
-                self._streams[topic] = left
-            else:
-                self._streams.pop(topic, None)
-                self._kicks.pop(topic, None)
+            await finish()
+
+    def claim(self, topic: str) -> bool:
+        """Count one more app connection with ``topic``, or False past
+        :data:`STREAM_MAX_PER_KEY`. Counted before anything is awaited, so connections made at the
+        same moment can't all pass the check; :meth:`release` gives it back."""
+        if self._streams.get(topic, 0) >= STREAM_MAX_PER_KEY:
+            return False
+        self._streams[topic] = self._streams.get(topic, 0) + 1
+        return True
+
+    def release(self, topic: str) -> None:
+        left = self._streams.get(topic, 1) - 1
+        if left > 0:
+            self._streams[topic] = left
+        else:
+            self._streams.pop(topic, None)
+            self._kicks.pop(topic, None)
+
+    @staticmethod
+    async def close_upstream(upstream: httpx.Response) -> None:
+        await upstream.aclose()
+        client = upstream.extensions.get("mtg_client")
+        if client is not None:
+            await client.aclose()
 
     def streams(self, topic: str) -> int:
         """App connections open with ``topic`` now."""
@@ -597,21 +617,58 @@ def add_stream_route(state: AppState, server: Any) -> None:
                 return _refuse(401, "unknown_key", "This phone's notification key is no longer valid.")
             if outcome is Membership.UNAVAILABLE:
                 return _refuse(503, "unavailable", "The sign-in service isn't answering. Try again shortly.")
-        if n.streams(key) >= STREAM_MAX_PER_KEY:
+        if not n.claim(key):
             return _refuse(429, "too_many", "This key already has too many connections open.")
         since = request.query_params.get("since", "")
-        upstream = await n.open_upstream(key, since if SINCE_RE.fullmatch(since) else "")
+        try:
+            upstream = await n.open_upstream(key, since if SINCE_RE.fullmatch(since) else "")
+        except BaseException:
+            n.release(key)
+            raise
         if upstream is None:
+            n.release(key)
             return _refuse(503, "unavailable", "The notification server isn't answering. Try again shortly.")
+        finished = False
 
-        def still_valid() -> bool:
-            return topic_owner(state.db, key) == (sub, True)
+        async def finish() -> None:
+            nonlocal finished
+            if finished:
+                return
+            finished = True
+            n.release(key)
+            await n.close_upstream(upstream)
 
-        return StreamingResponse(
-            n.relay(key, upstream, still_valid),
+        async def still_valid() -> bool:
+            """The key is still the member's and on, and the member is still allowed in (a member
+            removed at the identity provider is cut off at the next re-check)."""
+            if topic_owner(state.db, key) != (sub, True):
+                return False
+            if state.membership is not None:
+                return await state.membership.check(sub) is not Membership.REVOKED
+            return True
+
+        return _Stream(
+            n.relay(key, upstream, still_valid, finish),
+            finish,
             media_type="application/x-ndjson",
             headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
         )
+
+
+class _Stream(StreamingResponse):
+    """A StreamingResponse that also runs ``finish`` when the client left before the body started
+    (the body's own ``finally`` never runs then), shielded from the request's cancellation."""
+
+    def __init__(self, content: AsyncIterator[bytes], finish: Callable[[], Awaitable[None]], **kw: Any):
+        super().__init__(content, **kw)
+        self._finish = finish
+
+    async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
+        try:
+            await super().__call__(scope, receive, send)
+        finally:
+            with anyio.CancelScope(shield=True):
+                await self._finish()
 
 
 # -- Account page: the Notifications card, with the summary ----------------------------------------
