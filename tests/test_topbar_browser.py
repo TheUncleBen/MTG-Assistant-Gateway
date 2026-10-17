@@ -47,6 +47,25 @@ def _admin(server: Server) -> str:
     return sid
 
 
+def _zoom(page, zoom: str) -> None:
+    """The text size: none, root or text (200%, as in test_text_zoom_browser), or root-150,
+    text-125 and so on: the root's size or every element's text size times that percentage."""
+    from .test_text_zoom_browser import ROOT_200, TEXT_200
+
+    if zoom == "none":
+        return
+    kind, _, pct = zoom.partition("-")
+    if not pct:
+        page.evaluate(ROOT_200 if kind == "root" else TEXT_200)
+    elif kind == "root":
+        size = 14 * int(pct) / 100
+        root = "document.documentElement.style"
+        page.evaluate(f"() => {root}.setProperty('font-size', '{size}px', 'important')")
+    else:
+        assert "* 2)" in TEXT_200
+        page.evaluate(TEXT_200.replace("* 2)", f"* {int(pct) / 100})"))
+
+
 @pytest.mark.parametrize("theme", ["light", "dark"])
 def test_account_menu_links_use_the_menu_colours(server: Server, theme: str) -> None:
     from playwright.sync_api import sync_playwright
@@ -269,14 +288,16 @@ FOCUSED = """() => {
 }"""
 
 
-@pytest.mark.parametrize("script", [True, False])
-@pytest.mark.parametrize("zoom", ["none", "root", "text"])
-def test_a_focused_control_is_never_hidden_under_the_top_bar(server: Server, zoom: str, script: bool) -> None:
-    """With scripts off, the stylesheet's own room (5.5rem, at least 60 px) covers the two-row bar
-    at 200% text (review round 10)."""
-    from playwright.sync_api import sync_playwright
+ZOOMS = ["none", "root-125", "root-150", "root-175", "root", "text-125", "text-150", "text-175", "text"]
 
-    from .test_text_zoom_browser import ROOT_200, TEXT_200
+
+@pytest.mark.parametrize("script", [True, False])
+@pytest.mark.parametrize("zoom", ZOOMS)
+def test_a_focused_control_is_never_hidden_under_the_top_bar(server: Server, zoom: str, script: bool) -> None:
+    """With scripts off, the stylesheet's own room covers the bar at every text size from 100% to
+    200% (review round 10; milestone review M-2: 5.5rem fell short between 125% and 175%). 920 px
+    at 150% text is where the bar is tallest for its text size (183 px, about 8.7rem)."""
+    from playwright.sync_api import sync_playwright
 
     exe = _chromium_path()
     if exe == "missing":
@@ -285,14 +306,13 @@ def test_a_focused_control_is_never_hidden_under_the_top_bar(server: Server, zoo
     hidden: list[str] = []
     with sync_playwright() as p:
         browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
-        for width, height in ((1000, 700), (717, 700), (1280, 800)):
+        for width, height in ((1000, 700), (920, 700), (717, 700), (600, 700), (1280, 800)):
             ctx = browser.new_context(viewport={"width": width, "height": height}, java_script_enabled=script)
             ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
             page = ctx.new_page()
             for path in ("/admin/settings", "/history"):
                 page.goto(f"{server.base}{path}", wait_until="networkidle")
-                if zoom != "none":
-                    page.evaluate(ROOT_200 if zoom == "root" else TEXT_200)
+                _zoom(page, zoom)
                 page.wait_for_timeout(50)
                 seen = 0
                 # forwards from the top, then backwards from the bottom
@@ -317,3 +337,53 @@ def test_a_focused_control_is_never_hidden_under_the_top_bar(server: Server, zoo
             ctx.close()
         browser.close()
     assert hidden == [], "\n".join(hidden[:20])
+
+
+# Milestone review M-1: Tab goes through the top bar in the order it reads, left to right and top
+# to bottom, at every text size: with the links on a row of their own under search and account,
+# Tab went from the links back up to search and account.
+TAB_STOP = """() => {
+  const el = document.activeElement;
+  if (!el || !el.closest('.topbar')) return null;
+  const r = el.getBoundingClientRect();
+  return {what: (el.outerHTML || '').slice(0, 60), top: r.top, bottom: r.bottom, left: r.left,
+          right: r.right};
+}"""
+
+
+@pytest.mark.parametrize("zoom", ZOOMS)
+def test_tab_goes_through_the_top_bar_in_the_order_it_reads(server: Server, zoom: str) -> None:
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_path()
+    if exe == "missing":
+        pytest.skip("no Chromium available for Playwright")
+    sid = _admin(server)
+    problems: list[str] = []
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+        ctx = browser.new_context(viewport={"width": 1000, "height": 800})
+        ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
+        page = ctx.new_page()
+        for width in (600, 673, 717, 800, 899, 900, 920, 1000, 1280, 1440):
+            page.set_viewport_size({"width": width, "height": 800})
+            page.goto(f"{server.base}/history", wait_until="networkidle")
+            _zoom(page, zoom)
+            page.wait_for_timeout(30)
+            stops = []
+            for _ in range(20):
+                page.keyboard.press("Tab")
+                g = page.evaluate(TAB_STOP)
+                if g is None and stops:
+                    break
+                if g is not None:
+                    stops.append(g)
+            where = f"@{width}px {zoom}"
+            if len(stops) < 10:  # the brand, eight links and the account button at least
+                problems.append(f"{where}: {len(stops)} stops")
+            for a, b in zip(stops, stops[1:], strict=False):
+                row = b["top"] < a["bottom"] - 1 and a["top"] < b["bottom"] - 1
+                if b["bottom"] <= a["top"] + 1 or (row and b["right"] <= a["left"] + 1):
+                    problems.append(f"{where}: {a['what']} then {b['what']}")
+        browser.close()
+    assert problems == [], "\n".join(problems)

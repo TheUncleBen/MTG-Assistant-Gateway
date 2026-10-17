@@ -187,7 +187,10 @@ CSS = (
     + _LIGHT
     + """}
 *{box-sizing:border-box}
-html{font-size:14px;scroll-padding:var(--bar-room,max(60px,5.5rem)) 0 120px;-webkit-text-size-adjust:100%;
+/* --bar-room is the top bar's height plus 10 px (static/topbar.js). Without scripts, 9.5rem covers
+   the bar at every text size from 100% to 200% (milestone review M-2). Measured from 600 to
+   1920 px: at most 191 px at 200% text, and at most about 8.7rem (183 px) at 920 px and 150%. */
+html{font-size:14px;scroll-padding:var(--bar-room,9.5rem) 0 120px;-webkit-text-size-adjust:100%;
   min-width:320px;font-family:Lato,"Helvetica Neue",Arial,Helvetica,sans-serif;line-height:1.15}
 body{margin:0;min-height:100vh;display:flex;flex-direction:column;background:var(--bg);color:var(--text);
   font:inherit;font-size:1rem;line-height:1.35;transition:background-color .25s ease-in}
@@ -720,9 +723,9 @@ details.raw{margin:.5rem 0 0} details.raw summary{cursor:pointer;color:var(--tex
 .brand{min-width:0}
 .brand .word{overflow:hidden;text-overflow:ellipsis;min-width:0}
 /* Large text with a mouse (a raised font size, a text-only zoom, 200% text): when the bar's text
-   links no longer fit beside the brand and the account button, they move to a row of their own
-   under them and wrap there, so the page never scrolls sideways and nothing runs under the search
-   box or the account button. The bar is a size container, so the test is in the bar's own em
+   links no longer fit on one row beside the brand and the account button, they wrap onto more
+   rows between them (_NAV_ROW_RULES), so the page never scrolls sideways and nothing runs under
+   the search box or the account button. The bar is a size container, so the test is in the bar's own em
    (its text size): 42.5em is just under a 600 px window at the normal size, where the eight links
    of an admin still fit on one row; with the search box (900 px and wider) one row needs 58em.
    The rail and the phone layout (touch, the app) hide these links, so they are left as they are. */
@@ -911,13 +914,17 @@ CSS = CSS.replace(
 )
 # The top bar's second row for large text with a mouse (the container queries above): the brand
 # mark and the account side share the first row, the text links wrap in the row under them.
+# The links wrap between the brand and the search box and account button, which sit at the foot of
+# the links' last row, so the bar reads, and Tab goes, brand, links, search, account at every text
+# size (milestone review M-1: with the links on a row of their own under the account side, Tab
+# went from the links' row back up to search and account).
 _NAV_ROW_RULES = (
     "body:not(.app) .topbar .wrap{flex-wrap:wrap;height:auto;row-gap:0;padding-bottom:.35rem}"
     "body:not(.app) .topbar .left{display:contents}"
-    "body:not(.app) .topbar .brand{order:0;min-height:50px}"
+    "body:not(.app) .topbar .brand{min-height:50px;align-self:flex-start}"
     "body:not(.app) .topbar .brand .word{display:none}"
-    "body:not(.app) .topbar .right{order:1;margin-left:auto;min-height:50px}"
-    "body:not(.app) .topbar nav.site{order:2;flex:1 0 100%;flex-wrap:wrap;min-width:0}"
+    "body:not(.app) .topbar nav.site{flex:1 1 12em;flex-wrap:wrap;min-width:0}"
+    "body:not(.app) .topbar .right{margin-left:auto;min-height:50px;align-self:flex-end}"
 )
 CSS = CSS.replace("__NAVROW__", _NAV_ROW_RULES)
 
