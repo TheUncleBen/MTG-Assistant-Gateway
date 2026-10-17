@@ -98,7 +98,7 @@ from .idp_sweep import AuthentikSweep
 from .membership import Membership, MembershipChecker
 from .metrics import Metrics
 from .mf_proxy import ALLOWED_TOOLS, BUSY_PREFIX, MysticForgeProxy
-from .notify import Notifier, add_stream_route
+from .notify import Notifier, add_stream_route, replace_old_topics
 from .oidc import OIDCClient
 from .pages import SESSION_COOKIE, _csrf, add_browser_routes, browser_session
 from .plugin_page import CONNECTOR_ICON_PATH, CONNECTOR_ICON_PX, SERVER_DESCRIPTION, add_plugin_routes
@@ -886,6 +886,7 @@ def build_mcp_server(state: AppState) -> MCPServer:
     # (prices.py), which exist only with MTG_WATCHLISTS_ENABLED: off, there is no price service, so
     # no Watchlist page or API, no watch tools and no daily price check. Stored rows stay.
     state.notifier = Notifier(s.ntfy_url, s.ntfy_token, state.db, s.public_url)
+    replace_old_topics(state.db)  # once per database: no topic from before 0.7.30 is an app's key
     if s.watchlists_enabled:
         state.prices = PriceService(
             s,
