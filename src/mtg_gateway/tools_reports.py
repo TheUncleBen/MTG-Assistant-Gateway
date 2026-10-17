@@ -235,9 +235,10 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
                 # that starts with a quantity, is still read as one. Anything else is refused.
                 if _looks_like_list(ref):
                     return as_list(side, ref)
-                raise DeckError(
-                    "invalid", f"Deck {side}: {NOT_DECK_OR_SNAPSHOT} A pasted list goes in {side}_list."
-                ) from exc
+                # the same words as deck_ref and compare_with (R6 finding 1): only a reference that
+                # is neither a deck nor a snapshot names both; another site's link says only that
+                why = NOT_DECK_OR_SNAPSHOT if str(exc) == NOT_A_DECK_ID else _sentence(str(exc))
+                raise DeckError("invalid", f"Deck {side}: {why} A pasted list goes in {side}_list.") from exc
             deck = await state.decks.get_any_deck(_sub(), deck_id)
             return deck, deck_to_text(deck), sim_mode(deck_stats.compute(deck))
 
@@ -306,7 +307,8 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
             "with a 95% interval and how it lost, the median game time and turn, and how the games "
             "ended. Poll with get_deck_report "
             "view='forge' until the state is done or another final state (failed, timeout, cancelled, "
-            "lost: a run that stopped early, whose games_done still count). Forge plays Commander decks "
+            "lost: the run did not end cleanly; its games_done still count, and a run with fewer than "
+            "games_requested stopped early). Forge plays Commander decks "
             "only: a 60-card deck's "
             "report never starts it (forge state skipped, with the reason). forge=false leaves Forge out "
             "for a quick solo-test-only report (default: as simulate). A report without Forge games is "

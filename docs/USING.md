@@ -137,7 +137,7 @@ One deck:
   deck in Archidekt, or, when none is set, for Archidekt's estimate from
   cards. Each precon's bracket comes from the game changers it holds. When there are not
   enough precons of that bracket, the nearest bracket fills in, and an older
-  Forge image without precon brackets plays the newest precons; the report
+  version of Forge without precon brackets plays the newest precons; the report
   names the opponents, their brackets and why they were picked. Forge plays
   10 games per report by default (your gateway's operator can change this)
   and shows each win rate with its 95% interval. Forge does not run 60-card
@@ -152,10 +152,11 @@ One deck:
 - A report without Forge games (Forge not set up, a 60-card deck, or Forge
   left out of the report) is labelled **Preflight only (no rules engine)**
   where the Forge games would be. A Forge run that stops early (a group of
-  games failed, the run reached its time limit, or the gateway lost track of
-  it) shows the games it did play, marked **stopped early**, and the report is
-  partial. Each report shows its status: queued, running, complete, partial
-  (some part did not run or stopped early) or failed.
+  games failed, the run reached its time limit, the run was stopped, or the
+  gateway lost track of it) shows the games it did play, marked **stopped
+  early**, and the report is partial. Each report shows its status: queued,
+  running, complete, partial (some parts did not run or did not finish) or
+  failed.
 - A deck's report trends on its History page compare a simulation number
   only across reports run the same way (Commander or 60-card game, same last
   turn), and the table of numbers shows each report's settings.
@@ -348,7 +349,7 @@ assistant applies what that mode allows, always with a snapshot.
   the deck's statistics, a legality check, and the solo test, the Forge games
   or both, so you can follow how a deck develops.
 - **Compare** has **Test both in Forge against the same opponents** when
-  Forge is on and both are Commander decks: both decks play Forge games
+  Forge is on and both decks have a commander: both decks play Forge games
   against the same three precons, picked for the higher of the two decks'
   brackets, so it doesn't matter which deck you compare from.
 - The **Goldfish** page's **How to play** guide walks a first game step by

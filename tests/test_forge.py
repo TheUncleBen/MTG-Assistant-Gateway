@@ -423,6 +423,14 @@ def test_report_page_and_markdown_show_forge_results() -> None:
     page = forge_html(full)
     assert "Forge played all 5 games, but the run did not end cleanly. The results below count all 5." in page
     assert "stopped early" not in page and "not run" not in page
+    # proofread R6 finding 11: one game asked for and played reads as one, not "all 1"
+    one = {**part, "games_requested": 1, "result": {**part["result"], "games": 1, "games_requested": 1}}
+    page = forge_html(one)
+    assert (
+        "Forge played the one game asked for, but the run did not end cleanly. The results below count it."
+        in page
+    )
+    assert "all 1" not in page and "stopped early" not in page
     lost = forge_html({**part, "state": "lost", "error": "Forge stopped answering about this run."})
     assert (
         "The gateway lost track of this run after 5 of 10 games. The results below count only those 5 "
@@ -1022,8 +1030,8 @@ async def test_shared_opponents_that_left_the_engine_or_never_sat() -> None:
     unrated = [{"name": n} for n in BRACKETED]
     _, old = shared_opponents(unrated, {"deck_name": "Deck A", "bracket": [3, "estimate"]})
     assert (
-        "Archidekt's estimate from cards for Deck A is bracket 3, but this Forge image's precons carry no "
-        "bracket, so the newest precons play." in old["note"]
+        "Archidekt's estimate from cards for Deck A is bracket 3, but the precons in this gateway's version "
+        "of Forge carry no bracket, so the newest precons play." in old["note"]
     )
     assert "picked" not in none["note"] + old["note"]
     # N1: in the second deck's report, every note names the first deck, never "the deck"

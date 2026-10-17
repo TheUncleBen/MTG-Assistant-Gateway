@@ -293,8 +293,8 @@ def pick_opponents(
             "bracket": bracket,
             "source": source,
             "rule": "newest",
-            "note": f"{lead}, but this Forge image's precons carry no bracket, so "
-            "the newest precons play. A newer Forge image matches opponents by bracket.",
+            "note": f"{lead}, but the precons in this gateway's version of Forge carry no bracket, so "
+            "the newest precons play. A newer version of Forge matches opponents by bracket.",
         }
     order = sorted(range(len(rated)), key=lambda i: (abs(rated[i]["bracket"] - bracket), i))
     chosen = [rated[i] for i in order[:DEFAULT_OPPONENTS]]

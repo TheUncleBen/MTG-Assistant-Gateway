@@ -430,6 +430,13 @@ async def test_forge_comparison_reads_the_other_deck_first_on_every_path(stack: 
         assert cmp_unknown["ok"] is False and cmp_unknown["message"] == (
             f"Deck a: {NOT_DECK_OR_SNAPSHOT} A pasted list goes in a_list."
         ), cmp_unknown
+        # proofread R6 finding 1: another site's link reads as on deck_ref and compare_with, per side
+        cmp_elsewhere = structured(
+            await call(h, token, "compare_decks", {"a": "42", "b": "https://moxfield.com/decks/x"})
+        )
+        assert cmp_elsewhere["message"] == (
+            "Deck b: Only archidekt.com deck links are accepted. A pasted list goes in b_list."
+        ), cmp_elsewhere
         stats_unknown = structured(await call(h, token, "deck_stats", {"deck_ref": "snap_nothere"}))
         assert stats_unknown["ok"] is False and stats_unknown["message"] == NOT_DECK_OR_SNAPSHOT, (
             stats_unknown
