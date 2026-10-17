@@ -301,6 +301,11 @@ async def test_compare_page_tests_both_decks_against_the_same_forge_opponents(st
             if "opponent_choice" in second:  # it started: it seats the same table
                 assert [d["precon"] for d in fake.started[-1]["decks"][1:]] == chosen
                 assert second["opponent_choice"]["rule"] == "shared"
+                # proofread R4 fix 3: the second report says how the shared table was picked
+                assert (
+                    "Forge games, picked for the higher of the two decks' brackets, so both decks met"
+                    in (second["opponent_choice"]["note"])
+                ), second
             else:
                 assert "start" in second and second["start"]["shared"]["report_id"], second
         stack.ark.decks[43]["edhBracket"] = None
@@ -325,8 +330,10 @@ async def test_forge_comparison_reads_the_other_deck_first_on_every_path(stack: 
     compare_with and the REST route's compare_with all pick the precons for the higher of the two
     decks' brackets. The other deck is read before anything is stored: a deck that can't be read
     leaves no report and says so. A press reads each deck once."""
+    from mtg_gateway.decks import RateBudget
     from mtg_gateway.forge import PAIR_LEAD, bracket_parts
-    from mtg_gateway.reports import BOTH_PAIRINGS, PAIR_UNREAD
+    from mtg_gateway.reports import BOTH_PAIRINGS, PAIR_NO_FORGE, PAIR_UNREAD
+    from mtg_gateway.tools_reports import NOT_A_PAIR
 
     from .test_forge import BRACKETED, FakeForge
 
@@ -365,7 +372,8 @@ async def test_forge_comparison_reads_the_other_deck_first_on_every_path(stack: 
         # a deck that can't be read: nothing is kept, and the page says so
         db.execute("DELETE FROM reports")
         bad = await b.http.post("/decks/42/compare/forge", data={"csrf": csrf, "with": "99999"})
-        assert bad.status_code == 404 and html.unescape(PAIR_UNREAD) in html.unescape(bad.text), bad.text
+        unread = f"{PAIR_UNREAD} Archidekt could not find that deck."  # the reason as its own sentence
+        assert bad.status_code == 404 and unread in html.unescape(bad.text), bad.text
         assert stored() == []
         # run_deck_report's compare_with, either order
         token = await mcp_token(h)
@@ -391,7 +399,21 @@ async def test_forge_comparison_reads_the_other_deck_first_on_every_path(stack: 
                 {"deck_ref": "42", "simulate": False, "forge": True, "compare_with": "99999"},
             )
         )
-        assert gone["ok"] is False and PAIR_UNREAD in gone["message"] and stored() == [], gone
+        assert gone["ok"] is False and gone["message"] == unread and stored() == [], gone
+        odd = structured(
+            await call(h, token, "run_deck_report", {"deck_ref": "42", "forge": True, "compare_with": "x y"})
+        )
+        assert odd["ok"] is False and odd["message"] == f"{PAIR_UNREAD} {NOT_A_PAIR}" and stored() == []
+        # no Forge games: refused rather than ignored (pending Ben's call), nothing kept
+        off = structured(
+            await call(
+                h,
+                token,
+                "run_deck_report",
+                {"deck_ref": "42", "simulate": False, "forge": False, "compare_with": "43"},
+            )
+        )
+        assert off["ok"] is False and off["message"] == PAIR_NO_FORGE and stored() == [], off
         both = structured(
             await call(
                 h,
@@ -404,7 +426,10 @@ async def test_forge_comparison_reads_the_other_deck_first_on_every_path(stack: 
         listed = structured(
             await call(h, token, "run_deck_report", {"deck_ref": "1 Sol Ring\n", "compare_with": "43"})
         )
-        assert listed["ok"] is False and "so compare_with needs a deck id or URL" in listed["message"]
+        assert listed["ok"] is False and listed["message"] == (
+            "A pasted list gets no Forge games, so compare_with works only when deck_ref is a deck id, URL "
+            "or snapshot id."
+        )
         # the REST route's compare_with
         auth = {"Authorization": f"Bearer {await mcp_token(h)}"}
         for here, there in (("43", "42"), ("42", 43)):
@@ -422,7 +447,26 @@ async def test_forge_comparison_reads_the_other_deck_first_on_every_path(stack: 
             json={"deck_id": "42", "simulate": False, "forge": True, "compare_with": "99999"},
             headers=auth,
         )
-        assert missing.status_code == 404 and PAIR_UNREAD in missing.text and stored() == []
+        assert missing.status_code == 404 and missing.json()["message"] == unread and stored() == []
+        no_forge = await h.http.post(
+            "/api/v1/reports",
+            json={"deck_id": "42", "simulate": False, "forge": False, "compare_with": "43"},
+            headers=auth,
+        )
+        assert no_forge.status_code == 400 and no_forge.json()["message"] == PAIR_NO_FORGE and stored() == []
+        # Archidekt busy during a press: the shared busy page, whose Try again opens the Compare
+        # page (the press itself answers POST only, so the same URL would be a 405)
+        reports.decks.archidekt_budget = RateBudget(per_window=1, window=600)
+        busy = None
+        for _ in range(3):
+            busy = await b.http.post("/decks/42/compare/forge", data={"csrf": csrf, "with": "43"})
+            if busy.status_code == 429:
+                break
+        assert busy is not None and busy.status_code == 429, busy.text
+        assert "<a class='btn btn-primary' href='/decks/42/compare?with=43'>Try again</a>" in busy.text
+        assert busy.headers["cache-control"] == "no-store" and int(busy.headers["retry-after"]) >= 1
+        again = await b.http.get("/decks/42/compare?with=43", headers=NAV)
+        assert again.status_code in (200, 429), again.status_code  # a page, never 405
     finally:
         stack.ark.decks[43]["edhBracket"] = None
         reports.forge = None

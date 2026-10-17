@@ -308,9 +308,12 @@ class ReportService:
         stats = deck_stats.compute(deck)
         mode = sim_mode(stats)
         plays_forge = self.forge is not None and forge and mode == "commander"
+        if pair_with is not None and not plays_forge:
+            # Pending Ben's call (proofread R4 fix 2): refused, the safe default, not ignored.
+            raise DeckError("invalid", PAIR_NO_FORGE)
         # The other deck of a comparison is read now, before anything is stored and outside the
         # Forge start lock: a deck that can't be read stops the run with no report kept.
-        other = await self.pair_deck(sub, pair_with) if plays_forge and pair_with is not None else None
+        other = await self.pair_deck(sub, pair_with) if pair_with is not None else None
         goldfish: dict[str, Any] | None = None
         validation: dict[str, Any] | None = None
         if self.mf is not None:
@@ -408,7 +411,11 @@ class ReportService:
             return await self.decks.get_any_deck(sub, pair_with)
         except DeckError as exc:
             raise DeckError(
-                exc.kind, f"{PAIR_UNREAD} {exc}", retry_after=exc.retry_after, sent=exc.sent, **exc.extra
+                exc.kind,
+                f"{PAIR_UNREAD} {_sentence(str(exc))}",
+                retry_after=exc.retry_after,
+                sent=exc.sent,
+                **exc.extra,
             ) from exc
 
     async def _start_or_queue_forge(
@@ -501,6 +508,8 @@ class ReportService:
             out["opponents"] = seats[1:]
         elif isinstance(section, dict) and (section.get("start") or {}).get("bracket"):
             out["bracket"] = section["start"]["bracket"]
+        if isinstance(section, dict) and (section.get("opponent_choice") or {}).get("pair"):
+            out["pair"] = True  # a comparison's run: its table was picked for the higher bracket
         return out
 
     # -- Forge runs (background) ----------------------------------------------
@@ -1124,7 +1133,11 @@ NO_FORGE_TO_SHARE = (
     "That report has no Forge games, so there are no opponents to share. Run it again with Forge, then "
     "compare."
 )
-PAIR_UNREAD = "The gateway could not read the other deck, so no report was made:"
+PAIR_UNREAD = "The gateway could not read the other deck, so no report was made."
+PAIR_NO_FORGE = (
+    "compare_with needs Forge games, and this report has none (forge is false, Forge isn't set up on "
+    "this gateway, or the deck isn't a Commander deck)."
+)
 BOTH_PAIRINGS = (
     "compare_with and same_opponents_as each pick the opponents: use compare_with on the first deck's "
     "report and same_opponents_as on the second's, not both on one."
@@ -1458,6 +1471,15 @@ def sim_mode(stats: dict[str, Any]) -> str:
     if count < MIN_CONSTRUCTED:
         return SMALL_DECK_TEXT.format(min=MIN_CONSTRUCTED, count=count)
     return "constructed"
+
+
+def _sentence(text: str) -> str:
+    """A reason as its own sentence: first letter upper-cased, ending with a full stop."""
+    text = text.strip()
+    if not text:
+        return ""
+    text = text[0].upper() + text[1:]
+    return text if text[-1] in ".!?" else text + "."
 
 
 def _pair_bracket(deck: Any, stats: dict[str, Any], other: Deck | None) -> tuple[Any, ...]:
