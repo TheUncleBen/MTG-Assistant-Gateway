@@ -25,7 +25,16 @@ from .archidekt import Deck
 from .db import Database, _like
 from .decklist import DecklistError, front_faces, parse_decklist, to_text
 from .decks import DeckError, DeckService, _clean_deck_id, current_client, deck_to_text
-from .forge import FINAL_STATES, GIVE_UP_SECONDS, ForgeClient, ForgeError, bracket_parts, refresh, start_run
+from .forge import (
+    FINAL_STATES,
+    GIVE_UP_SECONDS,
+    ForgeClient,
+    ForgeError,
+    bracket_parts,
+    refresh,
+    start_run,
+    summarise,
+)
 from .mf_proxy import FULL_REPORT, MysticForgeProxy, busy_retry_after, is_busy
 from .report_view import PREFLIGHT_ONLY, goldfish_settings, speed_numbers
 
@@ -83,7 +92,12 @@ MAX_FORGE_WAITING = 2
 RUN_KEY = "_run"
 # What a member never sees of a Forge section: the start's own data, the copy it plays on (an
 # internal address) and how many copies there are, and since when that copy has not answered.
-NOT_SHOWN = frozenset({"start", "engine", "engine_copies", "unanswered_since"})
+NOT_SHOWN = frozenset(
+    {"start", "engine", "engine_copies", "unanswered_since", "deck_text", "played", "earlier", "previous"}
+)
+# Forge games one report can hold at most, Play more games included (the Forge service's own most
+# for one run, FORGE_MAX_GAMES).
+MAX_REPORT_FORGE_GAMES = 50
 # Why a report has no Forge games although the gateway runs Forge (a "skipped" section's note).
 FORGE_NOT_ASKED = "Forge was not asked for this report (solo test only)."
 FORGE_CONSTRUCTED = (
@@ -126,7 +140,7 @@ class ReportService:
         *,
         min_interval: int = 600,
         forge: ForgeClient | None = None,
-        forge_games: int = 10,
+        forge_games: int = 4,
     ):
         self.db = db
         self.decks = decks
@@ -456,7 +470,9 @@ class ReportService:
         hold: PairHold | None = None,
     ) -> None:
         try:
-            await self._start_or_queue(sub, rid, deck, games, seed, bracket, shared, copies, hold)
+            await self._start_or_queue(
+                sub, rid, deck_to_text(deck), deck.name, games, seed, bracket, shared, copies, hold
+            )
         finally:
             if hold is not None:  # this run is saved: its place is in the reports table now
                 hold.left = max(0, hold.left - 1)
@@ -465,28 +481,45 @@ class ReportService:
         self,
         sub: str,
         rid: str,
-        deck: Any,
+        text: str,
+        name: str,
         games: int,
         seed: Any,
         bracket: tuple[Any, ...],
         shared: dict[str, Any] | None,
         copies: list[str] | None,
         hold: PairHold | None,
+        more: dict[str, Any] | None = None,
     ) -> None:
-        text, seed = deck_to_text(deck), seed if isinstance(seed, int) else None
+        """Start report rid's Forge run, or queue it behind the member's unfinished one. ``more``
+        (Play more games): what the extra games keep from the report's earlier ones (more_start)."""
+        seed = seed if isinstance(seed, int) else None
         if self._forge_running(sub, rid) and not self._side_by_side(sub, shared):
             # One unfinished Forge run per member, so nobody can fill the shared engine's queue:
             # this one waits for theirs (MAX_FORGE_WAITING at most, counting the places another
             # comparison has reserved).
             full = self._queue_full(sub, rid, hold)
+            if full and more is not None:  # extra games: nothing starts, the report stays as it was
+                raise DeckError("invalid", MORE_QUEUE_FULL)
             if full:
                 self._save_forge(rid, {"state": "skipped", "error": full})
                 return
-            self._save_forge(rid, self._waiting_section(text, deck.name, games, seed, bracket, shared=shared))
+            self._save_forge(
+                rid, self._waiting_section(text, name, games, seed, bracket, shared=shared, more=more)
+            )
             self._ensure_forge_refresher()
             return
         await self._start_forge(
-            rid, text, deck.name, games, seed, bracket, shared=shared, copies=copies, new_for=(sub, hold)
+            rid,
+            text,
+            name,
+            games,
+            seed,
+            bracket,
+            shared=shared,
+            copies=copies,
+            new_for=(sub, hold),
+            more=more,
         )
 
     def _queue_full(self, sub: str, rid: str, hold: PairHold | None) -> str | None:
@@ -527,6 +560,63 @@ class ReportService:
             f"have at most {MAX_FORGE_WAITING} reports waiting, so nothing was started. Try again when "
             "none of your reports is waiting for its games."
         )
+
+    async def play_more(self, sub: str, report_id: str) -> dict[str, Any]:
+        """Play more games: another round of Forge games for a report whose games have finished,
+        against the same opponents, added to its earlier ones (its win rates and 95% intervals then
+        count them all). It starts or waits like any run of the member's; with no room in their
+        queue nothing is started and the report stays as it was."""
+        if self.forge is None:
+            raise DeckError("invalid", MORE_NO_FORGE)
+        copies = await self.forge.copies()  # the name's lookup, kept out of the start lock
+        async with self._forge_start_lock:
+            row = self.db._one(
+                "SELECT id, forge_json FROM reports WHERE id = ? AND owner_sub = ?", (str(report_id), sub)
+            )
+            if row is None:
+                raise DeckError("not_found", "No such report for your account.")
+            section = json.loads(row["forge_json"]) if row["forge_json"] else None
+            games, why = more_room(section, self.forge_games)
+            if why:
+                raise DeckError("invalid", why)
+            rid = str(row["id"])
+            played = list(section["played"])
+            total = len(played) + games
+            keep = {
+                "earlier": played,
+                "played": played,
+                "games_requested": total,
+                "result": summarise({"results": played, "games_requested": total}, section["seats"]),
+                "seats": section["seats"],
+                "opponent_choice": section.get("opponent_choice") or {},
+                "not_played": section.get("not_played") or [],
+                "earlier_runs": section.get("earlier_runs")
+                or [{**_run_record(section), "games": len(played)}],
+                "deck_text": section["deck_text"],
+                **({"shared_with": section["shared_with"]} if section.get("shared_with") else {}),
+            }
+            previous = {k: v for k, v in section.items() if k != "more_note"}
+            more = {
+                "opponents": section["seats"][1:],
+                "choice": section.get("opponent_choice") or {},
+                "keep": keep,
+                "previous": previous,
+            }
+            await self._start_or_queue(
+                sub,
+                rid,
+                section["deck_text"],
+                str(section["seats"][0]),
+                games,
+                None,
+                (None, None),
+                None,
+                copies,
+                None,
+                more=more,
+            )
+        self.db.audit("report_more_games", sub=sub, detail={"report_id": rid, "games": games})
+        return self.get(sub, rid)
 
     def reserve_pair(self, sub: str) -> tuple[PairHold | None, str | None]:
         """Check the member's room for a comparison's two runs (``pair_room``) and reserve it in
@@ -579,12 +669,24 @@ class ReportService:
         seed: int | None,
         bracket: Any,
         shared: dict[str, Any] | None = None,
+        more: dict[str, Any] | None = None,
         **extra: Any,
     ) -> dict[str, Any]:
-        """A Forge section waiting in the gateway's queue, with no engine job yet."""
+        """A Forge section waiting in the gateway's queue, with no engine job yet. Extra games
+        (``more``) show the report's earlier games while they wait."""
         start = {"text": text, "name": name, "games": games, "seed": seed, "bracket": bracket}
         if shared is not None:
             start["shared"] = shared
+        if more is not None:
+            start["more"] = more
+            return {
+                **more["keep"],
+                "state": "queued",
+                "waiting": True,
+                "queued_at": int(time.time()),
+                "start": start,
+                **extra,
+            }
         return {
             "state": "queued",
             "waiting": True,
@@ -654,9 +756,9 @@ class ReportService:
 
     @property
     def forge_parallel(self) -> int:
-        """Forge games played at once (forge_parallel_games, 1-4; the Forge service's own
-        FORGE_MAX_PARALLEL may lower it)."""
-        return self._live("forge_parallel_games", 1)
+        """Forge games a run asks to play at once (forge_parallel_games, 1-4); the Forge service
+        plays as many as it has places for (FORGE_MAX_PARALLEL, else what its machine fits)."""
+        return self._live("forge_parallel_games", 4)
 
     async def _start_forge(
         self,
@@ -670,9 +772,11 @@ class ReportService:
         shared: dict[str, Any] | None = None,
         copies: list[str] | None = None,
         new_for: tuple[str, PairHold | None] | None = None,
+        more: dict[str, Any] | None = None,
     ) -> None:
         """Start a Forge run for report rid. new_for (member, their comparison's hold) marks a new
-        run: if the engine is busy it would wait, so it must fit the member's queue."""
+        run: if the engine is busy it would wait, so it must fit the member's queue. ``more``: extra
+        games for a report that has some (Play more games), at the same table."""
         assert self.forge is not None
         level, source, of_deck, pair = bracket_parts(bracket)
         try:
@@ -693,7 +797,11 @@ class ReportService:
                 pair=pair,
                 parallel=self.forge_parallel,
                 shared=shared,
+                more={"opponents": more["opponents"], "choice": more["choice"]} if more else None,
             )
+            if more is not None and section.get("job_id"):
+                runs = [*more["keep"].get("earlier_runs", []), _run_record(section)]
+                section = {**section, **more["keep"], "earlier_runs": runs}
             if engine is not None and section.get("job_id"):
                 section.update(engine=engine, engine_copies=how_many)
         except ForgeError as exc:
@@ -715,6 +823,7 @@ class ReportService:
                         seed,
                         bracket,
                         shared=shared,
+                        more=more,
                         engine_busy=True,
                         busy_since=since,
                         retry_after=max(1, round(self.forge_interval)),
@@ -728,6 +837,10 @@ class ReportService:
         except Exception:  # an unexpected reply must not turn a stored report into a tool error
             logger.exception("starting a Forge run failed for %s", rid)
             section = {"state": "failed", "error": "Forge gave an unexpected answer."}
+        if more is not None and section.get("state") in ("failed", "skipped"):
+            # the extra games did not start: the report keeps its earlier games, with the reason
+            why = MORE_QUEUE_FULL if section.get("state") == "skipped" else section.get("error")
+            section = {**more["previous"], "more_note": str(why or "")}
         if not self._save_forge(rid, section):  # the report was deleted while the run started
             self._cancel_forge(section)
             return
@@ -765,6 +878,9 @@ class ReportService:
                 continue
             if isinstance(section, dict):
                 out.append((str(r["id"]), str(r["deck_name"] or ""), section))
+        # the runs going first, then the waiting ones in the order they joined the queue (extra games
+        # for an older report wait behind runs queued before them)
+        out.sort(key=lambda r: (_waiting(r[2]), _number_or_zero(r[2].get("queued_at")) * _waiting(r[2])))
         return out
 
     async def _start_waiting_runs(self) -> None:
@@ -797,6 +913,7 @@ class ReportService:
                     busy_since=section.get("busy_since") if section.get("engine_busy") else None,
                     shared=start.get("shared") if isinstance(start.get("shared"), dict) else None,
                     copies=copies,
+                    more=start.get("more") if isinstance(start.get("more"), dict) else None,
                 )
 
     def measured_game_seconds(self) -> float | None:
@@ -821,6 +938,8 @@ class ReportService:
         out = {k: v for k, v in section.items() if k not in NOT_SHOWN}
         out["games_done"] = _done_games(out)
         if out.get("state") in FINAL_STATES:
+            # how many games Play more games would add on the report page (0: it can't)
+            out["more_games"] = more_room(section, self.forge_games)[0] if self.forge is not None else 0
             return out
         runs = self._member_runs(sub)
         ids = [r[0] for r in runs]
@@ -1310,6 +1429,21 @@ PAIR_SETTING_UP = (
     "Another comparison of yours is still being set up, so nothing was started. Try again once it "
     "is set up and none of your reports is waiting for its games."
 )
+MORE_NO_FORGE = "Forge is not set up on this gateway, so no more games can be played."
+MORE_NOT_ENDED = "More games can be added once this report's Forge games have finished."
+MORE_NOT_THIS_ONE = (
+    "More games can't be added to this report: it has no Forge games to add to, or it was made "
+    "before this gateway kept what more games need. Run the report again."
+)
+MORE_FULL = (
+    f"This report already has {MAX_REPORT_FORGE_GAMES} Forge games, the most one report can hold. "
+    "Run the report again for a fresh set."
+)
+MORE_QUEUE_FULL = (
+    f"Your Forge queue has no room for more games now: each member can have at most {MAX_FORGE_WAITING} "
+    "reports waiting, and a comparison still being set up holds its places too. Nothing was started. "
+    f"Try again once fewer than {MAX_FORGE_WAITING} of your reports are waiting."
+)
 PAIR_SETTING_UP_SKIP = (
     "Another comparison of yours is still being set up and needs the rest of your Forge queue, so "
     "this report has no Forge games. Run the report again once that comparison is set up and fewer "
@@ -1439,6 +1573,35 @@ def _cards_or_none(text: str) -> list[Any]:
 def _shared_link(shared: dict[str, Any]) -> dict[str, str]:
     """Whose opponents a run seats (K6), as the report shows it."""
     return {k: shared[k] for k in ("report_id", "deck_name") if isinstance(shared.get(k), str)}
+
+
+def _number_or_zero(value: Any) -> float:
+    return float(value) if _number(value) else 0.0
+
+
+def _run_record(section: dict[str, Any]) -> dict[str, Any]:
+    """One Forge run of a report, for the record: its seed, whose seed it was, its games and the
+    Forge version that played them."""
+    return {
+        "seed": section.get("seed"),
+        "seed_source": section.get("seed_source"),
+        "games": section.get("games_requested"),
+        "forge_version": section.get("forge_version"),
+    }
+
+
+def more_room(section: Any, most: int) -> tuple[int, str | None]:
+    """(games, None) when Play more games can add ``games`` Forge games to a report with this
+    section (``most`` a press, the Forge games per report setting), else (0, why not)."""
+    if not isinstance(section, dict) or section.get("state") not in FINAL_STATES:
+        return 0, MORE_NOT_ENDED
+    played = section.get("played") if isinstance(section.get("played"), list) else []
+    if not played or not section.get("deck_text") or len(section.get("seats") or []) < 2:
+        return 0, MORE_NOT_THIS_ONE
+    room = min(most, MAX_REPORT_FORGE_GAMES - len(played))
+    if room <= 0:
+        return 0, MORE_FULL
+    return room, None
 
 
 def _waiting(section: dict[str, Any]) -> bool:

@@ -661,20 +661,26 @@ default, and an install that leaves it off behaves exactly as before.
   - Docker Compose: start the `forge` profile (`COMPOSE_PROFILES=forge`) and set
     `MTG_FORGE_URL=http://forge:8000`.
 - **Load:** Java starts only while Forge plays, capped by `FORGE_MEMORY_LIMIT` (default 1536M) and
-  `FORGE_CPUS` (default 2). `MTG_FORGE_GAMES` (default 10) sets the games per
-  report. An idle Forge service holds no Java memory.
-- **Games at once:** a run's games are cut into groups of at most five, the same way whatever the
-  setting, and each group starts from its own seed. The seed is kept with the report for the
+  `FORGE_CPUS` (default 2). `MTG_FORGE_GAMES` (default 4) sets the games per
+  report; **Play more games** on a finished report plays that many again against the same
+  opponents and adds them to the results (50 games a report at most). An idle Forge service holds
+  no Java memory.
+- **Games at once:** each game of a run is its own Java process with its own seed, so a run's games can
+  all play at once when Forge has room. The seed is kept with the report for the
   record: Forge does not always replay a game exactly, so compare runs by their win rates and
-  95% intervals, not game by game. `MTG_FORGE_PARALLEL_GAMES` (default 1, or
-  the admin Settings page) asks for that many groups at once, and `FORGE_MAX_PARALLEL` on the Forge
-  service (default 1) is the most it allows, for all runs together: runs start in order, and a run
+  95% intervals, not game by game. `MTG_FORGE_PARALLEL_GAMES` (default 4, or
+  the admin Settings page) is how many one report asks for at once, and `FORGE_MAX_PARALLEL` on the
+  Forge service is the most it allows, for all runs together: runs start in order, and a run
   that uses fewer lets the next one play beside it (with 2 or more, a Compare's second deck plays
-  beside the first when a place is still free for it). Each group is its own Java process with up to `FORGE_XMX` of memory. One four-player game has used up to about 930 MiB in the measurements so
-  far, and two at once about 1780 MiB (simple test decks on a PC; real precons on a Pi are not
-  measured yet). That is more than the default `FORGE_MEMORY_LIMIT` of 1536M, so raise
-  `FORGE_MEMORY_LIMIT` before raising `FORGE_MAX_PARALLEL` above 1. `FORGE_GAME_SECONDS`
-  (default 600) is how long one game may run before Forge calls it a draw; such games are counted as
+  beside the first when a place is still free for it). Left empty (the default), Forge works the
+  number out from its container: one game per 2 CPUs and per 1.2 GB of memory, 1 to 4, which is 1
+  inside the default limits; its log and `/health` (`max_parallel`, `max_parallel_from`) say which.
+  Each game takes up to `FORGE_XMX` of Java memory. Measured in CI with the
+  default limits (1536M, 2 CPUs, 15 games): one at a time peaked at about 770 MiB, two at once at about
+  1,230 to 1,290 MiB and finished 15 to 27% sooner, and three at once were stopped for memory. Raise
+  `FORGE_MEMORY_LIMIT` and `FORGE_CPUS`, or set `FORGE_MAX_PARALLEL`, to play more at once.
+  `FORGE_GAME_SECONDS` (default 240, four minutes) is how long one game may run before Forge calls
+  it a draw; such games are counted as
   draws in the report. Forge reads a card's rules only when a game needs that card, which roughly
   halves each Java start (measured 7 s to 3 s on a 4-CPU PC); `FORGE_LAZY_CARDS=0` makes it read
   them all at start again.
@@ -839,11 +845,11 @@ value. Leave it out to manage it on the page.
 | `MTG_LISTEN_HOST`, `MTG_LISTEN_PORT` | no | `0.0.0.0`, `8080` | Address and port inside the container. Leave them; the stack, Compose file and health checks expect 8080 |
 | `MTG_MYSTIC_FORGE_URL` | no, *stack* | empty (no research tools) | Internal Mystic Forge MCP URL; the stack sets `http://mtg-assistant-mysticforge:8000/mcp` |
 | `MTG_FORGE_URL` | no, *stack* | empty (Forge off) | Internal Forge runner URL; deck reports add real Forge games when set (see the Forge section above) |
-| `MTG_FORGE_GAMES` | no, *stack* | `10` | Forge games per deck report (1 to 50) |
+| `MTG_FORGE_GAMES` | no, *stack* | `4` | Forge games per deck report (1 to 50); **Play more games** adds this many again |
 | `FORGE_REPLICAS`, `FORGE_NODE` | no, *stack* | `0`, empty | Copies of the Forge service, and the node they run on. `0` leaves Forge off; `1` with `FORGE_NODE` is the usual setup. For copies on several machines, place them by a node label instead of `FORGE_NODE` (see "More than one machine" in the Forge section above) |
 | *(node label)* `mtg-forge=true` | no | none | Only for Forge copies on several machines: label each machine (`docker node update --label-add mtg-forge=true <node>`) and place the Forge service by `node.labels.mtg-forge == true` instead of `FORGE_NODE` (see "More than one machine" in the Forge section above) |
-| `MTG_FORGE_PARALLEL_GAMES` | no | `1` | How many groups of a report's Forge games (up to five games each) Forge plays at once (1 to 4). `FORGE_MAX_PARALLEL` caps it for all runs together. Also on the Settings page |
-| `FORGE_MAX_PARALLEL` | no, *stack* | `1` | On the Forge service: the most groups of games Forge plays at once, for all runs together (1 to 4). Each group needs up to `FORGE_XMX` of memory, so raise `FORGE_MEMORY_LIMIT` before raising this above 1 (see the Forge section above) |
+| `MTG_FORGE_PARALLEL_GAMES` | no | `4` | How many of a report's Forge games it asks Forge to play at once (1 to 4). `FORGE_MAX_PARALLEL` caps it for all runs together. Also on the Settings page |
+| `FORGE_MAX_PARALLEL` | no, *stack* | empty | On the Forge service: the most games Forge plays at once, for all runs together (1 to 4). Empty: one per 2 CPUs and 1.2 GB of the container's limits (see the Forge section above) |
 | `MTG_WRITES_ENABLED` | no, *stack* | `false` | `true` lets approved proposals be applied to Archidekt |
 | `MTG_APPROVAL_MODE_DEFAULT` | no, *stack* | `manual` | The approval mode of a member who has not chosen one on their Account page: `manual` (every change waits for their own press), `semi` (the assistant applies low-risk changes itself, such as a small edit or a private copy of a deck) or `auto` (the assistant applies most changes itself; some still wait for the member). Members pick their own; see [OPERATIONS.md](OPERATIONS.md#approval-modes-when-the-assistant-may-apply-by-itself) |
 | `MTG_APPROVAL_MODE_MAX` | no, *stack* | `auto` | The highest mode members may choose; `auto` means no cap. A stored choice above the cap is read as the cap |

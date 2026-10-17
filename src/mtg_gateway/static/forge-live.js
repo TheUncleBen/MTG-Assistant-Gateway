@@ -48,15 +48,20 @@
     patch(shown, Array.prototype.slice.call(doc.body.firstChild.childNodes));
   }
 
-  // Once the run has ended, the Markdown copy (built from the whole report) is read from the page.
+  // Once the run has ended, the Markdown copy (built from the whole report) and the Play more games
+  // button under the card are read from the page.
   function refreshMarkdown() {
     var area = document.getElementById("rep-md");
-    if (!area) return;
+    var more = document.getElementById("forge-more");
+    if (!area && !more) return;
     fetch(location.href, { credentials: "same-origin", cache: "no-store" })
       .then(function (r) { if (!r.ok) throw new Error(String(r.status)); return r.text(); })
       .then(function (html) {
-        var md = new DOMParser().parseFromString(html, "text/html").getElementById("rep-md");
-        if (md) area.value = md.value;
+        var doc = new DOMParser().parseFromString(html, "text/html");
+        var md = doc.getElementById("rep-md");
+        if (area && md) area.value = md.value;
+        var button = doc.getElementById("forge-more");
+        if (more && button) more.replaceWith(document.importNode(button, true));
       })
       .catch(function () { /* the copy keeps the earlier text */ });
   }

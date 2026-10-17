@@ -27,7 +27,8 @@ unchanged.
   - Phones get a stacked layout.
 - **Live Forge card:** while the games play, the report page asks a small status route (`GET /api/v1/reports/{rid}/forge`) instead of reloading the page.
 - `options.forge_seed`: the Forge games' own seed.
-- `MTG_FORGE_PARALLEL_GAMES` (also on the admin Settings page, default 1): how many groups of a run's games (up to five games each) Forge plays at once. `FORGE_MAX_PARALLEL` (Forge service, default 1): the most groups Forge plays at once for all runs together; with 2 or more, a Compare's two decks can play at the same time when Forge has room for two runs.
+- **Play more games** on a report whose Forge games have finished: plays more games against the same opponents and adds them to the results, so the win rates and their 95% intervals count every game (up to 50 games a report). The button is on the report page; assistants see the added games in the report.
+- `MTG_FORGE_PARALLEL_GAMES` (also on the admin Settings page, default 4): how many of a report's Forge games it asks Forge to play at once. `FORGE_MAX_PARALLEL` (Forge service): the most games Forge plays at once for all runs together; left empty (the default), Forge works it out from its container's CPUs and memory, which is 1 inside the default limits. With 2 or more, a Compare's two decks can play at the same time when Forge has room for two runs.
 - **Forge on more than one machine** (optional): the gateway can use several copies of the Forge service, for example on a Pi and a PC. Each run plays on one copy, the one with the most free places, and stays there. One copy is still the usual setup. So far this is tested only with a stand-in, not on real machines.
 - `scripts/measure_recognition.py` and a one-off CI step: for the precons and test decks, the share of cards played with their effect and the share known (played with their effect or left out on purpose).
 - The Goldfish page has the card size switch too, and its cards follow it.
@@ -44,8 +45,10 @@ unchanged.
 - **Played without their effect:**
   - Reports call the simulator's "unrecognized" cards "Played without their effect" (not "Not recognized"), count copies, and offer "Copy a request for your assistant".
 - **Forge runs:**
-  - A run's games are cut into groups of at most five, each with its own seed. The seed is kept for the record only: every report with Forge games and a recorded seed says Forge does not always replay the same games from the same seed, so compare runs by their win rates and 95% intervals.
-- **Forge speed:** each Forge game's result shows on the report within a few seconds of the game ending. Forge reads a card's rules only when a game needs that card, so each group of games starts faster. A Compare's two decks play at the same time when Forge has room for two runs.
+  - Each game of a run has its own seed, and a run's games play at once as far as Forge has room. The seed is kept for the record only: every report with Forge games and a recorded seed says Forge does not always replay the same games from the same seed, so compare runs by their win rates and 95% intervals.
+  - A report plays 4 Forge games by default (`MTG_FORGE_GAMES`, was 10); **Play more games** adds more.
+  - A game still going after four minutes stops and counts as a draw (`FORGE_GAME_SECONDS`, default 240, was 600).
+- **Forge speed:** each Forge game's result shows on the report within a few seconds of the game ending. Forge reads a card's rules only when a game needs that card, so each game starts faster. A Compare's two decks play at the same time when Forge has room for two runs.
 - **Forge image:** 2.0.15-mag3. Build pins are by digest (Dockerfile frontend and base, buildkit, binfmt).
 - **Report wording:** "Out of scope" reads "Left out on purpose", and "Modeled but never mattered" reads "Played with their effect but never mattered". The report adds a second coverage figure, the cards known to the solo test (played with their effect or left out on purpose).
 

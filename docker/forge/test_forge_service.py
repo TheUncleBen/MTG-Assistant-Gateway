@@ -100,16 +100,64 @@ class Output(unittest.TestCase):
         )
 
 
+class Places(unittest.TestCase):
+    def test_places_follow_the_machine(self):
+        gib = 2**30
+        self.assertEqual(fs.places_for(2, 1536 * 2**20), 1)  # the stack's default limits
+        self.assertEqual(fs.places_for(4, 8 * gib), 2)  # a Pi 4 or 5 with 8 GB, no limits
+        self.assertEqual(fs.places_for(4, 2 * gib), 1)  # memory decides
+        self.assertEqual(fs.places_for(16, 64 * gib), 4)  # never more than 4
+        self.assertEqual(fs.places_for(1, 16 * gib), 1)  # never fewer than 1
+        self.assertEqual(fs.places_for(8, None), 1)  # memory unknown: one at a time
+
+    def test_the_setting_wins_over_the_machine(self):
+        self.assertEqual(fs.max_parallel("3"), (3, "FORGE_MAX_PARALLEL"))
+        self.assertEqual(fs.max_parallel("9"), (4, "FORGE_MAX_PARALLEL"))
+        self.assertEqual(fs.max_parallel("0"), (1, "FORGE_MAX_PARALLEL"))
+        places, source = fs.max_parallel("")
+        self.assertEqual(source, "machine")
+        self.assertTrue(1 <= places <= 4)
+        self.assertEqual(fs.max_parallel(None)[1], "machine")
+
+    def test_the_container_limits_are_read(self):
+        reads = {
+            "/sys/fs/cgroup/cpu.max": "200000 100000",
+            "/sys/fs/cgroup/memory.max": str(1536 * 2**20),
+        }
+        saved, fs._read = fs._read, lambda path: reads.get(path, "")
+        try:
+            self.assertEqual(fs.machine_cpus(), 2.0)
+            self.assertEqual(fs.machine_memory(), 1536 * 2**20)
+            reads["/sys/fs/cgroup/cpu.max"] = "max 100000"  # no CPU limit: the machine's count
+            self.assertEqual(fs.machine_cpus(), float(os.cpu_count() or 1))
+            reads["/sys/fs/cgroup/memory.max"] = "max"
+            reads["/proc/meminfo"] = "MemTotal:        8000000 kB\nMemFree: 1 kB"
+            self.assertEqual(fs.machine_memory(), 8000000 * 1024)
+        finally:
+            fs._read = saved
+
+
 class Slices(unittest.TestCase):
-    def test_cut_by_the_number_of_games_only(self):
+    def test_one_game_per_group(self):
+        self.assertEqual(fs.SLICE_GAMES, 1)
         self.assertEqual(fs.slices(1), [1])
-        self.assertEqual(fs.slices(5), [5])
-        self.assertEqual(fs.slices(7), [4, 3])
-        self.assertEqual(fs.slices(10), [5, 5])
-        self.assertEqual(fs.slices(12), [4, 4, 4])
-        self.assertEqual(fs.slices(50), [5] * 10)
+        self.assertEqual(fs.slices(4), [1, 1, 1, 1])
         for games in range(1, fs.MAX_GAMES + 1):
-            self.assertEqual(sum(fs.slices(games)), games)
+            self.assertEqual(fs.slices(games), [1] * games)
+
+    def test_cut_by_the_number_of_games_only(self):
+        saved, fs.SLICE_GAMES = fs.SLICE_GAMES, 5
+        try:
+            self.assertEqual(fs.slices(1), [1])
+            self.assertEqual(fs.slices(5), [5])
+            self.assertEqual(fs.slices(7), [4, 3])
+            self.assertEqual(fs.slices(10), [5, 5])
+            self.assertEqual(fs.slices(12), [4, 4, 4])
+            self.assertEqual(fs.slices(50), [5] * 10)
+            for games in range(1, fs.MAX_GAMES + 1):
+                self.assertEqual(sum(fs.slices(games)), games)
+        finally:
+            fs.SLICE_GAMES = saved
 
     def test_seeds(self):
         self.assertEqual(fs.slice_seed(42, 0), 42)  # one slice plays exactly as before slices
@@ -161,9 +209,15 @@ class Run(unittest.TestCase):
         self.old = {k: os.environ.get(k) for k in [*self.env, "FAKE_SLOW"]}
         os.environ.update(self.env)
         self.home, fs.FORGE_HOME = fs.FORGE_HOME, self.tmp / "forge"
+        # one place unless a test sets more (the default follows the test machine), and groups of
+        # up to 5 games so these tests see how a job's games are cut and played in several groups
+        fs.MAX_PARALLEL = 1
+        fs.FREE_PLACES[:] = [0]
+        self.slice_games, fs.SLICE_GAMES = fs.SLICE_GAMES, 5
 
     def tearDown(self):
         fs.FORGE_HOME = self.home
+        fs.SLICE_GAMES = self.slice_games
         fs.MAX_PARALLEL = 1
         fs.FREE_PLACES[:] = [0]
         for k, v in self.old.items():
@@ -177,6 +231,17 @@ class Run(unittest.TestCase):
         job = fs.Job([deck, deck], games, "Commander", seed, parallel)
         fs.run_job(job)
         return job
+
+    def test_with_one_game_per_group_every_game_can_play_at_once(self):
+        fs.SLICE_GAMES = 1
+        fs.MAX_PARALLEL = 4
+        fs.FREE_PLACES[:] = [0, 1, 2, 3]
+        job = self.run_job(4, parallel=4)
+        view = job.view()
+        self.assertEqual(view["state"], "done")
+        self.assertEqual([s["games"] for s in view["slices"]], [1, 1, 1, 1])
+        self.assertEqual(view["parallel"], 4)
+        self.assertEqual(sorted(r["game"] for r in view["results"]), [1, 2, 3, 4])
 
     def test_same_seed_same_games_at_any_parallel_setting(self):
         one = self.run_job(12).view()

@@ -1,0 +1,204 @@
+"""Play more games (Q146 item 10): another round of Forge games for a report whose games have
+ended, at the same table, added to its earlier games; refused with a reason when it can't start."""
+
+from __future__ import annotations
+
+import asyncio
+import json
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+from mtg_gateway import reports as reports_module
+from mtg_gateway.db import Database
+from mtg_gateway.decks import DeckError
+from mtg_gateway.report_view import forge_html, more_games_html
+from mtg_gateway.reports import (
+    MAX_REPORT_FORGE_GAMES,
+    MORE_FULL,
+    MORE_NO_FORGE,
+    MORE_NOT_ENDED,
+    MORE_NOT_THIS_ONE,
+    MORE_QUEUE_FULL,
+    ReportService,
+    more_room,
+)
+
+from .test_forge import FakeForge, _Decks
+
+
+def _service(tmp_path: Path, fake: FakeForge | None) -> tuple[Database, ReportService]:
+    db = Database(tmp_path / "t.sqlite")
+    db.upsert_user("alice", email=None, name=None, preferred_username=None, groups=[])
+    reports = ReportService(db, _Decks(), None, forge=fake.client() if fake else None, forge_games=4)  # type: ignore[arg-type]
+    reports.forge_interval = 0.05
+    return db, reports
+
+
+async def _until(check: Any) -> None:
+    for _ in range(300):
+        if check():
+            return
+        await asyncio.sleep(0.02)
+    raise AssertionError("never happened")
+
+
+async def _finished_report(reports: ReportService, fake: FakeForge, winners: list[int], seed: int = 7) -> str:
+    out = await reports.run("alice", "42", games=300, options={"seed": seed})
+    fake.finish(out["forge"]["job_id"], winners)
+    rid = out["report_id"]
+    await _until(lambda: reports.get("alice", rid)["forge"]["state"] == "done")
+    return rid
+
+
+async def test_more_games_play_the_same_table_and_count_with_the_earlier_ones(tmp_path: Path) -> None:
+    fake = FakeForge()
+    db, reports = _service(tmp_path, fake)
+    rid = await _finished_report(reports, fake, [1, 2, 1, 1])
+    done = reports.get("alice", rid)["forge"]
+    assert done["more_games"] == 4
+    assert not {"deck_text", "played", "earlier", "previous"} & done.keys()  # kept inside
+    first = fake.started[0]
+    after = await reports.play_more("alice", rid)
+    assert len(fake.started) == 2
+    again = fake.started[1]
+    assert again["games"] == 4 and again["decks"] == first["decks"]  # same deck, same opponents
+    assert again["seed"] != 7  # a fresh seed, so these are new games
+    # while they play, the report still shows the earlier games
+    playing = after["forge"]
+    assert playing["state"] == "running" and playing["result"]["games"] == 4
+    assert playing["games_requested"] == 8 and playing["seats"] == done["seats"]
+    fake.finish(playing["job_id"], [2, 2, 3, 1])
+    await _until(lambda: reports.get("alice", rid)["forge"]["state"] == "done")
+    final = reports.get("alice", rid)["forge"]
+    result = final["result"]
+    assert result["games"] == 8 and result["games_requested"] == 8
+    assert [s["wins"] for s in result["seats"]] == [4, 3, 1, 0]
+    assert result["seats"][0]["win_rate"] == 0.5
+    assert [r["seed"] for r in final["earlier_runs"]] == [7, playing["seed"]]
+    assert [r["games"] for r in final["earlier_runs"]] == [4, 4]
+    stored = json.loads(db._one("SELECT forge_json FROM reports WHERE id = ?", (rid,))["forge_json"])
+    assert [g["game"] for g in stored["played"]] == list(range(1, 9))  # numbered after the earlier ones
+    assert final["more_games"] == 4
+    audit = db._one("SELECT detail_json FROM audit_log WHERE event = 'report_more_games'", ())
+    assert json.loads(audit["detail_json"]) == {"report_id": rid, "games": 4}
+
+
+async def test_more_games_wait_behind_the_members_running_run(tmp_path: Path) -> None:
+    fake = FakeForge()
+    _, reports = _service(tmp_path, fake)
+    rid = await _finished_report(reports, fake, [1, 1, 1, 1])
+    other = await reports.run("alice", "43", games=300, options={"seed": 2})
+    assert other["forge"]["state"] == "running" and len(fake.started) == 2
+    waiting = (await reports.play_more("alice", rid))["forge"]
+    assert waiting["state"] == "queued" and waiting["position"] == 1
+    assert waiting["result"]["games"] == 4  # the earlier games stay on show
+    assert len(fake.started) == 2
+    fake.finish(other["forge"]["job_id"], [1])
+    await _until(lambda: len(fake.started) == 3)
+    assert fake.started[2]["decks"] == fake.started[0]["decks"] and fake.started[2]["games"] == 4
+    assert reports.get("alice", rid)["forge"]["state"] == "running"
+    reports._forge_task.cancel()
+
+
+async def test_a_full_queue_starts_nothing_and_keeps_the_report(tmp_path: Path) -> None:
+    fake = FakeForge()
+    db, reports = _service(tmp_path, fake)
+    rid = await _finished_report(reports, fake, [1, 2, 3, 4])
+    before = db._one("SELECT forge_json FROM reports WHERE id = ?", (rid,))["forge_json"]
+    await reports.run("alice", "43", games=300, options={"seed": 1})  # plays
+    await reports.run("alice", "42", games=300, options={"seed": 2})  # waits
+    await reports.run("alice", "42", games=300, options={"seed": 3})  # waits
+    started = len(fake.started)
+    with pytest.raises(DeckError) as refused:
+        await reports.play_more("alice", rid)
+    assert str(refused.value) == MORE_QUEUE_FULL and len(fake.started) == started
+    assert db._one("SELECT forge_json FROM reports WHERE id = ?", (rid,))["forge_json"] == before
+    reports._forge_task.cancel()
+
+
+async def test_refusals_say_why(tmp_path: Path) -> None:
+    fake = FakeForge()
+    db, reports = _service(tmp_path, fake)
+    running = await reports.run("alice", "42", games=300, options={"seed": 1})
+    with pytest.raises(DeckError, match=MORE_NOT_ENDED):
+        await reports.play_more("alice", running["report_id"])
+    with pytest.raises(DeckError) as missing:
+        await reports.play_more("alice", "nope")
+    assert missing.value.kind == "not_found"
+    with pytest.raises(DeckError) as theirs:  # someone else's report
+        await reports.play_more("bob", running["report_id"])
+    assert theirs.value.kind == "not_found"
+    # a report from before the gateway kept the deck it played: nothing to add to
+    old = {"state": "done", "seats": ["Liesa", "A", "B", "C"], "result": {"games": 4}}
+    with db.tx() as c:
+        c.execute("UPDATE reports SET forge_json = ? WHERE id = ?", (json.dumps(old), running["report_id"]))
+    with pytest.raises(DeckError, match=MORE_NOT_THIS_ONE):
+        await reports.play_more("alice", running["report_id"])
+    assert reports.get("alice", running["report_id"])["forge"]["more_games"] == 0
+    _, plain = _service(tmp_path / "plain", None)
+    with pytest.raises(DeckError, match=MORE_NO_FORGE):
+        await plain.play_more("alice", running["report_id"])
+    reports._forge_task.cancel()
+
+
+def test_more_room_caps_a_report_at_its_most_games() -> None:
+    def section(n: int, state: str = "done") -> dict[str, Any]:
+        played = [{"game": i + 1, "winner": 1} for i in range(n)]
+        return {"state": state, "played": played, "deck_text": "1 X", "seats": ["X", "Y"]}
+
+    assert more_room(section(4), 4) == (4, None)
+    assert more_room(section(MAX_REPORT_FORGE_GAMES - 2), 4) == (2, None)
+    assert more_room(section(MAX_REPORT_FORGE_GAMES), 4) == (0, MORE_FULL)
+    assert more_room(section(4, "running"), 4) == (0, MORE_NOT_ENDED)
+    assert more_room(section(4, "failed"), 4) == (4, None)  # the games it did play count
+    assert more_room(section(0), 4) == (0, MORE_NOT_THIS_ONE)
+    assert more_room(None, 4) == (0, MORE_NOT_ENDED)
+
+
+async def test_opponents_gone_from_forge_keep_the_earlier_games(tmp_path: Path) -> None:
+    fake = FakeForge()
+    _, reports = _service(tmp_path, fake)
+    rid = await _finished_report(reports, fake, [1, 1, 2, 2])
+    fake.brackets = {"Another Precon": 3, "Precon 1": 3}  # Precon 2 and 3 left this Forge
+    after = (await reports.play_more("alice", rid))["forge"]
+    assert len(fake.started) == 1
+    assert after["state"] == "done" and after["result"]["games"] == 4
+    assert after["more_note"] == (
+        "Some of this report's opponents are no longer in this Forge (Precon 2, Precon 3), so more games "
+        "can't be played at the same table. Run the report again."
+    )
+    html = forge_html(after)
+    assert "The extra games did not start. Some of this report&#x27;s opponents" in html
+    # pressing again once they are back clears the note
+    fake.brackets = None
+    again = (await reports.play_more("alice", rid))["forge"]
+    assert again["state"] == "running" and "more_note" not in again
+    reports._forge_task.cancel()
+
+
+async def test_an_engine_failure_keeps_the_earlier_games(tmp_path: Path, monkeypatch: Any) -> None:
+    fake = FakeForge()
+    _, reports = _service(tmp_path, fake)
+    rid = await _finished_report(reports, fake, [1, 1, 2, 2])
+
+    async def failed(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        return {"state": "failed", "error": "Forge gave an unexpected answer."}
+
+    monkeypatch.setattr(reports_module, "start_run", failed)
+    after = (await reports.play_more("alice", rid))["forge"]
+    assert after["state"] == "done" and after["result"]["games"] == 4
+    assert after["more_note"] == "Forge gave an unexpected answer." and after["more_games"] == 4
+
+
+def test_the_button_shows_only_when_more_games_can_be_added() -> None:
+    assert (
+        more_games_html({"state": "done", "more_games": 0}, "tok", "rep_1") == "<div id='forge-more'></div>"
+    )
+    assert more_games_html(None, "tok", "rep_1") == "<div id='forge-more'></div>"
+    html = more_games_html({"state": "done", "more_games": 4}, "tok", "rep_1")
+    assert "action='/history/reports/rep_1/forge/more'" in html and "value='tok'" in html
+    assert "Play more games</button>" in html
+    assert "Plays 4 more Forge games against the same opponents" in html
+    assert "Plays 1 more Forge game against" in more_games_html({"more_games": 1}, "tok", "rep_1")

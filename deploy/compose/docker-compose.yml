@@ -252,9 +252,10 @@ services:
     environment:
       FORGE_XMX: ${FORGE_XMX:-1g}
       FORGE_MAX_GAMES: ${FORGE_MAX_GAMES:-50}
-      FORGE_GAME_SECONDS: ${FORGE_GAME_SECONDS:-600}
-      # Forge games played at once at most; each needs up to FORGE_XMX inside FORGE_MEMORY_LIMIT
-      FORGE_MAX_PARALLEL: ${FORGE_MAX_PARALLEL:-1}
+      FORGE_GAME_SECONDS: ${FORGE_GAME_SECONDS:-240}
+      # Forge games played at once at most (1 to 4); empty: as many as the container's CPUs and
+      # memory fit (about 2 CPUs and 1.2 GB a game), so 1 inside the default limits
+      FORGE_MAX_PARALLEL: ${FORGE_MAX_PARALLEL:-}
       PUID: ${PUID:-1000}
       PGID: ${PGID:-1000}
       TZ: ${TIMEZONE:-UTC}
