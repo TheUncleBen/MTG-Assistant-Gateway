@@ -629,7 +629,9 @@ default, and an install that leaves it off behaves exactly as before.
   measured yet). That is more than the default `FORGE_MEMORY_LIMIT` of 1536M, so raise
   `FORGE_MEMORY_LIMIT` before raising `FORGE_MAX_PARALLEL` above 1. `FORGE_GAME_SECONDS`
   (default 600) is how long one game may run before Forge calls it a draw; such games are counted as
-  draws in the report.
+  draws in the report. Forge reads a card's rules only when a game needs that card, which roughly
+  halves each Java start (measured 7 s to 3 s on a 4-CPU PC); `FORGE_LAZY_CARDS=0` makes it read
+  them all at start again.
 - **No upkeep:** the image carries Forge's card scripts, an index of Scryfall's alternative printed
   names, and the newest Commander precons as opponents, each with a bracket estimated from the game
   changers it holds (Scryfall's list, read once when CI builds the image). The gateway seats the

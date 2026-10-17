@@ -58,6 +58,10 @@ JOB_TIMEOUT = int(os.environ.get("FORGE_JOB_TIMEOUT", "7200"))
 # Forge's sim calls a game a draw after this many seconds (its -c flag; Forge's own default is 120,
 # too short for a four-player Commander game on a Raspberry Pi).
 GAME_SECONDS = int(os.environ.get("FORGE_GAME_SECONDS", "600"))
+# Forge reads each card's script only when a game needs it (its own LOAD_CARD_SCRIPTS_LAZILY
+# preference) instead of all ~35,000 at start-up: measured 7 s -> 3 s per Forge start on 4 CPUs,
+# with the same seeded game. FORGE_LAZY_CARDS=0 loads them all again.
+LAZY_CARDS = os.environ.get("FORGE_LAZY_CARDS", "1") != "0"
 KEEP_SECONDS = int(os.environ.get("FORGE_KEEP_SECONDS", str(48 * 3600)))
 FORMATS = {"Commander", "Constructed"}
 MAX_DECKS = 4
@@ -246,10 +250,25 @@ def parse_result(line: str) -> dict[str, Any] | None:
     return out
 
 
+def place_home(slot: int) -> Path:
+    """Forge's home for parallel place ``slot``, where it reads its preferences and writes its log:
+    the container's HOME for the first place, a folder of its own below it for each other one."""
+    base = Path(os.environ.get("HOME", "/data"))
+    home = base / f"slot-{slot}" if slot else base
+    prefs = home / ".forge" / "preferences" / "forge.preferences"
+    prefs.parent.mkdir(parents=True, exist_ok=True)
+    old = prefs.read_text("utf-8").splitlines() if prefs.exists() else []
+    # Only the one line is set; any other preference already in the file stays as it is.
+    lines = [ln for ln in old if not ln.startswith("LOAD_CARD_SCRIPTS_LAZILY=")]
+    lines.append(f"LOAD_CARD_SCRIPTS_LAZILY={'true' if LAZY_CARDS else 'false'}")
+    if lines != old:
+        prefs.write_text("\n".join(lines) + "\n", "utf-8")
+    return home
+
+
 def run_slice(job: Job, index: int, work: Path, names: list[str], slot: int) -> int | None:
     """Play slice ``index`` in its own Forge process and add its games to the job, numbered after the
-    slices before it. ``slot`` is which of the job's parallel places it uses: the first keeps the
-    container's HOME (Forge writes its preferences and logs there), the others get their own."""
+    slices before it. ``slot`` is which parallel place it uses, each with its own home (place_home)."""
     offset = sum(job.slices[:index])
     seed = slice_seed(job.seed, index)
     cmd = [
@@ -259,6 +278,9 @@ def run_slice(job: Job, index: int, work: Path, names: list[str], slot: int) -> 
         "java",
         f"-Xmx{XMX}",
         "-Djava.awt.headless=true",
+        # Java takes its home from the user account, never from $HOME, so without this every
+        # place shared one preferences and log folder.
+        f"-Duser.home={place_home(slot)}",
         "-jar",
         str(forge_jar()),
         "sim",
@@ -275,11 +297,6 @@ def run_slice(job: Job, index: int, work: Path, names: list[str], slot: int) -> 
         *(["-s", str(seed)] if seed is not None else []),
         "-q",
     ]
-    env = None
-    if slot:
-        home = Path(os.environ.get("HOME", "/data")) / f"slot-{slot}"
-        home.mkdir(parents=True, exist_ok=True)
-        env = {**os.environ, "HOME": str(home)}
     with job.lock:
         if job.cancelled or job.timed_out:
             job.slice_state[index] = "cancelled"
@@ -287,7 +304,6 @@ def run_slice(job: Job, index: int, work: Path, names: list[str], slot: int) -> 
         proc = subprocess.Popen(
             cmd,
             cwd=FORGE_HOME,
-            env=env,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
