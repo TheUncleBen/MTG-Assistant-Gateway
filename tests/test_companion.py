@@ -357,7 +357,7 @@ async def test_compare_press_starts_or_queues_both_decks_or_neither(stack: Stack
         full = await b.http.post("/decks/42/compare/forge", data={"csrf": csrf, "with": "43"})
         assert full.status_code == 409, full.text
         assert (
-            "You already have 1 Forge run playing and 1 report waiting for its games. Comparing two "
+            "You already have 1 Forge run going and 1 report waiting for its games. Comparing two "
             "decks needs room for 2 more, and each member can have at most 2 reports waiting, so "
             "nothing was started. Try again when none of your reports is waiting for its games."
         ) in html.unescape(full.text)
@@ -366,7 +366,7 @@ async def test_compare_press_starts_or_queues_both_decks_or_neither(stack: Stack
         await reports.run(sub, "42", simulate=False, forge=True, options={"seed": 3})  # 2 waiting
         fuller = await b.http.post("/decks/42/compare/forge", data={"csrf": csrf, "with": "43"})
         assert fuller.status_code == 409 and (
-            "You already have 1 Forge run playing and 2 reports waiting for their games."
+            "You already have 1 Forge run going and 2 reports waiting for their games."
             in html.unescape(fuller.text)
         ), fuller.text
         assert states() == ["running", "queued", "queued"]

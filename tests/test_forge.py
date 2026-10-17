@@ -320,7 +320,12 @@ async def test_a_second_report_queues_behind_the_running_forge_run(tmp_path: Pat
     assert (
         third["forge"]["position"] == 2 and third["forge"]["waiting_for"]["report_id"] == second["report_id"]
     )
-    assert fourth["forge"]["state"] == "skipped" and "2 reports waiting" in fourth["forge"]["error"]
+    assert fourth["forge"]["state"] == "skipped"
+    assert fourth["forge"]["error"] == (
+        "You already have 2 reports waiting for Forge, and each member can have at most 2 waiting, so "
+        "this report has no Forge games. Run the report again once fewer than 2 of your reports are "
+        "waiting."
+    )
     status = reports.forge_only("alice", second["report_id"])["forge_status"]
     assert status == {
         "state": "queued",
@@ -752,6 +757,50 @@ class _BusyForge(FakeForge):
             self.refused += 1
             return httpx.Response(429, json={"error": "simulation queue is full; try again later"})
         return super().handler(request)
+
+
+async def test_a_report_made_while_forge_is_busy_never_splits_a_comparison(tmp_path: Path) -> None:
+    """Review L9: a report made while the member had nothing unfinished went straight to Forge; with
+    Forge's own queue full it became a waiting run without counting a Compare press's held places,
+    so the press's second deck lost its Forge games. A run that would wait on a busy Forge now
+    counts them first, and is skipped instead when the comparison needs the room."""
+    db = Database(tmp_path / "t.sqlite")
+    db.upsert_user("alice", email=None, name=None, preferred_username=None, groups=[])
+    fake = _BusyForge()
+    fake.brackets = dict(BRACKETED)
+    reports = ReportService(db, _Decks(), None, forge=fake.client(), forge_games=4)  # type: ignore[arg-type]
+    reports.forge_interval = 3600  # no retry while the press runs
+
+    def states() -> list[str]:
+        rows = db._conn.execute("SELECT forge_json FROM reports ORDER BY rowid").fetchall()
+        return [json.loads(r["forge_json"])["state"] for r in rows]
+
+    hold, full = reports.reserve_pair("alice")  # the press holds its 2 places, then reads the decks
+    assert hold is not None and full is None
+    other = await reports.pair_deck("alice", "43")
+    solo = await reports.run("alice", "44", simulate=False, forge=True, options={"seed": 7})
+    assert solo["forge"]["state"] == "skipped", solo["forge"]
+    assert solo["forge"]["error"] == reports_module.PAIR_SETTING_UP_SKIP
+    first = await reports.run("alice", "42", simulate=False, forge=True, pair_with=other, pair_hold=hold)
+    second = await reports.run(
+        "alice",
+        "43",
+        simulate=False,
+        forge=True,
+        deck=other,
+        same_opponents_as=first["report_id"],
+        pair_hold=hold,
+    )
+    reports.release_pair("alice", hold)
+    assert first["forge"]["state"] == "queued" and first["forge"]["engine_busy"] is True
+    assert second["forge"]["state"] == "queued", second["forge"]  # both decks wait: no split
+    assert states() == ["skipped", "queued", "queued"]
+    # with no comparison holding places, a busy Forge still lets the report wait its turn
+    db._conn.execute("DELETE FROM reports")
+    alone = await reports.run("alice", "44", simulate=False, forge=True, options={"seed": 8})
+    assert alone["forge"]["state"] == "queued" and alone["forge"]["engine_busy"] is True
+    if reports._forge_task:
+        reports._forge_task.cancel()
 
 
 async def test_an_engine_busy_run_waits_and_is_retried(tmp_path: Path) -> None:
