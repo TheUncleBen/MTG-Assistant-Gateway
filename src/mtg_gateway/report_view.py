@@ -826,14 +826,25 @@ def more_games_html(f: Any, csrf: str, report_id: str) -> str:
     if not (isinstance(games, int) and games > 0 and csrf and report_id):
         return "<div id='forge-more'></div>"
     word = "game" if games == 1 else "games"
+    other = f.get("more_with")
+    if isinstance(other, str) and other:  # a comparison: both decks get as many
+        line = (
+            f"Plays {games} more Forge {word} for this deck and {games} for {_esc(other)}, the other deck "
+            "of this comparison, against the same opponents, so the two stay even. Each report's win "
+            "rates and their 95% intervals then count every game."
+        )
+    else:
+        line = (
+            f"Plays {games} more Forge {word} against the same opponents and adds them to the results "
+            "above, so the win rates and their 95% intervals count every game."
+        )
     return (
         "<div id='forge-more' class='card more-games'>"
         f"<form method='post' action='/history/reports/{_esc(report_id)}/forge/more'>"
         f"<input type='hidden' name='csrf' value='{_esc(csrf)}'>"
         f"<button type='submit' class='btn'>{icon('play')} Play more games</button>"
         "</form>"
-        f"<p class='muted small'>Plays {games} more Forge {word} against the same opponents and adds them "
-        "to the results above, so the win rates and their 95% intervals count every game.</p>"
+        f"<p class='muted small'>{line}</p>"
         "</div>"
     )
 

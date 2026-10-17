@@ -663,7 +663,8 @@ default, and an install that leaves it off behaves exactly as before.
 - **Load:** Java starts only while Forge plays, capped by `FORGE_MEMORY_LIMIT` (default 1536M) and
   `FORGE_CPUS` (default 2). `MTG_FORGE_GAMES` (default 4) sets the games per
   report; **Play more games** on a finished report plays that many again against the same
-  opponents and adds them to the results (50 games a report at most). An idle Forge service holds
+  opponents and adds them to the results (50 games a report at most; on a comparison, the same
+  number to both decks). An idle Forge service holds
   no Java memory.
 - **Games at once:** each game of a run is its own Java process with its own seed, so a run's games can
   all play at once when Forge has room. The seed is kept with the report for the
