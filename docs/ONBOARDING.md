@@ -71,16 +71,16 @@ https://mtg.example.com/mcp
 - **ChatGPT** (web only). Turn on **Developer mode** in Settings, create an
   app with the URL and OAuth sign-in, then connect, press **Approve and sign
   in** on the gateway's page if it returns to `chatgpt.com`, and sign in. Heads up:
-  these steps are only partly verified, OpenAI says custom connectors
+  these steps are only partly tested, OpenAI says custom connectors
   **don't work in the ChatGPT iOS and Android apps** ("No - web only"), the
   desktop app is unconfirmed, and on Pro (maybe Plus too) ChatGPT only allows
   read and fetch tools. If you're mostly on your phone, use Claude.
 
-Full step-by-step, error messages and what's been verified are in
+Full step-by-step, error messages and what's been tested are in
 [CONNECT.md](CONNECT.md).
 
 **Check it worked:** in a new chat, turn the connector on and ask "Use the
-MTG Assistant Gateway to call whoami." You should see your own name.
+MTG Assistant Gateway: who am I signed in as?" You should see your own name.
 
 ## 3. Link your Archidekt account
 
@@ -192,7 +192,7 @@ so:
    the deck as it is now, saves a copy of it (a snapshot), and puts a private
    backup copy in a folder called "MTG Gateway backups" in your Archidekt
    account (unless the owner switched backups off). Then it makes the change and reads the deck back to confirm it
-   matches. The assistant should tell you it was verified, give you the
+   matches. The assistant should tell you the deck was read back and matched, give you the
    snapshot id (or the new deck's link), and say how to undo it. You can
    always use the review link instead of answering in chat, just not both.
 
@@ -213,11 +213,15 @@ Good to know:
 - The review page says which app made the proposal ("browser", or the AI
   app's name). If you disconnect an app on your Account page, its pending
   proposals are rejected.
-- A proposal expires after 24 hours and can only be applied once. Don't want
+- A proposal waits 7 days unless the owner changed that, and can only be
+  applied once. Don't want
   it? Press **Reject this proposal** on the review page. Nothing goes to
   Archidekt, and the assistant sees it as rejected.
-- If you edit the deck on Archidekt after a proposal is made, applying is
-  refused. Ask for a fresh proposal.
+- If the deck changes on Archidekt after a proposal is made, the gateway
+  works the change out again on the deck as it is now. If it still does
+  exactly what you reviewed, it shows **Updated** and can be applied; if not,
+  it shows **Needs a look** and nothing is sent until your assistant updates
+  it or you reject it.
 - **To undo an edit**, ask the assistant to restore the deck from its
   snapshot. It proposes the restore like any other change, you okay it, and
   every card goes back as it was: same printing, foil, quantity and
@@ -227,13 +231,14 @@ Good to know:
   "MTG Gateway backups" folder are there too if you ever want to look at or
   copy an old version yourself; they don't show up in the assistant's list
   of your decks.
-- The assistant can't delete decks. If it created a deck you don't want,
-  delete it yourself (the deck's More menu, **Delete deck**, or on
-  Archidekt).
+- The assistant can propose deleting a deck, but only your own press on the
+  proposal's review page deletes it. You can also delete a deck yourself
+  (the deck's More menu, **Delete deck**, or on Archidekt).
 - The assistant can also propose a deck's settings: name, description,
   format, bracket, privacy, and moving it to another of your folders,
   changing its tags or its cover. You approve those like any other change.
-  Creating or renaming folders is yours alone, on the Folders page.
+  It can propose a new folder, which only your own press creates; renaming
+  folders is yours alone, on the Folders page.
 - The owner can switch applying off for everyone. While it's off you can
   still make and review proposals, and the assistant will tell you applying
   is disabled.

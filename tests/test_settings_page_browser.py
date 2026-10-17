@@ -144,9 +144,9 @@ CHOICES_WHOLE = """
     [(344, ""), (360, ""), (1280, ""), (360, "root"), (673, "root"), (360, "text"), (673, "text")],
 )
 def test_review_round_1_settings_details(server: Server, width: int, zoom: str) -> None:
-    """Review round 1: a locked setting's variable name never breaks mid-word (finding 4), the approval
-    modes show their whole names at any width and text size (9), a refused value doesn't paint the
-    tick box red (9), and Back to default keeps the section's other unsaved values (6)."""
+    """A locked setting's variable name never breaks mid-word, the approval
+    modes show their whole names at any width and text size, a refused value doesn't paint the
+    tick box red, and Back to default keeps the section's other unsaved values."""
     from playwright.sync_api import sync_playwright
 
     exe = _chromium()
@@ -204,7 +204,7 @@ def test_review_round_1_settings_details(server: Server, width: int, zoom: str) 
     assert errors == []
 
 
-# Ben, 10-16 19:45Z: a setting the stack sets is shown where it would be changed, greyed out, with
+# A setting the stack sets is shown where it would be changed, greyed out, with
 # its value, and nothing on the page can change it.
 LOCKED = {
     "forge_games": 12,
@@ -304,7 +304,7 @@ def test_a_setting_the_stack_sets_shows_greyed_out_and_cannot_be_changed(
         assert rows["server_name"]["shown"] == ["Our Table"]
         assert "WARNING" in rows["log_level"]["shown"]
         assert rows["deck_sync_minutes"]["shown"] == ["60"]
-        # card Q139 item 3: the line at the top names every one, in the page's order, each a link
+        # The line at the top names every one, in the page's order, each a link
         summary = page.locator(".set-stack")
         assert (
             summary.locator("p")
@@ -394,9 +394,9 @@ LOCKED_CHOICES = """
 def test_a_locked_setting_shows_its_value_in_words_and_its_variable_whole(
     locked_server: Server, width: int, theme: str, zoom: str
 ) -> None:
-    """Review round 2: a locked On/Off row shows "On"/"Off", not the radios on top of them (R2-1); the
+    """A locked On/Off row shows "On"/"Off", not the radios on top of them; the
     approval modes keep plain radios (no dashed ring); and at 200% text the variable name breaks
-    only after an underscore (finding 4)."""
+    only after an underscore."""
     from playwright.sync_api import sync_playwright
 
     exe = _chromium()
@@ -429,7 +429,7 @@ def test_a_locked_setting_shows_its_value_in_words_and_its_variable_whole(
 
 
 # The five settings whose row name only reads right beside its value box get a whole wording in
-# the summary box (SUMMARY-LINK-TEXTS-r3.md option a, R-216). The two longest are drawn here at
+# the summary box (SUMMARY-LINK-TEXTS-r3.md option a). The two longest are drawn here at
 # phone width and 200% text, where a link wraps inside its chip.
 WORDED = {
     "deck_sync_minutes": 60,
@@ -440,8 +440,7 @@ WORDED = {
 }
 
 
-# The five link texts as approved (PROOFREAD-SUMMARY-LINKS-r3.md READY; SUMMARY-LINK-TEXTS-r3.md
-# L1 to L5), written out here so a changed word in LINK_TEXT fails (milestone review M-3).
+# The five link texts as approved, written out here so a changed word in LINK_TEXT fails.
 APPROVED_LINKS = {
     "deck_sync_minutes": "How often to check Archidekt for deck changes",
     "archidekt_cache_seconds": "How long public deck reads are reused",
@@ -479,7 +478,7 @@ def test_the_summary_box_says_the_whole_name_where_a_row_name_needs_its_value(
         order = [k for k in MANAGED_SETTINGS if k in WORDED]
         assert set(LINK_TEXT) == set(APPROVED_LINKS) == set(order)
         assert links.all_inner_texts() == [f"{APPROVED_LINKS[k]} ({MANAGED_SETTINGS[k].env})" for k in order]
-        # the rows keep the names Ben approved
+        # the rows keep their approved names
         for k in order:
             assert page.locator(f"#s-row-{k}").inner_text().startswith(label(k)), k
         assert page.evaluate(MEASURE) == []

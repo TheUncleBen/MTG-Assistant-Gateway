@@ -161,7 +161,7 @@ async def test_social_routes_need_session_csrf_and_a_linked_account(stack: Stack
     # and no MCP tool can do any of it directly
     token = await mcp_token(stack.h)
     names = {t["name"] for t in sse_json(await stack.h.mcp(token, "tools/list"))["result"]["tools"]}
-    # R-142: social actions reach the assistant only as proposals the member approves each time
+    # Social actions reach the assistant only as proposals the member approves each time
     acting = {n for n in names for w in ("vote", "like", "follow", "comment", "bookmark") if w in n}
     assert all(n.startswith("propose_") or n == "get_deck_comments" for n in acting), acting
 

@@ -134,7 +134,7 @@ turned away (HTTP 429, `busy`) rather than queued. The `/scan` page queues
 its own lookups and retries a busy answer by itself.
 
 **Scryfall's rate limit.** Scryfall rate-limits clients, and we couldn't
-find its current limits published in a form we could verify. A live run on
+find its current limits published in a form we could check. A live run on
 2026-10-04 got HTTP 429 with `Retry-After: 60` at about 5 single-card
 lookups a second. So the gateway spaces single-card lookups (`named`,
 `autocomplete`, printings) `MTG_SCRYFALL_LOOKUP_INTERVAL` seconds apart
@@ -268,12 +268,12 @@ already; see [DEPLOY.md](DEPLOY.md#environment-reference).
 - It reads the printed English title only. Foreign-language cards, heavily
   foiled or glossy cards under glare, and art-covered "showcase" titles read
   poorly. Use the suggestions, or type it.
-- A scan identifies the card name. The printing shown is Scryfall's default
-  unless the set and collector number were read or typed, or the artwork
-  check picked one. The artwork check has only been measured on synthetic
+- A scan identifies the card name. The printing shown is the newest one
+  already out on paper, unless the set and collector number were read or
+  typed, or the artwork check picked one. The artwork check has only been measured on synthetic
   photos (99% right with the card straightened, under 1% wrong automatic
-  picks). Real phone results, especially with foil glare, aren't verified
+  picks). Real phone results, especially with foil glare, aren't tested
   yet.
 - Browsers without `getUserMedia` (some in-app browsers) fall back to the
   Photo button. In an iOS home-screen web app the camera is reported to work
-  on current iOS versions, but the project hasn't verified that yet.
+  on current iOS versions, but the project hasn't tested that yet.

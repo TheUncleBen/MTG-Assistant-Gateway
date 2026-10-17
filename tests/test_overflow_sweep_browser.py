@@ -1,4 +1,4 @@
-"""R-131 overflow sweep in headless Chromium: with realistic data (a deck named like the app's
+"""Overflow sweep in headless Chromium: with realistic data (a deck named like the app's
 own copies, a very long deck name, long card names in a full collection, a long member name,
 history, a report and a pending proposal) every page is laid out at 18 widths from 320 to 1400
 px, with a mouse and on a touch screen, and must never scroll sideways, keep every control
@@ -154,7 +154,7 @@ def _pages(server: Server, pending: str) -> list[str]:
         "/admin/metrics",
         "/logout",
         "/install",
-        # the guided setup's steps, with their copy boxes (T-145)
+        # the guided setup's steps, with their copy boxes
         "/install?for=claude",
         "/install?for=claude-code",
         "/install?for=chatgpt",
@@ -406,7 +406,7 @@ FOLLOW_PAGES = [f"/users/{LONGUSER}", f"/users/{LONG64}", "/decks/47", "/decks/4
 
 @pytest.mark.parametrize("touch", [False, True], ids=["mouse", "touch"])
 def test_follow_question_can_be_answered(server: Server, touch: bool) -> None:
-    """Gate R5-1: pressing Follow on a profile or deck page with a long owner name shows a question
+    """Pressing Follow on a profile or deck page with a long owner name shows a question
     whose Follow and No buttons are visible, inside the chip and not under another control, at
     every sweep width, with no sideways scroll (fresh load and press at each width)."""
     from playwright.sync_api import sync_playwright

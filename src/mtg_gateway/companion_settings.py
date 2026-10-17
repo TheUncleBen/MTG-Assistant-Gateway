@@ -285,7 +285,7 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
                 + "<p class='muted'>Your folders could not be read from Archidekt right now.</p></section>"
             )
         current = deck.parent_folder if deck.parent_folder is not None else folders["root_id"]
-        # the backup folder is no place to move a deck to (Q21); a deck already in it keeps its row
+        # the backup folder is no place to move a deck to; a deck already in it keeps its row
         opts = "".join(
             f"<option value='{f['id']}'{' selected' if f['id'] == current else ''}>"
             f"{_esc(INDENT * f['depth'] + f['name'])}</option>"
@@ -533,7 +533,7 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
         """Add or remove a collaborator of the member's own deck: one press, then a confirmation,
         then it is sent to Archidekt (0.7.24; before, the form made a proposal to apply on its
         review page). The member's own click with their session and CSRF token, like the delete and
-        new-folder forms; an assistant's propose_collaborator still needs the review page (R-142)."""
+        new-folder forms; an assistant's propose_collaborator still needs the review page."""
         deck_id = request.path_params["deck_id"]
 
         async def run(sub: str, data: dict[str, str], sid: str | None) -> str | Response:
@@ -702,7 +702,7 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
                 "<div class='panel'><p>Your folders could not be read from Archidekt right now.</p>"
                 "<a class='btn' href='/decks'>Back to My decks</a></div>"
             )
-        rows = visible_folders(folders)  # never the gateway's backup folder (Q21)
+        rows = visible_folders(folders)  # never the gateway's backup folder
         tree = "".join(
             f"<li style='--depth:{f['depth']}'><span class='name'>{icon('folder')} {_esc(f['name'])}</span>"
             + ("<span class='badge'>private</span>" if f["private"] else "")
@@ -836,7 +836,7 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
         bracket = data.get("edh_bracket", "")
         details["edh_bracket"] = int(bracket) if re.fullmatch(r"[1-5]", bracket) else None
         # only a Commander deck has a bracket: archidekt.com's own settings form sends none for
-        # another format (Q56), so a bracket left picked when the format moves off Commander goes
+        # another format, so a bracket left picked when the format moves off Commander goes
         fmt = details.get("deck_format") or deck.format
         if FORMAT_IDS.get(str(fmt or "")) != FORMAT_IDS["commander"]:
             details["edh_bracket"] = None

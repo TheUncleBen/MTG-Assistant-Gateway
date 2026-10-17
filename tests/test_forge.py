@@ -296,7 +296,7 @@ async def test_one_unfinished_forge_run_per_member(tmp_path: Path, monkeypatch: 
 
 
 async def test_a_second_report_queues_behind_the_running_forge_run(tmp_path: Path) -> None:
-    """Owner's checklist T-152 (F39): a report made while the member's Forge run is still playing
+    """A report made while the member's Forge run is still playing
     used to get no Forge games ("skipped"). It now waits in the member's queue, says where it is
     and what it waits for, starts by itself when the run ahead ends (also after a restart), and
     only a third waiting report is refused."""
@@ -363,7 +363,7 @@ async def test_a_second_report_queues_behind_the_running_forge_run(tmp_path: Pat
 
 
 async def test_forge_runs_are_always_seeded() -> None:
-    """F40: without options.seed Forge picked its own seed and the report said null. The gateway
+    """Without options.seed Forge picked its own seed and the report said null. The gateway
     now picks one, sends it and records it (seed_source says whose it was)."""
     fake = FakeForge()
     section = await start_run(fake.client(), DECK_TEXT, "Liesa", games=1)
@@ -393,7 +393,7 @@ def test_report_page_and_markdown_show_forge_results() -> None:
         },
     }
     page = forge_html(done)
-    # G9: laid out as a table, a row per deck at the table (a run stored before 0.7.30 as well)
+    # Laid out as a table, a row per deck at the table (a run stored before 0.7.30 as well)
     assert "Forge games" in page and "<table class='qty seats stack'>" in page
     assert "<th scope='row'>Liesa &lt;b&gt; <span class='badge'>your deck</span></th>" in page
     assert (
@@ -411,7 +411,7 @@ def test_report_page_and_markdown_show_forge_results() -> None:
     assert "data-forge-live" in live and "updates by itself" in live
     assert "data-forge-live" not in forge_html(done, live=True)  # a finished run is not refreshed
     assert "not run" in forge_html({"state": "failed", "error": "Forge does not have this deck's commander"})
-    # review r1 fix 3: a run that stopped early reports the games it did play, never "not run"
+    # A run that stopped early reports the games it did play, never "not run"
     part = {
         **done,
         "state": "failed",
@@ -427,12 +427,12 @@ def test_report_page_and_markdown_show_forge_results() -> None:
     assert "<table class='qty seats stack'>" in page
     for state, why in (("timeout", "reached its time limit"), ("cancelled", "was stopped")):
         assert why in forge_html({**part, "state": state})
-    # proofread 6 P7-P9: every game played, a lost run, one game, no total recorded
+    # every game played, a lost run, one game, no total recorded
     full = {**part, "games_requested": 5, "result": {**part["result"], "games_requested": 5}}
     page = forge_html(full)
     assert "Forge played all 5 games, but the run did not end cleanly. The results below count all 5." in page
     assert "stopped early" not in page and "not run" not in page
-    # proofread R6 finding 11: one game asked for and played reads as one, not "all 1"
+    # one game asked for and played reads as one, not "all 1"
     one = {**part, "games_requested": 1, "result": {**part["result"], "games": 1, "games_requested": 1}}
     page = forge_html(one)
     assert (
@@ -458,7 +458,7 @@ def test_report_page_and_markdown_show_forge_results() -> None:
     from mtg_gateway.reports import report_status
 
     assert report_status(None, None, part) == "partial"
-    # proofread 6 P2: the Reports page, History and the assistant count its games as Forge games
+    # the Reports page, History and the assistant count its games as Forge games
     from mtg_gateway.reports import ReportService, run_settings
     from mtg_gateway.reports_page import engines_text
 
@@ -473,7 +473,7 @@ def test_report_page_and_markdown_show_forge_results() -> None:
         none["engine"] == "preflight_only" and run_settings({}, None, {"state": "timeout"})["engines"] == []
     )
     assert report_status(None, None, {"state": "failed", "result": {"games": 0}}) == "failed"
-    # review r1 item 11: a run still playing shows its count once, and no "won" figure worked out
+    # A run still playing shows its count once, and no "won" figure worked out
     # from an older run's totals (the games not yet finished are not wins)
     live = forge_html({**done, "state": "running", "games_requested": 10, "result": {**done["result"]}})
     assert "Games played" in live and "Games finished so far" not in live
@@ -600,7 +600,7 @@ def test_report_page_shows_a_queued_run_and_its_place() -> None:
     assert "Waiting: number 1 in line" in md
     seeded = forge_html({"state": "done", "seed": 12, "seed_source": "gateway", "result": {"games": 1}})
     assert "Seed: 12 (chosen by the gateway, kept for the record)." in seeded
-    # R-207: every report says the games can differ, the page and the export, whoever chose the seed;
+    # Every report says the games can differ, the page and the export, whoever chose the seed;
     # none promises a replay
     for source, said in (
         ("gateway", "(chosen by the gateway, kept for the record)"),
@@ -614,7 +614,7 @@ def test_report_page_shows_a_queued_run_and_its_place() -> None:
 
 
 async def test_report_keeps_a_text_result_once(tmp_path: Path) -> None:
-    """B7: a research tool that answers in text also sends it as {"result": text}; the report kept
+    """A research tool that answers in text also sends it as {"result": text}; the report kept
     both (about 35 KB for one report). Now the text is kept once, and old reports read back without
     the copy."""
     import mcp_types as types
@@ -651,7 +651,7 @@ class _SixtyCardDecks:
 
 
 async def test_compare_with_is_refused_whenever_no_forge_games_run(tmp_path: Path) -> None:
-    """Review r4 L1 (pending Ben, safe default): a comparison's other deck with no Forge games to
+    """A comparison's other deck with no Forge games to
     play is refused, not ignored, and keeps no report: forge=False, no Forge on the gateway, and a
     60-card deck."""
     from mtg_gateway.decks import DeckError
@@ -673,7 +673,7 @@ async def test_compare_with_is_refused_whenever_no_forge_games_run(tmp_path: Pat
 
 
 def test_a_shared_comparison_run_names_the_higher_bracket_only_when_one_picked(tmp_path: Path) -> None:
-    """Proofread R5 finding 5: the second report says its table was picked for the higher of the two
+    """The second report says its table was picked for the higher of the two
     brackets only when a bracket picked it; a comparison whose first run seated the newest precons
     (no bracket on either deck, or unrated precons) gets the plain share note."""
     import json
@@ -720,7 +720,7 @@ async def test_a_sixty_card_report_never_starts_or_queues_forge(tmp_path: Path) 
 
 
 async def test_a_report_can_leave_forge_out(tmp_path: Path) -> None:
-    """D17: forge=False runs a quick report without Forge games (simulate is no longer the one switch
+    """Forge=False runs a quick report without Forge games (simulate is no longer the one switch
     for both); unset, Forge follows simulate as before. A later report that asks for Forge does
     not reuse one that left it out."""
     db = Database(tmp_path / "t.sqlite")
@@ -760,7 +760,7 @@ class _BusyForge(FakeForge):
 
 
 async def test_a_report_made_while_forge_is_busy_never_splits_a_comparison(tmp_path: Path) -> None:
-    """Review L9: a report made while the member had nothing unfinished went straight to Forge; with
+    """A report made while the member had nothing unfinished went straight to Forge; with
     Forge's own queue full it became a waiting run without counting a Compare press's held places,
     so the press's second deck lost its Forge games. A run that would wait on a busy Forge now
     counts them first, and is skipped instead when the comparison needs the room."""
@@ -921,7 +921,7 @@ def test_a_forge_run_that_ended_without_games_is_labelled_preflight_only() -> No
 
 
 def test_summary_has_game_lengths_endings_and_losses() -> None:
-    """G9/A33: per-seat losses by kind, the median game time and turn, how the games ended, and
+    """Per-seat losses by kind, the median game time and turn, how the games ended, and
     each game listed; an older Forge image without turns or reasons leaves those out."""
     out = summarise(
         {
@@ -968,8 +968,8 @@ class _Live:
 
 
 async def test_forge_reads_its_settings_live_and_its_own_seed(tmp_path: Path) -> None:
-    """O11: games per run and games at once come from the Settings page as they are now
-    (decks.live); A34: options.forge_seed seeds Forge alone and never reaches the goldfish."""
+    """Games per run and games at once come from the Settings page as they are now
+    (decks.live); options.forge_seed seeds Forge alone and never reaches the goldfish."""
     db = Database(tmp_path / "t.sqlite")
     db.upsert_user("alice", email=None, name=None, preferred_username=None, groups=[])
     fake = FakeForge()
@@ -1005,7 +1005,7 @@ class _PairDecks:
 
 
 async def test_two_decks_meet_the_same_opponents(tmp_path: Path) -> None:
-    """K6 (Q136): the second deck's run seats the first run's precons (picked for the first deck's
+    """The second deck's run seats the first run's precons (picked for the first deck's
     bracket), waits behind it as any second run does, says whose opponents they are and links that
     report; a report of someone else, or one without Forge games, is refused."""
     from mtg_gateway.report_view import report_body_html
@@ -1071,11 +1071,11 @@ async def test_shared_opponents_that_left_the_engine_or_never_sat() -> None:
         "bracket set on Deck A in Archidekt): only 2 bracket 2 precons are here; the rest come from the "
         "nearest bracket (3)."
     )
-    # N20: an estimate is never called the deck's bracket
+    # An estimate is never called the deck's bracket
     _, est = shared_opponents(precons, {"deck_name": "Deck A", "bracket": [2, "estimate"]})
     assert "Archidekt's estimate from cards for Deck A is bracket 2: only 2" in est["note"]
     assert "Deck A's bracket" not in est["note"]
-    # P1: with no bracket, or precons without brackets, the note says the newest precons play
+    # With no bracket, or precons without brackets, the note says the newest precons play
     _, none = shared_opponents(precons, {"deck_name": "Deck A"})
     assert none["note"].endswith(
         "There is no bracket for Deck A (none set in Archidekt and no estimate), so the newest precons play."
@@ -1087,10 +1087,10 @@ async def test_shared_opponents_that_left_the_engine_or_never_sat() -> None:
         "of Forge carry no bracket, so the newest precons play." in old["note"]
     )
     assert "picked" not in none["note"] + old["note"]
-    # N1: in the second deck's report, every note names the first deck, never "the deck"
+    # In the second deck's report, every note names the first deck, never "the deck"
     for note in (why["note"], est["note"], none["note"], old["note"]):
         assert "the deck" not in note.lower().replace("the deck's", ""), note
-    # N13 / review r1 item 13: every sentence starts with a capital, and a deck's name is never re-cased
+    # Every sentence starts with a capital, and a deck's name is never re-cased
     _, unnamed = shared_opponents(precons, {"deck_name": ""})
     assert "table. There is no bracket for the other deck (none set in Archidekt" in unnamed["note"]
     note = pick_opponents(precons, None, None, deck="eldrazi tron")[1]["note"]
@@ -1100,7 +1100,7 @@ async def test_shared_opponents_that_left_the_engine_or_never_sat() -> None:
     assert pick_opponents(precons, 4, "estimate")[1]["note"].startswith(
         "Archidekt's estimate from cards is bracket 4"
     )
-    # proofread R4 fixes 3 and 4: a comparison's notes, in the first report and the second
+    # a comparison's notes, in the first report and the second
     from mtg_gateway.forge import PAIR_LEAD, PAIR_NO_BRACKET, pair_choice
 
     first = pair_choice(pick_opponents(precons, 3, "archidekt")[1], 3)
@@ -1123,7 +1123,7 @@ async def test_shared_opponents_that_left_the_engine_or_never_sat() -> None:
 
 
 async def test_a_comparisons_second_deck_plays_beside_the_first_when_forge_has_room(tmp_path: Path) -> None:
-    """Speed fix 5 (R-215): with places for two runs on the engine, a comparison's second deck
+    """With places for two runs on the engine, a comparison's second deck
     starts at once beside its first instead of waiting for it; otherwise, and for any other report,
     one run at a time per member stays."""
     db = Database(tmp_path / "t.sqlite")
@@ -1195,7 +1195,7 @@ async def test_a_comparisons_second_deck_plays_beside_the_first_when_forge_has_r
 
 
 async def test_each_forge_game_shows_as_it_finishes(tmp_path: Path, monkeypatch: Any) -> None:
-    """Speed fixes 3 and 4 (R-215): while the run plays, each finished game reaches the report
+    """Speed fixes 3 and 4: while the run plays, each finished game reaches the report
     within one refresh (every 3 s by default, was 15), on the page and in the poller's numbers,
     and a refresh that finds nothing new writes nothing."""
     from mtg_gateway.report_view import forge_html
@@ -1278,7 +1278,7 @@ def _section(db: Database, rid: str) -> dict[str, Any]:
 
 
 async def test_runs_stay_with_the_forge_copy_that_started_them(tmp_path: Path) -> None:
-    """Coordinator 05:09Z item 2: with two copies of the Forge service behind one name, a run
+    """With two copies of the Forge service behind one name, a run
     started on one copy and asked about on the other was marked lost. Each run now keeps the copy
     it started on and is always asked there; with one address nothing changes."""
     db = Database(tmp_path / "t.sqlite")
@@ -1302,7 +1302,7 @@ async def test_runs_stay_with_the_forge_copy_that_started_them(tmp_path: Path) -
     a = await reports.run("alice", "42", games=300, options={"seed": 2})
     stored = _section(db, a["report_id"])
     assert stored["engine"] == "http://10.0.9.2:8000" and stored["engine_copies"] == 2
-    # the copy's internal address is not shown to the member (review r5 L3)
+    # the copy's internal address is not shown to the member
     assert not {"engine", "engine_copies"} & set(a["forge"])
     assert not {"engine", "engine_copies"} & set(reports.get("alice", a["report_id"])["forge_status"])
     two.free = {"10.0.9.1": 1, "10.0.9.2": 0}  # the second copy is now playing alice's run
@@ -1343,7 +1343,7 @@ async def test_runs_stay_with_the_forge_copy_that_started_them(tmp_path: Path) -
 async def test_a_run_whose_forge_copy_restarted_elsewhere_is_marked_lost(
     tmp_path: Path, monkeypatch: Any
 ) -> None:
-    """Review r5 M1: a copy that restarts comes back on a new address, and its old one never
+    """A copy that restarts comes back on a new address, and its old one never
     answers. The run kept on it is marked lost at once, as a single copy's restart is, and the
     member's next run starts; a copy still listed but silent is given up after
     PINNED_SILENCE_SECONDS. Neither stays "running" for GIVE_UP_SECONDS."""
@@ -1386,7 +1386,7 @@ async def test_a_run_whose_forge_copy_restarted_elsewhere_is_marked_lost(
     silent = reports.get("alice", second["report_id"])["forge"]
     assert silent["state"] == "lost" and silent["error"] == "Forge stopped answering about this run."
 
-    # review round 5 L6: the given-up job is cancelled on its copy once that copy answers again,
+    # the given-up job is cancelled on its copy once that copy answers again,
     # so a copy that comes back does not play the abandoned run to its end
     job_id = _section(db, second["report_id"])["job_id"]
     assert two.copies[playing].cancelled == [] and reports._forge_cancels  # still asking
@@ -1407,7 +1407,7 @@ async def test_a_run_whose_forge_copy_restarted_elsewhere_is_marked_lost(
 async def test_cancelling_on_a_silent_copy_stops_asking_after_a_while(
     tmp_path: Path, monkeypatch: Any
 ) -> None:
-    """Review round 5 L6: the cancel of a given-up run is asked again only while its copy stays
+    """The cancel of a given-up run is asked again only while its copy stays
     silent, up to SILENT_CANCEL_SECONDS; a job the copy no longer knows ends it at once."""
     db = Database(tmp_path / "t.sqlite")
     two = _TwoCopies()
@@ -1447,7 +1447,7 @@ async def test_one_forge_address_changes_nothing(tmp_path: Path, monkeypatch: An
         ("http://forge.test:8000", one),
         ("http://localhost:8000", loopback),
         ("http://forge.test:8000", broken),
-        ("http://forge.test:8000", slow),  # no answer within the lookup's time limit (review r5 L4)
+        ("http://forge.test:8000", slow),  # no answer within the lookup's time limit
         ("http://10.0.9.7:8000", one),
     ):
         client = ForgeClient(url, transport=httpx.MockTransport(fake.handler), resolver=resolver)

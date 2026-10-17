@@ -3,7 +3,7 @@ Scryfall's 175 with ``page`` (Scryfall's own has_more and next_page), filters by
 border and sorts newest, oldest or cheapest on Scryfall's side, keeps every page in its cache and
 refuses values it does not know; and the deck page's "Change printing…" save: one set_printing
 change through the deck edit endpoint, its Undo (the old set, number and finish), and a printing
-not made in the card's finish moving the finish with it (P6)."""
+not made in the card's finish moving the finish with it."""
 
 from __future__ import annotations
 
@@ -109,7 +109,7 @@ async def test_printings_filter_and_sort_on_scryfalls_side(stack: Stack) -> None
 
 
 async def test_one_printing_by_set_and_number(stack: Stack) -> None:
-    """The picker's own printing (N7), for a card with more printings than a page: one search by
+    """The picker's own printing, for a card with more printings than a page: one search by
     set and collector number, kept like every page; another card's printing is not given."""
     stack.sf.extra_cards = sol_ring_printings()
     b = await linked(stack)
@@ -234,7 +234,7 @@ async def test_change_printing_saves_at_once_and_undo_puts_it_back(stack: Stack)
 
 
 async def test_a_printing_not_made_in_the_finish_moves_the_finish_and_undo_restores_it(stack: Stack) -> None:
-    """P6: SLD 1074 is etched only. The picker names the finish the printing has (etched), the
+    """SLD 1074 is etched only. The picker names the finish the printing has (etched), the
     card becomes etched; the Undo names the old finish (normal) with the old printing."""
     b = await linked(stack)
     try:

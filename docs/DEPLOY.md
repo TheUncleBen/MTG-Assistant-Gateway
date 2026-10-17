@@ -1,10 +1,14 @@
 # Deploying the gateway on Docker Swarm (with or without Portainer)
 
-This gets you one Swarm stack with two services:
+This gets you one Swarm stack with these services:
 
-- `mtg-assistant-gateway`, the gateway itself, and
+- `mtg-assistant-gateway`, the gateway itself;
 - `mtg-assistant-mysticforge`, a private research service the gateway talks to (more
-  on it [near the end](#mystic-forge-internal-research-service)).
+  on it [near the end](#mystic-forge-internal-research-service));
+- `mtg-assistant-ntfy`, a private notification server for the members' Android app
+  ([Notifications on members' phones](#notifications-on-members-phones)); and
+- `mtg-assistant-forge`, the simulation engine, which runs only if you turn it on
+  ([Forge simulations](#forge-simulations-optional)).
 
 Not running a Swarm? [DEPLOY-COMPOSE.md](DEPLOY-COMPOSE.md) does the same on
 one machine with plain Docker Compose. How the pieces fit together is in
@@ -36,8 +40,8 @@ Placeholders used below:
 
 The stack doesn't create the network it shares with your reverse proxy. It
 joins an existing overlay network by name, so create it before you deploy
-(the small private network between the gateway and Mystic Forge is created
-by the stack itself):
+(the small private networks between the gateway and Mystic Forge, ntfy and
+Forge are created by the stack itself):
 
 ```bash
 docker network create --driver overlay --attachable --opt encrypted mtg-gateway
@@ -330,21 +334,42 @@ gateway's own address.
 
 1. **Before you update the stack**, create the `mtg_ntfy_token` secret
    (step 4, the fourth command in Option B, or Option A). The new stack file
-   needs it; without it the stack won't deploy.
+   needs it; without it the stack won't deploy. **If you already have an
+   `mtg_ntfy_token` secret** (it held the token for an ntfy server of your
+   own), make a new one instead, so the stack's ntfy server doesn't accept a
+   token your old server accepts too: Swarm won't remove a secret a service
+   still uses, so first run
+   `docker service update --secret-rm mtg_ntfy_token mtg_mtg-assistant-gateway`,
+   then `docker secret rm mtg_ntfy_token`, then the step 4 command. The
+   gateway can't start without its token file in between, so do this just
+   before you update the stack. Revoke the old token on your old ntfy server
+   as well.
 2. If your stack's environment has `MTG_NTFY_URL` or `MTG_NTFY_TOKEN_FILE`
    with a value, delete those lines (empty is fine): the stack file now
    points the gateway at its own ntfy server. If you ran an ntfy server of
    your own for the gateway, you can stop it after the update, and delete
    the proxy host you made for it: the new ntfy server needs none.
-3. Update the stack with the new file, as in the 0.7.29 steps below (your
+3. **If Forge is on:** the new stack file pulls Forge image `2.0.15-mag3`.
+   GitHub publishes that image only after this release is on `main` and the
+   **Forge image** workflow's run for it has finished, so check that the run
+   has finished (the repository's **Actions** tab) before you update; until
+   then the pull fails. If your variables file was copied from an older
+   `stack.env.example`, it still sets `FORGE_TAG=2.0.15-mag2`, which keeps
+   the old Forge image: change it to `FORGE_TAG=2.0.15-mag3`, or delete the
+   line. Delete its `FORGE_GAME_SECONDS=600` line too, and
+   `FORGE_MAX_PARALLEL=1` if it has one, to get the new defaults (a
+   four-minute game limit, and Forge working out how many games fit at
+   once). Its `MTG_FORGE_GAMES=10` keeps 10 games a report, locked on the
+   Settings page; delete it for the new default of 4.
+4. Update the stack with the new file, as in the 0.7.29 steps below (your
    old `mtg_ntfy_token` lines, if you had them, are already in it).
-4. Tell the members: notifications now come in the gateway's own Android
+5. Tell the members: notifications now come in the gateway's own Android
    app, not the ntfy app, and members need app 0.7.30 to get them. Each
    member who wants them opens their Account page in the app and presses
    **Get notifications on this phone**. Their old subscriptions in the ntfy
    app stop getting messages and can be deleted. There are no notifications
    on iPhone.
-5. **Members on an app older than 0.7.12 must update the app:** in those
+6. **Members on an app older than 0.7.12 must update the app:** in those
    apps, sign-in no longer starts by itself. They install the new app from the
    gateway's Install page (uninstalling the old one first, since it was
    signed with a different key).
@@ -418,10 +443,11 @@ provider signs in, `MTG_ALLOW_ANY_IDP_USER=true`) and update the stack.
 Stacks deployed before this check existed with an empty group stop at this
 point after an upgrade.
 
-Both services run with every Linux capability dropped except the four their
-start-up script needs to switch to `PUID:PGID` (`CHOWN`, `DAC_OVERRIDE`,
+The gateway, Mystic Forge and Forge run with every Linux capability dropped
+except the four their start-up script needs to switch to `PUID:PGID` (`CHOWN`, `DAC_OVERRIDE`,
 `SETUID`, `SETGID`), and the switched process can't gain privileges back
-(`setpriv --no-new-privs`). Swarm applies `cap_drop`/`cap_add` from Docker
+(`setpriv --no-new-privs`). ntfy runs as `PUID:PGID` from the start, with
+no capabilities at all. Swarm applies `cap_drop`/`cap_add` from Docker
 20.10 on; older engines ignore them and print `Ignoring unsupported options`
 at deploy. The root filesystem is left writable: when `PUID`/`PGID` differ
 from the image's 1000:1000 the start-up script edits `/etc/passwd` and
@@ -698,8 +724,12 @@ default, and an install that leaves it off behaves exactly as before.
   GitHub builds and publishes a new tag the first time `main` carries it (the Forge image
   workflow, after its test games pass on arm64 and amd64), so pulling a new tag fails until that
   run has finished. After an update that changes the tag, wait for the run, then update the stack.
-- **Load:** Java starts only while Forge plays, capped by `FORGE_MEMORY_LIMIT` (default 1536M) and
-  `FORGE_CPUS` (default 2). `MTG_FORGE_GAMES` (default 4) sets the games per
+- **No login between the gateway and Forge.** Forge's job service takes jobs from anything that
+  can reach it. The stack files keep it on a private network (`forge`) that only the gateway joins,
+  with no published port and no internet access, so nothing else can. Keep it that way: don't
+  publish its port, don't proxy it, and don't attach other containers to that network.
+- **Load:** Java starts only while Forge plays, limited by `FORGE_MEMORY_LIMIT` (default 1536M) and
+  `FORGE_CPUS` (default 2); where Docker can't cap memory, see the memory note below. `MTG_FORGE_GAMES` (default 4) sets the games per
   report; **Play more games** on a finished report plays that many again against the same
   opponents and adds them to the results (50 games a report at most; on a comparison, the same
   number to both decks). An idle Forge service holds
@@ -787,7 +817,7 @@ yet picked up.
 - **Members** turn notifications on in the **Notifications** card of their Account page, in the
   app. **Get notifications on this phone** asks once to let the app run in the background, and on
   Android 13 and later it first asks to allow notifications. Android then shows a quiet "Always
-  connected" notification while the app listens. It reconnects after the phone restarts and after an app update. **Disconnect my phones** gives
+  connected" notification while the app listens. The app is built to reconnect after the phone restarts and after an app update; that is tested on an emulator, not yet on a real phone. **Disconnect my phones** gives
   the member a new topic, which signs out every phone; turning notifications off ends the stream
   too. **Send test** sends one message to check it, at most once a minute.
 - **Memory:** ntfy is limited to 128 MB (`NTFY_MEMORY_LIMIT`).

@@ -1,4 +1,4 @@
-"""A50 C1 in headless Chromium: the Collection page's "Importing the CSV on archidekt.com" fold
+"""In headless Chromium: the Collection page's "Importing the CSV on archidekt.com" fold
 opens, shows the column table, and at 360, 720 and 1280 px, light and dark, nothing scrolls
 sideways, no control is clipped or covered, the table fits the panel and its text keeps a 4.5:1
 contrast. Set MTG_CSVHELP_SHOTS=<dir> to also save screenshots. Skipped without a Chromium build."""

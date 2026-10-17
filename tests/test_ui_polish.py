@@ -145,7 +145,7 @@ def test_offline_page_names_the_site_and_follows_the_theme() -> None:
         ":root[data-theme=light]{" in page
         and "@media (prefers-color-scheme: light){:root:not([data-theme=dark])" in page
     )
-    # no inline script (its CSP allows none): only the one file the worker answers (Q63)
+    # no inline script (its CSP allows none): only the one file the worker answers
     assert page.count("<script") == 1 and "<script src='/static/offline.js'></script>" in page
 
 
@@ -211,7 +211,7 @@ async def test_page_head_and_skip_link(stack: Stack) -> None:  # noqa: F811
 
 
 async def test_the_account_page_names_archidekt_writes_in_plain_words(stack: Stack) -> None:  # noqa: F811
-    """Q141 item 7A: the Account page says "Archidekt writes", on or off, with Track A's words and
+    """The Account page says "Archidekt writes", on or off, in plain words and
     no variable name."""
     import dataclasses
 

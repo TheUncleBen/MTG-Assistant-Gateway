@@ -49,7 +49,7 @@ async def test_quantity_remove_and_category_edits_answer_with_fresh_rows_and_che
         assert r.status_code == 201, r.text
         d = r.json()
         assert d["ok"] and d["applied"] is True and d["snapshot_id"] and d["stale"] is False
-        # the quick edit keeps the gateway snapshot but makes no extra copy on Archidekt (D-02)
+        # the quick edit keeps the gateway snapshot but makes no extra copy on Archidekt
         assert d["result"]["result"]["archidekt_backup"] == "skipped", d["result"]
         assert len(stack.ark.patches) > patches
         assert d["rows"] == [
@@ -60,7 +60,7 @@ async def test_quantity_remove_and_category_edits_answer_with_fresh_rows_and_che
                 "categories": d["rows"][0]["categories"],
                 "relation_id": d["rows"][0]["relation_id"],
                 "finish": "Normal",
-                "label": ",#656565",  # archidekt.com's empty tag, sent with every modify (Q58)
+                "label": ",#656565",  # archidekt.com's empty tag, sent with every modify
                 "mana_value": None,
                 "notes": "",
                 # the row's printing, so a printing change redraws the picture (Change printing…)
@@ -164,7 +164,7 @@ async def test_an_add_puts_a_card_back_under_every_category(stack: Stack) -> Non
 
 
 async def test_a_move_puts_a_card_back_under_every_category(stack: Stack) -> None:  # noqa: F811
-    """A23: the deck page's Undo of a move of a card filed under several categories is a
+    """The deck page's Undo of a move of a card filed under several categories is a
     set_category with every category it had, the primary first; it files the row under all of
     them. Only set_category and add take categories, and the first is the category."""
     row = _deck_card(stack, "Cultivate")[0]
@@ -208,7 +208,7 @@ def test_set_category_categories_round_trip_through_the_stored_proposal() -> Non
 
 async def test_an_add_puts_back_the_companion_and_flip_flags(stack: Stack) -> None:  # noqa: F811
     """The deck page's Undo of a removal names the row's companion and "flipped by default"
-    flags; the add puts them back, as a printing change and a restore already do (M2)."""
+    flags; the add puts them back, as a printing change and a restore already do."""
     row = _deck_card(stack, "Cultivate")[0]
     row.update(companion=True, flippedDefault=True)
     b = await linked(stack)
@@ -246,7 +246,7 @@ def test_add_flags_round_trip_through_the_stored_proposal() -> None:
     )[0]
     assert ch.companion and ch.flipped_default
     assert parse_changes([ch.as_dict()], row_flags=True) == [ch]
-    # only the deck page's own edit reads them (review 2 N1); every other caller drops them
+    # only the deck page's own edit reads them; every other caller drops them
     dropped = parse_changes([ch.as_dict()])[0]
     assert not dropped.companion and not dropped.flipped_default
     plain = parse_changes([{"action": "add", "card_name": "Opt"}])[0].as_dict()
@@ -304,7 +304,7 @@ async def test_side_zone_edits_target_the_maybeboard_row(stack: Stack) -> None: 
 
 
 async def test_a_deck_changed_on_archidekt_is_judged_as_it_is_now(stack: Stack) -> None:  # noqa: F811
-    """T-040: the deck is legal, then a card is added on Archidekt (outside the gateway) to make
+    """The deck is legal, then a card is added on Archidekt (outside the gateway) to make
     101: the deck page and the API both say it is not legal, though every card still is."""
     _legal_commander_deck(stack)
     b = await linked(stack)
@@ -469,7 +469,7 @@ async def test_a_lagging_re_read_is_read_again_and_marked_stale(
 
 
 async def test_an_assistants_pending_proposal_is_not_applied_by_the_page(stack: Stack) -> None:  # noqa: F811
-    """0.7.9 gate L1: the follow-up with a proposal_id answers only the question this endpoint
+    """0.7.9: the follow-up with a proposal_id answers only the question this endpoint
     asked. A proposal an app made (pending, with its Approve card and its backup copy) is refused
     here and stays pending; nothing reaches Archidekt."""
     b = await linked(stack)

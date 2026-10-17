@@ -2,7 +2,7 @@
 
 The deck banner (the bracket set on the deck, else Archidekt's estimate from the cards), the Deck
 checks row, the Deck stats panel's bracket box and the deck list's card line all draw their bracket
-parts here, so the bracket work (BRACKET-ESTIMATE.md, G8, Q49, O14) changes one module. The chat
+parts here, so the bracket work changes one module. The chat
 stats card (static/cards/stats-card.html) follows the same rule. The callers in
 deckpage.py stay where they are and only call these. deck.js swaps the stats panel's ``.bracket``
 box after a save, so its class name is part of the page's contract.
@@ -17,8 +17,8 @@ from .theme import esc
 BRACKET_NAMES = {1: "Exhibition (1)", 2: "Core (2)", 3: "Upgraded (3)", 4: "Optimized (4)", 5: "cEDH (5)"}
 
 
-# What every page calls the estimate (O14 "Archidekt label"): Archidekt's own rules from the deck's
-# cards, never a second bracket beside the one set on the deck (Q49).
+# What every page calls the estimate: Archidekt's own rules from the deck's
+# cards, never a second bracket beside the one set on the deck.
 ESTIMATE_LABEL = "Archidekt's estimate from cards"
 
 
@@ -29,7 +29,7 @@ def bracket_name(value: Any) -> str:
 
 def banner_bracket_html(deck: Any, stats: dict[str, Any]) -> str:
     """The deck banner's one bracket chip: the bracket set on the deck, which is the deck's bracket,
-    or, only when none is set, Archidekt's estimate from the cards (Q49, O14, G8)."""
+    or, only when none is set, Archidekt's estimate from the cards."""
     if deck.edh_bracket:
         return f"<span class='bracket-set'>Bracket: {esc(bracket_name(deck.edh_bracket))}</span>"
     bracket = stats.get("bracket_estimate") or {}
@@ -40,7 +40,7 @@ def banner_bracket_html(deck: Any, stats: dict[str, Any]) -> str:
 
 def checks_bracket_row(checks: dict[str, Any]) -> tuple[str, str, bool] | None:
     """The Deck checks panel's Bracket row (label, text, passed), or None when no bracket is set.
-    The estimate is named only on a real mismatch, as archidekt.com's "Bracket Mismatch" (Q49)."""
+    The estimate is named only on a real mismatch, as archidekt.com's "Bracket Mismatch"."""
     br = checks.get("bracket") or {}
     if not br.get("set"):
         return None

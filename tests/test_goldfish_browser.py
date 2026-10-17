@@ -258,7 +258,7 @@ def _current_step(page) -> str | None:
 @pytest.mark.parametrize("width", [320, 344, 717, 1366])
 @pytest.mark.parametrize("scheme", ["light", "dark"])
 def test_goldfish_guide_walks_a_first_game_and_can_be_hidden(server: Server, width: int, scheme: str) -> None:
-    """G9: the page's own guide takes a first-time player through a game, marking the step the game
+    """The page's own guide takes a first-time player through a game, marking the step the game
     is at; hidden, it stays hidden for the account (on reload too) until How to play brings it back.
     Readable (4.5:1) and no wider than the window on every screen, light and dark."""
     from playwright.sync_api import sync_playwright
@@ -272,7 +272,7 @@ def test_goldfish_guide_walks_a_first_game_and_can_be_hidden(server: Server, wid
         guide = page.locator("#gf-guide")
         assert guide.is_visible() and page.locator("[data-guide=show]").is_hidden()
         assert guide.locator("li").count() == 6
-        # phones show the step the game is at, and open all six on request (Q138 item 8); wider
+        # phones show the step the game is at, and open all six on request; wider
         # screens show all six and no such button
         assert guide.locator("li:visible").count() == (1 if width <= 600 else 6)
         assert _current_step(page) == "hand"
@@ -340,7 +340,7 @@ def test_goldfish_guide_walks_a_first_game_and_can_be_hidden(server: Server, wid
         browser.close()
 
 
-# The card size (Ben's answer: wherever card pictures show) on the Goldfish page: the same S / M / L
+# The card size (it applies wherever card pictures show) on the Goldfish page: the same S / M / L
 # switch as the deck page, saved to the account, at phone, Fold and desktop widths, light and dark,
 # at normal and 200% text, with nothing wider than the window and the switch's text readable.
 SIZE_STATE = """() => {
@@ -367,10 +367,10 @@ SIZE_STATE = """() => {
     card: c.getBoundingClientRect().width,
     segInside: r.left >= -1 && r.right <= innerWidth + 1,
     // every button whole inside the switch, none cut off by its edge and none narrower than its
-    // letter (join review J4-4: L was cut off on the folded Fold at 200% text)
+    // letter (the L button was once cut off on a folded Fold at 200% text)
     whole: [...seg.querySelectorAll('button')].every(b => { const q = b.getBoundingClientRect();
       return q.left >= r.left - 0.5 && q.right <= r.right + 0.5 && b.scrollWidth <= b.clientWidth + 1; }),
-    // the label beside the buttons, and lined up with the game's buttons above (join review J1-7)
+    // the label beside the buttons, and lined up with the game's buttons above
     row: lbl.top < r.bottom - 1 && r.top < lbl.bottom - 1 && lbl.right <= r.left + 1,
     lined: Math.abs(lbl.left - first.getBoundingClientRect().left) <= 2,
     contrast: Math.min(...[...seg.querySelectorAll('button')].map(ratio))};

@@ -110,7 +110,7 @@ def test_example_env_keeps_watchlists_off(name: str):
 
 @pytest.mark.parametrize("name", ["deploy/portainer-stack.yml", "deploy/compose/docker-compose.yml"])
 def test_stack_files_leave_the_settings_page_its_settings(name: str):
-    """0.7.29 (Q17): a setting the Settings page manages is passed empty unless the
+    """0.7.29: a setting the Settings page manages is passed empty unless the
     env sets it. A default written here would count as "set in your stack" and lock it there."""
     from mtg_gateway.config import MANAGED_SETTINGS
 
@@ -132,7 +132,7 @@ def test_example_env_files_leave_the_settings_page_its_settings(name: str):
         for value in re.findall(rf"^# {spec.env}=(.*)$", text, re.M):
             default = spec.default
             shown = str(default).lower() if isinstance(default, bool) else str(default)
-            # every one, the gateway name too (review R12-3: "# MTG_SERVER_NAME=" passed before)
+            # every one, the gateway name too ("# MTG_SERVER_NAME=" passed before)
             assert value == shown, (spec.env, value)
 
 

@@ -35,7 +35,7 @@ def stack_options(monkeypatch) -> StackOptions:
 def whole_apply(stack: Stack, monkeypatch) -> None:
     """For a test that checks the apply's own final reply: wait for the whole apply (on the fake it
     takes well under a second) instead of answering "applying" after 0.2 s, which a busy machine
-    could reach first (review N9: wait on state, not time). It asks for ``stack`` so it is set after
+    could reach first (wait on state, not time). It asks for ``stack`` so it is set after
     the stack's own 0.2 s, also when a test names it in ``usefixtures`` (set up before arguments)."""
     monkeypatch.setattr(decks_mod, "APPLY_WAIT_SECONDS", 30)
 
@@ -233,7 +233,7 @@ async def test_a_backup_that_fails_after_the_answer_is_explained(stack: Stack, m
 
 
 async def test_an_apply_waits_out_archidekts_429_and_finishes(stack: Stack) -> None:
-    """T-032: a 429 halfway through an apply pauses it (the review page says so) instead of
+    """A 429 halfway through an apply pauses it (the review page says so) instead of
     failing it with the deck partly changed; the refused request is sent again after the pause."""
     h, ark = stack.h, stack.ark
     token = await linked_user(stack)
@@ -258,7 +258,7 @@ async def test_an_apply_waits_out_archidekts_429_and_finishes(stack: Stack) -> N
 async def test_a_failed_apply_that_changed_nothing_deletes_its_backup_copy(
     stack: Stack, whole_apply: None
 ) -> None:
-    """Q14: Archidekt refuses the first write, so the deck is as it was; the backup copy the apply
+    """Archidekt refuses the first write, so the deck is as it was; the backup copy the apply
     made a moment before is deleted again. The gateway's own snapshot stays."""
     h, ark = stack.h, stack.ark
     token = await linked_user(stack)
@@ -352,8 +352,8 @@ async def test_a_copy_whose_post_meets_a_429_is_made_once(stack: Stack) -> None:
     assert refused["n"] == 1 and len(made) == 1, made
 
 
-# -- Archidekt's 429s during an apply (Q41, Q62, Q66) and the backup copy (Q35) ---------------------
-# Q78: a stop that changed nothing leaves the proposal pending
+# -- Archidekt's 429s during an apply and the backup copy ---------------------
+# A stop that changed nothing leaves the proposal pending
 NOTHING_CHANGED = (
     "Nothing was changed on Archidekt. The proposal is still pending, so it can be approved again in a "
     "few minutes."
@@ -404,10 +404,10 @@ async def _review_page(h, pid: str) -> str:
 async def test_an_apply_that_runs_out_of_patience_with_nothing_sent_drops_its_backup(
     stack: Stack, quick_waits: list[float]
 ) -> None:
-    """Review M1 (Q35, Q41, Q62): every card write meets a 429. The apply waits exactly six times,
+    """Every card write meets a 429. The apply waits exactly six times,
     sends the write seven times, never opens the gateway-wide breaker, and stops with one plain
     message; nothing changed, so the backup copy it made is deleted again, and the proposal is
-    pending again (Q78)."""
+    pending again."""
     h, ark = stack.h, stack.ark
     token = await linked_user(stack)
     p = structured(await call(h, token, "propose_deck_changes", {"deck_id": "42", "changes": THREE}))
@@ -420,7 +420,7 @@ async def test_an_apply_that_runs_out_of_patience_with_nothing_sent_drops_its_ba
     assert tries["n"] == 7 and len(quick_waits) == 6 and ark.patches == []
     assert not result.get("deck_written") and result.get("backup_deleted") is True, result
     assert len(ark.deleted) == 1 and ark.deleted[0] != 42 and 42 in ark.decks
-    assert not h.app.state.gateway.decks.client.pacer.paused()  # Q62: no pause for everyone
+    assert not h.app.state.gateway.decks.client.pacer.paused()  # no pause for everyone
     got = structured(await call(h, token, "get_proposal", {"proposal_id": p["proposal_id"]}))
     assert got["next_step"] == f"{ark_mod.PATIENCE_SPENT} {NOTHING_CHANGED}", got["next_step"]
     page = await _review_page(h, p["proposal_id"])
@@ -434,7 +434,7 @@ async def test_an_apply_that_runs_out_of_patience_with_nothing_sent_drops_its_ba
 async def test_an_apply_that_runs_out_of_patience_partway_keeps_its_backup(
     stack: Stack, quick_waits: list[float]
 ) -> None:
-    """Q35: the first card write landed, then Archidekt kept answering 429: the deck is partly
+    """The first card write landed, then Archidekt kept answering 429: the deck is partly
     changed, so the backup copy is kept and the message says how far it got."""
     h, ark = stack.h, stack.ark
     token = await linked_user(stack)
@@ -454,7 +454,7 @@ async def test_an_apply_that_runs_out_of_patience_partway_keeps_its_backup(
 async def test_a_breaker_refusal_on_the_first_write_counts_as_nothing_written(
     stack: Stack, whole_apply: None
 ) -> None:
-    """Review M1: the gateway-wide breaker (opened by other failures) refuses the apply's first
+    """The gateway-wide breaker (opened by other failures) refuses the apply's first
     card write before it is sent. Nothing changed, so the backup copy is deleted again."""
     h, ark = stack.h, stack.ark
     token = await linked_user(stack)
@@ -480,7 +480,7 @@ async def test_a_breaker_refusal_on_the_first_write_counts_as_nothing_written(
 async def test_a_details_step_whose_re_read_fails_after_the_write_keeps_the_backup(
     stack: Stack, whole_apply: None
 ) -> None:
-    """Review M5: the tag is added on Archidekt, then the re-read just after is refused (403). The
+    """The tag is added on Archidekt, then the re-read just after is refused (403). The
     deck changed, so the backup copy must be kept, not deleted as if nothing was written."""
     h, ark = stack.h, stack.ark
     token = await linked_user(stack)
@@ -517,7 +517,7 @@ async def test_a_details_step_whose_re_read_fails_after_the_write_keeps_the_back
 async def test_dropping_an_unused_backup_never_deletes_the_deck_itself(
     stack: Stack, monkeypatch, whole_apply: None
 ) -> None:
-    """Review L7: if the copy's id were ever the source deck's own, the clean-up after a failed
+    """If the copy's id were ever the source deck's own, the clean-up after a failed
     apply must not delete the real deck."""
     h, ark = stack.h, stack.ark
     token = await linked_user(stack)
@@ -579,7 +579,7 @@ PARTLY = (
 async def test_a_stop_after_a_tag_was_added_never_tells_the_assistant_nothing_changed(
     stack: Stack, quick_waits: list[float]
 ) -> None:
-    """Follow-up N1, N3: the tag reached Archidekt, then the re-read kept meeting 429s. The stored
+    """The tag reached Archidekt, then the re-read kept meeting 429s. The stored
     message, get_proposal's next_step and the review page all say part of it reached Archidekt;
     none says "Nothing was changed", and a tags-only proposal never claims other details."""
     h, ark = stack.h, stack.ark
@@ -606,7 +606,7 @@ async def test_a_stop_after_a_tag_was_added_never_tells_the_assistant_nothing_ch
 async def test_a_stop_after_the_new_deck_was_made_says_so_to_the_assistant(
     stack: Stack, quick_waits: list[float]
 ) -> None:
-    """Follow-up N1: the new deck was created, then every card write met a 429. get_proposal's
+    """The new deck was created, then every card write met a 429. get_proposal's
     next_step says the deck was made, as the stored message does."""
     h, ark = stack.h, stack.ark
     token = await linked_user(stack)
@@ -630,7 +630,7 @@ async def test_a_stop_after_the_new_deck_was_made_says_so_to_the_assistant(
 async def test_a_tags_only_stop_before_anything_was_written_claims_no_other_details(
     stack: Stack, quick_waits: list[float]
 ) -> None:
-    """Follow-up N3: a tags-only proposal whose tag write keeps meeting 429s wrote nothing. The
+    """A tags-only proposal whose tag write keeps meeting 429s wrote nothing. The
     message says nothing changed and never that "the deck's other details were applied"."""
     h, ark = stack.h, stack.ark
     token = await linked_user(stack)
@@ -641,7 +641,7 @@ async def test_a_tags_only_stop_before_anything_was_written_claims_no_other_deta
     await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]})
     row = await _finished(h, p["proposal_id"])
     result = row["result"]
-    assert row["state"] == "pending" and result["error"] == "rate_limited", result  # Q78
+    assert row["state"] == "pending" and result["error"] == "rate_limited", result
     assert not ark.deck_tags.get(42) and not result.get("deck_written"), result
     assert result["detail"] == (
         f"{ark_mod.PATIENCE_SPENT} A snapshot ({result['snapshot_id']}) of the deck before the change "
@@ -654,7 +654,7 @@ async def test_a_tags_only_stop_before_anything_was_written_claims_no_other_deta
 async def test_a_details_stop_after_other_details_were_written_still_says_they_were(
     stack: Stack, quick_waits: list[float]
 ) -> None:
-    """Follow-up N3, the other side: the new name was written, then the tag kept meeting 429s.
+    """The other side: the new name was written, then the tag kept meeting 429s.
     "The deck's other details were applied" is true here and stays, with what reached Archidekt."""
     h, ark = stack.h, stack.ark
     token = await linked_user(stack)
@@ -684,7 +684,7 @@ LATER = (
 async def test_a_stop_whose_backup_copy_could_not_be_deleted_queues_its_delete(
     stack: Stack, quick_waits: list[float]
 ) -> None:
-    """Follow-up N4 (B4), now Q77 and Q78: Archidekt asks for 30 s, so the clean-up's delete of the
+    """Archidekt asks for 30 s, so the clean-up's delete of the
     unused backup would be refused too. It is not sent but queued for later, and the assistant's
     message, next_step and the review page say the copy will be deleted by itself. Nothing
     changed, so the proposal is pending again."""
@@ -728,7 +728,7 @@ async def test_a_stop_whose_backup_copy_could_not_be_deleted_queues_its_delete(
     ) in page
 
 
-# -- review D1: a clone stopped after its copy was made ---------------------------------------------
+# -- a clone stopped after its copy was made ---------------------------------------------------------
 def _clone_copied_then(ark: FakeArchidekt, answer: httpx.Response) -> dict[str, bool]:
     """The clone's POST /decks/copy/ goes through; every deck read after it gets ``answer``."""
     orig = ark.transport.handler
@@ -758,7 +758,7 @@ def _copy_made(copy_id: str) -> str:
 async def test_a_clone_stopped_after_its_copy_was_made_stays_failed_and_is_never_copied_twice(
     stack: Stack,
 ) -> None:
-    """Review D1 (the reviewer's repro): the copy was made, then the read-back met a 429 longer
+    """The copy was made, then the read-back met a 429 longer
     than the apply may wait. Something changed on Archidekt, so the proposal stays failed (not
     pending), records the new deck, says the copy was made (never "no cards were added": a copy
     holds the cards), and a second approval makes no second copy."""
@@ -790,7 +790,7 @@ async def test_a_clone_stopped_after_its_copy_was_made_stays_failed_and_is_never
 
 @pytest.mark.usefixtures("whole_apply")
 async def test_a_clone_whose_read_back_fails_says_the_copy_was_made(stack: Stack) -> None:
-    """Review D1: a clone whose read-back meets a 5xx after the copy was made fails with the new
+    """A clone whose read-back meets a 5xx after the copy was made fails with the new
     deck recorded, and its message says the copy was made."""
     h, ark = stack.h, stack.ark
     token = await linked_user(stack)

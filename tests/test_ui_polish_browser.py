@@ -135,7 +135,7 @@ def test_skip_link_times_images_and_copy_button(server: Server) -> None:
         )
         page.locator(".img-fallback").wait_for(timeout=3000)
         assert page.locator(".img-fallback").inner_text() == "Sol Ring"
-        # a picture with a real alt keeps its name for screen readers (review N8)
+        # a picture with a real alt keeps its name for screen readers
         assert page.locator(".img-fallback").get_attribute("role") == "img"
         assert page.locator(".img-fallback").get_attribute("aria-label") == "Sol Ring (image unavailable)"
         assert page.locator(".img-fallback").get_attribute("aria-hidden") is None

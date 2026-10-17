@@ -221,7 +221,7 @@ async def test_code_is_bound_to_the_proposal_the_member_and_the_app(stack: Stack
     h = stack.h
     token = await linked_user(stack)
     a = await _propose(h, token)
-    b = await _propose(h, token, "Arcane Signet")  # 0.7.29 (A5): a repeat would be the same proposal
+    b = await _propose(h, token, "Arcane Signet")  # 0.7.29: a repeat would be the same proposal
     pa, ca = structured(a)["proposal_id"], a["_meta"][APPROVAL_META_KEY]
     pb, cb = structured(b)["proposal_id"], b["_meta"][APPROVAL_META_KEY]
     assert ca != cb
@@ -263,7 +263,7 @@ async def test_card_cannot_apply_what_the_browser_already_rejected(stack: Stack)
 
 
 async def test_a_failed_approve_says_the_proposal_is_now_failed(stack: Stack) -> None:
-    """Review B6: an Approve whose apply fails answers with the proposal's state (failed), so the
+    """An Approve whose apply fails answers with the proposal's state (failed), so the
     card shows that and drops its buttons instead of showing Pending with buttons that would only
     be refused. A refusal that leaves the proposal pending says pending."""
     h = stack.h
@@ -288,12 +288,12 @@ async def test_a_failed_approve_says_the_proposal_is_now_failed(stack: Stack) ->
 
 @pytest.mark.usefixtures("quick_waits")
 async def test_the_review_page_right_after_a_failed_apply_says_it_once(stack: Stack) -> None:
-    """Review B6: right after a failed Apply (the page's ?err=failed), a failure the page explains
+    """Right after a failed Apply (the page's ?err=failed), a failure the page explains
     on its own (here Archidekt's waits ran out) shows that one message in the error box, not the
     general "could not be applied" box above the same message further down. A failure with no
     message of its own keeps the general box, once.
 
-    Q78, Q79: the stop on Archidekt's waits changed nothing, so the proposal is pending again: the
+    The stop on Archidekt's waits changed nothing, so the proposal is pending again: the
     card's reply says pending with the assistant's message (no "new proposal"), the page shows its
     one box and the Apply button, and the card's code approves it again once Archidekt allows."""
     from mtg_gateway import archidekt as ark_mod

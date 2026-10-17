@@ -71,14 +71,14 @@ def test_the_card_models_page_fits_and_reads(server: Server, width: int, theme: 
             "() => [...document.querySelectorAll('.models button')]"
             ".map(b => b.getBoundingClientRect().height)"
         )
-        assert min(sizes) >= 43.5, sizes  # review round 2, R2-2: 44 px, as on every touch target
-        # R2-4: every Remove in one column, and a name breaks between words where its words fit
+        assert min(sizes) >= 43.5, sizes  # 44 px, as on every touch target
+        # Every Remove in one column, and a name breaks between words where its words fit
         rights = page.evaluate(
             "() => [...document.querySelectorAll('.models button')]"
             ".map(b => Math.round(b.getBoundingClientRect().right))"
         )
         assert len(set(rights)) == 1, rights
-        # round 3, R3-1: a row with a one-line name is about as tall as its text and button
+        # A row with a one-line name is about as tall as its text and button
         heights = page.evaluate(ROW_HEIGHTS)
         assert heights["Opt"] < (80 if width >= 673 else 120), heights
         if width >= 673:
@@ -94,7 +94,7 @@ def test_the_card_models_page_fits_and_reads(server: Server, width: int, theme: 
 
 @pytest.mark.parametrize(("width", "zoom"), [(344, "root"), (344, "text"), (360, "root"), (360, "text")])
 def test_the_card_models_page_fits_a_phone_at_200_percent_text(server: Server, width: int, zoom: str) -> None:
-    """Review round 3, R3-2: no sideways scroll, and a name breaks inside a word only when that one
+    """No sideways scroll, and a name breaks inside a word only when that one
     word is wider than the row (Remove moves under the text instead of squeezing it)."""
     from playwright.sync_api import sync_playwright
 

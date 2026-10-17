@@ -93,7 +93,7 @@ class Browser:
     async def review_form(self, url: str) -> dict[str, str]:
         """The hidden fields of the review page ``url`` (``/proposals/<pid>``) as a person sends
         them: the CSRF token, a render stamp old enough for the click guard and the version the
-        page showed (G16: an Apply without it is refused)."""
+        page showed (an Apply without it is refused)."""
         form = {
             "csrf": await self.csrf(url),
             "shown": proposal_stamp(self.h, self.http, url.rsplit("/", 1)[1]),
@@ -287,7 +287,7 @@ async def test_propose_then_apply_happy_path(stack: Stack) -> None:
 
 
 async def test_apply_rejects_stale_deck(stack: Stack) -> None:
-    """0.7.29 (K1): a change made elsewhere to a card the proposal touches means it would no longer
+    """0.7.29: a change made elsewhere to a card the proposal touches means it would no longer
     do what was reviewed: nothing is sent and the proposal waits again, marked Needs a look."""
     h, ark = stack.h, stack.ark
     token = await linked_user(stack)
@@ -311,7 +311,7 @@ async def test_apply_rejects_stale_deck(stack: Stack) -> None:
 
 
 async def test_an_unrelated_change_elsewhere_still_applies(stack: Stack) -> None:
-    """0.7.29 (K1, K2): a change elsewhere that leaves the proposal's rows as reviewed only moves
+    """0.7.29: a change elsewhere that leaves the proposal's rows as reviewed only moves
     its baseline ("Updated"), so it still applies."""
     h, ark = stack.h, stack.ark
     token = await linked_user(stack)
@@ -1237,7 +1237,7 @@ async def test_apply_keeps_a_backup_copy_on_archidekt_first(stack: Stack) -> Non
     a2 = structured(await call(h, token, "apply_proposal", {"proposal_id": p2["proposal_id"]}))
     assert a2["ok"], a2
     assert [f["name"] for f in ark.folders["alice"]] == ["MTG Gateway backups", "Brews"]
-    # Q14/B15: within 15 minutes of the first copy, the second edit shares it (its own snapshot
+    # within 15 minutes of the first copy, the second edit shares it (its own snapshot
     # still holds the exact deck before it); tests/test_backup_limits.py covers the rest.
     assert a2["result"]["backup_deck_id"] == a["result"]["backup_deck_id"]
     assert a2["result"]["backup_reused"] is True and a2["snapshot_id"] != a["snapshot_id"]
@@ -1468,7 +1468,7 @@ async def test_simulation_calls_take_the_shape_mystic_forge_accepts(stack: Stack
         )
     )
     assert rep["ok"], rep
-    # forge_seed is the gateway's own (A34): the simulator gets seed only
+    # forge_seed is the gateway's own: the simulator gets seed only
     ((_, sent),) = [c for c in SIM_CALLS if c[0] == "goldfish_run"][-1:]
     assert sent["seed"] == 1 and "forge_seed" not in sent, sent
     gf, val = rep["goldfish"], rep["validation"]
@@ -1535,7 +1535,7 @@ async def test_sixty_card_decks_are_simulated_as_sixty_card_games(stack: Stack) 
     # the stored report reads back as a 60-card game
     got = structured(await call(h, token, "get_deck_report", {"report_id": rep["report_id"]}))
     assert "Format: 60-card" in got["goldfish"]["text"], got
-    # the copies of each main-deck card are kept with the run (A30, A31); the sideboard card is not
+    # the copies of each main-deck card are kept with the run; the sideboard card is not
     kept = got["goldfish"]["quantities"]
     sent_total = sum(c.quantity for c in parse_decklist(sent["deck"]) if c.zone == "main")
     assert sum(kept.values()) == sent_total and sideboard_name.split(" // ")[0] not in kept, kept
@@ -1647,7 +1647,7 @@ async def test_pasted_lists_are_reported_but_not_stored(stack: Stack) -> None:
 
 async def test_validate_decklist_gets_the_gateways_singleton_check() -> None:
     """validate_decklist (Mystic Forge) checks names, size and color identity only, so a 100-card
-    list with two Sol Rings came back PASSED while deck_stats flagged it (F04). The gateway adds a
+    list with two Sol Rings came back PASSED while deck_stats flagged it. The gateway adds a
     Gateway checks section and turns the headline to ISSUES FOUND."""
     passed = "# Validation: PASSED\n\nAll 3 unique cards verified on Scryfall.\nDeck size: 100 cards."
     mf = MCPServer(name="mystic-forge-validate")

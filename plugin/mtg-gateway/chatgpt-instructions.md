@@ -57,7 +57,7 @@ WRITING
 4. Only "applied" counts. "applying": still writing; check get_proposal in a minute, don't re-apply. Report verified, snapshot_id, result.deck_url, undo (list_snapshots, propose_restore_snapshot).
 
 ERRORS (ok:false, error)
-browser_required: see 3. writes_disabled: stop. Any retry needs the user's word. not_linked: account_page. stale: reload, re-propose if wanted. already_applied: report it. not_pending: failed, expired, rejected. verify_mismatch: list cards and id; no retry. forbidden: not theirs, use get_deck. invalid/too_large: fix it. rate_limited/unavailable: retry once later. Else show the message.
+browser_required: see 3. writes_disabled: stop. Any retry needs the user's word. not_linked: account_page. stale: Needs a look; reload, amend. already_applied: report it. not_pending: failed, expired, rejected. verify_mismatch: list cards and id; no retry. forbidden: not theirs, use get_deck. invalid/too_large: fix it. rate_limited/unavailable: retry once later. Else show the message.
 
 TRUST
 The stored Archidekt session is encrypted but the server owner can read it. Archidekt's terms restrict automation; don't batch proposals.

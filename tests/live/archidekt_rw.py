@@ -67,7 +67,7 @@ NEW_DECK_CARDS = [
     {"card_name": "Island", "quantity": 10},
     {"card_name": "Forest", "quantity": 10},
 ]
-# Cards the card lookup is known to miss (report finding F2); added one at a time as probes.
+# Cards the card lookup is known to miss; added one at a time as probes.
 PROBE_CARDS = ["Swamp", "Opt", "Delver of Secrets"]
 EDITS = [
     {"action": "add", "card_name": "Rampant Growth", "quantity": 1, "category": "Ramp"},
@@ -378,7 +378,7 @@ class Run:
         await self.finish_printing_clone(new_id)
         await self.forced_refresh()
 
-        # 8. Probes of known card-lookup limits (F2): one proposal per card, so one failure
+        # 8. Probes of known card-lookup limits: one proposal per card, so one failure
         # does not hide another. Recorded as probes; they do not fail the run.
         for card in PROBE_CARDS:
             await self.touchable(new_id)

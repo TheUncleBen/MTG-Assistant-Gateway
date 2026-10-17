@@ -49,7 +49,7 @@ def to_arena(deck: Deck) -> str:
     return "\n\n".join(blocks) + "\n"
 
 
-# EDHPlay's My Decks, where its import starts (Ben, Q52 10-14); signed out, EDHPlay asks to sign in
+# EDHPlay's My Decks, where its import starts; signed out, EDHPlay asks to sign in
 # and then comes back here (checked on the test account, 2026-10-14)
 EDHPLAY_URL = "https://edhplay.com/decks"
 
@@ -73,7 +73,7 @@ class EdhplayList:
     commanders: list[str]
     left_out: list[tuple[int, str]]  # (copies, name) that did not fit EDHPlay's 15-card sideboard
     # a companion goes in the Sideboard section: EDHPlay's import never sets one, so the box asks
-    # the member to set it there (Ben, Q54 10-14)
+    # the member to set it there
     companion: bool = False
 
 
@@ -118,7 +118,7 @@ def to_edhplay(deck: Deck) -> EdhplayList:
 
     Verified 2026-10-11 against EDHPlay itself: its help page ('Click "Create Deck", choose your
     format and commander. Add cards by searching or use "Bulk Import" to paste your decklist (e.g.,
-    "1 Sol Ring", "1 Command Tower")'), the import dialog's own text ("1 Sol Ring (C18) 222": "Use
+    "1 Sol Ring", "1 Command Tower")'), the import dialog's own text ("1 Sol Ring 222": "Use
     set code and collector number to specify exact printing"), the parser the dialog runs in the
     browser (edhplay.com/assets/DeckEditorSkeleton-*.js, functions ``tc``/``Vs``/``bn``) and live
     imports with a test account, read back through EDHPlay's own Export:
@@ -137,7 +137,7 @@ def to_edhplay(deck: Deck) -> EdhplayList:
     So: commander(s) first, marked; then the main deck; then, after a blank line, ``Sideboard``
     with the deck's companion and sideboard, up to 15 copies (the companion first); anything past
     that is left out and named in the note. The maybeboard (and any other category kept outside
-    the deck) is never sent (Ben's choice, 23:21Z 2026-10-11), and neither are tokens; the note
+    the deck) is never sent, and neither are tokens; the note
     says so. Printings keep their set and number when EDHPlay's parser can read them. A deck with
     no commander starts with a card EDHPlay can't take as one (``_edh_lead``): a line of several
     copies when it has one, else a land, because EDHPlay's parser takes a first line of quantity 1

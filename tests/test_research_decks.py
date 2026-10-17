@@ -1,7 +1,7 @@
-"""Research tools given a deck id or link read the deck as the member sees it (B1, F34 in the
-2026-10-11 live run: goldfish_annotate said "Deck not found" for the member's own private deck,
+"""Research tools given a deck id or link read the deck as the member sees it (in the
+2026-10-11 live run, goldfish_annotate said "Deck not found" for the member's own private deck,
 because Mystic Forge reads Archidekt anonymously). Also: a simulation's text names a stored copy
-only when the gateway stored one (F26), and the tool descriptions the gateway adds (F09, F10)."""
+only when the gateway stored one, and the tool descriptions the gateway adds."""
 
 from __future__ import annotations
 

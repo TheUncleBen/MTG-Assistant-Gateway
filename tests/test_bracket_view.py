@@ -1,6 +1,6 @@
 """How the bracket shows on the deck page (bracket_view.py): the bracket set on the deck is the
 deck's bracket; Archidekt's estimate from the cards shows in the banner only when none is set, is
-named in the checks row only on a real mismatch, and keeps Archidekt's own notes (Q49, O14, G8)."""
+named in the checks row only on a real mismatch, and keeps Archidekt's own notes."""
 
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ EST = {
 
 
 def test_label_is_the_one_ben_chose() -> None:
-    assert ESTIMATE_LABEL == "Archidekt's estimate from cards"  # O14 "Archidekt label"
+    assert ESTIMATE_LABEL == "Archidekt's estimate from cards"
 
 
 def test_banner_shows_one_bracket() -> None:

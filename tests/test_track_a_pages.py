@@ -1,5 +1,5 @@
 """Release 0.7.29, approvals and proposals: the Proposals page with checkboxes, the confirm, the
-result panel and Undo, the deck page's strip and the Home tile (FLEX §3-§4, Q134 A2)."""
+result panel and Undo, the deck page's strip and the Home tile."""
 
 from __future__ import annotations
 
@@ -72,7 +72,7 @@ async def test_reject_from_the_list_rejects_only_the_checked_rows(stack: Stack) 
         a = await _propose(h, token, _add("Opt"))
         c = await _propose(h, token, _add("Delver of Secrets"))
         csrf = await b.csrf("/proposals")
-        # Q141 item 8C: Reject asks first (without the list's script, on a page of its own)
+        # Reject asks first (without the list's script, on a page of its own)
         r = await b.http.post(
             "/proposals/select", data={"csrf": csrf, "action": "reject", "pick": a, "back": "/proposals"}
         )
@@ -119,9 +119,9 @@ async def test_apply_confirms_the_order_then_applies_and_offers_undo(stack: Stac
         assert _qty(ark, "Opt") == 0  # the confirm sends nothing
         picks = re.search(r"name='picks' value='([^']+)'", confirm).group(1)
         assert picks == f"{a},{c}"
-        vs = {f"v_{a}": "1", f"v_{c}": "1"}  # the versions the confirm carries (G16)
+        vs = {f"v_{a}": "1", f"v_{c}": "1"}  # the versions the confirm carries
         assert f"name='v_{a}' value='1'" in confirm
-        # without them, nothing is applied: the change may have been updated since (G16)
+        # without them, nothing is applied: the change may have been updated since
         r = await b.http.post(
             "/proposals/apply",
             data={"csrf": csrf, "action": "apply", "picks": picks, "shown": "1.x", "back": "/proposals"},
@@ -168,11 +168,11 @@ async def test_apply_confirms_the_order_then_applies_and_offers_undo(stack: Stac
         assert seen, r.text
         shown = aged_stamp(h.settings, f"undo:{SUB}:{form['snapshot']}")
         # only the deck's updated time moved (a backup copy can do that): the same preview, so the
-        # Undo would not be refused for it (proofread A2, M8)
+        # Undo would not be refused for it
         ark.decks[42]["updatedAt"] = "2026-10-15T09:00:00Z"
         again = await b.http.post("/proposals/undo", data={"csrf": csrf, "action": "preview", **form})
         assert f"name='deck_seen' value='{seen.group(1)}'" in again.text, again.text
-        # the deck's cards changed on Archidekt after the preview: refused, nothing sent (finding 11)
+        # the deck's cards changed on Archidekt after the preview: refused, nothing sent
         for c in ark.decks[42]["cards"]:
             if c["card"]["oracleCard"]["name"] == "Opt":
                 c["quantity"] = 2
@@ -203,7 +203,7 @@ async def test_apply_confirms_the_order_then_applies_and_offers_undo(stack: Stac
 
 
 async def test_the_review_page_sends_the_version_it_showed(stack: Stack) -> None:
-    """G16: the review page's Apply carries the version; one amended since is refused."""
+    """The review page's Apply carries the version; one amended since is refused."""
     h, ark = stack.h, stack.ark
     token, b = await _signed_in(stack)
     try:
@@ -242,7 +242,7 @@ async def test_the_deck_page_shows_the_strip_and_home_counts_the_decks(stack: St
         page = (await b.http.get("/decks/42")).text
         assert "<details class='wstrip' id='waiting' data-open-wide>" in page
         assert "<b>2 waiting changes</b>" in page and "oldest 1 min" in page
-        # at the top, under the banner (Q134 A2)
+        # at the top, under the banner
         assert page.index("class='banner") < page.index("class='wstrip'") < page.index("id='cards'")
         assert "name='back' value='/decks/42'" in page
         home = (await b.http.get("/")).text

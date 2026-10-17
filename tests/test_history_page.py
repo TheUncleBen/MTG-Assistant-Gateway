@@ -1,4 +1,4 @@
-"""The history page (T-045) and the report page (T-041) over the ASGI stack: the lists are
+"""The history page and the report page over the ASGI stack: the lists are
 narrowed and paged in SQL so a deck keeps its older entries, the filter bar, the "When" presets
 (UTC calendar days), the day and deck groupings render, snapshots keep their Restore button,
 and a stored report renders as a designed page with Markdown and HTML exports."""
@@ -201,7 +201,7 @@ async def test_history_page_filters_groups_and_pages(stack: Stack) -> None:
         assert "2 most recent stored reports" in body and "<svg class='tspark'" in body
         # the filter bar: themed selects in one form, the deck list from the member's history
         assert "class='card filterbar'" in body and body.count("<select") == 5
-        # Q11: current decks by their live Archidekt names (the history recorded "Immortal
+        # Current decks by their live Archidekt names (the history recorded "Immortal
         # Reckoning"); a deck no longer in the member's list sits in its own group below
         assert "<option value='42' selected>Sample Commander Deck</option>" in body
         assert "Immortal Reckoning</option>" not in body
@@ -609,7 +609,7 @@ async def test_trends_never_mix_simulations_run_differently(stack: Stack) -> Non
 
 
 async def test_a_relinked_member_keeps_the_old_accounts_history(stack: Stack) -> None:
-    """L1: after relinking to another Archidekt account, the decks of the account linked before are
+    """After relinking to another Archidekt account, the decks of the account linked before are
     not in the new account's list, but they are not gone: they stay with the current decks and
     their snapshots keep Restore. A deck of the account linked now that left its list still is."""
     b = await linked_browser(stack)
@@ -675,7 +675,7 @@ async def test_a_relinked_member_keeps_the_old_accounts_history(stack: Stack) ->
 
 
 def test_own_decks_are_the_linked_accounts_only(tmp_path: Path) -> None:
-    """L1: which decks of the history count as the linked account's own (the only ones that can
+    """Which decks of the history count as the linked account's own (the only ones that can
     be called gone). A snapshot names its deck's owner; a proposal counts by the account linked
     when it was made, and every doubt leaves a deck out."""
     db = Database(tmp_path / "g.db")

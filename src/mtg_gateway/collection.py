@@ -410,7 +410,7 @@ class CollectionService:
     async def _run(self, sub: str, fn: Any, *, progress: dict[str, Any] | None = None) -> Any:
         """``progress``: a write of a collection proposal's apply, recorded there (one record
         changed, or a write that may have landed) so a stop says what had changed and a proposal
-        that changed something never goes back to pending (Q78)."""
+        that changed something never goes back to pending."""
         try:
             out = await _writing(progress, self.decks._call(sub, fn))
         except (DeckError, ArchidektError) as exc:
@@ -568,7 +568,7 @@ class CollectionService:
                         opts["quantity"],
                         modifier=MODIFIERS[finish],
                         # with none picked, English and Near Mint, as archidekt.com's own new
-                        # record (its site code; Q60)
+                        # record (its site code)
                         condition=opts["condition"] or "NM",
                         language=opts["language"],
                     ),

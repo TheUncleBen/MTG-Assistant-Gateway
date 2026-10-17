@@ -77,9 +77,13 @@ In plain terms:
   this gateway: it used every tool, creating proposals included (verified).
   Plus is still untested.
 - **What that means for deck changes in ChatGPT.** The gateway marks every
-  tool as read-only except six: `apply_proposal`, `confirm_proposal`,
-  `reject_proposal`, `run_deck_report`, `save_scan_session` and
-  `propose_collection_changes`.
+  tool as read-only except the ones that apply, approve, reject or tidy
+  waiting changes, start Forge games, save a scan, remove a saved card
+  description or change your watchlist: `apply_proposal`, `confirm_proposal`, `confirm_waiting`, `reject_proposal`,
+  `amend_proposal`, `withdraw_proposal`, `combine_proposals`,
+  `run_deck_report`, `play_more_games`, `save_scan_session` and
+  `remove_card_model`, and, when the operator has turned watchlists on,
+  `watch_card`, `watch_deck` and `unwatch`.
   Making a proposal only records it, so even if ChatGPT limits you to
   read-only tools you should still be able to propose changes and then press
   Approve on the card ChatGPT shows with the proposal, or Apply on the
@@ -263,10 +267,11 @@ Claude lets you set each tool to always allow, needs approval, or blocked
 (verified). Keep `apply_proposal` on **needs approval**: in an auto mode
 that's the tool that actually changes your deck. Claude's Research mode can
 call connector tools without asking (verified). Everything except
-`apply_proposal`, `confirm_proposal` (the card's own button),
-`reject_proposal`, `run_deck_report`, `save_scan_session` and
-`propose_collection_changes` (which only records a proposal) only reads or
-records proposals.
+`apply_proposal`, `confirm_proposal` and `confirm_waiting` (the card's own
+buttons), `reject_proposal`, `amend_proposal`, `withdraw_proposal`,
+`combine_proposals`, `run_deck_report`, `play_more_games`,
+`save_scan_session`, `remove_card_model`, `watch_card`, `watch_deck` and
+`unwatch` only reads or records proposals.
 
 ## ChatGPT
 

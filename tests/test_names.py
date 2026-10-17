@@ -143,7 +143,7 @@ def test_short_queries_answer_nothing(query: str) -> None:
 
 
 def test_a_longer_text_searches_only_the_names_the_shorter_one_matched() -> None:
-    """A12: each keystroke narrows the last keystroke's matches; the answers are the same as a
+    """Each keystroke narrows the last keystroke's matches; the answers are the same as a
     scan of the whole catalog, in the same order."""
     import random
 

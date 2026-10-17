@@ -1,4 +1,4 @@
-"""Choices that follow the account (0.7.29, G7; QUESTIONS-2 B6-B9, card Q135 items 4-6): the
+"""Choices that follow the account (0.7.29): the
 pages' own API for them, what it accepts, the one-time copy from a device, the newest 150 stack
 orders, "View as" moving from a cookie to the account, and "Forget my view choices"."""
 
@@ -109,7 +109,7 @@ async def test_the_copy_from_a_device_never_overwrites_the_account(stack: Stack)
 
 
 def test_the_newest_150_stack_orders_are_kept(tmp_path: Path) -> None:
-    """B8 (card Q135 item 5): one more forgets the oldest instead of refusing; nothing else goes."""
+    """One more forgets the oldest instead of refusing; nothing else goes."""
     db = Database(tmp_path / "g.sqlite")
     db.upsert_user(SUB, email=None, name=None, preferred_username=None, groups=[])
     assert prefs.save(db, SUB, "card.size", "s")
@@ -168,7 +168,7 @@ async def test_forget_my_view_choices(stack: Stack) -> None:
         assert r.status_code == 303 and "ok=choices_forgotten" in r.headers["location"]
         where = r.headers["location"]
         assert db.get_prefs(SUB) == {"track.a.something": True, prefs.FORGOTTEN: True}
-        # a device not used since the update can't bring the forgotten choices back (K5): its
+        # a device not used since the update can't bring the forgotten choices back: its
         # stored choices aren't copied, and its view cookie is dropped, not copied
         r = await api(b, "POST", "/api/v1/prefs", {"copy": {"stack:42:type": ["Land"], "scan.intro": True}})
         assert r.json()["ok"] is True and r.json()["saved"] == []

@@ -222,7 +222,7 @@ async def test_install_steps_narrow_to_one_client(harness: Harness) -> None:
 
 
 def test_connector_icon_fits_chatgpts_upload_limit() -> None:
-    """ChatGPT's custom connector form takes a PNG of at most 10 KB (T-145, backlog item 3)."""
+    """ChatGPT's custom connector form takes a PNG of at most 10 KB."""
     from PIL import Image
 
     path = REPO / "src" / "mtg_gateway" / "static" / plugin_page.CONNECTOR_ICON_PATH.rsplit("/", 1)[1]
@@ -238,7 +238,7 @@ def test_connector_icon_fits_chatgpts_upload_limit() -> None:
 async def test_chatgpt_steps_offer_the_name_description_url_and_icon_to_copy(
     tmp_path: Path, idp: FakeIdP, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """T-145: the ChatGPT steps hand over what its form asks for, the name taken from
+    """The ChatGPT steps hand over what its form asks for, the name taken from
     MTG_SERVER_NAME, and the icon downloads without signing in (on a phone too)."""
     monkeypatch.setenv("MTG_PLUGIN_DIR", str(REPO_PLUGIN))
     async with running(Harness(make_settings(tmp_path, server_name="Deck Helper"), idp)) as h:

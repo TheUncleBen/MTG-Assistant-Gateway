@@ -1,11 +1,11 @@
-"""Remembered choices that follow the account (0.7.29, G7; QUESTIONS-2 B6-B10).
+"""Remembered choices that follow the account (0.7.29).
 
 Everything a member picks once and expects to find again on their other devices is kept on their
 account (``account_prefs``, schema 13): "View as" on the deck page, My decks, card search and the
 collection; the card size; the stack order of each deck and grouping; the deck stats toggles; and
 the two dismissed tips (the EDHPlay steps and the scan intro). Light or dark stays on each device.
 
-Three things stay on each device on purpose (card Q135 item 4): the last deck picked in "Add to
+Three things stay on each device on purpose: the last deck picked in "Add to
 deck", the last set used per deck in the printing picker, and a scan in progress.
 
 The choices a device held before 0.7.29 are copied to the account once: the view cookies here,
@@ -37,7 +37,7 @@ DECKSTATS = "deckstats"
 EDHPLAY_STEPS = "edhplay.steps"
 SCAN_INTRO = "scan.intro"
 STACK = "stack:"  # + deck id + ":" + grouping
-MAX_STACK_ORDERS = 150  # B8: the newest 150; saving one more forgets the oldest
+MAX_STACK_ORDERS = 150  # the newest 150; saving one more forgets the oldest
 MAX_STACK_NAMES = 300  # stacks in one order (a deck has far fewer groups)
 # Set by "Forget my view choices" and kept: from then on a device's pre-0.7.29 choices (a view
 # cookie, the browser's stored ones) are never copied to the account, so a device not used since
@@ -100,7 +100,7 @@ def valid_name(name: str) -> bool:
 
 
 def forget(db: Database, sub: str) -> int:
-    """ "Forget my view choices" (B9): views, card size, stack orders, stats toggles and the
+    """ "Forget my view choices": views, card size, stack orders, stats toggles and the
     dismissed tips. Other things kept on the account (notifications, approval mode) stay."""
     n = db.delete_prefs(
         sub,

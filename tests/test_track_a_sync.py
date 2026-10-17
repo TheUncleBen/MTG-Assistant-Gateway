@@ -1,4 +1,4 @@
-"""Release 0.7.29, leftover A7 (0.7.26 audit S2): the deck sync's branches that had no test, driven
+"""Release 0.7.29: the deck sync's branches that had no test, driven
 on a stand-in for the deck service so each branch is reached on purpose: the read cap, a slow
 deck list, a busy pacer, a deck being written, the round stopping when Archidekt struggles, the
 timer loop surviving a bad round, and the seen-list bound."""

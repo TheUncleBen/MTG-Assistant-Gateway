@@ -1,6 +1,6 @@
 """Release 0.7.29: an amend and an apply of the same waiting note racing each other. Whichever
 claims the note first wins; the other is refused and nothing it would have done reaches
-Archidekt, so the deck gets exactly the version that was approved (G16)."""
+Archidekt, so the deck gets exactly the version that was approved."""
 
 from __future__ import annotations
 

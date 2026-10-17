@@ -44,7 +44,7 @@ browser's text zoom up to 200%, wrapping rather than running off the screen.
 ## Home
 
 Your newest decks with their cover art, a deck search box, and one tile per
-section: Decks, Search, Scan, Collection, Proposals (how many wait for you), History, Guide. **Connect an AI
+section: Decks, Search, Precons, Scan, Collection, Proposals (how many wait for you), History, Guide. **Connect an AI
 assistant** at the end holds the connector URL and the guided setup.
 
 ## Your decks
@@ -124,8 +124,8 @@ One deck:
   finger or the keyboard. Nothing is sent to Archidekt and nothing is kept.
 - **Run full test** runs the statistics, the legality check and the
   solo test (300 games, no opponents) and opens the result, filed under
-  History. It is the same run the assistant's `run_deck_report` makes, so
-  the numbers match whichever way it is started. A Commander deck is played
+  History. It is the same run your assistant makes when you ask it for a
+  deck report, so the numbers match whichever way it is started. A Commander deck is played
   from the command zone against 40 life. A deck without a commander and with
   at least 60 cards (Standard, Modern, Pioneer, Legacy, Vintage, Pauper and
   the like) is played as a 60-card game: seven-card London mulligan with no
@@ -170,8 +170,8 @@ One deck:
   preconstructed deck (pick one from Archidekt's list), any deck id or
   link, or a pasted list: what the build took out of the other deck, what
   it put in, changed counts, basic lands, and the statistics' differences.
-  Tap a card name for the whole card. The assistant's `compare_decks` makes
-  the same comparison.
+  Tap a card name for the whole card. Your assistant makes the same
+  comparison when you ask it to compare two decks.
 - The **More** menu in the banner holds Deck settings, Export (text, JSON or
   CSV), History and snapshots, Compare, Deck stats, the deck's page on
   Archidekt and **Delete deck**. Deleting asks you to type the deck's name; a snapshot is
@@ -303,9 +303,9 @@ condition and count.
   fix misread cards, printings and quantities first, then send it to your
   collection or a deck, which removes the draft. Nothing expires by age.
 
-Your assistant can read and add to the collection too (`list_collection`,
-`propose_collection_changes`, a proposal you approve on the card in the chat
-or the review page, like a deck edit), for questions like "which cards in
+Your assistant can read and add to the collection too (an addition is a
+proposal you approve on the card in the chat or the review page, like a deck
+edit), for questions like "which cards in
 this deck do I not own yet?". After a collection change is applied, the
 gateway reads the collection back to check every card landed. Adding takes about a second a card,
 because each one is written to Archidekt.
@@ -317,8 +317,9 @@ deck's score), **Bookmark**, **Follow** its owner, and a **Comments** panel
 that shows the deck's thread and lets you reply or add a comment, and edit
 or delete your own comments. A user page has the Follow button too. Each one asks you to confirm first, then
 goes to Archidekt under your Archidekt name, exactly as if you had pressed
-it on archidekt.com. These buttons are yours alone: your assistant has no
-tool for any of them and cannot like, follow or comment for you.
+it on archidekt.com. Your assistant can suggest a like, bookmark, follow or
+comment, but it never sends one: each waits for your own press, in every
+approval mode, on the card in the chat or on its review page.
 
 ## Proposals and history
 
@@ -354,7 +355,7 @@ assistant applies what that mode allows, always with a snapshot.
   deck's own name, description, format, bracket and privacy alike (another
   proposal you approve).
 - **Reports** (under More) list your stored deck reports, newest first (the
-  gateway keeps the newest 200), with what Forge is playing now. Each holds
+  gateway keeps the newest 200), with what Forge has going for you now. Each holds
   the deck's statistics, a legality check, and the solo test, the Forge games
   or both, so you can follow how a deck develops.
 - **Compare** has **Test both in Forge against the same opponents** when
@@ -367,7 +368,8 @@ assistant applies what that mode allows, always with a snapshot.
 ## Watchlist and prices
 
 Watchlists are off unless the operator turns them on; until then the page,
-the card viewer's price buttons and the watch tools below are not there.
+the card viewer's price buttons and your assistant's watchlist abilities are
+not there.
 
 The **Watchlist** page (in the account menu, and under More on a phone)
 keeps the price of cards and decks you choose, once a day:
@@ -389,8 +391,8 @@ keeps the price of cards and decks you choose, once a day:
 Prices come from Scryfall (TCGplayer in dollars, Cardmarket in euros) and
 are checked once a day; the operator sets how many cards and decks you may
 watch and how long prices are kept (a year unless they changed it). Your
-assistant has the same: `watch_card`, `watch_deck`, `unwatch`,
-`list_watchlist` and `card_price_history`. Watching changes nothing on
+assistant can do the same: watch a card or a deck, stop watching, list your
+watchlist and read a card's price history. Watching changes nothing on
 Archidekt, so it needs no proposal.
 
 ## Notifications and summaries
@@ -441,8 +443,9 @@ deck by category with pictures and rules text, and your account's setup.
 A tap is passed to the assistant as text; nothing changes until a proposal
 you approve. The [assistant skill](SKILL.md) teaches
 the house rules. The assistant can also propose moving a deck to another
-folder, changing its tags or its cover (a settings change you approve);
-deleting a deck and creating or renaming folders stay yours alone.
+folder, changing its tags or its cover (a settings change you approve). It
+can also suggest deleting a deck or creating a folder, but only your own
+press applies those; renaming folders is yours alone.
 [CAPABILITIES.md](CAPABILITIES.md) lists every tool the
 assistant has, which one owns each job, everything you can do by hand, and
 what only one of the two paths can do.
@@ -450,8 +453,8 @@ what only one of the two paths can do.
 ## The Android app
 
 The [Android app](ANDROID.md) shows these same pages as a native-feeling
-app with the phone camera built in. The app's own actions (scan with the
-phone camera, reload, open in browser, change gateway) sit in the account
+app with the phone camera built in. The app's own actions (Scan with the
+app's camera, Reload, Open in browser, Change gateway) sit in the account
 menu. On a foldable, the folded screen has the tabs at the bottom and the
 unfolded screen moves them to a rail down the left edge. No Android phone? Add the site to your home screen from the
 browser and it opens like an app, scanning included.

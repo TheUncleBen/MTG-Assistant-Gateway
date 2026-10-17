@@ -51,7 +51,7 @@ async def _app_token(h: Harness, name: str, scope: str = "mtg") -> tuple[str, st
     return r.json()["access_token"], client["client_id"]
 
 
-# -- B-2: "Delete my data" racing an apply or a report ------------------------------------------
+# -- "Delete my data" racing an apply or a report ------------------------------------------
 async def test_delete_data_during_apply_leaves_no_snapshot(stack: Stack) -> None:
     h, ark = stack.h, stack.ark
     token = await linked_user(stack)
@@ -115,7 +115,7 @@ async def test_delete_data_during_report_stores_no_report(stack: Stack) -> None:
     await b.aclose()
 
 
-# -- B-3: a token refresh racing a relink ------------------------------------------------------
+# -- a token refresh racing a relink ------------------------------------------------------
 async def _start_refresh_then_relink(stack: Stack, outcome):
     h, ark = stack.h, stack.ark
     ark.access_ttl = 200  # alice's stored access token is inside the 5-minute refresh window
@@ -167,7 +167,7 @@ async def test_failed_refresh_of_old_link_does_not_revoke_the_new_one(stack: Sta
     assert link is not None and link["archidekt_username"] == "amy"
 
 
-# -- B-4: a new-deck proposal is bound to the account it was made for --------------------------
+# -- a new-deck proposal is bound to the account it was made for --------------------------
 async def test_new_deck_proposal_is_bound_to_its_archidekt_account(stack: Stack) -> None:
     h, ark = stack.h, stack.ark
     token = await linked_user(stack)  # alice
@@ -188,7 +188,7 @@ async def test_new_deck_proposal_is_bound_to_its_archidekt_account(stack: Stack)
     await b.aclose()
 
 
-# -- B-5: a details apply re-checks the deck after the backup --------------------------------
+# -- a details apply re-checks the deck after the backup --------------------------------
 async def test_details_apply_refuses_a_change_made_during_backup(stack: Stack) -> None:
     h, ark = stack.h, stack.ark
     token = await linked_user(stack)
@@ -223,7 +223,7 @@ async def test_details_apply_still_works_when_nothing_changed(stack: Stack) -> N
     assert ark.decks[42]["name"] == "Gateway name"
 
 
-# -- B-6: admin actions are attributed to an administrator in the member's log ---------------
+# -- admin actions are attributed to an administrator in the member's log ---------------
 async def test_admin_actions_show_as_admin_in_members_activity(tmp_path, idp: FakeIdP) -> None:
     ark = FakeArchidekt()
     settings = make_settings(
@@ -262,7 +262,7 @@ async def test_admin_actions_show_as_admin_in_members_activity(tmp_path, idp: Fa
         await m.aclose()
 
 
-# -- B-7: deck covers go with the member's data; the page is truthful about backups ------------
+# -- deck covers go with the member's data; the page is truthful about backups ------------
 async def test_delete_data_removes_deck_covers_and_mentions_backups(stack: Stack) -> None:
     h = stack.h
     await linked_user(stack)
@@ -290,7 +290,7 @@ async def test_deck_covers_from_before_the_owner_column_go_by_deck_id(tmp_path: 
     db.close()
 
 
-# -- B-8: failed Archidekt link attempts are limited and audited ------------------------------
+# -- failed Archidekt link attempts are limited and audited ------------------------------
 async def test_link_attempts_are_limited_per_member(stack: Stack) -> None:
     h = stack.h
     b = Browser(h)
@@ -346,7 +346,7 @@ def test_applied_proposals_are_purged_after_the_retention(tmp_path: Path) -> Non
     db.close()
 
 
-# -- E-2: moving cards to the maybeboard is shown as leaving the deck --------------------------
+# -- moving cards to the maybeboard is shown as leaving the deck --------------------------
 async def test_set_category_to_maybeboard_is_shown_as_removal(stack_browser_only: Stack) -> None:
     h, ark = stack_browser_only.h, stack_browser_only.ark
     ark.decks[42]["categories"].append({"name": "Maybeboard", "isPremier": False, "includedInDeck": False})
@@ -378,7 +378,7 @@ def test_skill_no_longer_says_maybeboard_rows_are_never_touched() -> None:
     assert "set_category" in text
 
 
-# -- E-3: a read-only token cannot write ---------------------------------------------------
+# -- a read-only token cannot write ---------------------------------------------------
 async def test_read_scope_token_cannot_propose_or_write_via_api(stack: Stack) -> None:
     h = stack.h
     await linked_user(stack)
@@ -417,7 +417,7 @@ async def test_read_scope_token_cannot_propose_or_write_via_api(stack: Stack) ->
     assert p["ok"], p
 
 
-# -- E-4: proposals name their app; disconnecting an app closes its pending proposals ---------
+# -- proposals name their app; disconnecting an app closes its pending proposals ---------
 async def test_proposals_name_their_app_and_close_on_disconnect(stack_browser_only: Stack) -> None:
     h = stack_browser_only.h
     await linked_user(stack_browser_only)
@@ -449,7 +449,7 @@ async def test_proposals_name_their_app_and_close_on_disconnect(stack_browser_on
     await b.aclose()
 
 
-# -- E-5: the research proxy bounds the arguments of expensive tools --------------------------
+# -- the research proxy bounds the arguments of expensive tools --------------------------
 class _Upstream:
     def __init__(self, seen: list):
         self.seen = seen
@@ -486,7 +486,7 @@ async def test_proxy_refuses_unbounded_simulation_arguments() -> None:
     assert seen == [("goldfish_run", {"deck": "1 Island", "n": 300, "until_turn": 8})]
 
 
-# -- E-6: a per-member budget of Archidekt calls -------------------------------------------
+# -- a per-member budget of Archidekt calls -------------------------------------------
 async def test_archidekt_calls_have_a_per_member_budget(tmp_path: Path, idp: FakeIdP) -> None:
     ark = FakeArchidekt()
     settings = make_settings(
@@ -537,9 +537,9 @@ def test_budget_refills_over_time(monkeypatch: pytest.MonkeyPatch) -> None:
     assert budget.retry_after("u") == 1 and budget.take("u")
 
 
-# -- E-7: apps delete only their own reports; Q129 (0.7.29): no pending limit per app ----------
+# -- apps delete only their own reports; 0.7.29: no pending limit per app -----------------------
 async def test_one_app_may_use_every_pending_slot(stack: Stack, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Q129: the 30-per-app limit is gone; only the member's 100 waiting proposals are counted."""
+    """The 30-per-app limit is gone; only the member's 100 waiting proposals are counted."""
     monkeypatch.setattr(decks_module, "MAX_PENDING_PROPOSALS", 3)
     h = stack.h
     await linked_user(stack)

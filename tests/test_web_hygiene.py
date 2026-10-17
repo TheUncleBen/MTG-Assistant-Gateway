@@ -34,7 +34,7 @@ async def h(tmp_path: Path, idp: FakeIdP):
         yield harness
 
 
-# -- logout (finding 5) --------------------------------------------------------
+# -- logout --------------------------------------------------------
 async def test_logout_without_form_token_clears_nothing(h: Harness) -> None:
     b = Browser(h)
     try:
@@ -91,7 +91,7 @@ async def test_err_query_shows_only_known_codes(h: Harness) -> None:
         await b.aclose()
 
 
-# -- headers (finding 7) -----------------------------------------------------------
+# -- headers -----------------------------------------------------------
 async def test_authenticated_json_and_pages_are_not_cached_or_sniffed(h: Harness) -> None:
     b = Browser(h)
     try:
@@ -107,7 +107,7 @@ async def test_authenticated_json_and_pages_are_not_cached_or_sniffed(h: Harness
     assert (await h.http.get("/healthz")).headers["x-content-type-options"] == "nosniff"
 
 
-# -- request bodies (L2) ---------------------------------------------------------
+# -- request bodies ---------------------------------------------------------
 async def test_oversized_bodies_are_refused_without_reading_them_whole(h: Harness) -> None:
     b = Browser(h)
     try:
@@ -136,7 +136,7 @@ async def test_oversized_bodies_are_refused_without_reading_them_whole(h: Harnes
         await b.aclose()
 
 
-# -- scan sessions (L1) ----------------------------------------------------------
+# -- scan sessions ----------------------------------------------------------
 def test_scan_session_size_is_capped() -> None:
     card = summarize(json.loads((FIXTURES / "live" / "scryfall_named_sol_ring.json").read_text()))
     # A realistic full session (500 cards) still fits.
@@ -154,7 +154,7 @@ def test_scan_session_size_is_capped() -> None:
     assert "too large" in str(err.value) and MAX_SESSION_BYTES < 2_000_000
 
 
-# -- scan lookups per user (M4) ----------------------------------------------------
+# -- scan lookups per user ----------------------------------------------------
 async def test_scan_lookups_are_limited_per_user(h: Harness) -> None:
     service = h.app.state.gateway.scan
     gate = asyncio.Event()
@@ -187,7 +187,7 @@ async def test_scan_lookups_are_limited_per_user(h: Harness) -> None:
         await b.aclose()
 
 
-# -- Scryfall cache (finding 50) ---------------------------------------------------
+# -- Scryfall cache ---------------------------------------------------
 async def test_scryfall_cache_keeps_slim_cards() -> None:
     sf = ScryfallClient("https://scryfall.test", min_interval=0.0, http=FakeScryfall().client())
     raw = json.loads((FIXTURES / "live" / "scryfall_named_sol_ring.json").read_text())
@@ -198,7 +198,7 @@ async def test_scryfall_cache_keeps_slim_cards() -> None:
     assert len(json.dumps(cached)) < 1500 < len(json.dumps(raw))
 
 
-# -- asset version (finding 42) ----------------------------------------------------
+# -- asset version ----------------------------------------------------
 def test_asset_version_covers_every_static_file(tmp_path: Path) -> None:
     static = tmp_path / "static"
     shutil.copytree(scan_routes.STATIC_DIR, static, ignore=shutil.ignore_patterns("vendor"))
@@ -230,7 +230,7 @@ async def test_unversioned_static_files_are_not_immutable(
     assert "immutable" in r.headers["cache-control"]
 
 
-# -- Mystic Forge proxy (finding 39) ----------------------------------------------
+# -- Mystic Forge proxy ----------------------------------------------
 class _SlowClient:
     def __init__(self, gate: asyncio.Event | None = None):
         self.gate = gate
@@ -277,7 +277,7 @@ async def test_proxy_middleware_counts_calls_by_token_subject(h: Harness) -> Non
     assert out.get("isError") is True and "busy" in str(out)
 
 
-# -- GET /mcp (finding 51) ---------------------------------------------------------
+# -- GET /mcp ---------------------------------------------------------
 async def test_get_mcp_is_refused_after_auth(h: Harness) -> None:
     assert (await h.http.get("/mcp")).status_code == 401
     token = await mcp_token(h)
@@ -293,7 +293,7 @@ async def test_get_mcp_is_refused_after_auth(h: Harness) -> None:
     assert (await h.mcp(token, "tools/list")).status_code == 200
 
 
-# -- Connected apps (finding 37) ---------------------------------------------------
+# -- Connected apps ---------------------------------------------------
 async def test_member_can_see_and_disconnect_connected_apps(h: Harness) -> None:
     first = await h.register(client_name="Claude")
     second = await h.register(client_name="ChatGPT")

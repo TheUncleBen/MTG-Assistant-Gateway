@@ -1,6 +1,6 @@
 """Release 0.7.29, approvals and proposals in headless Chromium: the Proposals page with its
 checkboxes, the confirm and the result; the deck page's waiting strip; and the review page of a
-change that keeps formatting (Q137). Phone, Fold and desktop, light and dark: no sideways scroll,
+change that keeps formatting. Phone, Fold and desktop, light and dark: no sideways scroll,
 labels at 4.5:1. Skipped without a Chromium build."""
 
 from __future__ import annotations
@@ -179,7 +179,7 @@ def test_proposals_page_strip_and_formatting_review_in_the_browser(server: Serve
             page.wait_for_selector("text=Apply 2 changes")
             button = page.locator("form.guarded button[value=apply]")
             # locked until the page was seen (click guard), but still in the Tab order, so a fast
-            # keyboard user does not skip past it (review round 2)
+            # keyboard user does not skip past it
             assert button.get_attribute("aria-disabled") == "true" and not button.evaluate("e => e.disabled")
             locked = button.evaluate(CONTRAST)
             assert locked["ratio"] >= 4.5 and locked["opacity"] == 1, locked
@@ -245,7 +245,7 @@ WORDS_BROKEN = """(sel) => {
 
 
 def test_the_checked_bar_at_200_percent_text_on_a_phone(server: Server) -> None:
-    """Review round 1, finding 8: at 200% text the bar stays two rows (Apply and Reject side by
+    """At 200% text the bar stays two rows (Apply and Reject side by
     side, Clear by the count), words wrap whole, and Apply is on screen and not covered."""
     from playwright.sync_api import sync_playwright
 
@@ -299,7 +299,7 @@ def test_the_checked_bar_at_200_percent_text_on_a_phone(server: Server) -> None:
 
 
 def test_reject_asks_first_on_the_list_and_the_deck_strip(server: Server) -> None:
-    """Q141 item 8C: Reject on the Proposals page and the deck strip asks in the bar first
+    """Reject on the Proposals page and the deck strip asks in the bar first
     ("Reject 2 changes?"); Cancel rejects nothing and gives the focus back; the confirm's Reject
     rejects only the checked ones. Phone, Fold and desktop, light and dark: readable, a ring on
     the focused button, no sideways scroll."""
@@ -362,10 +362,10 @@ def test_reject_asks_first_on_the_list_and_the_deck_strip(server: Server) -> Non
 
 
 def test_the_full_test_buttons_fit_every_screen_and_text_size(tmp_path: Path) -> None:
-    """Track C's banner texts (C-W-281 to C-W-286, coordinator-approved ~05:24Z 10-17) on the deck
-    page: "Run full test" and More's "Solo test only" with their tooltips, at 344, 360 and 390 px,
-    on the Fold and on desktop, light and dark, 100% and 200% text. No sideways scroll, words
-    whole, labels readable (contrast at least 4.5:1), and the tooltips word for word."""
+    """The banner's full-test texts on the deck page: "Run full test" and More's "Solo test only"
+    with their tooltips, at 344, 360 and 390 px, on the Fold and on desktop, light and dark, 100%
+    and 200% text. No sideways scroll, words whole, labels readable (contrast at least
+    4.5:1), and the tooltips word for word."""
     from playwright.sync_api import sync_playwright
 
     exe = _chromium_path()

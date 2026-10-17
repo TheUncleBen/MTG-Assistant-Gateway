@@ -86,7 +86,8 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
         if not sub:
             return login_redirect("/decks")
         qp = request.query_params
-        if qp.get("reread"):  # Try again on the Q64 notice: read the list again, then show it
+        # Try again on the notice that the deck list couldn't be read: read it again, then show it
+        if qp.get("reread"):
             decks.reread_deck_list(sub)
             rest = urlencode([(k, v) for k, v in qp.multi_items() if k != "reread"])
             return RedirectResponse("/decks" + (f"?{rest}" if rest else ""), 303)
@@ -96,9 +97,9 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
         if failure is not None and (busy := busy_response(failure, request, page, sub=sub, sid=sid)):
             return busy
         pending = rows is None  # cold start: the shell goes out now, decks.js fills the list
-        unreadable = bool(getattr(rows, "unreadable", 0))  # entries Archidekt left unreadable (Q64)
-        hidden = 0  # the gateway's backup copies, kept out of this list (D-03); the list is warm now
-        if not pending and not problem and not unreadable:  # unreadable: the list is not kept (Q64)
+        unreadable = bool(getattr(rows, "unreadable", 0))  # entries Archidekt left unreadable
+        hidden = 0  # the gateway's backup copies, kept out of this list; the list is warm now
+        if not pending and not problem and not unreadable:  # unreadable: the list is not kept
             try:
                 hidden = len(await decks.backup_copies(sub, wait=0.0) or [])
             except DeckError:
@@ -222,7 +223,7 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
             )
             out["count"] = len(recent)
         else:
-            unreadable = bool(getattr(rows, "unreadable", 0))  # Q64, as on /decks
+            unreadable = bool(getattr(rows, "unreadable", 0))  # the deck list couldn't be read, as on /decks
             tree = None
             if rows is not None:
                 tree, _late = await folder_tree(sub, wait=DECKS_JSON_TIMEOUT)
@@ -414,7 +415,7 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
             sort=qp.get("sort") or "name",
             q=(qp.get("q") or "").strip()[:80],
             notice=notice,
-            waiting=waiting_changes(state.db, sub, deck.id, own=own),  # waiting_strip.py (S4)
+            waiting=waiting_changes(state.db, sub, deck.id, own=own),  # waiting_strip.py
         ) + prefs.page_prefs(state.db, sub, f"{prefs.STACK}{deck.id}:", prefs.EDHPLAY_STEPS, prefs.DECKSTATS)
         resp = page(
             deck.name or f"Deck {deck.id}",
@@ -427,7 +428,7 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
             csp=DECK_CSP,
             heading=False,
             deck_css=True,
-            # social.js: the banner's like, bookmark and follow and the comments (Track A's file)
+            # social.js: the banner's like, bookmark and follow and the comments
             extra_scripts=("social.js", "deckstats.js", "printpick.js"),
         )
         return prefs.remember_view(state.db, sub, resp, "deck", view, secure=secure) if remember else resp

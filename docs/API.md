@@ -18,9 +18,11 @@ Every `/api/v1` call needs one of:
 
 A bearer token whose scopes are all read-only (`mtg.read` or a bare `read`, for an app that asked
 for `scope=mtg.read`) may call every `GET` route but none of the writes: they answer `403` with
-`"error": "insufficient_scope"`. The MCP tools that change something (`propose_*`, `apply_proposal`,
-`confirm_proposal`, `reject_proposal`, `run_deck_report`, `save_scan_session`) refuse such a token
-the same way. A token
+`"error": "insufficient_scope"`. The MCP tools that change something refuse such a token the same
+way: every `propose_*` tool (`propose_collection_changes` included), `apply_proposal`,
+`confirm_proposal`, `reject_proposal`, `amend_proposal`, `withdraw_proposal`, `combine_proposals`,
+`confirm_waiting`, `run_deck_report`, `play_more_games`, `remove_card_model`, `save_scan_session`,
+`watch_card`, `watch_deck` and `unwatch`. A token
 with the default scope `mtg`, with no scope, or with any scope that is not read-only (for example
 `read write`) has full access, as before.
 
@@ -49,7 +51,7 @@ code and a human `message`:
 | `other_client` | 403 | the proposal was made by another connected app (or, for reject, in the browser); use the review page (`review_url` is included) |
 | `not_linked` | 409 | no Archidekt account linked yet; send the user to `/account` |
 | `not_pending` / `already_applied` / `stale` | 409 | the proposal cannot be applied in its current state |
-| `rate_limited` | 429 | the Archidekt pacer is busy, the member's Archidekt budget (`MTG_ARCHIDEKT_CALLS_PER_10_MIN`) is used up, too many failed link attempts, or too many pending proposals (100 per member, 30 per app) |
+| `rate_limited` | 429 | the Archidekt pacer is busy, the member's Archidekt budget (`MTG_ARCHIDEKT_CALLS_PER_10_MIN`) is used up, too many failed link attempts, or too many pending proposals (100 per member) |
 | `unavailable` | 503 | Archidekt or Mystic Forge is unreachable |
 | `idp_unavailable` | 503 | the identity provider can't be reached to confirm the caller is still a member; nothing was revoked, try again shortly (`Retry-After: 30`) |
 
@@ -192,7 +194,6 @@ cookie, set by `POST /theme`); internal links never open a new tab.
 | `/decks/{id}/goldfish` | Goldfish: play the deck by hand in the browser; nothing is sent or kept |
 | `/decks/{id}/compare` | Compare the deck with a precon, another deck or a pasted list |
 | `/decks/{id}/collaborators` (POST) | Add or remove a deck collaborator by hand, after a confirmation page |
-| `/decks/{id}/playtest` | Redirects to Archidekt's own playtester (kept for old links) |
 | `/history?deck_id=` | Proposals, snapshots and reports over time, with restore; `type=`, `state=`, `q=`, `when=` (today, 7d, 30d, 90d, year: UTC days) and `group=` (day or deck) narrow and arrange the page, `offset=` pages it |
 | `POST /history/restore` | Browser session (CSRF): makes a restore proposal for `snapshot_id` and opens its review page |
 | `/history/reports/{rid}` | One report, designed: headline tiles, trends, the research service's text; `/history/reports/{rid}/export.md` and `.html` download it, and Copy puts the Markdown on the clipboard |

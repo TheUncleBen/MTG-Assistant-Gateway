@@ -123,7 +123,7 @@ def test_admin_warning_reads_everywhere(server: Server, width: int, theme: str) 
 def test_admin_note_on_a_shortened_developer_name_reads_everywhere(
     tmp_path: Path, width: int, theme: str
 ) -> None:
-    """B4 b: a MTG_SERVER_NAME over 120 characters, with a short MTG_CHATGPT_NAME: only the
+    """A MTG_SERVER_NAME over 120 characters, with a short MTG_CHATGPT_NAME: only the
     developer-name note shows, and it reads at every size."""
     from playwright.sync_api import sync_playwright
 
@@ -154,7 +154,7 @@ def test_admin_note_on_a_shortened_developer_name_reads_everywhere(
 @pytest.mark.parametrize("width,theme", SIZES)
 def test_both_name_notices_read_together(tmp_path: Path, width: int, theme: str) -> None:
     """MTG_CHATGPT_NAME empty and MTG_SERVER_NAME over 120 characters: the 80-character warning
-    (W14) and the developer-name notice (B4 b) both show, one under the other, and both read."""
+    and the developer-name notice both show, one under the other, and both read."""
     from playwright.sync_api import sync_playwright
 
     from mtg_gateway.plugin_page import developer_name_warning

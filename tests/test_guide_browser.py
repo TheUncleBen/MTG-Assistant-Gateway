@@ -257,7 +257,7 @@ def test_phone_drawer_folds_and_nothing_overflows_at_360(server: Server) -> None
 
 @pytest.mark.parametrize("width", [390, 1366])
 def test_search_results_are_walked_with_the_arrow_keys(server: Server, width: int) -> None:
-    """L13: Down from the box reaches the first match, Down and Up go on through the list (Up from
+    """Down from the box reaches the first match, Down and Up go on through the list (Up from
     the first one goes back to the box), Home and End jump to its ends, and Escape goes back to the
     box with the search kept. Enter on a match opens it, as a click does."""
     from playwright.sync_api import sync_playwright

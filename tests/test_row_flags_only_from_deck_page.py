@@ -1,4 +1,4 @@
-"""Review 2 N1: an add's companion and "flipped by default" flags come only from the deck page's
+"""An add's companion and "flipped by default" flags come only from the deck page's
 own edit (its Undo of a removal). The proposal review and the chat card don't show them, so an
 assistant's proposal, or one made through ``/api/v1/proposals``, drops them: the card is added
 without either flag."""

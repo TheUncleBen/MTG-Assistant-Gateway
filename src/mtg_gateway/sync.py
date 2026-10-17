@@ -1,4 +1,4 @@
-"""Automatic Archidekt -> gateway deck sync (0.7.25, R-153).
+"""Automatic Archidekt -> gateway deck sync (0.7.25).
 
 Archidekt is the master copy of every deck. It has no webhooks, so the gateway asks it: when a
 member opens the app (any signed-in page, at most once per OPEN_GAP) and every
@@ -8,16 +8,16 @@ already reads, with each deck's ``updatedAt``; one request per 50 decks, at most
 plus a full read of a deck only when it has a waiting proposal and its ``updatedAt`` moved since
 the last check (at most MAX_DECK_READS per check). Only the member's own decks are in that list;
 a waiting proposal on someone else's deck (a copy of a public deck) has no such signal, so that
-deck is read in full on each check, inside the same cap (0.7.29, leftover A4, Track A call A10).
+deck is read in full on each check, inside the same cap (0.7.29).
 The fresh list lands in the member's deck-list cache, so the app shows the current decks.
 
-What it does with a changed deck (0.7.29, K1): each waiting proposal on it is worked out again on
+What it does with a changed deck (0.7.29): each waiting proposal on it is worked out again on
 the deck as it is now (decks.py ``recheck_waiting``, recheck.py, the same check Apply makes). One
 that still does exactly what was reviewed is marked "updated" and its baseline moves to that deck;
 one that would now do something else is marked "needs a look" with the reason, so the review page,
 the proposal list and the assistant say so before anyone presses Apply.
 
-Rules it keeps (COMPARISON.md section 7, R1-R5):
+Rules it keeps:
 - Read-only on Archidekt. It never writes there and never applies, rejects or deletes a
   proposal, snapshot or undo entry; it only records a waiting proposal's status (updated, needs a
   look) and moves the baseline of one that still fits. Apply still re-reads the live deck and
@@ -37,7 +37,7 @@ Rules it keeps (COMPARISON.md section 7, R1-R5):
   audited as the deck sync's.
 
 The statuses are stored with the proposals (schema 13), so a restart keeps them. Unknown (needs a
-live check by Ben): whether Archidekt moves ``updatedAt`` on every card edit. If it does not, a
+live check): whether Archidekt moves ``updatedAt`` on every card edit. If it does not, a
 change can go unnoticed until Apply checks it, exactly as before 0.7.25.
 """
 
@@ -170,7 +170,7 @@ class DeckSync:
             return {"skipped": "slow"}
         listed = {str(d["id"]): str(d.get("updated_at") or "") for d in rows}
         # The member's decks with waiting proposals first, then the decks of someone else (a copy
-        # of a public deck), which have no updatedAt to go by (A10).
+        # of a public deck), which have no updatedAt to go by.
         waiting: dict[str, None] = {}
         others: dict[str, None] = {}
         for p in self.db.pending_baselines(sub):

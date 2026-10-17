@@ -751,7 +751,7 @@ async def test_each_deck_value_names_its_price_source(stack: Stack, monkeypatch)
 
 @pytest.mark.parametrize(("watched", "remove"), [(["1"], "Remove 1"), (["1", "2", "3"], "Remove 3")])
 def test_the_deck_limit_says_how_many_to_remove(watched: list[str], remove: str) -> None:
-    """0.7.29 (W2): a lowered limit can leave a member several over, so the refusal counts them."""
+    """0.7.29: a lowered limit can leave a member several over, so the refusal counts them."""
     from types import SimpleNamespace
 
     from mtg_gateway.decks import DeckError

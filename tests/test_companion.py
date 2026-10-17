@@ -165,7 +165,7 @@ async def test_reports_are_stored_and_listed(stack: Stack) -> None:
         assert listed.status_code == 200 and len(listed.json()["reports"]) == 1
         one = await h.http.get(f"/api/v1/reports/{rep['report_id']}", headers=auth)
         assert one.status_code == 200 and one.json()["deck_id"] == "42"
-        # A32: the Forge run alone, for a page or app watching it (no Forge here: preflight only)
+        # The Forge run alone, for a page or app watching it (no Forge here: preflight only)
         forge = await h.http.get(f"/api/v1/reports/{rep['report_id']}/forge", headers=auth)
         body = forge.json()
         assert forge.status_code == 200 and body["ok"] and body["report_id"] == rep["report_id"], body
@@ -194,7 +194,7 @@ async def test_reports_are_stored_and_listed(stack: Stack) -> None:
 
 
 async def test_the_rest_and_page_routes_can_leave_forge_out(stack: Stack) -> None:
-    """D17: the REST route takes "forge": false and the deck page's report form forge=0, each passed
+    """The REST route takes "forge": false and the deck page's report form forge=0, each passed
     to the report as forge=False; without either, Forge follows simulate as before (forge None)."""
     h = stack.h
     b = await linked_browser(stack)
@@ -223,7 +223,7 @@ async def test_the_rest_and_page_routes_can_leave_forge_out(stack: Stack) -> Non
 
 
 async def test_compare_page_tests_both_decks_against_the_same_forge_opponents(stack: Stack) -> None:
-    """K6 (Q136): with Forge set up, the Compare page of two Commander decks offers Forge games of
+    """With Forge set up, the Compare page of two Commander decks offers Forge games of
     both against the same opponents: this deck's report first, then the other's seated with its
     opponents (same_opponents_as), both without the solo test; the second report opens. The REST
     route and run_deck_report take the same same_opponents_as."""
@@ -275,7 +275,7 @@ async def test_compare_page_tests_both_decks_against_the_same_forge_opponents(st
             )
         )
         assert listed["ok"] is False and "pasted list gets no Forge games" in listed["message"]
-        # Q140 item 3: the higher of the two decks' set brackets picks them, whichever page it ran
+        # The higher of the two decks' set brackets picks them, whichever page it ran
         # from (the runs wait behind the member's first one, so each keeps the bracket it waits with)
         from mtg_gateway.forge import PAIR_LEAD, bracket_parts, shared_opponents
 
@@ -302,7 +302,7 @@ async def test_compare_page_tests_both_decks_against_the_same_forge_opponents(st
             if "opponent_choice" in second:  # it started: it seats the same table
                 assert [d["precon"] for d in fake.started[-1]["decks"][1:]] == chosen
                 assert second["opponent_choice"]["rule"] == "shared"
-                # proofread R4 fix 3: the second report says how the shared table was picked
+                # the second report says how the shared table was picked
                 assert (
                     "Forge games, picked for the higher of the two decks' brackets, so both decks met"
                     in (second["opponent_choice"]["note"])
@@ -327,7 +327,7 @@ async def test_compare_page_tests_both_decks_against_the_same_forge_opponents(st
 
 
 async def test_compare_press_starts_or_queues_both_decks_or_neither(stack: Stack) -> None:
-    """Proofread R13 O1: with one Forge run playing and one report waiting, the Compare press queued
+    """With one Forge run playing and one report waiting, the Compare press queued
     the first deck and left the second without Forge games (the queue keeps at most two waiting),
     though the button says both decks' games are started or queued. The press is now refused
     before either report is made; with room for both, both wait their turn."""
@@ -385,7 +385,7 @@ async def test_compare_press_starts_or_queues_both_decks_or_neither(stack: Stack
 
 
 async def test_compare_presses_at_once_never_pass_the_member_limit(stack: Stack) -> None:
-    """Review L7: the room check reserved nothing, so two presses at once (two tabs) both passed
+    """The room check reserved nothing, so two presses at once (two tabs) both passed
     while the other deck was read, and each pair lost its second deck's Forge games; so did a
     press beside an assistant's report. The room is now kept from the check until both runs are
     saved: one press goes through whole, the other is refused, and no pair loses a deck."""
@@ -460,7 +460,7 @@ async def test_compare_presses_at_once_never_pass_the_member_limit(stack: Stack)
 
 
 async def test_forge_comparison_reads_the_other_deck_first_on_every_path(stack: Stack) -> None:
-    """Review r3 items 1 and 2 (Q140 item 3): the website's Compare press, run_deck_report's
+    """Review r3 items 1 and 2: the website's Compare press, run_deck_report's
     compare_with and the REST route's compare_with all pick the precons for the higher of the two
     decks' brackets. The other deck is read before anything is stored: a deck that can't be read
     leaves no report and says so. A press reads each deck once."""
@@ -542,14 +542,14 @@ async def test_forge_comparison_reads_the_other_deck_first_on_every_path(stack: 
             and odd["message"] == f"{PAIR_UNREAD} {NOT_DECK_OR_SNAPSHOT}"
             and stored() == []
         )
-        # review r4 L2: an unknown (or another member's) snapshot id is refused naming snapshots too
+        # an unknown (or another member's) snapshot id is refused naming snapshots too
         for args in (
             {"deck_ref": "snap_nothere"},
             {"deck_ref": "42", "forge": True, "compare_with": "snap_nothere"},
         ):
             unknown = structured(await call(h, token, "run_deck_report", args))
             assert unknown["ok"] is False and unknown["message"].endswith(NOT_DECK_OR_SNAPSHOT), unknown
-        # proofread R5 finding 1: another site's link on compare_with reads as on deck_ref
+        # another site's link on compare_with reads as on deck_ref
         elsewhere = structured(
             await call(
                 h,
@@ -559,12 +559,12 @@ async def test_forge_comparison_reads_the_other_deck_first_on_every_path(stack: 
             )
         )
         assert elsewhere["message"] == f"{PAIR_UNREAD} Only archidekt.com deck links are accepted.", elsewhere
-        # proofread R5 finding 6: compare_decks gives the same refusal, per side
+        # compare_decks gives the same refusal, per side
         cmp_unknown = structured(await call(h, token, "compare_decks", {"a": "snap_nothere", "b": "42"}))
         assert cmp_unknown["ok"] is False and cmp_unknown["message"] == (
             f"Deck a: {NOT_DECK_OR_SNAPSHOT} A pasted list goes in a_list."
         ), cmp_unknown
-        # proofread R6 finding 1: another site's link reads as on deck_ref and compare_with, per side
+        # another site's link reads as on deck_ref and compare_with, per side
         cmp_elsewhere = structured(
             await call(h, token, "compare_decks", {"a": "42", "b": "https://moxfield.com/decks/x"})
         )
@@ -576,7 +576,7 @@ async def test_forge_comparison_reads_the_other_deck_first_on_every_path(stack: 
             stats_unknown
         )
         assert stored() == []
-        # no Forge games: refused rather than ignored (pending Ben's call), nothing kept
+        # no Forge games: refused rather than ignored (a safe default), nothing kept
         off = structured(
             await call(
                 h,
@@ -626,7 +626,7 @@ async def test_forge_comparison_reads_the_other_deck_first_on_every_path(stack: 
             headers=auth,
         )
         assert no_forge.status_code == 400 and no_forge.json()["message"] == PAIR_NO_FORGE and stored() == []
-        # proofread R5 finding 4: the deck lost its commander after the page loaded: plain words for
+        # the deck lost its commander after the page loaded: plain words for
         # the member, never the assistant's parameter names, and nothing kept
         from mtg_gateway.companion_tools import COMPARE_NO_COMMANDER
 
@@ -661,7 +661,7 @@ async def test_forge_comparison_reads_the_other_deck_first_on_every_path(stack: 
 
 
 async def test_reports_page_lists_every_report_and_what_forge_plays(stack: Stack) -> None:
-    """K8 (Q136, T-152): /reports lists the member's reports newest first with their status, what
+    """/reports lists the member's reports newest first with their status, what
     ran and a link to the deck's trend in History; a deck filter; and the Forge runs playing or
     waiting, with their place. Signed out, it asks to sign in."""
     from .test_forge import FakeForge
@@ -817,7 +817,7 @@ async def test_app_shell_routes(stack: Stack) -> None:
     sw = await h.http.get("/sw.js")
     assert sw.status_code == 200 and "fetch" in sw.text and sw.headers["cache-control"] == "no-store"
     # a dropped connection or a gateway restart doesn't show the offline page: about 5 s of
-    # retries first (Q63), GET navigations only
+    # retries first, GET navigations only
     assert "RETRY=[500,1000,1500,2000]" in sw.text and "e.request.method!=='GET'" in sw.text
     # the offline page's script is answered by the worker itself, so it loads while offline
     assert "const OFFLINE_JS=" in sw.text and "/static/offline.js" in sw.text
@@ -884,8 +884,8 @@ async def test_deck_editor_page(stack: Stack) -> None:
 
 
 async def test_playtest_goes_to_archidekts_own_playtester(stack: Stack) -> None:
-    """Playtest opens Archidekt's playtester in its own tab (D-13): a frame on a gateway page never
-    carried the person's Archidekt sign-in, so a private deck stayed empty there (T-098). Old links
+    """Playtest opens Archidekt's playtester in its own tab: a frame on a gateway page never
+    carried the person's Archidekt sign-in, so a private deck stayed empty there. Old links
     to the gateway's old playtest page are gone; nothing is framed any more."""
     b = await linked_browser(stack)
     try:
@@ -1138,7 +1138,7 @@ def test_precon_by_label_needs_the_set_when_two_precons_share_a_name() -> None:
     assert precon_by_label(precons, "") is None
 
 
-# -- a busy or unreachable Archidekt answers the same on every page (0.7.9, gate finding D6) ----
+# -- a busy or unreachable Archidekt answers the same on every page (0.7.9) ----------------------
 BUSY_PAGES = (
     "/decks",
     "/decks/42",
@@ -1289,7 +1289,7 @@ async def test_every_page_that_links_the_manifest_lets_the_browser_load_it(stack
 
 
 async def test_goldfish_guide_choice_is_kept_for_the_account(stack: Stack) -> None:
-    """G9: hiding the Goldfish guide is remembered for the account (account_prefs), only from the
+    """Hiding the Goldfish guide is remembered for the account (account_prefs), only from the
     member's own browser session with its CSRF header, and showing it again forgets the choice."""
     b = await linked_browser(stack)
     try:
@@ -1313,7 +1313,7 @@ async def test_goldfish_guide_choice_is_kept_for_the_account(stack: Stack) -> No
 
 
 def test_reports_page_row_shows_the_set_bracket_over_the_estimate() -> None:
-    """Q49, O14: a bracket set on the deck is THE bracket; Archidekt's estimate shows, labelled,
+    """A bracket set on the deck is THE bracket; Archidekt's estimate shows, labelled,
     only when none is set."""
     from mtg_gateway.reports_page import row_html
 

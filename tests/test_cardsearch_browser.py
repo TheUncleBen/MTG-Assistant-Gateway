@@ -249,7 +249,7 @@ def test_add_to_deck_from_the_card_page_saves_through_the_edit_endpoint(
         viewer = page.locator(".cardview.open")
         viewer.wait_for(timeout=3000)
         assert viewer.locator("h3").inner_text().startswith("Sol Talisman")
-        # the printing reads "SET #number", as every screen writes it (N15)
+        # the printing reads "SET #number", as every screen writes it
         assert re.search(r"\b[A-Z0-9]{2,6} #\w+", viewer.locator("dl.facts").inner_text())
         viewer.locator("button", has_text="Add to deck").click()
         sheet = page.locator(".addsheet.open")
