@@ -4,6 +4,7 @@ proposal card's line about the other changes waiting on its deck (Q134 A3)."""
 
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 
@@ -134,6 +135,13 @@ async def test_apply_all_applies_the_set_and_refuses_a_wrong_or_stale_code(stack
     out = structured(
         await call(h, token, "confirm_waiting", {"proposal_ids": the_set["ids"], "approval": the_set["code"]})
     )
+    # under a heavy load the apply can outlast the call's wait and answer "applying"; then it is read
+    # back as an assistant would, with get_apply_result
+    for _ in range(60):
+        if not (out["ok"] and out["state"] == "applying"):
+            break
+        await asyncio.sleep(0.5)
+        out = structured(await call(h, token, "get_apply_result", {"batch_id": out["batch_id"]}))
     assert out["ok"] and out["state"] == "done", out
     assert [x["proposal_id"] for x in out["applied"]] == [a, b] and out["summary"].startswith("Applied 2.")
     assert out["result_url"].endswith(f"/proposals/applied/{out['batch_id']}")
