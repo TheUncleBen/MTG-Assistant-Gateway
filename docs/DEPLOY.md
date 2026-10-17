@@ -615,16 +615,17 @@ default, and an install that leaves it off behaves exactly as before.
     `MTG_FORGE_URL=http://mtg-assistant-forge:8000`, then update the stack.
   - Docker Compose: start the `forge` profile (`COMPOSE_PROFILES=forge`) and set
     `MTG_FORGE_URL=http://forge:8000`.
-- **Load:** Java starts only while Forge plays a run, one run at a time, capped by `FORGE_MEMORY_LIMIT`
-  (default 1536M) and `FORGE_CPUS` (default 2). `MTG_FORGE_GAMES` (default 10) sets the games per
+- **Load:** Java starts only while Forge plays, capped by `FORGE_MEMORY_LIMIT` (default 1536M) and
+  `FORGE_CPUS` (default 2). `MTG_FORGE_GAMES` (default 10) sets the games per
   report. An idle Forge service holds no Java memory.
 - **Games at once:** a run's games are cut into groups of at most five, the same way whatever the
   setting, and each group starts from its own seed. The seed is kept with the report for the
   record: Forge does not always replay a game exactly, so compare runs by their win rates and
   95% intervals, not game by game. `MTG_FORGE_PARALLEL_GAMES` (default 1, or
   the admin Settings page) asks for that many groups at once, and `FORGE_MAX_PARALLEL` on the Forge
-  service (default 1) is the most it allows. Each group is its own Java process with up to
-  `FORGE_XMX` of memory. One four-player game has used up to about 930 MiB in the measurements so
+  service (default 1) is the most it allows, for all runs together: runs start in order, and a run
+  that uses fewer lets the next one play beside it (with 2 or more, a Compare's two decks play at
+  once). Each group is its own Java process with up to `FORGE_XMX` of memory. One four-player game has used up to about 930 MiB in the measurements so
   far, and two at once about 1780 MiB (simple test decks on a PC; real precons on a Pi are not
   measured yet). That is more than the default `FORGE_MEMORY_LIMIT` of 1536M, so raise
   `FORGE_MEMORY_LIMIT` before raising `FORGE_MAX_PARALLEL` above 1. `FORGE_GAME_SECONDS`

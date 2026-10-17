@@ -1,15 +1,17 @@
 """Job service around Forge's headless ``sim`` mode, for the gateway's deck simulations.
 
 Forge itself runs unchanged: this file only writes deck files, starts ``java -jar <forge> sim``
-and reads what it prints. One simulation runs at a time and its Java processes exit when the job
-ends, so an idle container holds no Forge memory. Only the gateway reaches this service, over the
-stack's private network.
+and reads what it prints. Its Java processes exit when the job ends, so an idle container holds no
+Forge memory. Only the gateway reaches this service, over the stack's private network.
 
 A job's games are cut into fixed slices by their number alone (``slices``), each slice one Forge
 process with its own seed made from the job's seed, so the cut and the seeds are the same however
 many slices play at once (Forge does not always replay a game exactly from its seed, so the games
-themselves can still differ). A job asks for ``parallel`` slices at once; FORGE_MAX_PARALLEL (default 1)
-caps it, because each Forge process needs its own memory (FORGE_XMX) inside the container's limit.
+themselves can still differ). A job asks for ``parallel`` slices at once. FORGE_MAX_PARALLEL
+(default 1) is the number of places, one Forge process each, shared by all jobs, because each
+process needs its own memory (FORGE_XMX) inside the container's limit. Jobs start in the order they
+came, each when a place is free, on the free places it asked for (fewer when fewer are free); so a
+job that leaves places unused (a comparison's first deck, say) lets the next one play beside it.
 
 Endpoints (JSON):
   GET    /health          status, Forge version, busy flag, queue length
@@ -50,9 +52,8 @@ MAX_QUEUE = int(os.environ.get("FORGE_MAX_QUEUE", "4"))
 # Forge processes one job may run at once. Each takes up to FORGE_XMX of heap plus Java's own
 # memory (one four-player game peaked near 790 MiB), so raise it only with the container's limit.
 MAX_PARALLEL = max(1, min(4, int(os.environ.get("FORGE_MAX_PARALLEL", "1"))))
-# A job's games are cut into slices of at most this many, the same way at any parallel setting.
-# TODO(Q138 item 1, held for Ben's re-confirmation card): groups of up to five (R-207), which the
-# card recommends keeping; no replay promise rests on the groups.
+# A job's games are cut into slices of at most this many, the same way at any parallel setting:
+# groups of up to five (R-207; a smaller group size is on Ben's milestone card with R-215).
 SLICE_GAMES = 5
 JOB_TIMEOUT = int(os.environ.get("FORGE_JOB_TIMEOUT", "7200"))
 # Forge's sim calls a game a draw after this many seconds (its -c flag; Forge's own default is 120,
@@ -212,6 +213,11 @@ class Job:
 JOBS: dict[str, Job] = {}
 JOBS_LOCK = threading.Lock()
 QUEUE: queue.Queue[Job] = queue.Queue()
+# The free places (0 to FORGE_MAX_PARALLEL - 1), shared by all jobs; a place is one Forge process
+# with its own home (place_home). Taken by the worker for a job, given back as each one finishes.
+PLACES = threading.Condition()
+FREE_PLACES: list[int] = list(range(MAX_PARALLEL))
+HELD: list[Job] = []  # the job the worker holds while it waits for a place (counted as queued)
 
 
 def deck_file(index: int, deck: dict[str, Any], fmt: str) -> str:
@@ -354,8 +360,12 @@ def run_slice(job: Job, index: int, work: Path, names: list[str], slot: int) -> 
     return code
 
 
-def run_job(job: Job) -> None:
+def run_job(job: Job, slots: list[int] | None = None) -> None:
+    """Play the job's slices on ``slots`` (its places, one Forge process each; by default places
+    0 to parallel - 1). Each place given back with ``release_place`` once it has no slice left."""
+    slots = list(range(job.parallel)) if slots is None else slots
     work = Path(tempfile.mkdtemp(prefix="forge-job-"))
+    started_places: set[int] = set()
     try:
         names = []
         for i, deck in enumerate(job.decks, start=1):
@@ -373,23 +383,25 @@ def run_job(job: Job) -> None:
         pending_lock = threading.Lock()
 
         def place(slot: int) -> None:
-            # Each parallel place takes the next slice in order until none is left.
-            while True:
-                with pending_lock:
-                    if not pending or job.cancelled or time.time() >= deadline:
-                        return
-                    index = pending.pop(0)
-                try:
-                    codes[index] = run_slice(job, index, work, names, slot)
-                except Exception as exc:  # one slice failing ends the job as failed, never the service
-                    with job.lock:
-                        job.slice_state[index] = "failed"
-                        job.tail.append(f"service error: {exc!r}"[:300])
+            # Each parallel place takes the next slice in order until none is left, then lets go.
+            try:
+                while True:
+                    with pending_lock:
+                        if not pending or job.cancelled or time.time() >= deadline:
+                            return
+                        index = pending.pop(0)
+                    try:
+                        codes[index] = run_slice(job, index, work, names, slot)
+                    except Exception as exc:  # one slice failing ends the job as failed, never the service
+                        with job.lock:
+                            job.slice_state[index] = "failed"
+                            job.tail.append(f"service error: {exc!r}"[:300])
+            finally:
+                release_place(slot)
 
         try:
-            places = [
-                threading.Thread(target=place, args=(slot,), daemon=True) for slot in range(job.parallel)
-            ]
+            places = [threading.Thread(target=place, args=(slot,), daemon=True) for slot in slots]
+            started_places.update(slots)
             for t in places:
                 t.start()
             for t in places:
@@ -414,6 +426,35 @@ def run_job(job: Job) -> None:
         with job.lock:
             job.slice_state = [st if st != "queued" else job.state for st in job.slice_state]
         shutil.rmtree(work, ignore_errors=True)
+        for slot in slots:
+            if slot not in started_places:  # the job failed before its places started
+                release_place(slot)
+
+
+def release_place(slot: int) -> None:
+    with PLACES:
+        if slot not in FREE_PLACES and slot < MAX_PARALLEL:
+            FREE_PLACES.append(slot)
+            FREE_PLACES.sort()
+        PLACES.notify_all()
+
+
+def take_places(job: Job) -> list[int] | None:
+    """Wait for a free place, then take as many as the job asks for (at least one): the places it
+    plays on. None when the job was cancelled while it waited."""
+    with PLACES:
+        while not FREE_PLACES and job.state == "queued":
+            PLACES.wait(timeout=1.0)  # a cancel only sets the job's state; checked each second
+        if job.state != "queued":
+            return None
+        slots = FREE_PLACES[: job.parallel]
+        del FREE_PLACES[: len(slots)]
+        return slots
+
+
+def run_and_prune(job: Job, slots: list[int]) -> None:
+    run_job(job, slots)
+    prune()
 
 
 def _time_out(job: Job) -> None:
@@ -436,11 +477,19 @@ def _kill(job: Job) -> None:
 
 
 def worker() -> None:
+    """Start jobs in the order they came, each once a place is free; the next job waits for a
+    place, never overtaking an earlier one."""
     while True:
         job = QUEUE.get()
-        if job.state == "queued":
-            run_job(job)
-        prune()
+        HELD[:] = [job]
+        try:
+            slots = take_places(job) if job.state == "queued" else None
+        finally:
+            HELD.clear()
+        if slots:
+            threading.Thread(target=run_and_prune, args=(job, slots), daemon=True).start()
+        else:
+            prune()
 
 
 def prune() -> None:
@@ -541,7 +590,7 @@ class Handler(BaseHTTPRequestHandler):
                     "cards": len(NAMES),
                     "aliases": len(ALIASES),
                     "busy": busy,
-                    "queued": QUEUE.qsize(),
+                    "queued": QUEUE.qsize() + len(HELD),
                     "max_parallel": MAX_PARALLEL,
                 },
             )
@@ -594,7 +643,7 @@ class Handler(BaseHTTPRequestHandler):
                 if unknown:
                     self.send(422, {"error": "cards Forge does not have", "unknown": sorted(set(unknown))})
                     return
-                if QUEUE.qsize() >= MAX_QUEUE:
+                if QUEUE.qsize() + len(HELD) >= MAX_QUEUE:
                     self.send(429, {"error": "simulation queue is full; try again later"})
                     return
                 seed = body.get("seed")

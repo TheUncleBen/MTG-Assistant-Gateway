@@ -36,6 +36,7 @@ class FakeForge:
         self.cancelled: list[str] = []
         self.up = True
         self.health_probes = 0
+        self.max_parallel: int | None = None  # the engine's places, listed in each job when set
 
     def handler(self, request: httpx.Request) -> httpx.Response:
         path = request.url.path
@@ -76,6 +77,8 @@ class FakeForge:
             self.started.append(body)
             jid = f"{len(self.jobs):016x}"
             self.jobs[jid] = {"id": jid, "state": "running", "games_requested": body["games"], "results": []}
+            if self.max_parallel is not None:
+                self.jobs[jid]["max_parallel"] = self.max_parallel
             return httpx.Response(202, json=self.jobs[jid])
         if path.startswith("/jobs/"):
             job = self.jobs.get(path.rsplit("/", 1)[1])
@@ -1067,3 +1070,113 @@ async def test_shared_opponents_that_left_the_engine_or_never_sat() -> None:
     assert shared_opponents(precons, sat)[1]["note"] == (
         "The same opponents as Deck A's Forge games, so both decks met the same table."
     )
+
+
+async def test_a_comparisons_second_deck_plays_beside_the_first_when_forge_has_room(tmp_path: Path) -> None:
+    """Speed fix 5 (R-215): with places for two runs on the engine, a comparison's second deck
+    starts at once beside its first instead of waiting for it; otherwise, and for any other report,
+    one run at a time per member stays."""
+    db = Database(tmp_path / "t.sqlite")
+    db.upsert_user("alice", email=None, name=None, preferred_username=None, groups=[])
+    deck = await _Decks().get_any_deck("alice", "42")
+
+    async def pair(fake: FakeForge) -> tuple[ReportService, dict[str, Any], dict[str, Any]]:
+        reports = ReportService(db, _Decks(), None, forge=fake.client(), forge_games=4)  # type: ignore[arg-type]
+        reports.forge_interval = 0.05
+        first = await reports.run("alice", "42", games=300, options={"seed": 1}, pair_with=deck)
+        second = await reports.run(
+            "alice", "42", games=300, options={"seed": 2}, deck=deck, same_opponents_as=first["report_id"]
+        )
+        return reports, first, second
+
+    async def settle(reports: ReportService, fake: FakeForge) -> None:
+        for jid in list(fake.jobs):
+            fake.finish(jid, [1])
+        for _ in range(400):
+            if reports._forge_task is None or reports._forge_task.done():
+                break
+            for jid in list(fake.jobs):
+                if fake.jobs[jid]["state"] != "done":
+                    fake.finish(jid, [1])
+            await asyncio.sleep(0.02)
+        assert reports._forge_task is None or reports._forge_task.done()
+
+    roomy = FakeForge()
+    roomy.max_parallel = 2
+    reports, first, second = await pair(roomy)
+    assert first["forge"]["max_parallel"] == 2
+    assert second["forge"]["state"] == "running" and len(roomy.started) == 2
+    assert roomy.started[1]["decks"][1:] == roomy.started[0]["decks"][1:]  # the same table
+    # a third report waits until both have ended
+    third = await reports.run("alice", "42", games=300, options={"seed": 3})
+    assert third["forge"]["state"] == "queued" and len(roomy.started) == 2
+    roomy.finish(first["forge"]["job_id"], [1])
+    for _ in range(20):
+        await asyncio.sleep(0.05)
+    assert len(roomy.started) == 2  # the second deck still plays
+    await settle(reports, roomy)
+    assert len(roomy.started) == 3
+
+    # one place on the engine: the second deck waits for the first, as before
+    tight = FakeForge()
+    tight.max_parallel = 1
+    reports, first, second = await pair(tight)
+    assert second["forge"]["state"] == "queued" and len(tight.started) == 1
+    await settle(reports, tight)
+    assert len(tight.started) == 2
+
+    # an engine that does not say (an older image): as before
+    old = FakeForge()
+    reports, first, second = await pair(old)
+    assert second["forge"]["state"] == "queued" and len(old.started) == 1
+    await settle(reports, old)
+
+    # same_opponents_as on a report made without compare_with is not a pair: it waits
+    plain = FakeForge()
+    plain.max_parallel = 2
+    reports = ReportService(db, _Decks(), None, forge=plain.client(), forge_games=4)  # type: ignore[arg-type]
+    reports.forge_interval = 0.05
+    one = await reports.run("alice", "42", games=300, options={"seed": 4})
+    two = await reports.run(
+        "alice", "42", games=300, options={"seed": 5}, deck=deck, same_opponents_as=one["report_id"]
+    )
+    assert two["forge"]["state"] == "queued" and len(plain.started) == 1
+    await settle(reports, plain)
+
+
+async def test_each_forge_game_shows_as_it_finishes(tmp_path: Path, monkeypatch: Any) -> None:
+    """Speed fixes 3 and 4 (R-215): while the run plays, each finished game reaches the report
+    within one refresh (every 3 s by default, was 15), on the page and in the poller's numbers,
+    and a refresh that finds nothing new writes nothing."""
+    from mtg_gateway.report_view import forge_html
+    from mtg_gateway.reports import forge_status
+
+    assert ReportService(Database(tmp_path / "d.sqlite"), _Decks(), None).forge_interval == 3.0  # type: ignore[arg-type]
+    db = Database(tmp_path / "t.sqlite")
+    db.upsert_user("alice", email=None, name=None, preferred_username=None, groups=[])
+    fake = FakeForge()
+    reports = ReportService(db, _Decks(), None, forge=fake.client(), forge_games=4)  # type: ignore[arg-type]
+    reports.forge_interval = 0.05
+    saves: list[str] = []
+    real_save = reports._save_forge
+    monkeypatch.setattr(reports, "_save_forge", lambda rid, s: saves.append(rid) or real_save(rid, s))
+    out = await reports.run("alice", "42", games=300, options={"seed": 7})
+    jid, rid = out["forge"]["job_id"], out["report_id"]
+    await asyncio.sleep(0.3)
+    quiet = len(saves)
+    await asyncio.sleep(0.3)
+    assert len(saves) == quiet  # nothing new: nothing written
+    fake.jobs[jid]["results"] = [
+        {"game": i + 1, "ms": 40000, "winner": w, "draw": False, "turn": 9} for i, w in enumerate([1, 3])
+    ]
+    for _ in range(100):
+        if (reports.get("alice", rid)["forge"].get("result") or {}).get("games") == 2:
+            break
+        await asyncio.sleep(0.02)
+    section = reports.get("alice", rid)["forge"]
+    assert section["state"] == "running" and forge_status(section)["games_done"] == 2
+    page = forge_html(section, live=True, report_id=rid)
+    assert "<summary>Each game (2)</summary>" in page and "data-forge-live" in page
+    fake.finish(jid, [1, 3, 1, 1])
+    await asyncio.wait_for(reports._forge_task, timeout=20)
+    assert reports.get("alice", rid)["forge"]["state"] == "done"

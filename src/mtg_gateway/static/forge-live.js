@@ -1,11 +1,11 @@
 "use strict";
 // Report page: while the Forge games are queued or running (the card carries data-forge-live and
-// the report's id), ask the JSON status route (/api/v1/reports/<id>/forge) every 15 seconds and swap
+// the report's id), ask the JSON status route (/api/v1/reports/<id>/forge) every 5 seconds and swap
 // in the new Forge card and status, until the run ends; then the page is fetched once more so the
 // Markdown copy matches. No polling while the tab is hidden; it stops for good after a failed fetch
 // or after five hours (the gateway gives a run up after four).
 (function () {
-  var INTERVAL = 15000;
+  var INTERVAL = 5000;  // each finished game shows within about 8 s (the gateway asks Forge every 3 s)
   var LIMIT = 5 * 3600 * 1000;
   var started = Date.now();
   var timer = null;

@@ -471,6 +471,8 @@ async def start_run(
         "forge_version": job.get("forge_version"),
         # how many games the engine plays at once (its own ceiling may lower what was asked)
         **({"parallel": job["parallel"]} if isinstance(job.get("parallel"), int) else {}),
+        # its places for all runs together: two or more let a comparison's decks play side by side
+        **({"max_parallel": job["max_parallel"]} if isinstance(job.get("max_parallel"), int) else {}),
         "started_at": int(time.time()),
     }
 
