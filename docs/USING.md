@@ -184,8 +184,9 @@ One deck:
   the four-copies limit, restricted cards, companion, sideboard size, cards
   banned or not legal in the format, the bracket you set against the
   estimate, uncategorised cards; a deck with a banned card is never reported
-  fine), the bracket set on the deck (or, when none is set, Archidekt's
-  estimate from cards) and the description.
+  fine), the bracket set on the deck, Archidekt's estimate from cards with
+  Archidekt's notes (beside a bracket you set, labelled as Archidekt's
+  estimate; alone when none is set) and the description.
 - **Export** (More menu) shows the deck as Archidekt import text (every row
   with printing, finish, categories and labels; paste it into Archidekt's
   Import dialog or the gateway's New deck page), as a plain decklist and as
