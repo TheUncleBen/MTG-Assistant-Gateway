@@ -185,6 +185,20 @@ def test_forge_section_refreshes_itself_until_the_run_ends(server: Server) -> No
         assert "updates by itself" in page.locator(".card.forge").inner_text()
         assert page.locator("#rep-status").inner_text().startswith("running")  # the overall status
         page.evaluate("window.__same_page = true")  # gone if the page reloads
+        # review r5 M3: a poll that brings nothing new leaves the live card's nodes untouched, so
+        # screen readers are not told the whole card again every 5 seconds
+        page.evaluate(
+            "() => { const els = [...document.querySelectorAll('.card.forge > *, #rep-status > *')];"
+            " els.forEach(n => { n.__kept = true; }); window.__nodes = els.length; }"
+        )
+        with page.expect_response(lambda r: r.url.endswith("/api/v1/reports/rep_forge/forge")):
+            page.clock.run_for(6000)
+        time.sleep(0.5)  # the answer is read and applied (fetch is not on the page clock)
+        kept = page.evaluate(
+            "() => [...document.querySelectorAll('.card.forge > *, #rep-status > *')]"
+            ".filter(n => n.__kept).length"
+        )
+        assert kept == page.evaluate("window.__nodes") > 0, kept
         set_forge(
             {
                 "state": "done",
