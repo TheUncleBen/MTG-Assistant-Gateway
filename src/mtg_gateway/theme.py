@@ -275,7 +275,7 @@ details.dd .menu.left{left:0;right:auto}
   color:var(--text);text-decoration:none;font:inherit;font-weight:400;font-size:1rem;cursor:pointer;
   text-align:left;white-space:nowrap;justify-content:flex-start;height:auto}
 /* An item carrying a member's text (a category name) wraps inside the panel instead of widening
-   it past the window (gate R5-3 seed: a 51-character unbroken category name at 320 px). */
+   it past the window (a 51-character unbroken category name at 320 px, for one). */
 details.dd .menu a,details.dd .menu button{white-space:normal;overflow-wrap:anywhere;min-width:0}
 .menu a:hover,.menu button:hover,.menu a:focus-visible,.menu button:focus-visible,
 details.dd .menu a:hover,details.dd .menu button:hover,details.dd .menu a:focus-visible,
@@ -698,13 +698,13 @@ details.raw{margin:.5rem 0 0} details.raw summary{cursor:pointer;color:var(--tex
 .banner .social a.soc,.banner .social button.soc{height:34px;min-height:34px}
 /* A control that carries text a member typed (a username in Follow, a deck's category in the
    editor's chips, a folder's name) shrinks and ellipsises inside its row, with the whole text
-   in its title, instead of widening the page (gate R4-2: a 40-character username). */
+   in its title, instead of widening the page (a 40-character username, for one). */
 .soc,.btn.soc,.addbox button.tchip,.chips button{max-width:100%;min-width:0}
 .soc > span,.addbox button.tchip{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .social .confirm{max-width:100%;flex-wrap:wrap;min-width:0}
 .social .confirm > span{min-width:0;overflow-wrap:anywhere}
 /* Touch screens: every control at least 40 px tall (Material's minimum), including the small
-   ones a mouse never minds (gate D11): the editor's add-to chips, the deck page's category
+   ones a mouse never minds: the editor's add-to chips, the deck page's category
    button and odds form, folded Details, footer links, the brand mark, list links, crumbs. */
 @media (pointer:coarse){
   .addbox button.tchip,.popular a,.cardview .chip{min-height:40px}
@@ -789,7 +789,7 @@ details.raw{margin:.5rem 0 0} details.raw summary{cursor:pointer;color:var(--tex
 .home .panel-head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;
   gap:.5rem 1rem;margin:0 0 .75rem}
 .home .panel-head h2{margin:0}
-/* the deck list couldn't be read (Q64): the /decks notice inside the panel, over any covers read */
+/* the deck list couldn't be read: the /decks notice inside the panel, over any covers read */
 .home .decks-unreadable p{margin:0}
 .home .decks-unreadable .actions{margin-top:.75rem}
 .home .decks-unreadable .actions .btn{min-height:44px}
