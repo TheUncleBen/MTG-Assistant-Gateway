@@ -115,8 +115,25 @@ adb shell run-as "$PKG" sh -c "mkdir -p shared_prefs && cat > shared_prefs/mtgas
 XML
 adb shell am start-foreground-service -n "$SERVICE" >/dev/null
 if until_ok connected 60; then result "connects with the key" ok; else result "connects with the key" no "no connection"; fi
-if until_ok 'shows "Connected"' 30; then result "quiet Connected notification" ok; else result "quiet Connected notification" no "not in dumpsys"; fi
+if until_ok 'shows "Always connected"' 30; then result "quiet Always connected notification" ok; else result "quiet Always connected notification" no "not in dumpsys"; fi
 shot 01-connected
+
+# -- for the card: the app's own menu, with its Scan entry
+adb shell monkey -p "$PKG" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1; sleep 4
+adb shell uiautomator dump /sdcard/ui.xml >/dev/null 2>&1
+fab=$(adb shell cat /sdcard/ui.xml | tr -d '\r' | python3 -c '
+import re, sys
+m = re.search(r"content-desc=\"Menu\"[^>]*bounds=\"\[(\d+),(\d+)\]\[(\d+),(\d+)\]\"", sys.stdin.read())
+print("%d %d" % ((int(m[1]) + int(m[3])) // 2, (int(m[2]) + int(m[4])) // 2) if m else "")')
+if [ -n "$fab" ]; then
+  set -- $fab
+  adb shell input tap "$1" "$2"; sleep 2
+  shot app-menu
+  adb shell input keyevent KEYCODE_BACK
+else
+  echo "note: the app's Menu button was not found (see 01-connected.png)"
+fi
+adb shell input keyevent KEYCODE_HOME
 
 send m001AbCdEf "Test one" "The first message"
 if until_ok 'shows "Test one"' 30; then result "a message shows" ok; else result "a message shows" no "not posted"; fi
@@ -155,7 +172,7 @@ adb shell uiautomator dump /sdcard/ui.xml >/dev/null 2>&1
 bounds=$(adb shell cat /sdcard/ui.xml | tr -d '\r' | python3 -c '
 import re, sys
 x = sys.stdin.read()
-m = re.search(r"text=\"Connected\"[^>]*bounds=\"\[(\d+),(\d+)\]\[(\d+),(\d+)\]\"", x)
+m = re.search(r"text=\"Always connected\"[^>]*bounds=\"\[(\d+),(\d+)\]\[(\d+),(\d+)\]\"", x)
 print(" ".join(m.groups()) if m else "")')
 if [ -n "$bounds" ]; then
   set -- $bounds
