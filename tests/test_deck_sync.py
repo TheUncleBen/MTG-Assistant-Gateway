@@ -440,3 +440,52 @@ def test_deck_sync_minutes_setting(tmp_path, monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setenv("MTG_DECK_SYNC_MINUTES", "-5")
     with pytest.raises(ConfigError):
         load_settings()
+
+
+async def test_the_fallback_read_of_someone_elses_deck_is_sent_once(stack: Stack) -> None:
+    """The anonymous read after the member's session can't see a deck goes out once too, with the
+    shipped retry setting, so it adds at most one failure to the shared breaker."""
+    h, ark = stack.h, stack.ark
+    await linked_user(stack)
+    decks = h.app.state.gateway.decks
+    decks.client.retries, decks.client.backoff_base = 2, 0.0
+    hits = {"member": 0, "anonymous": 0}
+    orig = ark.transport.handler
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.url.path == "/api/decks/777/":
+            if req.headers.get("authorization"):
+                hits["member"] += 1
+                return httpx.Response(404, json={"detail": "Not found."})
+            hits["anonymous"] += 1
+            return httpx.Response(503, text="busy")
+        return orig(req)
+
+    ark.transport.handler = handler
+    with pytest.raises(decks_mod.DeckError) as e:
+        await decks.sync_read_any_deck(SUB, "777")
+    assert e.value.kind == "unavailable"
+    assert hits == {"member": 1, "anonymous": 1} and decks.client.pacer._failures == 1
+
+
+async def test_the_check_spends_the_members_budget_and_leaves_them_a_quarter(stack: Stack) -> None:
+    h, ark = stack.h, stack.ark
+    sync = _sync(stack)
+    token = await linked_user(stack)
+    await _propose(h, token)
+    decks = h.app.state.gateway.decks
+    budget = decks.archidekt_budget
+    _later(stack)
+    full = budget.per_window
+    budget._buckets[SUB] = (float(full), time.monotonic())
+    out = await sync.check(SUB)
+    assert "error" not in out, out
+    left = budget._buckets[SUB][0]
+    assert full - 3 < left <= full - 1  # the list read, and the deck read when it changed
+    # with only a quarter left, the check sends nothing and the member's own actions still work
+    budget._buckets[SUB] = (float(full // 4), time.monotonic())
+    _later(stack)
+    sent = len(ark.calls)
+    assert await sync.check(SUB) == {"error": "budget"} and len(ark.calls) == sent
+    got = structured(await call(h, token, "list_my_decks"))
+    assert got["ok"], got
