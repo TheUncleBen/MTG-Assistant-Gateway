@@ -671,6 +671,15 @@ def add_deck_tool_routes(
         try:
             if not other.isdigit():
                 raise DeckError("invalid", "Pick the other deck on the Compare page first.")
+            if reports.forge is not None and (full := reports.pair_room(sub)) is not None:
+                # refused before either report is made: both decks' games start or wait, or neither
+                return page(
+                    "Compare",
+                    f"<div class='panel'><p class='notice error'>{_esc(full)}</p>{back}</div>",
+                    sub=sub,
+                    sid=sid,
+                    status=409,
+                )
             other_deck = await reports.pair_deck(sub, other)
             # without Forge on the gateway no pair is asked for: the first report says why it has no
             # Forge games and the page below names that deck (compare_with is refused then)

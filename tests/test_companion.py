@@ -325,6 +325,64 @@ async def test_compare_page_tests_both_decks_against_the_same_forge_opponents(st
         await b.aclose()
 
 
+async def test_compare_press_starts_or_queues_both_decks_or_neither(stack: Stack) -> None:
+    """Proofread R13 O1: with one Forge run playing and one report waiting, the Compare press queued
+    the first deck and left the second without Forge games (the queue keeps at most two waiting),
+    though the button says both decks' games are started or queued. The press is now refused
+    before either report is made; with room for both, both wait their turn."""
+    from mtg_gateway.reports import MAX_FORGE_WAITING
+
+    from .test_forge import BRACKETED, FakeForge
+
+    h = stack.h
+    b = await linked_browser(stack)
+    reports = h.app.state.gateway.reports
+    db = h.app.state.gateway.db._conn
+    stack.ark.private.discard(43)
+    try:
+        csrf = await b.csrf("/account")
+        await b.http.post("/decks/42/report", data={"csrf": csrf, "forge": "0"})
+        sub = db.execute("SELECT owner_sub FROM reports").fetchone()[0]
+        db.execute("DELETE FROM reports")
+        reports.forge = FakeForge(brackets=BRACKETED).client()
+        await reports.run(sub, "42", simulate=False, forge=True, options={"seed": 1})  # playing
+        await reports.run(sub, "42", simulate=False, forge=True, options={"seed": 2})  # waiting
+        assert MAX_FORGE_WAITING == 2
+
+        def states() -> list[str]:
+            rows = db.execute("SELECT forge_json FROM reports ORDER BY rowid").fetchall()
+            return [json.loads(r["forge_json"])["state"] for r in rows]
+
+        assert states() == ["running", "queued"]
+        full = await b.http.post("/decks/42/compare/forge", data={"csrf": csrf, "with": "43"})
+        assert full.status_code == 409, full.text
+        assert (
+            "You already have 1 Forge run playing and 1 report waiting for its games. Comparing two "
+            "decks needs room for 2 more, and each member can have at most 2 reports waiting, so "
+            "nothing was started. Try again once one of them has finished."
+        ) in html.unescape(full.text)
+        assert "href='/decks/42/compare?with=43'>Back to the comparison</a>" in full.text
+        assert states() == ["running", "queued"]  # no report made for either deck
+        await reports.run(sub, "42", simulate=False, forge=True, options={"seed": 3})  # 2 waiting
+        fuller = await b.http.post("/decks/42/compare/forge", data={"csrf": csrf, "with": "43"})
+        assert fuller.status_code == 409 and (
+            "You already have 1 Forge run playing and 2 reports waiting for their games."
+            in html.unescape(fuller.text)
+        ), fuller.text
+        assert states() == ["running", "queued", "queued"]
+
+        # one run playing, none waiting: both decks wait their turn, neither is skipped
+        db.execute("DELETE FROM reports WHERE rowid > (SELECT MIN(rowid) FROM reports)")
+        ok = await b.http.post("/decks/42/compare/forge", data={"csrf": csrf, "with": "43"})
+        assert ok.status_code == 303, ok.text
+        assert states() == ["running", "queued", "queued"]
+    finally:
+        reports.forge = None
+        if reports._forge_task:
+            reports._forge_task.cancel()
+        await b.aclose()
+
+
 async def test_forge_comparison_reads_the_other_deck_first_on_every_path(stack: Stack) -> None:
     """Review r3 items 1 and 2 (Q140 item 3): the website's Compare press, run_deck_report's
     compare_with and the REST route's compare_with all pick the precons for the higher of the two
