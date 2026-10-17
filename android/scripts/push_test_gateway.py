@@ -9,7 +9,10 @@ then the messages the test sends. The test drives it on the same port:
   POST /control/delete   {"sequence_id"}                             withdraw a deck's message
   POST /control/refuse   {"status", "error"}                         refuse from now on, end streams
   POST /control/drop                                                 end streams (the app reconnects)
-  GET  /control/state    {"connections", "connects", "last_since", "pages": {path: requests}}
+  POST /control/press    {"name"}                     the page clicks its button for that app method
+  GET  /control/state    {"connections", "connects", "last_since", "pages": {path: requests}, "seen"}
+
+"seen" is what the page last reported: whether the app's bridge was there and which buttons showed.
 
 Only the key in PUSH_TEST_KEY is accepted. Every other path answers a small page with the account
 menu's App buttons and the gateway's own feedback.js (from PUSH_TEST_STATIC, the gateway's static
@@ -40,11 +43,20 @@ PAGE = (
     "<button type='button' data-native='openInBrowser'>Open in browser</button>"
     "<button type='button' data-native='changeGateway'>Change gateway</button>"
     "<script src='/static/feedback.js'></script>"
+    # Reports what it shows, and clicks a button when the test asks (POST /control/press)
+    "<script>(function(){"
+    "function shown(){return Array.prototype.filter.call(document.querySelectorAll('[data-native]'),"
+    "function(b){return !b.hidden;}).map(function(b){return b.getAttribute('data-native');}).join(',');}"
+    "setTimeout(function(){fetch('/control/seen?bridge='+(window.MtgNative?1:0)+'&shown='+shown());},500);"
+    "setInterval(function(){fetch('/control/press').then(function(r){return r.json();}).then(function(j){"
+    "var b=j.name&&document.querySelector('[data-native=\"'+j.name+'\"]');if(b)b.click();})"
+    ".catch(function(){});},500);"
+    "})();</script>"
 ).encode()
 
 lock = threading.Lock()
 streams: list[queue.Queue] = []
-state = {"connects": 0, "last_since": None, "refuse": None}
+state = {"connects": 0, "last_since": None, "refuse": None, "press": None, "seen": None}
 pages: dict[str, int] = {}
 history: list[dict] = []  # sent messages, for since=
 
@@ -86,8 +98,19 @@ class Handler(BaseHTTPRequestHandler):
                         "connects": state["connects"],
                         "last_since": state["last_since"],
                         "pages": dict(pages),
+                        "seen": state["seen"],
                     },
                 )
+            return
+        if path == "/control/seen":
+            with lock:
+                state["seen"] = query
+            self._json(200, {"ok": True})
+            return
+        if path == "/control/press":
+            with lock:
+                name, state["press"] = state["press"], None
+            self._json(200, {"name": name})
             return
         if path == "/static/feedback.js" and STATIC:
             with open(os.path.join(STATIC, "feedback.js"), "rb") as f:
@@ -176,6 +199,9 @@ class Handler(BaseHTTPRequestHandler):
                     "sequence_id": body["sequence_id"],
                 }
             )
+        elif self.path == "/control/press":
+            with lock:
+                state["press"] = body.get("name")
         elif self.path == "/control/drop":
             _publish({"event": "end"})
         elif self.path == "/control/refuse":
