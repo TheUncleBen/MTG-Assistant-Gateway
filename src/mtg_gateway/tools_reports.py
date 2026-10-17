@@ -29,7 +29,8 @@ from .views import deck_brief
 # models are switched on (card_models.SWITCHED_ON), as remove_card_model exists only then.
 KEPT_MODELS_TEXT = (
     "When the gateway keeps card models (goldfish.models_saved is then true), annotations that "
-    "pass its check of Mystic Forge's format are kept once the run goes through "
+    "pass its check of Mystic Forge's format are kept once the run goes through (from a stored "
+    "deck's report only, and only for cards the simulator cannot play on its own) "
     "(goldfish.models_kept names them, and why any was not), and later solo tests of any "
     "member's deck play them unless the run passes its own annotation for that card "
     "(goldfish.kept_models: card, model hash, yours or not, when last changed). Only the member "
@@ -289,7 +290,9 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
             "(state, games_done of games_requested, expected_seconds); its result has each seat's wins "
             "with a 95% interval and how it lost, the median game time and turn, and how the games "
             "ended. Poll with get_deck_report "
-            "view='forge' until the state is done. Forge plays Commander decks only: a 60-card deck's "
+            "view='forge' until the state is done or another final state (failed, timeout, cancelled, "
+            "lost: a run that stopped early, whose games_done still count). Forge plays Commander decks "
+            "only: a 60-card deck's "
             "report never starts it (forge state skipped, with the reason). forge=false leaves Forge out "
             "for a quick solo-test-only report (default: as simulate). A report without Forge games is "
             "labelled engine_label 'Preflight only (no rules engine)'. same_opponents_as (another of the "

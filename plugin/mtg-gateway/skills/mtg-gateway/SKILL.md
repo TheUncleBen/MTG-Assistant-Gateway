@@ -206,7 +206,9 @@ When the gateway runs Forge, a report from `run_deck_report` also has a
 `forge` section: real games of the deck against Commander precons, played by
 Forge's rules engine with opponents, combat and the stack. It runs in the
 background, so `forge.state` is `queued` or `running` at first; read the
-report again with `get_deck_report` until it is `done`.
+report again with `get_deck_report` until it is `done`, or another final state
+(`failed`, `timeout`, `cancelled`, `lost`): then quote the games it did play
+(`games_done` of `games_requested`) as a run that stopped early.
 
 - Quote `forge.result`: games played, the deck's wins and `win_rate_95`, and
   the opponent decks (`forge.seats`). These are Forge AI games, not a

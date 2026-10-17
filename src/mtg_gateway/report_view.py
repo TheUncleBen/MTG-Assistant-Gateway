@@ -868,16 +868,16 @@ def ask_prompt(deck_name: str, deck_url: str, cards: list[dict[str, Any]], *, mo
     # TODO(Q140 item 1, held for Ben's re-confirmation card): the last clause only while kept
     # models are switched on (review r1 fix 4)
     told = (
-        "which cards you could not describe, and which models the gateway kept, if any."
+        ", which cards you could not describe, and which models the gateway kept, if any."
         if models
-        else "and which cards you could not describe."
+        else " and which cards you could not describe."
     )
     return (
         f'In the solo test (goldfish simulation) of my deck "{deck_name}" ({deck_url}), these cards '
         f"are played without their effect: {names}. Use the gateway's goldfish annotation tool on the "
         "deck to see what each one needs, and write each model only from the card's exact Oracle text "
         "(the gateway's card text and rules tools), never from memory. Then run a new deck report for "
-        f"the deck with your models as its annotations, and tell me what changed, {told}"
+        f"the deck with your models as its annotations, and tell me what changed{told}"
     )
 
 
@@ -1042,7 +1042,7 @@ STATUS_TEXT = {
     "complete": "complete",
     "running": "running: Forge games are playing",
     "queued": "queued: Forge games are waiting to start",
-    "partial": "partial: some parts did not run",
+    "partial": "partial: some parts did not run or did not finish",
     "failed": "failed: nothing beyond the deck statistics came back",
 }
 
@@ -1235,7 +1235,8 @@ def forge_lines(f: dict[str, Any], *, results: bool = True) -> list[str]:
         out.append(f"Expected to finish in about {minutes} minute{'s' if minutes != 1 else ''}{basis}.")
     seats = res.get("seats") or []
     if res.get("games") and results:
-        out.append(f"Games played: {res['games']} of {res.get('games_requested') or res['games']}.")
+        asked = res.get("games_requested") or f.get("games_requested")
+        out.append(f"Games played: {res['games']} of {asked}." if asked else f"Games played: {res['games']}.")
         for seat in seats:
             low, high = (seat.get("win_rate_95") or [None, None])[:2]
             ci = (
@@ -1305,7 +1306,8 @@ def forge_html(f: Any, *, live: bool = False, report_id: Any = None) -> str:
     not_run = " <span class='badge danger'>not run</span>"
     stopped = forge_stopped_text(f)
     if stopped:
-        not_run = " <span class='badge warn'>stopped early</span>"
+        # every game played: the notice says the run did not end cleanly, and no badge
+        not_run = " <span class='badge warn'>stopped early</span>" if forge_stopped_early(f) else ""
     head = f"<h2>{FORGE_HEADING}{badge.get(state, not_run)}</h2>"
     parts = [
         head,
@@ -1366,25 +1368,54 @@ FORGE_STOPPED_WHY = {
     "failed": "because the rest of the games failed",
     "timeout": "because the run reached its time limit",
     "cancelled": "because the run was stopped",
-    "lost": "before the gateway lost track of the run",
 }
 
 
+def _forge_stop(f: dict[str, Any]) -> tuple[int, int | None] | None:
+    """(games played, games asked for or None) for a run that ended without "done" after playing
+    some games, else None."""
+    if str(f.get("state") or "") not in (*FORGE_STOPPED_WHY, "lost"):
+        return None
+    result = f.get("result") if isinstance(f.get("result"), dict) else {}
+    played = result.get("games")
+    if not isinstance(played, int) or isinstance(played, bool) or played <= 0:
+        return None
+    total = f.get("games_requested") or result.get("games_requested")
+    return played, total if isinstance(total, int) and total >= played else None
+
+
 def forge_stopped_text(f: dict[str, Any]) -> str:
-    """The sentence for a run that ended early with some games played, else ""."""
-    state = str(f.get("state") or "")
-    played = (f.get("result") or {}).get("games") if isinstance(f.get("result"), dict) else None
-    if state not in FORGE_STOPPED_WHY or not isinstance(played, int) or played <= 0:
+    """The sentence for a run that ended without "done" after playing some games, else ""."""
+    stop = _forge_stop(f)
+    if stop is None:
         return ""
-    total = f.get("games_requested") or f["result"].get("games_requested")
-    of = f" of {total}" if isinstance(total, int) and total >= played else ""
-    games = "game" if played == 1 and not of else "games"
-    text = (
-        f"Forge stopped after {played}{of} {games}, {FORGE_STOPPED_WHY[state]}. "
-        f"The results below count only the {played} {'game' if played == 1 else 'games'} played."
-    )
+    played, total = stop
+    games = "game" if played == 1 else "games"
+    those = "that one game" if played == 1 else f"those {played} games"
+    of = f"{played} of {total} games" if total is not None else f"{played} {games}"
+    if total is not None and played >= total:
+        # every game asked for played, then one group still ended badly (proofread 6 P7)
+        text = (
+            f"Forge played all {played} {games}, but the run did not end cleanly. "
+            f"The results below count all {played}."
+        )
+    elif f.get("state") == "lost":
+        # a lost run keeps what the last check saw; Forge may have played on (P8)
+        text = f"The gateway lost track of this run after {of}. The results below count only {those}."
+    else:
+        counted = "that one game" if played == 1 else f"the {played} games played"
+        text = (
+            f"Forge stopped after {of}, {FORGE_STOPPED_WHY[str(f['state'])]}. "
+            f"The results below count only {counted}."
+        )
     error = str(f.get("error") or "")
     return f"{text} {error}" if error else text
+
+
+def forge_stopped_early(f: dict[str, Any]) -> bool:
+    """Whether the card carries the "stopped early" badge: some games played, but not all."""
+    stop = _forge_stop(f)
+    return stop is not None and (stop[1] is None or stop[0] < stop[1])
 
 
 def _forge_key(f: dict[str, Any]) -> str:
