@@ -28,6 +28,7 @@ import json
 import logging
 import re
 import secrets
+import threading
 import time
 from collections.abc import AsyncIterator, Callable
 from typing import TYPE_CHECKING, Any
@@ -85,10 +86,11 @@ STREAM_STALE = 150.0  # seconds without a line from ntfy (it sends one every 45 
 STREAM_MAX_PER_KEY = 4  # connections at once with one key (a phone reconnecting overlaps its old one)
 # ``since``: an ntfy message id, or a Unix time; anything else starts from now.
 SINCE_RE = re.compile(r"^(?:[A-Za-z0-9]{8,24}|\d{9,11})$")
-# A deck's grouped message (see Notifier.group_for): ntfy replaces a message with the same id.
+# A deck's grouped message (Notifier.deck_waiting): a later one with the same id replaces it.
 GROUP_RE = re.compile(r"^deck-\d{1,12}$")
+NEW_DECKS = "0"  # the group of new decks an assistant proposed: no deck of their own yet
 
-
+RECOUNT_DELAY = 1.0  # seconds: changes close together (an apply all, a sweep) are counted once
 WAITING_TEXT = "Open it to look at the changes, then apply or reject them."
 
 
@@ -98,6 +100,13 @@ def waiting_title(count: int, deck_name: str) -> str:
     if count == 1:
         return f"1 change to {name} is waiting for you"
     return f"{count} changes to {name} are waiting for you"
+
+
+def new_decks_title(count: int) -> str:
+    """The title of the message for new decks an assistant proposed."""
+    if count == 1:
+        return "1 new deck is waiting for you"
+    return f"{count} new decks are waiting for you"
 
 
 def new_topic() -> str:
@@ -205,10 +214,17 @@ class Notifier:
         self.sent = 0
         self._last_test: dict[str, float] = {}
         self._waiting: dict[tuple[str, str], int] = {}  # the count each deck's message last said
+        self._cleared: set[tuple[str, str]] = set()  # decks whose message this process withdrew
         self._streams: dict[str, int] = {}  # open app connections per key
         self._kicks: dict[str, asyncio.Event] = {}  # set to end a key's connections now
         self._closing: asyncio.Event | None = None  # set when the gateway stops
         self._loop: asyncio.AbstractEventLoop | None = None
+        # what waits for each member's press, per deck: {deck_id: (deck name, count, a waiting
+        # proposal's id)}; set by watch_waiting
+        self._count: Callable[[str], dict[str, tuple[str, int, str]]] | None = None
+        self._dirty: dict[str, set[str]] = {}  # members to count again, with the decks touched
+        self._dirty_lock = threading.Lock()
+        self.recount_delay = RECOUNT_DELAY
 
     def test_allowed(self, sub: str) -> bool:
         """True (and the member's next test held back for TEST_COOLDOWN) unless they pressed
@@ -318,30 +334,113 @@ class Notifier:
         if self.enabled:
             self._background(self.withdraw(sub, group))
 
-    def deck_waiting(self, sub: str, deck_id: str, deck_name: str, count: int, path: str) -> None:
+    def deck_waiting(
+        self, sub: str, deck_id: str, deck_name: str, count: int, path: str, *, touched: bool = False
+    ) -> None:
         """The member's one message for a deck: how many assistant changes wait for their press
         there (``count``), replaced on the phone each time the count changes and removed when it
-        reaches 0. A count the phone already shows sends nothing."""
+        reaches 0. A count the phone already shows sends nothing. A deck whose proposals just
+        changed (``touched``) is withdrawn at 0 even when this process never sent its message (one
+        sent before a restart), once until it sends one again."""
         if not self.enabled or not str(deck_id).isdigit():
             return
         group = f"deck-{int(deck_id)}"
         key = (sub, group)
-        if self._waiting.get(key, 0) == count:
+        if count == 0 and key not in self._waiting and not (touched and key not in self._cleared):
+            return
+        if count > 0 and self._waiting.get(key) == count:
             return
         if count > 0:
             self._waiting[key] = count
-            self.soon(sub, "proposals", waiting_title(count, deck_name), WAITING_TEXT, path, group)
+            self._cleared.discard(key)
+            title = new_decks_title(count) if deck_id == NEW_DECKS else waiting_title(count, deck_name)
+            self.soon(sub, "proposals", title, WAITING_TEXT, path, group)
         else:
             self._waiting.pop(key, None)
+            self._cleared.add(key)
             self.withdraw_soon(sub, group)
         if len(self._waiting) > 5000:  # a long-running gateway: forget the oldest decks
             for k in list(self._waiting)[:1000]:
                 self._waiting.pop(k, None)
+        if len(self._cleared) > 5000:
+            self._cleared.clear()
+
+    def watch_waiting(self, count: Callable[[str], dict[str, tuple[str, int, str]]]) -> None:
+        """Keep each deck's message in step with ``count(sub)`` (DeckService.waiting_by_deck),
+        counted again shortly after :meth:`proposals_changed`."""
+        self._count = count
+
+    def start(self) -> None:
+        """Remember the gateway's event loop: a change made on a worker thread is counted on it,
+        and the gateway's stop ends the app connections from it."""
+        self._loop = asyncio.get_running_loop()
+        if self._closing is None:
+            self._closing = asyncio.Event()
+
+    def proposals_changed(self, sub: str, deck_id: str | None) -> None:
+        """A member's proposals changed (Database.watch_proposals; any thread, inside the write):
+        count them again in the background, once for changes close together."""
+        if not self.enabled or self._count is None:
+            return
+        with self._dirty_lock:
+            first = sub not in self._dirty
+            decks = self._dirty.setdefault(sub, set())
+            if deck_id and len(decks) < 200:
+                decks.add(deck_id)
+        if not first:
+            return
+        try:
+            loop: asyncio.AbstractEventLoop | None = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+        if loop is not None:
+            loop.call_later(self.recount_delay, self._recount_soon, sub)
+        elif self._loop is not None and not self._loop.is_closed():
+            self._loop.call_soon_threadsafe(
+                self._loop.call_later, self.recount_delay, self._recount_soon, sub
+            )
+        else:  # no loop to count on (a script, a test without one): nothing is sent
+            with self._dirty_lock:
+                self._dirty.pop(sub, None)
+
+    def _recount_soon(self, sub: str) -> None:
+        self._background(self.recount(sub))
+
+    async def recount(self, sub: str) -> None:
+        """Count what waits for the member's press on each deck and bring each deck's message
+        in step: sent or replaced when its count changed, withdrawn when nothing waits there."""
+        with self._dirty_lock:
+            touched = self._dirty.pop(sub, set())
+        if self._count is None:
+            return
+        try:
+            counted = await asyncio.to_thread(self._count, sub)
+        except Exception:
+            logger.exception("counting waiting proposals failed")
+            return
+
+        def key(deck_id: str) -> str:  # new decks share one message, deck-0
+            return NEW_DECKS if deck_id == "new" else deck_id
+
+        now = {key(k): v for k, v in counted.items()}
+        touched = {key(d) for d in touched}
+        shown = {g[len("deck-") :] for (s, g) in self._waiting if s == sub}
+        for deck_id in sorted(shown | set(now) | touched):
+            name, count, proposal_id = now.get(deck_id, ("", 0, ""))
+            if count == 1:
+                path = f"/proposals/{proposal_id}"
+            else:
+                path = "/proposals" if deck_id == NEW_DECKS else f"/decks/{deck_id}"
+            self.deck_waiting(sub, deck_id, name, count, path, touched=deck_id in touched)
 
     async def drain(self) -> None:
-        """Wait for background sends (tests, shutdown)."""
-        while self._tasks:
-            await asyncio.gather(*list(self._tasks), return_exceptions=True)
+        """Wait for background sends, and for counts still to run (tests, shutdown)."""
+        deadline = time.monotonic() + self.recount_delay + 5
+        while self._tasks or (self._dirty and time.monotonic() < deadline):
+            if self._tasks:
+                await asyncio.gather(*list(self._tasks), return_exceptions=True)
+            else:
+                await asyncio.sleep(0.02)
 
     # -- the Android app's connection ------------------------------------------------------
 
@@ -393,9 +492,8 @@ class Notifier:
         ntfy ends or goes quiet for :data:`STREAM_STALE` seconds, when :func:`still_valid` turns
         false (checked every :data:`STREAM_RECHECK` seconds), on :meth:`kick` and on
         :meth:`close_streams`."""
-        if self._loop is None:
-            self._loop = asyncio.get_running_loop()
-            self._closing = asyncio.Event()
+        if self._closing is None:
+            self.start()
         assert self._closing is not None
         closing = self._closing
         kick = self._kicks.setdefault(topic, asyncio.Event())

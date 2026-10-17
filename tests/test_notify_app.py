@@ -20,7 +20,7 @@ from mtg_gateway import notify
 from mtg_gateway.membership import Membership
 
 from .conftest import Stack, StackOptions, stack_with
-from .test_decks_and_proxy import Browser
+from .test_decks_and_proxy import Browser, call, mcp_token, structured
 
 TOKEN = "tk_secret_ntfy_token_value"
 APP_UA = "Mozilla/5.0 (Linux; Android 16; wv) Chrome/140 Mobile Safari/537.36 MTGAssistant/0.7.30"
@@ -423,5 +423,74 @@ async def test_one_message_per_deck_follows_its_waiting_count(stack: Stack) -> N
         await n.drain()
         assert len(stack.ntfy.published) == 2
         assert notify.waiting_title(3, "") == "3 changes to your deck are waiting for you"
+    finally:
+        await b.aclose()
+
+
+async def test_each_decks_message_follows_its_proposals(stack: Stack) -> None:
+    """Saved, rejected, a mode that lets the assistant apply, and a restart: the deck's one
+    message follows what really waits for the member's press."""
+    b, key = await _member(stack)
+    n = stack.gw.notifier
+    n.recount_delay = 0.01
+    try:
+        r = await b.link("alice", "pw-alice")
+        assert r.status_code == 303, r.text
+        token = await mcp_token(stack.h)
+
+        async def propose(card: str) -> dict:
+            p = structured(
+                await call(
+                    stack.h,
+                    token,
+                    "propose_deck_changes",
+                    {"deck_id": "42", "changes": [{"action": "add", "card_name": card}]},
+                )
+            )
+            assert p["state"] == "pending" and p["assistant_may_apply"] is False  # manual mode
+            await n.drain()
+            return p
+
+        p1 = await propose("Arcane Signet")
+        msg = stack.ntfy.published[-1]
+        assert msg["title"] == notify.waiting_title(1, p1["deck_name"])
+        assert (
+            msg["sequence_id"] == "deck-42"
+            and msg["click"] == f"https://mtg.test/proposals/{p1['proposal_id']}"
+        )
+        assert "Arcane Signet" not in json.dumps(msg)
+        p2 = await propose("Sol Ring")
+        msg = stack.ntfy.published[-1]
+        assert (
+            msg["title"] == notify.waiting_title(2, p1["deck_name"])
+            and msg["click"] == "https://mtg.test/decks/42"
+        )
+        sent = len(stack.ntfy.published)
+        await call(stack.h, token, "reject_proposal", {"proposal_id": p2["proposal_id"]})
+        await n.drain()
+        assert len(stack.ntfy.published) == sent + 1
+        assert stack.ntfy.published[-1]["title"] == notify.waiting_title(1, p1["deck_name"])
+        # a mode that lets the assistant apply it: nothing waits for the member any more
+        assert stack.h.db.set_approval_mode("user-1", "auto")
+        await n.drain()
+        assert stack.ntfy.deleted == [f"/{key}/deck-42"]
+        assert stack.h.db.set_approval_mode("user-1", None)
+        await n.drain()
+        assert stack.ntfy.published[-1]["title"] == notify.waiting_title(1, p1["deck_name"])
+        await call(stack.h, token, "reject_proposal", {"proposal_id": p1["proposal_id"]})
+        await n.drain()
+        assert stack.ntfy.deleted == [f"/{key}/deck-42"] * 2
+        # after a restart the gateway no longer knows what it sent: a deck whose proposals change
+        # is withdrawn at 0 all the same
+        n.proposals_changed("user-1", "42")
+        await n.drain()
+        assert stack.ntfy.deleted == [f"/{key}/deck-42"] * 2  # withdrawn already: not again
+        n._waiting.clear()
+        n._cleared.clear()
+        n.proposals_changed("user-1", "42")
+        await n.drain()
+        assert stack.ntfy.deleted == [f"/{key}/deck-42"] * 3
+        assert n._waiting == {}
+        assert stack.gw.decks.waiting_by_deck("user-1") == {}
     finally:
         await b.aclose()

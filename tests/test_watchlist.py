@@ -369,7 +369,7 @@ async def test_notifications_are_off_and_harmless_without_a_server(plain: Stack)
         assert r.headers["location"] == "/account?err=summary_off#summary"
         assert notify.prefs(plain.h.db, "user-1")["summary_every"] == "off"
         assert plain.gw.notifier.enabled is False
-        assert plain.gw.decks.on_proposal_saved is None  # nothing hooked
+        assert plain.gw.notifier._count is None  # nothing hooked
     finally:
         await b.aclose()
 
@@ -442,9 +442,10 @@ async def test_a_proposal_waiting_for_the_member_and_a_finished_report_notify(st
     assert p["state"] == "pending" and p["assistant_may_apply"] is False  # manual mode: it waits
     await stack.gw.notifier.drain()
     msg = stack.ntfy.messages[-1]
-    assert msg["title"] == "A proposal waits for you"
+    assert msg["title"] == notify.waiting_title(1, p["deck_name"])
+    assert msg["sequence_id"] == "deck-42"
     assert msg["click"] == f"https://mtg.test/proposals/{p['proposal_id']}"
-    assert "Arcane Signet" not in json.dumps(msg) and "Sample Commander" not in json.dumps(msg)
+    assert "Arcane Signet" not in json.dumps(msg)
     rep = structured(await call(h, token, "run_deck_report", {"deck_ref": "42", "simulate": False}))
     await stack.gw.notifier.drain()
     msg = stack.ntfy.messages[-1]
