@@ -318,14 +318,18 @@ def add_history_routes(
         return RedirectResponse(f"/history/reports/{_esc(rid)}?models={outcome}", status_code=303)
 
     def _more_notices() -> dict[str, str]:
-        from .reports import MORE_FULL, MORE_NO_FORGE, MORE_NOT_ENDED, MORE_NOT_THIS_ONE, MORE_QUEUE_FULL
+        from . import reports as r
 
         return {
-            "queue": MORE_QUEUE_FULL,
-            "full": MORE_FULL,
-            "ended": MORE_NOT_ENDED,
-            "none": MORE_NOT_THIS_ONE,
-            "noforge": MORE_NO_FORGE,
+            "queue": r.MORE_QUEUE_FULL,
+            "full": r.MORE_FULL,
+            "ended": r.MORE_NOT_ENDED,
+            "none": r.MORE_NOT_THIS_ONE,
+            "noforge": r.MORE_NO_FORGE,
+            "pairwait": r.MORE_PAIR_WAIT,
+            "paircant": r.MORE_PAIR_CANT,
+            "pairqueue": r.MORE_PAIR_QUEUE,
+            "setup": r.PAIR_SETTING_UP,
         }
 
     @server.custom_route("/history/reports/{rid}/forge/more", methods=["POST"], include_in_schema=False)
