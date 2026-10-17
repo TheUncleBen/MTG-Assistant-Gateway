@@ -2502,8 +2502,11 @@ class DeckService:
         (A8)."""
         if row.get("state") != "pending":
             return None
-        if row.get("status") == "held" and str(row.get("status_reason") or "").startswith("replaces:"):
-            other = str(row["status_reason"]).split(":", 2)[1]
+        replaced = next(
+            (c for c in board.hold_causes(row.get("status_reason")) if c.startswith("replaces:")), None
+        )
+        if row.get("status") == "held" and replaced:
+            other = replaced.split(":", 2)[1]
             no = self.db.proposal_board_numbers(sub, [other]).get(other)
             return f"would replace {f'#{no}' if no else 'a change'}, which was applied"
         if self._takes_over_another_app(sub, row):
@@ -2851,11 +2854,12 @@ class DeckService:
             **status_info,
             "next_step": (OUT_OF_DATE_STEP + status_info["status_reason"] + " " if out_of_date else "")
             + (
-                (
-                    HELD_REPLACED_STEP
-                    if str(row.get("status_reason") or "").startswith("replaces:")
-                    else HELD_STEP
+                "".join(
+                    step
+                    for step, kind in ((HELD_STEP, "depends:"), (HELD_REPLACED_STEP, "replaces:"))
+                    if any(c.startswith(kind) for c in board.hold_causes(row.get("status_reason")))
                 )
+                or HELD_STEP
                 if status == "held"
                 else ""
             )
@@ -3322,6 +3326,7 @@ class DeckService:
         archidekt_backup: bool | None = None,
         version: int | None = None,
         shown_status: str | None = None,
+        shown_status_at: int | None = None,
     ) -> dict[str, Any]:
         """``archidekt_backup=False`` (a member's own hand edit, the save bar's tick box unticked, or a
         quick edit on the deck page) skips the extra backup copy on Archidekt; the gateway's own
@@ -3330,7 +3335,8 @@ class DeckService:
         amended since is refused with ``changed`` and nothing sent. ``shown_status`` is the status
         the chat card showed with the press: a change held since is refused with
         ``now_held`` and nothing sent, so the member sees the hold even when the card could not
-        read the change again first."""
+        read the change again first; with ``shown_status_at`` (when that status was set), so is a
+        held change that was held for a new cause since."""
         if not self.settings.writes_enabled:
             raise DeckError("writes_disabled", refusals.WRITES_OFF_KEPT)  # Q141 item 7A
         row = self.db.get_proposal(proposal_id, sub)
@@ -3410,7 +3416,13 @@ class DeckService:
         async def run() -> dict[str, Any]:
             async with self.archidekt_slot(sub):  # refused before the claim, so nothing is sent
                 return await self._apply_slotted(
-                    sub, proposal_id, row, via=via, version=expect, shown_status=shown_status
+                    sub,
+                    proposal_id,
+                    row,
+                    via=via,
+                    version=expect,
+                    shown_status=shown_status,
+                    shown_status_at=shown_status_at,
                 )
 
         # The apply runs as its own task: a caller that gives up (an app's tool timeout, a closed
@@ -3577,6 +3589,7 @@ class DeckService:
         via: str,
         version: int | None = None,
         shown_status: str | None = None,
+        shown_status_at: int | None = None,
     ) -> dict[str, Any]:
         if shown_status is not None:
             # checked just before the claim, with nothing awaited in between, so no hold can be
@@ -3584,7 +3597,13 @@ class DeckService:
             self.db.hold_blocked(sub)
             now = self.db.get_proposal(proposal_id, sub)
             held = now is not None and now["state"] == "pending" and now.get("status") == "held"
-            if held and shown_status != "held":
+            # held for a cause the card did not show: every new cause moves status_at
+            moved = (
+                shown_status_at is not None and int(now.get("status_at") or 0) != shown_status_at
+                if held
+                else False
+            )
+            if held and (shown_status != "held" or moved):
                 raise self._now_held(sub, now)
         if not self.db.claim_proposal(proposal_id, sub, expect_version=version):
             now = self.db.get_proposal(proposal_id, sub)
@@ -5397,7 +5416,8 @@ class DeckService:
             raise needs_look_error(DESCRIPTION_CHANGED)
         # words changed on Archidekt since the review are never written over, formatted or not
         was, now_text = _description_before(row.get("rows")), _description_before(now_rows)
-        if was is not None and now_text is not None and was != now_text:
+        # (no description row now: Archidekt already has the new words, changed there since)
+        if was is not None and (now_text is None or was != now_text):
             raise needs_look_error(DESCRIPTION_CHANGED)
         if not changes and not organise:
             raise DeckError("invalid", "The deck already has these details; nothing was sent.")

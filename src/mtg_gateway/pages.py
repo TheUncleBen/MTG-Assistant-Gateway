@@ -1650,6 +1650,12 @@ def _proposal_body(p: dict[str, Any], csrf: str | None, shown: str, *, step: boo
             else ""
         )
         + (
+            # every cause it is held for, as the card's "Held." note says them
+            f"<dt>Held</dt><dd>{html.escape(str(p['status_reason']))}</dd>"
+            if p.get("state") == "pending" and p.get("status") == "held" and p.get("status_reason")
+            else ""
+        )
+        + (
             # why it waits for the member's own press, and a replace that waits (WORDING-3-r2)
             "<dt>Waits for you</dt><dd>"
             + html.escape(
