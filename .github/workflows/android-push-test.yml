@@ -58,10 +58,21 @@ jobs:
           yes | "$sdk/sdkmanager" --licenses > /dev/null
           "$sdk/sdkmanager" "emulator" "platform-tools" "system-images;android-35;google_apis;x86_64" > /dev/null
           echo no | "$sdk/avdmanager" create avd -n push -k "system-images;android-35;google_apis;x86_64" -d pixel_6
+          mkdir -p "$RUNNER_TEMP/push-test"
+          log="$RUNNER_TEMP/push-test/emulator.log"
+          "$ANDROID_HOME/emulator/emulator" -accel-check || true
           nohup "$ANDROID_HOME/emulator/emulator" -avd push -no-window -no-audio -no-boot-anim -no-snapshot \
-            -gpu swiftshader_indirect > "$RUNNER_TEMP/emulator.log" 2>&1 &
-          "$ANDROID_HOME/platform-tools/adb" wait-for-device
+            -gpu swiftshader_indirect > "$log" 2>&1 &
+          # Never wait for ever: an emulator that doesn't come up fails here, with its log.
+          if ! timeout 600 "$ANDROID_HOME/platform-tools/adb" wait-for-device; then
+            echo "the emulator did not come up in 10 minutes"; tail -n 80 "$log"; exit 1
+          fi
+          if ! timeout 600 sh -c 'until [ "$("$0" shell getprop sys.boot_completed 2>/dev/null | tr -d "\r")" = 1 ]; do sleep 5; done' \
+            "$ANDROID_HOME/platform-tools/adb"; then
+            echo "the emulator did not finish starting in 10 minutes"; tail -n 80 "$log"; exit 1
+          fi
       - name: Push tests
+        timeout-minutes: 30
         env:
           PUSH_TEST_CERTS: ${{ runner.temp }}/certs
         run: |
