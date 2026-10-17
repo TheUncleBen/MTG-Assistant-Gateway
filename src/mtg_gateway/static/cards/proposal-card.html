@@ -48,7 +48,7 @@ ul.changes li.more-row{display:block;padding:0;border-left-color:var(--border)}
 .badges{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:6px;flex:0 1 auto;min-width:min-content}
 .badge.risk.high,.badge.risk.consent{background:var(--amber-bg);color:var(--amber)}
 .badge.risk.destructive{background:var(--red-bg);color:var(--red)}
-/* D-4 (review M-1): at large text sizes the badges move under the title rather than over it,
+/* At large text sizes the badges move under the title rather than over it,
    and the risk badge may wrap */
 .head{flex-wrap:wrap}
 .head h1{flex:1 1 10rem}
@@ -56,7 +56,7 @@ ul.changes li.more-row{display:block;padding:0;border-left-color:var(--border)}
 .badge.risk{white-space:normal;text-align:center;flex:0 1 auto}
 /* Locked (the 700 ms after drawing, and while a press is out), a button keeps a label that reads:
    full-strength text with a dashed outline in its own colour, not faded (as the review page's
-   Apply and Reject, R-181) */
+   Apply and Reject) */
 button:disabled{opacity:1;cursor:default;background:transparent;border:1px dashed currentColor;color:var(--text)}
 button.danger:disabled{color:var(--red)}
 .why{margin-top:10px;padding:10px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg2)}
@@ -64,7 +64,7 @@ button.danger:disabled{color:var(--red)}
 .why textarea{font:inherit;color:var(--text);background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);
   width:100%;min-height:64px;padding:8px 10px;resize:vertical}
 .why .actions{margin-top:8px}
-/* The other changes waiting on this deck (Q134 A3): one line, Apply all and Review all. */
+/* The other changes waiting on this deck: one line, Apply all and Review all. */
 .also{margin-top:12px;padding:10px 12px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg2)}
 .also p{margin:0;font-size:.8125rem;overflow-wrap:anywhere}
 .also .actions{margin-top:8px}
@@ -101,7 +101,7 @@ button.danger:disabled{color:var(--red)}
   function lowerFirst(t) { return t ? t.charAt(0).toLowerCase() + t.slice(1) : t; }
   var B = Bridge; // the shared host protocol (_bridge.js), inlined by cards.card_html (A10)
   var APPROVAL_KEY = "mtg/approval";
-  var SET_KEY = "mtg/approval_set"; // "Apply all": this app's waiting changes on the deck (Q134 A3)
+  var SET_KEY = "mtg/approval_set"; // "Apply all": this app's waiting changes on the deck
   var MAX_IMAGES = 24;   // Scryfall thumbnails at most, over the whole card
   var COLLAPSE_AT = 8;   // a longer list shows a summary and this many rows until "Show all"
   var ARM_DELAY_MS = 700; // buttons stay disabled this long after the card is drawn
@@ -223,7 +223,7 @@ button.danger:disabled{color:var(--red)}
   function changeNote(p) {
     if (Number(p.version) <= 1 || !p.changed_by) return "";
     var what = String(p.what_changed || "").trim();
-    // Q141 1B in Ben's approved form, "Changed by ChatGPT" (coordinator 03:19Z 10-17)
+    // the approved form: "Changed by ChatGPT"
     return "Changed by " + appNames(p) + (what ? ". Last change: " + what : "") + (/[.!?]$/.test(what) ? "" : ".");
   }
   function modeNote(p) {
@@ -235,16 +235,16 @@ button.danger:disabled{color:var(--red)}
         : maker + " made this change, so this card can't approve it. Approve it on " + maker + "'s card or in your browser.";
     }
     if (p.press_reason) {
-      // it waits for the member's own press in every mode: say why (safe defaults, WORDING-3-r2)
+      // it waits for the member's own press in every mode: say why
       var first = /^waits for (#\d+)/.exec(String(p.press_reason));
       return "This one " + p.press_reason + ", so it needs your press" +
         (p.approval_mode === "auto" ? " even in Full auto" : "") + "." +
         (first ? " Apply " + first[1] + " first unless you want this one on its own." : "");
     }
-    // Q137: a change that keeps formatting is approved on the review page, which shows it
+    // a change that keeps formatting is approved on the review page, which shows it
     var keeps = (p.rows || []).some(function (r) { return r && r.after_doc; });
     var loses = (p.rows || []).some(function (r) { return r && r.formatting_lost; });
-    // D-1, E-2 (wording draft, WORDING-6): approved on its review page, which says what goes
+    // approved on its review page, which says what goes
     if (loses && !p.assistant_may_apply) return "This removes all the formatting already there, such as bold text, links and pictures. Open it to see what goes, and approve it there.";
     if (keeps && !p.assistant_may_apply) return "This keeps the formatting already there, such as bold text, links or pictures. Open it to see how it will look, and approve it there.";
     if (p.assistant_may_apply) {
@@ -267,7 +267,7 @@ button.danger:disabled{color:var(--red)}
     var st0 = meta[SET_KEY];
     applySet = st0 && Array.isArray(st0.ids) && typeof st0.code === "string" ? { ids: st0.ids.map(String), code: st0.code } : null;
     confirming = false;
-    // T-151: the assistant's apply_proposal of a change the user must approve answers with the
+    // The assistant's apply_proposal of a change the user must approve answers with the
     // proposal itself (error browser_required), so its card shows the change and the buttons.
     var needsPress = sc.ok === false && sc.error === "browser_required" && sc.proposal_id && sc.state === "pending";
     if ((sc.ok === false || result.isError) && !needsPress) {
@@ -297,7 +297,7 @@ button.danger:disabled{color:var(--red)}
     var risk = $("risk");
     var RISK_TEXT = { consent: "Needs your approval", destructive: "Destructive: deletes a deck" };
     if (sc.risk === "high" && sc.state === "pending" && sc.assistant_may_apply && sc.approval_mode === "auto") {
-      // D-4 (coordinator 04:26Z 10-17, WORDING-7): every high-risk change Full auto applies
+      // every high-risk change Full auto applies
       risk.textContent = "No press needed"; risk.className = "badge risk";
     } else if (sc.risk) { risk.textContent = RISK_TEXT[sc.risk] || sc.risk + " risk"; risk.className = "badge risk " + sc.risk; }
     else risk.className = "badge risk hidden";
@@ -386,7 +386,7 @@ button.danger:disabled{color:var(--red)}
       })
       .catch(function () { refreshing = false; });
   }
-  // Q141 item 1B, wording drafts (WORDING-6): only where Apply all is offered, by number
+  // only where Apply all is offered, by number
   function leftOutText(nos, n) {
     var list = (nos || []).map(function (x) { return "#" + x; });
     if (!list.length) return n === 1 ? "Apply all leaves out 1 change, because another app changed it: approve it on its own."
@@ -434,14 +434,14 @@ button.danger:disabled{color:var(--red)}
             setStatus("Still applying, but the card can't read its progress (" + String(sc.message || "the gateway refused") + "). Open the review page to follow it.", "err");
             return;
           }
-          // Q78: an apply Archidekt's waits stopped before it changed anything leaves the proposal
+          // An apply Archidekt's waits stopped before it changed anything leaves the proposal
           // pending, and this card's code approves it again (the code stays valid while pending).
           var meta = {};
           if (sc.state === "pending" && heldCode) meta[APPROVAL_KEY] = heldCode;
           render({ structuredContent: sc, _meta: meta });
           var r = sc.result || {};
           if (sc.state === "pending") {
-            // the stop's own message, shown here and told to the assistant as it is (Q95: the
+            // the stop's own message, shown here and told to the assistant as it is (the
             // approved stop message, no other line)
             var stop = String((r.error === "rate_limited" && r.detail) || sc.next_step || "");
             setStatus(stop, "err");
@@ -497,8 +497,8 @@ button.danger:disabled{color:var(--red)}
     var a = $("actions"); a.replaceChildren();
     if (!proposal) return;
     var p = proposal;
-    // Only a proposal the member may approve in the chat has a code. Since 0.7.29 (Q8) an account
-    // action (a like, a comment, a folder...) has one too; a deck deletion never does (R-142), so it
+    // Only a proposal the member may approve in the chat has a code. Since 0.7.29 an account
+    // action (a like, a comment, a folder...) has one too; a deck deletion never does, so it
     // takes the "review page" branch below.
     if (p.state === "pending" && p.writes_enabled && approval) {
       var ok = el("button", "primary", "Approve: apply to Archidekt");
@@ -535,7 +535,7 @@ button.danger:disabled{color:var(--red)}
     reportSize();
   }
 
-  // Q134 A3: the other changes waiting on this deck, in one line ("1 from ChatGPT also waits"),
+  // The other changes waiting on this deck, in one line ("1 from ChatGPT also waits"),
   // with Apply all for this app's own (a confirm lists them first) and Review all for the rest.
   function renderAlso() {
     var box = $("also"), acts = $("also-actions");
@@ -549,7 +549,7 @@ button.danger:disabled{color:var(--red)}
       var who = o.app === "you" ? "your browser" : String(o.app);
       bits.push(Number(o.count) + " from " + who + " also " + (Number(o.count) === 1 ? "waits" : "wait") + ".");
     });
-    // Q141 item 1B: a change another app rewrote is approved on its own (wording draft, WORDING-4)
+    // a change another app rewrote is approved on its own
     var out = Number(w.left_out || 0);
     if (w.this_left_out) bits.push("Another app changed this one, so Apply all leaves it out: approve it here on its own.");
     if (out) bits.push(leftOutText(w.left_out_nos, out));
@@ -660,7 +660,7 @@ button.danger:disabled{color:var(--red)}
 
   // Approve's re-read did not answer (a host may refuse a card's read): nothing is approved on
   // this press, the card says so, and the next press approves the change as the card shows it,
-  // so a host that never lets the card read can't lock Approve (review round 3; WORDING-3-r3)
+  // so a host that never lets the card read can't lock Approve
   var uncheckedOk = false;
   function notChecked() {
     var ok = $("approve"), no = $("reject");

@@ -1,5 +1,5 @@
 // The service worker's "You're offline" page (companion.offline_page). The worker (/sw.js) answers
-// this file from memory, so it loads while the gateway can't be reached. Q63: the page loads its
+// this file from memory, so it loads while the gateway can't be reached. The page loads its
 // address again by itself
 // 1. when the browser says it is back online (the online event), and
 // 2. once the gateway answers a check made every few seconds: a plain GET of /healthz, which the

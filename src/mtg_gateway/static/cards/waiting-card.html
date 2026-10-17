@@ -27,7 +27,7 @@
 .res li{margin:3px 0;overflow-wrap:anywhere}
 h2.dh{font-size:.6875rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin:12px 0 4px}
 /* Locked (the 700 ms after drawing, and while a press is out), a button keeps a label that reads
-   (R-181, as the proposal card) */
+   (as the proposal card) */
 button:disabled{opacity:1;background:transparent;border:1px dashed currentColor;color:var(--text)}
 button.danger:disabled{color:var(--red)}
 @media (max-width:480px){.wl .btns{flex:1 1 100%}.wl .btns button{flex:1 1 0}}
@@ -60,7 +60,7 @@ button.danger:disabled{color:var(--red)}
   "use strict";
   // "Held: it depends on #3, …", as the Proposals page writes it (batch.held_text)
   function lowerFirst(t) { return t ? t.charAt(0).toLowerCase() + t.slice(1) : t; }
-  // The waiting changes as a card (show_waiting_changes; Q134 A6). Each of this app's own waiting
+  // The waiting changes as a card (show_waiting_changes). Each of this app's own waiting
   // changes has Approve and Reject (confirm_proposal, with the per-proposal code in _meta);
   // another app's has its review link only (O9). "Apply all N" applies this app's own together,
   // after a confirm that lists the order, each re-checked against the deck just before it is
@@ -89,7 +89,7 @@ button.danger:disabled{color:var(--red)}
     if (Number(x.version) <= 1 || !x.changed_by) return "";
     var what = String(x.what_changed || "").trim();
     var apps = (x.changed_by_apps && x.changed_by_apps.length ? x.changed_by_apps : [x.changed_by]).map(creator);
-    // Q141 1B in Ben's approved form, "Changed by ChatGPT" (coordinator 03:19Z 10-17)
+    // the approved form: "Changed by ChatGPT"
     return "Changed by " + apps.join(", then ") + (what ? ". Last change: " + what : "") + (/[.!?]$/.test(what) ? "" : ".");
   }
   function statusWord(x) {
@@ -120,7 +120,7 @@ button.danger:disabled{color:var(--red)}
       if ((x.status === "needs_look" || x.status === "held") && why) what.appendChild(el("span", "why", String(why)));
       if (changeNote(x)) what.appendChild(el("span", "why", changeNote(x)));
       if (x.link_note) what.appendChild(el("span", "why", String(x.link_note)));
-      // Q141 item 1B (wording draft, WORDING-5): which row Apply all leaves out
+      // which row Apply all leaves out
       if (x.not_in_apply_all) what.appendChild(el("span", "why", "Not in Apply all: another app changed it."));
       if (x.review_page_only && x.own) what.appendChild(el("span", "why", "Approve it on its review page."));
       li.appendChild(what);
@@ -150,7 +150,7 @@ button.danger:disabled{color:var(--red)}
     (data.other_apps || []).forEach(function (o) {
       notes.push(o.count + " from " + (o.app === "you" ? "your browser" : o.app) + " also " + (o.count === 1 ? "waits" : "wait") + ". Approve " + (o.count === 1 ? "it" : "them") + " on the Proposals page.");
     });
-    // Q141 item 1B: a change another app rewrote is approved on its own (wording draft, WORDING-4)
+    // a change another app rewrote is approved on its own
     var out = Number(data.left_out || 0), nos = (data.left_out_nos || []).map(function (x) { return "#" + x; });
     if (out && nos.length) notes.push("Apply all leaves out " + (nos.length === 1 ? nos[0] : nos.slice(0, -1).join(", ") + " and " + nos[nos.length - 1])
       + ", which another app changed: approve " + (nos.length === 1 ? "it" : "each") + " on its own.");

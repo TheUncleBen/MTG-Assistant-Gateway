@@ -256,7 +256,7 @@
     toast((err && err.message) || "No connection; nothing was changed.", { error: true });
   }
 
-  // -- saves in the background (T-159): the card's edits from its menu, viewer and drags --------
+  // -- saves in the background: the card's edits from its menu, viewer and drags --------
   // The edit is drawn on the page at once and Archidekt saves it behind, one save at a time in
   // the order they were made: a Saving note until it answers, then Saved with Undo (applyAnswer).
   // A save that does not go through puts the card back as it was and says why in a red note. A
@@ -2045,7 +2045,7 @@
   })();
 })();
 
-/* Play on EDHPlay (R-154, T-161): every press opens a small confirmation box; its "Copy and Open
+/* Play on EDHPlay: every press opens a small confirmation box; its "Copy and Open
    EDHPlay.com" copies the whole deck in EDHPlay's import format and opens edhplay.com (in the
    Android app, the phone's browser). The box asks the gateway for the list as it opens (the
    button's data-src, made by export_formats.to_edhplay) and the button turns on once it is here,
@@ -2113,8 +2113,8 @@
     if (!kind) setTimeout(function () { t.remove(); }, 8000);
   }
   // the list for the deck: {list, left_out, left_count}, or an Error whose message is shown.
-  // The box shows only the three approved messages (Q53, Q67): the gateway's own reason goes to
-  // the console, never on screen. Signed out, retrying can't help (Q69): err.signedOut.
+  // The box shows only the three approved messages: the gateway's own reason goes to
+  // the console, never on screen. Signed out, retrying can't help: err.signedOut.
   function fetchList(src) {
     return fetch(src, { credentials: "same-origin", headers: { Accept: "application/json" } }).then(function (r) {
       return r.json().catch(function () { return {}; }).then(function (d) {
@@ -2213,11 +2213,11 @@
           spot.appendChild(make("p", "notice warn", cutLine(d.left_count, d.left_out)));
           spot.hidden = false;
         }
-        if (d.no_commander) {  // nothing is marked, so EDHPlay sets no commander (Ben, Q55)
+        if (d.no_commander) {  // nothing is marked, so EDHPlay sets no commander
           spot.appendChild(make("p", "notice", "Choose your commander on EDHPlay."));
           spot.hidden = false;
         }
-        if (d.companion) {  // EDHPlay's import never sets a companion (Ben, Q54)
+        if (d.companion) {  // EDHPlay's import never sets a companion
           spot.appendChild(make("p", "notice", "Set your companion on EDHPlay."));
           spot.hidden = false;
         }

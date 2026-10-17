@@ -2534,7 +2534,7 @@ table.qty td:last-child{text-align:right;font-variant-numeric:tabular-nums;font-
     align-items:center}
   .listbar .field:last-of-type .lbl{margin-right:auto} .listbar .field.grow{min-width:0} }
 @media (max-width:600px){ .listbar .controls{grid-template-columns:minmax(0,1fr)} }
-/* the list couldn't be read (Q64): the reason and Try again, a full-size touch target */
+/* the list couldn't be read: the reason and Try again, a full-size touch target */
 .decks-unreadable p{margin:0}
 .decks-unreadable .actions .btn{min-height:44px}
 /* minmax(0,1fr), never 1fr: a long deck name (the "Copy of - …" names the app itself makes) must shrink
