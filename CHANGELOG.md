@@ -7,7 +7,9 @@ Notable changes for people who run or use the gateway. The format follows
 with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 (`release/1.2.3`); `latest` is always the newest.
 
-## [0.7.30] - Unreleased
+## [0.7.30] - 2026-10-18
+
+This release also includes every change listed under 0.7.27, 0.7.28 and 0.7.29 in CHANGELOG.md. Those versions were not released on their own.
 
 The simulator release: a Reports page under More, Forge games of two decks against the same
 opponents, laid-out Forge results, a guide on the Goldfish page and quicker Forge runs. Forge stays
@@ -91,7 +93,7 @@ stack.
 - **Members need app 0.7.30 to get notifications. Members on an app older than 0.7.12 must update the app first.**
 - Members who used the ntfy app connect again in the gateway's Android app; there are no notifications on iPhone. Their old ntfy subscriptions get nothing more.
 
-## [0.7.29] - Unreleased
+## [0.7.29] - not released on its own, included in 0.7.30
 
 Changes that wait can be amended, combined and approved in the chat, account actions are approved
 on the card, an admin Settings page manages most of the gateway's tuning settings, view choices
@@ -208,7 +210,7 @@ Android app is unchanged.
 - **Upgrade note for existing deployments (DEPLOY.md and DEPLOY-COMPOSE.md "Updating to 0.7.29 from an earlier version"):** a stack or Compose file from before 0.7.29 gives 24 of the page's 47 settings a value of its own, so they show locked. Before replacing the file, note your own edits to it (the uncommented Authentik and ntfy secret lines, lines added under `environment:`) and redo them in the new one. Portainer: paste the new stack file if it was pasted into the Web editor before (the Repository method brings it). Without Portainer: `git checkout deploy/portainer-stack.yml`, then `git pull`. Compose: download the new docker-compose.yml (in a clone, `git checkout docker-compose.yml` then `git pull`). Optionally delete the variables you want to manage on the page (an older Portainer variables file sets 19, an older .env 17). Any variable kept stays locked. Then update with re-pull (if `MTG_TAG` names a version, change it to `0.7.30` first; without Portainer: from a new shell in your copy of the repository, load `mtg.env` and run `docker stack deploy` again).
 - New variables: `MTG_ARCHIDEKT_BACKUP_COPIES` (10), `MTG_ARCHIDEKT_BACKUP_BOX_DEFAULT` (false), `MTG_SNAPSHOTS_PER_DECK` (25). DEPLOY.md's environment table describes them; OPERATIONS.md "The Settings page" describes the page.
 
-## [0.7.28] - Unreleased
+## [0.7.28] - not released on its own, included in 0.7.30
 
 Card search with every Scryfall filter, My decks by folder, a printing picker on the deck page and
 in the editor, a clearer collection import, and leftover fixes. The database stays at schema 12,
@@ -291,7 +293,7 @@ so going back to 0.7.27 is a plain image swap. The Android app is unchanged.
 - A long server name shortens in the top bar instead of pushing the search box and the account
   button out of a narrow window.
 
-## [0.7.27] - Unreleased
+## [0.7.27] - not released on its own, included in 0.7.30
 
 Bug fixes and small fixes from the owner's checks of 0.7.26, a check of every Archidekt write
 call against archidekt.com's own site code, and the fixes from an independent review. The database
