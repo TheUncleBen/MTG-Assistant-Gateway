@@ -336,7 +336,8 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
             deck = await decks.get_own_deck(who.sub, deck_id)
             return ok({"applied": None, **view(deck, {front_face(n).casefold() for n in names}, stale=False)})
         pid = data.get("proposal_id")
-        if pid is not None:
+        answer = pid is not None
+        if answer:
             if not isinstance(pid, str) or not pid:
                 raise DeckError("invalid", "proposal_id must be a string")
             p = decks.describe(who.sub, pid)
@@ -354,13 +355,29 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
                 )
             if p.get("state") != "pending":
                 raise DeckError("invalid", f"That proposal is {p.get('state')}, not waiting for an answer.")
+            # the answer applies only the version the question showed: one another app amended
+            # since is refused as changed, so the page asks again
+            version = data.get("version")
+            if version is not None and (isinstance(version, bool) or not isinstance(version, int)):
+                raise DeckError("invalid", "version must be a whole number")
+            if version is None:
+                raise DeckError("invalid", "Send the version of the proposal the page showed.")
         else:
             # the deck page's Undo of a removal puts back the row's flags (row_flags; nobody else)
             p = await decks.propose(who.sub, deck_id, data.get("changes"), row_flags=True)
             why = modes.hand_edit_confirm("edit", p.get("rows"))
             if why and data.get("confirmed") is not True:
                 pid = p["proposal_id"]
-                return ok({"applied": False, "needs_confirm": True, "why": why, "proposal_id": pid}, 201)
+                return ok(
+                    {
+                        "applied": False,
+                        "needs_confirm": True,
+                        "why": why,
+                        "proposal_id": pid,
+                        "version": int(p.get("version") or 1),
+                    },
+                    201,
+                )
         pid = p["proposal_id"]
         if not s.writes_enabled:
             # kept for review, like every proposal while writes are off; the page goes there
@@ -368,7 +385,13 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
         # A quick edit from the deck page (one click: a copy more, a move, a removal) keeps the
         # gateway's snapshot but not the extra copy on Archidekt: one deck copy per click
         # would fill the backup folder and slow each save by paced Archidekt writes.
-        result = await decks.apply(who.sub, pid, via="browser", archidekt_backup=False)
+        result = await decks.apply(
+            who.sub,
+            pid,
+            via="browser",
+            archidekt_backup=False,
+            version=data.get("version") if answer else None,
+        )
         applied = result.get("state") == "applied"
         out: dict[str, Any] = {
             "applied": applied,

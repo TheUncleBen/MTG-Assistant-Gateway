@@ -360,7 +360,8 @@ async def test_big_removal_asks_first_then_the_proposal_id_applies_it(stack: Sta
         assert d["applied"] is False and d["needs_confirm"] is True and "cards" in d["why"]
         assert "rows" not in d and len(stack.ark.patches) == before  # nothing sent before the answer
         # the follow-up names the proposal (the page's "Save anyway") and gets the full answer
-        r = await api(b, "POST", "/api/v1/decks/42/edit", {"proposal_id": d["proposal_id"]})
+        assert d["version"] == 1
+        r = await api(b, "POST", "/api/v1/decks/42/edit", {"proposal_id": d["proposal_id"], "version": 1})
         assert r.status_code == 201, r.text
         a = r.json()
         assert a["applied"] is True and a["proposal_id"] == d["proposal_id"] and a["rows"] == []
@@ -381,6 +382,49 @@ async def test_big_removal_asks_first_then_the_proposal_id_applies_it(stack: Sta
             },
         )
         assert r.status_code == 201 and r.json()["applied"] is True, r.text
+    finally:
+        await b.aclose()
+
+
+async def test_save_anyway_applies_only_the_version_the_question_showed(stack: Stack) -> None:  # noqa: F811
+    """Another app may amend the proposal the page's question was about; the answer sends the
+    version the question showed, so an amended one is refused with nothing sent, and an answer
+    without a version is refused."""
+    b = await linked(stack)
+    try:
+        names = [
+            c["card"]["oracleCard"]["name"]
+            for c in stack.ark.decks[42]["cards"]
+            if c["categories"] != ["Commander"]
+        ][:9]
+        r = await api(
+            b,
+            "POST",
+            "/api/v1/decks/42/edit",
+            {"changes": [{"action": "remove", "card_name": n} for n in names]},
+        )
+        d = r.json()
+        assert r.status_code == 201 and d["needs_confirm"] is True and d["version"] == 1, r.text
+        decks = stack.h.app.state.gateway.decks
+        await decks.amend(
+            "user-1",
+            d["proposal_id"],
+            [{"action": "remove", "card_name": "Aesi, Tyrant of Gyre Strait"}],
+            version=1,
+        )
+        before = len(stack.ark.patches)
+        r = await api(b, "POST", "/api/v1/decks/42/edit", {"proposal_id": d["proposal_id"]})
+        assert r.status_code == 400 and r.json()["error"] == "invalid", r.text
+        assert r.json()["message"] == "Send the version of the proposal the page showed."
+        r = await api(b, "POST", "/api/v1/decks/42/edit", {"proposal_id": d["proposal_id"], "version": "1"})
+        assert r.status_code == 400 and r.json()["message"] == "version must be a whole number", r.text
+        r = await api(b, "POST", "/api/v1/decks/42/edit", {"proposal_id": d["proposal_id"], "version": 1})
+        assert r.status_code == 409 and r.json()["error"] == "changed", r.text
+        assert len(stack.ark.patches) == before
+        assert any(
+            c["card"]["oracleCard"]["name"] == "Aesi, Tyrant of Gyre Strait"
+            for c in stack.ark.decks[42]["cards"]
+        )
     finally:
         await b.aclose()
 
@@ -507,9 +551,9 @@ async def test_an_assistants_pending_proposal_is_not_applied_by_the_page(stack: 
         )
         assert r.status_code == 201 and r.json()["needs_confirm"] is True, r.text
         own = r.json()["proposal_id"]
-        r = await api(b, "POST", "/api/v1/decks/42/edit", {"proposal_id": own})
+        r = await api(b, "POST", "/api/v1/decks/42/edit", {"proposal_id": own, "version": 1})
         assert r.status_code == 201 and r.json()["applied"] is True, r.text
-        r = await api(b, "POST", "/api/v1/decks/42/edit", {"proposal_id": own})
+        r = await api(b, "POST", "/api/v1/decks/42/edit", {"proposal_id": own, "version": 1})
         assert r.status_code == 400 and "applied" in r.json()["message"], r.text
     finally:
         await b.aclose()
