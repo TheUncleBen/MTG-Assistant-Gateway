@@ -760,7 +760,7 @@ class _BusyForge(FakeForge):
 
 
 async def test_runs_waiting_on_a_busy_forge_ask_again_first_come_first_served(tmp_path: Path) -> None:
-    """Security review S-10: with Forge's queue full, each round asked again for each member's
+    """With Forge's queue full, each round asked again for each member's
     waiting run in no particular order, so a later run could take the room an earlier one waited
     for. The member whose run joined the queue first now asks first."""
     db = Database(tmp_path / "t.sqlite")
