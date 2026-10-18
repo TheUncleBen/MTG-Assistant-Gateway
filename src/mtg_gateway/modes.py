@@ -177,6 +177,15 @@ def effective_mode(chosen: str | None, *, default: str, cap: str) -> str:
     return mode if rank(mode) <= rank(cap) else cap
 
 
+COMMANDER_MAY_REASON = "may change the commander"
+
+
+def _only_stays(rows: list[dict[str, Any]]) -> bool:
+    """Whether every commander row says the commanders stay (a commander's other rows go)."""
+    rows_c = [r for r in rows if r.get("kind") == "commander"]
+    return bool(rows_c) and all(r.get("stays") for r in rows_c)
+
+
 def risk_of(
     kind: str, rows: list[dict[str, Any]] | None, *, max_rows: int = DEFAULT_MAX_ROWS
 ) -> tuple[str, str]:
@@ -199,7 +208,7 @@ def risk_of(
         return "high", "has no list of rows to check"
     kinds = [str(r.get("kind")) for r in rows]
     if any(k == "commander" for k in kinds):
-        return "high", "changes the commander"
+        return "high", COMMANDER_MAY_REASON if _only_stays(rows) else "changes the commander"
     if any(k not in LOW_RISK_ROW_KINDS for k in kinds):
         return (
             "high",
@@ -231,6 +240,8 @@ def hand_edit_confirm(kind: str, rows: list[dict[str, Any]] | None) -> str | Non
     if kind != "edit" or not rows:
         return None
     if any(r.get("kind") == "commander" for r in rows):
+        if _only_stays(rows):
+            return "This may change the deck's commander."
         return "This changes the deck's commander."
     removed_rows = [r for r in rows if r.get("kind") == "remove" or _removes(r)]
     copies = sum(_removes(r) for r in rows)
@@ -286,7 +297,7 @@ def auto_waits(
         if rows is None:
             return "has no list of rows to check"
         if any(str(r.get("kind")) == "commander" for r in rows):
-            return "changes the commander"
+            return COMMANDER_MAY_REASON if _only_stays(rows) else "changes the commander"
         if len(rows) > big_rows:
             return f"changes {len(rows)} rows, more than the {big_rows} Full auto applies by itself"
         return None

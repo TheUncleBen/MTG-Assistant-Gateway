@@ -3,7 +3,9 @@ page only, risk tiers from the review rows, and strict per-member isolation."""
 
 from __future__ import annotations
 
+import html
 import json
+import re
 
 import pytest
 
@@ -451,7 +453,6 @@ async def test_deleting_my_data_forgets_the_mode(stack: Stack) -> None:
 
 def _flat(text: str) -> str:
     import html
-    import re
 
     return re.sub(r"\s+", " ", html.unescape(text))
 
@@ -657,12 +658,25 @@ async def test_a_lowered_count_on_a_commander_with_two_rows_waits_and_keeps_the_
     assert p["ok"] and p["state"] == "pending", p
     assert "commander" in [r.get("kind") for r in p["rows"]]
     assert p["risk"] == "high" and p["assistant_may_apply"] is False
+    # the commander stays, and every text says so rather than "changes the commander"
+    stays = (
+        f"{AESI} stays the commander. Its rows in other categories are removed, "
+        "and the commander zone keeps 1 copy."
+    )
+    assert p["diff"].splitlines() == [f"2 -> 1 {AESI}", stays], p["diff"]
+    assert p["risk_reason"] == "may change the commander", p
+    assert modes.hand_edit_confirm("edit", p["rows"]) == "This may change the deck's commander."
     out = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
     assert out["ok"] is False and out["error"] == "browser_required"
     assert ark.patches == []
     b = Browser(h)
     try:
         await b.login()
+        page = (await b.http.get(f"/proposals/{p['proposal_id']}")).text
+        text = html.unescape(page)
+        assert stays in text
+        row = text[text.rindex("<li", 0, text.index(stays)) : text.index("</li>", text.index(stays))]
+        assert "→" not in row and "Commander" in row
         r = await b.http.post(
             f"/api/v1/proposals/{p['proposal_id']}/apply",
             headers={"X-CSRF-Token": await b.csrf()},

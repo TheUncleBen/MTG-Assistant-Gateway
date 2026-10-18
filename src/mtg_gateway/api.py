@@ -260,9 +260,10 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
         the deck is read again from Archidekt and the answer carries the touched rows, the
         freshly computed checks and the re-rendered Legality chip and Deck checks panel, so the
         page redraws in place. Body: ``{changes: [1..40]}`` (``confirmed: true`` after a
-        needs_confirm answer) or ``{proposal_id}`` to apply the proposal a needs_confirm answer
-        named; ``{refresh: true, names: [...]}`` only reads the deck again (the page's follow-up
-        when an answer was stale). Browser session only; apps propose through /api/v1/proposals."""
+        needs_confirm answer) or ``{proposal_id, version}`` to apply the version of the proposal a
+        needs_confirm answer named; ``{refresh: true, names: [...]}`` only reads the deck again
+        (the page's follow-up when an answer was stale). Browser session only; apps propose
+        through /api/v1/proposals."""
         from .archidekt import front_face, parse_deck
         from .deckpage import (
             card_image,

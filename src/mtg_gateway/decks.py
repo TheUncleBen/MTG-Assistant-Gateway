@@ -494,6 +494,16 @@ class MemberCache:
 FULL_TEXT_FIELDS = ("before_text", "after_text", "after_doc")  # after_doc: the Quill document
 
 
+def commander_stays_text(stay: dict[str, Any]) -> str:
+    """The commander row's text when the commanders stay and a commander's other rows go."""
+    qty = int(stay.get("qty") or 0)  # at least 1: a card whose copies all go doesn't stay
+    copies = "1 copy" if qty == 1 else f"{qty} copies"
+    return (
+        f"{stay.get('name')} stays the commander. Its rows in other categories are removed, and the "
+        f"commander zone keeps {copies}."
+    )
+
+
 def _row(kind: str, **fields: Any) -> dict[str, Any]:
     out: dict[str, Any] = {"kind": kind}
     for key, value in fields.items():
@@ -576,6 +586,8 @@ def row_line(r: dict[str, Any]) -> str:
     if kind == "clone":
         return f"Clone '{r['source']}' ({r['cards']} cards) as '{r['name']}'"
     if kind == "commander":
+        if r.get("stays"):
+            return " ".join(commander_stays_text(x) for x in r["stays"])
         return f"Commander: {r['before']} -> {r['after']}"
     if kind == "new_deck":
         visibility = "private" if r.get("private") else "public"
@@ -1421,29 +1433,32 @@ def plan_zones(
         was, now, unsure = _commanders_before_after(
             deck, changes, cats_want, {"main": after, "side": after_side}
         )
-        if unsure or [n.lower() for n in was] != [n.lower() for n in now]:
+        if [n.lower() for n in was] != [n.lower() for n in now]:
             lines.append(
                 _row("commander", before=", ".join(was) or "(none)", after=", ".join(now) or "(none)")
             )
+        elif unsure:
+            # the commanders stay: what changes is the card's other rows (see build_payload)
+            lines.append(_row("commander", before=", ".join(was), after=", ".join(now), stays=unsure))
     return before, after, lines, before_side, after_side
 
 
 def _commanders_before_after(
     deck: Deck, changes: list[Change], cats_want: dict[int, list[str]], after: dict[str, dict[str, int]]
-) -> tuple[list[str], list[str], bool]:
+) -> tuple[list[str], list[str], list[dict[str, Any]]]:
     """The deck's commanders (cards with a row in its commander zone: every category the deck
     marks premier, plus "Commander", ``Deck.premier_keys``, compared without case) now and once
     ``changes`` are applied: rows ``cats_want`` (``category_plan_rows``) moves into or out of that
     zone, cards whose copies all go (``after``, per zone), and adds that make a row in it.
 
-    The third value is True when a card with a row in the commander zone and other rows in the
-    same zone loses copies: ``build_payload`` folds such a card into its commander-zone row
-    (``_rows_kept_first``), but a lowered count on it always gets a commander row, so the member
-    sees it whatever the rows do."""
+    The third value lists each card with a row in the commander zone and other rows in the same
+    zone that loses copies (``name``, and ``qty``, its copies after): ``build_payload`` removes its
+    other rows and keeps that many in its commander-zone row (``_rows_kept_first``), but such a
+    change always gets a commander row, so the member sees it whatever the rows do."""
     premier = deck.premier_keys()
     was: dict[str, str] = {}
     now: dict[str, str] = {}
-    unsure = False
+    unsure: list[dict[str, Any]] = []
     for zone in ZONES:
         left = {n.lower() for n, q in after[zone].items() if q > 0}
         rows: dict[str, list[Any]] = {}
@@ -1457,8 +1472,9 @@ def _commanders_before_after(
         counts = {n.lower(): q for n, q in after[zone].items()}
         for key, cards in rows.items():
             if len(cards) > 1 and any(_in_premier(premier, c.categories) for c in cards):
-                if counts.get(key, sum(c.quantity for c in cards)) < sum(c.quantity for c in cards):
-                    unsure = True
+                total = sum(c.quantity for c in cards)
+                if counts.get(key, total) < total:
+                    unsure.append({"name": cards[0].name, "qty": counts.get(key, total)})
     for ch in changes:
         if ch.action == "add" and _in_premier(premier, _all_categories([ch])):
             now.setdefault(ch.card_name.lower(), ch.card_name)

@@ -24,7 +24,15 @@ from .archidekt import PATIENCE_SPENT
 from .auth_provider import BROWSER_COOKIE, LoginError, cookie_name
 from .avatars import initials_svg
 from .clickguard import form_stamp, guarded_form, submitted_too_soon
-from .decks import REVIEW_PAGE, DeckError, current_client, row_label, row_line, tag_change_text
+from .decks import (
+    REVIEW_PAGE,
+    DeckError,
+    commander_stays_text,
+    current_client,
+    row_label,
+    row_line,
+    tag_change_text,
+)
 from .formatting import DOC_CSS, doc_html
 from .refusals import WRITES_OFF_KEPT, WRITES_OFF_KEPT_MANY
 from .theme import (
@@ -1317,12 +1325,15 @@ def _change_rows(rows: list[dict[str, Any]] | None, diff: str) -> tuple[str, dic
             out.append(_li("chg", "Category", name, _was_now(r.get("before", ""), r.get("after", ""))))
         elif kind == "commander":
             counts["cat"] += 1
+            stays = r.get("stays")
             out.append(
                 _li(
                     "chg",
                     "Commander",
                     html.escape(str(r.get("after", ""))),
-                    _was_now(r.get("before", ""), r.get("after", "")),
+                    html.escape(" ".join(commander_stays_text(x) for x in stays))
+                    if isinstance(stays, list) and stays
+                    else _was_now(r.get("before", ""), r.get("after", "")),
                 )
             )
         elif kind == "finish":
