@@ -493,6 +493,28 @@ def test_every_topic_the_gateway_didnt_make_is_replaced(tmp_path) -> None:
         db.close()
 
 
+def test_the_marks_key_is_read_once_and_kept_in_memory(tmp_path) -> None:
+    """A phone connecting checks its topic's mark; after the first read that takes no write
+    transaction on the database."""
+    db = Database(tmp_path / "gw.sqlite")
+    try:
+        db.upsert_user("u", email=None, name=None, preferred_username=None, groups=[])
+        topic = notify.new_topic(db, "u")
+        opened: list[int] = []
+        real_tx = db.tx
+
+        def counting_tx(*a, **k):
+            opened.append(1)
+            return real_tx(*a, **k)
+
+        db.tx = counting_tx  # type: ignore[method-assign]
+        for _ in range(3):
+            assert notify.strong_topic(db, "u", topic)
+        assert opened == []
+    finally:
+        db.close()
+
+
 async def test_a_topic_typed_while_an_older_version_ran_is_never_a_key(stack: Stack) -> None:
     """Rolled back to 0.7.29 after the update, a member can type a topic of the keys' form again.
     The stream refuses it at once, the Account page in the app doesn't hand it to the phone, and
