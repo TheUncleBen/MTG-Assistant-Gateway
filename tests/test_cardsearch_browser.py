@@ -470,3 +470,59 @@ def test_a_category_outside_the_deck_adds_to_the_maybeboard_or_sideboard(
     assert (sent.get("zone"), sent.get("category")) == ("side", category), sent
     rows = [c for c in server.ark.decks[42]["cards"] if c["card"]["oracleCard"]["name"] == "Sol Talisman"]
     assert [(r["quantity"], r["categories"]) for r in rows] == [(1, [category])], rows
+
+
+def test_a_printing_tile_says_its_printing_is_not_kept_outside_the_deck(server: Server) -> None:
+    """A printing picked on its tile and then a category outside the deck: the maybeboard or
+    sideboard takes no pinned printing, so the sheet no longer shows "This printing" but says it
+    is not kept, and the add goes without it."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium()
+    server.ark.decks[42]["categories"] += [{"name": "Sideboard", "isPremier": False, "includedInDeck": True}]
+    sid = _link(server)
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, 1366, "light", exe)
+        bodies: list = []
+        page.on(
+            "request",
+            lambda r: (
+                bodies.append(r.post_data_json) if r.method == "POST" and r.url.endswith("/edit") else None
+            ),
+        )
+        page.goto(f"{server.base}/cards?q=sol+ring&prints=1", wait_until="networkidle")
+        page.wait_for_selector("#cardgrid[data-printing]", timeout=5000)
+        first = page.locator("#cardgrid button[data-add]").first
+        code, number = first.get_attribute("data-set-code"), first.get_attribute("data-number")
+        first.click()
+        sheet = page.locator(".addsheet.open")
+        sheet.wait_for(timeout=3000)
+        page.wait_for_function("() => document.querySelectorAll('#ad-deck option').length >= 3", timeout=5000)
+        page.evaluate(
+            "() => { const s = document.getElementById('ad-deck'); s.value = '42';"
+            " s.dispatchEvent(new Event('change', {bubbles: true})); }"
+        )
+        page.wait_for_function(
+            "() => [...document.querySelectorAll('#ad-cat option')].some(o => o.value === 'Sideboard')",
+            timeout=5000,
+        )
+
+        def pick(category: str) -> str:
+            page.evaluate(
+                f"() => {{ const s = document.getElementById('ad-cat'); s.value = '{category}';"
+                " s.dispatchEvent(new Event('change', {bubbles: true})); }"
+            )
+            return sheet.locator(".note").inner_text()
+
+        assert pick("Sideboard") == (
+            "This printing is not kept: a card added under Sideboard goes to the maybeboard or "
+            "sideboard, where Archidekt picks the printing."
+        )
+        assert f"This printing: {code.upper()} #{number}." in pick(""), "back to the deck: the printing shows"
+        pick("Sideboard")
+        sheet.locator("button[type=submit]").click()
+        page.locator(".cards-toast").wait_for(timeout=8000)
+        assert errors == [], errors
+        browser.close()
+    (sent,) = bodies[0]["changes"]
+    assert sent.get("zone") == "side" and "set_code" not in sent, sent

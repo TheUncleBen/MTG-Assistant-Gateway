@@ -338,9 +338,11 @@ assistant applies what that mode allows, with a snapshot first for a change to o
 - **Proposals** lists what is waiting. Open one to read the diff and press
   **Apply** or **Reject**.
 - Before an edit is applied, the gateway checks the change still fits the
-  deck as it is now, saves a **snapshot** and puts a backup copy of the deck in
-  an "MTG Gateway backups" folder on your Archidekt account, then reads the
-  deck back to confirm.
+  deck as it is now, saves a **snapshot** and, with backups on (the operator's
+  setting), puts a backup copy of the deck in an "MTG Gateway backups" folder
+  on your Archidekt account, then reads the deck back to confirm. The deck
+  page's own saves, Card search's Add to deck, and the deck editor's save with
+  its backup box unticked make no backup copy.
 - **Updated** and **Needs a look**: Archidekt is the master copy of your
   decks. When you open the app, and every 30 minutes while changes are
   waiting, the gateway checks your decks on Archidekt (it only reads). If a

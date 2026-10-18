@@ -1814,7 +1814,7 @@ async def test_a_flat_call_is_refused_when_the_tool_listing_failed() -> None:
     assert out.is_error and out.structured_content["error"] == "unavailable", out
     assert out.structured_content["retry_after"] == 60
     assert out.content[0].text == (
-        "the research service is not ready yet; nothing was sent, try again in a minute"
+        "the research service is not ready yet and nothing was sent; try again in a minute"
     )
     assert _ListingDown.forwarded == []
     # once Mystic Forge lists its tools, the same flat call is wrapped and answered

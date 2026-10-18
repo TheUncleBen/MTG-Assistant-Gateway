@@ -624,10 +624,11 @@
     var l3 = el("label", null, "Category"); l3.htmlFor = "ad-cat";
     catSel = el("select"); catSel.id = "ad-cat"; catSel.name = "category";
     f3.appendChild(l3); f3.appendChild(catSel);
+    catSel.addEventListener("change", showNote);
     two.appendChild(f2); two.appendChild(f3);
     box.appendChild(two);
 
-    note = el("p", "note"); note.hidden = true;
+    note = el("p", "note"); note.hidden = true; note.setAttribute("aria-live", "polite");
     box.appendChild(note);
     msg = el("p", "msg"); msg.setAttribute("aria-live", "polite");
     box.appendChild(msg);
@@ -701,6 +702,7 @@
       if (c && c !== "Maybeboard") { var o = option(c, c); if (c === keep) o.selected = true; catSel.appendChild(o); }
     });
     if (window.MtgSelect) window.MtgSelect.refresh(catSel);
+    showNote();
   }
   var outside = {};  // deck id -> its categories whose rows sit outside the deck
   var catLoads = {};  // deck id -> true while its categories are being read, so one read per deck
@@ -727,11 +729,7 @@
     cardPin = pin || null;
     title.textContent = "";
     title.appendChild(el("span", null, "Add " + name));
-    note.textContent = "";
-    if (cardPin) note.textContent = "This printing: " + cardPin.set_code.toUpperCase() + " #" + cardPin.collector_number + ".";
-    var lang = form.elements.lang ? form.elements.lang.value : "";
-    if (lang && lang !== "en") note.textContent += (note.textContent ? " " : "") + "Archidekt decks keep no card language, so the deck shows it in English.";
-    note.hidden = !note.textContent;
+    showNote();
     qtyIn.value = "1";
     setMsg("");
     saveBtn.disabled = false;
@@ -749,14 +747,27 @@
     document.documentElement.classList.remove("cardview-open");
     if (lastFocus && lastFocus.focus) lastFocus.focus();
   }
+  // a category whose rows sit outside the deck (Sideboard, Considering...) puts the card in the
+  // maybeboard or sideboard, which takes no pinned printing
+  function sideCat() { return !!catSel.value && (outside[catDeck] || []).indexOf(catSel.value) >= 0; }
+  function showNote() {
+    if (!note) return;
+    var parts = [];
+    if (cardPin && sideCat()) {
+      parts.push("This printing is not kept: a card added under " + catSel.value + " goes to the maybeboard or sideboard, where Archidekt picks the printing.");
+    } else if (cardPin) {
+      parts.push("This printing: " + cardPin.set_code.toUpperCase() + " #" + cardPin.collector_number + ".");
+    }
+    var lang = form.elements.lang ? form.elements.lang.value : "";
+    if (lang && lang !== "en") parts.push("Archidekt decks keep no card language, so the deck shows it in English.");
+    note.textContent = parts.join(" ");
+    note.hidden = !note.textContent;
+  }
   function changes() {
     var qty = Math.max(1, Math.min(99, parseInt(qtyIn.value, 10) || 1));
     var ch = { action: "add", card_name: cardName, quantity: qty };
     if (catSel.value) ch.category = catSel.value;
-    // a category whose rows sit outside the deck (Sideboard, Considering...): the card goes to the
-    // maybeboard or sideboard under it, which takes no pinned printing
-    var side = catSel.value && (outside[catDeck] || []).indexOf(catSel.value) >= 0;
-    if (side) ch.zone = "side";
+    if (sideCat()) ch.zone = "side";
     else if (cardPin) { ch.set_code = cardPin.set_code; ch.collector_number = cardPin.collector_number; }
     return [ch];
   }

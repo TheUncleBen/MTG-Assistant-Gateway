@@ -185,8 +185,8 @@ Screenshots of the browser pages are in [docs/screenshots/](docs/screenshots/).
   - For an edit, the gateway checks the change still does what was reviewed on the deck as it is now, saves a
     snapshot, makes the change, then reads the deck back to confirm it. With backups on (the operator's
     setting), it first also puts a private backup copy of the deck in the user's
-    "MTG Gateway backups" folder on Archidekt; the deck page's own saves, and the deck editor's save with
-    its backup box unticked, make none.
+    "MTG Gateway backups" folder on Archidekt; the deck page's own saves, Card search's Add to deck, and
+    the deck editor's save with its backup box unticked, make none.
   - Undo is the same flow in reverse: `list_snapshots`, then
     `propose_restore_snapshot`, which puts every card back as it was
     (printing, foil, quantity, categories, commander, sideboard and

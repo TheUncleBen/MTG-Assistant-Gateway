@@ -261,8 +261,10 @@ restore, everyone signs in again and relinks Archidekt on `/account`. The
 Fernet key isn't in the backup either: it's a Docker secret and stays out on
 purpose. Keep your copy of the key with your other credentials.
 
-Separately, every applied edit also leaves a private backup copy of the deck
-in the user's own Archidekt account (see
+Separately, with backups on (`MTG_ARCHIDEKT_BACKUPS`, on by default), every
+applied edit also leaves a private backup copy of the deck in the user's own
+Archidekt account, except the deck page's own saves, Card search's Add to deck,
+and the deck editor's save with its backup box unticked (see
 [Archidekt writes](#archidekt-writes-and-the-kill-switch)). Those live on Archidekt,
 not in your backups.
 
