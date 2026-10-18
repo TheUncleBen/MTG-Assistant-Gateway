@@ -544,36 +544,59 @@ def test_the_semi_auto_notice_names_what_semi_auto_applies() -> None:
 
 
 AESI = "Aesi, Tyrant of Gyre Strait"  # deck 42's commander
-COMMANDER_MOVES = {
-    "card into Commander": [{"action": "set_category", "card_name": "Sol Ring", "category": "Commander"}],
-    "commander out of Commander": [{"action": "set_category", "card_name": AESI, "category": "Creatures"}],
-    "commander removed": [{"action": "remove", "card_name": AESI}],
-    "card added under Commander": [{"action": "add", "card_name": "Opt", "category": "Commander"}],
-}
+
+
+def commander_moves(zone: str) -> dict[str, list[dict]]:
+    return {
+        "card into the zone": [{"action": "set_category", "card_name": "Sol Ring", "category": zone}],
+        "commander out of the zone": [{"action": "set_category", "card_name": AESI, "category": "Creatures"}],
+        "commander removed": [{"action": "remove", "card_name": AESI}],
+        "card added in the zone": [{"action": "add", "card_name": "Opt", "category": zone}],
+    }
+
+
+COMMANDER_MOVES = commander_moves("Commander")
+
+
+def _rename_zone(ark, zone: str) -> None:
+    """Give deck 42's commander zone (its premier category) another name, as a deck may."""
+    deck = ark.decks[42]
+    for c in deck["categories"]:
+        if c["name"] == "Commander":
+            c["name"] = zone
+    for c in deck["cards"]:
+        c["categories"] = [zone if x == "Commander" else x for x in (c.get("categories") or [])] or None
 
 
 def _commanders(ark) -> list[str]:
+    deck = ark.decks[42]
+    zone = {c["name"] for c in deck["categories"] if c.get("isPremier")} | {"Commander"}
     return [
-        c["card"]["oracleCard"]["name"]
-        for c in ark.decks[42]["cards"]
-        if "Commander" in (c.get("categories") or [])
+        c["card"]["oracleCard"]["name"] for c in deck["cards"] if zone.intersection(c.get("categories") or [])
     ]
 
 
+@pytest.mark.parametrize("zone", ["Commander", "Oathbreaker"])
 @pytest.mark.parametrize("shape", list(COMMANDER_MOVES))
 @pytest.mark.parametrize("mode", ["auto", "semi"])
 async def test_every_commander_change_waits_for_the_members_press(
-    stack: Stack, mode: str, shape: str
+    stack: Stack, mode: str, shape: str, zone: str
 ) -> None:
-    """Not only set_commander: moving a card into or out of Commander, removing the commander and
-    adding a card under Commander change the commanders too, so they wait in Full auto and
-    Semi-auto on every assistant path (the tool and the API), and the member can still apply them."""
+    """Not only set_commander: moving a card into or out of the commander zone, removing the
+    commander and adding a card in the zone change the commanders too, so they wait in Full auto
+    and Semi-auto on every assistant path (the tool and the API), and the member can still apply
+    them. The zone is every category the deck marks premier, whatever its name."""
     h, ark = stack.h, stack.ark
+    if zone != "Commander":
+        _rename_zone(ark, zone)
     token = await linked_user(stack)
     await _set_mode(h, mode)
     before = _commanders(ark)
+    assert before == [AESI]
     p = structured(
-        await call(h, token, "propose_deck_changes", {"deck_id": "42", "changes": COMMANDER_MOVES[shape]})
+        await call(
+            h, token, "propose_deck_changes", {"deck_id": "42", "changes": commander_moves(zone)[shape]}
+        )
     )
     assert p["ok"] and p["state"] == "pending", p
     assert "commander" in [r.get("kind") for r in p["rows"]]

@@ -1430,21 +1430,23 @@ def plan_zones(
 def _commanders_before_after(
     deck: Deck, changes: list[Change], cats_want: dict[int, list[str]], after: dict[str, dict[str, int]]
 ) -> tuple[list[str], list[str]]:
-    """The deck's commanders (cards with a Commander row) now and once ``changes`` are applied:
-    rows ``cats_want`` (``category_plan_rows``) moves into or out of Commander, cards whose copies
-    all go (``after``, per zone), and adds that make a row under Commander."""
+    """The deck's commanders (cards with a row in its commander zone: every category the deck
+    marks premier, plus "Commander", ``Deck.premier_categories``) now and once ``changes`` are
+    applied: rows ``cats_want`` (``category_plan_rows``) moves into or out of that zone, cards whose
+    copies all go (``after``, per zone), and adds that make a row in it."""
+    premier = deck.premier_categories()
     was: dict[str, str] = {}
     now: dict[str, str] = {}
     for zone in ZONES:
         left = {n.lower() for n, q in after[zone].items() if q > 0}
         for c in deck.cards_in(zone):
-            if COMMANDER in c.categories:
+            if premier.intersection(c.categories):
                 was[c.name.lower()] = c.name
             cats = cats_want.get(c.relation_id, c.categories) if c.relation_id is not None else c.categories
-            if COMMANDER in cats and c.name.lower() in left:
+            if premier.intersection(cats) and c.name.lower() in left:
                 now[c.name.lower()] = c.name
     for ch in changes:
-        if ch.action == "add" and COMMANDER in _all_categories([ch]):
+        if ch.action == "add" and premier.intersection(_all_categories([ch])):
             now.setdefault(ch.card_name.lower(), ch.card_name)
     return sorted(was.values(), key=str.lower), sorted(now.values(), key=str.lower)
 
