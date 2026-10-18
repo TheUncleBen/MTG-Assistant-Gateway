@@ -38,7 +38,7 @@ Always the member's own press: Actions on your Archidekt account (likes,
 votes, bookmarks, follows, comments, new folders and collaborator changes) and
 deleting a deck are never applied by an assistant: each one waits for your own press, in every mode, on the card in the chat or on its review page (deleting a deck, and an edit of a comment that has formatting: on the review page only).
 In every mode: a held change, a change waiting for another change first, one another app had a hand in, one that replaces another app's change, or one that another app's waiting change would replace waits for the member's press; its card and review page say why.
-Every applied proposal keeps a snapshot first and is read back to verify.
+Every applied proposal keeps a snapshot first and is read back to check it.
 
 | Capability | The one tool | Writes? | Notes |
 | --- | --- | --- | --- |
@@ -47,7 +47,7 @@ Every applied proposal keeps a snapshot first and is read back to verify.
 | Search public decks (name, commander, partial commander names, format, colours, owner), and one user's public decks (`owner`, newest first) | `search_decks` | no | hides Mystic Forge `archidekt_user_decks`; the web profile page `/users/<name>` is the hand path |
 | Read any deck, the member's own private ones included: cards (type line, power/toughness, loyalty), zones, stats, plain list, Archidekt import text, picked with `view`; rules text, faces, flavour and artist on request | `get_deck` | no | the deck card in the chat shows the deck by category with pictures and rules text; hides Mystic Forge `archidekt_deck`, `archidekt_export`; `owner` says whose deck it is |
 | Read a pasted list or an Archidekt CSV export | `parse_decklist`, `parse_deck_export` | no | |
-| Statistics, legality, structural checks, bracket estimate; curve by type or category, land-only colour sources, pips outside the commander's identity, subtype and keyword counts (0.7.24: one legality engine, the deck page's, for every legality figure; the curve, average, grouping, sorting and draw odds use a card's custom mana value when the deck sets one, whether archidekt.com does the same in its own curve is not verified) | `deck_stats` | no | hides `validate_archidekt_deck` |
+| Statistics, legality, structural checks, bracket estimate; curve by type or category, land-only colour sources, pips outside the commander's identity, subtype and keyword counts (0.7.24: one legality engine, the deck page's, for every legality figure; the curve, average, grouping, sorting and draw odds use a card's custom mana value when the deck sets one, whether archidekt.com does the same in its own curve is not confirmed) | `deck_stats` | no | hides `validate_archidekt_deck` |
 | Diff two decks, snapshots or lists (precon upgrades included), with an optional paired goldfish A/B | `compare_decks` | no | hides `precon_diff`, `goldfish_ab`; the A/B takes two Commander decks or two 60-card decks; the deck page's Compare view is the hand path |
 | Solo test (300 games, no opponents) of one deck or pasted list, stored with its stats and validation (a pasted list is returned, not stored); trends across a deck's reports | `run_deck_report` (+ `list_deck_reports` with its `trend`, `get_deck_report`) | stores a report | hides `goldfish_run`; takes the simulator's options; a Commander deck plays from the command zone at 40 life, a deck without a commander and with 60 or more cards (Standard, Modern, Pioneer, Legacy, Vintage, Pauper...) plays a 60-card game (0.7.23: 20 life, London mulligan with no free one, on the play, sideboard left out); Forge games (Commander decks) seat precons of the deck's bracket and say why (0.7.23); the deck page's Run full test is the hand path, its History page draws the trends |
 | Play more Forge games for a report whose games have finished, against the same opponents (on a comparison, both decks get the same number) | `play_more_games` | starts Forge games | the report page's Play more games button is the hand path, with the same rules: up to 50 games a report, and nothing starts when the member's Forge queue is full |
@@ -59,7 +59,7 @@ Every applied proposal keeps a snapshot first and is read back to verify.
 | Edit a deck's cards (main or maybeboard): counts, categories, commander, finish, printing, colour tags, custom mana value | `propose_deck_changes` | proposal | per-card notes are returned by `get_deck` but cannot be changed (see D) |
 | Create a deck from cards, a list, a CSV, the gateway's JSON or a scan | `propose_new_deck` | proposal (high) | |
 | Clone a deck | `propose_clone_deck` | proposal (low) | |
-| Change a deck's name, description, format, bracket, privacy; move it to a folder, add or remove tags, set its cover | `propose_deck_details` | proposal (high) | applied with the same verified calls as the deck settings page |
+| Change a deck's name, description, format, bracket, privacy; move it to a folder, add or remove tags, set its cover | `propose_deck_details` | proposal (high) | applied with the same checked calls as the deck settings page |
 | Undo: snapshots and restore (cards and the deck's name, description, format, bracket, privacy) | `list_snapshots`, `get_snapshot`, `propose_restore_snapshot` | proposal (high) | |
 | My collection: read; add or remove cards | `list_collection`, `propose_collection_changes` | proposal | in-chat card like a deck proposal; read back after applying |
 | Like, vote down, bookmark a deck; follow its owner | `propose_deck_social` | proposal (consent) | the same calls as the deck page's buttons; never applied by the assistant in any mode |
@@ -75,7 +75,7 @@ Every applied proposal keeps a snapshot first and is read back to verify.
 Archidekt, approval modes, notification and summary settings, admin. Social actions and deleting a deck have
 tools since 0.7.17, but only as proposals, and the person applies each one
 with their own press, in every approval mode, on the card in the chat or on
-its review page (deleting a deck: review page only): no mode,
+its review page (deleting a deck, and an edit of a comment that has formatting: review page only): no mode,
 setting or batch lets an assistant apply a like, vote, bookmark, follow,
 comment, new folder, collaborator change or deck deletion. The gateway enforces this where proposals
 are applied, not only in the pages.
@@ -145,9 +145,9 @@ tools.
   photos into names, proposing changes it worked out itself.
 - **Only a person plays:** the deck page's Goldfish, a game played by hand in
   the browser. It is a playtable, not a tool result, so the assistant has no
-  counterpart; its simulated games are `run_deck_report`. The goldfish
-  simulation of one deck and the comparison of two are both paths: Run
-  full test and Compare on the deck page for people, `run_deck_report` and
+  counterpart; its simulated games are `run_deck_report`. The solo test of
+  one deck and the comparison of two are both paths: Run full test and
+  Compare on the deck page for people, `run_deck_report` and
   `compare_decks` for the assistant, same engine and settings.
 - **Only a person does:** link Archidekt and set approval modes, turn
   notifications and summaries on or off, approve a

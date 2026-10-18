@@ -197,7 +197,7 @@ the ongoing notification, Doze, an app update, a reboot, a message missed
 while offline, a force stop (`am force-stop`, the nearest adb step to
 Android's Stop button) and opening the app again, and the gateway switching
 notifications off. Passing on an emulator with a stand-in gateway does not
-show that a real phone behaves the same. It also takes launcher screenshots at phone and Fold
+show that a real phone behaves the same. The test also takes launcher screenshots at phone and Fold
 widths. The debug build it tests trusts a certificate made for that run
 only; a release build never does. A 24 hour battery test needs a real phone.
 
@@ -394,7 +394,7 @@ Nothing here costs money or needs an account with anyone:
   anyway. An app bundle is still produced in case that changes.
 - **Not F-Droid.** As far as the maintainers know, F-Droid only accepts apps
   under a free and open-source licence, and this project's PolyForm
-  Noncommercial licence isn't one. Verify against F-Droid's inclusion policy
+  Noncommercial licence isn't one. Check against F-Droid's inclusion policy
   before relying on that.
 - **Updates in the app.** The app updates itself from the gateway it is set up
   for ([Updates](#updates)), so after the first install nobody downloads it by hand.

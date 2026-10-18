@@ -17,7 +17,7 @@ What each person types or clicks:
 
 Use your gateway's hostname instead of `mtg.example.com`. The rest of this
 page covers what's behind each row and how sure we are about it. Labels:
-**verified** means read on the vendor's own docs on 2026-10-04 or
+**confirmed** means read on the vendor's own docs on 2026-10-04 or
 2026-10-05; **reported** means an official page says so but we could only
 read it through a tool that summarises pages; **unknown** means no official
 page we could read says.
@@ -47,7 +47,7 @@ anything.
 
 ## Claude Code
 
-Verified in the official Claude Code docs
+Confirmed in the official Claude Code docs
 (https://code.claude.com/docs/en/plugins/marketplace-reference,
 https://code.claude.com/docs/en/plugins/install,
 https://code.claude.com/docs/en/mcp, read 2026-10-04):
@@ -77,13 +77,13 @@ You can also install straight from the GitHub repository:
 read access to the repository through your own git credentials, and gives
 you the same plugin without an address: its `.mcp.json` URL is
 `${MTG_GATEWAY_URL:-}`, which Claude Code fills in from the environment
-(verified in its docs and checked with the CLI: with the variable set,
+(confirmed in its docs and checked with the CLI: with the variable set,
 `claude mcp list` shows the address; unset, it reports the server as failed
 with "invalid MCP url" instead of quietly skipping it).
 
 ## Claude: web, desktop app and phones
 
-Verified on claude.com/docs and support.claude.com (read 2026-10-05:
+Confirmed on claude.com/docs and support.claude.com (read 2026-10-05:
 https://claude.com/docs/plugins/overview,
 https://claude.com/docs/plugins/platform-support,
 https://claude.com/docs/connectors/building/directory-vs-custom and
@@ -113,16 +113,16 @@ https://support.claude.com/en/articles/13837440-use-plugins-in-claude):
 
 Unknown: whether a plugin or skill can be added from the phone apps
 themselves (every documented way is the web or desktop app). A connector
-added there does work on the phone (verified).
+added there does work on the phone (confirmed).
 
 Not used: Claude Desktop's `.mcpb` extensions, because they're for local
-servers only (verified).
+servers only (confirmed).
 
 ## ChatGPT and Codex
 
 Every OpenAI page is blocked from the environment this was built in, so all
 of this was read through search summaries and is **reported**, not
-verified:
+confirmed:
 
 - ChatGPT has plugins (manifest `plugin.json`, remote servers in `mcp.json`
   with `"type": "streamable-http"`). The plugin folder carries both files,

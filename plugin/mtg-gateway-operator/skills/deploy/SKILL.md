@@ -1,6 +1,6 @@
 ---
 name: deploy
-description: Guided first deployment or redeployment of the MTG Assistant Gateway stack (gateway plus Mystic Forge) on Docker Swarm with Portainer, Authentik and Nginx Proxy Manager. Use when the operator says "deploy the gateway", "set up the stack", "install the gateway on my swarm" or asks to verify a deployment.
+description: Guided first deployment or redeployment of the MTG Assistant Gateway stack (gateway plus Mystic Forge) on Docker Swarm with Portainer, Authentik and Nginx Proxy Manager. Use when the operator says "deploy the gateway", "set up the stack", "install the gateway on my swarm" or asks to check a deployment.
 ---
 
 # Deploy the MTG Assistant Gateway
@@ -40,7 +40,7 @@ anything that isn't the default:
    command that changes the Swarm (creating networks, stacks or proxy
    hosts). Reading (`docker service ps`, `curl`, `docker secret ls`) is
    fine without asking.
-3. **Verify, do not assume.** Every step ends with a check and you report
+3. **Check, do not assume.** Every step ends with a check and you report
    its real output. Say "not checked" for anything you could not check.
 4. **Label what you know.** Menu names in Authentik, Portainer and Nginx
    Proxy Manager come from the project's docs and may have changed; say
@@ -198,7 +198,7 @@ client_max_body_size 4m;
 
 No proxy host for Mystic Forge: it stays internal.
 
-### 8. Verify from anywhere
+### 8. Check from anywhere
 
 ```bash
 curl -s https://<gateway host>/healthz
@@ -236,7 +236,7 @@ the rest, including linking Archidekt.
 - Recommend narrowing `MTG_TRUSTED_PROXIES` to NPM's address or the overlay
   subnet once NPM works (`docs/DEPLOY.md` step 7).
 - Keep `MTG_WRITES_ENABLED=false` until a proposal has been applied to a
-  throwaway deck and verified on Archidekt (see `docs/OPERATIONS.md`,
+  throwaway deck and checked on Archidekt (see `docs/OPERATIONS.md`,
   "Archidekt writes and the kill switch").
 
 ## Report
