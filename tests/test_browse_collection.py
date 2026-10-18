@@ -6,43 +6,17 @@ from __future__ import annotations
 
 import json
 import re
-from pathlib import Path
 
 import pytest
-from mcp import Client
 
-from mtg_gateway.archidekt import ArchidektClient, Pacer
-from mtg_gateway.mf_proxy import MysticForgeProxy
-from mtg_gateway.scan.scryfall import ScryfallClient
-
-from .conftest import FakeIdP, Harness, make_settings, running, sse_json
-from .fake_archidekt import FakeArchidekt
-from .fake_scryfall import FakeScryfall
-from .test_decks_and_proxy import Browser, call, fake_mystic_forge, mcp_token, structured
+from .conftest import COLLECTION, Stack, sse_json, stack_with
+from .test_decks_and_proxy import Browser, call, mcp_token, structured
 
 NAV = {"Sec-Fetch-Mode": "navigate", "Accept": "text/html"}
 APP_UA = {"User-Agent": "Mozilla/5.0 (Linux; Android 16) Chrome/140 Mobile Safari/537.36 MTGAssistant/0.6.4"}
 
 
-class Stack:
-    def __init__(self, h: Harness, ark: FakeArchidekt, sf: FakeScryfall):
-        self.h = h
-        self.ark = ark
-        self.sf = sf
-
-
-@pytest.fixture
-async def stack(tmp_path: Path, idp: FakeIdP):
-    ark = FakeArchidekt()
-    sf = FakeScryfall()
-    settings = make_settings(tmp_path, writes_enabled=True, archidekt_base="https://ark.test/api")
-    client = ArchidektClient(settings.archidekt_base, "test-agent", Pacer(0.0), http=ark.client())
-    proxy = MysticForgeProxy("http://mf.test/mcp", client_factory=lambda: Client(fake_mystic_forge()))
-    async with running(Harness(settings, idp, archidekt=client, mf_proxy=proxy)) as h:
-        h.app.state.gateway.scan.scryfall = ScryfallClient(
-            "https://scryfall.test", min_interval=0.0, http=sf.client()
-        )
-        yield Stack(h, ark, sf)
+stack_options = stack_with(COLLECTION)
 
 
 async def linked(stack: Stack) -> Browser:
@@ -238,7 +212,8 @@ async def test_collection_import_from_csv_and_plain_list(stack: Stack) -> None:
         assert "Import a list" in page.text and "importfile" in page.text and "filepick.js" in page.text
         plain = "2 Sol Ring (CMR) 436\n1 Opt *F*\n"
         r = await b.http.post("/collection", data={"csrf": csrf, "action": "import", "text": plain})
-        assert r.status_code == 303 and r.headers["location"] == "/collection?ok=imported", r.headers
+        assert r.status_code == 303, r.headers
+        assert re.fullmatch(r"/collection\?ok=imported&r=[\w-]+", r.headers["location"]), r.headers
         rows = {
             (c["card"]["oracleCard"]["name"], c["modifier"]): c["quantity"]
             for c in stack.ark.collections["alice"].values()
@@ -266,9 +241,13 @@ async def test_collection_import_from_csv_and_plain_list(stack: Stack) -> None:
         # refusals: too many rows, nothing readable
         many = "\n".join(f"1 Card {i}" for i in range(101))
         r = await b.http.post("/collection", data={"csrf": csrf, "action": "import", "text": many})
-        assert r.headers["location"] == "/collection?err=toomany"
+        assert r.headers["location"].startswith("/collection?err=toomany&r=")
+        shown = await b.http.get(r.headers["location"], headers=NAV)
+        assert "Nothing was imported: that is 101 rows; an import adds at most 100 at a time" in shown.text
         r = await b.http.post("/collection", data={"csrf": csrf, "action": "import", "text": "   "})
-        assert r.headers["location"] == "/collection?err=unreadable"
+        assert r.headers["location"].startswith("/collection?err=unreadable&r=")
+        shown = await b.http.get(r.headers["location"], headers=NAV)
+        assert "Nothing was imported: paste or choose a CSV or a card list first." in shown.text
         assert sum(c["quantity"] for c in stack.ark.collections["alice"].values()) == 9
         items = parse_collection_import("Quantity,Name,Finish\n1,Sol Ring,Etched\n")
         assert items[0]["finish"] == "etched" and items[0]["quantity"] == 1
@@ -365,7 +344,9 @@ async def test_collection_tools(stack: Stack) -> None:
         review = await b.http.get(f"/proposals/{p['proposal_id']}", headers=NAV)
         assert review.status_code == 200 and "Your Archidekt collection" in review.text
         applied = await b.http.post(
-            f"/api/v1/proposals/{p['proposal_id']}/apply", headers={"X-CSRF-Token": csrf}
+            f"/api/v1/proposals/{p['proposal_id']}/apply",
+            headers={"X-CSRF-Token": csrf},
+            json={"version": p["version"]},
         )
         assert applied.status_code == 200, applied.text
         a = applied.json()
@@ -379,14 +360,18 @@ async def test_collection_tools(stack: Stack) -> None:
             await call(stack.h, token, "propose_collection_changes", {"remove": [{"id": rid, "quantity": 1}]})
         )
         assert p2["ok"] is True and "-1 Sol Ring" in p2["diff"], p2
-        a2 = await b.http.post(f"/api/v1/proposals/{p2['proposal_id']}/apply", headers={"X-CSRF-Token": csrf})
+        a2 = await b.http.post(
+            f"/api/v1/proposals/{p2['proposal_id']}/apply",
+            headers={"X-CSRF-Token": csrf},
+            json={"version": p2["version"]},
+        )
         assert a2.status_code == 200 and a2.json()["result"]["removed"][0]["quantity"] == 2
         assert sorted(r["quantity"] for r in stack.ark.collections["alice"].values()) == [1, 1]
         # the assistant cannot apply it itself in manual mode
         p3 = structured(await call(stack.h, token, "propose_collection_changes", {"add": ["Sol Ring"]}))
         refused = structured(await call(stack.h, token, "apply_proposal", {"proposal_id": p3["proposal_id"]}))
         assert refused["ok"] is False and refused["error"] == "browser_required"
-        # social actions only exist as proposals the member approves each time (R-142),
+        # social actions only exist as proposals the member approves each time,
         # and no tool writes the collection directly
         listing = sse_json(await stack.h.mcp(token, "tools/list"))
         names = {t["name"] for t in listing["result"]["tools"]}
@@ -466,7 +451,7 @@ async def test_android_app_gets_the_app_layout(stack: Stack) -> None:
         assert re.search(r"<body class='[^']*\bapp\b", app.text)
         for action in ("openCamera", "reload", "openInBrowser", "changeGateway"):
             assert f"data-native='{action}'" in app.text, action
-        # D10: these two stay in the app's own menu and the Account page's App card only
+        # These two stay in the app's own menu and the Account page's App card only
         for action in ("openCopiedLink", "checkForUpdates"):
             assert f"data-native='{action}'" not in app.text, action
         assert (
@@ -478,7 +463,7 @@ async def test_android_app_gets_the_app_layout(stack: Stack) -> None:
 
 
 async def test_account_page_in_the_app_has_an_app_card(stack: Stack) -> None:
-    """T-123/T-143: inside the app the Account page shows the installed version and the update
+    """Inside the app the Account page shows the installed version and the update
     check, not "Get the Android app"; in a browser it stays as it was."""
     b = Browser(stack.h)
     try:

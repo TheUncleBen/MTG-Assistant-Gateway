@@ -1,30 +1,36 @@
 """0.7.17: the Archidekt account actions an assistant can propose (actions.py): like, bookmark
 and follow; post, edit, delete and vote on comments; delete a deck; create a folder. Each is a
-proposal, and (R-142) none of them is ever applied by the assistant, whatever the approval mode:
-the member applies each one with their own press on its review page. Since 0.7.19 the in-chat
-card cannot apply one either: it gets no approval code and only opens the review page."""
+proposal, and none of them is ever applied by the assistant, whatever the approval mode:
+the member applies each one with their own press. From 0.7.19 to 0.7.28 only the review page
+applied one; since 0.7.29 the member's press on the in-chat card does too, with its
+one-time code, except a deck deletion, which stays review page only."""
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
-from mtg_gateway import modes
+from mtg_gateway import actions, modes
 from mtg_gateway.approve import APPROVAL_META_KEY, approval_code
+from mtg_gateway.archidekt import rich_doc
 from mtg_gateway.decks import DeckError
 
-from .conftest import FakeIdP, running
-from .test_approval_modes import _set_mode, _stack_with
-from .test_decks_and_proxy import Browser, Stack, call, linked_user, structured
+from .conftest import Stack, stack_with
+from .fake_archidekt import FakeArchidekt
+from .test_approval_modes import SHIPPED, _set_mode
+from .test_decks_and_proxy import Browser, call, linked_user, structured
 
 SUB = "user-1"  # the signed-in member of linked_user
 
 
-@pytest.fixture
-async def stack(tmp_path, idp: FakeIdP):
-    h, ark = _stack_with(tmp_path, idp)
+def _amy_public() -> FakeArchidekt:
+    ark = FakeArchidekt()
     ark.private.discard(43)  # amy's deck is public: someone else's deck to like and follow
-    async with running(h):
-        yield Stack(h, ark)
+    return ark
+
+
+stack_options = stack_with(SHIPPED.but(archidekt=_amy_public))
 
 
 async def _browser_apply(h, pid: str) -> dict:
@@ -32,8 +38,8 @@ async def _browser_apply(h, pid: str) -> dict:
     b = Browser(h)
     try:
         await b.login()
-        csrf = await b.csrf()
-        r = await b.http.post(f"/proposals/{pid}", data={"csrf": csrf, "action": "apply"})
+        url = f"/proposals/{pid}"
+        r = await b.http.post(url, data={**await b.review_form(url), "action": "apply"})
         assert r.status_code == 303, r.text
         err = r.headers["location"].partition("?err=")[2]
         if err:  # the review page shows the refusal by its code
@@ -44,11 +50,23 @@ async def _browser_apply(h, pid: str) -> dict:
 
 
 async def _press(h, token: str, res) -> dict:
-    """The member's press on the review page, the only place an account action is applied. The
-    in-chat card got no approval code for it."""
+    """The member's own press: on the in-chat card with its one-time code (0.7.29), or, for a
+    deck deletion, which has no code, on its review page."""
     p = structured(res)
-    assert not (res.get("_meta") or {}).get(APPROVAL_META_KEY), res.get("_meta")
-    out = await _browser_apply(h, p["proposal_id"])
+    code = (res.get("_meta") or {}).get(APPROVAL_META_KEY)
+    if p["risk"] == "destructive":
+        assert not code, res.get("_meta")
+        out = await _browser_apply(h, p["proposal_id"])
+    else:
+        assert code, res.get("_meta")
+        out = structured(
+            await call(
+                h,
+                token,
+                "confirm_proposal",
+                {"proposal_id": p["proposal_id"], "approval": code, "decision": "approve"},
+            )
+        )
     assert out["ok"] and out["state"] == "applied", out
     return out
 
@@ -73,7 +91,7 @@ async def _propose_and_apply(h, token: str, tool: str, args: dict) -> dict:
     ],
 )
 def test_action_tiers(rows, risk) -> None:
-    """R-142: no mode lets an assistant apply an account action."""
+    """No mode lets an assistant apply an account action."""
     assert modes.risk_of("action", rows)[0] == risk
     for mode in modes.MODES:
         assert modes.assistant_may_apply(mode, risk) is False
@@ -99,6 +117,19 @@ async def test_like_bookmark_and_follow_through_proposals(stack: Stack) -> None:
     assert p["ok"] is False and "yourself" in p["message"]
     p = structured(await call(h, token, "propose_deck_social", {"deck_id": "43", "action": "hug"}))
     assert p["ok"] is False and p["error"] == "invalid"
+
+
+async def test_a_like_already_given_says_so_and_sends_nothing(stack: Stack) -> None:
+    """A like proposal for a deck the member already likes says applying changes nothing,
+    and applying it sends no vote (Archidekt might toggle it off)."""
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    await _propose_and_apply(h, token, "propose_deck_social", {"deck_id": "43", "action": "like"})
+    sent = len(ark.vote_calls)
+    res = await call(h, token, "propose_deck_social", {"deck_id": "43", "action": "like"})
+    assert structured(res)["rows"][0]["text"].endswith("(already the case; applying changes nothing)")
+    await _press(h, token, res)
+    assert len(ark.vote_calls) == sent and ark.votes == {("alice", 300043): 1}
 
 
 async def test_comments_post_edit_vote_delete(stack: Stack) -> None:
@@ -136,7 +167,7 @@ async def test_comments_post_edit_vote_delete(stack: Stack) -> None:
         "propose_comment",
         {"deck_id": "43", "action": "edit", "comment_id": mine["id"], "text": "Edited."},
     )
-    assert any(c["text"] == "Edited." for c in ark.comments[300043])
+    assert any(c["text"] == rich_doc("Edited.") for c in ark.comments[300043])  # as a Quill document
     await _propose_and_apply(
         h, token, "propose_comment", {"deck_id": "43", "action": "vote_up", "comment_id": 555001}
     )
@@ -164,6 +195,112 @@ async def test_comments_post_edit_vote_delete(stack: Stack) -> None:
     assert p["rows"][0]["cannot_undo"] is True and p["rows"][0]["before_text"] == "Edited."
     await _press(h, token, res)
     assert all(c["id"] != mine["id"] for c in ark.comments[300043])
+
+
+async def test_an_assistant_comment_is_posted_as_plain_text_only(stack: Stack) -> None:
+    """A comment proposed as a Quill document with a hidden link shows its words on the
+    review row, and exactly those words are posted (and edited) when the member applies it. (The
+    MCP tool itself turns a JSON text argument into an object and refuses it, so the proposal is
+    made here the way the tool makes it, with the text as a string.)"""
+    h, ark = stack.h, stack.ark
+    await linked_user(stack)
+    decks = h.app.state.gateway.decks
+    ark.comments[300043] = []
+    phish = json.dumps(
+        {"ops": [{"insert": "See my primer", "attributes": {"link": "https://evil.example/login"}}]}
+    )
+    p = await actions.propose(decks, SUB, "comment_post", {"deck_id": "43", "text": phish, "reply_to": None})
+    assert p["rows"][0]["after_text"] == "See my primer" and "evil" not in json.dumps(p), p
+    assert (await _browser_apply(h, p["proposal_id"]))["state"] == "applied"
+    (made,) = ark.comments[300043]
+    assert made["text"] == rich_doc("See my primer")
+    edit = {"deck_id": "43", "comment_id": made["id"], "text": phish.replace("See", "Read")}
+    p = await actions.propose(decks, SUB, "comment_edit", edit)
+    assert p["rows"][0]["after_text"] == "Read my primer" and "evil" not in json.dumps(p), p
+    assert (await _browser_apply(h, p["proposal_id"]))["state"] == "applied"
+    assert ark.comments[300043][0]["text"] == rich_doc("Read my primer")
+
+
+COMMENT_NOTE = (
+    "Only the words of this comment are saved: the gateway writes new text as plain text, so the "
+    "links, formatting and embeds in what you sent were removed (formatting already on Archidekt "
+    "stays where its words did not change). Don't tell the user a link or formatting was added."
+)
+
+
+async def test_the_assistant_is_told_when_a_comment_loses_its_link(stack: Stack) -> None:
+    """A comment post or edit proposed as a Quill document with a link (or a card link) is
+    saved as its words, and the proposal reply says so. (Made as the tool makes it: see
+    test_an_assistant_comment_is_posted_as_plain_text_only.)"""
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    decks = h.app.state.gateway.decks
+    ark.comments[300043] = []
+    phish = json.dumps(
+        {"ops": [{"insert": "See my primer", "attributes": {"link": "https://evil.example/login"}}]}
+    )
+    p = await actions.propose(decks, SUB, "comment_post", {"deck_id": "43", "text": phish, "reply_to": None})
+    assert p["note"] == COMMENT_NOTE and p["rows"][0]["after_text"] == "See my primer", p
+    assert p["changes"]["text"] == "See my primer"  # the same text is written as before
+    # the tool reply carries it, in its structured content and its text
+    from mtg_gateway.approve import proposal_tool_result
+
+    res = proposal_tool_result({"ok": True, **p}, decks=decks, sub=SUB, in_chat=True)
+    assert res.structured_content["note"] == COMMENT_NOTE
+    assert "note: " + COMMENT_NOTE in res.content[0].text
+    assert (await _browser_apply(h, p["proposal_id"]))["state"] == "applied"
+    (made,) = ark.comments[300043]
+    card = json.dumps({"ops": [{"insert": "Read "}, {"insert": {"card-link": "Sol Ring"}}, {"insert": "\n"}]})
+    p = await actions.propose(
+        decks, SUB, "comment_edit", {"deck_id": "43", "comment_id": made["id"], "text": card}
+    )
+    assert p["note"] == COMMENT_NOTE and p["rows"][0]["after_text"] == "Read Sol Ring", p
+    # a later get_proposal of it (stored as plain text) adds none
+    got = structured(await call(h, token, "get_proposal", {"proposal_id": p["proposal_id"]}))
+    assert got["ok"] and "note" not in got, got
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Nice deck!",
+        "**Nice** deck: [see](https://example.com/x)",
+        json.dumps({"ops": [{"insert": "Nice deck!\n"}]}),
+    ],
+)
+async def test_a_comment_that_loses_nothing_gets_no_note(stack: Stack, text: str) -> None:
+    """Plain text, Markdown and a document of words only lose nothing: no note, through the
+    tool itself as well."""
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    ark.comments[300043] = []
+    p = await actions.propose(
+        h.app.state.gateway.decks, SUB, "comment_post", {"deck_id": "43", "text": text, "reply_to": None}
+    )
+    assert "note" not in p, p
+    if not text.startswith("{"):  # the MCP layer turns JSON text into an object and refuses it
+        res = await call(h, token, "propose_comment", {"deck_id": "43", "action": "post", "text": text})
+        assert structured(res)["ok"] and "note" not in structured(res), structured(res)
+
+
+async def test_a_comment_stored_by_0726_tells_the_assistant_in_get_proposal(stack: Stack) -> None:
+    """A comment proposal stored by 0.7.26 with a formatted document is posted as its words
+    when the member applies it; get_proposal tells the assistant so."""
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    ark.comments[300043] = []
+    res = await call(h, token, "propose_comment", {"deck_id": "43", "action": "post", "text": "x"})
+    pid = structured(res)["proposal_id"]
+    row = h.db.get_proposal(pid, SUB)
+    phish = json.dumps({"ops": [{"insert": "Hi", "attributes": {"bold": True}}, {"insert": "\n"}]})
+    changes = {**row["changes"], "text": phish}
+    h.db._conn.execute("UPDATE proposals SET changes_json = ? WHERE id = ?", (json.dumps(changes), pid))
+    got = structured(await call(h, token, "get_proposal", {"proposal_id": pid}))
+    assert got["note"] == COMMENT_NOTE, got
+    assert (await _browser_apply(h, pid))["state"] == "applied"
+    assert ark.comments[300043][0]["text"] == rich_doc("Hi")
+    got = structured(await call(h, token, "get_proposal", {"proposal_id": pid}))
+    assert got["state"] == "applied" and got["note"] == COMMENT_NOTE, got
 
 
 async def test_delete_deck_waits_for_the_members_press_even_in_auto(stack: Stack) -> None:
@@ -202,6 +339,36 @@ async def test_create_folder_waits_for_the_members_press(stack: Stack) -> None:
     assert p["ok"] is False and "already" in p["message"]
 
 
+async def test_a_folder_named_like_the_backup_folder_is_refused_when_proposed(stack: Stack) -> None:
+    """The assistant's new-folder proposal with the backup folder's name is
+    refused when it is made, so the assistant can pick another name at once; the apply checks again."""
+    import dataclasses
+
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    await _set_mode(h, "semi")
+    for name in ("MTG Gateway backups", "mtg gateway backups"):
+        p = structured(await call(h, token, "propose_create_folder", {"name": name}))
+        assert p["ok"] is False and p["message"] == (
+            f"'{name}' is the name of the gateway's backup folder. Pick another name."
+        ), p
+    assert not any(f["name"].casefold() == "mtg gateway backups" for f in ark.folders.get("alice", []))
+    # the same name in other capitals inside another folder is not the backup folder's
+    await _press(h, token, await call(h, token, "propose_create_folder", {"name": "Brews"}))
+    inner = structured(
+        await call(h, token, "propose_create_folder", {"name": "mtg gateway backups", "inside": "Brews"})
+    )
+    assert inner["ok"] is True, inner
+    # at apply: a name that became the backup folder's after the proposal was made is refused there
+    p = structured(await call(h, token, "propose_create_folder", {"name": "Archive"}))
+    assert p["ok"] is True, p
+    decks = h.app.state.gateway.decks
+    decks.settings = dataclasses.replace(decks.settings, archidekt_backup_folder="Archive")
+    out = await _browser_apply(h, p["proposal_id"])
+    assert out.get("state") != "applied", out
+    assert not any(f["name"] == "Archive" for f in ark.folders["alice"])
+
+
 async def test_review_page_shows_the_action(stack: Stack) -> None:
     from .test_decks_and_proxy import Browser
 
@@ -238,7 +405,7 @@ async def test_review_page_shows_the_action(stack: Stack) -> None:
         await b.aclose()
 
 
-# R-142: every account action, in the modes that let an assistant apply other changes. The
+# Every account action, in the modes that let an assistant apply other changes. The
 # assistant's apply_proposal is refused with browser_required and nothing reaches Archidekt.
 ACCOUNT_ACTIONS = [
     ("propose_deck_social", {"deck_id": "43", "action": "like"}),
@@ -318,7 +485,7 @@ async def test_the_apply_path_refuses_an_account_action_even_if_its_tier_said_ye
     h, ark = stack.h, stack.ark
     token = await linked_user(stack)
     await _set_mode(h, "auto")
-    monkeypatch.setattr(modes, "assistant_may_apply", lambda mode, risk: True)
+    monkeypatch.setattr(modes, "assistant_may_apply", lambda mode, risk, **_: True)
     p = structured(await call(h, token, "propose_deck_social", {"deck_id": "43", "action": "like"}))
     out = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
     assert out["ok"] is False and out["error"] == "browser_required" and ark.votes == {}
@@ -363,47 +530,68 @@ async def test_no_vote_proposal_for_an_archived_comment(stack: Stack) -> None:
 @pytest.mark.parametrize(
     ("tool", "args"), ACCOUNT_ACTIONS, ids=[f"{t}:{a.get('action', 'folder')}" for t, a in ACCOUNT_ACTIONS]
 )
-async def test_the_in_chat_card_cannot_apply_an_account_action(stack: Stack, tool: str, args: dict) -> None:
-    """R-142, 0.7.19: the card's press runs inside the chat app, so for an account action the card
-    gets no approval code, and even a valid code for it is refused: only the review page applies."""
+async def test_the_in_chat_card_applies_an_account_action_only_with_the_members_press(
+    stack: Stack, tool: str, args: dict
+) -> None:
+    """0.7.29: the member's press on the in-chat card applies an account action
+    with its one-time code; a deck deletion gets no code and stays review page only. The
+    assistant's own apply and the REST apply with its bearer token stay refused."""
     h, ark = stack.h, stack.ark
     token = await linked_user(stack)
     _seed_comment(ark)
     res = await call(h, token, tool, args)
     p = structured(res)
     assert p["ok"] and p["kind"] == "action", p
-    assert not (res.get("_meta") or {}).get(APPROVAL_META_KEY), res.get("_meta")
-    assert "review page" in p["next_step"] and "card or the review page" not in p["next_step"]
-    # 0.7.24: the gateway refuses to make a code for it at all (approval_for refuses at the source)
+    deletion = tool == "propose_delete_deck"
+    code = (res.get("_meta") or {}).get(APPROVAL_META_KEY)
     decks = h.app.state.gateway.decks
     row = h.db.get_proposal(p["proposal_id"], SUB)
-    with pytest.raises(DeckError) as no_code:
-        decks.approval_for(SUB, row)
-    assert no_code.value.kind == "browser_required"
-    # and a correctly signed code for this proposal, as an older card would have held, is refused
-    # all the same, with the row's real tier (destructive for a deck deletion)
-    code = approval_code(
-        decks.settings.session_secret,
-        proposal_id=row["id"],
-        sub=SUB,
-        client_id=row.get("created_by_client") or "",
-        created_at=int(row["created_at"]),
-    )
-    out = structured(
-        await call(h, token, "confirm_proposal", {"proposal_id": p["proposal_id"], "approval": code})
-    )
+    before = _archidekt_state(ark)
+    # the assistant's own apply and the REST apply with the assistant's bearer token: refused
+    out = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
     assert out["ok"] is False and out["error"] == "browser_required", out
-    assert out["risk"] == ("destructive" if tool == "propose_delete_deck" else "consent"), out
-    # and the REST apply with the assistant's bearer token is the assistant's apply: refused too
     r = await h.http.post(
         f"/api/v1/proposals/{p['proposal_id']}/apply", headers={"Authorization": f"Bearer {token}"}
     )
     assert r.json().get("error") == "browser_required", r.text
-    assert ark.votes == {} and ark.deleted == [] and not any(ark.follows.values())
-    assert (
-        structured(await call(h, token, "get_proposal", {"proposal_id": p["proposal_id"]}))["state"]
-        == "pending"
+    assert _archidekt_state(ark) == before
+    if deletion:
+        assert not code, res.get("_meta")
+        assert "review page" in p["next_step"] and "proposal card in the chat" not in p["next_step"]
+        with pytest.raises(DeckError) as no_code:
+            decks.approval_for(SUB, row)
+        assert no_code.value.kind == "browser_required"
+        # a correctly signed code, as a card before 0.7.19 could have held, is refused all the same
+        signed = approval_code(
+            decks.settings.session_secret,
+            proposal_id=row["id"],
+            sub=SUB,
+            client_id=row.get("created_by_client") or "",
+            created_at=int(row["created_at"]),
+        )
+        out = structured(
+            await call(h, token, "confirm_proposal", {"proposal_id": p["proposal_id"], "approval": signed})
+        )
+        assert out["ok"] is False and out["error"] == "browser_required" and out["risk"] == "destructive"
+        assert ark.deleted == [] and h.db.get_proposal(p["proposal_id"], SUB)["state"] == "pending"
+        return
+    assert code, res.get("_meta")
+    assert "proposal card in the chat" in p["next_step"] and "Do not call apply_proposal" in p["next_step"]
+    # a wrong code does nothing; the card's own code applies it
+    bad = structured(
+        await call(h, token, "confirm_proposal", {"proposal_id": p["proposal_id"], "approval": "x" * 40})
     )
+    assert bad["ok"] is False and _archidekt_state(ark) == before, bad
+    out = structured(
+        await call(
+            h,
+            token,
+            "confirm_proposal",
+            {"proposal_id": p["proposal_id"], "approval": code, "decision": "approve"},
+        )
+    )
+    assert out["ok"] and out["state"] == "applied", out
+    assert _archidekt_state(ark) != before
 
 
 # -- 0.7.20: deck collaborators (Archidekt's "editors"). Adding or removing one changes who can
@@ -481,7 +669,7 @@ async def test_no_mode_lets_the_assistant_change_collaborators(stack: Stack, mod
     res = await call(h, token, "propose_collaborator", {"deck_id": "42", "action": action, "username": "amy"})
     p = structured(res)
     assert p["ok"] and p["kind"] == "action" and p["risk"] in modes.MEMBER_ONLY, p
-    assert not (res.get("_meta") or {}).get(APPROVAL_META_KEY)  # the in-chat card cannot apply it
+    assert (res.get("_meta") or {}).get(APPROVAL_META_KEY)  # the member's press on the card may
     before = [dict(r) for r in ark.editors.get(42, [])]
     out = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
     assert out["ok"] is False and out["error"] == "browser_required", out
@@ -489,7 +677,7 @@ async def test_no_mode_lets_the_assistant_change_collaborators(stack: Stack, mod
 
 
 async def test_settings_page_collaborators_take_one_press_and_a_confirmation(stack: Stack) -> None:
-    """D9 (0.7.24): on the member's own settings page, adding or removing a collaborator is one
+    """0.7.24: on the member's own settings page, adding or removing a collaborator is one
     press, then a confirmation page, then it is sent to Archidekt, like the page's delete and new
     folder forms. No proposal is made; the session and the page's CSRF token are required."""
     h, ark = stack.h, stack.ark
@@ -500,8 +688,17 @@ async def test_settings_page_collaborators_take_one_press_and_a_confirmation(sta
     try:
         await b.login()
         page = (await b.http.get("/decks/42/settings")).text
-        assert "id='collaborators'" in page and "<b>amy</b>" in page and "added by alice" in page
+        assert "id='collaborators'" in page and "<span class='name'>amy</span>" in page
+        assert "added by alice" in page and "aria-label='Remove amy'" in page
         assert "press Apply there" not in page
+        # One line on the rule; the people followed are offered (the site's own combobox, no
+        # datalist), less current collaborators: amy, the only one followed, is one already
+        assert "Only people you follow on Archidekt can be added" in page
+        assert "<datalist" not in page and "data-suggest='list'" not in page
+        assert "Everyone you follow on Archidekt is a collaborator already." in page
+        # each form names its section, so the answer (a refusal, or the page after the confirmation)
+        # opens there
+        assert "action='/decks/42/collaborators#collaborators'" in page
         csrf = await b.csrf()
         # the first press only asks: nothing is sent and no proposal is stored
         r = await b.http.post(
@@ -519,6 +716,11 @@ async def test_settings_page_collaborators_take_one_press_and_a_confirmation(sta
         assert ark.editors[42] == [] and h.db.list_proposals(SUB) == []
         shown = (await b.http.get(r.headers["location"])).text
         assert "Collaborator removed on Archidekt." in shown
+        # the notice sits in the section, next to the form, not at the top of the page
+        assert shown.index("Collaborator removed on Archidekt.") > shown.index("id='collaborators'")
+        assert "No collaborators yet." in shown
+        assert "data-suggest='list' data-options='[&quot;amy&quot;]'" in shown
+        assert "data-suggest-head='People you follow'" in shown and "<datalist" not in shown
         # adding: the same two steps, someone the member follows
         r = await b.http.post(
             "/decks/42/collaborators", data={"csrf": csrf, "action": "add", "username": "amy"}
@@ -534,7 +736,23 @@ async def test_settings_page_collaborators_take_one_press_and_a_confirmation(sta
         bad = await b.http.post(
             "/decks/42/collaborators", data={"csrf": csrf, "action": "add", "username": "nobody"}
         )
-        assert bad.status_code == 400 and "not among the people you follow" in bad.text
+        assert bad.status_code == 400 and "nobody isn't someone you follow on Archidekt." in bad.text
+        # One message, under the box, with the person's Archidekt profile to follow them there;
+        # not repeated at the top of the page
+        assert bad.text.count("someone you follow on Archidekt") == 1
+        assert "not among the people you follow" not in bad.text
+        assert "<p class='notice error'>" not in bad.text
+        msg = bad.text.index("id='collaborators-msg'")
+        assert bad.text.index("id='collabname'") < msg < bad.text.index("id='collab-help'")
+        assert (
+            "<a class='btn' href='https://archidekt.com/u/nobody' target='_blank' "
+            "rel='noreferrer noopener'>" in bad.text
+        )
+        assert "Open nobody on Archidekt</a>" in bad.text
+        # the box keeps the name, is marked invalid and is described by the message
+        assert (
+            "value='nobody' aria-describedby='collab-help collaborators-msg' aria-invalid='true'" in bad.text
+        )
         bad = await b.http.post(
             "/decks/42/collaborators",
             data={"csrf": csrf, "action": "add", "username": "nobody", "confirmed": "1"},
@@ -558,7 +776,7 @@ async def test_settings_page_collaborators_take_one_press_and_a_confirmation(sta
 
 
 async def test_an_assistant_token_cannot_use_the_settings_page_collaborator_form(stack: Stack) -> None:
-    """R-142: the direct form is the member's own click. An assistant's bearer token is not a
+    """The direct form is the member's own click. An assistant's bearer token is not a
     browser session, so the route sends it to sign in and nothing changes on Archidekt."""
     h, ark = stack.h, stack.ark
     token = await linked_user(stack)
@@ -577,7 +795,7 @@ async def test_an_assistant_token_cannot_use_the_settings_page_collaborator_form
 
 
 async def test_the_json_api_does_not_apply_an_account_action(stack: Stack) -> None:
-    """R-142: only the review page's own form applies an account action, not the JSON API, even
+    """Only the review page's own form applies an account action, not the JSON API, even
     with the member's signed-in session and CSRF token."""
     h, ark = stack.h, stack.ark
     token = await linked_user(stack)
@@ -586,7 +804,11 @@ async def test_the_json_api_does_not_apply_an_account_action(stack: Stack) -> No
     try:
         await b.login()
         csrf = await b.csrf()
-        r = await b.http.post(f"/api/v1/proposals/{p['proposal_id']}/apply", headers={"X-CSRF-Token": csrf})
+        r = await b.http.post(
+            f"/api/v1/proposals/{p['proposal_id']}/apply",
+            headers={"X-CSRF-Token": csrf},
+            json={"version": p["version"]},
+        )
         assert r.json()["error"] == "browser_required" and ark.votes == {}, r.text
     finally:
         await b.aclose()
@@ -628,7 +850,7 @@ ALL_ACCOUNT_ACTIONS = ACCOUNT_ACTIONS + [
 ]
 
 
-@pytest.mark.parametrize("via", ["browser", "app", "mcp", "auto", ""])
+@pytest.mark.parametrize("via", ["browser", "mcp", "auto", ""])
 @pytest.mark.parametrize(
     ("tool", "args"),
     ALL_ACCOUNT_ACTIONS,
@@ -637,6 +859,8 @@ ALL_ACCOUNT_ACTIONS = ACCOUNT_ACTIONS + [
 async def test_only_the_review_page_marker_applies_an_account_action(
     stack: Stack, via: str, tool: str, args: dict
 ) -> None:
+    """Every route but the member's own presses is refused. The card's press ("app", 0.7.29)
+    is tested with its code in test_the_in_chat_card_applies_an_account_action_only_with_the_members_press."""
     from mtg_gateway.decks import REVIEW_PAGE, DeckError
 
     h, ark = stack.h, stack.ark
@@ -653,14 +877,42 @@ async def test_only_the_review_page_marker_applies_an_account_action(
     assert p["ok"] and p["kind"] == "action", p
     decks = h.app.state.gateway.decks
     before = (_archidekt_state(ark), [dict(r) for r in ark.editors.get(42, [])])
+    sent = len(ark.calls)
     with pytest.raises(DeckError) as refused:
         await decks.apply(SUB, p["proposal_id"], via=via)
     assert refused.value.kind == "browser_required"
     assert (_archidekt_state(ark), [dict(r) for r in ark.editors.get(42, [])]) == before
+    # nothing reached Archidekt, by its request log: not even a read
+    assert ark.calls[sent:] == [], ark.calls[sent:]
     assert decks.db.get_proposal(p["proposal_id"], SUB)["state"] == "pending"
     # positive control, in the same harness: the review page's marker applies that same proposal
     done = await decks.apply(SUB, p["proposal_id"], via=REVIEW_PAGE)
     assert done["state"] == "applied", done
+
+
+async def test_the_refusal_list_covers_every_account_action(stack: Stack) -> None:
+    """Every action type actions.py knows is in ALL_ACCOUNT_ACTIONS, so a new
+    one cannot skip the refusal test above."""
+    from mtg_gateway.actions import ACTIONS
+
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    _seed_comment(ark)
+    own = dict(ark.comments[300043][0], id=555002, text="Mine.")
+    own["owner"] = {"id": 77, "username": "alice", "avatar": None, "frame": None}
+    ark.comments[300043].append(own)
+    ark.follows["alice"] = {78}
+    ark.editors[42] = [_amy_row()]
+    seen = set()
+    for tool, args in ALL_ACCOUNT_ACTIONS:
+        if tool == "propose_collaborator" and args["action"] == "add":
+            ark.editors[42] = []
+        p = structured(await call(h, token, tool, args))
+        assert p["ok"], (tool, args, p)
+        seen.add(p["rows"][0]["action"])
+        h.app.state.gateway.decks.reject(SUB, p["proposal_id"])
+        ark.editors[42] = [_amy_row()]
+    assert seen == set(ACTIONS), set(ACTIONS) - seen
 
 
 def test_only_the_review_page_passes_the_marker() -> None:
@@ -728,10 +980,13 @@ async def test_the_refusal_reports_the_rows_real_tier(stack: Stack, via: str) ->
     h, ark = stack.h, stack.ark
     token = await linked_user(stack)
     decks = h.app.state.gateway.decks
-    for tool, args, risk in (
+    cases = [
         ("propose_delete_deck", {"deck_id": "42"}, "destructive"),
         ("propose_create_folder", {"name": "Brews"}, "consent"),
-    ):
+    ]
+    if via == "app":  # 0.7.29: the card's press may apply a folder; only a deletion is refused
+        cases = cases[:1]
+    for tool, args, risk in cases:
         p = structured(await call(h, token, tool, args))
         with pytest.raises(DeckError) as refused:
             await decks.apply(SUB, p["proposal_id"], via=via)
@@ -748,7 +1003,7 @@ async def test_the_refusal_reports_the_rows_real_tier(stack: Stack, via: str) ->
 
 @pytest.mark.parametrize("mode", ["manual", "semi", "auto"])
 async def test_the_rest_apply_refuses_an_account_action_in_every_mode(stack: Stack, mode: str) -> None:
-    """D2: the REST route's own refusal was removed; the shared apply refuses for it with the same
+    """The REST route's own refusal was removed; the shared apply refuses for it with the same
     403 browser_required and the review_url, for a bearer token and for the browser session alike."""
     h, ark = stack.h, stack.ark
     token = await linked_user(stack)
@@ -769,14 +1024,20 @@ async def test_the_rest_apply_refuses_an_account_action_in_every_mode(stack: Sta
             await b.login()
             csrf = await b.csrf()
             r = await b.http.post(
-                f"/api/v1/proposals/{p['proposal_id']}/apply", headers={"X-CSRF-Token": csrf}
+                f"/api/v1/proposals/{p['proposal_id']}/apply",
+                headers={"X-CSRF-Token": csrf},
+                json={"version": p["version"]},
             )
             assert r.status_code == 403 and r.json()["error"] == "browser_required", r.text
         finally:
             await b.aclose()
-        # the assistant's apply_proposal and the card's confirm (with a correctly signed code) too
+        # the assistant's apply_proposal too
         out = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
         assert out["ok"] is False and out["error"] == "browser_required" and out["risk"] == risk, out
+        assert h.db.get_proposal(p["proposal_id"], SUB)["state"] == "pending"
+        if risk != "destructive":
+            continue  # 0.7.29: the card's confirm with its code is the member's press
+        # a deck deletion: the card's confirm with a correctly signed code is refused as well
         row = h.db.get_proposal(p["proposal_id"], SUB)
         code = approval_code(
             h.app.state.gateway.decks.settings.session_secret,
@@ -794,7 +1055,7 @@ async def test_the_rest_apply_refuses_an_account_action_in_every_mode(stack: Sta
 
 
 async def test_reject_attribution_uses_the_review_page_marker(stack: Stack) -> None:
-    """D2: reject records "review_page" only for the review page's own form (REVIEW_PAGE), and
+    """Reject records "review_page" only for the review page's own form (REVIEW_PAGE), and
     "browser" for the member's other pages; nothing is inferred from a missing ``via``."""
     from mtg_gateway.decks import BROWSER_CLIENT, REVIEW_PAGE, current_client
 
@@ -815,8 +1076,9 @@ async def test_reject_attribution_uses_the_review_page_marker(stack: Stack) -> N
 
 
 def test_the_card_has_no_branch_for_an_action_with_a_code() -> None:
-    """Bug 12: an account action never gets an in-chat code, so the card's red Delete button and
-    its warning (which needed one) are gone; such a card only opens the review page."""
+    """Bug 12: a deck deletion never gets an in-chat code, so the card's red Delete button and its
+    warning (which needed one) are gone; its card only opens the review page. Since 0.7.29 the
+    other account actions use the card's ordinary Approve button."""
     from mtg_gateway.approve import card_html
 
     html = card_html()
@@ -826,7 +1088,7 @@ def test_the_card_has_no_branch_for_an_action_with_a_code() -> None:
 
 
 async def test_folders_page_new_folder_takes_one_press_and_a_confirmation(stack: Stack) -> None:
-    """D9 (0.7.24): creating a folder on the Folders page asks once before it is sent."""
+    """0.7.24: creating a folder on the Folders page asks once before it is sent."""
     h, ark = stack.h, stack.ark
     await linked_user(stack)
     b = Browser(h)
@@ -878,7 +1140,7 @@ async def test_settings_page_collaborators_respect_the_writes_switch(stack: Stac
 
 
 async def test_hand_delete_and_new_folder_obey_the_writes_switch(stack: Stack) -> None:
-    """0.7.25 (Ben's decision 22:20Z 10-11): with MTG_WRITES_ENABLED false, deck delete (the deck
+    """0.7.25: with MTG_WRITES_ENABLED false, deck delete (the deck
     settings page) and new folder (the Folders page, both its first press and its confirmation)
     are refused like every other Archidekt write, and nothing is sent."""
     import dataclasses
@@ -919,7 +1181,7 @@ async def test_hand_delete_and_new_folder_obey_the_writes_switch(stack: Stack) -
 
 
 async def test_cover_tags_move_and_folder_rename_obey_the_writes_switch(stack: Stack) -> None:
-    """0.7.26 (Ben's yes to Q1, 02:43Z 10-12): with MTG_WRITES_ENABLED false the cover, tags, deck
+    """0.7.26: with MTG_WRITES_ENABLED false the cover, tags, deck
     move and folder rename are refused like the other deck settings and Folders page writes, and
     nothing is sent."""
     import dataclasses
@@ -956,3 +1218,191 @@ async def test_cover_tags_move_and_folder_rename_obey_the_writes_switch(stack: S
         with pytest.raises(DeckError) as exc:
             await pending
         assert exc.value.kind == "writes_disabled"
+
+
+async def test_likes_bookmarks_follows_comments_and_collection_edits_obey_the_writes_switch(
+    stack: Stack,
+) -> None:
+    """With MTG_WRITES_ENABLED false the member's own likes, bookmarks, follows, comments,
+    collaborators and collection edits are refused too, and nothing is sent to Archidekt."""
+    import dataclasses
+
+    from mtg_gateway.collection import CollectionError
+
+    h, ark = stack.h, stack.ark
+    await linked_user(stack)
+    decks = h.app.state.gateway.decks
+    social = decks.social
+    collection = h.app.state.gateway.collection
+    decks.settings = dataclasses.replace(decks.settings, writes_enabled=False)
+    calls = len(ark.calls)
+    for pending in (
+        social.vote(SUB, "42", 1),
+        social.vote_comment(SUB, "42", 1, 1),
+        social.bookmark(SUB, "42", True),
+        social.follow(SUB, 7, True),
+        social.comment(SUB, "42", "hello", None),
+        social.edit_comment(SUB, "42", 1, "edited"),
+        social.delete_comment(SUB, "42", 1),
+        social.add_collaborator(SUB, "42", 7),
+        social.remove_collaborator(SUB, "42", 7),
+    ):
+        with pytest.raises(DeckError) as exc:
+            await pending
+        assert exc.value.kind == "writes_disabled"
+    for pending in (
+        collection.add(SUB, [{"name": "Sol Ring"}], source="test"),
+        collection.set_quantity(SUB, 1, 2),
+        collection.update(SUB, 1, {"condition": "NM"}),
+        collection.remove(SUB, 1),
+    ):
+        with pytest.raises(CollectionError) as cexc:
+            await pending
+        assert cexc.value.kind == "writes_disabled"
+    assert ark.calls[calls:] == []  # refused before anything, reads included, was sent
+    b = Browser(h)
+    try:
+        await b.login()
+        csrf = await b.csrf()
+        r = await b.http.post(
+            "/social/api/decks/42/bookmark", json={"on": True}, headers={"X-CSRF-Token": csrf}
+        )
+        assert r.status_code == 403 and r.json()["error"] == "writes_disabled", r.text
+    finally:
+        await b.aclose()
+
+
+# -- an action whose write landed, then whose check met Archidekt's long wait ---------------------------
+async def _own_comment(h, token: str, ark) -> int:
+    """Post a comment of the member's own on deck 43 (through a proposal) and return its id."""
+    res = await call(h, token, "propose_comment", {"deck_id": "43", "action": "post", "text": "Mine."})
+    await _press(h, token, res)
+    return next(c["id"] for c in ark.comments[300043] if c["text"] == rich_doc("Mine."))
+
+
+async def _collaborator_amy(h, token: str, ark, *, added: bool) -> None:
+    ark.follows["alice"] = {78}
+    if added:
+        await _propose_and_apply(
+            h, token, "propose_collaborator", {"deck_id": "42", "action": "add", "username": "amy"}
+        )
+
+
+@pytest.mark.parametrize(
+    "case", ["collaborator_add", "collaborator_remove", "comment_edit", "comment_delete", "create_folder"]
+)
+async def test_an_action_whose_write_landed_is_never_put_back_to_pending(
+    stack: Stack, monkeypatch: pytest.MonkeyPatch, case: str
+) -> None:
+    """The action's write reached Archidekt, then the re-read that checks it met a
+    429 longer than an apply may wait. Something changed, so the proposal stays failed and never
+    says "Nothing was changed" (every write of an apply counts, fail closed)."""
+    import httpx
+
+    from mtg_gateway import social
+    from mtg_gateway.archidekt import ArchidektClient
+
+    async def no_wait(self, seconds: float) -> None:
+        return None
+
+    monkeypatch.setattr(ArchidektClient, "_wait_out", no_wait)
+    monkeypatch.setattr(social, "FRESH_GAP", 0.0)
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    if case == "collaborator_add":
+        await _collaborator_amy(h, token, ark, added=False)
+        tool, args = "propose_collaborator", {"deck_id": "42", "action": "add", "username": "amy"}
+        method, path, landed = "POST", "/editors/", lambda: len(ark.editors.get(42, [])) == 1
+    elif case == "collaborator_remove":
+        await _collaborator_amy(h, token, ark, added=True)
+        tool, args = "propose_collaborator", {"deck_id": "42", "action": "remove", "username": "amy"}
+        method, path, landed = "DELETE", "/decks/editors/", lambda: ark.editors[42] == []
+    elif case in ("comment_edit", "comment_delete"):
+        mine = await _own_comment(h, token, ark)
+        if case == "comment_edit":
+            tool = "propose_comment"
+            args = {"deck_id": "43", "action": "edit", "comment_id": mine, "text": "Changed."}
+            method, path = "PATCH", "/comments/"
+            landed = lambda: any(c["text"] == rich_doc("Changed.") for c in ark.comments[300043])  # noqa: E731
+        else:
+            tool, args = "propose_comment", {"deck_id": "43", "action": "delete", "comment_id": mine}
+            method, path = "DELETE", "/comments/"
+            landed = lambda: all(c["id"] != mine for c in ark.comments[300043])  # noqa: E731
+    else:
+        tool, args = "propose_create_folder", {"name": "Brews"}
+        method, path = "POST", "/decks/folders/"
+        landed = lambda: any(f["name"] == "Brews" for f in ark.folders["alice"])  # noqa: E731
+    p = structured(await call(h, token, tool, args))
+    assert p["ok"] and p["state"] == "pending", p
+    orig = ark.transport.handler
+    wrote = {"x": False}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.method == method and path in req.url.path:
+            wrote["x"] = True
+            return orig(req)
+        if wrote["x"] and req.method == "GET":
+            return httpx.Response(429, json={"detail": "slow"}, headers={"Retry-After": "3600"})
+        return orig(req)
+
+    ark.transport.handler = handler
+    try:
+        out = await _browser_apply(h, p["proposal_id"])
+    finally:
+        ark.transport.handler = orig
+        h.app.state.gateway.decks.client.pacer._retry_until = 0
+    assert wrote["x"] and landed(), case
+    row = h.db.get_proposal(p["proposal_id"], SUB)
+    assert out["ok"] is False and row["state"] == "failed", (case, out, row["result"])
+    assert row["result"]["error"] == "rate_limited", row["result"]
+    assert "Nothing was changed" not in row["result"]["detail"], row["result"]["detail"]
+    assert "Part of this change had already reached Archidekt" in row["result"]["detail"]
+
+
+async def test_follow_and_unfollow_someone_by_username(stack: Stack) -> None:
+    """The assistant can follow or unfollow anyone by their Archidekt username. It
+    is an account action like the rest: only the member's press applies it, and the person is
+    found with one read, through their public decks."""
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    before = len(ark.calls)
+    res = await call(h, token, "propose_deck_social", {"action": "follow_user", "username": "@amy"})
+    p = structured(res)
+    assert p["ok"] and p["kind"] == "action" and p["assistant_may_apply"] is False, p
+    assert p["rows"][0]["text"] == "Follow amy on Archidekt", p["rows"]
+    assert [c for c in ark.calls[before:] if "/decks/v3/" in c[1]], ark.calls[before:]
+    refused = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
+    assert refused["ok"] is False and 78 not in ark.follows.get("alice", set()), refused
+    await _press(h, token, res)
+    assert 78 in ark.follows["alice"]
+    res = await call(h, token, "propose_deck_social", {"action": "unfollow_user", "username": "amy"})
+    assert structured(res)["rows"][0]["text"] == "Stop following amy on Archidekt"
+    await _press(h, token, res)
+    assert 78 not in ark.follows["alice"]
+    # yourself, someone with no public decks, and no name at all are refused, with nothing proposed
+    for name, kind in (("alice", "invalid"), ("nobody-here", "not_found"), ("", "invalid")):
+        out = structured(
+            await call(h, token, "propose_deck_social", {"action": "follow_user", "username": name})
+        )
+        assert out["ok"] is False and out["error"] == kind, (name, out)
+    ark.private.add(43)  # amy's only deck private: she can't be found
+    out = structured(
+        await call(h, token, "propose_deck_social", {"action": "follow_user", "username": "amy"})
+    )
+    assert out["error"] == "not_found" and "public decks" in out["message"], out
+
+
+async def test_apply_all_on_the_card_lists_account_actions_before_the_press(stack: Stack) -> None:
+    """Likes, follows and the like can be in one "Apply all" press, and the proposal
+    card's confirm lists each one first (set_lines), as the waiting card does."""
+    from mtg_gateway.approve import APPROVAL_SET_META_KEY
+
+    h = stack.h
+    token = await linked_user(stack)
+    await call(h, token, "propose_deck_social", {"deck_id": "43", "action": "like"})
+    res = await call(h, token, "propose_deck_social", {"deck_id": "43", "action": "follow_owner"})
+    info = structured(res)["deck_waiting"]
+    ids = res["_meta"][APPROVAL_SET_META_KEY]["ids"]
+    lines = {x["proposal_id"]: x["summary"] for x in info["set_lines"]}
+    assert len(ids) == 2 and set(lines) == set(ids), (ids, lines)
+    assert any("Like" in s for s in lines.values()) and any("Follow" in s for s in lines.values()), lines

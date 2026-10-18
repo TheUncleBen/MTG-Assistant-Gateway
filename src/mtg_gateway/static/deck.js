@@ -6,7 +6,8 @@
    - on touch screens a tap fans a stack out and a tap on a card opens a viewer with the card
      large and what can be done with it (grid view, stacks, text rows alike);
    - a right-click, a press and hold, or Shift+F10 on a card opens the card's own menu (open it,
-     one more or one fewer copy, move to a category, remove, edit) in place of the browser's;
+     one more or one fewer copy, move to a category, change its printing through the shared
+     picker static/printpick.js, remove, edit) in place of the browser's;
    - on the member's own deck the menu, the viewer, Select cards and a drag between categories
      save through the deck page's edit endpoint (one proposal applied at once, with a snapshot);
      the answer redraws the touched cards, the Legality chip and the Deck checks in place. One
@@ -100,15 +101,24 @@
   var q = $("#q");
   var cards = $("#cards");
   if (q && cards) {
-    var items = $$("[data-name]", cards);
-    var stacks = $$(".stack", cards);
+    // the cards and each stack's cards are collected once, and again only after the view changed
+    // (a save redraws cards in place), not on every keystroke
+    var items = null, stacks = null;
+    var collect = function () {
+      items = $$("[data-name]", cards);
+      stacks = $$(".stack", cards).map(function (st) { return { el: st, cards: $$("[data-name]", st) }; });
+    };
+    if (window.MutationObserver) {
+      new MutationObserver(function () { items = null; }).observe(cards, { childList: true, subtree: true });
+    }
     var apply = function () {
+      if (!items || !window.MutationObserver) collect();
       var needle = q.value.trim().toLowerCase();
       items.forEach(function (el) {
         el.style.display = !needle || el.getAttribute("data-name").indexOf(needle) >= 0 ? "" : "none";
       });
       stacks.forEach(function (st) {
-        st.style.display = $$("[data-name]", st).some(function (el) { return el.style.display !== "none"; }) ? "" : "none";
+        st.el.style.display = st.cards.some(function (el) { return el.style.display !== "none"; }) ? "" : "none";
       });
     };
     q.addEventListener("input", apply);
@@ -122,7 +132,8 @@
   var deckId = cards.getAttribute("data-deck");
   var own = cards.hasAttribute("data-own");
   var canDrag = cards.hasAttribute("data-drop");
-  var byCategory = cards.getAttribute("data-grouping") === "category";
+  var grouping = cards.getAttribute("data-grouping");
+  var byCategory = grouping === "category";
   var touch = window.matchMedia("(hover: none)").matches;
   var phone = function () {
     return window.matchMedia("(max-width: 599.98px)").matches ||
@@ -211,18 +222,18 @@
     opts = opts || {};
     if (saving) return Promise.reject(new Error("Another change is still saving; one moment."));
     saving = true;
-    var body = opts.proposalId ? { proposal_id: opts.proposalId } : { changes: changes, confirmed: opts.confirmed === true };
+    var body = opts.proposalId ? { proposal_id: opts.proposalId, version: opts.version } : { changes: changes, confirmed: opts.confirmed === true };
     return api(editUrl, body).then(function (d) {
       if (d.ok && d.applied) {
         saving = false;
-        applyAnswer(d, changes, undoChanges, opts.replay);
+        applyAnswer(d, changes, undoChanges, opts.replay, opts.note);
         return d;
       }
       if (d.ok && d.needs_confirm) {
         saving = false;
         return askConfirm(d.why, d.proposal_id).then(function (yes) {
           if (!yes) { var c = new Error("Nothing was changed."); c.cancelled = true; throw c; }
-          return saveEdit(changes, undoChanges, { proposalId: d.proposal_id, replay: opts.replay });
+          return saveEdit(changes, undoChanges, { proposalId: d.proposal_id, version: d.version, replay: opts.replay, note: opts.note });
         });
       }
       saving = false;
@@ -245,32 +256,174 @@
     toast((err && err.message) || "No connection; nothing was changed.", { error: true });
   }
 
+  // -- saves in the background: the card's edits from its menu, viewer and drags --------
+  // The edit is drawn on the page at once and Archidekt saves it behind, one save at a time in
+  // the order they were made: a Saving note until it answers, then Saved with Undo (applyAnswer).
+  // A save that does not go through puts the card back as it was and says why in a red note. A
+  // card with an edit still waiting its turn keeps what it shows when an earlier answer is drawn
+  // (drawRows), so nothing jumps back and forth.
+  var bgQueue = Promise.resolve(), bgCount = 0, bgCards = [];
+  var qtySteps = [];  // a card's quantity steps not yet saved (stepQty): {card, shown, saved, timer, queued, gone}
+  function bgBusy() { return bgCount > 0 || qtySteps.length > 0; }
+  function waits(card) {
+    return bgCards.indexOf(card) >= 0 || qtySteps.some(function (s) { return s.card === card && s.timer; });
+  }
+  function idle() {
+    // a save made elsewhere on the page (selected cards, Undo, Redo) finishes first
+    return new Promise(function (resolve) {
+      (function check() { if (saving || histBusy) setTimeout(check, 100); else resolve(); })();
+    });
+  }
+  // the Saving note; one that already says this stays as it is (no flicker, no second
+  // announcement). later: a save whose turn came, which leaves an error or a question up.
+  // card, what: whose note it is, so a save that finds nothing to send can take its own note
+  // down and never another card's, an error or a question.
+  var savingFor = null;  // {el, card, what}
+  function savingNote(text, later, card, what) {
+    if (toastEl && $(".msg", toastEl).textContent === text && !toastEl.classList.contains("error")) {
+      savingFor = { el: toastEl, card: card, what: what };
+      return;
+    }
+    if (later && toastEl && (toastEl.classList.contains("error") || toastEl.getAttribute("role") === "alertdialog")) return;
+    savingFor = { el: toast(text, { sticky: true }), card: card, what: what };
+  }
+  function dropSavingNote(card, what) {
+    if (savingFor && toastEl && savingFor.el === toastEl && savingFor.card === card && savingFor.what === what) dismissToast();
+  }
+  // What Archidekt last confirmed for a card, per kind of edit ("Move", "Mana value"), while
+  // edits of that kind wait or save. A refused save puts the card back to that state, not to the
+  // unsaved one the edit was made over, and drops the card's later edits of that kind still
+  // waiting their turn (made over a state Archidekt never took).
+  var confirmed = [];  // {card, what, state, gen, open, queued}
+  function confirmedOf(card, what) {
+    return confirmed.filter(function (o) { return o.card === card && o.what === what; })[0] || null;
+  }
+  function holdConfirmed(card, what, current) {
+    var c = confirmedOf(card, what);
+    if (!c) { c = { card: card, what: what, state: current(), gen: 0, open: 0, queued: 0 }; confirmed.push(c); }
+    c.open++;
+    return c;
+  }
+  function releaseConfirmed(c) {
+    if (--c.open > 0) return;
+    var i = confirmed.indexOf(c);
+    if (i >= 0) confirmed.splice(i, 1);
+  }
+  // A refused edit's note says when later edits of the same
+  // kind were dropped with it. c.queued counts this kind's own edits still to finish (a Removal
+  // holds the card's Move state too, but is always sent); the refused one is among them here.
+  function droppedNote(c, one, many) {
+    var later = c.queued - 1;
+    return later > 1 ? " " + many : later === 1 ? " " + one : "";
+  }
+  /* job.card: the card drawn changed; job.start(): {changes, inverse, saying} when its turn comes
+     (null when nothing is left to send); job.saved(): after Archidekt took it; job.undo(): puts the
+     card back and returns the note's end ("Cultivate is back in Ramp."); job.what: "Move" and so on. */
+  function background(job) {
+    bgCount++;
+    bgCards.push(job.card);
+    syncHist();
+    var done = function () { bgCount--; if (job.done) job.done(); syncHist(); };
+    bgQueue = bgQueue.then(idle).then(function () {
+      bgCards.splice(bgCards.indexOf(job.card), 1);
+      var plan = job.start();
+      // nothing left to send (+ then − before the save went): its Saving note goes too
+      if (!plan) { dropSavingNote(job.card, job.what); return null; }
+      savingNote(plan.saying, true, job.card, job.what);
+      return saveEdit(plan.changes, plan.inverse, { note: plan.note }).then(function () { if (job.saved) job.saved(); }, function (err) {
+        var back = job.undo();
+        if (err && err.cancelled) { dismissToast(); return; }
+        var why = ((err && err.message) || "no connection").replace(/\.$/, "");
+        toast(job.what + " not saved: " + why + ". " + back, { error: true });
+      });
+    }).then(done, done);
+  }
+  // Where a card sits and how it is filed, to put it back there when its save does not go through
+  // (its stack too, when the card was the last one in it and the stack went with it).
+  var SPOT_ATTRS = ["data-cat", "data-allcats", "data-zone"];
+  function spotOf(card) {
+    var st = card.closest(".stack");
+    return {
+      list: card.parentNode, next: card.nextSibling, stack: st, stackNext: st && st.nextSibling,
+      attrs: SPOT_ATTRS.map(function (a) { return card.getAttribute(a); }), side: card.classList.contains("side")
+    };
+  }
+  function putBack(card, spot, fileOnly) {
+    if (fileOnly) {
+      SPOT_ATTRS.forEach(function (a, i) { if (spot.attrs[i] === null) card.removeAttribute(a); else card.setAttribute(a, spot.attrs[i]); });
+      card.classList.toggle("side", spot.side);
+      return;
+    }
+    var st = spot.stack, list = spot.list;
+    if (st && !st.isConnected) {
+      var same = stackByName(st.getAttribute("data-group"));
+      if (same) st = same;
+      else cards.insertBefore(st, spot.stackNext && spot.stackNext.parentNode === cards ? spot.stackNext : null);
+    }
+    if (st) list = $(".cards, .rows", st);
+    var focused = document.activeElement === card;
+    if (list) list.insertBefore(card, spot.next && spot.next.parentNode === list ? spot.next : null);
+    if (focused) card.focus();
+    SPOT_ATTRS.forEach(function (a, i) { if (spot.attrs[i] === null) card.removeAttribute(a); else card.setAttribute(a, spot.attrs[i]); });
+    card.classList.toggle("side", spot.side);
+    refreshStacks();
+  }
+  // the keyboard stays on the page when the focused card leaves it: the next card of its stack
+  function focusNear(stack) {
+    var next = (stack && stack.isConnected && $(".c, .row", stack)) || $(".c, .row", cards);
+    if (next) next.focus();
+  }
+
   // -- drawing the answer in place: the touched cards, the stack totals, the chip and the panels --
-  var removedCards = {}; // front face -> [elements taken off the page], put back by an Undo
+  // front face -> [{card, home}]: elements taken off the page and the stack they were in, put
+  // back there by an Undo (a card filed under no category has no category of its own to go by)
+  var removedCards = {};
+  function keepRemoved(card, home) {
+    var face = frontFace(card.getAttribute("data-card"));
+    (removedCards[face] = removedCards[face] || []).push({ card: card, home: home });
+  }
   function stackByName(name) {
     return $$(".stack", cards).filter(function (st) { return st.getAttribute("data-group") === name; })[0] || null;
+  }
+  // a stack made on the page, drawn as the server draws one (deckpage.cards_html)
+  function makeStack(name) {
+    var st = el("section", "stack");
+    st.setAttribute("data-group", name);
+    var head = el("div", "stackhead");
+    var h2 = el("h2");
+    var title = el("span", "title", name);
+    title.title = name;
+    h2.appendChild(title);
+    head.appendChild(h2);
+    head.appendChild(el("div", "meta", "Qty: 0"));
+    st.appendChild(head);
+    var rows = cards.classList.contains("text") || cards.classList.contains("table") || cards.classList.contains("brewer");
+    var list = rows ? el("ul", "plain rows") : el("div", "cards");
+    var th = $(".rows > .th", cards);  // the Table view's column heads
+    if (th) list.appendChild(th.cloneNode(true));
+    st.appendChild(list);
+    return st;
   }
   function ensureStack(name) {
     var st = stackByName(name);
     if (st || !byCategory) return st;
-    st = el("section", "stack");
-    st.setAttribute("data-group", name);
-    var head = el("div", "stackhead");
-    var h4 = el("h4");
-    h4.appendChild(el("span", "title", name));
-    head.appendChild(h4);
-    head.appendChild(el("div", "meta", "Qty: 0"));
-    st.appendChild(head);
-    st.appendChild(cards.classList.contains("text") || cards.classList.contains("table") ? el("ul", "plain rows") : el("div", "cards"));
+    st = makeStack(name);
     // the maybeboard sits last, as on Archidekt; a new category goes before it
     var side = excluded.map(stackByName).filter(Boolean)[0];
     if (side && excluded.indexOf(name) < 0) cards.insertBefore(st, side); else cards.appendChild(st);
     return st;
   }
+  // the count shown for a card in the open menu or viewer, kept in step with the card's own
+  var qtyLabels = [];  // {el, card, show}
   function setQty(card, qty) {
     card.setAttribute("data-qty", String(qty));
     var q = $(".qty, .q", card);
     if (q) q.textContent = String(qty);
+    qtyLabels = qtyLabels.filter(function (l) {
+      if (!l.el.isConnected) return false;
+      if (l.card === card) l.show();
+      return true;
+    });
   }
   // the finish badge Archidekt shows beside the name (F, E); none for a normal card
   function setFinish(card, finish) {
@@ -310,12 +463,39 @@
     dot.textContent = "";
     dot.appendChild(el("span", "sr-only", "tag " + t.name));
   }
-  // Archidekt's custom mana value: the deck's own override of a card's mana value (data-mv)
+  // Archidekt's custom mana value: the deck's own override of a card's mana value (data-mv). The
+  // Table view's MV column shows it, and grouped by Mana value the card moves to its stack.
   function setManaValue(card, mv) {
     if (mv === null || mv === undefined || mv === "") card.removeAttribute("data-mv");
     else card.setAttribute("data-mv", String(mv));
+    var custom = card.getAttribute("data-mv"), printed = card.getAttribute("data-cmc");
+    var now = custom !== null ? custom : printed;  // as the deck counts it (deck_stats.mana_value)
+    var cell = $(".mv", card);
+    if (cell) {
+      cell.textContent = now === null ? "" : String(Number(now));
+      if (custom !== null && printed !== null) cell.title = "Custom mana value; printed " + Number(printed);
+      else cell.removeAttribute("title");
+    }
+    var from = stackOf(card);
+    if (grouping !== "mv" || !from || from === "Land") return;  // a land is grouped as one whatever its value
+    var to = now === null ? "No mana value" : Number(now) + " mana value";  // deckpage.mv_group
+    if (to === from) return;
+    var focused = document.activeElement === card;
+    $(".cards, .rows", mvStack(to)).appendChild(card);
+    if (focused) card.focus();
+    refreshStacks();
   }
-  // The card menu's "Mana value…" form: a whole number from 0 to 20, or Clear to use the card's own
+  // the Mana value grouping's stack, made in its place in the order when there is none
+  function mvStack(name) {
+    var st = stackByName(name);
+    if (st) return st;
+    var rank = function (n) { return n === "Land" ? 1e6 : n === "No mana value" ? 2e6 : parseFloat(n); };
+    st = makeStack(name);
+    var after = $$(".stack", cards).filter(function (o) { return rank(o.getAttribute("data-group")) > rank(name); })[0];
+    cards.insertBefore(st, after || null);
+    return st;
+  }
+  // The card menu's "Mana value…" form: a whole number from 0 to 15, or Clear to use the card's own
   function manaValueForm(card, m) {
     var name = card.getAttribute("data-card") || "";
     var cur = card.getAttribute("data-mv");
@@ -325,7 +505,7 @@
     form.noValidate = true;  // our own message, in the menu, rather than the browser bubble
     var lab = el("label", "", "Custom mana value");
     var input = el("input", "");
-    input.type = "number"; input.min = "0"; input.max = "20"; input.step = "1"; input.inputMode = "numeric";
+    input.type = "number"; input.min = "0"; input.max = "15"; input.step = "1"; input.inputMode = "numeric";
     input.id = "mv-input"; lab.htmlFor = "mv-input";
     input.value = cur === null ? "" : cur;
     var hint = el("p", "hint", "Archidekt's mana value override for this card, in this deck only.");
@@ -339,17 +519,36 @@
     input.addEventListener("input", function () { msg.className = "status"; msg.textContent = ""; });
     form.appendChild(lab); form.appendChild(input); form.appendChild(hint); form.appendChild(acts); form.appendChild(msg);
     m.appendChild(form);
+    // The form closes at once and the card shows the new value while Archidekt saves it (a save
+    // in the background, as the menu's other edits are)
     var send = function (value) {
       var ch = { action: "set_mana_value", card_name: name, mana_value: value, zone: card.getAttribute("data-zone") || "main" };
       var inv = { action: "set_mana_value", card_name: name, mana_value: cur === null ? null : Number(cur), zone: ch.zone };
-      m.classList.add("busy");
-      saveEdit([ch], [inv]).then(function () { closeMenu(); })  // applyAnswer shows Saved with Undo
-        .catch(function (err) { m.classList.remove("busy"); if (!err || !err.cancelled) { msg.className = "status err"; msg.textContent = err.message; } });
+      var saying = "Saving the mana value of " + name + "…";
+      var held = holdConfirmed(card, "Mana value", function () { return cur; }), gen = held.gen;
+      held.queued++;
+      setManaValue(card, value);
+      closeMenu();
+      savingNote(saying, false, card, "Mana value");
+      background({
+        card: card, what: "Mana value",
+        // an earlier one of these was refused: this one was made over a value Archidekt never had
+        start: function () { return held.gen === gen ? { changes: [ch], inverse: [inv], saying: saying } : null; },
+        saved: function () { held.state = value === null ? null : String(value); },
+        undo: function () {
+          held.gen++;
+          var back = held.state;
+          setManaValue(card, back);
+          return name + " is back to " + (back === null ? "its own mana value" : back) + "." +
+            droppedNote(held, "Your later mana value for it was not sent.", "Your later mana values for it were not sent.");
+        },
+        done: function () { held.queued--; releaseConfirmed(held); }
+      });
     };
     form.addEventListener("submit", function (e) {
       stop(e);
       var v = input.value.trim();
-      if (!/^\d{1,2}$/.test(v) || Number(v) > 20) { msg.className = "status err"; msg.textContent = "Enter a whole number from 0 to 20."; input.focus(); return; }
+      if (!/^\d{1,2}$/.test(v) || Number(v) > 15) { msg.className = "status err"; msg.textContent = "Enter a whole number from 0 to 15."; input.focus(); return; }
       if (cur !== null && Number(cur) === Number(v)) { closeMenu(); return; }
       send(Number(v));
     });
@@ -428,6 +627,7 @@
       if (r.categories && r.categories.length > 1) card.setAttribute("data-allcats", JSON.stringify(r.categories));
       else card.removeAttribute("data-allcats");
       if (r.notes !== undefined) { if (r.notes) card.setAttribute("data-notes", r.notes); else card.removeAttribute("data-notes"); }
+      if (r.set_code) showPrinting(card, { set: String(r.set_code).toUpperCase() + " " + (r.collector_number || ""), img: r.image || "", price: r.price });
       if (r.relation_id !== null && r.relation_id !== undefined) card.setAttribute("data-rel", String(r.relation_id));
       card.classList.toggle("side", r.zone === "side" && card.classList.contains("row"));
       if (byCategory && cat && stackOf(card) !== cat) {
@@ -438,17 +638,19 @@
     names.forEach(function (name) {
       $$(".c, .row", cards).filter(function (c) { return frontFace(c.getAttribute("data-card")) === name; }).forEach(function (card) {
         var r = take(card);
+        if (waits(card)) return;  // an edit of it still to be saved: it shows that, and its answer follows
         if (r) { place(card, r); return; }
-        (removedCards[name] = removedCards[name] || []).push(card);
+        keepRemoved(card, stackOf(card));
         card.remove();
       });
     });
     // rows with no card on the page: a card an Undo put back (its element was kept)
     left.forEach(function (r) {
       var kept = removedCards[frontFace(r.name)];
-      var card = kept && kept.shift();
-      if (!card) return;
-      var st = ensureStack((r.categories && r.categories[0]) || stackOf(card)) || stackByName(stackOf(card)) || $(".stack", cards);
+      var was = kept && kept.shift();
+      if (!was) return;
+      var card = was.card, home = (r.categories && r.categories[0]) || was.home;
+      var st = (home && (ensureStack(home) || stackByName(home))) || stackByName(was.home) || $(".stack", cards);
       if (!st) return;
       $(".cards, .rows", st).appendChild(card);
       place(card, r);
@@ -481,8 +683,9 @@
   var past = [], future = [], histBusy = false;
   var undoBtnEl = null, redoBtnEl = null;
   function syncHist() {
-    if (undoBtnEl) undoBtnEl.disabled = histBusy || !past.length;
-    if (redoBtnEl) redoBtnEl.disabled = histBusy || !future.length;
+    // an edit still saving in the background goes first; Undo and Redo wait for it
+    if (undoBtnEl) undoBtnEl.disabled = histBusy || bgBusy() || !past.length;
+    if (redoBtnEl) redoBtnEl.disabled = histBusy || bgBusy() || !future.length;
   }
   function record(changes, inverse) {
     future = [];
@@ -500,11 +703,11 @@
   function histButton(label, fn) {
     var b = el("button", "btn", label);
     b.type = "button";
-    b.addEventListener("click", function () { b.disabled = true; fn(); });
+    b.addEventListener("click", function () { if (histBusy || saving || bgBusy()) return; b.disabled = true; fn(); });
     return b;
   }
   function undoLast() {
-    if (histBusy || saving || !past.length) return;
+    if (histBusy || saving || bgBusy() || !past.length) return;
     var entry = past.pop(), done = 0;
     histBusy = true;
     syncHist();
@@ -524,7 +727,7 @@
     });
   }
   function redoLast() {
-    if (histBusy || saving || !future.length) return;
+    if (histBusy || saving || bgBusy() || !future.length) return;
     var entry = future.pop();
     histBusy = true;
     syncHist();
@@ -532,7 +735,7 @@
       histBusy = false;
       past.push(entry);
       syncHist();
-      toast("Redone. Snapshot kept under History", { actions: [histButton("Undo", undoLast), historyLink()] });
+      toast("Redone. Snapshot kept under History.", { actions: [histButton("Undo", undoLast), historyLink()] });
     }).catch(function (err) {
       histBusy = false;
       future.push(entry);
@@ -542,12 +745,12 @@
   }
   if (own && deckId) {
     // the editor's keys: Ctrl+Z, Ctrl+Shift+Z or Ctrl+Y (Cmd on a Mac), never while typing in a
-    // field, behind the card menu or viewer, or while a question is up
+    // field, behind the card menu, viewer or EDHPlay dialog, or while a question is up
     document.addEventListener("keydown", function (ev) {
       if (!(ev.ctrlKey || ev.metaKey) || ev.altKey) return;
       var t = ev.target, tag = t && t.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || (t && t.isContentEditable)) return;
-      if (menu || document.documentElement.classList.contains("cardview-open") || $(".deck-toast[role=alertdialog]")) return;
+      if (menu || document.documentElement.classList.contains("cardview-open") || $(".deck-toast[role=alertdialog], .edhplay-dialog, .printpick.open")) return;
       var k = (ev.key || "").toLowerCase();
       if (k === "z" && !ev.shiftKey) { if (past.length) { ev.preventDefault(); undoLast(); } }
       else if ((k === "z" && ev.shiftKey) || (k === "y" && !ev.metaKey)) { if (future.length) { ev.preventDefault(); redoLast(); } }
@@ -555,15 +758,18 @@
   }
 
   var refreshed = false;
-  function applyAnswer(d, changes, undoChanges, replay) {
+  // note: what the Saved message says in place of the plain "Saved." (a printing change says
+  // which printing, and when the finish had to change with it)
+  function applyAnswer(d, changes, undoChanges, replay, note) {
+    var saved = note || "Saved. Snapshot kept under History.";
     var names = namesOf(changes);
     drawRows(d.rows, names);
     drawStats(d);
-    if (menu) closeMenu();
+    if (menu && !menuCard.isConnected) closeMenu();  // a menu open on a card the answer took off
     if (replay) {
       // an Undo or Redo step: the history says what was done; a stale read is read once more
       if (d.stale) setTimeout(function () {
-        api(editUrl, { refresh: true, names: names }).then(function (r) { if (r.ok) { drawRows(r.rows, names); drawStats(r); } }).catch(function () { /* the next view shows it */ });
+        api(editUrl, { refresh: true, names: names }).then(function (r) { if (r.ok) { drawRows(r.rows, names); drawStats(r); if (menu && !menuCard.isConnected) closeMenu(); } }).catch(function () { /* the next view shows it */ });
       }, 1500);
       return;
     }
@@ -578,13 +784,13 @@
       toast("Saved. Refreshing…", { sticky: true, actions: actions });
       setTimeout(function () {
         api(editUrl, { refresh: true, names: names }).then(function (r) {
-          if (r.ok) { drawRows(r.rows, names); drawStats(r); }
-          toast("Saved. Snapshot kept under History", { actions: actions });
-        }).catch(function () { toast("Saved. Snapshot kept under History", { actions: actions }); });
+          if (r.ok) { drawRows(r.rows, names); drawStats(r); if (menu && !menuCard.isConnected) closeMenu(); }
+          toast(saved, { actions: actions });
+        }).catch(function () { toast(saved, { actions: actions }); });
       }, 1500);
       return;
     }
-    toast("Saved. Snapshot kept under History", { actions: actions });
+    toast(saved, { actions: actions });
   }
 
   // -- the edits a card offers (menu and viewer alike) ----------------------------------------
@@ -613,7 +819,7 @@
     else if (ch.action === "remove") {
       // put the row back as it was: every one of its categories (in order, the primary first),
       // its printing (the deck proper only; a maybeboard add takes no pinned printing), finish,
-      // color tag and custom mana value, not just name and category. Its notes cannot come back:
+      // color tag, custom mana value and companion and flip flags, not just name and category. Its notes cannot come back:
       // Archidekt has no way for the gateway to write them (confirmNotes warns first).
       inv = { action: "add", card_name: name, quantity: qty };
       var cats = catsOf(card);
@@ -623,6 +829,9 @@
       if (zone === "main" && pr.length === 2 && pr[0] && pr[1]) { inv.set_code = pr[0].toLowerCase(); inv.collector_number = pr[1]; }
       var fin = (card.getAttribute("data-finish") || "").toLowerCase();
       if (fin === "foil" || fin === "etched") inv.finish = fin;
+      // a companion, or a card set to show its back, comes back as one
+      if (card.hasAttribute("data-companion")) inv.companion = true;
+      if (card.hasAttribute("data-flipped")) inv.flipped_default = true;
       var more = [inv];
       var tag = splitLabel(card.getAttribute("data-label") || "");
       if (tag.name) more.push({ action: "set_label", card_name: name, label: tag.name, color: tag.colour || undefined });
@@ -631,26 +840,17 @@
       if (zone === "side") more.forEach(function (m) { m.zone = "side"; });
       return more;
     } else if (ch.action === "set_category") {
-      // a move files the card under that one category; a card filed under several could not
-      // get all of them back by a move, so it has no Undo
-      if (catsOf(card).length > 1) return null;
-      inv = { action: "set_category", card_name: name, category: catOf(card) || stackOf(card) };
+      // a move files the card under that one category; its Undo files it back under every
+      // category it had (in order, the primary first), as the Undo of a removal does
+      var was = catsOf(card);
+      inv = { action: "set_category", card_name: name, category: was[0] || stackOf(card) };
+      if (was.length > 1) inv.categories = was;
       // after the move the row sits in the zone its new category puts it in
       zone = excluded.indexOf(ch.category) >= 0 ? "side" : "main";
       if (twinIn(card, zone)) return null;
     } else return null;
     if (zone === "side") inv.zone = "side";
     return inv;
-  }
-  function edit(card, action, value) {
-    var ch = changeFor(card, action, value);
-    var inv = inverseFor(card, ch);
-    var go = function () { return saveEdit([ch], inv ? [].concat(inv) : null); };
-    if (action !== "remove") return go();
-    return confirmNotes([card]).then(function (yes) {
-      if (!yes) { var c = new Error("Nothing was changed."); c.cancelled = true; throw c; }
-      return go();
-    });
   }
   // Before a card with notes is removed: Archidekt keeps a card's notes on its row, and the
   // gateway has no way to write them, so neither an Undo nor anything else here brings them back.
@@ -677,10 +877,137 @@
       no.focus();
     });
   }
+  // Quantity steps (the menu's and the viewer's − and +): the count changes at once and a burst
+  // of steps is one save of the count it ends on, sent once the presses pause (or the menu
+  // closes); a step made while that save is out follows it in a save of its own. The last copy's
+  // − removes the card.
+  function copies(n) { return n === 1 ? "1 copy" : n + " copies"; }
+  function stepOf(card) { return qtySteps.filter(function (s) { return s.card === card; })[0] || null; }
   function stepQty(card, delta) {
-    var q = qtyOf(card) + delta;
-    if (q <= 0) return edit(card, "remove");
-    return edit(card, "set_quantity", q);
+    var s = stepOf(card);
+    var q = (s ? s.shown : qtyOf(card)) + delta;
+    if (q <= 0) { removeCard(card); return; }
+    if (!s) { s = { card: card, shown: q, saved: qtyOf(card), timer: 0, queued: false }; qtySteps.push(s); }
+    s.shown = q;
+    setQty(card, q);
+    refreshStacks();
+    savingNote("Saving " + card.getAttribute("data-card") + ": " + copies(q) + "…", false, card, "Quantity");
+    syncHist();
+    if (!s.queued) { clearTimeout(s.timer); s.timer = setTimeout(function () { sendSteps(s); }, 400); }
+  }
+  function flushSteps() { qtySteps.forEach(function (s) { if (s.timer) sendSteps(s); }); }
+  function settleSteps(s) {
+    if (s.timer || s.queued) return;
+    var i = qtySteps.indexOf(s);
+    if (i >= 0) qtySteps.splice(i, 1);
+    syncHist();
+  }
+  function sendSteps(s) {
+    clearTimeout(s.timer);
+    s.timer = 0;
+    s.queued = true;
+    var card = s.card, name = card.getAttribute("data-card"), sent = 0;
+    background({
+      card: card, what: "Quantity",
+      start: function () {
+        s.queued = false;
+        if (s.gone || s.shown === s.saved) { settleSteps(s); return null; }
+        sent = s.shown;
+        var ch = changeFor(card, "set_quantity", sent);
+        var inv = { action: "set_quantity", card_name: name, quantity: s.saved };
+        if (ch.zone) inv.zone = ch.zone;
+        return { changes: [ch], inverse: [inv], saying: "Saving " + name + ": " + copies(sent) + "…" };
+      },
+      saved: function () {
+        s.saved = sent;
+        if (!s.gone) { setQty(card, s.shown); refreshStacks(); }
+        settleSteps(s);
+      },
+      undo: function () {
+        s.shown = s.saved;
+        if (!s.gone) { setQty(card, s.saved); refreshStacks(); }
+        settleSteps(s);
+        return name + " is back to " + copies(s.saved) + ".";
+      }
+    });
+  }
+  // Remove from deck: the card leaves the page at once (after the question a card note asks) and
+  // comes back in its place when the save does not go through.
+  function removeCard(card) {
+    var name = card.getAttribute("data-card");
+    confirmNotes([card]).then(function (yes) {
+      if (!yes) return;
+      var s = stepOf(card);
+      if (s) { clearTimeout(s.timer); s.timer = 0; s.gone = true; }
+      // where Archidekt has the card filed, kept through any move of it still waiting or saving
+      // a refused move files it back there, and so does a refused removal
+      var filed = holdConfirmed(card, "Move", function () { return { spot: spotOf(card), cat: byCategory ? stackOf(card) : catOf(card) }; });
+      var near = card.closest(".stack");
+      var saying = "Removing " + name + "…";
+      card.remove();
+      refreshStacks();
+      closeMenu();
+      closeViewer();
+      if (!document.activeElement || document.activeElement === document.body) focusNear(near);
+      savingNote(saying, false, card, "Removal");
+      background({
+        card: card, what: "Removal",
+        start: function () {
+          // the count to put back with an Undo is the one Archidekt has by now
+          if (s) { setQty(card, s.saved); settleSteps(s); }
+          var ch = changeFor(card, "remove");
+          var inv = inverseFor(card, ch);
+          return { changes: [ch], inverse: inv ? [].concat(inv) : null, saying: saying };
+        },
+        // kept for an Undo, which puts this element back (drawRows)
+        saved: function () { var st = filed.state.spot.stack; keepRemoved(card, st ? st.getAttribute("data-group") : ""); },
+        undo: function () {
+          putBack(card, filed.state.spot);
+          return name + " is back in " + (zoneOf(card) === "side" ? "the " + sideCat : "the deck") + ".";
+        },
+        done: function () { releaseConfirmed(filed); }
+      });
+    });
+  }
+  // Move to (and a drop on another stack): the card is filed under its new category at once, in
+  // that stack when the page is grouped by category, and goes back when the save does not go through.
+  function moveTo(card, to, target) {
+    var name = card.getAttribute("data-card");
+    var from = byCategory ? stackOf(card) : catOf(card);
+    var ch = changeFor(card, "set_category", to);
+    var inv = inverseFor(card, ch);  // from where the card is now, before it moves
+    var held = holdConfirmed(card, "Move", function () { return { spot: spotOf(card), cat: from }; }), gen = held.gen;
+    held.queued++;
+    var saying = "Moving " + name + " to " + to + "…";
+    // filed as Archidekt files it: a category left out of the deck is the maybeboard (drawRows)
+    var zone = excluded.indexOf(to) >= 0 ? "side" : "main";
+    card.setAttribute("data-cat", to);
+    card.removeAttribute("data-allcats");
+    card.setAttribute("data-zone", zone);
+    card.classList.toggle("side", zone === "side" && card.classList.contains("row"));
+    target = target || (byCategory ? ensureStack(to) : null);
+    var focused = document.activeElement === card;
+    if (target) $(".cards, .rows", target).appendChild(card);
+    if (focused) card.focus();  // moving the element took the focus off it
+    refreshStacks();
+    var now = { spot: spotOf(card), cat: to };
+    savingNote(saying, false, card, "Move");
+    background({
+      card: card, what: "Move",
+      // an earlier move of this card was refused: this one was made from where Archidekt never had it
+      start: function () { return held.gen === gen ? { changes: [ch], inverse: inv ? [inv] : null, saying: saying } : null; },
+      saved: function () { held.state = now; },
+      undo: function () {
+        held.gen++;
+        var back = held.state;
+        // taken off the page meanwhile (a Remove waits its turn): only filed back; the removal's
+        // own answer decides whether it shows again
+        putBack(card, back.spot, !card.isConnected);
+        return name + " is back in " + (back.cat || "its category") + "." +
+          droppedNote(held, "Your later move of it was not sent.", "Your later moves of it were not sent.");
+      },
+      done: function () { held.queued--; releaseConfirmed(held); }
+    });
   }
   function categoryChoices(card) {
     var cur = byCategory ? stackOf(card) : catOf(card);
@@ -688,6 +1015,98 @@
     if (byCategory) $$(".stack", cards).forEach(function (st) { var n = st.getAttribute("data-group"); if (names.indexOf(n) < 0) names.push(n); });
     if (names.indexOf(sideCat) < 0) names.push(sideCat);
     return names.map(function (n) { return { name: n, current: n === cur, side: excluded.indexOf(n) >= 0 }; });
+  }
+
+  // -- Change printing… (the shared picker, static/printpick.js): a pick shows at once and saves
+  // in the background like the menu's other edits, as one set_printing change; Undo puts the old
+  // printing back, and the old finish when the new printing is not made in it.
+  // The card's printing as the page shows it: data-set ("CMR 472"), the picture, the price and
+  // the finish badge; pr: {set, img, price, finish}, each left as it is when not given.
+  function showPrinting(card, pr) {
+    var oldImg = card.getAttribute("data-img") || "";
+    if (pr.set) {
+      card.setAttribute("data-set", pr.set);
+      $$(".set", card).forEach(function (s) {
+        // the Text view shows the set code, the Table view the code and number ("SLD #1074")
+        s.textContent = s.textContent.indexOf(" ") >= 0 ? printLabel(pr.set) : pr.set.split(" ")[0];
+        s.title = printLabel(pr.set);
+      });
+    }
+    if (pr.img && pr.img !== oldImg) {
+      card.setAttribute("data-img", pr.img);
+      if (oldImg) $$("img", card).forEach(function (i) { if (i.getAttribute("src") === oldImg) i.src = pr.img; });
+    }
+    if (pr.price !== undefined) {
+      var p = pr.price === null || isNaN(pr.price) ? null : Number(pr.price);
+      if (p === null) card.removeAttribute("data-price"); else card.setAttribute("data-price", p.toFixed(2));
+      var cell = $(".price", card);
+      if (cell) cell.textContent = p === null ? "" : money(p);
+    }
+    if (pr.finish) setFinish(card, pr.finish);
+  }
+  function printingOf(card) {
+    var price = parseFloat(card.getAttribute("data-price"));
+    return { set: card.getAttribute("data-set") || "", img: card.getAttribute("data-img") || "",
+      price: isNaN(price) ? null : price, finish: card.getAttribute("data-finish") || "Normal" };
+  }
+  function changePrinting(card) {
+    var Pick = window.MtgPrintPick;
+    if (!Pick || !card.isConnected) return;
+    var pr = (card.getAttribute("data-set") || "").trim().split(/\s+/);
+    Pick.open({
+      name: card.getAttribute("data-card") || "",
+      current: pr.length === 2 && pr[0] ? { set: pr[0].toLowerCase(), number: pr[1] } : null,
+      finish: card.getAttribute("data-finish") || "Normal",
+      returnFocus: card,
+      onPick: function (p, info) { if (card.isConnected) savePrinting(card, p, info); }
+    });
+  }
+  var FINISH_WORDS = { normal: "non-foil", foil: "foil", etched: "etched" };
+  // "SLD 1075" (the page's data-set) as the picker writes it: "SLD #1075"
+  function printLabel(set) { return String(set || "").trim().replace(/\s+/, " #"); }
+  function savePrinting(card, p, info) {
+    var name = card.getAttribute("data-card") || "";
+    var was = printingOf(card);
+    var wasPr = was.set.trim().split(/\s+/);
+    var label = String(p.set).toUpperCase() + " " + p.collector_number;  // data-set, as the page draws it
+    var said = printLabel(label);
+    var ch = { action: "set_printing", card_name: name, set_code: String(p.set).toLowerCase(), collector_number: String(p.collector_number) };
+    if (info.changed) ch.finish = info.finish;
+    // Undo: the old printing (and finish, when this pick changed it). Another row of the card in
+    // the deck in another printing or finish would be swapped by it too: no Undo then.
+    var inv = wasPr.length === 2 && wasPr[0] ? { action: "set_printing", card_name: name, set_code: wasPr[0].toLowerCase(), collector_number: wasPr[1] } : null;
+    if (inv && info.changed) inv.finish = was.finish.toLowerCase();
+    if (inv && $$(".c, .row", cards).some(function (c) {
+      return c !== card && zoneOf(c) === "main" && frontFace(c.getAttribute("data-card")) === frontFace(name) &&
+        (c.getAttribute("data-set") !== was.set || c.getAttribute("data-finish") !== was.finish);
+    })) inv = null;
+    var fin = info.finish.charAt(0).toUpperCase() + info.finish.slice(1);
+    var now = { set: label, img: p.image_normal || p.image_small || "", price: window.MtgPrintPick.priceOf(p, info.finish), finish: fin };
+    var held = holdConfirmed(card, "Printing", function () { return was; }), gen = held.gen;
+    held.queued++;
+    var saying = "Changing " + name + " to " + said + "…";
+    showPrinting(card, now);
+    refreshStacks();
+    savingNote(saying, false, card, "Printing");
+    // the Saved message says when the finish changed with the printing
+    var note = "Saved. " + name + " is now " + said +
+      (info.changed ? ", " + FINISH_WORDS[info.finish] + ": that printing is not made in " + FINISH_WORDS[info.from] : "") +
+      ". Snapshot kept under History.";
+    background({
+      card: card, what: "Printing",
+      // an earlier printing change of this card was refused: this one was made over a printing Archidekt never had
+      start: function () { return held.gen === gen ? { changes: [ch], inverse: inv ? [inv] : null, saying: saying, note: note } : null; },
+      saved: function () { held.state = now; },
+      undo: function () {
+        held.gen++;
+        var back = held.state;
+        showPrinting(card, back);
+        refreshStacks();
+        return name + " is back to " + printLabel(back.set) + "." +
+          droppedNote(held, "Your later printing change was not sent.", "Your later printing changes were not sent.");
+      },
+      done: function () { held.queued--; releaseConfirmed(held); }
+    });
   }
 
   // -- card viewer (static/cardview.js shows the whole card; this adds the deck's actions) -------
@@ -714,25 +1133,14 @@
         plus.setAttribute("aria-label", "One more: " + (q + 1));
       };
       relabel();
-      var busy = function (on) { minus.disabled = plus.disabled = on; ctl.classList.toggle("busy", on); };
-      var step = function (delta) {
-        busy(true);
-        stepQty(card, delta).then(function () {
-          busy(false);
-          if (!card.isConnected) { closeViewer(); return; }
-          relabel();
-        }).catch(function (err) { busy(false); showError(err); });
-      };
-      minus.addEventListener("click", function () { step(-1); });
-      plus.addEventListener("click", function () { step(1); });
+      qtyLabels.push({ el: n, card: card, show: relabel });
+      minus.addEventListener("click", function () { stepQty(card, -1); });
+      plus.addEventListener("click", function () { stepQty(card, 1); });
       ctl.appendChild(minus); ctl.appendChild(n); ctl.appendChild(plus);
       acts.push(ctl);
       var rm = el("button", "btn btn-danger", "Remove from deck");
       rm.type = "button";
-      rm.addEventListener("click", function () {
-        rm.disabled = true;
-        edit(card, "remove").then(function () { closeViewer(); }).catch(function (err) { rm.disabled = false; showError(err); });
-      });
+      rm.addEventListener("click", function () { removeCard(card); });
       acts.push(rm);
       var move = el("button", "btn", "Move to…");
       move.type = "button";
@@ -786,11 +1194,10 @@
       try { history.back(); } catch (e) { ignorePop = false; }
     }
     menuPushed = false;
+    flushSteps();  // quantity steps made in it go to Archidekt now
     if (!back) return;
     if (card && card.isConnected) { card.focus(); return; }
-    // the card was removed: the next card of its stack, else any card, keeps the keyboard on the page
-    var next = (stack && stack.isConnected && $(".c, .row", stack)) || $(".c, .row", cards);
-    if (next) next.focus();
+    focusNear(stack);  // the card was removed
   }
   function menuItem(text, ic, onClick, cls) {
     var b = el("button", cls || "", "");
@@ -835,16 +1242,10 @@
         plus.setAttribute("aria-label", "One more " + name + ": " + (q + 1));
       };
       relabel();
-      var stepping = function (delta) {
-        minus.disabled = plus.disabled = true;
-        m.classList.add("busy");
-        stepQty(card, delta).then(function () { /* applyAnswer closed the menu */ }).catch(function (err) {
-          if (menu === m) { minus.disabled = plus.disabled = false; m.classList.remove("busy"); relabel(); }
-          showError(err);
-        });
-      };
-      minus.addEventListener("click", function (e) { stop(e); stepping(-1); });
-      plus.addEventListener("click", function (e) { stop(e); stepping(1); });
+      // the menu stays open for more steps; each shows at once and saves in the background
+      qtyLabels.push({ el: n, card: card, show: relabel });
+      minus.addEventListener("click", function (e) { stop(e); stepQty(card, -1); });
+      plus.addEventListener("click", function (e) { stop(e); stepQty(card, 1); });
       row.appendChild(minus); row.appendChild(n); row.appendChild(plus);
       m.appendChild(row);
       var moveBtn = menuItem("Move to", "swap", null, "more");
@@ -856,10 +1257,7 @@
       sub.setAttribute("aria-label", "Categories");
       sub.hidden = true;
       categoryChoices(card).forEach(function (c) {
-        var b = menuItem(c.name, c.side ? "eye-off" : "tag", function () {
-          m.classList.add("busy");
-          edit(card, "set_category", c.name).catch(function (err) { if (menu === m) m.classList.remove("busy"); showError(err); });
-        }, c.current ? "on" : "");
+        var b = menuItem(c.name, c.side ? "eye-off" : "tag", function () { closeMenu(); moveTo(card, c.name); }, c.current ? "on" : "");
         if (c.side) b.title = "Not counted in the deck";
         if (c.current) { b.disabled = true; b.setAttribute("aria-current", "true"); }
         sub.appendChild(b);
@@ -867,19 +1265,25 @@
       var toggleSub = function (open) {
         sub.hidden = !open;
         moveBtn.setAttribute("aria-expanded", open ? "true" : "false");
-        if (open) { var f = $("button:not([disabled])", sub); if (f) f.focus(); fit(m); }
+        if (!open) return;
+        fit(m);
+        // the opened list in view inside the menu (which scrolls in a short window), from its
+        // Move to item down as far as fits
+        var end = sub.offsetTop + sub.offsetHeight - m.clientHeight;
+        if (m.scrollTop < end) m.scrollTop = Math.min(moveBtn.offsetTop, end);
+        var f = $("button:not([disabled])", sub);
+        if (f) f.focus({ preventScroll: true });
       };
       moveBtn.addEventListener("click", function (e) { stop(e); toggleSub(sub.hidden); });
       moveBtn.addEventListener("keydown", function (e) { if (e.key === "ArrowRight") { stop(e); toggleSub(true); } });
       sub.addEventListener("keydown", function (e) { if (e.key === "ArrowLeft") { stop(e); toggleSub(false); moveBtn.focus(); } });
       m.appendChild(moveBtn);
       m.appendChild(sub);
+      // the deck proper only: Archidekt's printing change is for the deck's own rows
+      if (window.MtgPrintPick && zoneOf(card) === "main") m.appendChild(menuItem("Change printing…", "image", function () { closeMenu(); changePrinting(card); }));
       if (window.MtgDeckTag) m.appendChild(menuItem("Color tag…", "tag", function () { closeMenu(); window.MtgDeckTag(card); }));
       m.appendChild(menuItem("Mana value…", "edit", function () { manaValueForm(card, m); }));
-      m.appendChild(menuItem("Remove from deck", "x", function () {
-        m.classList.add("busy");
-        edit(card, "remove").catch(function (err) { if (menu === m) m.classList.remove("busy"); showError(err); });
-      }, "danger"));
+      m.appendChild(menuItem("Remove from deck", "x", function () { removeCard(card); }, "danger"));
       m.appendChild(el("div", "sep"));
       var editLink = el("a", "", "");
       editLink.setAttribute("role", "menuitem");
@@ -923,6 +1327,9 @@
   function fit(m) {
     // keep the whole menu inside the window: never a horizontal scrollbar, never off the bottom
     var pad = 8;
+    // measured at its own height, not at the cap an earlier fit put on it: a list opened inside
+    // it (Move to) makes it taller, and it moves up to show that before it scrolls
+    m.style.maxHeight = "";
     var w = m.offsetWidth, h = m.offsetHeight;
     var x = parseFloat(m.style.left) || 0, y = parseFloat(m.style.top) || 0;
     if (x + w + pad > window.innerWidth) x = Math.max(pad, window.innerWidth - w - pad);
@@ -1300,19 +1707,7 @@
   function moveCard(card, target) {
     var from = card.closest(".stack");
     if (!target || !from || target === from) return;
-    var to = target.getAttribute("data-group");
-    var ch = changeFor(card, "set_category", to);
-    var inv = inverseFor(card, ch);  // from where the card is now, before it moves
-    var next = card.nextSibling;
-    $(".cards, .rows", target).appendChild(card);  // shown where it was dropped while it saves
-    saveEdit([ch], inv ? [inv] : null).catch(function (err) {
-      // nothing was saved: the card goes back where it was
-      var back = from.isConnected ? from : ensureStack(from.getAttribute("data-group"));
-      var list = back && $(".cards, .rows", back);
-      if (list) list.insertBefore(card, next && next.parentNode === list ? next : null);
-      refreshStacks();
-      showError(err);
-    });
+    moveTo(card, target.getAttribute("data-group"), target);  // shown where it was dropped while it saves
   }
 
   // mouse drag (native drag and drop)
@@ -1324,6 +1719,10 @@
     closeMenu();
     dragged = card;
     card.classList.add("dragging");
+    // The stack under the pointer fans out below its stack's box, over the top of the stack
+    // directly below, and a native drag keeps it open: a drop there would land on the card's own
+    // stack. The fan stays closed while a card is dragged (deckpage.py, .carddrag).
+    cards.classList.add("carddrag");
     try { e.dataTransfer.setData("text/plain", card.getAttribute("data-card")); e.dataTransfer.effectAllowed = "move"; } catch (err) { /* older browsers */ }
   });
   cards.addEventListener("dragover", function (e) {
@@ -1346,6 +1745,7 @@
   });
   cards.addEventListener("dragend", function () {
     if (dragged) dragged.classList.remove("dragging");
+    cards.classList.remove("carddrag");
     $$(".stack.dropping", cards).forEach(function (s) { s.classList.remove("dropping"); });
     setTimeout(function () { dragged = null; }, 0);  // swallow the click that follows a drop
   });
@@ -1457,28 +1857,30 @@
 
   // -- stack order: drag a stack's handle (mouse, touch or pen), or focus it and press the arrow
   // keys, to put the stacks in your own order. Archidekt keeps no stack order of its own that the
-  // gateway could find, so the order is remembered in this browser, per deck and per grouping:
-  // on this device only (it is not a deck save, has no Undo, and the handle and Reset say so).
+  // gateway could find, so the order is kept on the member's account (0.7.29, prefs.js), per deck
+  // and per grouping: it is not a deck save and has no Undo; Reset puts the deck's order back.
   if (cards && cards.classList.contains("deckview")) (function () {
-    var key = "mtg-stack-order:" + cards.getAttribute("data-deck") + ":" + (cards.getAttribute("data-grouping") || "");
+    var prefs = window.MtgPrefs;
+    var key = "stack:" + cards.getAttribute("data-deck") + ":" + (cards.getAttribute("data-grouping") || "");
     function stacksNow() { return $$(".stack", cards); }
     function nameOf(st) { return st.getAttribute("data-group") || ""; }
     function save() {
-      try { localStorage.setItem(key, JSON.stringify(stacksNow().map(nameOf))); } catch (e) { /* private window */ }
+      if (prefs) prefs.set(key, stacksNow().map(nameOf));
       showReset();
     }
     function saved() {
-      try { var v = JSON.parse(localStorage.getItem(key) || "null"); return Array.isArray(v) ? v : null; } catch (e) { return null; }
+      var v = prefs ? prefs.get(key) : null;
+      return Array.isArray(v) ? v : null;
     }
     var reset = null;
     function showReset() {
       if (!reset) {
-        reset = el("button", "btn-ghost small stack-reset", "Reset stack order (this device only)");
+        reset = el("button", "btn-ghost small stack-reset", "Reset stack order");
         reset.type = "button";
-        reset.title = "Your stack order is kept in this browser on this device only, not on Archidekt; " +
+        reset.title = "Your stack order is kept with your account, not on Archidekt; " +
           "this puts the deck's own order back";
         reset.addEventListener("click", function () {
-          try { localStorage.removeItem(key); } catch (e) { /* nothing kept */ }
+          if (prefs) prefs.set(key, null);
           var later = stacksNow().filter(function (st) { return original.indexOf(st) < 0; });
           original.concat(later).forEach(function (st) { if (st.parentNode === cards) cards.appendChild(st); });
           reset.hidden = true;
@@ -1507,13 +1909,13 @@
       showReset();
     }
     function addHandle(st) {
-      var head = $(".stackhead h2, .stackhead h4", st);
+      var head = $(".stackhead h2", st);
       if (!head || $(".stackgrip", head)) return;
       var grip = el("button", "stackgrip icon-only btn-ghost", "⠿");
       grip.type = "button";
       grip.setAttribute("aria-label", "Move the stack " + nameOf(st) + " (drag, or use the arrow keys; " +
-        "the order is kept on this device only)");
-      grip.title = "Drag to reorder (kept on this device only); arrow keys move it too";
+        "the order is kept with your account)");
+      grip.title = "Drag to reorder (kept with your account); arrow keys move it too";
       head.insertBefore(grip, head.firstChild);
       grip.addEventListener("keydown", function (e) {
         var list = stacksNow(), i = list.indexOf(st);
@@ -1643,369 +2045,23 @@
     // a stack the page adds later (a card moved into a new category) gets a handle too
     new MutationObserver(function () { stacksNow().forEach(addHandle); }).observe(cards, { childList: true });
   })();
-
-  // -- Archidekt social actions: like, bookmark, follow, comments ------------------------------------
-  // Each is the person's own click: a confirmation chip appears first, then the gateway sends the
-  // action to Archidekt under their linked session (/social/api). Nothing here is reachable by an
-  // assistant.
-  function socialRequest(method, url, body) {
-    return fetch(url, {
-      method: method, credentials: "same-origin",
-      headers: { "Content-Type": "application/json", "X-CSRF-Token": CSRF },
-      body: body === undefined ? undefined : JSON.stringify(body)
-    }).then(function (r) { return r.json().then(function (d) { d.status = r.status; return d; }); });
-  }
-  function socialProblem(d) {
-    if (d && (d.error === "not_linked" || d.error === "auth")) {
-      var a = el("a", "", "Link your Archidekt account");
-      a.href = "/account";
-      var frag = document.createDocumentFragment();
-      frag.appendChild(a);
-      frag.appendChild(document.createTextNode(" to like, bookmark, follow or comment."));
-      return frag;
-    }
-    return document.createTextNode((d && d.message) || "That did not work; try again.");
-  }
-  function confirmChip(btn, question, yesLabel, onYes) {
-    var old = btn.parentNode.querySelector(".confirm");
-    if (old) old.dismiss(); // one question at a time; the other button comes back
-    var chip = el("span", "confirm");
-    chip.setAttribute("role", "group");
-    chip.appendChild(el("span", "", question)); // in a span, so a long name in it can wrap (.confirm > span)
-    var yes = el("button", "btn-primary", yesLabel);
-    yes.type = "button";
-    var no = el("button", "", "No");
-    no.type = "button";
-    chip.appendChild(yes);
-    chip.appendChild(no);
-    btn.hidden = true;
-    btn.parentNode.insertBefore(chip, btn.nextSibling);
-    var restore = function () { chip.remove(); btn.hidden = false; btn.focus(); };
-    chip.dismiss = function () { chip.remove(); btn.hidden = false; };
-    no.addEventListener("click", restore);
-    chip.addEventListener("keydown", function (e) { if (e.key === "Escape") restore(); });
-    yes.addEventListener("click", function () { chip.remove(); btn.hidden = false; onYes(); });
-    yes.focus();
-  }
-  var social = $(".banner .social");
-  if (social) {
-    var noteEl = null;
-    var note = function (content) {
-      if (noteEl) noteEl.remove();
-      noteEl = el("p", "note");
-      if (typeof content === "string") noteEl.textContent = content; else noteEl.appendChild(content);
-      social.appendChild(noteEl);
-    };
-    var deck = social.getAttribute("data-deck");
-    var setLabel = function (btn, text) { var sp = btn.querySelector("span"); if (sp) sp.textContent = text; };
-    var busy = function (btn, on) { btn.disabled = on; };
-    var likeBtn = $("[data-social=vote]", social);
-    if (likeBtn) {
-      likeBtn.addEventListener("click", function () {
-        var liked = likeBtn.getAttribute("data-state") === "1";
-        confirmChip(likeBtn, liked ? "Remove your like?" : "Like this deck on Archidekt?", liked ? "Remove" : "Like", function () {
-          busy(likeBtn, true);
-          socialRequest("POST", "/social/api/decks/" + encodeURIComponent(deck) + "/vote", { vote: liked ? "none" : "up" }).then(function (d) {
-            busy(likeBtn, false);
-            if (!d.ok) { note(socialProblem(d)); return; }
-            likeBtn.setAttribute("data-state", String(d.vote));
-            likeBtn.classList.toggle("on", d.vote === 1);
-            likeBtn.setAttribute("aria-pressed", d.vote === 1 ? "true" : "false");
-            $(".n", likeBtn).textContent = d.points;
-            setLabel(likeBtn, d.vote === 1 ? "Liked" : "Like");
-            if (noteEl) noteEl.remove();
-          }).catch(function () { busy(likeBtn, false); note("No connection."); });
-        });
-      });
-    }
-    var markBtn = $("[data-social=bookmark]", social);
-    if (markBtn) {
-      markBtn.addEventListener("click", function () {
-        var on = markBtn.getAttribute("data-state") === "1";
-        confirmChip(markBtn, on ? "Remove the bookmark?" : "Bookmark this deck on Archidekt?", on ? "Remove" : "Bookmark", function () {
-          busy(markBtn, true);
-          socialRequest("POST", "/social/api/decks/" + encodeURIComponent(deck) + "/bookmark", { on: !on }).then(function (d) {
-            busy(markBtn, false);
-            if (!d.ok) { note(socialProblem(d)); return; }
-            markBtn.setAttribute("data-state", d.bookmarked ? "1" : "0");
-            markBtn.classList.toggle("on", d.bookmarked);
-            markBtn.setAttribute("aria-pressed", d.bookmarked ? "true" : "false");
-            setLabel(markBtn, d.bookmarked ? "Bookmarked" : "Bookmark");
-            if (noteEl) noteEl.remove();
-          }).catch(function () { busy(markBtn, false); note("No connection."); });
-        });
-      });
-    }
-  }
-  // Follow buttons live in the deck banner and on user pages alike.
-  $$("[data-social=follow]").forEach(function (btn) {
-    var user = btn.getAttribute("data-user");
-    var name = btn.getAttribute("data-name") || "this user";
-    var holder = btn.closest(".social") || btn.parentNode;
-    var say = function (content) {
-      var old = holder.querySelector(".note");
-      if (old) old.remove();
-      var p = el("p", "note");
-      if (typeof content === "string") p.textContent = content; else p.appendChild(content);
-      holder.appendChild(p);
-    };
-    var paint = function (following) {
-      btn.setAttribute("data-state", following ? "1" : "0");
-      btn.classList.toggle("on", following);
-      btn.setAttribute("aria-pressed", following ? "true" : "false");
-      var sp = btn.querySelector("span");
-      if (sp) sp.textContent = (following ? "Following " : "Follow ") + name;
-    };
-    socialRequest("GET", "/social/api/users/" + encodeURIComponent(user) + "/follow").then(function (d) {
-      if (d.ok && d.self) { btn.hidden = true; return; }
-      if (d.ok) paint(d.following);
-    }).catch(function () {});
-    btn.addEventListener("click", function () {
-      var on = btn.getAttribute("data-state") === "1";
-      confirmChip(btn, on ? "Stop following " + name + "?" : "Follow " + name + " on Archidekt?", on ? "Unfollow" : "Follow", function () {
-        btn.disabled = true;
-        socialRequest("POST", "/social/api/users/" + encodeURIComponent(user) + "/follow", { on: !on }).then(function (d) {
-          btn.disabled = false;
-          if (!d.ok) { say(socialProblem(d)); return; }
-          paint(d.following);
-          var old = holder.querySelector(".note");
-          if (old) old.remove();
-        }).catch(function () { btn.disabled = false; say("No connection."); });
-      });
-    });
-  });
-  // The comment thread loads when its panel comes into view; posting asks first.
-  var commentsPanel = $("#comments");
-  if (commentsPanel) {
-    var thread = $(".thread", commentsPanel);
-    var countEl = $("[data-count]", commentsPanel);
-    var form = $("form.newcomment", commentsPanel);
-    var textarea = $("textarea", form);
-    var replyTo = $(".replyto", form);
-    var parentId = null;
-    var me = null;  // the member's Archidekt user id, from the thread load; own comments get Edit and Delete
-    var deckUrl = "/social/api/decks/" + encodeURIComponent(commentsPanel.getAttribute("data-deck")) + "/comments";
-    var when = function (iso) {  // one date format across the site (feedback.js)
-      if (window.MtgText) return window.MtgText.when(iso);
-      var d = new Date(iso);
-      return isNaN(d) ? "" : d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
-    };
-    var render = function (c) {
-      var box = el("article", "cmt");
-      box.setAttribute("data-id", c.id);
-      var who = el("div", "who");
-      var b = el("b", "", c.owner.username || "someone");
-      who.appendChild(b);
-      who.appendChild(document.createTextNode(" · " + when(c.created_at) + (c.edited_at ? " · edited" : "")));
-      var pts = el("span", "pts");
-      var showPoints = function () { pts.textContent = c.points ? " · " + c.points + (c.points === 1 || c.points === -1 ? " point" : " points") : ""; };
-      showPoints();
-      who.appendChild(pts);
-      box.appendChild(who);
-      var p = el("p", "", c.text);
-      box.appendChild(p);
-      var acts = el("div", "acts");
-      var reply = el("button", "btn-ghost", "Reply");
-      reply.type = "button";
-      reply.addEventListener("click", function () {
-        parentId = c.id;
-        replyTo.hidden = false;
-        replyTo.textContent = "";
-        replyTo.appendChild(document.createTextNode("Replying to " + (c.owner.username || "this comment") + " "));
-        var cancel = el("button", "", "Cancel");
-        cancel.type = "button";
-        cancel.addEventListener("click", function () { parentId = null; replyTo.hidden = true; });
-        replyTo.appendChild(cancel);
-        textarea.focus();
-      });
-      acts.appendChild(reply);
-      // votes on other people's comments (Archidekt's comment vote), asked first like the deck's Like
-      if (me !== null && c.id && !(c.owner && c.owner.id === me)) {
-        var voteBtn = function (up) {
-          var btn = el("button", "btn-ghost vote", up ? "▲ Up" : "▼ Down");
-          btn.type = "button";
-          var mine = function () { return c.user_vote === (up ? 1 : 2); };
-          var label = function () {
-            btn.setAttribute("aria-pressed", mine() ? "true" : "false");
-            btn.setAttribute("aria-label", (mine() ? "Take back your " : "Vote ") + (up ? "up" : "down") + ": comment by " + (c.owner.username || "someone"));
-          };
-          label();
-          btn.addEventListener("click", function () {
-            var undoing = mine();
-            confirmChip(btn, undoing ? "Take back your vote?" : (up ? "Vote this comment up on Archidekt?" : "Vote this comment down on Archidekt?"), undoing ? "Take back" : "Vote", function () {
-              btn.disabled = true;
-              socialRequest("POST", deckUrl + "/" + encodeURIComponent(c.id) + "/vote", { vote: undoing ? "none" : (up ? "up" : "down") }).then(function (d) {
-                btn.disabled = false;
-                if (!d.ok) { var n = el("p", "notice error"); n.appendChild(socialProblem(d)); acts.appendChild(n); setTimeout(function () { n.remove(); }, 8000); return; }
-                c.user_vote = d.vote; c.points = d.points;
-                showPoints();
-                Array.prototype.forEach.call(acts.querySelectorAll("button.vote"), function (x) { if (x.relabel) x.relabel(); });
-              }).catch(function () { btn.disabled = false; });
-            });
-          });
-          btn.relabel = label;
-          return btn;
-        };
-        acts.appendChild(voteBtn(true));
-        acts.appendChild(voteBtn(false));
-      }
-      if (me !== null && c.owner && c.owner.id === me) {
-        var edit = el("button", "btn-ghost", "Edit");
-        edit.type = "button";
-        edit.addEventListener("click", function () {
-          if ($("form.editcomment", box)) return;
-          var f = el("form", "editcomment");
-          var ta = document.createElement("textarea");
-          ta.value = c.text; ta.rows = 3; ta.maxLength = 2000; ta.setAttribute("aria-label", "Edit your comment");
-          var save = el("button", "btn-primary", "Save");
-          var cancel = el("button", "", "Cancel"); cancel.type = "button";
-          var note = el("span", "muted small", "");
-          f.appendChild(ta); f.appendChild(save); f.appendChild(cancel); f.appendChild(note);
-          cancel.addEventListener("click", function () { f.remove(); p.hidden = false; });
-          f.addEventListener("submit", function (ev) {
-            ev.preventDefault();
-            var text = ta.value.trim();
-            if (!text) { ta.focus(); return; }
-            save.disabled = true; note.textContent = "Saving…";
-            socialRequest("PATCH", deckUrl + "/" + encodeURIComponent(c.id), { text: text }).then(function (d) {
-              if (!d.ok) { save.disabled = false; note.textContent = ""; note.appendChild(socialProblem(d)); return; }
-              c.text = d.comment.text; p.textContent = c.text; p.hidden = false; f.remove();
-              if (!/edited/.test(who.textContent)) who.appendChild(document.createTextNode(" · edited"));
-            }).catch(function () { save.disabled = false; note.textContent = "Network error; nothing was changed."; });
-          });
-          p.hidden = true;
-          box.insertBefore(f, acts);
-          ta.focus();
-        });
-        acts.appendChild(edit);
-        var del = el("button", "btn-ghost del", "Delete");
-        del.type = "button";
-        del.addEventListener("click", function () {
-          if ($(".confirmbar", box)) return;
-          var bar = el("div", "confirmbar notice warn");
-          bar.setAttribute("role", "alertdialog");
-          bar.appendChild(document.createTextNode("Delete this comment on Archidekt? "));
-          var yes = el("button", "btn-danger", "Delete"); yes.type = "button";
-          var no = el("button", "", "Keep"); no.type = "button";
-          bar.appendChild(yes); bar.appendChild(no);
-          no.addEventListener("click", function () { bar.remove(); });
-          yes.addEventListener("click", function () {
-            yes.disabled = true;
-            socialRequest("DELETE", deckUrl + "/" + encodeURIComponent(c.id)).then(function (d) {
-              if (!d.ok) { yes.disabled = false; bar.textContent = ""; bar.appendChild(socialProblem(d)); bar.appendChild(no); return; }
-              box.remove();
-              if (countEl) countEl.textContent = d.count === 1 ? "1 comment" : d.count + " comments";
-              if (!$(".cmt", thread)) thread.appendChild(el("p", "muted", "No comments yet. Be the first."));
-            }).catch(function () { yes.disabled = false; bar.textContent = "Network error; nothing was changed."; });
-          });
-          box.insertBefore(bar, acts.nextSibling);
-          yes.focus();
-        });
-        acts.appendChild(del);
-      }
-      box.appendChild(acts);
-      if (c.replies && c.replies.length) {
-        var kids = el("div", "replies");
-        c.replies.forEach(function (k) { kids.appendChild(render(k)); });
-        box.appendChild(kids);
-      }
-      return box;
-    };
-    var loaded = false;
-    var failed = function (message) {
-      // say what happened and offer another try (a silent empty thread looked like "no comments")
-      loaded = false;
-      thread.textContent = "";
-      var p = el("p", "notice error");
-      p.setAttribute("role", "alert");
-      p.appendChild(document.createTextNode(message + " "));
-      var retry = el("button", "btn mini-inline", "Try again");
-      retry.type = "button";
-      retry.addEventListener("click", load);
-      p.appendChild(retry);
-      thread.appendChild(p);
-    };
-    var load = function () {
-      if (loaded) return;
-      loaded = true;
-      thread.textContent = "";
-      var loading = el("p", "muted", "Loading comments…");
-      loading.setAttribute("role", "status");
-      thread.appendChild(loading);
-      socialRequest("GET", thread.getAttribute("data-src")).then(function (d) {
-        if (!d.ok) { thread.textContent = ""; var p = el("p", "muted"); p.appendChild(socialProblem(d)); thread.appendChild(p); return; }
-        thread.textContent = "";
-        me = typeof d.me === "number" ? d.me : null;
-        if (countEl) countEl.textContent = d.count === 1 ? "1 comment" : d.count + " comments";
-        if (!d.comments.length) { thread.appendChild(el("p", "muted", "No comments yet. Be the first.")); return; }
-        d.comments.forEach(function (c) { thread.appendChild(render(c)); });
-        if (d.has_more) {
-          var more = el("a", "muted small", "More comments on Archidekt");
-          more.href = "https://archidekt.com/decks/" + encodeURIComponent(commentsPanel.getAttribute("data-deck"));
-          more.target = "_blank"; more.rel = "noopener noreferrer";
-          thread.appendChild(more);
-        }
-      }).catch(function () { failed("The comments could not be loaded: no connection."); });
-    };
-    if ("IntersectionObserver" in window) {
-      var io = new IntersectionObserver(function (entries) {
-        if (entries.some(function (e) { return e.isIntersecting; })) { load(); io.disconnect(); }
-      }, { rootMargin: "200px" });
-      io.observe(commentsPanel);
-    } else { load(); }
-    $$("[data-social=comments]").forEach(function (a) { a.addEventListener("click", load); });
-    form.addEventListener("submit", function (e) {
-      e.preventDefault();
-      var text = textarea.value.trim();
-      if (!text) { textarea.focus(); return; }
-      var old = $(".confirmbar", form);
-      if (old) old.remove();
-      var bar = el("div", "confirmbar");
-      bar.appendChild(document.createTextNode("Post this comment publicly on Archidekt?"));
-      var yes = el("button", "btn-primary", "Post");
-      yes.type = "button";
-      var no = el("button", "", "Cancel");
-      no.type = "button";
-      bar.appendChild(yes); bar.appendChild(no);
-      form.insertBefore(bar, form.querySelector("button[type=submit]"));
-      no.addEventListener("click", function () { bar.remove(); textarea.focus(); });
-      yes.addEventListener("click", function () {
-        yes.disabled = true;
-        socialRequest("POST", "/social/api/decks/" + encodeURIComponent(commentsPanel.getAttribute("data-deck")) + "/comments", { text: text, parent: parentId }).then(function (d) {
-          bar.remove();
-          if (!d.ok) { var p = el("p", "notice error"); p.appendChild(socialProblem(d)); form.insertBefore(p, form.firstChild); return; }
-          var old = $(".notice", form); if (old) old.remove();
-          var node = render(d.comment);
-          var parentBox = parentId ? $("[data-id='" + parentId + "']", thread) : null;
-          if (parentBox) {
-            var kids = $(".replies", parentBox) || parentBox.appendChild(el("div", "replies"));
-            kids.appendChild(node);
-          } else {
-            var empty = $("p.muted", thread); if (empty && /No comments yet/.test(empty.textContent)) empty.remove();
-            thread.insertBefore(node, thread.firstChild);
-          }
-          textarea.value = ""; parentId = null; replyTo.hidden = true;
-          if (countEl) { var n = (parseInt(countEl.textContent, 10) || 0) + 1; countEl.textContent = n === 1 ? "1 comment" : n + " comments"; }
-        }).catch(function () {
-          bar.remove();
-          var old = $(".notice", form); if (old) old.remove();
-          var p = el("p", "notice error", "The comment was not posted: no connection. Your text is still in the box.");
-          p.setAttribute("role", "alert");
-          form.insertBefore(p, form.firstChild);
-        });
-      });
-    });
-  }
 })();
 
-/* Play on EDHPlay (R-154): the press copies the whole deck in EDHPlay's import format (the
-   data-list text, made by export_formats.to_edhplay) and lets the link open edhplay.com in a new
-   tab (in the Android app, the phone's browser). The copy is made inside the press itself, the
-   way the app's WebView allows it; a short note says what to do next on EDHPlay, names any
-   sideboard cards left out to fit EDHPlay's 15-card limit, and on a device's first press adds a
-   tip on EDHPlay's import limits that stays until it is closed. */
+/* Play on EDHPlay: every press opens a small confirmation box; its "Copy and Open
+   EDHPlay.com" copies the whole deck in EDHPlay's import format and opens edhplay.com (in the
+   Android app, the phone's browser). The box asks the gateway for the list as it opens (the
+   button's data-src, made by export_formats.to_edhplay) and the button turns on once it is here,
+   so the copy can still be made inside that press, the way the app's WebView allows it; a list
+   that can't be had shows why, with Try again. The two import steps show open until the member
+   has launched once (kept on the account from 0.7.29), then sit folded in the same box. The box
+   closes with ×, Escape or a press outside it (there is no Cancel button). Sideboard cards left
+   out to fit EDHPlay's 15-card limit are named in the box and in the note that follows. Without
+   script the button is a plain link to EDHPlay. */
 (function () {
   "use strict";
+  var STEPS = ["On EDHPlay, go to My Decks, choose Add Deck, then open the new deck.",
+    "Press Import, paste, then press Import & Replace."];
+  var COPIED = "Deck list copied. On EDHPlay: My Decks, Add Deck, open the deck, Import, paste, then Import & Replace.";
   function copyNow(text) {
     // execCommand first: it works inside the press in the app's WebView, where the async
     // clipboard API may be refused; the async API is the fallback for browsers that dropped it.
@@ -2025,71 +2081,188 @@
     }
     return Promise.resolve(false);
   }
-  var TIP_SEEN = "mtg.edhplay.tip";  // this device has seen (and closed) the first-time tip
-  function tipSeen() { try { return localStorage.getItem(TIP_SEEN) === "1"; } catch (e) { return false; } }
-  function rememberTip() { try { localStorage.setItem(TIP_SEEN, "1"); } catch (e) { /* private window */ } }
-  // lines: the note's text, one per line; kind: "", "warn" or "error"; tip: a first-time tip,
-  // which stays until it is closed and is then not shown again on this device
-  function note(lines, kind, tip) {
+  // 0.7.25 and 0.7.26 kept a first-time tip's "seen" mark here; the box replaced that tip
+  try { localStorage.removeItem("mtg.edhplay.tip"); } catch (e) { /* private window */ }
+  // set once the member has launched from the box; kept on the account (0.7.29, prefs.js)
+  var STEPS_SEEN = "edhplay.steps";
+  function stepsSeen() { return !!(window.MtgPrefs && window.MtgPrefs.get(STEPS_SEEN) === true); }
+  function make(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text) e.textContent = text;
+    return e;
+  }
+  function cutLine(cut, leftOut) {
+    return (cut === 1 ? "1 sideboard card is" : cut + " sideboard cards are")
+      + " left out to fit EDHPlay's 15-card limit: " + leftOut + ".";
+  }
+  // lines: the note's text, one per line; kind: "", "warn" or "error" (those stay until closed)
+  function note(lines, kind) {
     var old = document.querySelector(".edhplay-toast");
     if (old) old.remove();
-    var t = document.createElement("div");
-    t.className = "toast deck-toast edhplay-toast" + (kind ? " " + kind : "");
+    var t = make("div", "toast deck-toast edhplay-toast" + (kind ? " " + kind : ""));
     t.setAttribute("role", kind === "error" ? "alert" : "status");
-    var msg = document.createElement("div");
-    msg.className = "msg";
-    lines.forEach(function (line) {
-      var l = document.createElement("span");
-      l.textContent = line;
-      msg.appendChild(l);
-    });
+    var msg = make("div", "msg");
+    lines.forEach(function (line) { msg.appendChild(make("span", "", line)); });
     t.appendChild(msg);
-    function close() { t.remove(); if (tip) rememberTip(); }
-    if (tip) {
-      var acts = document.createElement("span");
-      acts.className = "acts";
-      var ok = document.createElement("button");
-      ok.type = "button";
-      ok.textContent = "Got it";
-      ok.addEventListener("click", close);
-      acts.appendChild(ok);
-      t.appendChild(acts);
-    }
-    var x = document.createElement("button");
+    var x = make("button", "close icon-only", "×");
     x.type = "button";
-    x.className = "close icon-only";
     x.setAttribute("aria-label", "Dismiss");
-    x.textContent = "×";
-    x.addEventListener("click", close);
+    x.addEventListener("click", function () { t.remove(); });
     t.appendChild(x);
     document.body.appendChild(t);
-    if (!kind && !tip) setTimeout(function () { t.remove(); }, 8000);  // a cut list or a tip stays
+    if (!kind) setTimeout(function () { t.remove(); }, 8000);
+  }
+  // the list for the deck: {list, left_out, left_count}, or an Error whose message is shown.
+  // The box shows only the three approved messages: the gateway's own reason goes to
+  // the console, never on screen. Signed out, retrying can't help: err.signedOut.
+  function fetchList(src) {
+    return fetch(src, { credentials: "same-origin", headers: { Accept: "application/json" } }).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (d) {
+        if (r.ok && d && d.ok && typeof d.list === "string") return d;
+        if (r.status === 401) {
+          var out = new Error("You're signed out. Reload the page to sign in.");
+          out.signedOut = true;
+          throw out;
+        }
+        if (window.console) console.warn("Play on EDHPlay: the deck list request failed (HTTP " + r.status + ")" + (d && d.message ? ": " + d.message : ""));
+        throw new Error("The deck list couldn't be loaded.");
+      });
+    }, function () {
+      throw new Error("The deck list couldn't be loaded: no connection.");
+    });
+  }
+  var dialog = null, back = null;
+  function close() {
+    if (!dialog) return;
+    dialog.remove();
+    dialog = null;
+    document.removeEventListener("keydown", onKey, true);
+    if (back && back.isConnected) back.focus();
+    back = null;
+  }
+  function onKey(e) {
+    if (!dialog) return;
+    if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); close(); return; }
+    if (e.key === "Tab") {  // focus stays inside the dialog
+      var f = dialog.querySelectorAll("a[href],button:not([disabled]),summary");
+      var first = f[0], last = f[f.length - 1];
+      if (!dialog.contains(document.activeElement)) { e.preventDefault(); first.focus(); }
+      else if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    }
+  }
+  function open(link) {
+    close();
+    // a note left from an earlier launch would sit above the box: the box says it all again
+    var old = document.querySelector(".edhplay-toast");
+    if (old) old.remove();
+    back = link;
+    var data = null;  // the list, once the gateway has sent it
+    dialog = make("div", "picker edhplay-dialog");
+    var mine = dialog;
+    dialog.setAttribute("role", "dialog");
+    dialog.setAttribute("aria-modal", "true");
+    dialog.setAttribute("aria-labelledby", "edhplay-title");
+    dialog.addEventListener("click", function (e) { if (e.target === dialog) close(); });
+    var box = make("div", "pickbox");
+    var head = make("div", "head");
+    var h = make("h2", "", "Play on EDHPlay");
+    h.id = "edhplay-title";
+    var x = make("button", "close icon-only", "×");
+    x.type = "button";
+    x.setAttribute("aria-label", "Close");
+    x.title = "Close";
+    x.addEventListener("click", close);
+    head.appendChild(h); head.appendChild(x);
+    box.appendChild(head);
+    var how = make("details", "disclosure edhplay-steps");
+    how.open = !stepsSeen();
+    how.appendChild(make("summary", "", "How to import"));
+    var steps = make("ol", "steps");
+    STEPS.forEach(function (s) { steps.appendChild(make("li", "", s)); });
+    how.appendChild(steps);
+    box.appendChild(how);
+    var spot = make("div", "edhplay-state");  // the cut line, what to set on EDHPlay, or why the list isn't here
+    spot.hidden = true;
+    box.appendChild(spot);
+    box.appendChild(make("p", "muted small", "The maybeboard and tokens aren't sent."));
+    var acts = make("div", "acts");
+    var go = make("a", "btn btn-primary", "Copy and Open EDHPlay.com");
+    go.href = link.href;
+    go.target = "_blank";
+    go.rel = "noreferrer noopener";
+    acts.appendChild(go);
+    box.appendChild(acts);
+    dialog.appendChild(box);
+    document.body.appendChild(dialog);
+    document.addEventListener("keydown", onKey, true);
+    function waiting(on) {
+      if (on) { go.setAttribute("aria-disabled", "true"); go.setAttribute("aria-busy", "true"); }
+      else go.removeAttribute("aria-busy");
+    }
+    function load() {
+      spot.textContent = "";
+      spot.hidden = true;
+      waiting(true);
+      fetchList(link.getAttribute("data-src")).then(function (d) {
+        if (dialog !== mine) return;  // closed, or opened again, meanwhile
+        data = d;
+        waiting(false);
+        go.removeAttribute("aria-disabled");
+        if (d.left_count) {
+          spot.appendChild(make("p", "notice warn", cutLine(d.left_count, d.left_out)));
+          spot.hidden = false;
+        }
+        if (d.no_commander) {  // nothing is marked, so EDHPlay sets no commander
+          spot.appendChild(make("p", "notice", "Choose your commander on EDHPlay."));
+          spot.hidden = false;
+        }
+        if (d.companion) {  // EDHPlay's import never sets a companion
+          spot.appendChild(make("p", "notice", "Set your companion on EDHPlay."));
+          spot.hidden = false;
+        }
+      }, function (err) {
+        if (dialog !== mine) return;
+        waiting(false);
+        var p = make("p", "notice error");
+        p.setAttribute("role", "alert");
+        p.appendChild(make("span", "", err.message));
+        if (!err.signedOut) {
+          var again = make("button", "btn small", "Try again");
+          again.type = "button";
+          again.addEventListener("click", function () { load(); go.focus(); });
+          p.appendChild(again);
+        }
+        spot.appendChild(p);
+        spot.hidden = false;
+      });
+    }
+    go.addEventListener("click", function (e) {
+      if (!data) { e.preventDefault(); return; }  // the list is on its way, or couldn't be had
+      // the copy happens inside this press; the link itself opens EDHPlay (nothing is prevented)
+      var copied = copyNow(data.list);
+      var cut = data.left_count || 0, leftOut = data.left_out || "";
+      if (window.MtgPrefs && !stepsSeen()) window.MtgPrefs.set(STEPS_SEEN, true);
+      close();
+      copied.then(function (ok) {
+        if (!ok) {
+          note(["The deck list couldn't be copied here. Use More, then Export deck, to copy it."], "error");
+          return;
+        }
+        var lines = [COPIED];
+        if (cut) lines.push(cutLine(cut, leftOut));
+        note(lines, cut ? "warn" : "");
+      });
+    });
+    load();
+    go.focus();
   }
   document.addEventListener("click", function (e) {
     var link = e.target.closest && e.target.closest("a[data-edhplay]");
-    if (!link) return;
-    var leftOut = link.getAttribute("data-left-out") || "";
-    var cut = parseInt(link.getAttribute("data-left-count") || "0", 10) || 0;
-    var tip = !tipSeen();
-    copyNow(link.getAttribute("data-list") || "").then(function (ok) {
-      if (!ok) {
-        note(["The deck list couldn't be copied here. Use More, then Export deck, to copy it."], "error");
-        return;
-      }
-      var lines = ["Deck list copied. On EDHPlay: Create Deck, then Import, paste and Import & Replace."];
-      // only what this deck runs into (export_formats.to_edhplay): EDHPlay refuses an import whose
-      // sideboard passes 15 cards, so the rest was left out of the list
-      if (cut) {
-        lines.push((cut === 1 ? "1 sideboard card didn't" : cut + " sideboard cards didn't")
-          + " fit EDHPlay's 15-card limit: " + leftOut + ".");
-      }
-      // the first press on this device: EDHPlay's import limits, once
-      if (tip) {
-        lines.push("Good to know: EDHPlay's sideboard holds 15 cards, the maybeboard isn't sent,"
-          + " and tokens are added on EDHPlay by hand.");
-      }
-      note(lines, cut ? "warn" : "", tip);
-    });
-    // the link itself opens EDHPlay (target=_blank): nothing is prevented
+    // a Ctrl, Cmd or Shift press opens EDHPlay straight away, as a plain link
+    if (!link || e.ctrlKey || e.metaKey || e.shiftKey || e.button) return;
+    e.preventDefault();
+    open(link);
   });
 })();

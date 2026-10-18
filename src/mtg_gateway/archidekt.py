@@ -12,8 +12,11 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import contextlib
 import contextvars
 import copy
+import datetime
+import email.utils
 import hashlib
 import http.cookiejar
 import json
@@ -22,7 +25,7 @@ import random
 import re
 import time
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -38,6 +41,184 @@ TOKEN_FIELDS = ("access_token", "access", "token", "jwt")
 VOTE_NONE, VOTE_UP, VOTE_DOWN = 0, 1, 2
 # Collection "modifier" values are the deck ones: Normal, Foil, Etched.
 COLLECTION_PAGE_SIZE = 100
+# A collection record's condition and language are numbers on Archidekt: its site sends and reads
+# them through these tables (its bundle, read 2026-10-14: {NM:1, LP:2, MP:3, HP:4, D:5} and
+# {EN:1, CT:2, DE:3, FR:4, IT:5, JP:6, KR:7, PT:8, RU:9, CS:10, SP:11}), keyed here by the codes
+# the gateway shows (DMG for its D, ZHT/ZHS for CT/CS, JA/KO/ES for JP/KR/SP).
+CONDITION_IDS = {"NM": 1, "LP": 2, "MP": 3, "HP": 4, "DMG": 5}
+LANGUAGE_IDS = {
+    "EN": 1,
+    "ZHT": 2,
+    "DE": 3,
+    "FR": 4,
+    "IT": 5,
+    "JA": 6,
+    "KO": 7,
+    "PT": 8,
+    "RU": 9,
+    "ZHS": 10,
+    "ES": 11,
+}
+_CONDITION_CODES = {v: k for k, v in CONDITION_IDS.items()}
+_LANGUAGE_CODES = {v: k for k, v in LANGUAGE_IDS.items()}
+
+
+def condition_code(value: Any) -> str:
+    """A record's condition as the gateway's code (NM ... DMG), from Archidekt's number; "" when
+    it has none. A code given as text is passed through, upper-cased."""
+    if isinstance(value, int) and not isinstance(value, bool):
+        return _CONDITION_CODES.get(value, "")
+    return str(value or "").strip().upper()
+
+
+def language_code(value: Any) -> str:
+    """A record's language as the gateway's code (EN, JA, ...), from Archidekt's number; "" when
+    it has none. A code given as text is passed through, upper-cased."""
+    if isinstance(value, int) and not isinstance(value, bool):
+        return _LANGUAGE_CODES.get(value, "")
+    return str(value or "").strip().upper()
+
+
+def _condition_id(value: Any) -> int | None:
+    if value is None or (isinstance(value, int) and not isinstance(value, bool)):
+        return value
+    code = str(value).strip().upper()
+    if code == "D":
+        code = "DMG"
+    if code not in CONDITION_IDS:
+        raise ArchidektError("invalid", f"Archidekt has no card condition {code!r}")
+    return CONDITION_IDS[code]
+
+
+def _language_id(value: Any) -> int | None:
+    if value is None or (isinstance(value, int) and not isinstance(value, bool)):
+        return value
+    code = str(value).strip().upper()
+    if code not in LANGUAGE_IDS:
+        raise ArchidektError("invalid", f"Archidekt has no card language {code!r}")
+    return LANGUAGE_IDS[code]
+
+
+# Deck descriptions and comments are rich text on Archidekt: a Quill document stored as JSON text,
+# '{"ops":[{"insert":"..."}]}'. Its site writes them that way (its editor sends
+# JSON.stringify(getContents())) and reads them with JSON.parse, showing an empty text for anything
+# that is not JSON (its bundle and editor chunk, read 2026-10-14). So plain text from the gateway
+# is wrapped in a document before it is sent, and a document read back is shown as its text.
+#
+# What an assistant or a gateway form writes is plain text only: the gateway builds the
+# document from the text itself and never sends a document a caller supplied, so a link, any
+# formatting or an embed the review page does not show can never be written. Only a snapshot
+# restore puts a stored document back as it was, by handing it over as a QuillDoc. A later
+# formatted-text feature would make its own QuillDoc from checked input; nothing else changes.
+
+
+class QuillDoc(str):
+    """A Quill document (JSON text) that ``rich_doc`` sends unchanged, formatting included. Only a
+    snapshot restore makes one, from the document Archidekt itself stored."""
+
+
+def _quill_ops(value: Any) -> list[Any] | None:
+    """The ops of a Quill document given as JSON text, None for anything else."""
+    if not isinstance(value, str) or not value.lstrip().startswith("{"):
+        return None
+    try:
+        doc = json.loads(value)
+    except ValueError:
+        return None
+    ops = doc.get("ops") if isinstance(doc, dict) else None
+    return ops if isinstance(ops, list) else None
+
+
+def rich_text(value: Any) -> str:
+    """The plain text of an Archidekt rich-text field: a Quill document's text (a card link as its
+    card name, as the site's own text preview does), without the final line break every document
+    ends with. Text that is not a Quill document (older plain text) is returned as it is."""
+    ops = _quill_ops(value)
+    if ops is None:
+        return str(value) if isinstance(value, str) else ""
+    parts: list[str] = []
+    for op in ops:
+        insert = op.get("insert") if isinstance(op, dict) else None
+        if isinstance(insert, str):
+            parts.append(insert)
+        elif isinstance(insert, dict) and isinstance(insert.get("card-link"), str):
+            parts.append(insert["card-link"])
+    text = "".join(parts)
+    return text[:-1] if text.endswith("\n") else text
+
+
+def plain_text(value: str) -> str:
+    """Text an assistant or a form supplied, as the plain text that will be written: a Quill
+    document given as JSON text is reduced to its words (``rich_text``: links, formatting and
+    embeds dropped, a card link kept as its card name); any other text is kept as it is. A
+    document inside a document is reduced too, so the result is never a document and reducing it
+    again changes nothing: a proposal re-checked when it is applied writes what its review showed."""
+    text = str(value)
+    while _quill_ops(text) is not None:
+        text = rich_text(text)  # each pass is shorter than the last, so this ends
+    return text
+
+
+def _plain_insert(op: Any) -> bool:
+    """A Quill op that ``rich_text`` keeps whole: a text insert with no formatting."""
+    return (
+        isinstance(op, dict)
+        and isinstance(op.get("insert"), str)
+        and set(op) <= {"insert", "attributes"}
+        and not op.get("attributes")
+    )
+
+
+def drops_formatting(value: Any) -> bool:
+    """Whether ``plain_text(value)`` drops more than the words keep: ``value`` is a Quill document
+    (at any depth ``plain_text`` reduces) with an op other than a plain text insert, i.e. a link
+    or other formatting, an embed (an image; a card link kept only as its name) or any other op.
+    A document of plain inserts only, and any text that is not a document (Markdown included),
+    loses nothing."""
+    text = str(value) if isinstance(value, str) else ""
+    while (ops := _quill_ops(text)) is not None:
+        if not all(_plain_insert(op) for op in ops):
+            return True
+        text = rich_text(text)
+    return False
+
+
+def words_only_note(noun: str) -> str:
+    """The note an assistant's tool reply carries when its description or comment was a Quill
+    document that lost more than its words (``drops_formatting``), so the assistant does not
+    tell the user a link or formatting was added."""
+    return (
+        f"Only the words of this {noun} are saved: the gateway writes new text as plain text, so the "
+        "links, formatting and embeds in what you sent were removed (formatting already on Archidekt "
+        "stays where its words did not change). Don't tell the user a link or formatting was added."
+    )
+
+
+def written_text(value: str) -> str:
+    """The text ``rich_doc(value)`` writes, as a review shows it: a QuillDoc's words, else the
+    plain text itself."""
+    return rich_text(value) if isinstance(value, QuillDoc) else str(value)
+
+
+def rich_doc(value: str) -> str:
+    """The rich-text value to send for ``value``. Plain text, whatever it holds (JSON included),
+    becomes a one-insert document that ends with a line break, as the site's editor makes it, so
+    it shows on Archidekt exactly as written. Only a QuillDoc that holds a document (a
+    snapshot restore) is sent as it is, keeping its formatting. "" stays "" (no text)."""
+    if isinstance(value, QuillDoc) and _quill_ops(value) is not None:
+        return str(value)
+    value = str(value)
+    if not value:
+        return value
+    text = value if value.endswith("\n") else value + "\n"
+    return json.dumps({"ops": [{"insert": text}]}, ensure_ascii=False, separators=(",", ":"))
+
+
+def same_rich_text(a: Any, b: Any) -> bool:
+    """Whether two rich-text values hold the same text (either may be a Quill document or plain
+    text), compared without surrounding white space."""
+    return rich_text(a).strip() == rich_text(b).strip()
+
 
 # Archidekt's numeric deck formats as observed by the nccurry/mtg-mcp reference (reported, not verified).
 # Archidekt's deckFormat ids, read from the site's own client code on 2026-10-08 (its format
@@ -113,14 +294,19 @@ SEARCH_ORDERS = {
 _ART_UUID = re.compile(r"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})")
 
 
-def art_url(scryfall_uid: str) -> str:
+def art_url(scryfall_uid: str, image_hash: str = "") -> str:
     """The card-art URL Archidekt stores as a deck's ``featured`` cover: its art images live at
     card-images.archidekt.com/art/front/<u[0]>/<u[1]>/<uid>.webp (the pattern of every ``featured``
-    in the live precon listing, 2026-10-07; a path with other characters is refused)."""
+    in the live precon listing, 2026-10-07; a path with other characters is refused). The site's
+    "Set Deck Image" adds the card's ``scryfallImageHash`` as the query, "11" when it has none
+    (its image URL helper, bundle read 2026-10-14), so the same is sent here."""
     uid = str(scryfall_uid or "").lower()
     if not re.fullmatch(r"[0-9a-f-]{36}", uid):
         raise ArchidektError("invalid", "not a Scryfall card id")
-    return f"https://card-images.archidekt.com/art/front/{uid[0]}/{uid[1]}/{uid}.webp"
+    version = str(image_hash or "")
+    if not re.fullmatch(r"[0-9A-Za-z]{1,32}", version):
+        version = "11"
+    return f"https://card-images.archidekt.com/art/front/{uid[0]}/{uid[1]}/{uid}.webp?{version}"
 
 
 def featured_scryfall_id(url: Any) -> str | None:
@@ -142,6 +328,7 @@ def list_row(d: dict[str, Any]) -> dict[str, Any]:
     bracket = d.get("edhBracket")
     size = d.get("size")
     folder = d.get("parentFolderName")
+    folder_id = d.get("parentFolderId")
     views = d.get("viewCount")
     return {
         "id": str(d["id"]),
@@ -153,6 +340,8 @@ def list_row(d: dict[str, Any]) -> dict[str, Any]:
         "private": bool(d.get("private", False)),
         "unlisted": bool(d.get("unlisted", False)),
         "folder": str(folder) if isinstance(folder, str) and folder else None,
+        # the folder's id (verified in the v3 listing 2026-10-05); None at the top level
+        "folder_id": folder_id if isinstance(folder_id, int) and not isinstance(folder_id, bool) else None,
         "colors": {k: v for k, v in colors.items() if k in "WUBRG" and isinstance(v, int)},
         "size": size if isinstance(size, int) and not isinstance(size, bool) else None,
         "bracket": bracket if isinstance(bracket, int) and not isinstance(bracket, bool) else None,
@@ -172,11 +361,25 @@ class ArchidektError(Exception):
     ``kind`` is one of auth, not_found, rate_limited, unavailable, contract, forbidden.
     """
 
-    def __init__(self, kind: str, message: str, *, retryable: bool = False):
+    def __init__(
+        self,
+        kind: str,
+        message: str,
+        *,
+        retryable: bool = False,
+        sent: bool = True,
+        retry_after: float | None = None,
+    ):
         super().__init__(message)
         self.kind = kind
         # a GET that failed this way (timeout, network error, 5xx) may be retried after a backoff
         self.retryable = retryable
+        # False when the request never left the gateway (the pacer refused it): nothing can have
+        # been written, whatever the kind
+        self.sent = sent
+        # a 429's Retry-After in seconds as Archidekt sent it, before Pacer.MAX_RETRY_AFTER caps
+        # the shared pause (an apply stops rather than wait less than Archidekt asked)
+        self.retry_after = retry_after
 
 
 BACKUP_FOLDER_NAME = "MTG Gateway backups"
@@ -233,6 +436,7 @@ class DeckCard:
     # Archidekt's custom mana value for this row (the deck's own override of the card's), or None
     custom_cmc: float | None = None
     companion: bool = False
+    flipped_default: bool = False  # the row shows its back face by default (the site's flippedDefault)
     image_hash: str = ""
     scryfall_uid: str = ""
     default_category: str = ""  # Archidekt's auto category for cards with categories null
@@ -293,6 +497,9 @@ class Deck:
     user_vote: int = 0
     bookmarked: bool = False
     comment_root: int | None = None
+    # Set by DeckService.get_any_deck on a copy of the deck it read without a sign-in because the
+    # member's link was dropped on that request: what the member is told (relink).
+    link_notice: str = field(default="", repr=False, compare=False)
 
     def _rows(self) -> list[tuple[Any, ...]]:
         return sorted(
@@ -331,6 +538,11 @@ class Deck:
         }
         names.add("Commander")
         return names
+
+    def premier_keys(self) -> set[str]:
+        """``premier_categories`` casefolded, for the approval checks: a category that differs from
+        the commander zone's name only in case is treated as that zone, so such a change waits."""
+        return {n.casefold() for n in self.premier_categories()}
 
     def is_commander(self, card: DeckCard) -> bool:
         """Whether the card sits in the deck's commander zone (a premier category)."""
@@ -483,15 +695,64 @@ def _prefer_printing(
     return max(hits, key=score)  # stable: the first hit wins ties
 
 
-def _owned_by(owner: Any, username: str, user_id: str | None) -> bool:
-    """True only when a deck entry's owner field names the linked account."""
+def _owner_readable(owner: Any) -> bool:
+    """Whether a deck entry's owner field says who owns it (an id or a username)."""
     if isinstance(owner, dict):
-        if user_id and owner.get("id") is not None and str(owner["id"]) == str(user_id):
-            return True
-        return str(owner.get("username", "")).casefold() == username.casefold()
+        return owner.get("id") is not None or bool(owner.get("username"))
+    return isinstance(owner, str) and bool(owner)
+
+
+class DeckList(list):  # type: ignore[type-arg]
+    """``list_decks``' answer: the member's deck rows, plus ``complete``, whether they can be taken
+    as every deck of the account. False when any entry was dropped (its owner field could not be
+    read, or it named someone else, so the owner filter was not honoured), when the listing was
+    cut off at MAX_LIST_PAGES, when its count moved while the pages were read, when a deck came
+    back on two pages (the list shifted, so another may have been skipped), or when fewer decks
+    came back than Archidekt's count. Only a complete list may say a deck is gone
+    (DeckService.on_archidekt). ``unreadable`` counts the entries left out because their owner
+    field could not be read at all: My decks then says the list couldn't be read instead of
+    showing it as whole."""
+
+    def __init__(self, rows: Any = (), *, complete: bool = False, unreadable: int = 0) -> None:
+        super().__init__(rows)
+        self.complete = complete
+        self.unreadable = unreadable
+
+
+def _owned_by(owner: Any, username: str, user_id: str | None) -> bool:
+    """True only when a deck entry's owner field names the linked account. When both the owner's
+    id and the linked account's id are known, the ids decide alone: a username can be given up
+    and taken by someone else, an id cannot. The username decides only when an id is missing,
+    and an empty username never matches."""
+    if isinstance(owner, dict):
+        owner_id = owner.get("id")
+        if user_id and owner_id is not None and str(owner_id) != "":
+            return str(owner_id) == str(user_id)
+        owner = owner.get("username")
     if isinstance(owner, str):
-        return owner.casefold() == username.casefold()
+        return bool(owner) and bool(username) and owner.casefold() == username.casefold()
     return False
+
+
+DEFAULT_RETRY_AFTER = 30.0  # seconds paused after a 429 whose Retry-After is missing or unreadable
+
+
+def retry_after_seconds(value: str | None, *, now: float | None = None) -> float:
+    """Seconds a 429's Retry-After asks for, in either form RFC 9110 allows: delay-seconds
+    ("120") or an HTTP-date (0 once that date has passed). A missing or unreadable value gives
+    DEFAULT_RETRY_AFTER; Pacer.record caps whatever comes out at MAX_RETRY_AFTER."""
+    text = (value or "").strip()
+    if not text:
+        return DEFAULT_RETRY_AFTER
+    if text.isascii() and text.isdigit():
+        return float(text)
+    try:
+        when = email.utils.parsedate_to_datetime(text)
+    except (TypeError, ValueError, IndexError):
+        return DEFAULT_RETRY_AFTER
+    if when.tzinfo is None:  # "-0000": UTC, as HTTP dates always are
+        when = when.replace(tzinfo=datetime.UTC)
+    return max(0.0, when.timestamp() - (time.time() if now is None else now))
 
 
 class Pacer:
@@ -520,12 +781,15 @@ class Pacer:
             now = time.monotonic()
             if now < self._open_until:
                 raise ArchidektError(
-                    "unavailable", "Archidekt requests are paused after repeated failures; try later"
+                    "unavailable",
+                    "Archidekt requests are paused after repeated failures; try later",
+                    sent=False,
                 )
             if now < self._retry_until:
                 raise ArchidektError(
                     "rate_limited",
                     f"Archidekt asked us to slow down; try again in {int(self._retry_until - now) + 1} s",
+                    sent=False,
                 )
             if now < self._next_allowed:
                 await asyncio.sleep(self._next_allowed - now)
@@ -548,6 +812,10 @@ class Pacer:
         self._next_allowed = time.monotonic() + self.min_interval
         self._lock.release()
 
+    def retry_wait(self) -> float:
+        """Seconds left of the pause a 429's Retry-After set (0 when none is running)."""
+        return max(0.0, self._retry_until - time.monotonic())
+
     def busy(self) -> bool:
         """Whether a call is being sent or waiting its turn right now (the deck sync, sync.py,
         steps aside while one is)."""
@@ -559,11 +827,20 @@ class Pacer:
         now = time.monotonic()
         return now < self._open_until or now < self._retry_until
 
-    def record(self, ok: bool, retry_after: float | None = None) -> None:
+    def pause_left(self) -> float:
+        """Seconds until calls are no longer refused (the breaker and a Retry-After pause alike);
+        0 when none is running."""
+        return max(0.0, max(self._open_until, self._retry_until) - time.monotonic())
+
+    def record(self, ok: bool, retry_after: float | None = None, *, breaker: bool = True) -> None:
+        """Note a call's outcome. ``breaker=False`` (a 429 met during a member's apply) sets
+        the Retry-After pause like any 429 but does not count towards the breaker, so an apply
+        that waits out Archidekt's 429s never pauses the gateway for everyone."""
         if ok:
             self._failures = 0
             return
-        self._failures += 1
+        if breaker:
+            self._failures += 1
         if retry_after:
             wait = min(retry_after, self.MAX_RETRY_AFTER)
             self._retry_until = max(self._retry_until, time.monotonic() + wait)
@@ -583,15 +860,103 @@ BACKOFF_CAP = 10.0  # seconds; the longest single wait between retries
 # Set by the deck sync (sync.py) around its background reads: each GET is sent once and never
 # retried, so a failing Archidekt costs the shared breaker at most one failure per check.
 no_retry: contextvars.ContextVar[bool] = contextvars.ContextVar("archidekt_no_retry", default=False)
+RATE_LIMIT_WAITS = 6
+RATE_LIMIT_WAIT_TOTAL = 300.0
+# What an apply that stopped this way says (the apply adds whether anything had changed).
+PATIENCE_SPENT = (
+    "Archidekt is busy and asked the gateway to wait longer than an apply may wait, so the apply stopped."
+)
+
+
+class Patience:
+    """One member's apply's allowance for Archidekt's 429s: at most RATE_LIMIT_WAITS
+    waits and RATE_LIMIT_WAIT_TOTAL seconds of waiting in all, across every request of the apply
+    (not per request)."""
+
+    def __init__(self) -> None:
+        self.waits = 0
+        self.waited = 0.0
+
+    def left(self) -> float:
+        return max(0.0, RATE_LIMIT_WAIT_TOTAL - self.waited)
+
+
+# Set around a member's apply (decks.py), to that apply's own Patience: a 429, or a call refused
+# while a 429's Retry-After pause runs, is waited out and the same request sent again, so a long
+# apply (a 100-card new deck is a few hundred paced requests) slows down instead of failing halfway.
+# A 429 means Archidekt did not act on the request, so sending a write again after one cannot apply
+# it twice. The apply's 429s do not count towards the Pacer's breaker. Once the allowance is
+# used up, or Archidekt asks for a single wait longer than what is left of it, the request
+# fails at once as rate_limited with PATIENCE_SPENT; Archidekt's Retry-After is never cut short.
+# A task created inside an apply (asyncio.create_task copies the context) inherits this allowance.
+patient: contextvars.ContextVar[Patience | None] = contextvars.ContextVar("archidekt_patient", default=None)
+# The apply's progress dict (decks.py), so the review page can say the apply is waiting.
+wait_note: contextvars.ContextVar[dict[str, Any] | None] = contextvars.ContextVar(
+    "archidekt_wait_note", default=None
+)
+# Set around a member's apply (decks.py), to the apply's progress dict: every write ``_request``
+# sends inside the apply marks ``progress["deck_written"]`` once it succeeds or fails in a way that
+# may still have landed, so "the apply changed nothing" fails closed: a write
+# path that forgets to say it wrote can never send a proposal back to pending. Only the backup
+# copy's own writes (``backup_writes``) are not a change.
+apply_writes: contextvars.ContextVar[dict[str, Any] | None] = contextvars.ContextVar(
+    "archidekt_apply_writes", default=None
+)
+_backup_write: contextvars.ContextVar[bool] = contextvars.ContextVar("archidekt_backup_write", default=False)
+# Answers after which Archidekt did not act on a write: a 429, a 403, a 404, a 401.
+NOT_ACTED_ON = frozenset({"rate_limited", "forbidden", "not_found", "auth"})
+
+
+@contextlib.contextmanager
+def backup_writes() -> Iterator[None]:
+    """The writes inside are the gateway's backup copy (its folder, the copy, its description, the
+    delete of an unused copy): they are not a change to what the apply changes, so they do not
+    mark the apply as having written."""
+    token = _backup_write.set(True)
+    try:
+        yield
+    finally:
+        _backup_write.reset(token)
+
+
+def _note_write(exc: ArchidektError | None) -> None:
+    """A write inside an apply succeeded (``exc`` None) or failed with ``exc``: mark the apply's
+    progress as written unless the request never left the gateway or Archidekt did not act on it."""
+    progress = apply_writes.get()
+    if progress is None or _backup_write.get():
+        return
+    if exc is not None and (not exc.sent or exc.kind in NOT_ACTED_ON):
+        return
+    progress["deck_written"] = True
+
+
+NO_SIGN_IN_TEXT = "Archidekt asked for a sign-in, and this request was made without one"
 MAX_LIST_PAGES = 4  # deck-list pages of 50 followed for one member (200 decks)
+
+
+def _refusal_detail(resp: httpx.Response) -> str:
+    """Archidekt's own reason for a refusal (``{"detail": ...}`` and the like), one short line, or
+    "" when the body has none."""
+    try:
+        body = resp.json()
+    except ValueError:
+        return ""
+    if isinstance(body, dict):
+        body = next((body[k] for k in ("detail", "error", "message", "non_field_errors") if k in body), "")
+    if isinstance(body, list):
+        body = body[0] if body and isinstance(body[0], str) else ""
+    if not isinstance(body, str):
+        return ""
+    return " ".join(body.split())[:200]
 
 
 class ArchidektClient:
     """Every Archidekt request goes through ``_request``: paced by the shared Pacer, sent with the
     gateway's own honest User-Agent (no disguise), read caches as described above, and bounded
     retries with jittered exponential backoff for GETs that failed on a timeout, a network error
-    or a 5xx. A 429 is never retried: its Retry-After pauses every call. Writes are never
-    retried, so a slow answer can never apply a change twice."""
+    or a 5xx. A 429's Retry-After pauses every call; only a member's apply (``patient``) waits
+    the pause out and sends the request again. Writes are never retried after a timeout or a 5xx,
+    so a slow answer can never apply a change twice."""
 
     def __init__(
         self,
@@ -613,7 +978,14 @@ class ArchidektClient:
         self.cache_seconds = max(0.0, float(cache_seconds))
         self.card_cache_seconds = max(0.0, float(card_cache_seconds))
         self._cache: dict[str, tuple[float, Any]] = {}
-        self.stats = {"requests": 0, "cache_hits": 0, "retries": 0, "rate_limited": 0, "failures": 0}
+        self.stats = {
+            "requests": 0,
+            "cache_hits": 0,
+            "retries": 0,
+            "rate_limited": 0,
+            "rate_limit_waits": 0,
+            "failures": 0,
+        }
         # Called with the path of every write about to be sent (decks.py drops the member caches
         # that write makes stale: the deck list, the collection's first page).
         self.write_listeners: list[Callable[[str], None]] = []
@@ -701,13 +1073,15 @@ class ArchidektClient:
                 self.stats["cache_hits"] += 1
                 logger.debug("archidekt cache hit %s", path)
                 return copy.deepcopy(value)
-        if method != "GET" and not path.startswith("/rest-auth/"):
+        is_write = method != "GET" and not path.startswith("/rest-auth/")
+        if is_write:
             # cleared before the write is sent: a write that fails halfway may still have landed
             self.forget_deck_reads()
             for listener in self.write_listeners:
                 listener(path)
         attempts = 1 + (self.retries if method == "GET" and not no_retry.get() else 0)
-        for attempt in range(attempts):
+        attempt = 0
+        while True:
             try:
                 value = await self._send(
                     method, path, token=token, scheme=scheme, json_body=json_body, params=params
@@ -715,22 +1089,60 @@ class ArchidektClient:
             except ArchidektError as exc:
                 if exc.kind == "rate_limited":
                     self.stats["rate_limited"] += 1
+                    allowance = patient.get()
+                    if allowance is not None:
+                        # Archidekt's own Retry-After, uncapped (the shared pause is capped at
+                        # MAX_RETRY_AFTER), or the shared pause still running
+                        asked = max(exc.retry_after or 0.0, self.pacer.retry_wait(), 1.0)
+                        left = allowance.left()
+                        if allowance.waits >= RATE_LIMIT_WAITS or asked > left:
+                            self.stats["failures"] += 1
+                            raise ArchidektError(
+                                "rate_limited", PATIENCE_SPENT, sent=exc.sent, retry_after=exc.retry_after
+                            ) from exc
+                        # the jitter keeps many waiters from all coming back at once; added before
+                        # the cap, so the apply's waits never add up past RATE_LIMIT_WAIT_TOTAL
+                        wait = min(asked + random.uniform(0, 1.0), left)
+                        allowance.waits += 1
+                        allowance.waited += wait
+                        self.stats["rate_limit_waits"] += 1
+                        await self._wait_out(wait)
+                        continue
                 retryable = exc.kind == "unavailable" and exc.retryable
                 if not retryable or attempt + 1 >= attempts:
                     self.stats["failures"] += 1
+                    if is_write:
+                        _note_write(exc)
                     raise
                 self.stats["retries"] += 1
                 await asyncio.sleep(self._backoff(attempt))
+                attempt += 1
                 continue
+            except BaseException:
+                if is_write:  # cancelled or unexpected while the write was under way
+                    _note_write(None)
+                raise
+            if is_write:
+                _note_write(None)
             if key is not None:
                 self._cache_put(key, copy.deepcopy(value))
-            elif method != "GET" and not path.startswith("/rest-auth/"):
+            elif is_write:
                 # and again once the write has landed: a list fetched while it was under way could
                 # otherwise be kept as fresh with the old rows
                 for listener in self.write_listeners:
                     listener(path)
             return value
-        raise AssertionError("unreachable")  # pragma: no cover
+
+    async def _wait_out(self, seconds: float) -> None:
+        """Sleep through a rate-limit pause, marking the running apply's progress meanwhile."""
+        note = wait_note.get()
+        if note is not None:
+            note["waiting_for_archidekt"] = int(seconds) + 1
+        try:
+            await asyncio.sleep(seconds)
+        finally:
+            if note is not None:
+                note.pop("waiting_for_archidekt", None)
 
     async def _send(
         self,
@@ -772,14 +1184,26 @@ class ArchidektClient:
                     "unavailable", f"Archidekt request failed: {type(exc).__name__}", retryable=True
                 ) from exc
             if resp.status_code == 429:
-                ra = resp.headers.get("Retry-After")
-                self.pacer.record(False, float(ra) if ra and ra.isdigit() else 30.0)
-                raise ArchidektError("rate_limited", "Archidekt asked us to slow down; try again in a minute")
-            if resp.status_code in (401, 403):
-                self.pacer.record(True)
+                asked = retry_after_seconds(resp.headers.get("Retry-After"))
+                # During a member's apply a 429 is waited out, not counted towards the breaker
+                self.pacer.record(False, asked, breaker=patient.get() is None)
                 raise ArchidektError(
-                    "auth" if resp.status_code == 401 else "forbidden",
-                    "Archidekt rejected the stored session; relink your account",
+                    "rate_limited",
+                    "Archidekt asked us to slow down; try again in a minute",
+                    retry_after=asked,
+                )
+            if resp.status_code == 401:
+                self.pacer.record(True)
+                if "Authorization" not in headers:  # a read made without a sign-in: no session to blame
+                    raise ArchidektError("auth", NO_SIGN_IN_TEXT)
+                raise ArchidektError("auth", "Archidekt rejected the stored session; relink your account")
+            if resp.status_code == 403:
+                # A 403 is Archidekt refusing this one request; the session itself still works
+                # (that is a 401), so it is never reported as a link to redo.
+                self.pacer.record(True)
+                why = _refusal_detail(resp)
+                raise ArchidektError(
+                    "forbidden", "Archidekt refused this request" + (f": {why}" if why else " (HTTP 403)")
                 )
             if resp.status_code == 404:
                 self.pacer.record(True)
@@ -850,7 +1274,7 @@ class ArchidektClient:
         user_id: str | None = None,
         *,
         backup_folder: str | None = None,
-    ) -> list[dict[str, Any]]:
+    ) -> DeckList:
         """The linked user's decks. Archidekt honours ``ownerId`` and ``ownerUsername`` (verified
         live 2026-10-04 and 2026-10-05: each returned exactly the account's decks, private ones
         included, when sent with the usual ``JWT`` scheme; ``Bearer`` is treated as signed out and
@@ -862,11 +1286,14 @@ class ArchidektClient:
         an entry whose owner cannot be read is dropped rather than shown as the user's. Entries in
         the folder named ``backup_folder``, or named like the gateway's backup copies, come back
         with ``backup: True``: the deck pages keep them out of the member's lists and show them
-        under History instead."""
+        under History instead. Whether the rows can be taken as every deck of the account comes
+        back as the list's ``complete`` (see DeckList)."""
         flt: dict[str, Any] = {"ownerId": user_id} if user_id else {"ownerUsername": username}
         decks: list[dict[str, Any]] = []
         seen: set[str] = set()
-        dropped = 0
+        dropped = unreadable = 0
+        counts: set[int] = set()
+        cut_off = repeated = False
         for page in range(1, MAX_LIST_PAGES + 1):
             params = {**flt, "orderBy": "-updatedAt", "pageSize": 50}
             if page > 1:
@@ -875,14 +1302,19 @@ class ArchidektClient:
             results = body.get("results") if isinstance(body, dict) else None
             if not isinstance(results, list):
                 raise ArchidektError("contract", "unexpected deck list shape")
+            count = body.get("count")
+            if isinstance(count, int) and not isinstance(count, bool):
+                counts.add(count)
             for d in results:
                 if not isinstance(d, dict) or "id" not in d:
                     raise ArchidektError("contract", "unexpected deck entry shape")
                 if not _owned_by(d.get("owner"), username, user_id):
                     dropped += 1
+                    unreadable += not _owner_readable(d.get("owner"))
                     continue
                 deck_id = str(d["id"])
                 if deck_id in seen:
+                    repeated = True  # the list shifted between pages: another deck may have been skipped
                     continue
                 seen.add(deck_id)
                 row = list_row(d)
@@ -892,10 +1324,19 @@ class ArchidektClient:
                 decks.append(row)
             if not body.get("next") or len(results) < 50:
                 break
+        else:
+            cut_off = True  # MAX_LIST_PAGES full pages and Archidekt still offers another
         if dropped:
-            logger.info("deck list: dropped %d entries not owned by the linked account", dropped)
+            logger.info(
+                "deck list: dropped %d entries not owned by the linked account (%d with no readable owner)",
+                dropped,
+                unreadable,
+            )
         decks.sort(key=lambda d: d["updated_at"], reverse=True)
-        return decks
+        # fewer decks than the count Archidekt gave: some were never seen
+        short = any(len(seen) < n for n in counts)
+        complete = not dropped and not cut_off and not repeated and not short and len(counts) <= 1
+        return DeckList(decks, complete=complete, unreadable=unreadable)
 
     async def search_decks(
         self,
@@ -988,7 +1429,7 @@ class ArchidektClient:
             token=token,
             json_body={
                 "name": name,
-                "description": description,
+                "description": rich_doc(description),
                 "deckFormat": format_id,
                 "edhBracket": None,
                 "parentFolder": None,
@@ -1069,7 +1510,7 @@ class ArchidektClient:
                 "name": name,
                 "deckFormat": deck.raw.get("deckFormat") or 3,
                 "edhBracket": None,
-                "description": description,
+                "description": rich_doc(description),
                 "featured": "",
                 "playmat": "",
                 "copyId": int(deck.id),
@@ -1088,7 +1529,10 @@ class ArchidektClient:
         if description:
             try:
                 await self._request(
-                    "PATCH", f"/decks/{new_id}/update/", token=token, json_body={"description": description}
+                    "PATCH",
+                    f"/decks/{new_id}/update/",
+                    token=token,
+                    json_body={"description": rich_doc(description)},
                 )
             except ArchidektError as exc:
                 logger.info("backup %s: description not set (%s)", new_id, exc.kind)
@@ -1248,6 +1692,7 @@ class ArchidektClient:
     # answer OPTIONS with the field list: game, quantity, card, modifier, language, condition,
     # purchasePrice); DELETE /collection/bulk/ {"ids": [...]} removes records. The write calls
     # are taken from the bundle and the OPTIONS schemas; this session could not exercise them.
+    # language and condition are numbers there (CONDITION_IDS, LANGUAGE_IDS; re-read 2026-10-14).
 
     async def collection_page(
         self,
@@ -1285,7 +1730,9 @@ class ArchidektClient:
         condition: str | None = None,
         language: str | None = None,
     ) -> dict[str, Any]:
-        """POST /collection/v2/: one new record for ``card_id`` (an Archidekt printing id)."""
+        """POST /collection/v2/: one new record for ``card_id`` (an Archidekt printing id).
+        ``condition`` and ``language`` are the gateway's codes (NM, EN, ...), sent as Archidekt's
+        numbers (CONDITION_IDS, LANGUAGE_IDS)."""
         body: dict[str, Any] = {
             "game": 1,
             "quantity": int(quantity),
@@ -1293,9 +1740,9 @@ class ArchidektClient:
             "modifier": modifier,
         }
         if condition:
-            body["condition"] = condition
+            body["condition"] = _condition_id(condition)
         if language:
-            body["language"] = language
+            body["language"] = _language_id(language)
         resp = await self._request("POST", "/collection/v2/", token=token, json_body=body)
         if not isinstance(resp, dict):
             raise ArchidektError("contract", "unexpected collection create response shape")
@@ -1318,14 +1765,29 @@ class ArchidektClient:
             "card": card_id,
             "modifier": record.get("modifier") or "Normal",
         }
-        for key in ("language", "condition", "tags", "purchasePrice"):
+        for key in ("tags", "purchasePrice"):
             if record.get(key) is not None:
                 body[key] = record[key]
+        # Archidekt keeps condition and language as numbers (see CONDITION_IDS). A value copied
+        # from the record goes back as it came when it is a number, as its number when it is a
+        # known code, and is left out when it is neither (an edit never fails on a stored value
+        # the gateway does not know); only the values in ``changes`` must be known codes.
+        for key, to_id in (("language", _language_id), ("condition", _condition_id)):
+            stored = record.get(key)
+            if stored is None:
+                continue
+            try:
+                body[key] = to_id(stored)
+            except ArchidektError:
+                logger.info("collection record %s: unknown stored %s left out", rid, key)
         # None clears purchasePrice and condition (the site sends null for "no price" and "no
         # condition"); for the other fields None means "leave as is".
-        body.update(
-            {k: v for k, v in changes.items() if v is not None or k in ("purchasePrice", "condition")}
-        )
+        changed = {k: v for k, v in changes.items() if v is not None or k in ("purchasePrice", "condition")}
+        if "condition" in changed:
+            changed["condition"] = _condition_id(changed["condition"])
+        if "language" in changed:
+            changed["language"] = _language_id(changed["language"])
+        body.update(changed)
         resp = await self._request("PATCH", f"/collection/v2/{rid}/", token=token, json_body=body)
         if not isinstance(resp, dict):
             raise ArchidektError("contract", "unexpected collection update response shape")
@@ -1340,15 +1802,27 @@ class ArchidektClient:
 
     # -- social actions (a person's own clicks; no assistant tool calls these) -----------------
     # Routes from archidekt.com's deck page bundle (2026-10-07): bookmarks are POST/DELETE
-    # /decks/{id}/bookmarks/ (OPTIONS answers "Bookmark" with POST); a deck's like is a vote on
-    # its comment root, PUT /comments/vote/{root}/ {"up": bool, "remove": bool}; follow is POST
+    # /decks/{id}/bookmarks/ (OPTIONS answers "Bookmark" with POST); a deck's like is PUT
+    # /decks/{id}/vote/ and a comment's vote PUT /comments/vote/{id}/, both {"up": bool, "remove":
+    # bool} (re-read from the bundle 2026-10-14; the like had been sent to the comment route before
+    # 0.7.27); follow is POST
     # /users/follow/ {"followId", "unfollow"}; the thread is GET /comments/{root}/?page=&orderBy=
     # (checked live) and POST /comments/createComment/ {"parent", "text"} (OPTIONS lists text and
     # parent). Writes are reported from the bundle, not exercised by this session.
 
-    async def vote_deck(self, token: str, comment_root: int, *, up: bool, remove: bool = False) -> Any:
+    async def vote_deck(self, token: str, deck_id: str, *, up: bool, remove: bool = False) -> Any:
+        """PUT /decks/{id}/vote/ {up, remove}: the deck page's like button. Taking a vote back
+        sends ``remove`` with ``up`` naming the vote taken back, as the site does."""
+        if not DECK_ID_RE.fullmatch(str(deck_id)):
+            raise ArchidektError("contract", "deck id is not a number")
         return await self._request(
-            "PUT", f"/comments/vote/{int(comment_root)}/", token=token, json_body={"up": up, "remove": remove}
+            "PUT", f"/decks/{deck_id}/vote/", token=token, json_body={"up": up, "remove": remove}
+        )
+
+    async def vote_comment(self, token: str, comment_id: int, *, up: bool, remove: bool = False) -> Any:
+        """PUT /comments/vote/{id}/ {up, remove}: a comment's vote buttons."""
+        return await self._request(
+            "PUT", f"/comments/vote/{int(comment_id)}/", token=token, json_body={"up": up, "remove": remove}
         )
 
     async def bookmark_deck(self, token: str, deck_id: str, *, on: bool) -> Any:
@@ -1418,7 +1892,10 @@ class ArchidektClient:
 
     async def comment_create(self, token: str, parent: int, text: str) -> dict[str, Any]:
         resp = await self._request(
-            "POST", "/comments/createComment/", token=token, json_body={"parent": int(parent), "text": text}
+            "POST",
+            "/comments/createComment/",
+            token=token,
+            json_body={"parent": int(parent), "text": rich_doc(text)},
         )
         if not isinstance(resp, dict):
             raise ArchidektError("contract", "unexpected comment create response shape")
@@ -1427,9 +1904,12 @@ class ArchidektClient:
     async def update_deck(self, token: str, deck_id: str, fields: dict[str, Any]) -> dict[str, Any]:
         """PATCH /decks/{id}/update/ with the deck's own details: any of ``name``, ``description``,
         ``deckFormat`` (int, see FORMAT_IDS), ``edhBracket`` (int or None), ``private`` and
-        ``unlisted`` (bool), and the cover: ``featured`` (a card-art URL, see ``art_url``) with
-        ``customFeatured`` ``""`` (the site sends both when a member picks a card; ``{"customFeatured":
-        ""}`` alone is its "Autoselect deck image"). Only the keys given are sent. The route with
+        ``unlisted`` (bool), and the cover: ``customFeatured`` (a card-art URL, see ``art_url``; the
+        site's "Set Deck Image" sends only that key, its bundle read 2026-10-14) or ``""`` for its
+        "Autoselect deck image". ``featured`` is Archidekt's own automatic pick and is never sent.
+        Only the keys given are sent. ``description`` is rich text: it is sent as a Quill document
+        built from its plain text (``rich_doc``), as the site's description editor sends it; only
+        a QuillDoc (a snapshot restore) goes as it is. The route with
         ``description`` is verified live (backup_deck uses it); the other keys are what Archidekt's
         own site bundle sends on the same route (reported 2026-10-07, not verified). Callers re-read
         the deck afterwards and compare every field rather than trusting the response, which only
@@ -1443,12 +1923,13 @@ class ArchidektClient:
             "edhBracket",
             "private",
             "unlisted",
-            "featured",
             "customFeatured",
         )
         body = {k: fields[k] for k in allowed if k in fields}
         if not body:
             raise ArchidektError("contract", "no deck details to update")
+        if isinstance(body.get("description"), str):
+            body["description"] = rich_doc(body["description"])
         resp = await self._request("PATCH", f"/decks/{deck_id}/update/", token=token, json_body=body)
         if not isinstance(resp, dict):
             raise ArchidektError("contract", "unexpected deck update response shape")
@@ -1489,25 +1970,19 @@ class ArchidektClient:
         return made
 
     async def mass_update(self, token: str, items: list[dict[str, Any]]) -> Any:
-        """PATCH /massUpdate/ {"items": [{id, type: "deck" | "folder", patch: {...}, parentFolderId?}]}:
+        """PATCH /massUpdate/ {"items": [{id, type: "deck" | "folder", patch: {...}}]}:
         the folder page's move (patch ``parentFolder``) and rename (patch ``name``) (reported)."""
         return await self._request("PATCH", "/massUpdate/", token=token, json_body={"items": items})
 
     async def search_tags(self, token: str, query: str) -> list[dict[str, Any]]:
-        """GET /decks/tags/v2/?q=: the site's tag picker lookup ({id, name} rows; reported)."""
+        """GET /decks/tags/v2/?q=: the site's tag picker lookup ({id, name} rows; reported). Deck tags
+        are one list Archidekt keeps: its own deck page only ever picks from it and never creates a
+        tag (its bundle, read 2026-10-14), so the gateway does not create tags either."""
         body = await self._request("GET", "/decks/tags/v2/", token=token, params={"q": query[:60]})
         results = body.get("results") if isinstance(body, dict) else body
         if not isinstance(results, list):
             raise ArchidektError("contract", "unexpected tag search shape")
         return [r for r in results if isinstance(r, dict)]
-
-    async def create_tag(self, token: str, name: str) -> dict[str, Any]:
-        """POST /decks/tags/ {name}: a new global deck tag (reported; the body is inferred from the
-        site's picker, which creates a tag by its typed name)."""
-        made = await self._request("POST", "/decks/tags/", token=token, json_body={"name": name})
-        if not isinstance(made, dict) or not isinstance(made.get("id"), int):
-            raise ArchidektError("contract", "unexpected tag create response")
-        return made
 
     async def add_deck_tag(self, token: str, deck_id: str, tag_id: int, position: str) -> dict[str, Any]:
         """POST /decks/tagRelations/ {deck, tag, position} (reported)."""
@@ -1527,9 +2002,10 @@ class ArchidektClient:
 
     async def comment_update(self, token: str, comment_id: int, text: str) -> dict[str, Any]:
         """PATCH /comments/{id}/ {text}: edit one's own comment (the site sends text, archived and
-        locked; only the text is sent here; reported)."""
+        locked as it read them; only the text is sent here). The text goes as a Quill document
+        (``rich_doc``), as the site's comment editor sends it."""
         resp = await self._request(
-            "PATCH", f"/comments/{int(comment_id)}/", token=token, json_body={"text": text}
+            "PATCH", f"/comments/{int(comment_id)}/", token=token, json_body={"text": rich_doc(text)}
         )
         if not isinstance(resp, dict):
             raise ArchidektError("contract", "unexpected comment update response shape")
@@ -1686,6 +2162,7 @@ def parse_deck(body: Any) -> Deck:
                 label=str(entry.get("label") or ""),
                 custom_cmc=_number(entry.get("customCmc")),
                 companion=entry.get("companion") is True,
+                flipped_default=entry.get("flippedDefault") is True,
                 image_hash=str(card.get("scryfallImageHash") or ""),
                 scryfall_uid=str(card.get("uid") or ""),
                 default_category=str(oracle.get("defaultCategory") or ""),
@@ -1721,7 +2198,7 @@ def parse_deck(body: Any) -> Deck:
     return Deck(
         id=str(body["id"]),
         name=str(body.get("name", "")),
-        owner=str(owner.get("username", "")),
+        owner=str(owner.get("username") or ""),  # a null username is no owner, never "None"
         updated_at=str(body.get("updatedAt", "")),
         cards=cards,
         categories=[c for c in (body.get("categories") or []) if isinstance(c, dict)],

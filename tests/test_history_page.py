@@ -1,4 +1,4 @@
-"""The history page (T-045) and the report page (T-041) over the ASGI stack: the lists are
+"""The history page and the report page over the ASGI stack: the lists are
 narrowed and paged in SQL so a deck keeps its older entries, the filter bar, the "When" presets
 (UTC calendar days), the day and deck groupings render, snapshots keep their Restore button,
 and a stored report renders as a designed page with Markdown and HTML exports."""
@@ -11,11 +11,16 @@ import re
 import time
 from pathlib import Path
 
+import pytest
+
+from mtg_gateway import history_view
 from mtg_gateway.db import Database
 
-from .test_companion import NAV, Stack, linked_browser
-from .test_companion import stack as stack  # noqa: PLC0414  (the fixture)
+from .conftest import Stack, stack_with
+from .test_companion import COMPANION, NAV, linked_browser
 from .test_decks_and_proxy import call, mcp_token, structured
+
+stack_options = stack_with(COMPANION)
 
 FIX = Path(__file__).parent / "fixtures" / "reports"
 GOLDFISH = (FIX / "goldfish_run.md").read_text()
@@ -24,9 +29,36 @@ VALIDATION = (FIX / "validation_issues.md").read_text()
 DAY = 86400
 
 
+class _FrozenTime:
+    """The ``time`` module with ``time()`` fixed, for the History page's idea of "now"."""
+
+    def __init__(self, now: int) -> None:
+        self._now = now
+
+    def time(self) -> float:
+        return float(self._now)
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(time, name)
+
+
+def page_clock(monkeypatch: pytest.MonkeyPatch) -> int:
+    """A "now" at least ten minutes into its UTC day, with the History page's clock stopped at it.
+    Rows seeded seconds or minutes before now then fall on the page's "today" whenever the test
+    runs, including just after midnight UTC or across it."""
+    real = int(time.time())
+    now = real if real % DAY >= 600 else real - real % DAY - 1
+    monkeypatch.setattr(history_view, "time", _FrozenTime(now))
+    return now
+
+
 def seed_history(db: Database, sub: str, *, now: int) -> None:
     """30 proposals for deck 42 and 30 for deck 43, alternating and spread over 20 days, one
-    snapshot per applied proposal, so the user-wide newest 20 hold only part of deck 42's."""
+    snapshot per applied proposal, so the user-wide newest 20 hold only part of deck 42's. A
+    snapshot's deck names its owner, the linked account, as a deck read from Archidekt does."""
+    link = db.get_link(sub)
+    uid = (link or {}).get("archidekt_user_id")
+    owner = {"owner": {"id": int(uid), "username": link["archidekt_username"]}} if link and uid else {}
     for i in range(60):
         deck = "42" if i % 2 == 0 else "43"
         pid = f"p{i:02d}"
@@ -60,6 +92,7 @@ def seed_history(db: Database, sub: str, *, now: int) -> None:
                     "id": deck,
                     "name": "Immortal Reckoning" if deck == "42" else "Reap the Tides",
                     "cards": [],
+                    **owner,
                 },
             )
             with db.tx() as c:
@@ -167,12 +200,12 @@ def test_db_lists_narrow_in_sql(tmp_path: Path) -> None:
 
 
 # -- pages -------------------------------------------------------------------------
-async def test_history_page_filters_groups_and_pages(stack: Stack) -> None:
+async def test_history_page_filters_groups_and_pages(stack: Stack, monkeypatch: pytest.MonkeyPatch) -> None:
     b = await linked_browser(stack)
     try:
         gw = stack.h.app.state.gateway
         sub = gw.db._one("SELECT sub FROM users", ())["sub"]
-        now = int(time.time())
+        now = page_clock(monkeypatch)
         seed_history(gw.db, sub, now=now)
         store_report(gw.db, sub, "rep_a", taken_at=now - 100)
         store_report(gw.db, sub, "rep_b", taken_at=now - 2 * DAY)
@@ -194,8 +227,14 @@ async def test_history_page_filters_groups_and_pages(stack: Stack) -> None:
         assert "2 most recent stored reports" in body and "<svg class='tspark'" in body
         # the filter bar: themed selects in one form, the deck list from the member's history
         assert "class='card filterbar'" in body and body.count("<select") == 5
-        assert "<option value='42' selected>Immortal Reckoning</option>" in body
-        assert "<option value='43'>Reap the Tides</option>" in body
+        # Current decks by their live Archidekt names (the history recorded "Immortal
+        # Reckoning"); a deck no longer in the member's list sits in its own group below
+        assert "<option value='42' selected>Sample Commander Deck</option>" in body
+        assert "Immortal Reckoning</option>" not in body
+        assert (
+            "<optgroup label='No longer on Archidekt'><option value='43'>Reap the Tides</option></optgroup>"
+            in body
+        )
         assert (
             "<label for='h-when'>When (UTC days)</label>" in body
             and "<select id='h-when' name='when'>" in body
@@ -248,7 +287,7 @@ async def test_history_page_filters_groups_and_pages(stack: Stack) -> None:
         await b.aclose()
 
 
-async def test_history_when_presets(stack: Stack) -> None:
+async def test_history_when_presets(stack: Stack, monkeypatch: pytest.MonkeyPatch) -> None:
     """The "When" presets narrow every kind by UTC calendar day: "Today" is midnight UTC to now,
     "Last 7 days" the seven days ending today, "This year" from 1 January; the filter is in the
     query string and the pager keeps it; an unknown preset means "Any time"."""
@@ -256,7 +295,7 @@ async def test_history_when_presets(stack: Stack) -> None:
     try:
         gw = stack.h.app.state.gateway
         sub = gw.db._one("SELECT sub FROM users", ())["sub"]
-        now = int(time.time())
+        now = page_clock(monkeypatch)
         midnight = now - now % DAY  # the start of today, UTC
         jan1 = int(calendar.timegm((time.gmtime(now).tm_year, 1, 1, 0, 0, 0)))
 
@@ -418,7 +457,7 @@ async def test_report_page_and_exports(stack: Stack) -> None:
             "class='charts'",
             "<polyline class='s1'",
             "<rect class='col'",
-            "What the simulation could not model",
+            "What the solo test could not model",
             "32 of 98 cards (33% of the deck)",
             "Validation <span class='badge warn'>issues found</span>",
             "Deck statistics",
@@ -459,7 +498,7 @@ async def test_report_page_and_exports(stack: Stack) -> None:
         assert anon.status_code == 302 and anon.headers["location"].startswith("/login")
         # the deck page's button explains the wait and shows busy while the run blocks
         deck = await b.http.get("/decks/42", headers=NAV)
-        assert "data-busy-label='Simulating…'" in deck.text and "takes up to a minute" in deck.text
+        assert "data-busy-label='Testing…'" in deck.text and "takes up to a minute" in deck.text
         assert "run_deck_report" not in deck.text
     finally:
         await b.aclose()
@@ -593,3 +632,162 @@ async def test_trends_never_mix_simulations_run_differently(stack: Stack) -> Non
         assert "no rules engine" in table
     finally:
         await b.aclose()
+
+
+async def test_a_relinked_member_keeps_the_old_accounts_history(stack: Stack) -> None:
+    """After relinking to another Archidekt account, the decks of the account linked before are
+    not in the new account's list, but they are not gone: they stay with the current decks and
+    their snapshots keep Restore. A deck of the account linked now that left its list still is."""
+    b = await linked_browser(stack)
+    try:
+        gw = stack.h.app.state.gateway
+        sub = gw.db._one("SELECT sub FROM users", ())["sub"]
+        link = gw.db.get_link(sub)
+        me = {"id": int(link["archidekt_user_id"]), "username": link["archidekt_username"]}
+        before = {"id": 999999, "username": "my-old-account"}
+        now = int(time.time())
+
+        def snapshot(sid: str, deck: str, name: str, owner: dict) -> None:
+            gw.db.save_snapshot(
+                sid,
+                owner_sub=sub,
+                deck_id=deck,
+                proposal_id=None,
+                fingerprint="f",
+                deck={"id": deck, "name": name, "cards": [], "owner": owner},
+            )
+            with gw.db.tx() as c:
+                c.execute("UPDATE snapshots SET taken_at = ? WHERE id = ?", (now - DAY, sid))
+
+        snapshot("s_old_account", "7001", "Old Account Deck", before)
+        snapshot("s_mine_gone", "7002", "Mine Deleted", me)
+        gw.db.save_proposal(  # a change to the old account's deck, made before the relink
+            {
+                "id": "p_old_account",
+                "owner_sub": sub,
+                "kind": "edit",
+                "deck_id": "7003",
+                "deck_name": "Old Account Other",
+                "baseline_fingerprint": "f",
+                "changes": [],
+                "diff_text": "+1 Sol Ring",
+                "expires_at": now + 3600,
+            }
+        )
+        # the old account was linked 60 days ago (the audit log names each account linked)
+        gw.db.audit("archidekt_linked", sub=sub, detail={"archidekt_username": before["username"]})
+        with gw.db.tx() as c:
+            c.execute("UPDATE proposals SET created_at = ? WHERE id = 'p_old_account'", (now - 30 * DAY,))
+            c.execute("UPDATE archidekt_links SET created_at = ? WHERE sub = ?", (now - 2 * DAY, sub))
+            c.execute(
+                "UPDATE audit_log SET at = ? WHERE sub = ? AND event = 'archidekt_linked' "
+                "AND detail_json LIKE '%my-old-account%'",
+                (now - 60 * DAY, sub),
+            )
+        page = await b.http.get("/history", headers=NAV)
+        body = page.text.split("<main")[1]
+        gone = body.split("<optgroup label='No longer on Archidekt'>")[1].split("</optgroup>")[0]
+        assert "Mine Deleted" in gone
+        assert "Old Account Deck" not in gone and "Old Account Other" not in gone
+        assert "<option value='7001'>Old Account Deck</option>" in body
+        assert "<option value='7003'>Old Account Other</option>" in body
+        snaps = re.findall(r"<li class='hrow k-snapshot.*?</li>", body, re.S)
+        (old_row,) = [r for r in snaps if "Old Account Deck" in r]
+        (mine_row,) = [r for r in snaps if "Mine Deleted" in r]
+        assert "action='/history/restore'" in old_row and "no longer on Archidekt" not in old_row
+        assert "action='/history/restore'" not in mine_row and "no longer on Archidekt" in mine_row
+    finally:
+        await b.aclose()
+
+
+def test_own_decks_are_the_linked_accounts_only(tmp_path: Path) -> None:
+    """Which decks of the history count as the linked account's own (the only ones that can
+    be called gone). A snapshot names its deck's owner; a proposal counts by the account linked
+    when it was made, and every doubt leaves a deck out."""
+    db = Database(tmp_path / "g.db")
+    now = int(time.time())
+
+    def at(sql: str, when: int, key: str) -> None:
+        with db.tx() as c:
+            c.execute(sql, (when, key))
+
+    def proposal(pid: str, deck: str, when: int) -> None:
+        db.save_proposal(
+            {
+                "id": pid,
+                "owner_sub": "u",
+                "kind": "edit",
+                "deck_id": deck,
+                "deck_name": deck,
+                "baseline_fingerprint": "f",
+                "changes": [],
+                "diff_text": "x",
+                "expires_at": now + 3600,
+            }
+        )
+        at("UPDATE proposals SET created_at = ? WHERE id = ?", when, pid)
+
+    def linked(name: str, when: int) -> None:
+        db.audit("archidekt_linked", sub="u", detail={"archidekt_username": name})
+        at("UPDATE audit_log SET at = ? WHERE id = (SELECT MAX(id) FROM audit_log WHERE ? != '')", when, "x")
+
+    def own(**kw) -> set[str]:
+        return db.own_history_deck_ids("u", **{"account_id": "7", "username": "Me", "linked_at": now, **kw})
+
+    for sid, deck, owner in (("s1", "1", {"id": 7}), ("s2", "2", {"id": 8}), ("s3", "3", None)):
+        db.save_snapshot(
+            sid, owner_sub="u", deck_id=deck, proposal_id=None, fingerprint="f", deck={"owner": owner}
+        )
+        at("UPDATE snapshots SET taken_at = ? WHERE id = ?", now - 50 * DAY, sid)
+    proposal("p_now", "10", now + 1)
+    proposal("p_before", "11", now - 40 * DAY)
+    # no link recorded at all: one account only, as before this release
+    assert own() == {"1", "3", "10", "11"}
+    # the same account linked (and relinked): still the member's own
+    linked("me", now - 60 * DAY)
+    linked("Me", now)
+    assert own() == {"1", "3", "10", "11"}
+    # another account was linked when "11" was changed (after "3" was snapshotted): not this one's
+    linked("someone-else", now - 45 * DAY)
+    assert own() == {"1", "3", "10"}
+    # an empty username never matches
+    assert own(username="") == {"1", "10"}
+
+
+def test_deck_filter_groups_use_live_names_and_set_gone_decks_apart() -> None:
+    from mtg_gateway.history_view import deck_filter_groups
+
+    seen = {"42": "Old name", "43": "Deleted deck", "new": "Brand new", "collection": "x", "44": "Kept"}
+    live = [{"id": "42", "name": "New name"}, {"id": "44", "name": ""}]
+    own = {"42", "43", "44"}
+    current, gone = deck_filter_groups(seen, live, listed={"42", "44"}, own=own)
+    assert current == {"42": "New name", "collection": "Your Archidekt collection", "44": "Kept"}
+    assert gone == {"43": "Deleted deck"}
+    # an incomplete or unreadable list can't tell a deck is gone: it stays with the current ones
+    current, gone = deck_filter_groups(seen, live, listed=None, own=own)
+    assert gone == {} and current["43"] == "Deleted deck"
+    current, gone = deck_filter_groups(seen, None, listed=None, own=own)
+    assert gone == {} and current["42"] == "Old name"
+
+
+def test_only_a_deck_known_as_the_members_can_be_no_longer_on_archidekt() -> None:
+    """Bug (found in this release's checks): a report on someone else's public deck (or a copy
+    made of it) put that deck under "No longer on Archidekt", since it is never in the member's
+    own deck list. Only decks the member's history shows as theirs (a change, restore, snapshot
+    or new deck) can be judged gone; any other missing deck stays with the current ones."""
+    from mtg_gateway.history_view import deck_filter_groups
+
+    seen = {"42": "Mine", "43": "Mine, deleted", "900": "Someone else's"}
+    live = [{"id": "42", "name": "Mine"}]
+    current, gone = deck_filter_groups(seen, live, listed={"42"}, own={"42", "43"})
+    assert gone == {"43": "Mine, deleted"}
+    assert current == {"42": "Mine", "900": "Someone else's"}
+
+
+def test_the_gone_group_follows_the_complete_list_not_a_later_read() -> None:
+    # The names come from one read of the list and the judgement from another (on_archidekt):
+    # a deck the judging list holds is never called gone because the names list lacks it.
+    from mtg_gateway.history_view import deck_filter_groups
+
+    current, gone = deck_filter_groups({"42": "Mine"}, [], listed={"42"}, own={"42"})
+    assert gone == {} and current == {"42": "Mine"}

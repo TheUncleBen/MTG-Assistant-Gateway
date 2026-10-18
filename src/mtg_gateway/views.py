@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import Any
 
 from . import deck_stats
-from .archidekt import Deck, DeckCard
+from .archidekt import Deck, DeckCard, rich_text
 from .decks import deck_to_archidekt_text, deck_to_text
 
 
@@ -25,7 +25,7 @@ def card_out(deck: Deck, c: DeckCard) -> dict[str, Any]:
     }
     if not c.categories:
         # No category of the member's own: archidekt.com shows the card under its auto category
-        # (else its type), and deck_stats counts it there, so the row says which (B3, F27).
+        # (else its type), and deck_stats counts it there, so the row says which.
         out["shown_under"] = deck_stats.primary_category(c)
     # Oracle fields are optional on the model (older fixtures and the fake server may lack them).
     for key in (
@@ -87,11 +87,12 @@ def deck_out(
         "updated_at": deck.updated_at,
         "url": f"https://archidekt.com/decks/{deck.id}",
         "format": getattr(deck, "format", None),
-        "description": getattr(deck, "description", None) or "",
+        "description": rich_text(getattr(deck, "description", None)),  # its text, not the Quill JSON
         "edh_bracket": getattr(deck, "edh_bracket", None),
         "private": getattr(deck, "private", None),
         "tags": getattr(deck, "tags", None) or [],
         "card_count": sum(c.quantity for c in deck.main_cards),
+        **({"link_notice": deck.link_notice} if getattr(deck, "link_notice", "") else {}),
         "side_count": sum(c.quantity for c in deck.side_cards),
         "commanders": [c.name for c in deck.cards if "Commander" in c.categories],
         "categories": [c.get("name") for c in deck.categories if isinstance(c.get("name"), str)],

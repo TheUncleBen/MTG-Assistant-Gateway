@@ -13,26 +13,13 @@ import time
 from pathlib import Path
 
 import pytest
-from mcp import Client
 
 from mtg_gateway import link_disclosure, pages
-from mtg_gateway.mf_proxy import MysticForgeProxy
 
-from .conftest import FakeIdP, Harness, make_settings, running
-from .test_decks_and_proxy import Browser, Stack, _client, call, fake_mystic_forge, linked_user, structured
+from .conftest import AUTO_PROXY, Stack, stack_with
+from .test_decks_and_proxy import Browser, call, linked_user, structured
 
-
-@pytest.fixture
-async def stack(tmp_path: Path, idp: FakeIdP):
-    from .fake_archidekt import FakeArchidekt
-
-    ark = FakeArchidekt()
-    settings = make_settings(
-        tmp_path, writes_enabled=True, approval_mode_default="auto", archidekt_base="https://ark.test/api"
-    )
-    proxy = MysticForgeProxy("http://mf.test/mcp", client_factory=lambda: Client(fake_mystic_forge()))
-    async with running(Harness(settings, idp, archidekt=_client(settings, ark), mf_proxy=proxy)) as h:
-        yield Stack(h, ark)
+stack_options = stack_with(AUTO_PROXY)
 
 
 def _jwt(claims: dict) -> str:
@@ -87,7 +74,7 @@ def test_disclosure_names_what_the_operator_and_admins_can_and_cannot_do() -> No
         "how many app tokens and browser sessions you have open",
         "whether and when you were disabled",
         "disable and enable your account",
-        # the operator list names the sign-in service's user ID too (0.7.8 gate item I-1)
+        # the operator list names the sign-in service's user ID too
         "email, username, user ID and groups at the sign-in service",
         # the summary on top
         "never stores it",

@@ -4,8 +4,10 @@ result (MCP Apps), without any of it passing through the model.
 Every card follows the same rules:
 
 * The tool result's text and structured content stay what the assistant needs: a summary it can
-  act on without the card. Pictures come from Scryfall into the card. A long list (a deck, the
-  printings of a card) reaches the card through a **signed link** in the result's ``_meta``: a
+  act on without the card. Pictures come from Scryfall into the card. A deck reaches the deck
+  card in the result's ``_meta``, which the host hands to the card and never to the model, so the
+  card needs no connection to the gateway. A long list (a deck too large to carry, the printings
+  of a card) reaches the card through a **signed link** in the result's ``_meta``: a
   Fernet token naming the member, what to read and when it was issued. The card fetches it from
   ``/cards/data/<token>``; nothing about it is in the model's context. The link is read-only,
   bound to one member and one object, and expires after ``LINK_TTL`` seconds. Private decks are
@@ -44,6 +46,7 @@ from urllib.parse import urlparse
 import pydantic_core
 from cryptography.fernet import Fernet, InvalidToken
 from mcp.server.apps import Apps, ResourceCsp
+from mcp.server.mcpserver.resources import TextResource
 from mcp_types import CallToolResult, TextContent
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
@@ -67,6 +70,7 @@ COMPARE_CARD_URI = URI_BASE + "compare-card"
 STATS_CARD_URI = URI_BASE + "stats-card"
 DECK_LIST_CARD_URI = URI_BASE + "deck-list-card"
 SCAN_CARD_URI = URI_BASE + "scan-card"
+WAITING_CARD_URI = URI_BASE + "waiting-card"  # show_waiting_changes (0.7.29)
 CARD_META_KEY = "mtg/card"  # tool-result _meta key a card reads its link or data from
 LINK_TTL = 600  # seconds a signed link stays valid
 LINK_PATH = "/cards/data/"
@@ -93,11 +97,45 @@ def card_html(name: str, public_url: str = "") -> str:
     return html.replace("/*@BASE@*/", base).replace("/*@BRIDGE@*/", bridge).replace('"@GATEWAY@"', gateway)
 
 
+def _add_card(
+    apps: Apps,
+    uri: str,
+    html: str,
+    *,
+    name: str,
+    title: str,
+    description: str,
+    csp: ResourceCsp,
+    prefers_border: bool,
+) -> None:
+    """One card as an MCP Apps resource: ``_meta.ui`` as the extension spells it, plus the same
+    origins under ``openai/widgetCSP``, the key ChatGPT read before it took ``_meta.ui.csp``."""
+    ui: dict[str, Any] = {
+        "csp": csp.model_dump(by_alias=True, exclude_none=True),
+        "prefersBorder": prefers_border,
+    }
+    widget_csp = {
+        "connect_domains": csp.connect_domains or [],
+        "resource_domains": csp.resource_domains or [],
+    }
+    apps.add_resource(
+        TextResource(
+            uri=uri,
+            name=name,
+            title=title,
+            description=description,
+            meta={"ui": ui, "openai/widgetCSP": widget_csp},
+            text=html,
+        )
+    )
+
+
 def add_card_resources(apps: Apps, public_url: str) -> None:
     """Register the cards on the MCP Apps extension. Each declares only the origins it needs:
     Scryfall for pictures, the gateway for its signed link, Scryfall's API for rules text."""
     gateway = _origin(public_url)
-    apps.add_html_resource(
+    _add_card(
+        apps,
         PRINTINGS_CARD_URI,
         card_html("printings-card"),
         name="printings-card",
@@ -106,7 +144,8 @@ def add_card_resources(apps: Apps, public_url: str) -> None:
         csp=ResourceCsp(resource_domains=list(CARD_IMAGE_HOSTS), connect_domains=[gateway]),
         prefers_border=True,
     )
-    apps.add_html_resource(
+    _add_card(
+        apps,
         PICKER_CARD_URI,
         card_html("picker-card"),
         name="picker-card",
@@ -115,7 +154,8 @@ def add_card_resources(apps: Apps, public_url: str) -> None:
         csp=ResourceCsp(resource_domains=list(CARD_IMAGE_HOSTS)),
         prefers_border=True,
     )
-    apps.add_html_resource(
+    _add_card(
+        apps,
         DECK_CARD_URI,
         card_html("deck-card"),
         name="deck-card",
@@ -124,7 +164,20 @@ def add_card_resources(apps: Apps, public_url: str) -> None:
         csp=ResourceCsp(resource_domains=list(CARD_IMAGE_HOSTS), connect_domains=[gateway, SCRYFALL_API]),
         prefers_border=True,
     )
-    apps.add_html_resource(
+    _add_card(
+        apps,
+        WAITING_CARD_URI,
+        card_html("waiting-card", public_url),
+        name="waiting-card",
+        title="Waiting changes",
+        description=(
+            "The changes waiting for the user's approval, each with Approve and Reject, and Apply all."
+        ),
+        csp=ResourceCsp(),
+        prefers_border=True,
+    )
+    _add_card(
+        apps,
         ACCOUNT_CARD_URI,
         card_html("account-card"),
         name="account-card",
@@ -133,7 +186,8 @@ def add_card_resources(apps: Apps, public_url: str) -> None:
         csp=ResourceCsp(),
         prefers_border=True,
     )
-    apps.add_html_resource(
+    _add_card(
+        apps,
         COMPARE_CARD_URI,
         card_html("compare-card", public_url),
         name="compare-card",
@@ -142,7 +196,8 @@ def add_card_resources(apps: Apps, public_url: str) -> None:
         csp=ResourceCsp(),
         prefers_border=True,
     )
-    apps.add_html_resource(
+    _add_card(
+        apps,
         STATS_CARD_URI,
         card_html("stats-card", public_url),
         name="stats-card",
@@ -151,7 +206,8 @@ def add_card_resources(apps: Apps, public_url: str) -> None:
         csp=ResourceCsp(),
         prefers_border=True,
     )
-    apps.add_html_resource(
+    _add_card(
+        apps,
         DECK_LIST_CARD_URI,
         card_html("deck-list-card", public_url),
         name="deck-list-card",
@@ -160,7 +216,8 @@ def add_card_resources(apps: Apps, public_url: str) -> None:
         csp=ResourceCsp(resource_domains=list(CARD_IMAGE_HOSTS)),
         prefers_border=True,
     )
-    apps.add_html_resource(
+    _add_card(
+        apps,
         SCAN_CARD_URI,
         card_html("scan-card", public_url),
         name="scan-card",
@@ -371,6 +428,24 @@ def deck_card_data(deck: Deck, *, public_url: str, snapshot: dict[str, Any] | No
     return out
 
 
+# The deck travels in the tool result's _meta up to this size (JSON bytes); a larger one is left to
+# the signed link, so a very long list never bloats a result.
+DECK_INLINE_MAX = 300_000
+
+
+def deck_card_payload(
+    deck: Deck, *, link: str, public_url: str, snapshot: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    """The deck card's part of a deck read's ``_meta``: the deck as the card draws it (the same
+    rows the signed link serves), so the card fetches nothing from the gateway, and the link as the
+    fallback for a deck too large to carry. A host hands ``_meta`` to the card, never to the model."""
+    data = deck_card_data(deck, public_url=public_url, snapshot=snapshot)
+    out: dict[str, Any] = {"link": link, "name": deck.name}
+    if len(pydantic_core.to_json(data, fallback=str)) <= DECK_INLINE_MAX:
+        out["deck"] = data
+    return out
+
+
 # The endpoint answers with its own words, never with Archidekt's or Scryfall's.
 FIXED_MESSAGES = {
     "not_found": "The deck, snapshot or card behind this link no longer exists.",
@@ -542,6 +617,7 @@ __all__ = [
     "card_html",
     "client_elicits_forms",
     "deck_card_data",
+    "deck_card_payload",
     "tool_meta",
     "with_card",
 ]

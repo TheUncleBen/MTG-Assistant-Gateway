@@ -5,8 +5,20 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .conftest import FakeIdP, Harness, gw, idp, make_settings, running  # noqa: F401
-from .test_decks_and_proxy import Browser, call, mcp_token, stack, structured  # noqa: F401
+from .conftest import (  # noqa: F401
+    AUTO_PROXY,
+    FakeIdP,
+    Harness,
+    gw,
+    idp,
+    make_settings,
+    proposal_stamp,
+    running,
+    stack_with,
+)
+from .test_decks_and_proxy import Browser, call, mcp_token, structured  # noqa: F401
+
+stack_options = stack_with(AUTO_PROXY)
 
 AMY = {
     "sub": "user-2",
@@ -28,7 +40,7 @@ async def browser_for(h: Harness, user: dict | None, ark_user: str, pw: str) -> 
     return b
 
 
-async def test_cross_user_objects(stack) -> None:  # noqa: F811
+async def test_cross_user_objects(stack) -> None:
     h = stack.h
     alice_user = dict(h.idp.user)
     # --- Alice makes one of everything --------------------------------------
@@ -134,7 +146,8 @@ async def test_cross_user_objects(stack) -> None:  # noqa: F811
     # Browser pages
     r = await bb.http.get(f"/proposals/{pid}", headers=NAV)
     assert r.status_code == 404
-    r = await bb.http.post(f"/proposals/{pid}", data={"csrf": csrf_b, "action": "reject"})
+    shown = proposal_stamp(h, bb.http, pid)  # a stamp of Bob's own, so only ownership refuses it
+    r = await bb.http.post(f"/proposals/{pid}", data={"csrf": csrf_b, "action": "reject", "shown": shown})
     assert r.status_code in (303, 404), r.text
     r = await bb.http.get(f"/history/reports/{rid}", headers=NAV)
     assert r.status_code == 404
@@ -164,7 +177,7 @@ async def test_cross_user_objects(stack) -> None:  # noqa: F811
     await bb.aclose()
 
 
-async def test_private_deck_of_another_member_is_unreachable(stack) -> None:  # noqa: F811
+async def test_private_deck_of_another_member_is_unreachable(stack) -> None:
     """Amy's deck 43 is private on Archidekt. Alice (linked as alice) must not read or edit it."""
     h = stack.h
     bb = await browser_for(h, AMY, "amy", "pw-amy")

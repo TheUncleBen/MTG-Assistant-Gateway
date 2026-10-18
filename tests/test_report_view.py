@@ -149,15 +149,15 @@ def test_sixty_card_run_reads_as_a_sixty_card_game() -> None:
 def test_page_speaks_plainly_and_shows_every_panel() -> None:
     html = rv.report_body_html(report(), stats_html="<div class='tiles'>stats</div>", reused=True)
     for text in (
-        "Goldfish simulation",
+        "Solo test (300 games, no opponents)",
         "class='tiles wide'",
         "class='ci'",
         "class='charts'",
         "<svg",
-        "What the simulation could not model",
-        "Not recognized",
+        "What the solo test could not model",
+        "Played without their effect",
         "32 of 98 cards (33% of the deck)",
-        "Out of scope",
+        "Left out on purpose",
         "Removal and other interaction",
         "badge warn'>issues found",
         "Deck statistics",
@@ -179,7 +179,7 @@ def test_page_without_a_simulation() -> None:
     refused = {
         "tool": "goldfish_run",
         "ok": False,
-        "text": "Not simulated: the goldfish simulator models Commander decks and needs one card in the "
+        "text": "No solo test: the solo test plays Commander decks and needs one card in the "
         "deck's Commander (premier) category.",
     }
     html = rv.report_body_html(report(goldfish=refused["text"]) | {"goldfish": refused})
@@ -193,8 +193,14 @@ def test_markdown_and_html_exports() -> None:
     md = rv.report_markdown(r)
     assert md.startswith("# Deck report: Immortal Reckoning\n")
     assert "- Commander: Liesa, Forgotten Archangel" in md and "- Games: 300, through turn 10" in md
-    assert "## Goldfish simulation" in md and "40 damage dealt by turn 10: 57% (95% interval 51–62%)" in md
-    assert "Not recognized — 32 of 98 cards (33% of the deck):" in md and "## Validation: issues found" in md
+    assert (
+        "## Solo test (300 games, no opponents)" in md
+        and "40 damage dealt by turn 10: 57% (95% interval 51–62%)" in md
+    )
+    assert (
+        "Played without their effect: 32 of 98 cards (33% of the deck)." in md
+        and "## Validation: issues found" in md
+    )
     assert "## Simulation output" in md and "## Metrics" in md and "goldfish_" not in md
     doc = rv.report_export_html(r, stats_html="<p>stats</p>", theme_css=".tiles{display:grid}")
     assert doc.startswith("<!doctype html>") and "<script" not in doc and "href='/" not in doc
@@ -264,9 +270,13 @@ def test_no_causal_claim_and_one_coverage_figure() -> None:
     and out of scope: 98 - 32 - 17 = 49), for Commander games only (60-card decks hold copies)."""
     html = rv.report_body_html(report())
     assert "underperforms" not in html and "says nothing about how the card does" in html
-    assert "Modeled: 49 of 98 cards (50% of the deck); the rest are listed below." in html
+    assert (
+        "Played with their effect: 49 of 98 cards (50% of the deck). Known: 66 of 98 cards (67% of the "
+        "deck), counting the cards played with their effect and those left out on purpose. The rest are "
+        "listed below." in html
+    )
     md = rv.report_markdown(report())
-    assert "underperforms" not in md and "Modeled: 49 of 98 cards (50% of the deck)" in md
+    assert "underperforms" not in md and "Played with their effect: 49 of 98 cards (50% of the deck)" in md
     g = rv.parse_goldfish({"ok": True, "text": GOLDFISH})
     assert (
         rv.coverage({**g, "format": "constructed"}) is None and rv.coverage({**g, "deck_size": None}) is None
@@ -274,7 +284,7 @@ def test_no_causal_claim_and_one_coverage_figure() -> None:
 
 
 def test_preflight_only_label_and_overall_status() -> None:
-    """D16: a report without Forge games (Forge off, or left out of this report) says "Preflight only
+    """A report without Forge games (Forge off, or left out of this report) says "Preflight only
     (no rules engine)" where the Forge games would be. QA-010: its overall status is in the head."""
     html = rv.report_body_html(report(status="complete"))  # Forge was not set up
     assert "<h2>Preflight only (no rules engine)</h2>" in html and "was not set up" in html
@@ -282,7 +292,7 @@ def test_preflight_only_label_and_overall_status() -> None:
     skipped = {"state": "skipped", "reason": "not_commander", "note": "Forge plays Commander games only."}
     html = rv.report_body_html(report(forge=skipped, status="complete"))
     assert "<h2>Preflight only (no rules engine)</h2>" in html and "Commander games only." in html
-    assert "Forge games" not in html and "not run" not in html.split("Goldfish simulation")[0]
+    assert "Forge games" not in html and "not run" not in html.split("Solo test (")[0]
     full = {"state": "skipped", "error": "You already have a Forge run going and 2 reports waiting."}
     html = rv.report_body_html(report(forge=full, status="partial"))
     assert "Preflight only" in html and "notice warn'>You already have" in html
@@ -293,4 +303,64 @@ def test_preflight_only_label_and_overall_status() -> None:
     md = rv.report_markdown(report(forge=skipped, status="complete"))
     assert "## Preflight only (no rules engine)" in md and "- Status: complete" in md
     assert "## Preflight only (no rules engine)" in rv.report_markdown(report())
-    assert "## Forge games" in rv.report_markdown(report(forge={"state": "running"}, status="running"))
+    assert "## Forge games (against precons)" in rv.report_markdown(
+        report(forge={"state": "running"}, status="running")
+    )
+
+
+def test_copies_and_sixty_card_coverage_come_from_the_kept_quantities() -> None:
+    """The cards played without their effect show their copies; a 60-card game kept with
+    its quantities gets a coverage figure counted in copies (none without them, as before)."""
+    g0 = rv.parse_goldfish({"ok": True, "text": GOLDFISH})
+    name = g0["honesty"]["unrecognized"][0]["name"]
+    quantities = {rv.front_face(name): 3, "Not In The Report": 2, "bad": "x", "neg": -1, "flag": True}
+    g = rv.parse_goldfish({"ok": True, "text": GOLDFISH, "quantities": quantities})
+    assert g["quantities"] == {rv.front_face(name).casefold(): 3, "not in the report": 2}
+    first = g["honesty"]["unrecognized"][0]
+    assert first["copies"] == 3 and g["honesty"]["unrecognized"][1]["copies"] is None
+    assert f"<li>3× {rv.front_face(name)}" in rv.honesty_html(g)
+    # 98 cards less 34 copies played without their effect (32 cards, one of them 3 times) less 17 = 47
+    assert rv.coverage(g) == {"modeled": 47, "deck_size": 98, "pct": 48, "known": 64, "known_pct": 65}
+    con = {**g, "format": "constructed", "deck_size": 60}
+    assert rv.coverage({**con, "quantities": {}}) is None
+    assert rv.coverage(con)["deck_size"] == 60
+    md = rv.report_markdown(
+        report(goldfish=None)
+        | {"goldfish": {"tool": "goldfish_run", "ok": True, "text": GOLDFISH, "quantities": quantities}}
+    )
+    assert f"3× {rv.front_face(name)}" in md
+
+
+def test_ask_button_only_on_the_signed_in_page() -> None:
+    """The cards played without their effect get a copy-a-request button on the signed-in page (the
+    same words for Claude and ChatGPT, no tool names on the page); exports carry no button."""
+    r = report(deck_url="https://archidekt.com/decks/42")
+    html = rv.report_body_html(r)
+    assert "data-copy='ask-model'" in html and rv.ASK_LABEL in html and "id='ask-model-status'" in html
+    assert "Immortal Reckoning" in html.split("id='ask-model'")[1] and "goldfish_" not in html
+    assert "never from memory" in html
+    assert "ask-model" not in rv.report_export_html(r, stats_html="", theme_css="")
+    assert rv.ASK_LABEL not in rv.report_markdown(r)
+    assert rv.ask_html(r, []) == ""
+    # names are escaped in the hidden text
+    assert "&lt;b&gt;" in rv.ask_html(r | {"deck_name": "<b>"}, [{"name": "X"}])
+
+
+def test_left_out_groups_count_copies_as_their_heading_does() -> None:
+    """A group under "Left out on purpose" counts copies, like the heading."""
+    g = {
+        "deck_size": 60,
+        "honesty": {
+            "out_of_scope": [
+                {
+                    "kind": "interaction_removal",
+                    "label": "Removal",
+                    "cards": [{"name": "Murder", "copies": 4}],
+                }
+            ],
+            "unrecognized": [],
+            "low_impact": [],
+        },
+    }
+    html = rv.honesty_html(g)
+    assert "<h4>Removal <small>4</small></h4>" in html

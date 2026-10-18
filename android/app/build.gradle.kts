@@ -118,4 +118,5 @@ dependencies {
     implementation("androidx.window:window:1.5.1") // fold posture
     implementation("androidx.window:window-java:1.5.1") // ...with a callback API, no coroutines in app code
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303") // Push.parse in JVM tests: Android's org.json is a stub there
 }

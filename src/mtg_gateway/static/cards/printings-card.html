@@ -123,7 +123,7 @@
       .catch(function () { B.setStatus("The printings could not be loaded (no connection to the gateway). The newest sets are in the assistant's message.", "err"); });
   }
   $("filter").addEventListener("input", draw);
-  // The finish filter is a row of the card's own chips, not the host browser's list (R-131).
+  // The finish filter is a row of the card's own chips, not the host browser's list.
   function finishWanted() {
     var on = $("finish").querySelector("button.on");
     return on ? on.getAttribute("data-finish") || "" : "";

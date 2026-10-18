@@ -3,7 +3,7 @@
 Skills for whoever deploys and runs the gateway. It bundles no MCP server.
 
 - `skills/deploy/`: walks through `docs/DEPLOY.md` step by step, generates
-  the random secrets on the operator's machine, and verifies the result.
+  the random secrets on the operator's machine, and checks the result.
 - `skills/invite/`: adds a user in Authentik and sends them the install
   link.
 

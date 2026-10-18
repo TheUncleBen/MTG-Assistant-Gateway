@@ -12,7 +12,7 @@ from urllib.parse import urlencode
 from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
 
-from . import deck_stats
+from . import deck_stats, prefs
 from .archidekt import format_label
 from .busy import busy_response
 from .companion import (
@@ -28,11 +28,13 @@ from .deckpage import (
     VIEWS,
     covers_for,
     deck_list_controls_html,
-    deck_list_html,
     deck_page_html,
+    decks_unreadable_html,
     featured,
+    reread_href,
 )
-from .decks import DeckError, current_client
+from .decks import DeckError, current_client, owns_deck
+from .folderview import FOLDER_CSS, arrange, level_html, resolve_folder
 from .pages import (
     BROWSER_CLIENT_ID,
     _csrf,
@@ -44,9 +46,8 @@ from .theme import (
 )
 from .theme import (
     icon,
-    remember_view,
-    view_choice,
 )
+from .waiting_strip import waiting_changes
 
 if TYPE_CHECKING:
     from mcp.server.mcpserver import MCPServer
@@ -58,7 +59,6 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
     """My decks, new deck, one deck and clone."""
     EXPIRED = h.EXPIRED
     apply_now = h.apply_now
-    arrange_decks = h.arrange_decks
     check_csrf = h.check_csrf
     deck_list_skeleton = h.deck_list_skeleton
     decks = h.decks
@@ -70,6 +70,15 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
     s = h.s
     secure = h.secure
 
+    async def folder_tree(sub: str, *, wait: float) -> tuple[dict[str, Any] | None, bool]:
+        """(the member's folder tree, still being read). The tree is None when Archidekt could
+        not give it (My decks then lists every deck flat, with a notice) or is still coming."""
+        try:
+            tree = await decks.folder_view(sub, wait=wait)
+        except DeckError:
+            return None, False
+        return tree, tree is None
+
     # -- my decks ---------------------------------------------------------------
     @server.custom_route("/decks", methods=["GET"], include_in_schema=False)
     async def decks_page(request: Request) -> Response:
@@ -77,19 +86,37 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
         if not sub:
             return login_redirect("/decks")
         qp = request.query_params
-        chosen, remember = view_choice(request, "decks", LIST_VIEWS, "grid")
+        # Try again on the notice that the deck list couldn't be read: read it again, then show it
+        if qp.get("reread"):
+            if prefs.from_this_site(request):  # a link on another site only shows the page
+                decks.reread_deck_list(sub)
+            rest = urlencode([(k, v) for k, v in qp.multi_items() if k != "reread"])
+            return RedirectResponse("/decks" + (f"?{rest}" if rest else ""), 303)
+        chosen, remember = prefs.view_choice(state.db, sub, request, "decks", LIST_VIEWS, "grid")
         q, order, view, folder = list_query(qp, chosen)
         rows, problem, failure = await my_decks(sub, wait=decks.deck_list_wait)
         if failure is not None and (busy := busy_response(failure, request, page, sub=sub, sid=sid)):
             return busy
         pending = rows is None  # cold start: the shell goes out now, decks.js fills the list
-        hidden = 0  # the gateway's backup copies, kept out of this list (D-03); the list is warm now
-        if not pending and not problem:
+        unreadable = bool(getattr(rows, "unreadable", 0))  # entries Archidekt left unreadable
+        hidden = 0  # the gateway's backup copies, kept out of this list; the list is warm now
+        if not pending and not problem and not unreadable:  # unreadable: the list is not kept
             try:
                 hidden = len(await decks.backup_copies(sub, wait=0.0) or [])
             except DeckError:
                 hidden = 0
-        rows, folders, total = arrange_decks(rows or [], q=q, order=order, folder=folder)
+        tree, tree_pending = None, False
+        if not pending and not problem:  # Archidekt failing on the list: no second request
+            tree, tree_pending = await folder_tree(sub, wait=decks.deck_list_wait)
+        pending = pending or tree_pending  # the folders are still being read: decks.js fills the list
+        folder_id = resolve_folder(tree, folder)
+        level = arrange(rows or [], tree, folder_id=folder_id, q=q, order=order)
+        total = level.total
+        if not pending:  # the toolbar keeps the folder shown (an old name address becomes its id)
+            folder = str(folder_id) if folder_id is not None else ""
+        unread_html = (
+            decks_unreadable_html(some_shown=total > 0, again=reread_href("/decks", qp)) if unreadable else ""
+        )
         open_form = (
             "<form method='get' action='/decks/open' class='openform'>"
             "<label for='ref'>Open any Archidekt deck</label>"
@@ -106,18 +133,30 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
             return page("My decks", notice + body, sub=sub, sid=sid, current="/decks")
         if pending:
             src = "/api/decks/mine?" + urlencode(
-                {"shape": "list", "q": q, "order": order, "view": view, "folder": folder}
+                {
+                    "shape": "list",
+                    "q": q,
+                    "order": order,
+                    "view": view,
+                    "folder": request.query_params.get("folder") or "",
+                }
             )
             listing = f"<div data-decks-src='{_esc(src)}' aria-busy='true'>{deck_list_skeleton(view)}</div>"
         else:
-            covers = covers_for(rows, state.db.deck_covers([str(d["id"]) for d in rows]))
-            listing = (f"<p class='notice error'>{_esc(problem)}</p>" if problem else "") + deck_list_html(
-                rows, covers=covers, q=q, view=view, folder=folder
-            )
+            shown = level.decks
+            covers = covers_for(shown, state.db.deck_covers([str(d["id"]) for d in shown]))
+            listing = (f"<p class='notice error'>{_esc(problem)}</p>" if problem else "") + unread_html
+            if not (unreadable and not total):  # nothing read: the notice instead of "No decks yet"
+                listing += level_html(level, covers=covers, q=q, view=view, order=order)
         body = (
             notice
             + deck_list_controls_html(
-                q=q, order=order, view=view, folders=folders, folder=folder, total=total, pending=pending
+                q=q,
+                order=order,
+                view=view,
+                folder=folder,
+                total=None if unreadable and not total else total,
+                pending=pending,
             )
             + listing
             + (
@@ -141,8 +180,9 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
             csp=DECK_CSP,  # the covers are Scryfall images
             deck_css=True,
             extra_scripts=("decks.js",),
+            extra_css=FOLDER_CSS,
         )
-        return remember_view(resp, "decks", view, secure=secure) if remember else resp
+        return prefs.remember_view(state.db, sub, resp, "decks", view, secure=secure) if remember else resp
 
     @server.custom_route("/api/decks/mine", methods=["GET"], include_in_schema=False)
     async def my_decks_json(request: Request) -> Response:
@@ -179,15 +219,27 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
 
             recent = sorted(rows or [], key=lambda d: d.get("updated_at") or "", reverse=True)
             covers = covers_for(recent, state.db.deck_covers([str(d["id"]) for d in recent]))
-            out["html"] = recent_panel_inner(None if problem else recent, covers)
+            out["html"] = recent_panel_inner(
+                None if problem else recent, covers, unreadable=bool(getattr(rows, "unreadable", 0))
+            )
             out["count"] = len(recent)
         else:
-            shown, folders, total = arrange_decks(rows or [], q=q, order=order, folder=folder)
+            unreadable = bool(getattr(rows, "unreadable", 0))  # the deck list couldn't be read, as on /decks
+            tree = None
+            if rows is not None:
+                tree, _late = await folder_tree(sub, wait=DECKS_JSON_TIMEOUT)
+            level = arrange(rows or [], tree, folder_id=resolve_folder(tree, folder), q=q, order=order)
+            shown, total = level.decks, level.total
             covers = covers_for(shown, state.db.deck_covers([str(d["id"]) for d in shown]))
-            out["html"] = (
-                f"<p class='notice error'>{_esc(problem[1])}</p>" if problem else ""
-            ) + deck_list_html(shown, covers=covers, q=q, view=view, folder=folder)
-            out["count"], out["total"], out["folders"] = len(shown), total, folders
+            out["html"] = (f"<p class='notice error'>{_esc(problem[1])}</p>" if problem else "") + (
+                decks_unreadable_html(some_shown=total > 0, again=reread_href("/decks", qp))
+                if unreadable
+                else ""
+            )
+            if not (unreadable and not total):
+                out["html"] += level_html(level, covers=covers, q=q, view=view, order=order)
+            out["count"] = len(shown)
+            out["total"] = None if unreadable and not total else total  # no count it doesn't know
         for d in rows or []:
             d.setdefault("url", f"https://archidekt.com/decks/{d['id']}")
         out["decks"] = rows or []
@@ -334,7 +386,7 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
                 status=404 if exc.kind == "not_found" else 400,
             )
         link = state.db.get_link(sub)
-        own = bool(link and deck.owner and deck.owner.lower() == str(link["archidekt_username"]).lower())
+        own = bool(link) and owns_deck(deck, link) is True
         stats = deck_stats.compute(deck)
         art = featured(deck)
         if own and art is not None:  # the deck list shows covers for the member's own decks
@@ -347,10 +399,12 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
         elif err_code in DECK_ERR_MESSAGES:
             # Only known codes; the text is fixed here, so a link cannot choose the words.
             notice = f"<p class='notice error'>{_esc(DECK_ERR_MESSAGES[err_code])}</p>"
+        if deck.link_notice:  # the member's link was dropped while reading this deck
+            notice = f"<p class='notice error'>{_esc(deck.link_notice)}</p>" + notice
         # Archidekt marks each deck card with the copies the signed-in member owns ("owned" on the
         # card when the deck is read with their session); the gateway's green dot is that number.
         owned = {c.name.lower(): c.owned for c in deck.cards if c.owned} if link else None
-        view, remember = view_choice(request, "deck", VIEWS, "text")
+        view, remember = prefs.view_choice(state.db, sub, request, "deck", VIEWS, "text")
         body = deck_page_html(
             deck,
             stats,
@@ -364,7 +418,8 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
             sort=qp.get("sort") or "name",
             q=(qp.get("q") or "").strip()[:80],
             notice=notice,
-        )
+            waiting=waiting_changes(state.db, sub, deck.id, own=own),  # waiting_strip.py
+        ) + prefs.page_prefs(state.db, sub, f"{prefs.STACK}{deck.id}:", prefs.EDHPLAY_STEPS, prefs.DECKSTATS)
         resp = page(
             deck.name or f"Deck {deck.id}",
             body,
@@ -376,9 +431,10 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
             csp=DECK_CSP,
             heading=False,
             deck_css=True,
-            extra_scripts=("deckstats.js",),
+            # social.js: the banner's like, bookmark and follow and the comments
+            extra_scripts=("social.js", "deckstats.js", "printpick.js"),
         )
-        return remember_view(resp, "deck", view, secure=secure) if remember else resp
+        return prefs.remember_view(state.db, sub, resp, "deck", view, secure=secure) if remember else resp
 
     @server.custom_route("/decks/{deck_id}/clone", methods=["POST"], include_in_schema=False)
     async def clone_deck(request: Request) -> Response:

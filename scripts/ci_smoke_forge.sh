@@ -10,6 +10,8 @@ for i in $(seq 1 60); do
 done
 curl -fsS http://127.0.0.1:18100/health | python3 -c 'import json,sys; h=json.load(sys.stdin); print(h); sys.exit(h["cards"] < 30000)'
 docker exec forge grep '^Uid:' /proc/1/status | grep -qw 1234
+# the memory guards' choom (util-linux) is in the image and works for the unprivileged user
+docker exec -u 1234:1234 forge choom -n 1000 -- cat /proc/self/oom_score_adj | grep -qx 1000
 echo "Idle:"; docker stats --no-stream --format '{{.MemUsage}}' forge
 curl -fsS -X POST http://127.0.0.1:18100/check -H 'Content-Type: application/json' \
   -d '{"names":["liesa, forgotten archangel","Fire // Ice","Not A Real Card"]}' \

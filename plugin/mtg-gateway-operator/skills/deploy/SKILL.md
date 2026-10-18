@@ -1,6 +1,6 @@
 ---
 name: deploy
-description: Guided first deployment or redeployment of the MTG Assistant Gateway stack (gateway plus Mystic Forge) on Docker Swarm with Portainer, Authentik and Nginx Proxy Manager. Use when the operator says "deploy the gateway", "set up the stack", "install the gateway on my swarm" or asks to verify a deployment.
+description: Guided first deployment or redeployment of the MTG Assistant Gateway stack (gateway plus Mystic Forge) on Docker Swarm with Portainer, Authentik and Nginx Proxy Manager. Use when the operator says "deploy the gateway", "set up the stack", "install the gateway on my swarm" or asks to check a deployment.
 ---
 
 # Deploy the MTG Assistant Gateway
@@ -40,7 +40,7 @@ anything that isn't the default:
    command that changes the Swarm (creating networks, stacks or proxy
    hosts). Reading (`docker service ps`, `curl`, `docker secret ls`) is
    fine without asking.
-3. **Verify, do not assume.** Every step ends with a check and you report
+3. **Check, do not assume.** Every step ends with a check and you report
    its real output. Say "not checked" for anything you could not check.
 4. **Label what you know.** Menu names in Authentik, Portainer and Nginx
    Proxy Manager come from the project's docs and may have changed; say
@@ -56,8 +56,8 @@ anything that isn't the default:
 | How the operator reaches a Swarm manager from this machine | `ssh <manager>` | whether you can run commands or must hand them over |
 | `PUID:PGID` the operator uses in other stacks | `1000:1000` | folder ownership |
 | Overlay network name | `mtg-gateway` | shared with the proxy |
-| Allow deck writes now? | `false` | `MTG_WRITES_ENABLED`; recommend `false` until a throwaway deck test passes |
-| Default approval mode for members who have not chosen one? | `manual` | `MTG_APPROVAL_MODE_DEFAULT`; recommend `manual` (every change waits for the member's own press). Each member picks their own mode (`manual`, `semi`: low-risk edits apply without asking, `auto`: everything) on their Account page |
+| Allow Archidekt writes now? | `false` | `MTG_WRITES_ENABLED`; recommend `false` until a throwaway deck test passes |
+| Default approval mode for members who have not chosen one? | `manual` | `MTG_APPROVAL_MODE_DEFAULT`; recommend `manual` (every change waits for the member's own press). Each member picks their own mode (`manual`, `semi`: low-risk changes, such as a small edit or a private copy of a deck, apply without asking, `auto`: most changes apply without asking, but some still wait for the member) on their Account page |
 | Cap the approval mode members may choose? | `auto` (no cap) | `MTG_APPROVAL_MODE_MAX`; `semi` or `manual` to stop members choosing looser modes. `MTG_AUTO_APPLY_MAX_ROWS` (default 5) is the row limit of a low-risk edit |
 | Show the Approve/Reject card in the chat? | `true` | `MTG_APPLY_IN_CHAT`; recommend `true`: Claude and ChatGPT show each proposal as a card whose Approve button carries a one-time code the assistant never sees; the same switch gives the other cards in the chat (printings, recognised cards, a deck, the account, comparisons, statistics, deck lists, scans); `false` leaves only the review page |
 
@@ -154,8 +154,10 @@ registry, Custom, URL `ghcr.io`, with their GitHub login. The token is a
 secret: it goes into Portainer, not into this chat. The registry URL must be exactly
 `ghcr.io` (no path): Portainer only sends a registry's login when its URL
 equals the image's host, so a per-image entry like `ghcr.io/<owner>/mtg-assistant-gateway`
-is ignored and tasks end `rejected` with `No such image`. Later updates are
-then one click: Update the stack with Re-pull image on. A `docker login` on
+is ignored and tasks end `rejected` with `No such image`. Later updates:
+Update the stack (if the stack uses the Repository build method, the button is
+called Pull and redeploy), then in the box that asks “Are you sure?” make sure Re-pull image and redeploy is on and
+click Update. A `docker login` on
 the node does not fix Swarm pulls (docs/DEPLOY.md step 5).
 
 ### 6. Portainer stack (browser)
@@ -196,7 +198,7 @@ client_max_body_size 4m;
 
 No proxy host for Mystic Forge: it stays internal.
 
-### 8. Verify from anywhere
+### 8. Check from anywhere
 
 ```bash
 curl -s https://<gateway host>/healthz
@@ -234,8 +236,8 @@ the rest, including linking Archidekt.
 - Recommend narrowing `MTG_TRUSTED_PROXIES` to NPM's address or the overlay
   subnet once NPM works (`docs/DEPLOY.md` step 7).
 - Keep `MTG_WRITES_ENABLED=false` until a proposal has been applied to a
-  throwaway deck and verified on Archidekt (see `docs/OPERATIONS.md`, "Deck
-  writes and the kill switch").
+  throwaway deck and checked on Archidekt (see `docs/OPERATIONS.md`,
+  "Archidekt writes and the kill switch").
 
 ## Report
 

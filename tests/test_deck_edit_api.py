@@ -10,8 +10,11 @@ import pytest
 
 from mtg_gateway import api as api_module
 
-from .test_browse_collection import Stack, api, linked, stack  # noqa: F401 - fixture
+from .conftest import COLLECTION, Stack, stack_with
+from .test_browse_collection import api, linked
 from .test_round4_data import _app_token
+
+stack_options = stack_with(COLLECTION)
 
 
 def _deck_card(st: Stack, name: str, *, zone: str | None = None) -> list[dict]:
@@ -46,7 +49,7 @@ async def test_quantity_remove_and_category_edits_answer_with_fresh_rows_and_che
         assert r.status_code == 201, r.text
         d = r.json()
         assert d["ok"] and d["applied"] is True and d["snapshot_id"] and d["stale"] is False
-        # the quick edit keeps the gateway snapshot but makes no extra copy on Archidekt (D-02)
+        # the quick edit keeps the gateway snapshot but makes no extra copy on Archidekt
         assert d["result"]["result"]["archidekt_backup"] == "skipped", d["result"]
         assert len(stack.ark.patches) > patches
         assert d["rows"] == [
@@ -57,11 +60,17 @@ async def test_quantity_remove_and_category_edits_answer_with_fresh_rows_and_che
                 "categories": d["rows"][0]["categories"],
                 "relation_id": d["rows"][0]["relation_id"],
                 "finish": "Normal",
-                "label": "",
+                "label": ",#656565",  # archidekt.com's empty tag, sent with every modify
                 "mana_value": None,
                 "notes": "",
+                # the row's printing, so a printing change redraws the picture (Change printing…)
+                "set_code": d["rows"][0]["set_code"],
+                "collector_number": d["rows"][0]["collector_number"],
+                "image": d["rows"][0]["image"],
+                "price": d["rows"][0]["price"],
             }
         ]
+        assert d["rows"][0]["set_code"] and d["rows"][0]["collector_number"]
         assert _deck_card(stack, "Cultivate")[0]["quantity"] == 2
         # the checks are computed from the re-read deck: 101 cards now, so the deck size check fails
         st = d["stats"]
@@ -105,11 +114,17 @@ async def test_quantity_remove_and_category_edits_answer_with_fresh_rows_and_che
                 "categories": ["Removal"],
                 "relation_id": d["rows"][0]["relation_id"],
                 "finish": "Normal",
-                "label": "",
+                "label": ",#656565",
                 "mana_value": None,
                 "notes": "",
+                # the row's printing, so a printing change redraws the picture (Change printing…)
+                "set_code": d["rows"][0]["set_code"],
+                "collector_number": d["rows"][0]["collector_number"],
+                "image": d["rows"][0]["image"],
+                "price": d["rows"][0]["price"],
             }
         ]
+        assert d["rows"][0]["set_code"] and d["rows"][0]["collector_number"]
         assert _deck_card(stack, "Acidic Slime")[0]["categories"] == ["Removal"]
     finally:
         await b.aclose()
@@ -146,6 +161,142 @@ async def test_an_add_puts_a_card_back_under_every_category(stack: Stack) -> Non
             assert r.status_code == 400 and r.json()["error"] == "invalid", (bad, r.text)
     finally:
         await b.aclose()
+
+
+async def test_undo_puts_back_a_maybeboard_row_in_the_commander_zone(stack: Stack) -> None:  # noqa: F811
+    """The deck page's Undo of removing a maybeboard row that also carries the commander zone's
+    category puts it back as it was: the add's first category is outside the deck, so the row is
+    written with every category as asked, the commander zone included. It is a commander-zone
+    change, so the page asks first; the answer applies it, and the row reads back as it was."""
+    stack.ark.add_side_row(42, "Sol Ring", quantity=2)
+    side = _deck_card(stack, "Sol Ring", zone="side")[0]
+    side["categories"] = ["Maybeboard", "Commander"]
+    b = await linked(stack)
+    try:
+        r = await api(
+            b,
+            "POST",
+            "/api/v1/decks/42/edit",
+            {"changes": [{"action": "remove", "card_name": "Sol Ring", "zone": "side"}]},
+        )
+        d = r.json()
+        if d.get("needs_confirm"):
+            r = await api(
+                b, "POST", "/api/v1/decks/42/edit", {"proposal_id": d["proposal_id"], "version": d["version"]}
+            )
+        assert r.status_code in (200, 201), r.text
+        rows = [c for c in stack.ark.decks[42]["cards"] if c["card"]["oracleCard"]["name"] == "Sol Ring"]
+        assert all(c["categories"] != ["Maybeboard", "Commander"] for c in rows), rows
+        undo = {"action": "add", "card_name": "Sol Ring", "quantity": 2, "zone": "side",
+                "category": "Maybeboard", "categories": ["Maybeboard", "Commander"]}  # fmt: skip
+        r = await api(b, "POST", "/api/v1/decks/42/edit", {"changes": [undo]})
+        d = r.json()
+        assert r.status_code == 201 and d["needs_confirm"] is True, r.text
+        assert d["why"] == "This adds or changes a row with a commander-zone category.", d
+        r = await api(
+            b, "POST", "/api/v1/decks/42/edit", {"proposal_id": d["proposal_id"], "version": d["version"]}
+        )
+        assert r.status_code in (200, 201) and r.json().get("applied") is True, r.text
+        back = [
+            (c["quantity"], c["categories"])
+            for c in stack.ark.decks[42]["cards"]
+            if c["card"]["oracleCard"]["name"] == "Sol Ring"
+            and c["categories"]
+            and c["categories"][0] == "Maybeboard"
+        ]
+        assert back == [(2, ["Maybeboard", "Commander"])], back
+    finally:
+        await b.aclose()
+
+
+async def test_a_move_puts_a_card_back_under_every_category(stack: Stack) -> None:  # noqa: F811
+    """The deck page's Undo of a move of a card filed under several categories is a
+    set_category with every category it had, the primary first; it files the row under all of
+    them. Only set_category and add take categories, and the first is the category."""
+    row = _deck_card(stack, "Cultivate")[0]
+    row.update(categories=["Ramp", "Value"])
+    b = await linked(stack)
+    try:
+        r = await api(b, "POST", "/api/v1/decks/42/edit", {"changes": [{"action": "set_category",
+                      "card_name": "Cultivate", "category": "Lands"}]})  # fmt: skip
+        assert r.status_code == 201 and _deck_card(stack, "Cultivate")[0]["categories"] == ["Lands"], r.text
+        back = {"action": "set_category", "card_name": "Cultivate", "category": "Ramp",
+                "categories": ["Ramp", "Value"]}  # fmt: skip
+        r = await api(b, "POST", "/api/v1/decks/42/edit", {"changes": [back]})
+        assert r.status_code == 201, r.text
+        assert [x["categories"] for x in r.json()["rows"]] == [["Ramp", "Value"]]
+        assert _deck_card(stack, "Cultivate")[0]["categories"] == ["Ramp", "Value"]
+        for bad in (
+            {
+                "action": "set_category",
+                "card_name": "Cultivate",
+                "category": "Value",
+                "categories": ["Ramp", "Value"],
+            },
+            {"action": "set_commander", "card_name": "Cultivate", "categories": ["Commander", "Ramp"]},
+            {"action": "set_category", "card_name": "Cultivate", "categories": "Ramp"},
+        ):
+            r = await api(b, "POST", "/api/v1/decks/42/edit", {"changes": [bad]})
+            assert r.status_code == 400 and r.json()["error"] == "invalid", (bad, r.text)
+    finally:
+        await b.aclose()
+
+
+def test_set_category_categories_round_trip_through_the_stored_proposal() -> None:
+    from mtg_gateway.decks import parse_changes
+
+    ch = parse_changes([{"action": "set_category", "card_name": "Opt", "categories": ["Draw", "Cantrip"]}])[0]
+    assert ch.category == "Draw" and ch.categories == ("Draw", "Cantrip")
+    assert parse_changes([ch.as_dict()]) == [ch]
+    one = parse_changes([{"action": "set_category", "card_name": "Opt", "category": "Draw"}])[0]
+    assert "categories" not in one.as_dict()
+
+
+async def test_an_add_puts_back_the_companion_and_flip_flags(stack: Stack) -> None:  # noqa: F811
+    """The deck page's Undo of a removal names the row's companion and "flipped by default"
+    flags; the add puts them back, as a printing change and a restore already do."""
+    row = _deck_card(stack, "Cultivate")[0]
+    row.update(companion=True, flippedDefault=True)
+    b = await linked(stack)
+    try:
+        r = await api(
+            b, "POST", "/api/v1/decks/42/edit", {"changes": [{"action": "remove", "card_name": "Cultivate"}]}
+        )
+        assert r.status_code == 201 and _deck_card(stack, "Cultivate") == [], r.text
+        add = {"action": "add", "card_name": "Cultivate", "quantity": 1, "category": "Ramp",
+               "companion": True, "flipped_default": True}  # fmt: skip
+        r = await api(b, "POST", "/api/v1/decks/42/edit", {"changes": [add]})
+        assert r.status_code == 201, r.text
+        back = _deck_card(stack, "Cultivate")
+        assert [(x["companion"], x["flippedDefault"]) for x in back] == [(True, True)]
+        # an add without them stays as before; they go with an add only, as true or false
+        r = await api(
+            b, "POST", "/api/v1/decks/42/edit", {"changes": [{"action": "add", "card_name": "Opt"}]}
+        )
+        assert r.status_code == 201 and _deck_card(stack, "Opt")[0]["companion"] is False, r.text
+        for bad in (
+            {"action": "set_quantity", "card_name": "Cultivate", "quantity": 2, "companion": True},
+            {"action": "add", "card_name": "Opt", "flipped_default": "yes"},
+        ):
+            r = await api(b, "POST", "/api/v1/decks/42/edit", {"changes": [bad]})
+            assert r.status_code == 400 and r.json()["error"] == "invalid", (bad, r.text)
+    finally:
+        await b.aclose()
+
+
+def test_add_flags_round_trip_through_the_stored_proposal() -> None:
+    from mtg_gateway.decks import parse_changes
+
+    ch = parse_changes(
+        [{"action": "add", "card_name": "Lurrus", "companion": True, "flipped_default": True}], row_flags=True
+    )[0]
+    assert ch.companion and ch.flipped_default
+    assert parse_changes([ch.as_dict()], row_flags=True) == [ch]
+    # only the deck page's own edit reads them; every other caller drops them
+    dropped = parse_changes([ch.as_dict()])[0]
+    assert not dropped.companion and not dropped.flipped_default
+    plain = parse_changes([{"action": "add", "card_name": "Opt"}])[0].as_dict()
+    assert "companion" not in plain and "flipped_default" not in plain
 
 
 def test_add_categories_round_trip_through_the_stored_proposal() -> None:
@@ -199,7 +350,7 @@ async def test_side_zone_edits_target_the_maybeboard_row(stack: Stack) -> None: 
 
 
 async def test_a_deck_changed_on_archidekt_is_judged_as_it_is_now(stack: Stack) -> None:  # noqa: F811
-    """T-040: the deck is legal, then a card is added on Archidekt (outside the gateway) to make
+    """The deck is legal, then a card is added on Archidekt (outside the gateway) to make
     101: the deck page and the API both say it is not legal, though every card still is."""
     _legal_commander_deck(stack)
     b = await linked(stack)
@@ -240,6 +391,262 @@ async def test_a_deck_changed_on_archidekt_is_judged_as_it_is_now(stack: Stack) 
         await b.aclose()
 
 
+async def test_save_anyway_keeps_the_editors_unticked_backup_box(stack: Stack) -> None:  # noqa: F811
+    """The deck editor's save that asks first is applied by its "Save anyway" through the
+    proposal's apply route. That route made a backup copy on Archidekt even with the editor's box
+    unticked; it now takes the box (archidekt_backup) from the browser."""
+    b = await linked(stack)
+    try:
+        deck = stack.ark.decks[42]
+        names = [c["card"]["oracleCard"]["name"] for c in deck["cards"] if c["categories"] != ["Commander"]]
+        for keep_copy, batch in ((False, names[:9]), (True, names[9:18])):
+            changes = [{"action": "remove", "card_name": n} for n in batch]
+            body = {"kind": "edit", "deck_id": "42", "changes": changes, "apply": True}
+            r = await api(b, "POST", "/api/v1/proposals", {**body, "archidekt_backup": keep_copy})
+            d = r.json()
+            assert r.status_code == 201 and d["needs_confirm"] is True, r.text
+            r = await api(
+                b,
+                "POST",
+                f"/api/v1/proposals/{d['proposal_id']}/apply",
+                {"version": d["version"], "archidekt_backup": keep_copy},
+            )
+            a = r.json()
+            assert r.status_code == 200 and a["state"] == "applied", r.text
+            if keep_copy:
+                assert a["result"].get("backup_url"), a["result"]
+            else:
+                assert a["result"].get("archidekt_backup") == "skipped", a["result"]
+                assert not a["result"].get("backup_url"), a["result"]
+    finally:
+        await b.aclose()
+
+
+async def test_an_assistants_proposal_applied_from_the_browser_keeps_its_backup_copy(stack: Stack) -> None:  # noqa: F811
+    """The browser's archidekt_backup false on the apply route is the deck editor's own box: an
+    assistant's proposal applied from the browser still gets its backup copy on Archidekt."""
+    b = await linked(stack)
+    try:
+        token, _cid = await _app_token(stack.h, "assistant-test")
+        r = await stack.h.http.post(
+            "/api/v1/proposals",
+            json={
+                "kind": "edit",
+                "deck_id": "42",
+                "changes": [{"action": "set_quantity", "card_name": "Cultivate", "quantity": 3}],
+            },
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert r.status_code == 201, r.text
+        pid = r.json()["proposal_id"]
+        r = await api(b, "POST", f"/api/v1/proposals/{pid}/apply", {"version": 1, "archidekt_backup": False})
+        a = r.json()
+        assert r.status_code == 200 and a["state"] == "applied", r.text
+        assert a["result"].get("backup_url") and "archidekt_backup" not in a["result"], a["result"]
+    finally:
+        await b.aclose()
+
+
+async def test_a_saved_choice_of_no_backup_copy_holds_when_applied_later(stack: Stack) -> None:  # noqa: F811
+    """A member's own save that makes no backup copy (the deck editor with its box unticked, or
+    the deck page) and is left waiting (its question unanswered, or writes off) keeps that choice
+    when it is applied later from its review page or the Proposals page, which send no box."""
+    b = await linked(stack)
+    try:
+        deck = stack.ark.decks[42]
+        names = [c["card"]["oracleCard"]["name"] for c in deck["cards"] if c["categories"] != ["Commander"]]
+        editor = {
+            "kind": "edit",
+            "deck_id": "42",
+            "changes": [{"action": "remove", "card_name": n} for n in names[:9]],
+            "apply": True,
+            "archidekt_backup": False,
+        }
+        r = await api(b, "POST", "/api/v1/proposals", editor)
+        asked_editor = r.json()
+        page = {"changes": [{"action": "remove", "card_name": n} for n in names[9:18]]}
+        r = await api(b, "POST", "/api/v1/decks/42/edit", page)
+        asked_page = r.json()
+        for d in (asked_editor, asked_page):
+            assert d["needs_confirm"] is True, d
+            waiting = (await api(b, "GET", f"/api/v1/proposals/{d['proposal_id']}")).json()
+            assert waiting["state"] == "pending" and waiting["result"] is None, waiting
+            r = await api(b, "POST", f"/api/v1/proposals/{d['proposal_id']}/apply", {"version": d["version"]})
+            a = r.json()
+            assert r.status_code == 200 and a["state"] == "applied", r.text
+            assert a["result"].get("archidekt_backup") == "skipped" and not a["result"].get("backup_url"), a
+    finally:
+        await b.aclose()
+
+
+@pytest.mark.parametrize("box", [None, False, "deck page"])
+async def test_an_own_save_an_app_changed_in_any_version_keeps_its_backup_copy(stack: Stack, box) -> None:  # noqa: F811
+    """A member's own save that made no backup copy, changed by an app in an earlier version and
+    by the member's browser in the latest one, gets its backup copy when applied, with or without
+    an unticked box sent along: the choice holds only while no app ever touched it."""
+    from mtg_gateway.decks import BROWSER_CLIENT
+
+    b = await linked(stack)
+    try:
+        deck = stack.ark.decks[42]
+        names = [c["card"]["oracleCard"]["name"] for c in deck["cards"] if c["categories"] != ["Commander"]]
+        r = await api(
+            b,
+            "POST",
+            "/api/v1/decks/42/edit",
+            {"changes": [{"action": "remove", "card_name": n} for n in names[:9]]},
+        )
+        d = r.json()
+        assert d["needs_confirm"] is True, d
+        db, pid = stack.h.db, d["proposal_id"]
+        row = db.get_proposal(pid, "user-1")
+        for version, client in ((1, "some-app"), (2, BROWSER_CLIENT)):  # no browser amend route: faked
+            kept = dict(
+                changes=row["changes"], rows=row["rows"], diff_text=row["diff_text"], by_client=client
+            )
+            assert db.amend_proposal(pid, "user-1", expect_version=version, **kept) == version + 1
+        assert db.get_proposal(pid, "user-1")["amended_by_client"] == BROWSER_CLIENT
+        if box == "deck page":  # its own question answered: the deck page's save sends no box
+            r = await api(b, "POST", "/api/v1/decks/42/edit", {"proposal_id": pid, "version": 3})
+            assert r.status_code == 201 and r.json()["applied"] is True, r.text
+            result = r.json()["result"]["result"]
+        else:
+            body = {"version": 3} if box is None else {"version": 3, "archidekt_backup": box}
+            r = await api(b, "POST", f"/api/v1/proposals/{pid}/apply", body)
+            assert r.status_code == 200 and r.json()["state"] == "applied", r.text
+            result = r.json()["result"]
+        assert result.get("backup_url") and "archidekt_backup" not in result, result
+    finally:
+        await b.aclose()
+
+
+async def test_a_box_ticked_before_save_anyway_makes_the_backup_copy(stack: Stack) -> None:  # noqa: F811
+    """The editor's first save had its box unticked; the member ticks it before pressing Save
+    anyway, which sends archidekt_backup true: that save gets its backup copy."""
+    b = await linked(stack)
+    try:
+        deck = stack.ark.decks[42]
+        names = [c["card"]["oracleCard"]["name"] for c in deck["cards"] if c["categories"] != ["Commander"]]
+        body = {
+            "kind": "edit",
+            "deck_id": "42",
+            "changes": [{"action": "remove", "card_name": n} for n in names[:9]],
+            "apply": True,
+            "archidekt_backup": False,
+        }
+        d = (await api(b, "POST", "/api/v1/proposals", body)).json()
+        assert d["needs_confirm"] is True, d
+        r = await api(
+            b,
+            "POST",
+            f"/api/v1/proposals/{d['proposal_id']}/apply",
+            {"version": d["version"], "archidekt_backup": True},
+        )
+        a = r.json()
+        assert r.status_code == 200 and a["state"] == "applied", r.text
+        assert a["result"].get("backup_url") and "archidekt_backup" not in a["result"], a["result"]
+    finally:
+        await b.aclose()
+
+
+async def test_an_own_save_stopped_and_waiting_again_keeps_its_choice(stack: Stack) -> None:  # noqa: F811
+    """An own save that makes no backup copy, stopped before anything was written (stale, or by
+    Archidekt's rate limit) and so waiting again with a new result, keeps its choice when it is
+    applied later."""
+    b = await linked(stack)
+    try:
+        deck = stack.ark.decks[42]
+        names = [c["card"]["oracleCard"]["name"] for c in deck["cards"] if c["categories"] != ["Commander"]]
+        r = await api(
+            b,
+            "POST",
+            "/api/v1/decks/42/edit",
+            {"changes": [{"action": "remove", "card_name": n} for n in names[:9]]},
+        )
+        d = r.json()
+        assert d["needs_confirm"] is True, d
+        db, pid = stack.h.db, d["proposal_id"]
+        # as decks.apply records a stop that wrote nothing: pending again, its result replaced
+        db.finish_proposal(pid, state="pending", result={"error": "rate_limited", "detail": "Wait."})
+        assert db.get_proposal(pid, "user-1")["result"]["error"] == "rate_limited"
+        r = await api(b, "POST", f"/api/v1/proposals/{pid}/apply", {"version": d["version"]})
+        a = r.json()
+        assert r.status_code == 200 and a["state"] == "applied", r.text
+        assert a["result"].get("archidekt_backup") == "skipped" and not a["result"].get("backup_url"), a
+        # a closed result is replaced as it was (no mark is carried into it)
+        assert "no_backup_copy" not in db.get_proposal(pid, "user-1")["result"]
+    finally:
+        await b.aclose()
+
+
+@pytest.mark.parametrize("stop", ["writes off", "rate limit"])
+@pytest.mark.parametrize("first_box", [False, True])
+async def test_the_box_at_a_stopped_save_anyway_is_the_saves_choice(  # noqa: F811
+    stack: Stack, monkeypatch: pytest.MonkeyPatch, stop: str, first_box: bool
+) -> None:
+    """The member changes the backup box between the editor's first save and its Save anyway,
+    and that press is stopped (writes off, or Archidekt's rate limit), so the save waits. Applied
+    later with no box sent, it follows the box at the press, not the one at the first save."""
+    import dataclasses
+
+    import httpx
+
+    from mtg_gateway.archidekt import ArchidektClient
+
+    async def no_wait(self, seconds: float) -> None:
+        return None
+
+    monkeypatch.setattr(ArchidektClient, "_wait_out", no_wait)
+    b = await linked(stack)
+    try:
+        decks = stack.h.app.state.gateway.decks
+        deck = stack.ark.decks[42]
+        names = [c["card"]["oracleCard"]["name"] for c in deck["cards"] if c["categories"] != ["Commander"]]
+        body = {
+            "kind": "edit",
+            "deck_id": "42",
+            "changes": [{"action": "remove", "card_name": n} for n in names[:9]],
+            "apply": True,
+            "archidekt_backup": first_box,
+        }
+        d = (await api(b, "POST", "/api/v1/proposals", body)).json()
+        assert d["needs_confirm"] is True, d
+        pid, pressed = d["proposal_id"], not first_box
+        orig = stack.ark.transport.handler
+        if stop == "writes off":
+            decks.settings = dataclasses.replace(decks.settings, writes_enabled=False)
+        else:
+
+            def slow(req: httpx.Request) -> httpx.Response:
+                if req.method == "PATCH" and "modifyCards" in req.url.path:
+                    return httpx.Response(429, json={"detail": "slow down"}, headers={"Retry-After": "0"})
+                return orig(req)
+
+            stack.ark.transport.handler = slow
+        r = await api(
+            b,
+            "POST",
+            f"/api/v1/proposals/{pid}/apply",
+            {"version": d["version"], "archidekt_backup": pressed},
+        )
+        assert r.status_code >= 400, r.text
+        waiting = stack.h.db.get_proposal(pid, "user-1")
+        assert waiting["state"] == "pending", waiting
+        if not pressed:  # stored as a true boolean, also after a stop replaced the result
+            assert waiting["result"]["no_backup_copy"] is True, waiting["result"]
+        decks.settings = dataclasses.replace(decks.settings, writes_enabled=True)
+        stack.ark.transport.handler = orig
+        r = await api(b, "POST", f"/api/v1/proposals/{pid}/apply", {"version": waiting["version"]})
+        a = r.json()
+        assert r.status_code == 200 and a["state"] == "applied", r.text
+        if pressed:
+            assert a["result"].get("backup_url"), a["result"]
+        else:
+            assert a["result"].get("archidekt_backup") == "skipped" and not a["result"].get("backup_url"), a
+    finally:
+        await b.aclose()
+
+
 async def test_big_removal_asks_first_then_the_proposal_id_applies_it(stack: Stack) -> None:  # noqa: F811
     b = await linked(stack)
     try:
@@ -255,7 +662,8 @@ async def test_big_removal_asks_first_then_the_proposal_id_applies_it(stack: Sta
         assert d["applied"] is False and d["needs_confirm"] is True and "cards" in d["why"]
         assert "rows" not in d and len(stack.ark.patches) == before  # nothing sent before the answer
         # the follow-up names the proposal (the page's "Save anyway") and gets the full answer
-        r = await api(b, "POST", "/api/v1/decks/42/edit", {"proposal_id": d["proposal_id"]})
+        assert d["version"] == 1
+        r = await api(b, "POST", "/api/v1/decks/42/edit", {"proposal_id": d["proposal_id"], "version": 1})
         assert r.status_code == 201, r.text
         a = r.json()
         assert a["applied"] is True and a["proposal_id"] == d["proposal_id"] and a["rows"] == []
@@ -276,6 +684,49 @@ async def test_big_removal_asks_first_then_the_proposal_id_applies_it(stack: Sta
             },
         )
         assert r.status_code == 201 and r.json()["applied"] is True, r.text
+    finally:
+        await b.aclose()
+
+
+async def test_save_anyway_applies_only_the_version_the_question_showed(stack: Stack) -> None:  # noqa: F811
+    """Another app may amend the proposal the page's question was about; the answer sends the
+    version the question showed, so an amended one is refused with nothing sent, and an answer
+    without a version is refused."""
+    b = await linked(stack)
+    try:
+        names = [
+            c["card"]["oracleCard"]["name"]
+            for c in stack.ark.decks[42]["cards"]
+            if c["categories"] != ["Commander"]
+        ][:9]
+        r = await api(
+            b,
+            "POST",
+            "/api/v1/decks/42/edit",
+            {"changes": [{"action": "remove", "card_name": n} for n in names]},
+        )
+        d = r.json()
+        assert r.status_code == 201 and d["needs_confirm"] is True and d["version"] == 1, r.text
+        decks = stack.h.app.state.gateway.decks
+        await decks.amend(
+            "user-1",
+            d["proposal_id"],
+            [{"action": "remove", "card_name": "Aesi, Tyrant of Gyre Strait"}],
+            version=1,
+        )
+        before = len(stack.ark.patches)
+        r = await api(b, "POST", "/api/v1/decks/42/edit", {"proposal_id": d["proposal_id"]})
+        assert r.status_code == 400 and r.json()["error"] == "invalid", r.text
+        assert r.json()["message"] == "Send the version of the proposal the page showed."
+        r = await api(b, "POST", "/api/v1/decks/42/edit", {"proposal_id": d["proposal_id"], "version": "1"})
+        assert r.status_code == 400 and r.json()["message"] == "version must be a whole number", r.text
+        r = await api(b, "POST", "/api/v1/decks/42/edit", {"proposal_id": d["proposal_id"], "version": 1})
+        assert r.status_code == 409 and r.json()["error"] == "changed", r.text
+        assert len(stack.ark.patches) == before
+        assert any(
+            c["card"]["oracleCard"]["name"] == "Aesi, Tyrant of Gyre Strait"
+            for c in stack.ark.decks[42]["cards"]
+        )
     finally:
         await b.aclose()
 
@@ -364,7 +815,7 @@ async def test_a_lagging_re_read_is_read_again_and_marked_stale(
 
 
 async def test_an_assistants_pending_proposal_is_not_applied_by_the_page(stack: Stack) -> None:  # noqa: F811
-    """0.7.9 gate L1: the follow-up with a proposal_id answers only the question this endpoint
+    """0.7.9: the follow-up with a proposal_id answers only the question this endpoint
     asked. A proposal an app made (pending, with its Approve card and its backup copy) is refused
     here and stays pending; nothing reaches Archidekt."""
     b = await linked(stack)
@@ -402,9 +853,9 @@ async def test_an_assistants_pending_proposal_is_not_applied_by_the_page(stack: 
         )
         assert r.status_code == 201 and r.json()["needs_confirm"] is True, r.text
         own = r.json()["proposal_id"]
-        r = await api(b, "POST", "/api/v1/decks/42/edit", {"proposal_id": own})
+        r = await api(b, "POST", "/api/v1/decks/42/edit", {"proposal_id": own, "version": 1})
         assert r.status_code == 201 and r.json()["applied"] is True, r.text
-        r = await api(b, "POST", "/api/v1/decks/42/edit", {"proposal_id": own})
+        r = await api(b, "POST", "/api/v1/decks/42/edit", {"proposal_id": own, "version": 1})
         assert r.status_code == 400 and "applied" in r.json()["message"], r.text
     finally:
         await b.aclose()

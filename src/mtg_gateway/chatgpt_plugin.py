@@ -31,10 +31,13 @@ from starlette.responses import PlainTextResponse, Response
 from . import __version__
 from .plugin_page import (
     DEFAULT_SITE,
+    DEVELOPER_NAME_MAX,
     PLUGIN_NAME,
     SERVER_DESCRIPTION,
     _renamed,
+    chatgpt_label,
     chatgpt_zip_name,
+    cut_at_word,
     plugin_dir,
     plugin_label,
     plugin_slug,
@@ -63,15 +66,22 @@ DEFAULT_PROMPTS = [
 ]
 
 
-def manifest(base: Path, site: str, public_url: str) -> dict:
+def manifest(base: Path, site: str, public_url: str, chatgpt_name: str | None = None) -> dict:
     """``plugin.json``: the repository's portable manifest, renamed under an owner's name, with
-    the schema, this version and ChatGPT's display fields added."""
+    the schema, this version and ChatGPT's display fields added. ``displayName`` is the owner's
+    MTG_CHATGPT_NAME when set, else their site name (ChatGPT refuses one over 80 characters)."""
     name = plugin_slug(site)
     raw = (base / PLUGIN_NAME / "plugin.json").read_bytes()
     if site != DEFAULT_SITE:
         raw = _renamed(raw, "plugin.json", site, name)
     doc = json.loads(raw)
-    developer = (doc.get("author") or {}).get("name") or plugin_label(site)
+    # OpenAI's package validation refuses an author.name or interface.developerName over 120
+    # characters (plugin_author_name_too_long, plugin_developer_name_too_long; its plugin docs,
+    # read 2026-10-16): a long MTG_SERVER_NAME is cut there, at a word, so the file still uploads,
+    # and the owner is told so (developer_name_warning: admin page and log)
+    if isinstance(doc.get("author"), dict) and isinstance(doc["author"].get("name"), str):
+        doc["author"]["name"] = cut_at_word(doc["author"]["name"], DEVELOPER_NAME_MAX)
+    developer = cut_at_word((doc.get("author") or {}).get("name") or plugin_label(site), DEVELOPER_NAME_MAX)
     return {
         "$schema": PLUGIN_SCHEMA,
         "name": name,
@@ -81,8 +91,8 @@ def manifest(base: Path, site: str, public_url: str) -> dict:
         "extensions": {
             "com.openai": {
                 "interface": {
-                    "displayName": plugin_label(site),
-                    "shortDescription": "Magic: The Gathering decks and research",
+                    "displayName": chatgpt_label(site, chatgpt_name),
+                    "shortDescription": "MTG decks and research",  # max 240; 30 in OpenAI's directory
                     "longDescription": SERVER_DESCRIPTION
                     + " Every deck change is shown to you first and applied only after you approve.",
                     "developerName": developer,
@@ -105,11 +115,13 @@ def mcp_config(site: str, mcp_url: str) -> dict:
     }
 
 
-def build_zip(base: Path, mcp_url: str, public_url: str, site: str = DEFAULT_SITE) -> bytes:
+def build_zip(
+    base: Path, mcp_url: str, public_url: str, site: str = DEFAULT_SITE, chatgpt_name: str | None = None
+) -> bytes:
     """The ChatGPT plugin archive, with ``plugin.json`` at its root (not inside a folder)."""
     name = plugin_slug(site)
     files: dict[str, bytes] = {
-        "plugin.json": (json.dumps(manifest(base, site, public_url), indent=2) + "\n").encode(),
+        "plugin.json": (json.dumps(manifest(base, site, public_url, chatgpt_name), indent=2) + "\n").encode(),
         "mcp.json": (json.dumps(mcp_config(site, mcp_url), indent=2) + "\n").encode(),
     }
     skill = base / PLUGIN_NAME / "skills" / PLUGIN_NAME
@@ -134,10 +146,10 @@ def add_chatgpt_plugin_route(server: MCPServer, state: AppState) -> None:
         base = plugin_dir()
         if base is None:
             return PlainTextResponse("plugin not installed on this gateway", status_code=503)
-        key = f"{base}|{s.mcp_url}|{s.server_name}"
+        key = f"{base}|{s.mcp_url}|{s.server_name}|{s.chatgpt_name}"
         hit = cache.get(key)
         if hit is None:
-            data = build_zip(base, s.mcp_url, s.public_url, s.server_name)
+            data = build_zip(base, s.mcp_url, s.public_url, s.server_name, s.chatgpt_name)
             hit = cache[key] = (data, hashlib.sha256(data).hexdigest())
         return Response(
             hit[0],

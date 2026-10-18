@@ -16,7 +16,10 @@ from mtg_gateway.archidekt_csv import parse_export, to_deck_json
 from mtg_gateway.pages import actor_html
 from mtg_gateway.report_view import report_export_html
 
-from .test_companion import NAV, Stack, linked_browser, stack  # noqa: F401  (fixture)
+from .conftest import Stack, stack_with
+from .test_companion import COMPANION, NAV, linked_browser
+
+stack_options = stack_with(COMPANION)
 
 STATIC = Path(companion.__file__).parent / "static"
 SCAN_STATIC = Path(companion.__file__).parent / "scan" / "static"
@@ -44,6 +47,11 @@ def test_plural_and_short_name_and_time() -> None:
 def test_event_sentences_and_actor_badges() -> None:
     assert companion.event_label("archidekt_linked") == "Archidekt account linked"
     assert companion.event_label("something_new") == "Something new"
+    # the backup trim says what it does in the approved words, not "Backup trim queued"
+    assert (
+        companion.event_label("backup_trim_queued")
+        == "Older backup copies queued for deletion from Archidekt"
+    )
     html = companion.event_detail_html(
         {"deck_id": "42", "deck_name": "Reap", "proposal_id": "p0123456789", "via": "x"}
     )
@@ -137,7 +145,8 @@ def test_offline_page_names_the_site_and_follows_the_theme() -> None:
         ":root[data-theme=light]{" in page
         and "@media (prefers-color-scheme: light){:root:not([data-theme=dark])" in page
     )
-    assert "<script" not in page
+    # no inline script (its CSP allows none): only the one file the worker answers
+    assert page.count("<script") == 1 and "<script src='/static/offline.js'></script>" in page
 
 
 # -- the shell over HTTP ---------------------------------------------------------------------
@@ -201,6 +210,30 @@ async def test_page_head_and_skip_link(stack: Stack) -> None:  # noqa: F811
         await b.aclose()
 
 
+async def test_the_account_page_names_archidekt_writes_in_plain_words(stack: Stack) -> None:  # noqa: F811
+    """The Account page says "Archidekt writes", on or off, in plain words and
+    no variable name."""
+    import dataclasses
+
+    b = await linked_browser(stack)
+    decks = stack.h.app.state.gateway.decks
+    note = (
+        "<p class='muted small'>Archidekt writes are switched on or off for the whole gateway by the "
+        "person who runs it. While they are off, changes can be reviewed but not applied.</p>"
+    )
+    try:
+        page = (await b.http.get("/account", headers=NAV)).text
+        assert "<dt>Archidekt writes</dt><dd><span class='badge ok'>on</span></dd>" in page and note in page
+        decks.settings = dataclasses.replace(decks.settings, writes_enabled=False)
+        page = (await b.http.get("/account", headers=NAV)).text
+        assert "<dt>Archidekt writes</dt><dd><span class='badge'>off</span></dd>" in page and note in page
+        for old in ("Deck writes", "MTG_WRITES_ENABLED", "by its operator"):
+            assert old not in page, old
+    finally:
+        decks.settings = dataclasses.replace(decks.settings, writes_enabled=True)
+        await b.aclose()
+
+
 async def test_signed_out_shell_offers_sign_in(stack: Stack) -> None:  # noqa: F811
     page = (await stack.h.http.get("/no-such-page", headers=NAV)).text
     assert "<a class='btn signin' href='/login'>" in page and "Sign in</a>" in page
@@ -237,16 +270,18 @@ async def test_nav_highlights_export_and_proposals_and_copy_keeps_its_icon(stack
         await b.aclose()
 
 
-async def test_long_folder_filter_and_its_empty_message(stack: Stack) -> None:  # noqa: F811
+async def test_an_unknown_folder_in_the_address_shows_the_top_level(stack: Stack) -> None:  # noqa: F811
+    """A folder address that names no folder (a long made-up name, an old link to a folder since
+    renamed) opens the top level rather than an empty page: no deck is ever out of reach."""
     b = await linked_browser(stack)
     try:
         name = "Commander decks in progress and testing builds for Friday Night Magic at the shop " + "x" * 12
         assert len(name) > 80
         page = (await b.http.get("/decks", params={"folder": name}, headers=NAV)).text
-        assert "No decks yet" not in page and ("No decks in the folder" in page or "data-decks-src" in page)
+        assert "Sample Commander Deck" in page or "data-decks-src" in page
+        assert "class='crumbs'" not in page
         listing = await b.http.get("/api/decks/mine", params={"shape": "list", "folder": name})
-        assert listing.status_code == 200 and "No decks in the folder" in listing.json()["html"]
-        assert "Show every folder" in listing.json()["html"]
+        assert listing.status_code == 200 and "Sample Commander Deck" in listing.json()["html"]
     finally:
         await b.aclose()
 

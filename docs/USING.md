@@ -44,7 +44,7 @@ browser's text zoom up to 200%, wrapping rather than running off the screen.
 ## Home
 
 Your newest decks with their cover art, a deck search box, and one tile per
-section: Decks, Search, Scan, Collection, Proposals (how many wait for you), History, Guide. **Connect an AI
+section: Decks, Search, Precons, Scan, Collection, Proposals (how many wait for you), History, Guide. **Connect an AI
 assistant** at the end holds the connector URL and the guided setup.
 
 ## Your decks
@@ -75,7 +75,9 @@ One deck:
 - On your own deck, **drag a card** onto another category: with a mouse, or
   press and hold on a touch screen and slide. The move goes to Archidekt
   when you let go, with a snapshot taken first, as a change from the card
-  menu or **Select cards** does.
+  menu or **Select cards** does. Dragging a card into the commander
+  stack first asks "This changes the deck's commander. Save
+  anyway?".
 - **Undo** and **Redo** (beside **Select cards**, and **Undo** on the
   message after each save) take back or redo any of those changes, each a
   save of its own; the editor's keys work too: Ctrl+Z, and Ctrl+Shift+Z or
@@ -83,7 +85,7 @@ One deck:
   cannot come back: Archidekt gives the gateway no way to write them, so
   removing a card that has a note asks first.
 - Drag a stack's handle to put the stacks in your own order. That order is
-  kept in this browser on this device only (Archidekt has no stack order);
+  kept with your account, so every device shows it (Archidekt has no stack order);
   **Reset stack order** puts the deck's own order back.
 - **Quick add** types a card name and takes you to the editor with it
   filled in.
@@ -94,19 +96,23 @@ One deck:
   the browser you use. To play the deck by hand on the gateway itself, use
   **Goldfish**.
 - **Play on EDHPlay** takes the deck to [EDHPlay](https://edhplay.com/), the
-  free online table for Commander: it copies the deck in EDHPlay's import
-  format and opens EDHPlay in a new tab (in the app, your phone's browser).
-  The list has the commander first (marked as the commander, partners too),
-  the rest of the deck with each card's printing, then a **Sideboard**
-  section with your companion and sideboard. EDHPlay's sideboard holds 15
-  cards, so anything past that is left out and a note names it. Your
-  maybeboard, and anything else kept outside the deck, isn't sent (EDHPlay
-  has no maybeboard), and EDHPlay doesn't take tokens from a list, so add
-  those there by hand. The first time you press the button, a short tip
-  repeats these limits until you close it. On EDHPlay choose **Create
-  Deck**, then **Import**: paste the list and press **Import & Replace**
-  (the list sets the commander). EDHPlay has no way to receive a deck by link, so a later change
-  on Archidekt is taken over the same way: press the button again.
+  free online table for Commander. The button opens a short box; its **Copy
+  and Open EDHPlay.com** copies the deck in EDHPlay's import format and opens
+  EDHPlay's My Decks (in the app, in your phone's browser). The list has the
+  commander first (marked as the commander, partners too), the rest of the
+  deck with each card's printing, then a **Sideboard** section with your
+  companion and sideboard. EDHPlay's sideboard holds 15 cards, so anything
+  past that is left out and the box names it. Your maybeboard, and anything
+  else kept outside the deck, isn't sent (EDHPlay has no maybeboard), and
+  EDHPlay doesn't take tokens from a list, so add those there by hand.
+  EDHPlay's import never sets a companion, and a deck with no commander set
+  arrives with none, so the box says when to set them on EDHPlay. On EDHPlay
+  go to **My Decks**, choose **Add Deck** and open the new deck, then press
+  **Import**, paste and press **Import & Replace** (the list sets the
+  commander). The box shows these steps the first time and keeps them folded
+  under **How to import** after that. EDHPlay has no way to receive a deck by
+  link, so a later change on Archidekt is taken over the same way: press the
+  button again.
 - **Goldfish** plays the deck by hand on a gateway page, in your browser:
   the deck is shuffled and you get seven cards. Keep the hand or take a
   mulligan (London rules: the hand goes back, you draw seven again, and
@@ -118,35 +124,47 @@ One deck:
   Commander deck starts with its commander in the command zone; other decks
   have none. The page shows the library count and works with a mouse, a
   finger or the keyboard. Nothing is sent to Archidekt and nothing is kept.
-- **Run simulation** runs the statistics, the decklist validation and the
-  goldfish simulation (300 games) and opens the result, filed under
-  History. It is the same run the assistant's `run_deck_report` makes, so
-  the numbers match whichever way it is started. A Commander deck is played
+- **Run full test** runs the statistics, the legality check and the
+  solo test (300 games, no opponents) and opens the result, filed under
+  History. It is the same run your assistant makes when you ask it for a
+  deck report, so the numbers match whichever way it is started. A Commander deck is played
   from the command zone against 40 life. A deck without a commander and with
   at least 60 cards (Standard, Modern, Pioneer, Legacy, Vintage, Pauper and
   the like) is played as a 60-card game: seven-card London mulligan with no
   free one, 20 life, on the play, sideboard left out. A Commander-format
   deck without a card in its Commander category, or a smaller deck without
-  one, is not simulated and the report says why.
+  one, gets no solo test and the report says why.
 - When the gateway runs Forge, a Commander deck's report also has Forge
-  games against three precons. They are precons of the deck's bracket: the
-  bracket set on the deck in Archidekt, or else the gateway's estimate. Each
-  precon's bracket comes from the game changers it holds. When there are not
+  games against three precons. They are picked for the bracket set on the
+  deck in Archidekt, or, when none is set, for Archidekt's estimate from
+  cards. Each precon's bracket comes from the game changers it holds. When there are not
   enough precons of that bracket, the nearest bracket fills in, and an older
-  Forge image without precon brackets plays the newest precons; the report
+  version of Forge without precon brackets plays the newest precons; the report
   names the opponents, their brackets and why they were picked. Forge plays
-  10 games per report by default (`MTG_FORGE_GAMES`) and shows each win rate
-  with its 95% range. Forge does not run 60-card decks (its opponents are
-  Commander precons): their reports never start or queue a Forge run and say
-  why. When the Forge engine is busy
-  with other runs, a report waits in the queue and starts by itself. Because
-  each deck meets precons of its own bracket, two decks' Forge win rates are
-  not a like-for-like comparison; the paired goldfish A/B of `compare_decks`
-  is.
-- A report without Forge games (Forge not set up, a 60-card deck, or Forge
-  left out of the report) is labelled **Preflight only (no rules engine)**
-  where the Forge games would be. Each report shows its status: queued,
-  running, complete, partial (some part did not run) or failed.
+  4 games per report by default (your gateway's operator can change this)
+  and shows each win rate with its 95% interval. Once they have finished,
+  **Play more games** on the report page plays that many more against the
+  same opponents and adds them to the results, up to 50 games a report
+  (on a comparison, both decks get the same number, so the two stay even).
+  You can also ask your assistant for more games, with the same rules. A
+  game still going after four minutes (by default) stops and counts as a draw. Forge does not run 60-card
+  decks (its opponents are Commander precons): their reports never start or
+  queue a Forge run and say why. When the Forge engine is busy
+  with other runs, a report waits in the queue and starts by itself. Unless you
+  use the Compare page's Forge button (or your assistant asks for the same
+  opponents), each deck meets precons picked for its own bracket (or
+  Archidekt's estimate when none is set), so two decks' Forge
+  win rates are not a like-for-like comparison; the paired goldfish A/B, which
+  your assistant can run for the two decks, is.
+- A report without Forge games (Forge not set up, a 60-card deck, a deck
+  with no commander marked, Forge left out of the report, or too many of
+  your reports already waiting for Forge) is labelled **Preflight only (no rules engine)**
+  where the Forge games would be. A Forge run that stops early (a group of
+  games failed, the run reached its time limit, the run was stopped, or the
+  gateway lost track of it) shows the games it did play, marked **stopped
+  early**, and the report is partial. Each report shows its status: queued,
+  running, complete, partial (some parts did not run or did not finish) or
+  failed.
 - A deck's report trends on its History page compare a simulation number
   only across reports run the same way (Commander or 60-card game, same last
   turn), and the table of numbers shows each report's settings.
@@ -154,8 +172,8 @@ One deck:
   preconstructed deck (pick one from Archidekt's list), any deck id or
   link, or a pasted list: what the build took out of the other deck, what
   it put in, changed counts, basic lands, and the statistics' differences.
-  Tap a card name for the whole card. The assistant's `compare_decks` makes
-  the same comparison.
+  Tap a card name for the whole card. Your assistant makes the same
+  comparison when you ask it to compare two decks.
 - The **More** menu in the banner holds Deck settings, Export (text, JSON or
   CSV), History and snapshots, Compare, Deck stats, the deck's page on
   Archidekt and **Delete deck**. Deleting asks you to type the deck's name; a snapshot is
@@ -175,7 +193,9 @@ One deck:
   the four-copies limit, restricted cards, companion, sideboard size, cards
   banned or not legal in the format, the bracket you set against the
   estimate, uncategorised cards; a deck with a banned card is never reported
-  fine), the bracket estimate and the description.
+  fine), the bracket set on the deck, Archidekt's estimate from cards with
+  Archidekt's notes (beside a bracket you set, labelled as Archidekt's
+  estimate; alone when none is set) and the description.
 - **Export** (More menu) shows the deck as Archidekt import text (every row
   with printing, finish, categories and labels; paste it into Archidekt's
   Import dialog or the gateway's New deck page), as a plain decklist and as
@@ -264,17 +284,30 @@ condition and count.
   are shown as Archidekt holds them).
 - Cards you own show a **green dot** on every deck page, your own decks and
   public ones alike, with the number of copies Archidekt knows about.
-- **Export CSV** downloads the whole collection in the column layout
-  Archidekt's own import reads. **Import a list** adds cards from that CSV,
-  from a CSV with Archidekt's column names or from a plain card list, pasted
-  or chosen as a file, up to 100 rows at a time.
+- **Export CSV** downloads the whole collection. Archidekt's import does not
+  read the column names: on archidekt.com you pick each column's type when
+  you import (the page's **Importing the CSV on archidekt.com** lists them)
+  and leave **Skip first line** on. Condition and Language are written in
+  Archidekt's own codes: D for Damaged, and JP Japanese, KR Korean, SP
+  Spanish, CS Chinese (Simplified) and CT Chinese (Traditional); the other codes
+  are the same as the gateway's.
+  **Import a list** adds cards from that CSV, from a CSV with Archidekt's
+  column names or from a plain card list, pasted or chosen as a file, up to
+  100 rows at a time. Afterwards the page says how many cards went in and
+  names the lines it could not take as given: a language Archidekt's
+  collection doesn't store (such as Phyrexian) is kept as English, a
+  condition Archidekt's collection doesn't store (such as EX) is kept as
+  Near Mint, copies of a card you already own in another language are added
+  to that copy, and
+  cards Archidekt cannot find are left out. When the text itself cannot be
+  read, nothing is imported and the page says which line is wrong.
 - A scan is a draft that stays as long as you like, up to a whole deck:
   fix misread cards, printings and quantities first, then send it to your
   collection or a deck, which removes the draft. Nothing expires by age.
 
-Your assistant can read and add to the collection too (`list_collection`,
-`propose_collection_changes`, a proposal you approve on the card in the chat
-or the review page, like a deck edit), for questions like "which cards in
+Your assistant can read and add to the collection too (an addition is a
+proposal you approve on the card in the chat or the review page, like a deck
+edit), for questions like "which cards in
 this deck do I not own yet?". After a collection change is applied, the
 gateway reads the collection back to check every card landed. Adding takes about a second a card,
 because each one is written to Archidekt.
@@ -286,8 +319,9 @@ deck's score), **Bookmark**, **Follow** its owner, and a **Comments** panel
 that shows the deck's thread and lets you reply or add a comment, and edit
 or delete your own comments. A user page has the Follow button too. Each one asks you to confirm first, then
 goes to Archidekt under your Archidekt name, exactly as if you had pressed
-it on archidekt.com. These buttons are yours alone: your assistant has no
-tool for any of them and cannot like, follow or comment for you.
+it on archidekt.com. Your assistant can suggest a like, bookmark, follow or
+comment, but it never sends one: each waits for your own press, in every
+approval mode, on the card in the chat or on its review page.
 
 ## Proposals and history
 
@@ -299,33 +333,47 @@ settings change, restore or collection change is first saved as a
 **proposal**: the exact list of what would change. Approve it on the card
 in the chat or on the review page, or pick an approval mode on your Account
 page (Manual, Semi-auto for small deck or collection edits and copies of a deck, Full auto) and the
-assistant applies what that mode allows, always with a snapshot.
+assistant applies what that mode allows, with a snapshot first for a change to one of your decks. Adding, removing or swapping a deck's commander always waits for your press.
 
 - **Proposals** lists what is waiting. Open one to read the diff and press
   **Apply** or **Reject**.
-- Before an edit is applied, the gateway checks the deck has not changed in
-  the meantime, saves a **snapshot** and puts a backup copy of the deck in
-  an "MTG Gateway backups" folder on your Archidekt account, then reads the
-  deck back to confirm.
-- **Out of date**: Archidekt is the master copy of your decks. When you open
-  the app, and every 30 minutes while proposals are waiting, the gateway
-  checks your decks on Archidekt (it only reads). If a deck changed after a
-  proposal for it was made, on archidekt.com, in another app or by another
-  change applied here, the proposal is marked **out of date** at once: Apply
-  would be refused and nothing sent, so reject it and ask for a new one.
-  The check never changes a deck, a proposal, a snapshot or your undo
-  history, and it waits while you or your assistant are working.
+- Before an edit is applied, the gateway checks the change still fits the
+  deck as it is now, saves a **snapshot** and, with backups on (the operator's
+  setting), puts a backup copy of the deck in an "MTG Gateway backups" folder
+  on your Archidekt account, then reads the deck back to confirm. The deck
+  page's own saves, Card search's Add to deck, and the deck editor's save with
+  its backup box unticked make no backup copy.
+- **Updated** and **Needs a look**: Archidekt is the master copy of your
+  decks. When you open the app, and every 30 minutes while changes are
+  waiting, the gateway checks your decks on Archidekt (it only reads). If a
+  deck changed after a change for it was made, on archidekt.com, in another
+  app or by another change applied here, the gateway works that change out
+  again on the deck as it is now. If it still does exactly what you
+  reviewed, it shows **Updated** and can be applied as before. If it would
+  now do something else, it shows **Needs a look** with the reason, and
+  Apply sends nothing: ask your assistant to update it, or reject it. The
+  check never changes a deck, a snapshot or your undo history, and it waits
+  while you or your assistant are working.
 - **History** shows proposals, snapshots and deck reports over time.
   **Restore** puts a deck back exactly as a snapshot had it, cards and the
   deck's own name, description, format, bracket and privacy alike (another
   proposal you approve).
-- **Reports** store a deck's statistics, a legality check and a goldfish
-  simulation so you can follow how it develops.
+- **Reports** (under More) list your stored deck reports, newest first (the
+  gateway keeps the newest 200), with what Forge has going for you now. Each holds
+  the deck's statistics, a legality check, and the solo test, the Forge games
+  or both, so you can follow how a deck develops.
+- **Compare** has **Test both in Forge against the same opponents** when
+  Forge is on and both decks have a commander: both decks play Forge games
+  against the same three precons, picked for the higher of the two decks'
+  brackets, so it doesn't matter which deck you compare from.
+- The **Goldfish** page's **How to play** guide walks a first game step by
+  step; you can hide it.
 
 ## Watchlist and prices
 
 Watchlists are off unless the operator turns them on; until then the page,
-the card viewer's price buttons and the watch tools below are not there.
+the card viewer's price buttons and your assistant's watchlist abilities are
+not there.
 
 The **Watchlist** page (in the account menu, and under More on a phone)
 keeps the price of cards and decks you choose, once a day:
@@ -347,26 +395,27 @@ keeps the price of cards and decks you choose, once a day:
 Prices come from Scryfall (TCGplayer in dollars, Cardmarket in euros) and
 are checked once a day; the operator sets how many cards and decks you may
 watch and how long prices are kept (a year unless they changed it). Your
-assistant has the same: `watch_card`, `watch_deck`, `unwatch`,
-`list_watchlist` and `card_price_history`. Watching changes nothing on
+assistant can do the same: watch a card or a deck, stop watching, list your
+watchlist and read a card's price history. Watching changes nothing on
 Archidekt, so it needs no proposal.
 
 ## Notifications and summaries
 
-When the operator has set up a notification server (ntfy), the
-**Notifications** card on your Account page can send a short message to
-your phone when a proposal waits for your approval, a deck report finishes
-(Forge runs that waited in the queue included), or a watched card crosses
-your price alert. Tick **Send me notifications**, choose which of these you
-want, and save: you get a topic of your own that nobody can guess (or type
-your own). Install the ntfy app, add the server shown there and subscribe to
-your topic; if the operator protects the server, sign in in the app with
-the user they gave you (check your app for where). **Send test** checks it.
-Messages say only what happened and link to the page here; they never list
-a deck's cards.
+The **Notifications** card on your Account page can send you a short message
+in the gateway's Android app when an assistant leaves changes waiting for
+your press (one message per deck, such as "2 changes to Atraxa are waiting
+for you"), a deck report finishes (Forge runs that waited in the queue
+included), or a watched card crosses your price alert. There are no
+notifications on iPhone. Open your Account page in the app, tick **Send me
+notifications**, choose which of these you want, and save, then press
+**Get notifications on this phone**. On Android 13 and later the app asks
+you to allow notifications, and it asks once to run in the background.
+Android then shows a quiet "Always connected" notification while the app
+listens. **Send test** checks it, and
+**Disconnect my phones** stops every phone you connected. Messages say only
+what happened and link to the page here; they never list a deck's cards.
 
-The summary is part of the **Notifications** card, so it is there only when
-the operator has set up ntfy. Choose **Every day** or **Every week
+The summary is part of the **Notifications** card. Choose **Every day** or **Every week
 (Mondays)** and the card shows a plain summary of today or the last 7 days
 (watched prices that moved and your watched decks' values when watchlists
 are on, deck reports finished, and proposals waiting and applied), and it is
@@ -375,11 +424,11 @@ own data. It does not write an AI summary itself: that would need a paid AI
 model service, and the gateway uses only free ones.
 
 For a summary in your assistant's own words, use the assistant you already
-have. Its `get_summary` tool returns the same summary (with `period` day or
-week), with or without ntfy. Claude and ChatGPT can both run a prompt on a schedule (check your
-app for scheduled tasks); a prompt such as "Every Monday morning, call
-get_summary from my MTG gateway and tell me in a few lines what changed and
-what needs me" does it. The tool is read-only.
+have. It can read the same summary, for a day or a week, with or without
+notifications, and reading it changes nothing. Claude and ChatGPT can both
+run a prompt on a schedule (check your app for scheduled tasks); a prompt
+such as "Every Monday morning, get my weekly summary from my MTG gateway and
+tell me in a few lines what changed and what needs me" does it.
 
 ## With an AI assistant
 
@@ -398,8 +447,9 @@ deck by category with pictures and rules text, and your account's setup.
 A tap is passed to the assistant as text; nothing changes until a proposal
 you approve. The [assistant skill](SKILL.md) teaches
 the house rules. The assistant can also propose moving a deck to another
-folder, changing its tags or its cover (a settings change you approve);
-deleting a deck and creating or renaming folders stay yours alone.
+folder, changing its tags or its cover (a settings change you approve). It
+can also suggest deleting a deck or creating a folder, but only your own
+press applies those; renaming folders is yours alone.
 [CAPABILITIES.md](CAPABILITIES.md) lists every tool the
 assistant has, which one owns each job, everything you can do by hand, and
 what only one of the two paths can do.
@@ -407,8 +457,8 @@ what only one of the two paths can do.
 ## The Android app
 
 The [Android app](ANDROID.md) shows these same pages as a native-feeling
-app with the phone camera built in. The app's own actions (scan with the
-phone camera, reload, open in browser, change gateway) sit in the account
+app with the phone camera built in. The app's own actions (Scan with the
+app's camera, Reload, Open in browser, Change gateway) sit in the account
 menu. On a foldable, the folded screen has the tabs at the bottom and the
 unfolded screen moves them to a rail down the left edge. No Android phone? Add the site to your home screen from the
 browser and it opens like an app, scanning included.

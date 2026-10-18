@@ -1,0 +1,321 @@
+"""0.7.29: the waiting changes as a pin board the assistant can read and tidy.
+
+Every waiting proposal ("note") has a number on its deck's board, a version and links ("depends
+on #1", "replaces #2"). The assistant sees the whole board of a deck (``lines``), is told card by
+card where a new request overlaps a waiting note (``overlaps``), and tidies with amend, replace,
+withdraw and combine (DeckService methods below, MCP tools in tools_decks.py). The gateway does
+only one thing by itself: an exact duplicate from the same app is not saved again.
+
+Holds: a note that depends on a note that is rejected, withdrawn or fails is held, so
+no assistant applies it in any mode (the member still may); the hold lifts when that note is
+applied or comes back. A note replaced by another comes back when its replacement is rejected or
+withdrawn."""
+
+from __future__ import annotations
+
+import logging
+from typing import Any
+
+from .db import HOLDING_STATES, hold_reason, replaced_hold_reason
+
+logger = logging.getLogger(__name__)
+
+SOFT_PER_DECK = 20  # a hint only, never a refusal
+WHAT_CHANGED_MAX = 400
+
+# How a review row reads in an overlap line ("#2 removes it").
+_VERBS = {
+    "add": lambda r: f"adds {r.get('qty') or 1}",
+    "remove": lambda r: "removes it",
+    "change": lambda r: f"changes its count from {r.get('before')} to {r.get('after')}",
+    "category": lambda r: "moves its category",
+    "finish": lambda r: "changes its finish",
+    "printing": lambda r: "changes its printing",
+    "label": lambda r: "changes its color tag",
+    "mana_value": lambda r: "changes its custom mana value",
+    "commander": lambda r: "changes the commander",
+}
+
+
+def _verb(r: dict[str, Any]) -> str:
+    f = _VERBS.get(str(r.get("kind")))
+    return f(r) if f else "changes it"
+
+
+def _cards(rows: list[dict[str, Any]] | None) -> dict[str, dict[str, Any]]:
+    """Card name (case-folded) -> its first row, for the rows that name a card."""
+    out: dict[str, dict[str, Any]] = {}
+    for r in rows or []:
+        name = str(r.get("name") or "").strip()
+        if name and r.get("kind") in _VERBS:
+            out.setdefault(name.casefold(), r)
+    return out
+
+
+def overlaps(
+    waiting: list[dict[str, Any]], rows: list[dict[str, Any]] | None, numbers: dict[str, Any]
+) -> list[str]:
+    """One line per card that a new request and a waiting note both touch:
+    "Sol Ring: #2 changes its printing; this request removes it." ``waiting`` are full proposal
+    rows (with ``rows``), oldest first; ``numbers`` maps their ids to board numbers."""
+    mine = _cards(rows)
+    out: list[str] = []
+    for note in waiting:
+        theirs = _cards(note.get("rows"))
+        for key, r in mine.items():
+            other = theirs.get(key)
+            if other is None:
+                continue
+            no = numbers.get(note["id"])
+            label = f"#{no}" if no else "another waiting change"
+            out.append(f"{r.get('name')}: {label} {_verb(other)}; this request {_verb(r)}.")
+    return out
+
+
+def what_changed(old_rows: list[dict[str, Any]] | None, new_rows: list[dict[str, Any]] | None) -> str:
+    """The gateway's own line for an amended note: what the new version does that the
+    old one did not, and what it no longer does, from the rows (an assistant's words never appear
+    here, so a note cannot describe itself wrongly)."""
+    from .decks import row_line
+
+    def clean(rows: list[dict[str, Any]] | None) -> list[str]:
+        return [row_line({k: v for k, v in r.items() if k != "guessed_from"}) for r in rows or []]
+
+    old, new = clean(old_rows), clean(new_rows)
+    bits = [f"now {line}" for line in new if line not in old]
+    bits += [f"no longer {line}" for line in old if line not in new]
+    text = "; ".join(bits) or "the same changes"
+    return text if len(text) <= WHAT_CHANGED_MAX else text[: WHAT_CHANGED_MAX - 3] + "..."
+
+
+# A held note keeps every cause it was held for, newest last, joined by this (each cause is
+# ``depends:<id>:<state>`` or ``replaces:<id>:applied``); every new cause moves its status_at.
+CAUSES_SEP = "|"
+
+
+def hold_causes(reason: Any) -> list[str]:
+    """The causes a hold's stored reason records, oldest first."""
+    return [c for c in str(reason or "").split(CAUSES_SEP) if c]
+
+
+def _cause_key(cause: str) -> str:
+    kind, _, rest = cause.partition(":")
+    return kind + ":" + rest.split(":", 1)[0]
+
+
+def add_hold(db: Any, sub: str, proposal_id: str, cause: str) -> None:
+    """Hold a waiting note for ``cause`` as well as for whatever already holds it. A cause about
+    the same note as one it records (another state of the same first step) takes its place."""
+    row = db.get_proposal(proposal_id, sub)
+    if row is None or row.get("state") != "pending":
+        return
+    causes = hold_causes(row.get("status_reason")) if row.get("status") == "held" else []
+    if cause in causes:
+        return
+    causes = [c for c in causes if _cause_key(c) != _cause_key(cause)] + [cause]
+    db.set_hold(proposal_id, sub, CAUSES_SEP.join(causes))
+
+
+def settle(svc: Any, sub: str, proposal_id: str, state: str) -> None:
+    """After a note was applied, rejected, withdrawn, failed or came back: hold the notes that
+    depend on it, or lift their hold, and bring back what a rejected or withdrawn
+    replacement replaced. Never raises: a link it cannot settle is logged."""
+    try:
+        db = svc.db
+        if state in HOLDING_STATES:
+            for dep in db.dependents(sub, proposal_id):
+                note = db.get_proposal(proposal_id, sub) or {}
+                add_hold(
+                    db,
+                    sub,
+                    dep,
+                    hold_reason({"id": proposal_id, "board_no": note.get("board_no"), "state": state}),
+                )
+            if state in ("rejected", "withdrawn"):
+                for link in db.proposal_links(sub, [proposal_id]):
+                    if link["proposal_id"] == proposal_id and link["kind"] == "replaces":
+                        old = db.get_proposal(link["other_id"], sub)
+                        if old is not None and old["state"] == "replaced":
+                            if db.reopen_proposal(old["id"], sub, max_pending=svc.max_pending()):
+                                settle(svc, sub, old["id"], "pending")
+        elif state in ("applied", "pending"):
+            if state == "applied":
+                close_replaced_on_apply(svc, sub, proposal_id)
+                hold_replacing(svc, sub, proposal_id)
+            for dep in db.dependents(sub, proposal_id):
+                row = db.get_proposal(dep, sub)
+                if row and row.get("status") == "held" and not _still_blocked(db, sub, dep):
+                    # its first steps no longer hold it; a replaced note applied on its own still does
+                    causes = hold_causes(row.get("status_reason"))
+                    rest = [c for c in causes if not c.startswith("depends:")]
+                    if rest != causes:
+                        db.set_hold(dep, sub, CAUSES_SEP.join(rest) if rest else None)
+    except Exception:
+        logger.exception("settling the links of a proposal failed")
+
+
+def close_replaced_on_apply(svc: Any, sub: str, proposal_id: str) -> None:
+    """Once a note is applied, the notes it replaces that were left waiting (another app's:
+    DeckService.mark_replaced) are closed as replaced by it, as a replace by the same app is at
+    once."""
+    db = svc.db
+    no = db.proposal_board_numbers(sub, [proposal_id]).get(proposal_id)
+    for link in db.proposal_links(sub, [proposal_id]):
+        if link["proposal_id"] != proposal_id or link["kind"] != "replaces":
+            continue
+        old = db.get_proposal(link["other_id"], sub)
+        if (
+            old is not None
+            and old["state"] == "pending"
+            and db.close_proposal(old["id"], sub, "replaced", f"replaced by #{no}" if no else "replaced")
+        ):
+            settle(svc, sub, old["id"], "withdrawn")
+
+
+def hold_replacing(svc: Any, sub: str, proposal_id: str) -> None:
+    """Once a note is applied on its own, a waiting note that would replace it is held: applying
+    it too would change the deck twice. The member may still apply it; no assistant does, in any mode."""
+    db = svc.db
+    for link in db.proposal_links(sub, [proposal_id]):
+        if link["other_id"] != proposal_id or link["kind"] != "replaces":
+            continue
+        new = db.get_proposal(link["proposal_id"], sub)
+        if new is not None and new["state"] == "pending":
+            # also when it is held already: the member must see this cause too
+            add_hold(db, sub, new["id"], replaced_hold_reason(proposal_id))
+
+
+# What the member reads about a replace.
+REPLACED_BY_WAITING = "{new} would replace this. Apply one of them, not both."
+REPLACES_WAITING = "This replaces {old}, which still waits."
+REPLACED_BY = "Replaced by {new}."
+
+
+def number(row: dict[str, Any]) -> str:
+    """A note's board number ("#3"), or "another change" when it has none."""
+    return f"#{row['board_no']}" if row.get("board_no") else "another change"
+
+
+def replaced_by_waiting(db: Any, sub: str, proposal_id: str) -> dict[str, Any] | None:
+    """A waiting note that replaces ``proposal_id`` (another app's replace, closed only when the
+    new one is applied), or None."""
+    for link in db.proposal_links(sub, [proposal_id]):
+        if link["other_id"] == proposal_id and link["kind"] == "replaces":
+            other = db.get_proposal(link["proposal_id"], sub)
+            if other is not None and other["state"] == "pending":
+                return other
+    return None
+
+
+def replace_note(db: Any, sub: str, row: dict[str, Any]) -> str | None:
+    """On a waiting note: the change that would replace it, or the waiting changes it replaces;
+    on a replaced one: which change replaced it."""
+    pid = row["id"]
+    if row.get("state") == "pending":
+        later = replaced_by_waiting(db, sub, pid)
+        if later is not None:
+            return REPLACED_BY_WAITING.format(new=number(later))
+        olds = [
+            db.get_proposal(lk["other_id"], sub) or {}
+            for lk in db.proposal_links(sub, [pid])
+            if lk["proposal_id"] == pid and lk["kind"] == "replaces"
+        ]
+        olds = [o for o in olds if o.get("state") == "pending"]
+        if olds:
+            return REPLACES_WAITING.format(old=", ".join(number(o) for o in olds))
+    elif row.get("state") == "replaced":
+        for lk in db.proposal_links(sub, [pid]):
+            if lk["other_id"] == pid and lk["kind"] == "replaces":
+                new = db.get_proposal(lk["proposal_id"], sub)
+                if new is not None:
+                    return REPLACED_BY.format(new=number(new))
+    return None
+
+
+WAITS_FOR = "Waits for {first}, which is not applied."
+
+
+def first_step_not_applied(db: Any, sub: str, proposal_id: str) -> dict[str, Any] | None:
+    """The first note ``proposal_id`` depends on that is not applied (its row), or None."""
+    for link in db.proposal_links(sub, [proposal_id]):
+        if link["proposal_id"] == proposal_id and link["kind"] == "depends_on":
+            other = db.get_proposal(link["other_id"], sub)
+            if other is not None and other["state"] != "applied":
+                return other
+    return None
+
+
+def link_note(db: Any, sub: str, row: dict[str, Any]) -> str:
+    """A waiting note's link in words for the lists and cards: a replace that waits, or
+    the change it waits for."""
+    note = replace_note(db, sub, {**row, "state": "pending"})
+    if note:
+        return note
+    if row.get("status") == "held":
+        return ""  # the Held line already says which change and why
+    first = first_step_not_applied(db, sub, row["id"])
+    return WAITS_FOR.format(first=number(first)) if first is not None else ""
+
+
+def _cause_text(db: Any, sub: str, cause: str) -> str:
+    if cause.startswith("depends:"):
+        _tag, other, closed = (cause.split(":", 2) + ["", ""])[:3]
+        no = db.proposal_board_numbers(sub, [other]).get(other)
+        words = {
+            "rejected": "you rejected",
+            "withdrawn": "was withdrawn",
+            "failed": "failed",
+            "expired": "expired",
+        }
+        which = f"#{no}" if no else "another change"
+        return f"It depends on {which}, which {words.get(closed, closed)}."
+    other = cause.split(":", 2)[1] if cause.count(":") >= 1 else ""
+    no = db.proposal_board_numbers(sub, [other]).get(other)
+    return f"It would replace {f'#{no}' if no else 'a change'}, which was applied."
+
+
+def status_text(db: Any, sub: str, row: dict[str, Any]) -> str:
+    """A waiting note's status in words, for the pages, the card and the assistant: why it is
+    "held" (as in "which you rejected"), what "updated" means, or why it "needs a look"
+    (recheck.py)."""
+    from . import recheck
+
+    status = row.get("status")
+    reason = str(row.get("status_reason") or "")
+    if (
+        status == "held"
+        and hold_causes(reason)
+        and all(c.startswith(("depends:", "replaces:")) for c in hold_causes(reason))
+    ):
+        # every cause it is held for, in the order they came
+        return " ".join(_cause_text(db, sub, c) for c in hold_causes(reason))
+    if status == "updated":
+        return "The deck changed since this was made; it still does exactly what was reviewed."
+    return recheck.reason_text(reason)
+
+
+def _still_blocked(db: Any, sub: str, proposal_id: str) -> bool:
+    for link in db.proposal_links(sub, [proposal_id]):
+        if link["proposal_id"] == proposal_id and link["kind"] == "depends_on":
+            other = db.get_proposal(link["other_id"], sub)
+            if other is not None and other["state"] in HOLDING_STATES:
+                return True
+    return False
+
+
+def links_text(db: Any, sub: str, proposal_id: str) -> list[dict[str, Any]]:
+    """A note's links for the board: {kind, proposal_id, board_no, state}, both directions
+    ("depends_on", "replaces", "needed_by", "replaced_by")."""
+    out: list[dict[str, Any]] = []
+    links = db.proposal_links(sub, [proposal_id])
+    others = {lk["other_id"] if lk["proposal_id"] == proposal_id else lk["proposal_id"] for lk in links}
+    numbers = db.proposal_board_numbers(sub, sorted(others))
+    for lk in links:
+        mine = lk["proposal_id"] == proposal_id
+        other = lk["other_id"] if mine else lk["proposal_id"]
+        kind = lk["kind"] if mine else {"depends_on": "needed_by", "replaces": "replaced_by"}[lk["kind"]]
+        row = db.get_proposal(other, sub) or {}
+        out.append(
+            {"kind": kind, "proposal_id": other, "board_no": numbers.get(other), "state": row.get("state")}
+        )
+    return out

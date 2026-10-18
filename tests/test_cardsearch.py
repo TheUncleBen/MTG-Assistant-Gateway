@@ -8,8 +8,11 @@ from __future__ import annotations
 
 import pytest
 
-from .test_browse_collection import Stack, linked, stack  # noqa: F401 - fixture
+from .conftest import COLLECTION, Stack, stack_with
+from .test_browse_collection import linked
 from .test_decks_and_proxy import Browser
+
+stack_options = stack_with(COLLECTION)
 
 CATALOG = [
     "Sol Ring",
@@ -38,22 +41,24 @@ async def test_matching_cards_are_listed_with_viewer_data_and_a_live_add_button(
         r = await b.http.get("/cards?q=sol")
         assert r.status_code == 200, r.text
         t = r.text
-        # the two names the fake Scryfall knows come back with picture, cost and type; the names it
-        # does not know (the hostile ones) are left out rather than shown empty
-        assert "Cards matching “sol”" in t and "2 cards" in t
+        # Scryfall's search answers (paper only by default): both Sol cards, with picture, cost, type
+        assert stack.sf.searches[-1]["q"] == "sol (game:paper)"
+        assert ">2 cards<" in t
         assert "data-card='Sol Ring'" in t and "data-card='Sol Talisman'" in t
         assert "data-mana='{1}'" in t and "data-type='Artifact'" in t
         assert "data-img='https://cards.scryfall.io/" in t
         assert "data-scry='https://scryfall.com/" in t
-        assert "<ul class='cardgrid' id='cardgrid' data-linked>" in t
-        assert "data-add='Sol Ring'>" in t and "disabled" not in t.split("id='cardgrid'")[1]
+        assert "<ul class='cardgrid' id='cardgrid' data-view='grid' data-linked>" in t
+        assert "data-add='Sol Ring' aria-label='Add Sol Ring to a deck'>" in t
+        assert "disabled" not in t.split("id='cardgrid'")[1].split("</ul>")[0]
         # the page's own script and the shared viewer, and pictures allowed from Scryfall only
         assert "/static/cardsearch.js" in t and "/static/cardview.js" in t
         assert "img-src 'self' https://cards.scryfall.io" in r.headers["content-security-policy"]
         assert "connect-src 'self'" in r.headers["content-security-policy"]
-        # the box keeps the text, suggests as it is typed and offers the deck search for it
-        assert "id='c-q' type='search' name='q' value='sol'" in t and "data-suggest-submit" in t
-        assert "href='/search?name=sol'" in t
+        # the box keeps the text, has no dropdown any more (live tiles), offers the deck search
+        assert "id='c-q' type='search' name='q' value='sol'" in t
+        assert "data-suggest" not in t.split("cs-top")[1]
+        assert "href='/search'" in t
     finally:
         await b.aclose()
 
@@ -69,39 +74,41 @@ async def test_a_member_without_an_archidekt_link_sees_the_add_disabled_with_the
         assert r.status_code == 200, r.text
         t = r.text
         assert "data-card='Sol Ring'" in t
-        assert "<ul class='cardgrid' id='cardgrid'>" in t  # no data-linked
+        assert "<ul class='cardgrid' id='cardgrid' data-view='grid'>" in t  # no data-linked
         assert "data-add='Sol Ring' disabled title='Link your Archidekt account on the Account page" in t
         assert "no Archidekt account is linked" in t and "href='/account'" in t
     finally:
         await b.aclose()
 
 
-async def test_hostile_text_is_escaped_and_short_text_shows_the_help(stack: Stack) -> None:  # noqa: F811
+async def test_hostile_text_is_escaped_and_no_filter_shows_the_help(stack: Stack) -> None:  # noqa: F811
     _catalog(stack)
     b = await linked(stack)
     try:
         r = await b.http.get("/cards", params={"q": "<script>alert(1)</script> שלום \U0001f525"})
         assert r.status_code == 200
         assert "<script>alert" not in r.text and "&lt;script&gt;alert(1)&lt;/script&gt;" in r.text
-        assert "No card is named like that" in r.text
-        r = await b.http.get("/cards?q=s")
-        assert r.status_code == 200 and "Find a card" in r.text and "id='cardgrid'" not in r.text
+        assert "No card matches these filters" in r.text
+        n = len(stack.sf.searches)
         r = await b.http.get("/cards")
+        assert r.status_code == 200 and "Find a card" in r.text and "id='cardgrid'" not in r.text
+        r = await b.http.get("/cards?g=paper&order=cmc")  # the games and the order alone pick nothing
         assert r.status_code == 200 and "Find a card" in r.text
-        # a very long text is cut to the catalog's limit, not refused
+        assert len(stack.sf.searches) == n  # nothing asked of Scryfall without a filter
+        # a very long text is cut to the box's limit, not refused
         r = await b.http.get("/cards", params={"q": "Okiri " * 60})
-        assert r.status_code == 200 and "Cards matching" in r.text
+        assert r.status_code == 200 and len(stack.sf.searches[-1]["q"]) < 260
     finally:
         await b.aclose()
 
 
-async def test_a_name_the_catalog_knows_but_scryfall_does_not_is_left_out(stack: Stack) -> None:  # noqa: F811
-    _catalog(stack)
+async def test_a_search_scryfall_cannot_read_says_so(stack: Stack) -> None:  # noqa: F811
     b = await linked(stack)
     try:
-        r = await b.http.get("/cards?q=okiri")
-        assert r.status_code == 200
-        assert "0 cards" in r.text and "No card is named like that" in r.text
+        r = await b.http.get("/cards", params={"x": "bad:thing"})
+        assert r.status_code == 200 and "Scryfall could not read that search: unknown keyword bad" in r.text
+        r = await b.http.get("/cards", params={"q": "okiri"})
+        assert r.status_code == 200 and "No card matches these filters" in r.text
     finally:
         await b.aclose()
 
@@ -350,3 +357,72 @@ def test_link_check_refuses_urls_a_browser_reads_differently(url: str) -> None:
     from mtg_gateway.cardsearch import card_links
 
     assert card_links({"related_uris": {"edhrec": url}}) == {}
+
+
+# -- 0.7.28 review: only a 404 is an unknown card; one member's "busy" stays theirs ------------------
+@pytest.mark.parametrize("status", [400, 403, 422])
+async def test_a_scryfall_refusal_is_not_kept_as_an_unknown_card(stack: Stack, status: int) -> None:  # noqa: F811
+    b = await linked(stack)
+    try:
+        stack.sf.fail_with = status
+        r = await b.http.get("/cards/api/text", params={"name": "Cultivate"})
+        assert r.status_code == 503 and r.json()["error"] == "unavailable", r.json()
+        assert not stack.h.app.state.gateway.card_texts._absent  # nothing remembered as unknown
+        stack.sf.fail_with = None
+        r = await b.http.get("/cards/api/text", params={"name": "Cultivate"})
+        assert r.status_code == 200 and r.json()["card"]["name"] == "Cultivate"
+    finally:
+        stack.sf.fail_with = None
+        await b.aclose()
+
+
+async def test_only_a_404_is_an_unknown_card_at_the_scryfall_client() -> None:
+    import httpx
+
+    from mtg_gateway.scan.scryfall import ScryfallClient, ScryfallError
+
+    status = [404]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(status[0], json={"object": "error", "status": status[0], "details": "no"})
+
+    http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    client = ScryfallClient(base="https://scryfall.invalid", http=http, min_interval=0)
+    with pytest.raises(ScryfallError) as err:
+        await client.named_raw("Lightning Bolt")
+    assert err.value.kind == "not_found"
+    for code in (400, 403, 422):
+        status[0] = code
+        with pytest.raises(ScryfallError) as err:
+            await client.named_raw("Lightning Bolt")
+        assert err.value.kind == "unavailable", code
+        with pytest.raises(ScryfallError) as err:
+            await client.named("Lightning Bolt", fuzzy=True)
+        assert err.value.kind == "unavailable", code
+    await http.aclose()
+
+
+async def test_a_waiter_does_not_take_the_fetching_members_busy_answer() -> None:
+    import asyncio
+
+    from mtg_gateway.cardsearch import TextCache
+    from mtg_gateway.scan.service import ScanError
+
+    cache = TextCache()
+    calls: list[str] = []
+
+    async def busy(name: str) -> dict:  # member A: their other lookups fill their slots
+        await asyncio.sleep(0.05)
+        raise ScanError("busy", "other card lookups for your account are still running; wait for them")
+
+    async def free(name: str) -> dict:  # member B: a slot free
+        calls.append(name)
+        return {"name": "Lightning Bolt", "oracle_text": "x"}
+
+    a = asyncio.create_task(cache.fetch("Lightning Bolt", busy))
+    await asyncio.sleep(0.01)
+    b = asyncio.create_task(cache.fetch("lightning bolt", free))
+    got = await asyncio.gather(a, b, return_exceptions=True)
+    assert isinstance(got[0], ScanError) and got[0].kind == "busy"  # A's own answer
+    assert isinstance(got[1], dict) and got[1]["name"] == "Lightning Bolt", got[1]  # B asked in its slot
+    assert calls == ["lightning bolt"] and not cache._absent and not cache._inflight

@@ -35,7 +35,7 @@ async def test_signed_in_user_gets_page_and_zip(harness: Harness) -> None:
     b = Browser(harness)
     try:
         await b.login("/skill")
-        # D11: /skill leads to the setup hub's skill section
+        # /skill leads to the setup hub's skill section
         r = await b.http.get("/skill")
         assert r.status_code == 302 and r.headers["location"] == "/install?for=skill"
         page = await b.http.get("/install?for=skill")

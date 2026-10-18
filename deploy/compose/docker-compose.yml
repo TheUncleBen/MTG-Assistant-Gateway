@@ -1,6 +1,6 @@
 # MTG Assistant Gateway: plain Docker Compose (one machine, no Swarm).
 #
-# Same two services as deploy/portainer-stack.yml, for people who don't run a
+# Same services as deploy/portainer-stack.yml, for people who don't run a
 # Swarm. Walkthrough: docs/DEPLOY-COMPOSE.md. In short:
 #
 #   cp .env.example .env              # then edit the REQUIRED lines
@@ -28,11 +28,10 @@ secrets:
   # remove the "# " from the next two lines and from "# - mtg_authentik_api_token" below.
   # mtg_authentik_api_token:
   #   file: ${MTG_SECRETS_DIR:-./secrets}/mtg_authentik_api_token.txt
-  # Optional: the access token the gateway publishes notifications with, for an ntfy server with
-  # access control (docs/DEPLOY.md, "Optional: notifications through ntfy"). After creating it,
-  # remove the "# " from the next two lines and from "# - mtg_ntfy_token" below.
-  # mtg_ntfy_token:
-  #   file: ${MTG_SECRETS_DIR:-./secrets}/mtg_ntfy_token.txt
+  # The token the gateway uses with this stack's own ntfy server (the members' notifications);
+  # make-secrets.sh creates it.
+  mtg_ntfy_token:
+    file: ${MTG_SECRETS_DIR:-./secrets}/mtg_ntfy_token.txt
 
 services:
   # The gateway: OAuth server for AI clients, MCP endpoint and browser pages.
@@ -62,7 +61,10 @@ services:
       - mtg_session_secret
       - mtg_oidc_client_secret
       # - mtg_authentik_api_token
-      # - mtg_ntfy_token
+      - mtg_ntfy_token
+    # A setting passed as ${MTG_X:-} (empty unless your env sets it) is one an admin changes on
+    # the gateway's Settings page (/admin/settings), which starts from the gateway's default. A
+    # value set in your env wins and locks the setting: the page shows it greyed out with its value.
     environment:
       MTG_PUBLIC_URL: ${MTG_PUBLIC_URL:?PUBLIC HTTPS URL REQUIRED e.g. https://mtg.example.com}
       MTG_OIDC_ISSUER: ${MTG_OIDC_ISSUER:?OIDC ISSUER URL REQUIRED}
@@ -79,64 +81,65 @@ services:
       MTG_OIDC_PREVIOUS_ISSUERS: ${MTG_OIDC_PREVIOUS_ISSUERS:-}
       MTG_OIDC_TOKEN_AUTH_METHOD: ${MTG_OIDC_TOKEN_AUTH_METHOD:-}
       MTG_SERVER_NAME: ${MTG_SERVER_NAME:-}
+      MTG_CHATGPT_NAME: ${MTG_CHATGPT_NAME:-}
       # Optional removed-member clean-up: /run/secrets/mtg_authentik_api_token once that secret
       # is listed above. Empty = off. The API URL defaults to the issuer's address.
       MTG_AUTHENTIK_API_TOKEN_FILE: ${MTG_AUTHENTIK_API_TOKEN_FILE:-}
       MTG_AUTHENTIK_API_URL: ${MTG_AUTHENTIK_API_URL:-}
-      # Optional notifications through an ntfy server (empty = off), and its token file:
-      # /run/secrets/mtg_ntfy_token once that secret is listed above (docs/DEPLOY.md).
-      MTG_NTFY_URL: ${MTG_NTFY_URL:-}
-      MTG_NTFY_TOKEN_FILE: ${MTG_NTFY_TOKEN_FILE:-}
+      # Notifications to the members' Android app go through this stack's own ntfy server
+      # (the ntfy service below); the phones reach it through the gateway's own address.
+      MTG_NTFY_URL: ${MTG_NTFY_URL:-http://ntfy:8080}
+      MTG_NTFY_TOKEN_FILE: ${MTG_NTFY_TOKEN_FILE:-/run/secrets/mtg_ntfy_token}
       # Watchlists and prices, off by default: with false the Watchlist pages, the price buttons,
       # the five watch tools and the daily price check are absent (stored watches are kept).
-      MTG_WATCHLISTS_ENABLED: ${MTG_WATCHLISTS_ENABLED:-false}
+      MTG_WATCHLISTS_ENABLED: ${MTG_WATCHLISTS_ENABLED:-}
       # Deck sync (read-only): minutes between checks of Archidekt for members with waiting
       # proposals; opening the app checks too. 0 turns it off.
-      MTG_DECK_SYNC_MINUTES: ${MTG_DECK_SYNC_MINUTES:-30}
+      MTG_DECK_SYNC_MINUTES: ${MTG_DECK_SYNC_MINUTES:-}
       # Watchlists: cards and decks per member, days of daily prices kept, and the hour (UTC) of
       # the daily price check. Nothing is asked of Scryfall while nobody watches anything.
-      MTG_WATCH_MAX_CARDS: ${MTG_WATCH_MAX_CARDS:-200}
-      MTG_WATCH_MAX_DECKS: ${MTG_WATCH_MAX_DECKS:-10}
-      MTG_PRICE_HISTORY_DAYS: ${MTG_PRICE_HISTORY_DAYS:-365}
-      MTG_PRICE_HOUR_UTC: ${MTG_PRICE_HOUR_UTC:-6}
+      MTG_WATCH_MAX_CARDS: ${MTG_WATCH_MAX_CARDS:-}
+      MTG_WATCH_MAX_DECKS: ${MTG_WATCH_MAX_DECKS:-}
+      MTG_PRICE_HISTORY_DAYS: ${MTG_PRICE_HISTORY_DAYS:-}
+      MTG_PRICE_HOUR_UTC: ${MTG_PRICE_HOUR_UTC:-}
       MTG_DATA_DIR: /data
       MTG_BACKUP_DIR: /backups
       # Copies every backup here too; off unless MTG_BACKUP_COPY_DIR names a host folder (below).
       MTG_BACKUP_COPY_DIR: /backup-copy
-      MTG_BACKUP_HOUR_UTC: ${MTG_BACKUP_HOUR_UTC:-3}
-      MTG_BACKUP_KEEP_DAYS: ${MTG_BACKUP_KEEP_DAYS:-14}
-      MTG_LOG_LEVEL: ${MTG_LOG_LEVEL:-INFO}
+      MTG_BACKUP_HOUR_UTC: ${MTG_BACKUP_HOUR_UTC:-}
+      MTG_BACKUP_KEEP_DAYS: ${MTG_BACKUP_KEEP_DAYS:-}
+      MTG_LOG_LEVEL: ${MTG_LOG_LEVEL:-}
       # Set to an empty value (and drop the mysticforge service) to run without research tools.
       MTG_MYSTIC_FORGE_URL: ${MTG_MYSTIC_FORGE_URL-http://mysticforge:8000/mcp}
       # Forge simulations: empty (the default) leaves them off; http://forge:8000 with the forge profile.
       MTG_FORGE_URL: ${MTG_FORGE_URL:-}
-      MTG_FORGE_GAMES: ${MTG_FORGE_GAMES:-10}
+      MTG_FORGE_GAMES: ${MTG_FORGE_GAMES:-}
       MTG_WRITES_ENABLED: ${MTG_WRITES_ENABLED:-false}
-      MTG_APPROVAL_MODE_DEFAULT: ${MTG_APPROVAL_MODE_DEFAULT:-manual}
-      MTG_APPROVAL_MODE_MAX: ${MTG_APPROVAL_MODE_MAX:-auto}
-      MTG_AUTO_APPLY_MAX_ROWS: ${MTG_AUTO_APPLY_MAX_ROWS:-5}
-      MTG_APPLY_IN_CHAT: ${MTG_APPLY_IN_CHAT:-true}
-      MTG_UPDATE_CHECK: ${MTG_UPDATE_CHECK:-true}
-      MTG_ARCHIDEKT_BACKUPS: ${MTG_ARCHIDEKT_BACKUPS:-true}
+      MTG_APPROVAL_MODE_DEFAULT: ${MTG_APPROVAL_MODE_DEFAULT:-}
+      MTG_APPROVAL_MODE_MAX: ${MTG_APPROVAL_MODE_MAX:-}
+      MTG_AUTO_APPLY_MAX_ROWS: ${MTG_AUTO_APPLY_MAX_ROWS:-}
+      MTG_APPLY_IN_CHAT: ${MTG_APPLY_IN_CHAT:-}
+      MTG_UPDATE_CHECK: ${MTG_UPDATE_CHECK:-}
+      MTG_ARCHIDEKT_BACKUPS: ${MTG_ARCHIDEKT_BACKUPS:-}
       MTG_ARCHIDEKT_BACKUP_FOLDER: ${MTG_ARCHIDEKT_BACKUP_FOLDER:-MTG Gateway backups}
       MTG_ACCESS_TOKEN_TTL: ${MTG_ACCESS_TOKEN_TTL:-3600}
       MTG_REFRESH_TOKEN_TTL: ${MTG_REFRESH_TOKEN_TTL:-2592000}
       MTG_BROWSER_SESSION_TTL: ${MTG_BROWSER_SESSION_TTL:-7200}
       MTG_REAUTH_INTERVAL: ${MTG_REAUTH_INTERVAL:-604800}
       MTG_MEMBERSHIP_CHECK_TTL: ${MTG_MEMBERSHIP_CHECK_TTL:-5}
-      MTG_ARCHIDEKT_CALLS_PER_10_MIN: ${MTG_ARCHIDEKT_CALLS_PER_10_MIN:-120}
-      MTG_ARCHIDEKT_MAX_PER_MINUTE: ${MTG_ARCHIDEKT_MAX_PER_MINUTE:-40}
-      MTG_ARCHIDEKT_MIN_INTERVAL: ${MTG_ARCHIDEKT_MIN_INTERVAL:-1.0}
-      MTG_ARCHIDEKT_RETRIES: ${MTG_ARCHIDEKT_RETRIES:-2}
-      MTG_ARCHIDEKT_BACKOFF_BASE: ${MTG_ARCHIDEKT_BACKOFF_BASE:-1.0}
-      MTG_ARCHIDEKT_CACHE_SECONDS: ${MTG_ARCHIDEKT_CACHE_SECONDS:-60}
-      MTG_ARCHIDEKT_CARD_CACHE_SECONDS: ${MTG_ARCHIDEKT_CARD_CACHE_SECONDS:-3600}
+      MTG_ARCHIDEKT_CALLS_PER_10_MIN: ${MTG_ARCHIDEKT_CALLS_PER_10_MIN:-}
+      MTG_ARCHIDEKT_MAX_PER_MINUTE: ${MTG_ARCHIDEKT_MAX_PER_MINUTE:-}
+      MTG_ARCHIDEKT_MIN_INTERVAL: ${MTG_ARCHIDEKT_MIN_INTERVAL:-}
+      MTG_ARCHIDEKT_RETRIES: ${MTG_ARCHIDEKT_RETRIES:-}
+      MTG_ARCHIDEKT_BACKOFF_BASE: ${MTG_ARCHIDEKT_BACKOFF_BASE:-}
+      MTG_ARCHIDEKT_CACHE_SECONDS: ${MTG_ARCHIDEKT_CACHE_SECONDS:-}
+      MTG_ARCHIDEKT_CARD_CACHE_SECONDS: ${MTG_ARCHIDEKT_CARD_CACHE_SECONDS:-}
       MTG_TRUSTED_PROXIES: ${MTG_TRUSTED_PROXIES:-}
       # Host headers /mcp accepts. Empty = the host in MTG_PUBLIC_URL.
       MTG_ALLOWED_HOSTS: ${MTG_ALLOWED_HOSTS:-}
       MTG_CIMD_ENABLED: ${MTG_CIMD_ENABLED:-true}
       MTG_CIMD_ALLOWED_HOSTS: ${MTG_CIMD_ALLOWED_HOSTS:-}
-      MTG_SCRYFALL_LOOKUP_INTERVAL: ${MTG_SCRYFALL_LOOKUP_INTERVAL:-0.5}
+      MTG_SCRYFALL_LOOKUP_INTERVAL: ${MTG_SCRYFALL_LOOKUP_INTERVAL:-}
       PUID: ${PUID:-1000}
       PGID: ${PGID:-1000}
       TZ: ${TIMEZONE:-UTC}
@@ -159,6 +162,7 @@ services:
       - mtg
       - mysticforge
       - forge
+      - ntfy
     # Least privilege: the entrypoint starts as root only to match PUID/PGID, then drops to
     # that user with setpriv --no-new-privs; these four capabilities are all it needs.
     cap_drop:
@@ -172,6 +176,8 @@ services:
       - no-new-privileges:true
     depends_on:
       mysticforge:
+        condition: service_started
+      ntfy:
         condition: service_started
     deploy:
       resources:
@@ -233,12 +239,80 @@ services:
           memory: ${MF_MEMORY_LIMIT:-512M}
           pids: 512 # processes and threads, as for the gateway
 
+  # ntfy: holds the members' notifications until their Android app picks them up (it keeps
+  # them for 12 hours, in memory, for a phone that was offline). The gateway is its only user:
+  # it publishes with the mtg_ntfy_token secret and relays each member's own topic to their app
+  # at /app/notifications/stream, on the gateway's address. No published port: don't put a
+  # reverse proxy in front of it. Every other request is refused, and its web app is off.
+  ntfy:
+    image: ${NTFY_IMAGE:-binwiederhier/ntfy:v2.31.1@sha256:91bb7fa607b02006c119bb4a31032923b414a713a032ecb40f0c5d6bfd5b7e40}
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    # The gateway's only user is made at each start from the secret (a random password nobody
+    # knows, the token, and read-write on the members' mtg- topics); the token goes in the
+    # environment of ntfy alone, never on its command line. "$$" is a "$" for the shell.
+    entrypoint:
+      - sh
+      - -c
+      - |
+        set -eu
+        pw=$$(head -c 32 /dev/urandom | base64)
+        hash=$$(printf '%s\n%s\n' "$$pw" "$$pw" | ntfy user hash 2>/dev/null | tr ' ' '\n' | grep '^\$$2')
+        NTFY_AUTH_USERS="mtg-gateway:$$hash:user"
+        NTFY_AUTH_TOKENS="mtg-gateway:$$(cat /run/secrets/mtg_ntfy_token):gateway"
+        export NTFY_AUTH_USERS NTFY_AUTH_TOKENS
+        unset pw hash
+        exec ntfy serve
+    environment:
+      NTFY_LISTEN_HTTP: ":8080"
+      NTFY_AUTH_FILE: /tmp/ntfy-auth.db
+      NTFY_AUTH_DEFAULT_ACCESS: deny-all
+      NTFY_AUTH_ACCESS: "mtg-gateway:mtg-*:rw"
+      NTFY_WEB_ROOT: disable
+      NTFY_CACHE_DURATION: 12h
+      # Every phone's connection reaches ntfy from the gateway, so ntfy counts them all as one
+      # visitor: room for the gateway's own cap of 200 connections, and for a mass reconnect
+      # (ntfy 2.31.1's defaults are 30 subscriptions and a burst of 60 requests, one more per 5 s).
+      NTFY_VISITOR_SUBSCRIPTION_LIMIT: "250"
+      NTFY_VISITOR_REQUEST_LIMIT_BURST: "600"
+      NTFY_VISITOR_REQUEST_LIMIT_REPLENISH: "1s"
+      TZ: ${TIMEZONE:-UTC}
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - wget -q -O /dev/null http://127.0.0.1:8080/v1/health
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    secrets:
+      - mtg_ntfy_token
+    # Runs as PUID (the owner of the secret files), with no capabilities at all: it listens on
+    # 8080 and writes only to /tmp.
+    user: "${PUID:-1000}:${PGID:-1000}"
+    networks:
+      - ntfy
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          memory: ${NTFY_MEMORY_LIMIT:-128M}
+          pids: 128
+
   # Forge, the rules engine for deck simulations (docker/forge/, GPL-3.0, unmodified). Optional and
   # off by default: start it with COMPOSE_PROFILES=forge and set MTG_FORGE_URL=http://forge:8000 for
-  # the gateway. It starts Java only while a simulation runs, one at a time, and needs no internet.
+  # the gateway. It starts Java only while a simulation runs, as many games at once as its CPUs and
+  # memory fit (or FORGE_MAX_PARALLEL when set), and needs no internet.
   forge:
     profiles: ["forge"]
-    image: ${FORGE_IMAGE:-ghcr.io/theuncleben/mtg-assistant-forge}:${FORGE_TAG:-2.0.15-mag2}
+    image: ${FORGE_IMAGE:-ghcr.io/theuncleben/mtg-assistant-forge}:${FORGE_TAG:-2.0.15-mag3}
     restart: unless-stopped
     logging:
       driver: json-file
@@ -247,8 +321,14 @@ services:
         max-file: "3"
     environment:
       FORGE_XMX: ${FORGE_XMX:-1g}
+      # The memory limit again, which sizes Forge's games at once where Docker can't cap memory
+      # (Raspberry Pi OS by default); not a hard limit as Docker's is
+      FORGE_MEMORY_BUDGET: ${FORGE_MEMORY_LIMIT:-1536M}
       FORGE_MAX_GAMES: ${FORGE_MAX_GAMES:-50}
-      FORGE_GAME_SECONDS: ${FORGE_GAME_SECONDS:-600}
+      FORGE_GAME_SECONDS: ${FORGE_GAME_SECONDS:-240}
+      # Forge games played at once at most (1 to 4); empty: as many as the container's CPUs and
+      # memory fit (about 2 CPUs and 1.2 GB a game), so 1 inside the default limits
+      FORGE_MAX_PARALLEL: ${FORGE_MAX_PARALLEL:-}
       PUID: ${PUID:-1000}
       PGID: ${PGID:-1000}
       TZ: ${TIMEZONE:-UTC}
@@ -280,4 +360,7 @@ networks:
   mysticforge:
   # Only the gateway and Forge are on it, and it has no way out: Forge needs no internet.
   forge:
+    internal: true
+  # Only the gateway and ntfy are on it, and it has no way out: phones never reach ntfy directly.
+  ntfy:
     internal: true

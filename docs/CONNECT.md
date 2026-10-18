@@ -39,13 +39,17 @@ each AI client automatically, and you prove who you are by signing in to
 the owner's sign-in service in your browser.
 
 **About the labels below.** Every claim about Claude or ChatGPT comes from
-the vendor's own help pages, read on 2026-10-04 or 2026-10-05, and is
-marked:
+the vendor's own help pages, read on 2026-10-04 or 2026-10-05, or from the
+owner's own checks with this gateway, and is marked:
 
-- **verified**: an official page says so, and we read the exact wording;
-- **reported**: an official page says so, but we could only read it through
-  a tool that summarises pages, so the wording isn't checked;
-- **unverified**: no official page we could read says either way.
+- **tested**: tried with this gateway;
+- **reported**: an official page of the vendor says so, but it hasn't been
+  tried with this gateway (some of those pages could only be read through a
+  tool that summarises pages);
+- **not tested**: not tried, and no official page we could read says either
+  way.
+
+Where a line is our own reasoning from one of those, it says so.
 
 Vendors rename menus and change plans all the time, so if a label doesn't
 match, look for the closest thing. Not every client and device has been
@@ -55,14 +59,14 @@ tested end to end with this gateway yet; the owner keeps those results.
 
 | Client | Add the connector | Use it once added |
 | --- | --- | --- |
-| Claude web (claude.ai) | Yes (verified) | Yes (verified) |
-| Claude desktop app | Yes (verified; Anthropic doesn't separate Windows and Mac) | Yes (verified) |
-| Claude iOS and Android | Beta, and not documented for custom connectors (unverified). Add it on the web or desktop instead | Yes, once added on the web or desktop (verified) |
-| ChatGPT web, Pro plan | Yes, in Developer mode (verified 2026-10-10) | Yes, every tool, deck proposals included (verified 2026-10-10) |
+| Claude web (claude.ai) | Yes (reported) | Yes (reported) |
+| Claude desktop app | Yes (reported; Anthropic doesn't separate Windows and Mac) | Yes (reported) |
+| Claude iOS and Android | Beta, and not documented for custom connectors (not tested). Add it on the web or desktop instead | Yes, once added on the web or desktop (reported) |
+| ChatGPT web, Pro plan | Yes, in Developer mode (tested 2026-10-10) | Yes, every tool, deck proposals included (tested 2026-10-10) |
 | ChatGPT web, Plus plan | OpenAI's pages disagree (reported) | OpenAI's pages disagree (reported) |
-| ChatGPT desktop app | Unverified; OpenAI's pages only mention the web | Unverified |
+| ChatGPT desktop app | Not tested; OpenAI's pages only mention the web | Not tested |
 | ChatGPT iOS and Android apps | **No, OpenAI doesn't support it** (reported: "No - web only") | **No, OpenAI doesn't support it** (reported) |
-| ChatGPT in a phone's web browser | Unverified, untested | Unverified, untested |
+| ChatGPT in a phone's web browser | Not tested | Not tested |
 
 In plain terms:
 
@@ -74,12 +78,16 @@ In plain terms:
   change things) is for Business, Enterprise and Edu. OpenAI's developer
   guide says Plus and Pro get read and write tools on the web. On
   2026-10-10 the owner checked ChatGPT on the web with a Pro plan against
-  this gateway: it used every tool, creating proposals included (verified).
+  this gateway: it used every tool, creating proposals included (tested).
   Plus is still untested.
 - **What that means for deck changes in ChatGPT.** The gateway marks every
-  tool as read-only except six: `apply_proposal`, `confirm_proposal`,
-  `reject_proposal`, `run_deck_report`, `save_scan_session` and
-  `propose_collection_changes`.
+  tool as read-only except the ones that apply, approve, reject or tidy
+  waiting changes, start Forge games, save a scan, remove a saved card
+  description or change your watchlist: `apply_proposal`, `confirm_proposal`, `confirm_waiting`, `reject_proposal`,
+  `amend_proposal`, `withdraw_proposal`, `combine_proposals`,
+  `run_deck_report`, `play_more_games`, `save_scan_session` and
+  `remove_card_model`, and, when the operator has turned watchlists on,
+  `watch_card`, `watch_deck` and `unwatch`.
   Making a proposal only records it, so even if ChatGPT limits you to
   read-only tools you should still be able to propose changes and then press
   Approve on the card ChatGPT shows with the proposal, or Apply on the
@@ -88,7 +96,7 @@ In plain terms:
   markings, and whether ChatGPT shows the card for a connector added in
   developer mode, hasn't been tested yet.
 - **On ChatGPT Plus and Android? Use Claude for deck edits.** Claude's free
-  plan allows one custom connector (verified), and it works in Claude's
+  plan allows one custom connector (reported), and it works in Claude's
   Android app once added on the web. ChatGPT might still work for you in a
   computer's browser; whether Plus can call the gateway's tools is unknown
   until someone tries it.
@@ -96,7 +104,7 @@ In plain terms:
 ## Claude
 
 Custom connectors work on Claude's Free, Pro, Max, Team and Enterprise plans
-(verified; Free is limited to one custom connector).
+(reported; Free is limited to one custom connector).
 
 ### Add the connector (web or desktop app)
 
@@ -106,7 +114,7 @@ Custom connectors work on Claude's Free, Pro, Max, Team and Enterprise plans
    **Continue**.
 4. Look over the authentication settings and click **Continue**.
 5. When asked how to sign in, pick **Sign in now**.
-6. Under **OAuth client**, Claude offers three options (verified). The
+6. Under **OAuth client**, Claude offers three options (reported). The
    gateway supports the first two. Pick **Use Claude's published identity**:
    - **Use Claude's published identity** (recommended, by us and by
      Anthropic): Claude identifies itself with a web address that points to
@@ -122,17 +130,17 @@ Custom connectors work on Claude's Free, Pro, Max, Team and Enterprise plans
      enter.
 
    Some accounts see one screen instead, with the client ID and secret
-   under **Advanced settings** (verified). Leave those empty.
+   under **Advanced settings** (reported). Leave those empty.
 7. Click **Add**. A browser window opens.
    - You first see the gateway's **Connect an application** page. It says "An application wants to connect to your
      account", names the application (**Claude**) and the host it's
      "identified by", lists what it'll be able to do (read your decks and
-     propose deck changes, and apply them only when you approve, unless you
-     chose an approval mode on your account page that lets it apply changes
-     without asking), and
+     your collection, and propose changes on your Archidekt account, and
+     apply them only when you approve, unless the approval mode on your
+     account page lets it apply changes without asking), and
      shows "After sign-in you go to" a host. That host should be
      `claude.ai`, Claude's sign-in return address for its hosted apps
-     (verified). If it all looks right, press **Approve and sign in**. If
+     (reported). If it all looks right, press **Approve and sign in**. If
      not, press **Deny**. The sign-in is cancelled, Claude is told it was
      refused, and nothing gets connected.
    - Then the owner's sign-in page opens. Sign in with the account
@@ -152,7 +160,7 @@ If sign-in gets stuck on that page, remove the connector, add it again with
 **Register automatically**, and tell the owner which browser you used.
 
 Claude can't change a connector's sign-in settings after it's added
-(verified). To switch options, remove the connector and add it again.
+(reported). To switch options, remove the connector and add it again.
 
 ### The connector's icon in Claude
 
@@ -176,7 +184,7 @@ connectors (Organization settings → Connectors). Once they've added it, you
 connect and sign in from Customize → Connectors.
 
 For the gateway owner: Claude's sign-in returns to
-`https://claude.ai/api/mcp/auth_callback` (verified). Clients send their
+`https://claude.ai/api/mcp/auth_callback` (reported). Clients send their
 return address when they register automatically or in their published
 description, so there's no list of addresses to keep on the gateway. The
 gateway only accepts `https` return addresses, or `http` on `localhost` for
@@ -192,7 +200,7 @@ published descriptions are accepted, see
 2. Ask: "Use the MTG Assistant Gateway to call whoami." You should see your own name.
 
 A connector added on the web or desktop shows up in the Claude iOS and
-Android apps the next time you sign in there (verified). Anthropic calls
+Android apps the next time you sign in there (reported). Anthropic calls
 adding connectors from the phone apps a beta, and its custom-connector page
 doesn't list mobile, so add it on the web or desktop.
 
@@ -209,7 +217,7 @@ mode on your Account page (see below). The card's Approve button sends a
 one-time code the assistant never receives, and the gateway refuses that
 tool without it, so a tricked assistant can't approve its own proposal.
 That rests on Claude keeping the card's tool and code away from the model,
-as the MCP Apps standard says (reported, not yet verified in a live
+as the MCP Apps standard says (reported, not yet tested in a live
 session); the review page in your browser never relies on it and is linked
 from every card.
 
@@ -231,7 +239,7 @@ page. A tap on these cards is sent to the assistant as plain text and
 it carries on from there, with a proposal if anything is to change; none of
 them changes anything by itself. The pictures and rules text come from
 Scryfall; the deck rows and printings come from the gateway through a link
-that is yours alone and expires after ten minutes. All of this is verified
+that is yours alone and expires after ten minutes. All of this is tested
 in a browser test against the cards themselves, not yet in a live Claude
 session; Claude Code shows the text instead and asks about unsure names with
 a form.
@@ -242,40 +250,47 @@ your press; the default), *Semi-auto* (it applies a small deck or
 collection edit itself: up to the row limit, 5 card rows by default,
 each a card added or removed, or a new quantity, category, finish,
 printing, color tag or custom mana value, no more than 4 copies a row,
-never the commander; it also makes a private copy of a deck; a new deck,
+never a change to which cards are the commanders or to the categories of a row in the commander zone, and never fewer copies of
+a card that has a row in the commander zone and another row, both in the deck or both in the maybeboard or sideboard; it also makes a private copy of a deck; a new deck,
 a restore, the deck's details and bigger edits still ask you) or *Full
-auto* (it applies the deck and collection changes it proposes).
+auto* (it applies the rest too, except a restore, a commander change, a new deck, an edit of more
+than 20 rows, making a deck public or unlisted, and any edit of a description that has formatting, such as bold text, links or pictures, which still wait for your press; so does a held change, a change waiting for
+another change first, one another app had a hand in, one that replaces another app's change, or one
+that another app's waiting change would replace).
 Actions on your Archidekt account (likes, votes, bookmarks, follows,
 comments, new folders and collaborator changes) and deleting a deck are
-never applied by an assistant: each one waits for your own press on its
-review page, in every mode. It is your own setting:
+never applied by an assistant: each one waits for your own press, in every mode, on the card in the chat or on its review page (deleting a deck, and an edit of a comment that has formatting: on the review page only). It is your own setting:
 it covers only your account, your decks and the apps you connected, and
-only you can change it, in your browser. In either auto mode the assistant
-applies what the mode allows with `apply_proposal` and tells you; the card
-then shows the change without buttons. Every change still keeps a snapshot
-you can restore from the History page. The cost: an assistant can be
-tricked by text it reads into proposing a change you did not ask for, and
-in an auto mode that change lands without your press.
+only you can change it, in your browser. In Semi-auto and Full auto the
+assistant applies what the mode allows with `apply_proposal` and tells you;
+the card then shows the change without buttons. A change to one of your
+decks still keeps a snapshot you can restore from the History page; a
+collection change keeps none. Restoring a snapshot does not put back a
+deck's folder, tags or cover. The cost: an assistant can be tricked by text
+it reads into making changes you did not ask for. If you let your assistant
+apply changes without asking, such a change can land on Archidekt without
+your press.
 
 Claude lets you set each tool to always allow, needs approval, or blocked
-(verified). Keep `apply_proposal` on **needs approval**: in an auto mode
-that's the tool that actually changes your deck. Claude's Research mode can
-call connector tools without asking (verified). Everything except
-`apply_proposal`, `confirm_proposal` (the card's own button),
-`reject_proposal`, `run_deck_report`, `save_scan_session` and
-`propose_collection_changes` (which only records a proposal) only reads or
-records proposals.
+(reported). Keep `apply_proposal` on **needs approval**: in Semi-auto and
+Full auto that's the tool that actually changes your deck or collection. Claude's Research mode can
+call connector tools without asking (reported). Everything except
+`apply_proposal`, `confirm_proposal` and `confirm_waiting` (the card's own
+buttons), `reject_proposal`, `amend_proposal`, `withdraw_proposal`,
+`combine_proposals`, `run_deck_report`, `play_more_games`,
+`save_scan_session`, `remove_card_model`, `watch_card`, `watch_deck` and
+`unwatch` only reads or records proposals.
 
 ## ChatGPT
 
 Read [Which apps and devices work](#which-apps-and-devices-work) first.
 ChatGPT supports this gateway on the **web only**. On Pro every tool
-worked when the owner checked it on 2026-10-10 (verified); Plus is untested.
+worked when the owner checked it on 2026-10-10 (tested); Plus is untested.
 
 ### Add the connector (ChatGPT on the web)
 
 The menu path comes from OpenAI's developer guide (reported); the field
-names are **unverified**. The gateway's own page,
+names are **not tested**. The gateway's own page,
 `https://mtg.example.com/install?for=chatgpt`, has the same steps with Copy
 buttons for the name, description and URL, and the icon to download.
 
@@ -291,7 +306,9 @@ buttons for the name, description and URL, and the icon to download.
 4. Open **Plugins** in the sidebar and press **+** (reported, OpenAI
    developer docs seen 2026-10-05; older pages call this Apps, then Create).
 5. Name: the gateway's name as the owner set it (`MTG Assistant Gateway`
-   unless they changed it; the install page shows the right one).
+   unless they changed it; the install page shows the right one). An owner
+   can set `MTG_CHATGPT_NAME` to give the ChatGPT connector a different name
+   from `MTG_SERVER_NAME` ([DEPLOY.md](DEPLOY.md)).
 6. Description: `Magic: The Gathering deck research, goldfish testing and
    safe Archidekt deck edits, from a self-hosted gateway.` This is the
    description the gateway also gives apps itself.
@@ -315,8 +332,10 @@ buttons for the name, description and URL, and the icon to download.
 
 **Download the ChatGPT plugin (ZIP)** from the ChatGPT section of the
 gateway's setup hub, or directly at
-`https://mtg.example.com/plugin/mtg-gateway-chatgpt.zip` (the name follows
-the owner's `MTG_SERVER_NAME`, as the Claude plugin's does). It holds the
+`https://mtg.example.com/plugin/mtg-gateway-chatgpt.zip` (the file name
+follows the owner's `MTG_SERVER_NAME`, as the Claude plugin's does; the
+connector name inside it is their `MTG_CHATGPT_NAME` when set, otherwise
+their `MTG_SERVER_NAME`). It holds the
 connector (this gateway's address) and the MTG skill in one file, in the
 Agent Plugins format that OpenAI's plugins use. It needs no sign-in to
 download: it holds nothing secret.
@@ -334,7 +353,7 @@ Who can install it:
 
 Start a new chat on the web, open the tools menu next to the message box,
 and pick the MTG Assistant Gateway app (in developer mode it may be under a developer
-mode or apps entry). Then ask it to call `whoami`. (Unverified.)
+mode or apps entry). Then ask it to call `whoami`. (Not tested.)
 
 OpenAI says ChatGPT asks for confirmation before write actions by default,
 and may block some risky ones (reported). OpenAI also says ChatGPT renders
@@ -362,7 +381,7 @@ card lookups for scanning, and making deck proposals. For the write tools
   chose an auto approval mode on your Account page, the assistant applies
   what the mode allows itself.
 - `reject_proposal`: press **Reject this proposal** on the review page.
-- `run_deck_report`: press **Run simulation** on the deck's page under
+- `run_deck_report`: press **Run full test** on the deck's page under
   **Decks** on the gateway.
 - `save_scan_session`: scan on the gateway's `/scan` page in your browser
   instead.
@@ -379,9 +398,9 @@ has blocked.
   about apps you create in Developer mode, so don't count on them on a
   phone.
 - **ChatGPT in your phone's browser** (chatgpt.com, not the app):
-  unverified and untested. It's the web version, so it might work. Tell the
+  not tested. It's the web version, so it might work. Tell the
   owner if you try it.
-- **Desktop (Windows and Mac): unverified.** OpenAI's pages only mention the
+- **Desktop (Windows and Mac): not tested.** OpenAI's pages only mention the
   web. If you try it, ask the assistant to call `whoami` and tell the owner
   what happened, including any error text.
 

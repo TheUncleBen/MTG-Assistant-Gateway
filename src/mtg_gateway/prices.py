@@ -32,6 +32,7 @@ from typing import TYPE_CHECKING, Any
 
 from .decklist import clean_text
 from .decks import DeckError, _clean_deck_id
+from .theme import plural
 
 if TYPE_CHECKING:
     from .config import Settings
@@ -171,6 +172,12 @@ class PriceService:
         self.notifier = notifier
         self._run_lock = asyncio.Lock()
 
+    def _limit(self, key: str) -> int:
+        """watch_max_cards / watch_max_decks as the admin Settings page has them now (0.7.29): a
+        change there applies at once, without a restart."""
+        live = getattr(self.decks, "live", None)
+        return int(live.get(key)) if live is not None else int(getattr(self.settings, key))
+
     # -- reading ----------------------------------------------------------------------------------
     def _rows(self, sql: str, args: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
         with self.db._lock:
@@ -251,7 +258,7 @@ class PriceService:
         return {
             "cards": [self.card_view(w, days) for w in self.watched_cards(sub)],
             "decks": [self.deck_view(sub, d, days) for d in self.watched_decks(sub)],
-            "limits": {"cards": s.watch_max_cards, "decks": s.watch_max_decks},
+            "limits": {"cards": self._limit("watch_max_cards"), "decks": self._limit("watch_max_decks")},
             "checked_daily_at_utc": f"{s.price_hour_utc:02d}:00",
         }
 
@@ -300,7 +307,7 @@ class PriceService:
         if finish not in FINISHES:
             raise DeckError("invalid", "finish must be nonfoil, foil or etched.")
         alerts = _alerts(alert_pct, alert_above, alert_below)
-        if self.settings.watch_max_cards <= 0:
+        if self._limit("watch_max_cards") <= 0:
             raise DeckError("invalid", "Watching cards is switched off on this gateway.")
         row = {"name": name, "set": set_code, "cn": number}
         card: dict[str, Any] | None = None
@@ -344,11 +351,14 @@ class PriceService:
                 created = False
             else:
                 count = c.execute("SELECT COUNT(*) FROM watch_cards WHERE sub = ?", (sub,)).fetchone()[0]
-                if count >= self.settings.watch_max_cards:
+                if count >= (most := self._limit("watch_max_cards")):
+                    # 0.7.29: the limit can be lowered below what a member already watches (their
+                    # watches are kept), so the message names both numbers.
                     raise DeckError(
                         "rate_limited",
-                        f"You watch {count} cards, the most this gateway keeps per member. "
-                        "Remove some first.",
+                        f"You watch {plural(count, 'card')}; this gateway lets each member watch "
+                        f"at most {most}. "
+                        f"Remove {count - most + 1} to add another.",
                     )
                 wid = "w_" + secrets.token_urlsafe(9)
                 stored = c.execute(
@@ -413,17 +423,19 @@ class PriceService:
             have = [r["deck_id"] for r in self._rows(sql, args)]
         else:
             have = [r[0] for r in c.execute(sql, args).fetchall()]
-        if str(deck_id) not in {str(d) for d in have} and len(have) >= self.settings.watch_max_decks:
+        most = self._limit("watch_max_decks")
+        if str(deck_id) not in {str(d) for d in have} and len(have) >= most:
             raise DeckError(
                 "rate_limited",
-                f"You watch {len(have)} decks, the most this gateway keeps per member. Remove one first.",
+                f"You watch {plural(len(have), 'deck')}; this gateway lets each member watch at most {most}. "
+                f"Remove {len(have) - most + 1} to add another.",
             )
 
     async def watch_deck(self, sub: str, deck_ref: str) -> dict[str, Any]:
         """Watch a deck's value: read it now (as the member sees it), price its cards and store
         today's value."""
         deck_id = _clean_deck_id(deck_ref)
-        if self.settings.watch_max_decks <= 0:
+        if self._limit("watch_max_decks") <= 0:
             raise DeckError("invalid", "Watching decks is switched off on this gateway.")
         self._check_deck_limit(sub, deck_id)
         deck = await self.decks.get_any_deck(sub, deck_id)

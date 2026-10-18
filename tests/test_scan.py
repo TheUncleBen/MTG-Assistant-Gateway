@@ -15,26 +15,15 @@ from mtg_gateway.scan import service as scan_service
 from mtg_gateway.scan.scryfall import ScryfallClient
 from mtg_gateway.scan.service import parse_text
 
-from .conftest import GATEWAY, FakeIdP, Harness, make_settings, running
+from .conftest import GATEWAY, Stack, StackOptions, stack_with
 from .fake_scryfall import FakeScryfall
 from .test_decks_and_proxy import Browser, call, mcp_token
 
 VENDOR = Path(__file__).resolve().parents[1] / "src" / "mtg_gateway" / "scan" / "static" / "vendor"
 
 
-class Stack:
-    def __init__(self, h: Harness, sf: FakeScryfall):
-        self.h = h
-        self.sf = sf
-
-
-@pytest.fixture
-async def stack(tmp_path: Path, idp: FakeIdP):
-    sf = FakeScryfall()
-    async with running(Harness(make_settings(tmp_path), idp)) as h:
-        service = h.app.state.gateway.scan
-        service.scryfall = ScryfallClient("https://scryfall.test", min_interval=0.0, http=sf.client())
-        yield Stack(h, sf)
+# The shipped settings, no Archidekt, and a fake Scryfall the test can inspect (``stack.sf``).
+stack_options = stack_with(StackOptions(settings={}, archidekt=None, scryfall=True))
 
 
 async def api(b: Browser, method: str, path: str, body: dict | None = None, *, csrf: str | None = None):
@@ -1191,11 +1180,14 @@ async def test_card_printings_lists_released_paper_first_and_clear_counts(stack:
         ("fdn", None, None),
         ("mdd", True, False),
     ]
-    assert out["matching_total"] == out["matching"] == 3 and out["returned_count"] == 2
+    assert out["matching_total"] == 3 and "matching" not in out and out["returned_count"] == 2
     assert out["truncated"] is True and out["has_more"] is False and out["total_cards"] == 3
-    assert {s["set"] for s in out["sets"]} == {"fdn", "mdd", "ea1"} and "not narrowed" in out["sets_scope"]
+    # the limit caps the set list too; the count says how many there are
+    assert len(out["sets"]) == 2 and out["sets_total"] == 3 and out["sets_truncated"] is True
+    assert "not narrowed" in out["sets_scope"]
     one = (await call(stack.h, token, "card_printings", {"name": "Swamp", "set_code": "ea1"}))[
         "structuredContent"
     ]
     assert one["matching_total"] == 1 and one["returned_count"] == 1 and one["truncated"] is False
+    assert {s["set"] for s in one["sets"]} == {"fdn", "mdd", "ea1"} and one["sets_truncated"] is False
     assert len(one["sets"]) == 3  # every set of the card, whatever the filter

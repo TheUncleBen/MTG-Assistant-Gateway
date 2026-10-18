@@ -286,6 +286,8 @@ CALL_DEADLINE_SECONDS = 120.0
 # serve the gateway's own tools (plus any cached research tools), then wait before asking again.
 LIST_DEADLINE_SECONDS = 10.0
 LIST_RETRY_SECONDS = 60.0
+# A call whose shape is unknown because Mystic Forge's tool listing has not succeeded yet.
+NOT_READY_TEXT = "the research service is not ready yet and nothing was sent; try again in a minute"
 HEALTH_DEADLINE_SECONDS = 3.0  # the health check's own probe: short, so /healthz stays quick
 HEALTH_CACHE_SECONDS = 30.0  # one probe per half minute at most, however often /healthz is asked
 # A failed probe is held for a few seconds only, so a Mystic Forge that was still starting (it
@@ -344,6 +346,20 @@ def busy_retry_after(result: types.CallToolResult) -> int | None:
 
 def _refusal(text: str) -> types.CallToolResult:
     return types.CallToolResult(content=[types.TextContent(type="text", text=text)], isError=True)
+
+
+def _not_ready() -> types.CallToolResult:
+    """The refusal for a flat call while Mystic Forge's tool listing has not succeeded: error
+    unavailable (worth retrying), with ``retry_after`` the listing's back-off."""
+    out: dict[str, Any] = {
+        "ok": False,
+        "error": "unavailable",
+        "message": NOT_READY_TEXT,
+        "retry_after": int(LIST_RETRY_SECONDS),
+    }
+    return types.CallToolResult(
+        content=[types.TextContent(type="text", text=NOT_READY_TEXT)], structured_content=out, isError=True
+    )
 
 
 def _deck_refusal(exc: DeckError) -> types.CallToolResult:
@@ -575,11 +591,12 @@ class MysticForgeProxy:
         # below for the tools that take params.
         if arguments is None:
             arguments = {}
-        if (
+        came_wrapped = (
             isinstance(arguments, dict)
             and set(arguments) == {"params"}
             and isinstance(arguments["params"], dict)
-        ):
+        )
+        if came_wrapped:
             arguments = arguments["params"]
         if (
             name == "scryfall_search"
@@ -616,9 +633,16 @@ class MysticForgeProxy:
         try:
             if isinstance(arguments, dict):
                 if not self._listed:
-                    await self.tools()  # learn which tools take a params object
-                if name in self._wrapped:
-                    arguments = {"params": arguments}
+                    # Learn which tools take a params object. A flat call has no other way to
+                    # know its shape, so it tries once now even within the back-off.
+                    await self.tools(force=not came_wrapped)
+                if self._listed:
+                    if name in self._wrapped:
+                        arguments = {"params": arguments}
+                elif came_wrapped:
+                    arguments = {"params": arguments}  # the caller knew the shape; keep it
+                else:
+                    return _not_ready()  # never sent in a shape that may be wrong
             result = research_refusal(_rewrite_result(await self._forward(name, arguments)))
             if name == "validate_decklist":
                 result = _validation_checks(result, arguments)

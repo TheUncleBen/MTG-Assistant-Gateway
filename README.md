@@ -78,7 +78,7 @@ identity provider you control (Authentik, Keycloak, Authelia, ...).
    you through the same steps and generates the secrets for you. See
    [docs/PLUGIN.md](docs/PLUGIN.md#for-the-operator).
 3. Keep [docs/OPERATIONS.md](docs/OPERATIONS.md) handy for running it:
-   updates, backups, adding and removing people, and turning deck writes on
+   updates, backups, adding and removing people, and turning Archidekt writes on
    or off.
 4. To invite someone, give them an account in your identity provider, then
    send them your gateway's address and [docs/ONBOARDING.md](docs/ONBOARDING.md).
@@ -111,7 +111,7 @@ identity provider you control (Authentik, Keycloak, Authelia, ...).
 | [IDP-AUTHENTIK.md](docs/IDP-AUTHENTIK.md) | Operators | Authentik, field by field: group, provider, application, binding, adding people, checks and troubleshooting |
 | [IDP-OTHERS.md](docs/IDP-OTHERS.md) | Operators | The identity provider checklist, and notes for Keycloak, Authelia, Zitadel, Pocket ID, Kanidm, Entra ID and Google |
 | [VERSIONS.md](docs/VERSIONS.md) | Operators | Following `latest` or staying on one version, what the version numbers mean, and how every update to `main` becomes a release |
-| [OPERATIONS.md](docs/OPERATIONS.md) | Operators | Logs, updates, people, which AI clients may connect, backups, rotating secrets, revoking access, deck writes, the audit log |
+| [OPERATIONS.md](docs/OPERATIONS.md) | Operators | Logs, updates, people, which AI clients may connect, backups, rotating secrets, revoking access, Archidekt writes, the audit log |
 | [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Operators | Symptoms and fixes, from a container that won't start to a sign-in that fails |
 | [THIRD-PARTY-NOTICES.md](docs/THIRD-PARTY-NOTICES.md) | Everyone | Licences of the components the gateway is built on |
 | [tests/e2e/README.md](tests/e2e/README.md) | Contributors | The end-to-end test setup: a real Swarm stack, Authentik and a scripted client |
@@ -153,10 +153,11 @@ Screenshots of the browser pages are in [docs/screenshots/](docs/screenshots/).
   curve, colour pips against mana sources, types, rarities, lands, average
   mana value, price total, format legality problems, salt, game changers,
   tutors, extra turns and mass land denial from Archidekt's own card data,
-  plus a Commander bracket estimate (2 to 4) from those flags and the
-  structural checks (deck size for the format, commander zone, colour
-  identity, singleton rule, uncategorised rows). It is an
-  estimate, not an official bracket, and the tools say so.
+  plus Archidekt's own Estimated Bracket worked out from those flags, rule
+  for rule as archidekt.com does it, and the structural checks (deck size
+  for the format, commander zone, colour identity, singleton rule,
+  uncategorised rows). A bracket set on the deck is the deck's bracket; the
+  estimate says what the cards suggest, and the tools say so.
 - **Deck reports and history.** `run_deck_report` stores the statistics
   together with a decklist validation and a goldfish simulation (when Mystic
   Forge is up; the simulator's options such as annotations, seed, turns,
@@ -181,14 +182,15 @@ Screenshots of the browser pages are in [docs/screenshots/](docs/screenshots/).
     or Full-auto approval mode on their Account page, the assistant applies
     it with `apply_proposal`. The card's Approve button carries a one-time code
     the assistant never sees, so a tricked assistant can't press it.
-  - For an edit, the gateway checks the deck hasn't changed since the proposal, saves a
-    snapshot, puts a private backup copy of the deck in the user's
-    "MTG Gateway backups" folder on Archidekt, makes the change, then reads
-    the deck back to confirm it.
+  - For an edit, the gateway checks the change still does what was reviewed on the deck as it is now, saves a
+    snapshot, makes the change, then reads the deck back to confirm it. With backups on (the operator's
+    setting), it first also puts a private backup copy of the deck in the user's
+    "MTG Gateway backups" folder on Archidekt; the deck page's own saves, Card search's Add to deck, and
+    the deck editor's save with its backup box unticked make none.
   - Undo is the same flow in reverse: `list_snapshots`, then
     `propose_restore_snapshot`, which puts every card back as it was
     (printing, foil, quantity, categories, commander, sideboard and
-    maybeboard).
+    maybeboard, color tag and custom mana value).
   - A pending proposal the user no longer wants is closed with
     `reject_proposal` or the Reject button.
   - Every step is audited and limited to the signed-in user.
@@ -207,11 +209,13 @@ Screenshots of the browser pages are in [docs/screenshots/](docs/screenshots/).
     the editor also edits maybeboard and sideboard rows and takes a pasted
     list; the settings page sets the cover image, deck tags and folder;
     `/folders` creates and renames folders; Delete deck asks you to type the
-    deck's name and keeps a snapshot (and the Archidekt backup copy) first.
+    deck's name and keeps a snapshot first (and, with backups on, a backup
+    copy on Archidekt).
     `/precons` lists every preconstructed deck Archidekt knows, by set.
     The assistant reaches folder, tags and cover only through a
-    `propose_deck_details` proposal you approve; deleting a deck and
-    creating or renaming folders are your own buttons alone.
+    `propose_deck_details` proposal you approve. It can propose deleting a
+    deck or creating a folder, but only your own press applies those;
+    renaming folders is yours alone, on the Folders page.
 - **Collection.** The cards you own, which is your Collection on Archidekt
   shown and edited through the gateway (nothing about them is stored here):
   add by name or from a scan, count copies, set a card's finish, condition,
@@ -294,10 +298,10 @@ between releases ([docs/VERSIONS.md](docs/VERSIONS.md)).
 | Area | State |
 | --- | --- |
 | Sign-in, research, deck import, account linking, proposals, scanning | Built. Tested against fakes, recorded Archidekt and Scryfall responses, and a real Swarm stack with Authentik in CI |
-| Applying edits, creating decks, backups and restores on Archidekt | Built, and run live against a throwaway Archidekt account (create, add, remove, quantities, categories, commander, backup folder and copy). The code default is off (`MTG_WRITES_ENABLED=false`); the example env files turn writes on (each change is still applied only by the member's own press, the Approve button on the in-chat card or the Apply button on the review page, unless the member chose a looser approval mode on their Account page; an Archidekt account action, such as a like, comment, new folder or deck deletion, is approved only on the review page, in every mode). Try your first edit on a deck you don't care about |
-| Client and device coverage | See [docs/CONNECT.md](docs/CONNECT.md#which-apps-and-devices-work), which labels each claim as verified, reported or unverified |
+| Applying edits, creating decks, backups and restores on Archidekt | Built, and run live against a throwaway Archidekt account (create, add, remove, quantities, categories, commander, backup folder and copy). The code default is off (`MTG_WRITES_ENABLED=false`); the example env files turn writes on (each change is still applied only by the member's own press, the Approve button on the in-chat card or the Apply button on the review page, unless the member chose a looser approval mode on their Account page; an Archidekt account action, such as a like, comment, new folder or deck deletion, always waits for the member's own press, in every mode, on the card in the chat or on its review page; a deck deletion, and an edit of a comment that has formatting, is approved only on its review page). Try your first edit on a deck you don't care about |
+| Client and device coverage | See [docs/CONNECT.md](docs/CONNECT.md#which-apps-and-devices-work), which labels each claim as tested, reported or not tested |
 | Deck statistics, stored deck reports and history, compare, companion pages, admin page, JSON API | Built and covered by the test suite against fakes. The companion pages and admin page were also checked by the owner on his own deployment on 2026-10-10 and 2026-10-11 (speed, backup copies, the redesigned pages, edit and restore) |
-| Deck deletion, cover image, folders, tags, comment editing, collection details (0.7.2); comment votes, colour tags and the assistant's account-action proposals (likes, bookmarks, follows, comments, folders, deck deletion; 0.7.16 to 0.7.19); custom mana value and deck collaborators (0.7.20) | Built against Archidekt routes read from its own site code and covered by tests against a fake; not yet exercised live (taking a colour tag off a card is also unverified). Each one reads the result back and reports a mismatch rather than trusting Archidekt's answer |
+| Deck deletion, cover image, folders, tags, comment editing, collection details (0.7.2); comment votes, colour tags and the assistant's account-action proposals (likes, bookmarks, follows, comments, folders, deck deletion; 0.7.16 to 0.7.19); custom mana value and deck collaborators (0.7.20) | Built against Archidekt routes read from its own site code and covered by tests against a fake; not yet exercised live (taking a colour tag off a card is also not confirmed). Each one reads the result back and reports a mismatch rather than trusting Archidekt's answer |
 | Forge games in deck reports (0.7.14, optional, off by default) | Built. The Forge image is built and smoke-tested on arm64 in CI, with a card-coverage gate (99.69% of the cards legal in at least one format; the cards Forge lacks are named in every report). Not yet measured on a Raspberry Pi. Opponents are Commander precons of the deck's bracket (0.7.23; the bracket set on Archidekt, else the gateway's estimate; a precon's bracket counts only its game changers; the nearest bracket fills in, and the report says which and why). Commander decks only: there are no 60-card opponent decks |
 | Watchlists and price history (0.7.23) | Built and covered by tests against fakes; off unless the operator sets `MTG_WATCHLISTS_ENABLED=true` |
 | Features not built yet | The full list is in [docs/CAPABILITIES.md](docs/CAPABILITIES.md#d-parked) (Mystic Forge's own saved goldfish reports stay hidden too; the gateway's stored deck reports replace them) |

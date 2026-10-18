@@ -1,4 +1,4 @@
-"""Automatic Archidekt -> gateway deck sync (0.7.25, R-153).
+"""Automatic Archidekt -> gateway deck sync (0.7.25).
 
 Archidekt is the master copy of every deck. It has no webhooks, so the gateway asks it: when a
 member opens the app (any signed-in page, at most once per OPEN_GAP) and every
@@ -6,25 +6,30 @@ member opens the app (any signed-in page, at most once per OPEN_GAP) and every
 read of the member's deck list (Archidekt's ``/decks/v3/?ownerId=...``, the list every deck page
 already reads, with each deck's ``updatedAt``; one request per 50 decks, at most MAX_LIST_PAGES)
 plus a full read of a deck only when it has a waiting proposal and its ``updatedAt`` moved since
-the last check (at most MAX_DECK_READS per check). Only the member's own decks are in that list,
-so proposals on someone else's deck (a clone of a public deck, a collaborator's deck) are not
-checked; Apply still compares those as before. The fresh list lands in the member's deck-list
-cache, so the app shows the current decks.
+the last check (at most MAX_DECK_READS per check). Only the member's own decks are in that list;
+a waiting proposal on someone else's deck (a copy of a public deck) has no such signal, so that
+deck is read in full, inside the same cap, at most once per OTHER_GAP; one that Archidekt says is
+gone or private is left alone for GONE_GAP.
+The fresh list lands in the member's deck-list cache, so the app shows the current decks.
 
-What it does with a changed deck: a waiting proposal whose deck no longer matches the deck the
-proposal was made from (the same fingerprint Apply compares, decks.py ``_current_deck_for``) is
-flagged out of date at once, so the review page, the proposal list and the assistant say so before
-anyone presses Apply.
+What it does with a changed deck (0.7.29): each waiting proposal on it is worked out again on
+the deck as it is now (decks.py ``recheck_waiting``, recheck.py, the same check Apply makes). One
+that still does exactly what was reviewed is marked "updated" and its baseline moves to that deck;
+one that would now do something else is marked "needs a look" with the reason, so the review page,
+the proposal list and the assistant say so before anyone presses Apply.
 
-Rules it keeps (COMPARISON.md section 7, R1-R5):
-- Read-only. It never writes to Archidekt and never changes, applies, rejects or deletes a
-  proposal, snapshot or undo entry. The flag lives in memory next to the proposal; Apply still
-  re-reads the live deck and decides for itself, so a missed or wrong flag cannot lose data.
+Rules it keeps:
+- Read-only on Archidekt. It never writes there and never applies, rejects or deletes a
+  proposal, snapshot or undo entry; it only records a waiting proposal's status (updated, needs a
+  look) and moves the baseline of one that still fits. Apply still re-reads the live deck and
+  decides for itself, so a missed or wrong status cannot lose data.
 - Members and assistants go first. Before the list read and before each deck read it waits for
   every member's Archidekt work, every apply and the shared pacer to be idle, and skips the rest
   of the check (until the next one) rather than queue behind them; a member arriving while one
   of its requests is in the pacer waits for that one request. All checks share one lock, so at
-  most one background request is ever in the pacer. It uses no member's Archidekt slot or budget.
+  most one background request is ever in the pacer. It uses no member's Archidekt slot; each read
+  spends from the member's own budget, and the check stops while less than a quarter of that
+  budget is left, so the member's own actions always have room.
 - A deck with an apply or restore running is left alone until that ends.
 - Fails quietly: every request is sent once, never retried, and nothing is sent while the
   pacer's breaker or a Retry-After pause is on. Any error ends that member's check, and Archidekt
@@ -34,9 +39,9 @@ Rules it keeps (COMPARISON.md section 7, R1-R5):
   own next request decides, as before. A token refresh it needs is stored like any other and
   audited as the deck sync's.
 
-After a restart the flags are rebuilt by the first checks (no database change, schema stays 12).
-Unknown (needs a live check by Ben): whether Archidekt moves ``updatedAt`` on every card edit. If
-it does not, a change can go unflagged until Apply refuses it, exactly as before 0.7.25.
+The statuses are stored with the proposals (schema 13), so a restart keeps them. Unknown (needs a
+live check): whether Archidekt moves ``updatedAt`` on every card edit. If it does not, a
+change can go unnoticed until Apply checks it, exactly as before 0.7.25.
 """
 
 from __future__ import annotations
@@ -55,8 +60,10 @@ OPEN_GAP = 5 * 60.0  # an app open checks again once the member's last check is 
 IDLE_WAIT = 10.0  # how long a step waits for members' Archidekt work to end before skipping
 IDLE_POLL = 0.5
 MAX_DECK_READS = 5  # full deck reads one member's check may make; the rest wait for the next
-START_DELAY = 120.0  # the first timed round after a start (flags are rebuilt then)
-MAX_FLAGS = 20_000
+OTHER_GAP = 30 * 60.0  # a deck the member doesn't own is read again once its last read is this old
+GONE_GAP = 6 * 3600.0  # ... and once this old after Archidekt said it is gone or private
+START_DELAY = 120.0  # the first timed round after a start
+MAX_SEEN = 20_000
 
 
 class DeckSync:
@@ -69,15 +76,17 @@ class DeckSync:
         self._tasks: dict[str, asyncio.Task[Any]] = {}  # sub -> the app-open check under way
         # (sub, deck id) -> the deck list's updatedAt when its waiting proposals were last compared
         self._seen: dict[tuple[str, str], str] = {}
-        self._flags: dict[str, int] = {}  # proposal id -> when it was seen out of date (epoch)
+        # (sub, deck id) of a deck the member doesn't own -> when it may be read again (monotonic)
+        self._next_read: dict[tuple[str, str], float] = {}
 
     @property
     def enabled(self) -> bool:
         return self.interval > 0
 
     def out_of_date(self, proposal_id: str) -> int | None:
-        """When the sync saw this proposal's deck stop matching it; None when it has not."""
-        return self._flags.get(proposal_id)
+        """When a waiting proposal was found to need a look (it would now do something other than
+        what was reviewed); None when it does not. Stored with the proposal (0.7.29)."""
+        return self.db.needs_look_since(proposal_id)
 
     # -- triggers ---------------------------------------------------------------------------------
     def opened(self, sub: str) -> None:
@@ -159,22 +168,30 @@ class DeckSync:
                 return {"error": "internal"}
 
     async def _check(self, sub: str) -> dict[str, Any]:
-        self._forget_closed()
+        if len(self._seen) >= MAX_SEEN:
+            self._seen.clear()
+        if len(self._next_read) >= MAX_SEEN:
+            self._next_read.clear()
         if not await self._idle():
             return {"skipped": "busy"}
         rows = await self.decks.sync_deck_list(sub)
         if rows is None:
             return {"skipped": "slow"}
         listed = {str(d["id"]): str(d.get("updated_at") or "") for d in rows}
-        waiting: dict[str, list[dict[str, Any]]] = {}
+        # The member's decks with waiting proposals first, then the decks of someone else (a copy
+        # of a public deck), which have no updatedAt to go by.
+        waiting: dict[str, None] = {}
+        others: dict[str, None] = {}
         for p in self.db.pending_baselines(sub):
-            if p["deck_id"] in listed and p["id"] not in self._flags:
-                waiting.setdefault(p["deck_id"], []).append(p)
-        reads, flagged, skipped = 0, [], ""
-        for deck_id, props in waiting.items():
+            (waiting if p["deck_id"] in listed else others)[p["deck_id"]] = None
+        reads, flagged, updated, skipped = 0, [], [], ""
+        for deck_id in [*waiting, *others]:
             key = (sub, deck_id)
-            if listed[deck_id] and self._seen.get(key) == listed[deck_id]:
+            own = deck_id in listed
+            if own and listed[deck_id] and self._seen.get(key) == listed[deck_id]:
                 continue  # unchanged on Archidekt since its proposals were last compared
+            if not own and time.monotonic() < self._next_read.get(key, 0.0):
+                continue  # read lately, or gone: no updatedAt to tell, so not on every check
             if reads >= MAX_DECK_READS:
                 skipped = "read_cap"
                 break
@@ -183,27 +200,26 @@ class DeckSync:
             if not await self._idle():
                 skipped = "busy"
                 break
-            deck = await self.decks.sync_read_deck(sub, deck_id)
+            if own:
+                deck = await self.decks.sync_read_deck(sub, deck_id)
+            else:
+                self._next_read[key] = time.monotonic() + OTHER_GAP
+                try:
+                    deck = await self.decks.sync_read_any_deck(sub, deck_id)
+                except DeckError as exc:
+                    if exc.kind not in ("not_found", "auth", "forbidden", "not_linked"):
+                        raise
+                    reads += 1  # gone or private: Apply says so when pressed
+                    self._next_read[key] = time.monotonic() + GONE_GAP
+                    continue
             reads += 1
             if self.decks.deck_busy(sub, deck_id):
                 continue  # an apply started meanwhile: what was read may be halfway through it
-            fingerprint = deck.fingerprint()
-            still = {p["id"] for p in self.db.pending_baselines(sub)}
-            for p in props:
-                if p["id"] in still and p["baseline_fingerprint"] != fingerprint:
-                    self._flags[p["id"]] = int(time.time())
-                    flagged.append(p["id"])
-            self._seen[key] = listed[deck_id]
+            for pid, status in self.decks.recheck_waiting(sub, deck).items():
+                (flagged if status == "needs_look" else updated).append(pid)
+            if own:
+                self._seen[key] = listed[deck_id]
         if flagged:
-            logger.info("deck sync: %d waiting proposal(s) flagged out of date", len(flagged))
-        out: dict[str, Any] = {"decks": len(listed), "reads": reads, "flagged": flagged}
+            logger.info("deck sync: %d waiting proposal(s) need a look", len(flagged))
+        out: dict[str, Any] = {"decks": len(listed), "reads": reads, "flagged": flagged, "updated": updated}
         return {**out, "skipped": skipped} if skipped else out
-
-    def _forget_closed(self) -> None:
-        """Drop flags of proposals no longer waiting, and remembered decks past the cap."""
-        if not self._flags and len(self._seen) < MAX_FLAGS:
-            return
-        live = {p["id"] for p in self.db.pending_baselines()}
-        self._flags = {pid: at for pid, at in self._flags.items() if pid in live}
-        if len(self._seen) >= MAX_FLAGS:
-            self._seen.clear()

@@ -18,6 +18,7 @@ import asyncio
 import logging
 import time
 import unicodedata
+from collections import OrderedDict
 from collections.abc import Callable
 from typing import Any
 
@@ -26,6 +27,10 @@ logger = logging.getLogger("mtg_gateway.scan.names")
 CATALOG_TTL = 24 * 3600
 RETRY_AFTER_FAILURE = 600
 MAX_SUGGESTIONS = 20
+# Typing extends the text one letter at a time, and every name that contains "sol r" also
+# contains "sol ": the catalog positions matching the last few texts are kept, so the next
+# keystroke searches only those instead of all ~35,000 names.
+NARROW_KEEP = 64
 
 
 _JOINERS = str.maketrans("-'\u2019,", "    ")
@@ -70,6 +75,7 @@ class NameCatalog:
         self._loaded_at = 0.0
         self._next_try = 0.0
         self._task: asyncio.Task[None] | None = None
+        self._hits: OrderedDict[str, list[int]] = OrderedDict()
 
     @property
     def loaded(self) -> bool:
@@ -87,6 +93,7 @@ class NameCatalog:
         """Install a catalog (also used by tests and for a fresh download)."""
         self._names = sorted(set(names), key=_sort_key)
         self._folded = [fold(n) for n in self._names]
+        self._hits.clear()
         self._loaded_at = time.monotonic()
 
     def ensure(self) -> None:
@@ -129,14 +136,36 @@ class NameCatalog:
         q = fold(query)
         if len(q) < 2:
             return []
+        hits = self._matching(q)
         starts: list[str] = []
         words: list[str] = []
         inside: list[str] = []
-        for name, folded in zip(self._names, self._folded, strict=True):
-            where = rank(folded, q)
-            if where is None:
+        for i in hits:
+            where = rank(self._folded[i], q)
+            if where is None:  # cannot happen: _matching only keeps names containing q
                 continue
-            (starts, words, inside)[where].append(name)
+            (starts, words, inside)[where].append(self._names[i])
             if len(starts) >= limit:
                 break
         return (starts + words + inside)[:limit]
+
+    def _matching(self, q: str) -> list[int]:
+        """Catalog positions of every name containing ``q``, in catalog order. Starts from the
+        kept positions of the longest earlier text that ``q`` contains, else the whole catalog."""
+        known = self._hits.get(q)
+        if known is not None:
+            self._hits.move_to_end(q)
+            return known
+        base: list[int] | None = None
+        for prev, idx in self._hits.items():
+            if prev in q and (base is None or len(idx) < len(base)):
+                base = idx
+        folded = self._folded
+        if base is None:
+            out = [i for i, f in enumerate(folded) if q in f]
+        else:
+            out = [i for i in base if q in folded[i]]
+        self._hits[q] = out
+        if len(self._hits) > NARROW_KEEP:
+            self._hits.popitem(last=False)
+        return out
