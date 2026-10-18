@@ -484,13 +484,18 @@ def run_job(job: Job, slots: list[int] | None = None) -> None:
         def place(slot: int) -> None:
             # Each parallel place takes the next slice in order until none is left, then lets go.
             # While another job waits for a place, a job on more than one place gives one back
-            # after its group ends, so one run never holds every place until its last game.
+            # after its group ends, so one run never holds every place until its last game. The
+            # give-back counts itself in the same locked step, so two places never both let go
+            # of what was the job's last but one.
+            gave_back = False
             try:
                 while True:
                     with pending_lock:
                         if not pending or job.cancelled or time.time() >= deadline:
                             return
                         if holding[0] > 1 and waiting():
+                            holding[0] -= 1
+                            gave_back = True
                             return
                         index = pending.pop(0)
                     try:
@@ -500,8 +505,9 @@ def run_job(job: Job, slots: list[int] | None = None) -> None:
                             job.slice_state[index] = "failed"
                             job.tail.append(f"service error: {exc!r}"[:300])
             finally:
-                with pending_lock:
-                    holding[0] -= 1
+                if not gave_back:
+                    with pending_lock:
+                        holding[0] -= 1
                 release_place(slot)
 
         try:
