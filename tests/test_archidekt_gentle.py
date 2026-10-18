@@ -722,8 +722,24 @@ async def test_a_403_says_archidekt_refused_and_never_asks_to_relink() -> None:
     assert "relink" not in str(err.value)
     ark.inject = [(401, None)]
     with pytest.raises(ArchidektError) as auth:
-        await client.search_decks(name="Sample")
+        await client.get_deck("signed-in-token", "42", fresh=True)
     assert auth.value.kind == "auth" and "relink" in str(auth.value)
+
+
+async def test_a_401_on_a_read_made_without_a_sign_in_never_blames_a_stored_session() -> None:
+    """A deck read made without a sign-in (the member may have no account linked) that Archidekt
+    answers with 401 says a sign-in was asked for, not that a stored session was rejected."""
+    ark = FakeArchidekt()
+    client = _client(ark)
+    ark.inject = [(401, None)]
+    with pytest.raises(ArchidektError) as auth:
+        await client.search_decks(name="Sample")
+    assert auth.value.kind == "auth"
+    assert str(auth.value) == "Archidekt asked for a sign-in, and this request was made without one"
+    ark.inject = [(401, None)]
+    with pytest.raises(ArchidektError) as anon:
+        await client.get_deck(None, "42", fresh=True)
+    assert str(anon.value) == "Archidekt asked for a sign-in, and this request was made without one"
 
 
 def test_the_review_page_no_longer_blames_another_account_for_a_refusal() -> None:

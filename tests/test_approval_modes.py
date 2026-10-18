@@ -537,11 +537,11 @@ def test_docs_quote_the_one_wording(doc: str, low: bool, member_only: bool) -> N
 def test_the_low_risk_texts_say_which_commander_changes_wait() -> None:
     """A copy more or less of a commander with one row is low risk, so the texts don't say
     "never the commander"; they name what waits: a change to which cards are the commanders, and
-    fewer copies of a commander that has another row (both tested above)."""
+    fewer copies of a commander that has another row in the deck (both tested above)."""
     for text in (modes.low_risk_text(), modes.mode_help("semi")):
         assert "never the commander" not in text
         assert "never a change to which cards are the commanders" in text
-        assert "fewer copies of a commander that has another row" in text
+        assert "fewer copies of a commander that has another row in the deck" in text
 
 
 def test_the_semi_auto_notice_names_what_semi_auto_applies() -> None:

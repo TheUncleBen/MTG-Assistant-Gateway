@@ -927,6 +927,7 @@ def _note_write(exc: ArchidektError | None) -> None:
     progress["deck_written"] = True
 
 
+NO_SIGN_IN_TEXT = "Archidekt asked for a sign-in, and this request was made without one"
 MAX_LIST_PAGES = 4  # deck-list pages of 50 followed for one member (200 decks)
 
 
@@ -1190,6 +1191,8 @@ class ArchidektClient:
                 )
             if resp.status_code == 401:
                 self.pacer.record(True)
+                if "Authorization" not in headers:  # a read made without a sign-in: no session to blame
+                    raise ArchidektError("auth", NO_SIGN_IN_TEXT)
                 raise ArchidektError("auth", "Archidekt rejected the stored session; relink your account")
             if resp.status_code == 403:
                 # A 403 is Archidekt refusing this one request; the session itself still works
