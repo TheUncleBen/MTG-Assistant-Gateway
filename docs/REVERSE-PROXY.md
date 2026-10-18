@@ -10,9 +10,10 @@ What's been checked, by hand for 0.7.31: the Caddyfile passes `caddy validate`
 nginx block passes `nginx -t` (nginx 1.24, with a test certificate in place of
 the Let's Encrypt one, and without the two `listen [::]` lines, because the test
 machine has no IPv6), and the Compose overrides pass `docker compose config`
-(Compose 5.6.0). Nothing runs these checks automatically. The end-to-end tests run behind an nginx with
-the same header, buffering and timeout settings. The Traefik labels and the NPM settings follow those
-projects' documentation and real use, but aren't run by the tests.
+(Compose 5.6.0). Nothing runs these checks automatically. The end-to-end tests
+run behind an nginx with the same header, buffering and timeout settings. The
+Traefik labels and the NPM settings follow those projects' documentation and
+real use, but aren't run by the tests.
 
 ## What every proxy needs
 

@@ -58,8 +58,10 @@ gateway or the app works.
   need the Fernet key, and which tools are marked as changing something. They also describe the
   Android app's permissions and notification steps, the phone tabs and the admin Card models page
   as they are. The third-party notices now list the gateway's Python packages and their licences.
-- In the Android app, the messages about a shared link that isn't a deck link now point to
-  **Open a copied link** on the Account page's App card, which has that button.
+- In the Android app, the messages about a shared or copied link the app doesn't open, and the
+  one about turning the camera on, are shorter, and they are now short enough to fit Android's
+  two-line limit at the default text size. The ones about a share with no link point to **Open a
+  copied link** on the Account page's App card, which has that button.
 
 ## [0.7.30] - 2026-10-18
 
@@ -107,7 +109,7 @@ stack.
 - **Forge runs:**
   - Each game of a run has its own seed, and a run's games play at once as far as Forge has room. The seed is kept for the record only: every report with Forge games and a recorded seed says Forge does not always replay the same games from the same seed, so compare runs by their win rates and 95% intervals.
   - A report plays 4 Forge games by default (`MTG_FORGE_GAMES`, was 10); **Play more games** adds more.
-  - A game still going after four minutes stops and counts as a draw (`FORGE_GAME_SECONDS`, default 240, was 600). A stack variables file copied from the old example still sets `FORGE_TAG=2.0.15-mag2`, `FORGE_GAME_SECONDS=600` and `MTG_FORGE_GAMES=10`: DEPLOY.md's "Updating to 0.7.30" says what to change.
+  - A game still going after four minutes stops and counts as a draw (`FORGE_GAME_SECONDS`, default 240, was 600). A stack variables file copied from the old example still sets `FORGE_TAG=2.0.15-mag2`, `FORGE_GAME_SECONDS=600` and `MTG_FORGE_GAMES=10`: DEPLOY.md's "Updating to 0.7.30" says what to change (now in [docs/UPGRADING.md](docs/UPGRADING.md#0730)).
 - **Forge memory:** where Docker can't cap memory (Raspberry Pi OS by default), Forge guards its own memory from inside the container, with nothing to change on the machine: `FORGE_MEMORY_LIMIT` sizes the games at once, each Java has a ceiling on its class data, and the kernel stops a Forge game first if the machine runs out of memory (`FORGE_MAX_METASPACE`, `FORGE_OOM_SCORE_ADJ`). This is not a hard limit as Docker's is.
 - **Forge speed:** each Forge game's result shows on the report within a few seconds of the game ending. Forge reads a card's rules only when a game needs that card, so each game starts faster. With more than one Forge place, a Compare's second deck can start before the first deck's run has ended.
 - **Forge image:** 2.0.15-mag3. Build pins are by digest (Dockerfile frontend and base, buildkit, binfmt).
@@ -261,7 +263,7 @@ Android app is unchanged.
 
 ### Deployment
 - The stack and Compose files pass the 24 settings the Settings page manages that they used to set (each with its default) as empty unless your environment sets them, so the page can change them. The example env files list every setting the stack passes, commented out with the default. A value you set in your environment still wins and is shown locked.
-- **Upgrade note for existing deployments (DEPLOY.md and DEPLOY-COMPOSE.md "Updating to 0.7.29 from an earlier version"):** a stack or Compose file from before 0.7.29 gives 24 of the page's 47 settings a value of its own, so they show locked. Before replacing the file, note your own edits to it (the uncommented Authentik and ntfy secret lines, lines added under `environment:`) and redo them in the new one. Portainer: paste the new stack file if it was pasted into the Web editor before (the Repository method brings it). Without Portainer: `git checkout deploy/portainer-stack.yml`, then `git pull`. Compose: download the new docker-compose.yml (in a clone, `git checkout docker-compose.yml` then `git pull`). Optionally delete the variables you want to manage on the page (an older Portainer variables file sets 19, an older .env 17). Any variable kept stays locked. Then update with re-pull (if `MTG_TAG` names a version, change it to `0.7.30` first; without Portainer: from a new shell in your copy of the repository, load `mtg.env` and run `docker stack deploy` again).
+- **Upgrade note for existing deployments (DEPLOY.md and DEPLOY-COMPOSE.md "Updating to 0.7.29 from an earlier version", now in [docs/UPGRADING.md](docs/UPGRADING.md#0729-included-in-0730)):** a stack or Compose file from before 0.7.29 gives 24 of the page's 47 settings a value of its own, so they show locked. Before replacing the file, note your own edits to it (the uncommented Authentik and ntfy secret lines, lines added under `environment:`) and redo them in the new one. Portainer: paste the new stack file if it was pasted into the Web editor before (the Repository method brings it). Without Portainer: `git checkout deploy/portainer-stack.yml`, then `git pull`. Compose: download the new docker-compose.yml (in a clone, `git checkout docker-compose.yml` then `git pull`). Optionally delete the variables you want to manage on the page (an older Portainer variables file sets 19, an older .env 17). Any variable kept stays locked. Then update with re-pull (if `MTG_TAG` names a version, change it to `0.7.30` first; without Portainer: from a new shell in your copy of the repository, load `mtg.env` and run `docker stack deploy` again).
 - New variables: `MTG_ARCHIDEKT_BACKUP_COPIES` (10), `MTG_ARCHIDEKT_BACKUP_BOX_DEFAULT` (false), `MTG_SNAPSHOTS_PER_DECK` (25). DEPLOY.md's environment table describes them; OPERATIONS.md "The Settings page" describes the page.
 
 ## [0.7.28] - not released on its own, included in 0.7.30

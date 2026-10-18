@@ -67,19 +67,19 @@
     <string name="sign_in_no_browser">No browser is installed to sign in with. Use "Sign in inside the app instead" on the page.</string>
     <string name="sign_in_not_started">That sign-in wasn\'t started here or has expired. Sign in again from the app.</string>
     <string name="camera_permission_needed">Camera permission is needed to scan cards.</string>
-    <string name="camera_permission_settings">The camera is turned off for this app. Turn on Camera under Permissions, then come back and tap Scan again.</string>
+    <string name="camera_permission_settings">The camera is off for this app. Turn on Camera under Permissions, then tap Scan again.</string>
     <string name="scan_page_too_old">This gateway\'s scan page has no photo hooks; it needs a newer gateway version.</string>
     <string name="scan_handoff_failed">The scan page did not take the photo. Tap Done, reload the page and try again.</string>
     <string name="scan_page_slow">The scan page did not answer in time. Tap Done and check the page.</string>
     <string name="scan_page_missing">This gateway has no scan page.</string>
     <string name="page_elsewhere">A page from another site tried to open inside the app and was stopped. Tap Retry to go back to your gateway.</string>
-    <!-- A share or a copied link the app does not open. %1$s is the link's host, %2$s the gateway's. -->
-    <string name="link_other_gateway">The link that arrived goes to %1$s. This app opens links to your gateway (%2$s) and archidekt.com deck links, so it was not opened.</string>
-    <string name="link_discord_message">Discord shared a link to the message (%1$s), not the deck link. Long-press the archidekt.com link itself and share that, or copy it and choose Open a copied link on the Account page\'s App card.</string>
-    <string name="link_none_shared">There was no https link in what was shared. Share a link to your gateway or an archidekt.com deck link, or copy it and choose Open a copied link on the Account page\'s App card.</string>
-    <string name="link_file_shared">A file arrived, not a link. Share a link to your gateway or an archidekt.com deck link, or copy it and choose Open a copied link on the Account page\'s App card.</string>
-    <string name="clip_other">The copied link goes to %1$s. This app opens links to your gateway (%2$s) and archidekt.com deck links.</string>
-    <string name="clip_none">There is no link on the clipboard. Copy an archidekt.com deck link or a link to your gateway, then try again.</string>
+    <!-- A share or a copied link the app does not open (a toast: two lines from Android 12). %1$s is the link's host. -->
+    <string name="link_other_gateway">This app opens only your gateway\'s links and archidekt.com deck links, not %1$s.</string>
+    <string name="link_discord_message">Discord shared the message, not the deck. Share the archidekt.com link itself.</string>
+    <string name="link_none_shared">No link was shared. Use Open a copied link on the Account page\'s App card.</string>
+    <string name="link_file_shared">A file arrived, not a link. Use Open a copied link on the Account page\'s App card.</string>
+    <string name="clip_other">This app opens only your gateway\'s links and archidekt.com deck links, not %1$s.</string>
+    <string name="clip_none">No link on the clipboard. Copy a deck link or a link to your gateway first.</string>
 
     <string name="camera_title">Scan a card</string>
     <string name="shoot">Shoot</string>
