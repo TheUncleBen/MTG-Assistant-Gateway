@@ -652,7 +652,7 @@ on what the review page would show, not on what the assistant says:
 | Tier | Proposals |
 |---|---|
 | Low | A small edit to an existing deck or to your collection: at most 5 card rows, each a card added or removed, or a new quantity, category, finish, printing, color tag or custom mana value, no more than 4 copies a row and never the commander; and a private copy of a deck (a clone), which changes nothing that exists. (The row limit is `MTG_AUTO_APPLY_MAX_ROWS`, default 5.) |
-| High | Everything else: more rows than that, a commander change, a new deck, restoring a snapshot, and the deck's details (name, format, bracket, description, visibility, folder, tags and cover). |
+| High | Everything else: more rows than that, a commander change, a new deck, restoring a snapshot, and the deck's details (name, format, bracket, description, visibility, folder, tags and cover). A commander change is any change to the deck's commander zone (Archidekt's commander categories, whatever they are named): a card moved into or out of it, the commander removed, or a card added to it. It waits for the member's press in every mode. |
 | Consent, destructive | Actions on your Archidekt account (likes, votes, bookmarks, follows, comments, new folders and collaborator changes) and deleting a deck are never applied by an assistant: each one waits for your own press, in every mode, on the card in the chat or on its review page (deleting a deck, and an edit of a comment that has formatting: on the review page only). |
 
 Every proposal result carries `approval_mode`, `risk`, `risk_reason` and
@@ -764,8 +764,9 @@ A check reads the member's deck list (one request per 50 decks, at most four);
 a deck is read only when it has a waiting proposal and its "updated" time on
 Archidekt moved, at most five per check. Only the member's own decks are in
 that list, so a deck of someone else's with a waiting proposal (a clone of a
-public deck, a collaborator's deck) is read in full on each check, within the
-same five. A waiting proposal on a deck that changed is worked out again on
+public deck, a collaborator's deck) is read in full at most every 30 minutes,
+within the same five; one Archidekt says is gone or private is left alone
+for 6 hours. A waiting proposal on a deck that changed is worked out again on
 the deck as it is now: it is marked **Updated** when it still does what was
 reviewed, or **Needs a look** with the reason when it would now do something
 else, on its review page, in the Proposals list, on the chat cards and in
@@ -775,7 +776,9 @@ waiting proposal's status and moves the baseline of one that still fits
 (Apply still re-reads the deck and decides for itself). Before each request it
 waits until no member's Archidekt work is running or queued and gives up
 until the next check if that takes more than 10 seconds; a deck being
-applied or restored is left alone; it uses none of the member limits below;
+applied or restored is left alone; each list or deck read spends one of the
+member's own Archidekt actions (`MTG_ARCHIDEKT_CALLS_PER_10_MIN`), and a check
+stops while less than a quarter of them would be left;
 a member arriving while one of its requests is under way waits for that one
 request. It never retries a request, sends nothing while the breaker or a
 Retry-After pause is on, and Archidekt failing or asking us to slow down ends
