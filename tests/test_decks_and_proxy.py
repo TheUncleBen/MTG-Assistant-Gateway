@@ -1759,6 +1759,87 @@ async def test_a_busy_research_refusal_says_when_to_retry() -> None:
     assert not ok.is_error and proxy._started == {} and proxy._in_flight == {}
 
 
+class _ListingDown:
+    """A Mystic Forge client whose tool listing fails while ``down`` is set (as a fresh gateway's
+    first listing can, while the network attaches); calls still reach the fake Mystic Forge."""
+
+    down = True
+    forwarded: list[str] = []
+
+    def __init__(self) -> None:
+        self.inner = Client(fake_mystic_forge())
+
+    async def __aenter__(self) -> _ListingDown:
+        await self.inner.__aenter__()
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        await self.inner.__aexit__(*exc)
+
+    async def list_tools(self):
+        if _ListingDown.down:
+            raise TimeoutError
+        return await self.inner.list_tools()
+
+    async def call_tool(self, name: str, arguments: dict):
+        _ListingDown.forwarded.append(name)
+        return await self.inner.call_tool(name, arguments)
+
+
+def _listing_down_proxy() -> MysticForgeProxy:
+    _ListingDown.down, _ListingDown.forwarded = True, []
+    return MysticForgeProxy("http://mf.test/mcp", client_factory=_ListingDown)  # type: ignore[arg-type]
+
+
+async def test_a_wrapped_call_keeps_its_shape_when_the_tool_listing_failed() -> None:
+    """When Mystic Forge's first tool listing failed, a call that arrived inside params was sent
+    flat (the proxy knew no tool took params), Mystic Forge refused it, and the report's simulation
+    failed. The caller knew the shape, so it is now kept."""
+    proxy = _listing_down_proxy()
+    out = await proxy.call(
+        "goldfish_run", {"params": {"deck": "1 Sol Ring\n59 Island", "n": 20}}, internal=True
+    )
+    text = out.content[0].text
+    assert not out.is_error and "## Metrics" in text, text
+    assert proxy._listed is False and _ListingDown.forwarded == ["goldfish_run"]
+
+
+async def test_a_flat_call_is_refused_when_the_tool_listing_failed() -> None:
+    """A flat call has no shape to go by while the listing is down: the proxy tries one listing
+    now, even within the back-off, and if that fails too it refuses, worth retrying, without
+    sending anything."""
+    proxy = _listing_down_proxy()
+    await proxy.tools()  # failed once: the back-off is running
+    out = await proxy.call("goldfish_run", {"deck": "1 Sol Ring\n59 Island", "n": 20}, internal=True)
+    assert out.is_error and out.structured_content["error"] == "unavailable", out
+    assert out.structured_content["retry_after"] == 60
+    assert out.content[0].text == (
+        "the research service is not ready yet; nothing was sent, try again in a minute"
+    )
+    assert _ListingDown.forwarded == []
+    # once Mystic Forge lists its tools, the same flat call is wrapped and answered
+    _ListingDown.down = False
+    ok = await proxy.call("goldfish_run", {"deck": "1 Sol Ring\n59 Island", "n": 20}, internal=True)
+    assert not ok.is_error and "## Metrics" in ok.content[0].text, ok
+    assert proxy._listed and _ListingDown.forwarded == ["goldfish_run"]
+
+
+async def test_a_report_still_simulates_when_the_first_tool_listing_failed(stack: Stack) -> None:
+    """The e2e failure: a report made while Mystic Forge's first tool listing had failed came back
+    simulation_failed. It now runs its goldfish games."""
+    h = stack.h
+    token = await linked_user(stack)
+    proxy = stack.gw.mf_proxy  # as a freshly started gateway has it: nothing listed yet
+    assert proxy is stack.gw.reports.mf
+    _ListingDown.down, _ListingDown.forwarded = True, []
+    proxy._client_factory, proxy._listed, proxy._wrapped, proxy._tools = _ListingDown, False, set(), []
+    rep = structured(await call(h, token, "run_deck_report", {"deck_ref": "42", "games": 20}))
+    assert rep["ok"] and rep["goldfish"]["ok"] is True, rep
+    assert "goldfish_run" in _ListingDown.forwarded
+    rows = await call(h, token, "list_deck_reports", {})
+    assert structured(rows)["reports"][0]["has_goldfish"] is True, rows
+
+
 async def test_run_deck_report_takes_the_members_own_snapshot(stack: Stack) -> None:
     """Consolidation bug 4: run_deck_report said it took a snapshot id and refused one. It now
     reports the member's own snapshot (as compare_decks reads it), filed under its deck with the

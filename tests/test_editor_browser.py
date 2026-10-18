@@ -279,7 +279,8 @@ def test_a_picture_that_fails_keeps_the_editor_rows_layout(server: Server, width
 def test_a_category_outside_the_deck_adds_to_the_maybeboard_or_sideboard(server: Server) -> None:
     """A card added under a category whose rows sit outside the deck (a chip, or the new card's
     own category menu) goes to the maybeboard or sideboard with that category, so the save is not
-    refused as an add to the deck proper outside it."""
+    refused as an add to the deck proper outside it. A pasted list goes there too, under that
+    category, not the deck's maybeboard."""
     import json
 
     from playwright.sync_api import sync_playwright
@@ -328,13 +329,23 @@ def test_a_category_outside_the_deck_adds_to_the_maybeboard_or_sideboard(server:
         )
         hydra = page.locator(".erow.new", has_text="Apocalypse Hydra")
         assert "new sideboard card" in hydra.inner_text().lower(), hydra.inner_text()
-        # what the save sends: both adds to the side zone with their categories, and no refusal
+        # a pasted list with the Sideboard chip picked goes there too, under Sideboard
+        page.locator(".targets .tchip", has_text="Sideboard").first.click()
+        page.locator("details.pastebox summary").click()
+        page.locator("#pastetext").fill("1 Cultivate")
+        page.locator("form.pastelist button").click()
+        page.locator(".erow.new", has_text="Cultivate").wait_for(timeout=3000)
+        # what the save sends: every add to the side zone with its category, and no refusal
         with page.expect_response(lambda r: r.url.endswith("/api/v1/proposals")) as resp:
             page.locator(".editbar button.review").click()
         sent = json.loads(resp.value.request.post_data or "{}")
         adds = {c["card_name"]: c for c in sent["changes"] if c["action"] == "add"}
         got = {name: (adds[name].get("zone"), adds[name].get("category")) for name in adds}
-        want = {"Oathsworn Giant": ("side", "Considering"), "Apocalypse Hydra": ("side", "Sideboard")}
+        want = {
+            "Oathsworn Giant": ("side", "Considering"),
+            "Apocalypse Hydra": ("side", "Sideboard"),
+            "Cultivate": ("side", "Sideboard"),
+        }
         assert got == want, got
         answer = resp.value.text()
         assert "outside the deck" not in answer, answer

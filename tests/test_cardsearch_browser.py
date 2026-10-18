@@ -418,3 +418,55 @@ def test_the_top_bar_search_suggests_on_every_page_without_csp_violations(server
         assert blocked == [], blocked
         assert errors == [], errors
         browser.close()
+
+
+@pytest.mark.parametrize("category", ["Sideboard", "Considering"])
+def test_a_category_outside_the_deck_adds_to_the_maybeboard_or_sideboard(
+    server: Server, category: str
+) -> None:
+    """Add to deck under a category whose rows sit outside the deck (Sideboard, counted or not by
+    the deck, or one the deck excludes) adds the card to the maybeboard or sideboard under it,
+    as the deck editor does, instead of a deck add the gateway refuses."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium()
+    server.ark.decks[42]["categories"] += [
+        {"name": "Sideboard", "isPremier": False, "includedInDeck": True},
+        {"name": "Considering", "isPremier": False, "includedInDeck": False},
+    ]
+    sid = _link(server)
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, 1366, "light", exe)
+        bodies: list = []
+        page.on(
+            "request",
+            lambda r: (
+                bodies.append(r.post_data_json) if r.method == "POST" and r.url.endswith("/edit") else None
+            ),
+        )
+        page.goto(f"{server.base}/cards?q=sol", wait_until="networkidle")
+        page.locator("button[data-add]").nth(1).click()
+        page.locator(".addsheet.open").wait_for(timeout=3000)
+        page.wait_for_function("() => document.querySelectorAll('#ad-deck option').length >= 3", timeout=5000)
+        page.evaluate(
+            "() => { const s = document.getElementById('ad-deck'); s.value = '42';"
+            " s.dispatchEvent(new Event('change', {bubbles: true})); }"
+        )
+        page.wait_for_function(
+            f"() => [...document.querySelectorAll('#ad-cat option')].some(o => o.value === '{category}')",
+            timeout=5000,
+        )
+        page.evaluate(
+            f"() => {{ const s = document.getElementById('ad-cat'); s.value = '{category}';"
+            " s.dispatchEvent(new Event('change', {bubbles: true})); }"
+        )
+        page.locator(".addsheet.open button[type=submit]").click()
+        toast = page.locator(".cards-toast")
+        toast.wait_for(timeout=8000)
+        assert "Added 1 × Sol Talisman to Sample Commander Deck" in toast.inner_text()
+        assert errors == [], errors
+        browser.close()
+    (sent,) = bodies[0]["changes"]
+    assert (sent.get("zone"), sent.get("category")) == ("side", category), sent
+    rows = [c for c in server.ark.decks[42]["cards"] if c["card"]["oracleCard"]["name"] == "Sol Talisman"]
+    assert [(r["quantity"], r["categories"]) for r in rows] == [(1, [category])], rows

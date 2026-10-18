@@ -63,6 +63,7 @@ stack.
 - In Full auto, a change that moves a card into or out of the commander zone, removes the commander or adds a card to the commander zone waits for the member's press, as other commander changes do.
 - The Android app's menu entry **Scan with phone camera** is now **Scan with the app's camera**, and the launcher shortcut **Scan cards** is now **Scan page**.
 - The build images (Dockerfile, the Mystic Forge Dockerfile and the BuildKit and binfmt images in CI) are pinned by digest, and so are pip and wheel. The image installs only the wheels it built.
+- Adding a card to the commander zone is now refused when the card is already in the deck but not in the commander zone, or when it is added to the maybeboard or sideboard with a first category that is not outside the deck. Before, the card was added without its commander-zone category.
 
 ### Fixed
 - In Semi-auto, an assistant's change that moved a card into or out of the commander zone, removed the commander or added a card to the commander zone applied without the member's press. It now waits for the press, as other commander changes do, also when the deck's commander zone has another name. On the deck page, such a move now asks before it saves.
@@ -70,7 +71,9 @@ stack.
 - The bracket estimate now follows archidekt.com's own rule for combos and extra turns; it followed an older, reversed rule.
 - The Android app's colour strips under the status and navigation bars kept their full colour when Android faded the window.
 - Restoring a snapshot left each card's color tag and custom mana value, and the order of its categories (the first one decides whether the card counts in the deck), as they were, and still reported the deck restored, or said it already matched the snapshot. A restore now puts them back and checks them.
-- Adding a card to the deck under Maybeboard, Sideboard or another category the deck does not count wrote the card outside the deck, then reported that the deck did not match the change. Such an add is now refused before anything is written, and the message says to add the card to the maybeboard.
+- Adding a card to the deck under Maybeboard, Sideboard or another category the deck does not count wrote the card outside the deck, then reported that the deck did not match the change. The deck editor and Card search's Add to deck now add such a card to the maybeboard or sideboard. Any other such add, such as one from an assistant, is now refused before anything is written, and the message says to add the card to the maybeboard.
+- A card added to the maybeboard or sideboard under Sideboard went into the Maybeboard unless the deck marked Sideboard as outside the deck. It now goes into the Sideboard.
+- When the gateway's first try to reach the research service after a start failed, a deck report asked for in the next minute failed because its solo test did not run, and some research calls from an assistant were sent in a form the research service refused. A report now runs its solo test, and an assistant's research call made while the service still cannot be reached is refused before anything is sent, with a message to try again in a minute.
 
 ### Removed
 - The old `/decks/{id}/playtest` address. The deck page's Playtest opens Archidekt's own playtester directly.

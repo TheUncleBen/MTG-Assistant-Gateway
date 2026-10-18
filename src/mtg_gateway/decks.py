@@ -1354,6 +1354,13 @@ def is_outside_category(deck: Deck, category: str) -> bool:
     return not deck.categories_count([category]) or category.casefold() in ("maybeboard", "sideboard")
 
 
+def _side_categories(deck: Deck, chs: list[Change]) -> list[str]:
+    """The categories a new maybeboard or sideboard row made by these adds of one card is written
+    with, and reviewed as: ``side_category_for`` first, then the adds' other categories."""
+    side_cat = side_category_for(deck, chs[0])
+    return [side_cat] + [c for c in _all_categories(chs)[1:] if c != side_cat]
+
+
 def side_category_for(deck: Deck, ch: Change) -> str:
     """The category a maybeboard add goes in: the change's own category when a row under it sits
     outside the deck, else the deck's maybeboard category."""
@@ -1400,7 +1407,10 @@ def _refuse_adds_written_otherwise(deck: Deck, changes: list[Change], main_looku
             continue
         cats = _all_categories([ch])
         if ch.zone == "side":
-            if _in_premier(premier, cats):
+            # a row whose first category is outside the deck is written with every category as
+            # asked (side_category_for keeps that first one), the commander zone included: the
+            # Undo of removing such a row puts it back as it was
+            if _in_premier(premier, cats) and not is_outside_category(deck, cats[0]):
                 raise DeckError(
                     "invalid",
                     f"'{ch.card_name}': a card added to the maybeboard or sideboard cannot go in the "
@@ -1490,7 +1500,7 @@ def plan_zones(
         if zone == "main":
             cats = {n: ", ".join(_all_categories(chs)) or None for n, chs in adds_by_name.items()}
         else:
-            cats = {n: side_category_for(deck, chs[0]) for n, chs in adds_by_name.items()}
+            cats = {n: ", ".join(_side_categories(deck, chs)) for n, chs in adds_by_name.items()}
         pinned_names = {n for n, chs in adds_by_name.items() if any(c.pinned for c in chs)}
         side = "side" if zone == "side" else None
         for name in sorted(set(b_counts) | set(a_counts), key=str.lower):
@@ -4157,9 +4167,8 @@ class DeckService:
         new_cats: dict[str, list[str]] = {}
         side_cats: dict[str, list[str]] = {}
         for key, chs in side_adds.items():
-            side_cat = side_category_for(deck, chs[0])
             # an add naming every category (an Undo of a removal) keeps the others beside it
-            side_cats[key] = [side_cat] + [c for c in _all_categories(chs)[1:] if c != side_cat]
+            side_cats[key] = _side_categories(deck, chs)
             if after_side.get(key, 0) > 0 and key.lower() not in have_side:
                 card = await self._call(sub, self.client.resolve_card, key)
                 resolve[key] = card["id"]

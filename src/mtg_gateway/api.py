@@ -24,6 +24,7 @@ from .decks import (
     DeckError,
     current_client,
     edit_mismatches,
+    is_outside_category,
     parse_changes,
     printing_not_shown,
     scopes_allow_writes,
@@ -212,7 +213,11 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
     async def get_deck(request: Request, who: Caller) -> Response:
         deck = await decks.get_any_deck(who.sub, request.path_params["deck_id"])
         with_cards = request.query_params.get("cards", "1") != "0"
-        return ok(deck_out(deck, with_cards=with_cards))
+        out = deck_out(deck, with_cards=with_cards)
+        # the categories a card added under them sits outside the deck in: Card search sends such
+        # an add to the maybeboard or sideboard, as the deck editor does
+        out["outside_categories"] = [c for c in out["categories"] if is_outside_category(deck, c)]
+        return ok(out)
 
     @route("/decks/{deck_id}/stats", "GET")
     async def stats(request: Request, who: Caller) -> Response:

@@ -183,9 +183,10 @@ Screenshots of the browser pages are in [docs/screenshots/](docs/screenshots/).
     it with `apply_proposal`. The card's Approve button carries a one-time code
     the assistant never sees, so a tricked assistant can't press it.
   - For an edit, the gateway checks the change still does what was reviewed on the deck as it is now, saves a
-    snapshot, puts a private backup copy of the deck in the user's
-    "MTG Gateway backups" folder on Archidekt, makes the change, then reads
-    the deck back to confirm it.
+    snapshot, makes the change, then reads the deck back to confirm it. With backups on (the operator's
+    setting), it first also puts a private backup copy of the deck in the user's
+    "MTG Gateway backups" folder on Archidekt; the deck page's own saves, and the deck editor's save with
+    its backup box unticked, make none.
   - Undo is the same flow in reverse: `list_snapshots`, then
     `propose_restore_snapshot`, which puts every card back as it was
     (printing, foil, quantity, categories, commander, sideboard and
@@ -208,7 +209,8 @@ Screenshots of the browser pages are in [docs/screenshots/](docs/screenshots/).
     the editor also edits maybeboard and sideboard rows and takes a pasted
     list; the settings page sets the cover image, deck tags and folder;
     `/folders` creates and renames folders; Delete deck asks you to type the
-    deck's name and keeps a snapshot (and the Archidekt backup copy) first.
+    deck's name and keeps a snapshot first (and, with backups on, a backup
+    copy on Archidekt).
     `/precons` lists every preconstructed deck Archidekt knows, by set.
     The assistant reaches folder, tags and cover only through a
     `propose_deck_details` proposal you approve. It can propose deleting a

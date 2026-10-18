@@ -163,6 +163,52 @@ async def test_an_add_puts_a_card_back_under_every_category(stack: Stack) -> Non
         await b.aclose()
 
 
+async def test_undo_puts_back_a_maybeboard_row_in_the_commander_zone(stack: Stack) -> None:  # noqa: F811
+    """The deck page's Undo of removing a maybeboard row that also carries the commander zone's
+    category puts it back as it was: the add's first category is outside the deck, so the row is
+    written with every category as asked, the commander zone included. It is a commander-zone
+    change, so the page asks first; the answer applies it, and the row reads back as it was."""
+    stack.ark.add_side_row(42, "Sol Ring", quantity=2)
+    side = _deck_card(stack, "Sol Ring", zone="side")[0]
+    side["categories"] = ["Maybeboard", "Commander"]
+    b = await linked(stack)
+    try:
+        r = await api(
+            b,
+            "POST",
+            "/api/v1/decks/42/edit",
+            {"changes": [{"action": "remove", "card_name": "Sol Ring", "zone": "side"}]},
+        )
+        d = r.json()
+        if d.get("needs_confirm"):
+            r = await api(
+                b, "POST", "/api/v1/decks/42/edit", {"proposal_id": d["proposal_id"], "version": d["version"]}
+            )
+        assert r.status_code in (200, 201), r.text
+        rows = [c for c in stack.ark.decks[42]["cards"] if c["card"]["oracleCard"]["name"] == "Sol Ring"]
+        assert all(c["categories"] != ["Maybeboard", "Commander"] for c in rows), rows
+        undo = {"action": "add", "card_name": "Sol Ring", "quantity": 2, "zone": "side",
+                "category": "Maybeboard", "categories": ["Maybeboard", "Commander"]}  # fmt: skip
+        r = await api(b, "POST", "/api/v1/decks/42/edit", {"changes": [undo]})
+        d = r.json()
+        assert r.status_code == 201 and d["needs_confirm"] is True, r.text
+        assert d["why"] == "This adds or changes a row with a commander-zone category.", d
+        r = await api(
+            b, "POST", "/api/v1/decks/42/edit", {"proposal_id": d["proposal_id"], "version": d["version"]}
+        )
+        assert r.status_code in (200, 201) and r.json().get("applied") is True, r.text
+        back = [
+            (c["quantity"], c["categories"])
+            for c in stack.ark.decks[42]["cards"]
+            if c["card"]["oracleCard"]["name"] == "Sol Ring"
+            and c["categories"]
+            and c["categories"][0] == "Maybeboard"
+        ]
+        assert back == [(2, ["Maybeboard", "Commander"])], back
+    finally:
+        await b.aclose()
+
+
 async def test_a_move_puts_a_card_back_under_every_category(stack: Stack) -> None:  # noqa: F811
     """The deck page's Undo of a move of a card filed under several categories is a
     set_category with every category it had, the primary first; it files the row under all of

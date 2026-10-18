@@ -589,7 +589,7 @@
         var found = 0;
         mutate(function () {
           (d.cards || []).forEach(function (it, i) {
-            if (it.card && it.card.name) { addCard(it.card.name, it.quantity || items[i].quantity || 1, null, null, null, zone); found += it.quantity || 1; }
+            if (it.card && it.card.name) { addCard(it.card.name, it.quantity || items[i].quantity || 1, outside(catIn.value) ? catIn.value : null, null, null, zone); found += it.quantity || 1; }
             else missed.push((it.input && it.input.name) || items[i].name);
           });
         });

@@ -702,6 +702,7 @@
     });
     if (window.MtgSelect) window.MtgSelect.refresh(catSel);
   }
+  var outside = {};  // deck id -> its categories whose rows sit outside the deck
   var catLoads = {};  // deck id -> true while its categories are being read, so one read per deck
   function loadCats(id) {
     if (!id) { fillCats([]); return; }
@@ -711,7 +712,11 @@
     catLoads[id] = true;
     api("GET", "/api/v1/decks/" + enc(id) + "?cards=0").then(function (d) {
       delete catLoads[id];
-      if (d.ok && d.categories) { cats[id] = d.categories; if (deckSel.value === id) fillCats(cats[id], id); }
+      if (d.ok && d.categories) {
+        cats[id] = d.categories;
+        outside[id] = d.outside_categories || [];
+        if (deckSel.value === id) fillCats(cats[id], id);
+      }
     }).catch(function () { delete catLoads[id]; /* the default category still works */ });
   }
   var cardPin = null;  // the printing shown on the tile, when the search is about printings
@@ -748,7 +753,11 @@
     var qty = Math.max(1, Math.min(99, parseInt(qtyIn.value, 10) || 1));
     var ch = { action: "add", card_name: cardName, quantity: qty };
     if (catSel.value) ch.category = catSel.value;
-    if (cardPin) { ch.set_code = cardPin.set_code; ch.collector_number = cardPin.collector_number; }
+    // a category whose rows sit outside the deck (Sideboard, Considering...): the card goes to the
+    // maybeboard or sideboard under it, which takes no pinned printing
+    var side = catSel.value && (outside[catDeck] || []).indexOf(catSel.value) >= 0;
+    if (side) ch.zone = "side";
+    else if (cardPin) { ch.set_code = cardPin.set_code; ch.collector_number = cardPin.collector_number; }
     return [ch];
   }
   function deckName(id) {
