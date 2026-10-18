@@ -49,6 +49,9 @@ CONTRAST = """(el) => {
   const ratio = (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
   return {ratio: ratio, opacity: Number(s.opacity), disabled: el.disabled};
 }"""
+# CONTRAST of a guarded button just after the click guard locked it again (clickguard.js locks on
+# a window blur, synchronously)
+LOCKED_CONTRAST = "(el) => { window.dispatchEvent(new Event('blur')); return (" + CONTRAST + ")(el); }"
 
 
 @pytest.fixture
@@ -109,12 +112,16 @@ def test_review_page_reads_in_both_themes_on_desktop_and_phone(server: Server) -
                         color_scheme=theme,
                         is_mobile=phone,
                         has_touch=phone,
+                        reduced_motion="reduce",  # no colour transition while the lock is measured
                     )
                     ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
                     page = ctx.new_page()
                     page.goto(f"{server.base}/proposals/{details}", wait_until="networkidle")
                     for value in ("apply", "reject"):
-                        got = page.locator(f"form.guarded button[value={value}]").evaluate(CONTRAST)
+                        # the locked look: the click guard unlocks after any pointer or key event
+                        # plus 800 ms on the page, which a slow runner can reach before this line,
+                        # so lock it first (a blur does, at once) and measure in the same step
+                        got = page.locator(f"form.guarded button[value={value}]").evaluate(LOCKED_CONTRAST)
                         assert got["disabled"], got  # locked until the click guard sees the page in use
                         assert got["opacity"] == 1 and got["ratio"] >= 4.5, (theme, vw, value, got)
                     rows = page.locator("ul.changes li")
