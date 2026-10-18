@@ -499,8 +499,8 @@ def commander_stays_text(stay: dict[str, Any]) -> str:
     qty = int(stay.get("qty") or 0)  # at least 1: a card whose copies all go doesn't stay
     copies = "1 copy" if qty == 1 else f"{qty} copies"
     return (
-        f"{stay.get('name')} stays the commander. Its rows in other categories are removed, and the "
-        f"commander zone keeps {copies}."
+        f"{stay.get('name')} stays in the commander zone, now with {copies}. "
+        "Its other rows in the deck are removed."
     )
 
 

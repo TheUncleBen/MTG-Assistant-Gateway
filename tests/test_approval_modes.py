@@ -658,14 +658,11 @@ async def test_a_lowered_count_on_a_commander_with_two_rows_waits_and_keeps_the_
     assert p["ok"] and p["state"] == "pending", p
     assert "commander" in [r.get("kind") for r in p["rows"]]
     assert p["risk"] == "high" and p["assistant_may_apply"] is False
-    # the commander stays, and every text says so rather than "changes the commander"
-    stays = (
-        f"{AESI} stays the commander. Its rows in other categories are removed, "
-        "and the commander zone keeps 1 copy."
-    )
+    # the commander stays, and every text says what changes rather than "changes the commander"
+    stays = f"{AESI} stays in the commander zone, now with 1 copy. Its other rows in the deck are removed."
     assert p["diff"].splitlines() == [f"2 -> 1 {AESI}", stays], p["diff"]
-    assert p["risk_reason"] == "may change the commander", p
-    assert modes.hand_edit_confirm("edit", p["rows"]) == "This may change the deck's commander."
+    assert p["risk_reason"] == "changes the commander's copies", p
+    assert modes.hand_edit_confirm("edit", p["rows"]) == "This changes the copies of the deck's commander."
     out = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
     assert out["ok"] is False and out["error"] == "browser_required"
     assert ark.patches == []
@@ -687,6 +684,40 @@ async def test_a_lowered_count_on_a_commander_with_two_rows_waits_and_keeps_the_
         await b.aclose()
     rows = [c for c in ark.decks[42]["cards"] if c["card"]["oracleCard"]["name"] == AESI]
     assert [(c["quantity"], c["categories"]) for c in rows] == [(1, ["Commander"])]
+
+
+async def test_the_commander_zone_keeps_the_new_count_and_the_maybeboard_row_stays(stack: Stack) -> None:
+    """The commander-stays text is what the write does: the card's other rows in the deck go, its
+    commander-zone row takes the new count (more copies than before when other rows held them),
+    and its Maybeboard row is left alone."""
+    h, ark = stack.h, stack.ark
+    _second_commander_row_first(ark)
+    deck = ark.decks[42]
+    next(c for c in deck["cards"] if c["categories"] == ["Creatures"])["quantity"] = 2  # 3 in all
+    ark.add_side_row(42, AESI)
+    token = await linked_user(stack)
+    await _set_mode(h, "auto")
+    change = {"action": "set_quantity", "card_name": AESI, "quantity": 2}
+    p = structured(await call(h, token, "propose_deck_changes", {"deck_id": "42", "changes": [change]}))
+    stays = f"{AESI} stays in the commander zone, now with 2 copies. Its other rows in the deck are removed."
+    assert stays in p["diff"].splitlines(), p["diff"]
+    b = Browser(h)
+    try:
+        await b.login()
+        r = await b.http.post(
+            f"/api/v1/proposals/{p['proposal_id']}/apply",
+            headers={"X-CSRF-Token": await b.csrf()},
+            json={"version": p["version"]},
+        )
+        assert r.status_code == 200 and r.json()["state"] == "applied", r.text
+    finally:
+        await b.aclose()
+    rows = sorted(
+        (c["quantity"], c["categories"])
+        for c in ark.decks[42]["cards"]
+        if c["card"]["oracleCard"]["name"] == AESI
+    )
+    assert rows == [(1, ["Maybeboard"]), (2, ["Commander"])], rows
 
 
 @pytest.mark.parametrize("name", ["commander", "COMMANDER"])
