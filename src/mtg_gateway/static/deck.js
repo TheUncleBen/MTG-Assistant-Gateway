@@ -222,7 +222,7 @@
     opts = opts || {};
     if (saving) return Promise.reject(new Error("Another change is still saving; one moment."));
     saving = true;
-    var body = opts.proposalId ? { proposal_id: opts.proposalId } : { changes: changes, confirmed: opts.confirmed === true };
+    var body = opts.proposalId ? { proposal_id: opts.proposalId, version: opts.version } : { changes: changes, confirmed: opts.confirmed === true };
     return api(editUrl, body).then(function (d) {
       if (d.ok && d.applied) {
         saving = false;
@@ -233,7 +233,7 @@
         saving = false;
         return askConfirm(d.why, d.proposal_id).then(function (yes) {
           if (!yes) { var c = new Error("Nothing was changed."); c.cancelled = true; throw c; }
-          return saveEdit(changes, undoChanges, { proposalId: d.proposal_id, replay: opts.replay, note: opts.note });
+          return saveEdit(changes, undoChanges, { proposalId: d.proposal_id, version: d.version, replay: opts.replay, note: opts.note });
         });
       }
       saving = false;

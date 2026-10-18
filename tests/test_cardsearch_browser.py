@@ -289,6 +289,48 @@ def test_add_to_deck_from_the_card_page_saves_through_the_edit_endpoint(
     assert rows and rows[0]["quantity"] == 2 and rows[0]["categories"] == ["Ramp"], rows
 
 
+def test_save_anyway_in_the_add_dialog_sends_the_version_it_was_asked_about(server: Server) -> None:
+    """An add under Commander asks first; Save anyway answers with the proposal's version, which
+    the edit endpoint requires, and the card is added."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium()
+    sid = _link(server)
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, 1366, "light", exe)
+        bodies: list = []
+        page.on(
+            "request",
+            lambda r: (
+                bodies.append(r.post_data_json) if r.method == "POST" and r.url.endswith("/edit") else None
+            ),
+        )
+        page.goto(f"{server.base}/cards?q=sol", wait_until="networkidle")
+        page.locator("button[data-add]").nth(1).click()
+        page.locator(".addsheet.open").wait_for(timeout=3000)
+        page.wait_for_function("() => document.querySelectorAll('#ad-deck option').length >= 3", timeout=5000)
+        page.evaluate(
+            "() => { const s = document.getElementById('ad-deck'); s.value = '42';"
+            " s.dispatchEvent(new Event('change', {bubbles: true})); }"
+        )
+        page.wait_for_function("() => document.querySelectorAll('#ad-cat option').length >= 2", timeout=5000)
+        page.evaluate(
+            "() => { const s = document.getElementById('ad-cat'); s.value = 'Commander';"
+            " s.dispatchEvent(new Event('change', {bubbles: true})); }"
+        )
+        page.locator(".addsheet.open button[type=submit]").click()
+        yes = page.locator(".addsheet.open button", has_text="Save anyway")
+        yes.wait_for(timeout=8000)
+        yes.click()
+        page.locator(".cards-toast").wait_for(timeout=8000)
+        assert errors == [], errors
+        browser.close()
+    assert len(bodies) == 2 and set(bodies[1]) == {"proposal_id", "version"}, bodies
+    assert isinstance(bodies[1]["version"], int)
+    rows = [c for c in server.ark.decks[42]["cards"] if c["card"]["oracleCard"]["name"] == "Sol Talisman"]
+    assert rows and rows[0]["categories"] == ["Commander"], rows
+
+
 def test_with_writes_off_the_add_is_kept_for_review_and_nothing_is_written(server: Server) -> None:
     from playwright.sync_api import sync_playwright
 

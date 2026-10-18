@@ -782,7 +782,7 @@
         var no = el("button", "", "No"); no.type = "button";
         msg.appendChild(document.createTextNode(" "));
         msg.appendChild(yes); msg.appendChild(document.createTextNode(" ")); msg.appendChild(no);
-        yes.addEventListener("click", function () { save({ proposal_id: d.proposal_id }); });
+        yes.addEventListener("click", function () { save({ proposal_id: d.proposal_id, version: d.version }); });
         no.addEventListener("click", function () {
           api("POST", "/api/v1/proposals/" + enc(d.proposal_id) + "/reject", {}).catch(function () {});
           setMsg("Nothing was changed.");
