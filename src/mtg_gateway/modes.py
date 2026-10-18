@@ -92,8 +92,9 @@ def low_risk_text(max_rows: int = DEFAULT_MAX_ROWS) -> str:
     """Which proposals are low risk (risk_of), as one sentence."""
     return (
         f"A small edit to an existing deck or to your collection: at most {_rows(max_rows)}, each "
-        f"{LOW_RISK_CHANGES}, no more than {MAX_COPIES_PER_ROW} copies a row and never the "
-        "commander; and a private copy of a deck (a clone), which changes nothing that exists."
+        f"{LOW_RISK_CHANGES}, no more than {MAX_COPIES_PER_ROW} copies a row, never a change to which "
+        "cards are the commanders, and never fewer copies of a commander that has other rows; and a "
+        "private copy of a deck (a clone), which changes nothing that exists."
     )
 
 
@@ -134,7 +135,8 @@ def mode_help(mode: str, *, max_rows: int = DEFAULT_MAX_ROWS, big_rows: int = DE
         return (
             "Your assistant applies low-risk changes itself: a small edit to a deck or your collection "
             f"(at most {_rows(max_rows)}, each {LOW_RISK_CHANGES}, no more than {MAX_COPIES_PER_ROW} "
-            "copies each, never the commander) and a private copy of a deck (a clone, which changes "
+            "copies each, never a change to which cards are the commanders or fewer copies of a "
+            "commander that has other rows) and a private copy of a deck (a clone, which changes "
             "nothing that exists). A new deck built from a list, restores, deck details, commander "
             f"changes, bigger edits, and anything on your Archidekt account ({ACCOUNT_ACTIONS_TEXT}) "
             "or deleting a deck still wait for your press. So does a held change, a change waiting for "
