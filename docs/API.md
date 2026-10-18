@@ -50,6 +50,7 @@ code and a human `message`:
 | `other_account` | 409 | a new-deck proposal was made for another Archidekt account than the one linked now |
 | `other_client` | 403 | the proposal was made by another connected app (or, for reject, in the browser); use the review page (`review_url` is included) |
 | `not_linked` | 409 | no Archidekt account linked yet; send the user to `/account` |
+| `changed` | 409 | the proposal changed since the page showed it (the `version` sent is out of date); `review_url` and the current version are included |
 | `not_pending` / `already_applied` / `stale` | 409 | the proposal cannot be applied in its current state |
 | `rate_limited` | 429 | the Archidekt pacer is busy, the member's Archidekt budget (`MTG_ARCHIDEKT_CALLS_PER_10_MIN`) is used up, too many failed link attempts, or too many pending proposals (100 per member) |
 | `unavailable` | 503 | Archidekt or Mystic Forge is unreachable |
@@ -72,7 +73,7 @@ Request bodies are JSON objects of at most 2 MB.
 | `GET /api/v1/proposals?state=` | The user's proposals, optionally filtered by state |
 | `POST /api/v1/proposals` | Create a proposal (see kinds below). Answers `201` with the proposal, its `diff` and `review_url`. The browser session may add `apply: true` and `archidekt_backup: false` (skip the extra backup copy on Archidekt for that save; the gateway's own snapshot is always kept) |
 | `GET /api/v1/proposals/{pid}` | One proposal with `state`, `diff`, `changes`, `snapshot_id`, `result`, `next_step` |
-| `POST /api/v1/proposals/{pid}/apply` | Apply it. A change to one of the member's existing decks gets a snapshot, an Archidekt backup copy, a re-check, the write and a check by reading it back; a new deck, a clone or a collection change is written and then read back. A bearer caller applies only what the member's approval mode allows (`manual`: nothing, `browser_required`; `semi`: low-risk proposals; `auto`: everything except what Full auto still leaves to the member, listed in OPERATIONS.md under Approval modes), judged inside the apply; the in-chat card uses the `confirm_proposal` MCP tool instead, not this route. An Archidekt account action (a proposal of kind `action`) is never applied here, with a bearer token or the browser session: `403 browser_required` with its `review_url` and `risk` (only the member's own press applies one, with Apply on the review page or Approve on the in-chat card; a deck deletion, and an edit of a comment that has formatting, only on the review page) |
+| `POST /api/v1/proposals/{pid}/apply` | Apply it. A change to one of the member's existing decks gets a snapshot, an Archidekt backup copy (with backups on), a re-check, the write and a check by reading it back; a new deck, a clone or a collection change is written and then read back. A bearer caller applies only what the member's approval mode allows (`manual`: nothing, `browser_required`; `semi`: low-risk proposals; `auto`: everything except what Full auto still leaves to the member, listed in OPERATIONS.md under Approval modes), judged inside the apply. The browser session must send `{"version": n}`, the version of the proposal the page showed: without it `400 invalid` ("Send the version of the proposal the page showed."), with one that isn't a whole number `400 invalid` ("version must be a whole number."), and with an older one `409 changed` with `review_url` and the current version. A bearer caller may send the version too and gets the same `409 changed` when it is out of date, but needn't. Another member's proposal is `404 not_found`, checked first. The in-chat card uses the `confirm_proposal` MCP tool instead, not this route. An Archidekt account action (a proposal of kind `action`) is never applied here, with a bearer token or the browser session: `403 browser_required` with its `review_url` and `risk` (only the member's own press applies one, with Apply on the review page or Approve on the in-chat card; a deck deletion, and an edit of a comment that has formatting, only on the review page) |
 | `POST /api/v1/proposals/{pid}/reject` | Mark a pending proposal rejected. A bearer caller can reject only proposals its own app made; others answer `other_client` |
 | `GET /api/v1/snapshots?deck_id=` | Deck snapshots taken before applies (and on demand) |
 | `GET /api/v1/snapshots/{sid}` | One snapshot with the full deck as it was |
@@ -155,7 +156,7 @@ a bearer token. They answer `401` without a browser session, and `404` to signed
 - `clone`: `{"deck_id", "name"?}` copies one of your decks into a new private deck ("Copy of - …" by
   default), the way Archidekt's Clone deck button does.
 
-Nothing changes on Archidekt until the proposal is applied, and every apply takes a snapshot first.
+Nothing changes on Archidekt until the proposal is applied, and an apply to one of the member's existing decks takes a snapshot first.
 
 ## Companion pages
 

@@ -75,7 +75,9 @@ One deck:
 - On your own deck, **drag a card** onto another category: with a mouse, or
   press and hold on a touch screen and slide. The move goes to Archidekt
   when you let go, with a snapshot taken first, as a change from the card
-  menu or **Select cards** does.
+  menu or **Select cards** does. Dragging a card into the commander
+  stack first asks "This changes the deck's commander. Save
+  anyway?".
 - **Undo** and **Redo** (beside **Select cards**, and **Undo** on the
   message after each save) take back or redo any of those changes, each a
   save of its own; the editor's keys work too: Ctrl+Z, and Ctrl+Shift+Z or
@@ -331,7 +333,7 @@ settings change, restore or collection change is first saved as a
 **proposal**: the exact list of what would change. Approve it on the card
 in the chat or on the review page, or pick an approval mode on your Account
 page (Manual, Semi-auto for small deck or collection edits and copies of a deck, Full auto) and the
-assistant applies what that mode allows, always with a snapshot.
+assistant applies what that mode allows, with a snapshot first for a change to one of your decks. A change to a deck's commander always waits for your press.
 
 - **Proposals** lists what is waiting. Open one to read the diff and press
   **Apply** or **Reject**.
