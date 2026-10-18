@@ -656,16 +656,16 @@ default, and an install that leaves it off behaves exactly as before.
   number the machine holds (in these measurements, 2 in 1536M and 2 CPUs, not 3).
   `FORGE_GAME_SECONDS` (default 240, four minutes) is how long one game may run before Forge calls
   it a draw; such games are counted as draws in the report. Forge reads a card's rules only when a
-  game needs that card, which roughly halves each Java start (measured 7 s to 3 s on a 4-CPU PC);
-  `FORGE_LAZY_CARDS=0` makes it read them all at start again.
+  game needs that card, which roughly halves each Java start (measured 7 s to 3 s on a 4-CPU PC).
+  This is fixed in the Forge image.
 - **Memory where Docker can't cap it:** on Raspberry Pi OS the kernel's memory controller is off by
   default, so Docker drops the stack's `FORGE_MEMORY_LIMIT` and nothing caps Forge's memory. Forge
   then guards its own memory from inside, with nothing to change on the machine: the stack also
   passes `FORGE_MEMORY_LIMIT` as `FORGE_MEMORY_BUDGET`, which sizes the games at once when no limit
-  can be read; each Java gets a ceiling on its class data on top of `FORGE_XMX`
-  (`FORGE_MAX_METASPACE`, default `256m`); and each Java runs with an out-of-memory score of
-  `FORGE_OOM_SCORE_ADJ` (default 1000), so if the machine runs out of memory while Forge plays, the
-  kernel stops a Forge game before the gateway or other services. These keep Forge in bounds, but
+  can be read; each Forge game gets a cap on its extra Java memory for loaded code, on top of
+  `FORGE_XMX` (`FORGE_MAX_METASPACE`, default `256m`); and `FORGE_OOM_SCORE_ADJ` (default 1000)
+  sets how readily the kernel stops a Forge game, so if the machine runs out of memory while Forge
+  plays, the kernel stops a Forge game before the gateway or other services. These keep Forge in bounds, but
   they are not a hard limit as the kernel's memory controller is.
 - **More than one machine** (optional; one copy is the default): the gateway can use several
   copies of the Forge service, for example a Pi and an x86 PC, each playing whole runs.
@@ -738,7 +738,8 @@ yet picked up.
   member's topic; past those it answers `503 busy` and `429`, and the app tries again by itself.
   These values are fixed, not settings: the ntfy limits are written into the ntfy service in the
   stack files, and the gateway's limits, the 25-second keepalive and the 12 hours ntfy keeps
-  messages are fixed too. The ntfy limits must stay above the gateway's 200 connections.
+  messages are fixed too. ntfy's subscription limit (250) is set above the gateway's 200
+  connections on purpose.
 
 ## Environment reference
 
@@ -754,10 +755,11 @@ itself:
 | `MTG_NETWORK_NAME` | `mtg-gateway` | The overlay network from step 1. Must exist before you deploy and match its name exactly (case-sensitive) |
 | `TIMEZONE` | `UTC` | Passed to the containers as `TZ` |
 
-**Gateway settings.** Read by the gateway. The stack file and the Compose
-file pass every one marked *stack*, and both example env files list each of
-them. The ones marked *fixed* are not settings: the stack file or the image
-sets them, so leave them as they are.
+**Gateway settings.** Read by the gateway. The ones marked *stack* are
+passed by the stack file and the Compose file and listed in their example env
+files. `FORGE_REPLICAS`, `FORGE_NODE` and `MTG_NODE` are Swarm-only. The ones
+marked *fixed* are not settings: the stack file or the image sets them, so
+leave them as they are.
 
 Since 0.7.29 most of the tuning settings below can also be changed by an
 admin on the gateway's Settings page (`/admin/settings`, see
@@ -772,9 +774,9 @@ value. Leave it out to manage it on the page.
 | `MTG_PUBLIC_URL` | yes, *stack* | | Public https URL, no path |
 | `MTG_OIDC_ISSUER` | yes, *stack* | | Identity provider issuer URL |
 | `MTG_OIDC_CLIENT_ID` | yes, *stack* | | OIDC client ID |
-| `MTG_OIDC_CLIENT_SECRET_FILE` | yes, *stack* | | File holding the OIDC client secret (`/run/secrets/mtg_oidc_client_secret`) |
-| `MTG_FERNET_KEY_FILE` | yes, *stack* | | File holding the encryption key (`/run/secrets/mtg_fernet_key`) |
-| `MTG_SESSION_SECRET_FILE` | yes, *stack* | | File holding a random secret of 32+ characters (`/run/secrets/mtg_session_secret`) |
+| `MTG_OIDC_CLIENT_SECRET_FILE` | yes, *fixed* | | File holding the OIDC client secret (`/run/secrets/mtg_oidc_client_secret`). Set by the stack file to the Docker secret's path; not a setting |
+| `MTG_FERNET_KEY_FILE` | yes, *fixed* | | File holding the encryption key (`/run/secrets/mtg_fernet_key`). Set by the stack file to the Docker secret's path; not a setting |
+| `MTG_SESSION_SECRET_FILE` | yes, *fixed* | | File holding a random secret of 32+ characters (`/run/secrets/mtg_session_secret`). Set by the stack file to the Docker secret's path; not a setting |
 | `MTG_OIDC_SCOPES` | no, *stack* | `openid profile email offline_access` | Scopes requested from the identity provider, used exactly as set. Keep `offline_access` in it: the provider's refresh token is what lets the gateway keep checking membership. Leave it out only for a provider that refuses it; members then sign in again whenever the provider's access token runs out |
 | `MTG_OIDC_PREVIOUS_ISSUERS` | no, *stack* | | Only when you move the identity provider to a new address: the old issuer URL(s), comma separated, with `MTG_OIDC_ISSUER` set to the new one. Members whose account was created under an old address are moved to the new one at their next sign-in. Anyone else signing in with a different issuer than their account was created with is refused, so a second provider can't take over accounts |
 | `MTG_MEMBERSHIP_CHECK_TTL` | no, *stack* | `5` | Before serving any request with a browser session or a gateway token, the gateway asks the identity provider's userinfo endpoint whether the person is still in `MTG_REQUIRED_GROUP` (and `MTG_ADMIN_GROUP`). The answer is reused for this many seconds, which is the longest a removed member can keep going. `0` asks on every request; 0 to 60. If the provider can't be reached, requests get 503 and nothing is revoked |
@@ -785,8 +787,8 @@ value. Leave it out to manage it on the page.
 | `MTG_AUTHENTIK_API_URL` | no, *stack* | the scheme and host of `MTG_OIDC_ISSUER` | Where the clean-up reaches Authentik's API. https only |
 | `MTG_OIDC_GROUPS_CLAIM` | no, *stack* | `groups` | Dot-path to the group list in the ID token (or userinfo) claims. Authentik: `groups`; Keycloak: `realm_access.roles`; Zitadel: `urn:zitadel:iam:org:project:roles` (a dict whose keys are the role names also works; a key whose value is empty or `false` does not count). The whole value is tried as one claim name first, so Auth0-style `https://example.com/groups` works too. Names are compared exactly, with no trimming. A missing or differently shaped claim means no groups, so `MTG_REQUIRED_GROUP` refuses the sign-in |
 | `MTG_OIDC_TOKEN_AUTH_METHOD` | no, *stack* | `client_secret_post` | How the gateway sends its client secret to the token endpoint: `client_secret_post` (in the form body) or `client_secret_basic` (HTTP Basic header). Match what the client is configured for in the identity provider |
-| `MTG_DATA_DIR` | no, *stack* | `/data` | Where the SQLite database lives. In the stack, the variable is the folder on the host, mounted at `/data` |
-| `MTG_BACKUP_DIR` | no, *stack* | `/backups` in the image | Where nightly backups go; empty turns them off. In the stack, the folder on the host, mounted at `/backups` |
+| `MTG_DATA_DIR` | yes with Swarm, *stack* | `/data` | Where the SQLite database lives. In the stack, the variable is the folder on the host, mounted at `/data` |
+| `MTG_BACKUP_DIR` | yes with Swarm, *stack* | `/backups` in the image | Where nightly backups go; empty turns them off. In the stack, the folder on the host, mounted at `/backups` |
 | `MTG_BACKUP_HOUR_UTC` | no, *stack* | `3` | Hour (UTC) of the nightly backup, 0 to 23 |
 | `MTG_BACKUP_KEEP_DAYS` | no, *stack* | `14` | How many days of backups to keep, 1 to 3650 |
 | `MTG_BACKUP_COPY_DIR` | no, *stack* | empty (no second copy) | A host folder (another disk, or storage every node mounts at the same path) that every backup is also copied to and pruned the same way. It must already exist on `MTG_NODE`. The stack mounts it at `/backup-copy`; left empty it mounts `/dev/null` there and nothing is copied. A failed copy is logged and shown on the admin page. See [OPERATIONS.md](OPERATIONS.md#backups) |
@@ -804,7 +806,7 @@ value. Leave it out to manage it on the page.
 | `FORGE_REPLICAS`, `FORGE_NODE` | no, *stack* | `0`, empty | Copies of the Forge service, and the node they run on. `0` leaves Forge off; `1` with `FORGE_NODE` is the usual setup. For copies on several machines, place them by a node label instead of `FORGE_NODE` (see "More than one machine" in the Forge section above) |
 | *(node label)* `mtg-forge=true` | no | none | Only for Forge copies on several machines: label each machine (`docker node update --label-add mtg-forge=true <node>`) and place the Forge service by `node.labels.mtg-forge == true` instead of `FORGE_NODE` (see "More than one machine" in the Forge section above) |
 | `MTG_FORGE_PARALLEL_GAMES` | no, *stack* | `4` | How many of a report's Forge games the gateway asks Forge to play at once (1 to 4). `FORGE_MAX_PARALLEL` caps it for all runs together. Also on the Settings page |
-| `FORGE_MAX_METASPACE`, `FORGE_OOM_SCORE_ADJ` | no, *stack* | `256m`, `1000` | On the Forge service: each Java's ceiling on its class data on top of `FORGE_XMX`, and its out-of-memory score, 1 to 1000 (1000: the kernel stops a Forge game first when the machine runs out of memory; 0 turns this off; any other value is left out and Forge's log says why) |
+| `FORGE_MAX_METASPACE`, `FORGE_OOM_SCORE_ADJ` | no, *stack* | `256m`, `1000` | On the Forge service: each Forge game's extra Java memory for loaded code (on top of `FORGE_XMX`), and how readily the kernel stops a Forge game when the machine runs out of memory, 1 to 1000 (1000: Forge goes first; 0 turns this off; any other value is left out and Forge's log says why) |
 | `FORGE_MAX_PARALLEL` | no, *stack* | empty | On the Forge service: the most games Forge plays at once, for all runs together (1 to 4). Empty: one per 2 CPUs and 1.2 GB of the container's limits (see the Forge section above) |
 | `FORGE_IMAGE`, `FORGE_TAG` | no, *stack* | `ghcr.io/theuncleben/mtg-assistant-forge`, `2.0.15-mag3` | The Forge image and its version. The stack file names one exact Forge version, which changes only when you deploy a newer stack file. Leave these out to use it; set `FORGE_TAG` only to pin Forge on purpose, and it then stays on that version even when the stack file moves on |
 | `FORGE_XMX` | no, *stack* | `1g` | The Java heap limit (`-Xmx`) of each Forge game |
@@ -852,7 +854,7 @@ value. Leave it out to manage it on the page.
 | `MTG_APP_DIR` | no, *stack* | `/usr/share/mtg-gateway/app` | Folder holding the Android app (`mtg-assistant-gateway.apk` and `mtg-assistant-gateway.json`) that `/app` hands out; the release build puts it in the image, see [ANDROID.md](ANDROID.md) |
 | `MTG_ANDROID_ASSETLINKS` | no, *stack* | empty (an empty list is served) | The Android App Links statement list served at `/.well-known/assetlinks.json`, as one JSON list (the whole `assetlinks.json` content, starting with `[`). Anything that isn't valid JSON, or isn't a list, stops the gateway at startup with a config error. Only needed if you build the app's App Links flavor for this gateway ([ANDROID.md](ANDROID.md#12-app-links-opening-gateway-links-in-the-app)) |
 | `MTG_ANDROID_PACKAGE` | no, *stack* | `local.mtgassistantgateway.app` | The Android app's package ID, which the browser sign-in hands back to ([ANDROID.md](ANDROID.md#13-privacy-and-security-notes)). Change it only if you build the app with another package ID ([ANDROID.md](ANDROID.md#11-the-package-id)); anything that isn't a package ID stops the gateway at startup with a config error |
-| `PUID`, `PGID` | yes, *stack* | | User and group the process runs as |
+| `PUID`, `PGID` | yes with Swarm (Compose: `1000`), *stack* | | User and group the process runs as |
 
 The card scanning settings (`MTG_SCAN_*`) are listed in
 [SCANNING.md](SCANNING.md#operator-notes).

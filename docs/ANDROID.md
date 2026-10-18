@@ -162,7 +162,8 @@ For operators whose image has no app, or who build their own:
            read_only: true
    ```
 
-   and set `MTG_APP_DIR=/app-dist` in the stack's environment variables. Redeploy the stack.
+   and set `MTG_APP_DIR=/app-dist` in your variables (Portainer's variables, `mtg.env`, or `.env`
+   with Docker Compose). Redeploy.
 4. Open `/app` signed in: it now shows the version, checksums and the
    download button. If you built the app yourself, give your users your
    signing certificate SHA-256 some way other than the gateway (step 1 of

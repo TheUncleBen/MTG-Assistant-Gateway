@@ -236,8 +236,9 @@ copies that to `/usr/share/mtg-gateway/plugin`, so a new image brings new
 skill text and a new plugin archive at `/plugin/mtg-gateway.zip` (or `/plugin/<slug of MTG_SERVER_NAME>.zip`).
 
 To serve your own edited copy without rebuilding, mount a folder with the
-same layout (`mtg-gateway/` inside it) into the gateway and set
-`MTG_PLUGIN_DIR` to its path in your environment variables. The `/skill`
+same layout (`mtg-gateway/` inside it) into the gateway (a `volumes:` entry
+in the stack or Compose file) and set `MTG_PLUGIN_DIR` to its path inside the
+container in your variables. The `/skill`
 page, `/install` and the plugin marketplace all read from there.
 
 ## Backups

@@ -62,9 +62,10 @@ services:
       - mtg_oidc_client_secret
       # - mtg_authentik_api_token
       - mtg_ntfy_token
-    # A setting passed as ${MTG_X:-} (empty unless your env sets it) is one an admin changes on
-    # the gateway's Settings page (/admin/settings), which starts from the gateway's default. A
-    # value set in your env wins and locks the setting: the page shows it greyed out with its value.
+    # Most settings passed as ${MTG_X:-} (empty unless your env sets it) are also on the gateway's
+    # Settings page (/admin/settings), which starts from the gateway's default; .env.example says
+    # which. A value set in your env wins and locks it: the page shows it greyed out with its
+    # value.
     environment:
       MTG_PUBLIC_URL: ${MTG_PUBLIC_URL:?PUBLIC HTTPS URL REQUIRED e.g. https://mtg.example.com}
       MTG_OIDC_ISSUER: ${MTG_OIDC_ISSUER:?OIDC ISSUER URL REQUIRED}
@@ -160,6 +161,8 @@ services:
       MTG_PLUGIN_DIR: ${MTG_PLUGIN_DIR:-}
       MTG_APP_DIR: ${MTG_APP_DIR:-}
       MTG_SCRYFALL_LOOKUP_INTERVAL: ${MTG_SCRYFALL_LOOKUP_INTERVAL:-}
+      # Archidekt API base. Leave the default; the end-to-end tests point it at a local mock.
+      MTG_ARCHIDEKT_BASE: ${MTG_ARCHIDEKT_BASE:-https://archidekt.com/api}
       # Card scanning: name matching, reading and glare thresholds, and the artwork check
       # (docs/SCANNING.md). A change applies after the gateway restarts.
       MTG_SCAN_FUZZY_MIN_SIMILARITY: ${MTG_SCAN_FUZZY_MIN_SIMILARITY:-}
@@ -366,8 +369,9 @@ services:
       # Forge games played at once at most (1 to 4); empty: as many as the container's CPUs and
       # memory fit (about 2 CPUs and 1.2 GB a game), so 1 inside the default limits
       FORGE_MAX_PARALLEL: ${FORGE_MAX_PARALLEL:-}
-      # Each Java's ceiling on its class data on top of FORGE_XMX, and its out-of-memory score
-      # (1000: the kernel stops a Forge game first when the machine runs out of memory; 0 = off)
+      # Each Forge game's extra Java memory for loaded code (on top of FORGE_XMX), and how readily
+      # the kernel stops a Forge game when the machine runs out of memory (1000: Forge goes first;
+      # 0 = off)
       FORGE_MAX_METASPACE: ${FORGE_MAX_METASPACE:-256m}
       FORGE_OOM_SCORE_ADJ: ${FORGE_OOM_SCORE_ADJ:-1000}
       PUID: ${PUID:-1000}
