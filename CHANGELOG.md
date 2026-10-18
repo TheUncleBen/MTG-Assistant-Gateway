@@ -7,6 +7,46 @@ Notable changes for people who run or use the gateway. The format follows
 with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 (`release/1.2.3`); `latest` is always the newest.
 
+## [0.7.32] - unreleased
+
+The example settings files now list every variable the stack files read, each marked required or
+optional, and the stack files now pass every setting on the Settings page to the gateway.
+
+### Upgrade notes
+- From 0.7.31: the stack file and the Compose file changed, so take the new ones as the update
+  steps describe ([docs/UPGRADING.md](docs/UPGRADING.md)). Your env file keeps working as it is.
+  If your environment already sets one of the settings listed under Fixed below, that value now
+  reaches the gateway and locks the setting on the Settings page; remove it from your environment
+  to keep managing that setting on the page.
+
+### Changed
+- `deploy/stack.env.example` and `deploy/compose/.env.example` list every variable their stack
+  file reads (the Compose example also lists the proxy overrides' variables), each with the value
+  used when it isn't set. Each note says whether the variable is required or optional, and for an
+  optional one, whether it is on the Settings page when the file doesn't set it. Setting one of
+  those in the file locks it there. Newly listed, all commented out: `MTG_NTFY_URL`,
+  `MTG_NTFY_TOKEN_FILE`, the settings below, `MTG_ANDROID_PACKAGE`, `MTG_ANDROID_ASSETLINKS`,
+  `MTG_PLUGIN_DIR`, `MTG_APP_DIR`, `FORGE_MAX_METASPACE` and `FORGE_OOM_SCORE_ADJ`. The stack
+  files now pass the last six too, so they can be set from the environment without editing the
+  stack file.
+- The Forge image notes in the examples and the environment reference now say that the stack file
+  names one exact Forge version, which changes only when you deploy a newer stack file, and that
+  setting `FORGE_TAG` pins Forge on purpose. `FORGE_XMX` is described as each Forge game's Java
+  memory.
+- The notifications section of [docs/DEPLOY.md](docs/DEPLOY.md) no longer names ntfy's per-visitor
+  limits as if they were settings. It says which values there are fixed and that
+  `NTFY_MEMORY_LIMIT` is the one setting.
+
+### Fixed
+- 21 settings on the Settings page couldn't be set from the environment, although the guides said
+  they could: the stack files didn't pass them to the gateway, so a value in your environment
+  did nothing. They are the approvals' big-edit rows and proposal expiry
+  (`MTG_AUTO_BIG_EDIT_ROWS`, `MTG_PROPOSAL_EXPIRY_DAYS`), the backup copies kept, the backup
+  box's default and the restore points per deck (`MTG_ARCHIDEKT_BACKUP_COPIES`,
+  `MTG_ARCHIDEKT_BACKUP_BOX_DEFAULT`, `MTG_SNAPSHOTS_PER_DECK`), Forge games at once
+  (`MTG_FORGE_PARALLEL_GAMES`) and the 15 card scanning settings (`MTG_SCAN_*`). Both stack files
+  now pass them, empty unless your environment sets them.
+
 ## [0.7.31] - 2026-10-18
 
 A documentation release: the example settings files are reorganised, and the guides are checked

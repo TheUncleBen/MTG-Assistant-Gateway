@@ -108,10 +108,10 @@ Worth a look:
 | `MTG_UPDATE_CHECK` | `true` | Admins see a notice when a newer release is out, with the update steps on the admin overview. The gateway never updates itself. `false` turns the check off |
 
 Every other variable is explained in `.env` and in the
-[environment reference](DEPLOY.md#environment-reference). A setting only
-reaches the gateway if `docker-compose.yml` lists it under the gateway's
-`environment:`; for one that isn't there yet, add a line there as well as in
-`.env`.
+[environment reference](DEPLOY.md#environment-reference). `.env.example`
+lists every variable `docker-compose.yml` and the proxy overrides read, and
+says for each one whether it is required or optional and whether it is on the
+Settings page when `.env` doesn't set it.
 
 Lines in `.env` that start `# MTG_` (the approval modes, `MTG_APPLY_IN_CHAT`,
 `MTG_UPDATE_CHECK` and the other tuning settings) are left to the gateway's
