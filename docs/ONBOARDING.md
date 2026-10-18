@@ -173,7 +173,9 @@ so:
      every time" to Semi-auto (small deck or collection edits up to the
      row limit, 5 card rows by default, each a card added or removed, or a
      new quantity, category, finish, printing, color tag or custom mana
-     value, no more than 4 copies a row, no commander change, and private
+     value, no more than 4 copies a row, never a change to which cards are
+     the commanders, never fewer copies of a commander that has another
+     row, and private
      copies of a deck) or Full auto (the rest too, except a restore, a
      commander change, a new deck, an edit of more than 20 rows, making
      a deck public or unlisted, and any edit of a description that has formatting,

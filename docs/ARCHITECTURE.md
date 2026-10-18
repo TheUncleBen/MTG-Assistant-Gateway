@@ -273,7 +273,9 @@ For the exact devices and plans tested, see
   default: ask every time), `semi` (the assistant may apply a low-risk edit
   itself: at most `MTG_AUTO_APPLY_MAX_ROWS` review rows of card adds,
   removes, quantity, category, finish, printing, color tag or custom mana
-  value changes of at most four copies each, no commander change; or a
+  value changes of at most four copies each, never a change to which cards
+  are the commanders and never fewer copies of a commander that has another
+  row; or a
   clone) or `auto` (the assistant may apply deck and collection changes,
   except those Full auto still leaves to the member, `modes.auto_waits`, and
   those that wait in every mode, `DeckService.press_reason` and
