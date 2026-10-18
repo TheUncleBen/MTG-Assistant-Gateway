@@ -50,7 +50,7 @@ MAX_CALL_SECONDS = 40.0  # wall-clock budget per resolve call, under proxy and c
 MIN_PREFIX = 4
 STATUSES = ("exact", "printing", "fuzzy", "ambiguous", "not_found", "deferred", "error", "conflict")
 MAX_NEWER = 3  # newer printings passed over for the default (previews, digital only) named on a result
-# one printing asked for by the picker (its own, N7): a set code and a collector number
+# one printing asked for by the picker (its own): a set code and a collector number
 _PRINT_SET = re.compile(r"[a-z0-9]{2,6}")
 _PRINT_NUMBER = re.compile(r"[A-Za-z0-9★†\-]{1,10}")
 
@@ -899,7 +899,7 @@ class ScanService:
         2015, future) and ``border`` (black, white, borderless, silver, gold) narrow the list and
         ``order`` (newest, oldest, cheapest) sorts it, on Scryfall's side; with ``oldest`` or
         ``cheapest`` the list keeps that order. An unknown value is ``invalid``. ``set_code`` with
-        ``number`` gives that one printing of the card (the picker's own, N7), or none.
+        ``number`` gives that one printing of the card (the picker's own), or none.
         """
         oid = str(oracle_id or "").strip().lower()
         if not re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", oid):

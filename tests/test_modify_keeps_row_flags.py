@@ -1,4 +1,4 @@
-"""A50: a change to a deck row sends the row's own companion and "flipped by default" flags, as
+"""A change to a deck row sends the row's own companion and "flipped by default" flags, as
 Archidekt's site does, so a category, quantity or finish change cannot clear them."""
 
 from mtg_gateway.archidekt import DeckCard
@@ -40,7 +40,7 @@ def test_the_deck_reader_takes_flipped_default():
 
 
 def test_a_new_commander_keeps_its_other_categories_commander_first():
-    """K10: Set as commander files the card under Commander as its primary category and keeps its
+    """Set as commander files the card under Commander as its primary category and keeps its
     other categories, as archidekt.com's "Set Commander as primary" does."""
     from mtg_gateway.archidekt import parse_deck
     from mtg_gateway.decks import category_plan_rows, parse_changes
@@ -65,7 +65,7 @@ def test_a_new_commander_keeps_its_other_categories_commander_first():
 
 def test_a_printing_change_keeps_the_flip_and_companion_flags():
     """A printing change is a remove plus an add: the add carries the old row's "flipped by
-    default" and companion flags, so a double-faced card set to show its back keeps that (M2)."""
+    default" and companion flags, so a double-faced card set to show its back keeps that."""
     import asyncio
 
     from mtg_gateway.archidekt import Deck
@@ -131,7 +131,7 @@ def test_a_restore_puts_the_flags_back():
 
 
 def test_a_card_with_commander_as_a_later_category_is_put_commander_first():
-    """K10 (review L12): a card that already has Commander, but not first, is rewritten with
+    """A card that already has Commander, but not first, is rewritten with
     Commander first, its other categories kept; the review shows it and the proposal is not
     refused as leaving the deck as it is. A card with Commander first already is left alone."""
     from mtg_gateway.archidekt import parse_deck
@@ -158,7 +158,7 @@ def test_a_card_with_commander_as_a_later_category_is_put_commander_first():
 
 
 def test_the_apply_check_sees_a_primary_category_archidekt_did_not_put_first() -> None:
-    """Set as commander asks for Commander first (K10): a re-read with the same categories in
+    """Set as commander asks for Commander first: a re-read with the same categories in
     another order, so a different primary, is a mismatch; secondaries in another order are not."""
     from mtg_gateway.archidekt import Deck
     from mtg_gateway.decks import _category_mismatches

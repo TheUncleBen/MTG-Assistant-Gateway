@@ -1,4 +1,4 @@
-"""The purge runs in short transactions and batches (0.7.29, leftover A8): it gives the same
+"""The purge runs in short transactions and batches (0.7.29): it gives the same
 result as one big transaction, but never holds the lock for its whole run."""
 
 from __future__ import annotations

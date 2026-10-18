@@ -1,4 +1,4 @@
-"""A58: what ChatGPT reads first. The server instructions put the safety rules in their first 512
+"""What ChatGPT reads first. The server instructions put the safety rules in their first 512
 characters (OpenAI's Apps SDK: "Keep the most important details in the first 512 characters"),
 the plugin's short description fits OpenAI's documented 30 characters, and the install page says
 that ChatGPT shows the name and description typed by hand and may not show the gateway's icon."""

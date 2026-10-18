@@ -5,7 +5,7 @@ preview printings until the switch shows them (labelled), never lists another la
 pages past Scryfall's page with Load more (filtered on Scryfall's side then). Hovering a tile
 shows the whole card; "Use this printing" saves at once through the deck edit endpoint, with
 Undo putting the old printing and finish back, and a printing not made in the card's finish
-moves the finish and the Saved message says so (P6). With writes off the change is kept as a
+moves the finish and the Saved message says so. With writes off the change is kept as a
 proposal. The deck editor's row menu and its add box use the same picker and queue the change.
 At 360, 673 and 1280 px in both themes nothing scrolls sideways, no control of the dialog is
 covered, text keeps 4.5:1 and touch controls are 44 px. The card menu opened near the bottom of
@@ -364,7 +364,7 @@ def test_change_printing_from_the_card_menu_saves_with_undo(server: Server) -> N
         page.mouse.move(640, 4)
         assert "Commander Legends" in page.locator(".pppreview h3").inner_text()
         assert page.locator(".pppreview .ppuse").is_disabled()
-        # search: set name or code; the card's current printing (CMR #472) always shows (N7), and
+        # search: set name or code; the card's current printing (CMR #472) always shows, and
         # the count line counts only what matches and says why it is there
         status = page.locator(".ppstatus")
         own = "The card's current printing is shown too."
@@ -462,7 +462,7 @@ def test_change_printing_from_the_card_menu_saves_with_undo(server: Server) -> N
             "confirmed": False,
         }
         assert page.locator(".printpick.open").count() == 0
-        # shown at once, then Saved: the message says the finish changed (P6)
+        # shown at once, then Saved: the message says the finish changed
         assert card.get_attribute("data-set") == "SLD 1074" and card.get_attribute("data-finish") == "Etched"
         toast = page.locator(".deck-toast .msg", has_text="Saved")
         toast.wait_for(timeout=8000)
@@ -471,7 +471,7 @@ def test_change_printing_from_the_card_menu_saves_with_undo(server: Server) -> N
             "Snapshot kept under History."
         )
         assert server.sol_ring() == [("sld", "1074", "Etched")]
-        # the row's set reads as the toast writes it (N15)
+        # the row's set reads as the toast writes it
         assert card.locator(".set").first.get_attribute("title") == "SLD #1074"
         assert card.locator(".set").inner_text() == "SLD" and card.locator(".finish").inner_text() == "E"
         assert page.url == url
@@ -599,7 +599,7 @@ def test_load_more_pages_and_filters_go_to_scryfall(tmp_path: Path) -> None:
             pages = [q for q in s.sf.print_searches if " set:" not in q["q"]]
             assert [q.get("page") for q in pages] == [None, "2", "3"]
             # the card's own printing, when page 1 didn't list it, was asked for once by set and
-            # number (N7)
+            # number
             own = [q for q in s.sf.print_searches if " set:" in q["q"]]
             assert [q["q"].split(" ", 1)[1] for q in own] in ([], ["set:cmr cn:472"])
             # a filter now: Scryfall filters all 30 (not only the pages read); the card's own
@@ -626,7 +626,7 @@ def test_load_more_pages_and_filters_go_to_scryfall(tmp_path: Path) -> None:
             assert last["order"] == "usd" and last["dir"] == "asc"
             assert _tiles(page)[0] == "4ED #325 · 1995"
             # oldest first: the card's own printing (2020) is not on the first page of 10; it is
-            # shown after that page's tiles, not counted, and the count line says so (B3)
+            # shown after that page's tiles, not counted, and the count line says so
             _choose(page, "Sort", "Oldest first")
             page.wait_for_function(
                 "() => document.querySelector('.ppstatus').innerText.includes('printing is shown too')"
@@ -762,7 +762,7 @@ def test_card_menu_near_the_bottom_keeps_move_to_usable(server: Server) -> None:
         page.set_viewport_size({"width": 1366, "height": 420})
         # the page closes an open menu on a resize, and the resize event can arrive after the
         # viewport call returns: wait for it (the new height, then one frame) before opening the
-        # menu, or the late event closes it (review 2 N2; the CI failure on 16fa4cf)
+        # menu, or the late event closes it
         page.wait_for_function("() => window.innerHeight === 420", timeout=3000)
         page.evaluate("() => new Promise(r => requestAnimationFrame(() => r()))")
         card.evaluate(
@@ -870,7 +870,7 @@ def test_picker_fits_reads_and_touches_at_every_size(server: Server, width: int,
             assert page.evaluate(SMALL) == []
             _shot(page, f"picker-filters-{width}-{theme}")
             page.locator(".printpick .ppfiltbtn").tap()
-        # a search the card's own printing doesn't match: it shows anyway, and the count says why (N7)
+        # a search the card's own printing doesn't match: it shows anyway, and the count says why
         page.locator("#pp-q").fill("secret")
         page.wait_for_timeout(100)
         assert "The card's current printing is shown too." in page.locator(".ppstatus").inner_text()

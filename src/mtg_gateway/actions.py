@@ -1,8 +1,8 @@
 """Archidekt account actions an assistant can propose (0.7.17): like or vote down a deck, bookmark
 it, follow its owner, post, edit, delete or vote on a comment, delete a deck and create a
 folder; 0.7.20 adds and removes a deck's collaborators. Each is a proposal of kind ``action``
-with one review row, so it goes through the same approval flow as every other write, but (R-142)
-only the member's own press applies one: on the in-chat card (0.7.29, Q8) or on the signed-in
+with one review row, so it goes through the same approval flow as every other write, but
+only the member's own press applies one: on the in-chat card (0.7.29) or on the signed-in
 review page (a deck deletion: the review page only), never the assistant, whatever the approval
 mode (modes.py). The work itself is the code the gateway's own pages already use (the deck page's social
 buttons in social.py, the delete and folder pages in decks.py), so a proposal does exactly what
@@ -25,7 +25,7 @@ if TYPE_CHECKING:
 
 ACCOUNT_TARGET = "account"  # deck_id of a proposal that is about the account, not one deck
 ACCOUNT_NAME = "Your Archidekt account"
-# A comment edit that keeps formatting (Q137) whose comment changed since its review: its
+# A comment edit that keeps formatting whose comment changed since its review: its
 # "needs a look" reason, in words (recheck.reason_text shows any other text as it is)
 COMMENT_CHANGED = (
     "The comment changed on Archidekt since this was reviewed, so it would not look as reviewed."
@@ -81,7 +81,7 @@ def _comment_text(text: Any) -> str:
 
     clean = comment_text(str(text or ""))
     if not clean:
-        raise DeckError("invalid", refusals.EMPTY_COMMENT)  # Q141 item 7A
+        raise DeckError("invalid", refusals.EMPTY_COMMENT)
     if len(clean) > MAX_COMMENT:
         raise DeckError("invalid", refusals.comment_too_long(MAX_COMMENT))
     return clean
@@ -160,7 +160,7 @@ async def collaborator_target(
 
 
 async def follow_target(decks: DeckService, sub: str, username: Any) -> tuple[int, str]:
-    """(user id, username) of the person to follow by name (Q141 item 6A): one Archidekt read,
+    """(user id, username) of the person to follow by name: one Archidekt read,
     through their public decks, which is the only lookup the gateway has, so someone with no
     public decks is not found."""
     want = clean_text(str(username or "")).lstrip("@")
@@ -169,7 +169,7 @@ async def follow_target(decks: DeckService, sub: str, username: Any) -> tuple[in
     found = await decks.user_profile(sub, want)
     name = clean_text(str((found or {}).get("username") or ""))
     if not found or not str(found.get("id") or "").isdigit() or name.casefold() != want.casefold():
-        # wording draft (WORDING-6): one text for follow and unfollow
+        # one text for follow and unfollow
         raise DeckError(
             "not_found",
             f"No Archidekt user called {want} with public decks was found. Check the spelling. The "
@@ -191,7 +191,7 @@ async def collaborator_by_hand(
         raise DeckError("invalid", "Pick add or remove.")
     # Before 0.7.24 this form made a proposal, which the writes switch held back; keep it so.
     if not decks.settings.writes_enabled:
-        raise DeckError("writes_disabled", refusals.WRITES_OFF)  # Q141 item 7A
+        raise DeckError("writes_disabled", refusals.WRITES_OFF)
     social = _social(decks)
     social._me(sub)
     deck = await decks.get_own_deck(sub, _clean_deck_id(str(deck_id or "")))
@@ -215,7 +215,7 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
     changes: dict[str, Any] = {"action": action}
     row: dict[str, Any] = {"action": action, "label": LABELS[action]}
     deck = None
-    # Q141 item 6A: follow or unfollow someone by username, not through one of their decks
+    # Follow or unfollow someone by username, not through one of their decks
     by_name = action == "follow" and params.get("username") is not None and not params.get("deck_id")
     if action != "create_folder" and not by_name:
         deck_id = _clean_deck_id(str(params.get("deck_id") or ""))
@@ -259,13 +259,12 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
             )
         state = await social.follow_state(sub, owner_id)
         if state["self"]:
-            raise DeckError("invalid", refusals.FOLLOW_SELF)  # Q141 item 7A
+            raise DeckError("invalid", refusals.FOLLOW_SELF)
         changes.update(user_id=owner_id, on=on)
         if by_name:
             changes["username"] = who
         row["text"] = ("Follow " if on else "Stop following ") + f"{who} on Archidekt"
         if state.get("unknown"):
-            # Q141 item 4A (wording draft, WORDING-4)
             row["text"] += " (the gateway could not check whether you already follow them)"
         elif state["following"] == on:
             row["text"] += " (already the case; applying changes nothing)"
@@ -292,7 +291,7 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
         row["before_text"] = found["text"]
         if action == "comment_vote":
             if own:
-                raise DeckError("invalid", refusals.OWN_COMMENT_VOTE)  # Q141 item 7A
+                raise DeckError("invalid", refusals.OWN_COMMENT_VOTE)
             if found.get("archived"):
                 raise DeckError("invalid", refusals.ARCHIVED_COMMENT)
             vote = _vote(params.get("vote"))
@@ -304,18 +303,18 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
             }[vote] + f" {found['owner']['username'] or 'a'}'s comment on the deck {where}"
         else:
             if not own:
-                raise DeckError("forbidden", refusals.NOT_OWN_COMMENT)  # Q141 item 7A
+                raise DeckError("forbidden", refusals.NOT_OWN_COMMENT)
             if action == "comment_edit":
                 text = _comment_text(params.get("text"))
                 changes["text"] = text
                 row["after_text"] = text
-                # Q137: its bold text, links and pictures stay where their words did not change;
+                # Its bold text, links and pictures stay where their words did not change;
                 # the review page draws the result, and the edit is approved there
                 kept = formatting.keep_formatting(found.get("_doc"), text)
                 if kept is not None:
                     row["after_doc"], row["dropped_embeds"] = kept
                 elif text and formatting.is_formatted(found.get("_doc")):
-                    # E-2 for comments (review M-2): a rewrite that keeps none of it says what goes
+                    # as for descriptions: a comment rewrite that keeps none of its formatting says what goes
                     row["formatting_lost"] = True
                     row["dropped_embeds"] = formatting.embeds(found.get("_doc"))
                 row["text"] = f"Change your comment on the deck {where}"
@@ -335,7 +334,7 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
         info = await decks.folders(sub)
         inside = clean_text(str(params.get("inside") or ""))
         if inside:
-            shown = [f for f in info["folders"] if f["depth"] and not f.get("backup")]  # Q21
+            shown = [f for f in info["folders"] if f["depth"] and not f.get("backup")]
             hits = [f for f in shown if f["name"].casefold() == inside.casefold()]
             if len(hits) != 1:
                 names = ", ".join(f"'{f['name']}'" for f in shown) or "none"
@@ -346,7 +345,7 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
             parent = hits[0]
         else:
             parent = info["folders"][0]
-        # refused now, not only at apply, so the assistant can pick another name (B8 a)
+        # refused now, not only at apply, so the assistant can pick another name
         decks._not_the_backup_name(name, parent["depth"] + 1)
         siblings = [f["name"].casefold() for f in info["folders"] if f["parent"] == parent["id"]]
         if name.casefold() in siblings:
@@ -381,7 +380,7 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
     )
     decks._audit("proposal_created", sub=sub, detail={"proposal_id": pid, "kind": "action", "action": action})
     out = decks.describe(sub, pid)
-    # Q90: a comment given as a Quill document is posted as its words alone; the assistant (the
+    # A comment given as a Quill document is posted as its words alone; the assistant (the
     # only caller) is told when links, formatting or embeds were lost, so it does not claim them
     if action in ("comment_post", "comment_edit") and drops_formatting(params.get("text")):
         out["note"] = words_only_note("comment")
@@ -409,7 +408,7 @@ async def apply(
         )
         result = {"comment_id": out["comment"]["id"], "parent": out["parent"]}
     elif action == "comment_edit":
-        # Q137: the comment's formatting is kept as the review showed it (after_doc), or not sent
+        # The comment's formatting is kept as the review showed it (after_doc), or not sent
         reviewed = next((r for r in row.get("rows") or [] if r.get("kind") == "action"), {})
         try:
             out = await _social(decks).edit_comment(
@@ -435,10 +434,10 @@ async def apply(
     elif action == "delete_deck":
         deck = await decks.get_own_deck(sub, deck_id)
         if deck.fingerprint() != row["baseline_fingerprint"]:
-            raise needs_look_error(None)  # a deck deletion stays strict (K1): any change stops it
+            raise needs_look_error(None)  # a deck deletion stays strict: any change stops it
         try:
-            # progress: the snapshot and the backup copy are recorded as every apply's are (review
-            # L1), so a stop that changed nothing deletes the copy or queues its delete (Q77)
+            # progress: the snapshot and the backup copy are recorded as every apply's are,
+            # so a stop that changed nothing deletes the copy or queues its delete
             result = {
                 **(await decks.delete_deck(sub, deck_id, deck.name, progress=progress)),
                 "verified": True,

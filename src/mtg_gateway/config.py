@@ -35,7 +35,7 @@ def _env(name: str, default: str | None = None, *, required: bool = False) -> st
     value = os.environ.get(name)
     if value is not None and name in _managed_envs():
         # A setting the Settings page manages: a value of only spaces is unset, as for its lock
-        # (env_set), and spaces around a value are dropped (0.7.29 proofread).
+        # (env_set), and spaces around a value are dropped.
         value = value.strip()
     if value is None or value == "":
         if required and default is None:
@@ -267,17 +267,17 @@ class Settings:
     approval_mode_max: str = "auto"
     auto_apply_max_rows: int = 5
     # Auto mode: an edit changing more than this many rows is a big edit and waits for the
-    # member's press on the chat card (O8 "Over 20"). Read through LiveSettings.
+    # member's press on the chat card. Read through LiveSettings.
     auto_big_edit_rows: int = 20
-    # How many days a waiting change waits before it expires (Q27q, Q130). Read through
+    # How many days a waiting change waits before it expires. Read through
     # LiveSettings; proposal_ttl below is what proposals use until the approvals work switches.
     proposal_expiry_days: int = 7
     archidekt_base: str = "https://archidekt.com/api"
     archidekt_backups: bool = True
-    # Archidekt backup copies kept per deck (Q12, Q13) and local snapshots kept per deck (25 is
+    # Archidekt backup copies kept per deck and local snapshots kept per deck (25 is
     # db.SNAPSHOTS_KEEP_PER_DECK). Read through LiveSettings.
     archidekt_backup_copies: int = 10
-    # the deck editor's "Also keep a backup copy on Archidekt" box starts ticked (Q15: off)
+    # the deck editor's "Also keep a backup copy on Archidekt" box starts ticked (off)
     archidekt_backup_box_default: bool = False
     snapshots_per_deck: int = 25
     # A second folder every database backup is also copied to (another disk or a network share).
@@ -356,7 +356,7 @@ class Settings:
     ntfy_url: str | None = None
     ntfy_token: str | None = field(default=None, repr=False)
     # The MANAGED_SETTINGS keys the deployment set (a non-empty environment variable): those win
-    # over the admin Settings page, which shows them as set by the deployment (Q17, Q130).
+    # over the admin Settings page, which shows them as set by the deployment.
     env_set: frozenset[str] = frozenset()
 
     def grants_access(self, groups: list[str] | None) -> bool:
@@ -563,7 +563,7 @@ def load_settings() -> Settings:
         scan_art_images_per_hour=_int_env("MTG_SCAN_ART_IMAGES_PER_HOUR", 1500, lo=1, hi=36000),
         scan_art_max_galleries=_int_env("MTG_SCAN_ART_MAX_GALLERIES", 500, lo=1, hi=100000),
         scan_art_gallery_idle_days=_int_env("MTG_SCAN_ART_GALLERY_IDLE_DAYS", 180, lo=1, hi=3650),
-        # set = a value other than blanks; a blank (or only spaces) leaves it to the page (Q17)
+        # set = a value other than blanks; a blank (or only spaces) leaves it to the page
         env_set=frozenset(
             key for key, spec in MANAGED_SETTINGS.items() if (os.environ.get(spec.env) or "").strip()
         ),
@@ -571,15 +571,15 @@ def load_settings() -> Settings:
     )
 
 
-# -- settings the server owner manages on the admin Settings page (Q17, 0.7.29) ------------------
+# -- settings the server owner manages on the admin Settings page (0.7.29) ------------------
 #
-# Q17 "Deployment only": the website address, sign-in provider, secrets, ports and paths, image
+# The website address, sign-in provider, secrets, ports and paths, image
 # versions, sign-in lifetimes and the writes switch stay in the deployment. Every other setting is
 # registered here and can be changed on the admin Settings page while the deployment leaves it
 # blank; a value the deployment sets wins, and the page shows it as set by the deployment.
 # Read a value with LiveSettings.get(key), never from Settings, so a change on the page applies.
-# A key is the Settings field it overrides. ``owner`` is the 0.7.29/0.7.30 track whose code reads
-# it (A approvals, B settings and data, C simulator); a new key is a request to Track B.
+# A key is the Settings field it overrides. ``owner`` is the area whose code reads it
+# (A approvals, B settings and data, C simulator).
 
 logger = logging.getLogger(__name__)
 
@@ -689,12 +689,12 @@ _LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
 
 # Bounds are what the dashboard may store; a deployment value is checked by load_settings instead.
 # They sit inside load_settings' ranges. Pacing towards Archidekt and Scryfall can only be made
-# gentler than today's defaults from the page, never faster ("be gentle on Archidekt's servers", R-123; G13);
+# gentler than today's defaults from the page, never faster ("be gentle on Archidekt's servers");
 # the same goes for anything else that adds background reads (deck sync, watchlist sizes).
 MANAGED_SETTINGS: dict[str, SettingSpec] = {
     s.key: s
     for s in (
-        # approvals (Track A reads these)
+        # approvals
         _spec(
             "approval_mode_default",
             "MTG_APPROVAL_MODE_DEFAULT",
@@ -719,7 +719,7 @@ MANAGED_SETTINGS: dict[str, SettingSpec] = {
         _spec("auto_big_edit_rows", "MTG_AUTO_BIG_EDIT_ROWS", "int", 20, "approvals", "A", lo=1, hi=100),
         _spec("proposal_expiry_days", "MTG_PROPOSAL_EXPIRY_DAYS", "int", 7, "approvals", "A", lo=1, hi=30),
         _spec("apply_in_chat", "MTG_APPLY_IN_CHAT", "bool", True, "approvals", "A", restart=True),
-        # sync, backups and the nightly database backup (Track B)
+        # sync, backups and the nightly database backup
         _spec(
             "deck_sync_minutes",
             "MTG_DECK_SYNC_MINUTES",
@@ -749,7 +749,7 @@ MANAGED_SETTINGS: dict[str, SettingSpec] = {
         _spec(
             "backup_keep_days", "MTG_BACKUP_KEEP_DAYS", "int", 14, "backups", "B", lo=1, hi=3650, restart=True
         ),
-        # simulation (Track C)
+        # simulation
         _spec("forge_games", "MTG_FORGE_GAMES", "int", 4, "simulation", "C", lo=1, hi=50),
         _spec("forge_parallel_games", "MTG_FORGE_PARALLEL_GAMES", "int", 4, "simulation", "C", lo=1, hi=4),
         # watchlists and prices

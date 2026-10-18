@@ -1,4 +1,4 @@
-"""Backup copies on Archidekt in 0.7.29 (Q12-Q15, QUESTIONS-2 B11-B16, card Q135 items 7, 8 and 10):
+"""Backup copies on Archidekt in 0.7.29:
 an edit shares the deck's newest copy when the deck is unchanged since it or it is under 15
 minutes old; copies past "Backup copies kept per deck" are deleted later with their own rule; the
 record of how a copy was made lives in the database; a shared copy is never deleted for one edit;
@@ -103,7 +103,7 @@ async def test_a_copy_the_member_changed_is_never_shared(stack: Stack) -> None:
 
 @pytest.mark.usefixtures("no_sharing")
 async def test_copies_past_the_limit_are_deleted_later_oldest_first(stack: Stack) -> None:
-    """B11 (card Q135 item 7): over-limit copies have their own rule, so a copy whose edit changed
+    """Over-limit copies have their own rule, so a copy whose edit changed
     the deck (every applied edit does) is still deleted once it is past the limit."""
     token = await linked_user(stack)
     _live(stack).set("archidekt_backup_copies", 2, by="admin-1")
@@ -156,7 +156,7 @@ async def test_a_copy_changed_on_archidekt_is_kept_and_no_longer_counted(stack: 
 
 @pytest.mark.usefixtures("no_sharing")
 async def test_the_record_of_a_copy_outlives_a_restart(stack: Stack, tmp_path: Path) -> None:
-    """B12 (card Q135 item 8): the over-limit delete still checks the copy as made after the
+    """The over-limit delete still checks the copy as made after the
     gateway's memory of it is gone."""
     token = await linked_user(stack)
     _live(stack).set("archidekt_backup_copies", 1, by="admin-1")
@@ -173,7 +173,7 @@ async def test_the_record_of_a_copy_outlives_a_restart(stack: Stack, tmp_path: P
 
 @pytest.mark.usefixtures("no_sharing")
 async def test_a_copy_from_before_0729_is_left_alone(stack: Stack) -> None:
-    """Card Q140 item 4: a copy made before the update (no record of how it was made) is never
+    """A copy made before the update (no record of how it was made) is never
     deleted and doesn't count toward "Backup copies kept per deck"."""
     token = await linked_user(stack)
     _live(stack).set("archidekt_backup_copies", 2, by="admin-1")
@@ -196,7 +196,7 @@ async def test_a_copy_from_before_0729_is_left_alone(stack: Stack) -> None:
 
 @pytest.mark.usefixtures("quick_waits")
 async def test_a_shared_copy_is_never_deleted_for_a_failed_edit(stack: Stack) -> None:
-    """B16: the second edit shares the first's copy and then stops before it changes anything
+    """The second edit shares the first's copy and then stops before it changes anything
     (Archidekt answers every card write with a 429); the copy the first edit relies on stays,
     and no delete of it is queued."""
     token = await linked_user(stack)
@@ -238,7 +238,7 @@ def test_a_deleted_copy_is_forgotten_by_every_snapshot(tmp_path: Path) -> None:
 
 
 def test_pruning_restore_points_keeps_the_ones_a_copy_or_a_queued_delete_needs(tmp_path: Path) -> None:
-    """B13 (card Q135 item 9): at the default settings the oldest restore point holding a copy is
+    """At the default settings the oldest restore point holding a copy is
     past the 25 kept, so pruning it would leave the copy with no record of how it was made."""
     db = Database(tmp_path / "g.sqlite")
     db.snapshots_per_deck = 3
@@ -251,7 +251,7 @@ def test_pruning_restore_points_keeps_the_ones_a_copy_or_a_queued_delete_needs(t
     db.set_snapshot_backup("s6", backup_deck_id="500", backup_url="u")  # shared later
     db.record_backup_made("500", {"name": "x"})
     db.queue_backup_delete("s1", sub=SUB, backup_deck_id="501", deck_id="42", proposal_id=None, due=0)
-    # a copy made before 0.7.29 (no record) is never deleted (card Q140 item 4): it holds nothing
+    # a copy made before 0.7.29 (no record) is never deleted: it holds nothing
     db.set_snapshot_backup("s2", backup_deck_id="502", backup_url="u")
     db.purge_expired()
     with db.tx() as c:
@@ -293,7 +293,7 @@ def test_the_shared_note_reads_as_a_sentence() -> None:
 
 @pytest.mark.usefixtures("no_sharing")
 async def test_a_trim_that_gave_up_is_never_queued_again(stack: Stack) -> None:
-    """Review round 1, finding 2: a copy the gateway could not delete (here: owned by another
+    """A copy the gateway could not delete (here: owned by another
     account than the link's) is no longer counted, so later copies don't queue it again, and its
     restore point is not held for ever."""
     token = await linked_user(stack)
@@ -320,7 +320,7 @@ async def test_a_trim_that_gave_up_is_never_queued_again(stack: Stack) -> None:
 
 @pytest.mark.usefixtures("no_sharing")
 async def test_delete_my_data_removes_the_backup_copy_records_at_once(stack: Stack) -> None:
-    """Review round 1, finding 5: the records (deck name, description, deck URL) go with the
+    """The records (deck name, description, deck URL) go with the
     member's data, not at the next hourly clean-up; another member's stay."""
     token = await linked_user(stack)
     first = (await _apply(stack, token, ADDS[0]))["result"]["backup_deck_id"]
@@ -342,7 +342,7 @@ async def test_delete_my_data_removes_the_backup_copy_records_at_once(stack: Sta
 
 @pytest.mark.usefixtures("no_sharing")
 async def test_a_real_restart_keeps_the_exact_record_of_every_copy(tmp_path: Path, idp) -> None:
-    """Coordinator 20:04Z (card Q135 item 8): a copy made by this version is judged by its exact
+    """A copy made by this version is judged by its exact
     record after the gateway restarts, never by the rule for copies made before 0.7.29. The
     record is written with the snapshot's link to the copy, in one transaction."""
     from cryptography.fernet import Fernet

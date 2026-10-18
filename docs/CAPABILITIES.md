@@ -73,9 +73,9 @@ Every applied proposal keeps a snapshot first and is read back to verify.
 
 **No assistant tool exists for:** renaming folders, linking or unlinking
 Archidekt, approval modes, notification and summary settings, admin. Social actions and deleting a deck have
-tools since 0.7.17, but only as proposals, and (R-142) the person applies each
-one themselves on its review page, in every approval mode (the in-chat card
-only opens that page, since 0.7.19): no mode,
+tools since 0.7.17, but only as proposals, and the person applies each one
+with their own press, in every approval mode, on the card in the chat or on
+its review page (deleting a deck: review page only): no mode,
 setting or batch lets an assistant apply a like, vote, bookmark, follow,
 comment, new folder, collaborator change or deck deletion. The gateway enforces this where proposals
 are applied, not only in the pages.
@@ -147,7 +147,7 @@ tools.
   the browser. It is a playtable, not a tool result, so the assistant has no
   counterpart; its simulated games are `run_deck_report`. The goldfish
   simulation of one deck and the comparison of two are both paths: Run
-  simulation and Compare on the deck page for people, `run_deck_report` and
+  full test and Compare on the deck page for people, `run_deck_report` and
   `compare_decks` for the assistant, same engine and settings.
 - **Only a person does:** link Archidekt and set approval modes, turn
   notifications and summaries on or off, approve a

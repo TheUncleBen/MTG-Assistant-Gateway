@@ -1,4 +1,4 @@
-"""Release 0.7.29, the social review (G14/Q47) and A29: every page of a deck's comment thread can be
+"""Release 0.7.29: every page of a deck's comment thread can be
 read, voted on, replied to, edited and deleted, on the website and from the assistant alike, and a
 vote right after the thread loaded costs one thread read and the vote, not three Archidekt calls."""
 
@@ -58,7 +58,7 @@ async def test_the_website_reads_and_votes_on_a_later_page(stack: Stack) -> None
         # the thread page and the vote: the deck is not read again for its thread root
         assert len(sent) == 2, sent
         assert sent[0][0] == "GET" and "/comments/" in sent[0][1] and sent[1][0] == "PUT"
-        # shown on page 1, it is found on the last page too (a new comment sits there: finding 6)
+        # shown on page 1, it is found on the last page too (a new comment sits there)
         r = await post(b, "/social/api/decks/43/comments/555005/vote", {"vote": "none"})
         assert r.json()["ok"] is True and ("alice", 555005) not in stack.ark.votes
         # one that is in no page read is still refused
@@ -122,7 +122,7 @@ async def test_the_assistant_can_vote_on_a_later_page_too(stack: Stack) -> None:
 
 def test_show_more_comments_then_vote_on_page_two_in_the_browser(tmp_path) -> None:
     """The deck page's comments: "Show more comments" adds the next page under the first, and a
-    vote on a comment from it reaches Archidekt (A29). Phone, Fold and desktop; light and dark."""
+    vote on a comment from it reaches Archidekt. Phone, Fold and desktop; light and dark."""
     import os
 
     import pytest
@@ -194,7 +194,7 @@ def test_show_more_comments_then_vote_on_page_two_in_the_browser(tmp_path) -> No
 
 
 def test_post_reply_edit_and_delete_a_comment_in_the_browser(tmp_path) -> None:
-    """The social review (G14/Q47) on a phone: every comment write asks first (an edit too, which
+    """Comments on a phone: every comment write asks first (an edit too, which
     used to save at once), the count counts comments not replies, and a refused write says why."""
     import os
 
@@ -396,7 +396,7 @@ def test_with_writes_switched_off_the_deck_page_is_read_only(tmp_path, monkeypat
 
 
 async def test_a_comment_just_posted_can_be_changed_and_deleted_on_a_long_thread(stack: Stack) -> None:
-    """Review round 1, finding 6: the page draws a new comment at the top (page 1), but with no
+    """The page draws a new comment at the top (page 1), but with no
     points it is on the last page of a thread of 3 or more pages."""
     b = await linked(stack)
     try:
@@ -427,7 +427,7 @@ async def test_a_comment_just_posted_can_be_changed_and_deleted_on_a_long_thread
 
 
 async def test_a_follow_the_gateway_could_not_check_says_so(stack: Stack, monkeypatch) -> None:
-    """Q141 item 4A: the member's following list is read only so far (gentle on Archidekt). When it
+    """The member's following list is read only so far (gentle on Archidekt). When it
     goes on past that and the person is not in the part read, the follow state is unknown: the page
     is told so (it offers Follow and Unfollow), and the assistant's row says it could not check."""
     h, ark = stack.h, stack.ark

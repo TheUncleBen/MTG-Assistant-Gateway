@@ -75,7 +75,7 @@ def test_rich_text_round_trip_matches_the_site_editor() -> None:
             ]
         }
     )
-    # only a snapshot restore's document (a QuillDoc) keeps its formatting (Q70); any other text,
+    # only a snapshot restore's document (a QuillDoc) keeps its formatting; any other text,
     # a document included, is written as the plain text it is
     assert rich_doc(QuillDoc(formatted)) == formatted
     assert json.loads(rich_doc(formatted)) == {"ops": [{"insert": formatted + "\n"}]}
@@ -148,7 +148,7 @@ async def test_comments_read_as_text_and_post_as_documents(stack: Stack) -> None
 
 
 # A Quill document with a hidden phishing link and an embed, as an assistant steered by text in
-# another deck might send it (review M4).
+# another deck might send it.
 PHISH = json.dumps(
     {
         "ops": [
@@ -161,7 +161,7 @@ PHISH = json.dumps(
 
 
 def test_plain_text_keeps_only_the_words_of_a_document() -> None:
-    """Q70: what an assistant or a form supplies is reduced to its words, never sent as a document;
+    """What an assistant or a form supplies is reduced to its words, never sent as a document;
     reducing it again changes nothing (a nested document is reduced all the way)."""
     assert plain_text(PHISH) == "See my primer"
     nested = json.dumps({"ops": [{"insert": PHISH + "\n"}]})
@@ -171,7 +171,7 @@ def test_plain_text_keeps_only_the_words_of_a_document() -> None:
 
 
 def test_drops_formatting_only_when_a_document_loses_more_than_its_words() -> None:
-    """Q90's rule: a Quill document (at any depth plain_text reduces) with an op other than a
+    """A Quill document (at any depth plain_text reduces) with an op other than a
     plain text insert loses something; plain text, Markdown and a words-only document do not."""
     from mtg_gateway.archidekt import drops_formatting, words_only_note
 
@@ -196,7 +196,7 @@ def test_drops_formatting_only_when_a_document_loses_more_than_its_words() -> No
 
 
 async def test_a_comment_typed_as_a_document_is_posted_as_plain_text(stack: Stack) -> None:
-    """M4: a comment or comment edit sent as a Quill document with a hidden link (the comment form,
+    """A comment or comment edit sent as a Quill document with a hidden link (the comment form,
     or any caller of its API) is posted and edited as its words only."""
     stack.ark.private.discard(43)
     stack.ark.comments[300043] = []
@@ -238,7 +238,7 @@ async def test_deck_like_goes_to_the_deck_vote_route(stack: Stack) -> None:
 
 
 async def test_a_deck_like_already_so_sends_nothing(stack: Stack) -> None:
-    """L6: as for comment votes, liking a deck the member already likes (or taking back a vote
+    """As for comment votes, liking a deck the member already likes (or taking back a vote
     they have not given) sends nothing, since Archidekt might toggle the vote off instead."""
     stack.ark.private.discard(43)
     b = await linked(stack)
@@ -305,7 +305,7 @@ async def test_collection_writes_send_numbers() -> None:
 
 
 async def test_a_collection_edit_never_fails_on_a_stored_value_it_does_not_know() -> None:
-    """M9: only the values being changed are converted (and refused when unknown). A stored
+    """Only the values being changed are converted (and refused when unknown). A stored
     number goes back as it came, a stored code as its number, and a stored string with no number
     ("" or an old "JAPANESE") is left out instead of failing a plain quantity change."""
     ark = FakeArchidekt()
@@ -334,7 +334,7 @@ async def test_collection_page_shows_codes_for_archidekts_numbers(stack: Stack) 
         )
         assert r.status_code == 303
         rid = next(iter(stack.ark.collections["alice"]))
-        # nothing picked: English and Near Mint, as archidekt.com's own new record (Q60)
+        # nothing picked: English and Near Mint, as archidekt.com's own new record
         sent = stack.ark.collection_posts[-1]
         assert (sent.get("condition"), sent.get("language")) == (1, 1), sent
         stack.ark.collections["alice"][rid].update(condition=3, language=4)
@@ -357,7 +357,7 @@ def test_tag_position_follows_the_last_tag_like_the_site() -> None:
 
 
 def test_a_tag_after_the_last_letter_still_sorts_last() -> None:
-    """L5: past "Z" there is no next letter; the new tag must not wrap to "Z-0" (which sorts first)."""
+    """Past "Z" there is no next letter; the new tag must not wrap to "Z-0" (which sorts first)."""
     for last in ("Z-990000", "Z-995000", "Z-999998", "Z-999999"):
         after = next_tag_position(["M-500000", last])
         assert after.startswith("Z-") and int(after[2:]) >= int(last[2:]), (last, after)

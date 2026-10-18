@@ -1,6 +1,6 @@
 """On a phone one history entry stands for "a menu is open" (static/feedback.js), so Back closes
-the menu instead of leaving the page. Gate R4-1: opening a second menu straight from the first
-left the second without an entry, and Back left the page. The entry has one owner now: the first
+the menu instead of leaving the page. Opening a second menu straight from the first used to
+leave the second without an entry, and Back left the page. The entry has one owner now: the first
 menu takes it, the last one closing gives it back, and a menu opened while that back() is still
 landing takes it again. Real taps in a touch context at 390 px. Skipped without Chromium."""
 
@@ -79,7 +79,7 @@ def _open(server: Server):
 
 
 # Closes the open menu with its own button and opens the other in the same script run, before the
-# close's history.back() can land (a popstate is a later task): the real race of gate R4-6b.
+# close's history.back() can land (a popstate is a later task): the real race.
 RACE = """
 ([ai, bi]) => {
   const s = [...document.querySelectorAll('details.dd > summary')]
@@ -89,7 +89,7 @@ RACE = """
   return document.querySelectorAll('details.dd[open]').length;
 }
 """
-# Back and another menu's button in the same instant, with a menu open (gate R4-6b).
+# Back and another menu's button in the same instant, with a menu open.
 BACK_AND_OPEN = """
 (bi) => {
   const s = [...document.querySelectorAll('details.dd > summary')]
@@ -101,7 +101,7 @@ BACK_AND_OPEN = """
 
 
 def test_a_menu_opened_straight_from_another_keeps_its_back_entry(server: Server) -> None:
-    """Gate R4-1: open menu A, tap menu B's button; B opens with the history entry, and Back
+    """Open menu A, tap menu B's button; B opens with the history entry, and Back
     closes B and stays on the page."""
     p, browser, page, errors = _open(server)
     try:
@@ -177,7 +177,7 @@ POPS = "() => { window.__pops = 0; addEventListener('popstate', () => { window._
 
 
 def test_back_in_the_same_instant_as_opening_another_menu_stays_on_the_page(server: Server) -> None:
-    """Gate R4-6b: with menu A open, Back and B's button in the same script run. Whatever ends up
+    """With menu A open, Back and B's button in the same script run. Whatever ends up
     open, the page stays, and the history is consistent: a menu open only with the entry, and
     never two entries.
 

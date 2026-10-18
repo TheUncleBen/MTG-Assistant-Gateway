@@ -366,7 +366,7 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
             # kept for review, like every proposal while writes are off; the page goes there
             return ok({"applied": False, "proposal_id": pid, "review_url": f"/proposals/{pid}"}, 201)
         # A quick edit from the deck page (one click: a copy more, a move, a removal) keeps the
-        # gateway's snapshot but not the extra copy on Archidekt (D-02): one deck copy per click
+        # gateway's snapshot but not the extra copy on Archidekt: one deck copy per click
         # would fill the backup folder and slow each save by paced Archidekt writes.
         result = await decks.apply(who.sub, pid, via="browser", archidekt_backup=False)
         applied = result.get("state") == "applied"
@@ -386,7 +386,7 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
         stale = False
         try:
             before = parse_deck(decks.snapshot(who.sub, str(result.get("snapshot_id")))["deck"])
-            # a printing change is compared by its set, number and finish (L1)
+            # a printing change is compared by its set, number and finish
             if edit_mismatches(before, changes, deck) or printing_not_shown(changes, deck):
                 await asyncio.sleep(EDIT_REREAD_DELAY)
                 deck = await decks.get_own_deck(who.sub, deck_id)
@@ -466,8 +466,8 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
         pid = request.path_params["pid"]
         # A bearer token applies under the member's approval mode, exactly like apply_proposal
         # over MCP (decks.apply decides); the browser session is the member's own press. An
-        # account action is refused inside decks.apply for both (R-142: only the review page's
-        # own form applies one), with browser_required (403) and its review_url. The browser
+        # account action is refused inside decks.apply for both (only the review page's own
+        # form applies one), with browser_required (403) and its review_url. The browser
         # sends the version it showed ({"version": n}), so a proposal another app amended since
         # is refused with ``changed`` and nothing sent; a bearer caller may send it too.
         data = await json_body(request)
@@ -531,9 +531,9 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
                 games=games if isinstance(games, int) else 300,
                 # Forge games apart from the goldfish ones; unset follows simulate
                 forge=forge if isinstance(forge, bool) else None,
-                # K6: seat another of the member's reports' Forge opponents
+                # seat another of the member's reports' Forge opponents
                 same_opponents_as=share if isinstance(share, str) else None,
-                # Q140 item 3: precons for the higher of this deck's and that deck's brackets
+                # precons for the higher of this deck's and that deck's brackets
                 pair_with=str(pair) if isinstance(pair, (str, int)) and not isinstance(pair, bool) else None,
             ),
             201,
@@ -545,7 +545,7 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
 
     @route("/reports/{rid}/forge", "GET")
     async def report_forge_status(request: Request, who: Caller) -> Response:
-        """A report's Forge run alone, for a page or an app watching it play (A32): its state and
+        """A report's Forge run alone, for a page or an app watching it play: its state and
         section, the report's status, and the Forge card and status as the report page draws them.
         Reads the gateway's own database only; Archidekt is never asked."""
         from .report_view import forge_status

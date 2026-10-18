@@ -1,6 +1,6 @@
 """The request log line (timing.py) names the route, never the request: deck numbers, Archidekt
 usernames, signed-link tokens and member IDs stay out of the gateway's own log, as the Archidekt
-link disclosure and OPERATIONS.md promise (0.7.9 gate B-3)."""
+link disclosure and OPERATIONS.md promise."""
 
 from __future__ import annotations
 

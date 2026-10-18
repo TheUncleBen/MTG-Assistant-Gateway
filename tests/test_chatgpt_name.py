@@ -1,7 +1,7 @@
 """MTG_CHATGPT_NAME: the ChatGPT connector name, when it should differ from MTG_SERVER_NAME. It is
 the ChatGPT plugin's displayName and the name the ChatGPT install steps tell people to type; nothing
 else changes. ChatGPT refuses a plugin file whose name is over 80 characters (OpenAI's plugin docs).
-A longer name never stops the gateway (Q115): it is warned about in the log at start, on the admin
+A longer name never stops the gateway: it is warned about in the log at start, on the admin
 page, and on the install page's plugin-file step."""
 
 from __future__ import annotations
@@ -325,7 +325,7 @@ async def test_admin_warns_about_a_long_chatgpt_name(
 
 
 def test_a_long_server_name_is_cut_where_openai_limits_the_developer_name() -> None:
-    """L15: OpenAI's package validation refuses an author.name or developerName over 120
+    """OpenAI's package validation refuses an author.name or developerName over 120
     characters; with a short MTG_CHATGPT_NAME the plugin file must still upload, so a long
     MTG_SERVER_NAME is cut there at a word."""
     site = " ".join(["Commander"] * 14)  # 139 characters
@@ -341,7 +341,7 @@ def test_a_long_server_name_is_cut_where_openai_limits_the_developer_name() -> N
 
 
 def test_a_shortened_developer_name_is_told_to_the_owner() -> None:
-    """B4 b: when MTG_SERVER_NAME (filtered as the plugin file writes it) is over 120 characters,
+    """When MTG_SERVER_NAME (filtered as the plugin file writes it) is over 120 characters,
     the plugin file shortens it, and the owner's notice says so with the shortened name. With no
     space in the first 120 characters the name is cut at 120, inside the word."""
     from mtg_gateway.plugin_page import developer_name_cut, developer_name_warning
@@ -396,7 +396,7 @@ async def test_admin_and_log_tell_the_owner_about_a_shortened_developer_name(
 
 
 async def test_a_long_chatgpt_name_set_in_the_stack_is_fixed_there(tmp_path: Path, idp: FakeIdP) -> None:
-    """Re-proofread issue 4: with MTG_CHATGPT_NAME set in the stack, "Name in ChatGPT" is locked, so
+    """With MTG_CHATGPT_NAME set in the stack, "Name in ChatGPT" is locked, so
     neither warning points at the page; both say to change the variable and redeploy."""
     long = "z" * 81
     settings = make_settings(

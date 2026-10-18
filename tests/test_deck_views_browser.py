@@ -121,7 +121,7 @@ def test_stack_order_by_keyboard_is_kept_and_reset(server: Server) -> None:
 
 
 def test_choices_kept_in_the_browser_before_are_copied_to_the_account_once(server: Server) -> None:
-    """B7: a stack order, the stats toggles and the dismissed EDHPlay steps that 0.7.28 kept in
+    """A stack order, the stats toggles and the dismissed EDHPlay steps that 0.7.28 kept in
     this browser show at once on the first visit after the update, are saved to the account, and
     are removed from the browser; a value the account already has wins."""
     from playwright.sync_api import sync_playwright
@@ -153,7 +153,7 @@ def test_choices_kept_in_the_browser_before_are_copied_to_the_account_once(serve
 
 
 def test_after_forget_a_devices_old_choices_are_never_shown(server: Server) -> None:
-    """Re-proofread PW 4: after "Forget my view choices" a device's pre-0.7.29 stack order isn't
+    """After "Forget my view choices" a device's pre-0.7.29 stack order isn't
     shown even on the first page it opens; it is dropped, not copied, and removed from the browser."""
     from playwright.sync_api import sync_playwright
 
@@ -195,7 +195,7 @@ def _poll(page, js: str, timeout_ms: int = 6000) -> None:
 
 
 def test_stack_drag_by_mouse_scrolls_on_and_lands_where_the_bar_shows(server: Server) -> None:
-    """T-153: the stacks stay put while one is dragged (a bar shows where it lands, its name follows
+    """The stacks stay put while one is dragged (a bar shows where it lands, its name follows
     the pointer), the page scrolls on near the window's edge so a stack off screen is reachable, the
     move happens on letting go and is kept after a reload; Escape puts a dragged stack back."""
     from playwright.sync_api import sync_playwright
@@ -259,7 +259,7 @@ def _touch(cdp, kind: str, x: float = 0, y: float = 0) -> None:
 
 
 def test_stack_and_card_drag_by_touch_scroll_on_near_the_edge(server: Server) -> None:
-    """T-153 on a phone: a stack's handle takes a 44 px finger; a finger held near the bottom edge
+    """On a phone: a stack's handle takes a 44 px finger; a finger held near the bottom edge
     scrolls the page on, for a stack and for a held card alike, so a category off screen is
     reachable; Android's own long press does not open the card menu under a held card."""
     from playwright.sync_api import sync_playwright
@@ -322,7 +322,7 @@ def test_stack_and_card_drag_by_touch_scroll_on_near_the_edge(server: Server) ->
         t = page.locator(".stack[data-group='Sorcery']").bounding_box()["y"]
         _touch(cdp, "touchMove", x, t + 40)
         page.wait_for_timeout(100)
-        # the drop is saved at once (D4), as the card menu's Move to is
+        # the drop is saved at once, as the card menu's Move to is
         with page.expect_request(EDIT_URL) as req:
             _touch(cdp, "touchEnd")
         assert json.loads(req.value.post_data)["changes"] == [
@@ -379,7 +379,7 @@ def _edge_run(log: list, t_in: float, t_out: float, t_next: float) -> dict:
 
 # How far ahead of the page's clock it is paused, in seconds. Playwright refuses to pause at a
 # moment already past ("Cannot fast-forward to the past"), and on a busy machine 50 ms had passed
-# by the time the pause arrived (review F1). Nothing the tests hold is pending when it pauses, so
+# by the time the pause arrived. Nothing the tests hold is pending when it pauses, so
 # the jump ahead fires nothing they measure.
 PAUSE_AHEAD_S = 2
 
@@ -397,7 +397,7 @@ def test_edge_auto_scroll_is_measured(server: Server, how: str, hz: int | None) 
     by finger in every view, a held card by finger, and on a 120 Hz and a 30 Hz screen. Resting
     near the bottom edge, the page starts on the next frame, scrolls at a steady speed (about
     1,200 px/s at the very edge, half that halfway into the zone) whatever the frame rate, and
-    stops as soon as the pointer leaves the zone or is let go. Review N9: the page's clock is
+    stops as soon as the pointer leaves the zone or is let go. The page's clock is
     Playwright's, paused while measuring and moved on by the test, so the frames come on time
     however busy the machine running the test is (a busy machine used to fail it)."""
     from playwright.sync_api import sync_playwright
@@ -585,7 +585,7 @@ def test_colour_tag_from_the_card_menu_and_undo(server: Server, width: int, sche
         with page.expect_response(EDIT_URL):
             page.locator(".bulkbar button", has_text="Take tag off").click()
         page.locator(".deck-toast .msg", has_text="Saved").wait_for(timeout=8000)
-        assert _rows(server, "Cultivate")[0].get("label") == ",#656565"  # the site's empty tag (Q58)
+        assert _rows(server, "Cultivate")[0].get("label") == ",#656565"  # the site's empty tag
         assert page.locator(".deckview .row[data-card='Cultivate'] .tagdot").count() == 0
         # Undo puts the tag back
         with page.expect_response(EDIT_URL) as r2:
@@ -684,7 +684,7 @@ def test_brewer_view_and_custom_mana_value(server: Server, width: int, scheme: s
 
 @pytest.mark.parametrize(("width", "scheme"), [(390, "dark"), (1280, "light")])
 def test_mana_value_saves_in_the_background(server: Server, width: int, scheme: str) -> None:
-    """0.7.27 (T-159): Save closes the Mana value form at once and the new value is on the card
+    """0.7.27: Save closes the Mana value form at once and the new value is on the card
     while Archidekt is still answering, with a Saving note and then Saved; a save Archidekt refuses
     puts the old value back and says why."""
     import threading
@@ -744,7 +744,7 @@ def test_mana_value_saves_in_the_background(server: Server, width: int, scheme: 
         browser.close()
 
 
-# 0.7.27 (T-159): the card menu's Quantity, Move to and Remove from deck save in the background, as
+# 0.7.27: the card menu's Quantity, Move to and Remove from deck save in the background, as
 # Mana value does: the change is on the page at once, the menu never fades, a Saving note shows
 # until Archidekt answers (then Saved with Undo), and a save Archidekt refuses puts the card back
 # as it was with a red note saying why. Shots go to MTG_SHOTS as t159-menu-*.
@@ -755,7 +755,7 @@ ORDER_JS = "() => [...document.querySelectorAll('.deckview .row')].map(r => r.da
 def _menu_page(p, server: Server, width: int, height: int, scheme: str, *, clock: bool = False):
     """``clock``: the page runs on Playwright's clock, so a test can hold the page's timers (the
     400 ms that gathers quantity steps into one save) while it clicks, however slow the clicks
-    are on a busy machine (review N9)."""
+    are on a busy machine."""
     sid = server.sign_in_and_link()
     browser, page, errors = _page(p, server, sid, width, color_scheme=scheme)
     if clock:
@@ -818,7 +818,7 @@ def test_quantity_steps_save_in_the_background(server: Server, width: int, heigh
             assert menu.locator(".sub").is_hidden()
             plus = menu.locator(".qtyrow .step").nth(1)
             # a quick burst: the page's 400 ms does not run out between these presses, however
-            # long the presses take here (review N9: a busy run sent [2] and then 4)
+            # long the presses take here (a busy run sent [2] and then 4)
             _hold_timers(page)
             plus.click()
             # on the page at once; the menu stays open, not faded, for more steps
@@ -1054,7 +1054,7 @@ def test_mana_value_grouping_restacks_at_once(server: Server, width: int, height
         browser.close()
 
 
-# 0.7.27 review M6 and M7: the card menu's background saves never leave a stale note, and a card
+# 0.7.27: the card menu's background saves never leave a stale note, and a card
 # whose edits Archidekt refused goes back to what Archidekt really has.
 STACK_OF_JS = (
     "n => document.querySelector(`.deckview .row[data-card=\"${n}\"]`)?.closest('.stack')?.dataset.group"
@@ -1079,7 +1079,7 @@ def _settle(page, ms: int = 1200) -> None:
 
 @pytest.mark.parametrize(("width", "height", "scheme"), MENU_SIZES[:2])
 def test_plus_then_minus_leaves_no_saving_note(server: Server, width: int, height: int, scheme: str) -> None:
-    """M6: + then - inside the 400 ms window sends nothing, and the Saving note goes away (it used
+    """+ then - inside the 400 ms window sends nothing, and the Saving note goes away (it used
     to stay on screen for good, saying a save was running)."""
     from playwright.sync_api import sync_playwright
 
@@ -1089,7 +1089,7 @@ def test_plus_then_minus_leaves_no_saving_note(server: Server, width: int, heigh
         sent = _edits(page)
         row = page.locator(".deckview .row[data-card='Cultivate']").first
         menu = _open_menu(page, row)
-        _hold_timers(page)  # both presses inside the 400 ms, however slow they are here (N9)
+        _hold_timers(page)  # both presses inside the 400 ms, however slow they are here
         menu.locator(".qtyrow .step").nth(1).click()
         menu.locator(".qtyrow .step").nth(0).click()
         assert page.locator(".deck-toast .msg", has_text="Saving Cultivate: 1 copy").count() == 1
@@ -1107,7 +1107,7 @@ def test_plus_then_minus_leaves_no_saving_note(server: Server, width: int, heigh
 def test_two_refused_moves_put_the_card_back_where_archidekt_has_it(
     server: Server, width: int, height: int, scheme: str
 ) -> None:
-    """M7: Ramp -> Lands -> Draw, both refused: the card is back in Ramp (it used to stay in Lands,
+    """Ramp -> Lands -> Draw, both refused: the card is back in Ramp (it used to stay in Lands,
     an unsaved state, with "back in Lands"). Then a move held while the card is removed, both
     refused: back in Ramp, not where the unsaved move put it."""
     from playwright.sync_api import sync_playwright
@@ -1136,7 +1136,7 @@ def test_two_refused_moves_put_the_card_back_where_archidekt_has_it(
             held.set()
         _settle(page)
         text = _error(page)
-        # N5 (provisional, review question 1): the note says the later move was not sent
+        # the note says the later move was not sent
         assert text.startswith("Move not saved:"), text
         assert text.endswith("Cultivate is back in Ramp. Your later move of it was not sent."), text
         assert page.evaluate(STACK_OF_JS, "Cultivate") == "Ramp"
@@ -1175,7 +1175,7 @@ def test_two_refused_moves_put_the_card_back_where_archidekt_has_it(
 def test_two_refused_mana_values_put_back_the_value_archidekt_has(
     server: Server, width: int, scheme: str
 ) -> None:
-    """M7: mana value 5 then 7, both refused: the card has its own mana value again and the note
+    """Mana value 5 then 7, both refused: the card has its own mana value again and the note
     says so (it used to show 5, "back to 5", a value Archidekt never had)."""
     from playwright.sync_api import sync_playwright
 
@@ -1204,7 +1204,7 @@ def test_two_refused_mana_values_put_back_the_value_archidekt_has(
         _settle(page)
         text = _error(page)
         assert text.startswith("Mana value not saved:"), text
-        # N5 (provisional, review question 1): the note says the later value was not sent
+        # the note says the later value was not sent
         assert text.endswith(
             "Cultivate is back to its own mana value. Your later mana value for it was not sent."
         ), text

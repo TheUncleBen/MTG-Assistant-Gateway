@@ -133,7 +133,7 @@ async def test_a_listing_without_a_count_is_judged_by_its_rows() -> None:
 
 
 async def test_a_deck_seen_on_two_pages_makes_the_list_incomplete() -> None:
-    """L3: the listing shifted between pages (a deck came back again), so another deck may have
+    """The listing shifted between pages (a deck came back again), so another deck may have
     been skipped, even when the count did not move."""
     pages = [[_row(i) for i in range(50)], [_row(49), _row(50)]]
     client = _Paged(pages)
@@ -148,7 +148,7 @@ async def test_a_deck_seen_on_two_pages_makes_the_list_incomplete() -> None:
 
 
 async def test_fewer_decks_than_archidekts_count_make_the_list_incomplete() -> None:
-    """L3: Archidekt's count says more decks exist than came back."""
+    """Archidekt's count says more decks exist than came back."""
     client = _Paged([[_row(i) for i in range(3)]])
     real = client._request
 

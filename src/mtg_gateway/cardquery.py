@@ -21,7 +21,7 @@ on scryfall.com and reading the search it produced):
 The order goes to Scryfall as its own ``order`` and ``dir`` parameters. Only known values are
 accepted from each control (sets, blocks and types by their shape, since those lists come from
 Scryfall itself), so nothing a page sends can reach Scryfall as anything but a search.
-Cards are shown only for paper unless the games say otherwise (Q5b "Paper default"). The two
+Cards are shown only for paper unless the games say otherwise. The two
 free-text boxes (name, Scryfall syntax) have their quotes and brackets balanced, so neither can
 close the bracket around it or open one that swallows the filters after it; a search longer than
 Scryfall takes is refused whole (``too_long``), never cut.
@@ -346,7 +346,7 @@ class Filters:
 
     def shows_printings(self) -> bool:
         """Whether a result stands for one printing the member chose to see (every printing, a
-        preferred printing or a language), so Add to deck adds that printing (C2)."""
+        preferred printing or a language), so Add to deck adds that printing."""
         return self.prints or bool(self.prefer) or bool(self.lang)
 
     def to_params(self) -> list[tuple[str, str]]:

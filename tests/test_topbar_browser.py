@@ -1,7 +1,7 @@
 """The top bar in headless Chromium: the account menu keeps the menu's own colours on the light
-theme (0.7.9 gate B-1), and a narrow window with a mouse (600 to 800 px, an open Fold or a
+theme, and a narrow window with a mouse (600 to 800 px, an open Fold or a
 half-width desktop window) keeps its text links clear of the account button without a sideways
-scroll (gate B-2). Skipped without a Chromium build."""
+scroll. Skipped without a Chromium build."""
 
 from __future__ import annotations
 
@@ -398,7 +398,7 @@ def test_the_top_bar_links_fit_at_every_width_and_text_size(chromium, server: Se
     assert problems == [], "\n".join(problems)
 
 
-# Review round 9 (R9-1): the bar is sticky, so a control that Tab or Shift+Tab reaches must not
+# The bar is sticky, so a control that Tab or Shift+Tab reaches must not
 # end up under it; at 200% text with a mouse the bar has two rows and is about 147 px tall, and a
 # fixed 60 px of scroll room hid 10 of the Settings page's controls (WCAG 2.4.11). The scroll room
 # now follows the bar's height (static/topbar.js).
@@ -421,7 +421,7 @@ def test_a_focused_control_is_never_hidden_under_the_top_bar(
     chromium, server: Server, zoom: str, script: bool
 ) -> None:
     """With scripts off, the stylesheet's own room covers the bar at every text size from 100% to
-    200% (review round 10; milestone review M-2: 5.5rem fell short between 125% and 175%). 920 px
+    200% (5.5rem fell short between 125% and 175%). 920 px
     at 150% text is where the bar is tallest for its text size (183 px, about 8.7rem)."""
     sid = _admin(server)
     hidden: list[str] = []
@@ -462,7 +462,7 @@ SCROLL_TO = """edge => window.scrollTo({top: edge === 'Home' ? 0 : document.docu
                                      behavior: 'instant'})"""
 
 
-# Milestone review M-1: Tab goes through the top bar in the order it reads, left to right and top
+# Tab goes through the top bar in the order it reads, left to right and top
 # to bottom, at every text size: with the links on a row of their own under search and account,
 # Tab went from the links back up to search and account.
 TAB_STOP = """() => {
@@ -505,7 +505,7 @@ def test_tab_goes_through_the_top_bar_in_the_order_it_reads(chromium, server: Se
     assert problems == [], "\n".join(problems)
 
 
-# Review R12-1: with a mouse, where the bar keeps one row beside the search box, the last links
+# With a mouse, where the bar keeps one row beside the search box, the last links
 # (History, Admin) ran under the search box, so a click there landed in the box. Nothing in the
 # bar may sit over anything else, at any width or text size, for a member or an admin.
 BAR_OVERLAP = """() => {
@@ -559,7 +559,7 @@ BRAND_AND_SEARCH = """() => {
 
 
 def test_a_long_server_name_gives_way_before_the_search_box_and_the_links(chromium, server: Server) -> None:
-    """The order the one-row bar gives up room in (review R12-1, 83ec5a7): the brand's word first
+    """The order the one-row bar gives up room in: the brand's word first
     (an ellipsis), then the search box down to 9rem; the links never."""
     sid = _admin(server)
     settings = server.app.state.gateway.settings
@@ -599,7 +599,7 @@ def test_a_long_server_name_gives_way_before_the_search_box_and_the_links(chromi
 
 
 def test_without_scripts_the_scroll_room_is_large_only_where_the_bar_wraps(chromium, server: Server) -> None:
-    """Review R12-2: 60 px over the one-row bar, 9.5rem where its links wrap."""
+    """60 px over the one-row bar, 9.5rem where its links wrap."""
     sid = _admin(server)
     seen = {}
     with _session(chromium) as browser:
@@ -628,8 +628,8 @@ def test_without_scripts_the_scroll_room_is_large_only_where_the_bar_wraps(chrom
     assert seen[(1280, "none")][1] == 50 and seen[(920, "root-150")][1] > 50  # both kinds were seen
 
 
-# The search box's placeholder, whole, beside the links at the normal text size (review R13-3:
-# at 920 px it read "Search cards and d"). Large text may shrink the box further, by design.
+# The search box's placeholder, whole, beside the links at the normal text size (at
+# 920 px it read "Search cards and d"). Large text may shrink the box further, by design.
 PLACEHOLDER_FIT = """() => {
   const i = document.querySelector('.topbar .topsearch input');
   const cs = getComputedStyle(i);
@@ -660,7 +660,7 @@ def test_the_search_placeholder_fits_beside_the_links_at_normal_size(
     assert problems == [], "\n".join(problems)
 
 
-# Review R14-1: with a font about 15% wider than Lato (DejaVu Sans, a monospace font) and large
+# With a font about 15% wider than Lato (DejaVu Sans, a monospace font) and large
 # text, an admin's one-row bar ran past the window (up to 59 px at 125%, 1024 to 1082 px; and,
 # found while fixing it, up to 48 px at 110% to 150% between 660 and 898 px). The
 # browser may lack DejaVu Sans (it then falls back), so the page's own font with wider letter
@@ -705,7 +705,7 @@ def test_a_wide_font_at_large_text_keeps_the_bar_inside_the_window(
     assert problems == [], "\n".join(problems[:40]) + f"\n… {len(problems)} in all"
 
 
-# Review R14-2: where the brand's word gives way, a stub such as "M." (920 px, an admin) read
+# Where the brand's word gives way, a stub such as "M." (920 px, an admin) read
 # oddly. The word now shows at least 3em ("MTG…") or none of it, and the brand keeps its height
 # with the mark in the middle either way.
 BRAND_WORD = """() => {
@@ -747,8 +747,8 @@ def test_the_brand_word_shows_at_least_three_letters_or_none(
 
 
 # The app has no text links in its bar, so the one-row rules for the links leave it alone (review
-# R13-2: at 344 px, the Fold's cover screen, they cut the gateway's name one letter earlier).
-# Review R14-3: besides the styles, where the name is cut. The bar's left side ends one gap before
+# At 344 px, the Fold's cover screen, they cut the gateway's name one letter earlier).
+# Besides the styles, where the name is cut. The bar's left side ends one gap before
 # the account side and holds the brand (and the links' empty row after it); a long name is cut
 # where the brand's room ends, and the usual name only when its whole width does not fit there.
 APP_BAR = """() => {
@@ -807,8 +807,8 @@ def test_the_app_bar_keeps_its_own_spacing(chromium, server: Server, width: int)
         assert seen[LONG_NAME]["cut"], seen[LONG_NAME]
 
 
-# The Account page on a phone with 200% text, scripts on and off (a Track A review note on the
-# bottom tab bar at 344 and 360 px; 320 px too): nothing reaches past the window. The causes found
+# The Account page on a phone with 200% text, scripts on and off (the bottom tab bar at 344
+# and 360 px; 320 px too): nothing reaches past the window. The causes found
 # were the link disclosure's "/decks/{deck_id}" (shown open without scripts) and the
 # "Notifications" heading at 320 px; both now break instead.
 @pytest.mark.parametrize("script", [True, False], ids=["script", "no-script"])

@@ -1,6 +1,6 @@
 """Render first, in headless Chromium: a cold /decks and home go out with a placeholder while the
 deck list is still being read, and decks.js swaps the real list in from /api/decks/mine without a
-page error (T-037). Skipped without Chromium."""
+page error. Skipped without Chromium."""
 
 from __future__ import annotations
 
@@ -84,7 +84,7 @@ def test_cold_deck_pages_fill_their_placeholders(server: Server) -> None:
         assert page.locator("[aria-busy=true]").count() == 0
         assert "Sample Commander Deck" in page.locator("ul.decklist").inner_text()
         assert page.locator("#decks-total").inner_text() == "Total decks: 1"
-        assert page.locator("#folder-field").count() == 0  # opening folders replaced the dropdown (F3)
+        assert page.locator("#folder-field").count() == 0  # opening folders replaced the dropdown
         assert page.locator(".listbar a[href='/folders']").inner_text().strip() == "Manage folders"
         # home, cold again
         svc.deck_lists.drop("user-1")
@@ -97,8 +97,8 @@ def test_cold_deck_pages_fill_their_placeholders(server: Server) -> None:
 
 
 def test_a_deck_list_that_cannot_be_read_says_so_with_try_again(server: Server) -> None:
-    """Q64, on a cold /decks: the placeholder becomes the notice (no "No decks yet", no total), and
-    Try again loads the page again, which reads Archidekt again."""
+    """On a cold /decks, when the deck list can't be read: the placeholder becomes the notice (no
+    "No decks yet", no total), and Try again loads the page again, which reads Archidekt again."""
     from playwright.sync_api import sync_playwright
 
     exe = _chromium_path()
@@ -137,9 +137,9 @@ def test_a_deck_list_that_cannot_be_read_says_so_with_try_again(server: Server) 
 
 
 def test_home_my_decks_panel_says_the_list_could_not_be_read(server: Server) -> None:
-    """Q64 on a cold home page: the My decks panel's placeholder becomes the /decks notice with
-    Try again (never "No decks yet"), at phone width without sideways scroll, and Try again loads
-    the page again, which reads Archidekt again."""
+    """On a cold home page, when the deck list can't be read: the My decks panel's placeholder
+    becomes the /decks notice with Try again (never "No decks yet"), at phone width without
+    sideways scroll, and Try again loads the page again, which reads Archidekt again."""
     from playwright.sync_api import sync_playwright
 
     exe = _chromium_path()
@@ -163,7 +163,7 @@ def test_home_my_decks_panel_says_the_list_could_not_be_read(server: Server) -> 
         errors: list[str] = []
         page.on("pageerror", lambda e: errors.append(str(e)))
         # the panel's own read is held until the placeholder has been seen, so a fast answer can
-        # never swap it out first (review N9: a busy run missed it)
+        # never swap it out first (a busy run missed it)
         held: list = []
         page.route(re.compile(r".*/api/decks/mine\?shape=recent$"), lambda route: held.append(route))
         page.goto(f"{server.base}/", wait_until="commit")

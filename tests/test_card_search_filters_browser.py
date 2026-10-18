@@ -430,7 +430,7 @@ def test_a_late_next_page_is_not_added_to_a_newer_search(server: Server, handler
 
 @pytest.mark.parametrize("width,theme", SIZES)
 def test_a_search_too_long_for_scryfall_says_so_at_every_size(server: Server, width: int, theme: str) -> None:
-    """A search over Scryfall's length is refused whole, not cut (review L6): the page's notice
+    """A search over Scryfall's length is refused whole, not cut: the page's notice
     says so, fits the window and keeps a 4.5:1 contrast."""
     from urllib.parse import urlencode
 
@@ -455,7 +455,7 @@ def test_a_search_too_long_for_scryfall_says_so_at_every_size(server: Server, wi
 
 
 def test_a_tap_above_a_dropdown_sheet_in_the_phone_panel_only_closes_it(server: Server) -> None:
-    """Review R4-2: on a phone a dropdown in the Filters panel opens as a sheet over a dim
+    """On a phone a dropdown in the Filters panel opens as a sheet over a dim
     background. A tap on the dimmed part (here on the first colour, above the sheet) closes the
     sheet and nothing else: the colour stays off."""
     from playwright.sync_api import sync_playwright
@@ -485,7 +485,7 @@ def test_a_tap_above_a_dropdown_sheet_in_the_phone_panel_only_closes_it(server: 
 
 
 def test_one_escape_closes_the_dropdown_sheet_and_not_the_filters_panel(server: Server) -> None:
-    """Review round 5: on a phone, Escape on an open dropdown sheet in the Filters panel closes the
+    """On a phone, Escape on an open dropdown sheet in the Filters panel closes the
     sheet only; the next Escape closes the panel."""
     from playwright.sync_api import sync_playwright
 

@@ -1,4 +1,4 @@
-"""How much of a deck the solo test knows what to do with (K9 in Q136; R-134, T-152): the share of a
+"""How much of a deck the solo test knows what to do with: the share of a
 deck's cards Mystic Forge models by itself, files as out of scope on purpose, or plays without
 their effect until an assistant writes a model ("needs annotation"). Numbers only; it never gates.
 

@@ -57,7 +57,7 @@ def add_account_tools(state: AppState, h: SimpleNamespace) -> None:
     ) -> CallToolResult:
         try:
             raw = dumped(details, unset=True)
-            # Q90: a description given as a Quill document is saved as its words alone; say so
+            # A description given as a Quill document is saved as its words alone; say so
             # when links, formatting or embeds were lost, so the assistant does not claim them
             lost = drops_formatting(raw.get("description")) if isinstance(raw, dict) else False
             out = await state.decks.propose_deck_details(_sub(), deck_id, raw)
@@ -146,7 +146,7 @@ def add_account_tools(state: AppState, h: SimpleNamespace) -> None:
     async def propose_deck_social(
         action: str, deck_id: str | None = None, username: str | None = None
     ) -> CallToolResult:
-        if action in ("follow_user", "unfollow_user"):  # Q141 item 6A: by username, no deck
+        if action in ("follow_user", "unfollow_user"):  # by username, no deck
             try:
                 out = await state.decks.propose_action(
                     _sub(), "follow", username=username or "", on=action == "follow_user"

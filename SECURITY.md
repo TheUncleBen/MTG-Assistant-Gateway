@@ -49,8 +49,11 @@ redeploy with the image pulled again; with a pinned version, change the tag firs
 
 - the gateway itself: its OAuth server (`/authorize`, `/token`, `/register`,
   `/revoke`, consent), the `/mcp` endpoint and its tools, the browser pages
-  (`/account`, `/proposals`, `/scan`, `/install`), and how it stores tokens
-  and Archidekt sessions;
+  (`/account`, `/proposals`, `/scan`, `/install`), the JSON API under
+  `/api/v1`, the Android app's sign-in (`/login/app`) and notification stream
+  (`/app/notifications/stream`), and how it stores tokens and Archidekt
+  sessions;
+- the Android app in `android/`;
 - the container images, stack and compose files, and example proxy configs
   in this repository;
 - the assistant plugins and skill in `plugin/`.

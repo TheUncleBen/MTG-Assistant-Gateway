@@ -286,7 +286,7 @@ def _filler(n: int) -> list[DeckCard]:
 
 
 # Each rule of archidekt.com's "Estimated Bracket" (its deck page script, read 2026-10-14;
-# planning BRACKET-ESTIMATE.md §3), pinned one by one (Q49 "Match Archidekt").
+# planning BRACKET-ESTIMATE.md §3), pinned one by one.
 def test_bracket_matches_archidekts_rules() -> None:
     big = _filler(40)
     gc = [card(f"gc{i}", game_changer=True) for i in range(4)]
@@ -625,7 +625,7 @@ def test_format_specific_command_zones() -> None:
     # Pauper Commander: a creature ever printed at uncommon may lead, whichever printing the deck
     # uses (a mythic or rare printing of such a card is fine). The deck's data names only the
     # chosen printing's rarity, so a non-uncommon printing is reported as unverified, never as a
-    # failure (owner test round T-115: a leader in a rare printing that was also printed at uncommon).
+    # failure (for example a leader in a rare printing that was also printed at uncommon).
     pdh = deck([_cmdr("Aesi", rarity="mythic"), card("Island", 99, types=["Land"], supertypes=["Basic"])],
                format_id=17, categories=cat)  # fmt: skip
     pdh_zone = compute(pdh)["checks"]["commander_zone"]
@@ -915,7 +915,7 @@ def test_live_payload_carries_the_legality_fields() -> None:
 
 def test_mana_sources_stay_inside_the_commanders_colors() -> None:
     """A source of any color (Command Tower, an any-color land) counts for the commanders' colors
-    only in the commander formats (backlog 13, F28); colorless stays."""
+    only in the commander formats (backlog 13); colorless stays."""
     s = compute(live("blink_sample"))  # Brago: white and blue
     assert set(s["mana_sources"]) == {"W", "U", "C"} and set(s["mana_sources_lands"]) <= {"W", "U", "C"}
     field = card("Lotus Field", 1, types=["Land"], mana_production={"W": 3, "U": 3, "B": 3, "R": 3, "G": 3})
@@ -927,7 +927,7 @@ def test_mana_sources_stay_inside_the_commanders_colors() -> None:
 
 
 def test_card_rows_say_where_an_uncategorised_card_is_shown() -> None:
-    """B3 / F27: get_deck's rows had categories [] for uncategorised cards while deck_stats counted
+    """Get_deck's rows had categories [] for uncategorised cards while deck_stats counted
     them under Archidekt's auto category; the row now names it (shown_under)."""
     from mtg_gateway.views import deck_out
 
@@ -947,7 +947,7 @@ def test_card_rows_say_where_an_uncategorised_card_is_shown() -> None:
 
 
 def test_legality_chip_and_panel_list_every_failing_rule() -> None:
-    """T-040: the deck page shows every rule the deck fails, with its reason and cards, not the
+    """The deck page shows every rule the deck fails, with its reason and cards, not the
     first five (the chip) or the cards' own statuses only (the panel)."""
     from mtg_gateway.deckpage import legality_chip_html, legality_panel_html
 
@@ -1082,7 +1082,7 @@ def test_custom_mana_value_on_the_deck_page() -> None:
 
 
 def test_one_type_order_and_auto_category() -> None:
-    """D2: the deck page, the stats and get_deck's shown_under share one helper."""
+    """The deck page, the stats and get_deck's shown_under share one helper."""
     from mtg_gateway import deckpage, views
     from mtg_gateway.deck_stats import PRIMARY_TYPES, auto_category, primary_category, primary_type
 
@@ -1100,7 +1100,7 @@ def test_one_type_order_and_auto_category() -> None:
 
 
 def test_list_rows_come_from_one_builder() -> None:
-    """D2: Text, Table and Brewer rows are one builder; the markup each view had is kept."""
+    """Text, Table and Brewer rows are one builder; the markup each view had is kept."""
     from mtg_gateway.deckpage import TABLE_HEAD, card_row, cards_html
 
     c = card("Opt", 2, cmc=1.0, mana_cost="{U}", types=["Instant"], set_code="xln",
@@ -1111,7 +1111,7 @@ def test_list_rows_come_from_one_builder() -> None:
     assert "<span class='q'>2</span><span class='n'><span class='name' title='Opt'>Opt</span></span>" in text
     assert "<span class='set' title='XLN #65'>XLN</span><span class='price'>$0.25</span></li>" in text
     table = card_row(c, deck=d, view="table")
-    assert "<span class='set' title='XLN #65'>XLN #65</span>" in table  # N15
+    assert "<span class='set' title='XLN #65'>XLN #65</span>" in table
     assert (
         "<span class='ty' title='Instant'>Instant</span><span class='mv'>1</span><span class='mc'>" in table
     )
@@ -1124,8 +1124,8 @@ def test_list_rows_come_from_one_builder() -> None:
 
 
 def test_the_full_test_button_has_the_approved_texts() -> None:
-    """D3 and Track C's banner texts C-W-281 to C-W-283 (coordinator-approved ~05:24Z 10-17), word
-    for word: the manual page keeps the name Goldfish; the run is "Run full test"."""
+    """The banner's approved texts, word for word: the manual page keeps the name Goldfish; the run
+    is "Run full test"."""
     from mtg_gateway.deckpage import banner_html
 
     html = banner_html(deck([card("Opt")]), {}, own=True, csrf="t", writes_enabled=True)
@@ -1141,8 +1141,8 @@ def test_the_full_test_button_has_the_approved_texts() -> None:
 
 
 def test_the_solo_test_only_run_is_offered_only_when_forge_is_on() -> None:
-    """D17: with Forge set up, More offers the same run without Forge games (forge=0), with Track C's
-    texts C-W-284 to C-W-286 word for word."""
+    """With Forge set up, More offers the same run without Forge games (forge=0), with its
+    approved texts word for word."""
     from mtg_gateway.deckpage import banner_html
 
     off = banner_html(deck([card("Opt")]), {}, own=True, csrf="t", writes_enabled=True)

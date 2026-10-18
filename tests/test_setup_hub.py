@@ -1,4 +1,4 @@
-"""The setup hub (D11): one /install page with a section for Claude, Claude Code, ChatGPT, Codex,
+"""The setup hub: one /install page with a section for Claude, Claude Code, ChatGPT, Codex,
 the assistant skill and the Android app, and /install.md, both from one step list. The old
 addresses keep working: /skill and /app lead to their section, and the downloads stay where they
 were."""

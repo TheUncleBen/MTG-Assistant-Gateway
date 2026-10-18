@@ -16,7 +16,7 @@ their notifications in the gateway's own Android app, from a notification server
 stack.
 
 ### Added
-- **Reports page** under More: your stored deck reports, newest first (the newest 200), with their status and what ran. It also shows what Forge is playing for you now and what waits, with the expected times. A deck filter narrows the list, and each report links to its deck's trend in History. Reports stay in History too.
+- **Reports page** under More: your stored deck reports, newest first (the newest 200), with their status and what ran. It also shows what Forge has going for you now and what waits, with the expected times. A deck filter narrows the list, and each report links to its deck's trend in History. Reports stay in History too.
 - **Same opponents in compares:**
   - The Compare page's **Test both in Forge against the same opponents** seats both decks at the same three precons, picked for the higher of the two decks' brackets (the bracket set on each deck, or Archidekt's estimate when none is set), so it doesn't matter which deck you compare from. Assistants and the app API do the same with `compare_with` on the first report and `same_opponents_as` on the second.
 - **Saved card descriptions:** each member keeps their own (up to 200), they play only in that member's solo tests and goldfish A/B comparisons, and the member or an admin removes them.
@@ -51,7 +51,7 @@ stack.
 - **Forge runs:**
   - Each game of a run has its own seed, and a run's games play at once as far as Forge has room. The seed is kept for the record only: every report with Forge games and a recorded seed says Forge does not always replay the same games from the same seed, so compare runs by their win rates and 95% intervals.
   - A report plays 4 Forge games by default (`MTG_FORGE_GAMES`, was 10); **Play more games** adds more.
-  - A game still going after four minutes stops and counts as a draw (`FORGE_GAME_SECONDS`, default 240, was 600). A stack env file copied from the old example still sets `FORGE_GAME_SECONDS=600` and `FORGE_MAX_PARALLEL=1`: remove those two lines to get the new defaults.
+  - A game still going after four minutes stops and counts as a draw (`FORGE_GAME_SECONDS`, default 240, was 600). A stack variables file copied from the old example still sets `FORGE_TAG=2.0.15-mag2`, `FORGE_GAME_SECONDS=600` and `MTG_FORGE_GAMES=10`: DEPLOY.md's "Updating to 0.7.30" says what to change.
 - **Forge memory:** where Docker can't cap memory (Raspberry Pi OS by default), Forge guards its own memory from inside the container, with nothing to change on the machine: `FORGE_MEMORY_LIMIT` sizes the games at once, each Java has a ceiling on its class data, and the kernel stops a Forge game first if the machine runs out of memory (`FORGE_MAX_METASPACE`, `FORGE_OOM_SCORE_ADJ`). This is not a hard limit as Docker's is.
 - **Forge speed:** each Forge game's result shows on the report within a few seconds of the game ending. Forge reads a card's rules only when a game needs that card, so each game starts faster. With more than one Forge place, a Compare's second deck can start before the first deck's run has ended.
 - **Forge image:** 2.0.15-mag3. Build pins are by digest (Dockerfile frontend and base, buildkit, binfmt).
@@ -148,10 +148,10 @@ Android app is unchanged.
   - an index for the expiry sweep.
   An older image refuses a schema 13 database. Take a backup before upgrading.
 - Each setting the admin Settings page manages has an allowed range. A value set in your stack always wins and is shown locked. On the page, Archidekt and Scryfall pacing can only be made gentler than the gateway's defaults.
-- New deployment settings, each also on the Settings page: `MTG_PROPOSAL_EXPIRY_DAYS` (7), `MTG_AUTO_BIG_EDIT_ROWS` (20) and `MTG_FORGE_PARALLEL_GAMES` (1).
+- New deployment settings, each also on the Settings page: `MTG_PROPOSAL_EXPIRY_DAYS` (7) and `MTG_AUTO_BIG_EDIT_ROWS` (20).
 - A restore point of a deck that had no name is now listed in History by the deck's number, and assistants get an empty name instead. Before, both showed "None".
 - **Live settings.** Approval settings are read live (approval mode default and limit, auto rows,
-  big-edit rows, expiry), so a dashboard change applies without a restart.
+  big-edit rows, expiry), so a change on the Settings page applies without a restart.
 - **The proposal card uses the shared card template.**
 - **The history page** shows the bracket set on the deck, and the estimate only when none is set.
 - **A comment vote costs 2 Archidekt calls instead of 3.**
@@ -195,7 +195,7 @@ Android app is unchanged.
 
 ### Deployment
 - The stack and Compose files pass the 24 settings the Settings page manages that they used to set (each with its default) as empty unless your environment sets them, so the page can change them. The example env files list every setting the stack passes, commented out with the default. A value you set in your environment still wins and is shown locked.
-- **Upgrade note for existing deployments (DEPLOY.md and DEPLOY-COMPOSE.md "Updating to 0.7.29 from an earlier version"):** a stack or Compose file from before 0.7.29 gives 24 of the page's 47 settings a value of its own, so they show locked. Before replacing the file, note your own edits to it (the uncommented Authentik and ntfy secret lines, lines added under `environment:`) and redo them in the new one. Portainer: paste the new stack file if it was pasted into the Web editor before (the Repository method brings it). Without Portainer: `git checkout deploy/portainer-stack.yml`, then `git pull`. Compose: download the new docker-compose.yml (in a clone, `git checkout docker-compose.yml` then `git pull`). Optionally delete the variables you want to manage on the page (an older Portainer variables file sets 19, an older .env 17). Any variable kept stays locked. Then update with re-pull (if `MTG_TAG` names a version, change it to `0.7.30` first; without Portainer: from a new shell in your copy of the repository, load `mtg.env` and run `docker stack deploy` again).
+- **Upgrade note for existing deployments (DEPLOY.md and DEPLOY-COMPOSE.md "Updating to 0.7.29 from an earlier version"):** a stack or Compose file from before 0.7.29 gives 24 of the page's 47 settings a value of its own, so they show locked. Before replacing the file, note your own edits to it (the uncommented Authentik and ntfy secret lines, lines added under `environment:`) and redo them in the new one. Portainer: paste the new stack file if it was pasted into the Web editor before (the Repository method brings it). Without Portainer: `git checkout deploy/portainer-stack.yml`, then `git pull`. Compose: download the new docker-compose.yml (in a clone, `git checkout docker-compose.yml` then `git pull`). Optionally delete the variables you want to manage on the page (an older Portainer variables file sets 19, an older .env 17). Any variable kept stays locked. Then update with re-pull (if `MTG_TAG` names a version, change it to the new version first; without Portainer: from a new shell in your copy of the repository, load `mtg.env` and run `docker stack deploy` again).
 - New variables: `MTG_ARCHIDEKT_BACKUP_COPIES` (10), `MTG_ARCHIDEKT_BACKUP_BOX_DEFAULT` (false), `MTG_SNAPSHOTS_PER_DECK` (25). DEPLOY.md's environment table describes them; OPERATIONS.md "The Settings page" describes the page.
 
 ## [0.7.28] - Unreleased
@@ -281,7 +281,7 @@ so going back to 0.7.27 is a plain image swap. The Android app is unchanged.
 - A long server name shortens in the top bar instead of pushing the search box and the account
   button out of a narrow window.
 
-## [0.7.27] - 2026-10-14
+## [0.7.27] - Unreleased
 
 Bug fixes and small fixes from the owner's checks of 0.7.26, a check of every Archidekt write
 call against archidekt.com's own site code, and the fixes from an independent review. The database

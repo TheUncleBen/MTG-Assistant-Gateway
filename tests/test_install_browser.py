@@ -1,4 +1,4 @@
-"""The guided setup's Copy buttons and icon download in headless Chromium (T-145): each Copy
+"""The guided setup's Copy buttons and icon download in headless Chromium: each Copy
 button puts exactly the value shown on the clipboard, and the connector icon downloads without a
 sign-in. Skipped without a Chromium build."""
 

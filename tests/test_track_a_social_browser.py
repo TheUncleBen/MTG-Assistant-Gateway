@@ -57,7 +57,7 @@ def test_the_confirm_chip_shows_a_focus_ring_on_yes(server: Server, scheme: str)
 
 
 def test_the_comment_confirms_show_a_focus_ring(server: Server) -> None:
-    """Review round 3: posting a comment and changing your own ask first; focus moves to the
+    """Posting a comment and changing your own ask first; focus moves to the
     confirm's first button, and it shows a ring."""
     from playwright.sync_api import sync_playwright
 
@@ -139,7 +139,7 @@ def test_the_user_page_follow_confirm_shows_a_focus_ring(server: Server) -> None
 
 @pytest.mark.parametrize("where", ["deck", "user"])
 def test_a_follow_state_not_known_offers_follow_and_unfollow(server: Server, where: str) -> None:
-    """Q141 item 4A: when the gateway could not check whether the member follows someone, the deck
+    """When the gateway could not check whether the member follows someone, the deck
     page and the user page say so and offer both Follow and Unfollow; Unfollow asks first, and its
     answer leaves one button."""
     from playwright.sync_api import sync_playwright
@@ -190,7 +190,7 @@ def test_a_follow_state_not_known_offers_follow_and_unfollow(server: Server, whe
 
 
 def test_a_down_vote_shows_as_voted_down_and_can_be_taken_back(server: Server) -> None:
-    """Q141 item 5A: a down vote cast through the assistant shows on the deck page as "Voted down",
+    """A down vote cast through the assistant shows on the deck page as "Voted down",
     and the button takes it back ("Remove vote") rather than turning it into a like. The page adds
     no down button."""
     from playwright.sync_api import sync_playwright
@@ -233,7 +233,7 @@ def test_a_down_vote_shows_as_voted_down_and_can_be_taken_back(server: Server) -
 
 
 def test_with_writes_off_the_unknown_follows_unfollow_is_off_too(tmp_path, monkeypatch) -> None:
-    """Proofread of WORDING-4: with Archidekt writes switched off, the Unfollow offered beside
+    """With Archidekt writes switched off, the Unfollow offered beside
     Follow (follow state not known) is off like Follow, with the same reason; the server refuses
     a follow sent anyway, and nothing reaches Archidekt."""
     from playwright.sync_api import sync_playwright

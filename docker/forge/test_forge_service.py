@@ -348,7 +348,7 @@ class Run(unittest.TestCase):
         self.assertLess(starts[1] - starts[0], 0.4)  # the first two slices played at once
 
     def test_each_place_has_its_own_forge_home_with_lazy_card_loading(self):
-        # Speed findings C1, C2: parallel Forge processes shared the account's home folder, as
+        # Parallel Forge processes shared the account's home folder, as
         # Java ignores $HOME; each place now names its own, and Forge loads card scripts lazily.
         fs.MAX_PARALLEL = 2
         os.environ["FAKE_SLOW"] = "0.3"
@@ -385,7 +385,7 @@ class Run(unittest.TestCase):
         self.assertTrue(all(j.finished is not None for j in jobs), [j.state for j in jobs])
 
     def test_jobs_share_the_places_in_order(self):
-        # speed fix 5: a job that leaves places free (a comparison's first deck) lets the next job
+        # a job that leaves places free (a comparison's first deck) lets the next job
         # play beside it, never more processes than places, and never out of order
         old = fs.QUEUE
         try:
@@ -485,7 +485,7 @@ class Run(unittest.TestCase):
         self.assertEqual(len(list((self.tmp / "log").iterdir())), 2)  # no further slice started
 
     def test_no_group_starts_after_the_time_limit(self):
-        # review r1 item 16: a group picked up just as the timer fires never starts its process
+        # A group picked up just as the timer fires never starts its process
         deck = {"commander": ["Liesa, Forgotten Archangel"], "main": [[99, "Forest"]]}
         job = fs.Job([deck, deck], 10, "Commander", 1, 1)
         fs._time_out(job)

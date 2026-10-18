@@ -78,7 +78,7 @@ async def test_propose_details_then_apply_changes_and_verifies(stack: Stack) -> 
         "private: yes -> no",
         'description: (changed, 120 chars) "' + "x" * 120 + '"',
     }
-    # Q141 item 3B: making a deck public waits for the member's press even in Full auto
+    # Making a deck public waits for the member's press even in Full auto
     assert p2["assistant_may_apply"] is False and p2["risk_reason"] == "makes the deck public", p2
     a2 = await apply_any(h, token, p2["proposal_id"])
     assert a2["ok"] and a2["result"]["verified"] is True, a2
@@ -214,7 +214,7 @@ PHISH = json.dumps(
 
 
 async def test_an_assistant_description_is_written_as_plain_text_only(stack: Stack) -> None:
-    """M4/Q70, the reviewer's scenario: an assistant proposes a description as a Quill document
+    """An assistant proposes a description as a Quill document
     with a hidden link. The review page, the chat card's rows and the proposal text show "See my
     primer", and that plain text is exactly what is written: the link never reaches Archidekt."""
     h, ark = stack.h, stack.ark
@@ -241,7 +241,7 @@ async def test_an_assistant_description_is_written_as_plain_text_only(stack: Sta
 
 
 async def test_the_settings_form_writes_a_typed_document_as_plain_text(stack: Stack) -> None:
-    """Q70: text typed (or pasted) in the gateway's deck settings form is plain text too."""
+    """Text typed (or pasted) in the gateway's deck settings form is plain text too."""
     h, ark = stack.h, stack.ark
     await linked_user(stack)
     b = Browser(h)
@@ -258,7 +258,7 @@ async def test_the_settings_form_writes_a_typed_document_as_plain_text(stack: St
 
 
 async def test_a_restore_puts_the_formatted_description_back(stack: Stack) -> None:
-    """Q70: only a snapshot restore writes a Quill document as it is: the deck's own formatted
+    """Only a snapshot restore writes a Quill document as it is: the deck's own formatted
     description (a link the member made on Archidekt included) comes back unchanged."""
     h, ark = stack.h, stack.ark
     formatted = json.dumps(
@@ -287,7 +287,7 @@ async def test_a_restore_puts_the_formatted_description_back(stack: Stack) -> No
     assert ark.decks[42]["description"] == formatted
 
 
-# Q90: the note an assistant's reply carries when its description lost links, formatting or embeds
+# The note an assistant's reply carries when its description lost links, formatting or embeds
 DESCRIPTION_NOTE = (
     "Only the words of this description are saved: the gateway writes new text as plain text, so the "
     "links, formatting and embeds in what you sent were removed (formatting already on Archidekt "
@@ -302,7 +302,7 @@ NO_LOSS = (
 
 
 async def test_the_assistant_is_told_when_a_description_loses_its_link(stack: Stack) -> None:
-    """Q90: a description proposed as a Quill document with a link is saved as its words, and the
+    """A description proposed as a Quill document with a link is saved as its words, and the
     proposal reply says so (structured content and the text the model reads), so the assistant
     does not claim the link was added."""
     h = stack.h
@@ -321,7 +321,7 @@ async def test_the_assistant_is_told_when_a_description_loses_its_link(stack: St
 
 @pytest.mark.parametrize("text", NO_LOSS)
 async def test_a_description_that_loses_nothing_gets_no_note(stack: Stack, text: str) -> None:
-    """Q90: plain text, Markdown and a document of words only lose nothing: no note."""
+    """Plain text, Markdown and a document of words only lose nothing: no note."""
     token = await linked_user(stack)
     res = await call(
         stack.h, token, "propose_deck_details", {"deck_id": "42", "details": {"description": text}}
@@ -345,7 +345,7 @@ async def _stored_0726(stack: Stack, token: str, text: str) -> str:
 
 
 async def test_a_description_stored_by_0726_is_applied_as_words_and_the_reply_says_so(stack: Stack) -> None:
-    """Q90: a details proposal stored by 0.7.26 with a formatted document is converted when it is
+    """A details proposal stored by 0.7.26 with a formatted document is converted when it is
     applied; get_proposal and the apply reply tell the assistant so."""
     h, ark = stack.h, stack.ark
     token = await linked_user(stack)
@@ -358,7 +358,7 @@ async def test_a_description_stored_by_0726_is_applied_as_words_and_the_reply_sa
 
 
 async def test_the_cards_apply_of_a_0726_description_says_so_too(stack: Stack) -> None:
-    """Q90: the in-chat card's apply (confirm_proposal) of such a proposal carries the note."""
+    """The in-chat card's apply (confirm_proposal) of such a proposal carries the note."""
     h, ark = stack.h, stack.ark
     token = await linked_user(stack)
     pid = await _stored_0726(stack, token, PHISH)
@@ -369,7 +369,7 @@ async def test_the_cards_apply_of_a_0726_description_says_so_too(stack: Stack) -
 
 
 async def test_a_0726_description_that_loses_nothing_or_was_rejected_gets_no_note(stack: Stack) -> None:
-    """Q90: a stored words-only document or Markdown loses nothing; a rejected proposal saves nothing."""
+    """A stored words-only document or Markdown loses nothing; a rejected proposal saves nothing."""
     h = stack.h
     token = await linked_user(stack)
     for text in NO_LOSS[1:]:
@@ -636,7 +636,7 @@ async def test_restoring_a_snapshot_puts_the_deck_details_back(stack: Stack) -> 
         )
     )
     assert (await apply_any(h, token, p0["proposal_id"]))["ok"]
-    # moving the deck to Modern also clears its bracket, as on archidekt.com (Q56)
+    # moving the deck to Modern also clears its bracket, as on archidekt.com
     details = {"name": "Aesi Lands", "description": "new text", "deck_format": "modern", "private": True}
     p = structured(await call(h, token, "propose_deck_details", {"deck_id": "42", "details": details}))
     a = await apply_any(h, token, p["proposal_id"])
@@ -697,7 +697,7 @@ async def test_restoring_a_snapshot_puts_the_deck_details_back(stack: Stack) -> 
 
 
 async def test_restoring_the_snapshot_undoes_a_details_change(stack: Stack) -> None:
-    """R-119: undo works for details too. The snapshot an applied details proposal kept puts the
+    """Undo works for details too. The snapshot an applied details proposal kept puts the
     name, description and privacy back (the cards are untouched, so only details are sent)."""
     h, ark = stack.h, stack.ark
     token = await linked_user(stack)

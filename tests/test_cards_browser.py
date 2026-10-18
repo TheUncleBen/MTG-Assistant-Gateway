@@ -315,7 +315,7 @@ def test_printings_card_lists_pictures_filters_and_sends_the_pick_to_the_assista
             card.locator("#filter").fill("legends")
             assert card.locator(".tile").count() == 1 and "CMR" in card.locator(".tile").first.inner_text()
             card.locator("#filter").fill("")
-            # the finish filter is the card's own chip row, never the host's native list (R-131)
+            # the finish filter is the card's own chip row, never the host's native list
             assert card.locator("select").count() == 0
             card.locator("#finish button[data-finish=etched]").click()
             assert card.locator("#finish button[aria-pressed=true]").inner_text() == "Etched"
@@ -613,7 +613,7 @@ def test_account_card_points_at_what_is_missing() -> None:
                 )
                 assert fit[0] <= fit[1], (width, theme, fit)
                 _shot(page, f"account-semi-{theme}-{width}")
-            # writes off: the 7A wording, no setting name (Track A, WORDING-6)
+            # writes off: the shared refusal wording, no setting name
             card = _open(page, "account-card", {"structuredContent": {**ready, "writes_enabled": False}})
             card.locator("#open").wait_for()
             assert "Archidekt writes" in card.locator("#facts").inner_text()
@@ -956,7 +956,7 @@ def test_compare_card_shows_each_side_and_the_differences_at_320px() -> None:
 
 
 def test_stats_card_shows_archidekts_estimate_only_when_no_bracket_is_set() -> None:
-    """Q49 and O14: with no bracket set, the card names Archidekt's estimate from the cards with
+    """With no bracket set, the card names Archidekt's estimate from the cards with
     Archidekt's own notes (kept as text)."""
     stats = {
         **STATS["stats"],
@@ -988,7 +988,7 @@ def test_stats_card_draws_curve_colours_price_and_verdict_at_320px() -> None:
         facts = card.locator("#facts").inner_text()
         assert "$412.50" in facts and "3.12" in facts
         verdict = card.locator("#verdict")
-        # a bracket set on the deck is the deck's bracket; the estimate is not shown beside it (Q49)
+        # a bracket set on the deck is the deck's bracket; the estimate is not shown beside it
         assert (
             "bad" in verdict.get_attribute("class")
             and "Bracket: Core (2), set on the deck." in verdict.inner_text()
@@ -1066,7 +1066,7 @@ CURVE_LABELS = """() => {
 
 @pytest.mark.parametrize("theme", ["light", "dark"])
 def test_deck_card_curve_labels_read_against_their_background(theme: str) -> None:
-    """L14: the mana curve's labels (0 to 7+) sit on the card, not inside their bars: each one
+    """The mana curve's labels (0 to 7+) sit on the card, not inside their bars: each one
     reaches 4.5:1 against what is behind it (a "0" under an empty bar measured 1.1:1 against the
     bar it belonged to). The bars keep their heights, one per mana value."""
     from playwright.sync_api import sync_playwright

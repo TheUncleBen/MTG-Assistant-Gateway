@@ -183,9 +183,9 @@ class TextCache:
         """The text for ``name``: from the cache, from a fetch already in flight for it, or from
         one new ``await source(name)`` (the whole card) that every concurrent caller shares. A
         name Scryfall does not know is remembered for a while too, so asking again costs no
-        request (A15). When the caller whose fetch others are waiting on goes away (its page was
+        request. When the caller whose fetch others are waiting on goes away (its page was
         closed), the fetch is cancelled with it; a waiter that is still wanted then starts its own
-        instead of failing as if it had been cancelled itself (A16). Likewise a ``busy`` answer
+        instead of failing as if it had been cancelled itself. Likewise a ``busy`` answer
         belongs to the caller whose lookup slot ran the fetch (its own other lookups were still
         running): a waiter, maybe another member, starts its own fetch in its own slot instead
         of taking that answer as its own."""

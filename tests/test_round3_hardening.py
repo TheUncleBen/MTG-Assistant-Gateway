@@ -194,7 +194,7 @@ async def test_pending_proposals_are_capped_per_member(stack: Stack, monkeypatch
     token = await linked_user(stack)
     monkeypatch.setattr(decks_mod, "MAX_PENDING_PROPOSALS", 3)
 
-    def args(i: int) -> dict:  # 0.7.29 (A5): an exact repeat would return the waiting one
+    def args(i: int) -> dict:  # 0.7.29: an exact repeat would return the waiting one
         return {"name": f"x{i}", "cards": [{"card_name": "Sol Ring", "quantity": 1}]}
 
     for i in range(3):

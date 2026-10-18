@@ -311,7 +311,7 @@ def test_card_without_a_code_only_offers_the_review_page() -> None:
 
 def test_narrow_card_keeps_badges_whole_and_names_readable() -> None:
     """At phone widths the state and risk badges stay one line each and clear of the title (beside
-    it, or under it when the title would get less than 10rem, review M-1 of Track A), and a
+    it, or under it when the title would get less than 10rem), and a
     long change ("Main → Maybeboard (leaves the deck, −1)") wraps beside its action label, never over
     it, instead of squeezing the card name to a letter a line."""
     from playwright.sync_api import sync_playwright
@@ -369,7 +369,7 @@ def test_narrow_card_keeps_badges_whole_and_names_readable() -> None:
 
 
 def test_rows_read_on_a_phone_with_no_empty_column_and_the_footer_names_the_app() -> None:
-    """R-181: at 380 px a row is two lines (the action with its count or change, then the card), a
+    """At 380 px a row is two lines (the action with its count or change, then the card), a
     row with no picture (a setting, or a picture that did not load) leaves no empty column, tag
     changes say what is added and taken off, and the footer names the app, never its client id."""
     from playwright.sync_api import sync_playwright
@@ -519,7 +519,7 @@ def test_a_press_on_a_closed_proposal_shows_its_state_and_drops_the_buttons() ->
     ],
 )
 def test_a_failed_approve_shows_failed_with_one_message_and_no_buttons(message: str, shown: str) -> None:
-    """Review B6: an Approve whose apply fails answers with the proposal's state (failed). The card
+    """An Approve whose apply fails answers with the proposal's state (failed). The card
     shows Failed, the reason once as an error with what to do next, and no Approve or Reject (it
     used to keep Pending and live buttons that would only be refused)."""
     from playwright.sync_api import sync_playwright
@@ -560,7 +560,7 @@ STOPPED = (
 
 
 def test_an_approve_stopped_back_to_pending_keeps_pending_and_working_buttons() -> None:
-    """Q78, Q79: an Approve whose apply Archidekt's waits stopped before anything changed answers
+    """An Approve whose apply Archidekt's waits stopped before anything changed answers
     with state pending. The card keeps Pending, shows the assistant's message once (no "review
     page" or "new proposal" sentence), and its Approve works again with the same code."""
     from playwright.sync_api import sync_playwright
@@ -596,7 +596,7 @@ def test_an_approve_stopped_back_to_pending_keeps_pending_and_working_buttons() 
 
 
 def test_a_long_approve_that_ends_back_at_pending_offers_approve_again() -> None:
-    """Q78, Q79: the Approve outlasted the gateway's wait ("applying"); the card follows it with
+    """The Approve outlasted the gateway's wait ("applying"); the card follows it with
     get_proposal and finds it pending again after a stop on Archidekt's waits. It shows Pending,
     the stop's own message (not the assistant's next_step), and Approve with the card's code."""
     from playwright.sync_api import sync_playwright
@@ -624,7 +624,7 @@ def test_a_long_approve_that_ends_back_at_pending_offers_approve_again() -> None
             card.locator("#state.pending").wait_for(timeout=10_000)  # the card reads it every 5 s
             card.locator("#status.err").wait_for(timeout=5_000)
             assert card.locator("#status").inner_text() == STOPPED
-            # Q95 (review F3): the assistant is told the stop's own approved message (section E),
+            # The assistant is told the stop's own approved message (section E),
             # nothing the owner has not approved
             told = [m["params"]["content"][0]["text"] for m in _calls(page, "ui/update-model-context")]
             assert len(told) == 2 and told[1] == STOPPED, told
@@ -642,8 +642,8 @@ def test_a_long_approve_that_ends_back_at_pending_offers_approve_again() -> None
 
 
 def test_a_long_approve_that_ends_failed_shows_the_same_failed_text() -> None:
-    """Review F2: the Approve outlasted the gateway's wait ("applying") and the apply then failed.
-    The card shows Failed with the same text as an Approve that failed at once (D1.2, Q85): the
+    """The Approve outlasted the gateway's wait ("applying") and the apply then failed.
+    The card shows Failed with the same text as an Approve that failed at once: the
     reason, "The review page shows what happened." and to ask for a new proposal, never the
     assistant's next_step."""
     from playwright.sync_api import sync_playwright
@@ -712,7 +712,7 @@ LOCKED = """() => {
 
 @pytest.mark.parametrize("theme", ["light", "dark"])
 def test_locked_buttons_read_at_full_strength(theme: str) -> None:
-    """L8 (as R-181 did for the review page): while Approve and Reject are locked (the 700 ms after
+    """As on the review page, while Approve and Reject are locked (the 700 ms after
     drawing, and while a press is out) they are not faded: full-strength text with a dashed outline
     in each button's own colour, at least 4.5:1 against the card, at 344, 390, 673 and 1280 px."""
     from playwright.sync_api import sync_playwright
@@ -739,7 +739,7 @@ def test_locked_buttons_read_at_full_strength(theme: str) -> None:
                 card = page.frame_locator("#f")
                 # Locked by the arming delay, or (to measure it at leisure) by a press still out: the
                 # same disabled state either way. The 700 ms arming ends first (waited on the buttons'
-                # state, not on time), so its timer cannot unlock them during the measure (review F4).
+                # state, not on time), so its timer cannot unlock them during the measure.
                 card.locator("#approve:enabled").wait_for(timeout=5_000)
                 card.locator("#reject:enabled").wait_for(timeout=5_000)
                 frame = page.frames[1]

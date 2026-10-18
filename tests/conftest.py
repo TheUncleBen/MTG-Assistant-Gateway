@@ -283,7 +283,7 @@ def make_settings(tmp_path: Path, **over: object) -> Settings:
     base.update(over)
     if "env_set" not in over:
         # a managed setting a test passes is one its deployment set: live readers (LiveSettings)
-        # then use it, as they use a stack's value (0.7.29, Track A's live approval settings)
+        # then use it, as they use a stack's value (0.7.29, the live approval settings)
         from mtg_gateway.config import MANAGED_SETTINGS
 
         base["env_set"] = frozenset(k for k in over if k in MANAGED_SETTINGS)

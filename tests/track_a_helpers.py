@@ -1,6 +1,6 @@
-"""Test helpers of 0.7.29 Track A (approvals and proposals).
+"""Test helpers for the 0.7.29 approvals and proposals.
 
-Since 0.7.29 auto mode no longer applies everything (O7, O8): a restore, a new deck, a commander
+Since 0.7.29 auto mode no longer applies everything: a restore, a new deck, a commander
 change and a big edit wait for the member's press on the card. Tests that used the assistant's
 own apply for those press the card instead, as the member would."""
 
@@ -44,7 +44,7 @@ async def press_approve(h, token: str, pid: str) -> dict:
 async def apply_any(h, token: str, pid: str) -> dict:
     """Apply a proposal as the tests did before 0.7.29: the assistant's own apply when the mode
     lets it, else the member's press on the card, or on the review page for a change that keeps
-    or removes formatting (Q137, Q141 items 3B and 10, D-1: no card approves it, and Full auto
+    or removes formatting (no card approves it, and Full auto
     waits for it)."""
     p = structured(await call(h, token, "get_proposal", {"proposal_id": pid}))
     if p.get("assistant_may_apply"):

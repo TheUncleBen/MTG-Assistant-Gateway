@@ -55,7 +55,7 @@ async def test_matching_cards_are_listed_with_viewer_data_and_a_live_add_button(
         assert "/static/cardsearch.js" in t and "/static/cardview.js" in t
         assert "img-src 'self' https://cards.scryfall.io" in r.headers["content-security-policy"]
         assert "connect-src 'self'" in r.headers["content-security-policy"]
-        # the box keeps the text, has no dropdown any more (live tiles, Q4), offers the deck search
+        # the box keeps the text, has no dropdown any more (live tiles), offers the deck search
         assert "id='c-q' type='search' name='q' value='sol'" in t
         assert "data-suggest" not in t.split("cs-top")[1]
         assert "href='/search'" in t

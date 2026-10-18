@@ -1,7 +1,7 @@
-"""Kept card models (K1-K3 in Q136): only Mystic Forge's validated shape is kept, every number is
+"""Kept card models: only Mystic Forge's validated shape is kept, every number is
 bounded, a member's count is capped, later solo tests of the member's decks play their kept models
-(each member keeps their own: Q140 item 1), and a report gives each one's date. The schema 14 table is Track
-B's (db.py): each test runs against a fake with the agreed methods and against the real database."""
+(each member keeps their own), and a report gives each one's date. The schema 14 table is in
+db.py: each test runs against a fake with the agreed methods and against the real database."""
 
 from __future__ import annotations
 
@@ -44,7 +44,7 @@ def _switched_on(monkeypatch: Any) -> None:
 
 
 def test_kept_models_are_on_and_the_switch_turns_them_off(tmp_path: Path, monkeypatch: Any) -> None:
-    """Kept models ship switched on (Q140 item 1); with every schema 14 method there, nothing is
+    """Kept models ship switched on; with every schema 14 method there, nothing is
     kept or used once the switch is off."""
     assert card_models.SWITCHED_ON is True
     monkeypatch.setattr(card_models, "SWITCHED_ON", False)
@@ -96,7 +96,7 @@ def test_models_out_of_shape_or_bounds_are_refused(raw: Any, why: str) -> None:
 
 
 class CardModelRefused(Exception):
-    """Track B's db.CardModelRefused (schema 14, review r1 item 18): nothing was written."""
+    """db.CardModelRefused (schema 14): nothing was written."""
 
     def __init__(self, why: str) -> None:
         super().__init__(why)
@@ -104,15 +104,15 @@ class CardModelRefused(Exception):
 
 
 def _refuse(rows: dict[Any, dict[str, Any]], key: str, sub: str, most: int | None) -> None:
-    """Track B's put_card_model check, made in its own write: with ``most``, a save that newly counts
-    toward ``sub`` stops at that many. Each member keeps their own model of a card (Q140 item 1)."""
+    """The put_card_model check, made in its own write: with ``most``, a save that newly counts
+    toward ``sub`` stops at that many. Each member keeps their own model of a card."""
     if most is not None and (sub, key) not in rows:
         if sum(1 for s, _ in rows if s == sub) >= most:
             raise CardModelRefused("most")
 
 
 class FakeModelsDb(Database):
-    """The schema 14 methods as Track B built them (7a42c07): one model per card, the newest
+    """The schema 14 methods as db.py has them: one model per card, the newest
     put wins, and a member deletes only their own."""
 
     def __init__(self, path: Path) -> None:
@@ -200,7 +200,7 @@ class _RowsView(MutableMapping):
 
 
 class RealModelsDb(Database):
-    """Track B's real schema 14 table and methods (db.py), with the fake's ``rows`` as a view of
+    """The real schema 14 table and methods (db.py), with the fake's ``rows`` as a view of
     the table: every test that uses the fake also runs against the real database (the join check)."""
 
     @property
@@ -217,7 +217,7 @@ class RealModelsDb(Database):
 
 @pytest.fixture(autouse=True, params=["fake", "real"])
 def _models_db(request: Any, monkeypatch: Any) -> None:
-    """Each test runs with the fake and with Track B's real database."""
+    """Each test runs with the fake and with the real database."""
     if request.param == "real":
         monkeypatch.setitem(globals(), "FakeModelsDb", RealModelsDb)
 
@@ -272,7 +272,7 @@ def _service(tmp_path: Path) -> tuple[ReportService, FakeModelsDb, FakeMF]:
 
 
 async def test_a_kept_model_plays_only_in_its_members_later_runs(tmp_path: Path) -> None:
-    """Q140 item 1: each member keeps their own models, with no shared set."""
+    """Each member keeps their own models, with no shared set."""
     reports, db, mf = _service(tmp_path)
     name = next(c.name for c in (await _Decks().get_any_deck(None, "42")).cards if c.name != "Plains")
     model = {"name": name, "triggers": [{"on": "etb", "do": "draw", "count": 2}]}
@@ -334,9 +334,9 @@ async def test_each_member_keeps_at_most_the_cap(tmp_path: Path, monkeypatch: An
 async def test_nothing_is_kept_without_the_schema_14_table_or_while_off(
     tmp_path: Path, monkeypatch: Any
 ) -> None:
-    """No store without all four schema 14 methods keeps anything (delete included, Q138 item 4);
+    """No store without all four schema 14 methods keeps anything (delete included);
     and with the real database, whichever branch's schema it has, nothing is kept while the switch
-    is off (CI runs this branch merged onto Track B's, which has the methods)."""
+    is off (CI runs this branch merged onto the one that has the methods)."""
     store = _Store()
     assert KeptModels(store).available
     no_delete = SimpleNamespace(
@@ -357,7 +357,7 @@ async def test_nothing_is_kept_without_the_schema_14_table_or_while_off(
 async def test_models_are_kept_only_from_stored_decks_for_cards_the_run_could_not_play(
     tmp_path: Path,
 ) -> None:
-    """Review r1 fix 9: a pasted list never keeps a model (its names are the member's own
+    """A pasted list never keeps a model (its names are the member's own
     spelling: "1 Sol Ring // <any text>" reads as one card); a stored deck keeps only cards its run
     played without their effect, under the deck's name for the card; and every kept_models list an
     assistant reads says the models are member-written data."""
@@ -388,7 +388,7 @@ async def test_models_are_kept_only_from_stored_decks_for_cards_the_run_could_no
 async def test_a_model_the_run_played_is_kept_and_the_simulators_own_cards_are_not(
     tmp_path: Path,
 ) -> None:
-    """Proofread 6 P1: Mystic Forge files an annotated card as modelled, so the run that played the
+    """Mystic Forge files an annotated card as modelled, so the run that played the
     assistant's model never lists that card as unrecognized. Which cards may be kept comes from
     goldfish_annotate on the same deck text; when that cannot be read, nothing is kept."""
     reports, db, mf = _service(tmp_path)
@@ -426,14 +426,14 @@ def test_needs_annotation_reads_mystic_forges_preflight() -> None:
     none = "## Needs annotation (0 cards)\n- (none) \u2014 every card is auto-derived or classified."
     assert card_models.needs_annotation(none) == []
     assert card_models.needs_annotation("Deck not found") is None
-    # review r2 item 20: a list cut short (fewer cards than its heading counts) is not read as whole
+    # A list cut short (fewer cards than its heading counts) is not read as whole
     cut = text.split("### Fire // Ice")[0].replace("(2 cards)", "(3 cards)")
     assert card_models.needs_annotation(cut) is None
     assert card_models.needs_annotation(text.split("### Fire // Ice")[0]) is None
 
 
 async def test_a_kept_tutor_names_a_card_of_the_deck_as_the_deck_writes_it(tmp_path: Path) -> None:
-    """Review r2 item 21: a kept model plays in the member's later runs, so a tutor's name filter must
+    """A kept model plays in the member's later runs, so a tutor's name filter must
     name a card the deck holds, and is stored in the deck's own spelling."""
     reports, db, mf = _service(tmp_path)
     blank, other = mf.needs[0], mf.needs[1]
@@ -455,7 +455,7 @@ async def test_a_kept_tutor_names_a_card_of_the_deck_as_the_deck_writes_it(tmp_p
 async def test_the_save_itself_refuses_a_race_the_earlier_checks_missed(
     tmp_path: Path, monkeypatch: Any
 ) -> None:
-    """Review r1 item 18: Track B's put_card_model checks the cap in its own write. When another
+    """db.put_card_model checks the cap in its own write. When another
     save lands between the gateway's count and its write, the refusal it raises is passed on in
     the same words as the early check, and nothing is written."""
     reports, db, mf = _service(tmp_path)
@@ -471,7 +471,7 @@ async def test_the_save_itself_refuses_a_race_the_earlier_checks_missed(
 
 
 def test_the_simulator_version_saved_with_a_model_is_the_pinned_one(tmp_path: Path) -> None:
-    """Q139 item 5: each saved model records the simulator version it was checked with, the Mystic
+    """Each saved model records the simulator version it was checked with, the Mystic
     Forge commit pinned for the image (its vocabulary is card_models')."""
     pinned = re.search(r"^ARG MF_COMMIT=(\w+)", DOCKERFILE.read_text(), re.M).group(1)
     assert card_models.SIM_VERSION == f"mystic-forge {pinned[:7]}"
@@ -484,7 +484,7 @@ def test_the_simulator_version_saved_with_a_model_is_the_pinned_one(tmp_path: Pa
 
 
 async def test_a_long_preflight_is_read_whole(tmp_path: Path) -> None:
-    """Review r2 item 20: the gateway keeps 60 kB of a research tool's text, and "Needs annotation"
+    """The gateway keeps 60 kB of a research tool's text, and "Needs annotation"
     comes last in the pre-flight; it is read whole, so its last card can still be kept."""
     reports, db, mf = _service(tmp_path)
     last = mf.needs[-1]
@@ -542,7 +542,7 @@ def test_a_name_too_long_for_a_card_is_refused(tmp_path: Path) -> None:
 
 
 async def test_each_member_saves_and_removes_only_their_own_model(tmp_path: Path) -> None:
-    """Q140 item 1 (with Q138 item 4): two members each keep their own model of one card, each run
+    """Two members each keep their own model of one card, each run
     plays its member's own, and a member removes theirs and nobody else's."""
     reports, db, mf = _service(tmp_path)
     name = next(c.name for c in (await _Decks().get_any_deck(None, "42")).cards if c.name != "Plains")
@@ -605,7 +605,7 @@ class _Store:
 async def test_the_adder_removes_a_saved_model_from_the_report_and_through_the_assistant(
     stack: Stack, monkeypatch: Any
 ) -> None:
-    """Q138 item 4: the report page offers Remove only for the member's own saved descriptions;
+    """The report page offers Remove only for the member's own saved descriptions;
     the assistant's remove_card_model removes the member's own and nobody else's."""
     h = stack.h
     b = await linked_browser(stack)
@@ -660,7 +660,7 @@ async def test_the_adder_removes_a_saved_model_from_the_report_and_through_the_a
         gw.reports.models = KeptModels(SimpleNamespace())  # a store without the schema 14 methods
         out = structured(await call(h, token, "remove_card_model", {"card_name": "Sol Ring"}))
         assert out["ok"] is False and "does not save card models" in out["message"]
-        # N4: a store that fails is never reported as "already removed"
+        # A store that fails is never reported as "already removed"
         gw.reports.models = KeptModels(store)
         store.put_card_model("sol ring", "Sol Ring", model, sub, 3)
 

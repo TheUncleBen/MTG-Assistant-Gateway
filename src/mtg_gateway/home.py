@@ -70,7 +70,7 @@ def recent_panel_inner(
     """The inside of the home page's My decks panel: the newest covers, or why there are none.
     /api/decks/mine?shape=recent answers with the same markup for the placeholder to swap in.
     ``unreadable``: Archidekt left entries of the list unreadable, so the panel says so with the
-    /decks notice and Try again (Q64), over the covers it did read, never "No decks yet"."""
+    /decks notice and Try again, over the covers it did read, never "No decks yet"."""
     note = (
         decks_unreadable_html(some_shown=bool(decks), panel=False, again=reread_href("/"))
         if unreadable
@@ -125,7 +125,8 @@ def add_home_routes(server: MCPServer, state: AppState) -> None:
         sub, sid = browser_session(state, request)
         if sub is None:
             return login_redirect("/")
-        if request.query_params.get("reread"):  # Try again on the Q64 notice: read the list again
+        # Try again on the notice that the deck list couldn't be read: read it again
+        if request.query_params.get("reread"):
             state.decks.reread_deck_list(sub)
             return RedirectResponse("/", 303)
         user = state.db.get_user(sub) or {}
@@ -169,7 +170,7 @@ def add_home_routes(server: MCPServer, state: AppState) -> None:
             )
         elif link["linked"]:
             assert not isinstance(decks, str)
-            unreadable = bool(getattr(decks, "unreadable", 0))  # Q64, as on /decks
+            unreadable = bool(getattr(decks, "unreadable", 0))  # the deck list couldn't be read, as on /decks
             recent = (
                 "<section class='panel'>"
                 + recent_panel_inner(decks, covers, unreadable=unreadable)
@@ -256,7 +257,7 @@ def add_home_routes(server: MCPServer, state: AppState) -> None:
             current="/",
             heading=False,
             body_class="home",
-            # decks.js fills the recent-decks panel; Home has none of deck.js's hooks (AUDIT F1)
+            # decks.js fills the recent-decks panel; Home has none of deck.js's hooks
             head_extra="<script src='/static/decks.js' defer></script>",
         )
         resp.headers["Content-Security-Policy"] = DECK_CSP  # deck covers come from Scryfall
