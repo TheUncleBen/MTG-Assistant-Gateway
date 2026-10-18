@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from types import SimpleNamespace
 from typing import Annotated, Any, Literal
@@ -26,6 +27,8 @@ from .schemas import (
     dumped,
 )
 from .views import deck_brief
+
+logger = logging.getLogger(__name__)
 
 # Assistants read this only while kept models are switched on (card_models.SWITCHED_ON), as
 # remove_card_model exists only then. Each member keeps their own.
@@ -272,6 +275,7 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
             if failed:
                 # the A/B was asked for and did not run: the result says so at the top
                 message = f"The A/B did not run: {failed}. {_KEPT}"
+                logger.warning("compare_decks: the A/B did not run: %s", failed)
                 out.update(ok=False, error="simulation_failed", message=message)
         return out
 
@@ -411,6 +415,7 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
             failed = _simulation_failure(report.get("goldfish")) if simulate else None
             if failed:
                 # the simulation was asked for and did not run: the result says so at the top
+                logger.warning("run_deck_report: the simulation did not run: %s", failed)
                 return {
                     **report,
                     "ok": False,

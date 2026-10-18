@@ -4,6 +4,7 @@ linking, propose and apply, isolation between users."""
 from __future__ import annotations
 
 import json
+import logging
 import re
 import time
 from pathlib import Path
@@ -1547,7 +1548,9 @@ async def test_simulation_calls_take_the_shape_mystic_forge_accepts(stack: Stack
     assert bad["ok"] is False and "opponents" in bad["message"], bad
 
 
-async def test_sixty_card_decks_are_simulated_as_sixty_card_games(stack: Stack) -> None:
+async def test_sixty_card_decks_are_simulated_as_sixty_card_games(
+    stack: Stack, caplog: pytest.LogCaptureFixture
+) -> None:
     """A deck without a commander and with 60 or more cards (Modern here) is simulated as a 60-card
     game: Mystic Forge gets constructed=true and the main deck only, never the sideboard. A short
     list, and a Commander-format deck missing its commander, are refused with a reason; Commander
@@ -1585,9 +1588,14 @@ async def test_sixty_card_decks_are_simulated_as_sixty_card_games(stack: Stack) 
     ark.decks[44]["deckFormat"] = 3
     ark.decks[44]["updatedAt"] = "2026-10-03T00:00:00Z"
     SIM_CALLS.clear()
-    rep = structured(await call(h, token, "run_deck_report", {"deck_ref": "44", "games": 20}))
+    with caplog.at_level(logging.WARNING, logger="mtg_gateway.tools_reports"):
+        rep = structured(await call(h, token, "run_deck_report", {"deck_ref": "44", "games": 20}))
     assert rep["ok"] is False and rep["error"] == "simulation_failed" and "Commander" in rep["message"], rep
     assert SIM_CALLS == []
+    # the reason is in the gateway's log too, where an operator (or a CI log) can read it
+    assert any("simulation did not run: No solo test" in r.getMessage() for r in caplog.records), (
+        caplog.records
+    )
     # Pasted lists: 60 cards plays, 40 is refused, a Commander list keeps its commander game.
     sixty = "4 Lightning Bolt\n20 Mountain\n36 Goblin Guide\nSideboard\n2 Smash to Smithereens\n"
     rep = structured(await call(h, token, "run_deck_report", {"deck_ref": sixty, "games": 20}))

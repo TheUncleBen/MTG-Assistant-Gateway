@@ -155,7 +155,8 @@ def test_public_deck_reads_need_no_link_and_proposals_do(clients, env: Env):
             # The report's simulation reaches the real Mystic Forge in the stack with the argument
             # shape its tools take; a shape error would come back as a pydantic "validation error".
             rep = await c.call(s, "run_deck_report", {"deck_ref": "42", "games": 20})
-            assert rep["ok"], rep
+            # the message and the goldfish block first: a long report's repr is cut before them
+            assert rep["ok"], (rep.get("message"), rep.get("goldfish"), rep)
             for block in (rep["goldfish"], rep["validation"]):
                 assert block is not None and "validation error" not in block.get("text", ""), block
                 assert "Field required" not in block.get("text", ""), block

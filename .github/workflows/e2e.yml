@@ -121,6 +121,12 @@ jobs:
           for svc in mtg_mtg-assistant-gateway mtg_mtg-assistant-mysticforge e2eedge_archidektmock e2eedge_scryfallmock e2eedge_cimdmock; do
             for c in $(docker ps -aq -f "name=$svc"); do echo "== $svc $c"; timeout 30 docker logs --tail 150 "$c" 2>&1 || true; done
           done
+          # The gateway logs at DEBUG here, so its warnings and errors scroll out of the tail above:
+          # they are printed again from the whole log.
+          for c in $(docker ps -aq -f "name=mtg_mtg-assistant-gateway"); do
+            echo "== gateway warnings and errors $c"
+            timeout 30 docker logs "$c" 2>&1 | grep -E ' (WARNING|ERROR|CRITICAL) ' | tail -200 || true
+          done
           # Authentik's own account of every sign-in (events, failed logins, policy results), kept long
           # enough to explain a refused password; its static-asset lines are dropped.
           for svc in e2eedge_authentik-server e2eedge_authentik-worker; do
