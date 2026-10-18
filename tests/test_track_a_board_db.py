@@ -1,6 +1,6 @@
 """Release 0.7.29, approvals and proposals: the database side of the board. A claim that checks the
-version (G16), the re-check record (updated, needs a look), holds from the notes a note depends on
-(Q27j), exact duplicates (Q27k) and the board number of a note that comes back (A1)."""
+version, the re-check record (updated, needs a look), holds from the notes a note depends on,
+exact duplicates and the board number of a note that comes back."""
 
 from __future__ import annotations
 
@@ -78,7 +78,7 @@ def test_a_recheck_moves_the_baseline_only_when_the_note_still_fits(tmp_path: Pa
 
 
 def test_holds_follow_the_notes_a_note_depends_on(tmp_path: Path) -> None:
-    """K6: an amend keeps a hold while the note it depends on is rejected, withdrawn or failed, and
+    """An amend keeps a hold while the note it depends on is rejected, withdrawn or failed, and
     a note that comes back while that note is still one of those is held again."""
     db = _db(tmp_path)
     try:
@@ -142,7 +142,7 @@ def test_only_an_exact_duplicate_from_the_same_app_is_found(tmp_path: Path) -> N
 
 
 def test_a_note_that_comes_back_keeps_its_number_unless_another_took_it(tmp_path: Path) -> None:
-    """A1: numbers stay unique on a deck's board."""
+    """Numbers stay unique on a deck's board."""
     db = _db(tmp_path)
     try:
         for pid in ("a", "b"):

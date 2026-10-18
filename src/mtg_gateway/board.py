@@ -1,16 +1,15 @@
-"""0.7.29: the waiting changes as a pin board the assistant can read and tidy (BOARD design,
-Q27j-Q27m, O9, G5, G6, G16).
+"""0.7.29: the waiting changes as a pin board the assistant can read and tidy.
 
 Every waiting proposal ("note") has a number on its deck's board, a version and links ("depends
 on #1", "replaces #2"). The assistant sees the whole board of a deck (``lines``), is told card by
 card where a new request overlaps a waiting note (``overlaps``), and tidies with amend, replace,
 withdraw and combine (DeckService methods below, MCP tools in tools_decks.py). The gateway does
-only one thing by itself (Q27k): an exact duplicate from the same app is not saved again.
+only one thing by itself: an exact duplicate from the same app is not saved again.
 
-Holds (Q27j, K6): a note that depends on a note that is rejected, withdrawn or fails is held, so
-no assistant applies it in any mode (the member still may, A8); the hold lifts when that note is
+Holds: a note that depends on a note that is rejected, withdrawn or fails is held, so
+no assistant applies it in any mode (the member still may); the hold lifts when that note is
 applied or comes back. A note replaced by another comes back when its replacement is rejected or
-withdrawn (Q27l)."""
+withdrawn."""
 
 from __future__ import annotations
 
@@ -21,7 +20,7 @@ from .db import HOLDING_STATES, hold_reason, replaced_hold_reason
 
 logger = logging.getLogger(__name__)
 
-SOFT_PER_DECK = 20  # G6, Q27o: a hint only, never a refusal
+SOFT_PER_DECK = 20  # a hint only, never a refusal
 WHAT_CHANGED_MAX = 400
 
 # How a review row reads in an overlap line ("#2 removes it").
@@ -56,7 +55,7 @@ def _cards(rows: list[dict[str, Any]] | None) -> dict[str, dict[str, Any]]:
 def overlaps(
     waiting: list[dict[str, Any]], rows: list[dict[str, Any]] | None, numbers: dict[str, Any]
 ) -> list[str]:
-    """One line per card that a new request and a waiting note both touch (BOARD §2):
+    """One line per card that a new request and a waiting note both touch:
     "Sol Ring: #2 changes its printing; this request removes it." ``waiting`` are full proposal
     rows (with ``rows``), oldest first; ``numbers`` maps their ids to board numbers."""
     mine = _cards(rows)
@@ -74,7 +73,7 @@ def overlaps(
 
 
 def what_changed(old_rows: list[dict[str, Any]] | None, new_rows: list[dict[str, Any]] | None) -> str:
-    """The gateway's own line for an amended note (A4 rec): what the new version does that the
+    """The gateway's own line for an amended note: what the new version does that the
     old one did not, and what it no longer does, from the rows (an assistant's words never appear
     here, so a note cannot describe itself wrongly)."""
     from .decks import row_line
@@ -119,8 +118,8 @@ def add_hold(db: Any, sub: str, proposal_id: str, cause: str) -> None:
 
 def settle(svc: Any, sub: str, proposal_id: str, state: str) -> None:
     """After a note was applied, rejected, withdrawn, failed or came back: hold the notes that
-    depend on it, or lift their hold (K6), and bring back what a rejected or withdrawn
-    replacement replaced (Q27l). Never raises: a link it cannot settle is logged."""
+    depend on it, or lift their hold, and bring back what a rejected or withdrawn
+    replacement replaced. Never raises: a link it cannot settle is logged."""
     try:
         db = svc.db
         if state in HOLDING_STATES:
@@ -158,7 +157,7 @@ def settle(svc: Any, sub: str, proposal_id: str, state: str) -> None:
 def close_replaced_on_apply(svc: Any, sub: str, proposal_id: str) -> None:
     """Once a note is applied, the notes it replaces that were left waiting (another app's:
     DeckService.mark_replaced) are closed as replaced by it, as a replace by the same app is at
-    once (Q27m, G5)."""
+    once."""
     db = svc.db
     no = db.proposal_board_numbers(sub, [proposal_id]).get(proposal_id)
     for link in db.proposal_links(sub, [proposal_id]):
@@ -174,9 +173,8 @@ def close_replaced_on_apply(svc: Any, sub: str, proposal_id: str) -> None:
 
 
 def hold_replacing(svc: Any, sub: str, proposal_id: str) -> None:
-    """Once a note is applied on its own, a waiting note that would replace it is held (review
-    round 3; Q142 item 11 A, Ben approved 10-17): applying it too would change the deck twice. The
-    member may still apply it (A8); no assistant does, in any mode."""
+    """Once a note is applied on its own, a waiting note that would replace it is held: applying
+    it too would change the deck twice. The member may still apply it; no assistant does, in any mode."""
     db = svc.db
     for link in db.proposal_links(sub, [proposal_id]):
         if link["other_id"] != proposal_id or link["kind"] != "replaces":
@@ -187,7 +185,7 @@ def hold_replacing(svc: Any, sub: str, proposal_id: str) -> None:
             add_hold(db, sub, new["id"], replaced_hold_reason(proposal_id))
 
 
-# What the member reads about a replace (proofread A2, finding 2; WORDING-3-r2 item 2).
+# What the member reads about a replace.
 REPLACED_BY_WAITING = "{new} would replace this. Apply one of them, not both."
 REPLACES_WAITING = "This replaces {old}, which still waits."
 REPLACED_BY = "Replaced by {new}."
@@ -211,7 +209,7 @@ def replaced_by_waiting(db: Any, sub: str, proposal_id: str) -> dict[str, Any] |
 
 def replace_note(db: Any, sub: str, row: dict[str, Any]) -> str | None:
     """On a waiting note: the change that would replace it, or the waiting changes it replaces;
-    on a replaced one: which change replaced it (Q27l)."""
+    on a replaced one: which change replaced it."""
     pid = row["id"]
     if row.get("state") == "pending":
         later = replaced_by_waiting(db, sub, pid)
@@ -248,8 +246,8 @@ def first_step_not_applied(db: Any, sub: str, proposal_id: str) -> dict[str, Any
 
 
 def link_note(db: Any, sub: str, row: dict[str, Any]) -> str:
-    """A waiting note's link in words for the lists and cards: a replace that waits (Q27l), or
-    the change it waits for (Q27j "depends on #1", Q134 item 9 "waits for #1")."""
+    """A waiting note's link in words for the lists and cards: a replace that waits, or
+    the change it waits for."""
     note = replace_note(db, sub, {**row, "state": "pending"})
     if note:
         return note
@@ -278,7 +276,7 @@ def _cause_text(db: Any, sub: str, cause: str) -> str:
 
 def status_text(db: Any, sub: str, row: dict[str, Any]) -> str:
     """A waiting note's status in words, for the pages, the card and the assistant: why it is
-    "held" (Q27j; Q134 A8 "which you rejected"), what "updated" means, or why it "needs a look"
+    "held" (as in "which you rejected"), what "updated" means, or why it "needs a look"
     (recheck.py)."""
     from . import recheck
 

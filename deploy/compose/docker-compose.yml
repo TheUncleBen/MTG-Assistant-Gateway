@@ -308,7 +308,8 @@ services:
 
   # Forge, the rules engine for deck simulations (docker/forge/, GPL-3.0, unmodified). Optional and
   # off by default: start it with COMPOSE_PROFILES=forge and set MTG_FORGE_URL=http://forge:8000 for
-  # the gateway. It starts Java only while a simulation runs, one at a time, and needs no internet.
+  # the gateway. It starts Java only while a simulation runs, as many games at once as fit
+  # (FORGE_MAX_PARALLEL), and needs no internet.
   forge:
     profiles: ["forge"]
     image: ${FORGE_IMAGE:-ghcr.io/theuncleben/mtg-assistant-forge}:${FORGE_TAG:-2.0.15-mag3}

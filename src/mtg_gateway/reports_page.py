@@ -1,4 +1,4 @@
-"""The Reports page (/reports, under More; T-152, Q28, K8 in Q136): every stored deck report of the
+"""The Reports page (/reports, under More): every stored deck report of the
 member, newest first, with its status and the engines that ran; what Forge is playing for them now
 and what waits, with the expected times; a deck filter; and each deck's trend in History, where
 reports stay listed too. Reads the gateway's own database only: Archidekt is never asked."""
@@ -30,7 +30,7 @@ def _minutes(seconds: Any) -> str:
 
 
 def engines_text(r: dict[str, Any]) -> str:
-    """What ran for a report, in the page's words (K7: the 300 automatic games are the solo test)."""
+    """What ran for a report, in the page's words (the 300 automatic games are the solo test)."""
     parts = []
     if r.get("has_goldfish"):
         games = (r.get("settings") or {}).get("games")
@@ -92,7 +92,7 @@ def row_html(r: dict[str, Any]) -> str:
     kind, label = STATUS_BADGE.get(str(r.get("status")), ("", str(r.get("status") or "")))
     rid, did = esc(r["report_id"]), str(r.get("deck_id") or "")
     trend = "?" + urlencode({"deck_id": did, "type": "reports"})
-    # the bracket set on the deck is THE bracket; the estimate shows only without one (Q49, O14)
+    # the bracket set on the deck is THE bracket; the estimate shows only without one
     if r.get("bracket_set"):
         bracket = f" · Bracket: {esc(bracket_name(r['bracket_set']))}"
     elif r.get("bracket_estimate"):

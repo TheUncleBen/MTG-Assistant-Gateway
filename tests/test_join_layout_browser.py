@@ -1,4 +1,4 @@
-"""The 0.7.x join review's layout findings, in headless Chromium: a control that Tab reaches is never
+"""Layout checks, in headless Chromium: a control that Tab reaches is never
 hidden under what stays at the foot of the window (the phone's tab bar, the waiting changes' Apply
 bar, the Guide's Back to top), the deck page's View as, Card size, Group by and Sort by boxes never
 run over each other at desktop width, and Reports is in the account menu at desktop width. Each at
@@ -79,8 +79,8 @@ def test_tab_never_hides_a_control_under_the_bars_at_the_foot(
     zoom: str,
     script: bool,
 ) -> None:
-    """Join review J1-2 (the Proposals page's Apply bar on a phone at 200% text) and J1-6 (the
-    Guide's Back to top on a folded Fold): the room kept below a focused control follows those bars'
+    """The Proposals page's Apply bar on a phone at 200% text and the Guide's Back to top on a
+    folded Fold: the room kept below a focused control follows those bars'
     real height (static/topbar.js), and is 9rem without scripts."""
     from playwright.sync_api import sync_playwright
 
@@ -136,7 +136,7 @@ VIEW_BOXES = """() => {
 
 @pytest.mark.parametrize("zoom", ["none", "root", "text"])
 def test_the_deck_pages_view_boxes_never_overlap_at_desktop_width(server: Server, zoom: str) -> None:  # noqa: F811
-    """Join review J1-3: with the card size switch in the row, Group by and Sort by ran over each
+    """With the card size switch in the row, Group by and Sort by ran over each
     other at 1366 px and 200% text."""
     from playwright.sync_api import sync_playwright
 
@@ -159,7 +159,7 @@ def test_the_deck_pages_view_boxes_never_overlap_at_desktop_width(server: Server
 
 
 def test_reports_is_in_the_account_menu_at_desktop_width(server: Server) -> None:  # noqa: F811
-    """Join review J1-5: the top bar has no Reports link, so with a mouse at desktop width the
+    """The top bar has no Reports link, so with a mouse at desktop width the
     account menu has it (a phone has it under More, the rail as a tab)."""
     from playwright.sync_api import sync_playwright
 

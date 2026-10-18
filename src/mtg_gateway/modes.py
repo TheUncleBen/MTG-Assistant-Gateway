@@ -9,12 +9,12 @@ decks and connected apps:
 * ``semi``: the assistant may apply a *low-risk* proposal itself; anything high-risk waits for
   the member's press as in manual.
 * ``auto``: the assistant may apply every proposal itself, except the ones that always wait for
-  a card press (O7, O8; ``auto_waits``): restoring a snapshot, a commander change, a new deck, a
-  big edit (more rows than the ``auto_big_edit_rows`` setting, 20 by default), and (Q141 item 3B)
+  a card press (``auto_waits``): restoring a snapshot, a commander change, a new deck, a
+  big edit (more rows than the ``auto_big_edit_rows`` setting, 20 by default), and
   making a deck public or unlisted and a description edit that keeps formatting.
 
 In every mode an assistant never applies a proposal that is held (a proposal it depends on was
-rejected, withdrawn or failed, Q27j) or that another app changed after it was made (G5).
+rejected, withdrawn or failed) or that another app changed after it was made.
 
 Every apply still snapshots the deck first, so an auto-applied change can be undone from the
 History page. The risk tiers are decided from the proposal's stored review rows, so a
@@ -27,11 +27,11 @@ proposal is low risk only if what the review page would show is small and safe:
   creates a private copy and changes nothing that exists.
 * **high**: everything else: more rows than that, any commander change, a new deck, restoring
   a snapshot, deck details (name, format, description, visibility).
-* **consent** (R-142): the Archidekt account actions of actions.py: likes, votes, bookmarks,
+* **consent**: the Archidekt account actions of actions.py: likes, votes, bookmarks,
   follows, posting, editing, deleting and voting on comments, creating a folder, and adding or
   removing a deck's collaborators. Each one waits for the member's own press, in every mode: on
-  the card in the chat (0.7.29, Q8) or on its review page.
-* **destructive** (R-142): deleting a deck. Like consent, no mode lets an assistant apply it, and
+  the card in the chat (0.7.29) or on its review page.
+* **destructive**: deleting a deck. Like consent, no mode lets an assistant apply it, and
   only its review page applies it (not the card in the chat).
 
 The operator may set the default mode for members who have not chosen (``MTG_APPROVAL_MODE_DEFAULT``)
@@ -43,12 +43,12 @@ from __future__ import annotations
 from typing import Any
 
 MODES = ("manual", "semi", "auto")
-# Risk tiers no approval mode lets an assistant apply (R-142): acting publicly or on the member's
+# Risk tiers no approval mode lets an assistant apply: acting publicly or on the member's
 # account (consent) and deleting a deck (destructive) always wait for the member's own press.
 MEMBER_ONLY = ("consent", "destructive")
 DEFAULT_MODE = "manual"
 DEFAULT_MAX_ROWS = 5
-DEFAULT_BIG_EDIT_ROWS = 20  # O8: an edit with more rows than this waits for a card press in auto
+DEFAULT_BIG_EDIT_ROWS = 20  # an edit with more rows than this waits for a card press in auto
 MAX_COPIES_PER_ROW = 4  # a row that adds, removes or changes more copies than this is not small
 
 # Row kinds (decks.row_line) a low-risk edit may consist of, each with the word the wording below
@@ -72,7 +72,7 @@ LOW_RISK_ROW_KINDS = frozenset(LOW_RISK_ROW_WORDS)
 # What a low-risk row may change: "a card added or removed, or a new quantity, ... or custom mana value".
 _CHANGED = [w for k, w in LOW_RISK_ROW_WORDS.items() if k not in ("add", "remove")]
 LOW_RISK_CHANGES = "a card added or removed, or a new " + ", ".join(_CHANGED[:-1]) + " or " + _CHANGED[-1]
-# The Archidekt account actions of actions.py (R-142), in the member's words.
+# The Archidekt account actions of actions.py, in the member's words.
 ACCOUNT_ACTIONS_TEXT = "likes, votes, bookmarks, follows, comments, new folders and collaborator changes"
 # What each mode means, in the member's words, for the Account page and the docs.
 MODE_LABELS = {
@@ -80,7 +80,7 @@ MODE_LABELS = {
     "semi": "Apply low-risk changes without asking",
     "auto": "Apply deck and collection changes without asking",
 }
-# Each mode's name, as the Guide and the Account page write it (wording draft, WORDING-6)
+# Each mode's name, as the Guide and the Account page write it
 MODE_NAMES = {"manual": "Manual", "semi": "Semi-auto", "auto": "Full auto"}
 
 
@@ -112,7 +112,7 @@ MEMBER_ONLY_TEXT = (
 
 
 def auto_waits_text(big_rows: int = DEFAULT_BIG_EDIT_ROWS) -> str:
-    """What still waits for a press in auto mode (O7, O8), as one sentence."""
+    """What still waits for a press in auto mode, as one sentence."""
     return (
         "Restoring a snapshot, a commander change, a new deck, an edit of more than "
         f"{_rows(big_rows)}, making a deck public or unlisted, and any edit of a description that has "
@@ -272,12 +272,12 @@ def auto_waits(
     big_rows: int = DEFAULT_BIG_EDIT_ROWS,
     changes: dict[str, Any] | None = None,
 ) -> str | None:
-    """Why a proposal waits for the member's press even in auto mode (O7, O8), or None when auto
-    applies it: a restore, a new deck, a commander change, or an edit (deck or collection, A7) of
-    more than ``big_rows`` rows; and of the deck's details (Q141 item 3B) making it public or
-    unlisted (from any other visibility: D-3, a safe default pending Ben's card), a description
-    edit that keeps formatting (seen on its review page first, Q137) and one that removes all of
-    it (D-1, the same). Other details changes and clones apply in auto."""
+    """Why a proposal waits for the member's press even in auto mode, or None when auto
+    applies it: a restore, a new deck, a commander change, or an edit (deck or collection) of
+    more than ``big_rows`` rows; and of the deck's details making it public or
+    unlisted (from any other visibility, a safe default), a description
+    edit that keeps formatting (seen on its review page first) and one that removes all of
+    it (the same). Other details changes and clones apply in auto."""
     if kind == "restore":
         return "restores a snapshot"
     if kind == "create_deck":
@@ -302,7 +302,6 @@ def auto_waits(
             None,
         )
         if seen is not None:
-            # D-3 (coordinator 03:19Z 10-17, Ben's Q141 3B words "making a deck public or unlisted"):
             # any move to unlisted or public waits, public to unlisted too; to private applies
             if seen["seen_after"] != "private" and seen["seen_after"] != seen["seen_before"]:
                 return f"makes the deck {seen['seen_after']}"
@@ -326,6 +325,6 @@ def auto_waits(
 def assistant_may_apply(mode: str, risk: str, *, auto_wait: str | None = None) -> bool:
     """Whether the member's mode lets their assistant apply a proposal of this risk itself.
     ``auto_wait`` (``auto_waits``) is why auto mode still waits for the member's press."""
-    if risk in MEMBER_ONLY:  # R-142: the member's own press on each one, in every mode
+    if risk in MEMBER_ONLY:  # the member's own press on each one, in every mode
         return False
     return (mode == "auto" and not auto_wait) or (mode == "semi" and risk == "low")

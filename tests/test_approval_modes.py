@@ -169,7 +169,7 @@ async def test_a_cap_changed_on_the_settings_page_applies_at_once(stack: Stack) 
 
 
 async def test_a_lowered_cap_and_row_limit_apply_at_once_to_a_member_who_chose_more(stack: Stack) -> None:
-    """The join of Track A's live mode reading and Track B's Settings page: a member who already
+    """The join of the live mode reading and the Settings page: a member who already
     chose Full auto is read as Semi-auto as soon as an admin lowers the cap, with no restart, and a
     lowered row limit makes a 3-row edit high risk at once."""
     h = stack.h
@@ -444,7 +444,7 @@ async def test_deleting_my_data_forgets_the_mode(stack: Stack) -> None:
     assert user is None or user.get("approval_mode") is None
 
 
-# -- 0.7.24: one source for the approval-mode wording (D2, bug 6) ---------------------------------
+# -- 0.7.24: one source for the approval-mode wording (bug 6) ---------------------------------
 
 
 def _flat(text: str) -> str:
@@ -533,7 +533,7 @@ def test_docs_quote_the_one_wording(doc: str, low: bool, member_only: bool) -> N
 
 def test_the_semi_auto_notice_names_what_semi_auto_applies() -> None:
     """The Account page's notice after choosing Semi-auto names both kinds of change Semi-auto applies
-    by itself (a clone is low risk too), in the words PROOFREAD-WORDING-10 gave."""
+    by itself (a clone is low risk too)."""
     from mtg_gateway.pages import OK_MESSAGES
 
     assert OK_MESSAGES["mode_semi"] == (

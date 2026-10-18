@@ -1,5 +1,4 @@
-"""0.7.29: applying a selection of waiting changes with one press (PROPOSALS-FLEXIBLE-FLOWS.md
-§4 B-D and G; G16, Q27h, Q27i, Q134 A3, A8, A9).
+"""0.7.29: applying a selection of waiting changes with one press.
 
 The member checks any waiting changes, on any decks, in any order, and presses Apply once (the
 Proposals page, the deck's strip, or "Apply all" on the chat card). ``plan`` says what will happen
@@ -7,15 +6,15 @@ before anything is sent (the confirm); ``run`` does it:
 
 * each deck in turn, its changes oldest first, whatever order they were checked in;
 * every change is re-checked against the live deck just before it is sent, as a single apply is
-  (recheck.py): one that would now do something else is not sent and waits as "Needs a look"
-  (Q27h "Skip it"), and the rest go on;
+  (recheck.py): one that would now do something else is not sent and waits as "Needs a look",
+  and the rest go on;
 * one gateway snapshot (and one backup copy on Archidekt) per deck per selection, taken before the
   first change touches it, so "Undo" puts the deck back as it was before the whole selection and a
-  big selection does not push older snapshots out (G16);
+  big selection does not push older snapshots out;
 * a restore never runs with other changes to the same deck, and deleting a deck never runs in a
-  selection at all (its own review page only, R-142);
-* a change that depends on one that is not applied in this selection waits for it (A9); a held
-  change may be applied by the member, and the confirm says why it was held (A8);
+  selection at all (its own review page only);
+* a change that depends on one that is not applied in this selection waits for it; a held
+  change may be applied by the member, and the confirm says why it was held;
 * a change that fails after something reached Archidekt stops the rest of that deck's changes
   (they stay waiting), since the deck is then not as any of them was reviewed against.
 
@@ -56,7 +55,7 @@ FORMATTING_ALONE = (
     "Not sent: it keeps the formatting already there, such as bold text, links or pictures, so it is "
     "approved on its own review page, which shows how it will look. It is still waiting."
 )
-# D-1, E-2 (wording draft, WORDING-6)
+# A selected edit that removes all of a description's or comment's formatting
 FORMATTING_LOST_ALONE = (
     "Not sent: it removes all the formatting already there, such as bold text, links and pictures, so "
     "it is approved on its own review page, which says what goes. It is still waiting."
@@ -78,7 +77,7 @@ def no_longer_waiting_text(state: str) -> str:
     return f"Not sent: it is no longer waiting (it is {state})."
 
 
-# A change its own app replaced, picked (review round 3; wording drafts, WORDING-3-r3): its line
+# A change its own app replaced, picked: its line
 # in a selection, and the refusal when it was picked on its own
 REPLACED_NOT_SENT = "Not sent: it was replaced by {new}. Apply {new} instead."
 REPLACED_ALONE = "{old} was replaced by {new}, so nothing was sent. Apply {new} instead."
@@ -95,7 +94,7 @@ def older_waiting_text(n: int) -> str:
 
 
 def held_text(status_reason: str) -> str:
-    """A8: the confirm's line for a held change the member applies anyway."""
+    """The confirm's line for a held change the member applies anyway."""
     reason = str(status_reason or "").strip()
     if reason[:1].isupper():
         reason = reason[0].lower() + reason[1:]
@@ -116,7 +115,7 @@ def plan(
     """What applying ``picks`` would do, before anything is sent: per deck, the changes in the
     order they will run, the ones that will not be sent and why, and the older changes left
     waiting. ``versions`` (proposal id -> the version the member saw) is carried to the apply,
-    which refuses a change amended since (G16). ``shown`` (proposal id -> the status the member
+    which refuses a change amended since. ``shown`` (proposal id -> the status the member
     saw and when it was set) is carried too: a change held since is left out, not sent."""
     db = svc.db
     shown = dict(shown or {})
@@ -148,7 +147,7 @@ def plan(
             changes = row.get("changes") if isinstance(row.get("changes"), dict) else {}
             if row.get("kind") == "action" and changes.get("action") == "delete_deck":
                 skipped.append(_line(svc, sub, row, DELETE_ALONE))
-            elif formatting.keeps_formatting(row):  # Q137: approved where its formatting shows
+            elif formatting.keeps_formatting(row):  # approved where its formatting shows
                 lost = formatting.loses_formatting(row)
                 skipped.append(_line(svc, sub, row, FORMATTING_LOST_ALONE if lost else FORMATTING_ALONE))
             elif row.get("kind") in ALONE_KINDS and len(group) > 1:
@@ -302,10 +301,10 @@ async def _run(svc: Any, sub: str, run: dict[str, Any], *, via: str) -> None:
                         not_applied.add(pid)
                         run["not_sent"].append({**item, "why": EARLIER_FAILED})
                         continue
-                    # A9: it waits while a change it depends on is still waiting (not selected,
+                    # It waits while a change it depends on is still waiting (not selected,
                     # selected on a deck that comes later) or was not sent in this selection. A
                     # rejected, withdrawn, failed or expired one only holds it, and the member may
-                    # apply a held change (A8): the confirm said so.
+                    # apply a held change: the confirm said so.
                     blocked = [
                         d for d in _depends(svc, sub, pid) if d in not_applied or _still_open(svc, sub, d)
                     ]

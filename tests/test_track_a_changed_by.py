@@ -1,7 +1,7 @@
-"""Release 0.7.29, approvals: what the member sees about a change before the press (the Q141
-check). An amended change says which app changed it and what (G16, Q134 item 5) on the card's
+"""Release 0.7.29, approvals: what the member sees about a change before the press.
+An amended change says which app changed it and what on the card's
 data, the review page and the "Apply all" list; a held one says so there too; a form that does
-not carry the version it showed is refused (G16); the Guide's Full auto line says what still
+not carry the version it showed is refused; the Guide's Full auto line says what still
 waits."""
 
 from __future__ import annotations
@@ -89,7 +89,7 @@ async def test_apply_all_lists_its_changes_with_held_and_changed_and_names_the_a
     assert held is not None, lines
     assert held["version"] == 2 and held["what_changed"] == "Opt again"
     assert info["left_out"] == 0
-    # Q141 item 1B: one another app rewrote is left out of Apply all, and counted
+    # One another app rewrote is left out of Apply all, and counted
     _amend(
         h,
         first["proposal_id"],
@@ -115,7 +115,7 @@ async def test_apply_all_lists_its_changes_with_held_and_changed_and_names_the_a
     assert structured(board)["left_out"] == 1
     # its own Approve still works on the card: it has its own code
     assert first["proposal_id"] in board["_meta"][APPROVALS_META_KEY]
-    # proofread of WORDING-4: the note names it by number, and its row says so
+    # the note names it by number, and its row says so
     no = h.db.get_proposal(first["proposal_id"], SUB)["board_no"]
     assert structured(board)["left_out_nos"] == [no]
     rows = {x["proposal_id"]: x for x in structured(board)["waiting"]}
@@ -177,7 +177,7 @@ async def test_the_guide_says_what_full_auto_still_waits_for(stack: Stack) -> No
 async def test_a_change_another_app_rewrote_waits_even_after_its_own_app_changed_it_again(
     stack: Stack,
 ) -> None:
-    """Proofread of WORDING-4 (G5): ChatGPT rewrites Claude's change and Claude changes it back.
+    """ChatGPT rewrites Claude's change and Claude changes it back.
     Another app still had a hand in it, so no assistant applies it by itself, in Semi-auto or
     Full auto; its line names both apps, in order, and the review page has no "app:" badge text."""
     h, ark = stack.h, stack.ark
@@ -195,7 +195,7 @@ async def test_a_change_another_app_rewrote_waits_even_after_its_own_app_changed
         assert got["assistant_may_apply"] is False, (mode, got)
         assert got["changed_by_apps"][0] == "app: another-app" and len(got["changed_by_apps"]) == 2, got
         if mode == "auto":
-            # each app once, at its latest change: another app again puts it last (finding 7)
+            # each app once, at its latest change: another app again puts it last
             _amend(h, pid, got, by="another-app", what="Ponder once more")
             again = structured(await call(h, token, "get_proposal", {"proposal_id": pid}))
             assert again["changed_by_apps"][-1] == "app: another-app", again["changed_by_apps"]

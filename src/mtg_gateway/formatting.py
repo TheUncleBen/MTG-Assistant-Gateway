@@ -1,4 +1,4 @@
-"""Keep formatting (0.7.29, Q137 "Keep it, new words plain"; amends Q70 and Q90-Q92).
+"""Keep formatting (0.7.29).
 
 A deck description or a comment on Archidekt is a Quill document: text with bold, italics, links,
 headings and lists, card links and pictures. An assistant and the gateway's forms see and write
@@ -7,13 +7,13 @@ bold text and links the member had made on archidekt.com were lost.
 
 Now an edit keeps them: the old document's text and the new plain text are compared word by word,
 the parts whose words did not change keep their formatting (and their card links and pictures),
-and every new or changed word is plain text (Q70 still holds for new text: an assistant can never
+and every new or changed word is plain text (for new text: an assistant can never
 add a link or formatting). A picture or card link inside text that changed goes with that text.
 
 Before anything is written the member sees the result with its formatting: the review page draws
 it (``doc_html``), and a change that keeps formatting is approved there, not on a card in the
 chat or in a batch, which cannot show it (``keeps_formatting``). A restore and a clone write the
-stored document unchanged, as before (Q70)."""
+stored document unchanged, as before."""
 
 from __future__ import annotations
 
@@ -52,7 +52,7 @@ def is_formatted(value: Any) -> bool:
 
 def embeds(value: Any) -> int:
     """How many pictures and card links a stored Quill document holds (what a rewrite that keeps
-    none of it removes; D-1, E-2)."""
+    none of it removes)."""
     return sum(
         1 for op in _quill_ops(value) or [] if isinstance(op, dict) and not isinstance(op.get("insert"), str)
     )
@@ -236,7 +236,7 @@ def keep_formatting(old: Any, new_text: str) -> tuple[str, int] | None:
         _push(out, "\n")
     if all(_plain_insert(op) for op in out):
         # nothing kept: every bold or linked word and every picture went with changed text, so it
-        # is plain text as before 0.7.29, approved anywhere (proofread of WORDING-4, option a)
+        # is plain text as before 0.7.29, approved anywhere
         return None
     doc = json.dumps({"ops": out}, ensure_ascii=False, separators=(",", ":"))
     if rich_text(doc) != new_text:
@@ -246,9 +246,9 @@ def keep_formatting(old: Any, new_text: str) -> tuple[str, int] | None:
 
 def keeps_formatting(row: dict[str, Any]) -> bool:
     """Whether a stored proposal writes a document that keeps formatting (a review row with
-    ``after_doc``), or removes all of a formatted description's (``formatting_lost``, D-1 and E-2:
-    the 4103450 behaviour, a safe default pending Ben's milestone card): the member approves it on
-    the review page, which shows it or says what goes (Q137)."""
+    ``after_doc``), or removes all of a formatted description's (``formatting_lost``, a
+    safe default): the member approves it on
+    the review page, which shows it or says what goes."""
     return any(
         isinstance(r, dict) and (r.get("after_doc") or r.get("formatting_lost"))
         for r in row.get("rows") or []
@@ -256,7 +256,7 @@ def keeps_formatting(row: dict[str, Any]) -> bool:
 
 
 def loses_formatting(row: dict[str, Any]) -> bool:
-    """Whether a stored proposal removes all of a formatted description's formatting (D-1, E-2)."""
+    """Whether a stored proposal removes all of a formatted description's formatting."""
     return any(isinstance(r, dict) and r.get("formatting_lost") for r in row.get("rows") or [])
 
 

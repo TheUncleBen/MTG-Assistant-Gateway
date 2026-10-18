@@ -1,4 +1,4 @@
-"""Q64: when Archidekt's deck list doesn't say who owns its decks (the owner field missing, renamed
+"""When Archidekt's deck list doesn't say who owns its decks (the owner field missing, renamed
 or null), My decks says the list couldn't be read, with Try again, instead of showing an empty
 list or "No decks yet"; and Try again reads the list again rather than the cached answer."""
 
@@ -22,7 +22,7 @@ SOME_READ = html.escape(
     "Part of your deck list couldn't be read from Archidekt, so some decks may be missing here. "
     "Try again in a moment."
 )
-# Try again asks for a real re-read (N10: a partial list is otherwise kept for a minute)
+# Try again asks for a real re-read (a partial list is otherwise kept for a minute)
 TRY_AGAIN = "<a class='btn btn-primary' href='/decks?reread=1'>Try again</a>"
 TRY_AGAIN_HOME = "<a class='btn btn-primary' href='/?reread=1'>Try again</a>"
 UNREADABLE = {k: v for k, v in UNREADABLE_OWNER_ROWS.items() if k != "owner filter ignored"}
@@ -88,7 +88,7 @@ async def test_my_decks_shows_what_it_read_and_says_some_may_be_missing(stack: S
 
 
 async def test_a_partly_read_list_is_kept_briefly_and_try_again_reads_it_again(stack: Stack) -> None:  # noqa: F811
-    """Follow-up N10: a list with unreadable entries is kept for about a minute, so visiting My
+    """A list with unreadable entries is kept for about a minute, so visiting My
     decks and Home again does not re-read Archidekt each time; Try again (and a minute passing)
     reads it again. Try again on a list that read fine sends nothing more."""
     b = await linked(stack)
@@ -172,7 +172,7 @@ async def test_the_list_counts_entries_whose_owner_cannot_be_read() -> None:
 
 
 async def test_home_my_decks_panel_says_the_list_could_not_be_read(stack: Stack) -> None:  # noqa: F811
-    """The home page's My decks panel tells the same truth as /decks (Q64): the /decks notice and
+    """The home page's My decks panel tells the same truth as /decks: the /decks notice and
     Try again, never "No decks yet", when nothing could be read; the covers it did read plus the
     "some may be missing" notice when part of it could."""
     b = await linked(stack)
@@ -214,7 +214,7 @@ async def test_home_my_decks_panel_says_the_list_could_not_be_read(stack: Stack)
 
 async def test_list_my_decks_tool_says_when_entries_could_not_be_read(stack: Stack) -> None:  # noqa: F811
     """The assistant's list_my_decks says how many entries were left out because their owner
-    couldn't be read, with a note to relay (Q64); its other fields stay as they were."""
+    couldn't be read, with a note to relay; its other fields stay as they were."""
     h, ark = stack.h, stack.ark
     token = await linked_user(stack)  # type: ignore[arg-type]
     svc = h.app.state.gateway.decks

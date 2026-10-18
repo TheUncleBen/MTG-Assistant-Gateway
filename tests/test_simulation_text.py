@@ -1,6 +1,6 @@
 """The simulation's words and names: double-faced cards reach the research service by their front
 face, the commander is not filed as an unrecognised card, and the text never sends anyone to a
-hidden tool (owner test round, T-041, 2026-10-09)."""
+hidden tool."""
 
 from __future__ import annotations
 

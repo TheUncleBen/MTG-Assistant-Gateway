@@ -82,7 +82,7 @@ async def test_the_page_lists_every_setting_and_locks_the_deployments(gw: Harnes
 
 
 async def test_the_top_line_names_what_the_stack_sets(tmp_path: Path, idp: FakeIdP) -> None:
-    """Card Q139 item 3: one line at the top names every setting the stack sets, by variable, each
+    """One line at the top names every setting the stack sets, by variable, each
     a link to its row; a setting in the folded scan group opens it. No line when the stack sets
     none."""
     settings = make_settings(tmp_path, required_group="mtg-users", admin_group="mtg-admins")
@@ -119,7 +119,7 @@ async def test_the_top_line_names_what_the_stack_sets(tmp_path: Path, idp: FakeI
             assert r.status_code == 200 and "<details open>" not in r.text
         finally:
             await b.aclose()
-    # with one setting: "it", both times (PROOFREAD-r10 fix 2)
+    # with one setting: "it", both times
     settings = make_settings(
         tmp_path,
         required_group="mtg-users",
@@ -300,7 +300,7 @@ def test_saved_values_apply_at_the_next_start(tmp_path: Path) -> None:
 
 
 def test_one_second_and_one_day_are_singular() -> None:
-    """Re-proofread issue 5: "1 second", "1 day" in Back to default, the save notice and the log."""
+    """Singular units: "1 second", "1 day" in Back to default, the save notice and the log."""
     shown, specs = settings_page.shown, MANAGED_SETTINGS
     assert shown(specs["archidekt_min_interval"], 1.0) == "1 second"
     assert shown(specs["archidekt_min_interval"], 2) == "2 seconds"
@@ -327,7 +327,7 @@ async def test_member_cannot_reach_it_signed_out(gw: Harness) -> None:
 
 
 async def test_a_chatgpt_name_over_80_characters_is_warned_about(gw: Harness) -> None:
-    """C4: the page warns as the start-up log does, and still saves the name (it is not refused)."""
+    """The page warns as the start-up log does, and still saves the name (it is not refused)."""
     b = await admin_browser(gw)
     try:
         page = (await b.http.get("/admin/settings", headers=NAVIGATE)).text
@@ -365,7 +365,7 @@ async def test_the_activity_logs_say_a_setting_change_in_words(gw: Harness) -> N
 
 
 async def test_back_to_default_keeps_the_sections_other_typed_values(gw: Harness) -> None:
-    """Review round 1, finding 6: the other fields of the section are neither saved nor dropped."""
+    """The other fields of the section are neither saved nor dropped."""
     b = await admin_browser(gw)
     try:
         await _post(b, {"group": "backups", "v_snapshots_per_deck": "40"})
@@ -390,7 +390,7 @@ async def test_back_to_default_keeps_the_sections_other_typed_values(gw: Harness
 
 
 async def test_a_stack_value_holds_for_every_kind_of_setting(tmp_path: Path, idp: FakeIdP) -> None:
-    """Ben, 10-16: a value the stack sets is set in stone until the stack changes. No form post,
+    """A value the stack sets is set in stone until the stack changes. No form post,
     Back to default, stored value or restart changes it; every other write path goes through
     LiveSettings.set and reset, which refuse it."""
     locked = {
@@ -430,7 +430,7 @@ async def test_a_stack_value_holds_for_every_kind_of_setting(tmp_path: Path, idp
     db = Database(settings.db_path)
     try:
         assert with_stored(settings, db).deck_sync_minutes == 60
-        # card Q139 item 7: the page's value saved before the lock is kept, and applies again once
+        # The page's value saved before the lock is kept, and applies again once
         # the stack no longer sets it
         assert db.stored_settings()["deck_sync_minutes"] == 30
         unlocked = make_settings(tmp_path, required_group="mtg-users", admin_group="mtg-admins")

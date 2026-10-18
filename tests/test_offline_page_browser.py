@@ -1,7 +1,7 @@
-"""The service worker's "You're offline" page in headless Chromium (T-125): it answers a page load
+"""The service worker's "You're offline" page in headless Chromium: it answers a page load
 that cannot reach the gateway (the browser offline, or the gateway's connections reset), and once
 the connection is back one reload, or its Try again link, loads the page again, also when the
-browser stopped the idle worker meanwhile. Q63: the worker keeps trying a failed load for about
+browser stopped the idle worker meanwhile. The worker keeps trying a failed load for about
 5 s before it shows that page, and the page loads the address again by itself when the browser
 is back online or the gateway answers its check every few seconds. The gateway is reached through
 a small relay the test can cut, as a dropped network or a restarting gateway would. Skipped
@@ -207,7 +207,7 @@ def _wait_for_title(page, start: str, timeout_ms: int) -> None:
 
 def test_one_reload_after_the_connection_returns_loads_the_page(served) -> None:
     def run(page, ctx, base: str, relay: Relay, steps: Steps) -> None:
-        # The offline page loads the address again by itself once the connection is back (Q63),
+        # The offline page loads the address again by itself once the connection is back,
         # so each reload here follows the cut at once, well before its first check.
         steps.now = "the gateway cut off, then back"
         relay.cut()
@@ -246,7 +246,7 @@ CHECK_EVERY = 5.0  # seconds between the offline page's checks (static/offline.j
 
 
 def test_the_offline_page_reloads_itself_once_the_connection_is_back(served) -> None:
-    """Q63 (a): back online, the page loads again at once (the browser's online event, well before
+    """Back online, the page loads again at once (the browser's online event, well before
     the first check); with the gateway cut off, it asks /healthz every few seconds, never in a
     tight loop, and loads the page again once the gateway answers."""
 
@@ -281,7 +281,7 @@ def test_the_offline_page_reloads_itself_once_the_connection_is_back(served) -> 
 
 
 def test_the_worker_keeps_trying_a_failed_load_for_about_five_seconds(served) -> None:
-    """Q63 (b): a gateway restart or a short drop (here 2.5 s) never shows the offline page; a
+    """A gateway restart or a short drop (here 2.5 s) never shows the offline page; a
     longer one shows it after about 5 s of tries."""
 
     def run(page, ctx, base: str, relay: Relay, steps: Steps) -> None:
@@ -309,7 +309,7 @@ def test_the_worker_keeps_trying_a_failed_load_for_about_five_seconds(served) ->
 
 
 def test_a_browser_that_knows_it_is_offline_gets_the_offline_page_at_once(served) -> None:
-    """Review N7 (question 2, provisional): when the browser already says it is offline, the worker
+    """When the browser already says it is offline, the worker
     shows the offline page at once instead of trying for about 5 s; it still reloads by itself
     once the browser is back online. With the browser online, a failed load is still tried for
     about 5 s (the test above)."""
@@ -330,7 +330,7 @@ def test_a_browser_that_knows_it_is_offline_gets_the_offline_page_at_once(served
 
 
 def test_a_page_that_keeps_failing_is_reloaded_three_times_at_most(served) -> None:
-    """Review N11: a page that keeps failing at the network level while the gateway's /healthz
+    """A page that keeps failing at the network level while the gateway's /healthz
     answers is loaded again by itself 3 times at most, then the offline page stays, with its Try
     again link, which still works and starts the tries afresh."""
 

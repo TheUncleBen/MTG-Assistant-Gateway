@@ -187,8 +187,8 @@ def sideboard_rows(deck: Deck) -> list[DeckCard]:
     return [c for c in deck.cards if c.categories and c.categories[0] == "Sideboard"]
 
 
-# Archidekt's own notes under its "Estimated Bracket" (its deck page script, read 2026-10-14;
-# planning BRACKET-ESTIMATE.md §3), shown with the estimate as Archidekt shows them (Q49, O14).
+# Archidekt's own notes under its "Estimated Bracket" (its deck page script, read 2026-10-14),
+# shown with the estimate as Archidekt shows them.
 ARCHIDEKT_COMBO_NOTE = "If this is a late-game combo, your deck may be a Bracket: Upgraded"
 ARCHIDEKT_TURNS_NOTE = "If your deck chains extra turns, your deck should be Optimized or cEDH"
 
@@ -197,7 +197,7 @@ def bracket_estimate(
     cards: list[DeckCard], deck_format: str | None = None, side: list[DeckCard] | None = None
 ) -> dict[str, Any]:
     """Archidekt's "Estimated Bracket" for a Commander deck, rule for rule as archidekt.com works it
-    out (its deck page script, read 2026-10-14; Q49 "Match Archidekt"), from Archidekt's own card
+    out (its deck page script, read 2026-10-14), from Archidekt's own card
     flags. It counts copies of game changers, mass land denial cards, extra-turn cards and combo
     pieces (a card one of whose ``atomicCombos`` partners is also in the deck), over the
     commanders, the main deck and the sideboard (``side``), the cards archidekt.com's bracket

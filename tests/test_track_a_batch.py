@@ -1,5 +1,5 @@
-"""Release 0.7.29, approvals and proposals: a selection of waiting changes applied with one press
-(PROPOSALS-FLEXIBLE-FLOWS.md §4 B-G; G16, Q27h, Q27i, Q134 A8, A9) and its Undo."""
+"""Release 0.7.29, approvals and proposals: a selection of waiting changes applied with one press and
+its Undo."""
 
 from __future__ import annotations
 
@@ -62,7 +62,7 @@ async def test_a_selection_runs_oldest_first_with_one_snapshot_and_one_backup(st
     ]
     assert run["not_sent"] == [] and run["failed"] == []
     snaps = {h.db.get_proposal(i, SUB)["snapshot_id"] for i in ids}
-    assert len(snaps) == 1 and None not in snaps  # one snapshot per deck per selection (G16)
+    assert len(snaps) == 1 and None not in snaps  # one snapshot per deck per selection
     assert len(set(ark.decks) - before) == 1  # and one backup copy on Archidekt
     assert run["undo"] == [
         {
@@ -77,7 +77,7 @@ async def test_a_selection_runs_oldest_first_with_one_snapshot_and_one_backup(st
 
 
 async def test_a_change_that_no_longer_fits_is_skipped_and_the_rest_go_on(stack: Stack) -> None:
-    """Q27h "Skip it": #2 was made against 15 Forests; after #1 it would do something else."""
+    """Skip it: #2 was made against 15 Forests; after #1 it would do something else."""
     h, ark = stack.h, stack.ark
     token = await linked_user(stack)
     await _set_mode(h, "manual")
@@ -95,7 +95,7 @@ async def test_a_change_that_no_longer_fits_is_skipped_and_the_rest_go_on(stack:
 
 
 async def test_the_confirm_lists_the_order_and_what_stays_waiting(stack: Stack) -> None:
-    """Q27i "Note only": a newer change may go first; the confirm says the older one stays."""
+    """A newer change may go first; the confirm says the older one stays."""
     h = stack.h
     token = await linked_user(stack)
     await _set_mode(h, "manual")
@@ -143,7 +143,7 @@ async def test_a_restore_and_a_deck_deletion_never_run_with_other_changes(stack:
 
 
 async def test_a_change_waits_for_the_change_it_depends_on(stack: Stack) -> None:
-    """A9: a dependent waits while what it depends on is still waiting or was not sent."""
+    """A dependent waits while what it depends on is still waiting or was not sent."""
     h, ark = stack.h, stack.ark
     token = await linked_user(stack)
     await _set_mode(h, "manual")
@@ -173,7 +173,7 @@ async def test_a_dependent_of_a_change_not_sent_in_the_selection_waits_too(stack
 
 
 async def test_the_member_may_apply_a_held_change_and_the_confirm_says_why(stack: Stack) -> None:
-    """A8: holds stop assistants, never the member; the confirm names the hold."""
+    """Holds stop assistants, never the member; the confirm names the hold."""
     h, ark = stack.h, stack.ark
     token = await linked_user(stack)
     await _set_mode(h, "manual")
@@ -189,7 +189,7 @@ async def test_the_member_may_apply_a_held_change_and_the_confirm_says_why(stack
 
 
 async def test_a_change_amended_after_it_was_seen_is_not_sent(stack: Stack) -> None:
-    """G16: the selection carries the version the member saw."""
+    """The selection carries the version the member saw."""
     h, ark = stack.h, stack.ark
     token = await linked_user(stack)
     await _set_mode(h, "manual")

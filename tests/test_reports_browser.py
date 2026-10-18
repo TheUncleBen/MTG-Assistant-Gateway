@@ -185,7 +185,7 @@ def test_forge_section_refreshes_itself_until_the_run_ends(server: Server) -> No
         assert "updates by itself" in page.locator(".card.forge").inner_text()
         assert page.locator("#rep-status").inner_text().startswith("running")  # the overall status
         page.evaluate("window.__same_page = true")  # gone if the page reloads
-        # review r5 M3: a poll that brings nothing new leaves the live card's nodes untouched, so
+        # a poll that brings nothing new leaves the live card's nodes untouched, so
         # screen readers are not told the whole card again every 5 seconds
         page.evaluate(
             "() => { const els = [...document.querySelectorAll('.card.forge > *, #rep-status > *')];"
@@ -215,7 +215,7 @@ def test_forge_section_refreshes_itself_until_the_run_ends(server: Server) -> No
         page.wait_for_function("() => !document.querySelector('.card.forge[data-forge-live]')")
         text = page.locator(".card.forge").inner_text()
         assert "2 of 2\nGames played" in text and "running" not in text, text
-        # A32: it asked the small JSON status route, not the whole page, while the run played
+        # It asked the small JSON status route, not the whole page, while the run played
         assert polls and all(u.endswith("/api/v1/reports/rep_forge/forge") for u in polls), polls
         # the card itself stayed, so it is still the live region screen readers announce
         assert page.locator(".card.forge[aria-live=polite]").count() == 1
@@ -367,7 +367,7 @@ FORGE_DONE = {
 @pytest.mark.parametrize("width", [320, 344, 717, 1366])
 @pytest.mark.parametrize("scheme", ["light", "dark"])
 def test_forge_results_fit_and_read(server: Server, width: int, scheme: str) -> None:
-    """G9: Forge's games laid out as tiles, a table of the decks at the table, how the games ended
+    """Forge's games laid out as tiles, a table of the decks at the table, how the games ended
     and each game: no sideways page scroll (tables scroll in their own box), 4.5:1 text in both
     themes, and the folded game list opens with a 44px target."""
     import json
@@ -434,7 +434,7 @@ def test_forge_results_fit_and_read(server: Server, width: int, scheme: str) -> 
 @pytest.mark.parametrize("width", [320, 344, 600, 640, 717, 1366])
 @pytest.mark.parametrize("scheme", ["light", "dark"])
 def test_reports_page_fits_and_reads(server: Server, width: int, scheme: str) -> None:
-    """K8 (Q136): the Reports page under More, with a Forge run playing, one waiting and a long deck
+    """The Reports page under More, with a Forge run playing, one waiting and a long deck
     name: no sideways scroll, 4.5:1 text in both themes, 44px filter and trend targets."""
     import json
     import os
@@ -502,7 +502,7 @@ def test_reports_page_fits_and_reads(server: Server, width: int, scheme: str) ->
         assert state["rows"] == 3 and state["runs"] == 2
         assert min(state["targets"]) >= 44, state["targets"]
         if width > 600:
-            # review r2 item 19: on wider screens the Show button stays on the select's line (at
+            # On wider screens the Show button stays on the select's line (at
             # 600px and narrower the site's phone layout makes a form's button full width, below)
             tops = page.evaluate(
                 "() => ['.rp-filter .msel-btn', '.rp-filter .btn'].map(s =>"
@@ -510,10 +510,10 @@ def test_reports_page_fits_and_reads(server: Server, width: int, scheme: str) ->
             )
             assert tops[0] == tops[1], tops
         text = page.locator(".rp-queue").inner_text()
-        # review r1 fix 1: the games played so far, as the report page counts them
+        # The games played so far, as the report page counts them
         assert "Playing: 3 of 10 games" in text
         assert "Waiting: number 1 in line" in text
-        # review r1 fix 2 and r3 item 3: at 200% text the deck filter still fits, inside the window
+        # At 200% text the deck filter still fits, inside the window
         # and its panel, at every width, and the whole page fits the window too.
         from .test_overflow_sweep_browser import MEASURE
         from .test_text_zoom_browser import ROOT_200, TEXT_200
@@ -550,7 +550,7 @@ def test_reports_page_fits_and_reads(server: Server, width: int, scheme: str) ->
 def test_saved_descriptions_and_remove_fit_and_read(
     server: Server, width: int, scheme: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Q138 items 4 and 6: a report's saved card descriptions, with Remove on the member's own,
+    """A report's saved card descriptions, with Remove on the member's own,
     and both recognition figures: no sideways scroll, 4.5:1 text, a 44px Remove target; Remove
     takes the description away and says so."""
     import json
@@ -639,7 +639,7 @@ def test_saved_descriptions_and_remove_fit_and_read(
 def test_compare_page_never_scrolls_sideways_at_200_percent_text(
     server: Server, width: int, scheme: str
 ) -> None:
-    """Review r5 M2: the Compare page's two columns were at least 18rem wide, wider than a phone
+    """The Compare page's two columns were at least 18rem wide, wider than a phone
     at 200% text (532 px of page at 390 px). At 100% and 200% text (root size and text-only), on
     a phone, a Fold folded and open, and a desktop, in light and dark, nothing is outside the
     window and the page does not scroll sideways."""
@@ -682,7 +682,7 @@ def test_compare_page_never_scrolls_sideways_at_200_percent_text(
 @pytest.mark.parametrize("width", [320, 344, 717, 1366])
 @pytest.mark.parametrize("scheme", ["light", "dark"])
 def test_play_more_games_fits_reads_and_starts(server: Server, width: int, scheme: str) -> None:
-    """Q146 item 10: the Play more games button under the Forge card, at 100% and 200% text, in
+    """The Play more games button under the Forge card, at 100% and 200% text, in
     light and dark: inside the window, a 44px target, 4.5:1 text. Pressing it starts more games at
     the same table; a refusal comes back to the report saying why."""
     import json

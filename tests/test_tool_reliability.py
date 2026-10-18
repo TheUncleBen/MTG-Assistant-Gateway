@@ -125,7 +125,7 @@ def test_inline_refs_writes_definitions_out_and_stops_at_cycles() -> None:
 
 
 def test_the_mana_value_schema_allows_0_to_15_as_the_tool_does() -> None:
-    """Follow-up N6 (Q57): the schema assistants see bounds a custom mana value to 0-15, the same
+    """The schema assistants see bounds a custom mana value to 0-15, the same
     range the tool enforces, so 16 to 20 are refused at the schema too."""
     prop = DeckChange.model_json_schema()["properties"]["mana_value"]
     bounds = [b for b in prop.get("anyOf", [prop]) if b.get("type") == "integer"]
@@ -227,7 +227,7 @@ async def test_mystic_forge_upstream_failure_is_flagged_as_an_error(stack: Stack
 
 
 async def test_research_service_argument_refusals_are_flagged_and_structured(stack: Stack) -> None:
-    """QA F17: goldfish_odds answered "draws cannot exceed deck_size." and the like as a success
+    """goldfish_odds answered "draws cannot exceed deck_size." and the like as a success
     (isError false). They come back as the gateway's own refusal: flagged, error invalid,
     error_code INVALID_ARGUMENT, with the research service's reason in the message."""
     token = await mcp_token(stack.h)
@@ -267,7 +267,7 @@ async def test_arguments_that_do_not_fit_get_a_flagged_structured_refusal(stack:
     raw = await call(stack.h, token, "get_proposal", {"proposal_id": "nope"})
     res = structured(raw)
     assert res["error"] == "not_found" and res["error_code"] == "NOT_FOUND" and res["retryable"] is False
-    # clients that read only the text get the same fields, as plain lines rather than JSON (R-181)
+    # clients that read only the text get the same fields, as plain lines rather than JSON
     text = raw["content"][0]["text"]
     assert text.startswith("Not done: " + res["message"]), text
     for key, value in res.items():
@@ -659,7 +659,7 @@ async def test_folder_tags_and_cover_go_through_a_details_proposal(stack: Stack)
 
 
 async def test_one_tag_named_twice_is_added_once(stack: Stack) -> None:
-    """L4: ["Spicy", "spicy", "SPICY "] are one Archidekt tag: the proposal adds it once, so the
+    """["Spicy", "spicy", "SPICY "] are one Archidekt tag: the proposal adds it once, so the
     apply cannot fail halfway on a second add of a tag the deck by then has."""
     token = await linked_user(stack)
     ark = stack.ark
@@ -698,7 +698,7 @@ async def test_new_deck_cards_keep_the_etched_and_foil_finish(manual: Stack) -> 
     assert finishes == {"Sol Ring": "Etched", "Swamp": "Foil", "Island": ""}, finishes
 
 
-# -- G17: a name a scan guessed is flagged on the proposal ----------------------------------------
+# -- a name a scan guessed is flagged on the proposal ---------------------------------------------
 def _fuzzy_scan(stack: Stack, sub: str = "user-1") -> None:
     now = 1_700_000_000
     stack.h.app.state.gateway.scan.store.save(

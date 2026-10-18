@@ -133,7 +133,7 @@ def stats_strip(stats: dict[str, Any] | None) -> str:
         ("Lands", _num(stats.get("land_count"), 0)),
         ("Avg MV", _num(stats.get("average_mana_value"))),
         ("Price", money(stats.get("price_total")) if stats.get("price_total") is not None else "–"),
-        # the bracket set on the deck is the deck's bracket; else Archidekt's estimate (Q49, O14)
+        # the bracket set on the deck is the deck's bracket; else Archidekt's estimate
         (
             "Bracket" if stats.get("archidekt_bracket") else "Archidekt's estimate",
             _num(stats.get("archidekt_bracket"), 0)
@@ -271,7 +271,7 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
             head_extra=(stylesheet_link("deck.css") if deck_css else "")
             + (f"<style>{extra_css}</style>" if extra_css else "")
             # ``viewer_only``: a page that shows cards but none of the deck page's own hooks
-            # (Goldfish, Compare) loads the card viewer without deck.js (AUDIT F2)
+            # (Goldfish, Compare) loads the card viewer without deck.js
             + ("<script src='/static/cardview.js' defer></script>" if scripts or viewer_only else "")
             + ("<script src='/static/deck.js' defer></script>" if scripts and not viewer_only else "")
             + "".join(f"<script src='/static/{name}' defer></script>" for name in extra_scripts),
@@ -427,7 +427,7 @@ def offline_page(site: str) -> str:
     """The service worker's offline page: the site's name and icon, the chosen theme (the
     worker sets data-theme from the mtg_theme cookie; otherwise the system's), one button.
     static/offline.js (answered by the worker itself) loads the page again once the connection
-    is back (Q63)."""
+    is back."""
     title = html.escape(f"You're offline · {site}")
     return (
         "<!doctype html><html lang='en'><head><meta charset='utf-8'>"

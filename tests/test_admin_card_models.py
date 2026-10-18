@@ -1,6 +1,6 @@
-"""The admin list of the simulator's card models (card Q138 item 4): admins only, who added each
+"""The admin list of the simulator's card models: admins only, who added each
 model, and Remove for any model, with the form token and an audit entry. Each member keeps their
-own models (card Q140 item 1), so Remove names the card and the member."""
+own models, so Remove names the card and the member."""
 
 from __future__ import annotations
 
@@ -49,7 +49,7 @@ async def test_admins_see_who_added_each_model_and_can_remove_any(gw: Harness) -
         audit = [a for a in gw.db.audit_recent(5, sub="admin-1") if a["event"] == "card_model_removed"]
         removed = {"card": "Sol Ring", "card_key": "sol ring", "added_by": "user-9"}
         assert audit and audit[0]["detail"] == removed
-        # both activity logs say it in words, with whose model it was (re-proofread issue 8)
+        # both activity logs say it in words, with whose model it was
         for path in ("/admin/activity", "/activity"):
             text = html.unescape((await b.http.get(path, headers=NAVIGATE)).text)
             assert "Sol Ring (added by bram)" in text and '"card_key"' not in text, path
@@ -91,7 +91,7 @@ async def test_the_log_line_survives_the_adders_account_being_deleted(gw: Harnes
 
 
 async def test_a_page_past_the_end_shows_the_last_page(gw: Harness) -> None:
-    """Review round 2, R2-5: any page number, however large, shows the last page (no error)."""
+    """Any page number, however large, shows the last page (no error)."""
     gw.db.put_card_model("opt", "Opt", MODEL, "user-9", 100)
     b = await admin_browser(gw)
     try:
@@ -103,7 +103,7 @@ async def test_a_page_past_the_end_shows_the_last_page(gw: Harness) -> None:
 
 
 async def test_an_account_without_a_name_is_named_in_words_on_the_list(gw: Harness) -> None:
-    """PROOFREAD-r10 fix 9: the list and the Remove button say "an account with no username or
+    """The list and the Remove button say "an account with no username or
     email", as the Activity log does, not the account's raw id."""
     gw.db.upsert_user("user-8", email=None, name=None, preferred_username=None, groups=[])
     gw.db.put_card_model("opt", "Opt", MODEL, "user-8", 100)
@@ -117,7 +117,7 @@ async def test_an_account_without_a_name_is_named_in_words_on_the_list(gw: Harne
 
 
 async def test_an_account_without_a_name_is_not_called_deleted(gw: Harness) -> None:
-    """PROOFREAD-W3 L4: "a deleted account" only when the account is gone."""
+    """The words "a deleted account" only when the account is gone."""
     gw.db.upsert_user("user-8", email=None, name=None, preferred_username=None, groups=[])
     gw.db.put_card_model("opt", "Opt", MODEL, "user-8", 100)
     assert gw.db.admin_delete_card_model("opt", "user-8", by="admin-1")

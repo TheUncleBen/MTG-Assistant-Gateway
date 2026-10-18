@@ -1,4 +1,4 @@
-"""D-03: the deck copies the gateway makes on Archidekt before a change stay out of Home, My decks,
+"""The deck copies the gateway makes on Archidekt before a change stay out of Home, My decks,
 the JSON list and the assistant's deck list, and are listed under History instead (each linked to
 Archidekt and to the deck it copied)."""
 
@@ -102,7 +102,7 @@ async def test_backup_copies_leave_the_lists_and_show_under_history(stack: Stack
 
 
 async def test_history_reconciles_with_what_is_still_on_archidekt(stack: Stack) -> None:  # noqa: F811
-    """T-074: backup copies (and decks) deleted on Archidekt are noticed from the deck list the
+    """Backup copies (and decks) deleted on Archidekt are noticed from the deck list the
     gateway already reads: a deleted copy leaves the panel and its snapshot says so (Restore still
     works, from the snapshot kept here); a deleted deck's snapshot offers no Restore, and a restore
     asked anyway fails with a clear message. No request is sent per copy."""

@@ -1,4 +1,4 @@
-"""Play more games (Q146 item 10): another round of Forge games for a report whose games have
+"""Play more games: another round of Forge games for a report whose games have
 ended, at the same table, added to its earlier games; refused with a reason when it can't start."""
 
 from __future__ import annotations
@@ -223,7 +223,7 @@ async def _finished_pair(reports: ReportService, fake: FakeForge) -> tuple[str, 
 
 
 async def test_a_comparison_gets_more_games_on_both_decks(tmp_path: Path) -> None:
-    """Coordinator 18:02Z (safe default): more games for one deck of a comparison go to both, so
+    """A safe default: more games for one deck of a comparison go to both, so
     the two stay even; pressed on either deck."""
     db = Database(tmp_path / "t.sqlite")
     db.upsert_user("alice", email=None, name=None, preferred_username=None, groups=[])

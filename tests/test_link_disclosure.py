@@ -74,7 +74,7 @@ def test_disclosure_names_what_the_operator_and_admins_can_and_cannot_do() -> No
         "how many app tokens and browser sessions you have open",
         "whether and when you were disabled",
         "disable and enable your account",
-        # the operator list names the sign-in service's user ID too (0.7.8 gate item I-1)
+        # the operator list names the sign-in service's user ID too
         "email, username, user ID and groups at the sign-in service",
         # the summary on top
         "never stores it",

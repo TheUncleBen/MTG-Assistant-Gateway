@@ -371,7 +371,7 @@ async def test_collection_tools(stack: Stack) -> None:
         p3 = structured(await call(stack.h, token, "propose_collection_changes", {"add": ["Sol Ring"]}))
         refused = structured(await call(stack.h, token, "apply_proposal", {"proposal_id": p3["proposal_id"]}))
         assert refused["ok"] is False and refused["error"] == "browser_required"
-        # social actions only exist as proposals the member approves each time (R-142),
+        # social actions only exist as proposals the member approves each time,
         # and no tool writes the collection directly
         listing = sse_json(await stack.h.mcp(token, "tools/list"))
         names = {t["name"] for t in listing["result"]["tools"]}
@@ -451,7 +451,7 @@ async def test_android_app_gets_the_app_layout(stack: Stack) -> None:
         assert re.search(r"<body class='[^']*\bapp\b", app.text)
         for action in ("openCamera", "reload", "openInBrowser", "changeGateway"):
             assert f"data-native='{action}'" in app.text, action
-        # D10: these two stay in the app's own menu and the Account page's App card only
+        # These two stay in the app's own menu and the Account page's App card only
         for action in ("openCopiedLink", "checkForUpdates"):
             assert f"data-native='{action}'" not in app.text, action
         assert (
@@ -463,7 +463,7 @@ async def test_android_app_gets_the_app_layout(stack: Stack) -> None:
 
 
 async def test_account_page_in_the_app_has_an_app_card(stack: Stack) -> None:
-    """T-123/T-143: inside the app the Account page shows the installed version and the update
+    """Inside the app the Account page shows the installed version and the update
     check, not "Get the Android app"; in a browser it stays as it was."""
     b = Browser(stack.h)
     try:

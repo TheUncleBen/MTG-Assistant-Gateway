@@ -733,8 +733,8 @@ def _copies(cards: list[dict[str, Any]]) -> int:
 def coverage(g: dict[str, Any]) -> dict[str, Any] | None:
     """How much of the deck the simulator modeled, counted in copies: ``modeled``, the deck's cards
     less those it played without their effect and those out of its scope (set aside on purpose),
-    and ``known``, those less only the ones played without their effect (Q138 item 6). The honesty report
-    names each card once; the copies come from the quantities kept with the run (0.7.30, A30). A
+    and ``known``, those less only the ones played without their effect. The honesty report
+    names each card once; the copies come from the quantities kept with the run (0.7.30). A
     60-card game stored before that has several copies per card and no quantities, so no figure."""
     h = g.get("honesty") or {}
     size = g.get("deck_size")
@@ -759,8 +759,8 @@ def coverage_text(g: dict[str, Any]) -> str:
     c = coverage(g)
     if c is None:
         return ""
-    # Q138 item 6: both figures, as scripts/measure_recognition.py prints them (Q140 item 7: measured
-    # now on precons and test decks, on Ben's decks at deploy)
+    # both figures, as scripts/measure_recognition.py prints them (measured now on precons and test
+    # decks, on real decks at deploy)
     return (
         f"Played with their effect: {c['modeled']} of {c['deck_size']} cards ({c['pct']}% of the deck). "
         f"Known: {c['known']} of {c['deck_size']} cards ({c['known_pct']}% of the deck), counting the "
@@ -770,7 +770,7 @@ def coverage_text(g: dict[str, Any]) -> str:
 
 # The cards the simulator plays without their effect (its "unrecognized" group), in plain words.
 UNMODELED_HEADING = "Played without their effect"
-# Q136 item 1: an assistant can describe only some of these (about 6 to 8 of Liesa's 33), so the
+# An assistant can describe only some of these (about 6 to 8 of Liesa's 33), so the
 # text says so; the sentence on saving shows only when the gateway can save (the schema 14 table).
 UNMODELED_TEXT = (
     "The solo test found these cards and their exact text, but has no description yet of what they "
@@ -792,9 +792,9 @@ KEPT_TEXT = (
 
 
 def kept_models(r: dict[str, Any]) -> list[dict[str, Any]]:
-    """The kept card models a report's solo test played (K1): card, model hash, when it last
-    changed; only the member's own play (Q140 item 1). None while kept models
-    are switched off (Q140 item 1), even for a report made while they were on (review r1 fix 5)."""
+    """The kept card models a report's solo test played: card, model hash, when it last
+    changed; only the member's own play. None while kept models
+    are switched off, even for a report made while they were on."""
     if not card_models.SWITCHED_ON:
         return []
     block = r.get("goldfish") if isinstance(r.get("goldfish"), dict) else {}
@@ -803,7 +803,7 @@ def kept_models(r: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _kept_who(u: dict[str, Any]) -> str:
-    # every saved description is the member's own (Q140 item 1), so only its date is said
+    # every saved description is the member's own, so only its date is said
     when = time_text(u.get("changed_at"))[:10]
     return f"last changed {when}" if when else ""
 
@@ -856,7 +856,7 @@ def more_games_html(f: Any, csrf: str, report_id: str) -> str:
 
 
 def _remove_form(u: dict[str, Any], csrf: str, report_id: str) -> str:
-    """The adder's Remove button for a saved description (Q138 item 4)."""
+    """The adder's Remove button for a saved description."""
     card = front_face(u["name"])
     return (
         f"<form method='post' action='/history/reports/{_esc(report_id)}/models/remove' class='inline'>"
@@ -903,7 +903,7 @@ def ask_prompt(deck_name: str, deck_url: str, cards: list[dict[str, Any]], *, mo
     for both): the assistant reads each card's exact text and passes its models to a new run.
     ``models``: the gateway keeps card models, so the request asks which it kept."""
     names = ", ".join(front_face(c["name"]) for c in cards)
-    # the last clause only while kept models are switched on (review r1 fix 4)
+    # the last clause only while kept models are switched on
     told = (
         ", which cards you could not describe, and which models the gateway kept, if any."
         if models
@@ -936,7 +936,7 @@ def ask_html(r: dict[str, Any], cards: list[dict[str, Any]]) -> str:
     )
 
 
-# K7 (Q136): the 300 automatic games are the "solo test"; "Goldfish" is the page where the member
+# The 300 automatic games are the "solo test"; "Goldfish" is the page where the member
 # plays a hand. Forge's games always seat bundled precons (forge.start_run).
 SOLO_NAME = "Solo test"
 FORGE_HEADING = "Forge games (against precons)"
@@ -962,7 +962,7 @@ def honesty_html(g: dict[str, Any], ask: str = "") -> str:
     unrec = h.get("unrecognized") or []
     if unrec:
         # The simulator found these cards (their exact text comes from Scryfall; a name it cannot
-        # find is a warning above); "unrecognized" is its word for "no effect model yet" (R-134).
+        # find is a warning above); "unrecognized" is its word for "no effect model yet".
         parts.append(
             f"<div class='group unmodeled'><h3>{UNMODELED_HEADING} <small>"
             f"{_esc(_share(_copies(unrec), size))}</small></h3>"
@@ -1105,7 +1105,7 @@ def _seconds_text(seconds: Any) -> str:
     if _float(seconds) is None:
         return "–"
     seconds = float(seconds)
-    # a number keeps its unit on a phone's narrow tile (no space to wrap at: review r1 item 15)
+    # a number keeps its unit on a phone's narrow tile (no space to wrap at)
     if seconds < 90:
         return f"{seconds:g}\u00a0s"
     minutes, rest = divmod(round(seconds), 60)
@@ -1123,7 +1123,7 @@ def _losses_text(losses: Any) -> str:
 
 
 def forge_results_html(f: dict[str, Any]) -> str:
-    """Forge's games laid out (G9): headline tiles, one row per seat with its wins, win rate, 95%
+    """Forge's games laid out: headline tiles, one row per seat with its wins, win rate, 95%
     interval and how it lost, how the games ended, and each game in a folded table. '' before any
     game has finished."""
     res = f.get("result") if isinstance(f.get("result"), dict) else {}
@@ -1239,7 +1239,7 @@ def _interval(pair: Any) -> str:
     return f"{_pct(low)} to {_pct(high)}" if _float(low) is not None and _float(high) is not None else ""
 
 
-# R-207 and Q140 item 2 (no replay promise): the seed is for the record only, and every report, the
+# No replay promise: the seed is for the record only, and every report, the
 # page and every export, says how to compare runs instead.
 FORGE_DRIFT_NOTE = (
     "Forge does not always replay the same games from the same seed, so compare runs by their win "
@@ -1263,7 +1263,7 @@ def forge_lines(f: dict[str, Any], *, results: bool = True) -> list[str]:
         )
         out.append(f"{place}{behind}. It starts by itself when the run ahead of it ends.")
     elif f.get("state") == "running" and f.get("games_requested") and not (res.get("games") and not results):
-        # the page's results show "Games played" as a tile once a game has finished (review r1 item 11)
+        # the page's results show "Games played" as a tile once a game has finished
         out.append(f"Games finished so far: {res.get('games') or 0} of {f['games_requested']}.")
     if f.get("state") in ("queued", "running") and f.get("expected_seconds"):
         minutes = max(1, round(f["expected_seconds"] / 60))
@@ -1313,8 +1313,8 @@ def forge_lines(f: dict[str, Any], *, results: bool = True) -> list[str]:
         seated = ", ".join(f"{front_face(n)} (bracket {b})" for n, b in rated.items())
         out.append(f"Opponents: {choice['note']}" + (f" Seated: {seated}." if seated else ""))
     if f.get("seed") is not None:
-        # The seed is kept for the record only, never as a way to replay the games (R-207; Ben's
-        # re-confirmation card), and every report says why, the page and the export alike.
+        # The seed is kept for the record only, never as a way to replay the games,
+        # and every report says why, the page and the export alike.
         whose = {
             "gateway": " (chosen by the gateway, kept for the record)",
             "request": " (set when this report was asked for, kept for the record)",
@@ -1385,7 +1385,7 @@ def forge_html(f: Any, *, live: bool = False, report_id: Any = None) -> str:
             f"<p class='small'><a href='/history/reports/{_esc(ahead['report_id'])}'>Open the report "
             "it is waiting for</a></p>"
         )
-    # K6: a run seated with another report's opponents links that report (the live page only;
+    # A run seated with another report's opponents links that report (the live page only;
     # an export has no gateway pages to link to).
     choice = f.get("opponent_choice") if isinstance(f.get("opponent_choice"), dict) else {}
     pair = choice.get("shared_with") or f.get("shared_with")
@@ -1402,7 +1402,7 @@ def forge_html(f: Any, *, live: bool = False, report_id: Any = None) -> str:
 
 
 # A run that ended early but played some games (one group failed, the time limit, a cancel, or the
-# gateway losing track of it): the card reports what did play, never "not run" (review r1 fix 3).
+# gateway losing track of it): the card reports what did play, never "not run".
 FORGE_STOPPED_WHY = {
     "failed": "because the rest of the games failed",
     "timeout": "because the run reached its time limit",
@@ -1433,7 +1433,7 @@ def forge_stopped_text(f: dict[str, Any]) -> str:
     those = "that one game" if played == 1 else f"those {played} games"
     of = f"{played} of {total} games" if total is not None else f"{played} {games}"
     if total is not None and played >= total:
-        # every game asked for played, then one group still ended badly (proofread 6 P7)
+        # every game asked for played, then one group still ended badly
         text = (
             "Forge played the one game asked for, but the run did not end cleanly. "
             "The results below count it."
@@ -1442,7 +1442,7 @@ def forge_stopped_text(f: dict[str, Any]) -> str:
             f"The results below count all {played}."
         )
     elif f.get("state") == "lost":
-        # a lost run keeps what the last check saw; Forge may have played on (P8)
+        # a lost run keeps what the last check saw; Forge may have played on
         text = f"The gateway lost track of this run after {of}. The results below count only {those}."
     else:
         counted = "that one game" if played == 1 else f"the {played} games played"
@@ -1513,7 +1513,7 @@ def status_html(status: Any) -> str:
 
 
 def forge_status(r: dict[str, Any]) -> dict[str, Any]:
-    """What the report page's live view needs while the Forge games play (A32): the run's state
+    """What the report page's live view needs while the Forge games play: the run's state
     and section, the report's overall status, and the Forge card and the status as the page draws
     them, so forge-live.js swaps them in without fetching the whole page again."""
     f = r.get("forge") if isinstance(r.get("forge"), dict) else None

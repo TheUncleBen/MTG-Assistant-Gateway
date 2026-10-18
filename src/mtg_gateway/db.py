@@ -166,7 +166,7 @@ APPLIED_PROPOSAL_RETENTION_SECONDS = 365 * 86400
 # Snapshots are whole decks taken before every edit. The newest SNAPSHOTS_KEEP_PER_DECK of each
 # member's deck are always kept (and any a pending restore still needs); older ones are deleted.
 SNAPSHOTS_KEEP_PER_DECK = 25
-# Rows deleted per transaction by the purge's plain deletes (leftover A8), so the lock is
+# Rows deleted per transaction by the purge's plain deletes, so the lock is
 # released between batches.
 PURGE_BATCH = 500
 # Per-day usage counters and remembered deck covers are kept this long.
@@ -177,7 +177,7 @@ DECK_COVER_RETENTION_SECONDS = 180 * 86400
 PRICE_RETENTION_DAYS = 365
 # How long a write waits for another connection (such as `mtg-gateway backup`) to finish.
 BUSY_TIMEOUT_MS = 5000
-# Remembered choices that follow the account (G7): how many one account may keep and how large
+# Remembered choices that follow the account: how many one account may keep and how large
 # one may be, so a page script cannot grow the database without bound.
 MAX_PREFS_PER_ACCOUNT = 300
 MAX_PREF_BYTES = 4096
@@ -199,12 +199,11 @@ class CardModelRefused(Exception):
 
 
 # Earlier versions kept per waiting proposal (proposal_versions): past it an amend is refused, so an
-# app that keeps amending one note can't grow the database without bound (step 0 review, fix 3).
+# app that keeps amending one note can't grow the database without bound.
 MAX_PROPOSAL_VERSIONS = 50
 
 
-#: States of a note that hold the notes depending on it (K6, Q27j). "expired" holds them too
-#: (Q142 item 1 A, Ben approved 10-17).
+#: States of a note that hold the notes depending on it. "expired" holds them too.
 HOLDING_STATES = ("rejected", "withdrawn", "failed", "expired")
 
 # A note's state as the member sees it: a waiting one past its expiry is "expired" even before
@@ -236,7 +235,7 @@ GONE_REASON_SQL = "'replaces:' || o.id || ':applied'"
 
 def replaced_hold_reason(proposal_id: str) -> str:
     """The stored reason of a hold on a note whose replaced note was applied on its own:
-    ``replaces:<id>:applied`` (review round 3)."""
+    ``replaces:<id>:applied``."""
     return f"replaces:{proposal_id}:applied"
 
 
@@ -473,8 +472,8 @@ def _step_12(conn: sqlite3.Connection) -> None:
 
 
 def snapshot_summary(deck: Any) -> tuple[str, int | None, str | None]:
-    """What a snapshot list shows of a stored deck, worked out once when the snapshot is stored
-    (A1): its name, its card count (None when the deck has no card list) and the Archidekt
+    """What a snapshot list shows of a stored deck, worked out once when the snapshot is stored:
+    its name, its card count (None when the deck has no card list) and the Archidekt
     account that owned the deck then (None when not recorded)."""
     if not isinstance(deck, dict):
         return "", None, None
@@ -500,21 +499,21 @@ _STEP_13_BATCH = 200
 
 
 def _step_13(conn: sqlite3.Connection) -> None:
-    """0.7.29, the one upgrade for settings and the new approvals (Q18, Q126 step 0).
+    """0.7.29, the one upgrade for settings and the new approvals.
 
     - ``settings``: values the server owner sets on the admin Settings page (config.py
       MANAGED_SETTINGS; a value set in the deployment always wins and is never stored here).
-    - ``account_prefs``: remembered choices that follow the account (G7), one row per account and
+    - ``account_prefs``: remembered choices that follow the account, one row per account and
       choice name, so a new choice needs no upgrade.
     - proposals: a version, who amended it last and what that version changed, a waiting status
-      with its reason, a number on the deck's board, the Archidekt account it was made under
-      (Q127), past versions
+      with its reason, a number on the deck's board, the Archidekt account it was made under,
+      past versions
       (``proposal_versions``) and links between proposals (``proposal_links``: depends on,
-      replaces); and the ``(state, expires_at)`` index of the pending queries (A2).
+      replaces); and the ``(state, expires_at)`` index of the pending queries.
     - snapshots: the deck's name, card count and owner, stored when taken so lists don't parse
-      every stored deck (A1), and the Archidekt account it was taken under (Q127).
-    - ``backup_deletes``: the queued deletes of unused backup copies (Q77), moved out of
-      ``job_runs`` into a table of their own with the Archidekt account they belong to (Q127).
+      every stored deck, and the Archidekt account it was taken under.
+    - ``backup_deletes``: the queued deletes of unused backup copies, moved out of
+      ``job_runs`` into a table of their own with the Archidekt account they belong to.
     """
     conn.execute(
         """CREATE TABLE IF NOT EXISTS settings (
@@ -675,18 +674,18 @@ def _step_13(conn: sqlite3.Connection) -> None:
 
 
 def _step_14(conn: sqlite3.Connection) -> None:
-    """0.7.30, the one small upgrade the simulator needs (Q128, Q136): ``card_models``, the models
+    """0.7.30, the one small upgrade the simulator needs: ``card_models``, the models
     members taught the simulator for cards it plays without their effect. Each member keeps their
-    own (card Q140 item 1): one model per card per member, keyed by the card's front face,
+    own: one model per card per member, keyed by the card's front face,
     casefolded, and the member, and used only in that member's simulations.
 
-    ``sim_version`` is the simulator version the model was checked with (Q136 item 3, card Q139
-    item 5), so models checked with an older simulator can be found when it changes; ``oracle_hash``
-    is a spare column for a fingerprint of the card's rules text (Q139 item 5).
+    ``sim_version`` is the simulator version the model was checked with, so models checked
+    with an older simulator can be found when it changes; ``oracle_hash``
+    is a spare column for a fingerprint of the card's rules text.
 
     ``added_by`` is the member who keeps the model (never shown to other members). It has no
     foreign key, like every member table but the proposals: a member's models go with their data
-    through MEMBER_TABLES (card Q138 item 5).
+    through MEMBER_TABLES.
     """
     conn.execute(
         """CREATE TABLE IF NOT EXISTS card_models (
@@ -713,8 +712,8 @@ def _card_models_need_repair(conn: sqlite3.Connection) -> bool:
 
 def _repair_card_models(conn: sqlite3.Connection) -> bool:
     """Bring a ``card_models`` table written by an earlier build of schema 14 to the shape
-    ``_step_14`` makes now. Step 14 changed in place before any release carried it (card Q140 item 1,
-    card Q139 item 5): those builds kept one model per card for the whole gateway (``card_key``
+    ``_step_14`` makes now. Step 14 changed in place before any release carried it: those
+    builds kept one model per card for the whole gateway (``card_key``
     alone the key) and had no ``sim_version``, so a test database from them would fail every read
     with "no such column". Each kept model stays, kept by the member who added it, with no simulator
     version recorded. Runs at every start and does nothing once the table has the new shape, so the
@@ -776,7 +775,7 @@ def _like_prefix(prefix: str) -> str:
 
 # job_runs rows recording how each backup copy was made (record_backup_made), by the copy's id.
 BACKUP_MADE_JOB = "backup_made:"
-# job_runs rows of the queued backup deletes (Q77) before schema 13 moved them to backup_deletes:
+# job_runs rows of the queued backup deletes before schema 13 moved them to backup_deletes:
 # this prefix and the snapshot id (read only by _step_13)
 BACKUP_DELETE_JOB = "backup_delete:"
 
@@ -1007,7 +1006,7 @@ class Database:
         ]
 
     def all_user_clients(self) -> dict[str, list[dict[str, Any]]]:
-        """user_clients for every member at once (the admin Users page, leftover A9): one query
+        """user_clients for every member at once (the admin Users page): one query
         for the tokens and one name lookup for all their apps, instead of one per member and app."""
         with self._lock:
             rows = self._conn.execute(
@@ -1350,7 +1349,7 @@ class Database:
 
         Each step runs in its own short transaction, and the plain time-based deletes go in
         batches of PURGE_BATCH rows, so a large purge never holds the lock (and every other
-        request) for its whole run (0.7.29, leftover A8). Every step is idempotent: a purge cut
+        request) for its whole run (0.7.29). Every step is idempotent: a purge cut
         short by an error or a restart is finished by the next one."""
         now = int(time.time())
         n = self._delete_batched("tokens", "expires_at < ?", (now - 86400,))
@@ -1468,13 +1467,13 @@ class Database:
     @staticmethod
     def _prune_snapshots(c: sqlite3.Connection, keep: int = SNAPSHOTS_KEEP_PER_DECK) -> int:
         """Keep the newest ``keep`` snapshots of each member's deck, and any snapshot a pending or
-        running proposal (a restore) still points at; delete the rest. Also kept (QUESTIONS-2 B13):
+        running proposal (a restore) still points at; delete the rest. Also kept:
         the snapshot each recorded Archidekt backup copy was made with, and any snapshot with a
-        queued backup delete, so the gateway never loses its record of a copy it may delete (card
-        Q135 item 9, Ben's "Approve all" 10-16). Only a copy the gateway may still delete holds
-        one (card Q139 item 4): a copy the member changed on Archidekt is kept and no longer
-        counted (B11), and a copy made before 0.7.29 has no record and is never deleted (card Q140
-        item 4), so neither holds its snapshot past the newest ``keep``."""
+        queued backup delete, so the gateway never loses its record of a copy it may delete.
+        Only a copy the gateway may still delete holds
+        one: a copy the member changed on Archidekt is kept and no longer
+        counted, and a copy made before 0.7.29 has no record and is never deleted, so
+        neither holds its snapshot past the newest ``keep``."""
         return c.execute(
             """DELETE FROM snapshots WHERE id IN (
                    SELECT id FROM (
@@ -1722,8 +1721,8 @@ class Database:
         ("deck_values", "sub"),
         ("notify_prefs", "sub"),
         ("account_prefs", "sub"),
-        ("card_models", "added_by"),  # card Q138 item 5: their simulator card models go too
-        ("backup_deletes", "sub"),  # their queued backup deletes (Q77) go with their snapshots
+        ("card_models", "added_by"),  # their simulator card models go too
+        ("backup_deletes", "sub"),  # their queued backup deletes go with their snapshots
         ("users", "sub"),
     )
 
@@ -1756,7 +1755,7 @@ class Database:
                     "DELETE FROM deck_covers WHERE deck_id = ? AND owner_sub IS NULL", (deck_id,)
                 ).rowcount
             out["deck_covers"] = covers
-            # Review round 1, finding 5: the records of their backup copies (each holds the deck's
+            # The records of their backup copies (each holds the deck's
             # name and URL) go now, not at the next hourly clean-up: those their snapshots name,
             # and those recorded for them. Taken before the snapshots go.
             out["backup_records"] = (
@@ -1951,7 +1950,7 @@ class Database:
             # The number on the deck's board (0.7.29): one more than the highest of the owner's live
             # waiting proposals on that deck, those being applied included (an apply can put one
             # back to waiting), so a board that empties starts again at 1, and an amend keeps it.
-            # The Archidekt account is the one linked now (Q127), unless given.
+            # The Archidekt account is the one linked now, unless given.
             account = (
                 "?"
                 if "archidekt_user_id" in row
@@ -2223,10 +2222,10 @@ class Database:
             ).fetchone()
         return row is not None
 
-    # 0.7.29 flexible approvals and the assistant board (Track A builds on these) ----------------
+    # 0.7.29 flexible approvals and the assistant board -----------------------------------------------
     def pending_board(self, owner_sub: str, deck_id: str | None = None) -> list[dict[str, Any]]:
         """Every live waiting proposal of the owner (of one deck when ``deck_id``), oldest first,
-        with no cap: the deck's board (BOARD §2). Rows carry what a board line needs; the whole
+        with no cap: the deck's board. Rows carry what a board line needs; the whole
         proposal comes from get_proposal."""
         sql = (
             "SELECT id, kind, deck_id, deck_name, created_at, expires_at, created_by_client, diff_text, "
@@ -2244,8 +2243,7 @@ class Database:
         return [dict(r) for r in rows]
 
     def pending_count_by_deck(self, owner_sub: str) -> dict[str, int]:
-        """How many live waiting proposals each of the owner's decks has (the Home tile, Q27o's
-        soft 20)."""
+        """How many live waiting proposals each of the owner's decks has (the Home tile)."""
         with self._lock:
             rows = self._conn.execute(
                 "SELECT deck_id, COUNT(*) AS n FROM proposals WHERE owner_sub = ? AND state = 'pending' "
@@ -2268,10 +2266,10 @@ class Database:
         baseline_fingerprint: str | None = None,
     ) -> int | None:
         """Replace a waiting proposal's content with a new version, keeping its id, date and board
-        number (BOARD §2, §4). The version being replaced is kept in ``proposal_versions`` with
+        number (§4). The version being replaced is kept in ``proposal_versions`` with
         who made it. Only while it is pending, unexpired and still at ``expect_version`` (so two
         amends, or an amend and an apply that claimed it first, cannot both win). Its waiting
-        status is cleared, except a hold that a rejected note it depends on put there (Q27j): that
+        status is cleared, except a hold that a rejected note it depends on put there: that
         stays until the link is gone, so the new version can't apply by itself. Returns the new
         version, or None when it isn't waiting, has expired or is at another version. Raises
         ProposalVersionsFull once it keeps MAX_PROPOSAL_VERSIONS earlier versions."""
@@ -2291,7 +2289,7 @@ class Database:
             ).fetchone()
             if kept >= MAX_PROPOSAL_VERSIONS:
                 raise ProposalVersionsFull(proposal_id)
-            # A hold stays while a note it depends on is still rejected, withdrawn or failed (K6).
+            # A hold stays while a note it depends on is still rejected, withdrawn or failed.
             held = row["status"] == "held" and _blocking_dependency(c, proposal_id) is not None
             old = int(row["version"])
             c.execute(
@@ -2370,7 +2368,7 @@ class Database:
         self, proposal_id: str, owner_sub: str, state: str, reason: str | None = None, *, by: Any = None
     ) -> bool:
         """Move a live waiting proposal to ``withdrawn`` or ``replaced`` with its reason (kept
-        visible and restorable while unexpired, BOARD §4). ``by`` is merged into its result as
+        visible and restorable while unexpired). ``by`` is merged into its result as
         ``closed_by``. True when it was changed."""
         if state not in ("withdrawn", "replaced"):
             raise ValueError(f"close_proposal does not set {state!r}")
@@ -2388,9 +2386,9 @@ class Database:
             )
 
     def reopen_proposal(self, proposal_id: str, owner_sub: str, *, max_pending: int | None = None) -> bool:
-        """Bring a withdrawn or replaced proposal back to waiting while it is unexpired (Q27l: a
+        """Bring a withdrawn or replaced proposal back to waiting while it is unexpired (a
         replaced note returns when its replacement is rejected). With ``max_pending``, refused when
-        the owner already has that many live waiting proposals, as save_proposal (Q129). True when
+        the owner already has that many live waiting proposals, as save_proposal. True when
         it was changed."""
         now = int(time.time())
         with self.tx() as c:
@@ -2402,7 +2400,7 @@ class Database:
                 ).fetchone()
                 if pending >= max_pending:
                     return False
-            # A note it depends on that is still rejected, withdrawn or failed holds it again (K6).
+            # A note it depends on that is still rejected, withdrawn or failed holds it again.
             blocking = _blocking_dependency(c, proposal_id)
             changed = (
                 c.execute(
@@ -2422,7 +2420,7 @@ class Database:
             )
             if changed:
                 # Its board number stays unless another live note on the deck took it meanwhile;
-                # then it gets the next free one, so a board never shows one number twice (A1).
+                # then it gets the next free one, so a board never shows one number twice.
                 c.execute(
                     """UPDATE proposals SET board_no = (
                          SELECT COALESCE(MAX(o.board_no), 0) + 1 FROM proposals o
@@ -2439,7 +2437,7 @@ class Database:
             return changed
 
     def link_proposals(self, proposal_id: str, owner_sub: str, kind: str, other_id: str) -> bool:
-        """Record that ``proposal_id`` depends on, or replaces, ``other_id`` (Q27j, BOARD §2). Both
+        """Record that ``proposal_id`` depends on, or replaces, ``other_id``. Both
         must be the owner's and different. True when stored (a repeat is a no-op, still True)."""
         if kind not in PROPOSAL_LINK_KINDS:
             raise ValueError(f"unknown proposal link {kind!r}")
@@ -2479,7 +2477,7 @@ class Database:
     def claim_proposal(self, proposal_id: str, owner_sub: str, *, expect_version: int | None = None) -> bool:
         """Move pending -> applying atomically; False if it was not pending (duplicate apply), or
         with ``expect_version`` when it is at another version now (amended since it was read: the
-        apply then reads its content again after a successful claim, G16)."""
+        apply then reads its content again after a successful claim)."""
         with self.tx() as c:
             now = int(time.time())
             # applied_at marks when the apply started; finish_proposal overwrites it when it ends.
@@ -2533,7 +2531,7 @@ class Database:
             return c.execute(sql, args).rowcount == 1
 
     def dependents(self, owner_sub: str, proposal_id: str) -> list[str]:
-        """The owner's live waiting proposals that depend on ``proposal_id`` (Q27j)."""
+        """The owner's live waiting proposals that depend on ``proposal_id``."""
         with self._lock:
             rows = self._conn.execute(
                 "SELECT p.id FROM proposal_links l JOIN proposals p ON p.id = l.proposal_id "
@@ -2545,9 +2543,9 @@ class Database:
 
     def hold_blocked(self, owner_sub: str) -> int:
         """Hold each live waiting note of the owner that depends on a rejected, withdrawn, failed
-        or expired note (K6), adding the cause to one held already. The apply paths settle their
+        or expired note, adding the cause to one held already. The apply paths settle their
         own links; this catches the ones that close a note without them: a restart mid-apply, a
-        shutdown cancel, the six-hour backstop and expiry (review round 1, finding 3). Returns how
+        shutdown cancel, the six-hour backstop and expiry. Returns how
         many it held."""
         first = (
             f"SELECT {{}} FROM proposal_links l JOIN proposals o ON o.id = l.other_id "
@@ -2555,8 +2553,8 @@ class Database:
             f"AND {_SEEN_STATE} IN {_HOLDING_SQL} ORDER BY l.created_at, l.rowid LIMIT 1"
         )
         reason = first.format("'depends:' || o.id || ':' || " + _SEEN_STATE)
-        # a waiting note whose replaced note was applied on its own (review round 3; Q142 item 11 A,
-        # Ben approved 10-17): applying it too would change the deck twice
+        # a waiting note whose replaced note was applied on its own: applying it too
+        # would change the deck twice
         gone = (
             "SELECT {} FROM proposal_links l JOIN proposals o ON o.id = l.other_id "
             "WHERE l.proposal_id = proposals.id AND l.kind = 'replaces' AND o.state = 'applied' "
@@ -2619,7 +2617,7 @@ class Database:
         self, owner_sub: str, *, deck_id: str, kind: str, changes: Any, client: str | None
     ) -> str | None:
         """A live waiting proposal of the owner, made by the same app, on the same deck, of the
-        same kind and with exactly these stored changes (Q27k: only exact duplicates are skipped).
+        same kind and with exactly these stored changes (only exact duplicates are skipped).
         One marked "needs a look" is not: it no longer does what was reviewed, and asking again is
         how the assistant makes it fresh from the deck as it is now."""
         row = self._one(
@@ -2632,7 +2630,7 @@ class Database:
         return str(row[0]) if row else None
 
     def restart_expiry(self, proposal_id: str, owner_sub: str, expires_at: int) -> bool:
-        """A waiting proposal's expiry starts again (an amend, A12). Only while it is pending."""
+        """A waiting proposal's expiry starts again (an amend). Only while it is pending."""
         with self.tx() as c:
             return (
                 c.execute(
@@ -2720,7 +2718,7 @@ class Database:
             owner_id,
             owner_sub,
         )
-        # The Archidekt account on the member's active link now (Q127), read in the same statement.
+        # The Archidekt account on the member's active link now, read in the same statement.
         sql = """INSERT INTO snapshots (id, owner_sub, deck_id, proposal_id, taken_at, fingerprint,
                  deck_json, deck_name, card_count, deck_owner_id, archidekt_user_id)
                  SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
@@ -2745,13 +2743,13 @@ class Database:
         offset: int = 0,
     ) -> list[dict[str, Any]]:
         """Newest first. Each row carries the deck name, card count and owner stored with the
-        snapshot (A1), never the deck itself (a snapshot is a whole deck; get_snapshot returns
+        snapshot, never the deck itself (a snapshot is a whole deck; get_snapshot returns
         one). ``deck_id``, ``search`` (on the deck's name) and a time window (``since`` inclusive,
         ``until`` exclusive, epoch seconds) narrow the list in SQL."""
         sql = (
             "SELECT id, deck_id, proposal_id, taken_at, deck_name, card_count, deck_owner_id, "
             "archidekt_user_id, backup_deck_id, backup_url, "
-            # Taken for an apply that stopped before it changed anything (Q78): its proposal is
+            # Taken for an apply that stopped before it changed anything: its proposal is
             # open again or was closed without being applied (only a pending one is rejected or
             # expires), or a later apply of it took another snapshot.
             "(SELECT 1 FROM proposals p WHERE p.id = snapshots.proposal_id "
@@ -2787,7 +2785,7 @@ class Database:
                 "backup_url": r["backup_url"],
                 # the Archidekt account that owned the deck then (None when not recorded)
                 "account_id": r["deck_owner_id"],
-                # the Archidekt account linked when it was taken (Q127; None before schema 13)
+                # the Archidekt account linked when it was taken (None before schema 13)
                 "linked_account_id": r["archidekt_user_id"],
                 "card_count": r["card_count"],
                 **({"stopped_attempt": True} if r["stopped_attempt"] else {}),
@@ -2845,7 +2843,7 @@ class Database:
 
     def clear_backup_everywhere(self, owner_sub: str, backup_deck_id: str) -> int:
         """A backup copy was deleted on Archidekt: every snapshot of the member that records it
-        forgets it (a copy can be shared by several snapshots, QUESTIONS-2 B14/B15/B16), and so
+        forgets it (a copy can be shared by several snapshots), and so
         does the record of how it was made."""
         with self.tx() as c:
             n = c.execute(
@@ -2884,7 +2882,7 @@ class Database:
     def record_backup_made(self, backup_deck_id: str, record: dict[str, Any]) -> None:
         """How the gateway made a backup copy (name, description, folder, the time its writes took,
         when, for whom): kept in the database so the checks before a later delete outlive a
-        restart (QUESTIONS-2 B12/B21). One job_runs row per copy; schema 13 is unchanged."""
+        restart. One job_runs row per copy; schema 13 is unchanged."""
         now = int(time.time())
         with self.tx() as c:
             c.execute(
@@ -2904,9 +2902,9 @@ class Database:
             return None
         return out if isinstance(out, dict) else None
 
-    # Later deletes of unused backup copies (Q77): one row per snapshot whose copy waits to be
+    # Later deletes of unused backup copies: one row per snapshot whose copy waits to be
     # deleted (``due_at`` the time it is due), so the queue outlives a restart and a re-apply of
-    # the proposal. Each row records the Archidekt account linked when it was queued (Q127).
+    # the proposal. Each row records the Archidekt account linked when it was queued.
     _BACKUP_DELETE_COLUMNS = (
         "snapshot_id, sub, archidekt_user_id, backup_deck_id, deck_id, proposal_id, due_at, attempts, "
         "queued_at, expect_json"
@@ -2943,8 +2941,8 @@ class Database:
         expect: dict[str, Any] | None = None,
     ) -> None:
         """``expect``: the copy as the gateway made it (name, description, folder id), which the
-        later delete checks before it deletes (review D4). The Archidekt account is the one on the
-        member's active link now, read in the same transaction (Q127)."""
+        later delete checks before it deletes. The Archidekt account is the one on the
+        member's active link now, read in the same transaction."""
         with self.tx() as c:
             c.execute(
                 f"""INSERT OR REPLACE INTO backup_deletes ({self._BACKUP_DELETE_COLUMNS})
@@ -3148,7 +3146,7 @@ class Database:
             rows = self._conn.execute("SELECT key, updated_at, updated_by FROM settings").fetchall()
         return {str(r["key"]): {"updated_at": r["updated_at"], "updated_by": r["updated_by"]} for r in rows}
 
-    # remembered choices that follow the account (G7) ----------------------------------------------
+    # remembered choices that follow the account ----------------------------------------------
     def get_prefs(self, sub: str) -> dict[str, Any]:
         """Every remembered choice of one account, by name."""
         with self._lock:
@@ -3179,7 +3177,7 @@ class Database:
         MAX_PREF_NAME characters, a value over MAX_PREF_BYTES as JSON, an account that is not a
         known user, and a new name once the account keeps MAX_PREFS_PER_ACCOUNT choices.
         ``keep_newest=(prefix, n)``: a new name starting with ``prefix`` first forgets the oldest
-        choices with that prefix so at most ``n`` remain with it (B8: stack orders)."""
+        choices with that prefix so at most ``n`` remain with it (stack orders)."""
         name = str(name)
         raw = json.dumps(value, separators=(",", ":"))
         if not name or len(name) > MAX_PREF_NAME or len(raw.encode("utf-8")) > MAX_PREF_BYTES:
@@ -3226,13 +3224,13 @@ class Database:
         with self.tx() as c:
             return c.execute("DELETE FROM account_prefs WHERE sub = ? AND name = ?", (sub, name)).rowcount > 0
 
-    # -- simulator card models (schema 14, Track C) --------------------------------------------
-    # Decided: each member keeps their own models (card Q140 item 1); the member and an admin may
+    # -- simulator card models (schema 14) -----------------------------------------------------
+    # Decided: each member keeps their own models; the member and an admin may
     # remove one (delete_card_model, admin_delete_card_model; the admin list is list_card_models);
-    # a member's models go with their data (MEMBER_TABLES, card Q138 item 5). put_card_model
+    # a member's models go with their data (MEMBER_TABLES). put_card_model
     # enforces, when given ``most``, the cap of 200 per member in the same transaction as its write,
-    # so two saves at once can't both pass the check (Track C review r1 item 18). Each model records
-    # the simulator version it was checked with (``sim_version``, Q136 item 3, card Q139 item 5);
+    # so two saves at once can't both pass the check. Each model records
+    # the simulator version it was checked with (``sim_version``);
     # ``oracle_hash`` is kept as a spare column.
 
     def get_card_models(self, keys: list[str], sub: str) -> list[dict[str, Any]]:
@@ -3310,7 +3308,7 @@ class Database:
             )
 
     def admin_delete_card_model(self, card_key: str, added_by: str, *, by: str) -> bool:
-        """An admin removes any member's model (Q136 item 2): ``added_by``'s model of the card.
+        """An admin removes any member's model: ``added_by``'s model of the card.
         Audited as ``card_model_removed`` under the admin, with the card and whose model it was.
         True when a model was deleted."""
         with self.tx() as c:
@@ -3329,7 +3327,7 @@ class Database:
         return True
 
     def list_card_models(self, *, limit: int = 100, offset: int = 0) -> list[dict[str, Any]]:
-        """The kept models for the admin list (card Q138 item 4), the most recently changed first:
+        """The kept models for the admin list, the most recently changed first:
         card_key, name, added_by, added_at, updated_at and size (bytes of model_json). Holds member
         ids: only for an admin's page, never another member's."""
         with self._lock:

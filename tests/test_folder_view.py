@@ -1,7 +1,7 @@
 """My decks by folder (folderview.py, 0.7.28 §6): one level of the folder tree at a time, folders
 A to Z above the decks directly in the open folder, a breadcrumb back up, the name filter over
-every deck with each match's folder, the backup folder hidden everywhere (Q21), the old Folder
-dropdown gone (F3), and the tree read once and kept like the deck list."""
+every deck with each match's folder, the backup folder hidden everywhere, the old Folder
+dropdown gone, and the tree read once and kept like the deck list."""
 
 from __future__ import annotations
 
@@ -62,11 +62,11 @@ ROWS = [
 
 def test_the_top_level_shows_its_folders_a_to_z_and_only_its_own_decks() -> None:
     level = fv.arrange(ROWS, INFO, folder_id=None, q="", order="updated")
-    assert [t["name"] for t in level.folders] == ["Archive", "commander"]  # A to Z, any case (F1)
+    assert [t["name"] for t in level.folders] == ["Archive", "commander"]  # A to Z, any case
     assert [d["name"] for d in level.decks] == ["Top deck", "Root deck", "Lost deck"]
     commander = level.folders[1]
     assert (commander["decks"], commander["subfolders"]) == (1, 2)
-    assert level.folders[0]["decks"] == level.folders[0]["subfolders"] == 0  # empty folders show (F5)
+    assert level.folders[0]["decks"] == level.folders[0]["subfolders"] == 0  # empty folders show
     assert level.crumbs == [(None, "Decks")] and level.current is None
     assert level.total == 7  # the copy in the backup folder is not counted
 
@@ -210,7 +210,7 @@ async def test_my_decks_opens_folders_and_hides_the_backup_folder(stack: Stack) 
         assert re.search(r"<li><a href='/decks\?folder=501'>Commander</a></li>", inside)
         assert "Precon in a folder" in inside and "Sample Commander Deck" not in inside
         assert "<input type='hidden' name='folder' value='502'>" in inside
-        found = (await b.http.get("/decks?folder=502&q=sample", headers=NAV)).text  # every folder (Q20)
+        found = (await b.http.get("/decks?folder=502&q=sample", headers=NAV)).text  # every folder
         assert "Sample Commander Deck" in found and "Precon in a folder" not in found
         api = (await b.http.get("/api/decks/mine", params={"shape": "list", "folder": "501"})).json()
         assert ">Precons</span>" in api["html"] and "title='Private folder'" in api["html"]
@@ -224,7 +224,7 @@ async def test_my_decks_opens_folders_and_hides_the_backup_folder(stack: Stack) 
 
 
 async def test_the_backup_folder_stays_hidden_with_backups_switched_off(stack: Stack) -> None:
-    """Q21 (review L13): with MTG_ARCHIDEKT_BACKUPS off the gateway's backup folder still never
+    """With MTG_ARCHIDEKT_BACKUPS off the gateway's backup folder still never
     shows on My decks or the Folders page, and a deck in it is handled as with backups on: kept
     out of My decks and listed as a backup copy."""
     ark = stack.ark
@@ -250,7 +250,7 @@ async def test_the_backup_folder_stays_hidden_with_backups_switched_off(stack: S
 
 
 async def test_the_server_refuses_the_backup_folder_as_a_target(stack: Stack) -> None:
-    """Q21 (review L14): a hand-made POST cannot move a deck into the backup folder (or a folder
+    """A hand-made POST cannot move a deck into the backup folder (or a folder
     in it), rename it, or make a folder inside it; each is refused as the move by name refuses
     it, and nothing is sent. A deck already in it keeps its place when its own folder is posted."""
     import pytest
@@ -293,7 +293,7 @@ async def test_the_server_refuses_the_backup_folder_as_a_target(stack: Stack) ->
 
 
 async def test_a_folder_cannot_be_named_like_the_backup_folder(stack: Stack) -> None:
-    """B8 a: renaming a folder to the backup folder's name, or making one with it, would hide that
+    """Renaming a folder to the backup folder's name, or making one with it, would hide that
     folder and list its decks as backup copies (the folder list matches the name exactly anywhere,
     and in any capitals directly under the top level), so both are refused and nothing is sent.
     The same name in other capitals deeper down is not the backup folder and is allowed."""
@@ -345,7 +345,7 @@ async def test_a_folder_write_drops_the_kept_tree(stack: Stack) -> None:
 
 
 async def test_home_goldfish_and_compare_do_without_deck_js(stack: Stack) -> None:
-    """AUDIT F1/F2 (A25): Home loads only decks.js; Goldfish and Compare load the card viewer
+    """Home loads only decks.js; Goldfish and Compare load the card viewer
     without deck.js; the deck page and My decks still load it."""
     b = await linked_browser(stack)
     try:

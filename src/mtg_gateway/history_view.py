@@ -169,7 +169,7 @@ def build_events(
         )
         count = x.get("card_count")
         summary = f"{count} cards as the deck stood" if count is not None else "The whole deck as it stood"
-        if x.get("stopped_attempt"):  # Q78: taken for an apply that changed nothing
+        if x.get("stopped_attempt"):  # taken for an apply that changed nothing
             summary += " just before an apply that stopped before it changed anything."
         else:
             summary += " just before a change was applied." if x.get("proposal_id") else "."
@@ -214,7 +214,7 @@ def build_events(
             bits.append(f"average mana value {float(m['average_mana_value']):.1f}")
         if m.get("price_total") is not None:
             bits.append(f"${float(m['price_total']):,.0f}")
-        # the bracket set on the deck is THE bracket (Q49/O14); the estimate only when none is set
+        # the bracket set on the deck is THE bracket; the estimate only when none is set
         if r.get("bracket_set"):
             bits.append(f"bracket {r['bracket_set']}")
         elif r.get("bracket_estimate"):
@@ -500,7 +500,7 @@ def pager_html(query: dict[str, Any], *, has_more: bool) -> str:
     return "".join(parts)
 
 
-# Track A's own History page styles (S3): HISTORY_CSS ends with this.
+# Further History page styles: HISTORY_CSS ends with this.
 HISTORY_CSS_A = ""
 
 
@@ -649,7 +649,7 @@ def trend_html(trend: dict[str, Any] | None) -> str:
     )
 
 
-# Track C's own History page styles (the trends; S3): HISTORY_CSS ends with this.
+# The trends' own History page styles: HISTORY_CSS ends with this.
 HISTORY_CSS_C = ""
 
 

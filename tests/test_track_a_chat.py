@@ -1,6 +1,6 @@
 """Release 0.7.29, approvals and proposals in the chat: the waiting changes card
-(show_waiting_changes, Q134 A6), its Apply all (confirm_waiting, get_apply_result) and the
-proposal card's line about the other changes waiting on its deck (Q134 A3)."""
+(show_waiting_changes), its Apply all (confirm_waiting, get_apply_result) and the
+proposal card's line about the other changes waiting on its deck."""
 
 from __future__ import annotations
 
@@ -77,7 +77,7 @@ async def test_own_changes_get_codes_and_another_apps_only_a_link(stack: Stack) 
     assert sc["review_all_url"].endswith("/proposals#deck-42")
     assert len(sc["other_apps"]) == 1 and sc["other_apps"][0]["count"] == 1
     codes = res["_meta"][APPROVALS_META_KEY]
-    assert set(codes) == {a, b}  # never another app's (O9)
+    assert set(codes) == {a, b}  # never another app's
     the_set = res["_meta"][APPROVAL_SET_META_KEY]
     assert sorted(the_set["ids"]) == sorted([a, b])
     text = json.dumps(sc) + res["content"][0]["text"]
@@ -194,7 +194,7 @@ async def test_in_chat_off_means_no_codes_and_no_apply_all(no_card: Stack) -> No
 
 
 def test_the_proposal_card_uses_the_shared_card_template() -> None:
-    """A10: the proposal card is built like every other card: shared bridge and base inlined, with its
+    """The proposal card is built like every other card: shared bridge and base inlined, with its
     own words when it cannot reach the chat."""
     from mtg_gateway import approve
 
@@ -206,7 +206,7 @@ def test_the_proposal_card_uses_the_shared_card_template() -> None:
 
 
 def test_the_history_row_shows_the_bracket_set_on_the_deck_over_the_estimate() -> None:
-    """Q49/O14: the bracket set on the deck is THE bracket; the estimate shows only when none is set."""
+    """The bracket set on the deck is THE bracket; the estimate shows only when none is set."""
     from mtg_gateway.history_view import build_events
     from mtg_gateway.reports import ReportService
 
@@ -223,8 +223,8 @@ def test_the_history_row_shows_the_bracket_set_on_the_deck_over_the_estimate() -
         )
 
     est = {"bracket_estimate": {"bracket": 3}, "card_count": 100}
-    # `bracket_set` (the bracket set on the deck) is Track C's summary field (reports.py, C's
-    # branch); until the join the summary is given it here
+    # `bracket_set` (the bracket set on the deck) is a summary field from reports.py; here the
+    # summary is given it directly
     set_one = build_events([], [], [{**row(est), "bracket_set": 2}], csrf_input="")[0]["summary"]
     assert "bracket 2" in set_one and "about" not in set_one
     none_set = build_events([], [], [{**row(est), "bracket_set": None}], csrf_input="")[0]["summary"]
@@ -232,7 +232,7 @@ def test_the_history_row_shows_the_bracket_set_on_the_deck_over_the_estimate() -
 
 
 async def test_a_page_that_shared_a_failed_sync_read_reads_again_on_its_own() -> None:
-    """A6: a page arriving while the deck sync's read is under way shares it; when that read fails
+    """A page arriving while the deck sync's read is under way shares it; when that read fails
     (the sync reads with no retry), the page reads once more on its own terms instead of showing
     the error. A page's own failed read is not repeated."""
     import asyncio

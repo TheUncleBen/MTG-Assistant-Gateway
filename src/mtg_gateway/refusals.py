@@ -1,6 +1,6 @@
-"""One wording for each refusal that the website and the assistant share (Q141 item 7A): the same
+"""One wording for each refusal that the website and the assistant share: the same
 situation reads the same on the deck page, the review page, the cards and in the assistant's
-answers. Wording drafts for the wording card (WORDING-4); what each refusal does is unchanged."""
+answers."""
 
 from __future__ import annotations
 

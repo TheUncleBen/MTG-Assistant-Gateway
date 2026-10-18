@@ -1,5 +1,5 @@
-"""Release 0.7.29, approvals: the admin overview's approval-mode lines read the live settings
-(Q142 item 8 A), so a change on the Settings page shows there at once, without a restart."""
+"""Release 0.7.29, approvals: the admin overview's approval-mode lines read the live settings,
+so a change on the Settings page shows there at once, without a restart."""
 
 from __future__ import annotations
 

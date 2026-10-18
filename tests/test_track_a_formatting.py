@@ -1,4 +1,4 @@
-"""Release 0.7.29, Keep formatting (Q137 "Keep it, new words plain"): an edit to a formatted deck
+"""Release 0.7.29, Keep formatting: an edit to a formatted deck
 description or comment keeps the bold text, links and pictures whose words did not change, writes
 new words as plain text, and is approved on the review page, which draws the result."""
 
@@ -296,7 +296,7 @@ async def test_a_comment_changed_since_its_review_is_not_sent(stack: Stack) -> N
 
 
 async def test_a_comment_rewrite_that_keeps_none_of_its_formatting_says_so(stack: Stack) -> None:
-    """Review M-2, E-2 for comments: a comment edit that keeps none of its link says so on its
+    """A comment edit that keeps none of its link says so on its
     review page, is approved there (not on the card) and writes plain text."""
     h, ark = stack.h, stack.ark
     token = await linked_user(stack)
@@ -348,7 +348,7 @@ async def test_a_comment_rewrite_that_keeps_none_of_its_formatting_says_so(stack
 
 
 async def test_full_auto_waits_for_a_formatted_description_and_for_making_a_deck_public(stack: Stack) -> None:
-    """Q141 item 3B (Ben approved 10-17): in Full auto, making a deck public or unlisted and a
+    """In Full auto, making a deck public or unlisted and a
     description edit that keeps formatting wait for the member's press; other details apply."""
     h, ark = stack.h, stack.ark
     token = await linked_user(stack)
@@ -375,7 +375,7 @@ async def test_full_auto_waits_for_a_formatted_description_and_for_making_a_deck
     name = structured(
         await call(h, token, "propose_deck_details", {"deck_id": "42", "details": {"name": "Auto name"}})
     )
-    assert name["assistant_may_apply"] is True  # O7: other details still apply in Full auto
+    assert name["assistant_may_apply"] is True  # other details still apply in Full auto
     # Semi-auto is unchanged: every details change waits there
     await _set_mode(h, "semi")
     assert (
@@ -387,7 +387,7 @@ async def test_full_auto_waits_for_a_formatted_description_and_for_making_a_deck
 
 
 def test_an_edit_that_keeps_no_formatting_is_plain_text() -> None:
-    """Proofread of WORDING-4, option a: when every bold or linked word changes, nothing is kept,
+    """When every bold or linked word changes, nothing is kept,
     so the edit is plain text: no "keeps the bold text" note, and the card may approve it."""
     doc = _doc(
         {"insert": "Primer", "attributes": {"link": "https://example.com/p"}}, {"insert": " and notes\n"}
@@ -397,7 +397,7 @@ def test_an_edit_that_keeps_no_formatting_is_plain_text() -> None:
 
 
 async def test_an_edit_that_removes_all_formatting_waits_and_says_so(stack: Stack) -> None:
-    """D-1, safe default pending Ben's card (coordinator 03:19Z 10-17): a rewrite of a formatted
+    """A safe default: a rewrite of a formatted
     description keeps none of its bold text, links or pictures, so Full auto waits, the review
     page says they go, and a plain description's edit still applies."""
     h, ark = stack.h, stack.ark
@@ -414,7 +414,7 @@ async def test_an_edit_that_removes_all_formatting_waits_and_says_so(stack: Stac
         == "removes all of the description's formatting, such as bold text, links and pictures"
     ), p
     assert any(r.get("formatting_lost") for r in p["rows"]), p["rows"]
-    # E-2: approved on its review page only, as at 4103450 (the card can't approve it)
+    # Approved on its review page only, as at 4103450 (the card can't approve it)
     assert not (res.get("_meta") or {}).get(APPROVAL_META_KEY), res.get("_meta")
     out = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
     assert out.get("state") != "applied" and ark.patches == [], out
@@ -442,8 +442,7 @@ STATES = {"private": (True, False), "unlisted": (False, True), "public": (False,
 @pytest.mark.parametrize("old", list(STATES))
 @pytest.mark.parametrize("new", list(STATES))
 async def test_full_auto_waits_for_a_move_to_unlisted_or_public(stack: Stack, old: str, new: str) -> None:
-    """Review of 4103450 (High) and D-3 (coordinator 03:19Z 10-17, Ben's Q141 3B words "making a
-    deck public or unlisted"): Full auto compares who can see the deck before and after, so any
+    """Full auto compares who can see the deck before and after, so any
     move to unlisted or public waits for the member's press, public to unlisted too, and a move to
     private applies. A deck marked both private and unlisted is taken as private (not checked on
     Archidekt)."""
@@ -483,10 +482,10 @@ def _set_visibility(ark, private: bool, unlisted: bool) -> None:
 
 
 async def test_full_auto_judges_who_sees_the_deck_again_when_it_applies(stack: Stack) -> None:
-    """Delta review 2, E-1 (the reviewer's probe): "turn unlisted off" on a private and unlisted
+    """A "turn unlisted off" on a private and unlisted
     deck keeps it private, so Full auto may apply it; once the member makes the deck non-private
     on Archidekt (updatedAt not moved), the same change would make it public. It is judged again on
-    the deck just read: nothing is sent, and it needs a look with the move in words (E-3)."""
+    the deck just read: nothing is sent, and it needs a look with the move in words."""
     h, ark = stack.h, stack.ark
     token = await linked_user(stack)
     await _set_mode(h, "manual")
@@ -508,7 +507,7 @@ async def test_full_auto_judges_who_sees_the_deck_again_when_it_applies(stack: S
 
 
 async def test_a_description_that_gained_formatting_is_judged_again(stack: Stack) -> None:
-    """Delta review 2, E-1 for E-2: a plain description's edit may apply in Full auto, but if the
+    """A plain description's edit may apply in Full auto, but if the
     description gained bold text or links on Archidekt since, the edit would now remove them: it
     needs a look and nothing is sent."""
     h, ark = stack.h, stack.ark

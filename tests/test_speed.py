@@ -1,4 +1,4 @@
-"""Page speed with a linked Archidekt account (T-037): the per-member deck-list cache (fresh,
+"""Page speed with a linked Archidekt account: the per-member deck-list cache (fresh,
 stale-while-revalidate, dropped by writes), pages that render from it without an Archidekt call,
 one listing per cold load, the render-first placeholder and /api/decks/mine, the collection's
 first-page cache, request timing (Server-Timing) and the throttled last_used_at write."""
@@ -193,7 +193,7 @@ async def test_cold_pages_render_a_placeholder_and_the_json_endpoint_fills_it(st
             in r.text
         )
         assert "decklist list skeleton" in r.text and "Total decks: …" in r.text
-        assert "folder-field" not in r.text and "/static/decks.js" in r.text  # no Folder dropdown (F3)
+        assert "folder-field" not in r.text and "/static/decks.js" in r.text  # no Folder dropdown
         assert "Sample Commander Deck" not in r.text
         assert "script-src 'self'" in r.headers["content-security-policy"]
         assert "connect-src 'self'" in r.headers["content-security-policy"]

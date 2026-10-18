@@ -1,6 +1,6 @@
-"""0.7.25 (R-154): "Play on EDHPlay" on the deck page. EDHPlay has no import by link, so the press
-copies the deck in EDHPlay's import format and opens edhplay.com. Ben (22:38Z 10-11): the full deck,
-commander and sideboard included; (23:21Z) the maybeboard is never sent. The format was read from
+"""0.7.25: "Play on EDHPlay" on the deck page. EDHPlay has no import by link, so the press
+copies the deck in EDHPlay's import format and opens edhplay.com. It sends the full deck,
+commander and sideboard included; the maybeboard is never sent. The format was read from
 EDHPlay's own help page, import dialog and import parser, then checked with live imports on a test
 account (2026-10-11): its sideboard holds 15 cards (more and nothing is imported) and its import
 drops tokens (export_formats.to_edhplay)."""
@@ -241,7 +241,7 @@ def test_an_all_single_copy_deck_without_a_land_starts_with_a_non_creature() -> 
 
 
 def test_a_legendary_land_ranks_with_the_lands_not_the_commanders() -> None:
-    """L15: a single legendary land is a land: it leads a deck of single copies with no
+    """A single legendary land is a land: it leads a deck of single copies with no
     commander, ahead of a legendary creature that sorts before it."""
     deck = _deck()
     aesi = next(c for c in deck.cards if deck.is_commander(c))
@@ -259,7 +259,7 @@ def test_a_legendary_land_ranks_with_the_lands_not_the_commanders() -> None:
 
 
 def test_a_list_with_only_a_sideboard_starts_at_its_heading() -> None:
-    """L16: no blank first line when there is no main deck to end."""
+    """No blank first line when there is no main deck to end."""
     ark = FakeArchidekt()
     ark.add_side_row(42, "Sol Ring", quantity=1, category="Sideboard")
     deck = parse_deck(ark.decks[42])
@@ -272,7 +272,7 @@ def test_a_list_with_only_a_sideboard_starts_at_its_heading() -> None:
 
 
 def test_a_companion_in_a_main_deck_category_moves_to_the_sideboard() -> None:
-    """L17: a row flagged as the companion but filed in a main-deck category goes to the
+    """A row flagged as the companion but filed in a main-deck category goes to the
     Sideboard (first) with the box's companion note, as a companion does in the Arena export."""
     ark = FakeArchidekt()
     deck_json = ark.decks[42]
@@ -376,11 +376,11 @@ def _launch(page) -> str:
 
 @pytest.mark.parametrize(("width", "scheme"), [(390, "dark"), (673, "light"), (1280, "light")])
 def test_the_button_opens_a_dialog_then_copies_and_launches(server: Server, width: int, scheme: str) -> None:
-    """0.7.27 (T-161): every press opens a small box and opens nothing yet; Escape, the backdrop and
-    × close it and give focus back to the button (no Cancel: Ben, 02:08Z 10-14), Tab stays inside
+    """0.7.27: every press opens a small box and opens nothing yet; Escape, the backdrop and
+    × close it and give focus back to the button (no Cancel button), Tab stays inside
     it; its Copy and Open EDHPlay.com copies the list and opens EDHPlay. The page doesn't carry the
     list: the box asks for it as it opens. The two import steps show open until the first launch on
-    this device, then folded under How to import (Ben, 01:36Z 10-14). The 0.7.25 first-time tip is
+    this device, then folded under How to import. The 0.7.25 first-time tip is
     gone, and so is the mark it kept in this browser."""
     from playwright.sync_api import sync_playwright
 
@@ -406,7 +406,7 @@ def test_the_button_opens_a_dialog_then_copies_and_launches(server: Server, widt
             and btn.get_attribute("data-src") == "/decks/42/edhplay.json"
         )
         assert btn.get_attribute("href") == EDHPLAY_URL and btn.get_attribute("target") == "_blank"
-        assert EDHPLAY_URL == "https://edhplay.com/decks"  # straight to My Decks (Q52)
+        assert EDHPLAY_URL == "https://edhplay.com/decks"  # straight to My Decks
         assert "noopener" in (btn.get_attribute("rel") or "")
 
         dialog = _open_dialog(page)
@@ -657,7 +657,7 @@ def test_the_box_waits_for_the_list_and_says_when_it_cannot_have_it(
 @pytest.mark.parametrize(("width", "scheme"), [(390, "dark"), (1280, "light")])
 def test_the_box_says_what_to_set_on_edhplay(server: Server, width: int, scheme: str) -> None:
     """EDHPlay's import never sets a companion, and with no commander marked it sets none: the
-    box says so for such decks only (Ben, Q54 and Q55 10-14); deck 42 has a commander and no
+    box says so for such decks only; deck 42 has a commander and no
     companion, so it says neither."""
     from playwright.sync_api import sync_playwright
 
@@ -697,8 +697,8 @@ def _answer(status: int, text: str):
 
 @pytest.mark.parametrize(("width", "scheme"), [(390, "dark"), (1280, "light")])
 def test_the_box_shows_only_the_approved_messages(server: Server, width: int, scheme: str) -> None:
-    """M8, Q67 (approved only): whatever the gateway answers, the box shows one of the three Q53
-    messages, never the gateway's own text. Q69: signed out, retrying can't help, so there is no
+    """Whatever the gateway answers, the box shows one of the three approved messages, never the
+    gateway's own text. Signed out, retrying can't help, so there is no
     Try again; the two load failures keep it."""
     from playwright.sync_api import sync_playwright
 
@@ -783,8 +783,8 @@ UNDER = """() => [".topbar", ".tabbar"].map(sel => {
 def test_the_box_covers_the_bars_and_takes_the_old_note_down(
     server: Server, width: int, height: int, scheme: str, touch: bool
 ) -> None:
-    """L10: the backdrop dims the top bar, the phone's tab bar and the Fold's rail too, and a
-    "Deck list copied" note left from an earlier launch is gone when the box opens again. L9: the
+    """The backdrop dims the top bar, the phone's tab bar and the Fold's rail too, and a
+    "Deck list copied" note left from an earlier launch is gone when the box opens again. The
     box's x and How to import are finger-sized (44 px)."""
     from playwright.sync_api import sync_playwright
 

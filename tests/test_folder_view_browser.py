@@ -136,7 +136,7 @@ def test_my_decks_by_folder_fits_every_width(server: Server, width: int, theme: 
 def test_the_backup_folder_name_is_refused_and_reads_everywhere(
     tmp_path: Path, width: int, theme: str
 ) -> None:
-    """B8 a: Manage folders refuses renaming a folder to the backup folder's name; the refusal fits
+    """Manage folders refuses renaming a folder to the backup folder's name; the refusal fits
     and keeps a 4.5:1 contrast at every size."""
     server = Server(tmp_path, writes_enabled=True)
     server.ark.folders["alice"] = [

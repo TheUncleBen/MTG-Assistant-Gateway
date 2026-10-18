@@ -1,4 +1,4 @@
-"""Card size S / M / L (0.7.29, Q22, card Q135 item 7) in headless Chromium: M is today's size; on
+"""Card size S / M / L (0.7.29) in headless Chromium: M is today's size; on
 a phone the deck page shows 3, 2 or 1 cards across; on a wide screen My decks shows 6, 5 or 4
 decks across; the switch next to "View as" applies at once and follows the account; the printing
 picker has the same switch; card search shows it with the Grid view only. At 360, 720 and 1280 px
@@ -163,7 +163,7 @@ def test_quick_size_changes_keep_the_last_one(server: Server) -> None:
 
 
 def test_a_save_with_an_unreadable_answer_does_not_stop_the_next_ones(server: Server) -> None:
-    """Review R4-3: the first save's answer is cut off (not JSON). The saves after it still go,
+    """The first save's answer is cut off (not JSON). The saves after it still go,
     in order, and the account keeps the last choice."""
     from playwright.sync_api import sync_playwright
 

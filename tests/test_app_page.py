@@ -47,7 +47,7 @@ async def test_signed_in_user_gets_page_and_apk(harness: Harness) -> None:
     b = Browser(harness)
     try:
         await b.login("/app")
-        # D11: /app leads to the setup hub's Android section
+        # /app leads to the setup hub's Android section
         r = await b.http.get("/app")
         assert r.status_code == 302 and r.headers["location"] == "/install?for=android"
         page = await b.http.get("/install?for=android")
@@ -86,7 +86,7 @@ async def test_gateway_without_the_app(tmp_path: Path, idp: FakeIdP, monkeypatch
         try:
             await b.login("/app")
             page = await b.http.get("/install?for=android")
-            assert page.status_code == 200  # a friendly page, not an error (Q18)
+            assert page.status_code == 200  # a friendly page, not an error
             assert "No app file on this gateway" in page.text and "phone's browser" in page.text
             r = await b.http.get("/app/mtg-assistant-gateway.apk")
             assert r.status_code == 404
@@ -120,7 +120,7 @@ async def test_page_without_a_recorded_certificate(
 
 
 async def test_latest_json_for_the_apps_update_check(harness: Harness) -> None:
-    """D10: the app asks its own gateway for the newest app, behind the APK's sign-in."""
+    """The app asks its own gateway for the newest app, behind the APK's sign-in."""
     r = await harness.http.get("/app/latest.json")
     assert r.status_code == 401 and r.json() == {"ok": False, "error": "unauthenticated"}
     b = Browser(harness)

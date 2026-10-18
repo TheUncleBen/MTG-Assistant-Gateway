@@ -1,8 +1,7 @@
-"""Release 0.7.29, approvals (review round 1): a second step never lands without its first, and a
+"""Release 0.7.29, approvals: a second step never lands without its first, and a
 combined change keeps what its parts needed. An assistant does not apply a change while one it
-depends on still waits (Q27j, A9); a held change, or another app's, is never combined (Q142 item
-2 A); a change that depends on one closed
-outside the apply paths (a restart mid-apply, expiry) is held (K6; expiry pending a card)."""
+depends on still waits; a held change, or another app's, is never combined; a change that
+depends on one closed outside the apply paths (a restart mid-apply, expiry) is held."""
 
 from __future__ import annotations
 
@@ -55,7 +54,7 @@ async def test_full_auto_waits_while_the_first_step_still_waits(stack: Stack) ->
 
 
 async def test_a_held_change_is_not_combined(stack: Stack) -> None:
-    """Q142 item 2 A (Ben approved 10-17): a held change is never combined; nothing changes."""
+    """A held change is never combined; nothing changes."""
     h = stack.h
     token = await linked_user(stack)
     await _set_mode(h, "manual")
@@ -73,7 +72,7 @@ async def test_a_held_change_is_not_combined(stack: Stack) -> None:
 
 
 async def test_another_apps_change_is_not_combined(stack: Stack) -> None:
-    """Q142 item 2 A: an assistant combines only its own app's waiting changes that no other app
+    """An assistant combines only its own app's waiting changes that no other app
     changed; another app's, or one another app changed, is refused and nothing changes."""
     h = stack.h
     await linked_user(stack)
@@ -147,7 +146,7 @@ async def test_an_expired_first_step_holds_its_dependents_and_does_not_block_the
     assert got["status_reason"] == f"It depends on #{first['board_no']}, which expired.", got
     await _set_mode(h, "auto")
     assert (await _get(h, token, second["proposal_id"]))["assistant_may_apply"] is False
-    # the member may still apply a held change themselves (A8)
+    # the member may still apply a held change themselves
     decks = h.app.state.gateway.decks
     reset = current_client.set(BROWSER_CLIENT)
     try:
@@ -160,7 +159,7 @@ async def test_an_expired_first_step_holds_its_dependents_and_does_not_block_the
 
 
 async def test_a_change_that_replaces_another_apps_change_waits_for_the_member(stack: Stack) -> None:
-    """Q27m and G5 (the Q142 check): a new change that replaces another app's waiting change is
+    """A new change that replaces another app's waiting change is
     not applied by an assistant in Full auto; one that replaces only its own app's change is."""
     h, ark = stack.h, stack.ark
     await linked_user(stack)
@@ -179,7 +178,7 @@ async def test_a_change_that_replaces_another_apps_change_waits_for_the_member(s
     assert new["replace_note"] == f"This replaces #{theirs['board_no']}, which still waits."
     old = await _get(h, b, theirs["proposal_id"])
     assert old["replace_note"] == f"#{new['board_no']} would replace this. Apply one of them, not both."
-    # ChatGPT can't apply its own change by itself while a replacement waits (finding 2)
+    # ChatGPT can't apply its own change by itself while a replacement waits
     assert old["assistant_may_apply"] is False
     assert old["press_reason"] == f"would be replaced by #{new['board_no']}, which also waits"
     out = structured(await call(h, a, "apply_proposal", {"proposal_id": new["proposal_id"]}))
@@ -225,7 +224,7 @@ async def test_rejecting_a_replacement_of_another_apps_change_leaves_that_change
 
 
 async def test_a_change_and_its_replacement_ticked_together_are_refused_by_name(stack: Stack) -> None:
-    """The Q142 check: another app's change waits until its replacement is applied, so both can
+    """Another app's change waits until its replacement is applied, so both can
     be ticked; Apply all never applies both, and never picks one for the member."""
     from mtg_gateway.decks import DeckError
 
@@ -276,7 +275,7 @@ async def test_a_change_and_its_replacement_ticked_together_are_refused_by_name(
 
 
 async def test_the_pages_show_why_a_change_waits_and_what_replaces_it(stack: Stack) -> None:
-    """Proofread A2 findings 2 and 5: the member sees the replace pair and the second-step wait on
+    """The member sees the replace pair and the second-step wait on
     the Proposals list and the review page, and the assistant's next step in Full auto says why."""
     import html
 
@@ -320,7 +319,7 @@ async def test_the_pages_show_why_a_change_waits_and_what_replaces_it(stack: Sta
 
 
 async def test_applying_a_replaced_change_on_its_own_holds_its_replacement(stack: Stack) -> None:
-    """Review round 3 (safe default pending a card): ChatGPT's +Arcane Signet is #1, Claude's
+    """A safe default: ChatGPT's +Arcane Signet is #1, Claude's
     +Delver replacing it is #2. The member applies #1 on its own; #2 is then held, says why, and
     no assistant applies it in any mode. The member may still apply it."""
     h, ark = stack.h, stack.ark
@@ -351,7 +350,7 @@ async def test_applying_a_replaced_change_on_its_own_holds_its_replacement(stack
         assert out.get("state") != "applied", out
     assert h.db.get_proposal(new["proposal_id"], SUB)["state"] == "pending"
     sent = len(ark.patches)
-    # the member may still apply it (A8)
+    # the member may still apply it
     reset = current_client.set(BROWSER_CLIENT)
     try:
         run = decks.apply_selection(SUB, [new["proposal_id"]], via="review_page")

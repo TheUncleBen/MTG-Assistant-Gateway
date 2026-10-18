@@ -1,7 +1,7 @@
-"""Schema 14 (0.7.30, Q128, Q136, cards Q138, Q139 and Q140): the simulator's card models. Each
-member keeps their own (Q140 item 1), with the simulator version each was checked with (Q139 item
-5). The member and an admin may remove one, the admin list shows who added each, a member's models
-go with their data, and the cap per member is checked in the write's own transaction."""
+"""Schema 14 (0.7.30): the simulator's card models. Each member keeps their own, with the
+simulator version each was checked with. The member and an admin may remove one, the admin list
+shows who added each, a member's models go with their data, and the cap per member is checked in
+the write's own transaction."""
 
 from __future__ import annotations
 
@@ -52,7 +52,7 @@ def test_a_schema_13_database_gets_the_table_and_keeps_its_rows(
 
 
 def test_each_member_keeps_their_own_model_of_a_card(tmp_path: Path) -> None:
-    """Card Q140 item 1: one member's model never replaces or changes another's."""
+    """One member's model never replaces or changes another's."""
     db = Database(tmp_path / "g.sqlite")
     try:
         assert (
@@ -85,7 +85,7 @@ def test_each_member_keeps_their_own_model_of_a_card(tmp_path: Path) -> None:
 
 
 def test_a_member_replacing_their_model_leaves_an_earlier_members_alone(tmp_path: Path) -> None:
-    """Review round 8 (R8-2): the other member saves first, so a save or a replacement that lost
+    """The other member saves first, so a save or a replacement that lost
     its member condition would find, or overwrite, their row."""
     db = Database(tmp_path / "g.sqlite")
     try:
@@ -121,7 +121,7 @@ EARLIER_14 = """CREATE TABLE IF NOT EXISTS card_models (
 def test_a_database_from_an_earlier_schema_14_build_is_brought_to_the_new_shape(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Review round 8 (R8-1): step 14 changed in place, so a database an earlier build already
+    """Step 14 changed in place, so a database an earlier build already
     took to 14 is repaired at start, without a new schema number, and keeps its models."""
     path = tmp_path / "earlier14.sqlite"
     monkeypatch.setattr(db_module, "MIGRATIONS", db_module.MIGRATIONS[:13])
@@ -211,7 +211,7 @@ def test_a_member_deletes_only_their_own_model(tmp_path: Path) -> None:
 
 
 def test_an_admin_removes_any_members_model_and_it_is_audited(tmp_path: Path) -> None:
-    """Q136 item 2: the member who added a model and an admin may remove it."""
+    """The member who added a model and an admin may remove it."""
     db = Database(tmp_path / "g.sqlite")
     try:
         db.put_card_model("sol ring", "Sol Ring", MODEL, "u1", 1)
@@ -227,7 +227,7 @@ def test_an_admin_removes_any_members_model_and_it_is_audited(tmp_path: Path) ->
 
 
 def test_the_admin_list_and_delete_my_data(tmp_path: Path) -> None:
-    """Card Q138 items 4 and 5."""
+    """The admin list shows who added each model, and deleting a member's data removes theirs."""
     db = Database(tmp_path / "g.sqlite")
     try:
         for sub in ("u1", "u2"):
@@ -270,7 +270,7 @@ def test_the_cap_counts_only_a_save_that_newly_counts(tmp_path: Path) -> None:
 
 
 def test_two_saves_at_once_never_pass_the_cap_together(tmp_path: Path) -> None:
-    """Track C review r1 item 18: the cap check and the write are one transaction, so of two new
+    """The cap check and the write are one transaction, so of two new
     cards a member saves at the same moment with one place left, one is kept and the other is
     refused (before, both could pass a separate count and the member went over the cap)."""
     import threading

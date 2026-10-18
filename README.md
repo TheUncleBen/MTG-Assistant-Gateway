@@ -182,7 +182,7 @@ Screenshots of the browser pages are in [docs/screenshots/](docs/screenshots/).
     or Full-auto approval mode on their Account page, the assistant applies
     it with `apply_proposal`. The card's Approve button carries a one-time code
     the assistant never sees, so a tricked assistant can't press it.
-  - For an edit, the gateway checks the deck hasn't changed since the proposal, saves a
+  - For an edit, the gateway checks the change still does what was reviewed on the deck as it is now, saves a
     snapshot, puts a private backup copy of the deck in the user's
     "MTG Gateway backups" folder on Archidekt, makes the change, then reads
     the deck back to confirm it.
@@ -211,8 +211,9 @@ Screenshots of the browser pages are in [docs/screenshots/](docs/screenshots/).
     deck's name and keeps a snapshot (and the Archidekt backup copy) first.
     `/precons` lists every preconstructed deck Archidekt knows, by set.
     The assistant reaches folder, tags and cover only through a
-    `propose_deck_details` proposal you approve; deleting a deck and
-    creating or renaming folders are your own buttons alone.
+    `propose_deck_details` proposal you approve. It can propose deleting a
+    deck or creating a folder, but only your own press applies those;
+    renaming folders is your own button alone.
 - **Collection.** The cards you own, which is your Collection on Archidekt
   shown and edited through the gateway (nothing about them is stored here):
   add by name or from a scan, count copies, set a card's finish, condition,
@@ -295,7 +296,7 @@ between releases ([docs/VERSIONS.md](docs/VERSIONS.md)).
 | Area | State |
 | --- | --- |
 | Sign-in, research, deck import, account linking, proposals, scanning | Built. Tested against fakes, recorded Archidekt and Scryfall responses, and a real Swarm stack with Authentik in CI |
-| Applying edits, creating decks, backups and restores on Archidekt | Built, and run live against a throwaway Archidekt account (create, add, remove, quantities, categories, commander, backup folder and copy). The code default is off (`MTG_WRITES_ENABLED=false`); the example env files turn writes on (each change is still applied only by the member's own press, the Approve button on the in-chat card or the Apply button on the review page, unless the member chose a looser approval mode on their Account page; an Archidekt account action, such as a like, comment, new folder or deck deletion, is approved only on the review page, in every mode). Try your first edit on a deck you don't care about |
+| Applying edits, creating decks, backups and restores on Archidekt | Built, and run live against a throwaway Archidekt account (create, add, remove, quantities, categories, commander, backup folder and copy). The code default is off (`MTG_WRITES_ENABLED=false`); the example env files turn writes on (each change is still applied only by the member's own press, the Approve button on the in-chat card or the Apply button on the review page, unless the member chose a looser approval mode on their Account page; an Archidekt account action, such as a like, comment, new folder or deck deletion, always waits for the member's own press, in every mode, on the card in the chat or on its review page; a deck deletion only on its review page). Try your first edit on a deck you don't care about |
 | Client and device coverage | See [docs/CONNECT.md](docs/CONNECT.md#which-apps-and-devices-work), which labels each claim as verified, reported or unverified |
 | Deck statistics, stored deck reports and history, compare, companion pages, admin page, JSON API | Built and covered by the test suite against fakes. The companion pages and admin page were also checked by the owner on his own deployment on 2026-10-10 and 2026-10-11 (speed, backup copies, the redesigned pages, edit and restore) |
 | Deck deletion, cover image, folders, tags, comment editing, collection details (0.7.2); comment votes, colour tags and the assistant's account-action proposals (likes, bookmarks, follows, comments, folders, deck deletion; 0.7.16 to 0.7.19); custom mana value and deck collaborators (0.7.20) | Built against Archidekt routes read from its own site code and covered by tests against a fake; not yet exercised live (taking a colour tag off a card is also unverified). Each one reads the result back and reports a mismatch rather than trusting Archidekt's answer |

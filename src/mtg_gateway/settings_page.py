@@ -1,8 +1,7 @@
 """The admin Settings page (0.7.29): every setting in config.MANAGED_SETTINGS, grouped, with where
-its value comes from. A value set in the deployment wins and is shown read-only (Q17, R-172);
+its value comes from. A value set in the deployment wins and is shown read-only;
 the others are stored through LiveSettings, which checks bounds and writes the audit log.
 
-All text here is draft until Ben's wording card for the page (WORDING-AND-CALLS-2).
 """
 
 from __future__ import annotations
@@ -176,8 +175,8 @@ TEXT: dict[str, tuple[str, str]] = {
     "scan_art_gallery_idle_days": ("Forget a card's printings after", "Days without a scan of that card."),
 }
 
-# Changes that delete or stop keeping something need a tick on the page (QUESTIONS-2 B5, card
-# Q135): key -> (what needs it: "off" or "lower", the tick box's text).
+# Changes that delete or stop keeping something need a tick on the page:
+# key -> (what needs it: "off" or "lower", the tick box's text).
 CONFIRM: dict[str, tuple[str, str]] = {
     "archidekt_backups": (
         "off",
@@ -305,7 +304,7 @@ class Outcome:
     errors: dict[str, str] = field(default_factory=dict)
     posted: dict[str, str] = field(default_factory=dict)
     # Back to default: the section's other fields the admin had changed but not saved (kept in
-    # the form and named in a notice, never dropped without a word; review round 1, finding 6).
+    # the form and named in a notice, never dropped without a word).
     unsaved: list[str] = field(default_factory=list)
 
 
@@ -319,7 +318,7 @@ def label(key: str) -> str:
 
 # The summary box's link text where the row's name only reads right beside its value box ("Check
 # Archidekt for deck changes every [30] minutes"). A link has no value after it, so these five say
-# the whole thing (SUMMARY-LINK-TEXTS-r3.md option a, approved 10-17 about 03:21Z, R-216). The rows, the
+# the whole thing (SUMMARY-LINK-TEXTS-r3.md option a, approved 10-17 about 03:21Z). The rows, the
 # save notices and the Activity log keep the row's name.
 LINK_TEXT = {
     "deck_sync_minutes": "How often to check Archidekt for deck changes",
@@ -492,7 +491,7 @@ def settings_body(
 
 
 def _stack_summary(live: LiveSettings) -> str:
-    """Card Q139 item 3: one line at the top naming every setting the stack sets, by its name on
+    """One line at the top naming every setting the stack sets, by its name on
     the page (for five, the whole wording in LINK_TEXT) and its variable, each a link to its row
     (a folded group opens), so the operator can see which lines to remove from the stack to manage
     those settings here. Nothing when the stack sets none."""
@@ -518,7 +517,7 @@ def _stack_summary(live: LiveSettings) -> str:
 
 def chatgpt_name_warning(live: LiveSettings) -> str:
     """The warning under "Name in ChatGPT" when the name ChatGPT gets (this setting, else the gateway
-    name) is over the plugin file's limit, as the start-up log and the admin page warn (C4)."""
+    name) is over the plugin file's limit, as the start-up log and the admin page warn."""
     long = chatgpt_name_too_long(live.get("server_name"), live.get("chatgpt_name") or None)
     if not long:
         return ""
@@ -584,7 +583,7 @@ def _source(d: dict[str, Any], spec: SettingSpec, running: Any, who: Callable, w
     if d["source"] == "deployment":
         return (
             "<span class='set-lock'>Set in your stack "
-            # it may break only after an underscore, never mid-word (review round 2, finding 4)
+            # it may break only after an underscore, never mid-word
             f"(<code>{html.escape(spec.env).replace('_', '_<wbr>')}</code>), {STACK_LOCK_HOW}</span>"
         )
     if d["source"] == "dashboard":
@@ -615,7 +614,7 @@ def _control(spec: SettingSpec, value: Any, *, locked: bool, described: str) -> 
         )
     if spec.kind == "choice" and spec.labels:
         # Named choices (the approval modes) as a list of radio buttons, so the whole name shows
-        # and wraps at any width or text size (review round 1, finding 9).
+        # and wraps at any width or text size.
         picked = next((c for c in spec.choices if str(value).lower() == c.lower()), None)
         opts = "".join(
             f"<label><input type='radio' name='{name}' value='{html.escape(c)}'"

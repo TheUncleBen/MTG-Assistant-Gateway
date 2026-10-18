@@ -1,7 +1,7 @@
-"""0.7.25 (R-153): the automatic Archidekt -> gateway deck sync (sync.py). Archidekt is the master
+"""0.7.25: the automatic Archidekt -> gateway deck sync (sync.py). Archidekt is the master
 copy; the gateway checks it when the app opens and on a timer, read-only, behind every member's
 own work, and flags a waiting proposal out of date as soon as it sees the deck change. It must
-never break or overwrite what a member or an assistant does from the gateway (R1-R6)."""
+never break or overwrite what a member or an assistant does from the gateway."""
 
 from __future__ import annotations
 
@@ -47,7 +47,7 @@ def _reads(ark: FakeArchidekt, deck_id: int = 42) -> int:
 
 def _edit_elsewhere(ark: FakeArchidekt, when: str = "2026-10-05T00:00:00Z") -> None:
     """A change made on archidekt.com (or in another app), as Archidekt would report it: to the
-    Forest row the waiting proposals change, so they no longer do what was reviewed (0.7.29, K1:
+    Forest row the waiting proposals change, so they no longer do what was reviewed (0.7.29;
     a change to another card leaves them "updated", test_track_a_recheck)."""
     forest = next(c for c in ark.decks[42]["cards"] if c["card"]["oracleCard"]["name"] == "Forest")
     forest["quantity"] += 1
@@ -138,7 +138,7 @@ async def test_an_unchanged_deck_costs_one_list_request_and_no_deck_read(stack: 
 
 
 async def test_the_check_is_read_only_and_never_touches_proposals_or_snapshots(stack: Stack) -> None:
-    """R1: only GETs go out; proposals (but for the status of a waiting one, 0.7.29), snapshots
+    """Only GETs go out; proposals (but for the status of a waiting one, 0.7.29), snapshots
     and the undo history stay exactly as they were."""
     h, ark = stack.h, stack.ark
     sync = _sync(stack)
@@ -168,7 +168,7 @@ async def test_the_check_is_read_only_and_never_touches_proposals_or_snapshots(s
 
 
 async def test_the_check_waits_behind_a_members_request_then_skips(stack: Stack) -> None:
-    """R2: while a member's Archidekt call is under way the check sends nothing and gives up for
+    """While a member's Archidekt call is under way the check sends nothing and gives up for
     this round; the member's call finishes as it would have."""
     h, ark = stack.h, stack.ark
     sync = _sync(stack)
@@ -189,7 +189,7 @@ async def test_the_check_waits_behind_a_members_request_then_skips(stack: Stack)
 
 
 async def test_a_check_beside_an_apply_leaves_it_to_finish_exactly_as_today(stack: Stack) -> None:
-    """R3/R6: an apply under way on the deck is never read halfway; it ends applied, and its own
+    """An apply under way on the deck is never read halfway; it ends applied, and its own
     write does not flag it."""
     h, ark = stack.h, stack.ark
     sync = _sync(stack)
@@ -243,13 +243,13 @@ async def test_restore_and_details_proposals_are_flagged_too(stack: Stack) -> No
     _edit_elsewhere(ark)
     _later(stack)
     out = await sync.check(SUB)
-    # 0.7.29 (K1): the restore would now put Forest back from 4, not 3; the rename still fits
+    # 0.7.29: the restore would now put Forest back from 4, not 3; the rename still fits
     assert out["flagged"] == [restore["proposal_id"]] and out["updated"] == [details["proposal_id"]], out
 
 
 async def test_the_gateways_own_apply_checks_another_waiting_proposal(stack: Stack) -> None:
     """Two proposals for one deck: applying the first changes the deck. Its verify read checks
-    the second at once (0.7.29, K2): it still does what was reviewed, so it is "updated", and the
+    the second at once (0.7.29): it still does what was reviewed, so it is "updated", and the
     next check has nothing to say. The applied one is not flagged."""
     h, ark = stack.h, stack.ark
     sync = _sync(stack)
@@ -282,7 +282,7 @@ async def test_the_gateways_own_apply_checks_another_waiting_proposal(stack: Sta
 
 
 async def test_a_failed_check_is_quiet_and_the_member_carries_on(stack: Stack) -> None:
-    """R5: Archidekt failing ends the check with nothing changed; the member's next request works."""
+    """Archidekt failing ends the check with nothing changed; the member's next request works."""
     h, ark = stack.h, stack.ark
     sync = _sync(stack)
     token = await linked_user(stack)
@@ -300,7 +300,7 @@ async def test_a_failed_check_is_quiet_and_the_member_carries_on(stack: Stack) -
 async def test_a_failing_archidekt_costs_the_breaker_one_failure_with_production_retries(
     stack: Stack,
 ) -> None:
-    """R5 with the shipped retry setting (two retries for a member's read): the sync sends each
+    """With the shipped retry setting (two retries for a member's read): the sync sends each
     request once, so a check adds one failure to the shared breaker, and while the breaker or a
     Retry-After pause is on it sends nothing at all."""
     h, ark = stack.h, stack.ark

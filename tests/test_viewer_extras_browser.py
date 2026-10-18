@@ -227,7 +227,7 @@ def test_editor_redo(server: Server, width: int) -> None:
     ("width", "scheme"), [(374, "dark"), (390, "light"), (673, "dark"), (1366, "light"), (1366, "dark")]
 )
 def test_editor_save_bar_never_covers_the_top_bar(server: Server, width: int, scheme: str) -> None:
-    """A24: scrolled down, the deck editor's save bar sticks under the site's top bar, not over it
+    """Scrolled down, the deck editor's save bar sticks under the site's top bar, not over it
     (on a phone it sits at the bottom, over the tab bar): the top bar's middle is the top bar's own,
     and the save bar is still on screen."""
     from playwright.sync_api import sync_playwright

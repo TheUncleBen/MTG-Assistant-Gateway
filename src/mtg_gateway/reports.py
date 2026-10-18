@@ -145,7 +145,7 @@ class ReportService:
         self.db = db
         self.decks = decks
         self.mf = mf
-        # K1-K3 (Q136): card models assistants wrote, kept for every member's later solo tests
+        # card models assistants wrote, kept for every member's later solo tests
         self.models = card_models.KeptModels(db)
         self.forge = forge
         self._forge_games = forge_games
@@ -206,9 +206,9 @@ class ReportService:
         ``forge`` asks for Forge games apart from the goldfish ones (None: as ``simulate``).
         ``deck`` is a deck already read (one of the member's snapshots, ``snapshot_id``), filed
         under its Archidekt deck like any other report. ``same_opponents_as`` is another of the
-        member's reports: this run's Forge games seat that run's opponents (K6, Q136), and the run
+        member's reports: this run's Forge games seat that run's opponents, and the run
         is never a reused report. ``pair_with`` is the other deck of a Forge comparison (its id,
-        or the deck already read; Q140 item 3): the opponents are picked for the higher of the two
+        or the deck already read): the opponents are picked for the higher of the two
         decks' brackets, and the run is never a reused report either. The other deck is read
         before anything is stored, so a deck that can't be read leaves no report behind.
         A ``deck`` given without ``snapshot_id`` is the Archidekt deck already read."""
@@ -344,7 +344,7 @@ class ReportService:
         mode = sim_mode(stats)
         plays_forge = self.forge is not None and forge and mode == "commander"
         if pair_with is not None and not plays_forge:
-            # Pending Ben's call (proofread R4 fix 2): refused, the safe default, not ignored.
+            # Refused, the safe default, not ignored.
             raise DeckError("invalid", PAIR_NO_FORGE)
         # The other deck of a comparison is read now, before anything is stored and outside the
         # Forge start lock: a deck that can't be read stops the run with no report kept.
@@ -432,7 +432,7 @@ class ReportService:
             note = FORGE_CONSTRUCTED if mode == "constructed" else FORGE_NO_COMMANDER
             self._save_forge(rid, {"state": "skipped", "reason": "not_commander", "note": note})
         else:
-            # Forge's own seed when given (A34), else the goldfish's, else one the gateway picks
+            # Forge's own seed when given, else the goldfish's, else one the gateway picks
             seed = options.get("forge_seed", options.get("seed"))
             bracket = _pair_bracket(deck, stats, other)
             copies = await self.forge.copies()  # the name's lookup, kept out of the start lock
@@ -834,7 +834,7 @@ class ReportService:
         }
 
     def _share_from(self, sub: str, report_id: Any) -> dict[str, Any]:
-        """K6 (Q136): what seating another of the member's reports' opponents takes, checked now:
+        """What seating another of the member's reports' opponents takes, checked now:
         that report must be the member's own and have (or be waiting for) Forge games. Its
         opponents themselves are read when this run starts (``_shared_now``), as that run may
         still be waiting for its own."""
@@ -859,7 +859,7 @@ class ReportService:
         out = dict(shared)
         rid = shared.get("report_id")
         if not sub or not isinstance(rid, str):
-            return out  # never read a report without its owner (review r1, item 17)
+            return out  # never read a report without its owner
         row = self.db._one("SELECT forge_json FROM reports WHERE id = ? AND owner_sub = ?", (rid, sub))
         section = json.loads(row["forge_json"]) if row is not None and row["forge_json"] else {}
         seats = section.get("seats") if isinstance(section, dict) else None
@@ -1288,7 +1288,7 @@ class ReportService:
             refused = MIXED_MODES_TEXT
         if refused is not None:
             return {"tool": "goldfish_ab", "ok": False, "text": refused}
-        # both decks play the kept models of their cards (K1), as their own solo tests do
+        # both decks play the kept models of their cards, as their own solo tests do
         names = [c.name for t in (text_a, text_b) for c in _cards_or_none(t) if c.zone == "main"]
         opts, used = card_models.merge(sub, self.models, names, opts)
         args = {"deck_a": text_a, "deck_b": text_b, "n": games, **opts}
@@ -1311,8 +1311,8 @@ class ReportService:
         *,
         keep: bool,
     ) -> dict[str, Any]:
-        """The solo test (Mystic Forge's goldfish_run) with the kept models of the deck's cards
-        (K1). The report records which kept models played (``kept_models``); once the run went
+        """The solo test (Mystic Forge's goldfish_run) with the kept models of the deck's cards.
+        The report records which kept models played (``kept_models``); once the run went
         through, the valid models the assistant passed are kept (``models_kept``), only when
         ``keep`` (a stored deck, whose names are Archidekt's own) and only for cards the simulator
         plays without their effect (goldfish_annotate on the same deck text)."""
@@ -1322,7 +1322,7 @@ class ReportService:
             goldfish["kept_models"] = used
             goldfish["kept_models_note"] = card_models.MEMBER_WRITTEN_NOTE
         if self.models.available and keep:
-            goldfish["models_saved"] = True  # the report may say descriptions are saved (Q136 K1)
+            goldfish["models_saved"] = True  # the report may say descriptions are saved
         own = [a for a in options.get("annotations") or [] if isinstance(a, dict)]
         if own and keep and goldfish.get("ok") and self.models.available:
             goldfish["models_kept"] = self.models.keep(
@@ -1448,7 +1448,7 @@ class ReportService:
         return out
 
     def forge_queue(self, sub: str) -> list[dict[str, Any]]:
-        """The member's unfinished Forge runs for the Reports page (K8): the one playing first, then
+        """The member's unfinished Forge runs for the Reports page: the one playing first, then
         the waiting ones in turn, each as a reader sees it (place, expected times)."""
         return [
             {"report_id": rid, "deck_name": name, "forge": self._forge_view(sub, rid, section)}
@@ -1747,7 +1747,7 @@ def report_status(goldfish: Any, validation: Any, forge: Any) -> str:
     some = list(parts)
     if isinstance(forge, dict) and forge.get("reason") not in ("not_requested", "not_commander"):
         parts.append(forge.get("state") == "done")
-        # a run that stopped early still brought back the games it played (review r1 fix 3)
+        # a run that stopped early still brought back the games it played
         some.append(forge.get("state") == "done" or _done_games(forge) > 0)
     if parts and not any(some):
         return "failed"
@@ -1771,7 +1771,7 @@ def _cards_or_none(text: str) -> list[Any]:
 
 
 def _shared_link(shared: dict[str, Any]) -> dict[str, str]:
-    """Whose opponents a run seats (K6), as the report shows it."""
+    """Whose opponents a run seats, as the report shows it."""
     return {k: shared[k] for k in ("report_id", "deck_name") if isinstance(shared.get(k), str)}
 
 
@@ -1906,7 +1906,7 @@ def _stored_note(goldfish: dict[str, Any]) -> None:
 def _keep_quantities(goldfish: dict[str, Any], text: str) -> None:
     """Keep how many copies of each card the simulated deck held (front faces, main zone) with the
     simulation's result: its honesty report names each card once, so the report page shows the
-    copies beside each card (A31) and counts a 60-card deck's coverage in copies (A30)."""
+    copies beside each card and counts a 60-card deck's coverage in copies."""
     if not goldfish.get("ok"):
         return
     try:
@@ -2044,7 +2044,7 @@ def _sentence(text: str) -> str:
 
 def _pair_bracket(deck: Any, stats: dict[str, Any], other: Deck | None) -> tuple[Any, ...]:
     """The bracket this run's opponents are picked for: the deck's own (forge_bracket), or in a
-    Forge comparison the higher of the two decks' (Q140 item 3), each deck's set bracket where it
+    Forge comparison the higher of the two decks', each deck's set bracket where it
     has one, else Archidekt's estimate from cards; a tie keeps this deck's."""
     own = forge_bracket(deck, stats)
     if other is None:

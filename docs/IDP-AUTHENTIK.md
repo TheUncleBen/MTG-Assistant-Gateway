@@ -198,7 +198,7 @@ services:
 
 Redeploy, make sure a sign-in works, then `docker secret rm` the old one.
 Rotate it together with the Client Secret on the Authentik provider. The
-other two secrets, `mtg_fernet_key` and `mtg_session_secret`, are covered in
+other three, `mtg_fernet_key`, `mtg_session_secret` and `mtg_ntfy_token`, are covered in
 [DEPLOY.md](DEPLOY.md) step 4.
 
 Stack environment variables for the identity provider (the rest are in
@@ -433,7 +433,7 @@ gets the member's own picture, nothing more.
   there; a manual run of the workflow covers `2025.6.4` and `2026.8.3`.
   `2025.6.4` and `2026.2.2` passed in October 2026, and the provider fields,
   flows and group bindings came out the same on each. For the current state, look at the
-  latest `e2e` workflow run. Newer Authentik releases should work, but they
+  latest **End-to-end** workflow run. Newer Authentik releases should work, but they
   aren't covered until that list is updated.
 - **Reported, not re-checked for this page:** the admin UI menu paths and
   field labels (the tests use the API, whose field names are in section 4),

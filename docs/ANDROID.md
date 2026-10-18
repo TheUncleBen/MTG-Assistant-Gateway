@@ -180,8 +180,9 @@ default) and, once, to let the app run in the background. The app then runs
 a foreground service that holds one connection to the gateway's own address
 (`/app/notifications/stream`). Android shows its quiet **Always connected**
 notification while the service runs, as it does for every foreground
-service. The service starts again after the phone restarts, after an app
-update and whenever the app is opened. It stops when the gateway says the
+service. The app is built to start the service again after the phone
+restarts, after an app update and whenever the app is opened (tested on an
+emulator; a real-phone check is still to come). It stops when the gateway says the
 phone's key is no longer valid or notifications are off, and when the app is
 set up for another gateway. A connection that fails is tried again after 5
 seconds, then after longer waits up to 5 minutes, and at once when the
@@ -195,7 +196,8 @@ deck replaced and withdrawn, swiping the app away from Recents, dismissing
 the ongoing notification, Doze, an app update, a reboot, a message missed
 while offline, a force stop (`am force-stop`, the nearest adb step to
 Android's Stop button) and opening the app again, and the gateway switching
-notifications off. It also takes launcher screenshots at phone and Fold
+notifications off. Passing on an emulator with a stand-in gateway does not
+show that a real phone behaves the same. It also takes launcher screenshots at phone and Fold
 widths. The debug build it tests trusts a certificate made for that run
 only; a release build never does. A 24 hour battery test needs a real phone.
 
@@ -277,7 +279,7 @@ else your gateway serves. A few things are native:
   The camera screen is always dark, over the black viewfinder.
 - **Launcher.** The icon's label is "MTG Gateway" (the full name does not fit
   most launchers). Long-press the icon for shortcuts to **My decks**, **Scan
-  cards** and **Proposals** on your gateway. They are there from install, before
+  page** and **Proposals** on your gateway. They are there from install, before
   the app has been opened; each opens that page on the gateway address you
   saved, or the address screen if none is set yet. If the app was open, the
   page it was showing is replaced, so save an edit in progress first.

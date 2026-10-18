@@ -5,7 +5,7 @@ These routes are a person's own clicks: every write needs the browser session an
 CSRF token, every call runs under that member's own linked Archidekt session, and the page asks
 for a confirmation before each write. Since 0.7.17 an assistant can propose the same actions
 (propose_deck_social, propose_comment; actions.py), but it can never apply one: each is applied
-only by the member's own press on its review page (R-142), which then runs the code here.
+only by the member's own press on its review page, which then runs the code here.
 
 Routes and bodies are the ones archidekt.com's own pages send (read from its bundle on
 2026-10-07; see the notes on ``ArchidektClient.vote_deck`` and friends).
@@ -65,7 +65,7 @@ NOT_IN_THREAD = "That comment is not in this deck's thread, or no longer on the 
 
 
 def comment_text(text: str) -> str:
-    """A comment as it will be written: plain text only (Q70; a Quill document is kept as its words
+    """A comment as it will be written: plain text only (a Quill document is kept as its words
     alone, see ``plain_text``), without control characters or surrounding white space. Cleaning
     the result again changes nothing, so an approved comment is posted as its review showed it."""
     text = str(text)
@@ -100,7 +100,7 @@ def _int(value: Any) -> int | None:
 
 def comment_out(c: dict[str, Any], depth: int = 0, *, keep_doc: bool = False) -> dict[str, Any]:
     """One comment of Archidekt's thread in the gateway's shape; replies nest to a depth limit.
-    ``keep_doc``: a formatted comment also carries its stored document as ``_doc`` (Q137), for an
+    ``keep_doc``: a formatted comment also carries its stored document as ``_doc``, for an
     edit that keeps its formatting; never shown or sent to an assistant."""
     owner = c.get("owner") if isinstance(c.get("owner"), dict) else {}
     kids = c.get("children")
@@ -151,12 +151,12 @@ class SocialService:
         self.decks = state.decks
         self.client = state.decks.client
         self._following: dict[str, tuple[float, dict[int, str]]] = {}
-        # whether the last read stopped at FOLLOWING_PAGES with more pages left (Q141 item 4A)
+        # whether the last read stopped at FOLLOWING_PAGES with more pages left
         self._following_cut: dict[str, bool] = {}
         self._following_fresh: dict[str, float] = {}  # sub -> when a fresh read was last forced
         # (sub, deck id) -> (when, the deck's comment thread root) from that member's last read, so a
         # vote or a comment write straight after the thread loaded skips reading the whole deck
-        # again (A29: one thread read and the write, not three calls per vote)
+        # again (one thread read and the write, not three calls per vote)
         self._roots: dict[tuple[str, str], tuple[float, int | None]] = {}
 
     def _me(self, sub: str) -> tuple[str, str]:
@@ -202,7 +202,7 @@ class SocialService:
         uid, _name = self._me(sub)
         found, _thread = await self.find_comment(sub, deck_id, comment_id, page)
         if str(found["owner"]["id"]) == uid:
-            raise DeckError("invalid", refusals.OWN_COMMENT_VOTE)  # Q141 item 7A
+            raise DeckError("invalid", refusals.OWN_COMMENT_VOTE)
         if found["archived"]:
             raise DeckError("invalid", refusals.ARCHIVED_COMMENT)
         if found["user_vote"] == want:  # already so: nothing is sent (Archidekt might toggle it)
@@ -318,7 +318,7 @@ class SocialService:
             return {"self": True, "following": False}
         following = user_id in await self.following(sub)
         if not following and self._following_cut.get(sub):
-            # Q141 item 4A: the list was cut short and they are not in the part read, so whether
+            # The list was cut short and they are not in the part read, so whether
             # the member follows them is not known; the page offers both Follow and Unfollow
             return {"self": False, "following": False, "unknown": True}
         return {"self": False, "following": following}
@@ -327,7 +327,7 @@ class SocialService:
         self.decks._writes_switch()
         uid, _name = self._me(sub)
         if str(user_id) == uid:
-            raise DeckError("invalid", refusals.FOLLOW_SELF)  # Q141 item 7A
+            raise DeckError("invalid", refusals.FOLLOW_SELF)
         await self.decks._call(sub, lambda t: self.client.follow_user(t, user_id, on=on))
         self._following.pop(sub, None)
         self.state.db.audit("user_followed", sub=sub, detail={"user_id": user_id, "on": on})
@@ -392,7 +392,7 @@ class SocialService:
         found = _find(thread["comments"], comment_id)
         near = [thread["page"] - 1, thread["page"] + 1]
         # A comment just posted has no points yet, so it sits on the last page of a long thread
-        # although the page draws it at the top (review round 1, finding 6). A full page tells
+        # although the page draws it at the top. A full page tells
         # the page size, and the count of comments then gives the last page.
         if thread["has_more"] and thread["comments"]:
             near.append(-(-int(thread["count"]) // len(thread["comments"])))
@@ -415,7 +415,7 @@ class SocialService:
         """``found`` when it is the member's own comment, else a refusal."""
         uid, _name = self._me(sub)
         if str(found["owner"]["id"]) != uid:
-            raise DeckError("forbidden", refusals.NOT_OWN_COMMENT)  # Q141 item 7A
+            raise DeckError("forbidden", refusals.NOT_OWN_COMMENT)
         return found
 
     async def edit_comment(
@@ -430,7 +430,7 @@ class SocialService:
     ) -> dict[str, Any]:
         """Change the text of one of the member's own comments (Archidekt's edit); verified by
         re-reading the thread. The new words are plain, and the comment's bold text, links and
-        pictures stay where their words did not change (Q137, ``formatting.keep_formatting``).
+        pictures stay where their words did not change (``formatting.keep_formatting``).
         ``expect_doc``: for an approved proposal, the document its review showed ("" for plain
         text); a comment whose stored document gives another one now is not sent."""
         self.decks._writes_switch()

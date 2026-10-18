@@ -1,6 +1,6 @@
 """Release 0.7.29, approvals and proposals: the waiting changes card and the proposal card's
-"Apply all" line in a real browser, driven by a fake host that speaks the MCP Apps protocol
-(Q134 A3, A6). Nothing is sent before a press; Apply all asks first and sends the set's code."""
+"Apply all" line in a real browser, driven by a fake host that speaks the MCP Apps protocol.
+Nothing is sent before a press; Apply all asks first and sends the set's code."""
 
 from __future__ import annotations
 
@@ -159,7 +159,7 @@ def test_the_waiting_card_approves_one_and_applies_all_after_a_confirm(width: in
             )
             card.locator("#row-p1").wait_for()
             assert card.locator("h1").inner_text() == "Waiting changes to Sample Deck"
-            # another app's change has its review link only (O9)
+            # another app's change has its review link only
             assert card.locator("#row-p3 button").count() == 0
             assert card.locator("#row-p3 a.link").inner_text() == "Review"
             # data stays text
@@ -421,7 +421,7 @@ def test_the_card_quotes_the_comment_and_offers_no_undo_for_an_account_action(wi
 
 @pytest.mark.parametrize("width,theme", [(360, "light"), (1280, "dark")])
 def test_the_card_says_who_changed_a_change_and_where_to_approve_another_apps(width: int, theme: str) -> None:
-    """G16, Q134 item 5: an amended change says which app changed it and what. A change another
+    """An amended change says which app changed it and what. A change another
     app made says where it can be approved, without calling the card the review page."""
     from playwright.sync_api import sync_playwright
 
@@ -525,7 +525,7 @@ def test_a_change_decided_on_the_waiting_card_is_not_reported_as_not_sent() -> N
 
 @pytest.mark.parametrize("width,theme", [(360, "dark"), (1280, "light")])
 def test_approve_reads_the_change_again_and_shows_a_new_wait_first(width: int, theme: str) -> None:
-    """Review round 2: a card drawn before the change was held (a restart, another app's step)
+    """A card drawn before the change was held (a restart, another app's step)
     shows the hold when Approve is pressed, and applies only on a second press."""
     from playwright.sync_api import sync_playwright
 
@@ -582,7 +582,7 @@ def test_approve_reads_the_change_again_and_shows_a_new_wait_first(width: int, t
 
 
 def test_the_cards_size_their_text_in_rem() -> None:
-    """Review round 2: the chat cards follow a larger text size (200%), so no text is sized in px."""
+    """The chat cards follow a larger text size (200%), so no text is sized in px."""
     import re as _re
 
     for html in (card_html(), cards_html("waiting-card")):
@@ -592,7 +592,7 @@ def test_the_cards_size_their_text_in_rem() -> None:
 
 
 def test_approve_says_when_it_could_not_check_and_waits_for_a_second_press() -> None:
-    """Review round 3: when Approve's re-read gets no answer (the host refuses it), nothing is
+    """When Approve's re-read gets no answer (the host refuses it), nothing is
     approved on that press and the card says so; the next press approves the change as shown."""
     from playwright.sync_api import sync_playwright
 
@@ -993,7 +993,7 @@ def test_the_waiting_cards_result_says_not_sent_once() -> None:
 
 
 def test_the_waiting_cards_apply_all_confirm_warns_of_a_held_change() -> None:
-    """Q140 item 8 (Ben approved A, 10-17): a held change in the set shows its Held line on the
+    """A held change in the set shows its Held line on the
     Apply all confirm, before anything is sent."""
     from playwright.sync_api import sync_playwright
 
@@ -1031,7 +1031,7 @@ def test_the_waiting_cards_apply_all_confirm_warns_of_a_held_change() -> None:
 @pytest.mark.parametrize("width", [344, 360, 390])
 @pytest.mark.parametrize("text", ["100%", "200%"])
 def test_the_no_press_badge_fits_a_phone_at_any_text_size(width: int, text: str) -> None:
-    """D-4 (coordinator 04:26Z 10-17): a high-risk change Full auto applies shows "No press needed",
+    """A high-risk change Full auto applies shows "No press needed",
     not "high risk"; on the Fold cover (344 px) and a phone (390 px), at 100% and 200% text, the
     badge stays inside the card and the title keeps room. The sizes are printed for the record."""
     from playwright.sync_api import sync_playwright

@@ -12,6 +12,23 @@ upstream commit with the small patches in `docker/mystic-forge/patches/`, and
 copies upstream's `LICENSE` file into the image. It runs as a separate
 service; none of its code is part of the gateway itself.
 
+## Forge (simulation image)
+
+Deck simulations use **Forge**, <https://github.com/Card-Forge/forge>, under
+the GNU General Public License version 3. `docker/forge/Dockerfile` puts
+Forge's release archive into the image unmodified, beside the gateway's own
+small job service, which runs Forge as a separate program and includes none
+of its code. `docker/forge/NOTICE.md`, copied into the image, says where
+Forge's licence and source are.
+
+## ntfy (notification server)
+
+The stack runs the upstream **ntfy** image (`binwiederhier/ntfy`),
+<https://github.com/binwiederhier/ntfy>, unmodified. Its project is
+dual-licensed under the Apache License 2.0 and the GNU General Public
+License version 2. It runs as a separate service; none of its code is part
+of the gateway.
+
 ## Card artwork hash (scan)
 
 `src/mtg_gateway/scan/art.py` and `src/mtg_gateway/scan/static/scan-art.js`

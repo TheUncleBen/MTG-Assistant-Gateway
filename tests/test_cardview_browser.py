@@ -1,4 +1,4 @@
-"""The card viewer in headless Chromium (static/cardview.js, R-131): mana and rules symbols are
+"""The card viewer in headless Chromium (static/cardview.js): mana and rules symbols are
 drawn as the gateway's own discs (no raw {T} codes), the dialog never scrolls sideways at any
 width, the backdrop and focus behave like a dialog, and Escape closes it. Skipped without a
 Chromium build."""
