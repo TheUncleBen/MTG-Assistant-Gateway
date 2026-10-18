@@ -333,7 +333,7 @@ settings change, restore or collection change is first saved as a
 **proposal**: the exact list of what would change. Approve it on the card
 in the chat or on the review page, or pick an approval mode on your Account
 page (Manual, Semi-auto for small deck or collection edits and copies of a deck, Full auto) and the
-assistant applies what that mode allows, with a snapshot first for a change to one of your decks. A change to a deck's commander always waits for your press.
+assistant applies what that mode allows, with a snapshot first for a change to one of your decks. Adding, removing or swapping a deck's commander always waits for your press.
 
 - **Proposals** lists what is waiting. Open one to read the diff and press
   **Apply** or **Reject**.
