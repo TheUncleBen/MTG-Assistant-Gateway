@@ -34,6 +34,7 @@ import re
 import secrets
 import threading
 import time
+import weakref
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
@@ -137,10 +138,17 @@ TOPIC_KEY_JOB = "notify_topic_key"
 TOPIC_MARK_LEN = 6  # characters of the mark at the end of a topic
 
 
+_TOPIC_KEYS: weakref.WeakKeyDictionary[Database, bytes] = weakref.WeakKeyDictionary()
+
+
 def _topic_key(db: Database) -> bytes:
     """This database's key for the topics' marks, made on first use. It lives in the database
     rather than in a Docker secret so that rotating a secret never disconnects the members' phones,
-    and a member never sees it, so a topic they typed (before 0.7.30) can't carry a valid mark."""
+    and a member never sees it, so a topic they typed (before 0.7.30) can't carry a valid mark.
+    Kept in memory once read, so a phone connecting takes no write lock."""
+    known = _TOPIC_KEYS.get(db)
+    if known is not None:
+        return known
     with db.tx() as c:
         row = c.execute("SELECT detail_json FROM job_runs WHERE name = ?", (TOPIC_KEY_JOB,)).fetchone()
         if row is None:
@@ -152,7 +160,8 @@ def _topic_key(db: Database) -> bytes:
             )
         else:
             key = json.loads(row["detail_json"])["key"]
-    return bytes.fromhex(key)
+    _TOPIC_KEYS[db] = bytes.fromhex(key)
+    return _TOPIC_KEYS[db]
 
 
 def _topic_mark(key: bytes, sub: str, body: str) -> str:
