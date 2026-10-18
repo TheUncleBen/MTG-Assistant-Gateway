@@ -4,11 +4,10 @@ Skills for whoever deploys and runs the gateway. It bundles no MCP server.
 
 - `skills/deploy/`: walks through `docs/DEPLOY.md` step by step, generates
   the random secrets on the operator's machine, and checks the result.
-- `skills/invite/`: adds a user in Authentik and sends them the install
-  link.
+- `skills/invite/`: walks the operator through adding a user in Authentik
+  and drafts the message with the install link for the operator to send.
 
-Install (a private copy of the repository also needs read access, which
-`gh auth login` or your git credentials provide):
+Install:
 
 ```
 claude plugin marketplace add TheUncleBen/MTG-Assistant-Gateway

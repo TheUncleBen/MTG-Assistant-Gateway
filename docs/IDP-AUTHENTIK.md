@@ -278,9 +278,12 @@ every request (at most `MTG_MEMBERSHIP_CHECK_TTL` seconds old, 5 by
 default), so on their next request it revokes their gateway tokens, browser
 sessions and the Authentik tokens it kept, and they are signed out
 everywhere. Taking them out of the group also revokes their Archidekt link;
-for a deactivated or deleted user the link stays until an admin uses
-**Delete data** on the admin page, because Authentik reports that only as
-a refused token, which looks the same as an expired one. A new sign-in
+for a deactivated or deleted user the link stays until an admin presses
+**Disable**, **Unlink Archidekt** or **Delete data** on the admin page, until
+it expires (about 40 days after they linked; the hourly purge then deletes
+it), or until the optional clean-up in section 12 removes it. Authentik
+reports such a user only as a refused token, which looks the same as an
+expired one. A new sign-in
 then fails at Authentik's binding, or at the gateway's group check if the
 binding lets them through. This was
 tested live against Authentik 2026.2.2: taking someone out of a group

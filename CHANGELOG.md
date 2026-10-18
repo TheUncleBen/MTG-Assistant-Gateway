@@ -7,6 +7,63 @@ Notable changes for people who run or use the gateway. The format follows
 with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 (`release/1.2.3`); `latest` is always the newest.
 
+## [0.7.31] - 2026-10-18
+
+A documentation release: the example settings files are reorganised, and the guides are checked
+against the code and corrected. Apart from some wording in the Android app, the in-app Guide, the
+Account page and the admin page, and the example reverse-proxy files, nothing changes in how the
+gateway or the app works.
+
+### Upgrade notes
+- From 0.7.30: none; update as usual ([docs/UPGRADING.md](docs/UPGRADING.md)). Optional: if your
+  Swarm stack's variables (in Portainer, or in `mtg.env` without it) set `FORGE_IMAGE` and
+  `FORGE_TAG`, you can delete those two, so Forge follows the stack file's own version on later
+  updates.
+- From 0.7.26 or earlier: follow the 0.7.30 steps in [docs/UPGRADING.md](docs/UPGRADING.md#0730),
+  which include the 0.7.29 steps. They moved there from DEPLOY.md and DEPLOY-COMPOSE.md. On the
+  way, the members' notification steps were corrected, and the note about waiting for the Forge
+  image to be published was removed.
+
+### Added
+- New [docs/UPGRADING.md](docs/UPGRADING.md): what to do before every update, the update steps
+  for Portainer, Swarm and Docker Compose, and the extra steps some versions need. The 0.7.30 and
+  0.7.29 steps moved there from the deployment guides, which now describe only the current
+  version. From now on each version's notes have an **Upgrade notes** section after their summary.
+
+### Changed
+- `deploy/stack.env.example` and `deploy/compose/.env.example` are grouped in a new order that
+  reads top to bottom: images, server settings, placement (with Compose, where it listens) and
+  storage, standard container settings, sign-in, notifications and watchlists, deck edits, Forge,
+  sessions and tokens, AI clients, network trust, and the lines to leave as they are. The Compose
+  example then ends with the optional proxy overrides. The values are the same. The Compose
+  file's example gains a Forge section (off by default), and the Swarm example's Forge image and
+  version lines are commented out, so a copied file follows the stack file's own Forge version.
+  Both examples now also list, commented out, the other settings the stack files read, such as
+  the sign-in scopes, the ntfy image and memory, and Forge's limit on games per request. Only the
+  ntfy address and token file stay out, because the stack sets them itself. If you copied an
+  earlier example, your file keeps working as it is.
+- The images are public, and the guides now say so: no registry login, GitHub token or
+  `--with-registry-auth` is needed to pull them. Step 5 of the Swarm guide is now "Images".
+- The example reverse-proxy files: the nginx and Caddy examples limit request bodies to 4 MB, as
+  the guides say. The Caddy example compresses only the static files, as
+  [docs/REVERSE-PROXY.md](docs/REVERSE-PROXY.md) advises for the pages. The Traefik override keeps
+  ntfy and Forge out of Traefik too, not only Mystic Forge.
+
+### Fixed
+- Several places in the deployment guides, the operator plugin's deploy skill, the member guides,
+  the API and plugin guides, the architecture and operations guides and the third-party notices no
+  longer matched the gateway and are corrected. Among them: the deploy skill now hands over the
+  command that creates the `mtg_ntfy_token` secret and checks the ntfy service. The guides now say
+  that `/healthz` also reports "degraded" when Forge is on and doesn't answer, that backups don't
+  need the Fernet key, and which tools are marked as changing something. They also describe the
+  Android app's permissions and notification steps, the phone tabs and the admin Card models page
+  as they are. The third-party notices now list the gateway's Python packages and their licences.
+- In the Android app, the messages about a share or a copied link that the app doesn't open, the
+  one about turning the camera back on, and the app-update messages are shorter, so on most phones
+  they fit in the two lines that Android 12 and later show. When a share has no link in it, the
+  message now points to **Open a copied link** on the Account page's App card instead of the
+  account menu, which no longer has it.
+
 ## [0.7.30] - 2026-10-18
 
 This release also includes every change listed under 0.7.27, 0.7.28 and 0.7.29 in CHANGELOG.md. Those versions were not released on their own.
@@ -53,7 +110,7 @@ stack.
 - **Forge runs:**
   - Each game of a run has its own seed, and a run's games play at once as far as Forge has room. The seed is kept for the record only: every report with Forge games and a recorded seed says Forge does not always replay the same games from the same seed, so compare runs by their win rates and 95% intervals.
   - A report plays 4 Forge games by default (`MTG_FORGE_GAMES`, was 10); **Play more games** adds more.
-  - A game still going after four minutes stops and counts as a draw (`FORGE_GAME_SECONDS`, default 240, was 600). A stack variables file copied from the old example still sets `FORGE_TAG=2.0.15-mag2`, `FORGE_GAME_SECONDS=600` and `MTG_FORGE_GAMES=10`: DEPLOY.md's "Updating to 0.7.30" says what to change.
+  - A game still going after four minutes stops and counts as a draw (`FORGE_GAME_SECONDS`, default 240, was 600). A stack variables file copied from the old example still sets `FORGE_TAG=2.0.15-mag2`, `FORGE_GAME_SECONDS=600` and `MTG_FORGE_GAMES=10`: DEPLOY.md's "Updating to 0.7.30" (now in [docs/UPGRADING.md](docs/UPGRADING.md#0730)) says what to change.
 - **Forge memory:** where Docker can't cap memory (Raspberry Pi OS by default), Forge guards its own memory from inside the container, with nothing to change on the machine: `FORGE_MEMORY_LIMIT` sizes the games at once, each Java has a ceiling on its class data, and the kernel stops a Forge game first if the machine runs out of memory (`FORGE_MAX_METASPACE`, `FORGE_OOM_SCORE_ADJ`). This is not a hard limit as Docker's is.
 - **Forge speed:** each Forge game's result shows on the report within a few seconds of the game ending. Forge reads a card's rules only when a game needs that card, so each game starts faster. With more than one Forge place, a Compare's second deck can start before the first deck's run has ended.
 - **Forge image:** 2.0.15-mag3. Build pins are by digest (Dockerfile frontend and base, buildkit, binfmt).
@@ -207,7 +264,7 @@ Android app is unchanged.
 
 ### Deployment
 - The stack and Compose files pass the 24 settings the Settings page manages that they used to set (each with its default) as empty unless your environment sets them, so the page can change them. The example env files list every setting the stack passes, commented out with the default. A value you set in your environment still wins and is shown locked.
-- **Upgrade note for existing deployments (DEPLOY.md and DEPLOY-COMPOSE.md "Updating to 0.7.29 from an earlier version"):** a stack or Compose file from before 0.7.29 gives 24 of the page's 47 settings a value of its own, so they show locked. Before replacing the file, note your own edits to it (the uncommented Authentik and ntfy secret lines, lines added under `environment:`) and redo them in the new one. Portainer: paste the new stack file if it was pasted into the Web editor before (the Repository method brings it). Without Portainer: `git checkout deploy/portainer-stack.yml`, then `git pull`. Compose: download the new docker-compose.yml (in a clone, `git checkout docker-compose.yml` then `git pull`). Optionally delete the variables you want to manage on the page (an older Portainer variables file sets 19, an older .env 17). Any variable kept stays locked. Then update with re-pull (if `MTG_TAG` names a version, change it to `0.7.30` first; without Portainer: from a new shell in your copy of the repository, load `mtg.env` and run `docker stack deploy` again).
+- **Upgrade note for existing deployments (DEPLOY.md and DEPLOY-COMPOSE.md "Updating to 0.7.29 from an earlier version", now in [docs/UPGRADING.md](docs/UPGRADING.md#0729-included-in-0730)):** a stack or Compose file from before 0.7.29 gives 24 of the page's 47 settings a value of its own, so they show locked. Before replacing the file, note your own edits to it (the uncommented Authentik and ntfy secret lines, lines added under `environment:`) and redo them in the new one. Portainer: paste the new stack file if it was pasted into the Web editor before (the Repository method brings it). Without Portainer: `git checkout deploy/portainer-stack.yml`, then `git pull`. Compose: download the new docker-compose.yml (in a clone, `git checkout docker-compose.yml` then `git pull`). Optionally delete the variables you want to manage on the page (an older Portainer variables file sets 19, an older .env 17). Any variable kept stays locked. Then update with re-pull (if `MTG_TAG` names a version, change it to `0.7.30` first; without Portainer: from a new shell in your copy of the repository, load `mtg.env` and run `docker stack deploy` again).
 - New variables: `MTG_ARCHIDEKT_BACKUP_COPIES` (10), `MTG_ARCHIDEKT_BACKUP_BOX_DEFAULT` (false), `MTG_SNAPSHOTS_PER_DECK` (25). DEPLOY.md's environment table describes them; OPERATIONS.md "The Settings page" describes the page.
 
 ## [0.7.28] - not released on its own, included in 0.7.30

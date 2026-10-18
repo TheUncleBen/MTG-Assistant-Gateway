@@ -1341,8 +1341,8 @@ NAV_LINKS = [
 ]
 # The tabs, as Material's navigation bar (3 to 5 destinations) has them: on a compact screen Home,
 # Decks, Scan, Collection and More, with Search as the icon in the top bar. More opens a sheet with
-# the remaining pages (Proposals, History, Watchlist, Guide, Account, Admin) so nothing is more than
-# two taps away; Home is never under More. The rail (an unfolded Fold, a tablet, the app from
+# the remaining pages (Proposals, History, Reports, Watchlist, Guide, Account, Admin) so nothing
+# is more than two taps away; Home is never under More. The rail (an unfolded Fold, a tablet, the app from
 # 600px) is tall enough for every page, so it lists them all as tabs and has no More.
 TAB_LINKS = [
     ("/", "Home", "home", ""),

@@ -4,7 +4,7 @@ Every update to `main` is a new version of the gateway. Each one gets:
 
 | What | Name | Use it to |
 |---|---|---|
-| Container image | `ghcr.io/<owner>/mtg-assistant-gateway:1.2.3` | run exactly that version |
+| Container image | `ghcr.io/theuncleben/mtg-assistant-gateway:1.2.3` | run exactly that version |
 | Git tag | `v1.2.3` | see or check out the code of that version |
 | Branch | `release/1.2.3` | the same code as the tag, kept as a read-only branch |
 | GitHub release | **Releases → v1.2.3** | read what changed, download the Android app when it was built |
@@ -23,8 +23,8 @@ Set `MTG_TAG=latest` (the default in `deploy/stack.env.example` and the Compose
   **Update**.
 - Compose: `docker compose pull && docker compose up -d`.
 
-Read the [CHANGELOG](../CHANGELOG.md) entry first. A major version (see below)
-can need a change on your side.
+Read the [CHANGELOG](../CHANGELOG.md) entry of every version you're moving past
+first, and do any steps it lists under **Upgrade notes** ([UPGRADING.md](UPGRADING.md)).
 
 ## Staying on one version
 
@@ -61,7 +61,8 @@ that carries a new Mystic Forge tag publishes it and marks it with the git tag
 same build also moves the image's `latest` tag and adds a tag carrying the
 short commit SHA; deploy the versioned tag the stack file names.
 
-Forge, the simulation engine, works the same way: its image tag is
+Forge, the simulation engine, works the same way, except that its build adds
+no commit SHA tag: its image tag is
 `<Forge version>-mag<n>` (for example `2.0.15-mag3`), the **Forge image**
 workflow publishes it the first time `main` carries it, and the git tag is
 `forge-2.0.15-mag3`. Until that run has finished, the new tag can't be
@@ -75,7 +76,12 @@ There is no separate release step. Every pull request:
    PATCH as above, and changes the version in `pyproject.toml`,
    `src/mtg_gateway/__init__.py`, `.claude-plugin/marketplace.json` and the plugin manifests to match (a unit
    test checks they agree; the Android app reads `VERSION` on its own);
-2. adds a `## [1.1.0] - YYYY-MM-DD` section to `CHANGELOG.md`.
+2. adds a `## [1.1.0] - YYYY-MM-DD` section to `CHANGELOG.md`, starting with
+   `### Upgrade notes`: "None" when the update steps are enough, otherwise
+   what changes and a link to that version's section in
+   [UPGRADING.md](UPGRADING.md), which the same pull request adds. The deployment
+   guides describe only the current version; steps for getting there from an
+   older one go in UPGRADING.md.
 
 CI refuses a pull request whose `VERSION` isn't above every released version or
 has no CHANGELOG section. When the pull request is merged, CI on `main` tests it,

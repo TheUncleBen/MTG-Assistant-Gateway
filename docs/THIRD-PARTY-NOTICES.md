@@ -61,6 +61,21 @@ released under the MIT License:
 The project's published index file (`art_hashes.sqlite`) is not used or
 redistributed; the gateway builds its own hashes from Scryfall images.
 
+## Python packages
+
+The gateway image installs these Python packages directly, at the versions in
+`constraints.txt`, together with the packages they depend on. Each one's
+licence file is in its installed distribution in the image.
+
+| Package | Version | Licence |
+| --- | --- | --- |
+| `mcp` | 2.3.0 | MIT |
+| `httpx` | 0.28.1 | BSD-3-Clause |
+| `joserfc` | 1.7.5 | BSD-3-Clause |
+| `cryptography` | 50.0.2 | Apache-2.0 or BSD-3-Clause |
+| `uvicorn` | 0.54.0 | BSD-3-Clause |
+| `pillow` | 12.3.0 | MIT-CMU (more below) |
+
 ## Image decoding (scan)
 
 The gateway decodes Scryfall's card images with **Pillow**
@@ -80,10 +95,22 @@ assets under `src/mtg_gateway/scan/static/vendor/`.
 The Android app (`android/`, and the APK the gateway image and GitHub
 releases carry) includes the **Kotlin standard library** by JetBrains,
 distributed under the Apache License 2.0
-(<https://github.com/JetBrains/kotlin>). The build also uses, without shipping
+(<https://github.com/JetBrains/kotlin>), and these AndroidX libraries by Google,
+also under the Apache License 2.0
+(<https://developer.android.com/jetpack/androidx>), with the libraries they
+depend on:
+
+| Library | Version |
+| --- | --- |
+| `androidx.activity:activity-ktx` | 1.13.0 |
+| `androidx.browser:browser` | 1.10.0 |
+| `androidx.camera:camera-core`, `camera-camera2`, `camera-lifecycle`, `camera-view` | 1.6.2 |
+| `androidx.window:window`, `window-java` | 1.5.1 |
+
+The build also uses, without shipping
 them in the app: the Kotlin compiler (Apache-2.0), bundletool (Apache-2.0), an
-Android platform `android.jar` (compile-time stubs), and JUnit (EPL-1.0) and
-Hamcrest (BSD) for the unit tests.
+Android platform `android.jar` (compile-time stubs), and JUnit (EPL-1.0),
+Hamcrest (BSD) and org.json 20240303 (public domain) for the unit tests.
 
 ## Card data and images
 

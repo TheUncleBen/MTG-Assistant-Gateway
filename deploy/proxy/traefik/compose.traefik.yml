@@ -28,9 +28,16 @@ services:
       traefik.http.routers.mtg-gateway.middlewares: mtg-gateway-hsts
       traefik.http.middlewares.mtg-gateway-hsts.headers.stsSeconds: "31536000"
 
-  # Traefik's default exposedByDefault=true would make a router for this
-  # container too. It has no login, so keep it out explicitly.
+  # Traefik's default exposedByDefault=true would make a router for these
+  # containers too. Mystic Forge has no login, and none of them is meant to be
+  # reached from outside, so keep them out explicitly.
   mysticforge:
+    labels:
+      traefik.enable: "false"
+  ntfy:
+    labels:
+      traefik.enable: "false"
+  forge:
     labels:
       traefik.enable: "false"
 

@@ -26,17 +26,17 @@ python -m playwright install --with-deps chromium  # for the browser tests
 
 Run the gateway locally against your own identity provider with the
 variables in [docs/DEPLOY.md](docs/DEPLOY.md#environment-reference), or just
-run the tests: they bring their own fake identity provider, Archidekt and
-Scryfall.
+run the tests: they use simulated stand-in services in place of the identity
+provider, Archidekt and Scryfall, and need no real accounts.
 
 ## Checks
 
 Run these before you push. CI runs the same ones.
 
 ```bash
-ruff check src tests scripts
-ruff format --check src tests scripts
-pytest -q
+ruff check src tests scripts docker/forge
+ruff format --check src tests scripts docker/forge
+pytest -q -n auto
 git fetch --tags && python3 scripts/release_version.py check   # VERSION above every release
 ```
 
@@ -67,7 +67,13 @@ What CI runs on a pull request, on a merge to `main` and by hand is described
 at the top of each file in `.github/workflows/`. Pull requests always run lint
 and unit tests; non-draft ones also build and smoke-test the image (unless only
 docs or `android/` changed), run the end-to-end suite when relevant, and build
-the Android app when `android/` changed. The live research smoke test
+the Android app when `android/` changed. The Android push test
+(`android-push-test.yml`) runs the app's notifications on an emulator for
+pull requests that change `android/`, `src/mtg_gateway/notify.py` or the
+workflow itself, drafts included. The Forge and Mystic Forge image workflows
+(`forge-image.yml`, `mystic-forge-image.yml`) build and smoke-test their image
+on pull requests, drafts included, that change their `docker/` folder, their
+smoke-test scripts or the workflow itself. The live research smoke test
 (`live-research-smoke.yml`) runs only by hand, against real public services,
 and needs a public Archidekt deck id (its `deck_id` input or the
 `LIVE_SMOKE_DECK_ID` repository variable); a fork must change the image names

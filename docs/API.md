@@ -47,6 +47,8 @@ code and a human `message`:
 | `now_held` | 409 | MCP only: Approve on the card reached a change held for a reason that came up after the card showed it; nothing was sent, and the reply carries the hold (`status`, `status_reason`) so the card shows it |
 | `in_chat_disabled` | 403 | MCP only: `MTG_APPLY_IN_CHAT` is off, so the card cannot apply; use the review page |
 | `insufficient_scope` | 403 | the bearer token is read-only (`mtg.read`) and the route writes |
+| `csrf` | 403 | a browser-session write without a valid `X-CSRF-Token` header; reload the page and retry |
+| `too_large` | 413 | the request body is over 2 MB |
 | `other_account` | 409 | a new-deck proposal was made for another Archidekt account than the one linked now |
 | `other_client` | 403 | the proposal was made by another connected app (or, for reject, in the browser); use the review page (`review_url` is included) |
 | `not_linked` | 409 | no Archidekt account linked yet; send the user to `/account` |
@@ -88,6 +90,8 @@ Request bodies are JSON objects of at most 2 MB.
 | `POST /api/v1/reports/{rid}/forge/more` | Play more games, as the report page's button and the `play_more_games` tool do, with the same rules: once the report's Forge games have finished, the games-per-report number again against the same opponents, up to 50 Forge games a report; it queues like any report and starts nothing when 2 of your reports already wait (on a comparison, which needs room for 2, when any already waits); on a comparison the other deck's report gets the same number. `202` with the report as it now is (`forge.more_note` when the games did not start); a refusal is `400` with `message` and `reason` (`queue`, `full`, `ended`, `none`, `noforge`, `pairwait`, `paircant`, `pairqueue`, `setup`), and a report that is not yours is `404` with `reason` `notfound`. Never asks Archidekt; a read-only (`mtg.read`) token gets `403` `insufficient_scope` |
 | `DELETE /api/v1/reports/{rid}` | Delete a report. With a bearer token only a report that same app ran; the browser session may delete any of the member's reports |
 | `GET /api/v1/activity?limit=50` | The user's own audit trail |
+| `GET /api/v1/prefs` | Browser session only: the choices kept on the member's account for the pages (views, card size, stack orders, deck stats toggles, dismissed tips) as `prefs`. A bearer token gets `403 browser_required` |
+| `POST /api/v1/prefs` | Browser session only (CSRF header): `{"set": {name: value or null}}` saves each choice (null forgets it); `{"copy": {...}}` saves only the names the account doesn't have yet. Answers `saved` and `refused` |
 
 The cards an AI app shows in the chat load their bulky data from `GET /cards/data/{token}`, outside
 `/api/v1` and outside the session: the token (a ten-minute Fernet token the gateway hands to the
@@ -122,7 +126,11 @@ through `propose_deck_social` and `propose_comment`; there is no `/api/v1` count
 (the thread as nested `comments`) and `POST /social/api/decks/{id}/comments` `{"text", "parent"?}`
 (`parent` must be a comment of that deck's thread), and `POST
 /social/api/decks/{id}/comments/{comment_id}/vote` `{"vote": "up" | "down" | "none"}` on someone
-else's comment (answers `vote` and the comment's new `points`). All need the session cookie and the CSRF token
+else's comment (answers `vote` and the comment's new `points`), `PATCH
+/social/api/decks/{id}/comments/{comment_id}` `{"text", "page"?}` to change the text of one of the
+member's own comments (answers the `comment` as read back) and `DELETE
+/social/api/decks/{id}/comments/{comment_id}?page=` to delete one of the member's own comments
+(answers `deleted` and the thread's new `count`). All need the session cookie and the CSRF token
 and run under the member's own Archidekt session.
 
 Admin callers (members of `MTG_ADMIN_GROUP`) also have `GET /api/v1/admin/overview`,
@@ -201,6 +209,7 @@ cookie, set by `POST /theme`); internal links never open a new tab.
 | `/decks/{id}/collaborators` (POST) | Add or remove a deck collaborator by hand, after a confirmation page |
 | `/history?deck_id=` | Proposals, snapshots and reports over time, with restore; `type=`, `state=`, `q=`, `when=` (today, 7d, 30d, 90d, year: UTC days) and `group=` (day or deck) narrow and arrange the page, `offset=` pages it |
 | `POST /history/restore` | Browser session (CSRF): makes a restore proposal for `snapshot_id` and opens its review page |
+| `/reports?deck_id=&offset=` | Reports: every stored report of the member, newest first, with what Forge is playing for them now; the gateway's own database only |
 | `/history/reports/{rid}` | One report, designed: headline tiles, trends, the research service's text; `/history/reports/{rid}/export.md` and `.html` download it, and Copy puts the Markdown on the clipboard |
 | `POST /layout` | Browser session (CSRF): the "Desktop layout" / "Fit the screen" switch, remembered per device in a cookie |
 | `/activity` | My activity |
@@ -211,6 +220,8 @@ cookie, set by `POST /theme`); internal links never open a new tab.
 | `/account/avatar` | The signed-in member's picture (the provider's, else Gravatar, else initials) for the account menu |
 | `/app`, `/app/mtg-assistant-gateway.apk`, `/app/latest.json` | `/app` redirects to `/install?for=android`; the APK download and the version file the app checks for updates ([ANDROID.md](ANDROID.md)) |
 | `/admin`, `/admin/users`, `/admin/activity`, `/admin/metrics` | Admin page (members of `MTG_ADMIN_GROUP`) |
+| `/admin/models` (GET, POST) | Admin: the simulator's kept card models, who added each and when, with a Remove button per model |
+| `/admin/settings` (GET, POST) | Admin: the gateway's settings, grouped, with where each value comes from; a value set in the deployment is shown read-only, the others can be changed here |
 | `/app.webmanifest`, `/sw.js`, `/static/{file}` | App shell |
 | `/.well-known/assetlinks.json` | Android App Links statement from `MTG_ANDROID_ASSETLINKS` (empty list when unset) |
 

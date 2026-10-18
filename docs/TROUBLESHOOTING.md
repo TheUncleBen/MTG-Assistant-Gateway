@@ -24,7 +24,7 @@ connecting an assistant in [CONNECT.md](CONNECT.md#if-sign-in-fails).
 | Swarm or Compose: the Forge image can't be pulled (`No such image` or `manifest unknown` for `mtg-assistant-forge`) | A new Forge tag is published only after the release is on `main` and the **Forge image** workflow's run has finished. Wait for it, then update again ([VERSIONS.md](VERSIONS.md)) |
 | Swarm: tasks stay `pending` with `no suitable node` | `MTG_NODE` or `MF_NODE` doesn't match a node's hostname. `docker node ls` shows them |
 | Swarm: tasks `rejected` with `bind source path does not exist` | A host folder the stack mounts is missing on the node, or its name is misspelled: `MTG_DATA_DIR` or `MTG_BACKUP_DIR` must exist on the node named by `MTG_NODE`, exactly as written. Create it there (`sudo mkdir -p <folder>` and `sudo chown <PUID>:<PGID> <folder>`) or fix the variable, then update the stack |
-| Swarm: tasks `rejected` with `No such image` | Wrong image or tag, or private images without a registry login. See [DEPLOY.md](DEPLOY.md#5-registry-login-in-portainer) |
+| Swarm: tasks `rejected` with `No such image` | Wrong image name or tag, or a tag whose release isn't published yet. See [DEPLOY.md](DEPLOY.md#5-images) |
 | `mtg-gateway check-config` | Run it in the container (`docker compose run --rm --no-deps gateway mtg-gateway check-config`) to print the public URL, issuer and the redirect URI to register, without starting the server |
 
 ## The site doesn't load
@@ -39,7 +39,7 @@ connecting an assistant in [CONNECT.md](CONNECT.md#if-sign-in-fails).
 | Certificate errors | Fix the proxy's certificate. Claude and ChatGPT refuse self-signed certificates |
 | Android app: *No connection to your gateway. Check that the phone is online, then tap Retry.* | The phone couldn't reach the address at all (no signal, DNS, or a typo in the gateway address). It often clears by itself after a moment; tap Retry. If it doesn't, open the same address in the phone's browser. *Your gateway is not answering right now* instead means the proxy answered but the gateway didn't (502 to 504): see the `502 Bad Gateway` row |
 | `/healthz` returns `503` | The database can't be opened. Check the log, the data folder's ownership, and that it's on local disk, not NFS or SMB |
-| `/healthz` says `"status":"degraded"` (since 0.7.9 it says nothing else; the admin System card names the part that is down) | The gateway works (still HTTP 200, so it isn't restarted) but the research service doesn't answer: card research and simulations fail. Check the Mystic Forge service's state and log, and that `MTG_MYSTIC_FORGE_URL` points at it. The admin page's System card shows the same |
+| `/healthz` says `"status":"degraded"` (since 0.7.9 it says nothing else; the admin System card names the part that is down) | The gateway works (still HTTP 200, so it isn't restarted) but the research service, or Forge when it's on, doesn't answer: card research and simulations fail. Check the Mystic Forge service's state and log, and that `MTG_MYSTIC_FORGE_URL` points at it; with Forge on, check the Forge service and `MTG_FORGE_URL` too. The admin page's System card names the part that is down |
 | The gateway is under a path (`https://host/mtg/`) and nothing works | Not supported. Give it its own hostname |
 
 ## Signing in fails

@@ -522,6 +522,13 @@ def test_bulk_move_finish_and_remove(server: Server, width: int, scheme: str, vi
         page.locator(".deck-toast .msg", has_text="Saved").wait_for(timeout=8000)
         assert all(r["modifier"] == "Foil" for n in picks for r in _rows(server, n))
         first = page.locator(f'.deckview [data-card="{picks[0]}"]').first
+        # drawn from the answer, possibly after the Saved message (see the remove step below)
+        page.wait_for_function(
+            "(name) => [...document.querySelectorAll('.deckview [data-card]')]"
+            ".some((e) => e.dataset.card === name && e.dataset.finish === 'Foil')",
+            arg=picks[0],
+            timeout=8000,
+        )
         assert first.get_attribute("data-finish") == "Foil"
 
         # remove, with Escape leaving selection first to show it clears
@@ -537,6 +544,11 @@ def test_bulk_move_finish_and_remove(server: Server, width: int, scheme: str, vi
             page.locator(".bulkbar button", has_text="Remove").click()
         page.locator(".deck-toast .msg", has_text="Saved").wait_for(timeout=8000)
         assert all(not _rows(server, n) for n in picks)
+        # the rows can be drawn after the Saved message ("Saved. Refreshing…" when the re-read
+        # was stale, redrawn 1.5 s later in deck.js), so wait for them rather than count at once
+        page.wait_for_function(
+            "([sel, n]) => document.querySelectorAll(sel).length === n", arg=[sel, before - 2], timeout=8000
+        )
         assert page.locator(sel).count() == before - 2
         assert _overflow(page) == 0
         assert errors == []

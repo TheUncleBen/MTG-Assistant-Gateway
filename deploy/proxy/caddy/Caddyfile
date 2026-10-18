@@ -2,7 +2,9 @@
 # Used by caddy/compose.caddy.yml; on a Caddy you already run, copy the site
 # block and change the upstream to wherever the gateway is reachable from it.
 mtg.example.com {
-	encode zstd gzip
+	# Compress only the static files. The pages carry a form token, and compressed pages
+	# with a secret in them are what the BREACH attack works on (docs/REVERSE-PROXY.md).
+	encode /static/* zstd gzip
 	# HSTS: browsers that have been here once never try plain http again. The gateway
 	# sends the same header itself; no includeSubDomains, since the parent domain may
 	# host other (plain-http) things. Add it only if every subdomain is https.
@@ -15,6 +17,6 @@ mtg.example.com {
 		}
 	}
 	request_body {
-		max_size 5MB
+		max_size 4MB
 	}
 }
