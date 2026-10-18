@@ -261,6 +261,13 @@ WRITE_TOOLS = frozenset(
 )
 
 
+def token_may_write() -> bool:
+    """Whether this MCP call's token may write (no token: a call from the gateway's own pages).
+    A read-only token gets no in-chat approval codes: it could never use them."""
+    token = get_access_token()
+    return token is None or scopes_allow_writes(token.scopes)
+
+
 def scope_guard_middleware():
     """MCP middleware refusing WRITE_TOOLS to read-only tokens before the tool runs."""
 
@@ -827,7 +834,8 @@ def build_mcp_server(state: AppState) -> MCPServer:
         return p
 
     def _proposal(data: dict[str, object]) -> CallToolResult:
-        return proposal_tool_result(data, decks=state.decks, sub=_sub(), in_chat=s.apply_in_chat)
+        in_chat = s.apply_in_chat and token_may_write()
+        return proposal_tool_result(data, decks=state.decks, sub=_sub(), in_chat=in_chat)
 
     # The tool and route modules import this module, so they are imported here, not at the top.
     from .gateway_routes import add_gateway_routes

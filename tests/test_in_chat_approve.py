@@ -397,6 +397,40 @@ async def test_read_only_token_cannot_confirm(stack: Stack) -> None:
     assert res.get("isError") and "insufficient_scope" in json.dumps(res), res
 
 
+async def test_a_read_only_token_of_the_same_app_gets_no_approval_codes(stack: Stack) -> None:
+    """An app reconnected read-only (mtg.read) could never use an approval code, so neither
+    get_proposal nor show_waiting_changes hands it one; with the full scope the same app still
+    gets them."""
+    h = stack.h
+    await linked_user(stack)
+    client = await h.register(client_name="app", scope="mtg mtg.read")
+
+    async def token_for(scope: str) -> str:
+        code, verifier = await h.full_login(client, scope=scope)
+        r = await h.token(
+            client,
+            grant_type="authorization_code",
+            code=code,
+            code_verifier=verifier,
+            redirect_uri="https://client.test/cb",
+        )
+        assert r.status_code == 200, r.text
+        return r.json()["access_token"]
+
+    full = await token_for("mtg")
+    pids = [structured(await _propose(h, full, card))["proposal_id"] for card in ("Sol Ring", "Opt")]
+    reader = await token_for("mtg.read")
+    for token, codes in ((full, True), (reader, False)):
+        got = await call(h, token, "get_proposal", {"proposal_id": pids[0]})
+        assert structured(got)["ok"] and (approve.APPROVAL_META_KEY in got.get("_meta", {})) is codes
+        board = await call(h, token, "show_waiting_changes", {"deck_id": "42"})
+        assert structured(board)["own_count"] == 2
+        meta = board.get("_meta") or {}
+        assert (approve.APPROVALS_META_KEY in meta) is codes and (
+            approve.APPROVAL_SET_META_KEY in meta
+        ) is codes
+
+
 # -- the switch -------------------------------------------------------------------------------
 
 
