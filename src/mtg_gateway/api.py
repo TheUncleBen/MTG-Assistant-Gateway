@@ -498,7 +498,8 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
         # account action is refused inside decks.apply for both (only the review page's own
         # form applies one), with browser_required (403) and its review_url. The browser
         # sends the version it showed ({"version": n}), so a proposal another app amended since
-        # is refused with ``changed`` and nothing sent; a bearer caller may send it too.
+        # is refused with ``changed`` and nothing sent; a bearer caller may send it too. The deck
+        # editor's "Save anyway" also sends its backup box ({"archidekt_backup": false}).
         data = await json_body(request)
         if isinstance(data, Response):
             return data
@@ -509,7 +510,8 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
             decks.describe(who.sub, pid)  # nobody's proposal but the member's: not_found first
             raise DeckError("invalid", "Send the version of the proposal the page showed.")
         via = "browser" if who.via == "browser" else "mcp"
-        return ok(await decks.apply(who.sub, pid, via=via, version=version))
+        backup = data.get("archidekt_backup") is not False if via == "browser" else None
+        return ok(await decks.apply(who.sub, pid, via=via, version=version, archidekt_backup=backup))
 
     @route("/proposals/{pid}/reject", "POST", write=True)
     async def reject(request: Request, who: Caller) -> Response:

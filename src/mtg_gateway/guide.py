@@ -266,9 +266,15 @@ def guide_body(
         "what your assistant proposes stay waiting, and can be applied once the person who runs the "
         "gateway switches writes on."
     )
+    box_ticked = bool(live.get("archidekt_backup_box_default")) if live is not None else False
     backup_box = (
-        "The save bar has a tick box, <strong>Also keep a backup copy on Archidekt</strong>, off by "
-        "default: tick it to also keep that extra copy for that one save."
+        (
+            "The save bar has a tick box, <strong>Also keep a backup copy on Archidekt</strong>, ticked "
+            "by default on this gateway: untick it to skip that extra copy for that one save."
+            if box_ticked
+            else "The save bar has a tick box, <strong>Also keep a backup copy on Archidekt</strong>, "
+            "unticked by default on this gateway: tick it to also keep that extra copy for that one save."
+        )
         if archidekt_backups
         else "The backup copy on Archidekt is switched off on this gateway, so no tick box is offered."
     )
@@ -448,8 +454,7 @@ def guide_body(
         "<ul>"
         "<li>The <strong>More</strong> menu in a deck's banner holds Deck settings, Export (text, JSON or "
         "CSV), History, Compare, Deck stats, the deck's page on Archidekt and <strong>Delete deck</strong>, "
-        "which asks you to type the deck's name and keeps a snapshot (and the Archidekt backup copy) "
-        "first.</li>"
+        f"which asks you to type the deck's name and keeps {backup_delete} first.</li>"
         "<li><strong>Deck settings</strong> changes the name, format, bracket, description and whether the "
         "deck is private or unlisted, and also sets the deck's <strong>cover image</strong>, its "
         "<strong>tags</strong> and the <strong>folder</strong> it sits in.</li>"
@@ -470,8 +475,12 @@ def guide_body(
         "one deck at a time. A deck's own page shows its waiting changes at the top, and asking the "
         "assistant what is waiting shows them as a card with <strong>Apply all</strong>.</span></li>"
         "<li><span>Before the edit is applied, the gateway checks it still fits the deck, saves a "
-        f"snapshot and puts a backup copy of the deck in a “{folder}” folder on your Archidekt "
-        "account, then reads the deck back to confirm.</span></li>"
+        + (
+            f"snapshot and puts a backup copy of the deck in a “{folder}” folder on your Archidekt account"
+            if archidekt_backups
+            else "snapshot"
+        )
+        + ", then reads the deck back to confirm.</span></li>"
         "<li><span>After an apply, <strong>Undo</strong> puts the deck back as it was just before; it "
         "says first if it would also take back later changes.</span></li>"
         "<li><span>Your own saves appear under Proposals too, already applied, so every change has a "

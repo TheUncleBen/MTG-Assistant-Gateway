@@ -169,9 +169,8 @@ The assistant never changes a deck directly:
    itself; the gateway tells the assistant which in every proposal result.
 3. The gateway checks the change still fits the deck as it is now, saves a
    snapshot, makes a private backup copy of the deck on Archidekt when backups
-   are on (the operator's setting; the deck editor's save with its backup box
-   unticked makes none), applies the change, and reads the deck back to
-   confirm it.
+   are on (the operator's setting), applies the change, and reads the deck
+   back to confirm it.
 4. Every step lands in the audit log. Any snapshot can be restored the same
    way.
 

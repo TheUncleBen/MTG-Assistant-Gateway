@@ -391,6 +391,37 @@ async def test_a_deck_changed_on_archidekt_is_judged_as_it_is_now(stack: Stack) 
         await b.aclose()
 
 
+async def test_save_anyway_keeps_the_editors_unticked_backup_box(stack: Stack) -> None:  # noqa: F811
+    """The deck editor's save that asks first is applied by its "Save anyway" through the
+    proposal's apply route. That route made a backup copy on Archidekt even with the editor's box
+    unticked; it now takes the box (archidekt_backup) from the browser."""
+    b = await linked(stack)
+    try:
+        deck = stack.ark.decks[42]
+        names = [c["card"]["oracleCard"]["name"] for c in deck["cards"] if c["categories"] != ["Commander"]]
+        for keep_copy, batch in ((False, names[:9]), (True, names[9:18])):
+            changes = [{"action": "remove", "card_name": n} for n in batch]
+            body = {"kind": "edit", "deck_id": "42", "changes": changes, "apply": True}
+            r = await api(b, "POST", "/api/v1/proposals", {**body, "archidekt_backup": keep_copy})
+            d = r.json()
+            assert r.status_code == 201 and d["needs_confirm"] is True, r.text
+            r = await api(
+                b,
+                "POST",
+                f"/api/v1/proposals/{d['proposal_id']}/apply",
+                {"version": d["version"], "archidekt_backup": keep_copy},
+            )
+            a = r.json()
+            assert r.status_code == 200 and a["state"] == "applied", r.text
+            if keep_copy:
+                assert a["result"].get("backup_url"), a["result"]
+            else:
+                assert a["result"].get("archidekt_backup") == "skipped", a["result"]
+                assert not a["result"].get("backup_url"), a["result"]
+    finally:
+        await b.aclose()
+
+
 async def test_big_removal_asks_first_then_the_proposal_id_applies_it(stack: Stack) -> None:  # noqa: F811
     b = await linked(stack)
     try:

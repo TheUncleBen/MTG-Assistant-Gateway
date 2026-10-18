@@ -516,7 +516,8 @@ def test_a_printing_tile_says_its_printing_is_not_kept_outside_the_deck(server: 
 
         assert pick("Sideboard") == (
             "This printing is not kept: a card added under Sideboard goes to the maybeboard or "
-            "sideboard, where Archidekt picks the printing."
+            "sideboard, where a row it already has there keeps its own printing and a new row gets one "
+            "Archidekt picks."
         )
         assert f"This printing: {code.upper()} #{number}." in pick(""), "back to the deck: the printing shows"
         pick("Sideboard")

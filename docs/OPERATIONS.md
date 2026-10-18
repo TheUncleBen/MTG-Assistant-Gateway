@@ -675,8 +675,8 @@ Deleting a deck keeps a snapshot too. With backup copies on
 card or review page, also gets a backup copy on Archidekt. The member's own
 saves in the deck editor make one only when its "Also keep a backup copy on
 Archidekt" box is ticked (unticked by default,
-`MTG_ARCHIDEKT_BACKUP_BOX_DEFAULT`), and the deck page's own edits, which
-have no such box, never make one. A collection change, a clone, a new deck
+`MTG_ARCHIDEKT_BACKUP_BOX_DEFAULT`), and the deck page's own edits and Card
+search's Add to deck, which have no such box, never make one. A collection change, a clone, a new deck
 and the other actions on the member's Archidekt account (likes, votes,
 bookmarks, follows, comments, new folders and collaborator changes) keep no
 snapshot.
@@ -1003,7 +1003,7 @@ For the SQL snippets on this page, put the query inside the
 | Table | What's in it |
 | --- | --- |
 | `proposals` | Each proposal: owner, kind (`edit`, `create_deck`, `restore`, `details`, `clone`, `collection` or `action`), deck (the new deck's id once a create is applied), change list, diff, state (`pending`, `applying`, `applied`, `failed`, `rejected`, `withdrawn`, `replaced`, `expired`; a waiting one counts as `expired` once its expiry time passes), result and timestamps |
-| `snapshots` | The full deck as read from Archidekt just before a proposal was applied, plus `backup_deck_id` and `backup_url` for the private backup copy made in the user's Archidekt backup folder at the same moment. Users see theirs with `list_snapshots` and undo an edit with `propose_restore_snapshot`. `deck_json` is the raw deck |
+| `snapshots` | The full deck as read from Archidekt just before a proposal was applied, plus `backup_deck_id` and `backup_url` for the private backup copy made in the user's Archidekt backup folder at the same moment, when one was made (only with backup copies on, and not for the saves that make none). Users see theirs with `list_snapshots` and undo an edit with `propose_restore_snapshot`. `deck_json` is the raw deck |
 | `archidekt_links` | One row per user who linked Archidekt: Archidekt username, encrypted session, status and timestamps |
 | `reports` | Stored deck reports (`run_deck_report`, the "Run full test" button and `POST /api/v1/reports`): owner, deck, a fingerprint of the deck as read, the statistics, and the goldfish and validation results as JSON. The newest 200 per user are kept |
 | `metrics` | Per-day usage counters, see [The metrics table](#the-metrics-table) |

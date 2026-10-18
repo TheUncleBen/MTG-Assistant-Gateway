@@ -351,3 +351,65 @@ def test_a_category_outside_the_deck_adds_to_the_maybeboard_or_sideboard(server:
         assert "outside the deck" not in answer, answer
         assert errors == []
         browser.close()
+
+
+def test_save_anyway_sends_the_backup_box(server: Server) -> None:
+    """The editor's "Save anyway" (after a save that asks first) sends the backup box with the
+    proposal's version, so an unticked box makes no backup copy on Archidekt."""
+    import json
+
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_path()
+    if exe == "missing":
+        pytest.skip("no Chromium available for Playwright")
+    sid = _link(server)
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+        ctx = browser.new_context(viewport={"width": 1366, "height": 900})
+        ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
+        ctx.route(
+            re.compile(r"https://cards\.scryfall\.io/.*"),
+            lambda route: route.fulfill(status=200, content_type="image/png", body=PNG),
+        )
+        page = ctx.new_page()
+        errors: list[str] = []
+        page.on("pageerror", lambda e: errors.append(str(e)))
+        # the save asks first (as a big removal or a commander change does); Save anyway applies
+        asked = {
+            "ok": True,
+            "needs_confirm": True,
+            "why": "This asks first.",
+            "proposal_id": "p1",
+            "version": 3,
+        }
+        page.route(
+            re.compile(r".*/api/v1/proposals$"),
+            lambda route: route.fulfill(status=201, content_type="application/json", body=json.dumps(asked)),
+        )
+        sent: list[dict] = []
+
+        def answer(route) -> None:
+            sent.append(json.loads(route.request.post_data or "{}"))
+            route.fulfill(
+                status=200, content_type="application/json", body=json.dumps({"ok": False, "message": "x"})
+            )
+
+        page.route(re.compile(r".*/api/v1/proposals/p1/apply$"), answer)
+        page.goto(f"{server.base}/decks/42/edit", wait_until="networkidle")
+        box = page.locator("#addname")
+        box.press_sequentially("oathsw", delay=30)
+        page.locator("[role=option]").first.wait_for(timeout=3000)
+        box.press("Enter")
+        page.locator(".erow.new", has_text="Oathsworn Giant").wait_for(timeout=3000)
+        backup = page.locator("input[name=archidekt_backup]")
+        for ticked in (False, True):
+            backup.set_checked(ticked)
+            page.locator(".editbar button.review").click()
+            bar = page.locator(".confirmbar")
+            bar.wait_for(timeout=3000)
+            bar.locator("button", has_text="Save anyway").click()
+            page.wait_for_function("() => !document.querySelector('.confirmbar')", timeout=3000)
+            assert sent[-1] == {"version": 3, "archidekt_backup": ticked}, sent
+        assert errors == []
+        browser.close()

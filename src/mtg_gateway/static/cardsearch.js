@@ -754,7 +754,7 @@
     if (!note) return;
     var parts = [];
     if (cardPin && sideCat()) {
-      parts.push("This printing is not kept: a card added under " + catSel.value + " goes to the maybeboard or sideboard, where Archidekt picks the printing.");
+      parts.push("This printing is not kept: a card added under " + catSel.value + " goes to the maybeboard or sideboard, where a row it already has there keeps its own printing and a new row gets one Archidekt picks.");
     } else if (cardPin) {
       parts.push("This printing: " + cardPin.set_code.toUpperCase() + " #" + cardPin.collector_number + ".");
     }

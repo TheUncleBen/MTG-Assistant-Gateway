@@ -714,7 +714,7 @@
             fetch("/api/v1/proposals/" + encodeURIComponent(d.proposal_id) + "/apply", {
               method: "POST", credentials: "same-origin",
               headers: { "X-CSRF-Token": cfg.csrf, "Content-Type": "application/json" },
-              body: JSON.stringify({ version: d.version })
+              body: JSON.stringify({ version: d.version, archidekt_backup: !(backupBox && !backupBox.checked) })
             }).then(function (r) { return r.json(); }).then(function (a) {
               if (a.ok) { root.dataset.leaving = "1"; window.location.href = "/decks/" + encodeURIComponent(cfg.deckId) + "?ok=saved"; return; }
               bar.remove(); status.textContent = a.message || "Archidekt refused the change; nothing was saved."; status.className = "status notice error"; btn.disabled = false; saving = false;
