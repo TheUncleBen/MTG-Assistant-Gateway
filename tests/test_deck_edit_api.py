@@ -422,6 +422,31 @@ async def test_save_anyway_keeps_the_editors_unticked_backup_box(stack: Stack) -
         await b.aclose()
 
 
+async def test_an_assistants_proposal_applied_from_the_browser_keeps_its_backup_copy(stack: Stack) -> None:  # noqa: F811
+    """The browser's archidekt_backup false on the apply route is the deck editor's own box: an
+    assistant's proposal applied from the browser still gets its backup copy on Archidekt."""
+    b = await linked(stack)
+    try:
+        token, _cid = await _app_token(stack.h, "assistant-test")
+        r = await stack.h.http.post(
+            "/api/v1/proposals",
+            json={
+                "kind": "edit",
+                "deck_id": "42",
+                "changes": [{"action": "set_quantity", "card_name": "Cultivate", "quantity": 3}],
+            },
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert r.status_code == 201, r.text
+        pid = r.json()["proposal_id"]
+        r = await api(b, "POST", f"/api/v1/proposals/{pid}/apply", {"version": 1, "archidekt_backup": False})
+        a = r.json()
+        assert r.status_code == 200 and a["state"] == "applied", r.text
+        assert a["result"].get("backup_url") and "archidekt_backup" not in a["result"], a["result"]
+    finally:
+        await b.aclose()
+
+
 async def test_big_removal_asks_first_then_the_proposal_id_applies_it(stack: Stack) -> None:  # noqa: F811
     b = await linked(stack)
     try:
