@@ -182,6 +182,43 @@ async def test_a_link_from_another_site_shows_a_view_but_never_saves_it(stack: S
         await b.aclose()
 
 
+async def test_the_home_pages_try_again_reads_the_list_only_from_this_site(stack: Stack) -> None:
+    b = await linked(stack)
+    try:
+        decks = stack.h.app.state.gateway.decks
+        dropped: list[str] = []
+        decks.reread_deck_list = dropped.append
+        r = await b.http.get("/", params={"reread": "1"}, headers={"Sec-Fetch-Site": "cross-site"})
+        assert r.status_code == 303 and dropped == []
+        await b.http.get("/", params={"reread": "1"}, headers={"Sec-Fetch-Site": "same-origin"})
+        assert dropped == [SUB]
+    finally:
+        await b.aclose()
+
+
+async def test_without_sec_fetch_site_the_origin_or_referer_decides(stack: Stack) -> None:
+    """An older browser sends no Sec-Fetch-Site: a link from another site still names that site in
+    Origin or Referer, so its view is shown but not kept; this gateway's own pages, or no such
+    header at all (typed or bookmarked), still save."""
+    b = await linked(stack)
+    try:
+        here = stack.h.app.state.gateway.settings.public_url
+        await b.http.get("/cards", params={"q": "sol", "view": "grid"})
+        assert stack.h.db.get_pref(SUB, "view.cards") == "grid"
+        for header in (
+            {"Referer": "https://elsewhere.example/page"},
+            {"Origin": "https://elsewhere.example"},
+        ):
+            await b.http.get("/cards", params={"q": "sol", "view": "list"}, headers=header)
+            assert stack.h.db.get_pref(SUB, "view.cards") == "grid", header
+        await b.http.get("/cards", params={"q": "sol", "view": "list"}, headers={"Referer": f"{here}/decks"})
+        assert stack.h.db.get_pref(SUB, "view.cards") == "list"
+        await b.http.get("/cards", params={"q": "sol", "view": "grid"})
+        assert stack.h.db.get_pref(SUB, "view.cards") == "grid"
+    finally:
+        await b.aclose()
+
+
 async def test_forget_my_view_choices(stack: Stack) -> None:
     b = await linked(stack)
     try:
