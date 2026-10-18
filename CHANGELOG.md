@@ -59,12 +59,13 @@ stack.
 
 - The Notifications card no longer shows a server or topic, and members no longer choose a topic. When the gateway first starts after the update, every member who had a topic gets a new random one.
 - **Check for app updates** says at once that it is checking.
-- The deck sync's Archidekt reads count toward the member's Archidekt actions (120 per 10 minutes by default, `MTG_ARCHIDEKT_CALLS_PER_10_MIN`), and the sync waits while fewer than a quarter of them are left.
+- The deck sync now spends the member's Archidekt actions (120 per 10 minutes by default, `MTG_ARCHIDEKT_CALLS_PER_10_MIN`): each read of the deck list or of a deck uses one. A check stops while fewer than a quarter of them are left and tries again at the next check, so the member's own actions keep their room. The sync also checks a waiting change on someone else's deck, such as a copy of a public deck: it reads that deck at most once every 30 minutes, and leaves one that is gone or private alone for 6 hours.
+- In Full auto, a change that moves a card into or out of the commander zone, removes the commander or adds a card to the commander zone waits for the member's press, as other commander changes do.
 - The Android app's menu entry **Scan with phone camera** is now **Scan with the app's camera**, and the launcher shortcut **Scan cards** is now **Scan page**.
 - The build images (Dockerfile, the Mystic Forge Dockerfile and the BuildKit and binfmt images in CI) are pinned by digest, and so are pip and wheel. The image installs only the wheels it built.
 
 ### Fixed
-- In Semi-auto and Full auto, an assistant's change that moves a card into or out of the commander zone, removes the commander or adds a card to the commander zone now waits for the member's press, as other commander changes do. This holds for a commander zone with another name, such as Oathbreaker. On the deck page, such a move asks before it saves.
+- In Semi-auto, an assistant's change that moved a card into or out of the commander zone, removed the commander or added a card to the commander zone applied without the member's press. It now waits for the press, as other commander changes do, also when the deck's commander zone has another name. On the deck page, such a move now asks before it saves.
 - A pasted or Archidekt list's copies are counted in the report's shares (they were counted once per name).
 - The bracket estimate now follows archidekt.com's own rule for combos and extra turns; it followed an older, reversed rule.
 - The Android app's colour strips under the status and navigation bars kept their full colour when Android faded the window.
