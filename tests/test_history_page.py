@@ -11,6 +11,9 @@ import re
 import time
 from pathlib import Path
 
+import pytest
+
+from mtg_gateway import history_view
 from mtg_gateway.db import Database
 
 from .conftest import Stack, stack_with
@@ -24,6 +27,29 @@ GOLDFISH = (FIX / "goldfish_run.md").read_text()
 GOLDFISH_PRECON = (FIX / "goldfish_run_precon.md").read_text()
 VALIDATION = (FIX / "validation_issues.md").read_text()
 DAY = 86400
+
+
+class _FrozenTime:
+    """The ``time`` module with ``time()`` fixed, for the History page's idea of "now"."""
+
+    def __init__(self, now: int) -> None:
+        self._now = now
+
+    def time(self) -> float:
+        return float(self._now)
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(time, name)
+
+
+def page_clock(monkeypatch: pytest.MonkeyPatch) -> int:
+    """A "now" at least ten minutes into its UTC day, with the History page's clock stopped at it.
+    Rows seeded seconds or minutes before now then fall on the page's "today" whenever the test
+    runs, including just after midnight UTC or across it."""
+    real = int(time.time())
+    now = real if real % DAY >= 600 else real - real % DAY - 1
+    monkeypatch.setattr(history_view, "time", _FrozenTime(now))
+    return now
 
 
 def seed_history(db: Database, sub: str, *, now: int) -> None:
@@ -174,12 +200,12 @@ def test_db_lists_narrow_in_sql(tmp_path: Path) -> None:
 
 
 # -- pages -------------------------------------------------------------------------
-async def test_history_page_filters_groups_and_pages(stack: Stack) -> None:
+async def test_history_page_filters_groups_and_pages(stack: Stack, monkeypatch: pytest.MonkeyPatch) -> None:
     b = await linked_browser(stack)
     try:
         gw = stack.h.app.state.gateway
         sub = gw.db._one("SELECT sub FROM users", ())["sub"]
-        now = int(time.time())
+        now = page_clock(monkeypatch)
         seed_history(gw.db, sub, now=now)
         store_report(gw.db, sub, "rep_a", taken_at=now - 100)
         store_report(gw.db, sub, "rep_b", taken_at=now - 2 * DAY)
@@ -261,7 +287,7 @@ async def test_history_page_filters_groups_and_pages(stack: Stack) -> None:
         await b.aclose()
 
 
-async def test_history_when_presets(stack: Stack) -> None:
+async def test_history_when_presets(stack: Stack, monkeypatch: pytest.MonkeyPatch) -> None:
     """The "When" presets narrow every kind by UTC calendar day: "Today" is midnight UTC to now,
     "Last 7 days" the seven days ending today, "This year" from 1 January; the filter is in the
     query string and the pager keeps it; an unknown preset means "Any time"."""
@@ -269,7 +295,7 @@ async def test_history_when_presets(stack: Stack) -> None:
     try:
         gw = stack.h.app.state.gateway
         sub = gw.db._one("SELECT sub FROM users", ())["sub"]
-        now = int(time.time())
+        now = page_clock(monkeypatch)
         midnight = now - now % DAY  # the start of today, UTC
         jan1 = int(calendar.timegm((time.gmtime(now).tm_year, 1, 1, 0, 0, 0)))
 
