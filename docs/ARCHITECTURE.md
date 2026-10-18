@@ -75,8 +75,8 @@ Claude / ChatGPT / Android app / browser
 
 The project's images (the gateway, Mystic Forge and Forge) are multi-arch
 (`linux/amd64` and `linux/arm64`), so a Raspberry Pi 4 or 5 is fine. The gateway idles around 60 MB of memory and
-Mystic Forge around 115 to 170 MB. Those figures are from version 0.5.0, on test machines rather
-than a Pi, and have not been measured again since.
+Mystic Forge around 115 to 170 MB. Those figures were measured on test machines rather than a Pi,
+by version 0.5.0 at the latest, and have not been measured again since.
 
 ## What's fixed, and why
 

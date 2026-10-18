@@ -50,7 +50,7 @@ person has said yes to the exact change.
   is in the image or added by the operator), adding a camera scan screen with torch
   brightness that lays itself out around a foldable's hinge
   ([docs/ANDROID.md](docs/ANDROID.md)).
-- **What it talks to:** Archidekt for decks, Scryfall for cards, and a
+- **What it talks to:** Archidekt for decks, Scryfall for cards, and an
   internal [Mystic Forge](https://github.com/Kautiontape/mystic-forge)
   container (no published port) for research and simulation. Mystic Forge pulls from EDHREC,
   Commander Spellbook and the Comprehensive Rules.

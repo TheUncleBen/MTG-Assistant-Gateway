@@ -10,14 +10,15 @@ with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 ## [0.7.31] - 2026-10-18
 
 A documentation release: the example settings files are reorganised, and the guides are checked
-against the code and corrected. Apart from some wording in the Android app, the in-app Guide and the
-admin page, and the example reverse-proxy files, nothing changes in how the gateway or the app
+against the code and corrected. Apart from some wording in the Android app, the in-app Guide, the Account
+page and the admin page, and the example reverse-proxy files, nothing changes in how the gateway or the app
 works.
 
 ### Upgrade notes
 - From 0.7.30: none; update as usual ([docs/UPGRADING.md](docs/UPGRADING.md)). Optional: if your
-  Swarm variables file sets `FORGE_IMAGE` and `FORGE_TAG`, you can delete those two lines, so it
-  follows the stack file's own Forge version on later updates.
+  Swarm stack's variables (in Portainer, or in `mtg.env` without it) set `FORGE_IMAGE` and
+  `FORGE_TAG`, you can delete those two, so Forge follows the stack file's own version on later
+  updates.
 - From 0.7.26 or earlier: follow the 0.7.30 steps in [docs/UPGRADING.md](docs/UPGRADING.md#0730),
   which include the 0.7.29 steps. They moved there from DEPLOY.md and DEPLOY-COMPOSE.md. On the
   way, the members' notification steps were corrected, and the note about waiting for the Forge
@@ -37,9 +38,9 @@ works.
   example then ends with the optional proxy overrides. The values are the same. The Compose
   file's example gains a Forge section (off by default), and the Swarm example's Forge image and
   version lines are commented out, so a copied file follows the stack file's own Forge version.
-  Both examples now also list, commented out, the settings the stack files read that they left
-  out, such as the sign-in scopes, the ntfy image and memory, and Forge's limit on games per
-  request. If you copied an earlier example, your file keeps working as it is.
+  Both examples now also list, commented out, the other settings the stack files read, such as
+  the sign-in scopes, the ntfy image and memory, and Forge's limit on games per request. Only the
+  ntfy address and token file stay out, because the stack sets them itself. If you copied an earlier example, your file keeps working as it is.
 - The images are public, and the guides now say so: no registry login, GitHub token or
   `--with-registry-auth` is needed to pull them. Step 5 of the Swarm guide is now "Images".
 - The example reverse-proxy files: the nginx and Caddy examples limit request bodies to 4 MB, as

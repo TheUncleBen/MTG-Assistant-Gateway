@@ -27,7 +27,7 @@ assistant:
 | --- | --- | --- |
 | Manual, shown as "Ask me every time" (default) | the member presses Approve or Apply | the member presses |
 | Semi-auto, shown as "Apply low-risk changes without asking" | the assistant applies it (`apply_proposal`) | the member presses |
-| Full auto, shown as "Apply deck and collection changes without asking" | the assistant applies it | the assistant applies it, except a restore, a commander change, a new deck, an edit of more than 20 rows, making a deck public or unlisted, and any edit of a description that has formatting, such as bold text, links or pictures: the member presses |
+| Full auto, shown as "Apply deck and collection changes without asking" | the assistant applies it | the assistant applies it, except a restore, a commander change, a new deck, an edit of more than 20 rows (by default), making a deck public or unlisted, and any edit of a description that has formatting, such as bold text, links or pictures: the member presses |
 
 Low risk (`MTG_AUTO_APPLY_MAX_ROWS` sets the row limit, 5 here): A small edit
 to an existing deck or to your collection: at most 5 card rows, each a card

@@ -5,9 +5,10 @@ give it an `https://` address on your domain, because Claude and ChatGPT
 only connect to HTTPS servers. Any reverse proxy works. Ready-made configs
 for the common ones are in [`deploy/proxy/`](../deploy/proxy/).
 
-What's been checked: the Caddyfile (with `caddy validate`), the nginx block
-(with `nginx -t`) and the Compose overrides (with `docker compose config`) were
-checked by hand when they were written; nothing runs those checks
+What's been checked, by hand for 0.7.31: the Caddyfile passes `caddy validate`
+(Caddy 2.6.2), the nginx block passes `nginx -t` (nginx 1.24, with a test
+certificate in place of the Let's Encrypt one), and the Compose overrides pass
+`docker compose config` (Compose 5.6.0). Nothing runs these checks
 automatically. The end-to-end tests run behind an nginx with
 the same header, buffering and timeout settings. The Traefik labels and the NPM settings follow those
 projects' documentation and real use, but aren't run by the tests.
