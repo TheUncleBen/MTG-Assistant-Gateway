@@ -9,7 +9,7 @@ plus a full read of a deck only when it has a waiting proposal and its ``updated
 the last check (at most MAX_DECK_READS per check). Only the member's own decks are in that list;
 a waiting proposal on someone else's deck (a copy of a public deck) has no such signal, so that
 deck is read in full, inside the same cap, at most once per OTHER_GAP; one that Archidekt says is
-gone or private is left alone for GONE_GAP (0.7.29, leftover A4, Track A call A10).
+gone or private is left alone for GONE_GAP.
 The fresh list lands in the member's deck-list cache, so the app shows the current decks.
 
 What it does with a changed deck (0.7.29, K1): each waiting proposal on it is worked out again on

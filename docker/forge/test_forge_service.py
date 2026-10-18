@@ -417,7 +417,7 @@ class Run(unittest.TestCase):
             fs.QUEUE = old
 
     def test_a_job_on_every_place_gives_one_back_to_a_job_that_waits(self):
-        # security review S-10: a run on every place held them all until its last game; now each
+        # a run on every place held them all until its last game; now each
         # of its places lets go after its group while another job waits, and the run goes on
         old = fs.QUEUE
         try:
