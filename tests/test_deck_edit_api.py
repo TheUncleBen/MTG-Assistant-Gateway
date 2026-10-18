@@ -479,6 +479,40 @@ async def test_a_saved_choice_of_no_backup_copy_holds_when_applied_later(stack: 
         await b.aclose()
 
 
+async def test_an_own_save_an_app_changed_in_any_version_keeps_its_backup_copy(stack: Stack) -> None:  # noqa: F811
+    """A member's own save that made no backup copy, changed by an app in an earlier version and
+    by the member's browser in the latest one, gets its backup copy when applied: the choice
+    holds only while no app ever touched it."""
+    from mtg_gateway.decks import BROWSER_CLIENT
+
+    b = await linked(stack)
+    try:
+        deck = stack.ark.decks[42]
+        names = [c["card"]["oracleCard"]["name"] for c in deck["cards"] if c["categories"] != ["Commander"]]
+        r = await api(
+            b,
+            "POST",
+            "/api/v1/decks/42/edit",
+            {"changes": [{"action": "remove", "card_name": n} for n in names[:9]]},
+        )
+        d = r.json()
+        assert d["needs_confirm"] is True, d
+        db, pid = stack.h.db, d["proposal_id"]
+        row = db.get_proposal(pid, "user-1")
+        for version, client in ((1, "some-app"), (2, BROWSER_CLIENT)):  # no browser amend route: faked
+            kept = dict(
+                changes=row["changes"], rows=row["rows"], diff_text=row["diff_text"], by_client=client
+            )
+            assert db.amend_proposal(pid, "user-1", expect_version=version, **kept) == version + 1
+        assert db.get_proposal(pid, "user-1")["amended_by_client"] == BROWSER_CLIENT
+        r = await api(b, "POST", f"/api/v1/proposals/{pid}/apply", {"version": 3})
+        a = r.json()
+        assert r.status_code == 200 and a["state"] == "applied", r.text
+        assert a["result"].get("backup_url") and "archidekt_backup" not in a["result"], a["result"]
+    finally:
+        await b.aclose()
+
+
 async def test_big_removal_asks_first_then_the_proposal_id_applies_it(stack: Stack) -> None:  # noqa: F811
     b = await linked(stack)
     try:

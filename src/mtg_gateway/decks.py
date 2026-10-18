@@ -3683,10 +3683,8 @@ class DeckService:
             via = "browser"  # otherwise the review page is an ordinary browser apply
         if archidekt_backup is False and via == "browser":
             row["archidekt_backup"] = False
-        own = row.get("created_by_client") == BROWSER_CLIENT and row.get("amended_by_client") in (
-            None,
-            BROWSER_CLIENT,
-        )
+        # an app that changed it in any version (G5) means the copy is made after all
+        own = row.get("created_by_client") == BROWSER_CLIENT and not self.rewritten_by_another_app(sub, row)
         if own and (row.get("result") or {}).get(NO_BACKUP_KEY):
             row["archidekt_backup"] = False  # the member's own save said so (keep_no_backup)
         creator = row.get("created_by_client")
