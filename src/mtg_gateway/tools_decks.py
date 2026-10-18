@@ -569,8 +569,8 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
         title="Propose restoring a deck snapshot",
         description=(
             "Step 1 of undoing an edit: a proposal that puts every deck row back as the snapshot "
-            "recorded it (printing, foil or etched finish, quantity, categories in their order, so "
-            "commander, sideboard and maybeboard too, color tag and custom mana value) and the deck's "
+            "recorded it (printing, foil or etched finish, quantity, color tag, custom mana value and "
+            "categories in their order, so commander, sideboard and maybeboard too) and the deck's "
             "name, description, format, bracket and visibility as they were, so a details change can "
             "be undone too (folder, tags and cover stay). "
             "Returns the same fields as "

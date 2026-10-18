@@ -59,7 +59,10 @@ def rows_now(svc: Any, sub: str, row: dict[str, Any], deck: Deck) -> list[dict[s
         _details, detail_lines = d.details_rows(deck, d.snapshot_details(wanted))
         head = next((r for r in row.get("rows") or [] if r.get("kind") == "restore"), None)
         first = dict(head or {})
-        first["rows"] = len(payload)
+        if "rows" in first:  # a restore saved before its head counted its review lines
+            first["rows"] = len(payload)
+        else:
+            first["changes"] = len(lines) + len(detail_lines)
         return [first, *lines, *detail_lines]
     if kind == "details":
         stored = dict(row["changes"])

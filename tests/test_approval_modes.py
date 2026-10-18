@@ -537,11 +537,15 @@ def test_docs_quote_the_one_wording(doc: str, low: bool, member_only: bool) -> N
 def test_the_low_risk_texts_say_which_commander_changes_wait() -> None:
     """A copy more or less of a commander with one row is low risk, so the texts don't say
     "never the commander"; they name what waits: a change to which cards are the commanders, and
-    fewer copies of a commander that has another row in the deck (both tested above)."""
+    fewer copies of a card that has a row in the commander zone and another row in the same zone
+    (both tested above)."""
     for text in (modes.low_risk_text(), modes.mode_help("semi")):
         assert "never the commander" not in text
         assert "never a change to which cards are the commanders" in text
-        assert "fewer copies of a commander that has another row in the deck" in text
+        assert (
+            "fewer copies of a card that has a row in the commander zone and another row, both in "
+            "the deck or both in the maybeboard or sideboard"
+        ) in text
 
 
 def test_the_semi_auto_notice_names_what_semi_auto_applies() -> None:
@@ -735,7 +739,10 @@ async def test_the_commander_zone_keeps_the_new_count_and_the_maybeboard_row_sta
 async def test_a_commander_zone_row_in_the_maybeboard_still_waits_and_says_what_goes(stack: Stack) -> None:
     """A Maybeboard row that also carries the commander zone's category, with another Maybeboard
     row of the same card: taking a copy away still waits with a commander row, which says the
-    maybeboard or sideboard rows go (the deck's own rows are left alone)."""
+    maybeboard or sideboard rows go (the deck's own rows are left alone). That card is no
+    commander (its commander-zone row is not in the deck), so its reason and the deck page's
+    question say "a card with a row in the commander zone", not "the commander". It waits as a
+    safe default."""
     h, ark = stack.h, stack.ark
     ark.add_side_row(42, "Sol Ring")
     ark.add_side_row(42, "Sol Ring")
@@ -753,8 +760,64 @@ async def test_a_commander_zone_row_in_the_maybeboard_still_waits_and_says_what_
         "Its other rows in the maybeboard or sideboard are removed."
     )
     assert stays in p["diff"].splitlines(), p["diff"]
+    assert p["risk_reason"] == "changes the copies of a card with a row in the commander zone", p
+    assert (
+        modes.hand_edit_confirm("edit", p["rows"])
+        == "This changes the copies of a card with a row in the commander zone."
+    )
     out = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
     assert out["ok"] is False and ark.patches == []
+
+
+async def test_a_category_review_line_keeps_the_categories_in_their_order(stack: Stack) -> None:
+    """The set_category review line shows a row's categories in their order (the first one decides
+    whether the card counts in the deck), not sorted."""
+    h, ark = stack.h, stack.ark
+    ark.add_side_row(42, "Sol Ring")
+    side = next(c for c in ark.decks[42]["cards"] if c["categories"] == ["Maybeboard"])
+    side["categories"] = ["Maybeboard", "Commander"]
+    token = await linked_user(stack)
+    await _set_mode(h, "manual")
+    change = {
+        "action": "set_category",
+        "card_name": "Sol Ring",
+        "category": "Maybeboard",
+        "categories": ["Maybeboard"],
+        "zone": "side",
+    }
+    p = structured(await call(h, token, "propose_deck_changes", {"deck_id": "42", "changes": [change]}))
+    (row,) = [r for r in p["rows"] if r.get("kind") == "category"]
+    assert (row["before"], row["after"]) == ("Maybeboard, Commander", "Maybeboard"), row
+
+
+async def test_a_set_category_that_only_reorders_is_a_change_and_is_written(stack: Stack) -> None:
+    """Putting a row's categories in another order is a change (its primary category changes),
+    reviewed and written in the order asked."""
+    h, ark = stack.h, stack.ark
+    deck = ark.decks[42]
+    deck["categories"] += [
+        {"name": "Artifact", "isPremier": False, "includedInDeck": True},
+        {"name": "Ramp", "isPremier": False, "includedInDeck": True},
+    ]
+    sol = next(c for c in deck["cards"] if c["card"]["oracleCard"]["name"] == "Sol Ring")
+    sol["categories"] = ["Artifact", "Ramp"]
+    token = await linked_user(stack)
+    await _set_mode(h, "semi")
+    change = {
+        "action": "set_category",
+        "card_name": "Sol Ring",
+        "category": "Ramp",
+        "categories": ["Ramp", "Artifact"],
+    }
+    p = structured(await call(h, token, "propose_deck_changes", {"deck_id": "42", "changes": [change]}))
+    assert p["ok"], p
+    (row,) = [r for r in p["rows"] if r.get("kind") == "category"]
+    assert (row["before"], row["after"]) == ("Artifact, Ramp", "Ramp, Artifact"), row
+    if p["state"] == "pending":
+        out = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
+        assert out["ok"], out
+    sol = next(c for c in ark.decks[42]["cards"] if c["card"]["oracleCard"]["name"] == "Sol Ring")
+    assert sol["categories"] == ["Ramp", "Artifact"], sol
 
 
 @pytest.mark.parametrize("name", ["commander", "COMMANDER"])
@@ -872,7 +935,8 @@ async def test_a_maybeboard_commander_moved_into_the_deck_waits(stack: Stack, mo
     [
         (
             {"action": "add", "card_name": "Arcane Signet", "zone": "side", "category": "Commander"},
-            "cannot also go in the commander zone (Commander)",
+            "cannot go in the commander zone in the same step (Commander). Add it without the "
+            "commander zone; you can then change its categories.",
         ),
         (
             {
@@ -882,7 +946,7 @@ async def test_a_maybeboard_commander_moved_into_the_deck_waits(stack: Stack, mo
                 "category": "Commander",
                 "categories": ["Commander", "Ramp"],
             },
-            "cannot also go in the commander zone (Commander, Ramp)",
+            "cannot go in the commander zone in the same step (Commander, Ramp)",
         ),
         (
             {
@@ -895,7 +959,8 @@ async def test_a_maybeboard_commander_moved_into_the_deck_waits(stack: Stack, mo
         ),
         (
             {"action": "add", "card_name": "Arcane Signet", "category": "Maybeboard"},
-            "its first category, Maybeboard, is outside the deck",
+            "its first category, Maybeboard, is outside the deck, so the copies would not count in it. "
+            "Add it to the maybeboard instead; you can then change its categories.",
         ),
         (
             {

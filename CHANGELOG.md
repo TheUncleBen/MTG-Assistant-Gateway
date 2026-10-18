@@ -69,7 +69,8 @@ stack.
 - A pasted or Archidekt list's copies are counted in the report's shares (they were counted once per name).
 - The bracket estimate now follows archidekt.com's own rule for combos and extra turns; it followed an older, reversed rule.
 - The Android app's colour strips under the status and navigation bars kept their full colour when Android faded the window.
-- Restoring a snapshot left each card's color tag and custom mana value, and the order of its categories (the first one decides whether the card counts in the deck), as they were, and still reported the deck restored. A restore now puts them back and checks them.
+- Restoring a snapshot left each card's color tag and custom mana value, and the order of its categories (the first one decides whether the card counts in the deck), as they were, and still reported the deck restored, or said it already matched the snapshot. A restore now puts them back and checks them.
+- Adding a card to the deck under Maybeboard, Sideboard or another category the deck does not count wrote the card outside the deck, then reported that the deck did not match the change. Such an add is now refused before anything is written, and the message says to add the card to the maybeboard.
 
 ### Removed
 - The old `/decks/{id}/playtest` address. The deck page's Playtest opens Archidekt's own playtester directly.

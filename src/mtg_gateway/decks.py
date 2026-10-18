@@ -622,6 +622,10 @@ def row_line(r: dict[str, Any]) -> str:
         side = f", {r['side_cards']} more in the maybeboard or sideboard" if r.get("side_cards") else ""
         return f"New {r['format']} deck '{r['name']}' ({r['cards']} cards{side}, {visibility})"
     if kind == "restore":
+        if "changes" in r:  # the review lines under it (a restore saved before counted write entries)
+            n = int(r["changes"])
+            count = f"{n} change{'' if n == 1 else 's'}"
+            return f"Restore to snapshot {r['snapshot_id']} taken {r['taken']} ({count})"
         return f"Restore to snapshot {r['snapshot_id']} taken {r['taken']} ({r['rows']} rows)"
     if kind == "description":
         after_len = int(r.get("after_len") or 0)
@@ -1262,12 +1266,10 @@ def category_plan_rows(
             )
             for r in rows
         }
-        if ch.action == "set_commander":
-            # the order counts: Commander must come first, also when the card already has it
-            # as a later category (["Ramp", "Commander"])
-            changed = [r for r in rows if list(r.categories) != per_row[r.relation_id]]
-        else:
-            changed = [r for r in rows if sorted(r.categories) != sorted(per_row[r.relation_id])]
+        # the order counts: the first category is the row's primary one, which decides whether the
+        # card counts in the deck (and a new commander's Commander must come first, also when the
+        # card already has it as a later category, ["Ramp", "Commander"])
+        changed = [r for r in rows if list(r.categories) != per_row[r.relation_id]]
         for r in changed:
             want[r.relation_id] = per_row[r.relation_id]
         # a card that is a commander already is not in the commander row below, so its
@@ -1287,7 +1289,7 @@ def category_plan_rows(
                 )
             )
         if ch.action == "set_category" and changed:
-            old = sorted({", ".join(sorted(clean_text(c) for c in r.categories)) or "(none)" for r in rows})
+            old = sorted({", ".join(clean_text(c) for c in r.categories) or "(none)" for r in rows})
             lines.append(
                 _row(
                     "category",
@@ -1401,8 +1403,9 @@ def _refuse_adds_written_otherwise(deck: Deck, changes: list[Change], main_looku
             if _in_premier(premier, cats):
                 raise DeckError(
                     "invalid",
-                    f"'{ch.card_name}': a card added to the maybeboard or sideboard cannot also go in "
-                    f"the commander zone ({', '.join(cats)}). Add it to the deck instead.",
+                    f"'{ch.card_name}': a card added to the maybeboard or sideboard cannot go in the "
+                    f"commander zone in the same step ({', '.join(cats)}). Add it without the commander "
+                    "zone; you can then change its categories.",
                 )
             continue
         primary = cats[0] if cats else ""
@@ -1410,7 +1413,8 @@ def _refuse_adds_written_otherwise(deck: Deck, changes: list[Change], main_looku
             raise DeckError(
                 "invalid",
                 f"'{ch.card_name}': its first category, {primary}, is outside the deck, so the "
-                "copies would not count in it. Add it to the maybeboard or sideboard instead.",
+                "copies would not count in it. Add it to the maybeboard instead; you can then change "
+                "its categories.",
             )
         name = main_lookup.get(ch.card_name.lower()) or main_lookup.get(front_face(ch.card_name).lower())
         rows = main_rows.get(name.lower(), []) if name else []
@@ -5552,7 +5556,7 @@ class DeckService:
                 "baseline_fingerprint": deck.fingerprint(),
                 "changes": {"snapshot_id": snap["id"], "details": details},
             },
-            [_row("restore", snapshot_id=snap["id"], taken=taken, rows=len(payload)), *lines],
+            [_row("restore", snapshot_id=snap["id"], taken=taken, changes=len(lines)), *lines],
         )
         self._audit(
             "proposal_created",

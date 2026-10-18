@@ -647,6 +647,8 @@ async def test_restoring_a_snapshot_puts_the_deck_details_back(stack: Stack) -> 
     assert r["ok"] and r["kind"] == "restore", r
     lines = r["diff"].splitlines()
     assert lines[0].startswith(f"Restore to snapshot {a['snapshot_id']} taken ")
+    # the head counts the review lines under it (not Archidekt's write entries)
+    assert lines[0].endswith(" (5 changes)"), lines[0]
     assert set(lines[1:]) == {
         'name: "Aesi Lands" -> "Sample Commander Deck"',
         "description: (cleared)",

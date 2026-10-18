@@ -1267,6 +1267,14 @@ def _was_now(was: Any, now: Any) -> str:
     return f"<span class='was'>{html.escape(str(was))}</span> &rarr; {html.escape(str(now))}"
 
 
+def _restore_count(r: dict[str, Any]) -> str:
+    """A restore head's count: its review lines, or (saved before that) its write entries."""
+    if "changes" in r:
+        n = int(r.get("changes") or 0)
+        return f"{n} change{'' if n == 1 else 's'}"
+    return f"{r.get('rows', 0)} rows"
+
+
 def _change_rows(rows: list[dict[str, Any]] | None, diff: str) -> tuple[str, dict[str, int], int]:
     """Render a proposal's structured review rows (``decks.row_line`` describes each kind) as
     list items; return (html, counts by kind, net card delta).
@@ -1413,7 +1421,7 @@ def _change_rows(rows: list[dict[str, Any]] | None, diff: str) -> tuple[str, dic
                     "chg",
                     "Restore",
                     html.escape(f"snapshot {r.get('snapshot_id', '')}"),
-                    html.escape(f"taken {r.get('taken', '')}, {r.get('rows', 0)} rows"),
+                    html.escape(f"taken {r.get('taken', '')}, {_restore_count(r)}"),
                 )
             )
         else:

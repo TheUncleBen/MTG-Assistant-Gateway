@@ -1146,6 +1146,8 @@ async def test_a_restore_puts_back_colour_tags_mana_values_and_category_order(st
     lines = r["diff"].splitlines()
     assert "Sol Ring: color tag Want (#ff0000) -> no tag" in lines, lines
     assert "Sol Ring: custom mana value 3 -> none" in lines, lines
+    # one Archidekt entry, two review lines: the head counts what the member reads
+    assert lines[0].endswith(" (2 changes)"), lines[0]
     a3 = await apply_any(h, token, r["proposal_id"])
     assert a3["ok"] and a3["state"] == "applied" and a3["result"]["verified"] is True, a3
     ring = next(c for c in deck["cards"] if c["card"]["oracleCard"]["name"] == "Sol Ring")
