@@ -39,13 +39,13 @@ each AI client automatically, and you prove who you are by signing in to
 the owner's sign-in service in your browser.
 
 **About the labels below.** Every claim about Claude or ChatGPT comes from
-the vendor's own help pages, read on 2026-10-04 or 2026-10-05, and is
-marked:
+the vendor's own help pages, read on 2026-10-04 or 2026-10-05, or from the
+owner's own checks with this gateway, and is marked:
 
-- **tested**: tried with this gateway, or an official page says so and we
-  read the exact wording;
-- **reported**: an official page says so, but we could only read it through
-  a tool that summarises pages, so the wording isn't checked;
+- **tested**: tried with this gateway;
+- **reported**: an official page of the vendor says so, but it hasn't been
+  tried with this gateway (some of those pages could only be read through a
+  tool that summarises pages);
 - **not tested**: not tried, and no official page we could read says either
   way.
 
@@ -57,14 +57,14 @@ tested end to end with this gateway yet; the owner keeps those results.
 
 | Client | Add the connector | Use it once added |
 | --- | --- | --- |
-| Claude web (claude.ai) | Yes (tested) | Yes (tested) |
-| Claude desktop app | Yes (tested; Anthropic doesn't separate Windows and Mac) | Yes (tested) |
-| Claude iOS and Android | Beta, and not documented for custom connectors (not tested). Add it on the web or desktop instead | Yes, once added on the web or desktop (tested) |
+| Claude web (claude.ai) | Yes (reported) | Yes (reported) |
+| Claude desktop app | Yes (reported; Anthropic doesn't separate Windows and Mac) | Yes (reported) |
+| Claude iOS and Android | Beta, and not documented for custom connectors (not tested). Add it on the web or desktop instead | Yes, once added on the web or desktop (reported) |
 | ChatGPT web, Pro plan | Yes, in Developer mode (tested 2026-10-10) | Yes, every tool, deck proposals included (tested 2026-10-10) |
 | ChatGPT web, Plus plan | OpenAI's pages disagree (reported) | OpenAI's pages disagree (reported) |
 | ChatGPT desktop app | Not tested; OpenAI's pages only mention the web | Not tested |
 | ChatGPT iOS and Android apps | **No, OpenAI doesn't support it** (reported: "No - web only") | **No, OpenAI doesn't support it** (reported) |
-| ChatGPT in a phone's web browser | Not tested, untested | Not tested, untested |
+| ChatGPT in a phone's web browser | Not tested | Not tested |
 
 In plain terms:
 
@@ -94,7 +94,7 @@ In plain terms:
   markings, and whether ChatGPT shows the card for a connector added in
   developer mode, hasn't been tested yet.
 - **On ChatGPT Plus and Android? Use Claude for deck edits.** Claude's free
-  plan allows one custom connector (tested), and it works in Claude's
+  plan allows one custom connector (reported), and it works in Claude's
   Android app once added on the web. ChatGPT might still work for you in a
   computer's browser; whether Plus can call the gateway's tools is unknown
   until someone tries it.
@@ -102,7 +102,7 @@ In plain terms:
 ## Claude
 
 Custom connectors work on Claude's Free, Pro, Max, Team and Enterprise plans
-(tested; Free is limited to one custom connector).
+(reported; Free is limited to one custom connector).
 
 ### Add the connector (web or desktop app)
 
@@ -112,7 +112,7 @@ Custom connectors work on Claude's Free, Pro, Max, Team and Enterprise plans
    **Continue**.
 4. Look over the authentication settings and click **Continue**.
 5. When asked how to sign in, pick **Sign in now**.
-6. Under **OAuth client**, Claude offers three options (tested). The
+6. Under **OAuth client**, Claude offers three options (reported). The
    gateway supports the first two. Pick **Use Claude's published identity**:
    - **Use Claude's published identity** (recommended, by us and by
      Anthropic): Claude identifies itself with a web address that points to
@@ -128,7 +128,7 @@ Custom connectors work on Claude's Free, Pro, Max, Team and Enterprise plans
      enter.
 
    Some accounts see one screen instead, with the client ID and secret
-   under **Advanced settings** (tested). Leave those empty.
+   under **Advanced settings** (reported). Leave those empty.
 7. Click **Add**. A browser window opens.
    - You first see the gateway's **Connect an application** page. It says "An application wants to connect to your
      account", names the application (**Claude**) and the host it's
@@ -138,7 +138,7 @@ Custom connectors work on Claude's Free, Pro, Max, Team and Enterprise plans
      without asking), and
      shows "After sign-in you go to" a host. That host should be
      `claude.ai`, Claude's sign-in return address for its hosted apps
-     (tested). If it all looks right, press **Approve and sign in**. If
+     (reported). If it all looks right, press **Approve and sign in**. If
      not, press **Deny**. The sign-in is cancelled, Claude is told it was
      refused, and nothing gets connected.
    - Then the owner's sign-in page opens. Sign in with the account
@@ -158,7 +158,7 @@ If sign-in gets stuck on that page, remove the connector, add it again with
 **Register automatically**, and tell the owner which browser you used.
 
 Claude can't change a connector's sign-in settings after it's added
-(tested). To switch options, remove the connector and add it again.
+(reported). To switch options, remove the connector and add it again.
 
 ### The connector's icon in Claude
 
@@ -182,7 +182,7 @@ connectors (Organization settings → Connectors). Once they've added it, you
 connect and sign in from Customize → Connectors.
 
 For the gateway owner: Claude's sign-in returns to
-`https://claude.ai/api/mcp/auth_callback` (tested). Clients send their
+`https://claude.ai/api/mcp/auth_callback` (reported). Clients send their
 return address when they register automatically or in their published
 description, so there's no list of addresses to keep on the gateway. The
 gateway only accepts `https` return addresses, or `http` on `localhost` for
@@ -198,7 +198,7 @@ published descriptions are accepted, see
 2. Ask: "Use the MTG Assistant Gateway to call whoami." You should see your own name.
 
 A connector added on the web or desktop shows up in the Claude iOS and
-Android apps the next time you sign in there (tested). Anthropic calls
+Android apps the next time you sign in there (reported). Anthropic calls
 adding connectors from the phone apps a beta, and its custom-connector page
 doesn't list mobile, so add it on the web or desktop.
 
@@ -266,9 +266,9 @@ tricked by text it reads into proposing a change you did not ask for, and
 in an auto mode that change lands without your press.
 
 Claude lets you set each tool to always allow, needs approval, or blocked
-(tested). Keep `apply_proposal` on **needs approval**: in an auto mode
+(reported). Keep `apply_proposal` on **needs approval**: in an auto mode
 that's the tool that actually changes your deck. Claude's Research mode can
-call connector tools without asking (tested). Everything except
+call connector tools without asking (reported). Everything except
 `apply_proposal`, `confirm_proposal` and `confirm_waiting` (the card's own
 buttons), `reject_proposal`, `amend_proposal`, `withdraw_proposal`,
 `combine_proposals`, `run_deck_report`, `play_more_games`,
@@ -392,7 +392,7 @@ has blocked.
   about apps you create in Developer mode, so don't count on them on a
   phone.
 - **ChatGPT in your phone's browser** (chatgpt.com, not the app):
-  not tested and untested. It's the web version, so it might work. Tell the
+  not tested. It's the web version, so it might work. Tell the
   owner if you try it.
 - **Desktop (Windows and Mac): not tested.** OpenAI's pages only mention the
   web. If you try it, ask the assistant to call `whoami` and tell the owner
