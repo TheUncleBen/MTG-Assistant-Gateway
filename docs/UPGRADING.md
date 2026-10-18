@@ -33,7 +33,12 @@ so, shows its admins a notice with these steps ([OPERATIONS.md](OPERATIONS.md#re
 ([VERSIONS.md](VERSIONS.md)); with `MTG_TAG=latest` the update pulls the newest version. If the
 release notes say the stack file changed, replace the stack's text with the new
 [`deploy/portainer-stack.yml`](../deploy/portainer-stack.yml) (with the **Repository** build
-method, the update brings it). Then click **Update the stack** (with the Repository build method
+method, the update brings it). Before you replace it, note your own edits to the old text and
+make them again in the new one: the new file has the optional secret lines commented out again
+(such as the three `mtg_authentik_api_token` lines from
+[IDP-AUTHENTIK.md](IDP-AUTHENTIK.md#12-optional-removed-member-clean-up), step 7). Without
+them, `MTG_AUTHENTIK_API_TOKEN_FILE` names a file that isn't there, and the admin page says the
+removed-member clean-up is off because the token can't be read. Then click **Update the stack** (with the Repository build method
 the button is called **Pull and redeploy**), and in the box that asks “Are you sure?” make sure
 **Re-pull image and redeploy** is on, then click **Update**.
 

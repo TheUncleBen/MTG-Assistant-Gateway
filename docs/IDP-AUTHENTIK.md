@@ -541,7 +541,13 @@ goes only into a Docker secret, in step 6.
    `deploy/compose/docker-compose.yml`), remove the `# ` in front of the
    three `mtg_authentik_api_token` lines: the two under the top-level
    `secrets:` and the one in the gateway's `secrets:` list. Then set the
-   stack variable and redeploy:
+   stack variable and redeploy. Every update that brings a new stack file
+   brings these lines commented out again, so make this edit again then
+   ([UPGRADING.md](UPGRADING.md#portainer)). With Portainer's
+   **Repository** build method the stack file comes from the repository
+   as it is, with these lines commented out. Use the **Web editor**
+   method instead, or a copy of the repository you keep yourself with the
+   lines turned on.
 
    | Variable | Value |
    | --- | --- |

@@ -34,6 +34,11 @@ optional, and the stack files now pass every setting on the Settings page to the
   names one exact Forge version, which changes only when you deploy a newer stack file, and that
   setting `FORGE_TAG` pins Forge on purpose. `FORGE_XMX` is described as each Forge game's Java
   memory.
+- The update steps in [docs/UPGRADING.md](docs/UPGRADING.md) and the removed-member clean-up steps
+  in [docs/IDP-AUTHENTIK.md](docs/IDP-AUTHENTIK.md) now say that a new stack file has the optional
+  `mtg_authentik_api_token` lines commented out again, so the edit that turns them on has to be
+  made again on each such update. They also say that the Repository build method can't keep
+  that edit.
 - The notifications section of [docs/DEPLOY.md](docs/DEPLOY.md) no longer names ntfy's per-visitor
   limits as if they were settings. It says which values there are fixed and that
   `NTFY_MEMORY_LIMIT` is the one setting.
