@@ -1,6 +1,6 @@
 ---
 name: invite
-description: Give a person access to the MTG Assistant Gateway: create or enable their Authentik account, add them to the gateway group, and send them the one-link install instructions. Use when the operator says "invite", "add a user", "give X access" or "onboard" someone to the gateway.
+description: Give a person access to the MTG Assistant Gateway: walk the operator through creating or enabling their Authentik account and adding them to the gateway group, then draft the one-link install instructions for the operator to send. Use when the operator says "invite", "add a user", "give X access" or "onboard" someone to the gateway.
 ---
 
 # Invite a user to the MTG Assistant Gateway
@@ -56,7 +56,8 @@ That's enough: the gateway asks Authentik on every request (cached for
 `MTG_MEMBERSHIP_CHECK_TTL` seconds, 5 by default), so on their next request
 their gateway tokens and browser sessions are revoked. Removal from the
 group also revokes their Archidekt link; a deactivated user keeps it until
-the operator uses **Delete data** on the admin page. If
+the operator uses **Disable**, **Unlink Archidekt** or **Delete data** on
+the admin page. If
 the provider is missing the `offline_access` scope mapping, fix that first
 (`docs/IDP-AUTHENTIK.md`). Details in `docs/OPERATIONS.md`, "Revoking
 access".

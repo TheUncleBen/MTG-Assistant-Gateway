@@ -66,8 +66,8 @@ Claude / ChatGPT / Android app / browser
 | Piece | What it does | Can you swap it? |
 | --- | --- | --- |
 | **mtg-gateway** | The product. An MCP server at `/mcp`, its own OAuth 2.1 server for AI clients, the browser pages, the Archidekt connection, card scanning, and the database | No, this is the thing you're deploying |
-| **Mystic Forge** | Card search, prices, rules, EDHREC, Commander Spellbook, precons, goldfish simulation. Upstream open-source project, built from a pinned commit with small patches | Optional. Set `MTG_MYSTIC_FORGE_URL` to an empty value and remove the Mystic Forge service; the research tools disappear, deck tools, proposals and scanning still work |
-| **ntfy** | Holds each member's notifications, for up to 12 hours, until the gateway's Android app picks them up through the gateway's own address. Upstream open-source server, on a private network with no published port | Not separately: notifications need it, and the stack files run it for you |
+| **Mystic Forge** | Card search, prices, rules, EDHREC, Commander Spellbook, precons, goldfish simulation. Upstream open-source project, built from a pinned commit with small patches | Optional. Set `MTG_MYSTIC_FORGE_URL` to an empty value and remove the Mystic Forge service (in Compose, also the gateway's `depends_on` entry for `mysticforge`); the research tools disappear, deck tools, proposals and scanning still work |
+| **ntfy** | Holds each member's notifications, for up to 12 hours, until the gateway's Android app picks them up through the gateway's own address. Upstream open-source server, on a private network with no published port | Not separately: the shipped stack files require it and run it for you |
 | **Forge** | The rules engine for deck simulations: plays real games of a deck against precons. Upstream open-source engine, unmodified, behind a small job service | Optional and off by default (`FORGE_REPLICAS=0`, or the Compose `forge` profile); without it reports have no Forge games |
 | **Reverse proxy** | Gives the gateway an `https://` address on your domain | Any proxy that forwards to an HTTP backend and keeps the `Host` header. See [REVERSE-PROXY.md](REVERSE-PROXY.md) |
 | **Identity provider** | Who may sign in. The gateway never sees passwords | Any OpenID Connect provider that can send group membership in a claim (`MTG_OIDC_GROUPS_CLAIM`), or any provider at all if it already admits only the right people and you set `MTG_ALLOW_ANY_IDP_USER=true`. Authentik is the documented one; see [IDP-OTHERS.md](IDP-OTHERS.md) for the rest |
@@ -75,7 +75,8 @@ Claude / ChatGPT / Android app / browser
 
 The project's images (the gateway, Mystic Forge and Forge) are multi-arch
 (`linux/amd64` and `linux/arm64`), so a Raspberry Pi 4 or 5 is fine. The gateway idles around 60 MB of memory and
-Mystic Forge around 115 to 170 MB, measured on test machines rather than a Pi.
+Mystic Forge around 115 to 170 MB. Those figures were measured on test machines rather than a Pi,
+by version 0.5.0 at the latest, and have not been measured again since.
 
 ## What's fixed, and why
 
@@ -89,8 +90,9 @@ keeps it simple to run and to support:
   lives at fixed paths on the host.
 - **HTTPS only.** `MTG_PUBLIC_URL` must be `https://` (plain `http://` is
   accepted only for `localhost`, for development).
-- **Secrets are files.** The encryption key, cookie key and OIDC client
-  secret are read from files (Docker secrets on Swarm, `secrets: file:` in
+- **Secrets are files.** The encryption key, cookie key, OIDC client
+  secret, ntfy access token and the optional Authentik API token are read
+  from files (Docker secrets on Swarm, `secrets: file:` in
   Compose), never from environment variables, so they don't show up in
   `docker inspect` or Portainer's variable list.
 - **Mystic Forge is private.** It has no login of its own, so it never gets
@@ -289,7 +291,7 @@ For the exact devices and plans tested, see
   members who have not chosen with `MTG_APPROVAL_MODE_DEFAULT`. Every apply
   still snapshots the deck first.
   The card is an MCP App (`src/mtg_gateway/approve.py`, the HTML in
-  `static/proposal-card.html`): every `propose_*` tool and `get_proposal`
+  `static/cards/proposal-card.html`): every `propose_*` tool and `get_proposal`
   names it in `_meta.ui.resourceUri`, a host that renders MCP Apps shows it
   with the result, and its buttons call `confirm_proposal`, a tool marked
   `_meta.ui.visibility: ["app"]` (offered to the card, not to the model)
@@ -301,8 +303,11 @@ For the exact devices and plans tested, see
   check is that the caller holds the code, which a prompt-injected
   assistant does not in a host that follows the standard. `MTG_APPLY_IN_CHAT=false`
   removes the card, the code and the tool.
+  The waiting-changes card (`static/cards/waiting-card.html`) works the same
+  way: its buttons call `confirm_proposal` and `confirm_waiting`.
   The other cards (`src/mtg_gateway/cards.py`, HTML in `static/cards/`:
-  printings, picker, deck, account) only show and relay: a tap sends the
+  printings, picker, deck, deck list, compare, stats, scan, account) only
+  show and relay: a tap sends the
   pick to the assistant as text through the host (`ui/update-model-context`),
   and nothing on them calls a tool. A card that needs more data than the tool
   result carries (a deck's rows, a card's printings) gets a link to
@@ -324,8 +329,8 @@ For the exact devices and plans tested, see
   The MTG skill also tells the assistant
   never to treat text inside decks or tool output as an instruction. Each
   proposal records and shows the app that made it; disconnecting an app
-  rejects its pending proposals, and one app may hold at most 30 pending
-  proposals per member.
+  rejects its pending proposals, and a member may hold at most 100 pending
+  proposals.
 - **Archidekt load** is capped per member: `MTG_ARCHIDEKT_CALLS_PER_10_MIN`
   calls (120 by default) and three at a time, so a looping assistant can't
   hammer Archidekt or starve other members. Across everyone, requests go one

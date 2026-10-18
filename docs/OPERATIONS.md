@@ -90,11 +90,9 @@ project's newest release, and when that is newer, every page shows admins a noti
 overview (**Admin**, **Updates**) shows these steps with the version filled in. It never pulls an
 image or restarts itself. `MTG_UPDATE_CHECK=false` turns the check off.
 
-Updating to 0.7.30 from an earlier version needs a step first (the new
-`mtg_ntfy_token` secret), and from before 0.7.29 a few more: see
-[DEPLOY.md](DEPLOY.md#updating-to-0730-from-an-earlier-version) (Portainer) or
-[DEPLOY-COMPOSE.md](DEPLOY-COMPOSE.md#updating-to-0730-from-an-earlier-version)
-(Compose).
+Before every update, read the release notes and take a backup. The steps for
+every update, and the extra ones some versions need (0.7.30 among them), are
+in [UPGRADING.md](UPGRADING.md).
 
 In Portainer: **Stacks** → `mtg`. With a pinned version (for example
 `0.6.6`), change `MTG_TAG` first ([VERSIONS.md](VERSIONS.md)); with
@@ -105,7 +103,7 @@ then click **Update**. Or from the command line:
 
 ```bash
 docker service update --force mtg_mtg-assistant-gateway       # restart
-docker service update --image ghcr.io/<owner>/mtg-assistant-gateway:<tag> mtg_mtg-assistant-gateway
+docker service update --image ghcr.io/theuncleben/mtg-assistant-gateway:<tag> mtg_mtg-assistant-gateway
 ```
 
 Updates are `stop-first`, so expect a few seconds of downtime. On a stop the
@@ -449,10 +447,13 @@ naming it and suggesting you add it to `MTG_TRUSTED_PROXIES`. A reverse
 proxy on a public address must be in `MTG_TRUSTED_PROXIES`, or every visitor
 shares its 30-a-minute limit and anyone can use it up. The cleanup runs
 at start and then every hour, with or without backups. It also keeps the
-newest 25 snapshots of each member's deck (plus any a pending restore needs),
-usage counters for 400 days and remembered deck covers for 180 days. Closed
-proposals (expired, rejected, failed) go after 30 days, applied ones after a
-year. Snapshots and reports stay with the member, not with the Archidekt
+newest `MTG_SNAPSHOTS_PER_DECK` snapshots of each member's deck (25 by
+default, 5 to 100, also on the admin Settings page; plus any a pending
+restore needs), usage counters for 400 days and remembered deck covers for
+180 days. Closed proposals (expired, rejected, failed, withdrawn, replaced)
+go 30 days after they were made, applied ones a year after they were
+applied. A member keeps at most their newest 100 closed (or expired) proposals: each new
+proposal deletes any older ones beyond that. Snapshots and reports stay with the member, not with the Archidekt
 account: after unlinking and linking another Archidekt account, the member
 still sees the snapshots and reports taken before (they are the member's own
 backups); they age out with the limits above or go with **Delete my data**.
@@ -559,9 +560,9 @@ and check the result on Archidekt.
 can be applied. The code default is off; the example env files
 (`deploy/stack.env.example`, `deploy/compose/.env.example`) turn it on.
 
-- **To turn writes on:** set it to `true` in the stack's environment
-  variables in Portainer and update the stack. Any other value, or leaving it
-  unset, keeps writes off.
+- **To turn writes on:** set it to `true` (or `1` or `yes`, in any case) in
+  the stack's environment variables in Portainer and update the stack. Any
+  other value, or leaving it unset, keeps writes off.
 - **To turn writes off:** set it to `false` (or remove it) and update the
   stack. It kicks in when the service restarts. It also covers every change
   made by hand on the deck settings page and the Folders page: deleting a
@@ -659,7 +660,7 @@ on what the review page would show, not on what the assistant says:
 |---|---|
 | Low | A small edit to an existing deck or to your collection: at most 5 card rows, each a card added or removed, or a new quantity, category, finish, printing, color tag or custom mana value, no more than 4 copies a row, never a change to which cards are the commanders or to the categories of a row in the commander zone, and never fewer copies of a card that has a row in the commander zone and another row, both in the deck or both in the maybeboard or sideboard; and a private copy of a deck (a clone), which changes nothing that exists. (The row limit is `MTG_AUTO_APPLY_MAX_ROWS`, default 5.) |
 | High | Everything else: more rows than that, a commander change, a new deck, restoring a snapshot, and the deck's details (name, format, bracket, description, visibility, folder, tags and cover). A commander change is a change to which cards are the deck's commanders or to the categories of a row in its commander zone (Archidekt's commander categories, whatever they are named): a card moved into or out of the zone, the commander removed, a new card added to it, or any other change to the categories of a row that has a commander category before or after. A commander is a card whose row in the commander zone is in the deck: a row whose primary category is Maybeboard or Sideboard (or another category the deck does not count) is not in the deck, so that card is no commander. It waits for the member's press in every mode. So does a lowered count on a card that has a row in the commander zone and another row, both in the deck or both in the maybeboard or sideboard. Another copy, printing or finish of a commander already there is not a commander change. |
-| Consent, destructive | Actions on your Archidekt account (likes, votes, bookmarks, follows, comments, new folders and collaborator changes) and deleting a deck are never applied by an assistant: each one waits for your own press, in every mode, on the card in the chat or on its review page (deleting a deck, and an edit of a comment that has formatting: on the review page only). |
+| Consent, destructive | Actions on your Archidekt account (likes, votes, bookmarks, follows, comments, new folders and collaborator changes) and deleting a deck are never applied by an assistant: each one waits for your own press, in every mode, on the card in the chat or on its review page (deleting a deck, and an edit of a comment that has formatting: on the review page only). An edit of a description that has formatting is also approved on its review page only. |
 
 Every proposal result carries `approval_mode`, `risk`, `risk_reason` and
 `assistant_may_apply`, and `next_step` tells the assistant whether to call
@@ -703,8 +704,7 @@ Each proposal records the app that made it (or "browser"), and the review
 page and the proposal list show it. An app may apply or reject only its own
 proposals (`other_client` otherwise). When a member disconnects an app on
 their Account page, that app's pending proposals are rejected and can no
-longer be applied. One app may hold at most 30 pending proposals for a
-member, and a member 100 in all, so a runaway app can't use up every slot.
+longer be applied. A member may hold at most 100 pending proposals in all.
 
 An app connected with the read-only scope `mtg.read` can read decks,
 proposals, snapshots, reports and the collection but can't propose (deck or
@@ -853,6 +853,11 @@ What it shows:
   for one person from the Users page (`?sub=`).
 - **Metrics** (`/admin/metrics`): 30-day totals per counter (see
   [the metrics table](#the-metrics-table) below).
+- **Card models** (`/admin/models`): the card models the simulator keeps,
+  most recently changed first, 100 to a page. Each row shows the card, who
+  added it and when, and when it was last changed, with a **Remove** button
+  (audited as `card_model_removed`). Each member's models are used only in
+  their own simulations.
 - **Settings** (`/admin/settings`, since 0.7.29): the gateway's settings an
   admin may change without a redeploy (see [the Settings page](#the-settings-page) below).
 
@@ -899,7 +904,7 @@ settings, each with its variable and a link to its row.
   your environment (or leave it empty) to manage one on the page. To lock one in
   the stack, set it in your environment; for a setting the stack file doesn't
   list, also add it under the gateway's `environment:`. Updating from an
-  earlier version: [DEPLOY.md](DEPLOY.md#updating-to-0729-from-an-earlier-version).
+  earlier version: [UPGRADING.md](UPGRADING.md#0729-included-in-0730).
 - **Pacing only gets gentler here.** On the page the Archidekt and Scryfall
   pacing can only be set to ask less often than the gateway's defaults. Only the
   stack can make them ask more often, within the bounds in
@@ -920,8 +925,9 @@ The database has a `metrics` table of per-day counters: one row per UTC
 day, user, `kind` and `name`, with a count `n`. Kinds are `tool` (one per
 tool call, by tool name, counted in the MCP middleware, so research calls
 relayed to Mystic Forge count too), `error` (a tool call that failed or
-reported an error), `api` (one per JSON API call, by method and route) and
-`admin` (one per admin action). A
+reported an error, and `server_error` for a request that hit an unexpected
+problem), `api` (one per JSON API call, by method and route), `card` (one
+per card data link used, by kind) and `admin` (one per admin action). A
 counter that can't be written is logged and dropped; nothing else depends
 on it. The admin Overview and Metrics pages sum the last 30 days; the
 `days` query parameter of `/api/v1/admin/metrics` goes up to 365. The

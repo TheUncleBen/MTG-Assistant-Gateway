@@ -860,16 +860,15 @@ class MainActivity : ComponentActivity() {
      * link is left alone rather than opened inside.
      */
     private fun linkedPage(target: SharedLink.Target?, copied: Boolean = false): String? {
-        val gateway = origin.removePrefix("https://")
         val message = when (target) {
             null -> return null
             is SharedLink.Target.Open -> return target.url
             is SharedLink.Target.Other -> {
                 val host = SharedLink.hostOf(target.first) ?: target.first
                 when {
-                    copied -> getString(R.string.clip_other, host, gateway)
-                    SharedLink.isDiscord(target.first) -> getString(R.string.link_discord_message, host)
-                    else -> getString(R.string.link_other_gateway, host, gateway)
+                    copied -> getString(R.string.clip_other, host)
+                    SharedLink.isDiscord(target.first) -> getString(R.string.link_discord_message)
+                    else -> getString(R.string.link_other_gateway, host)
                 }
             }
             SharedLink.Target.File -> getString(R.string.link_file_shared)

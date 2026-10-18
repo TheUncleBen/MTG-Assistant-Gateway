@@ -17,8 +17,8 @@ This page covers using the app, how it is distributed, building and signing it,
 and what Google's developer-verification programme means for it. It is honest
 about what was and wasn't tested: the app has been built, unit-tested, its
 page hand-off exercised in a headless browser, and installed and signed in on
-the owner's phone; the camera scan and the fold layouts on a real device are
-still the owner's test to report.
+one real phone; the camera scan and the fold layouts have not been tried on a
+real device yet.
 
 ## Contents
 
@@ -72,7 +72,9 @@ download button. Then:
 **Updates** come to the app by themselves ([Updates](#updates) below): when a
 newer version is out, a bar at the top offers it and **Update** installs it over
 the one you have, keeping your settings and sign-in. **Change gateway** in the
-app's menu (the round button, bottom right) brings the address screen back.
+account menu (the person icon, top right) brings the address screen back; over
+a page that isn't the gateway's (the sign-in page, say) it is in the round
+button's menu at the bottom right.
 
 ### Updates
 
@@ -81,8 +83,8 @@ the app (`/app/latest.json`, the same facts the gateway's Android app page shows
 behind the same sign-in): each time it starts and right after you sign in (at
 most once an hour), when you come back to it after 12 hours, and whenever you
 tap **Check for app updates**. That button is on the **Account** page's **App**
-card, which also shows the installed version, and in the app's own menu (the
-round button).
+card, which also shows the installed version, and in the menu of the round
+button that shows over pages that aren't the gateway's.
 Inside the app the Account page shows this card instead of **Get the Android
 app**. When there is a newer version, a bar at the top says **Version x.y.z of
 the app is available**:
@@ -112,7 +114,7 @@ app finds no update there; install a newer app from its Android app page once.
 **Moving from a test build.** Builds before 0.7.12 were signed with a test
 key, and the release key is different. Android refuses to install an update
 signed with another key, so an app from before 0.7.12 can't update itself to
-it: uninstall it once, then install 0.7.12 from your gateway's `/app` page (and
+it: uninstall it once, then install the current app from your gateway's `/app` page (and
 type the gateway address again). Every later version updates in place.
 
 A fork or a self-built app gets its updates from the gateway that serves it,
@@ -174,9 +176,14 @@ still works, it just can't scan.
 
 From 0.7.30 the app shows the member's notifications itself. There is no
 Google push service and no separate notification app. On the Account page in
-the app, **Get notifications on this phone** asks Android to allow
+the app, the member ticks **Send me notifications** and presses **Save
+notifications**. The page then starts **Get notifications on this phone**
+by itself (the button stays on the card while this phone isn't connected).
+That asks Android to allow
 notifications (Android 13 and later ask; older versions allow them by
-default) and, once, to let the app run in the background. The app then runs
+default) and, once, to let the app run in the background. When the gateway
+has no notification server set up, the card says that the app can't get
+notifications. Once this phone is connected, the app runs
 a foreground service that holds one connection to the gateway's own address
 (`/app/notifications/stream`). Android shows its quiet **Always connected**
 notification while the service runs, as it does for every foreground
@@ -209,7 +216,8 @@ else your gateway serves. A few things are native:
 - **The App section of the account menu** (the person icon, top right):
   *Scan with the app's camera*, *Reload*, *Open in browser*, *Change gateway*.
   *Open a copied link* and *Check for app updates* are on the Account page's
-  **App** card and in the round button's menu.
+  **App** card and in the round button's menu (the round button shows only
+  over pages that aren't the gateway's).
   The same actions sit on a round button at the bottom right while a
   page that is not the gateway's is showing (the sign-in service, say); on
   the gateway's own pages the button stays out of the way of the bottom tab
@@ -360,6 +368,9 @@ The app talks only to pages and endpoints the gateway already serves:
 | Everything else | the normal pages, loaded in the app |
 | Phone-camera scans | the `/scan` page's `window.__scan` hooks (`flattenCard`, `flatTitleRegion`, `infoRegionOf`, `scanRegion`, `showTab`, `noCardFrame`, `undoLastAdd`) and its `scan:*` events |
 | App Links (optional) | `GET /.well-known/assetlinks.json`, served from `MTG_ANDROID_ASSETLINKS` ([section 12](#12-app-links-opening-gateway-links-in-the-app)) |
+| Keeping the sign-in page in the app | `GET /.well-known/mtg-gateway` (the sign-in address the gateway advertises; an older gateway without it still works) |
+| Updates | `GET /app/latest.json` (the version, size and checksums of the APK the gateway ships), then `GET /app/mtg-assistant-gateway.apk`, both with the app's sign-in ([Updates](#updates)) |
+| Notifications | `GET /app/notifications/stream` with the phone's notification key, held open by the app's foreground service ([Notifications](#notifications)) |
 
 The pages work with any gateway version; the phone-camera hand-off needs a scan
 page that has those hooks (the edge-detection scan page with continuous mode,
@@ -388,7 +399,7 @@ Nothing here costs money or needs an account with anyone:
   `mtg-assistant-gateway-release.apk`, `mtg-assistant-gateway-release.aab` and `mtg-assistant-gateway.json` to the version's
   GitHub release when the release signing secrets are set
   ([section 9](#9-releasing-the-ci-build-and-the-gateway-image)). Anyone can
-  download them there once the repository is public.
+  download them there.
 - **Not Google Play.** Publishing there needs a developer account with a
   one-time fee, and the app's users all have accounts on a private gateway
   anyway. An app bundle is still produced in case that changes.
@@ -659,12 +670,26 @@ screen is shown without a prefill, so a link can't pick your gateway for you.
 ## 13. Privacy and security notes
 
 - The app has no server of its own and no analytics. It stores the gateway
-  address and when it last looked for an update. It asks for internet and
+  address, the sign-in address that gateway advertised, the check value of a
+  browser sign-in in progress, when it last looked for an update, your
+  notification key, with a reference to the last message it got and to the
+  ones already shown (not the messages themselves),
+  and whether it has already asked Android for the notification permission
+  and to run in the background. It asks for internet and
   camera, and for the two permissions that let it install its own updates
   (`REQUEST_INSTALL_PACKAGES`, which Android grants only after you allow
   installs from this app, and `UPDATE_PACKAGES_WITHOUT_USER_ACTION`), and for
   the network state (`ACCESS_NETWORK_STATE`, granted at install without asking),
   only to notice the connection coming back while a page has failed to load.
+  For notifications it asks for `POST_NOTIFICATIONS` (to show your messages;
+  Android 13 and later ask you when you get notifications on this phone),
+  `FOREGROUND_SERVICE` and `FOREGROUND_SERVICE_SPECIAL_USE` (the service that
+  keeps the connection to the gateway open while the app is closed),
+  `RECEIVE_BOOT_COMPLETED` (to start that service again after the phone
+  restarts), `WAKE_LOCK` (to keep the phone awake for a moment while a message
+  is shown) and `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` (to ask you once to let
+  the app run in the background, so battery saving doesn't cut the
+  connection); all but `POST_NOTIFICATIONS` are granted at install.
   The update check talks to the app's own gateway only ([Updates](#updates)). Sign-in cookies live in the system WebView's cookie store
   for this app only. None of it is backed up or copied to a new phone: backup
   is off, and from Android 12 the data-extraction rules also exclude everything

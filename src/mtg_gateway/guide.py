@@ -974,9 +974,9 @@ def guide_body(
         + "".join(f"<tr><td>{_esc(p)}</td><td>{a}</td><td>{w}</td></tr>" for p, a, w in page_rows)
         + "</tbody></table></div>"
         "<p>On a phone the tabs at the bottom are Home, Decks, Scan, Collection and More (Proposals, "
-        "History, Guide, Account and Admin); Search is the magnifier at the top. From 600 px on a touch "
-        "screen every page is a tab on a rail down the left edge, with no More; a wider browser has the "
-        "links in the top bar, Home first.</p>"
+        "History, Reports, Watchlist when it is on, Guide, Account and Admin); Search is the magnifier "
+        "at the top. From 600 px on a touch screen every page is a tab on a rail down the left edge, "
+        "with no More; a wider browser has the links in the top bar, Home first.</p>"
     )
     # in every mode; since 0.7.29 the card in the chat too, but never for a deck deletion
     on_review_page = (

@@ -1,8 +1,8 @@
 # Using the pages
 
 What a member can do on the gateway's web pages and in the Android app, with
-or without an AI assistant. The same text is the in-app **Guide** (`/guide`,
-in the account menu), so the app and this file stay in step. Nothing here is
+or without an AI assistant. The in-app **Guide** (`/guide`, in the account
+menu) covers the same ground in its own words, step by step. Nothing here is
 about running a gateway; that's [DEPLOY.md](DEPLOY.md) and friends.
 
 ## Start here
@@ -31,13 +31,16 @@ you the exact change first.
    research, simulate or edit for you. Every edit still comes back to you
    as a proposal.
 
-On a phone the five tabs at the bottom are Decks, Search, Scan, Collection
-and More (More opens the home page with every section). On a wider touch
-screen, such as an unfolded foldable or a tablet, and in the Android app
-from 600 px, the same five sit in a rail down the left edge; a desktop
-browser shows them in the top bar. The layout follows the window as you
-fold, rotate or split the screen. The account menu is the person icon at
-the top right; a tap anywhere else closes it. Large text works too: the
+On a phone the five tabs at the bottom are Home, Decks, Scan, Collection
+and More; Search is the magnifier in the top bar, and More opens a sheet
+with Proposals, History, Reports, Watchlist (when watchlists are on), Guide
+and Account, and Admin for administrators. On a wider touch screen, such as an unfolded foldable or a
+tablet, and in the Android app from 600 px, a rail down the left edge lists
+every page, so it has no More. A desktop browser shows Home, Decks, Search,
+Collection, Scan, Proposals and History in the top bar. The layout follows
+the window as you fold, rotate or split the screen. The account menu is your
+profile picture (or your initials) at the top right; a tap anywhere else
+closes it. Large text works too: the
 pages follow the phone's font size (the Android app included) and a
 browser's text zoom up to 200%, wrapping rather than running off the screen.
 
@@ -59,8 +62,9 @@ between them from its settings page.
 
 One deck:
 
-- **View as** text, stacks or grid; **Group by** category, type, mana value,
-  colour or none; **Sort by** name, mana value, price and more. The page
+- **View as** Text, Table, Brewer, Stacks, Scroll or Grid; **Group by**
+  Categories, Type, Mana value, Color, Rarity or Full deck (no grouping);
+  **Sort by** name, mana value, price and more. The page
   updates as soon as you change a choice. Switching views, or coming back to
   the deck, within 20 seconds shows it as just read without asking Archidekt
   again; a change made on archidekt.com shows after that, or at once when
@@ -174,9 +178,10 @@ One deck:
   it put in, changed counts, basic lands, and the statistics' differences.
   Tap a card name for the whole card. Your assistant makes the same
   comparison when you ask it to compare two decks.
-- The **More** menu in the banner holds Deck settings, Export (text, JSON or
-  CSV), History and snapshots, Compare, Deck stats, the deck's page on
-  Archidekt and **Delete deck**. Deleting asks you to type the deck's name; a snapshot is
+- The **More** menu in the banner holds **Solo test only** (when the gateway
+  runs Forge: the same run without the Forge games), Deck settings, Export
+  deck, History and snapshots, **Delete deck**, Compare with another deck,
+  Deck stats and Open on Archidekt. Deleting asks you to type the deck's name; a snapshot is
   kept under History and, when backups are on, a copy in your backup folder
   on Archidekt. Archidekt itself has no undo for a deleted deck.
 - **Deck settings** holds the name, format, bracket, description and
@@ -213,7 +218,8 @@ line with a count in front (Archidekt's own export syntax is understood:
 printing, `*F*` and `*E*` finishes, `[Category]`, `# Sideboard` headers);
 names the gateway cannot match stay in the box.
 Press **Save changes** and they go to Archidekt straight away (a snapshot
-first, so History can undo); only a large removal asks you to confirm.
+first, so History can undo); only a large removal or a change to the
+commander zone asks you to confirm.
 
 ## Finding cards and decks
 
@@ -321,22 +327,27 @@ or delete your own comments. A user page has the Follow button too. Each one ask
 goes to Archidekt under your Archidekt name, exactly as if you had pressed
 it on archidekt.com. Your assistant can suggest a like, bookmark, follow or
 comment, but it never sends one: each waits for your own press, in every
-approval mode, on the card in the chat or on its review page.
+approval mode, on the card in the chat or on its review page (an edit of a
+comment that has formatting: on its review page only).
 
 ## Proposals and history
 
 What you save in the app (the editor, a drag between categories, a new
 deck, clone or settings) goes to Archidekt at once: pressing Save is your
 approval, and a snapshot is taken first so History can undo it. Only a big
-removal asks you to confirm. An **assistant's** edit, new deck, clone,
+removal or a change to the commander zone asks you to confirm, and a restore
+from History opens its review first. An **assistant's** edit, new deck, clone,
 settings change, restore or collection change is first saved as a
 **proposal**: the exact list of what would change. Approve it on the card
-in the chat or on the review page, or pick an approval mode on your Account
-page (Manual, Semi-auto for small deck or collection edits and copies of a deck, Full auto) and the
+in the chat or on the review page (deleting a deck, and any edit of a
+description or comment that has formatting: on the review page only), or
+pick an approval mode on your Account page (Manual, shown as "Ask me every
+time"; Semi-auto, shown as "Apply low-risk changes without asking", for small deck or collection edits and copies of a deck; Full auto, shown as "Apply deck and collection changes without asking") and the
 assistant applies what that mode allows, with a snapshot first for a change to one of your decks. Adding, removing or swapping a deck's commander always waits for your press.
 
 - **Proposals** lists what is waiting. Open one to read the diff and press
-  **Apply** or **Reject**.
+  **Apply** or **Reject**, or check several, on any decks, and press
+  **Apply checked** or **Reject checked** to do them together.
 - Before an edit is applied, the gateway checks the change still fits the
   deck as it is now, saves a **snapshot** and, with backups on (the operator's
   setting), puts a backup copy of the deck in an "MTG Gateway backups" folder
@@ -415,7 +426,9 @@ listens. **Send test** checks it, and
 **Disconnect my phones** stops every phone you connected. Messages say only
 what happened and link to the page here; they never list a deck's cards.
 
-The summary is part of the **Notifications** card. Choose **Every day** or **Every week
+The summary is part of the **Notifications** card, so it is there only when
+the gateway has a notification server set up (without one, the card only
+says so). Choose **Every day** or **Every week
 (Mondays)** and the card shows a plain summary of today or the last 7 days
 (watched prices that moved and your watched decks' values when watchlists
 are on, deck reports finished, and proposals waiting and applied), and it is

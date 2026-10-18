@@ -30,11 +30,11 @@
     <string name="update_later">Later</string>
     <string name="update_downloading">Downloading version %1$s…</string>
     <string name="update_installing">Installing version %1$s…</string>
-    <string name="update_handed_over">Android is installing the update. The app closes when it is done; open it again from its icon. If Android asks, allow installs from this app and confirm.</string>
+    <string name="update_handed_over">Installing the update. If Android asks, allow installs from this app, then reopen the app.</string>
     <string name="update_none">You have the newest version (%1$s).</string>
-    <string name="update_off">This build of the app does not look for updates. Get new versions from your gateway\'s Android app page.</string>
-    <string name="update_check_failed">Could not ask the gateway for an update. Check the connection, sign in if asked, and try again.</string>
-    <string name="update_other_key">Version %1$s is out, but it is signed with a different key than this app, so Android would refuse it. Get the app from your gateway\'s Android app page.</string>
+    <string name="update_off">This build doesn\'t check for updates. Get them from your gateway\'s Android app page.</string>
+    <string name="update_check_failed">Could not check for an update. Check the connection, sign in if asked, then try again.</string>
+    <string name="update_other_key">Version %1$s has a different signing key, so it can\'t update this app. See the Android app page.</string>
     <string name="update_download_failed">The update did not download completely. Try again later.</string>
     <string name="update_not_an_app">The downloaded file is not the expected version of this app, so it was not installed.</string>
     <string name="update_install_failed">The update was not installed (%1$s).</string>
@@ -67,19 +67,19 @@
     <string name="sign_in_no_browser">No browser is installed to sign in with. Use "Sign in inside the app instead" on the page.</string>
     <string name="sign_in_not_started">That sign-in wasn\'t started here or has expired. Sign in again from the app.</string>
     <string name="camera_permission_needed">Camera permission is needed to scan cards.</string>
-    <string name="camera_permission_settings">The camera is turned off for this app. Turn on Camera under Permissions, then come back and tap Scan again.</string>
+    <string name="camera_permission_settings">The camera is off for this app. Allow Camera under Permissions, then try again.</string>
     <string name="scan_page_too_old">This gateway\'s scan page has no photo hooks; it needs a newer gateway version.</string>
     <string name="scan_handoff_failed">The scan page did not take the photo. Tap Done, reload the page and try again.</string>
     <string name="scan_page_slow">The scan page did not answer in time. Tap Done and check the page.</string>
     <string name="scan_page_missing">This gateway has no scan page.</string>
     <string name="page_elsewhere">A page from another site tried to open inside the app and was stopped. Tap Retry to go back to your gateway.</string>
-    <!-- A share or a copied link the app does not open. %1$s is the link's host, %2$s the gateway's. -->
-    <string name="link_other_gateway">The link that arrived goes to %1$s. This app opens links to your gateway (%2$s) and archidekt.com deck links, so it was not opened.</string>
-    <string name="link_discord_message">Discord shared a link to the message (%1$s), not the deck link. Long-press the archidekt.com link itself and share that, or copy it and choose Open a copied link in the account menu, under App.</string>
-    <string name="link_none_shared">There was no https link in what was shared. Share a link to your gateway or an archidekt.com deck link, or copy it and choose Open a copied link in the account menu, under App.</string>
-    <string name="link_file_shared">A file arrived, not a link. Share a link to your gateway or an archidekt.com deck link, or copy it and choose Open a copied link in the account menu, under App.</string>
-    <string name="clip_other">The copied link goes to %1$s. This app opens links to your gateway (%2$s) and archidekt.com deck links.</string>
-    <string name="clip_none">There is no link on the clipboard. Copy an archidekt.com deck link or a link to your gateway, then try again.</string>
+    <!-- A share or a copied link the app does not open. %1$s is the link's host (link_other_gateway, clip_other). -->
+    <string name="link_other_gateway">Not opened: %1$s. Only gateway links and archidekt.com deck links open here.</string>
+    <string name="link_discord_message">Discord shared the message, not the deck. Share the archidekt.com link itself.</string>
+    <string name="link_none_shared">No https link was shared. Use Open a copied link on the Account page\'s App card.</string>
+    <string name="link_file_shared">A file arrived, not a link. Use Open a copied link on the Account page\'s App card.</string>
+    <string name="clip_other">Not opened: %1$s. Only gateway links and archidekt.com deck links open here.</string>
+    <string name="clip_none">No link on the clipboard. Copy an archidekt.com deck link or a gateway link first.</string>
 
     <string name="camera_title">Scan a card</string>
     <string name="shoot">Shoot</string>
