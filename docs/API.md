@@ -72,7 +72,7 @@ Request bodies are JSON objects of at most 2 MB.
 | `GET /api/v1/proposals?state=` | The user's proposals, optionally filtered by state |
 | `POST /api/v1/proposals` | Create a proposal (see kinds below). Answers `201` with the proposal, its `diff` and `review_url`. The browser session may add `apply: true` and `archidekt_backup: false` (skip the extra backup copy on Archidekt for that save; the gateway's own snapshot is always kept) |
 | `GET /api/v1/proposals/{pid}` | One proposal with `state`, `diff`, `changes`, `snapshot_id`, `result`, `next_step` |
-| `POST /api/v1/proposals/{pid}/apply` | Apply it: snapshot, Archidekt backup copy, write, re-read verification. A bearer caller applies only what the member's approval mode allows (`manual`: nothing, `browser_required`; `semi`: low-risk proposals; `auto`: everything except what Full auto still leaves to the member, listed in OPERATIONS.md under Approval modes), judged inside the apply; the in-chat card uses the `confirm_proposal` MCP tool instead, not this route. An Archidekt account action (a proposal of kind `action`) is never applied here, with a bearer token or the browser session: `403 browser_required` with its `review_url` and `risk` (R-142: only the review page's own form applies one) |
+| `POST /api/v1/proposals/{pid}/apply` | Apply it: snapshot, Archidekt backup copy, write, a check by reading it back. A bearer caller applies only what the member's approval mode allows (`manual`: nothing, `browser_required`; `semi`: low-risk proposals; `auto`: everything except what Full auto still leaves to the member, listed in OPERATIONS.md under Approval modes), judged inside the apply; the in-chat card uses the `confirm_proposal` MCP tool instead, not this route. An Archidekt account action (a proposal of kind `action`) is never applied here, with a bearer token or the browser session: `403 browser_required` with its `review_url` and `risk` (R-142: only the review page's own form applies one) |
 | `POST /api/v1/proposals/{pid}/reject` | Mark a pending proposal rejected. A bearer caller can reject only proposals its own app made; others answer `other_client` |
 | `GET /api/v1/snapshots?deck_id=` | Deck snapshots taken before applies (and on demand) |
 | `GET /api/v1/snapshots/{sid}` | One snapshot with the full deck as it was |
@@ -177,17 +177,17 @@ cookie, set by `POST /theme`); internal links never open a new tab.
 | `/skill`, `/skill/mtg-gateway.zip` | `/skill` redirects to `/install?for=skill`; the ZIP is the end-user skill |
 | `/plugin/marketplace.json`, `/plugin/{name}.zip`, `/plugin/{name}-chatgpt.zip` | The Claude plugin marketplace and plugin, and the ChatGPT plugin ZIP ([PLUGIN.md](PLUGIN.md)) |
 | `/decks?q=&folder=&view=grid|list&order=` | My decks: filter by name or Archidekt folder, grid or list, order by updated / created / name / format, "New deck", "Folders" |
-| `/folders` (GET, POST `action=create|rename`) | The member's Archidekt folders: create one (`name`, `parent_id`) or rename one (`folder_id`, `name`); verified by re-reading the folder tree |
+| `/folders` (GET, POST `action=create|rename`) | The member's Archidekt folders: create one (`name`, `parent_id`) or rename one (`folder_id`, `name`); checked by reading the folder tree |
 | `/precons?q=` | Archidekt's preconstructed decks grouped by set (cached an hour), filtered by set or deck name |
 | `/decks/open?ref=` | Redirects an Archidekt link or id to its deck page |
 | `/decks/new?scan_session=` | New deck form (name, format, private, pasted list or CSV) that makes a `new_deck` proposal; a scan session prefills the list |
 | `/decks/{id}?view=&group=&sort=&q=` | One deck: banner (art, legality, bracket, size, price, tags), toolbar (Quick add, View as text / stacks / grid, Group by, Sort by, local filter), cards, deck stats, description; owners get Edit deck, Clone deck and Deck settings |
 | `/decks/{id}/edit?scan_session=&add=` | The editor: quantities, categories (new ones by typing), finish, printing (picker over Scryfall), additions with instant suggestions (picture, mana cost, type) and Undo become one proposal; a scan session or a Quick add name prefills it |
 | `/decks/{id}/settings` | Deck settings (name, format, bracket, description, private, unlisted) as a `details` proposal, plus the hand actions below |
-| `/decks/{id}/cover` (POST `card`) | Set the cover image to a card of the deck (its Scryfall id) or back to Archidekt's automatic pick (empty); snapshot first, verified by re-reading |
-| `/decks/{id}/tags` (POST `action=add name=` or `action=remove relation_id=`) | Add an Archidekt deck tag (reused if it exists, else created) or remove one; snapshot first, verified |
-| `/decks/{id}/move` (POST `folder_id`) | Move the deck into one of the member's folders; verified |
-| `/decks/{id}/delete` (GET, POST `name`) | Delete the deck after its exact name is typed; a gateway snapshot and, with backups on, an Archidekt backup copy are made first, and the deletion is verified by reading the deck back. Owners only; never a tool |
+| `/decks/{id}/cover` (POST `card`) | Set the cover image to a card of the deck (its Scryfall id) or back to Archidekt's automatic pick (empty); snapshot first, checked by reading it back |
+| `/decks/{id}/tags` (POST `action=add name=` or `action=remove relation_id=`) | Add an Archidekt deck tag (reused if it exists, else created) or remove one; snapshot first, checked by reading it back |
+| `/decks/{id}/move` (POST `folder_id`) | Move the deck into one of the member's folders; checked by reading it back |
+| `/decks/{id}/delete` (GET, POST `name`) | Delete the deck after its exact name is typed; a gateway snapshot and, with backups on, an Archidekt backup copy are made first, and the deletion is checked by reading the deck back. Owners only; never a tool |
 | `/decks/{id}/clone` (POST) | A `clone` proposal for the deck |
 | `/decks/{id}/report` (POST) | Run a deck report and open it |
 | `/decks/{id}/export`, `export.archidekt.txt`, `export.txt`, `export.csv`, `export.json`, `export.arena.txt`, `export.dek`, `export.pdf` | The Export page and its downloads: Archidekt import text, plain text, an Archidekt-style CSV, JSON, and the one-way Arena, MTGO and PDF files ([EXPORT-IMPORT.md](EXPORT-IMPORT.md)) |

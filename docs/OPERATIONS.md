@@ -161,7 +161,7 @@ signed-in member a link that hands them that member's access.
 Fetching an address a client hands you is risky, so it's locked down:
 `https` on port 443 only, a hostname rather than an IP address, every DNS
 answer has to be a public address, and the connection goes to the address
-that was checked (the certificate is still verified against the hostname).
+that was checked (the certificate is still checked against the hostname).
 Redirects aren't followed, one five-second deadline covers the whole fetch
 (including waiting for a slot), documents over 64 KB are refused, at most
 eight fetches run at once (one per site), and an address that failed isn't tried again for a
@@ -537,8 +537,9 @@ Applying an edit or restore:
 
 Applying a new deck creates it (private unless the user asked otherwise),
 adds the cards and checks it the same way. A waiting proposal expires after
-`MTG_PROPOSAL_EXPIRY_DAYS` (7 days by default). The gateway deletes a deck only
-when its owner presses Delete on that proposal's review page. A proposal left in `applying` by a restart
+`MTG_PROPOSAL_EXPIRY_DAYS` (7 days by default). The gateway deletes a deck only on its
+owner's own press: on a deletion proposal's review page, or with Delete deck
+on the deck's page. A proposal left in `applying` by a restart
 mid-apply is marked `failed` at startup, with the snapshot and deck ids in
 its result; one somehow still `applying` six hours after it started is marked
 the same way by the regular clean-up.
@@ -981,7 +982,7 @@ For the SQL snippets on this page, put the query inside the
 
 | Table | What's in it |
 | --- | --- |
-| `proposals` | Each proposal: owner, kind (`edit`, `create_deck`, `restore`, `details`, `clone` or `collection`), deck (the new deck's id once a create is applied), change list, diff, state (`pending`, `applying`, `applied`, `failed`, `rejected`, `withdrawn`, `replaced`, `expired`; a waiting one counts as `expired` once its expiry time passes), result and timestamps |
+| `proposals` | Each proposal: owner, kind (`edit`, `create_deck`, `restore`, `details`, `clone`, `collection` or `action`), deck (the new deck's id once a create is applied), change list, diff, state (`pending`, `applying`, `applied`, `failed`, `rejected`, `withdrawn`, `replaced`, `expired`; a waiting one counts as `expired` once its expiry time passes), result and timestamps |
 | `snapshots` | The full deck as read from Archidekt just before a proposal was applied, plus `backup_deck_id` and `backup_url` for the private backup copy made in the user's Archidekt backup folder at the same moment. Users see theirs with `list_snapshots` and undo an edit with `propose_restore_snapshot`. `deck_json` is the raw deck |
 | `archidekt_links` | One row per user who linked Archidekt: Archidekt username, encrypted session, status and timestamps |
 | `reports` | Stored deck reports (`run_deck_report`, the "Run full test" button and `POST /api/v1/reports`): owner, deck, a fingerprint of the deck as read, the statistics, and the goldfish and validation results as JSON. The newest 200 per user are kept |
