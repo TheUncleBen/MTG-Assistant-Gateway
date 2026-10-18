@@ -1345,10 +1345,17 @@ def entering_deck(deck: Deck, recategorise: dict[int, list[str]]) -> dict[str, i
     return out
 
 
+def is_outside_category(deck: Deck, category: str) -> bool:
+    """Whether a row whose first category is this one sits outside the deck: one the deck does
+    not count (``Deck.categories_count``), or Maybeboard or Sideboard by name in any case (the
+    add refusal's test, ``_refuse_adds_written_otherwise``)."""
+    return not deck.categories_count([category]) or category.casefold() in ("maybeboard", "sideboard")
+
+
 def side_category_for(deck: Deck, ch: Change) -> str:
-    """The category a maybeboard add goes in: the change's own category when the deck excludes
-    it, else the deck's maybeboard category."""
-    if ch.category and ch.category in deck.excluded_categories():
+    """The category a maybeboard add goes in: the change's own category when a row under it sits
+    outside the deck, else the deck's maybeboard category."""
+    if ch.category and is_outside_category(deck, ch.category):
         return ch.category
     return deck.side_category()
 
@@ -1399,7 +1406,7 @@ def _refuse_adds_written_otherwise(deck: Deck, changes: list[Change], main_looku
                 )
             continue
         primary = cats[0] if cats else ""
-        if cats and (not deck.categories_count(cats) or primary.casefold() in ("maybeboard", "sideboard")):
+        if cats and is_outside_category(deck, primary):
             raise DeckError(
                 "invalid",
                 f"'{ch.card_name}': its first category, {primary}, is outside the deck, so the "

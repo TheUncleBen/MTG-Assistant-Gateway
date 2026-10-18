@@ -22,7 +22,7 @@ from .deckpage import (
     goldfish_page_html,
     precon_by_label,
 )
-from .decks import DeckError, current_client
+from .decks import DeckError, current_client, is_outside_category
 from .pages import (
     BROWSER_CLIENT_ID,
     _csrf,
@@ -133,6 +133,10 @@ def add_deck_tool_routes(
         for name, _cards in grouped:
             if name not in categories:
                 categories.append(name)
+        # categories a card added under them would sit outside the deck in (Maybeboard, Sideboard
+        # or another the deck does not count): such an add goes to the maybeboard or sideboard
+        # with that category, as decks.side_category_for writes it
+        outside = [c for c in categories if is_outside_category(deck, c)]
         prefill: list[dict[str, Any]] = []
         quick = (request.query_params.get("add") or "").strip()[:200]
         if quick:
@@ -173,6 +177,7 @@ def add_deck_tool_routes(
             "writesEnabled": s.writes_enabled,
             "maxChanges": 40,
             "sideCategory": deck.side_category(),
+            "outsideCategories": outside,
         }
         side_name = _esc(deck.side_category())
         body = (
@@ -218,7 +223,8 @@ def add_deck_tool_routes(
             "<button type='button' class='tchip on' data-cat='' data-zone='main' aria-pressed='true'>"
             "Auto</button>"
             + "".join(
-                f"<button type='button' class='tchip' data-cat='{_esc(c)}' data-zone='main' "
+                f"<button type='button' class='tchip' data-cat='{_esc(c)}' "
+                f"data-zone='{'side' if c in outside else 'main'}' "
                 f"aria-pressed='false' title='The {_esc(c)} category'>{_esc(c)}</button>"
                 # the side zone's own category has the zone chip below, not a second chip of the
                 # same name

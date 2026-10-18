@@ -953,6 +953,43 @@ async def test_a_new_card_added_to_the_commander_zone_is_written_there(stack: St
     assert rows == [["Commander"]], rows
 
 
+@pytest.mark.parametrize("category", ["Sideboard", "Considering"])
+async def test_a_side_add_keeps_its_own_category_outside_the_deck(stack: Stack, category: str) -> None:
+    """A card added to the maybeboard or sideboard under a category whose rows sit outside the
+    deck is written under that category, as the review shows, not under the deck's Maybeboard:
+    Sideboard by name (Archidekt counts it "included in deck" by default) and a category the deck
+    excludes. This is what the editor sends when a member picks such a category."""
+    h, ark = stack.h, stack.ark
+    deck = ark.decks[42]
+    deck["categories"] += [
+        {"name": "Maybeboard", "isPremier": False, "includedInDeck": False},
+        {"name": "Sideboard", "isPremier": False, "includedInDeck": True},
+        {"name": "Considering", "isPremier": False, "includedInDeck": False},
+    ]
+    token = await linked_user(stack)
+    await _set_mode(h, "manual")
+    change = {"action": "add", "card_name": "Arcane Signet", "zone": "side", "category": category}
+    p = structured(await call(h, token, "propose_deck_changes", {"deck_id": "42", "changes": [change]}))
+    assert p["ok"] is True, p
+    (row,) = [r for r in p["rows"] if r.get("name") == "Arcane Signet"]
+    assert row.get("category") == category and row.get("zone") == "side", row
+    b = Browser(h)
+    try:
+        await b.login()
+        r = await b.http.post(
+            f"/api/v1/proposals/{p['proposal_id']}/apply",
+            headers={"X-CSRF-Token": await b.csrf()},
+            json={"version": p["version"]},
+        )
+        assert r.status_code == 200 and r.json()["state"] == "applied", r.text
+    finally:
+        await b.aclose()
+    rows = [
+        c["categories"] for c in ark.decks[42]["cards"] if c["card"]["oracleCard"]["name"] == "Arcane Signet"
+    ]
+    assert rows == [[category]], rows
+
+
 async def test_a_raised_commander_with_another_row_says_the_rows_fold(stack: Stack) -> None:
     """Raising a commander that has a second row in the deck stays low risk, and the review says
     what the write does: the commander-zone row takes the new count and the other row goes."""

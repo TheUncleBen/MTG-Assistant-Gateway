@@ -274,3 +274,69 @@ def test_a_picture_that_fails_keeps_the_editor_rows_layout(server: Server, width
         assert page.evaluate("() => document.documentElement.scrollWidth") <= width
         assert errors == []
         browser.close()
+
+
+def test_a_category_outside_the_deck_adds_to_the_maybeboard_or_sideboard(server: Server) -> None:
+    """A card added under a category whose rows sit outside the deck (a chip, or the new card's
+    own category menu) goes to the maybeboard or sideboard with that category, so the save is not
+    refused as an add to the deck proper outside it."""
+    import json
+
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_path()
+    if exe == "missing":
+        pytest.skip("no Chromium available for Playwright")
+    server.ark.decks[42]["categories"] += [
+        {"name": "Maybeboard", "isPremier": False, "includedInDeck": False},
+        {"name": "Sideboard", "isPremier": False, "includedInDeck": True},
+        {"name": "Considering", "isPremier": False, "includedInDeck": False},
+        {"name": "Land", "isPremier": False, "includedInDeck": True},
+    ]
+    sid = _link(server)
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+        ctx = browser.new_context(viewport={"width": 1366, "height": 900})
+        ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
+        ctx.route(
+            re.compile(r"https://cards\.scryfall\.io/.*"),
+            lambda route: route.fulfill(status=200, content_type="image/png", body=PNG),
+        )
+        page = ctx.new_page()
+        errors: list[str] = []
+        page.on("pageerror", lambda e: errors.append(str(e)))
+        page.goto(f"{server.base}/decks/42/edit", wait_until="networkidle")
+        box = page.locator("#addname")
+        # a chip for a category outside the deck adds there
+        page.locator(".targets .tchip", has_text="Considering").first.click()
+        box.press_sequentially("oathsw", delay=30)
+        page.locator("[role=option]").first.wait_for(timeout=3000)
+        box.press("Enter")
+        assert "to Considering" in page.locator(".addstatus").inner_text()
+        new = page.locator(".erow.new", has_text="Oathsworn Giant")
+        new.wait_for(timeout=3000)
+        assert "new considering card" in new.inner_text().lower(), new.inner_text()
+        # a new card added to the deck, then given Sideboard in its own menu, moves there too
+        page.locator(".targets .tchip", has_text="Auto").click()
+        box.press_sequentially("apocalypse hy", delay=30)
+        page.locator("[role=option]").first.wait_for(timeout=3000)
+        box.press("Enter")
+        hydra = page.locator(".erow.new", has_text="Apocalypse Hydra")
+        hydra.wait_for(timeout=3000)
+        hydra.locator(".sel select").evaluate(
+            "s => { s.value = 'Sideboard'; s.dispatchEvent(new Event('change', {bubbles: true})); }"
+        )
+        hydra = page.locator(".erow.new", has_text="Apocalypse Hydra")
+        assert "new sideboard card" in hydra.inner_text().lower(), hydra.inner_text()
+        # what the save sends: both adds to the side zone with their categories, and no refusal
+        with page.expect_response(lambda r: r.url.endswith("/api/v1/proposals")) as resp:
+            page.locator(".editbar button.review").click()
+        sent = json.loads(resp.value.request.post_data or "{}")
+        adds = {c["card_name"]: c for c in sent["changes"] if c["action"] == "add"}
+        got = {name: (adds[name].get("zone"), adds[name].get("category")) for name in adds}
+        want = {"Oathsworn Giant": ("side", "Considering"), "Apocalypse Hydra": ("side", "Sideboard")}
+        assert got == want, got
+        answer = resp.value.text()
+        assert "outside the deck" not in answer, answer
+        assert errors == []
+        browser.close()

@@ -116,8 +116,11 @@
       })
       .catch(function () { /* offline: the row keeps its name only, as before */ });
   }
+  // a category whose rows sit outside the deck (Maybeboard, Sideboard...): a card added under it
+  // goes to the maybeboard or sideboard with that category, never to the deck proper
+  function outside(category) { return !!category && (cfg.outsideCategories || []).indexOf(category) >= 0; }
   function addCard(name, qty, category, printing, finish, zone) {
-    zone = zone === "side" ? "side" : "main";
+    zone = zone === "side" || outside(category) ? "side" : "main";
     var key = keyFor(name, zone);
     if (rows[key]) {
       rows[key].after = Math.min(99, rows[key].after + qty);
@@ -271,7 +274,7 @@
 
   var ACTION_LABELS = { add: "Add", remove: "Remove", set_quantity: "Count", set_commander: "Commander", set_category: "Category", set_finish: "Finish", set_printing: "Printing" };
   function describe(ch) {
-    var side = ch.zone === "side" ? " · " + (cfg.sideCategory || "maybeboard").toLowerCase() : "";
+    var side = ch.zone === "side" ? " · " + ((ch.action === "add" && ch.category) || cfg.sideCategory || "maybeboard").toLowerCase() : "";
     switch (ch.action) {
       case "add": return "+" + ch.quantity + (ch.set_code ? " (" + ch.set_code.toUpperCase() + " #" + ch.collector_number + ")" : "") + (ch.foil ? " foil" : "") + side;
       case "remove": return "remove" + side;
@@ -321,10 +324,17 @@
         a.image ? el("img", { class: "thumb", src: a.image, alt: "", loading: "lazy" }) : el("span", { class: "thumb ph" }, [svg("plus")]),
         el("span", { class: "main" }, [
           nameEl,
-          el("span", { class: "meta", text: [a.type || "", a.set_code ? a.set_code.toUpperCase() + " #" + a.collector_number : "", a.foil ? "foil" : "", a.zone === "side" ? "new " + (cfg.sideCategory || "maybeboard").toLowerCase() + " card" : "new card"].filter(Boolean).join(" · ") })
+          el("span", { class: "meta", text: [a.type || "", a.set_code ? a.set_code.toUpperCase() + " #" + a.collector_number : "", a.foil ? "foil" : "", a.zone === "side" ? "new " + (a.category || cfg.sideCategory || "maybeboard").toLowerCase() + " card" : "new card"].filter(Boolean).join(" · ") })
         ]),
         qtyControls(function () { return a.quantity; }, function (v) { mutate(function () { if (v === 0) delete added[k]; else a.quantity = v; }); }, a.name),
-        a.zone === "side" ? el("span", { class: "s muted small", text: cfg.sideCategory || "Maybeboard" }) : categorySelect(a.category || "", function (v) { mutate(function () { a.category = v || null; }); }, true, false, a.name),
+        a.zone === "side" ? el("span", { class: "s muted small", text: a.category || cfg.sideCategory || "Maybeboard" }) : categorySelect(a.category || "", function (v) {
+          mutate(function () {
+            if (!outside(v)) { a.category = v || null; return; }
+            // picked a category outside the deck: the new card moves to the maybeboard or sideboard
+            delete added[k];
+            addCard(a.name, a.quantity, v, null, null, "side");
+          });
+        }, true, false, a.name),
         el("button", { type: "button", class: "mini remove", "aria-label": "Remove " + a.name, title: "Remove", onclick: function () { mutate(function () { delete added[k]; }); } }, [svg("x")])
       ]));
     });
@@ -469,7 +479,7 @@
     var zone = zoneIn.value === "side" ? "side" : "main";
     var finish = foilIn && foilIn.checked ? "foil" : null;
     mutate(function () { addCard(parts.name, parts.qty, catIn.value || null, printing || null, finish, zone); });
-    var where = zone === "side" ? cfg.sideCategory || "Maybeboard" : (catIn.value || "the deck");
+    var where = zone === "side" || outside(catIn.value) ? catIn.value || cfg.sideCategory || "Maybeboard" : (catIn.value || "the deck");
     var print = printing && printing.set_code ? " (" + printing.set_code.toUpperCase() + " #" + printing.collector_number + ")" : "";
     if (addStatus) addStatus.textContent = "Added " + parts.qty + " × " + parts.name + print + " to " + where + ". Type the next card, or save.";
     input.value = "";
