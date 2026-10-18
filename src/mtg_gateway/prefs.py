@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import re
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlsplit
 
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
@@ -123,9 +124,32 @@ def card_size(db: Database, sub: str | None) -> str:
 
 def from_this_site(request: Request) -> bool:
     """Whether the browser says the request came from this gateway's own pages, or was typed or
-    bookmarked (``Sec-Fetch-Site``; a browser that doesn't send it counts as this site). A link on
-    another site still opens the page, but changes nothing kept on the account."""
-    return request.headers.get("sec-fetch-site", "none") in ("none", "same-origin")
+    bookmarked (``Sec-Fetch-Site``). A browser that doesn't send it counts as this site unless its
+    ``Origin`` or ``Referer`` names another one. A link on another site still opens the page, but
+    changes nothing kept on the account."""
+    site = request.headers.get("sec-fetch-site")
+    if site is not None:
+        return site in ("none", "same-origin")
+    here = _origin(_public_url(request))
+    for header in ("origin", "referer"):
+        value = request.headers.get(header)
+        if value and value != "null" and _origin(value) != here:
+            return False
+    return True
+
+
+def _public_url(request: Request) -> str:
+    gateway = getattr(request.app.state, "gateway", None)
+    url = getattr(getattr(gateway, "settings", None), "public_url", None)
+    return url if isinstance(url, str) and url else str(request.base_url)
+
+
+def _origin(url: str) -> str:
+    """``scheme://host[:port]`` of a URL, lowercased; empty for one without a host."""
+    parts = urlsplit(url)
+    if not parts.scheme or not parts.netloc:
+        return ""
+    return f"{parts.scheme}://{parts.netloc}".lower()
 
 
 def view_choice(

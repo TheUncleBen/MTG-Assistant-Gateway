@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any
 from starlette.requests import Request
 from starlette.responses import RedirectResponse, Response
 
+from . import prefs
 from .companion import DECK_CSP
 from .deckpage import covers_for, decks_unreadable_html, image_url, reread_href
 from .decks import DeckError
@@ -127,7 +128,8 @@ def add_home_routes(server: MCPServer, state: AppState) -> None:
             return login_redirect("/")
         # Try again on the notice that the deck list couldn't be read: read it again
         if request.query_params.get("reread"):
-            state.decks.reread_deck_list(sub)
+            if prefs.from_this_site(request):  # a link on another site only shows the page
+                state.decks.reread_deck_list(sub)
             return RedirectResponse("/", 303)
         user = state.db.get_user(sub) or {}
         admin = bool(s.admin_group and s.admin_group in (user.get("groups") or []))
