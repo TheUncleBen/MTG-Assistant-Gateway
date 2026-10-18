@@ -3053,6 +3053,25 @@ class DeckService:
             return
         self.db.edit_proposal_result(proposal_id, sub, lambda r: {**(r or {}), NO_BACKUP_KEY: True})
 
+    def keep_backup_box(self, sub: str, proposal_id: str, version: int | None, *, keep: bool) -> None:
+        """Record the backup box of a press on a member's own save that still waits at ``version``
+        (the deck editor's Save anyway): unticked marks it as keep_no_backup does, ticked takes
+        the mark off."""
+        row = self.db.get_proposal(proposal_id, sub)
+        if (
+            row is None
+            or row.get("created_by_client") != BROWSER_CLIENT
+            or row["state"] != "pending"
+            or (version is not None and int(row.get("version") or 1) != int(version))
+        ):
+            return
+
+        def mark(r: Any) -> dict[str, Any]:
+            out = {k: v for k, v in (r or {}).items() if k != NO_BACKUP_KEY}
+            return out if keep else {**out, NO_BACKUP_KEY: True}
+
+        self.db.edit_proposal_result(proposal_id, sub, mark)
+
     def describe(self, sub: str, proposal_id: str) -> dict[str, Any]:
         # A note closed without settling its links (a restart, a cancel, expiry) holds its
         # dependents before anything about them is shown or decided.

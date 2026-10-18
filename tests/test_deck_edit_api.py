@@ -579,6 +579,74 @@ async def test_an_own_save_stopped_and_waiting_again_keeps_its_choice(stack: Sta
         await b.aclose()
 
 
+@pytest.mark.parametrize("stop", ["writes off", "rate limit"])
+@pytest.mark.parametrize("first_box", [False, True])
+async def test_the_box_at_a_stopped_save_anyway_is_the_saves_choice(  # noqa: F811
+    stack: Stack, monkeypatch: pytest.MonkeyPatch, stop: str, first_box: bool
+) -> None:
+    """The member changes the backup box between the editor's first save and its Save anyway,
+    and that press is stopped (writes off, or Archidekt's rate limit), so the save waits. Applied
+    later with no box sent, it follows the box at the press, not the one at the first save."""
+    import dataclasses
+
+    import httpx
+
+    from mtg_gateway.archidekt import ArchidektClient
+
+    async def no_wait(self, seconds: float) -> None:
+        return None
+
+    monkeypatch.setattr(ArchidektClient, "_wait_out", no_wait)
+    b = await linked(stack)
+    try:
+        decks = stack.h.app.state.gateway.decks
+        deck = stack.ark.decks[42]
+        names = [c["card"]["oracleCard"]["name"] for c in deck["cards"] if c["categories"] != ["Commander"]]
+        body = {
+            "kind": "edit",
+            "deck_id": "42",
+            "changes": [{"action": "remove", "card_name": n} for n in names[:9]],
+            "apply": True,
+            "archidekt_backup": first_box,
+        }
+        d = (await api(b, "POST", "/api/v1/proposals", body)).json()
+        assert d["needs_confirm"] is True, d
+        pid, pressed = d["proposal_id"], not first_box
+        orig = stack.ark.transport.handler
+        if stop == "writes off":
+            decks.settings = dataclasses.replace(decks.settings, writes_enabled=False)
+        else:
+
+            def slow(req: httpx.Request) -> httpx.Response:
+                if req.method == "PATCH" and "modifyCards" in req.url.path:
+                    return httpx.Response(429, json={"detail": "slow down"}, headers={"Retry-After": "0"})
+                return orig(req)
+
+            stack.ark.transport.handler = slow
+        r = await api(
+            b,
+            "POST",
+            f"/api/v1/proposals/{pid}/apply",
+            {"version": d["version"], "archidekt_backup": pressed},
+        )
+        assert r.status_code >= 400, r.text
+        waiting = stack.h.db.get_proposal(pid, "user-1")
+        assert waiting["state"] == "pending", waiting
+        if not pressed:  # stored as a true boolean, also after a stop replaced the result
+            assert waiting["result"]["no_backup_copy"] is True, waiting["result"]
+        decks.settings = dataclasses.replace(decks.settings, writes_enabled=True)
+        stack.ark.transport.handler = orig
+        r = await api(b, "POST", f"/api/v1/proposals/{pid}/apply", {"version": waiting["version"]})
+        a = r.json()
+        assert r.status_code == 200 and a["state"] == "applied", r.text
+        if pressed:
+            assert a["result"].get("backup_url"), a["result"]
+        else:
+            assert a["result"].get("archidekt_backup") == "skipped" and not a["result"].get("backup_url"), a
+    finally:
+        await b.aclose()
+
+
 async def test_big_removal_asks_first_then_the_proposal_id_applies_it(stack: Stack) -> None:  # noqa: F811
     b = await linked(stack)
     try:

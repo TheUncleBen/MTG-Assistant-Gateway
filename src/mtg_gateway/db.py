@@ -2681,7 +2681,8 @@ class Database:
                 "applied_at = CASE WHEN ? = 'applying' THEN applied_at ELSE ? END, "
                 "snapshot_id = COALESCE(?, snapshot_id), "
                 "result_json = CASE WHEN ? = 'pending' AND ? IS NOT NULL THEN json_patch(?, json_object("
-                "'no_backup_copy', json_extract(result_json, '$.no_backup_copy'))) "
+                "'no_backup_copy', CASE WHEN json_extract(result_json, '$.no_backup_copy') "
+                "THEN json('true') END)) "
                 "ELSE COALESCE(?, result_json) END, deck_id = COALESCE(?, deck_id) WHERE id = ?",
                 (
                     state,

@@ -522,6 +522,10 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
                 who.sub, row
             )
             backup = data["archidekt_backup"] if own else None
+            if backup is not None:
+                # the box at this press is the save's choice from now on, also when the apply
+                # below is refused or stopped and the save waits (writes off, a rate limit)
+                decks.keep_backup_box(who.sub, pid, version, keep=backup)
         return ok(await decks.apply(who.sub, pid, via=via, version=version, archidekt_backup=backup))
 
     @route("/proposals/{pid}/reject", "POST", write=True)
