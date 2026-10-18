@@ -13,23 +13,32 @@ The example settings files now list every variable the stack files read, each ma
 optional, and the stack files now pass every setting on the Settings page to the gateway.
 
 ### Upgrade notes
-- From 0.7.31: the stack file and the Compose file changed, so take the new ones as the update
-  steps describe ([docs/UPGRADING.md](docs/UPGRADING.md)). Your env file keeps working as it is.
-  If your variables (in Portainer, in `mtg.env`, or in Compose's `.env`) already set one of the
-  settings listed under Fixed below, that value never reached the gateway before. Now it does,
-  and it locks the setting on the Settings page; remove it from your variables to keep managing
-  that setting on the page.
+- From 0.7.31: the stack file and the Compose file changed; take the new ones as the update
+  steps describe ([docs/UPGRADING.md](docs/UPGRADING.md#0732)). They now pass 27 more variables
+  themselves: the 21 settings under Fixed below, `MTG_ANDROID_PACKAGE`, `MTG_ANDROID_ASSETLINKS`,
+  `MTG_PLUGIN_DIR`, `MTG_APP_DIR`, `FORGE_MAX_METASPACE` and `FORGE_OOM_SCORE_ADJ` (the Compose
+  file also passes `MTG_ARCHIDEKT_BASE`). If you added a line for any of them under
+  `environment:` in your old file, don't copy that line into the new one. Put its value in your
+  variables (Portainer's, `mtg.env` or `.env`) instead. Any of the 21 settings your variables
+  already set now reaches the gateway and locks that setting on the Settings page. Remove it from
+  your variables to manage the setting on the page.
+- If you turned on the optional `mtg_authentik_api_token` lines, turn them on again in the new
+  file ([docs/UPGRADING.md](docs/UPGRADING.md#0732)).
 
 ### Changed
 - `deploy/stack.env.example` and `deploy/compose/.env.example` list every variable their stack
   file reads (the Compose example also lists the proxy overrides' variables), each with the value
-  used when it isn't set. Each note says whether the variable is required or optional, and for an
+  used when it isn't set (`MTG_WRITES_ENABLED=true` is the one exception, and its note says so).
+  Each note says whether the variable is required or optional, and for an
   optional one, whether it is on the Settings page when the file doesn't set it. Setting one of
   those in the file locks it there. Newly listed, all commented out: `MTG_NTFY_URL`,
-  `MTG_NTFY_TOKEN_FILE`, the settings below, `MTG_ANDROID_PACKAGE`, `MTG_ANDROID_ASSETLINKS`,
+  `MTG_NTFY_TOKEN_FILE`, the 21 settings under Fixed, `MTG_ANDROID_PACKAGE`, `MTG_ANDROID_ASSETLINKS`,
   `MTG_PLUGIN_DIR`, `MTG_APP_DIR`, `FORGE_MAX_METASPACE` and `FORGE_OOM_SCORE_ADJ`. The stack
-  files now pass the last six too, so they can be set from the environment without editing the
-  stack file.
+  files now pass the last six too, so they can be set from your variables without editing the
+  stack file. The Compose file now passes `MTG_ARCHIDEKT_BASE` as the stack file does, and the
+  Compose example lists it. In the Swarm example, `FORGE_XMX`, `FORGE_MEMORY_LIMIT`, `FORGE_CPUS`,
+  `FORGE_GAME_SECONDS` and `FORGE_MAX_PARALLEL` are now commented out, as in the Compose example;
+  the stack file uses the same values, so nothing changes.
 - The Forge image notes in the examples and the environment reference now say that the stack file
   names one exact Forge version, which changes only when you deploy a newer stack file, and that
   setting `FORGE_TAG` pins Forge on purpose. `FORGE_XMX` is described as each Forge game's Java
@@ -41,17 +50,17 @@ optional, and the stack files now pass every setting on the Settings page to the
   that edit.
 - The notifications section of [docs/DEPLOY.md](docs/DEPLOY.md) no longer names ntfy's per-visitor
   limits as if they were settings. It says which values there are fixed and that
-  `NTFY_MEMORY_LIMIT` is the one setting.
+  `NTFY_MEMORY_LIMIT` is the one limit you can set.
 
 ### Fixed
-- 21 settings on the Settings page couldn't be set from the environment, although the guides said
-  they could: the stack files didn't pass them to the gateway, so a value in your environment
-  did nothing. They are the approvals' big-edit rows and proposal expiry
+- 21 settings on the Settings page couldn't be set from your variables alone. The stack files
+  didn't pass them to the gateway, so a value set only in your variables did nothing until you
+  also added a line for it to the stack file. They are the approvals' big-edit rows and proposal expiry
   (`MTG_AUTO_BIG_EDIT_ROWS`, `MTG_PROPOSAL_EXPIRY_DAYS`), the backup copies kept, the backup
   box's default and the restore points per deck (`MTG_ARCHIDEKT_BACKUP_COPIES`,
   `MTG_ARCHIDEKT_BACKUP_BOX_DEFAULT`, `MTG_SNAPSHOTS_PER_DECK`), Forge games at once
   (`MTG_FORGE_PARALLEL_GAMES`) and the 15 card scanning settings (`MTG_SCAN_*`). Both stack files
-  now pass them, empty unless your environment sets them.
+  now pass them, empty unless your variables set them.
 
 ## [0.7.31] - 2026-10-18
 
