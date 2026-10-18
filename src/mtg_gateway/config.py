@@ -340,6 +340,9 @@ class Settings:
     # address (empty = the issuer's).
     authentik_api_token: str | None = field(default=None, repr=False)
     authentik_api_token_problem: str | None = None
+    # True when the token file named is not there at all, as when the stack's secret lines are
+    # still commented out (the admin page then names that cause).
+    authentik_api_token_missing: bool = False
     authentik_api_url: str | None = None
     # Watchlists and price history (prices.py), off unless MTG_WATCHLISTS_ENABLED is true: off, the
     # Watchlist page, its links, the card viewer's price buttons, the five watch tools and the daily
@@ -409,10 +412,12 @@ def load_settings() -> Settings:
     # instead of stopping the gateway.
     sweep_token: str | None = None
     sweep_problem: str | None = None
+    sweep_missing = False
     try:
         sweep_token = _read_secret("MTG_AUTHENTIK_API_TOKEN_FILE", required=False)
     except ConfigError as exc:
         sweep_problem = str(exc)
+        sweep_missing = isinstance(exc.__cause__, FileNotFoundError)
     # Optional, like the sweep token: the ntfy access token (notify.py). Never logged.
     ntfy_token = _read_secret("MTG_NTFY_TOKEN_FILE", required=False)
     if len(session_secret) < 32:
@@ -537,6 +542,7 @@ def load_settings() -> Settings:
         chatgpt_name=_chatgpt_name_env("MTG_CHATGPT_NAME"),
         authentik_api_token=sweep_token,
         authentik_api_token_problem=sweep_problem,
+        authentik_api_token_missing=sweep_missing,
         authentik_api_url=_authentik_api_url(oidc_issuer),
         watchlists_enabled=_bool_env("MTG_WATCHLISTS_ENABLED", False),
         watch_max_cards=_int_env("MTG_WATCH_MAX_CARDS", 200, lo=0, hi=5000),

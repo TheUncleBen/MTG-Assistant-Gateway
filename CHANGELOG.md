@@ -48,6 +48,9 @@ optional, and the stack files now pass every setting on the Settings page to the
   `mtg_authentik_api_token` lines commented out again, so the edit that turns them on has to be
   made again on each such update. They also say that the Repository build method can't keep
   that edit.
+- When the Authentik API token file named in `MTG_AUTHENTIK_API_TOKEN_FILE` isn't there at all,
+  the admin page's removed-member clean-up line now names the likely cause: the secret isn't
+  attached to the gateway because its three lines in the stack file are still commented out.
 - The notifications section of [docs/DEPLOY.md](docs/DEPLOY.md) no longer names ntfy's per-visitor
   limits as if they were settings. It says which values there are fixed and that
   `NTFY_MEMORY_LIMIT` is the one limit you can set.
