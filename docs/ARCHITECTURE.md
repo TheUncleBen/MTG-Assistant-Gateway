@@ -275,7 +275,7 @@ For the exact devices and plans tested, see
   removes, quantity, category, finish, printing, color tag or custom mana
   value changes of at most four copies each, never a change to which cards
   are the commanders and never fewer copies of a commander that has another
-  row; or a
+  row in the deck; or a
   clone) or `auto` (the assistant may apply deck and collection changes,
   except those Full auto still leaves to the member, `modes.auto_waits`, and
   those that wait in every mode, `DeckService.press_reason` and
