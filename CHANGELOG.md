@@ -10,9 +10,9 @@ with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 ## [0.7.31] - 2026-10-18
 
 A documentation release: the example settings files are reorganised, and the guides are checked
-against the code and corrected. Apart from some wording in the Android app, the in-app Guide, the Account
-page and the admin page, and the example reverse-proxy files, nothing changes in how the gateway or the app
-works.
+against the code and corrected. Apart from some wording in the Android app, the in-app Guide, the
+Account page and the admin page, and the example reverse-proxy files, nothing changes in how the
+gateway or the app works.
 
 ### Upgrade notes
 - From 0.7.30: none; update as usual ([docs/UPGRADING.md](docs/UPGRADING.md)). Optional: if your
@@ -40,7 +40,8 @@ works.
   version lines are commented out, so a copied file follows the stack file's own Forge version.
   Both examples now also list, commented out, the other settings the stack files read, such as
   the sign-in scopes, the ntfy image and memory, and Forge's limit on games per request. Only the
-  ntfy address and token file stay out, because the stack sets them itself. If you copied an earlier example, your file keeps working as it is.
+  ntfy address and token file stay out, because the stack sets them itself. If you copied an
+  earlier example, your file keeps working as it is.
 - The images are public, and the guides now say so: no registry login, GitHub token or
   `--with-registry-auth` is needed to pull them. Step 5 of the Swarm guide is now "Images".
 - The example reverse-proxy files: the nginx and Caddy examples limit request bodies to 4 MB, as
