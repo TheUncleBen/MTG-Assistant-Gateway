@@ -49,6 +49,8 @@ owner's own checks with this gateway, and is marked:
 - **not tested**: not tried, and no official page we could read says either
   way.
 
+Where a line is our own reasoning from one of those, it says so.
+
 Vendors rename menus and change plans all the time, so if a label doesn't
 match, look for the closest thing. Not every client and device has been
 tested end to end with this gateway yet; the owner keeps those results.
@@ -260,8 +262,8 @@ never applied by an assistant: each one waits for your own press, in every mode,
 it covers only your account, your decks and the apps you connected, and
 only you can change it, in your browser. In either auto mode the assistant
 applies what the mode allows with `apply_proposal` and tells you; the card
-then shows the change without buttons. Every change still keeps a snapshot
-you can restore from the History page. The cost: an assistant can be
+then shows the change without buttons. Every change to one of your decks
+still keeps a snapshot you can restore from the History page. The cost: an assistant can be
 tricked by text it reads into proposing a change you did not ask for, and
 in an auto mode that change lands without your press.
 

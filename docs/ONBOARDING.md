@@ -185,8 +185,8 @@ so:
      bookmarks, follows, comments, new folders and collaborator changes) and
      deleting a deck are never applied by an assistant: each one waits for your own press, in every mode, on the card in the chat or on its review page (deleting a deck, and an edit of a comment that has formatting: on the review page only). Be aware that an assistant can be tricked by text it
      reads into proposing a change you did not ask for; in an auto mode
-     that change lands without your press. Every change keeps a snapshot
-     you can restore from the History page.
+     that change lands without your press. Every change to one of your decks
+     keeps a snapshot you can restore from the History page.
 
    Either way, for an edit the gateway first checks the change still fits
    the deck as it is now, saves a copy of it (a snapshot), and puts a private
