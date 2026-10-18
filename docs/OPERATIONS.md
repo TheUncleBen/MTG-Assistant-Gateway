@@ -318,6 +318,10 @@ not in your backups.
   Everyone then reconnects their assistant, signs in to `/account` again and
   relinks Archidekt there.
 
+  A backup from before 0.7.30 has no marks on the members' notification
+  topics, so at the next start every member who had a topic gets a new one
+  and their phones have to connect again, as after **Disconnect my phones**.
+
 ## Rotating secrets
 
 Swarm secrets can't be edited. To rotate one, create a new secret under a
@@ -652,7 +656,7 @@ on what the review page would show, not on what the assistant says:
 | Tier | Proposals |
 |---|---|
 | Low | A small edit to an existing deck or to your collection: at most 5 card rows, each a card added or removed, or a new quantity, category, finish, printing, color tag or custom mana value, no more than 4 copies a row and never the commander; and a private copy of a deck (a clone), which changes nothing that exists. (The row limit is `MTG_AUTO_APPLY_MAX_ROWS`, default 5.) |
-| High | Everything else: more rows than that, a commander change, a new deck, restoring a snapshot, and the deck's details (name, format, bracket, description, visibility, folder, tags and cover). A commander change is any change to the deck's commander zone (Archidekt's commander categories, whatever they are named): a card moved into or out of it, the commander removed, or a card added to it. It waits for the member's press in every mode. |
+| High | Everything else: more rows than that, a commander change, a new deck, restoring a snapshot, and the deck's details (name, format, bracket, description, visibility, folder, tags and cover). A commander change is a change to which cards are in the deck's commander zone (Archidekt's commander categories, whatever they are named): a card moved into or out of it, the commander removed, or a new card added to it. It waits for the member's press in every mode. So does a lowered count on a commander that has another row of the same card in the deck. Another copy, printing or finish of a commander already there is not a commander change. |
 | Consent, destructive | Actions on your Archidekt account (likes, votes, bookmarks, follows, comments, new folders and collaborator changes) and deleting a deck are never applied by an assistant: each one waits for your own press, in every mode, on the card in the chat or on its review page (deleting a deck, and an edit of a comment that has formatting: on the review page only). |
 
 Every proposal result carries `approval_mode`, `risk`, `risk_reason` and
