@@ -501,12 +501,33 @@ def commander_stays_text(stay: dict[str, Any]) -> str:
     if stay.get("zone") == "side":  # rows outside the deck proper fold among themselves
         return (
             f"{stay.get('name')} stays in the commander zone, now with {copies}. "
-            "Its other rows in the maybeboard and sideboard are removed."
+            "Its other rows in the maybeboard or sideboard are removed."
         )
     return (
         f"{stay.get('name')} stays in the commander zone, now with {copies}. "
         "Its other rows in the deck are removed."
     )
+
+
+def commander_moved_text(moved: dict[str, Any]) -> str:
+    """The commander row's text for a row in, or moved into or out of, the commander zone whose
+    categories change while the commanders stay."""
+    if moved.get("added"):
+        return (
+            f"This adds {moved.get('name')} with a commander-zone category ({moved.get('after')}), "
+            "so it counts as a commander change."
+        )
+    return (
+        f"{moved.get('name')}'s categories change from {moved.get('before')} to {moved.get('after')}. "
+        "One of them is the commander zone, so this counts as a commander change."
+    )
+
+
+def commander_row_texts(r: dict[str, Any]) -> list[str]:
+    """The texts of a commander row that keeps the commanders (``stays``, ``moved``)."""
+    stays = r.get("stays") if isinstance(r.get("stays"), list) else []
+    moved = r.get("moved") if isinstance(r.get("moved"), list) else []
+    return [commander_stays_text(x) for x in stays] + [commander_moved_text(x) for x in moved]
 
 
 def _row(kind: str, **fields: Any) -> dict[str, Any]:
@@ -572,6 +593,8 @@ def row_line(r: dict[str, Any]) -> str:
     if kind == "remove":
         return f"-{r['qty']} {label}{side}"
     if kind == "change":
+        if r.get("fold"):  # a commander's rows fold into its commander-zone row
+            return f"{r['before']} -> {r['after']} {label}{side}. {commander_stays_text(r['fold'])}"
         return f"{r['before']} -> {r['after']} {label}{side}"
     if kind == "category":
         line = f"{r['name']}: category {r['before']} -> {r['after']}"
@@ -591,8 +614,8 @@ def row_line(r: dict[str, Any]) -> str:
     if kind == "clone":
         return f"Clone '{r['source']}' ({r['cards']} cards) as '{r['name']}'"
     if kind == "commander":
-        if r.get("stays"):
-            return " ".join(commander_stays_text(x) for x in r["stays"])
+        if r.get("stays") or r.get("moved"):
+            return " ".join(commander_row_texts(r))
         return f"Commander: {r['before']} -> {r['after']}"
     if kind == "new_deck":
         visibility = "private" if r.get("private") else "public"
@@ -1435,55 +1458,115 @@ def plan_zones(
     # removed or a card added under Commander changes the commanders as well, so the whole list's
     # commanders before and after are compared and the difference gets a commander row too.
     if not any(r.get("kind") == "commander" for r in lines):
-        was, now, unsure = _commanders_before_after(
+        was, now, unsure, moved, folds = _commanders_before_after(
             deck, changes, cats_want, {"main": after, "side": after_side}
         )
         if [n.lower() for n in was] != [n.lower() for n in now]:
             lines.append(
                 _row("commander", before=", ".join(was) or "(none)", after=", ".join(now) or "(none)")
             )
-        elif unsure:
-            # the commanders stay: what changes is the card's other rows (see build_payload)
-            lines.append(_row("commander", before=", ".join(was), after=", ".join(now), stays=unsure))
+        elif unsure or moved:
+            # the commanders stay: what changes is the card's other rows (see build_payload), or
+            # the categories of a row in the commander zone, which counts as a commander change
+            lines.append(
+                _row(
+                    "commander",
+                    before=", ".join(was),
+                    after=", ".join(now),
+                    stays=unsure or None,
+                    moved=moved or None,
+                )
+            )
+        # A raised commander with other rows in the same zone folds them into its commander-zone
+        # row as well; that is no commander change, but the review says what happens to the rows.
+        for fold in folds:
+            for r in lines:
+                if (
+                    r.get("kind") == "change"
+                    and str(r.get("name", "")).lower() == fold["name"].lower()
+                    and (r.get("zone") or "main") == fold["zone"]
+                ):
+                    r["fold"] = fold
     return before, after, lines, before_side, after_side
 
 
 def _commanders_before_after(
     deck: Deck, changes: list[Change], cats_want: dict[int, list[str]], after: dict[str, dict[str, int]]
-) -> tuple[list[str], list[str], list[dict[str, Any]]]:
-    """The deck's commanders (cards with a row in its commander zone: every category the deck
-    marks premier, plus "Commander", ``Deck.premier_keys``, compared without case) now and once
-    ``changes`` are applied: rows ``cats_want`` (``category_plan_rows``) moves into or out of that
-    zone, cards whose copies all go (``after``, per zone), and adds that make a row in it.
+) -> tuple[list[str], list[str], list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+    """The deck's commanders now and once ``changes`` are applied: cards with a row that is in
+    the deck (``Deck.categories_count``: its primary category is not excluded) and in its
+    commander zone (every category the deck marks premier, plus "Commander",
+    ``Deck.premier_keys``, compared without case). The changes are the rows ``cats_want``
+    (``category_plan_rows``) gives new categories, cards whose copies all go (``after``, per
+    zone), and adds.
 
     The third value lists each card with a row in the commander zone and other rows in the same
     zone that loses copies (``name``, ``qty``, its copies after, and ``zone``): ``build_payload`` removes its
     other rows and keeps that many in its commander-zone row (``_rows_kept_first``), but such a
-    change always gets a commander row, so the member sees it whatever the rows do."""
+    change always gets a commander row, so the member sees it whatever the rows do. The fifth
+    lists the same for a card whose copies go up, which is no commander change.
+
+    The fourth lists every row with a commander-zone category before or after whose categories
+    change (``name``, ``before`` and ``after`` categories), and every add with a commander-zone
+    category that makes no commander (``added``): any of those counts as a commander change
+    too, even when the commanders' names stay the same."""
     premier = deck.premier_keys()
+
+    def commander(categories: Any) -> bool:
+        cats = [c for c in categories or () if isinstance(c, str)]
+        # a primary Maybeboard or Sideboard is outside the deck even on a deck that has not
+        # marked that category yet (a new one is excluded when Archidekt makes it)
+        primary_out = bool(cats) and cats[0].casefold() in ("maybeboard", "sideboard")
+        return _in_premier(premier, cats) and deck.categories_count(cats) and not primary_out
+
     was: dict[str, str] = {}
     now: dict[str, str] = {}
     unsure: list[dict[str, Any]] = []
+    moved: list[dict[str, Any]] = []
+    folds: list[dict[str, Any]] = []
     for zone in ZONES:
         left = {n.lower() for n, q in after[zone].items() if q > 0}
         rows: dict[str, list[Any]] = {}
         for c in deck.cards_in(zone):
             rows.setdefault(c.name.lower(), []).append(c)
-            if _in_premier(premier, c.categories):
+            if commander(c.categories):
                 was[c.name.lower()] = c.name
             cats = cats_want.get(c.relation_id, c.categories) if c.relation_id is not None else c.categories
-            if _in_premier(premier, cats) and c.name.lower() in left:
+            if commander(cats) and c.name.lower() in left:
                 now[c.name.lower()] = c.name
+            if list(cats or []) != list(c.categories or []) and (
+                _in_premier(premier, c.categories) or _in_premier(premier, cats)
+            ):
+                moved.append(
+                    {
+                        "name": c.name,
+                        "before": ", ".join(c.categories or []) or "(none)",
+                        "after": ", ".join(cats or []) or "(none)",
+                    }
+                )
         counts = {n.lower(): q for n, q in after[zone].items()}
         for key, cards in rows.items():
             if len(cards) > 1 and any(_in_premier(premier, c.categories) for c in cards):
                 total = sum(c.quantity for c in cards)
+                stay = {"name": cards[0].name, "qty": counts.get(key, total), "zone": zone}
                 if counts.get(key, total) < total:
-                    unsure.append({"name": cards[0].name, "qty": counts.get(key, total), "zone": zone})
+                    unsure.append(stay)
+                elif counts.get(key, total) > total:
+                    folds.append(stay)
     for ch in changes:
-        if ch.action == "add" and _in_premier(premier, _all_categories([ch])):
-            now.setdefault(ch.card_name.lower(), ch.card_name)
-    return sorted(was.values(), key=str.lower), sorted(now.values(), key=str.lower), unsure
+        cats = _all_categories([ch])
+        if ch.action == "add" and _in_premier(premier, cats):
+            if ch.zone == "main" and commander(cats):
+                now.setdefault(ch.card_name.lower(), ch.card_name)
+            else:
+                moved.append({"name": ch.card_name, "added": True, "after": ", ".join(cats)})
+    return (
+        sorted(was.values(), key=str.lower),
+        sorted(now.values(), key=str.lower),
+        unsure,
+        moved,
+        folds,
+    )
 
 
 def _in_premier(premier: set[str], categories: Any) -> bool:
@@ -2477,18 +2560,25 @@ class DeckService:
         read anonymously (public or unlisted), through the client's shared read cache unless
         ``fresh`` (the deck page's Reload) asks Archidekt again."""
         deck_id = _clean_deck_id(deck_ref)
+        linked: DeckError | None = None
         if sub and self.db.get_link(sub):
             try:
                 return await self.get_deck(sub, deck_id)
             except DeckError as exc:
                 if exc.kind not in ("not_found", "auth", "forbidden", "not_linked"):
                     raise
+                if exc.kind == "not_linked":
+                    linked = exc
         async with self.archidekt_slot(sub):
             try:
                 if fresh:
                     return await self.client.get_deck(None, deck_id, fresh=True)
                 return await self.client.get_deck(None, deck_id)
             except ArchidektError as exc:
+                if linked is not None and exc.kind in ("not_found", "auth", "forbidden"):
+                    # the member's link stopped working on this request: that, and how to link
+                    # again, is what they need to hear, not why the read without it failed
+                    raise DeckError(linked.kind, str(linked)) from exc
                 raise DeckError(exc.kind, str(exc)) from exc
 
     # -- the deck sync's reads (sync.py) ----------------------------------------

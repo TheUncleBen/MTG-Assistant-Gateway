@@ -733,7 +733,7 @@ async def test_the_commander_zone_keeps_the_new_count_and_the_maybeboard_row_sta
 async def test_a_commander_zone_row_in_the_maybeboard_still_waits_and_says_what_goes(stack: Stack) -> None:
     """A Maybeboard row that also carries the commander zone's category, with another Maybeboard
     row of the same card: taking a copy away still waits with a commander row, which says the
-    maybeboard and sideboard rows go (the deck's own rows are left alone)."""
+    maybeboard or sideboard rows go (the deck's own rows are left alone)."""
     h, ark = stack.h, stack.ark
     ark.add_side_row(42, "Sol Ring")
     ark.add_side_row(42, "Sol Ring")
@@ -748,7 +748,7 @@ async def test_a_commander_zone_row_in_the_maybeboard_still_waits_and_says_what_
     assert p["risk"] == "high" and p["assistant_may_apply"] is False
     stays = (
         "Sol Ring stays in the commander zone, now with 1 copy. "
-        "Its other rows in the maybeboard and sideboard are removed."
+        "Its other rows in the maybeboard or sideboard are removed."
     )
     assert stays in p["diff"].splitlines(), p["diff"]
     out = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
@@ -779,3 +779,128 @@ async def test_a_category_move_that_leaves_the_commanders_alone_still_applies_in
     p = structured(await call(h, token, "propose_deck_changes", {"deck_id": "42", "changes": changes}))
     assert "commander" not in [r.get("kind") for r in p["rows"]]
     assert p["assistant_may_apply"] is True
+
+
+async def _assert_waits_as_a_commander_change(stack: Stack, token: str, changes: list[dict]) -> dict:
+    """The proposal is high risk with a commander row, the assistant may not apply it, and
+    applying it as the assistant writes nothing."""
+    h, ark = stack.h, stack.ark
+    p = structured(await call(h, token, "propose_deck_changes", {"deck_id": "42", "changes": changes}))
+    assert p["ok"], p
+    assert "commander" in [r.get("kind") for r in p["rows"]], p["rows"]
+    assert p["risk"] == "high" and p["assistant_may_apply"] is False, p
+    out = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
+    assert out["ok"] is False and ark.patches == [], out
+    return p
+
+
+@pytest.mark.parametrize("mode", ["auto", "semi"])
+@pytest.mark.parametrize(
+    "categories",
+    [["Maybeboard", "Commander"], ["Sideboard", "Commander"], ["Commander", "Maybeboard"]],
+)
+async def test_any_category_change_on_the_commanders_row_waits(
+    stack: Stack, mode: str, categories: list[str]
+) -> None:
+    """Moving the only commander's row to new categories that keep "Commander" waits for the
+    member's press in both modes: with an excluded primary category it takes the commander out
+    of the deck, and any category change on a commander-zone row counts as a commander change."""
+    h = stack.h
+    token = await linked_user(stack)
+    await _set_mode(h, mode)
+    change = {
+        "action": "set_category",
+        "card_name": AESI,
+        "category": categories[0],
+        "categories": categories,
+    }
+    p = await _assert_waits_as_a_commander_change(stack, token, [change])
+    commander = next(r for r in p["rows"] if r["kind"] == "commander")
+    if categories[0] == "Commander":  # still in the deck and still the commander
+        assert commander["before"] == commander["after"] == AESI
+        moved = f"{AESI}'s categories change from Commander to {', '.join(categories)}."
+        assert any(line.startswith(moved) for line in p["diff"].splitlines()), p["diff"]
+        assert p["risk_reason"] == "changes the categories of a row in the commander zone"
+    else:  # out of the deck: no commander is left
+        assert (commander["before"], commander["after"]) == (AESI, "(none)")
+        assert p["risk_reason"] == "changes the commander"
+
+
+@pytest.mark.parametrize("mode", ["auto", "semi"])
+@pytest.mark.parametrize("new", [["Command Zone", "Ramp"], ["command zone"]])
+async def test_a_category_change_in_a_renamed_commander_zone_waits(
+    stack: Stack, mode: str, new: list[str]
+) -> None:
+    """A deck whose commander zone has another name (a premier category): any category change on
+    a row in it waits, a second category or only a change of case included."""
+    h, ark = stack.h, stack.ark
+    deck = ark.decks[42]
+    deck["categories"].append({"name": "Command Zone", "isPremier": True, "includedInDeck": True})
+    next(c for c in deck["cards"] if c["card"]["oracleCard"]["name"] == AESI)["categories"] = ["Command Zone"]
+    token = await linked_user(stack)
+    await _set_mode(h, mode)
+    change = {"action": "set_category", "card_name": AESI, "category": new[0], "categories": new}
+    await _assert_waits_as_a_commander_change(stack, token, [change])
+
+
+@pytest.mark.parametrize("mode", ["auto", "semi"])
+async def test_a_maybeboard_commander_moved_into_the_deck_waits(stack: Stack, mode: str) -> None:
+    """The reverse: a maybeboard row carrying "Commander" is no commander, and moving it into the
+    deck makes it one, so it waits in both modes."""
+    h, ark = stack.h, stack.ark
+    ark.add_side_row(42, "Sol Ring")
+    side = next(c for c in ark.decks[42]["cards"] if c["categories"] == ["Maybeboard"])
+    side["categories"] = ["Maybeboard", "Commander"]
+    token = await linked_user(stack)
+    await _set_mode(h, mode)
+    change = {
+        "action": "set_category",
+        "card_name": "Sol Ring",
+        "category": "Commander",
+        "categories": ["Commander"],
+        "zone": "side",
+    }
+    p = await _assert_waits_as_a_commander_change(stack, token, [change])
+    commander = next(r for r in p["rows"] if r["kind"] == "commander")
+    assert (commander["before"], commander["after"]) == (AESI, f"{AESI}, Sol Ring")
+
+
+@pytest.mark.parametrize("mode", ["auto", "semi"])
+async def test_an_add_with_the_commander_zone_outside_the_deck_waits(stack: Stack, mode: str) -> None:
+    """An add whose primary category is the maybeboard and which also carries "Commander" makes
+    no commander, but it still counts as a commander change and waits."""
+    h = stack.h
+    token = await linked_user(stack)
+    await _set_mode(h, mode)
+    change = {
+        "action": "add",
+        "card_name": "Sol Ring",
+        "category": "Maybeboard",
+        "categories": ["Maybeboard", "Commander"],
+    }
+    p = await _assert_waits_as_a_commander_change(stack, token, [change])
+    added = "This adds Sol Ring with a commander-zone category (Maybeboard, Commander), so it counts"
+    assert any(line.startswith(added) for line in p["diff"].splitlines()), p["diff"]
+
+
+async def test_a_raised_commander_with_another_row_says_the_rows_fold(stack: Stack) -> None:
+    """Raising a commander that has a second row in the deck stays low risk, and the review says
+    what the write does: the commander-zone row takes the new count and the other row goes."""
+    h, ark = stack.h, stack.ark
+    _second_commander_row_first(ark)
+    token = await linked_user(stack)
+    await _set_mode(h, "semi")
+    change = {"action": "set_quantity", "card_name": AESI, "quantity": 3}
+    p = structured(await call(h, token, "propose_deck_changes", {"deck_id": "42", "changes": [change]}))
+    assert p["risk"] == "low" and "commander" not in [r.get("kind") for r in p["rows"]], p
+    fold = f"{AESI} stays in the commander zone, now with 3 copies. Its other rows in the deck are removed."
+    assert any(line.startswith("2 -> 3") and line.endswith(fold) for line in p["diff"].splitlines()), p[
+        "diff"
+    ]
+    b = Browser(h)
+    try:
+        await b.login()
+        page = (await b.http.get(f"/proposals/{p['proposal_id']}")).text
+    finally:
+        await b.aclose()
+    assert html.escape(fold) in page

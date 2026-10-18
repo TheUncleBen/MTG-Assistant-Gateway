@@ -217,3 +217,22 @@ async def test_refresh_that_races_an_unlink_does_not_resurrect_the_link(stack: S
     assert out["ok"] is False and out["error"] == "not_linked", out
     assert h.db.get_link("user-1") is None
     assert _audit_events(stack, "archidekt_session_refreshed") == []
+
+
+async def test_a_dropped_link_is_named_when_the_read_without_it_fails_too(stack: Stack) -> None:
+    """A linked member whose session Archidekt no longer accepts loses the link, and the deck is
+    then read without a sign-in. When that read is refused as well, the member is told the link
+    stopped working and where to link again, not only that the read without a sign-in failed."""
+    from mtg_gateway.decks import DeckError
+
+    h, ark = stack.h, stack.ark
+    await linked_user(stack)
+    ark.tokens.clear()  # the session and its refresh token are gone
+    ark.inject = [(401, None)] * 3  # the deck read, the refresh, then the read without a sign-in
+    with pytest.raises(DeckError) as err:
+        await h.app.state.gateway.decks.get_any_deck("user-1", "42", fresh=True)
+    assert err.value.kind == "not_linked"
+    assert "no longer accepts the stored session" in str(err.value)
+    assert "/account" in str(err.value)
+    assert h.db.get_link("user-1") is None
+    assert not ark.inject

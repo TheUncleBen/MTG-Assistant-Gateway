@@ -27,6 +27,7 @@ from .clickguard import form_stamp, guarded_form, submitted_too_soon
 from .decks import (
     REVIEW_PAGE,
     DeckError,
+    commander_row_texts,
     commander_stays_text,
     current_client,
     row_label,
@@ -1304,7 +1305,12 @@ def _change_rows(rows: list[dict[str, Any]] | None, diff: str) -> tuple[str, dic
                     "Change",
                     name,
                     f"<span class='was'>{before}</span> &rarr; {after} "
-                    f"<span class='sr-only'>copies, </span>({'+' if delta > 0 else ''}{delta})",
+                    f"<span class='sr-only'>copies, </span>({'+' if delta > 0 else ''}{delta})"
+                    + (
+                        " " + html.escape(commander_stays_text(r["fold"]))
+                        if isinstance(r.get("fold"), dict)
+                        else ""
+                    ),
                 )
             )
         elif kind == "category" and r.get("leaves"):
@@ -1326,14 +1332,14 @@ def _change_rows(rows: list[dict[str, Any]] | None, diff: str) -> tuple[str, dic
             out.append(_li("chg", "Category", name, _was_now(r.get("before", ""), r.get("after", ""))))
         elif kind == "commander":
             counts["cat"] += 1
-            stays = r.get("stays")
+            texts = commander_row_texts(r)
             out.append(
                 _li(
                     "chg",
                     "Commander",
                     html.escape(str(r.get("after", ""))),
-                    html.escape(" ".join(commander_stays_text(x) for x in stays))
-                    if isinstance(stays, list) and stays
+                    html.escape(" ".join(texts))
+                    if texts
                     else _was_now(r.get("before", ""), r.get("after", "")),
                 )
             )

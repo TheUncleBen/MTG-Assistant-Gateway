@@ -183,12 +183,19 @@ def effective_mode(chosen: str | None, *, default: str, cap: str) -> str:
 
 
 COMMANDER_COPIES_REASON = "changes the commander's copies"
+COMMANDER_ZONE_REASON = "changes the categories of a row in the commander zone"
 
 
-def _only_stays(rows: list[dict[str, Any]]) -> bool:
-    """Whether every commander row says the commanders stay (a commander's other rows go)."""
+def commander_reason(rows: list[dict[str, Any]]) -> str:
+    """Why a proposal's commander rows make it a commander change: the commanders change, a
+    row in the commander zone changes its categories (``moved``), or the commanders stay and a
+    commander's other rows go (``stays``)."""
     rows_c = [r for r in rows if r.get("kind") == "commander"]
-    return bool(rows_c) and all(r.get("stays") for r in rows_c)
+    if not rows_c or any(not (r.get("stays") or r.get("moved")) for r in rows_c):
+        return "changes the commander"
+    if any(r.get("moved") for r in rows_c):
+        return COMMANDER_ZONE_REASON
+    return COMMANDER_COPIES_REASON
 
 
 def risk_of(
@@ -213,7 +220,7 @@ def risk_of(
         return "high", "has no list of rows to check"
     kinds = [str(r.get("kind")) for r in rows]
     if any(k == "commander" for k in kinds):
-        return "high", COMMANDER_COPIES_REASON if _only_stays(rows) else "changes the commander"
+        return "high", commander_reason(rows)
     if any(k not in LOW_RISK_ROW_KINDS for k in kinds):
         return (
             "high",
@@ -245,7 +252,10 @@ def hand_edit_confirm(kind: str, rows: list[dict[str, Any]] | None) -> str | Non
     if kind != "edit" or not rows:
         return None
     if any(r.get("kind") == "commander" for r in rows):
-        if _only_stays(rows):
+        why = commander_reason(rows)
+        if why == COMMANDER_ZONE_REASON:
+            return "This changes the categories of a row in the commander zone."
+        if why == COMMANDER_COPIES_REASON:
             return "This changes the copies of the deck's commander."
         return "This changes the deck's commander."
     removed_rows = [r for r in rows if r.get("kind") == "remove" or _removes(r)]
@@ -302,7 +312,7 @@ def auto_waits(
         if rows is None:
             return "has no list of rows to check"
         if any(str(r.get("kind")) == "commander" for r in rows):
-            return COMMANDER_COPIES_REASON if _only_stays(rows) else "changes the commander"
+            return commander_reason(rows)
         if len(rows) > big_rows:
             return f"changes {len(rows)} rows, more than the {big_rows} Full auto applies by itself"
         return None
