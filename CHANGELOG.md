@@ -2744,6 +2744,7 @@ First release, before this repository existed.
 - A one-link install page and assistant plugin, and the MTG skill.
 - Docker Swarm / Portainer stack, nightly database backups, audit log.
 
+[0.7.30]: https://github.com/TheUncleBen/MTG-Assistant-Gateway/releases/tag/v0.7.30
 [0.7.26]: https://github.com/TheUncleBen/MTG-Assistant-Gateway/releases/tag/v0.7.26
 [0.7.25]: https://github.com/TheUncleBen/MTG-Assistant-Gateway/releases/tag/v0.7.25
 [0.7.24]: https://github.com/TheUncleBen/MTG-Assistant-Gateway/releases/tag/v0.7.24

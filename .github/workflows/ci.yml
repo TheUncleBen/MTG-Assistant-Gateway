@@ -137,8 +137,9 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
-    # the suite's pytest step took about 57 minutes on a runner during 0.7.29; 90 leaves room for a
-    # slow runner, and a hung browser test still fails the job instead of holding it 6 hours
+    # the suite's pytest step took about 57 minutes on a runner during 0.7.29 when it ran on one CPU;
+    # it now runs on every CPU the runner has (pytest-xdist), and 90 still leaves room for a slow
+    # runner, while a hung browser test still fails the job instead of holding it 6 hours
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -156,7 +157,9 @@ jobs:
       - run: ruff format --check src tests scripts docker/forge
       - run: python3 scripts/fetch_ocr_assets.py
       - run: playwright install --with-deps chromium
-      - run: pytest -q
+      # one pytest worker per CPU: most of the suite's time is browser tests waiting on Chromium,
+      # so the same tests run side by side instead of one after another
+      - run: pytest -q -n auto
 
   py311:
     # pyproject allows Python 3.11 (requires-python), while the suite runs on 3.12 only: a cheap check
