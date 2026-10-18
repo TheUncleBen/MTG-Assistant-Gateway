@@ -76,8 +76,8 @@ person sign in through `/mcp`, calls `whoami`, and points them at `/account`
 to link Archidekt. It never asks for a password or token.
 
 You can also install straight from the GitHub repository:
-`claude plugin marketplace add <owner>/MTG-Assistant-Gateway`, where
-`<owner>/MTG-Assistant-Gateway` is the repository that holds this code. That gives
+`claude plugin marketplace add TheUncleBen/MTG-Assistant-Gateway` (or your own copy of the
+repository in its place). That gives
 you the same plugin without an address: its `.mcp.json` URL is
 `${MTG_GATEWAY_URL:-}`, which Claude Code fills in from the environment
 (confirmed in its docs and checked with the CLI: with the variable set,
@@ -123,7 +123,7 @@ servers only (confirmed).
 
 ## ChatGPT and Codex
 
-Every OpenAI page is blocked from the environment this was built in, so all
+OpenAI's pages could not be read directly, so all
 of this was read through search summaries and is **reported**, not
 confirmed:
 
@@ -163,7 +163,7 @@ with no server and two skills:
 Install it with:
 
 ```
-claude plugin marketplace add <owner>/MTG-Assistant-Gateway
+claude plugin marketplace add TheUncleBen/MTG-Assistant-Gateway
 claude plugin install mtg-gateway-operator@mtg-gateway
 ```
 

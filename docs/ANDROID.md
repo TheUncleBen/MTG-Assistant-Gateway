@@ -17,8 +17,8 @@ This page covers using the app, how it is distributed, building and signing it,
 and what Google's developer-verification programme means for it. It is honest
 about what was and wasn't tested: the app has been built, unit-tested, its
 page hand-off exercised in a headless browser, and installed and signed in on
-the owner's phone; the camera scan and the fold layouts on a real device are
-still the owner's test to report.
+one real phone; the camera scan and the fold layouts have not been tried on a
+real device yet.
 
 ## Contents
 
@@ -72,7 +72,9 @@ download button. Then:
 **Updates** come to the app by themselves ([Updates](#updates) below): when a
 newer version is out, a bar at the top offers it and **Update** installs it over
 the one you have, keeping your settings and sign-in. **Change gateway** in the
-app's menu (the round button, bottom right) brings the address screen back.
+account menu (the person icon, top right) brings the address screen back; over
+a page that isn't the gateway's (the sign-in page, say) it is in the round
+button's menu at the bottom right.
 
 ### Updates
 
@@ -81,8 +83,8 @@ the app (`/app/latest.json`, the same facts the gateway's Android app page shows
 behind the same sign-in): each time it starts and right after you sign in (at
 most once an hour), when you come back to it after 12 hours, and whenever you
 tap **Check for app updates**. That button is on the **Account** page's **App**
-card, which also shows the installed version, and in the app's own menu (the
-round button).
+card, which also shows the installed version, and in the menu of the round
+button that shows over pages that aren't the gateway's.
 Inside the app the Account page shows this card instead of **Get the Android
 app**. When there is a newer version, a bar at the top says **Version x.y.z of
 the app is available**:
@@ -112,7 +114,7 @@ app finds no update there; install a newer app from its Android app page once.
 **Moving from a test build.** Builds before 0.7.12 were signed with a test
 key, and the release key is different. Android refuses to install an update
 signed with another key, so an app from before 0.7.12 can't update itself to
-it: uninstall it once, then install 0.7.12 from your gateway's `/app` page (and
+it: uninstall it once, then install the current app from your gateway's `/app` page (and
 type the gateway address again). Every later version updates in place.
 
 A fork or a self-built app gets its updates from the gateway that serves it,
@@ -175,13 +177,13 @@ still works, it just can't scan.
 From 0.7.30 the app shows the member's notifications itself. There is no
 Google push service and no separate notification app. On the Account page in
 the app, the member ticks **Send me notifications** and presses **Save
-notifications**. The page then presses **Get notifications on this phone**
-for them (the button stays on the card while this phone isn't connected).
+notifications**. The page then starts **Get notifications on this phone**
+by itself (the button stays on the card while this phone isn't connected).
 That asks Android to allow
 notifications (Android 13 and later ask; older versions allow them by
 default) and, once, to let the app run in the background. When the gateway
-has no notification server set up, the card says so and that the app can't
-get notifications. Once this phone is connected, the app runs
+has no notification server set up, the card says that the app can't get
+notifications. Once this phone is connected, the app runs
 a foreground service that holds one connection to the gateway's own address
 (`/app/notifications/stream`). Android shows its quiet **Always connected**
 notification while the service runs, as it does for every foreground
@@ -214,7 +216,8 @@ else your gateway serves. A few things are native:
 - **The App section of the account menu** (the person icon, top right):
   *Scan with the app's camera*, *Reload*, *Open in browser*, *Change gateway*.
   *Open a copied link* and *Check for app updates* are on the Account page's
-  **App** card and in the round button's menu.
+  **App** card and in the round button's menu (the round button shows only
+  over pages that aren't the gateway's).
   The same actions sit on a round button at the bottom right while a
   page that is not the gateway's is showing (the sign-in service, say); on
   the gateway's own pages the button stays out of the way of the bottom tab
@@ -669,7 +672,8 @@ screen is shown without a prefill, so a link can't pick your gateway for you.
 - The app has no server of its own and no analytics. It stores the gateway
   address, the sign-in address that gateway advertised, the check value of a
   browser sign-in in progress, when it last looked for an update, your
-  notification key with the last message it got and the ones already shown,
+  notification key, with a reference to the last message it got and to the
+  ones already shown (not the messages themselves),
   and whether it has already asked Android for the notification permission
   and to run in the background. It asks for internet and
   camera, and for the two permissions that let it install its own updates

@@ -3,7 +3,10 @@
 Everything a person can do with the gateway, by the path they take: asking an
 AI assistant, or using the web pages and the Android app by hand. One table
 per path, then how the two relate. Every feature appears exactly once as an
-owned capability; nothing is reachable two ways by the assistant.
+owned capability. An assistant reaches each job through one tool, with a few
+exceptions that show the same thing another way (for example, the
+`show_waiting_changes` card lists the waiting changes `list_my_proposals` also
+lists).
 
 The rule behind it: **one tool per job.** Where Mystic Forge has a tool that
 does what a gateway tool does, the Mystic Forge one is hidden and an
@@ -37,7 +40,7 @@ deck, restoring a snapshot, and the deck's details (name, format, bracket,
 description, visibility, folder, tags and cover).
 Always the member's own press: Actions on your Archidekt account (likes,
 votes, bookmarks, follows, comments, new folders and collaborator changes) and
-deleting a deck are never applied by an assistant: each one waits for your own press, in every mode, on the card in the chat or on its review page (deleting a deck, and any edit of a description or comment that has formatting: on the review page only).
+deleting a deck are never applied by an assistant: each one waits for your own press, in every mode, on the card in the chat or on its review page (deleting a deck, and an edit of a comment that has formatting: on the review page only). An edit of a description that has formatting is also approved on its review page only.
 In every mode: a held change, a change waiting for another change first, one another app had a hand in, one that replaces another app's change, or one that another app's waiting change would replace waits for the member's press; its card and review page say why.
 A change to one of your decks keeps a snapshot first. Deck and collection changes are read back to check them.
 
@@ -72,14 +75,14 @@ A change to one of your decks keeps a snapshot first. Deck and collection change
 | A plain summary of the last day or week: watched prices and deck values (when watchlists are on), reports finished, proposals waiting and applied | `get_summary` | no | written by the gateway without AI; an assistant's scheduled task can turn it into its own words ([USING.md](USING.md#notifications-and-summaries)) |
 | Proposals: list, read, approve with the card's code, reject (with a reason on the card), apply | `list_my_proposals`, `get_proposal`, `confirm_proposal`, `reject_proposal`, `apply_proposal` | apply writes | `apply_proposal` succeeds only when the mode allows |
 | Change a waiting proposal in place, take back one of its own, or combine several of its own waiting card edits on one deck into one | `amend_proposal`, `withdraw_proposal`, `combine_proposals` | proposal | changes nothing on Archidekt; a proposal amended by another app than the one that made it always waits for the member's press; a withdrawn one stays visible and the member can bring it back; combined ones come back if the combined one is rejected |
-| Show every waiting change (one deck or all), approve or reject each, and apply several with one press | `show_waiting_changes` (+ `confirm_waiting` and `get_apply_result`, called only by the card) | Apply all writes | the waiting-changes card; `confirm_waiting` needs the card's one-time code, which the assistant never has; another app's changes are listed with their review link; the Proposals page is the hand path |
-| Remove a saved card model (the description of a card the solo test kept) | `remove_card_model` | the member's own gateway data (no proposal) | changes nothing on Archidekt and leaves stored reports as they are; only while kept card models are on |
+| Show every waiting change (one deck or all), approve or reject each of this app's own, and apply several of them together | `show_waiting_changes` (+ `confirm_waiting` and `get_apply_result`, called only by the card) | Apply all writes | the waiting-changes card; `confirm_waiting` needs the card's one-time code, which the assistant never has; another app's changes are listed with their review link; the Proposals page is the hand path |
+| Remove a saved card description (a card model the solo test kept) | `remove_card_model` | the member's own gateway data (no proposal) | changes nothing on Archidekt and leaves stored reports as they are |
 
 **No assistant tool exists for:** renaming folders, linking or unlinking
 Archidekt, approval modes, notification and summary settings, admin. Social actions and deleting a deck have
 tools since 0.7.17, but only as proposals, and the person applies each one
 with their own press, in every approval mode, on the card in the chat or on
-its review page (deleting a deck, and any edit of a description or comment that has formatting: review page only): no mode,
+its review page (deleting a deck, and an edit of a comment that has formatting: review page only): no mode,
 setting or batch lets an assistant apply a like, vote, bookmark, follow,
 comment, new folder, collaborator change or deck deletion. The gateway enforces this where proposals
 are applied, not only in the pages.
@@ -123,8 +126,8 @@ assistant then proposes as usual; the only cards that act by themselves are the
 proposal card, whose Approve and Reject (with an optional reason) both use its
 one-time code, and the waiting-changes card (`show_waiting_changes`), which
 lists every waiting change, approves or rejects each of the assistant's own,
-and applies several with one **Apply all** press (`confirm_waiting`, with the
-card's one-time code). Display-only cards draw what the tool already answered, where a
+and applies several in order after one confirmation with **Apply all**
+(`confirm_waiting`, with the card's one-time code). Display-only cards draw what the tool already answered, where a
 picture reads faster than the text: the deck read (pictures and rules text), a
 comparison (`compare_decks`), a deck's statistics (`deck_stats`: curve,
 colours, price, legality, bracket estimate), a list of decks (`list_my_decks`,
@@ -152,8 +155,9 @@ tools.
   Solo test only in its More menu) and from `run_deck_report` are the same
   reports on the same History page.
 - **Only the assistant does:** research lookups (Scryfall, EDHREC, combos,
-  rules), the paired goldfish A/B with the simulator's options, reading card
-  photos into names, proposing changes it worked out itself.
+  rules), the paired goldfish A/B with the simulator's options, reading a card
+  photo shared in the chat into names (the Scan page reads its own camera
+  photos), proposing changes it worked out itself.
 - **Only a person plays:** the deck page's Goldfish, a game played by hand in
   the browser. It is a playtable, not a tool result, so the assistant has no
   counterpart; its simulated games are `run_deck_report`. The solo test of
@@ -165,7 +169,8 @@ tools.
   high-risk proposal in manual or semi-auto mode, approve a like, vote,
   bookmark, follow, comment, new folder, collaborator change or deck deletion (an assistant may
   propose these; the person approves each one on the card in the chat or on
-  its review page, in every mode, a deck deletion on its review page only), rename folders, scan with the camera, administer members.
+  its review page, in every mode, and a deck deletion or an edit of a comment
+  that has formatting only on its review page), rename folders, scan with the camera, administer members.
 - **Both reach:** reading decks and collections, statistics, creating and
   editing decks, deck settings (folder, tags and cover included), cloning,
   restoring snapshots, collection changes, scan drafts. The person's path applies at once; the assistant's path is a

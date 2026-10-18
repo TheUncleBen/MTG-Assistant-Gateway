@@ -11,9 +11,10 @@ so, shows its admins a notice with these steps ([OPERATIONS.md](OPERATIONS.md#re
 ## Before every update
 
 1. **Read the release notes** of every version between yours and the new one: the
-   [CHANGELOG](../CHANGELOG.md), or the project's GitHub releases, which carry the same text. A
-   version whose update needs more than the steps below says so under **Upgrade notes** and has a
-   section in [Upgrade notes by version](#upgrade-notes-by-version) here. Do those steps for every
+   [CHANGELOG](../CHANGELOG.md), or the project's GitHub releases, which carry the same text. From
+   0.7.31 on, a version whose update needs more than the steps below says so under **Upgrade
+   notes**. Every such version, 0.7.29 and 0.7.30 included, has a section in
+   [Upgrade notes by version](#upgrade-notes-by-version) here. Do those steps for every
    version you skip over, oldest first.
 2. **Take a backup.** The gateway upgrades its database when it starts, and an older image refuses
    to start on a database a newer one upgraded. Going back means restoring the backup you took
@@ -61,8 +62,10 @@ downtime; signed-in assistants keep working.
 
 ## Upgrade notes by version
 
-Only versions that need more than the update steps are listed, newest first. A version not listed
-here needs nothing extra.
+This list starts at 0.7.29. Only versions that need more than the update steps are listed, newest
+first, and a version from 0.7.29 on that is not listed needs nothing extra. If you are updating from
+an older version, also read each version's notes in the CHANGELOG. Sections stay here at least until
+version 1.0.0.
 
 ### 0.7.30
 
@@ -135,8 +138,8 @@ update the app.**
 
 ### 0.7.29 (included in 0.7.30)
 
-0.7.29 was not released on its own. Anyone updating to 0.7.30 or later from 0.7.26 or earlier does
-these steps as part of the 0.7.30 update, where its steps point here.
+0.7.29 was not released on its own. If you are updating from 0.7.26 or earlier to 0.7.30 or later,
+do these steps as part of the 0.7.30 steps above, which point here.
 
 #### Swarm or Portainer stack
 
@@ -168,9 +171,9 @@ locked (greyed out) even with no variable set.
    and `MTG_DECK_SYNC_MINUTES=30`. Any variable you keep stays locked: the
    Settings page shows it greyed out with its value, and you change it in
    the stack and redeploy.
-3. If `MTG_TAG` names a version, change it to `0.7.30` first (in the stack's
-   variables, or in `mtg.env` without Portainer); otherwise you redeploy the
-   old version with the new stack file. Click **Update the stack** (if your
+3. If `MTG_TAG` names a version, change it to the version you are updating
+   to (0.7.30 or later) first, in the stack's variables or, without Portainer,
+   in `mtg.env`. Otherwise you redeploy the old version with the new stack file. Click **Update the stack** (if your
    stack uses the Repository build method, the button is called **Pull and
    redeploy**). In the box that asks “Are you sure?”, make sure **Re-pull
    image and redeploy** is on, then click **Update**. Without Portainer: open a new shell (a variable you

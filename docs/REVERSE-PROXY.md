@@ -5,9 +5,10 @@ give it an `https://` address on your domain, because Claude and ChatGPT
 only connect to HTTPS servers. Any reverse proxy works. Ready-made configs
 for the common ones are in [`deploy/proxy/`](../deploy/proxy/).
 
-What's been checked: the Caddyfile passes `caddy validate` (Caddy 2.10), the
-nginx block passes `nginx -t` (nginx 1.24), the Compose overrides pass
-`docker compose config`, and the end-to-end tests run behind an nginx with
+What's been checked: the Caddyfile (with `caddy validate`), the nginx block
+(with `nginx -t`) and the Compose overrides (with `docker compose config`) were
+checked by hand when they were written; nothing runs those checks
+automatically. The end-to-end tests run behind an nginx with
 the same header, buffering and timeout settings. The Traefik labels and the NPM settings follow those
 projects' documentation and real use, but aren't run by the tests.
 
@@ -108,7 +109,7 @@ container labels.
 ## nginx
 
 [`deploy/proxy/nginx/mtg-gateway.conf`](../deploy/proxy/nginx/mtg-gateway.conf)
-is a complete server block: HTTP to HTTPS redirect, a 5 MB body limit, the
+is a complete server block: HTTP to HTTPS redirect, a 4 MB body limit, the
 `Host` and forwarded headers, buffering off and a 300 second read timeout.
 
 1. Get a certificate for the hostname first, for example
@@ -135,14 +136,15 @@ In NPM, **Hosts → Proxy Hosts → Add Proxy Host**:
     `127.0.0.1` there means NPM itself, not the host; going through the host
     instead needs `MTG_HTTP_BIND` set to an address NPM can reach, such as
     the Docker bridge address `172.17.0.1`.
-- **Block common exploits:** on. **Websockets support:** optional, the
-  gateway doesn't use websockets.
-- **SSL** tab: request a Let's Encrypt certificate, turn on **Force SSL** and
-  **HTTP/2**.
+- **Block common exploits:** on. **Websockets support:** off, the gateway
+  doesn't use websockets.
+- **SSL** tab: request a Let's Encrypt certificate, turn on **Force SSL**,
+  **HTTP/2** and **HSTS Enabled**. Turn on **HSTS Subdomains** only if every
+  subdomain of the domain serves HTTPS.
 - **Advanced** tab, custom Nginx configuration:
 
   ```nginx
-  client_max_body_size 5m;
+  client_max_body_size 4m;
   proxy_buffering off;
   proxy_read_timeout 300s;
   ```

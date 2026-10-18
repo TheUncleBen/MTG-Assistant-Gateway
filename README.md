@@ -31,13 +31,14 @@ person has said yes to the exact change.
   - The **operator** deploys it and decides who gets in.
   - **Users** connect their assistant and link their Archidekt account.
 - **What it runs on:** three Docker containers (the gateway, Mystic Forge
-  and ntfy), plus an optional fourth for Forge (amd64 or arm64, so a Raspberry
-  Pi is fine), behind any HTTPS reverse proxy, with any OpenID Connect
+  and ntfy) and an optional fourth for Forge, all for amd64 or arm64 (so a
+  Raspberry Pi is fine), behind any HTTPS reverse proxy, with any OpenID Connect
   identity provider handling sign-in.
   - **Deploy with** Docker Compose on one machine, or a Docker Swarm stack
     (Portainer optional).
   - **Tested end to end with** Swarm, Authentik and an nginx proxy in CI.
-    Caddy, Traefik, nginx and Nginx Proxy Manager configs are included;
+    Examples for Caddy, Traefik and nginx are included, plus Nginx Proxy
+    Manager steps;
     Keycloak, Authelia, Zitadel, Pocket ID and others have setup notes but
     haven't been tested with the gateway yet.
   - The picture: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
@@ -50,8 +51,8 @@ person has said yes to the exact change.
   brightness that lays itself out around a foldable's hinge
   ([docs/ANDROID.md](docs/ANDROID.md)).
 - **What it talks to:** Archidekt for decks, Scryfall for cards, and a
-  private [Mystic Forge](https://github.com/Kautiontape/mystic-forge)
-  container for research and simulation. Mystic Forge pulls from EDHREC,
+  internal [Mystic Forge](https://github.com/Kautiontape/mystic-forge)
+  container (no published port) for research and simulation. Mystic Forge pulls from EDHREC,
   Commander Spellbook and the Comprehensive Rules.
 - **Accountability:** every tool call is tied to whoever signed in, and every
   deck change lands in an audit log.
@@ -302,9 +303,9 @@ between releases ([docs/VERSIONS.md](docs/VERSIONS.md)).
 | Sign-in, research, deck import, account linking, proposals, scanning | Built. Tested against fakes, recorded Archidekt and Scryfall responses, and a real Swarm stack with Authentik in CI |
 | Applying edits, creating decks, backups and restores on Archidekt | Built, and run live against a throwaway Archidekt account (create, add, remove, quantities, categories, commander, backup folder and copy). The code default is off (`MTG_WRITES_ENABLED=false`); the example env files turn writes on (each change is still applied only by the member's own press, the Approve button on the in-chat card or the Apply button on the review page, unless the member chose a looser approval mode on their Account page; an Archidekt account action, such as a like, comment, new folder or deck deletion, always waits for the member's own press, in every mode, on the card in the chat or on its review page; a deck deletion, and any edit of a description or comment that has formatting, is approved only on its review page). Try your first edit on a deck you don't care about |
 | Client and device coverage | See [docs/CONNECT.md](docs/CONNECT.md#which-apps-and-devices-work), which labels each claim as tested, reported or not tested |
-| Deck statistics, stored deck reports and history, compare, companion pages, admin page, JSON API | Built and covered by the test suite against fakes. The companion pages and admin page were also checked by the owner on his own deployment on 2026-10-10 and 2026-10-11 (speed, backup copies, the redesigned pages, edit and restore) |
+| Deck statistics, stored deck reports and history, compare, companion pages, admin page, JSON API | Built and covered by the test suite against fakes. The companion pages and admin page were also checked on a live deployment on 2026-10-10 and 2026-10-11 (speed, backup copies, the redesigned pages, edit and restore) |
 | Deck deletion, cover image, folders, tags, comment editing, collection details (0.7.2); comment votes, colour tags and the assistant's account-action proposals (likes, bookmarks, follows, comments, folders, deck deletion; 0.7.16 to 0.7.19); custom mana value and deck collaborators (0.7.20) | Built against Archidekt routes read from its own site code and covered by tests against a fake; not yet exercised live (taking a colour tag off a card is also not confirmed). Each one reads the result back and reports a mismatch rather than trusting Archidekt's answer |
-| Forge games in deck reports (0.7.14, optional, off by default) | Built. The Forge image is built and smoke-tested on arm64 in CI, with a card-coverage gate (99.69% of the cards legal in at least one format; the cards Forge lacks are named in every report). Not yet measured on a Raspberry Pi. Opponents are Commander precons of the deck's bracket (0.7.23; the bracket set on Archidekt, else the gateway's estimate; a precon's bracket counts only its game changers; the nearest bracket fills in, and the report says which and why). Commander decks only: there are no 60-card opponent decks |
+| Forge games in deck reports (0.7.14, optional, off by default) | Built. The Forge image is built and smoke-tested on arm64 in CI, with a card-coverage check of 99.5% of the cards legal in at least one format (measured 99.69%; the cards Forge lacks are named in every report). Not yet measured on a Raspberry Pi. Opponents are Commander precons of the deck's bracket (0.7.23; the bracket set on Archidekt, else the gateway's estimate; a precon's bracket counts only its game changers; the nearest bracket fills in, and the report says which and why). Commander decks only: there are no 60-card opponent decks |
 | Watchlists and price history (0.7.23) | Built and covered by tests against fakes; off unless the operator sets `MTG_WATCHLISTS_ENABLED=true` |
 | Features not built yet | The full list is in [docs/CAPABILITIES.md](docs/CAPABILITIES.md#d-parked) (Mystic Forge's own saved goldfish reports stay hidden too; the gateway's stored deck reports replace them) |
 

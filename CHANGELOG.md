@@ -10,36 +10,54 @@ with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 ## [0.7.31] - 2026-10-18
 
 A documentation release: the example settings files are reorganised, and the guides are checked
-against the code and corrected. Nothing changes in how the gateway works.
+against the code and corrected. Apart from some wording in the Android app, the in-app Guide and the
+admin page, and the example reverse-proxy files, nothing changes in how the gateway or the app
+works.
 
 ### Upgrade notes
-- From 0.7.30: none; update as usual ([docs/UPGRADING.md](docs/UPGRADING.md)).
-- From 0.7.26 or earlier: do the 0.7.30 steps in [docs/UPGRADING.md](docs/UPGRADING.md#0730) first.
-  They moved there from DEPLOY.md and DEPLOY-COMPOSE.md, unchanged.
+- From 0.7.30: none; update as usual ([docs/UPGRADING.md](docs/UPGRADING.md)). Optional: if your
+  Swarm variables file sets `FORGE_IMAGE` and `FORGE_TAG`, you can delete those two lines, so it
+  follows the stack file's own Forge version on later updates.
+- From 0.7.26 or earlier: follow the 0.7.30 steps in [docs/UPGRADING.md](docs/UPGRADING.md#0730),
+  which include the 0.7.29 steps. They moved there from DEPLOY.md and DEPLOY-COMPOSE.md. On the
+  way, the members' notification steps were corrected, and the note about waiting for the Forge
+  image to be published was removed.
 
-### Changed
-- `deploy/stack.env.example` and `deploy/compose/.env.example` are grouped in a new order that
-  reads top to bottom: images, server settings, placement and storage, standard container
-  settings, sign-in, notifications and watchlists, deck edits, Forge, sessions and tokens, AI
-  clients, network trust, and the lines to leave as they are. The values are the same. The
-  Compose file's example gains a Forge section (off by default). If you copied an earlier
-  example, your file keeps working as it is.
-- The images are public, and the guides now say so: no registry login, GitHub token or
-  `--with-registry-auth` is needed to pull them. Step 5 of the Swarm guide is now "Images".
+### Added
 - New [docs/UPGRADING.md](docs/UPGRADING.md): what to do before every update, the update steps
   for Portainer, Swarm and Docker Compose, and the extra steps some versions need. The 0.7.30 and
   0.7.29 steps moved there from the deployment guides, which now describe only the current
-  version. From now on each version's notes start with **Upgrade notes**.
+  version. From now on each version's notes have an **Upgrade notes** section after their summary.
+
+### Changed
+- `deploy/stack.env.example` and `deploy/compose/.env.example` are grouped in a new order that
+  reads top to bottom: images, server settings, placement (with Compose, where it listens) and
+  storage, standard container settings, sign-in, notifications and watchlists, deck edits, Forge,
+  sessions and tokens, AI clients, network trust, and the lines to leave as they are. The Compose
+  example then ends with the optional proxy overrides. The values are the same. The Compose
+  file's example gains a Forge section (off by default), and the Swarm example's Forge image and
+  version lines are commented out, so a copied file follows the stack file's own Forge version.
+  Both examples now also list, commented out, the settings the stack files read that they left
+  out, such as the sign-in scopes, the ntfy image and memory, and Forge's limit on games per
+  request. If you copied an earlier example, your file keeps working as it is.
+- The images are public, and the guides now say so: no registry login, GitHub token or
+  `--with-registry-auth` is needed to pull them. Step 5 of the Swarm guide is now "Images".
+- The example reverse-proxy files: the nginx and Caddy examples limit request bodies to 4 MB, as
+  the guides say. The Caddy example compresses only the static files, as
+  [docs/REVERSE-PROXY.md](docs/REVERSE-PROXY.md) advises for the pages. The Traefik override keeps
+  ntfy and Forge out of Traefik too, not only Mystic Forge.
 
 ### Fixed
-- The deployment guides, the operator plugin's deploy skill, the member guides, the API and
-  plugin guides, the architecture and operations guides and the third-party notices are corrected
-  where they no longer matched the gateway, among them: the operator deploy skill now creates the
-  `mtg_ntfy_token` secret and checks the ntfy service; `/healthz` reports "degraded" for Forge
-  too; backups need no Fernet key; the tools marked as changing something; the Android app's
-  permissions and notification steps; the phone tabs; and the admin Card models page.
+- Several places in the deployment guides, the operator plugin's deploy skill, the member guides,
+  the API and plugin guides, the architecture and operations guides and the third-party notices no
+  longer matched the gateway and are corrected. Among them: the deploy skill now hands over the
+  command that creates the `mtg_ntfy_token` secret and checks the ntfy service. The guides now say
+  that `/healthz` also reports "degraded" when Forge is on and doesn't answer, that backups don't
+  need the Fernet key, and which tools are marked as changing something. They also describe the
+  Android app's permissions and notification steps, the phone tabs and the admin Card models page
+  as they are. The third-party notices now list the gateway's Python packages and their licences.
 - In the Android app, the messages about a shared link that isn't a deck link now point to
-  **Open a copied link** on the Account page's App card, where it is.
+  **Open a copied link** on the Account page's App card, which has that button.
 
 ## [0.7.30] - 2026-10-18
 

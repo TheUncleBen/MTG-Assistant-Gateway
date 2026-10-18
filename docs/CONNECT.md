@@ -39,8 +39,8 @@ each AI client automatically, and you prove who you are by signing in to
 the owner's sign-in service in your browser.
 
 **About the labels below.** Every claim about Claude or ChatGPT comes from
-the vendor's own help pages, read on 2026-10-04 or 2026-10-05, or from the
-owner's own checks with this gateway, and is marked:
+the vendor's own help pages, read between 2026-10-04 and 2026-10-11, or from
+checks with this gateway, and is marked:
 
 - **tested**: tried with this gateway;
 - **reported**: an official page of the vendor says so, but it hasn't been
@@ -53,7 +53,7 @@ Where a line is our own reasoning from one of those, it says so.
 
 Vendors rename menus and change plans all the time, so if a label doesn't
 match, look for the closest thing. Not every client and device has been
-tested end to end with this gateway yet; the owner keeps those results.
+tested end to end with this gateway yet.
 
 ## Which apps and devices work
 
@@ -77,7 +77,7 @@ In plain terms:
   gets read and fetch tools only, and full support (including tools that
   change things) is for Business, Enterprise and Edu. OpenAI's developer
   guide says Plus and Pro get read and write tools on the web. On
-  2026-10-10 the owner checked ChatGPT on the web with a Pro plan against
+  2026-10-10 ChatGPT on the web with a Pro plan was checked against
   this gateway: it used every tool, creating proposals included (tested).
   Plus is still untested.
 - **What that means for deck changes in ChatGPT.** The gateway marks every
@@ -221,13 +221,17 @@ as the MCP Apps standard says (reported, not yet tested in a live
 session); the review page in your browser never relies on it and is linked
 from every card.
 
-Ask the assistant what is waiting and it can show the **waiting changes**
-card (`show_waiting_changes`): every change waiting for your press, oldest
-first, with **Approve** and **Reject** on each of that assistant's own
-changes and **Apply all** to apply them with one press (`confirm_waiting`,
-with the card's own one-time code). Each one is checked against the deck
-just before it is sent. Another app's changes are listed with their review
-link.
+In an app that shows cards, on a gateway that lets you approve in the chat,
+ask the assistant what is waiting and it can show the **waiting changes**
+card (`show_waiting_changes`). It lists every change waiting for your press,
+oldest first, with **Approve** and **Reject** on each of that assistant's own
+changes. When two or more can go together, **Apply all** applies them in
+order after one confirmation (`confirm_waiting`, with the card's own one-time
+code). Each one is checked against the deck just before it is sent. Apply all
+leaves out the changes that must be approved on their own, such as a deck
+deletion, a change that keeps a description's or comment's formatting, or one
+another app changed, and says which. Another app's changes are listed with
+their review link.
 
 ### The other cards in the chat
 
@@ -254,7 +258,7 @@ a form.
 
 **Your approval mode.** On the gateway's Account page you choose how much
 your assistant may do without asking: *Manual*, shown as "Ask me every
-time" (every change waits for your press; the default), *Semi-auto*, shown
+time" (every change waits for your press; the starting mode by default), *Semi-auto*, shown
 as "Apply low-risk changes without asking" (it applies a small deck or
 collection edit itself: up to the row limit, 5 card rows by default,
 each a card added or removed, or a new quantity, category, finish,
@@ -263,12 +267,14 @@ never a change to which cards are the commanders or to the categories of a row i
 a card that has a row in the commander zone and another row, both in the deck or both in the maybeboard or sideboard; it also makes a private copy of a deck; a new deck,
 a restore, the deck's details and bigger edits still ask you) or *Full
 auto*, shown as "Apply deck and collection changes without asking" (it applies the rest too, except a restore, a commander change, a new deck, an edit of more
-than 20 rows, making a deck public or unlisted, and any edit of a description that has formatting, such as bold text, links or pictures, which still wait for your press; so does a held change, a change waiting for
+than 20 rows (by default), making a deck public or unlisted, and any edit of a description that has formatting, such as bold text, links or pictures, which still wait for your press; so does a held change, a change waiting for
 another change first, one another app had a hand in, one that replaces another app's change, or one
 that another app's waiting change would replace).
+Those numbers are the defaults: your Account page shows this gateway's
+numbers, and which modes it allows.
 Actions on your Archidekt account (likes, votes, bookmarks, follows,
 comments, new folders and collaborator changes) and deleting a deck are
-never applied by an assistant: each one waits for your own press, in every mode, on the card in the chat or on its review page (deleting a deck, and any edit of a description or comment that has formatting: on the review page only). It is your own setting:
+never applied by an assistant: each one waits for your own press, in every mode, on the card in the chat or on its review page (deleting a deck, and an edit of a comment that has formatting: on the review page only). An edit of a description that has formatting is also approved on its review page only. It is your own setting:
 it covers only your account, your decks and the apps you connected, and
 only you can change it, in your browser. In Semi-auto and Full auto the
 assistant applies what the mode allows with `apply_proposal` and tells you;
@@ -293,8 +299,9 @@ buttons), `reject_proposal`, `amend_proposal`, `withdraw_proposal`,
 ## ChatGPT
 
 Read [Which apps and devices work](#which-apps-and-devices-work) first.
-ChatGPT supports this gateway on the **web only**. On Pro every tool
-worked when the owner checked it on 2026-10-10 (tested); Plus is untested.
+ChatGPT supports this gateway on the **web only**. On a Pro plan, ChatGPT
+used every tool in a check with this gateway on 2026-10-10 (tested); Plus has
+not been tried yet.
 
 ### Add the connector (ChatGPT on the web)
 
@@ -430,7 +437,7 @@ assistant read and edit your own decks, link Archidekt once in a browser at
 | "This sign-in link has expired or was already used" | Go back to the AI app and press Connect again. Sign-in links last ten minutes, including time spent on the confirmation page. |
 | Claude shows an error right after you picked **Use Claude's published identity**, before any gateway page appears | The gateway couldn't fetch or accept Claude's published description, or the owner has limited which ones it accepts. Wait a minute (a failed fetch isn't retried sooner) and try again, or remove the connector and add it with **Register automatically**. Tell the owner either way. |
 | "This sign-in was started in a different browser" | The AI app opened sign-in in one browser and you finished it in another. Try again and keep the whole sign-in in one browser window. On a phone this can happen when a link opens in a different browser app. |
-| The connector worked before but now wants you to sign in again | Normal. By default the gateway asks you to sign in again about once a week (the owner can change that), and also after about 30 days of not using it, if the owner revoked your access, and once after the owner upgrades the gateway to version 0.6.1. Reconnect it in the app's connector settings. |
+| The connector worked before but now wants you to sign in again | Normal. By default the gateway asks you to sign in again about once a week (the owner can change that), and also after about 30 days of not using it, and if the owner revoked your access. Reconnect it in the app's connector settings. |
 
 Your sign-in password only ever goes into the owner's sign-in page,
 never into the AI app or the gateway.

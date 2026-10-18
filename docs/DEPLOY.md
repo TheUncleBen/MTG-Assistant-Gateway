@@ -3,9 +3,9 @@
 This gets you one Swarm stack with these services:
 
 - `mtg-assistant-gateway`, the gateway itself;
-- `mtg-assistant-mysticforge`, a private research service the gateway talks to (more
+- `mtg-assistant-mysticforge`, an internal research service the gateway talks to (more
   on it [near the end](#mystic-forge-internal-research-service));
-- `mtg-assistant-ntfy`, a private notification server for the members' Android app
+- `mtg-assistant-ntfy`, an internal notification server for the members' Android app
   ([Notifications on members' phones](#notifications-on-members-phones)); and
 - `mtg-assistant-forge`, the simulation engine, which runs only if you turn it on
   ([Forge simulations](#forge-simulations-optional)).
@@ -34,7 +34,9 @@ Placeholders used below:
 | --- | --- |
 | `mtg.example.com` | the gateway's public hostname |
 | `auth.example.com` | your identity provider's public hostname |
-| `<owner>` | the GitHub account or organisation whose copy of this repository builds the images |
+
+The image names below are the project's own (`ghcr.io/theuncleben/...`). If you build the images
+from your own copy of the project, put your GitHub account in place of `theuncleben`.
 
 ## 1. Overlay network (once, on a Swarm manager)
 
@@ -291,7 +293,7 @@ name and tag: a version's tag exists only once its release is published
 
    | Variable | What to put |
    | --- | --- |
-   | `MTG_IMAGE`, `MTG_TAG` | `ghcr.io/<owner>/mtg-assistant-gateway` and `latest` to follow every new version, or one version to stay on it, written `X.Y.Z` (the versions are in [VERSIONS.md](VERSIONS.md)) |
+   | `MTG_IMAGE`, `MTG_TAG` | `ghcr.io/theuncleben/mtg-assistant-gateway` and `latest` to follow every new version, or one version to stay on it, written `X.Y.Z` (the versions are in [VERSIONS.md](VERSIONS.md)) |
    | `MTG_PUBLIC_URL` | `https://mtg.example.com` |
    | `MTG_OIDC_ISSUER` | the issuer URL from step 3 |
    | `MTG_OIDC_CLIENT_ID` | the Client ID from step 3 |
@@ -301,8 +303,8 @@ name and tag: a version's tag exists only once its release is published
    | `PUID`, `PGID` | the user and group that own the folders from step 2, for example `1000` |
    | `TIMEZONE` | your time zone, for example `Europe/London` |
    | `MTG_REQUIRED_GROUP` | the group from step 3, spelled exactly as your identity provider sends it (it's case-sensitive). Required: the gateway won't start with it empty unless you also set `MTG_ALLOW_ANY_IDP_USER=true` (anyone your identity provider lets through gets in) |
-   | `MF_IMAGE`, `MF_NODE` | `ghcr.io/<owner>/mtg-assistant-mysticforge`, and the node Mystic Forge should run on (can be the same one) |
-   | `MTG_WRITES_ENABLED` | `true` to let approved proposals change Archidekt; `false` keeps everything review-only. Writes have been run live against a throwaway Archidekt account, but make your own first edit on a deck you don't care about |
+   | `MF_IMAGE`, `MF_NODE` | `ghcr.io/theuncleben/mtg-assistant-mysticforge`, and the node Mystic Forge should run on (can be the same one) |
+   | `MTG_WRITES_ENABLED` | `true` to let approved proposals change Archidekt; `false` keeps everything review-only. Make your first edit on a deck you don't care about |
    | `MTG_APPROVAL_MODE_DEFAULT` | Leave it `manual` (the example file and the code default): a member who has not chosen an approval mode has every change wait for their own press, on the Approve button of the card in the chat or on Apply on the review page. Each member picks their own mode (`manual`, `semi`: low-risk changes, such as a small edit or a private copy of a deck, apply without asking, `auto`: most changes apply without asking, but some still wait for the member) on their Account page |
    | `MTG_APPROVAL_MODE_MAX` | `auto` (no cap) lets members choose any mode; `semi` or `manual` caps what they may choose |
    | `MTG_APPLY_IN_CHAT` | `true` (the default): Claude and ChatGPT show each proposal as a card with Approve and Reject buttons, and only the card's one-time code can apply it; the other cards (printings, recognised cards, a deck, the account, comparisons, statistics, deck lists, scans) come with it. `false` removes every card; members use the review page |
@@ -515,7 +517,7 @@ The same stack runs `mtg-assistant-mysticforge`, which is
 [Mystic Forge](https://github.com/Kautiontape/mystic-forge) 1.3.2 (MIT
 licence, from upstream). It's built from upstream commit
 `dd82cd1449645862a2e309ae70df2fb7c3a2a839` into
-`ghcr.io/<owner>/mtg-assistant-mysticforge`. It provides the card search, EDHREC,
+`ghcr.io/theuncleben/mtg-assistant-mysticforge`. It provides the card search, EDHREC,
 rules, precon and goldfish tools, and the gateway relays an allowlisted set
 of them to signed-in users.
 
@@ -540,8 +542,8 @@ Upstream code is unchanged apart from seven small patches in
 - `0003-edhrec-current-page-shape.patch`: EDHREC changed its average-deck
   data, so `edhrec_average_deck` came back empty and `edhrec_commander`
   showed "? decks". The patch reads the new shape.
-- `0004-research-output-live-shapes.patch`: fixes found in the 2026-10-11
-  live run. EDHREC's precon, salt and top-card pages changed too
+- `0004-research-output-live-shapes.patch`: fixes for EDHREC page changes and
+  more. EDHREC's precon, salt and top-card pages changed
   (`edhrec_precon_upgrade` showed "?%", `edhrec_salt` no scores,
   `edhrec_top_cards` no section headings); recommendations no longer suggest
   cutting cards that were not given; double-faced cards given by their full
@@ -592,7 +594,7 @@ What to know about it:
 
 | Variable | Default | What it does |
 | --- | --- | --- |
-| `MF_IMAGE` | `ghcr.io/theuncleben/mtg-assistant-mysticforge` | Image. A fork that builds its own images sets `ghcr.io/<owner>/mtg-assistant-mysticforge` |
+| `MF_IMAGE` | `ghcr.io/theuncleben/mtg-assistant-mysticforge` | Image. A copy of the project that builds its own images sets `ghcr.io/<your account>/mtg-assistant-mysticforge` |
 | `MF_TAG` | `1.3.2-mag4` | Image tag |
 | `MF_PUBLIC_BASE` | `http://mtg-assistant-mysticforge:8000` | Base URL Mystic Forge uses in links (its own default points at the upstream author's site, so keep this) |
 | `MF_NODE` | none, required | Hostname of the node it runs on. The stack won't start without it |
@@ -742,7 +744,7 @@ itself:
 
 | Variable | Default | What it does |
 | --- | --- | --- |
-| `MTG_IMAGE` | `ghcr.io/theuncleben/mtg-assistant-gateway` | Gateway image. A fork that builds its own images sets `ghcr.io/<owner>/mtg-assistant-gateway` |
+| `MTG_IMAGE` | `ghcr.io/theuncleben/mtg-assistant-gateway` | Gateway image. A copy of the project that builds its own images sets `ghcr.io/<your account>/mtg-assistant-gateway` |
 | `MTG_TAG` | `latest` | Gateway image tag. Pin a release rather than relying on `latest` |
 | `MTG_NODE` | none, required | Hostname of the node the gateway runs on. The stack won't start without it |
 | `MTG_MEMORY_LIMIT` | `256M` | Memory cap |
@@ -800,6 +802,11 @@ value. Leave it out to manage it on the page.
 | `MTG_FORGE_PARALLEL_GAMES` | no | `4` | How many of a report's Forge games the gateway asks Forge to play at once (1 to 4). `FORGE_MAX_PARALLEL` caps it for all runs together. Also on the Settings page |
 | `FORGE_MAX_METASPACE`, `FORGE_OOM_SCORE_ADJ` | no | `256m`, `1000` | On the Forge service: each Java's ceiling on its class data on top of `FORGE_XMX`, and its out-of-memory score, 1 to 1000 (1000: the kernel stops a Forge game first when the machine runs out of memory; 0 turns this off; any other value is left out and Forge's log says why). Not in the stack files: add them to the Forge service's environment to change them |
 | `FORGE_MAX_PARALLEL` | no, *stack* | empty | On the Forge service: the most games Forge plays at once, for all runs together (1 to 4). Empty: one per 2 CPUs and 1.2 GB of the container's limits (see the Forge section above) |
+| `FORGE_IMAGE`, `FORGE_TAG` | no, *stack* | `ghcr.io/theuncleben/mtg-assistant-forge`, `2.0.15-mag3` | The Forge image and its version. Leave them out to follow the stack file's own version on every update |
+| `FORGE_XMX` | no, *stack* | `1g` | The Java heap limit (`-Xmx`) of each Forge game |
+| `FORGE_MEMORY_LIMIT`, `FORGE_CPUS` | no, *stack* | `1536M`, `2` | The Forge container's memory and CPU caps. `FORGE_MEMORY_LIMIT` is also passed to Forge as `FORGE_MEMORY_BUDGET`, which sizes the games at once where Docker can't cap memory (see the Forge section above) |
+| `FORGE_GAME_SECONDS` | no, *stack* | `240` | Seconds before Forge calls one game a draw |
+| `FORGE_MAX_GAMES` | no, *stack* | `50` | The most games Forge accepts in one request; a run that asks for more is refused |
 | `MTG_WRITES_ENABLED` | no, *stack* | `false` | `true` lets approved proposals be applied to Archidekt |
 | `MTG_APPROVAL_MODE_DEFAULT` | no, *stack* | `manual` | The approval mode of a member who has not chosen one on their Account page: `manual` (every change waits for their own press), `semi` (the assistant applies low-risk changes itself, such as a small edit or a private copy of a deck) or `auto` (the assistant applies most changes itself; some still wait for the member). Members pick their own; see [OPERATIONS.md](OPERATIONS.md#approval-modes-when-the-assistant-may-apply-by-itself) |
 | `MTG_APPROVAL_MODE_MAX` | no, *stack* | `auto` | The highest mode members may choose; `auto` means no cap. A stored choice above the cap is read as the cap |
@@ -827,6 +834,8 @@ value. Leave it out to manage it on the page.
 | `MTG_CIMD_ALLOWED_HOSTS` | no, *stack* | empty (any https host) | Comma-separated hostnames whose metadata documents are accepted, subdomains included. **Leave it empty** unless you know every client's host: listing only Claude's can lock ChatGPT out. Details in [OPERATIONS.md](OPERATIONS.md#which-ai-clients-may-connect) |
 | `MTG_NTFY_URL` | no, *stack* | the stack's own ntfy server (`http://mtg-assistant-ntfy:8080`; `http://ntfy:8080` with Docker Compose) | The ntfy server the members' notifications go through. Leave it empty to use the stack's own. See [Notifications on members' phones](#notifications-on-members-phones) |
 | `MTG_NTFY_TOKEN_FILE` | no, *stack* | `/run/secrets/mtg_ntfy_token` | File holding the token the gateway uses with ntfy (the `mtg_ntfy_token` secret); never logged |
+| `NTFY_IMAGE` | no, *stack* | `binwiederhier/ntfy:v2.31.1`, pinned by digest | The stack's own ntfy server's image |
+| `NTFY_MEMORY_LIMIT` | no, *stack* | `128M` | Memory cap of the stack's own ntfy server |
 | `MTG_DECK_SYNC_MINUTES` | no, *stack* | `30` | Deck sync (Archidekt is the master copy): minutes between background checks of Archidekt for members with proposals waiting; a member opening the app (any signed-in page, at most once in 5 minutes) checks too. A check reads the member's deck list (one request per 50 decks, at most 4) and reads a deck in full only when it has a waiting proposal and Archidekt says it changed, or the deck is someone else's (at most every 30 minutes; one Archidekt says is gone or private is left alone for 6 hours), at most 5 per check, so a proposal made before an outside change is checked again at once: Updated when it still does what was reviewed, Needs a look when it would now do something else. Never writes to Archidekt or unlinks an account, never retries and waits behind every member's own requests. Each list or deck read spends one of the member's Archidekt actions (`MTG_ARCHIDEKT_CALLS_PER_10_MIN`), and a check stops while less than a quarter of them would be left. 0 to 1440; `0` turns it off |
 | `MTG_WATCHLISTS_ENABLED` | no, *stack* | `false` (off) | Watchlists and prices. Off by default: the Watchlist page and its links, the card viewer's price buttons and the watch tools (`watch_card`, `watch_deck`, `unwatch`, `list_watchlist`, `card_price_history`) are absent and the daily price check does not run. Turning it off keeps members' stored watches and prices; old prices are still pruned after `MTG_PRICE_HISTORY_DAYS`. Summaries through ntfy work either way, without prices when it is off |
 | `MTG_WATCH_MAX_CARDS` | no, *stack* | `200` | Cards one member may watch (0 to 5000; 0 turns card watching off) |

@@ -56,7 +56,7 @@ anything that isn't the default:
 | How the operator reaches a Swarm manager from this machine | `ssh <manager>` | whether you can run commands or must hand them over |
 | `PUID:PGID` the operator uses in other stacks | `1000:1000` | folder ownership |
 | Overlay network name | `mtg-gateway` | shared with the proxy |
-| Allow Archidekt writes now? | `false` | `MTG_WRITES_ENABLED`; recommend `false` until a throwaway deck test passes |
+| Allow Archidekt writes now? | `true` | `MTG_WRITES_ENABLED`, as in the example files; `false` stops all writes (proposals can still be made and reviewed). Recommend making the first edit on a deck the operator doesn't care about |
 | Default approval mode for members who have not chosen one? | `manual` | `MTG_APPROVAL_MODE_DEFAULT`; recommend `manual` (every change waits for the member's own press). Each member picks their own mode (`manual`, `semi`: low-risk changes, such as a small edit or a private copy of a deck, apply without asking, `auto`: most changes apply without asking, but some still wait for the member) on their Account page |
 | Cap the approval mode members may choose? | `auto` (no cap) | `MTG_APPROVAL_MODE_MAX`; `semi` or `manual` to stop members choosing looser modes. `MTG_AUTO_APPLY_MAX_ROWS` (default 5) is the row limit of a low-risk edit |
 | Show the Approve/Reject card in the chat? | `true` | `MTG_APPLY_IN_CHAT`; recommend `true`: Claude and ChatGPT show each proposal as a card whose Approve button carries a one-time code the assistant never sees; the same switch gives the other cards in the chat (printings, recognised cards, a deck, the account, comparisons, statistics, deck lists, scans); `false` leaves only the review page |
@@ -234,9 +234,10 @@ the rest, including linking Archidekt.
   "Which AI clients may connect").
 - Recommend narrowing `MTG_TRUSTED_PROXIES` to NPM's address or the overlay
   subnet once NPM works (`docs/DEPLOY.md` step 7).
-- Keep `MTG_WRITES_ENABLED=false` until a proposal has been applied to a
-  throwaway deck and checked on Archidekt (see `docs/OPERATIONS.md`,
-  "Archidekt writes and the kill switch").
+- Recommend that the operator's first applied edit is on a deck they don't
+  care about, checked on Archidekt afterwards. `MTG_WRITES_ENABLED=false`
+  stops all writes (see `docs/OPERATIONS.md`, "Archidekt writes and the kill
+  switch").
 
 ## Report
 

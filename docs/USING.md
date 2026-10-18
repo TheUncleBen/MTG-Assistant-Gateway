@@ -34,7 +34,7 @@ you the exact change first.
 On a phone the five tabs at the bottom are Home, Decks, Scan, Collection
 and More; Search is the magnifier in the top bar, and More opens a sheet
 with Proposals, History, Reports, Watchlist (when watchlists are on), Guide
-and Account. On a wider touch screen, such as an unfolded foldable or a
+and Account, and Admin for administrators. On a wider touch screen, such as an unfolded foldable or a
 tablet, and in the Android app from 600 px, a rail down the left edge lists
 every page, so it has no More. A desktop browser shows Home, Decks, Search,
 Collection, Scan, Proposals and History in the top bar. The layout follows

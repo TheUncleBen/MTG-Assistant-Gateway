@@ -61,6 +61,21 @@ released under the MIT License:
 The project's published index file (`art_hashes.sqlite`) is not used or
 redistributed; the gateway builds its own hashes from Scryfall images.
 
+## Python packages
+
+The gateway image installs these Python packages directly, at the versions in
+`constraints.txt`, together with the packages they depend on. Each one's
+licence file is in its installed distribution in the image.
+
+| Package | Version | Licence |
+| --- | --- | --- |
+| `mcp` | 2.3.0 | MIT |
+| `httpx` | 0.28.1 | BSD-3-Clause |
+| `joserfc` | 1.7.5 | BSD-3-Clause |
+| `cryptography` | 50.0.2 | Apache-2.0 or BSD-3-Clause |
+| `uvicorn` | 0.54.0 | BSD-3-Clause |
+| `pillow` | 12.3.0 | MIT-CMU (more below) |
+
 ## Image decoding (scan)
 
 The gateway decodes Scryfall's card images with **Pillow**

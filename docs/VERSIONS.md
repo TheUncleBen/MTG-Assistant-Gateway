@@ -4,7 +4,7 @@ Every update to `main` is a new version of the gateway. Each one gets:
 
 | What | Name | Use it to |
 |---|---|---|
-| Container image | `ghcr.io/<owner>/mtg-assistant-gateway:1.2.3` | run exactly that version |
+| Container image | `ghcr.io/theuncleben/mtg-assistant-gateway:1.2.3` | run exactly that version |
 | Git tag | `v1.2.3` | see or check out the code of that version |
 | Branch | `release/1.2.3` | the same code as the tag, kept as a read-only branch |
 | GitHub release | **Releases → v1.2.3** | read what changed, download the Android app when it was built |

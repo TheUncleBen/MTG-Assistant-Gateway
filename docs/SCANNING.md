@@ -111,7 +111,7 @@ them.
 
 Scan sessions belong to you and live in the gateway's database (so they're
 in the nightly backup) for as long as you keep them: they are drafts, up to
-500 cards each and 500 scans per person, and never expire by age (only past that
+500 cards each and 500 drafts per person, and never expire by age (only past that
 ceiling does the oldest go). Saving a scan's cards to a deck or your
 collection removes the draft. Scanning itself never sends anything to
 Archidekt.

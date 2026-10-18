@@ -74,9 +74,9 @@ https://mtg.example.com/mcp
   these steps are only partly tested, OpenAI says custom connectors
   **don't work in the ChatGPT iOS and Android apps** ("No - web only"), the
   desktop app is unconfirmed, and OpenAI's pages disagree on which tools each
-  plan gets. On Pro every tool worked when the owner checked it, deck
-  proposals included; Plus is untested. If you're mostly on your phone, use
-  Claude.
+  plan gets. On a Pro plan, ChatGPT used every tool, deck proposals
+  included, in a check with this gateway on 2026-10-10. Plus has not been
+  tried yet. If you're mostly on your phone, use Claude.
 
 Full step-by-step, error messages and what's been tested are in
 [CONNECT.md](CONNECT.md).
@@ -172,7 +172,7 @@ so:
      did. In Claude Code the assistant can offer to open that page for you.
    - **The assistant applies it** (only if you chose that): on your
      Account page you can switch your own **approval mode** from Manual
-     (shown as "Ask me every time") to Semi-auto (shown as "Apply low-risk
+     (shown as "Ask me every time", the starting mode by default) to Semi-auto (shown as "Apply low-risk
      changes without asking": small deck or collection edits up to the
      row limit, 5 card rows by default, each a card added or removed, or a
      new quantity, category, finish, printing, color tag or custom mana
@@ -181,15 +181,17 @@ so:
      row in the commander zone and another row, both in the deck or both in the maybeboard or sideboard, and private
      copies of a deck) or Full auto (shown as "Apply deck and collection
      changes without asking": the rest too, except a restore, a
-     commander change, a new deck, an edit of more than 20 rows, making
+     commander change, a new deck, an edit of more than 20 rows (by default), making
      a deck public or unlisted, and any edit of a description that has formatting,
      such as bold text, links or pictures, which still wait for your press; so
      does a held change, a change waiting for another change first, one
      another app had a hand in, one that replaces another app's change,
-     or one that another app's waiting change would replace). Then the assistant applies what your mode allows and tells
+     or one that another app's waiting change would replace). Those numbers are the
+     defaults: your Account page shows this gateway's numbers, and which
+     modes it allows. Then the assistant applies what your mode allows and tells
      you what it did. Actions on your Archidekt account (likes, votes,
      bookmarks, follows, comments, new folders and collaborator changes) and
-     deleting a deck are never applied by an assistant: each one waits for your own press, in every mode, on the card in the chat or on its review page (deleting a deck, and any edit of a description or comment that has formatting: on the review page only). Be aware that an assistant can be tricked by text it
+     deleting a deck are never applied by an assistant: each one waits for your own press, in every mode, on the card in the chat or on its review page (deleting a deck, and an edit of a comment that has formatting: on the review page only). An edit of a description that has formatting is also approved on its review page only. Be aware that an assistant can be tricked by text it
      reads into making changes you did not ask for. If you let your
      assistant apply changes without asking, such a change can land on
      Archidekt without your press. A change to one of your decks keeps a
@@ -233,7 +235,7 @@ Good to know:
   it or you reject it.
 - **To undo an edit**, ask the assistant to restore the deck from its
   snapshot. It proposes the restore like any other change, you okay it, and
-  every card goes back as it was: same printing, foil, quantity, colour tag,
+  every card goes back as it was: same printing, foil, quantity, color tag,
   custom mana value and categories in their order, including the commander,
   sideboard and maybeboard. The deck's name, description, format, bracket
   and privacy go back too, so a settings change
@@ -249,7 +251,8 @@ Good to know:
   changing its tags or its cover. You approve those like any other change.
   It can propose a new folder, which only your own press creates; renaming
   folders is yours alone, on the Folders page.
-- The owner can switch applying off for everyone. While it's off you can
+- The owner decides whether changes can be applied to Archidekt; your
+  Account page shows whether it's on. While it's off you can
   still make and review proposals, and the assistant will tell you applying
   is disabled.
 - The assistant can also create a new deck in your Archidekt account from a
