@@ -498,6 +498,11 @@ def commander_stays_text(stay: dict[str, Any]) -> str:
     """The commander row's text when the commanders stay and a commander's other rows go."""
     qty = int(stay.get("qty") or 0)  # at least 1: a card whose copies all go doesn't stay
     copies = "1 copy" if qty == 1 else f"{qty} copies"
+    if stay.get("zone") == "side":  # rows outside the deck proper fold among themselves
+        return (
+            f"{stay.get('name')} stays in the commander zone, now with {copies}. "
+            "Its other rows in the maybeboard and sideboard are removed."
+        )
     return (
         f"{stay.get('name')} stays in the commander zone, now with {copies}. "
         "Its other rows in the deck are removed."
@@ -1452,7 +1457,7 @@ def _commanders_before_after(
     zone, cards whose copies all go (``after``, per zone), and adds that make a row in it.
 
     The third value lists each card with a row in the commander zone and other rows in the same
-    zone that loses copies (``name``, and ``qty``, its copies after): ``build_payload`` removes its
+    zone that loses copies (``name``, ``qty``, its copies after, and ``zone``): ``build_payload`` removes its
     other rows and keeps that many in its commander-zone row (``_rows_kept_first``), but such a
     change always gets a commander row, so the member sees it whatever the rows do."""
     premier = deck.premier_keys()
@@ -1474,7 +1479,7 @@ def _commanders_before_after(
             if len(cards) > 1 and any(_in_premier(premier, c.categories) for c in cards):
                 total = sum(c.quantity for c in cards)
                 if counts.get(key, total) < total:
-                    unsure.append({"name": cards[0].name, "qty": counts.get(key, total)})
+                    unsure.append({"name": cards[0].name, "qty": counts.get(key, total), "zone": zone})
     for ch in changes:
         if ch.action == "add" and _in_premier(premier, _all_categories([ch])):
             now.setdefault(ch.card_name.lower(), ch.card_name)

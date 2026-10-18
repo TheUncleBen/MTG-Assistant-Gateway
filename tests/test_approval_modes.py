@@ -720,6 +720,31 @@ async def test_the_commander_zone_keeps_the_new_count_and_the_maybeboard_row_sta
     assert rows == [(1, ["Maybeboard"]), (2, ["Commander"])], rows
 
 
+async def test_a_commander_zone_row_in_the_maybeboard_still_waits_and_says_what_goes(stack: Stack) -> None:
+    """A Maybeboard row that also carries the commander zone's category, with another Maybeboard
+    row of the same card: taking a copy away still waits with a commander row, which says the
+    maybeboard and sideboard rows go (the deck's own rows are left alone)."""
+    h, ark = stack.h, stack.ark
+    ark.add_side_row(42, "Sol Ring")
+    ark.add_side_row(42, "Sol Ring")
+    side = [c for c in ark.decks[42]["cards"] if c["categories"] == ["Maybeboard"]]
+    side[1]["categories"] = ["Maybeboard", "Commander"]
+    token = await linked_user(stack)
+    await _set_mode(h, "auto")
+    change = {"action": "set_quantity", "card_name": "Sol Ring", "quantity": 1, "zone": "side"}
+    p = structured(await call(h, token, "propose_deck_changes", {"deck_id": "42", "changes": [change]}))
+    assert p["ok"] and p["state"] == "pending", p
+    assert "commander" in [r.get("kind") for r in p["rows"]]
+    assert p["risk"] == "high" and p["assistant_may_apply"] is False
+    stays = (
+        "Sol Ring stays in the commander zone, now with 1 copy. "
+        "Its other rows in the maybeboard and sideboard are removed."
+    )
+    assert stays in p["diff"].splitlines(), p["diff"]
+    out = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
+    assert out["ok"] is False and ark.patches == []
+
+
 @pytest.mark.parametrize("name", ["commander", "COMMANDER"])
 async def test_a_move_into_the_commander_zone_under_another_case_waits(stack: Stack, name: str) -> None:
     """A category that differs from the commander zone's name only in case counts as that zone
