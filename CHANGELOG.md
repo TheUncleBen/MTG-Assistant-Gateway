@@ -15,9 +15,10 @@ optional, and the stack files now pass every setting on the Settings page to the
 ### Upgrade notes
 - From 0.7.31: the stack file and the Compose file changed, so take the new ones as the update
   steps describe ([docs/UPGRADING.md](docs/UPGRADING.md)). Your env file keeps working as it is.
-  If your environment already sets one of the settings listed under Fixed below, that value now
-  reaches the gateway and locks the setting on the Settings page; remove it from your environment
-  to keep managing that setting on the page.
+  If your variables (in Portainer, in `mtg.env`, or in Compose's `.env`) already set one of the
+  settings listed under Fixed below, that value never reached the gateway before. Now it does,
+  and it locks the setting on the Settings page; remove it from your variables to keep managing
+  that setting on the page.
 
 ### Changed
 - `deploy/stack.env.example` and `deploy/compose/.env.example` list every variable their stack
