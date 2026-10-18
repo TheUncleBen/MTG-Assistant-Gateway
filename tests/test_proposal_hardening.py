@@ -14,19 +14,11 @@ from mtg_gateway.archidekt import ArchidektClient, ArchidektError, Pacer
 from mtg_gateway.archidekt_csv import CsvError, parse_export
 from mtg_gateway.decklist import parse_decklist
 
-from .conftest import FakeIdP, Harness, make_settings, running
+from .conftest import Stack
 from .fake_archidekt import FakeArchidekt
-from .test_decks_and_proxy import Browser, Stack, _client, call, linked_user, mcp_token, structured
+from .test_decks_and_proxy import Browser, call, linked_user, mcp_token, structured
 
-
-@pytest.fixture
-async def stack(tmp_path, idp: FakeIdP):
-    ark = FakeArchidekt()
-    settings = make_settings(
-        tmp_path, writes_enabled=True, approval_mode_default="auto", archidekt_base="https://ark.test/api"
-    )
-    async with running(Harness(settings, idp, archidekt=_client(settings, ark))) as h:
-        yield Stack(h, ark)
+# ``stack`` is the shared AUTO stack (tests/conftest.py): writes on, applies allowed over MCP.
 
 
 async def _propose(h, token: str, changes: list[dict]) -> dict:
@@ -42,7 +34,11 @@ async def test_category_of_an_add_is_in_the_diff_and_capped(stack: Stack) -> Non
     h = stack.h
     token = await linked_user(stack)
     p = await _propose(h, token, [{"action": "add", "card_name": "Arcane Signet", "category": "Commander"}])
-    assert p["ok"] and p["diff"] == "+1 Arcane Signet [Commander]", p
+    # filed under Commander, it is a second commander too, so the commander row says so
+    assert p["ok"] and p["diff"].splitlines() == [
+        "+1 Arcane Signet [Commander]",
+        "Commander: Aesi, Tyrant of Gyre Strait -> Aesi, Tyrant of Gyre Strait, Arcane Signet",
+    ], p
     b = Browser(h)
     await b.login()
     r = await b.http.get(f"/proposals/{p['proposal_id']}")
@@ -110,7 +106,7 @@ async def test_another_client_cannot_apply_a_pending_proposal(stack: Stack) -> N
     b = Browser(h)
     await b.login()
     url = f"/proposals/{p2['proposal_id']}"
-    r = await b.http.post(url, data={"csrf": await b.csrf(url), "action": "apply"})
+    r = await b.http.post(url, data={**await b.review_form(url), "action": "apply"})
     await b.aclose()
     assert r.status_code == 303 and h.db.get_proposal(p2["proposal_id"], "user-1")["state"] == "applied"
 

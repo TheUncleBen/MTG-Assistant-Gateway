@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 
 from mtg_gateway.cards import card_html
+from mtg_gateway.modes import MODE_LABELS
 
 from .test_consent_browser import _chromium_or_skip, _launch
 
@@ -314,7 +315,7 @@ def test_printings_card_lists_pictures_filters_and_sends_the_pick_to_the_assista
             card.locator("#filter").fill("legends")
             assert card.locator(".tile").count() == 1 and "CMR" in card.locator(".tile").first.inner_text()
             card.locator("#filter").fill("")
-            # the finish filter is the card's own chip row, never the host's native list (R-131)
+            # the finish filter is the card's own chip row, never the host's native list
             assert card.locator("select").count() == 0
             card.locator("#finish button[data-finish=etched]").click()
             assert card.locator("#finish button[aria-pressed=true]").inner_text() == "Etched"
@@ -508,6 +509,56 @@ def test_deck_card_groups_by_category_and_shows_rules_text_on_tap() -> None:
             browser.close()
 
 
+def test_deck_card_draws_the_deck_from_the_result_with_no_connection_to_the_gateway() -> None:
+    """A host whose sandbox lets the card reach no server but the picture hosts (ChatGPT, as seen):
+    the deck rides in the result's _meta, so the card draws it and never calls the gateway."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_or_skip()
+    with sync_playwright() as p:
+        browser = _launch(p, exe)
+        try:
+            page = browser.new_page()
+            errors: list[str] = []
+            page.on("pageerror", lambda e: errors.append(str(e)))
+            _route(page)
+            gateway_calls: list[str] = []
+            page.unroute("https://mtg.test/cards/data/*")
+
+            def blocked(route):
+                gateway_calls.append(route.request.url)
+                route.abort()
+
+            page.route("https://mtg.test/**", blocked)
+            card = _open(
+                page,
+                "deck-card",
+                {
+                    "structuredContent": {"ok": True, "name": "Sample <b>Deck</b>"},
+                    "_meta": {"mtg/card": {"link": LINK, "name": "Sample <b>Deck</b>", "deck": DECK}},
+                },
+            )
+            card.locator(".row.cardrow").nth(3).wait_for(timeout=5_000)
+            assert card.locator("#count").inner_text().lower() == "4 cards + 1 aside"
+            assert card.locator(".row.group").count() == 3 and card.locator(".row.cardrow").count() == 4
+            assert "Commander:" in card.locator("#stat").inner_text()
+            assert card.locator("#status").get_attribute("class") == "status hidden"
+            assert gateway_calls == []
+            # Without the deck in the result the card still falls back to the link, and says so
+            # when that cannot be reached.
+            card = _open(
+                page,
+                "deck-card",
+                {"structuredContent": {"ok": True, "name": "X"}, "_meta": {"mtg/card": {"link": LINK}}},
+            )
+            card.locator("#status.err").wait_for()
+            assert "no connection to the gateway" in card.locator("#status").inner_text()
+            assert gateway_calls and gateway_calls[0].startswith(LINK)
+            assert not errors, errors
+        finally:
+            browser.close()
+
+
 def test_account_card_points_at_what_is_missing() -> None:
     from playwright.sync_api import sync_playwright
 
@@ -524,6 +575,7 @@ def test_account_card_points_at_what_is_missing() -> None:
                 "writes_enabled": True,
                 "account_page": "https://mtg.test/account",
                 "approval_mode": "manual",
+                "approval_mode_label": MODE_LABELS["manual"],
                 "approval_mode_note": "Every change waits for your press. Change it on the account page.",
             }
             card = _open(page, "account-card", {"structuredContent": status})
@@ -545,6 +597,28 @@ def test_account_card_points_at_what_is_missing() -> None:
                 and "Alice" in card.locator("#facts").inner_text()
             )
             assert card.locator("#open").inner_text() == "Open the Account page"
+            # the mode's label is account_status's, the words the Account page and the Guide use
+            semi = {
+                **ready,
+                "approval_mode": "semi",
+                "approval_mode_label": MODE_LABELS["semi"],
+                "approval_mode_note": None,
+            }
+            for width, theme in ((380, "light"), (380, "dark"), (700, "light"), (700, "dark")):
+                card = _open(page, "account-card", {"structuredContent": semi}, width=width, theme=theme)
+                card.locator("#open").wait_for()
+                assert "Apply low-risk changes without asking" in card.locator("#facts").inner_text()
+                fit = page.frames[1].evaluate(
+                    "() => [document.documentElement.scrollWidth, document.documentElement.clientWidth]"
+                )
+                assert fit[0] <= fit[1], (width, theme, fit)
+                _shot(page, f"account-semi-{theme}-{width}")
+            # writes off: the shared refusal wording, no setting name
+            card = _open(page, "account-card", {"structuredContent": {**ready, "writes_enabled": False}})
+            card.locator("#open").wait_for()
+            assert "Archidekt writes" in card.locator("#facts").inner_text()
+            text = card.locator("#summary").inner_text()
+            assert "switch Archidekt writes on" in text and "MTG_" not in text, text
             # whoami's shape works too (a name, the version and the account page; nothing else).
             who = {
                 "signed_in": True,
@@ -881,6 +955,29 @@ def test_compare_card_shows_each_side_and_the_differences_at_320px() -> None:
     _display_card("compare-card", {"structuredContent": COMPARE}, "#list .row", check)
 
 
+def test_stats_card_shows_archidekts_estimate_only_when_no_bracket_is_set() -> None:
+    """With no bracket set, the card names Archidekt's estimate from the cards with
+    Archidekt's own notes (kept as text)."""
+    stats = {
+        **STATS["stats"],
+        "archidekt_bracket": None,
+        "bracket_estimate": {
+            "bracket": 4,
+            "kind": "estimate",
+            "basis": ["two-card combo pieces: A, B"],
+            "notes": ["If this is a late-game combo, your deck may be a Bracket: Upgraded " + HOSTILE],
+        },
+        "checks": {"problems": [], "ok": True, "legal": True},
+    }
+
+    def check(page, card) -> None:
+        text = card.locator("#verdict").inner_text()
+        assert "Archidekt's estimate from cards: Optimized (4)." in text
+        assert ("may be a Bracket: Upgraded " + HOSTILE) in text and "set on the deck" not in text
+
+    _display_card("stats-card", {"structuredContent": {**STATS, "stats": stats}}, "#curve .col", check)
+
+
 def test_stats_card_draws_curve_colours_price_and_verdict_at_320px() -> None:
     def check(page, card) -> None:
         assert card.locator("#title").inner_text() == "Sample " + HOSTILE
@@ -891,7 +988,12 @@ def test_stats_card_draws_curve_colours_price_and_verdict_at_320px() -> None:
         facts = card.locator("#facts").inner_text()
         assert "$412.50" in facts and "3.12" in facts
         verdict = card.locator("#verdict")
-        assert "bad" in verdict.get_attribute("class") and "Bracket estimate 3" in verdict.inner_text()
+        # a bracket set on the deck is the deck's bracket; the estimate is not shown beside it
+        assert (
+            "bad" in verdict.get_attribute("class")
+            and "Bracket: Core (2), set on the deck." in verdict.inner_text()
+        )
+        assert "Archidekt's estimate from cards" not in verdict.inner_text()
         assert ("Banned: " + HOSTILE) in verdict.inner_text()
         assert card.locator("#state").inner_text().lower() == "2 problems"
         assert _keyboard_open(page, card, "Open in the app") == "https://mtg.test/decks/42"
@@ -936,3 +1038,63 @@ def test_scan_card_flags_unrecognised_items_and_links_the_scan_page_at_320px() -
         assert _keyboard_open(page, card, "Open the Scan page") == "https://mtg.test/scan"
 
     _display_card("scan-card", {"structuredContent": SCAN}, "#list .row", check)
+
+
+# WCAG contrast of each mana-curve label against what is drawn behind it (the nearest painted box)
+CURVE_LABELS = """() => {
+  function rgb(s) { const m = s.match(/[\\d.]+/g); return m ? m.map(Number) : [0, 0, 0, 0]; }
+  function lum(c) {
+    const a = c.slice(0, 3).map(v => {
+      v /= 255;
+      return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+    });
+    return 0.2126 * a[0] + 0.7152 * a[1] + 0.0722 * a[2];
+  }
+  function bg(e) {
+    for (; e; e = e.parentElement) {
+      const c = rgb(getComputedStyle(e).backgroundColor);
+      if (c.length < 4 || c[3] > 0) return c;
+    }
+    return [255, 255, 255];
+  }
+  return [...document.querySelectorAll(".curve i")].map(i => {
+    const a = lum(rgb(getComputedStyle(i).color)), z = lum(bg(i));
+    return [i.textContent, (Math.max(a, z) + 0.05) / (Math.min(a, z) + 0.05)];
+  });
+}"""
+
+
+@pytest.mark.parametrize("theme", ["light", "dark"])
+def test_deck_card_curve_labels_read_against_their_background(theme: str) -> None:
+    """The mana curve's labels (0 to 7+) sit on the card, not inside their bars: each one
+    reaches 4.5:1 against what is behind it (a "0" under an empty bar measured 1.1:1 against the
+    bar it belonged to). The bars keep their heights, one per mana value."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_or_skip()
+    with sync_playwright() as p:
+        browser = _launch(p, exe)
+        try:
+            for width in (344, 390, 673, 1280):
+                page = browser.new_page(viewport={"width": width, "height": 900})
+                _route(page, deck=DECK)
+                card = _open(
+                    page,
+                    "deck-card",
+                    {"structuredContent": {"ok": True}, "_meta": {"mtg/card": {"deck": DECK}}},
+                    width=width - 24,
+                    theme=theme,
+                )
+                card.locator(".curve i").nth(7).wait_for()
+                labels = page.frames[1].evaluate(CURVE_LABELS)
+                assert [t for t, _ in labels] == ["0", "1", "2", "3", "4", "5", "6", "7+"]
+                assert all(r >= 4.5 for _, r in labels), (width, labels)
+                heights = page.frames[1].evaluate(
+                    "() => [...document.querySelectorAll('.curve b')].map(b => b.offsetHeight)"
+                )
+                assert heights == [2, 28, 2, 28, 2, 2, 28, 2], heights  # curve 1, 3 and 6: one card each
+                page.wait_for_timeout(100)  # the frame takes the card's height (size-changed)
+                _shot(page, f"l14-deckcard-curve-{width}-{theme}")
+                page.close()
+        finally:
+            browser.close()

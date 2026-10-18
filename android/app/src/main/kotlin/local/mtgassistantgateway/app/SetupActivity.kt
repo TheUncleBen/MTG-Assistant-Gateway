@@ -58,7 +58,10 @@ class SetupActivity : ComponentActivity() {
                             if (isDestroyed || isFinishing) return@post
                             button.isEnabled = true
                             if (problem == null) {
-                                Prefs(this).gatewayOrigin = r.origin
+                                val prefs = Prefs(this)
+                                // Another gateway: this phone's notifications were the old one's.
+                                if (prefs.gatewayOrigin != r.origin) NotifyService.stop(this)
+                                prefs.gatewayOrigin = r.origin
                                 startActivity(Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP))
                                 finish()
                             } else {

@@ -1,4 +1,4 @@
-"""Typed card-name suggestions in headless Chromium (static/suggest.js, R-131): the themed
+"""Typed card-name suggestions in headless Chromium (static/suggest.js): the themed
 listbox replaces the browser's datalist, appears from the gateway's own catalog without a
 Scryfall call per keystroke, works from the keyboard, and the search form's buttons sit in one
 row at one height. Skipped without a Chromium build."""
@@ -216,7 +216,7 @@ def test_no_page_renders_a_datalist(server: Server) -> None:
 
 
 def test_sign_out_acts_on_the_first_click_and_says_so(server: Server) -> None:
-    """T-015: the Sign out button shows 'Signing out…' at once and locks itself, so a second press
+    """The Sign out button shows 'Signing out…' at once and locks itself, so a second press
     does nothing (feedback.js). The submit itself is swallowed here so the page stays inspectable;
     the server side of sign-out is covered by tests/test_web_hygiene.py."""
     from playwright.sync_api import sync_playwright
@@ -251,7 +251,7 @@ def test_sign_out_acts_on_the_first_click_and_says_so(server: Server) -> None:
 
 
 def test_desktop_layout_switch_gives_a_phone_the_computer_layout(server: Server) -> None:
-    """T-046: with the Desktop layout cookie a phone gets a 1100 px viewport (as a browser's Desktop
+    """With the Desktop layout cookie a phone gets a 1100 px viewport (as a browser's Desktop
     site switch would), so the width queries show the top bar instead of the bottom tab bar."""
     from playwright.sync_api import sync_playwright
 

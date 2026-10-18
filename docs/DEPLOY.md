@@ -1,10 +1,14 @@
 # Deploying the gateway on Docker Swarm (with or without Portainer)
 
-This gets you one Swarm stack with two services:
+This gets you one Swarm stack with these services:
 
-- `mtg-assistant-gateway`, the gateway itself, and
+- `mtg-assistant-gateway`, the gateway itself;
 - `mtg-assistant-mysticforge`, a private research service the gateway talks to (more
-  on it [near the end](#mystic-forge-internal-research-service)).
+  on it [near the end](#mystic-forge-internal-research-service));
+- `mtg-assistant-ntfy`, a private notification server for the members' Android app
+  ([Notifications on members' phones](#notifications-on-members-phones)); and
+- `mtg-assistant-forge`, the simulation engine, which runs only if you turn it on
+  ([Forge simulations](#forge-simulations-optional)).
 
 Not running a Swarm? [DEPLOY-COMPOSE.md](DEPLOY-COMPOSE.md) does the same on
 one machine with plain Docker Compose. How the pieces fit together is in
@@ -36,8 +40,8 @@ Placeholders used below:
 
 The stack doesn't create the network it shares with your reverse proxy. It
 joins an existing overlay network by name, so create it before you deploy
-(the small private network between the gateway and Mystic Forge is created
-by the stack itself):
+(the small private networks between the gateway and Mystic Forge, ntfy and
+Forge are created by the stack itself):
 
 ```bash
 docker network create --driver overlay --attachable --opt encrypted mtg-gateway
@@ -172,15 +176,16 @@ In the Authentik admin UI:
 
 ## 4. Docker secrets (once)
 
-The stack expects three Swarm secrets with exactly these names:
+The stack expects four Swarm secrets with exactly these names:
 
 | Secret name | What goes in it |
 | --- | --- |
 | `mtg_fernet_key` | A random encryption key for linked Archidekt sessions and the identity provider's tokens the gateway keeps. **Keep a copy** (password manager or similar). Lose it and every linked account has to be relinked (and everyone signs in once more), and old backups' Archidekt sessions can't be decrypted |
 | `mtg_session_secret` | A random string of 32+ characters that signs the browser sign-in cookie. No need to keep a copy |
 | `mtg_oidc_client_secret` | The Client Secret from the Authentik provider in step 3 |
+| `mtg_ntfy_token` | The token the gateway uses with the stack's own notification server: `tk_` and 29 random lowercase letters and digits. You don't need to keep a copy. |
 
-A fourth secret is optional: `mtg_authentik_api_token`, an Authentik API
+A fifth secret is optional: `mtg_authentik_api_token`, an Authentik API
 token that may view only the gateway's one or two groups (and its own tokens, see IDP-AUTHENTIK.md §12), turns on the hourly clean-up of removed
 members' stored Archidekt sessions. Its setup, and the three stack lines to
 uncomment, are in
@@ -195,7 +200,7 @@ ways below.
 ### Option A: in Portainer
 
 1. On any machine with `openssl` (Linux, macOS, WSL or Git Bash), generate
-   the two random values:
+   the three random values:
 
    ```bash
    # mtg_fernet_key: a Fernet key (URL-safe base64 of 32 random bytes)
@@ -203,20 +208,23 @@ ways below.
 
    # mtg_session_secret
    openssl rand -base64 48
+
+   # mtg_ntfy_token
+   printf 'tk_%s\n' "$(LC_ALL=C tr -dc a-z0-9 </dev/urandom | head -c 29)"
    ```
 
 2. In Portainer, pick your Swarm environment, then **Secrets → Add secret**.
 3. Name `mtg_fernet_key`, paste the first value into **Secret**, leave
    **Encode secret** on (the default), and click **Create the secret**.
    Save that value in your password manager now.
-4. Do the same for `mtg_session_secret` (the second value) and for
-   `mtg_oidc_client_secret` (paste the Client Secret straight from
-   Authentik).
+4. Do the same for `mtg_session_secret` (the second value),
+   `mtg_ntfy_token` (the third) and `mtg_oidc_client_secret` (paste the
+   Client Secret straight from Authentik).
 5. Clear your terminal (`clear`) so the values aren't left on screen.
 
 ### Option B: on a Swarm manager
 
-Same three secrets from the command line. Nothing is written to disk or your
+This creates the same four secrets from the command line. Nothing is written to disk or your
 shell history:
 
 ```bash
@@ -228,10 +236,13 @@ openssl rand -base64 48 | docker secret create mtg_session_secret -
 
 # 3. mtg_oidc_client_secret. Paste the Authentik Client Secret at the (silent) prompt and press Enter.
 read -rs S && printf %s "$S" | docker secret create mtg_oidc_client_secret - ; unset S
+
+# 4. mtg_ntfy_token. You don't need to keep a copy.
+printf 'tk_%s' "$(LC_ALL=C tr -dc a-z0-9 </dev/urandom | head -c 29)" | docker secret create mtg_ntfy_token -
 ```
 
 Either way, Portainer's **Secrets** page (or `docker secret ls`) should now
-list all three.
+list all four.
 
 Swarm secrets can't be edited. To change one later, remove the stack (or
 take the secret out of it), delete the secret, create it again with the
@@ -242,8 +253,8 @@ Archidekt and signs in once more.
 
 The images live in GitHub Container Registry (GHCR) under `<owner>`. If the
 packages are private (the default for a private repository), Portainer
-needs a login to pull them. Set it up once like this and every later update
-is one click:
+needs a login to pull them. Set it up once like this and later updates need
+no new login:
 
 1. On GitHub, create a classic personal access token with only the
    `read:packages` scope.
@@ -256,7 +267,9 @@ is one click:
 3. Deploy (step 6). Portainer stores the login with each service, so
    whichever node runs it can pull. To update later, open the stack, change
    `MTG_TAG` if you're moving to a new release, and click **Update the
-   stack** with **Re-pull image** on.
+   stack** (if your stack uses the Repository build method, the button is
+   called **Pull and redeploy**). In the box that asks “Are you sure?”, make
+   sure **Re-pull image and redeploy** is on, then click **Update**.
 
 If tasks show `rejected` with `No such image: ghcr.io/<owner>/...`, check
 the image name and tag first, then the registry URL above. A `docker login`
@@ -303,7 +316,7 @@ If the packages are public you can skip this step.
    | `MTG_REQUIRED_GROUP` | the group from step 3, spelled exactly as your identity provider sends it (it's case-sensitive). Required: the gateway won't start with it empty unless you also set `MTG_ALLOW_ANY_IDP_USER=true` (anyone your identity provider lets through gets in) |
    | `MF_IMAGE`, `MF_NODE` | `ghcr.io/<owner>/mtg-assistant-mysticforge`, and the node Mystic Forge should run on (can be the same one) |
    | `MTG_WRITES_ENABLED` | `true` to let approved proposals change Archidekt; `false` keeps everything review-only. Writes have been run live against a throwaway Archidekt account, but make your own first edit on a deck you don't care about |
-   | `MTG_APPROVAL_MODE_DEFAULT` | Leave it `manual` (the example file and the code default): a member who has not chosen an approval mode has every change wait for their own press, on the Approve button of the card in the chat or on Apply on the review page. Each member picks their own mode (`manual`, `semi`: small low-risk edits apply without asking, `auto`: every change) on their Account page |
+   | `MTG_APPROVAL_MODE_DEFAULT` | Leave it `manual` (the example file and the code default): a member who has not chosen an approval mode has every change wait for their own press, on the Approve button of the card in the chat or on Apply on the review page. Each member picks their own mode (`manual`, `semi`: low-risk changes, such as a small edit or a private copy of a deck, apply without asking, `auto`: most changes apply without asking, but some still wait for the member) on their Account page |
    | `MTG_APPROVAL_MODE_MAX` | `auto` (no cap) lets members choose any mode; `semi` or `manual` caps what they may choose |
    | `MTG_APPLY_IN_CHAT` | `true` (the default): Claude and ChatGPT show each proposal as a card with Approve and Reject buttons, and only the card's one-time code can apply it; the other cards (printings, recognised cards, a deck, the account, comparisons, statistics, deck lists, scans) come with it. `false` removes every card; members use the review page |
 
@@ -312,6 +325,97 @@ If the packages are public you can skip this step.
 4. Click **Deploy the stack**. The gateway should go healthy within about
    30 seconds. Check from a manager with
    `docker service logs mtg_mtg-assistant-gateway`.
+
+### Updating to 0.7.30 from an earlier version
+
+0.7.30 brings its own notification server (ntfy) into the stack, and the
+gateway's Android app gets the members' notifications from it through the
+gateway's own address.
+
+1. **Before you update the stack**, create the `mtg_ntfy_token` secret
+   (step 4, the fourth command in Option B, or Option A). The new stack file
+   needs it; without it the stack won't deploy. **If you already have an
+   `mtg_ntfy_token` secret** (it held the token for an ntfy server of your
+   own), make a new one instead, so the stack's ntfy server doesn't accept a
+   token your old server accepts too: Swarm won't remove a secret a service
+   still uses, so first run
+   `docker service update --secret-rm mtg_ntfy_token mtg_mtg-assistant-gateway`,
+   then `docker secret rm mtg_ntfy_token`, then the step 4 command. The
+   gateway can't start without its token file in between, so do this just
+   before you update the stack. Revoke the old token on your old ntfy server
+   as well.
+2. If your stack's environment has `MTG_NTFY_URL` or `MTG_NTFY_TOKEN_FILE`
+   with a value, delete those lines (empty is fine): the stack file now
+   points the gateway at its own ntfy server. If you ran an ntfy server of
+   your own for the gateway, you can stop it after the update, and delete
+   the proxy host you made for it: the new ntfy server needs none.
+3. **If Forge is on:** the new stack file pulls Forge image `2.0.15-mag3`.
+   GitHub publishes that image only after this release is on `main` and the
+   **Forge image** workflow's run for it has finished, so check that the run
+   has finished (the repository's **Actions** tab) before you update; until
+   then the pull fails. If your variables file was copied from an older
+   `stack.env.example`, it still sets `FORGE_TAG=2.0.15-mag2`, which keeps
+   the old Forge image: change it to `FORGE_TAG=2.0.15-mag3`, or delete the
+   line. Delete its `FORGE_GAME_SECONDS=600` line too, and
+   `FORGE_MAX_PARALLEL=1` if it has one, to get the new defaults (a
+   four-minute game limit, and Forge working out how many games fit at
+   once). Its `MTG_FORGE_GAMES=10` keeps 10 games a report, locked on the
+   Settings page; delete it for the new default of 4.
+4. Update the stack with the new file, as in the 0.7.29 steps below (your
+   old `mtg_ntfy_token` lines, if you had them, are already in it).
+5. Tell the members: notifications now come in the gateway's own Android
+   app, not the ntfy app, and members need app 0.7.30 to get them. Each
+   member who wants them opens their Account page in the app and presses
+   **Get notifications on this phone**. Their old subscriptions in the ntfy
+   app stop getting messages and can be deleted. There are no notifications
+   on iPhone.
+6. **Members on an app older than 0.7.12 must update the app:** in those
+   apps, sign-in no longer starts by itself. They install the new app from the
+   gateway's Install page (uninstalling the old one first, since it was
+   signed with a different key).
+
+### Updating to 0.7.29 from an earlier version
+
+0.7.29 adds the admin Settings page. A stack file from before 0.7.29 gives 24
+of the page's 47 settings a value of its own, so the page would show them
+locked (greyed out) even with no variable set.
+
+1. **If you pasted the stack file into Portainer's Web editor:** first note
+   your own edits to the old text: the optional secret lines you removed the
+   `# ` from (`mtg_authentik_api_token`, `mtg_ntfy_token`, each in two
+   places) and any line you added under `environment:`. Then, in
+   **Stacks** → `mtg` → **Editor**, replace the whole text with the new
+   [`deploy/portainer-stack.yml`](../deploy/portainer-stack.yml) and make
+   the same edits in it. Without the Authentik lines the removed-member
+   clean-up turns off (the admin page says so); without the ntfy lines the
+   gateway won't start. With the **Repository** build method and this
+   repository, the update brings the new file. If Portainer pulls your own
+   copy of the repository instead, bring that copy up to date first and keep
+   your edits in it.
+   **Without Portainer:** in your copy of the repository, keep a copy of your
+   edited file (`cp deploy/portainer-stack.yml
+   deploy/portainer-stack.old.local.yml`). Then run
+   `git checkout deploy/portainer-stack.yml` (this undoes your edits to it),
+   then `git pull`. Make the same edits in the new
+   `deploy/portainer-stack.yml` (your saved copy shows what they were).
+2. **Optional:** for each setting you want to change on the Settings page,
+   delete its variable. A variables file made from the older
+   `stack.env.example` sets 19 of them, such as `MTG_ARCHIDEKT_BACKUPS=true`
+   and `MTG_DECK_SYNC_MINUTES=30`. Any variable you keep stays locked: the
+   Settings page shows it greyed out with its value, and you change it in
+   the stack and redeploy.
+3. If `MTG_TAG` names a version, change it to `0.7.30` first (in the stack's
+   variables, or in `mtg.env` without Portainer); otherwise you redeploy the
+   old version with the new stack file. Click **Update the stack** (if your
+   stack uses the Repository build method, the button is called **Pull and
+   redeploy**). In the box that asks “Are you sure?”, make sure **Re-pull
+   image and redeploy** is on, then click **Update**. Without Portainer: open a new shell (a variable you
+   deleted from `mtg.env` stays set in the old one), go to your copy of the
+   repository (`cd` into it), and run the last two lines under “Without
+   Portainer” again.
+
+With Docker Compose, see
+[DEPLOY-COMPOSE.md](DEPLOY-COMPOSE.md#updating-to-0729-from-an-earlier-version).
 
 ### Without Portainer
 
@@ -339,10 +443,11 @@ provider signs in, `MTG_ALLOW_ANY_IDP_USER=true`) and update the stack.
 Stacks deployed before this check existed with an empty group stop at this
 point after an upgrade.
 
-Both services run with every Linux capability dropped except the four their
-start-up script needs to switch to `PUID:PGID` (`CHOWN`, `DAC_OVERRIDE`,
+The gateway, Mystic Forge and Forge run with every Linux capability dropped
+except the four their start-up script needs to switch to `PUID:PGID` (`CHOWN`, `DAC_OVERRIDE`,
 `SETUID`, `SETGID`), and the switched process can't gain privileges back
-(`setpriv --no-new-privs`). Swarm applies `cap_drop`/`cap_add` from Docker
+(`setpriv --no-new-privs`). ntfy runs as `PUID:PGID` from the start, with
+no capabilities at all. Swarm applies `cap_drop`/`cap_add` from Docker
 20.10 on; older engines ignore them and print `Ignoring unsupported options`
 at deploy. The root filesystem is left writable: when `PUID`/`PGID` differ
 from the image's 1000:1000 the start-up script edits `/etc/passwd` and
@@ -615,10 +720,63 @@ default, and an install that leaves it off behaves exactly as before.
     `MTG_FORGE_URL=http://mtg-assistant-forge:8000`, then update the stack.
   - Docker Compose: start the `forge` profile (`COMPOSE_PROFILES=forge`) and set
     `MTG_FORGE_URL=http://forge:8000`.
-- **Load:** Java starts only while a simulation runs, one at a time, capped by `FORGE_MEMORY_LIMIT`
-  (default 1536M) and `FORGE_CPUS` (default 2). `MTG_FORGE_GAMES` (default 10) sets the games per
-  report. An idle Forge service holds no Java memory. `FORGE_GAME_SECONDS` (default 600) is how long
-  one game may run before Forge calls it a draw; such games are counted as draws in the report.
+- **The image tag:** the stack files name the Forge image by `FORGE_TAG` (default `2.0.15-mag3`).
+  GitHub builds and publishes a new tag the first time `main` carries it (the Forge image
+  workflow, after its test games pass on arm64 and amd64), so pulling a new tag fails until that
+  run has finished. After an update that changes the tag, wait for the run, then update the stack.
+- **No login between the gateway and Forge.** Forge's job service takes jobs from anything that
+  can reach it. The stack files keep it on a private network (`forge`) that only the gateway joins,
+  with no published port and no internet access, so nothing else can. Keep it that way: don't
+  publish its port, don't proxy it, and don't attach other containers to that network.
+- **Load:** Java starts only while Forge plays, limited by `FORGE_MEMORY_LIMIT` (default 1536M) and
+  `FORGE_CPUS` (default 2); where Docker can't cap memory, see the memory note below. `MTG_FORGE_GAMES` (default 4) sets the games per
+  report; **Play more games** on a finished report plays that many again against the same
+  opponents and adds them to the results (50 games a report at most; on a comparison, the same
+  number to both decks). An idle Forge service holds
+  no Java memory.
+- **Games at once:** each game of a run is its own Java process with its own seed, so up to 4 of a
+  run's games can play at once when Forge has room. The seed is kept with the report for the record:
+  Forge does not always replay a game exactly, so compare runs by their win rates and 95% intervals,
+  not game by game. `MTG_FORGE_PARALLEL_GAMES` (default 4, or the admin Settings page) is how many
+  one report asks for at once, and `FORGE_MAX_PARALLEL` on the Forge service is the most it allows,
+  for all runs together: runs start in order, and a run that uses fewer lets the next one play
+  beside it (with 2 or more, a Compare's second deck plays beside the first when a place is still
+  free for it). Left empty (the default), Forge works the number out from its container: one game
+  per 2 CPUs and per 1.2 GB of memory, 1 to 4, which is 1 inside the default limits; its log and
+  `/health` (`max_parallel`, `max_parallel_from`) say which. Each game takes up to `FORGE_XMX` of
+  Java memory. Measured on GitHub's build machines (not a Pi) with the default limits (1536M, 2
+  CPUs, 15 four-player games, one game per Java process): one at a time peaked at about 600 MiB;
+  two at once at about 970 to 1,050 MiB, and finished about 25% sooner on the arm64 machine but
+  about 14% later on the x86 machine; three at once fit in the memory (about 1,210 to 1,380 MiB) but
+  slowed the games so much that 3 and 7 of the 15 reached the four-minute limit. To play more at
+  once, raise `FORGE_MEMORY_LIMIT` and `FORGE_CPUS`. Set `FORGE_MAX_PARALLEL` by hand only to a
+  number the machine holds (in these measurements, 2 in 1536M and 2 CPUs, not 3).
+  `FORGE_GAME_SECONDS` (default 240, four minutes) is how long one game may run before Forge calls
+  it a draw; such games are counted as draws in the report. Forge reads a card's rules only when a
+  game needs that card, which roughly halves each Java start (measured 7 s to 3 s on a 4-CPU PC);
+  `FORGE_LAZY_CARDS=0` makes it read them all at start again.
+- **Memory where Docker can't cap it:** on Raspberry Pi OS the kernel's memory controller is off by
+  default, so Docker drops the stack's `FORGE_MEMORY_LIMIT` and nothing caps Forge's memory. Forge
+  then guards its own memory from inside, with nothing to change on the machine: the stack also
+  passes `FORGE_MEMORY_LIMIT` as `FORGE_MEMORY_BUDGET`, which sizes the games at once when no limit
+  can be read; each Java gets a ceiling on its class data on top of `FORGE_XMX`
+  (`FORGE_MAX_METASPACE`, default `256m`); and each Java runs with an out-of-memory score of
+  `FORGE_OOM_SCORE_ADJ` (default 1000), so if the machine runs out of memory while Forge plays, the
+  kernel stops a Forge game before the gateway or other services. These keep Forge in bounds, but
+  they are not a hard limit as the kernel's memory controller is.
+- **More than one machine** (optional; one copy is the default): the gateway can use several
+  copies of the Forge service, for example a Pi and an x86 PC, each playing whole runs.
+  `MTG_FORGE_URL` stays the same. The stack's Forge service uses `endpoint_mode: dnsrr`, so the
+  gateway sees each copy's address; it starts each run on the copy with the most free places and
+  keeps asking that copy about it. One run still plays on one copy, never split across machines.
+  Placement is your choice: instead of `node.hostname == ${FORGE_NODE}`, label each machine
+  (`docker node update --label-add mtg-forge=true <node>`), set the constraint to
+  `node.labels.mtg-forge == true`, add `max_replicas_per_node: 1` under `placement`, and set
+  `FORGE_REPLICAS` to the number of labelled machines. ARM and x86 machines can be mixed (the
+  image is built and tested for both). The CPU and memory limits apply to each copy, so size them
+  for the smallest machine. With Docker Compose, `docker compose up --scale forge=2` gives two
+  copies on one host. The gateway's handling of several copies is so far tested only with a
+  stand-in, not yet on real machines or on a mix of ARM and x86.
 - **No upkeep:** the image carries Forge's card scripts, an index of Scryfall's alternative printed
   names, and the newest Commander precons as opponents, each with a bracket estimated from the game
   changers it holds (Scryfall's list, read once when CI builds the image). The gateway seats the
@@ -629,84 +787,51 @@ default, and an install that leaves it off behaves exactly as before.
 - Cards Forge cannot play are listed in each report's `forge.not_played`, and the games run without
   them.
 
-## Notifications through ntfy (optional)
+## Notifications on members' phones
 
-Members can get a short message on their phone when a proposal waits for their approval, a deck
-report finishes (Forge runs that waited in the queue included), a watched card crosses a price
-alert they set, or their daily or weekly summary is ready. The gateway sends them through an
-[ntfy](https://ntfy.sh/) server. It is off by default: with `MTG_NTFY_URL` empty nothing is sent,
-the Account page says the gateway has no notification server, and nothing else changes. ntfy is
-free and open source; the gateway uses no paid service for this.
+Members can get a short message on their phone when an assistant leaves changes waiting for their
+press (one message per deck, such as "2 changes to Atraxa are waiting for you", updated as the count changes
+and removed when nothing waits), a deck report finishes (Forge runs that waited in the queue
+included), a watched card crosses a price alert they set, or their daily or weekly summary is
+ready. They come in the gateway's own Android app. There is no iPhone version, no Firebase or
+Google push service, and no separate notification app.
 
-What a message holds: a title, one short line and a link to the gateway page (the proposal, the
-report, the watchlist, the Account page's summary). Never a deck's cards. A price alert names the
-watched card and its old and new price; a summary gives counts and totals and the card that moved
-most. The access token is read from a Docker secret file, sent only in the `Authorization` header
-and never written to the log; a refused message is logged with its HTTP status alone.
+How it works: the stack runs its own [ntfy](https://ntfy.sh/) server (`mtg-assistant-ntfy`, free
+and open source) on a private network with no published port and no internet access. The gateway
+is its only user: it publishes each member's messages, with the `mtg_ntfy_token` secret, to the
+member's own topic (`mtg-`, 16 random characters and a 6-character mark made with a key kept in the
+gateway's database), and ntfy refuses everything else. The gateway refuses an app connection whose
+topic has no valid mark, and at every start it gives a new topic to each member whose topic has none
+(after the update to 0.7.30, and after a rollback and a new update). The key is not one of the
+stack's secrets, so changing a secret doesn't disconnect any phone from its notifications. Debug
+logs show a topic only as `mtg-…`. The app
+holds one long request open to the gateway's own address (`/app/notifications/stream`), and the
+gateway passes the member's messages along it. ntfy keeps messages for 12 hours, in memory, so a
+phone that was offline gets them when it is back; a restart of the ntfy service drops messages not
+yet picked up.
 
-Each member turns notifications on in the **Notifications** card of their Account page. They get
-their own topic, `mtg-` and 22 random characters (128 bits) that nobody can guess, or choose one:
-`mtg-` and then 12 to 60 letters, digits, `-` or `_` (the prefix keeps members inside an
-`mtg-*` grant); two members can't have the same topic. **Send test** sends one message to check
-it, at most once a minute.
-
-### Self-hosted ntfy with access control (recommended)
-
-Run ntfy next to the gateway with `auth-default-access: deny-all`, so nobody can read or publish
-without a user and a grant. The ntfy image is `binwiederhier/ntfy` (pin a release tag); the
-settings below are its documented `server.yml` keys, also accepted as `NTFY_*` environment
-variables:
-
-```yaml
-# server.yml (or NTFY_BASE_URL, NTFY_AUTH_FILE, NTFY_AUTH_DEFAULT_ACCESS, NTFY_BEHIND_PROXY)
-base-url: https://ntfy.example.com
-auth-file: /var/lib/ntfy/user.db
-auth-default-access: deny-all
-behind-proxy: true
-```
-
-Then, inside the ntfy container (`docker exec -it <ntfy container> sh`):
-
-```bash
-# 1. A user for the gateway that may only publish, and a token for it.
-ntfy user add gateway                     # asks for a password; you won't need it again
-ntfy access gateway 'mtg-*' write-only    # or '*' when this server is only for the gateway
-ntfy token add gateway                    # prints tk_...; that is the token
-
-# 2. One user per member who wants notifications, allowed to read only their own topic
-#    (the member reads it on their Account page once they turned notifications on).
-ntfy user add alice
-ntfy access alice mtg-AbCdEf... read-only
-```
-
-Put the token in a Docker secret and point the gateway at the server:
-
-```bash
-printf '%s' 'tk_...' | docker secret create mtg_ntfy_token -
-```
-
-In the stack file remove the `# ` from the `mtg_ntfy_token` lines (under `secrets:` at the top and
-in the gateway's `secrets:` list), then set `MTG_NTFY_URL=https://ntfy.example.com` and
-`MTG_NTFY_TOKEN_FILE=/run/secrets/mtg_ntfy_token` and update the stack. For Docker Compose, write
-the token to `secrets/mtg_ntfy_token.txt` and uncomment the same lines in
-`deploy/compose/docker-compose.yml`. When ntfy runs on the same Docker network, `MTG_NTFY_URL` may
-be its internal `http://` address, but the link members subscribe with is the one they can reach,
-so give ntfy a public `https://` address through your reverse proxy and use that. A member who
-chooses their own topic needs it to start with `mtg-` for the `mtg-*` grant above, or a grant of
-its own.
-
-Members subscribe in the ntfy app on their phone: add this server, sign in with the user you gave
-them, and subscribe to their topic (the app's own help shows where; it differs between Android
-and iOS).
-
-### ntfy.sh instead (no server to run)
-
-`MTG_NTFY_URL=https://ntfy.sh` with no token works too, free. The trade-off is privacy: ntfy.sh is
-a public service run by someone else, a topic there is open to anyone who knows its name, and
-messages pass through and are kept on its servers for a while. The random topic is then the only
-protection, so members should keep it to themselves. Messages carry little (see above), but a price
-alert does name a card and a summary its biggest mover. ntfy.sh also limits how many messages one
-address may send.
+- **No new proxy host.** Don't make one for ntfy. The stream goes through the gateway's existing
+  one; the gateway sends a small keepalive every 25 seconds, so a proxy read timeout of 60 seconds
+  or more is enough, and it asks nginx (and Nginx Proxy Manager) not to buffer the stream. A proxy
+  that buffers responses anyway delays every message until the buffer fills.
+- **What a message holds:** a title, one short line and a link to the gateway page (the review
+  page, the report, the watchlist, the Account page's summary). Never a deck's cards. A price
+  alert names the watched card and its old and new price; a summary gives counts and totals and
+  the card that moved most. The token is read from the secret file, sent only in the
+  `Authorization` header and never written to the log.
+- **Members** turn notifications on in the **Notifications** card of their Account page, in the
+  app. **Get notifications on this phone** asks once to let the app run in the background, and on
+  Android 13 and later it first asks to allow notifications. Android then shows a quiet "Always
+  connected" notification while the app listens. The app is built to reconnect after the phone restarts and after an app update; that is tested on an emulator, not yet on a real phone. **Disconnect my phones** gives
+  the member a new topic, which signs out every phone; turning notifications off ends the stream
+  too. **Send test** sends one message to check it, at most once a minute.
+- **Memory:** ntfy is limited to 128 MB (`NTFY_MEMORY_LIMIT`).
+- **Connections:** every phone reaches ntfy through the gateway, so ntfy counts them all as one
+  visitor. The stacks raise ntfy's limits for that visitor to 250 subscriptions
+  (`NTFY_VISITOR_SUBSCRIPTION_LIMIT`, ntfy's default 30) and a burst of 600 requests, one more
+  each second (`NTFY_VISITOR_REQUEST_LIMIT_BURST` and `NTFY_VISITOR_REQUEST_LIMIT_REPLENISH`,
+  defaults 60 and 5 s). The gateway takes at most 200 app connections in all and at most 4 for
+  one member's topic; past those it answers `503 busy` and `429`, and the app tries again by itself.
 
 ## Environment reference
 
@@ -725,6 +850,14 @@ itself:
 **Gateway settings.** Read by the gateway. The stack file already passes
 through the ones marked *stack*; for any other, add a line under the
 gateway's `environment:` in the stack file, or it has no effect.
+
+Since 0.7.29 most of the tuning settings below can also be changed by an
+admin on the gateway's Settings page (`/admin/settings`, see
+[OPERATIONS.md](OPERATIONS.md#the-settings-page)). The stack file passes those
+through empty unless your environment sets them, and `stack.env.example`
+lists them commented out with their default. A value you set in the
+environment wins and locks the setting: the page shows it greyed out with its
+value. Leave it out to manage it on the page.
 
 | Variable | Required | Default | What it does |
 | --- | --- | --- | --- |
@@ -754,15 +887,23 @@ gateway's `environment:` in the stack file, or it has no effect.
 | `MTG_REFRESH_TOKEN_TTL` | no, *stack* | `2592000` | Refresh token lifetime, seconds (30 days; 3600 to 31536000) |
 | `MTG_REAUTH_INTERVAL` | no, *stack* | `604800` | How long (seconds, default a week) after signing in an assistant can keep refreshing its tokens without a fresh sign-in (3600 to 31536000). Once this runs out the next refresh is refused and the person signs in again (and sees the gateway's consent page). Group membership doesn't wait for this: it is checked live with the identity provider on every request (`MTG_MEMBERSHIP_CHECK_TTL`) |
 | `MTG_LOG_LEVEL` | no, *stack* | `INFO` | Logging level |
-| `MTG_SERVER_NAME` | no, *stack* | `MTG Assistant Gateway` | Name shown on the gateway's pages, the install page and to assistants. Set your own and the plugin's short name follows it (`Deck Helper` → `deck-helper`), and the public plugin files no longer name this project or link to its repository. Anyone who installed the plugin under the old short name installs it again from `/install` |
+| `MTG_SERVER_NAME` | no, *stack* | `MTG Assistant Gateway` | Name shown on the gateway's pages, the install page and to assistants. Set your own and the plugin's short name follows it (`Deck Helper` → `deck-helper`), and the public plugin files no longer name this project or link to its repository. Anyone who installed the plugin under the old short name installs it again from `/install`. The ChatGPT plugin file also uses this name as its developer name and author name, which OpenAI's plugin check refuses when either is over 120 characters ([plugin docs](https://developers.openai.com/plugins/llms-full.txt), `plugin_developer_name_too_long` and `plugin_author_name_too_long`, read 2026-10-16; not tested in ChatGPT). The 120 characters are counted after the same filter as `MTG_CHATGPT_NAME` below. A longer name is cut at a word there (inside the word only when the first 120 characters have no space), and the gateway says so in its log at start and on the admin page; the rest of the gateway keeps the whole name |
+| `MTG_CHATGPT_NAME` | no, *stack* | empty (`MTG_SERVER_NAME`) | The ChatGPT connector name, when it should differ from `MTG_SERVER_NAME`: the name in the ChatGPT plugin file and the name the ChatGPT install steps tell people to type. Everything else keeps `MTG_SERVER_NAME`. Letters, digits, spaces and `. _ ' -` only: any run of other characters becomes a space, and repeated spaces become one; the 80-character count below is taken after that. OpenAI's plugin docs say a plugin file whose name is over 80 characters is refused on upload ([plugin docs](https://developers.openai.com/plugins/llms-full.txt), `plugin_display_name_too_long`, read 2026-10-15 and again 2026-10-16; not tested in ChatGPT). Their 30-character limit applies only to OpenAI's public plugin directory, which the gateway doesn't use, and a name typed when adding the connector by hand has no documented limit. When the ChatGPT connector name is over 80 characters, whether from this setting or from `MTG_SERVER_NAME` with this one empty, the gateway still starts and warns in three places: its log at start, the admin page and the install page's ChatGPT plugin-file step |
 | `MTG_LISTEN_HOST`, `MTG_LISTEN_PORT` | no | `0.0.0.0`, `8080` | Address and port inside the container. Leave them; the stack, Compose file and health checks expect 8080 |
 | `MTG_MYSTIC_FORGE_URL` | no, *stack* | empty (no research tools) | Internal Mystic Forge MCP URL; the stack sets `http://mtg-assistant-mysticforge:8000/mcp` |
 | `MTG_FORGE_URL` | no, *stack* | empty (Forge off) | Internal Forge runner URL; deck reports add real Forge games when set (see the Forge section above) |
-| `MTG_FORGE_GAMES` | no, *stack* | `10` | Forge games per deck report (1 to 50) |
+| `MTG_FORGE_GAMES` | no, *stack* | `4` | Forge games per deck report (1 to 50); **Play more games** adds this many again |
+| `FORGE_REPLICAS`, `FORGE_NODE` | no, *stack* | `0`, empty | Copies of the Forge service, and the node they run on. `0` leaves Forge off; `1` with `FORGE_NODE` is the usual setup. For copies on several machines, place them by a node label instead of `FORGE_NODE` (see "More than one machine" in the Forge section above) |
+| *(node label)* `mtg-forge=true` | no | none | Only for Forge copies on several machines: label each machine (`docker node update --label-add mtg-forge=true <node>`) and place the Forge service by `node.labels.mtg-forge == true` instead of `FORGE_NODE` (see "More than one machine" in the Forge section above) |
+| `MTG_FORGE_PARALLEL_GAMES` | no | `4` | How many of a report's Forge games the gateway asks Forge to play at once (1 to 4). `FORGE_MAX_PARALLEL` caps it for all runs together. Also on the Settings page |
+| `FORGE_MAX_METASPACE`, `FORGE_OOM_SCORE_ADJ` | no | `256m`, `1000` | On the Forge service: each Java's ceiling on its class data on top of `FORGE_XMX`, and its out-of-memory score, 1 to 1000 (1000: the kernel stops a Forge game first when the machine runs out of memory; 0 turns this off; any other value is left out and Forge's log says why). Not in the stack files: add them to the Forge service's environment to change them |
+| `FORGE_MAX_PARALLEL` | no, *stack* | empty | On the Forge service: the most games Forge plays at once, for all runs together (1 to 4). Empty: one per 2 CPUs and 1.2 GB of the container's limits (see the Forge section above) |
 | `MTG_WRITES_ENABLED` | no, *stack* | `false` | `true` lets approved proposals be applied to Archidekt |
-| `MTG_APPROVAL_MODE_DEFAULT` | no, *stack* | `manual` | The approval mode of a member who has not chosen one on their Account page: `manual` (every change waits for their own press), `semi` (the assistant applies low-risk edits itself) or `auto` (the assistant applies everything). Members pick their own; see [OPERATIONS.md](OPERATIONS.md#approval-modes-when-the-assistant-may-apply-by-itself) |
+| `MTG_APPROVAL_MODE_DEFAULT` | no, *stack* | `manual` | The approval mode of a member who has not chosen one on their Account page: `manual` (every change waits for their own press), `semi` (the assistant applies low-risk changes itself, such as a small edit or a private copy of a deck) or `auto` (the assistant applies most changes itself; some still wait for the member). Members pick their own; see [OPERATIONS.md](OPERATIONS.md#approval-modes-when-the-assistant-may-apply-by-itself) |
 | `MTG_APPROVAL_MODE_MAX` | no, *stack* | `auto` | The highest mode members may choose; `auto` means no cap. A stored choice above the cap is read as the cap |
 | `MTG_AUTO_APPLY_MAX_ROWS` | no, *stack* | `5` | How many review rows an edit may have and still count as low risk in `semi` mode (1 to 100) |
+| `MTG_AUTO_BIG_EDIT_ROWS` | no | `20` | In `auto` mode, a deck or collection edit with more card rows than this waits for the member's press (1 to 100). Also on the Settings page |
+| `MTG_PROPOSAL_EXPIRY_DAYS` | no | `7` | Days a waiting change stays open for approval (1 to 30). A change nobody approves in that time expires; an assistant's amend starts the time again. Also on the Settings page |
 | `MTG_APPLY_IN_CHAT` | no, *stack* | `true` | The Approve/Reject card an AI app that renders MCP Apps shows next to a proposal. Its Approve button calls `confirm_proposal` with a one-time code the assistant never sees; The same switch turns on the other cards (printings, recognised cards, a deck, the account, comparisons, statistics, deck lists, scans) and the ten-minute signed data links they load (`GET /cards/data/`); `false` removes every card, the links and the tool, leaving the review page (and `apply_proposal` where the member's approval mode allows it) |
 | `MTG_UPDATE_CHECK` | no, *stack* | `true` | Twice a day, one anonymous request to GitHub's releases API for this project's newest release. When it is newer than the running gateway, admins see a notice on every page and the update steps on the admin overview (Portainer, Swarm, docker compose). Notice only: the gateway never pulls an image or touches Docker. `false` sends nothing |
 | `MTG_ARCHIDEKT_CALLS_PER_10_MIN` | no, *stack* | `120` | Archidekt work one member may start per 10 minutes (a deck read, a proposal, an apply, a link, and a research tool such as goldfish or precon given an Archidekt deck id or link), refilled evenly; past it the member gets `rate_limited` for a few minutes. Stops a looping assistant from keeping a steady stream of requests on Archidekt. 10 to 100000 |
@@ -772,16 +913,19 @@ gateway's `environment:` in the stack file, or it has no effect.
 | `MTG_ARCHIDEKT_BACKOFF_BASE` | no, *stack* | `1.0` | Seconds; a retry waits a random time up to this x 2, 4... (capped at 10) (0.1 to 10) |
 | `MTG_ARCHIDEKT_CACHE_SECONDS` | no, *stack* | `60` | How long anonymous public deck reads and deck searches are reused; cleared by any write the gateway sends (0 turns it off, up to 900). A member's deck page is also shown again from memory for up to 20 seconds (or this, if shorter) |
 | `MTG_ARCHIDEKT_CARD_CACHE_SECONDS` | no, *stack* | `3600` | How long card lookups are reused (0 to 86400) |
-| `MTG_ARCHIDEKT_BACKUPS` | no, *stack* | `true` | Before every applied edit or restore, copy the deck as a private deck into the user's backup folder on Archidekt (using Archidekt's own copy feature, so printings, finishes and categories are kept). If the copy fails, nothing changes and the proposal stays pending |
+| `MTG_ARCHIDEKT_BACKUPS` | no, *stack* | `true` | Before every applied edit or restore (except the deck page's own saves, Card search's Add to deck, and the deck editor's save with its backup box unticked), copy the deck as a private deck into the user's backup folder on Archidekt (using Archidekt's own copy feature, so printings, finishes and categories are kept). If the copy fails, nothing changes and the proposal stays pending |
+| `MTG_ARCHIDEKT_BACKUP_COPIES` | no | `10` | Backup copies kept per deck in that folder (1 to 50). Older ones are deleted from Archidekt one at a time, at most one a minute, once that deck gets its next new backup copy; a copy the member changed or moved on Archidekt, or one the gateway couldn't delete, is kept and no longer counts toward this number. Copies made before 0.7.29 are never deleted and don't count toward it either. Also on the Settings page |
+| `MTG_ARCHIDEKT_BACKUP_BOX_DEFAULT` | no | `false` | Whether the deck editor's "Also keep a backup copy on Archidekt" box starts ticked. Also on the Settings page |
+| `MTG_SNAPSHOTS_PER_DECK` | no | `25` | Restore points kept per deck on the gateway (5 to 100), for History > Restore. One that records a backup copy the gateway may still delete is kept too. Also on the Settings page |
 | `MTG_ARCHIDEKT_BACKUP_FOLDER` | no, *stack* | `MTG Gateway backups` | Name of that folder (at most 100 characters), created in the account's root folder the first time. Decks in it are left out of the assistant's deck list |
 | `MTG_BROWSER_SESSION_TTL` | no, *stack* | `7200` | Browser session lifetime for `/account` and review pages, seconds (300 to 86400) |
 | `MTG_ARCHIDEKT_BASE` | no, *stack* | `https://archidekt.com/api` | Archidekt API base. Only the tests change it |
 | `MTG_TRUSTED_PROXIES` | no, *stack* | private networks (`10/8`, `172.16/12`, `192.168/16`, loopback) | Comma-separated IPs or CIDR ranges whose `X-Forwarded-*` headers are trusted. Recommended: narrow it to NPM's address or the overlay subnet (see [step 7](#7-reverse-proxy)) |
 | `MTG_CIMD_ENABLED` | no, *stack* | `true` | Accept clients that identify themselves with a Client ID Metadata Document URL (Claude's "Use Claude's published identity" and, reportedly, ChatGPT). `false` leaves only automatic registration |
 | `MTG_CIMD_ALLOWED_HOSTS` | no, *stack* | empty (any https host) | Comma-separated hostnames whose metadata documents are accepted, subdomains included. **Leave it empty** unless you know every client's host: listing only Claude's can lock ChatGPT out. Details in [OPERATIONS.md](OPERATIONS.md#which-ai-clients-may-connect) |
-| `MTG_NTFY_URL` | no, *stack* | empty (off) | The ntfy server notifications are sent through, such as `https://ntfy.example.com` or `https://ntfy.sh` (an `http://` address works for a server on the same private network). Empty sends nothing. See [Notifications through ntfy](#notifications-through-ntfy-optional) |
-| `MTG_NTFY_TOKEN_FILE` | no, *stack* | empty | File holding the ntfy access token the gateway publishes with (`/run/secrets/mtg_ntfy_token`, an optional secret). Needed for a server with access control; never logged |
-| `MTG_DECK_SYNC_MINUTES` | no, *stack* | `30` | Deck sync (Archidekt is the master copy): minutes between background checks of Archidekt for members with proposals waiting; a member opening the app (any signed-in page, at most once in 5 minutes) checks too. A check reads the member's deck list (one request per 50 decks) and reads a deck only when it has a waiting proposal and Archidekt says it changed (at most 5 per check), so a proposal made before an outside change is marked out of date at once. Never writes to Archidekt or unlinks an account, never retries, waits behind every member's own requests and uses no member's limits. 0 to 1440; `0` turns it off |
+| `MTG_NTFY_URL` | no, *stack* | the stack's own ntfy server (`http://mtg-assistant-ntfy:8080`; `http://ntfy:8080` with Docker Compose) | The ntfy server the members' notifications go through. Leave it empty to use the stack's own. See [Notifications on members' phones](#notifications-on-members-phones) |
+| `MTG_NTFY_TOKEN_FILE` | no, *stack* | `/run/secrets/mtg_ntfy_token` | File holding the token the gateway uses with ntfy (the `mtg_ntfy_token` secret); never logged |
+| `MTG_DECK_SYNC_MINUTES` | no, *stack* | `30` | Deck sync (Archidekt is the master copy): minutes between background checks of Archidekt for members with proposals waiting; a member opening the app (any signed-in page, at most once in 5 minutes) checks too. A check reads the member's deck list (one request per 50 decks, at most 4) and reads a deck in full only when it has a waiting proposal and Archidekt says it changed, or the deck is someone else's (at most every 30 minutes; one Archidekt says is gone or private is left alone for 6 hours), at most 5 per check, so a proposal made before an outside change is checked again at once: Updated when it still does what was reviewed, Needs a look when it would now do something else. Never writes to Archidekt or unlinks an account, never retries and waits behind every member's own requests. Each list or deck read spends one of the member's Archidekt actions (`MTG_ARCHIDEKT_CALLS_PER_10_MIN`), and a check stops while less than a quarter of them would be left. 0 to 1440; `0` turns it off |
 | `MTG_WATCHLISTS_ENABLED` | no, *stack* | `false` (off) | Watchlists and prices. Off by default: the Watchlist page and its links, the card viewer's price buttons and the watch tools (`watch_card`, `watch_deck`, `unwatch`, `list_watchlist`, `card_price_history`) are absent and the daily price check does not run. Turning it off keeps members' stored watches and prices; old prices are still pruned after `MTG_PRICE_HISTORY_DAYS`. Summaries through ntfy work either way, without prices when it is off |
 | `MTG_WATCH_MAX_CARDS` | no, *stack* | `200` | Cards one member may watch (0 to 5000; 0 turns card watching off) |
 | `MTG_WATCH_MAX_DECKS` | no, *stack* | `10` | Decks one member may watch (0 to 200; 0 turns deck watching off). Each watched deck is read from Archidekt once a day, paced like every read |

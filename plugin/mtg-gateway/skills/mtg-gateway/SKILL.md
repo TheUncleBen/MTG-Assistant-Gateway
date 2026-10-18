@@ -71,7 +71,7 @@ in `unread_lines`: tell the user they were skipped.
 | **Photos of physical cards** | Read every card title you can see and call `resolve_cards` with the names (add set code and collector number from the bottom of the card when legible). Ask about every result whose `status` is not `exact` or `printing`; never silently keep a `fuzzy` correction the user did not confirm. In an app that shows cards, the user ticks and picks on the picker card and their choice reaches you as text: wait for it. For an exact printing, `card_printings` shows the pictures and the tap reaches you as text too. |
 | "Find decks for this commander", "show me X's decks", "what are people playing in Y" | `search_decks` (by `commander`, `name`, `owner`, `format`, `colors`; `limit` for how many), then `get_deck` on the ones worth a closer look. Say the results are Archidekt's public decks and give each deck's `url`. For one person's public decks give `owner` with `order_by: "-updatedAt"`. A partial commander name is looked up: `commander_matched` names the commander searched, `commander_suggestions` asks you to pick one and search again. |
 | "Which of these do I own?", "add these to my collection", "what's in my collection?" | `list_collection` (filter with `query`) and `propose_collection_changes` (`add` from names, a pasted list or a `scan_session`, `remove` by id or name). The collection is the user's Collection on Archidekt, so the change is a proposal the user approves (their approval mode applies, like deck edits). Compare a deck's cards with `list_collection` to say what the user still needs. |
-| "Like this deck", "bookmark it", "follow its owner", "comment on it", "vote on that comment", "delete my deck", "make a folder", "add or remove a collaborator" | `propose_deck_social`, `propose_comment` (comment ids from `get_deck_comments`), `propose_delete_deck`, `propose_create_folder`, `propose_collaborator` (current ones from `get_deck_collaborators`). Each is a proposal only the user applies: their own press on the review page (give them `review_url`; the in-chat card only opens it), every time, whatever their approval mode. Never call `apply_proposal` for these. Comments are public under the user's Archidekt name: post only words the user asked for, and quote them back. |
+| "Like this deck", "bookmark it", "follow its owner", "follow someone by name", "comment on it", "vote on that comment", "delete my deck", "make a folder", "add or remove a collaborator" | `propose_deck_social`, `propose_comment` (comment ids from `get_deck_comments`), `propose_delete_deck`, `propose_create_folder`, `propose_collaborator` (current ones from `get_deck_collaborators`). Each is a proposal only the user applies: their own press on the card in the chat or on the review page (give them `review_url`; deleting a deck, and an edit of a comment that has formatting: review page only), every time, whatever their approval mode. Never call `apply_proposal` for these. Comments are public under the user's Archidekt name: post only words the user asked for, and quote them back. |
 | "I scanned my cards" (on the gateway's `/scan` phone page) | `list_scan_sessions`, then `get_scan_session` with the name or id. Items without a `card` were not recognised; ask the user for them. Its `decklist_text` feeds `propose_new_deck`, its `changes` feed `propose_deck_changes`; or pass the session's id or name as `scan_session` to either tool and skip the copy. |
 
 After loading a deck, say how many cards it has and name the commander, so
@@ -104,12 +104,15 @@ the ingest tool, never a private deck's id.
   value, `price_total`, legality problems for the deck's format, game
   changers, tutors, extra turns, mass land denial and `salt_total`. Prices,
   salt and those flags are Archidekt's figures; say so when you quote them.
-- **Bracket:** `stats.bracket_estimate` is an estimate from Archidekt's card
-  flags, and a floor: it counts only game changers, mass land denial, extra
-  turns, tutors and two-card combos, never bracket 5. Always call it an
-  estimate, not the deck's official bracket. `archidekt_bracket` is the
-  bracket set on the deck (the owner's setting), if any; call it that.
-  Explain the `basis` lines.
+- **Bracket:** `archidekt_bracket` is the bracket set on the deck (the
+  owner's setting). When it is set, it is the deck's bracket: never present
+  the estimate as a second bracket. `stats.bracket_estimate` is Archidekt's
+  own Estimated Bracket, worked out from Archidekt's card flags as
+  archidekt.com does (game changers, mass land denial, extra turns and
+  two-card combo pieces; never bracket 5). Call it "Archidekt's estimate from
+  cards", quote it when no bracket is set or the checks report a bracket
+  mismatch, and give its `notes` (Archidekt's own) and `basis` lines. It
+  says what the cards suggest, not how strong the deck plays.
 - **Testing:** `run_deck_report` reads the deck, keeps its statistics and,
   when the research service is up, a `validate_decklist` and a goldfish run
   (`games`, default 300), stored for the user. `list_deck_reports` (per deck
@@ -159,7 +162,9 @@ and legal (validate the resulting list if in doubt).
 
 ## Simulation (goldfish)
 
-Goldfish simulation plays the deck alone, against no opponent. It measures
+Goldfish simulation plays the deck alone, against no opponent. The gateway's
+pages call it the "solo test" ("Run full test" and "Solo test only" on the deck
+page); "Goldfish" there is the page where the member plays a hand. It measures
 modelled speed and consistency, such as "how often is the commander cast by
 turn 4". It does **not** predict a win rate in a real multiplayer game and it
 cannot value interaction, removal, politics or an opponent's deck.
@@ -201,7 +206,10 @@ When the gateway runs Forge, a report from `run_deck_report` also has a
 `forge` section: real games of the deck against Commander precons, played by
 Forge's rules engine with opponents, combat and the stack. It runs in the
 background, so `forge.state` is `queued` or `running` at first; read the
-report again with `get_deck_report` until it is `done`.
+report again with `get_deck_report` until it is `done`, or another final state
+(`failed`, `timeout`, `cancelled`, `lost`): then quote the games it did play
+(`games_done` of `games_requested`); when that is fewer than asked for, call it
+a run that stopped early.
 
 - Quote `forge.result`: games played, the deck's wins and `win_rate_95`, and
   the opponent decks (`forge.seats`). These are Forge AI games, not a
@@ -220,9 +228,14 @@ report again with `get_deck_report` until it is `done`.
   against precons of its own bracket, so two decks' Forge win rates (one
   `run_deck_report` each) are each against their own bracket's table, not the
   same opponents, even with the same `options.seed` (check `forge.seats`).
-- Forge plays Commander decks only: a 60-card deck's report has
-  `forge.state: "skipped"` with the reason. `forge=false` leaves Forge out for
-  a quick goldfish-only report. A report without Forge games says
+  For the same table, run the first deck's report with `compare_with` set to
+  the second deck (its precons are picked for the higher of the two decks'
+  brackets, so the order doesn't matter), then the second deck's report with
+  `same_opponents_as` set to the first report's id. The same seed does not always replay the same
+  Forge games, so compare Forge runs by win rate and 95% interval.
+- Forge plays only decks with a commander: a 60-card deck's report, or one
+  with no commander marked, has `forge.state: "skipped"` with the reason. `forge=false` leaves Forge out for
+  a quick solo-test-only report. A report without Forge games says
   `engine_label: "Preflight only (no rules engine)"`; say so.
 
 ## Changing or creating a deck: propose, review, apply
@@ -270,7 +283,15 @@ own linked account. Follow every step, in order.
    every proposal waits for their own press on the card or the review
    page; `semi` lets you apply a low-risk edit yourself (`risk` is `low`:
    a few card rows, no commander change, or a clone); `auto` lets you apply
-   everything. `assistant_may_apply` is the gateway's answer for this
+   most changes, but some still wait for the user's press (a restore, a
+   commander change, a new deck, a big edit, making a deck public or
+   unlisted, any edit of a description that has formatting, such as bold
+   text, links or pictures, actions on their Archidekt account, and
+   deleting a deck; in every mode also a held
+   change, a change waiting for another change first, one another app had
+   a hand in, one that replaces another app's change, and one that another
+   app's waiting change would replace); the answer says why one waits.
+   `assistant_may_apply` is the gateway's answer for this
    proposal; never argue with it or work around it.
    **If your app shows the proposal as a card with Approve and Reject
    buttons** (Claude on the web, desktop and phones; ChatGPT), the user
@@ -343,7 +364,8 @@ own linked account. Follow every step, in order.
 - The approval mode is the user's own setting on their account page. Never
   ask them to loosen it so you can apply something; if they want to, they
   change it there themselves.
-- A proposal expires after 24 hours and can be applied only once.
+- A proposal expires after 7 days (unless the gateway's owner changed that)
+  and can be applied only once.
 - Edits change the deck proper unless a change says `"zone": "side"` (then
   the maybeboard and sideboard rows: `add`, `remove`, `set_quantity` and
   `set_category` only, counted apart from the deck). A `set_category` into a category the
@@ -353,9 +375,11 @@ own linked account. Follow every step, in order.
 - Cards already in the deck keep their categories. A card new to the deck
   gets the `category` named in its `add` change, if any. A new deck gets the
   categories from its source list.
-- Before every applied edit the gateway keeps two backups: its own snapshot
-  and a private copy of the deck in the user's "MTG Gateway backups" folder
-  on Archidekt (shown by `list_snapshots` as `backup_url`). Those copies
+- Before every applied edit the gateway keeps its own snapshot and, when
+  backups are on, a private copy of the deck in the user's "MTG Gateway
+  backups" folder on Archidekt (shown by `list_snapshots` as `backup_url`;
+  the user's own saves on the deck page, in Card search, or in the deck
+  editor with its backup box unticked get no copy). Those copies
   stay out of `list_my_decks`; mention them only when the user asks what
   backups exist or wants to undo. If an apply answers `backup_failed`,
   nothing changed and the proposal is still pending: say so and offer to
@@ -364,10 +388,12 @@ own linked account. Follow every step, in order.
   `propose_restore_snapshot` with the snapshot taken before that edit. It is
   an ordinary proposal: show its diff and review link, wait for the user's
   OK, then `apply_proposal`. A restore puts every deck row back as the
-  snapshot recorded it: the same printing, foil or etched finish, quantity
-  and categories, so the commander, sideboard and maybeboard too. It does
-  not change the deck's name, description, format or the settings of its
-  custom categories. Deleting a deck is `propose_delete_deck`, which only
+  snapshot recorded it: the same printing, foil or etched finish, quantity,
+  categories in their order (so the commander, sideboard and maybeboard
+  too), color tag and custom mana value. It also
+  puts back the deck's name, description, format, bracket and privacy if they
+  changed; folder, tags, cover and the settings of its custom categories stay
+  as they are. Deleting a deck is `propose_delete_deck`, which only
   the user's own press applies.
 
 ### When a tool says no
@@ -386,7 +412,7 @@ flagged as an error too: say the lookup failed. Act on the code:
 | `invalid_approval` / `in_chat_disabled` | Answers of `confirm_proposal`, the card's own tool. Never call it; the card does. |
 | `writes_disabled` | The owner has switched applying off. The proposal is kept. Give the user the review link and stop; do not retry. |
 | `not_linked` | No Archidekt link, or Archidekt no longer accepts it. Send the user to the account page to link or relink. |
-| `stale` | The deck changed on Archidekt after the proposal was made. Nothing was sent. Load the deck again, explain what changed, and propose again if the user still wants it. A pending proposal can say so before anyone applies it: `out_of_date: true` in `get_proposal` / `list_my_proposals` (the gateway's background deck sync saw the deck change). Don't apply it; tell the user and propose again from the current deck if they still want it. |
+| `stale` | The deck changed on Archidekt and the proposal would no longer do what was reviewed. Nothing was sent; it is still waiting, marked Needs a look (`status: needs_look`). Load the deck again, explain what changed, then `amend_proposal` it if the user still wants the change, or let them reject it. A waiting proposal can say so before anyone applies it: `out_of_date: true` in `get_proposal` / `list_my_proposals`. Don't apply it; tell the user and amend it from the current deck if they still want it. |
 | `already_applied` | It was applied before. Nothing was sent again. Report that and stop. |
 | `other_client` | Another connected app (or the browser) made this proposal, so it can't be applied or rejected from here. Nothing was sent. Give the user the `review_url` and stop. |
 | `not_pending` | The proposal failed, expired or was rejected by the user earlier. Propose again if wanted. |

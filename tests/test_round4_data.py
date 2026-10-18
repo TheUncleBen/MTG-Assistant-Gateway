@@ -18,31 +18,22 @@ from mtg_gateway.archidekt import ArchidektError, parse_deck
 from mtg_gateway.db import Database
 from mtg_gateway.mf_proxy import MysticForgeProxy
 
-from .conftest import FakeIdP, Harness, make_settings, running
+from .conftest import AUTO, FakeIdP, Harness, Stack, make_settings, open_stack, running
 from .fake_archidekt import FakeArchidekt
-from .test_decks_and_proxy import Browser, Stack, _client, call, linked_user, structured
+from .test_decks_and_proxy import Browser, _client, call, linked_user, structured
+from .track_a_helpers import apply_any
 
 ROOT = Path(__file__).resolve().parent.parent
 
 
-@pytest.fixture
-async def stack(tmp_path: Path, idp: FakeIdP):
-    ark = FakeArchidekt()
-    settings = make_settings(
-        tmp_path, writes_enabled=True, approval_mode_default="auto", archidekt_base="https://ark.test/api"
-    )
-    async with running(Harness(settings, idp, archidekt=_client(settings, ark))) as h:
-        yield Stack(h, ark)
+# ``stack`` is the shared AUTO stack (tests/conftest.py): writes on, applies allowed over MCP.
 
 
 @pytest.fixture
 async def stack_browser_only(tmp_path: Path, idp: FakeIdP):
-    ark = FakeArchidekt()
-    settings = make_settings(
-        tmp_path, writes_enabled=True, approval_mode_default="manual", archidekt_base="https://ark.test/api"
-    )
-    async with running(Harness(settings, idp, archidekt=_client(settings, ark))) as h:
-        yield Stack(h, ark)
+    manual = AUTO.but(settings={"writes_enabled": True, "approval_mode_default": "manual"})
+    async with open_stack(tmp_path, idp, manual) as st:
+        yield st
 
 
 async def _app_token(h: Harness, name: str, scope: str = "mtg") -> tuple[str, str]:
@@ -60,7 +51,7 @@ async def _app_token(h: Harness, name: str, scope: str = "mtg") -> tuple[str, st
     return r.json()["access_token"], client["client_id"]
 
 
-# -- B-2: "Delete my data" racing an apply or a report ------------------------------------------
+# -- "Delete my data" racing an apply or a report ------------------------------------------
 async def test_delete_data_during_apply_leaves_no_snapshot(stack: Stack) -> None:
     h, ark = stack.h, stack.ark
     token = await linked_user(stack)
@@ -124,7 +115,7 @@ async def test_delete_data_during_report_stores_no_report(stack: Stack) -> None:
     await b.aclose()
 
 
-# -- B-3: a token refresh racing a relink ------------------------------------------------------
+# -- a token refresh racing a relink ------------------------------------------------------
 async def _start_refresh_then_relink(stack: Stack, outcome):
     h, ark = stack.h, stack.ark
     ark.access_ttl = 200  # alice's stored access token is inside the 5-minute refresh window
@@ -176,7 +167,7 @@ async def test_failed_refresh_of_old_link_does_not_revoke_the_new_one(stack: Sta
     assert link is not None and link["archidekt_username"] == "amy"
 
 
-# -- B-4: a new-deck proposal is bound to the account it was made for --------------------------
+# -- a new-deck proposal is bound to the account it was made for --------------------------
 async def test_new_deck_proposal_is_bound_to_its_archidekt_account(stack: Stack) -> None:
     h, ark = stack.h, stack.ark
     token = await linked_user(stack)  # alice
@@ -191,13 +182,13 @@ async def test_new_deck_proposal_is_bound_to_its_archidekt_account(stack: Stack)
     decks_before = set(ark.decks)
     r = await b.link("amy", "pw-amy")
     assert r.status_code == 303
-    out = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
+    out = await apply_any(h, token, p["proposal_id"])
     assert not out["ok"] and out["error"] == "other_account", out
     assert set(ark.decks) == decks_before
     await b.aclose()
 
 
-# -- B-5: a details apply re-checks the deck after the backup --------------------------------
+# -- a details apply re-checks the deck after the backup --------------------------------
 async def test_details_apply_refuses_a_change_made_during_backup(stack: Stack) -> None:
     h, ark = stack.h, stack.ark
     token = await linked_user(stack)
@@ -232,7 +223,7 @@ async def test_details_apply_still_works_when_nothing_changed(stack: Stack) -> N
     assert ark.decks[42]["name"] == "Gateway name"
 
 
-# -- B-6: admin actions are attributed to an administrator in the member's log ---------------
+# -- admin actions are attributed to an administrator in the member's log ---------------
 async def test_admin_actions_show_as_admin_in_members_activity(tmp_path, idp: FakeIdP) -> None:
     ark = FakeArchidekt()
     settings = make_settings(
@@ -271,7 +262,7 @@ async def test_admin_actions_show_as_admin_in_members_activity(tmp_path, idp: Fa
         await m.aclose()
 
 
-# -- B-7: deck covers go with the member's data; the page is truthful about backups ------------
+# -- deck covers go with the member's data; the page is truthful about backups ------------
 async def test_delete_data_removes_deck_covers_and_mentions_backups(stack: Stack) -> None:
     h = stack.h
     await linked_user(stack)
@@ -299,7 +290,7 @@ async def test_deck_covers_from_before_the_owner_column_go_by_deck_id(tmp_path: 
     db.close()
 
 
-# -- B-8: failed Archidekt link attempts are limited and audited ------------------------------
+# -- failed Archidekt link attempts are limited and audited ------------------------------
 async def test_link_attempts_are_limited_per_member(stack: Stack) -> None:
     h = stack.h
     b = Browser(h)
@@ -355,7 +346,7 @@ def test_applied_proposals_are_purged_after_the_retention(tmp_path: Path) -> Non
     db.close()
 
 
-# -- E-2: moving cards to the maybeboard is shown as leaving the deck --------------------------
+# -- moving cards to the maybeboard is shown as leaving the deck --------------------------
 async def test_set_category_to_maybeboard_is_shown_as_removal(stack_browser_only: Stack) -> None:
     h, ark = stack_browser_only.h, stack_browser_only.ark
     ark.decks[42]["categories"].append({"name": "Maybeboard", "isPremier": False, "includedInDeck": False})
@@ -373,7 +364,7 @@ async def test_set_category_to_maybeboard_is_shown_as_removal(stack_browser_only
     page = (await b.http.get(url)).text
     summary = re.search(r"<div class='summary'>(.*?)</div>", page).group(1)
     assert f"{len(victims)} removed" in summary and f"Net -{gone} cards" in summary, summary
-    await b.http.post(url, data={"csrf": await b.csrf(url), "action": "apply"})
+    await b.http.post(url, data={**await b.review_form(url), "action": "apply"})
     await b.aclose()
     # verify agrees with the review: the cards left the deck proper, so the apply succeeded
     assert h.db.get_proposal(p["proposal_id"], "user-1")["state"] == "applied"
@@ -387,7 +378,7 @@ def test_skill_no_longer_says_maybeboard_rows_are_never_touched() -> None:
     assert "set_category" in text
 
 
-# -- E-3: a read-only token cannot write ---------------------------------------------------
+# -- a read-only token cannot write ---------------------------------------------------
 async def test_read_scope_token_cannot_propose_or_write_via_api(stack: Stack) -> None:
     h = stack.h
     await linked_user(stack)
@@ -426,7 +417,7 @@ async def test_read_scope_token_cannot_propose_or_write_via_api(stack: Stack) ->
     assert p["ok"], p
 
 
-# -- E-4: proposals name their app; disconnecting an app closes its pending proposals ---------
+# -- proposals name their app; disconnecting an app closes its pending proposals ---------
 async def test_proposals_name_their_app_and_close_on_disconnect(stack_browser_only: Stack) -> None:
     h = stack_browser_only.h
     await linked_user(stack_browser_only)
@@ -452,13 +443,13 @@ async def test_proposals_name_their_app_and_close_on_disconnect(stack_browser_on
     r = await b.http.post("/account", data={"csrf": csrf, "action": "disconnect", "client_id": client_id})
     assert r.status_code == 303
     assert h.db.get_proposal(p["proposal_id"], "user-1")["state"] == "rejected"
-    r = await b.http.post(url, data={"csrf": await b.csrf(url), "action": "apply"})
+    r = await b.http.post(url, data={**await b.review_form(url), "action": "apply"})
     assert "err=not_pending" in r.headers["location"]
     assert any(e["event"] == "proposal_rejected" for e in h.db.audit_for_user("user-1", 50))
     await b.aclose()
 
 
-# -- E-5: the research proxy bounds the arguments of expensive tools --------------------------
+# -- the research proxy bounds the arguments of expensive tools --------------------------
 class _Upstream:
     def __init__(self, seen: list):
         self.seen = seen
@@ -477,6 +468,7 @@ class _Upstream:
 async def test_proxy_refuses_unbounded_simulation_arguments() -> None:
     seen: list = []
     proxy = MysticForgeProxy("http://x/mcp", client_factory=lambda: _Upstream(seen))
+    proxy._listed = True  # as after a tool listing: a flat call is not refused as not ready
     for name, args in (
         ("goldfish_run", {"deck": "1 Island", "n": 10**9}),
         ("goldfish_run", {"deck": "1 Island", "n": "1000000000"}),
@@ -495,7 +487,7 @@ async def test_proxy_refuses_unbounded_simulation_arguments() -> None:
     assert seen == [("goldfish_run", {"deck": "1 Island", "n": 300, "until_turn": 8})]
 
 
-# -- E-6: a per-member budget of Archidekt calls -------------------------------------------
+# -- a per-member budget of Archidekt calls -------------------------------------------
 async def test_archidekt_calls_have_a_per_member_budget(tmp_path: Path, idp: FakeIdP) -> None:
     ark = FakeArchidekt()
     settings = make_settings(
@@ -503,6 +495,7 @@ async def test_archidekt_calls_have_a_per_member_budget(tmp_path: Path, idp: Fak
     )
     seen: list = []
     proxy = MysticForgeProxy("http://x/mcp", client_factory=lambda: _Upstream(seen))
+    proxy._listed = True  # as after a tool listing: a flat call is not refused as not ready
     async with running(Harness(settings, idp, archidekt=_client(settings, ark), mf_proxy=proxy)) as h:
         st = Stack(h, ark)
         token = await linked_user(st)  # the link itself is one call
@@ -546,19 +539,21 @@ def test_budget_refills_over_time(monkeypatch: pytest.MonkeyPatch) -> None:
     assert budget.retry_after("u") == 1 and budget.take("u")
 
 
-# -- E-7: per-app pending cap; report deletes from apps are limited to their own reports --------
-async def test_one_app_cannot_fill_every_pending_slot(stack: Stack, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(decks_module, "MAX_PENDING_PER_CLIENT", 2)
+# -- apps delete only their own reports; 0.7.29: no pending limit per app -----------------------
+async def test_one_app_may_use_every_pending_slot(stack: Stack, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The 30-per-app limit is gone; only the member's 100 waiting proposals are counted."""
+    monkeypatch.setattr(decks_module, "MAX_PENDING_PROPOSALS", 3)
     h = stack.h
     await linked_user(stack)
     noisy, _ = await _app_token(h, "noisy")
     quiet, _ = await _app_token(h, "quiet")
-    change = {"deck_id": "42", "changes": [{"action": "add", "card_name": "Opt"}]}
-    assert structured(await call(h, noisy, "propose_deck_changes", change))["ok"]
-    assert structured(await call(h, noisy, "propose_deck_changes", change))["ok"]
-    refused = structured(await call(h, noisy, "propose_deck_changes", change))
-    assert refused["error"] == "rate_limited", refused
-    assert structured(await call(h, quiet, "propose_deck_changes", change))["ok"]
+    assert not hasattr(decks_module, "MAX_PENDING_PER_CLIENT")
+    for card in ("Opt", "Ponder", "Brainstorm"):
+        change = {"deck_id": "42", "changes": [{"action": "add", "card_name": card}]}
+        assert structured(await call(h, noisy, "propose_deck_changes", change))["ok"]
+    change = {"deck_id": "42", "changes": [{"action": "add", "card_name": "Preordain"}]}
+    refused = structured(await call(h, quiet, "propose_deck_changes", change))
+    assert refused["error"] == "rate_limited" and "3 pending proposals" in refused["message"], refused
 
 
 async def test_apps_delete_only_their_own_reports(stack: Stack) -> None:

@@ -56,7 +56,9 @@
   function newGame() {
     g = {
       library: shuffle(all.slice()), hand: [], battlefield: [], graveyard: [], exile: [],
-      command: commanders.slice(), tapped: {}, turn: 0, phase: "mulligan", mulligans: 0, picked: {}
+      command: commanders.slice(), tapped: {}, turn: 0, phase: "mulligan", mulligans: 0, picked: {},
+      // for the guide: a land played this turn, and a tap or a spell this game
+      landTurn: 0, acted: false
     };
     draw(7);
   }
@@ -78,6 +80,9 @@
   }
   function moveTo(id, zone, bottom) {
     var from = zoneOf(id);
+    if (zone === "battlefield" && from !== "battlefield") {
+      if (cards[id].card.land) g.landTurn = g.turn; else g.acted = true;
+    }
     if (from) g[from].splice(g[from].indexOf(id), 1);
     delete g.tapped[id];
     if (zone === "library" && !bottom) g.library.unshift(id);
@@ -159,6 +164,7 @@
       hint = g.library.length ? "Select a card to play, tap or move it." : "The library is empty.";
     }
     $("#gf-hint").textContent = hint;
+    guideStep();
     show("keep", g.phase === "mulligan");
     show("mulligan", g.phase === "mulligan" && g.mulligans < 7);
     show("bottom", g.phase === "bottom");
@@ -174,6 +180,58 @@
       if (node) node.focus();
     }
   }
+
+  // -- the guide: the step the game is at, and hiding it for the account ---------------------------
+  function guideStep() {
+    var steps = $$("#gf-guide .gf-steps li");
+    if (!steps.length) return;
+    var now;
+    if (g.phase === "mulligan") now = "hand";
+    else if (g.phase === "bottom") now = "bottom";
+    else if (g.landTurn !== g.turn && g.turn < 3) now = "land";
+    else if (!g.acted && g.turn < 3) now = "cast";
+    else if (g.turn < 3) now = "next";
+    else now = "again";
+    var reached = false;
+    steps.forEach(function (li) {
+      var key = li.getAttribute("data-step");
+      if (key === now) { li.setAttribute("aria-current", "step"); reached = true; li.classList.remove("done"); }
+      else {
+        li.removeAttribute("aria-current");
+        // a step before the current one is done (the bottom step only when a mulligan needed it)
+        li.classList.toggle("done", !reached && !(key === "bottom" && !g.mulligans));
+      }
+    });
+  }
+  var csrfInput = $("input[name=csrf]");
+  function setGuide(hidden) {
+    var panel = $("#gf-guide"), showBtn = $(".gf-controls [data-guide='show']");
+    if (!panel || !showBtn) return;
+    panel.hidden = hidden;
+    showBtn.hidden = !hidden;
+    (hidden ? showBtn : $("[data-guide='hide']", panel)).focus();
+    say(hidden ? "Guide hidden. How to play shows it again." : "Guide shown.");
+    // remembered for the account (account_prefs); without a session token it lasts for this page only
+    if (!csrfInput) return;
+    fetch("/goldfish/guide", {
+      method: "POST", credentials: "same-origin",
+      headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfInput.value, Accept: "application/json" },
+      body: JSON.stringify({ hidden: hidden })
+    }).catch(function () { /* offline: shown or hidden for this page only */ });
+  }
+  // phones: the step the game is at, or all six
+  var allBtn = $("#gf-guide .gf-allsteps"), stepList = $("#gf-steps");
+  if (allBtn && stepList) {
+    allBtn.addEventListener("click", function () {
+      var all = !stepList.classList.contains("all");
+      stepList.classList.toggle("all", all);
+      allBtn.setAttribute("aria-expanded", all ? "true" : "false");
+      allBtn.textContent = allBtn.getAttribute(all ? "data-current" : "data-all");
+    });
+  }
+  $$("[data-guide]").forEach(function (b) {
+    b.addEventListener("click", function () { setGuide(b.getAttribute("data-guide") === "hide"); });
+  });
 
   // -- the game's buttons ----------------------------------------------------------------------------
   function startTurn() {
@@ -264,7 +322,7 @@
     if (g.phase !== "play") return acts;
     if (zone === "battlefield") {
       acts.push(actionButton(g.tapped[id] ? "Untap" : "Tap", function () {
-        if (g.tapped[id]) delete g.tapped[id]; else g.tapped[id] = true;
+        if (g.tapped[id]) delete g.tapped[id]; else { g.tapped[id] = true; g.acted = true; }
         say(nameOf(id) + (g.tapped[id] ? " tapped." : " untapped."));
         render(id);
       }));

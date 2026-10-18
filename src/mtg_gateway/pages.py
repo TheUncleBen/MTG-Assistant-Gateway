@@ -19,23 +19,40 @@ from urllib.parse import parse_qs, quote
 from starlette.requests import Request
 from starlette.responses import RedirectResponse, Response
 
-from . import app_signin, link_disclosure, modes, notify
+from . import app_signin, link_disclosure, modes, notify, prefs
+from .archidekt import PATIENCE_SPENT
 from .auth_provider import BROWSER_COOKIE, LoginError, cookie_name
 from .avatars import initials_svg
 from .clickguard import form_stamp, guarded_form, submitted_too_soon
-from .decks import REVIEW_PAGE, DeckError, current_client, row_label, row_line
+from .decks import (
+    REVIEW_PAGE,
+    DeckError,
+    commander_row_texts,
+    commander_stays_text,
+    current_client,
+    row_label,
+    row_line,
+    tag_change_text,
+)
+from .formatting import DOC_CSS, doc_html
+from .refusals import WRITES_OFF_KEPT, WRITES_OFF_KEPT_MANY
 from .theme import (
     LAYOUT_COOKIE,
     THEME_COOKIE,
+    VIEW_COOKIE,
+    VIEW_KINDS,
     app_version,
     display_name,
     in_app,
     layout_from_cookie,
     plural,
     render,
+    set_card_size,
     theme_from_cookie,
     time_html,
 )
+from .waiting_strip import LIST_CSS, LIST_SCRIPT, action_bar, line_for, row_html
+from .waiting_strip import _age as age_text
 
 if TYPE_CHECKING:
     from mcp.server.mcpserver import MCPServer
@@ -177,7 +194,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         resp.delete_cookie(session_cookie, path="/", secure=secure, httponly=True, samesite="lax")
         # Ask the browser to drop site storage (scan drafts and the like) too. Not "cache": every
         # gateway page is already Cache-Control: no-store, and clearing the browser's whole HTTP
-        # cache is what made sign-out take seconds in Chrome (owner test round T-015, 2026-10-09).
+        # cache is what made sign-out take seconds in Chrome.
         resp.headers["Clear-Site-Data"] = '"storage"'
         resp.set_cookie(
             fresh_cookie, "1", max_age=3600, path="/", secure=secure, httponly=True, samesite="lax"
@@ -213,7 +230,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
 
     @server.custom_route("/layout", methods=["POST"], include_in_schema=False)
     async def set_layout(request: Request) -> Response:
-        """ "Fit the screen" / "Desktop layout" from the account menu (T-046): a cookie read by
+        """ "Fit the screen" / "Desktop layout" from the account menu: a cookie read by
         theme.render, which then asks the device for a wide viewport like a browser's Desktop site
         switch. Signed-in members only, with the form token."""
         sub, sid = current(request)
@@ -350,7 +367,9 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             # The only place a mode can be set: the member's own browser session, never an
             # assistant over MCP or the API (modes.py).
             mode = data.get("mode", "")
-            if not modes.valid_mode(mode) or modes.rank(mode) > modes.rank(s.approval_mode_max):
+            # the cap as it is now: the Settings page changes it without a restart (LiveSettings)
+            cap = str(state.live.get("approval_mode_max"))
+            if not modes.valid_mode(mode) or modes.rank(mode) > modes.rank(cap):
                 return RedirectResponse("/account?err=mode_invalid", status_code=303)
             before = state.decks.mode_of(sub)
             state.db.set_approval_mode(sub, mode)
@@ -361,6 +380,15 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
                 detail={"from": before, "to": mode, "by": "user"},
             )
             return RedirectResponse(f"/account?ok=mode_{mode}", status_code=303)
+        if action == "forget_choices":
+            if data.get("confirm") != "yes":
+                return RedirectResponse("/account?err=confirm_forget#choices", status_code=303)
+            n = prefs.forget(state.db, sub)
+            state.db.audit("view_choices_forgotten", sub=sub, client_id=BROWSER_CLIENT_ID, detail={"n": n})
+            resp = RedirectResponse("/account?ok=choices_forgotten#choices", status_code=303)
+            for kind in VIEW_KINDS:  # this browser's pre-0.7.29 view cookies, if any are left
+                resp.delete_cookie(VIEW_COOKIE + kind, path="/", secure=secure, httponly=True, samesite="lax")
+            return resp
         if action == "delete_data":
             if data.get("confirm") != "yes":
                 return RedirectResponse("/account?err=confirm_delete", status_code=303)
@@ -417,24 +445,233 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         sub, sid = current(request)
         if not sub:
             return to_login("/proposals")
-        rows = state.decks.list_proposals(sub)
-        if not rows:
-            body = (
-                "<div class='card'><p>No proposals yet. Ask your assistant to propose a deck change "
-                "and it will appear here for review.</p></div>"
+        notice = _notice(request.query_params.get("ok"), request.query_params.get("err"))
+        body = notice + _proposals_body(state, sub, _csrf(s, sid))
+        return page("Proposals", body, sub=sub, sid=sid, current="/proposals", head_extra=LIST_STYLE)
+
+    @server.custom_route("/proposals/select", methods=["POST"], include_in_schema=False)
+    async def proposals_select(request: Request) -> Response:
+        """The checked rows of a waiting list (the Proposals page, the deck strip): Apply shows the
+        confirm with the order they will run in; Reject rejects them at once (FLEX flow C)."""
+        sub, sid = current(request)
+        if not sub:
+            return to_login("/proposals")
+        raw = await read_limited(request, MAX_FORM)
+        if raw is None:
+            return page("Too large", "<p>That form was too large.</p>", status=413)
+        multi = parse_qs(raw.decode("utf-8", "replace"), keep_blank_values=True)
+        data = {k: v[0] for k, v in multi.items()}
+        action = data.get("action")
+        if not check_csrf(sid, data) or action not in ("apply", "reject"):
+            return page(
+                "Proposals",
+                _err("This form expired. Reload the page and try again."),
+                status=403,
+                sub=sub,
+                sid=sid,
             )
-        else:
-            items = "".join(
-                f"<li><a class='name' href='/proposals/{html.escape(r['id'])}'>"
-                f"{html.escape(r['deck_name'] or r['deck_id'])}</a>"
-                f"<span class='badge {_badge(r['state'])}'>{html.escape(r['state'])}</span>"
-                + ("<span class='badge danger'>out of date</span>" if r.get("out_of_date") else "")
-                + actor_html(r.get("created_by"))
-                + f"<span class='when'>{_when(r['created_at'])}</span></li>"
-                for r in rows
+        back = _list_back(data.get("back"))
+        picks = [p for p in multi.get("pick", []) if re.fullmatch(r"[A-Za-z0-9_-]{1,64}", p)][:MAX_PICKS]
+        versions = _picked_versions(data, picks)
+        if not picks:
+            return RedirectResponse(_with_query(back, "err=none_selected"), status_code=303)
+        if any(p not in versions for p in picks) and action == "apply":
+            # Each checked change applies only as the version the list showed
+            return RedirectResponse(_with_query(back, "err=changed_some"), status_code=303)
+        if action == "reject" and data.get("sure") != "1":
+            # A short confirm first (the list's script asks in the bar itself)
+            return page(
+                "Reject changes",
+                _reject_confirm(picks, versions, back, _csrf(s, sid)),
+                sub=sub,
+                sid=sid,
+                current="/proposals",
+                head_extra=LIST_STYLE,
             )
-            body = f"<div class='card'><ul class='plain plist'>{items}</ul></div>"
-        return page("Proposals", body, sub=sub, sid=sid, current="/proposals")
+        if action == "reject":
+            current_client.set(BROWSER_CLIENT_ID)
+            for pid in picks:
+                try:
+                    state.decks.reject(sub, pid, via="browser")
+                except DeckError:
+                    continue  # already closed: nothing to do for it
+            return RedirectResponse(_with_query(back, "ok=rejected_some"), status_code=303)
+        try:
+            the_plan = state.decks.plan_selection(sub, picks, versions)
+        except DeckError as exc:
+            return _pick_one_page(exc, back, sub, sid)
+        stamp = form_stamp(s.session_secret, f"select:{sub}")
+        return page(
+            "Apply these changes?",
+            _confirm_body(the_plan, _csrf(s, sid), stamp, versions, back, s.writes_enabled),
+            sub=sub,
+            sid=sid,
+            current="/proposals",
+            head_extra=LIST_STYLE,
+        )
+
+    def _pick_one_page(exc: DeckError, back: str, sub: str, sid: str | None) -> Response:
+        """A selection with a change and its replacement: refused, the pair named."""
+        if exc.kind != "pick_one":
+            raise exc
+        return page(
+            "Apply these changes?",
+            "<div class='card'>"
+            + _err(str(exc))
+            + f"<p><a class='btn' href='{html.escape(back)}'>Back</a></p></div>",
+            status=409,
+            sub=sub,
+            sid=sid,
+            current="/proposals",
+        )
+
+    @server.custom_route("/proposals/apply", methods=["POST"], include_in_schema=False)
+    async def proposals_apply(request: Request) -> Response:
+        """The confirm's Apply: the member's one press for the whole selection (batch.py)."""
+        sub, sid = current(request)
+        if not sub:
+            return to_login("/proposals")
+        data = await form(request)
+        if isinstance(data, Response):
+            return data
+        if not check_csrf(sid, data) or data.get("action") != "apply":
+            return page(
+                "Proposals",
+                _err("This form expired. Reload the page and try again."),
+                status=403,
+                sub=sub,
+                sid=sid,
+            )
+        picks = [p for p in (data.get("picks") or "").split(",") if re.fullmatch(r"[A-Za-z0-9_-]{1,64}", p)]
+        picks = picks[:MAX_PICKS]
+        versions = _picked_versions(data, picks)
+        back = _list_back(data.get("back"))
+        if any(p not in versions for p in picks):  # a change not at the version shown, as on the list
+            return RedirectResponse(_with_query(back, "err=changed_some"), status_code=303)
+        if submitted_too_soon(s.session_secret, f"select:{sub}", data.get("shown")):
+            # Faster than a person reads the confirm (or a stamp that is not ours): nothing is
+            # applied and the same confirm is shown again, as the single review page does.
+            try:
+                state.decks.plan_selection(sub, picks, versions)
+            except DeckError as exc:
+                return _pick_one_page(exc, back, sub, sid)
+            return page(
+                "Apply these changes?",
+                _confirm_body(
+                    state.decks.plan_selection(sub, picks, versions),
+                    _csrf(s, sid),
+                    form_stamp(s.session_secret, f"select:{sub}"),
+                    versions,
+                    back,
+                    s.writes_enabled,
+                ),
+                sub=sub,
+                sid=sid,
+                current="/proposals",
+                head_extra=LIST_STYLE,
+            )
+        current_client.set(BROWSER_CLIENT_ID)
+        try:
+            run = state.decks.apply_selection(
+                sub, picks, via=REVIEW_PAGE, versions=versions, shown=_picked_shown(data, picks)
+            )
+        except DeckError as exc:
+            if exc.kind == "pick_one":
+                return _pick_one_page(exc, back, sub, sid)
+            code = (
+                "writes_disabled_some"
+                if exc.kind == "writes_disabled" and len(picks) > 1
+                else _err_code(exc.kind)
+            )
+            return RedirectResponse(_with_query(back, f"err={code}"), status_code=303)
+        await state.decks.batches.wait(run["batch_id"], BATCH_WAIT_SECONDS)
+        return RedirectResponse(f"/proposals/applied/{run['batch_id']}", status_code=303)
+
+    @server.custom_route("/proposals/applied/{bid}", methods=["GET"], include_in_schema=False)
+    async def proposals_applied(request: Request) -> Response:
+        bid = request.path_params["bid"]
+        sub, sid = current(request)
+        if not sub:
+            return to_login("/proposals")
+        run = state.decks.batches.get(sub, bid)
+        if run is None:
+            return page(
+                "Applied",
+                "<div class='card'><p>This result is no longer kept. Each change shows its own outcome "
+                "on the <a href='/proposals'>Proposals</a> page and in History.</p></div>",
+                status=404,
+                sub=sub,
+                sid=sid,
+                current="/proposals",
+            )
+        head = LIST_STYLE + (
+            f"<meta http-equiv='refresh' content='3;url=/proposals/applied/{quote(bid, safe='')}'>"
+            if run["state"] == "applying"
+            else ""
+        )
+        return page(
+            "Applying" if run["state"] == "applying" else "Applied",
+            _result_body(run, _csrf(s, sid)),
+            sub=sub,
+            sid=sid,
+            current="/proposals",
+            head_extra=head,
+        )
+
+    @server.custom_route("/proposals/undo", methods=["POST"], include_in_schema=False)
+    async def proposals_undo(request: Request) -> Response:
+        """Undo of an apply (flow G): first what it puts back, and a warning when that is more
+        than the apply; then, on the guarded Undo, the restore."""
+        sub, sid = current(request)
+        if not sub:
+            return to_login("/proposals")
+        data = await form(request)
+        if isinstance(data, Response):
+            return data
+        if not check_csrf(sid, data) or data.get("action") not in ("preview", "undo"):
+            return page(
+                "Undo",
+                _err("This form expired. Reload the page and try again."),
+                status=403,
+                sub=sub,
+                sid=sid,
+            )
+        snapshot_id = data.get("snapshot") or ""
+        applied = [
+            p for p in (data.get("applied") or "").split(",") if re.fullmatch(r"[A-Za-z0-9_-]{1,64}", p)
+        ]
+        after_at = int(data["after"]) if (data.get("after") or "").isdigit() else 0
+        current_client.set(BROWSER_CLIENT_ID)
+        if data.get("action") == "undo":
+            if submitted_too_soon(s.session_secret, f"undo:{sub}:{snapshot_id}", data.get("shown")):
+                return RedirectResponse("/proposals", status_code=303)
+            try:
+                done = await state.decks.undo(sub, snapshot_id, seen=data.get("deck_seen") or "")
+            except DeckError as exc:
+                return page(
+                    "Undo",
+                    "<div class='card'>"
+                    + _err(str(exc))
+                    + "<p><a class='btn' href='/proposals'>Back to Proposals</a></p></div>",
+                    status=409,
+                    sub=sub,
+                    sid=sid,
+                    current="/proposals",
+                )
+            return RedirectResponse(f"/proposals/{done['proposal_id']}?ok=undone", status_code=303)
+        try:
+            look = await state.decks.undo_preview(sub, snapshot_id, applied=applied, after_at=after_at)
+        except DeckError as exc:
+            return page("Undo", _err(str(exc)), status=404, sub=sub, sid=sid, current="/proposals")
+        stamp = form_stamp(s.session_secret, f"undo:{sub}:{snapshot_id}")
+        return page(
+            "Undo this change?",
+            _undo_body(look, _csrf(s, sid), stamp, applied, after_at),
+            sub=sub,
+            sid=sid,
+            current="/proposals",
+            head_extra=LIST_STYLE,
+        )
 
     @server.custom_route("/proposals/{pid}", methods=["GET"], include_in_schema=False)
     async def proposal(request: Request) -> Response:
@@ -453,15 +690,19 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
                 sid=sid,
                 current="/proposals",
             )
-        notice = _notice(request.query_params.get("ok"), request.query_params.get("err"))
+        err = request.query_params.get("err")
+        on_top = _failure_on_top(p, err)
+        # the stored proposal's own words only, never the URL's, so a crafted link adds nothing
+        notice = _err(_page_step(p)) if on_top else _notice(request.query_params.get("ok"), err)
         title = (
             f"New deck: {p['deck_name']}"
             if p.get("kind") == "create_deck"
             else f"Proposal for {p['deck_name'] or p['deck_id']}"
         )
+        stamp = form_stamp(s.session_secret, f"proposal:{sub}:{pid}")
         return page(
             title,
-            notice + _proposal_body(p, _csrf(s, sid), form_stamp(s.session_secret, f"proposal:{sub}:{pid}")),
+            notice + _proposal_body(p, _csrf(s, sid), stamp, step=not on_top),
             sub=sub,
             sid=sid,
             current="/proposals",
@@ -471,7 +712,8 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
                 f"<meta http-equiv='refresh' content='5;url=/proposals/{quote(pid, safe='')}'>"
                 if p["state"] == "applying"
                 else ""
-            ),
+            )
+            + DOC_STYLE,
         )
 
     @server.custom_route("/proposals/{pid}", methods=["POST"], include_in_schema=False)
@@ -492,18 +734,31 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
                 sub=sub,
                 sid=sid,
             )
-        if action == "apply" and submitted_too_soon(
-            s.session_secret, f"proposal:{sub}:{pid}", data.get("shown")
-        ):
-            # Faster than a person reads the page (double-clickjacking), or a stamp that is not
-            # ours: nothing is applied and the review page is shown again.
+        if submitted_too_soon(s.session_secret, f"proposal:{sub}:{pid}", data.get("shown")):
+            # Faster than a person reads the page (double-clickjacking), or a stamp that is
+            # missing or not ours: nothing is applied or rejected and the page is shown again.
             return RedirectResponse(f"/proposals/{pid}", status_code=303)
         current_client.set(BROWSER_CLIENT_ID)  # the audit rows name the browser as the actor
         try:
             if action == "reject":
                 state.decks.reject(sub, pid, via=REVIEW_PAGE)
             else:
-                result = await state.decks.apply(sub, pid, via=REVIEW_PAGE)  # R-142: the one path
+                seen = data.get("version") or ""
+                row = state.db.get_proposal(pid, sub)
+                if not seen.isdigit() and row is not None and row.get("state") == "pending":
+                    # Apply refuses a change that is not the version the page showed; a form
+                    # without one (an old page, or one made by hand) is refused the same way
+                    return RedirectResponse(f"/proposals/{pid}?err=changed", status_code=303)
+                at = data.get("seen_status_at") or ""
+                result = await state.decks.apply(  # the one path
+                    sub,
+                    pid,
+                    via=REVIEW_PAGE,
+                    version=int(seen) if seen.isdigit() else None,
+                    # a page drawn before the status field was added sends none: as before
+                    shown_status=str(data["seen_status"])[:20] if "seen_status" in data else None,
+                    shown_status_at=int(at) if at.isdigit() and len(at) < 16 else None,
+                )
         except DeckError as exc:
             # Only a code goes in the URL; _notice maps it to fixed text, so a crafted link cannot
             # put words of its choosing in the page's error box. Failure details are in the result.
@@ -627,9 +882,10 @@ def browser_session(state: Any, request: Request) -> tuple[str | None, str | Non
         return None, None  # a disabled account keeps no browser session either
     if not state.settings.grants_access(user["groups"]):
         return None, None
-    sync = getattr(state, "sync", None)
+    sync = state.sync
     if sync is not None:
         sync.opened(sub)  # opening the app checks the member's decks on Archidekt (sync.py)
+    set_card_size(state.db.get_pref(sub, prefs.CARD_SIZE))  # drawn on <html> (theme.render)
     return sub, sid
 
 
@@ -663,31 +919,54 @@ OK_MESSAGES = {
     "Its pending proposals were rejected.",
     "disconnected_all": "Every connected app was disconnected. Each has to be connected and approved again. "
     "Their pending proposals were rejected.",
+    "choices_forgotten": "Done. Every page starts with its usual view again, on all your devices.",
     "mode_manual": "Saved: your assistant asks you every time.",
-    "mode_semi": "Saved: your assistant applies small, low-risk edits without asking and asks for "
-    "everything else.",
-    "mode_auto": "Saved: your assistant applies deck and collection changes without asking (actions on "
-    "your Archidekt account and deleting a deck still wait for you). Each change keeps a "
-    "snapshot you can restore from History.",
+    "mode_semi": "Saved: your assistant applies low-risk changes without asking (a small deck or collection "
+    "edit, or a private copy of a deck) and asks for everything else. A change to one of your decks keeps "
+    "a snapshot you can restore from History; a collection change keeps none. Restoring a snapshot does "
+    "not put back a deck's folder, tags or cover.",
+    "mode_auto": "Saved: your assistant applies deck and collection changes without asking. Restoring a "
+    "snapshot, a commander change, a new deck, an edit of more rows than Full auto applies by itself, "
+    "making a deck public or unlisted, any edit of a description that has formatting, such as bold text, "
+    "links or pictures, actions on your Archidekt account and deleting a deck still wait for you. So "
+    "does a held change, a change waiting for another change first, one another app had a hand in, one "
+    "that replaces another app's change, or one that another app's waiting change would replace. When "
+    "a change waits for "
+    "your press, its card and review page say why. A change to one of your decks keeps a snapshot you "
+    "can restore from History; a collection change keeps none. Restoring a snapshot does not put back "
+    "a deck's folder, tags or cover.",
+    # 0.7.29: several waiting changes applied with one press (batch.py), and Undo
+    "rejected_some": "Rejected. Nothing was sent to Archidekt.",
+    "undone": "Undone. The deck is back as it was before that change.",
 }
 ERR_MESSAGES = {
     "confirm_delete": "Nothing was deleted. Tick the box to confirm, then press Delete my data.",
+    "confirm_forget": "Nothing was forgotten. Tick the box to confirm, then press Forget my view choices.",
     "mode_invalid": "That approval mode does not exist, or this gateway does not allow it. Nothing changed.",
     "failed": "This proposal could not be applied. Details are in the result below, if any.",
-    "writes_disabled": "Deck writes are switched off on this gateway. The proposal is kept for review; "
-    "nothing was sent to Archidekt.",
+    "writes_disabled": WRITES_OFF_KEPT,
+    "writes_disabled_some": WRITES_OFF_KEPT_MANY,  # a list's selection
     "not_found": "No such proposal for your account.",
     "missing": "Something this proposal needs was not found on Archidekt: a card, a printing, a deck or "
     "a snapshot. Nothing more was changed. The result below names it.",
     "already_applied": "This proposal was already applied; nothing was sent again.",
     "not_pending": "This proposal is no longer pending, so nothing was done.",
-    "stale": "The deck changed on Archidekt since this proposal was made. Nothing was sent. "
-    "Ask your assistant for a new proposal from the current deck.",
+    "stale": "Not applied: the deck changed on Archidekt, and this change would now do something "
+    "different from what you reviewed. Nothing was sent. It is still waiting, marked Needs a look: "
+    "review it again, then apply or reject it, or ask your assistant to amend it.",
+    "changed": "A newer version of this change was made since you opened it. Nothing was sent. Review "
+    "the new version below.",
+    "now_held": "This change is held for a reason that came up after you opened this page, so nothing "
+    "was sent. The page now says why under Held. Apply it again if you still want it.",
+    "changed_some": "One of the checked changes is not the version this page showed, so nothing was "
+    "sent. Look over the list again below.",
+    "none_selected": "Check at least one waiting change first. Nothing was done.",
     "backup_failed": "The backup copy of the deck could not be made on Archidekt, so nothing was "
     "changed. The proposal is still pending; try again once Archidekt answers.",
     "not_linked": "Your Archidekt account is not linked, or Archidekt no longer accepts the stored "
     "session. Relink it on the Account page.",
-    "forbidden": "This deck belongs to another Archidekt account than the one you linked.",
+    "forbidden": "Archidekt did not allow this change, so nothing more was changed. The reason is in "
+    "the result below. Your Archidekt link is fine; there is no need to relink.",
     "other_account": "This new deck was proposed for another Archidekt account than the one linked now, "
     "so nothing was created. Ask for a new proposal.",
     "verify_mismatch": "Archidekt accepted the change but the deck does not fully match the proposal. "
@@ -787,16 +1066,15 @@ def _account_body(state: Any, sub: str, csrf: str | None, *, disclosure_read: bo
     who = html.escape(user.get("preferred_username") or user.get("email") or sub)
     csrf_in = f"<input type='hidden' name='csrf' value='{html.escape(csrf or '')}'>"
     writes = (
-        "<span class='badge ok'>enabled</span>"
-        if info["writes_enabled"]
-        else "<span class='badge'>disabled</span>"
+        "<span class='badge ok'>on</span>" if info["writes_enabled"] else "<span class='badge'>off</span>"
     )
     out = [
         "<div class='card'><dl class='meta'>"
         f"<dt>Signed in as</dt><dd><strong>{who}</strong></dd>"
-        f"<dt>Deck writes</dt><dd>{writes}</dd></dl>"
-        "<p class='muted small'>Deck writes are switched on or off for the whole gateway by its "
-        "operator. While they are off, proposals can be reviewed but not applied.</p>"
+        f"<dt>Archidekt writes</dt><dd>{writes}</dd></dl>"
+        # The same words as the deck page's writes-off texts, and no variable names
+        "<p class='muted small'>Archidekt writes are switched on or off for the whole gateway by the "
+        "person who runs it. While they are off, changes can be reviewed but not applied.</p>"
         f"{_identity_details(user)}"
         "<div class='form-actions'>"
         "<a class='btn' href='/install?for=skill'>Get the assistant skill for Claude or ChatGPT</a>"
@@ -811,7 +1089,7 @@ def _account_body(state: Any, sub: str, csrf: str | None, *, disclosure_read: bo
         out.append(_app_card())
     out.append(_mode_card(state, sub, csrf_in))
     out.append(_apps_card(state, sub, csrf_in))
-    if getattr(state, "summaries", None) is not None:
+    if state.summaries is not None:
         out.append(notify.account_card_html(state, sub, csrf_in))  # the summary is inside, with ntfy on
     if info["linked"]:
         expires = _when(info.get("link_expires_at"))
@@ -849,6 +1127,7 @@ def _account_body(state: Any, sub: str, csrf: str | None, *, disclosure_read: bo
             "<button class='primary'>Link account</button></form></div>"
         )
     s = state.settings
+    out.append(_forget_choices_card(csrf_in))
     out.append(_delete_card(csrf_in, s.backup_keep_days if s.backup_dir is not None else None))
     return "".join(out)
 
@@ -874,26 +1153,28 @@ def _identity_details(user: dict[str, Any]) -> str:
 
 def _sweep_on(state: Any) -> bool:
     """Whether this gateway runs the removed-member clean-up (idp_sweep.py)."""
-    sweep = getattr(state, "sweep", None)
+    sweep = state.sweep
     return bool(sweep is not None and sweep.enabled)
 
 
 def _mode_card(state: Any, sub: str, csrf_in: str) -> str:
     """The member's approval mode (modes.py): three radio choices, the current one checked,
     choices above the gateway's cap shown disabled, and the plain cost of the auto modes."""
-    s = state.settings
+    live = state.decks.live  # the admin's Settings page values, read now
     current = state.decks.mode_of(sub)
+    big = int(live.get("auto_big_edit_rows"))
+    rows = int(live.get("auto_apply_max_rows"))
     choices = []
     for mode in modes.MODES:
-        allowed = modes.rank(mode) <= modes.rank(s.approval_mode_max)
+        allowed = modes.rank(mode) <= modes.rank(str(live.get("approval_mode_max")))
         choices.append(
             f"<label class='check mode{'' if allowed else ' muted'}'>"
             f"<input type='radio' name='mode' value='{mode}'{' checked' if mode == current else ''}"
             f"{'' if allowed else ' disabled'}><span><strong>{html.escape(modes.MODE_LABELS[mode])}</strong>"
-            f"<br><span class='small'>{html.escape(modes.mode_help(mode, max_rows=s.auto_apply_max_rows))}"
+            f"<br><span class='small'>"
+            f"{html.escape(modes.mode_help(mode, max_rows=rows, big_rows=big))}"
             f"{'' if allowed else ' (not allowed on this gateway)'}</span></span></label>"
         )
-    rows = s.auto_apply_max_rows
     return (
         "<div class='card'><h2>Approval mode</h2>"
         "<p>How much your assistant may change on Archidekt without asking you first. This is "
@@ -941,6 +1222,19 @@ def _short_id(client_id: str) -> str:
     return client_id if len(client_id) <= 40 else client_id[:37] + "..."
 
 
+def _forget_choices_card(csrf_in: str) -> str:
+    """Once view choices follow the account, signing out no longer resets them; this does."""
+    return (
+        "<div class='card' id='choices'><h2>Your view choices</h2>"
+        "<p>Your views, card size, stack orders, stats choices and dismissed tips follow your "
+        "account to every device. Light or dark mode stays on each device.</p>"
+        f"<form method='post'>{csrf_in}<input type='hidden' name='action' value='forget_choices'>"
+        "<label class='check'><input type='checkbox' name='confirm' value='yes' required> "
+        "Yes, forget my view choices on every device</label>"
+        "<button>Forget my view choices</button></form></div>"
+    )
+
+
 def _delete_card(csrf_in: str, backup_days: int | None = None) -> str:
     """Deleting your data is as easy to find as everything else on the page: no hiding it, no
     guilt-trip wording; one checkbox so a stray tap can't do it."""
@@ -971,6 +1265,14 @@ def _li(kind: str, label: str, name_html: str, qty_html: str = "") -> str:
 
 def _was_now(was: Any, now: Any) -> str:
     return f"<span class='was'>{html.escape(str(was))}</span> &rarr; {html.escape(str(now))}"
+
+
+def _restore_count(r: dict[str, Any]) -> str:
+    """A restore head's count: its review lines, or (saved before that) its write entries."""
+    if "changes" in r:
+        n = int(r.get("changes") or 0)
+        return f"{n} change{'' if n == 1 else 's'}"
+    return f"{r.get('rows', 0)} rows"
 
 
 def _change_rows(rows: list[dict[str, Any]] | None, diff: str) -> tuple[str, dict[str, int], int]:
@@ -1013,7 +1315,12 @@ def _change_rows(rows: list[dict[str, Any]] | None, diff: str) -> tuple[str, dic
                     "Change",
                     name,
                     f"<span class='was'>{before}</span> &rarr; {after} "
-                    f"<span class='sr-only'>copies, </span>({'+' if delta > 0 else ''}{delta})",
+                    f"<span class='sr-only'>copies, </span>({'+' if delta > 0 else ''}{delta})"
+                    + (
+                        " " + html.escape(commander_stays_text(r["fold"]))
+                        if isinstance(r.get("fold"), dict)
+                        else ""
+                    ),
                 )
             )
         elif kind == "category" and r.get("leaves"):
@@ -1035,12 +1342,15 @@ def _change_rows(rows: list[dict[str, Any]] | None, diff: str) -> tuple[str, dic
             out.append(_li("chg", "Category", name, _was_now(r.get("before", ""), r.get("after", ""))))
         elif kind == "commander":
             counts["cat"] += 1
+            texts = commander_row_texts(r)
             out.append(
                 _li(
                     "chg",
                     "Commander",
                     html.escape(str(r.get("after", ""))),
-                    _was_now(r.get("before", ""), r.get("after", "")),
+                    html.escape(" ".join(texts))
+                    if texts
+                    else _was_now(r.get("before", ""), r.get("after", "")),
                 )
             )
         elif kind == "finish":
@@ -1093,6 +1403,7 @@ def _change_rows(rows: list[dict[str, Any]] | None, diff: str) -> tuple[str, dic
                 extra += (
                     "<span class='small muted'>Will say:</span>"
                     f"<blockquote class='said'>{html.escape(str(r['after_text']))}</blockquote>"
+                    + _formatted_preview(r)
                 )
             if r.get("note"):
                 extra += f"<span class='small'>{html.escape(str(r['note']))}</span>"
@@ -1110,7 +1421,7 @@ def _change_rows(rows: list[dict[str, Any]] | None, diff: str) -> tuple[str, dic
                     "chg",
                     "Restore",
                     html.escape(f"snapshot {r.get('snapshot_id', '')}"),
-                    html.escape(f"taken {r.get('taken', '')}, {r.get('rows', 0)} rows"),
+                    html.escape(f"taken {r.get('taken', '')}, {_restore_count(r)}"),
                 )
             )
         else:
@@ -1136,16 +1447,23 @@ def _detail_rows(rows: list[dict[str, Any]] | None, diff: str) -> tuple[str, int
                 "<div class='description-change'>"
                 "<p><strong>New description</strong></p>"
                 f"<pre class='diff'>{html.escape(after) if after else '(empty)'}</pre>"
-                "<details><summary>Current description</summary>"
+                + _formatted_preview(r)
+                + "<details><summary>Current description</summary>"
                 f"<pre class='diff'>{html.escape(before) if before else '(empty)'}</pre></details></div>"
             )
             items.append(_li("chg", "description", html.escape(summary) + full))
         elif r.get("kind") == "detail":
+            said = tag_change_text(r)  # tags: which are added and which taken off, not only the lists
             items.append(
                 _li(
                     "chg",
                     str(r.get("field", "")).replace("_", " "),
-                    _was_now(r.get("before", ""), r.get("after", "")),
+                    _was_now(r.get("before", ""), r.get("after", ""))
+                    + (
+                        f"<br><span class='small'>{html.escape(said[0].upper() + said[1:])}</span>"
+                        if said
+                        else ""
+                    ),
                 )
             )
         else:
@@ -1153,11 +1471,35 @@ def _detail_rows(rows: list[dict[str, Any]] | None, diff: str) -> tuple[str, int
     return "".join(items), len(items)
 
 
-# The review page's words for a proposal the deck sync (sync.py) saw go out of date.
+# The review page's words for a proposal the re-check (recheck.py) marked Needs a look: the deck
+# changed after it was made and the change no longer fits. The reason follows when known.
 OUT_OF_DATE_PAGE = (
-    "Out of date: this deck changed after the proposal was made, so Apply will be refused and nothing "
-    "will be sent. Reject it and ask your assistant for a new one."
+    "Needs a look: the deck changed after this change was made and it no longer fits, so Apply will "
+    "be refused and nothing will be sent. Ask your assistant to update it, or reject it."
 )
+
+
+FAILED_PLAIN_STEP = (
+    "Nothing else was changed. Ask your assistant for a new proposal if you still want these edits."
+)
+
+
+def _failure_on_top(p: dict[str, Any], err: str | None) -> bool:
+    """Right after a failed Apply (?err=failed), a failure the page explains on its own
+    (Archidekt's waits ran out, part of it reached Archidekt) is that one message, in the error
+    box, instead of the general "could not be applied" box above the same message lower down.
+    The same for an apply that Archidekt's waits stopped before it changed anything, which left
+    the proposal pending: its one message, with the Apply button below."""
+    if err != "failed":
+        return False
+    if p.get("state") == "pending":
+        result = p.get("result") if isinstance(p.get("result"), dict) else {}
+        return (
+            result.get("error") == "rate_limited"
+            and bool(p.get("writes_enabled"))
+            and not p.get("out_of_date")
+        )
+    return p.get("state") == "failed" and _page_step(p) != FAILED_PLAIN_STEP
 
 
 def _page_step(p: dict[str, Any]) -> str:
@@ -1166,9 +1508,17 @@ def _page_step(p: dict[str, Any]) -> str:
     state = p.get("state")
     result = p.get("result") if isinstance(p.get("result"), dict) else {}
     if state == "pending" and not p.get("writes_enabled"):
-        return "Review only: deck writes are turned off on this gateway, so this can't be applied yet."
+        return "Review only: Archidekt writes are switched off on this gateway, so this can't be applied yet."
     if state == "pending" and p.get("out_of_date"):
-        return OUT_OF_DATE_PAGE
+        why = str(p.get("status_reason") or "").strip()
+        return OUT_OF_DATE_PAGE + (f" Why: {why}" if why else "")
+    if state == "pending" and result.get("error") == "rate_limited":
+        # Archidekt's waits stopped the last apply before it changed anything there
+        kept = f" {result['backup_note']}" if result.get("backup_note") else ""
+        return (
+            f"{PATIENCE_SPENT} Nothing was changed on Archidekt.{kept} The proposal is still pending, "
+            "so you can apply it again in a few minutes."
+        )
     if state == "pending":
         retry = (
             "The last try stopped before anything changed, because Archidekt's backup copy couldn't be made. "
@@ -1188,6 +1538,8 @@ def _page_step(p: dict[str, Any]) -> str:
         )
     if state == "applied":
         return "Done. Archidekt matches this proposal."
+    if state == "failed" and result.get("error") == "rate_limited":
+        return _rate_limited_step(p, result)
     if state == "failed" and p.get("kind") in ("create_deck", "clone") and result.get("deck_id"):
         return (
             "A new deck was made on Archidekt before this stopped, so it may not match the proposal. "
@@ -1202,9 +1554,7 @@ def _page_step(p: dict[str, Any]) -> str:
         )
         return f"Part of this change reached Archidekt before it stopped. Check {where}{undo}"
     if state == "failed":
-        return (
-            "Nothing else was changed. Ask your assistant for a new proposal if you still want these edits."
-        )
+        return FAILED_PLAIN_STEP
     if state == "rejected":
         by = {
             "assistant": " by your assistant (its reject_proposal call)",
@@ -1215,7 +1565,38 @@ def _page_step(p: dict[str, Any]) -> str:
             "disconnected": " when you disconnected the app that made it",
         }.get(str(p.get("closed_by") or ""), "")
         return f"This proposal was rejected{by}. Nothing was changed."
+    if state == "replaced" and p.get("replace_note"):
+        return str(p["replace_note"])  # "Replaced by #5."
     return "This proposal can no longer be applied."
+
+
+def _rate_limited_step(p: dict[str, Any], result: dict[str, Any]) -> str:
+    """The review page's one message for an apply that stopped because Archidekt asked the gateway
+    to wait longer than an apply may: why, how far it got, and to try again later."""
+    again = "Try again in a few minutes: ask your assistant for a new proposal."
+    where = "your collection" if p.get("kind") == "collection" else "the deck"
+    undo = (
+        " The snapshot taken just before it can be restored from History."
+        if result.get("snapshot_id") and p.get("kind") != "collection"
+        else ""
+    )
+    if p.get("kind") in ("create_deck", "clone") and result.get("deck_id"):
+        got = (
+            "A new deck was made on Archidekt before this stopped, so it may not match the proposal. "
+            "Check it, and delete it from its deck page if you don't want it."
+        )
+    elif result.get("sent_entries"):
+        sent, of = int(result["sent_entries"]), result.get("of_entries")
+        got = (
+            f"{sent} of {int(of)} changes reached Archidekt first, so {where} is partly changed."
+            if isinstance(of, int)
+            else f"Part of this change reached Archidekt first, so {where} is partly changed."
+        ) + f" Check {where}.{undo}"
+    elif result.get("deck_written"):
+        got = f"Part of this change reached Archidekt first. Check {where}.{undo}"
+    else:
+        got = "Nothing was changed on Archidekt."
+    return f"{PATIENCE_SPENT} {got} {again}"
 
 
 def _progress_html(p: dict[str, Any]) -> str:
@@ -1229,6 +1610,11 @@ def _progress_html(p: dict[str, Any]) -> str:
     if g.get("of_entries"):
         bits.append(f"sent {int(g.get('sent_entries') or 0)} of {int(g['of_entries'])} changes")
     text = "Applying to Archidekt" + (": " + ", ".join(bits) if bits else "") + "."
+    if g.get("waiting_for_archidekt"):
+        text += (
+            " Archidekt asked us to slow down, so the gateway is waiting about "
+            f"{int(g['waiting_for_archidekt'])} seconds before carrying on by itself."
+        )
     return f"<p class='notice warn' role='status'>{html.escape(text)}</p>"
 
 
@@ -1236,7 +1622,8 @@ def _risk_badge(risk: str) -> str:
     return "danger" if risk == "destructive" else "warn" if risk in ("high", "consent") else ""
 
 
-def _proposal_body(p: dict[str, Any], csrf: str | None, shown: str = "") -> str:
+def _proposal_body(p: dict[str, Any], csrf: str | None, shown: str, *, step: bool = True) -> str:
+    """``step=False``: what happens next is already in the error box above (_failure_on_top)."""
     if p.get("kind") == "details":
         rows, total = _detail_rows(p.get("rows"), p["diff"])
         summary = [f"<span>{total} deck detail{'s' if total != 1 else ''} changed; no cards change</span>"]
@@ -1286,11 +1673,48 @@ def _proposal_body(p: dict[str, Any], csrf: str | None, shown: str = "") -> str:
             else ""
         )
         + (f"<dt>Proposed by</dt><dd>{actor_html(p['created_by'])}</dd>" if p.get("created_by") else "")
+        + (  # an amended change says who changed it and what
+            f"<dt>Version</dt><dd>{int(p['version'])}, changed by {_changed_by_names(p)}"
+            + (f". Last change: {html.escape(p['what_changed'])}" if p.get("what_changed") else "")
+            + "</dd>"
+            if p.get("changed_by")
+            else ""
+        )
         + (
             f"<dt>Risk</dt><dd><span class='badge {_risk_badge(p['risk'])}'>"
             f"{html.escape(p['risk'])}</span> <span class='small muted'>"
             f"{html.escape(p['risk_reason'])}</span></dd>"
             if p.get("risk")
+            else ""
+        )
+        + (
+            # every cause it is held for, as the card's "Held." note says them
+            f"<dt>Held</dt><dd>{html.escape(str(p['status_reason']))}</dd>"
+            if p.get("state") == "pending" and p.get("status") == "held" and p.get("status_reason")
+            else ""
+        )
+        + (
+            # why it waits for the member's own press, and a replace that waits
+            "<dt>Waits for you</dt><dd>"
+            + html.escape(
+                " ".join(
+                    x
+                    for x in (
+                        p.get("replace_note") if p.get("state") == "pending" else "",
+                        # the Held row above already says why: said once
+                        "It needs your press."
+                        if p.get("press_reason")
+                        and p.get("status") == "held"
+                        and _held_repeat(p["press_reason"])
+                        else f"This one {p['press_reason']}, so it needs your press."
+                        if p.get("press_reason")
+                        else "",
+                    )
+                    if x
+                )
+            )
+            + "</dd>"
+            if p.get("state") == "pending" and (p.get("press_reason") or p.get("replace_note"))
             else ""
         )
         + f"<dt>Created</dt><dd>{_when(p['created_at'])}</dd>"
@@ -1306,7 +1730,8 @@ def _proposal_body(p: dict[str, Any], csrf: str | None, shown: str = "") -> str:
         f"<div class='summary'>{''.join(summary)}</div>"
         f"<ul class='changes' aria-label='{aria}'>{rows}</ul>"
         f"<details class='raw'><summary>Plain-text diff</summary>{raw}</details>"
-        f"<p class='muted'>{html.escape(_page_step(p))}</p>" + _progress_html(p)
+        + (f"<p class='muted'>{html.escape(_page_step(p))}</p>" if step else "")
+        + _progress_html(p)
     )
     if p["state"] == "pending" and p["writes_enabled"]:
         destroy = p.get("risk") == "destructive"
@@ -1329,11 +1754,13 @@ def _proposal_body(p: dict[str, Any], csrf: str | None, shown: str = "") -> str:
             )
             apply_button = ("apply", "Apply: do this on Archidekt", "primary btn-lg")
         else:
+            where = "your collection" if p.get("kind") == "collection" else "your deck"
             ask = (
                 "<div class='apply'><h2>Apply to Archidekt?</h2>"
-                "<p><strong>Applying writes these changes to your deck on Archidekt.</strong></p>"
-                "<p class='small'>The gateway re-checks that the deck is unchanged, keeps a snapshot of it "
-                "from just before the edit, then applies and verifies the result. Nothing happens until "
+                f"<p><strong>Applying writes these changes to {where} on Archidekt.</strong></p>"
+                "<p class='small'>The gateway applies the changes, then reads the result back from "
+                "Archidekt. For a change to one of your decks, it first checks that the deck still matches "
+                "this proposal and keeps a snapshot of it from just before the edit. Nothing happens until "
                 "you tap Apply.</p>"
             )
             apply_button = ("apply", "Apply these changes to Archidekt", "primary btn-lg")
@@ -1343,7 +1770,15 @@ def _proposal_body(p: dict[str, Any], csrf: str | None, shown: str = "") -> str:
             # connected app must not get its own proposal applied by a double-click on a page it
             # controls that swaps this window in (clickguard.py).
             + guarded_form(
-                hidden={"csrf": csrf or "", **({"shown": shown} if shown else {})},
+                # The version shown; an apply of a proposal amended since is refused
+                hidden={
+                    "csrf": csrf or "",
+                    "shown": shown,
+                    "version": str(p.get("version") or 1),
+                    # the status this page showed: a change held since is refused, nothing sent
+                    "seen_status": str(p.get("status") or ""),
+                    "seen_status_at": str(p.get("status_at") or ""),
+                },
                 buttons=[
                     apply_button,
                     ("reject", "Reject this proposal", "btn" if destroy else "danger"),
@@ -1356,8 +1791,25 @@ def _proposal_body(p: dict[str, Any], csrf: str | None, shown: str = "") -> str:
         body += (
             "<form method='post' class='reject'>"
             f"<input type='hidden' name='csrf' value='{html.escape(csrf or '')}'>"
+            f"<input type='hidden' name='shown' value='{html.escape(shown)}'>"
             "<input type='hidden' name='action' value='reject'>"
             "<button class='btn'>Reject this proposal</button></form>"
+        )
+    if (
+        p["state"] == "applied"
+        and p.get("kind") in ("edit", "details", "restore")
+        and p.get("snapshot_id")
+        and csrf
+    ):
+        # Flow G: one tap shows what Undo would put back, then asks once
+        body += (
+            "<form method='post' action='/proposals/undo' class='undo'>"
+            f"<input type='hidden' name='csrf' value='{html.escape(csrf)}'>"
+            "<input type='hidden' name='action' value='preview'>"
+            f"<input type='hidden' name='snapshot' value='{html.escape(str(p['snapshot_id']))}'>"
+            f"<input type='hidden' name='applied' value='{html.escape(p['proposal_id'])}'>"
+            f"<input type='hidden' name='after' value='{int(p.get('applied_at') or 0)}'>"
+            "<button class='btn'>Undo this change</button></form>"
         )
     # who rejected it (closed_by, said above) is not a result worth a box of its own
     result = p.get("result")
@@ -1379,3 +1831,374 @@ def _pretty(obj: Any) -> str:
     import json
 
     return json.dumps(obj, indent=2, sort_keys=True)
+
+
+# -- 0.7.29: the waiting changes as a list with checkboxes, applied together (batch.py) ------------
+
+MAX_PICKS = 100  # one press may apply every change a member can have waiting (decks.MAX_SELECTION)
+BATCH_WAIT_SECONDS = 8.0  # the confirm's Apply waits this long for the result, then shows progress
+LIST_STYLE = f"<style>{LIST_CSS}</style>"
+# A document drawn with its formatting; the review page's toggles are 44 px tall
+DOC_STYLE = (
+    f"<style>{DOC_CSS}main details > summary{{min-height:44px;padding:.6rem 0;cursor:pointer}}</style>"
+)
+
+
+def _formatted_preview(r: dict[str, Any]) -> str:
+    """A description or comment change that keeps formatting, drawn as it will look on
+    Archidekt (bold, links with their sites, lists, card links, pictures as "[picture]")."""
+    if r.get("formatting_lost"):  # the edit keeps none of it
+        lost = int(r.get("dropped_embeds") or 0)
+        noun = "comment" if r.get("action") == "comment_edit" else "description"
+        return (
+            f"<p class='notice warn'>This edit removes all the formatting from the {noun}, such as bold "
+            "text, links and pictures: it is written as plain text."
+            + (
+                f" {lost} picture{'s' if lost != 1 else ''} or card link{'s' if lost != 1 else ''} "
+                "will be removed with it."
+                if lost
+                else ""
+            )
+            + "</p>"
+        )
+    if not r.get("after_doc"):
+        return ""
+    lost = int(r.get("dropped_embeds") or 0)
+    gone = (
+        f"<p class='small'>{lost} picture{'s' if lost != 1 else ''} or card link{'s' if lost != 1 else ''} "
+        "in text that changed will be removed with it.</p>"
+        if lost
+        else ""
+    )
+    return (
+        "<p><strong>How it will look on Archidekt</strong><br><span class='small muted'>Bold text, links "
+        "and pictures already there are kept where their words did not change; new words are plain "
+        "text.</span></p>"
+        f"<div class='qdoc'>{doc_html(r['after_doc'])}</div>{gone}"
+    )
+
+
+# Changes that are not edits to one of the member's decks (FLEX §3 "Not tied to one of your decks").
+_UNTIED_KINDS = ("create_deck", "clone", "collection")
+_DECK_ACTIONS = ("collaborator_add", "collaborator_remove", "delete_deck")
+
+
+def _app_name(label: str) -> str:
+    """An actor label as the cards write it: the app's name alone, no "app:" badge and no client
+    id ("changed by app: ChatGPT: …" would have two colons)."""
+    m = re.fullmatch(r"app: (.+) \((.+)\)", label)
+    if m:
+        return m.group(1)
+    if label.startswith("app: "):
+        return "an assistant"
+    return "you, in your browser" if label == "browser" else label
+
+
+def _changed_by_names(p: dict[str, Any]) -> str:
+    """Every app that changed a note, in order: "ChatGPT, then Claude"."""
+    apps = p.get("changed_by_apps") or [p["changed_by"]]
+    return html.escape(", then ".join(_app_name(str(a)) for a in apps))
+
+
+# static/proposals.js asks the same in the list's bar
+REJECT_NOTE = (
+    "Nothing is sent to Archidekt. A rejected change can't be brought back: your assistant would have "
+    "to propose it again."
+)
+
+
+def reject_ask(n: int) -> str:
+    return "Reject this change?" if n == 1 else f"Reject {n} changes?"
+
+
+def _reject_confirm(picks: list[str], versions: dict[str, int], back: str, csrf: str) -> str:
+    """The short confirm before Reject on a waiting list, for a browser without
+    the list's script: the same checked changes, posted again with ``sure``."""
+    hidden = "".join(
+        f"<input type='hidden' name='pick' value='{html.escape(p)}'>"
+        + (f"<input type='hidden' name='v_{html.escape(p)}' value='{versions[p]}'>" if p in versions else "")
+        for p in picks
+    )
+    return (
+        f"<h1>{html.escape(reject_ask(len(picks)))}</h1><p class='muted'>{REJECT_NOTE}</p>"
+        "<form method='post' action='/proposals/select' class='rejectconfirm'>"
+        f"<input type='hidden' name='csrf' value='{html.escape(csrf)}'>"
+        f"<input type='hidden' name='back' value='{html.escape(back)}'>"
+        "<input type='hidden' name='sure' value='1'>"
+        f"{hidden}<p class='actions'>"
+        f"<button type='submit' name='action' value='reject' class='danger'>"
+        f"{'Reject' if len(picks) == 1 else f'Reject {len(picks)}'}</button> "
+        f"<a class='btn' href='{html.escape(back)}'>Cancel</a></p></form>"
+    )
+
+
+def _list_back(value: str | None) -> str:
+    """Where a waiting list's form returns to: the Proposals page or the deck page it was on."""
+    v = str(value or "")
+    return v if re.fullmatch(r"/decks/\d{1,12}", v) else "/proposals"
+
+
+def _with_query(path: str, query: str) -> str:
+    return f"{path}?{query}" + ("#waiting" if path.startswith("/decks/") else "")
+
+
+def _picked_versions(data: dict[str, str], picks: list[str]) -> dict[str, int]:
+    """The version of each checked change the member saw: the apply refuses one amended since."""
+    out = {}
+    for pid in picks:
+        v = data.get(f"v_{pid}") or ""
+        if v.isdigit() and 0 < int(v) < 10_000:
+            out[pid] = int(v)
+    return out
+
+
+def _held_repeat(press_reason: str) -> bool:
+    """A press reason that only says again why the change is held."""
+    return bool(re.match(r"(would replace .*, which was applied|is held because)", str(press_reason)))
+
+
+def _picked_shown(data: dict[str, str], picks: list[str]) -> dict[str, dict[str, Any]]:
+    """The status each change on the confirm showed, and when it was set (a confirm drawn before
+    these fields were added sends none: as before)."""
+    out: dict[str, dict[str, Any]] = {}
+    for pid in picks:
+        if f"s_{pid}" not in data:
+            continue
+        at = data.get(f"t_{pid}") or ""
+        out[pid] = {
+            "status": str(data[f"s_{pid}"])[:20],
+            "status_at": int(at) if at.isdigit() and len(at) < 16 else None,
+        }
+    return out
+
+
+def _untied(state: Any, sub: str, row: dict[str, Any]) -> bool:
+    if row.get("kind") in _UNTIED_KINDS or not str(row.get("deck_id") or "").isdigit():
+        return True
+    if row.get("kind") == "action":
+        full = state.db.get_proposal(row["id"], sub) or {}
+        action = (full.get("changes") or {}).get("action") if isinstance(full.get("changes"), dict) else None
+        return action not in _DECK_ACTIONS
+    return False
+
+
+def _proposals_body(state: Any, sub: str, csrf: str | None) -> str:
+    """The Proposals page (FLEX §3): the waiting changes grouped by deck, the deck with the oldest
+    first, each with checkboxes and a whole-deck box; then those not tied to one of the member's
+    decks; the bar that applies or rejects the checked ones; then the closed ones."""
+    import time
+
+    now = time.time()
+    waiting = state.db.pending_board(sub)
+    groups: dict[str, list[dict[str, Any]]] = {}
+    untied: list[dict[str, Any]] = []
+    for row in waiting:
+        line = line_for(state.db, sub, row)
+        if _untied(state, sub, row):
+            untied.append(line)
+        else:
+            groups.setdefault(line["deck_id"], []).append(line)
+    parts: list[str] = []
+    for deck_id, lines in groups.items():  # pending_board is oldest first, so is this order
+        n = len(lines)
+        name = lines[0]["deck_name"]
+        oldest = age_text(now - min(x["created_at"] for x in lines))
+        parts.append(
+            f"<section class='card dgroup' id='deck-{html.escape(deck_id)}'><h2>"
+            f"<label class='pick'><input type='checkbox' class='all' data-all='{html.escape(deck_id)}' "
+            f"aria-label='All waiting changes to {html.escape(name)}'></label>"
+            f"<a href='/decks/{html.escape(deck_id)}'>{html.escape(name)}</a>"
+            f"<span class='meta2'>{n} waiting · oldest {oldest}</span></h2>"
+            + "<ul class='wlist'>"
+            + "".join(row_html(x, now=now, group=deck_id) for x in lines)
+            + "</ul>"
+            "</section>"
+        )
+    if untied:
+        parts.append(
+            "<section class='card dgroup' id='untied'><h2>"
+            "<label class='pick'><input type='checkbox' class='all' data-all='untied' "
+            "aria-label='All changes not tied to one of your decks'></label>"
+            f"Not tied to one of your decks<span class='meta2'>{len(untied)} waiting</span></h2>"
+            + "<ul class='wlist'>"
+            + "".join(row_html(x, now=now, group="untied") for x in untied)
+            + "</ul>"
+            "</section>"
+        )
+    if parts:
+        body = (
+            "<form method='post' action='/proposals/select' class='wform'>"
+            f"<input type='hidden' name='csrf' value='{html.escape(csrf or '')}'>"
+            "<input type='hidden' name='back' value='/proposals'>"
+            "<p class='muted'>Check the changes to apply or reject, on any decks and in any order. They "
+            "are applied oldest first, each checked against the deck as it is just before it is sent; "
+            "one that would now do something else is not sent and waits as Needs a look.</p>"
+            + "".join(parts)
+            + action_bar()
+            + "</form>"
+            f"<script src='{LIST_SCRIPT}' defer></script>"
+        )
+    else:
+        body = (
+            "<div class='card'><p>Nothing is waiting for your approval. Ask your assistant to propose a "
+            "deck change and it will appear here for review.</p></div>"
+        )
+    closed = [r for r in state.decks.list_proposals(sub) if r["state"] != "pending"]
+    if closed:
+        items = "".join(
+            f"<li><a class='name' href='/proposals/{html.escape(r['id'])}'>"
+            f"{html.escape(r['deck_name'] or r['deck_id'])}</a>"
+            f"<span class='badge {_badge(r['state'])}'>{html.escape(r['state'])}</span>"
+            + actor_html(r.get("created_by"))
+            + f"<span class='when'>{_when(r['created_at'])}</span></li>"
+            for r in closed
+        )
+        body += f"<h2>Earlier</h2><div class='card'><ul class='plain plist'>{items}</ul></div>"
+    return body
+
+
+def _confirm_body(
+    plan: dict[str, Any],
+    csrf: str | None,
+    shown: str,
+    versions: dict[str, int],
+    back: str,
+    writes_enabled: bool,
+) -> str:
+    """The short confirm of FLEX flow B step 2: the order the changes will run in (oldest first
+    per deck), how many rows change, what stays waiting and what will not be sent."""
+    out = ["<div class='card'>"]
+    if plan["count"]:
+        n, rows = plan["count"], plan["rows"]
+        out.append(
+            f"<p><strong>{n} change{'s' if n != 1 else ''}, {rows} card line{'s' if rows != 1 else ''} in "
+            "all.</strong> They run in this order, each checked against the deck just before it is "
+            "sent. A snapshot of each deck is kept first, so Undo can put its cards and details back. "
+            "Only deck edits, details changes and restores have Undo: account actions (likes, follows, "
+            "comments and the like), collection edits, new decks and copies don't.</p>"
+        )
+    for deck in plan["decks"]:
+        out.append(f"<h2>{html.escape(deck['deck_name'])}</h2><ol class='order'>")
+        for c in deck["changes"]:
+            no = f"#{c['board_no']} " if c.get("board_no") else ""
+            held = f"<span class='held'>{html.escape(c['held'])}</span>" if c.get("held") else ""
+            out.append(f"<li><b>{html.escape(no)}</b>{html.escape(c['summary'])}{held}</li>")
+        out.append("</ol>")
+        if deck.get("older_text"):
+            out.append(f"<p class='muted'>{html.escape(deck['older_text'])}</p>")
+    if plan["skipped"]:
+        out.append("<h2>Not sent</h2><ul class='skips'>")
+        for c in plan["skipped"]:
+            no = f"#{c['board_no']} " if c.get("board_no") else ""
+            out.append(
+                f"<li><a href='/proposals/{html.escape(c['proposal_id'])}'>{html.escape(no)}"
+                f"{html.escape(c['summary'])}</a>: {html.escape(c['why'])}</li>"
+            )
+        out.append("</ul>")
+    if not plan["count"]:
+        out.append(
+            "<p>None of these can be applied together.</p>"
+            f"<p><a class='btn' href='{html.escape(back)}'>Back</a></p>"
+        )
+        return "".join(out) + "</div>"
+    if not writes_enabled:
+        # several waiting: the plural, as after a refused apply
+        off = WRITES_OFF_KEPT_MANY if plan["count"] > 1 else ERR_MESSAGES["writes_disabled"]
+        out.append(f"<p>{html.escape(off)}</p>")
+        return "".join(out) + "</div>"
+    picks = [c["proposal_id"] for d in plan["decks"] for c in d["changes"]]
+    hidden = {"csrf": csrf or "", "shown": shown, "picks": ",".join(picks), "back": back}
+    hidden.update({f"v_{p}": str(versions[p]) for p in picks if p in versions})
+    # the status each line showed: a change held since is not sent (it is reported)
+    for c in (c for d in plan["decks"] for c in d["changes"]):
+        hidden[f"s_{c['proposal_id']}"] = str(c.get("status") or "")
+        hidden[f"t_{c['proposal_id']}"] = str(c.get("status_at") or "")
+    n = plan["count"]
+    out.append(
+        guarded_form(
+            hidden=hidden,
+            buttons=[("apply", f"Apply {n} change{'s' if n != 1 else ''}", "primary btn-lg")],
+            action="/proposals/apply",
+            extra=f"<a class='btn' href='{html.escape(back)}'>Not now</a>",
+            tab_reachable=True,
+        )
+    )
+    return "".join(out) + "</div>"
+
+
+def _result_body(run: dict[str, Any], csrf: str | None) -> str:
+    """The result panel of FLEX flow B step 4: what was applied, what was not sent and why, and
+    an Undo per deck."""
+    from . import batch
+
+    out = ["<div class='card' aria-live='polite'>"]
+    if run["state"] == "applying":
+        out.append(
+            "<p class='notice'>Applying, one change at a time. You can leave this page; this refreshes "
+            "by itself.</p>"
+        )
+    out.append(f"<p><strong>{html.escape(batch.summary_text(run))}</strong></p>")
+
+    def items(rows: list[dict[str, Any]], why: bool) -> str:
+        lis = []
+        for c in rows:
+            no = f"#{c['board_no']} " if c.get("board_no") else ""
+            tail = f": {html.escape(c['why'])}" if why and c.get("why") else ""
+            lis.append(
+                f"<li><a href='/proposals/{html.escape(c['proposal_id'])}'>{html.escape(no)}"
+                f"{html.escape(c['summary'])}</a> ({html.escape(c['deck_name'])}){tail}</li>"
+            )
+        return "<ul class='results'>" + "".join(lis) + "</ul>"
+
+    if run["applied"]:
+        out.append("<h2>Applied</h2>" + items(run["applied"], False))
+    if run["failed"]:
+        out.append("<h2>Failed</h2>" + items(run["failed"], True))
+    if run["not_sent"]:
+        out.append(
+            "<h2>Not sent</h2><p class='muted'>These are still waiting; open one to fix or reject it.</p>"
+            + items(run["not_sent"], True)
+        )
+    for u in run["undo"]:
+        out.append(
+            "<form method='post' action='/proposals/undo' class='undo'>"
+            f"<input type='hidden' name='csrf' value='{html.escape(csrf or '')}'>"
+            "<input type='hidden' name='action' value='preview'>"
+            f"<input type='hidden' name='snapshot' value='{html.escape(u['snapshot_id'])}'>"
+            f"<input type='hidden' name='applied' value='{html.escape(','.join(u['applied']))}'>"
+            f"<input type='hidden' name='after' value='{int(u['after_at'])}'>"
+            f"<button class='btn'>Undo on {html.escape(u['deck_name'])}</button></form>"
+        )
+    out.append("<p><a class='btn' href='/proposals'>Back to Proposals</a></p>")
+    return "".join(out) + "</div>"
+
+
+def _undo_body(look: dict[str, Any], csrf: str | None, shown: str, applied: list[str], after_at: int) -> str:
+    """Flow G step 3-4: what Undo puts back, and the one warning when that is more than the apply."""
+    out = [f"<div class='card'><h2>{html.escape(look['deck_name'])}</h2>"]
+    if look["nothing"]:
+        out.append("<p>The deck already matches how it was before that change. There is nothing to undo.</p>")
+        return "".join(out) + "<p><a class='btn' href='/proposals'>Back</a></p></div>"
+    if look["warning"]:
+        out.append(f"<p class='notice warn'>{html.escape(look['warning'])}</p>")
+    out.append("<p>Undo puts the deck back as it was before that change:</p><ul class='results'>")
+    for r in look["rows"][:200]:
+        out.append(f"<li>{html.escape(row_line(r))}</li>")
+    out.append("</ul>")
+    out.append(
+        guarded_form(
+            hidden={
+                "csrf": csrf or "",
+                "shown": shown,
+                "deck_seen": look["fingerprint"],
+                "snapshot": look["snapshot_id"],
+                "applied": ",".join(applied),
+                "after": str(after_at),
+            },
+            buttons=[("undo", "Undo: put the deck back", "primary")],
+            action="/proposals/undo",
+            extra="<a class='btn' href='/proposals'>Not now</a>",
+            tab_reachable=True,
+        )
+    )
+    return "".join(out) + "</div>"

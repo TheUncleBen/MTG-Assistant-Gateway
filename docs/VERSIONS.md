@@ -17,8 +17,10 @@ Every update to `main` is a new version of the gateway. Each one gets:
 Set `MTG_TAG=latest` (the default in `deploy/stack.env.example` and the Compose
 `.env.example`). To update, redeploy with the image pulled again:
 
-- Portainer: **Stacks** → your stack → **Update the stack** with **Re-pull image**
-  on.
+- Portainer: **Stacks** → your stack → **Update the stack** (if your
+  stack uses the Repository build method, the button is called **Pull and
+  redeploy**), then in the box that asks “Are you sure?” make sure **Re-pull image and redeploy** is on and click
+  **Update**.
 - Compose: `docker compose pull && docker compose up -d`.
 
 Read the [CHANGELOG](../CHANGELOG.md) entry first. A major version (see below)
@@ -59,6 +61,12 @@ that carries a new Mystic Forge tag publishes it and marks it with the git tag
 same build also moves the image's `latest` tag and adds a tag carrying the
 short commit SHA; deploy the versioned tag the stack file names.
 
+Forge, the simulation engine, works the same way: its image tag is
+`<Forge version>-mag<n>` (for example `2.0.15-mag3`), the **Forge image**
+workflow publishes it the first time `main` carries it, and the git tag is
+`forge-2.0.15-mag3`. Until that run has finished, the new tag can't be
+pulled.
+
 ## For contributors: making a release
 
 There is no separate release step. Every pull request:
@@ -96,4 +104,4 @@ that needs two rulesets, set up once by the repository's owner
    **Create**.
 2. **New tag ruleset**: name `Locked version tags`, enforcement **Active**,
    target tags **Include by pattern** `v*` and again **Include by pattern**
-   `mystic-forge-*`, the same three rules. **Create**.
+   `mystic-forge-*`, and once more **Include by pattern** `forge-*`, the same three rules. **Create**.

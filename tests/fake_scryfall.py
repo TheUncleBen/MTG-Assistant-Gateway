@@ -30,6 +30,30 @@ def _oracle(card: dict[str, Any]) -> str | None:
     return card.get("oracle_id") or (faces[0].get("oracle_id") if faces else None)
 
 
+def _split(query: str) -> list[str]:
+    """Top-level search terms: spaces outside brackets and quotes split them."""
+    out: list[str] = []
+    depth = 0
+    quoted = False
+    cur = ""
+    for ch in query:
+        if ch == '"':
+            quoted = not quoted
+        elif not quoted and ch == "(":
+            depth += 1
+        elif not quoted and ch == ")":
+            depth -= 1
+        if ch == " " and depth == 0 and not quoted:
+            if cur:
+                out.append(cur)
+            cur = ""
+        else:
+            cur += ch
+    if cur:
+        out.append(cur)
+    return out
+
+
 class FakeScryfall:
     def __init__(self) -> None:
         self.cards: list[dict[str, Any]] = []
@@ -64,6 +88,52 @@ class FakeScryfall:
         # cards not named keep their recorded prices. collection_bodies: every identifier list.
         self.prices: dict[str, dict[str, str | None]] = {}
         self.collection_bodies: list[list[dict[str, str]]] = []
+        # The card search (/cards): page size (Scryfall's is 175; a test sets it small to page),
+        # extra cards a test adds to search over, and the queries the gateway sent.
+        self.page_size = 175
+        self.extra_cards: list[dict[str, Any]] = []
+        self.searches: list[dict[str, str]] = []
+        self.print_searches: list[dict[str, str]] = []  # the printing picker's oracleid: searches
+        self.sets: list[dict[str, Any]] = [
+            {
+                "object": "set",
+                "code": "c16",
+                "name": "Commander 2016",
+                "set_type": "commander",
+                "released_at": "2016-11-11",
+                "digital": False,
+            },
+            {
+                "object": "set",
+                "code": "ice",
+                "name": "Ice Age",
+                "set_type": "expansion",
+                "released_at": "1995-06-03",
+                "block_code": "ice",
+                "block": "Ice Age",
+                "digital": False,
+            },
+            {
+                "object": "set",
+                "code": "csp",
+                "name": "Coldsnap",
+                "set_type": "expansion",
+                "released_at": "2006-07-21",
+                "block_code": "ice",
+                "block": "Ice Age",
+                "digital": False,
+            },
+        ]
+        self.catalogs: dict[str, list[str]] = {
+            "card-types": ["Artifact", "Creature", "Instant", "Land", "Sorcery"],
+            "supertypes": ["Basic", "Legendary"],
+            "creature-types": ["Goblin", "Time Lord", "Elemental"],
+        }
+
+    def names_catalog(self) -> list[str]:
+        """An offline card-name catalog (``/catalog/card-names``): the recorded cards' names, then
+        filler names enough to pass the gateway's size check (a real catalog holds 1,000 or more)."""
+        return sorted({c["name"] for c in self.cards}) + [f"Filler Card {i}" for i in range(1200)]
 
     def client(self) -> httpx.AsyncClient:
         return httpx.AsyncClient(transport=httpx.MockTransport(self.handle), base_url="https://scryfall.test")
@@ -83,6 +153,126 @@ class FakeScryfall:
             if c["set"] == set_code.lower() and c["collector_number"].lower() == number.lower():
                 return c
         return None
+
+    # -- the card search: a small part of Scryfall's syntax, enough for the page's own tests ----
+    def matches(self, card: dict[str, Any], term: str) -> bool:
+        neg = term.startswith("-")
+        t = term[1:] if neg else term
+        if t.startswith("(") and t.endswith(")"):
+            inner = t[1:-1]
+            parts = re.split(r" (?:OR|or) ", inner)
+            if len(parts) > 1:
+                hit = any(self.matches(card, p.strip()) for p in parts)
+            else:
+                hit = all(self.matches(card, p) for p in _split(inner))
+            return hit != neg
+        m = re.fullmatch(r"([a-z]+)(:|>=|<=|=|<|>|!=)(.+)", t)
+        if not m:
+            hit = _norm(t) in _norm(card["name"])
+            return hit != neg
+        key, op, value = m.group(1), m.group(2), m.group(3).strip('"').lower()
+        if key == "game":
+            hit = value in (card.get("games") or [])
+        elif key == "type":
+            hit = value in (card.get("type_line") or "").lower()
+        elif key == "oracle":
+            hit = value in (card.get("oracle_text") or "").lower()
+        elif key == "rarity":
+            hit = (card.get("rarity") or "")[:1] == value[:1]
+        elif key == "set":
+            hit = card.get("set") == value
+        elif key == "color":
+            have = set(card.get("colors") or [])
+            want = set(value.upper()) - {"C"}
+            hit = {"=": have == want, ">=": have >= want, "<=": have <= want}.get(op, False)
+        elif key == "cmc":
+            v = float(card.get("cmc") or 0)
+            n = float(value)
+            hit = {"=": v == n, ">=": v >= n, "<=": v <= n, "<": v < n, ">": v > n, "!=": v != n}[op]
+        elif key in ("unique", "include", "prefer", "lang", "legal", "is", "commander", "block", "artist"):
+            hit = True  # read but not modelled here
+        else:
+            return False
+        return hit != neg
+
+    def search(self, q: dict[str, str]) -> httpx.Response:
+        query = q.get("q", "")
+        self.searches.append(dict(q))
+        if "bad:" in query:
+            return httpx.Response(
+                400, json={"object": "error", "code": "bad_request", "details": "unknown keyword bad"}
+            )
+        unique_prints = "unique:prints" in query
+        pool = self.cards + self.extra_cards
+        found = [c for c in pool if all(self.matches(c, t) for t in _split(query))]
+        if not unique_prints:  # one card per name, as Scryfall's default unique=cards
+            seen: set[str] = set()
+            once = []
+            for c in found:
+                if c["name"] not in seen:
+                    seen.add(c["name"])
+                    once.append(c)
+            found = once
+        found.sort(key=lambda c: c["name"], reverse=q.get("dir") == "desc")
+        if not found:
+            return self.not_found("Your query didn’t match any cards.")
+        page = int(q.get("page") or 1)
+        start = (page - 1) * self.page_size
+        chunk = found[start : start + self.page_size]
+        more = start + self.page_size < len(found)
+        return httpx.Response(
+            200, json={"object": "list", "total_cards": len(found), "has_more": more, "data": chunk}
+        )
+
+    def printings(self, q: dict[str, str], request: httpx.Request) -> httpx.Response:
+        """One card's printings (``oracleid:<id>``, the printing picker's search): the terms
+        ``is:nonfoil|foil|etched``, ``frame:`` and ``border:`` narrow it, ``order`` released or
+        usd with ``dir`` sorts it, and it pages at ``page_size`` with Scryfall's ``has_more`` and
+        ``next_page`` (this same search, ``page`` one higher)."""
+        self.print_searches.append(dict(q))
+        terms = q.get("q", "").split()
+        m2 = re.fullmatch(r"oracleid:([0-9a-f-]+)", terms[0] if terms else "")
+        if not m2:
+            return httpx.Response(400, json={"object": "error", "details": "unsupported query"})
+        found = [c for c in self.cards + self.extra_cards if _oracle(c) == m2.group(1)]
+        for t in terms[1:]:
+            key, _, value = t.partition(":")
+            if key == "is" and value in ("nonfoil", "foil", "etched"):
+                found = [c for c in found if value in (c.get("finishes") or [])]
+            elif key == "frame":
+                found = [c for c in found if str(c.get("frame") or "") == value]
+            elif key == "border":
+                found = [c for c in found if str(c.get("border_color") or "") == value]
+            elif key == "set":
+                found = [c for c in found if str(c.get("set") or "") == value]
+            elif key == "cn":
+                found = [c for c in found if str(c.get("collector_number") or "") == value.strip('"')]
+            else:
+                return httpx.Response(400, json={"object": "error", "details": f"unsupported term {t}"})
+        if q.get("order") == "usd":
+            priced = [c for c in found if (c.get("prices") or {}).get("usd")]
+            unpriced = [c for c in found if not (c.get("prices") or {}).get("usd")]
+            priced.sort(key=lambda c: float(c["prices"]["usd"]), reverse=q.get("dir") == "desc")
+            found = priced + unpriced  # as Scryfall: a printing with no price comes last
+        else:
+            found.sort(key=lambda c: c.get("released_at", ""), reverse=q.get("dir", "desc") != "asc")
+        if not found:
+            return self.not_found("Your query didn’t match any cards.")
+        page = int(q.get("page") or 1)
+        start = (page - 1) * self.page_size
+        chunk = found[start : start + self.page_size]
+        if not chunk:
+            return self.not_found("You have paged past the end of the results.")
+        body: dict[str, Any] = {
+            "object": "list",
+            "total_cards": len(found),
+            "has_more": start + self.page_size < len(found),
+            "data": chunk,
+        }
+        if body["has_more"]:
+            nxt = {**q, "page": str(page + 1)}
+            body["next_page"] = str(request.url.copy_with(params=nxt))
+        return httpx.Response(200, json=body)
 
     @staticmethod
     def not_found(detail: str) -> httpx.Response:
@@ -160,17 +350,18 @@ class FakeScryfall:
             return httpx.Response(
                 200, json={"object": "list", "total_cards": len(data), "has_more": False, "data": data}
             )
-        if path == "/cards/search":
-            m2 = re.fullmatch(r"oracleid:([0-9a-f-]+)", q.get("q", ""))
-            if not m2:
-                return httpx.Response(400, json={"object": "error", "details": "unsupported query"})
-            found = [c for c in self.cards if _oracle(c) == m2.group(1)]
-            found.sort(key=lambda c: c.get("released_at", ""), reverse=True)  # as Scryfall: newest first
-            if not found:
-                return self.not_found("Your query didn’t match any cards.")
+        if path == "/cards/search" and not q.get("q", "").startswith("oracleid:"):
+            return self.search(q)
+        if path == "/sets":
+            return httpx.Response(200, json={"object": "list", "has_more": False, "data": self.sets})
+        m4 = re.fullmatch(r"/catalog/([a-z-]+)", path)
+        if m4 and m4.group(1) != "card-names":
+            values = self.catalogs.get(m4.group(1), [])
             return httpx.Response(
-                200, json={"object": "list", "total_cards": len(found), "has_more": False, "data": found}
+                200, json={"object": "catalog", "total_values": len(values), "data": values}
             )
+        if path == "/cards/search":
+            return self.printings(q, request)
         if path == "/cards/collection" and request.method == "POST":
             body = json.loads(request.content)
             idents = body["identifiers"]

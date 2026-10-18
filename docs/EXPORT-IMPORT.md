@@ -2,7 +2,7 @@
 
 The gateway's website and Android app, the assistant's tools and archidekt.com each read and
 write decklists. This page says which file goes where and what survives the trip. Every line is
-labelled: **verified** means a test in this repository or a read of archidekt.com's own code
+labelled: **confirmed** means a test in this repository or a read of archidekt.com's own code
 proves it; **reported** means the code says so but the step was not exercised on a device or on
 the live site; **unknown** means we could not establish it.
 
@@ -12,12 +12,12 @@ the live site; **unknown** means we could not establish it.
 | --- | --- | --- |
 | **Archidekt import text** (`1x Name (set) 123 *F* [Category{top}] ^Label,#hex^`, one row per card, sorted by name) | gateway: deck page > More > Export ("Archidekt import text", Copy, Download Archidekt .txt); `get_deck` with `view` `export` (or `full`) as `archidekt_text`; archidekt.com: Export > Text with every option on | archidekt.com: deck > Import (paste, or "Upload exported Archidekt file", .txt up to 1 MB); gateway: New deck > paste a list, editor > Paste a list, `propose_new_deck(decklist_text)`, `parse_decklist`, `compare_decks` |
 | **Plain decklist** (`1 Name`, commander first, no headers, mainboard only; sideboard as a second list) | gateway: Export ("Plain decklist", "Sideboard and maybeboard", Download plain .txt); `decklist_text` and `sideboard_text` in `get_deck`'s default `text` view (and `full`) | gateway (as above); Moxfield, MTGO, Arena and the assistant's research tools (outside this repository: unknown beyond "they take `N Name` lines") |
-| **CSV** with Archidekt's column names (Quantity, Name, Finish, Category, Secondary categories, Edition code, Collector number, …) | gateway: Export > Download .csv; Collection > Export CSV; archidekt.com: Export > CSV with the columns you tick | gateway: New deck > CSV, `propose_new_deck(csv_text)`, `parse_deck_export`. **archidekt.com's deck import does not take CSV** (its CSV import is for the collection only; verified from its client code) |
-| **JSON**, the gateway's own format (the full deck read: cards with name, quantity, categories, set, collector number and finish, plus statistics) | gateway: Export > .json; every `get_deck` answer; `/api/v1/decks/{id}` | gateway: New deck > "a gateway .json export" (pasted or from a file), `propose_new_deck(json_text)`. Only the six card fields are read back. **archidekt.com has no JSON import** (verified from its client code), so this format is for the gateway and for your assistant |
+| **CSV** with Archidekt's column names (Quantity, Name, Finish, Category, Secondary categories, Edition code, Collector number, …) | gateway: Export > Download .csv; Collection > Export CSV; archidekt.com: Export > CSV with the columns you tick | gateway: New deck > CSV, `propose_new_deck(csv_text)`, `parse_deck_export`. **archidekt.com's deck import does not take CSV** (its CSV import is for the collection only; confirmed from its client code) |
+| **JSON**, the gateway's own format (the full deck read: cards with name, quantity, categories, set, collector number and finish, plus statistics) | gateway: Export > .json; every `get_deck` answer; `/api/v1/decks/{id}` | gateway: New deck > "a gateway .json export" (pasted or from a file), `propose_new_deck(json_text)`. Only the six card fields are read back. **archidekt.com has no JSON import** (confirmed from its client code), so this format is for the gateway and for your assistant |
 | **Arena text** (`1 Name (SET) 123` under Commander, Companion, Deck and Sideboard headings; the Maybeboard is left out, Arena has none) | gateway: Export > Arena .txt; archidekt.com: Export > Arena | MTG Arena's import (**reported**: the heading and line shape Arena's own export writes; not exercised in Arena). Export only: the gateway does not read it back |
-| **MTGO .dek** (the `Deck`/`Cards` XML the MTGO client exports, with `Quantity`, `Sideboard` and `Name`; MTGO's catalogue ids `CatID` are not known to the gateway and are left out) | gateway: Export > MTGO .dek; archidekt.com: Export > MTGO | the MTGO client (**unknown**: whether MTGO accepts a .dek without `CatID` was not verified; archidekt.com's own .dek was not compared). Export only |
-| **PDF** (a printable list: name, format, size, each category with its rows, printing and finish, several pages when needed) | gateway: Export > PDF (written by the gateway without a PDF library) | any PDF reader (**verified** with pdftotext and pypdf on the test deck). Export only |
-| **EDHPlay import text** (`1 Name (SET) 123`, the commander marked `[Commander{top}]`, a partner too; the rest of the deck; then `Sideboard` with the companion first and at most 15 copies) | gateway: deck page > **Play on EDHPlay** (copies the list and opens edhplay.com) | EDHPlay's Bulk Import (**verified** live 2026-10-11 with a test account, read back through EDHPlay's own Export). Copy only: the maybeboard and tokens are never sent, copies past EDHPlay's 15-card sideboard are left out and named in a note |
+| **MTGO .dek** (the `Deck`/`Cards` XML the MTGO client exports, with `Quantity`, `Sideboard` and `Name`; MTGO's catalogue ids `CatID` are not known to the gateway and are left out) | gateway: Export > MTGO .dek; archidekt.com: Export > MTGO | the MTGO client (**unknown**: whether MTGO accepts a .dek without `CatID` was not confirmed; archidekt.com's own .dek was not compared). Export only |
+| **PDF** (a printable list: name, format, size, each category with its rows, printing and finish, several pages when needed) | gateway: Export > PDF (written by the gateway without a PDF library) | any PDF reader (**confirmed** with pdftotext and pypdf on the test deck). Export only |
+| **EDHPlay import text** (`1 Name (SET) 123`, the commander marked `[Commander{top}]`, a partner too; the rest of the deck; then `Sideboard` with the companion first and at most 15 copies) | gateway: deck page > **Play on EDHPlay** (copies the list and opens edhplay.com) | EDHPlay's Bulk Import (**confirmed** live 2026-10-11 with a test account, read back through EDHPlay's own Export). Copy only: the maybeboard and tokens are never sent, copies past EDHPlay's 15-card sideboard are left out and named in a note |
 | Deck Registration PDF, EDHREC article | archidekt.com only | their own programs; not written or read by the gateway |
 
 ## What survives each trip
@@ -25,15 +25,15 @@ the live site; **unknown** means we could not establish it.
 | From | To | Quantities | Printing (set, collector number) | Finish (foil, etched) | Categories | Commander | Sideboard and maybeboard | Labels (colour tags) | Status |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | gateway Archidekt text | archidekt.com Import | yes | yes | yes (`*F*`, `*E*`) | yes, with `{top}` `{noDeck}` `{noPrice}` | yes (`{top}`) | yes (their category rows) | yes (`^Label,#hex^`) | **reported**: the text is the shape archidekt.com's own exporter writes and its import dialog is built to read back; a live import was not exercised (deck writes from the test sessions are blocked) |
-| gateway Archidekt text | gateway (New deck, editor paste, `propose_new_deck`) | yes | yes | yes | yes (flags stripped) | yes, when the category is named Commander or carries `{top}`-free "Commander" | yes: `Sideboard` and `Maybeboard` rows keep their category | dropped on import (tags are set afterwards on the deck page, or with `set_label`) | **verified** (`tests/test_parity_hand_actions.py`, `tests/test_decks_and_proxy.py`) |
-| archidekt.com Text export (all options on) | gateway | yes | yes | yes | yes | yes | yes, with `# Sideboard` or Generic section headers, or `[Sideboard]` / `[Maybeboard]` categories | dropped | **verified** against the syntax shown in archidekt.com's import dialog and written by its exporter; a renamed premier category (not "Commander") imports as a plain category |
-| archidekt.com Text export, Primary-category headers | gateway | yes | yes | yes | yes (the header becomes the category) | yes | yes | dropped | **verified** (`tests/test_decklist.py`) |
-| archidekt.com CSV export | gateway (`csv_text`) | yes | yes | yes (Finish column, Foil and Etched) | yes (Category and Secondary categories) | yes (Commander category) | yes (their categories) | dropped | **verified** on a 72-row live export (`tests/fixtures/sample_deck.csv`) |
-| gateway CSV | gateway | yes | yes | yes | yes | yes | yes | n/a | **verified** (`tests/test_csv_export.py`) |
-| gateway JSON | gateway (New deck, `propose_new_deck(json_text)`) | yes | yes | yes (etched too) | yes | yes | yes | n/a | **verified**: the export → import → compare test covers .json beside the plain .txt, the Archidekt text and the .csv (`tests/test_companion.py::test_export_import_round_trip_keeps_every_card_finish_and_commander`) |
-| gateway Arena .txt, MTGO .dek, PDF | anything | export only | | | | | | | **verified** that each file names every row with its count and keeps the commander and sideboard apart (`tests/test_companion.py::test_export_only_formats_arena_mtgo_and_pdf`); what Arena and MTGO do with them is **reported** (Arena) or **unknown** (MTGO) above |
-| gateway CSV | archidekt.com deck import | not accepted | | | | | | | **verified**: no CSV deck import on archidekt.com; use the Archidekt import text instead |
-| gateway plain decklist | gateway | yes | yes | foil only (`*F*`) | yes | yes (first line, Commander category) | second list imports under `Sideboard` | n/a | **verified** |
+| gateway Archidekt text | gateway (New deck, editor paste, `propose_new_deck`) | yes | yes | yes | yes (flags stripped) | yes, when the category is named Commander or carries `{top}`-free "Commander" | yes: `Sideboard` and `Maybeboard` rows keep their category | dropped on import (tags are set afterwards on the deck page, or with `set_label`) | **confirmed** (`tests/test_parity_hand_actions.py`, `tests/test_decks_and_proxy.py`) |
+| archidekt.com Text export (all options on) | gateway | yes | yes | yes | yes | yes | yes, with `# Sideboard` or Generic section headers, or `[Sideboard]` / `[Maybeboard]` categories | dropped | **confirmed** against the syntax shown in archidekt.com's import dialog and written by its exporter; a renamed premier category (not "Commander") imports as a plain category |
+| archidekt.com Text export, Primary-category headers | gateway | yes | yes | yes | yes (the header becomes the category) | yes | yes | dropped | **confirmed** (`tests/test_decklist.py`) |
+| archidekt.com CSV export | gateway (`csv_text`) | yes | yes | yes (Finish column, Foil and Etched) | yes (Category and Secondary categories) | yes (Commander category) | yes (their categories) | dropped | **confirmed** on a 72-row live export (`tests/fixtures/sample_deck.csv`) |
+| gateway CSV | gateway | yes | yes | yes | yes | yes | yes | n/a | **confirmed** (`tests/test_csv_export.py`) |
+| gateway JSON | gateway (New deck, `propose_new_deck(json_text)`) | yes | yes | yes (etched too) | yes | yes | yes | n/a | **confirmed**: the export → import → compare test covers .json beside the plain .txt, the Archidekt text and the .csv (`tests/test_companion.py::test_export_import_round_trip_keeps_every_card_finish_and_commander`) |
+| gateway Arena .txt, MTGO .dek, PDF | anything | export only | | | | | | | **confirmed** that each file names every row with its count and keeps the commander and sideboard apart (`tests/test_companion.py::test_export_only_formats_arena_mtgo_and_pdf`); what Arena and MTGO do with them is **reported** (Arena) or **unknown** (MTGO) above |
+| gateway CSV | archidekt.com deck import | not accepted | | | | | | | **confirmed**: no CSV deck import on archidekt.com; use the Archidekt import text instead |
+| gateway plain decklist | gateway | yes | yes | foil only (`*F*`) | yes | yes (first line, Commander category) | second list imports under `Sideboard` | n/a | **confirmed** |
 | gateway plain decklist | archidekt.com Import | yes | yes | foil | yes | yes | with a `# Sideboard` header you add | n/a | **reported** (same syntax family) |
 
 Quantities, printings, finishes, categories, the commander and the sideboard therefore survive
@@ -46,7 +46,7 @@ it read from Archidekt, and drops it when importing a list, because the gateway 
 The **New deck** page has a **From a file** picker beside the text box: choose a `.txt`, `.csv` or
 `.json` file and the page reads it in the browser (`static/filepick.js`, FileReader) into the box
 and sets "The text above is" from the extension, so the form posts plain text and the gateway
-handles no uploads. **Verified** that the page carries the picker and that each kind posts into
+handles no uploads. **Confirmed** that the page carries the picker and that each kind posts into
 the same import; the picker itself is browser behaviour, exercised in the headless browser used
 for the screenshots, not on a phone. The Collection page's **Import a list** has the same picker.
 
@@ -55,19 +55,46 @@ for the screenshots, not on a phone. The Collection page's **Import a list** has
 **Collection > Import a list** adds cards to your Archidekt Collection from pasted or uploaded
 text: the gateway's own **Export CSV** (so the collection round-trips, same printings and
 finishes, copies topped up), a CSV with Archidekt's collection column names (`Quantity`, `Name`,
-`Finish` or `Foil`, `Condition`, `Edition Code` or `Set Code`, `Collector Number`, `Scryfall ID`;
-headers are matched by name in any order and extra columns are ignored), or a plain card list
-(`2 Sol Ring (CMR) 436 *F*`). At most 100 rows per import, because Archidekt is written one card
-at a time about a second apart; split a bigger file and import the rest after. **Verified**
-against the test double (`tests/test_browse_collection.py::test_collection_import_from_csv_and_plain_list`).
+`Finish` or `Foil`, `Condition`, `Language` or `Lang`, `Edition Code` or `Set Code`, `Collector
+Number`, `Scryfall ID`; headers are matched by name in any order and extra columns are ignored;
+Condition and Language take the gateway's codes or Archidekt's, `D` for DMG and `JP`, `KR`, `SP`,
+`CS`, `CT` for JA, KO, ES, ZHS, ZHT, and the English names such as `Japanese`; an empty
+Language is English), or a plain card list (`2 Sol Ring (CMR) 436 *F*`). At most 100 rows per
+import, because Archidekt is written one card at a time about a second apart; split a bigger file
+and import the rest after.
+
+Archidekt's collection stores eleven languages (EN, ES, FR, DE, IT, PT, JA, KO, RU, ZHS, ZHT). A
+row in any other language (Phyrexian, Hebrew, Latin, Arabic, Sanskrit, Ancient Greek, or a value
+the gateway does not know) is imported as English and the result names its line. A Condition
+may also be written out (`Near Mint`, `Lightly Played`, `Moderately Played`, `Heavily Played`,
+`Damaged`); one the gateway does not know (anything but those, NM, LP, MP, HP, DMG, D or empty,
+such as `EX`) is imported as NM and the result names its line too. A row whose
+printing and finish you already own is added to that record whatever its language (archidekt.com's
+own add is thought to do the same; not checked against the site); when the languages differ the
+result names the line and both languages. Rows Archidekt cannot find are left out and named too. A whole import is refused only
+for a problem with the text itself (no Name column, a line with no card name, a quantity that is
+not a whole number from 1 to 9,999, a cell longer than 131,072 characters, more than 100 rows,
+nothing to read), and the page gives that reason with its line number, counted as the file's own
+lines (blank lines and line breaks inside a quoted cell included; a row whose cell spans several
+lines is named by the line it starts on). **Confirmed** against the test double
+(`tests/test_browse_collection.py::test_collection_import_from_csv_and_plain_list`,
+`tests/test_collection_import_result.py`, and in a browser at phone, Fold and desktop widths in
+`tests/test_collection_import_result_browser.py`).
 Whether archidekt.com's own collection CSV export carries exactly these headers is **reported**
-from its collection import page, not verified against a live file.
+from its collection import page, not confirmed against a live file.
+
+The other way, archidekt.com's collection import does not read column names: the person picks each
+column's type (read from its site's import page, 2026-10-14). For the gateway's Export CSV:
+Quantity→Quantity, Name→Card name, Finish→Foil/Variant, Condition→Condition,
+Language→Language, Edition Code→Edition code, Edition Name→Edition name, Collector
+Number→Collector number, Scryfall ID→Scryfall ID, Date Added→Ignore, with "Skip first line" on.
+The export writes Condition and Language in Archidekt's codes. Not tried against a live import.
 
 ## From the phone app
 
 The Android app shows the same Export page. **Copy** puts the list on the clipboard
 (**reported**: the app's WebView gives the page the standard clipboard API; the page falls back
-to selecting the text when the clipboard is refused, **verified** in `static/export.js`). The
+to selecting the text when the clipboard is refused, **confirmed** in `static/export.js`). The
 **Download** buttons save the file to the phone's Downloads folder (**reported**: the app's
 download listener fetches gateway downloads with the signed-in session and hands them to the
 system download manager, `android/.../MainActivity.kt`; not exercised on a device in this

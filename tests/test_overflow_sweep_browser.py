@@ -1,4 +1,4 @@
-"""R-131 overflow sweep in headless Chromium: with realistic data (a deck named like the app's
+"""Overflow sweep in headless Chromium: with realistic data (a deck named like the app's
 own copies, a very long deck name, long card names in a full collection, a long member name,
 history, a report and a pending proposal) every page is laid out at 18 widths from 320 to 1400
 px, with a mouse and on a touch screen, and must never scroll sideways, keep every control
@@ -60,7 +60,8 @@ LONG_CATS = [
 
 @pytest.fixture
 def server(tmp_path: Path):
-    s = Server(tmp_path, watchlists_enabled=True)  # the sweep covers the Watchlist page too
+    # the sweep covers the Watchlist page too; writes on, so the seed can add to the collection
+    s = Server(tmp_path, watchlists_enabled=True, writes_enabled=True)
     long_cards = ((9801, CARDS[-2]), (9802, CARDS[-1]))
     for cid, name in long_cards:
         FA.CARD_DB.setdefault(name.lower(), {"id": cid, "oracleCard": {"name": name}})
@@ -153,7 +154,7 @@ def _pages(server: Server, pending: str) -> list[str]:
         "/admin/metrics",
         "/logout",
         "/install",
-        # the guided setup's steps, with their copy boxes (T-145)
+        # the guided setup's steps, with their copy boxes
         "/install?for=claude",
         "/install?for=claude-code",
         "/install?for=chatgpt",
@@ -384,6 +385,7 @@ def test_no_page_scrolls_sideways_or_clips_a_control(server: Server, touch: bool
             # a remembered View as (the mtg_view_* cookies) would carry one address's view into the
             # next: each address is swept in the view it names, or the default
             ctx.clear_cookies(name=re.compile(r"^mtg_view_"))
+            server.db.delete_prefs("user-1", prefixes=("view.",))  # on the account from 0.7.29
             r = page.goto(f"{server.base}{path}", wait_until="networkidle")
             assert r is not None and r.status == 200, (path, r and r.status)
             for w in WIDTHS:
@@ -404,7 +406,7 @@ FOLLOW_PAGES = [f"/users/{LONGUSER}", f"/users/{LONG64}", "/decks/47", "/decks/4
 
 @pytest.mark.parametrize("touch", [False, True], ids=["mouse", "touch"])
 def test_follow_question_can_be_answered(server: Server, touch: bool) -> None:
-    """Gate R5-1: pressing Follow on a profile or deck page with a long owner name shows a question
+    """Pressing Follow on a profile or deck page with a long owner name shows a question
     whose Follow and No buttons are visible, inside the chip and not under another control, at
     every sweep width, with no sideways scroll (fresh load and press at each width)."""
     from playwright.sync_api import sync_playwright

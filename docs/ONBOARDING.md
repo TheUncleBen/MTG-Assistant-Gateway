@@ -71,16 +71,16 @@ https://mtg.example.com/mcp
 - **ChatGPT** (web only). Turn on **Developer mode** in Settings, create an
   app with the URL and OAuth sign-in, then connect, press **Approve and sign
   in** on the gateway's page if it returns to `chatgpt.com`, and sign in. Heads up:
-  these steps are only partly verified, OpenAI says custom connectors
+  these steps are only partly tested, OpenAI says custom connectors
   **don't work in the ChatGPT iOS and Android apps** ("No - web only"), the
   desktop app is unconfirmed, and on Pro (maybe Plus too) ChatGPT only allows
   read and fetch tools. If you're mostly on your phone, use Claude.
 
-Full step-by-step, error messages and what's been verified are in
+Full step-by-step, error messages and what's been tested are in
 [CONNECT.md](CONNECT.md).
 
 **Check it worked:** in a new chat, turn the connector on and ask "Use the
-MTG Assistant Gateway to call whoami." You should see your own name.
+MTG Assistant Gateway: who am I signed in as?" You should see your own name.
 
 ## 3. Link your Archidekt account
 
@@ -173,22 +173,31 @@ so:
      every time" to Semi-auto (small deck or collection edits up to the
      row limit, 5 card rows by default, each a card added or removed, or a
      new quantity, category, finish, printing, color tag or custom mana
-     value, no more than 4 copies a row, never the commander, and private
-     copies of a deck) or Full auto (the deck and collection changes it
-     proposes). Then the assistant applies what your mode allows and tells
+     value, no more than 4 copies a row, never a change to which cards are
+     the commanders or to the categories of a row in the commander zone, never fewer copies of a card that has a
+     row in the commander zone and another row, both in the deck or both in the maybeboard or sideboard, and private
+     copies of a deck) or Full auto (the rest too, except a restore, a
+     commander change, a new deck, an edit of more than 20 rows, making
+     a deck public or unlisted, and any edit of a description that has formatting,
+     such as bold text, links or pictures, which still wait for your press; so
+     does a held change, a change waiting for another change first, one
+     another app had a hand in, one that replaces another app's change,
+     or one that another app's waiting change would replace). Then the assistant applies what your mode allows and tells
      you what it did. Actions on your Archidekt account (likes, votes,
      bookmarks, follows, comments, new folders and collaborator changes) and
-     deleting a deck are never applied by an assistant: each one waits for
-     your own press on its review page, in every mode. Be aware that an assistant can be tricked by text it
-     reads into proposing a change you did not ask for; in an auto mode
-     that change lands without your press. Every change keeps a snapshot
-     you can restore from the History page.
+     deleting a deck are never applied by an assistant: each one waits for your own press, in every mode, on the card in the chat or on its review page (deleting a deck, and an edit of a comment that has formatting: on the review page only). Be aware that an assistant can be tricked by text it
+     reads into making changes you did not ask for. If you let your
+     assistant apply changes without asking, such a change can land on
+     Archidekt without your press. A change to one of your decks keeps a
+     snapshot you can restore from the History page; a collection change
+     keeps none. Restoring a snapshot does not put back a deck's folder, tags
+     or cover.
 
-   Either way, for an edit the gateway first checks the deck hasn't changed
-   since the proposal, saves a copy of it (a snapshot), and puts a private
+   Either way, for an edit the gateway first checks the change still fits
+   the deck as it is now, saves a copy of it (a snapshot), and puts a private
    backup copy in a folder called "MTG Gateway backups" in your Archidekt
    account (unless the owner switched backups off). Then it makes the change and reads the deck back to confirm it
-   matches. The assistant should tell you it was verified, give you the
+   matches. The assistant should tell you the deck was read back and matched, give you the
    snapshot id (or the new deck's link), and say how to undo it. You can
    always use the review link instead of answering in chat, just not both.
 
@@ -209,11 +218,15 @@ Good to know:
 - The review page says which app made the proposal ("browser", or the AI
   app's name). If you disconnect an app on your Account page, its pending
   proposals are rejected.
-- A proposal expires after 24 hours and can only be applied once. Don't want
+- A proposal waits 7 days unless the owner changed that, and can only be
+  applied once. Don't want
   it? Press **Reject this proposal** on the review page. Nothing goes to
   Archidekt, and the assistant sees it as rejected.
-- If you edit the deck on Archidekt after a proposal is made, applying is
-  refused. Ask for a fresh proposal.
+- If the deck changes on Archidekt after a proposal is made, the gateway
+  works the change out again on the deck as it is now. If it still does
+  exactly what you reviewed, it shows **Updated** and can be applied; if not,
+  it shows **Needs a look** and nothing is sent until your assistant updates
+  it or you reject it.
 - **To undo an edit**, ask the assistant to restore the deck from its
   snapshot. It proposes the restore like any other change, you okay it, and
   every card goes back as it was: same printing, foil, quantity and
@@ -223,13 +236,14 @@ Good to know:
   "MTG Gateway backups" folder are there too if you ever want to look at or
   copy an old version yourself; they don't show up in the assistant's list
   of your decks.
-- The assistant can't delete decks. If it created a deck you don't want,
-  delete it yourself (the deck's More menu, **Delete deck**, or on
-  Archidekt).
+- The assistant can propose deleting a deck, but only your own press on the
+  proposal's review page deletes it. You can also delete a deck yourself
+  (the deck's More menu, **Delete deck**, or on Archidekt).
 - The assistant can also propose a deck's settings: name, description,
   format, bracket, privacy, and moving it to another of your folders,
   changing its tags or its cover. You approve those like any other change.
-  Creating or renaming folders is yours alone, on the Folders page.
+  It can propose a new folder, which only your own press creates; renaming
+  folders is yours alone, on the Folders page.
 - The owner can switch applying off for everyone. While it's off you can
   still make and review proposals, and the assistant will tell you applying
   is disabled.
@@ -242,7 +256,7 @@ Good to know:
 ## 7. What it can't do
 
 - Edit anyone else's deck.
-- Predict multiplayer win rates. Goldfish simulation plays your deck alone.
+- Predict multiplayer win rates. The solo test (goldfish simulation) plays your deck alone.
   A good report gives the seed, number of games, mulligan settings, what it
   couldn't simulate, and the confidence intervals.
 - Keep price watchlists or price history unless whoever runs the gateway has

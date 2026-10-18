@@ -1,7 +1,7 @@
 name: CI
 
 # What runs where:
-#   pull request   lint + unit tests always; the amd64 container smoke test unless the pull request is a
+#   pull request   lint + unit tests (and a Python 3.11 compile and import check, which also gates a release) always; the amd64 container smoke test unless the pull request is a
 #                  draft or touches only documentation and/or android/. A non-draft pull request that changes android/ also
 #                  gets the Android unit tests and a debug build (no secrets). The version check makes sure
 #                  VERSION was raised above every released version (docs/VERSIONS.md). No image is pushed.
@@ -108,8 +108,9 @@ jobs:
   claim:
     # Creates the tag v<version> on this commit before anything is published. Creating a ref that exists
     # fails, so of two commits that carry the same version only the first gets this far; a re-run of the
-    # same commit finds its own tag and goes on. Runs no repository code.
-    needs: [test, version]
+    # same commit finds its own tag and goes on. Runs no repository code. The Python 3.11 check
+    # must pass too, so nothing is published that fails on the oldest Python pyproject allows.
+    needs: [test, version, py311]
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
@@ -136,6 +137,10 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
+    # the suite's pytest step took about 57 minutes on a runner during 0.7.29 when it ran on one CPU;
+    # it now runs on every CPU the runner has (pytest-xdist), and 90 still leaves room for a slow
+    # runner, while a hung browser test still fails the job instead of holding it 6 hours
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -152,7 +157,29 @@ jobs:
       - run: ruff format --check src tests scripts docker/forge
       - run: python3 scripts/fetch_ocr_assets.py
       - run: playwright install --with-deps chromium
-      - run: pytest -q
+      # one pytest worker per CPU: most of the suite's time is browser tests waiting on Chromium,
+      # so the same tests run side by side instead of one after another
+      - run: pytest -q -n auto
+
+  py311:
+    # pyproject allows Python 3.11 (requires-python), while the suite runs on 3.12 only: a cheap check
+    # that the code still compiles and the package imports on the oldest version it claims.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+            constraints.txt
+      - run: python -m compileall -q src scripts
+      - run: pip install -c constraints.txt -e .
+      - run: python -c "import mtg_gateway.app"
 
   android-check:
     # Pull requests that change android/ only: the Android unit tests and a debug build with Gradle and the
@@ -293,7 +320,7 @@ jobs:
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
         with:
           # BuildKit from Google's mirror of Docker Hub (see Dockerfile)
-          driver-opts: image=mirror.gcr.io/moby/buildkit:buildx-stable-1
+          driver-opts: image=mirror.gcr.io/moby/buildkit:buildx-stable-1@sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea
       - name: Log in to Docker Hub (only when the owner set DOCKERHUB_USERNAME and DOCKERHUB_TOKEN)
         # The base image comes from Google's mirror of Docker Hub, so this is a fallback for anything
         # buildx still fetches from Docker Hub: signed-in pulls have a much higher rate limit.
@@ -340,11 +367,11 @@ jobs:
           path: docker/app-dist/
       - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
         with:
-          image: mirror.gcr.io/tonistiigi/binfmt:latest
+          image: mirror.gcr.io/tonistiigi/binfmt:latest@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
         with:
           # BuildKit from Google's mirror of Docker Hub (see Dockerfile)
-          driver-opts: image=mirror.gcr.io/moby/buildkit:buildx-stable-1
+          driver-opts: image=mirror.gcr.io/moby/buildkit:buildx-stable-1@sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea
       - name: Log in to Docker Hub (only when the owner set DOCKERHUB_USERNAME and DOCKERHUB_TOKEN)
         # The base image comes from Google's mirror of Docker Hub, so this is a fallback for anything
         # buildx still fetches from Docker Hub: signed-in pulls have a much higher rate limit.

@@ -20,7 +20,15 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
 from . import deck_stats, modes
-from .decks import DeckError, current_client, edit_mismatches, parse_changes, scopes_allow_writes
+from .decks import (
+    DeckError,
+    current_client,
+    edit_mismatches,
+    is_outside_category,
+    parse_changes,
+    printing_not_shown,
+    scopes_allow_writes,
+)
 from .pages import BROWSER_CLIENT_ID, browser_session, csrf_header_ok, read_limited
 from .views import deck_brief, deck_out
 
@@ -46,6 +54,7 @@ STATUS_FOR = {
     "not_pending": 409,
     "already_applied": 409,
     "stale": 409,
+    "changed": 409,
     "rate_limited": 429,
     "other_client": 403,
     "other_account": 409,
@@ -204,7 +213,11 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
     async def get_deck(request: Request, who: Caller) -> Response:
         deck = await decks.get_any_deck(who.sub, request.path_params["deck_id"])
         with_cards = request.query_params.get("cards", "1") != "0"
-        return ok(deck_out(deck, with_cards=with_cards))
+        out = deck_out(deck, with_cards=with_cards)
+        # the categories a card added under them sits outside the deck in: Card search sends such
+        # an add to the maybeboard or sideboard, as the deck editor does
+        out["outside_categories"] = [c for c in out["categories"] if is_outside_category(deck, c)]
+        return ok(out)
 
     @route("/decks/{deck_id}/stats", "GET")
     async def stats(request: Request, who: Caller) -> Response:
@@ -252,11 +265,18 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
         the deck is read again from Archidekt and the answer carries the touched rows, the
         freshly computed checks and the re-rendered Legality chip and Deck checks panel, so the
         page redraws in place. Body: ``{changes: [1..40]}`` (``confirmed: true`` after a
-        needs_confirm answer) or ``{proposal_id}`` to apply the proposal a needs_confirm answer
-        named; ``{refresh: true, names: [...]}`` only reads the deck again (the page's follow-up
-        when an answer was stale). Browser session only; apps propose through /api/v1/proposals."""
+        needs_confirm answer) or ``{proposal_id, version}`` to apply the version of the proposal a
+        needs_confirm answer named; ``{refresh: true, names: [...]}`` only reads the deck again
+        (the page's follow-up when an answer was stale). Browser session only; apps propose
+        through /api/v1/proposals."""
         from .archidekt import front_face, parse_deck
-        from .deckpage import checks_panel_html, legal_problems, legality_chip_html, legality_panel_html
+        from .deckpage import (
+            card_image,
+            checks_panel_html,
+            legal_problems,
+            legality_chip_html,
+            legality_panel_html,
+        )
 
         if who.via != "browser":
             raise DeckError(
@@ -285,6 +305,11 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
                         "label": c.label,
                         "mana_value": c.custom_cmc,
                         "notes": c.notes or "",
+                        # the printing, so a printing change (and its Undo) redraws the picture
+                        "set_code": c.set_code,
+                        "collector_number": c.collector_number,
+                        "image": card_image(c),
+                        "price": c.price,
                     }
                     for c in deck.cards
                     if front_face(c.name).casefold() in touched
@@ -317,7 +342,8 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
             deck = await decks.get_own_deck(who.sub, deck_id)
             return ok({"applied": None, **view(deck, {front_face(n).casefold() for n in names}, stale=False)})
         pid = data.get("proposal_id")
-        if pid is not None:
+        answer = pid is not None
+        if answer:
             if not isinstance(pid, str) or not pid:
                 raise DeckError("invalid", "proposal_id must be a string")
             p = decks.describe(who.sub, pid)
@@ -335,20 +361,44 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
                 )
             if p.get("state") != "pending":
                 raise DeckError("invalid", f"That proposal is {p.get('state')}, not waiting for an answer.")
+            # the answer applies only the version the question showed: one another app amended
+            # since is refused as changed, so the page asks again
+            version = data.get("version")
+            if version is not None and (isinstance(version, bool) or not isinstance(version, int)):
+                raise DeckError("invalid", "version must be a whole number")
+            if version is None:
+                raise DeckError("invalid", "Send the version of the proposal the page showed.")
         else:
-            p = await decks.propose(who.sub, deck_id, data.get("changes"))
+            # the deck page's Undo of a removal puts back the row's flags (row_flags; nobody else)
+            p = await decks.propose(who.sub, deck_id, data.get("changes"), row_flags=True)
+            decks.keep_no_backup(who.sub, p["proposal_id"])  # also when it is applied later
             why = modes.hand_edit_confirm("edit", p.get("rows"))
             if why and data.get("confirmed") is not True:
                 pid = p["proposal_id"]
-                return ok({"applied": False, "needs_confirm": True, "why": why, "proposal_id": pid}, 201)
+                return ok(
+                    {
+                        "applied": False,
+                        "needs_confirm": True,
+                        "why": why,
+                        "proposal_id": pid,
+                        "version": int(p.get("version") or 1),
+                    },
+                    201,
+                )
         pid = p["proposal_id"]
         if not s.writes_enabled:
             # kept for review, like every proposal while writes are off; the page goes there
             return ok({"applied": False, "proposal_id": pid, "review_url": f"/proposals/{pid}"}, 201)
         # A quick edit from the deck page (one click: a copy more, a move, a removal) keeps the
-        # gateway's snapshot but not the extra copy on Archidekt (D-02): one deck copy per click
+        # gateway's snapshot but not the extra copy on Archidekt: one deck copy per click
         # would fill the backup folder and slow each save by paced Archidekt writes.
-        result = await decks.apply(who.sub, pid, via="browser", archidekt_backup=False)
+        result = await decks.apply(
+            who.sub,
+            pid,
+            via="browser",
+            archidekt_backup=False,
+            version=data.get("version") if answer else None,
+        )
         applied = result.get("state") == "applied"
         out: dict[str, Any] = {
             "applied": applied,
@@ -358,7 +408,7 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
         }
         if not applied:  # a large edit still running: the page says so and offers the review page
             return ok(out, 202)
-        changes = parse_changes(result.get("changes") or p.get("changes"))
+        changes = parse_changes(result.get("changes") or p.get("changes"), row_flags=True)
         # The apply verified the deck once; this read is the one the page draws from. Archidekt's
         # reads have been seen to lag a write, so a deck that does not show the change yet is
         # read once more after a short pause, and the answer says when it still has not caught up.
@@ -366,10 +416,11 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
         stale = False
         try:
             before = parse_deck(decks.snapshot(who.sub, str(result.get("snapshot_id")))["deck"])
-            if edit_mismatches(before, changes, deck):
+            # a printing change is compared by its set, number and finish
+            if edit_mismatches(before, changes, deck) or printing_not_shown(changes, deck):
                 await asyncio.sleep(EDIT_REREAD_DELAY)
                 deck = await decks.get_own_deck(who.sub, deck_id)
-                stale = bool(edit_mismatches(before, changes, deck))
+                stale = bool(edit_mismatches(before, changes, deck) or printing_not_shown(changes, deck))
         except DeckError:  # no snapshot to compare with: answer with the read as it is
             logger.info("edit %s: could not compare the re-read deck with its snapshot", pid)
         out.update(view(deck, {front_face(ch.card_name).casefold() for ch in changes}, stale=stale))
@@ -397,6 +448,8 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
             # when the page shows the reason and sends ``confirmed: true``. Bearer tokens (apps,
             # assistants) cannot use this: their proposals wait for the approval mode as always.
             if who.via == "browser" and data.get("apply") is True:
+                if data.get("archidekt_backup") is False:
+                    decks.keep_no_backup(who.sub, p["proposal_id"])  # also when it is applied later
                 why = modes.hand_edit_confirm("edit", p.get("rows"))
                 if why and data.get("confirmed") is not True:
                     return ok({**p, "applied": False, "needs_confirm": True, "why": why}, 201)
@@ -445,9 +498,35 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
         pid = request.path_params["pid"]
         # A bearer token applies under the member's approval mode, exactly like apply_proposal
         # over MCP (decks.apply decides); the browser session is the member's own press. An
-        # account action is refused inside decks.apply for both (R-142: only the review page's
-        # own form applies one), with browser_required (403) and its review_url.
-        return ok(await decks.apply(who.sub, pid, via="browser" if who.via == "browser" else "mcp"))
+        # account action is refused inside decks.apply for both (only the review page's own
+        # form applies one), with browser_required (403) and its review_url. The browser
+        # sends the version it showed ({"version": n}), so a proposal another app amended since
+        # is refused with ``changed`` and nothing sent; a bearer caller may send it too. The deck
+        # editor's "Save anyway" also sends its backup box ({"archidekt_backup": false}), honoured
+        # only for the member's own saves: an assistant's proposal always keeps its backup copy.
+        data = await json_body(request)
+        if isinstance(data, Response):
+            return data
+        version = data.get("version")
+        if version is not None and (isinstance(version, bool) or not isinstance(version, int)):
+            raise DeckError("invalid", "version must be a whole number")
+        if version is None and who.via == "browser":
+            decks.describe(who.sub, pid)  # nobody's proposal but the member's: not_found first
+            raise DeckError("invalid", "Send the version of the proposal the page showed.")
+        via = "browser" if who.via == "browser" else "mcp"
+        backup = None
+        if via == "browser" and isinstance(data.get("archidekt_backup"), bool):
+            row = state.db.get_proposal(pid, who.sub) or {}
+            # the box of the member's own save that no app ever changed (G5), ticked or not
+            own = row.get("created_by_client") == BROWSER_CLIENT_ID and not decks.rewritten_by_another_app(
+                who.sub, row
+            )
+            backup = data["archidekt_backup"] if own else None
+            if backup is not None:
+                # the box at this press is the save's choice from now on, also when the apply
+                # below is refused or stopped and the save waits (writes off, a rate limit)
+                decks.keep_backup_box(who.sub, pid, version, keep=backup)
+        return ok(await decks.apply(who.sub, pid, via=via, version=version, archidekt_backup=backup))
 
     @route("/proposals/{pid}/reject", "POST", write=True)
     async def reject(request: Request, who: Caller) -> Response:
@@ -489,7 +568,7 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
         if isinstance(data, Response):
             return data
         games = data.get("games", 300)
-        forge = data.get("forge")
+        forge, share, pair = data.get("forge"), data.get("same_opponents_as"), data.get("compare_with")
         return ok(
             await reports.run(
                 who.sub,
@@ -498,6 +577,10 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
                 games=games if isinstance(games, int) else 300,
                 # Forge games apart from the goldfish ones; unset follows simulate
                 forge=forge if isinstance(forge, bool) else None,
+                # seat another of the member's reports' Forge opponents
+                same_opponents_as=share if isinstance(share, str) else None,
+                # precons for the higher of this deck's and that deck's brackets
+                pair_with=str(pair) if isinstance(pair, (str, int)) and not isinstance(pair, bool) else None,
             ),
             201,
         )
@@ -505,6 +588,23 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
     @route("/reports/{rid}", "GET")
     async def get_report(request: Request, who: Caller) -> Response:
         return ok(reports.get(who.sub, request.path_params["rid"]))
+
+    @route("/reports/{rid}/forge", "GET")
+    async def report_forge_status(request: Request, who: Caller) -> Response:
+        """A report's Forge run alone, for a page or an app watching it play: its state and
+        section, the report's status, and the Forge card and status as the report page draws them.
+        Reads the gateway's own database only; Archidekt is never asked."""
+        from .report_view import forge_status
+
+        return ok(forge_status(reports.get(who.sub, request.path_params["rid"])))
+
+    @route("/reports/{rid}/forge/more", "POST", write=True)
+    async def report_more_games(request: Request, who: Caller) -> Response:
+        """Play more games, as the report page's button and the play_more_games tool do, with the
+        same rules (reports.play_more): the report as it now is, or a refusal with its reason.
+        Never asks Archidekt."""
+        report = await reports.play_more(who.sub, request.path_params["rid"])
+        return ok(report, 202)
 
     @route("/reports/{rid}", "DELETE", write=True)
     async def delete_report(request: Request, who: Caller) -> Response:

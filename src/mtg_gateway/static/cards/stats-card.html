@@ -54,6 +54,9 @@ ul.facts li b{font-weight:600;text-align:right;overflow-wrap:anywhere}
   var KEYS = ["0", "1", "2", "3", "4", "5", "6", "7+"];
   var NAMES = { W: "White", U: "Blue", B: "Black", R: "Red", G: "Green", C: "Colorless" };
   var MAX_PROBLEMS = 8;
+  // Archidekt's bracket names (bracket_view.BRACKET_NAMES)
+  var BRACKETS = { 1: "Exhibition (1)", 2: "Core (2)", 3: "Upgraded (3)", 4: "Optimized (4)", 5: "cEDH (5)" };
+  function bracketName(b) { return BRACKETS[b] || String(b); }
 
   function num(v) { var n = Number(v); return isFinite(n) ? n : 0; }
   function fact(list, k, v) { var li = el("li"); li.appendChild(el("span", "", k)); li.appendChild(el("b", "", v)); list.appendChild(li); }
@@ -106,10 +109,14 @@ ul.facts li b{font-weight:600;text-align:right;overflow-wrap:anywhere}
     if (legal === true) { head = "Legal" + (fmt ? " in " + fmt : "") + "."; v.className = problems.length ? "verdict info" : "verdict ok"; }
     else if (problems.length) { head = "Not legal" + (fmt ? " in " + fmt : "") + " yet."; v.className = "verdict bad"; }
     else { head = fmt ? "Checked for " + fmt + "." : "No format set, so legality was not checked."; v.className = "verdict info"; }
+    // The bracket set on the deck is the deck's bracket; Archidekt's estimate from the cards shows
+    // only when none is set, with Archidekt's own notes (as bracket_view.py does on the pages).
     var br = st.bracket_estimate || {};
-    var bracket = br.bracket != null ? "Bracket estimate " + br.bracket : "";
-    if (st.archidekt_bracket != null) bracket += (bracket ? " (set on the deck: " : "Bracket set on the deck: ") + st.archidekt_bracket + (bracket ? ")" : "");
-    if (bracket) lines.push(bracket + ".");
+    if (st.archidekt_bracket != null) lines.push("Bracket: " + bracketName(st.archidekt_bracket) + ", set on the deck.");
+    else if (br.bracket != null) {
+      lines.push("Archidekt's estimate from cards: " + bracketName(br.bracket) + ".");
+      (Array.isArray(br.notes) ? br.notes : []).forEach(function (n) { lines.push("Archidekt notes: “" + String(n) + "”."); });
+    }
     v.appendChild(el("span", "", head + (lines.length ? " " + lines.join(" ") : "") + (problems.length ? " To look at:" : "")));
     if (problems.length) {
       var ul = el("ul");

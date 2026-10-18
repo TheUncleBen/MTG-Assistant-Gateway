@@ -19,7 +19,9 @@ from urllib.parse import parse_qs, quote
 from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
 
-from . import idp_sweep, update_check
+from . import idp_sweep, settings_page, update_check
+from .companion import card_model_line, member_name
+from .config import MANAGED_SETTINGS
 from .decks import ADMIN_CLIENT, actor_label, current_client
 from .pages import (
     BROWSER_CLIENT_ID,
@@ -32,6 +34,7 @@ from .pages import (
     login_redirect,
     read_limited,
 )
+from .plugin_page import CHATGPT_NAME_MAX, chatgpt_name_too_long, developer_name_warning
 from .theme import display_name, plural, render
 
 if TYPE_CHECKING:
@@ -64,6 +67,7 @@ OK_MESSAGES = {
     "revoke": "Tokens and browser sessions revoked.",
     "unlink": "Archidekt account unlinked; the stored session was deleted.",
     "delete_data": "Deleted everything the gateway kept about that person.",
+    "model_removed": "Card model removed.",
 }
 ERR_MESSAGES = {
     "unknown_action": "Unknown action.",
@@ -72,6 +76,7 @@ ERR_MESSAGES = {
     "self_delete": "Use Delete my data on your Account page.",
     "confirm_delete": "Tick the confirmation box to delete.",
     "failed": "That action could not be done.",
+    "model_gone": "That card model was already removed.",
 }
 
 
@@ -88,7 +93,13 @@ def add_admin_routes(server: MCPServer, state: AppState) -> None:
     s = state.settings
 
     def page(
-        title: str, body: str, *, status: int = 200, sid: str | None = None, sid_sub: str | None = None
+        title: str,
+        body: str,
+        *,
+        status: int = 200,
+        sid: str | None = None,
+        sid_sub: str | None = None,
+        head_extra: str = "",
     ) -> Response:
         return render(
             title,
@@ -99,6 +110,7 @@ def add_admin_routes(server: MCPServer, state: AppState) -> None:
             csrf=_csrf(s, sid),
             admin=True,
             user=display_name(state.db.get_user(sid_sub) if sid_sub else None),
+            head_extra=head_extra,
         )
 
     def not_found(api: bool) -> Response:
@@ -239,6 +251,46 @@ def add_admin_routes(server: MCPServer, state: AppState) -> None:
             return RedirectResponse(f"/admin/users?err={quote(exc.code)}", status_code=303)
         return RedirectResponse(f"/admin/users?ok={out['action']}", status_code=303)
 
+    @server.custom_route("/admin/models", methods=["GET"], include_in_schema=False)
+    async def models(request: Request) -> Response:
+        who = admin_user(request)
+        if isinstance(who, Response):
+            return who
+        sub, sid = who
+        try:
+            page_no = max(1, int(request.query_params.get("page", "1")))
+        except ValueError:
+            page_no = 1
+        notice = _notice(request.query_params.get("ok"), request.query_params.get("err"))
+        return page(
+            "Admin: card models",
+            _nav("/admin/models") + notice + _models_body(state, _csrf(s, sid), page_no),
+            sid=sid,
+            sid_sub=sub,
+        )
+
+    @server.custom_route("/admin/models", methods=["POST"], include_in_schema=False)
+    async def models_post(request: Request) -> Response:
+        who = admin_user(request)
+        if isinstance(who, Response):
+            return who
+        admin_sub, sid = who
+        data = await form(request)
+        if not csrf_form_ok(s, sid, data):
+            return page(
+                "Admin: card models",
+                _nav("/admin/models") + _err("This form expired. Reload the page and try again."),
+                status=403,
+                sid=sid,
+                sid_sub=admin_sub,
+            )
+        key, owner = str(data.get("card_key") or ""), str(data.get("added_by") or "")
+        removed = bool(key and owner) and state.db.admin_delete_card_model(key, owner, by=admin_sub)
+        back = f"&page={quote(str(data.get('page') or '1'), safe='')}"
+        return RedirectResponse(
+            f"/admin/models?{'ok=model_removed' if removed else 'err=model_gone'}{back}", status_code=303
+        )
+
     @server.custom_route("/admin/activity", methods=["GET"], include_in_schema=False)
     async def activity(request: Request) -> Response:
         who = admin_user(request)
@@ -252,6 +304,100 @@ def add_admin_routes(server: MCPServer, state: AppState) -> None:
             _nav("/admin/activity") + _activity_body(state, rows, only),
             sid=sid,
             sid_sub=sub,
+        )
+
+    def settings_page_response(
+        sub: str,
+        sid: str | None,
+        *,
+        outcome: settings_page.Outcome | None = None,
+        notice: str = "",
+        focus: str | None = None,
+        status: int = 200,
+    ) -> Response:
+        body = settings_page.settings_body(
+            state.live,
+            state.settings,
+            csrf=_csrf(s, sid),
+            who=lambda who_sub: html.escape(
+                display_name(state.db.get_user(who_sub)) if who_sub else "someone"
+            ),
+            when=_when,
+            outcome=outcome,
+            notice=notice,
+            focus=focus,
+        )
+        return page(
+            "Admin: settings",
+            _nav("/admin/settings") + body,
+            status=status,
+            sid=sid,
+            sid_sub=sub,
+            head_extra=f"<style>{settings_page.SETTINGS_CSS}</style>",
+        )
+
+    @server.custom_route("/admin/settings", methods=["GET"], include_in_schema=False)
+    async def settings_get(request: Request) -> Response:
+        who = admin_user(request)
+        if isinstance(who, Response):
+            return who
+        sub, sid = who
+        q = request.query_params
+        notice, focus = "", None
+        if q.get("open") in settings_page.FOLDED:  # a link to a setting in a folded group
+            focus = q.get("open")
+        group = q.get("saved")
+        if group in {g for g, _t, _i in settings_page.GROUPS}:
+            focus = group
+            try:
+                since = int(q.get("after", "0"))
+            except ValueError:
+                since = 0
+            notice = settings_page.changes_notice(_saved_changes(state, sub, since))
+        return settings_page_response(sub, sid, notice=notice, focus=focus)
+
+    @server.custom_route("/admin/settings", methods=["POST"], include_in_schema=False)
+    async def settings_post(request: Request) -> Response:
+        who = admin_user(request)
+        if isinstance(who, Response):
+            return who
+        sub, sid = who
+        data = await form(request)
+        if not csrf_form_ok(s, sid, data):
+            return page(
+                "Admin: settings",
+                _nav("/admin/settings") + _err("This form expired. Reload the page and try again."),
+                status=403,
+                sid=sid,
+                sid_sub=sub,
+            )
+        last = state.db.audit_recent(1)
+        started = last[0]["id"] if last else 0
+        outcome = settings_page.apply_form(state.live, data, by=sub)
+        reset = data.get("reset") or ""
+        group = MANAGED_SETTINGS[reset].group if reset in MANAGED_SETTINGS else data.get("group", "")
+        if "_" in outcome.errors:
+            notice = _err(outcome.errors["_"])
+            return settings_page_response(sub, sid, notice=notice, status=400)
+        if outcome.errors:
+            n = len(outcome.errors)
+            first = settings_page.label(next(iter(outcome.errors)))
+            notice = _err(
+                f"Nothing was saved. See the message under \u201c{first}\u201d."
+                if n == 1
+                else f"Nothing was saved. See the {n} messages in this section."
+            )
+            return settings_page_response(sub, sid, outcome=outcome, notice=notice, focus=group, status=400)
+        if outcome.unsaved:
+            # Back to default with other edits in the section: say so and keep them in the form,
+            # rather than a redirect that would drop them.
+            notice = settings_page.changes_notice(outcome.changes) + settings_page.unsaved_notice(
+                outcome.unsaved, group
+            )
+            return settings_page_response(sub, sid, outcome=outcome, notice=notice, focus=group)
+        anchor = f"#s-row-{reset}" if reset else f"#g-{quote(group)}"
+        return RedirectResponse(
+            f"/admin/settings?saved={quote(group)}&after={started}{anchor}", status_code=303
         )
 
     @server.custom_route("/admin/metrics", methods=["GET"], include_in_schema=False)
@@ -419,6 +565,49 @@ def system_data(state: Any) -> dict[str, Any]:
     return out
 
 
+def _cleanup_warning(c: dict[str, Any]) -> str:
+    """A notice when the removed-member clean-up was set up but its token can't be read, as after a
+    stack file was replaced without its uncommented secret lines: the one line in
+    the System list and one start-up warning are easy to miss."""
+    if c.get("state") != "off" or c.get("cause") != "token-unreadable":
+        return ""
+    text = (
+        "The removed-member clean-up is off: its Authentik API token can't be read. If you replaced "
+        'the stack file or docker-compose.yml, check that you removed the "# " from its '
+        "mtg_authentik_api_token lines again, then redeploy."
+    )
+    return f"<div class='notice warn'>{html.escape(text)}</div>"
+
+
+def _chatgpt_name_warning(settings: Any) -> str:
+    """A notice when the ChatGPT connector name (MTG_CHATGPT_NAME, else MTG_SERVER_NAME) is over
+    the limit ChatGPT puts on a plugin file's name."""
+    out = ""
+    long = chatgpt_name_too_long(settings.server_name, getattr(settings, "chatgpt_name", None))
+    if long:
+        text = (
+            f"The ChatGPT connector name, “{long[0]}”, is {long[1]} characters; ChatGPT refuses a plugin "
+            f"file whose name is over {CHATGPT_NAME_MAX} characters. "
+        )
+        if "chatgpt_name" in getattr(settings, "env_set", ()):
+            # set in the stack: the Settings page row is locked, so the fix is in the stack
+            text += (
+                f"Change MTG_CHATGPT_NAME in your stack to a name of {CHATGPT_NAME_MAX} characters or "
+                "fewer, then redeploy."
+            )
+            out += f"<div class='notice warn'>{html.escape(text)}</div>"
+        else:
+            text += f"Set a name of {CHATGPT_NAME_MAX} characters or fewer under “Name in ChatGPT” on the "
+            out += (
+                f"<div class='notice warn'>{html.escape(text)}"
+                "<a href='/admin/settings#s-row-chatgpt_name'>Settings page</a>.</div>"
+            )
+    # the plugin file's developer and author name: a long MTG_SERVER_NAME shortened
+    if cut := developer_name_warning(settings.server_name):
+        out += f"<div class='notice warn'>{html.escape(cut)}</div>"
+    return out
+
+
 def _updates_card(u: dict[str, Any]) -> str:
     """Whether a newer gateway release is out (update_check.py) and how to move to it."""
     found = update_check.newer()
@@ -442,10 +631,12 @@ def _updates_card(u: dict[str, Any]) -> str:
         "<details><summary>How to update</summary>"
         "<p>The gateway never updates itself. Take a backup first; it upgrades its database on start, "
         "and going back means restoring that backup (docs/OPERATIONS.md, Restart or update).</p>"
-        "<p><strong>Portainer (Swarm stack)</strong>: Stacks, your stack, Editor. If "
-        f"<code>MTG_TAG</code> is a version number, change it to <code>{tag}</code> (leave "
-        "<code>latest</code> as it is). Then <strong>Update the stack</strong> with <strong>Re-pull "
-        "image</strong> on.</p>"
+        "<p><strong>Portainer (Swarm stack)</strong>: Stacks, your stack. If "
+        f"<code>MTG_TAG</code> is a version number, change it to <code>{tag}</code> in the stack's "
+        "environment variables (leave <code>latest</code> as it is). Then <strong>Update the "
+        "stack</strong> (if your stack uses the Repository build method, the button is called "
+        "<strong>Pull and redeploy</strong>); in the box that asks “Are you sure?”, make sure "
+        "<strong>Re-pull image and redeploy</strong> is on, then click <strong>Update</strong>.</p>"
         "<p><strong>Swarm without Portainer</strong>: set <code>MTG_TAG</code> in your variables "
         "file, load it into the shell as in docs/DEPLOY.md, then run "
         "<code>docker stack deploy --with-registry-auth -c deploy/portainer-stack.yml mtg</code> "
@@ -496,37 +687,51 @@ def _cleanup_text(c: dict[str, Any]) -> str:
             )
         if cause == "no-group":
             return "Off: it needs MTG_REQUIRED_GROUP. Set it in the stack and redeploy."
-        return f"Off. It is optional; to turn it on, follow {setup}."
+        return (
+            "Off. This optional hourly check deletes the saved Archidekt sign-in of people who no "
+            f"longer have access. To turn it on, follow {setup}."
+        )
     if st == "waiting":
         return (
-            f"On. The first check runs {c['first_after_seconds'] // 60} minutes after start; "
-            "reload this page then."
+            f"On. The first check runs {c['first_after_seconds'] // 60} minutes after the gateway "
+            "starts; reload this page then."
         )
     if st == "ok":
+        removed = int(c["removed"])
+        what = (
+            f"deleted the saved Archidekt sign-in of {plural(removed, 'person', 'people')} who lost access"
+            if removed
+            else "no one lost access"
+        )
         return _Html(
-            f"Working. Last check at {_when(c['at'])}: {plural(int(c['allowed']), 'allowed member')}, "
-            f"{plural(int(c['removed']), 'stored Archidekt session')} removed. Nothing to do."
+            f"Working. Last check at {_when(c['at'])}: {plural(int(c['allowed']), 'member')} with "
+            f"access; {what}. Nothing for you to do."
         )
     if st == "failed":
         err = str(c["error"])
         return _Html(
-            f"Last check at {_when(c['at'])} FAILED, nothing deleted: {html.escape(err)}. "
-            f"Next: {html.escape(idp_sweep.next_step(err))}"
+            f"Not working. The last check at {_when(c['at'])} failed and deleted nothing: "
+            f"{html.escape(err)}. To fix: {html.escape(idp_sweep.next_step(err))}"
         )
     return "Not started yet. Reload this page in a minute."
 
 
 def users_data(state: Any) -> list[dict[str, Any]]:
-    out = []
-    for u in state.db.list_users():
-        out.append({**u, "clients": state.db.user_clients(u["sub"]), "disabled": bool(u["disabled_at"])})
-    return out
+    clients = state.db.all_user_clients()
+    return [
+        {**u, "clients": clients.get(u["sub"], []), "disabled": bool(u["disabled_at"])}
+        for u in state.db.list_users()
+    ]
 
 
 # -- HTML -------------------------------------------------------------------------
 def _nav(active: str) -> str:
     links = (("/admin", "Overview"), ("/admin/users", "Users"), ("/admin/activity", "Activity"))
-    links += (("/admin/metrics", "Metrics"),)
+    links += (
+        ("/admin/metrics", "Metrics"),
+        ("/admin/settings", "Settings"),
+        ("/admin/models", "Card models"),
+    )
     return (
         "<div class='actions' role='navigation' aria-label='Admin'>"
         + "".join(
@@ -535,6 +740,25 @@ def _nav(active: str) -> str:
         )
         + "</div>"
     )
+
+
+def _saved_changes(state: Any, sub: str, after: int) -> list[tuple[str, Any, Any]]:
+    """The settings ``sub`` changed in audit rows after id ``after`` (the save that redirected
+    here), oldest first, for the notice after a save; a key changed twice shows its first value
+    and its last."""
+    rows = [
+        r
+        for r in state.db.audit_recent(200, sub=sub)
+        if r["event"] == "setting_changed" and r["id"] > after and isinstance(r.get("detail"), dict)
+    ]
+    out: dict[str, tuple[Any, Any]] = {}
+    for r in reversed(rows):
+        key = r["detail"].get("key")
+        if key not in MANAGED_SETTINGS:
+            continue
+        before = out[key][0] if key in out else r["detail"].get("previous")
+        out[key] = (before, r["detail"].get("value"))
+    return [(k, b, a) for k, (b, a) in out.items() if b != a]
 
 
 def _notice(ok: str | None, err: str | None) -> str:
@@ -573,6 +797,13 @@ def _sparkline(values: list[int], *, label: str, width: int = 240, height: int =
         f"<title>{html.escape(label)}: {', '.join(str(v) for v in values)}</title>"
         f"<polyline fill='none' stroke='var(--orange)' stroke-width='2' points='{pts}'/></svg>"
     )
+
+
+def _mode_name(mode: object) -> str:
+    """An approval mode as the Guide names it, with the word its setting takes: "Semi-auto (semi)"."""
+    from .modes import MODE_NAMES
+
+    return f"{MODE_NAMES.get(str(mode), str(mode))} ({mode})"
 
 
 def _overview_body(state: Any) -> str:
@@ -617,8 +848,9 @@ def _overview_body(state: Any) -> str:
         + _stat("Simulation engine (Forge)", sysd["forge"])
         + _stat("Removed-member clean-up", _cleanup_text(sysd["member_cleanup"]))
         + _archidekt_stats(sysd.get("archidekt"))
-        + _stat("Default approval mode", state.settings.approval_mode_default)
-        + _stat("Highest approval mode allowed", state.settings.approval_mode_max)
+        # the live settings; each by its name, with the setting's own word
+        + _stat("Default approval mode", _mode_name(state.decks.live.get("approval_mode_default")))
+        + _stat("Highest approval mode allowed", _mode_name(state.decks.live.get("approval_mode_max")))
         + "</dl>"
         + (
             _err(f"The last nightly backup failed ({sysd['last_backup_error']}). Check the gateway's log.")
@@ -630,6 +862,8 @@ def _overview_body(state: Any) -> str:
             if sysd.get("last_backup_copy_error")
             else ""
         )
+        + _cleanup_warning(sysd["member_cleanup"])
+        + _chatgpt_name_warning(state.settings)
         + "</div>"
     )
     cards.append(_updates_card(sysd["updates"]))
@@ -646,6 +880,61 @@ def _overview_body(state: Any) -> str:
         "middleware, API calls from the JSON API, admin actions from this page.</p></div>"
     )
     return "".join(cards)
+
+
+MODELS_PER_PAGE = 100
+
+
+def _models_body(state: Any, csrf: str | None, page_no: int) -> str:
+    """The simulator's kept card models: who added each (admins only), when, and
+    a Remove button per model."""
+    total = state.db.count_all_card_models()
+    intro = (
+        "<p class='muted small'>The card models the simulator keeps, most recently changed first. "
+        "Each member keeps their own models, and a model is used only in that member's "
+        "simulations. Only admins see who added it.</p>"
+    )
+    if not total:
+        return f"<div class='card'>{intro}<p>No card models are kept yet.</p></div>"
+    pages = (total + MODELS_PER_PAGE - 1) // MODELS_PER_PAGE
+    page_no = min(page_no, pages)  # a page past the end shows the last one (and never overflows SQLite)
+    rows = state.db.list_card_models(limit=MODELS_PER_PAGE, offset=(page_no - 1) * MODELS_PER_PAGE)
+    csrf_in = f"<input type='hidden' name='csrf' value='{html.escape(csrf or '')}'>"
+    people: dict[str, str] = {}
+    items = []
+    for r in rows:
+        adder = str(r["added_by"])
+        if adder not in people:
+            # an account with neither name reads as the Activity log says it, not as its raw id
+            people[adder] = html.escape(member_name(state.db, adder) or adder)
+        items.append(
+            f"<li><div class='model'><span class='name'>{html.escape(str(r['name']))}</span>"
+            f"<span class='muted small'>added by {people[adder]}, {_when(r['added_at'])}"
+            + (f"; changed {_when(r['updated_at'])}" if r["updated_at"] != r["added_at"] else "")
+            + "</span></div>"
+            f"<form method='post' action='/admin/models'>{csrf_in}"
+            f"<input type='hidden' name='card_key' value='{html.escape(str(r['card_key']))}'>"
+            f"<input type='hidden' name='added_by' value='{html.escape(adder)}'>"
+            f"<input type='hidden' name='page' value='{page_no}'>"
+            f"<button class='danger' aria-label='Remove the model of {html.escape(str(r['name']))} "
+            f"added by {people[adder]}'>Remove</button></form></li>"
+        )
+    pager = ""
+    if pages > 1:
+        links = []
+        if page_no > 1:
+            links.append(f"<a class='btn' href='/admin/models?page={page_no - 1}'>Newer</a>")
+        if page_no < pages:
+            links.append(f"<a class='btn' href='/admin/models?page={page_no + 1}'>Older</a>")
+        pager = (
+            f"<div class='actions'>{''.join(links)}</div>"
+            f"<p class='muted small'>Page {page_no} of {pages}.</p>"
+        )
+    count = f"{total} card model{'s' if total != 1 else ''} kept."
+    return (
+        f"<div class='card'>{intro}<p class='muted small'>{count}</p>"
+        f"<ul class='plain plist models'>{''.join(items)}</ul>{pager}</div>"
+    )
 
 
 def _users_body(state: Any, admin_sub: str, csrf: str | None) -> str:
@@ -721,6 +1010,7 @@ def _activity_body(state: Any, rows: list[dict[str, Any]], only: str | None) -> 
         )
     if not rows:
         return f"<div class='card'>{head}<p>No activity recorded.</p></div>"
+    names = state.db.client_names(r.get("client_id") for r in rows if r.get("client_id") != BROWSER_CLIENT_ID)
     items = []
     for r in rows:
         event = str(r["event"])
@@ -728,10 +1018,15 @@ def _activity_body(state: Any, rows: list[dict[str, Any]], only: str | None) -> 
         if event.startswith("admin_"):
             cls = "warn"
         detail = ""
-        if r.get("detail"):
+        said = settings_page.change_line(r.get("detail")) if event == "setting_changed" else None
+        if event == "card_model_removed" and isinstance(r.get("detail"), dict):
+            said = card_model_line(r["detail"], member_name(state.db, r["detail"].get("added_by")))
+        if said:
+            detail = f"<span class='small'>{html.escape(said)}</span>"
+        elif r.get("detail"):
             detail = f"<code>{html.escape(json.dumps(r['detail'], sort_keys=True)[:300])}</code>"
         cid = r.get("client_id")
-        client = actor_label(cid, state.db.client_name(cid) if cid and cid != BROWSER_CLIENT_ID else None)
+        client = actor_label(cid, names.get(cid) if cid and cid != BROWSER_CLIENT_ID else None)
         items.append(
             f"<li><span class='badge {cls}'>{html.escape(event)}</span>"
             f"<span class='name'>{html.escape(r.get('sub') or '')}</span>"

@@ -20,7 +20,7 @@ pytest.importorskip("playwright")
 @pytest.fixture
 def server(tmp_path: Path):
     s = Server(tmp_path)
-    s.sf.catalog = sorted({c["name"] for c in s.sf.cards}) + [f"Filler Card {i}" for i in range(1200)]
+    s.sf.catalog = s.sf.names_catalog()
     s.app.state.gateway.scan.names.set_names(s.sf.catalog)
     s.start()
     try:
@@ -85,6 +85,8 @@ def test_editor_new_category_is_inline_and_controls_name_the_card(server: Server
         box = page.locator(".editbar input[type=checkbox]")
         if box.count():
             assert box.evaluate("e => getComputedStyle(e).appearance") == "none"
+            assert not box.is_checked()  # unticked until the member ticks it (0.7.27)
+            box.check()
             assert "check.svg" in box.evaluate("e => getComputedStyle(e).backgroundImage")
         foil = page.locator("input[name=foil]")
         assert foil.evaluate("e => getComputedStyle(e).appearance") == "none"
@@ -133,6 +135,10 @@ def test_skip_link_times_images_and_copy_button(server: Server) -> None:
         )
         page.locator(".img-fallback").wait_for(timeout=3000)
         assert page.locator(".img-fallback").inner_text() == "Sol Ring"
+        # a picture with a real alt keeps its name for screen readers
+        assert page.locator(".img-fallback").get_attribute("role") == "img"
+        assert page.locator(".img-fallback").get_attribute("aria-label") == "Sol Ring (image unavailable)"
+        assert page.locator(".img-fallback").get_attribute("aria-hidden") is None
         assert page.locator("img.img-broken").evaluate("e => getComputedStyle(e).display") == "none"
         # the odds form words follow the number: "1 card", "2 cards"
         k = page.locator(".oddsform input[name=k]")
@@ -186,8 +192,7 @@ def test_scan_page_asks_with_a_themed_bar(server: Server) -> None:
     exe = _exe()
     with sync_playwright() as p:
         browser, page, dialogs, errors = _open(p, exe, server, sid, width=390)
-        page.goto(f"{server.base}/scan", wait_until="networkidle")
-        page.evaluate("() => localStorage.setItem('mtg-scan-intro-seen', '1')")
+        server.db.set_pref("user-1", "scan.intro", True)  # the intro dismissed (on the account)
         page.goto(f"{server.base}/scan", wait_until="networkidle")
         # the step numbers and the list badge use dark text on orange
         page.locator("[data-tab=list]").click()

@@ -1,4 +1,4 @@
-"""The deck page's direct edits in headless Chromium (static/deck.js, T-040): a right-click on a
+"""The deck page's direct edits in headless Chromium (static/deck.js): a right-click on a
 card opens the gateway's own themed menu and the browser's image menu is prevented; Quantity +
 sends one set_quantity change to the page's edit endpoint and the count, the stack total, the
 Legality chip and the Deck checks panel redraw in place without a navigation; the drag between
@@ -209,10 +209,16 @@ def test_right_click_menu_and_quantity_plus_redraw_in_place(server: Server, widt
             "confirmed": False,
         }
         assert req.value.headers.get("x-csrf-token")
-        page.locator(".deck-toast").wait_for(timeout=8000)
-        page.wait_for_timeout(200)
+        # until the save answers the toast says "Saving…" (a slow CI runner took longer than 200 ms)
+        page.wait_for_function(
+            "() => /Saved\\. Snapshot kept under History/.test("
+            "(document.querySelector('.deck-toast .msg') || {}).textContent || '')",
+            timeout=8000,
+        )
         assert page.url == url
-        assert page.locator(".ctxmenu").count() == 0  # the menu closed on the save
+        # the menu stays open for more steps (0.7.27), showing the saved count
+        assert page.locator(".ctxmenu").count() == 1 and menu.locator(".qtyrow .n").inner_text() == "2"
+        page.keyboard.press("Escape")
         assert "Saved. Snapshot kept under History" in page.locator(".deck-toast .msg").inner_text()
         assert page.locator(".deck-toast button", has_text="Undo").count() == 1
         assert server.quantity("Cultivate") == 2
@@ -256,11 +262,12 @@ def test_right_click_menu_and_quantity_plus_redraw_in_place(server: Server, widt
 def test_undo_of_a_remove_puts_back_printing_finish_tag_and_mana_value(server: Server) -> None:
     """Undo of a removal used to add the card back by name and category only, so a foil Cultivate
     with a color tag and a custom mana value came back as a plain one. The Undo now sends the
-    printing and finish with the add, and the tag and mana value after it."""
+    printing and finish with the add, and the tag and mana value after it; the companion and
+    "flipped by default" flags go with the add too."""
     from playwright.sync_api import sync_playwright
 
     row = next(c for c in server.ark.decks[42]["cards"] if c["card"]["oracleCard"]["name"] == "Cultivate")
-    row.update(modifier="Foil", label="Have,#37d67a", customCmc=5)
+    row.update(modifier="Foil", label="Have,#37d67a", customCmc=5, companion=True, flippedDefault=True)
     printing = (row["card"]["edition"]["editioncode"], row["card"]["collectorNumber"])
     _chromium()
     sid = server.sign_in_and_link()
@@ -291,6 +298,8 @@ def test_undo_of_a_remove_puts_back_printing_finish_tag_and_mana_value(server: S
                     "set_code": printing[0],
                     "collector_number": printing[1],
                     "finish": "foil",
+                    "companion": True,
+                    "flipped_default": True,
                 }
             ],
             [{"action": "set_label", "card_name": "Cultivate", "label": "Have", "color": "#37d67a"}],
@@ -301,7 +310,7 @@ def test_undo_of_a_remove_puts_back_printing_finish_tag_and_mana_value(server: S
         got = rows[0]
         assert (got["card"]["edition"]["editioncode"], got["card"]["collectorNumber"]) == printing
         assert got["modifier"] == "Foil" and got["label"] == "Have,#37d67a" and got["customCmc"] == 5, got
-        assert got["quantity"] == 1
+        assert got["quantity"] == 1 and got["companion"] is True and got["flippedDefault"] is True, got
         # and the page shows it as it was
         again = page.locator(".deckview .c[data-card='Cultivate']").first
         assert again.get_attribute("data-finish") == "Foil" and again.get_attribute("data-mv") == "5"
@@ -353,7 +362,7 @@ def test_viewer_quantity_buttons_and_remove(server: Server) -> None:
 
 def test_drag_between_stacks_saves_set_category_with_the_zone(server: Server) -> None:
     """Text view, where the Maybeboard and Commander stacks share the window: Chromium's own drag
-    and drop moves the row and saves it at once (D4, no "Save moves" bar any more): one
+    and drop moves the row and saves it at once (no "Save moves" bar any more): one
     set_category change with ``category`` and the side zone through the page's endpoint."""
     from playwright.sync_api import sync_playwright
 
@@ -388,6 +397,11 @@ def test_drag_between_stacks_saves_set_category_with_the_zone(server: Server) ->
         assert body["changes"] == [
             {"action": "set_category", "card_name": "Sol Ring", "category": "Commander", "zone": "side"}
         ]
+        # filed under Commander, Sol Ring becomes a second commander: a commander change asks first
+        dialog = page.locator(".deck-toast[role='alertdialog']")
+        dialog.wait_for(timeout=5000)
+        assert "This changes the deck's commander. Save anyway?" in dialog.inner_text()
+        dialog.locator("button", has_text="Save anyway").click()
         page.locator(".deck-toast .msg", has_text="Saved").wait_for(timeout=8000)
         page.wait_for_timeout(200)
         assert page.url == url and page.locator(".movebar").count() == 0  # no staging bar
@@ -532,7 +546,7 @@ def _edits(page) -> list[list[dict]]:
 
 
 def test_drag_saves_at_once_with_undo_and_redo_buttons_and_keys(server: Server) -> None:
-    """D4: a drag between categories saves at once, as the card menu's Move to does, and the
+    """A drag between categories saves at once, as the card menu's Move to does, and the
     page's one history undoes and redoes it with the Undo and Redo buttons, the toast's Undo and
     the editor's keys (Ctrl+Z, Ctrl+Shift+Z, Ctrl+Y); the keys do nothing while typing in a field."""
     from playwright.sync_api import sync_playwright
@@ -652,5 +666,130 @@ def test_undo_of_a_remove_restores_every_category_and_a_note_is_warned_about(ser
         page.locator(".deck-toast .msg", has_text="Redone").wait_for(timeout=8000)
         assert sent[-1] == [{"action": "remove", "card_name": "Cultivate"}]
         assert server.quantity("Cultivate") == 0
+        assert errors == []
+        browser.close()
+
+
+def test_undo_of_a_move_files_a_card_back_under_every_category(server: Server) -> None:
+    """Move to of a card filed under several categories has an Undo, as a single-category
+    move does; the Undo's set_category names every category it had, the primary first. Redo
+    moves it again."""
+    from playwright.sync_api import sync_playwright
+
+    _file_under(server, "Cultivate", ["Ramp", "Value"])
+    _file_under(server, "Rampant Growth", ["Lands"])
+    _chromium()
+    sid = server.sign_in_and_link()
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, 1366)
+        page.goto(f"{server.base}/decks/42?view=text", wait_until="networkidle")
+        sent = _edits(page)
+        card = page.locator(".deckview .row[data-card='Cultivate']").first
+        assert json.loads(card.get_attribute("data-allcats")) == ["Ramp", "Value"]
+        menu = page.locator(".ctxmenu[role=menu]")
+        card.evaluate("e => e.scrollIntoView({block: 'center'})")  # room below it for the whole menu
+        card.click(button="right")
+        menu.wait_for(timeout=3000)
+        menu.locator(".more").click()
+        menu.locator(".sub button", has_text="Lands").click()
+        page.locator(".deck-toast .msg", has_text="Saved").wait_for(timeout=8000)
+        assert sent == [[{"action": "set_category", "card_name": "Cultivate", "category": "Lands"}]]
+        assert _cats(server, "Cultivate") == ["Lands"]
+        undo = page.locator(".histtools button", has_text="Undo")
+        assert not undo.is_disabled()
+        page.locator(".deck-toast button", has_text="Undo").click()
+        page.locator(".deck-toast .msg", has_text="Undone").wait_for(timeout=8000)
+        assert sent[-1] == [
+            {
+                "action": "set_category",
+                "card_name": "Cultivate",
+                "category": "Ramp",
+                "categories": ["Ramp", "Value"],
+            }
+        ]
+        assert _cats(server, "Cultivate") == ["Ramp", "Value"]
+        back = page.locator(".stack[data-group='Ramp'] .row[data-card='Cultivate']")
+        assert back.count() == 1 and json.loads(back.get_attribute("data-allcats")) == ["Ramp", "Value"]
+        page.locator("h1.deckname").click()
+        page.keyboard.press("Control+Shift+z")
+        page.locator(".deck-toast .msg", has_text="Redone").wait_for(timeout=8000)
+        assert sent[-1] == [{"action": "set_category", "card_name": "Cultivate", "category": "Lands"}]
+        assert _cats(server, "Cultivate") == ["Lands"]
+        assert errors == []
+        browser.close()
+
+
+def test_drag_onto_the_stack_directly_below_in_the_stacks_view(server: Server) -> None:
+    """In the stacks view the cards after the one under the pointer fan out downwards, past
+    the bottom of their stack and over the top of the stack directly below. A native drag kept
+    that fan open, so a drop on the lower stack's head landed on the dragged card's own stack and
+    did nothing. While a card is dragged the fan stays closed: the drop reaches the lower stack."""
+    from playwright.sync_api import sync_playwright
+
+    _chromium()
+    sid = server.sign_in_and_link()
+    with sync_playwright() as p:
+        # Fold width: three columns, Creature (the tallest) with Land directly below it
+        browser, page, errors = _page(p, server, sid, 673)
+        page.goto(f"{server.base}/decks/42?view=stacks", wait_until="networkidle")
+        sent = _edits(page)
+        creature = page.locator(".stack[data-group='Creature']")
+        land = page.locator(".stack[data-group='Land']")
+        c, ld = creature.bounding_box(), land.bounding_box()
+        assert abs(c["x"] - ld["x"]) < 2 and c["y"] + c["height"] < ld["y"]  # the same column, below
+        page.evaluate("y => window.scrollBy(0, y)", ld["y"] - 650)
+        # the third card from the end: the two after it fan out over Land's head
+        source = creature.locator(".c").nth(-3)
+        name = source.get_attribute("data-card")
+        s = source.bounding_box()
+        head = land.locator(".stackhead").bounding_box()
+        x0, y0 = s["x"] + s["width"] / 2, s["y"] + 12
+        page.mouse.move(x0, y0)
+        page.wait_for_timeout(300)  # the fan opens under the pointer
+        page.mouse.down()
+        page.mouse.move(x0, y0 + 8, steps=2)  # the drag starts on this card
+        page.mouse.move(head["x"] + head["width"] / 2, head["y"] + head["height"] / 2, steps=8)
+        page.mouse.up()
+        page.locator(".deck-toast .msg", has_text="Saved").wait_for(timeout=8000)
+        assert sent == [[{"action": "set_category", "card_name": name, "category": "Land"}]]
+        assert land.locator(f".c[data-card={json.dumps(name)}]").count() == 1
+        assert errors == []
+        browser.close()
+
+
+def test_a_late_refresh_that_takes_a_card_off_closes_its_menu(server: Server) -> None:
+    """A save whose re-read was stale reads the deck once more a moment later; when
+    that read no longer has the card the menu is open on, the menu closes with it (it would
+    otherwise act on a card that is gone from the page)."""
+    from playwright.sync_api import sync_playwright
+
+    _chromium()
+    sid = server.sign_in_and_link()
+
+    def answer(route) -> None:
+        got = route.fetch().json()
+        if json.loads(route.request.post_data or "{}").get("refresh"):
+            got["rows"] = [r for r in got.get("rows") or [] if r["name"] != "Cultivate"]
+        else:
+            got["stale"] = True
+        route.fulfill(status=201, json=got)
+
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, 1366)
+        page.goto(f"{server.base}/decks/42?view=grid", wait_until="networkidle")
+        page.route(EDIT_URL, answer)
+        card = page.locator(".deckview .c[data-card='Cultivate']").first
+        card.scroll_into_view_if_needed()
+        card.click(button="right")
+        menu = page.locator(".ctxmenu[role=menu]")
+        menu.wait_for(timeout=3000)
+        with page.expect_request(lambda r: EDIT_URL.search(r.url) and "refresh" in (r.post_data or "")):
+            menu.locator(".qtyrow .step").nth(1).click()
+            # the menu stays open for more steps while the page waits to read the deck again
+            page.locator(".deck-toast .msg", has_text="Refreshing").wait_for(timeout=8000)
+            assert page.locator(".ctxmenu").count() == 1
+        page.locator(".deck-toast .msg", has_text="Saved. Snapshot kept").wait_for(timeout=8000)
+        assert page.locator(".deckview .c[data-card='Cultivate']").count() == 0
+        assert page.locator(".ctxmenu").count() == 0
         assert errors == []
         browser.close()

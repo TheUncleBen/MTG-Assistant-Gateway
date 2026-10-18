@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import contextlib
+import dataclasses
 import hashlib
 import ipaddress
 import json
@@ -13,13 +14,17 @@ import re
 import secrets
 import socket
 import time
+from collections.abc import Callable, Mapping
 from pathlib import Path
+from typing import Any
 from urllib.parse import parse_qs, unquote, urlencode, urlparse
 
 import httpx
 import pytest
 from joserfc import jwt
 from joserfc.jwk import OctKey, RSAKey
+from mcp import Client
+from mcp.server.mcpserver import MCPServer
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
@@ -28,11 +33,16 @@ from starlette.routing import Route
 from mtg_gateway import scan as scan_pkg
 from mtg_gateway import theme
 from mtg_gateway.app import create_app
+from mtg_gateway.archidekt import ArchidektClient, Pacer
+from mtg_gateway.clickguard import MIN_FORM_AGE, form_stamp
 from mtg_gateway.config import Settings
 from mtg_gateway.db import Database
+from mtg_gateway.mf_proxy import MysticForgeProxy
 from mtg_gateway.oidc import OIDCClient
 from mtg_gateway.scan import scryfall as scan_scryfall
 
+from .fake_archidekt import FakeArchidekt
+from .fake_mystic_forge import fake_mystic_forge
 from .fake_scryfall import FakeScryfall
 
 IDP = "https://idp.test/application/o/mtg"
@@ -231,6 +241,26 @@ class FakeIdP:
         self.directory[sub]["groups"] = list(groups)
 
 
+def aged_stamp(settings: Settings, scope: str) -> str:
+    """A click-guard render stamp (``shown``) for ``scope``, old enough to be accepted: what a
+    guarded form carries once a person has had it on screen for a moment."""
+    return form_stamp(settings.session_secret, scope, now=time.time() - 2 * MIN_FORM_AGE)
+
+
+def consent_stamp(settings: Settings, login_id: str) -> str:
+    """The accepted ``shown`` stamp for the consent page of ``login_id``."""
+    return aged_stamp(settings, f"consent:{login_id}")
+
+
+def proposal_stamp(h: Harness, http: httpx.AsyncClient, pid: str) -> str:
+    """The accepted ``shown`` stamp for proposal ``pid``'s review page, for the member signed in
+    on ``http`` (the stamp is bound to that member)."""
+    sid = next(c.value for c in http.cookies.jar if c.name.endswith("mtg_session") and c.value)
+    sub = h.db.get_browser_session(sid)
+    assert sub, "not signed in"
+    return aged_stamp(h.settings, f"proposal:{sub}:{pid}")
+
+
 def make_settings(tmp_path: Path, **over: object) -> Settings:
     from cryptography.fernet import Fernet
 
@@ -251,6 +281,12 @@ def make_settings(tmp_path: Path, **over: object) -> Settings:
         update_check=False,  # tests never ask GitHub (test_update_check.py drives the checker itself)
     )
     base.update(over)
+    if "env_set" not in over:
+        # a managed setting a test passes is one its deployment set: live readers (LiveSettings)
+        # then use it, as they use a stack's value (0.7.29, the live approval settings)
+        from mtg_gateway.config import MANAGED_SETTINGS
+
+        base["env_set"] = frozenset(k for k in over if k in MANAGED_SETTINGS)
     return Settings(**base)  # type: ignore[arg-type]
 
 
@@ -311,7 +347,13 @@ class Harness:
         assert page.status_code == 200, page.text
         csrf = re.search(r"name='csrf' value='([0-9a-f]+)'", page.text).group(1)  # type: ignore[union-attr]
         go = await self.http.post(
-            "/authorize/confirm", data={"state": login_id, "csrf": csrf, "action": "approve"}
+            "/authorize/confirm",
+            data={
+                "state": login_id,
+                "csrf": csrf,
+                "action": "approve",
+                "shown": consent_stamp(self.settings, login_id),
+            },
         )
         assert go.status_code == 303, go.text
         return go
@@ -415,7 +457,10 @@ def _reset_theme_globals(monkeypatch: pytest.MonkeyPatch) -> None:
 # gets one that answers from the recorded fixtures, so its start-up download of the card-name
 # catalog never reaches api.scryfall.com; and any request that still heads for a host other than
 # this machine is refused and fails the test that made it (SCAN_LIVE=1 lets the opt-in live
-# check in test_scan.py through). The end-to-end suite (tests/e2e/run.sh test, which sets
+# check in test_scan.py through). The guard sits at every way out: httpx's transports, a socket's
+# connect, and the name lookup before it (so not even a DNS query leaves). A refusal from a server
+# thread or a background task after its test has ended fails the next test's set-up, or the run's
+# last test, so none goes unnoticed. The end-to-end suite (tests/e2e/run.sh test, which sets
 # E2E_PUBLIC_URL) talks to its deployed stack by name, so the guard stands aside for it.
 OUTBOUND: list[str] = []
 E2E = bool(os.environ.get("E2E_PUBLIC_URL"))
@@ -449,6 +494,7 @@ def _refuse(where: str, host: str | None = None) -> None:
 _real_async_send = httpx.AsyncHTTPTransport.handle_async_request
 _real_send = httpx.HTTPTransport.handle_request
 _real_connect = socket.socket.connect
+_real_getaddrinfo = socket.getaddrinfo
 
 
 async def _offline_async_send(self: httpx.AsyncHTTPTransport, request: httpx.Request) -> httpx.Response:
@@ -470,9 +516,19 @@ def _offline_connect(self: socket.socket, address: object) -> None:
     return _real_connect(self, address)  # type: ignore[arg-type]
 
 
+def _offline_getaddrinfo(host: str | bytes | None, *args: object, **kwargs: object) -> list:
+    name = host.decode() if isinstance(host, bytes) else str(host)
+    if not _this_machine(host) and name != socket.gethostname():
+        if not _reserved(name):
+            OUTBOUND.append(f"name lookup: {name}")
+        raise socket.gaierror(socket.EAI_NONAME, f"tests stay offline, refused: {name}")
+    return _real_getaddrinfo(host, *args, **kwargs)  # type: ignore[arg-type]
+
+
 httpx.AsyncHTTPTransport.handle_async_request = _offline_async_send  # type: ignore[method-assign]
 httpx.HTTPTransport.handle_request = _offline_send  # type: ignore[method-assign]
 socket.socket.connect = _offline_connect  # type: ignore[method-assign]
+socket.getaddrinfo = _offline_getaddrinfo  # type: ignore[assignment]
 
 try:
     from playwright.sync_api import BrowserType
@@ -506,10 +562,30 @@ def _offline(monkeypatch: pytest.MonkeyPatch):
             args = args[1:]
         return real(*args, **kwargs)
 
+    early = _unreported()
+    assert early == [], f"something reached the network after an earlier test ended: {early}"
     monkeypatch.setattr(scan_pkg, "ScryfallClient", recorded)
-    before = len(OUTBOUND)
     yield
-    assert OUTBOUND[before:] == [], "a test reached the network"
+    reached = _unreported()
+    assert reached == [], f"a test reached the network: {reached}"
+
+
+_REPORTED = [0]
+
+
+def _unreported() -> list[str]:
+    """The refusals not yet reported by a test (OUTBOUND only grows)."""
+    new = OUTBOUND[_REPORTED[0] :]
+    _REPORTED[0] = len(OUTBOUND)
+    return new
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _offline_to_the_end():
+    """A refusal after the last test of the run (a server thread still finishing) fails it too."""
+    yield
+    late = _unreported()
+    assert late == [], f"something reached the network after the last test ended: {late}"
 
 
 @contextlib.asynccontextmanager
@@ -538,3 +614,121 @@ async def running(h: Harness):
 async def gw(tmp_path: Path, idp: FakeIdP):
     async with running(Harness(make_settings(tmp_path), idp)) as h:
         yield h
+
+
+# -- the ``stack`` fixture: a running gateway with its fakes ---------------------------------------
+# Many modules test against one running gateway with a fake Archidekt behind it. They share the
+# ``stack`` fixture below; what differs between them (settings, a Mystic Forge proxy, a fake
+# Scryfall to inspect, something set up once it runs) is spelled out in a StackOptions the module
+# picks with ``stack_options = stack_with(...)``. A module that picks nothing gets AUTO.
+
+
+class Stack:
+    """A running gateway (``h``) and the fakes behind it: ``ark`` (Archidekt, None without one) and
+    ``sf`` (the Scryfall the scan service asks, when the options swapped one in). A ``started``
+    hook may add more (the watchlist tests' ``ntfy``)."""
+
+    def __init__(
+        self,
+        h: Harness,
+        ark: FakeArchidekt | None = None,
+        sf: FakeScryfall | None = None,
+        options: StackOptions | None = None,
+    ):
+        self.h = h
+        self.ark = ark
+        self.sf = sf
+        self.options = options or AUTO
+
+    @property
+    def gw(self) -> Any:
+        return self.h.app.state.gateway
+
+
+@dataclasses.dataclass(frozen=True)
+class StackOptions:
+    """How a stack is built.
+
+    ``settings``: passed to make_settings as they are (plus ``archidekt_base`` when there is an
+    Archidekt); anything left out keeps the shipped default.
+    ``archidekt``: makes the fake Archidekt the gateway's client talks to; None for no client.
+    ``mystic_forge``: makes the fake Mystic Forge server behind the gateway's proxy; None for none.
+    ``scryfall``: once started, the scan service asks a FakeScryfall of its own (``stack.sf``).
+    ``started``: called with the stack once the gateway runs (and Scryfall is swapped)."""
+
+    settings: Mapping[str, object] = dataclasses.field(
+        default_factory=lambda: {"writes_enabled": True, "approval_mode_default": "auto"}
+    )
+    archidekt: Callable[[], FakeArchidekt] | None = FakeArchidekt
+    mystic_forge: Callable[[], MCPServer] | None = None
+    scryfall: bool = False
+    started: Callable[[Stack], None] | None = None
+
+    def but(self, **changes: Any) -> StackOptions:
+        return dataclasses.replace(self, **changes)
+
+
+ARK_BASE = "https://ark.test/api"
+# Writes on, applies allowed over MCP; no Mystic Forge.
+AUTO = StackOptions()
+# The same with the fake Mystic Forge behind the proxy (test_decks_and_proxy).
+AUTO_PROXY = AUTO.but(mystic_forge=fake_mystic_forge)
+# Writes on with the shipped approval mode, the fake Mystic Forge, and a fake Scryfall to inspect
+# (test_browse_collection).
+COLLECTION = StackOptions(settings={"writes_enabled": True}, mystic_forge=fake_mystic_forge, scryfall=True)
+
+
+def build_stack(tmp_path: Path, idp: FakeIdP, options: StackOptions = AUTO) -> Stack:
+    """The stack's gateway built but not yet running (a test can set up its database first)."""
+    ark = options.archidekt() if options.archidekt else None
+    over = {"archidekt_base": ARK_BASE} if ark is not None else {}
+    settings = make_settings(tmp_path, **over, **options.settings)
+    kw: dict[str, object] = {}
+    if ark is not None:
+        client = ArchidektClient(settings.archidekt_base, "test-agent", Pacer(0.0), http=ark.client())
+        kw["archidekt"] = client
+    if options.mystic_forge is not None:
+        server = options.mystic_forge
+        kw["mf_proxy"] = MysticForgeProxy("http://mf.test/mcp", client_factory=lambda: Client(server()))
+    return Stack(Harness(settings, idp, **kw), ark, options=options)
+
+
+@contextlib.asynccontextmanager
+async def run_stack(st: Stack):
+    """Run a built stack for the length of the block."""
+    async with running(st.h):
+        if st.options.scryfall:
+            st.sf = FakeScryfall()
+            st.gw.scan.scryfall = scan_scryfall.ScryfallClient(
+                "https://scryfall.test", min_interval=0.0, http=st.sf.client()
+            )
+        if st.options.started is not None:
+            st.options.started(st)
+        yield st
+
+
+@contextlib.asynccontextmanager
+async def open_stack(tmp_path: Path, idp: FakeIdP, options: StackOptions = AUTO):
+    async with run_stack(build_stack(tmp_path, idp, options)) as st:
+        yield st
+
+
+def stack_with(options: StackOptions):
+    """A module's ``stack_options`` fixture: ``stack_options = stack_with(COLLECTION)``."""
+
+    @pytest.fixture
+    def stack_options() -> StackOptions:
+        return options
+
+    return stack_options
+
+
+@pytest.fixture
+def stack_options() -> StackOptions:
+    return AUTO
+
+
+@pytest.fixture
+async def stack(tmp_path: Path, idp: FakeIdP, stack_options: StackOptions):
+    async with open_stack(tmp_path, idp, stack_options) as st:
+        yield st

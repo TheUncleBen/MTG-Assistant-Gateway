@@ -20,9 +20,17 @@ from mtg_gateway.approve import (
     approval_matches,
 )
 
-from .conftest import FakeIdP, Harness, make_settings, running, sse_json
+from .conftest import (
+    FakeIdP,
+    Stack,
+    StackOptions,
+    open_stack,
+    sse_json,
+    stack_with,
+)
 from .fake_archidekt import FakeArchidekt
-from .test_decks_and_proxy import Browser, Stack, _client, call, linked_user, mcp_token, structured
+from .test_background_apply import _every_patch_429, quick_waits  # noqa: F401 (a fixture)
+from .test_decks_and_proxy import Browser, call, linked_user, mcp_token, structured
 
 CARD_TOOLS = (
     "propose_deck_changes",
@@ -34,40 +42,25 @@ CARD_TOOLS = (
 )
 
 
-def _stack_with(tmp_path, idp: FakeIdP, **over):
-    ark = FakeArchidekt()
-    settings = make_settings(
-        tmp_path,
-        writes_enabled=True,
-        approval_mode_default="manual",
-        archidekt_base="https://ark.test/api",
-        **over,
-    )
-    return Harness(settings, idp, archidekt=_client(settings, ark)), ark
-
-
-@pytest.fixture
-async def stack(tmp_path, idp: FakeIdP):
-    """Writes on, the assistant's own apply off (the shipped default): only the card or the
-    review page applies."""
-    h, ark = _stack_with(tmp_path, idp)
-    async with running(h):
-        yield Stack(h, ark)
+# Writes on, the assistant's own apply off (the shipped default): only the card or the review
+# page applies.
+MANUAL = StackOptions(settings={"writes_enabled": True, "approval_mode_default": "manual"})
+stack_options = stack_with(MANUAL)
 
 
 @pytest.fixture
 async def no_card(tmp_path, idp: FakeIdP):
-    h, ark = _stack_with(tmp_path, idp, apply_in_chat=False)
-    async with running(h):
-        yield Stack(h, ark)
+    settings = {**MANUAL.settings, "apply_in_chat": False}
+    async with open_stack(tmp_path, idp, MANUAL.but(settings=settings)) as st:
+        yield st
 
 
-async def _propose(h, token: str) -> dict:
+async def _propose(h, token: str, card: str = "Sol Ring") -> dict:
     return await call(
         h,
         token,
         "propose_deck_changes",
-        {"deck_id": "42", "changes": [{"action": "add", "card_name": "Sol Ring"}]},
+        {"deck_id": "42", "changes": [{"action": "add", "card_name": card}]},
     )
 
 
@@ -128,6 +121,14 @@ async def test_approval_code_travels_only_in_meta(stack: Stack) -> None:
     assert len(code) >= 30
     text = res["content"][0]["text"]
     assert code not in text and code not in json.dumps(res["structuredContent"])
+    # The text is plain, not JSON (a chat app that draws no card shows it), and still names every
+    # field the assistant acts on, under the structured content's names.
+    sc = res["structuredContent"]
+    assert not text.lstrip().startswith("{")
+    assert text.startswith(f"Proposal {sc['proposal_id']} for ")
+    for key in ("proposal_id", "state", "review_url", "next_step", "assistant_may_apply", "approval_mode"):
+        assert f"\n{key}: " in text, key
+    assert "assistant_may_apply: false" in text and "\nChanges:\n  1 -> 2 Sol Ring" in text, text
     assert "approval" not in res["structuredContent"]
     # get_proposal shows the card again with the same code while the proposal is pending.
     again = await call(h, token, "get_proposal", {"proposal_id": structured(res)["proposal_id"]})
@@ -220,7 +221,7 @@ async def test_code_is_bound_to_the_proposal_the_member_and_the_app(stack: Stack
     h = stack.h
     token = await linked_user(stack)
     a = await _propose(h, token)
-    b = await _propose(h, token)
+    b = await _propose(h, token, "Arcane Signet")  # 0.7.29: a repeat would be the same proposal
     pa, ca = structured(a)["proposal_id"], a["_meta"][APPROVAL_META_KEY]
     pb, cb = structured(b)["proposal_id"], b["_meta"][APPROVAL_META_KEY]
     assert ca != cb
@@ -259,6 +260,89 @@ async def test_card_cannot_apply_what_the_browser_already_rejected(stack: Stack)
     assert got["state"] == "rejected" and got["closed_at"] and got["error_code"] == "FAILED_PRECONDITION"
     assert got["retryable"] is False and "already rejected" in got["message"]
     assert _writes(stack.ark) == 0
+
+
+async def test_a_failed_approve_says_the_proposal_is_now_failed(stack: Stack) -> None:
+    """An Approve whose apply fails answers with the proposal's state (failed), so the
+    card shows that and drops its buttons instead of showing Pending with buttons that would only
+    be refused. A refusal that leaves the proposal pending says pending."""
+    h = stack.h
+    token = await linked_user(stack)
+    res = await _propose(h, token)
+    p, code = structured(res), res["_meta"][APPROVAL_META_KEY]
+    wrong = structured(
+        await call(h, token, "confirm_proposal", {"proposal_id": p["proposal_id"], "approval": "x"})
+    )
+    assert wrong["ok"] is False and wrong["error"] == "invalid_approval" and wrong["state"] == "pending"
+    stack.ark.fail_card_writes = True
+    got = structured(
+        await call(h, token, "confirm_proposal", {"proposal_id": p["proposal_id"], "approval": code})
+    )
+    assert got["ok"] is False and got["state"] == "failed", got
+    print("B6 failed-apply message:", got["message"])
+    assert (
+        structured(await call(h, token, "get_proposal", {"proposal_id": p["proposal_id"]}))["state"]
+        == "failed"
+    )
+
+
+@pytest.mark.usefixtures("quick_waits")
+async def test_the_review_page_right_after_a_failed_apply_says_it_once(stack: Stack) -> None:
+    """Right after a failed Apply (the page's ?err=failed), a failure the page explains
+    on its own (here Archidekt's waits ran out) shows that one message in the error box, not the
+    general "could not be applied" box above the same message further down. A failure with no
+    message of its own keeps the general box, once.
+
+    The stop on Archidekt's waits changed nothing, so the proposal is pending again: the
+    card's reply says pending with the assistant's message (no "new proposal"), the page shows its
+    one box and the Apply button, and the card's code approves it again once Archidekt allows."""
+    from mtg_gateway import archidekt as ark_mod
+
+    h = stack.h
+    token = await linked_user(stack)
+    res = await _propose(h, token)
+    p, code = structured(res), res["_meta"][APPROVAL_META_KEY]
+    orig = stack.ark.transport.handler
+    _every_patch_429(stack.ark)
+    got = structured(
+        await call(h, token, "confirm_proposal", {"proposal_id": p["proposal_id"], "approval": code})
+    )
+    assert got["ok"] is False and got["error"] == "rate_limited" and got["state"] == "pending", got
+    assert got["message"] == (
+        f"{ark_mod.PATIENCE_SPENT} Nothing was changed on Archidekt. The proposal is still pending, so it "
+        "can be approved again in a few minutes."
+    ), got["message"]
+    b = Browser(h)
+    await b.login()
+    page = (await b.http.get(f"/proposals/{p['proposal_id']}?err=failed")).text
+    assert "could not be applied" not in page and "new proposal" not in page
+    # once as a message (the raw result further down quotes it too)
+    assert page.count(f">{ark_mod.PATIENCE_SPENT}") == 1
+    assert (
+        f"<div class='notice error'>{ark_mod.PATIENCE_SPENT} Nothing was changed on Archidekt. The "
+        "proposal is still pending, so you can apply it again in a few minutes.</div>"
+    ) in page
+    assert page.count("class='notice") == 1
+    assert "<span class='badge warn'>pending</span>" in page
+    assert "Apply these changes to Archidekt" in page
+    stack.ark.transport.handler = orig  # Archidekt allows it again: the same code approves it
+    again = structured(
+        await call(h, token, "confirm_proposal", {"proposal_id": p["proposal_id"], "approval": code})
+    )
+    assert again["ok"] is True and again["state"] == "applied", again
+
+    stack.ark.transport.handler = orig  # the 429s are over
+    stack.ark.fail_card_writes = True
+    res = await _propose(h, token)
+    p, code = structured(res), res["_meta"][APPROVAL_META_KEY]
+    got = structured(
+        await call(h, token, "confirm_proposal", {"proposal_id": p["proposal_id"], "approval": code})
+    )
+    assert got["ok"] is False and got["state"] == "failed", got
+    page = (await b.http.get(f"/proposals/{p['proposal_id']}?err=failed")).text
+    assert page.count("This proposal could not be applied. Details are in the result below, if any.") == 1
+    assert page.count("Nothing else was changed. Ask your assistant for a new proposal") == 1
+    await b.aclose()
 
 
 async def test_a_reject_names_who_closed_the_proposal(stack: Stack) -> None:
@@ -311,6 +395,40 @@ async def test_read_only_token_cannot_confirm(stack: Stack) -> None:
     token, _cid = await _app_token(h, "reader", scope="mtg.read")
     res = await call(h, token, "confirm_proposal", {"proposal_id": "p", "approval": "c"})
     assert res.get("isError") and "insufficient_scope" in json.dumps(res), res
+
+
+async def test_a_read_only_token_of_the_same_app_gets_no_approval_codes(stack: Stack) -> None:
+    """An app reconnected read-only (mtg.read) could never use an approval code, so neither
+    get_proposal nor show_waiting_changes hands it one; with the full scope the same app still
+    gets them."""
+    h = stack.h
+    await linked_user(stack)
+    client = await h.register(client_name="app", scope="mtg mtg.read")
+
+    async def token_for(scope: str) -> str:
+        code, verifier = await h.full_login(client, scope=scope)
+        r = await h.token(
+            client,
+            grant_type="authorization_code",
+            code=code,
+            code_verifier=verifier,
+            redirect_uri="https://client.test/cb",
+        )
+        assert r.status_code == 200, r.text
+        return r.json()["access_token"]
+
+    full = await token_for("mtg")
+    pids = [structured(await _propose(h, full, card))["proposal_id"] for card in ("Sol Ring", "Opt")]
+    reader = await token_for("mtg.read")
+    for token, codes in ((full, True), (reader, False)):
+        got = await call(h, token, "get_proposal", {"proposal_id": pids[0]})
+        assert structured(got)["ok"] and (approve.APPROVAL_META_KEY in got.get("_meta", {})) is codes
+        board = await call(h, token, "show_waiting_changes", {"deck_id": "42"})
+        assert structured(board)["own_count"] == 2
+        meta = board.get("_meta") or {}
+        assert (approve.APPROVALS_META_KEY in meta) is codes and (
+            approve.APPROVAL_SET_META_KEY in meta
+        ) is codes
 
 
 # -- the switch -------------------------------------------------------------------------------

@@ -4,37 +4,18 @@ routes with the member's own session, and the adaptive navigation (bottom bar, r
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
-import pytest
-from mcp import Client
-
-from mtg_gateway.archidekt import ArchidektClient, Pacer
-from mtg_gateway.mf_proxy import MysticForgeProxy
 from mtg_gateway.theme import CSS
 
-from .conftest import FakeIdP, Harness, make_settings, running, sse_json
-from .fake_archidekt import FakeArchidekt
-from .test_decks_and_proxy import Browser, fake_mystic_forge, mcp_token
+from .conftest import Stack, StackOptions, sse_json, stack_with
+from .fake_mystic_forge import fake_mystic_forge
+from .test_decks_and_proxy import Browser, mcp_token
 
 NAV = {"Sec-Fetch-Mode": "navigate", "Accept": "text/html"}
 APP_UA = {"User-Agent": "Mozilla/5.0 (Linux; Android 16) Chrome/140 Mobile Safari/537.36 MTGAssistant/0.6.4"}
 
 
-class Stack:
-    def __init__(self, h: Harness, ark: FakeArchidekt):
-        self.h = h
-        self.ark = ark
-
-
-@pytest.fixture
-async def stack(tmp_path: Path, idp: FakeIdP):
-    ark = FakeArchidekt()
-    settings = make_settings(tmp_path, writes_enabled=True, archidekt_base="https://ark.test/api")
-    client = ArchidektClient(settings.archidekt_base, "test-agent", Pacer(0.0), http=ark.client())
-    proxy = MysticForgeProxy("http://mf.test/mcp", client_factory=lambda: Client(fake_mystic_forge()))
-    async with running(Harness(settings, idp, archidekt=client, mf_proxy=proxy)) as h:
-        yield Stack(h, ark)
+stack_options = stack_with(StackOptions(settings={"writes_enabled": True}, mystic_forge=fake_mystic_forge))
 
 
 async def linked(stack: Stack, user: str = "alice", pw: str = "pw-alice") -> Browser:
@@ -180,7 +161,7 @@ async def test_social_routes_need_session_csrf_and_a_linked_account(stack: Stack
     # and no MCP tool can do any of it directly
     token = await mcp_token(stack.h)
     names = {t["name"] for t in sse_json(await stack.h.mcp(token, "tools/list"))["result"]["tools"]}
-    # R-142: social actions reach the assistant only as proposals the member approves each time
+    # Social actions reach the assistant only as proposals the member approves each time
     acting = {n for n in names for w in ("vote", "like", "follow", "comment", "bookmark") if w in n}
     assert all(n.startswith("propose_") or n == "get_deck_comments" for n in acting), acting
 

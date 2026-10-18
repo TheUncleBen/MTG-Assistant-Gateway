@@ -1,9 +1,11 @@
 """The top bar in headless Chromium: the account menu keeps the menu's own colours on the light
-theme (0.7.9 gate B-1), and a narrow window with a mouse (600 to 800 px, an open Fold or a
+theme, and a narrow window with a mouse (600 to 800 px, an open Fold or a
 half-width desktop window) keeps its text links clear of the account button without a sideways
-scroll (gate B-2). Skipped without a Chromium build."""
+scroll. Skipped without a Chromium build."""
 
 from __future__ import annotations
+
+from contextlib import contextmanager
 
 import pytest
 
@@ -14,6 +16,55 @@ from .test_suggest_browser import server as _server
 pytest.importorskip("playwright")
 
 server = _server  # the fixture, under its own name
+
+
+@pytest.fixture(scope="module")
+def chromium():
+    """One headless Chromium for the whole file; each test opens its own contexts and pages."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_path()
+    if exe == "missing":
+        pytest.skip("no Chromium available for Playwright")
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+        yield browser
+        browser.close()
+
+
+@contextmanager
+def _session(browser):
+    """The shared browser for one test; the test's contexts close when it ends, pass or fail."""
+    try:
+        yield browser
+    finally:
+        for ctx in list(browser.contexts):
+            ctx.close()
+
+
+# After the load event: these pages fetch nothing more that changes the layout (only the
+# favicon), so instead of waiting out 500 ms of network quiet on every load, wait for the fonts
+# and two frames, the frame topbar.js's ResizeObserver sets --bar-room in and one more. Without
+# scripts there is no observer and no frame to wait for (a frame callback never runs), so reading
+# the layout is enough.
+SETTLE = """async () => {
+  await document.fonts.ready;
+  await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+}"""
+SCRIPTS_RAN = "() => !!document.documentElement.style.getPropertyValue('--bar-room')"
+
+
+def _settle(page) -> None:
+    if page.evaluate(SCRIPTS_RAN):
+        page.evaluate(SETTLE)
+    else:
+        page.evaluate("() => document.body.getBoundingClientRect().height")
+
+
+def _open(page, url: str) -> None:
+    page.goto(url, wait_until="load")
+    _settle(page)
+
 
 GEOMETRY = """() => {
   const r = e => { const b = e.getBoundingClientRect(); return [Math.round(b.left), Math.round(b.right)]; };
@@ -47,16 +98,29 @@ def _admin(server: Server) -> str:
     return sid
 
 
-@pytest.mark.parametrize("theme", ["light", "dark"])
-def test_account_menu_links_use_the_menu_colours(server: Server, theme: str) -> None:
-    from playwright.sync_api import sync_playwright
+def _zoom(page, zoom: str) -> None:
+    """The text size: none, root or text (200%, as in test_text_zoom_browser), or root-150,
+    text-125 and so on: the root's size or every element's text size times that percentage."""
+    from .test_text_zoom_browser import ROOT_200, TEXT_200
 
-    exe = _chromium_path()
-    if exe == "missing":
-        pytest.skip("no Chromium available for Playwright")
+    if zoom == "none":
+        return
+    kind, _, pct = zoom.partition("-")
+    if not pct:
+        page.evaluate(ROOT_200 if kind == "root" else TEXT_200)
+    elif kind == "root":
+        size = 14 * int(pct) / 100
+        root = "document.documentElement.style"
+        page.evaluate(f"() => {root}.setProperty('font-size', '{size}px', 'important')")
+    else:
+        assert "* 2)" in TEXT_200
+        page.evaluate(TEXT_200.replace("* 2)", f"* {int(pct) / 100})"))
+
+
+@pytest.mark.parametrize("theme", ["light", "dark"])
+def test_account_menu_links_use_the_menu_colours(chromium, server: Server, theme: str) -> None:
     sid = server.sign_in()
-    with sync_playwright() as p:
-        browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+    with _session(chromium) as browser:
         ctx = browser.new_context(viewport={"width": 1366, "height": 800})
         ctx.add_cookies(
             [
@@ -65,9 +129,8 @@ def test_account_menu_links_use_the_menu_colours(server: Server, theme: str) -> 
             ]
         )
         page = ctx.new_page()
-        page.goto(f"{server.base}/decks", wait_until="networkidle")
+        _open(page, f"{server.base}/decks")
         got = page.evaluate(MENU_LINK)
-        browser.close()
     # the menu's text colour, not the bar's white, and the menu's regular weight, not the bar's bold
     assert got["color"] == _hex_to_rgb(got["text"]), got
     assert got["color"] != _hex_to_rgb(got["bar"]), got
@@ -75,20 +138,15 @@ def test_account_menu_links_use_the_menu_colours(server: Server, theme: str) -> 
 
 
 def test_a_narrow_window_with_a_mouse_keeps_the_links_clear_of_the_account_button(
+    chromium,
     server: Server,
 ) -> None:
-    from playwright.sync_api import sync_playwright
-
-    exe = _chromium_path()
-    if exe == "missing":
-        pytest.skip("no Chromium available for Playwright")
-    sid = _admin(server)  # seven links: the six sections and Admin
-    with sync_playwright() as p:
-        browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+    sid = _admin(server)  # eight links: Home, the six sections and Admin
+    with _session(chromium) as browser:
         ctx = browser.new_context(viewport={"width": 1000, "height": 700})
         ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
         page = ctx.new_page()
-        page.goto(f"{server.base}/decks", wait_until="networkidle")
+        _open(page, f"{server.base}/decks")
         seen = {}
         for width in (1000, 800, 760, 720, 705, 683, 673, 640, 600):
             page.set_viewport_size({"width": width, "height": 700})
@@ -97,9 +155,684 @@ def test_a_narrow_window_with_a_mouse_keeps_the_links_clear_of_the_account_butto
         page.set_viewport_size({"width": 599, "height": 700})
         page.wait_for_timeout(50)
         phone = page.evaluate(GEOMETRY)
-        browser.close()
     for width, g in seen.items():
-        assert g["links"] == 7, (width, g)
+        assert g["links"] == 8, (width, g)
         assert g["doc"] == g["win"] == width, (width, g)  # no sideways scroll
         assert g["last"] + 8 <= g["avatar"], (width, g)  # the last link ends before the account button
     assert phone["links"] == 0, phone  # the phone layout: links move to the tab bar
+
+
+HOME_PLACE = """() => {
+  const shown = e => !!e && e.getClientRects().length > 0 && getComputedStyle(e).visibility !== 'hidden';
+  const box = e => { const b = e.getBoundingClientRect(); return {x: b.left, y: b.top, bottom: b.bottom}; };
+  const pick = sel => [...document.querySelectorAll(sel)].find(shown);
+  const home = pick(".topbar nav.site a[href='/'], .tabbar > a[href='/']");
+  const decks = pick(".topbar nav.site a[href='/decks'], .tabbar > a[href='/decks']");
+  const more = document.querySelector('.tabbar details.more summary');
+  const tabs = [...document.querySelectorAll('.tabbar > a')].filter(shown);
+  return {home: home ? box(home) : null, decks: decks ? box(decks) : null,
+    homeInMore: !!document.querySelector(".tabbar details.more a[href='/']"),
+    moreShown: shown(more),
+    moreItems: [...document.querySelectorAll('.tabbar details.more .menu a')]
+      .map(a => a.getAttribute('href')),
+    tabs: tabs.map(a => a.getAttribute('href')),
+    tabsBottom: Math.max(0, ...tabs.map(a => a.getBoundingClientRect().bottom)), height: innerHeight,
+    doc: document.documentElement.scrollWidth, win: innerWidth};
+}"""
+
+
+@pytest.mark.parametrize(
+    "where",
+    ["desktop", "phone", "phone-app", "fold-unfolded", "fold-unfolded-app", "fold-landscape-app"],
+)
+def test_home_is_never_under_more(chromium, server: Server, where: str) -> None:
+    """Home sits left of Decks in the top bar and the phone tab bar and above Decks in the rail,
+    never under More; the rail (an unfolded Fold, the app from 600 px) shows every page as a tab
+    and has no More."""
+    width, height, touch, app = {
+        "desktop": (1280, 800, False, False),
+        "phone": (390, 844, True, False),
+        "phone-app": (390, 844, True, True),
+        "fold-unfolded": (884, 1104, True, False),
+        "fold-unfolded-app": (884, 1104, True, True),
+        "fold-landscape-app": (1104, 820, True, True),
+    }[where]
+    sid = server.sign_in()
+    with _session(chromium) as browser:
+        extra = {"user_agent": "Mozilla/5.0 (Linux; Android 14) MTGAssistant/0.7.27"} if app else {}
+        ctx = browser.new_context(
+            viewport={"width": width, "height": height}, has_touch=touch, is_mobile=touch, **extra
+        )
+        ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
+        page = ctx.new_page()
+        _open(page, f"{server.base}/decks")
+        got = page.evaluate(HOME_PLACE)
+    assert got["home"] and got["decks"], got
+    assert not got["homeInMore"], got
+    assert got["doc"] == got["win"], got  # no sideways scroll
+    if where.startswith("fold"):  # the rail: Home above Decks, every page a tab, no More
+        assert got["home"]["bottom"] <= got["decks"]["y"] + 1, got
+        assert abs(got["home"]["x"] - got["decks"]["x"]) < 1, got
+        assert not got["moreShown"], got
+        for href in (
+            "/",
+            "/decks",
+            "/search",
+            "/scan",
+            "/collection",
+            "/proposals",
+            "/history",
+            "/reports",
+            "/guide",
+        ):
+            assert href in got["tabs"], (href, got)
+        assert got["tabsBottom"] <= got["height"], got  # every tab on screen without scrolling the rail
+    else:  # a row: Home left of Decks
+        assert got["home"]["x"] < got["decks"]["x"], got
+        assert abs(got["home"]["y"] - got["decks"]["y"]) < 1, got
+    if where.startswith("phone"):  # the bar: Home, Decks, Scan, Collection and More
+        assert got["tabs"] == ["/", "/decks", "/scan", "/collection"], got
+        assert got["moreShown"] and "/proposals" in got["moreItems"] and "/reports" in got["moreItems"], got
+
+
+REPORTS_PLACE = """() => {
+  const shown = e => !!e && e.getClientRects().length > 0 && getComputedStyle(e).visibility !== 'hidden';
+  const lum = c => { const [r, g, b] = c.match(/\\d+(\\.\\d+)?/g).slice(0, 3).map(v => {
+      v = v / 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; });
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
+  const ratio = (a, b) => { const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p);
+    return (x + 0.05) / (y + 0.05); };
+  const bg = e => { for (; e; e = e.parentElement) { const c = getComputedStyle(e).backgroundColor;
+      if (c && !c.startsWith('rgba(0, 0, 0, 0)') && c !== 'transparent') return c; }
+    return getComputedStyle(document.body).backgroundColor; };
+  const contrast = e => ratio(getComputedStyle(e).color, bg(e));
+  const more = document.querySelector('.tabbar details.more');
+  const summary = more && more.querySelector('summary');
+  const tabs = [...document.querySelectorAll('.tabbar > a')].filter(shown);
+  const tab = tabs.find(a => a.getAttribute('href') === '/reports');
+  const out = {moreShown: shown(summary), moreOn: !!summary && summary.classList.contains('on'),
+    tabs: tabs.map(a => a.getAttribute('href')),
+    tabsBottom: Math.max(0, ...tabs.map(a => a.getBoundingClientRect().bottom)), height: innerHeight,
+    tabCurrent: !!tab && tab.getAttribute('aria-current') === 'page',
+    tabContrast: tab ? contrast(tab) : null,
+    doc: document.documentElement.scrollWidth, win: innerWidth};
+  if (out.moreShown) {
+    more.open = true;
+    const items = [...more.querySelectorAll('.menu a')];
+    const item = items.find(a => a.getAttribute('href') === '/reports');
+    const b = item ? item.getBoundingClientRect() : null;
+    Object.assign(out, {moreItems: items.map(a => a.getAttribute('href')),
+      itemCurrent: !!item && item.getAttribute('aria-current') === 'page',
+      itemText: item ? item.textContent.trim() : null,
+      itemContrast: item ? contrast(item) : null,
+      itemInside: !!b && b.left >= -1 && b.right <= innerWidth + 1 && b.top >= -1
+        && b.bottom <= innerHeight + 1});
+    more.open = false;
+  }
+  return out;
+}"""
+
+
+@pytest.mark.parametrize("zoom", ["none", "root", "text"])
+@pytest.mark.parametrize("theme", ["light", "dark"])
+@pytest.mark.parametrize(
+    "where",
+    ["phone", "fold-folded", "phone-app", "fold-unfolded", "fold-unfolded-app", "fold-landscape-app"],
+)
+def test_reports_is_under_more_on_the_phone_bar_and_a_tab_on_the_rail(
+    chromium, server: Server, where: str, theme: str, zoom: str
+) -> None:
+    """Reports (0.7.30) sits under More after History on the phone bar's sheet, is a tab on the rail
+    with every tab still on screen, and marks More (or its own rail tab) as the current page on
+    /reports, at normal and 200% text, light and dark."""
+    width, height, app = {
+        "phone": (390, 844, False),
+        "fold-folded": (344, 882, False),
+        "phone-app": (390, 844, True),
+        "fold-unfolded": (673, 841, False),
+        "fold-unfolded-app": (884, 1104, True),
+        "fold-landscape-app": (1104, 820, True),
+    }[where]
+    sid = server.sign_in()
+    with _session(chromium) as browser:
+        extra = {"user_agent": "Mozilla/5.0 (Linux; Android 14) MTGAssistant/0.7.30"} if app else {}
+        ctx = browser.new_context(
+            viewport={"width": width, "height": height}, has_touch=True, is_mobile=True, **extra
+        )
+        ctx.add_cookies(
+            [
+                {"name": "mtg_session", "value": sid, "url": server.base},
+                {"name": "mtg_theme", "value": theme, "url": server.base},
+            ]
+        )
+        page = ctx.new_page()
+        _open(page, f"{server.base}/reports")
+        _zoom(page, zoom)
+        _settle(page)
+        got = page.evaluate(REPORTS_PLACE)
+    assert got["doc"] == got["win"], got  # no sideways scroll
+    if got["moreShown"]:  # the phone bar: Reports under More, right after History
+        assert got["moreItems"][got["moreItems"].index("/history") + 1] == "/reports", got
+        assert got["moreOn"] and got["itemCurrent"], got
+        assert got["itemText"] == "Reports" and got["itemInside"], got
+        assert got["itemContrast"] >= 4.5, got
+        assert "/reports" not in got["tabs"], got
+    else:  # the rail: Reports is a tab after History, every tab on screen, the current one marked
+        assert where != "phone" and where != "fold-folded", got
+        assert got["tabs"][got["tabs"].index("/history") + 1] == "/reports", got
+        assert got["tabCurrent"], got
+        assert got["tabsBottom"] <= got["height"], got
+        assert got["tabContrast"] >= 4.5, got
+
+
+# The top bar with large text (review note, 0.7.29): with a mouse, the eight text links of an
+# admin used to run to 1036 px at 200% text, past a 717 px window and under the account button.
+# Now they keep one row while they fit and otherwise wrap in a row of their own under the brand
+# and the account side.
+NAV_FIT = """() => {
+  const box = e => e.getBoundingClientRect();
+  const shown = [...document.querySelectorAll('.topbar nav.site a')]
+    .filter(a => getComputedStyle(a).display !== 'none');
+  const right = box(document.querySelector('.topbar .right'));
+  const hit = (a, b) => a.left < b.right - 1 && b.left < a.right - 1 && a.top < b.bottom - 1
+    && b.top < a.bottom - 1;
+  const lum = c => { const [r, g, b] = c.match(/\\d+(\\.\\d+)?/g).slice(0, 3).map(v => {
+      v = v / 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; });
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
+  const ratio = (a, b) => { const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p);
+    return (x + 0.05) / (y + 0.05); };
+  const bar = getComputedStyle(document.querySelector('.topbar')).backgroundColor;
+  return {doc: document.documentElement.scrollWidth, win: innerWidth, links: shown.length,
+    outside: shown.filter(a => box(a).left < -1 || box(a).right > innerWidth + 1).map(a => a.textContent),
+    underRight: shown.filter(a => hit(box(a), right)).map(a => a.textContent),
+    overlap: shown.some((a, i) => shown.slice(i + 1).some(b => hit(box(a), box(b)))),
+    rows: new Set(shown.map(a => Math.round(box(a).top))).size,
+    contrast: Math.min(...shown.map(a => ratio(getComputedStyle(a).color, bar))),
+    height: document.querySelector('.topbar').offsetHeight};
+}"""
+
+
+@pytest.mark.parametrize("theme", ["light", "dark"])
+def test_the_top_bar_links_fit_at_every_width_and_text_size(chromium, server: Server, theme: str) -> None:
+    from .test_text_zoom_browser import ROOT_200, TEXT_200
+
+    sid = _admin(server)  # eight links: the most the bar carries
+    problems: list[str] = []
+    with _session(chromium) as browser:
+        for touch in (False, True):
+            kw = {"has_touch": True, "is_mobile": True} if touch else {}
+            ctx = browser.new_context(viewport={"width": 717, "height": 800}, **kw)
+            ctx.add_cookies(
+                [
+                    {"name": "mtg_session", "value": sid, "url": server.base},
+                    {"name": "mtg_theme", "value": theme, "url": server.base},
+                ]
+            )
+            page = ctx.new_page()
+            for path in ("/history", "/decks", "/reports"):
+                for width in (344, 360, 599, 600, 673, 717, 800, 899, 900, 1000, 1280, 1440):
+                    for zoom in ("none", "root", "text"):
+                        page.set_viewport_size({"width": width, "height": 800})
+                        _open(page, f"{server.base}{path}")
+                        if zoom != "none":
+                            page.evaluate(ROOT_200 if zoom == "root" else TEXT_200)
+                        _settle(page)
+                        g = page.evaluate(NAV_FIT)
+                        where = f"{path} @{width}px {'touch' if touch else 'mouse'} {zoom}: {g}"
+                        if g["doc"] != g["win"] or g["outside"] or g["underRight"] or g["overlap"]:
+                            problems.append(where)
+                        if g["links"] and g["contrast"] < 4.5:
+                            problems.append(f"contrast {where}")
+                        # a mouse from 600 px shows the links; at the normal size on one row in
+                        # the 50 px bar, as before
+                        if not touch and width >= 600 and g["links"] != 8:
+                            problems.append(f"links {where}")
+                        if (
+                            not touch
+                            and width >= 600
+                            and zoom == "none"
+                            and (g["rows"], g["height"]) != (1, 50)
+                        ):
+                            problems.append(f"one row {where}")
+            ctx.close()
+    assert problems == [], "\n".join(problems)
+
+
+# The bar is sticky, so a control that Tab or Shift+Tab reaches must not
+# end up under it; at 200% text with a mouse the bar has two rows and is about 147 px tall, and a
+# fixed 60 px of scroll room hid 10 of the Settings page's controls (WCAG 2.4.11). The scroll room
+# now follows the bar's height (static/topbar.js).
+FOCUSED = """() => {
+  const el = document.activeElement, bar = document.querySelector('.topbar').getBoundingClientRect();
+  if (!el || el === document.body || el.closest('.topbar') || el.matches('a.skip')) return null;
+  const r = el.getBoundingClientRect();
+  if (!r.width && !r.height) return null;
+  return {what: (el.outerHTML || '').slice(0, 80), top: r.top, bottom: r.bottom, bar: bar.bottom,
+          win: innerHeight};
+}"""
+
+
+ZOOMS = ["none", "root-125", "root-150", "root-175", "root", "text-125", "text-150", "text-175", "text"]
+
+
+@pytest.mark.parametrize("script", [True, False])
+@pytest.mark.parametrize("zoom", ZOOMS)
+def test_a_focused_control_is_never_hidden_under_the_top_bar(
+    chromium, server: Server, zoom: str, script: bool
+) -> None:
+    """With scripts off, the stylesheet's own room covers the bar at every text size from 100% to
+    200% (5.5rem fell short between 125% and 175%). 920 px
+    at 150% text is where the bar is tallest for its text size (183 px, about 8.7rem)."""
+    sid = _admin(server)
+    hidden: list[str] = []
+    with _session(chromium) as browser:
+        for width, height in ((1000, 700), (920, 700), (717, 700), (600, 700), (1280, 800)):
+            ctx = browser.new_context(viewport={"width": width, "height": height}, java_script_enabled=script)
+            ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
+            page = ctx.new_page()
+            for path in ("/admin/settings", "/history", "/reports"):
+                _open(page, f"{server.base}{path}")
+                _zoom(page, zoom)
+                _settle(page)
+                seen = 0
+                # forwards from the top, then backwards from the bottom
+                for key, start in (("Tab", "Home"), ("Shift+Tab", "End")):
+                    page.evaluate("document.activeElement && document.activeElement.blur()")
+                    # at once, not with the Home or End key: that scroll is animated, and a
+                    # control measured while it runs would read as hidden
+                    page.evaluate(SCROLL_TO, start)
+                    if key == "Shift+Tab":
+                        page.evaluate("document.querySelector('footer.site a:last-of-type')?.focus()")
+                    for _ in range(40):
+                        page.keyboard.press(key)
+                        g = page.evaluate(FOCUSED)
+                        if g is None:
+                            continue
+                        seen += 1
+                        # some of it shows below the bar; a control taller than the room left is
+                        # allowed to run past the window's foot
+                        if g["bottom"] <= g["bar"] + 1 or g["top"] < g["bar"] - 1:
+                            hidden.append(f"{path} @{width}px {zoom} {key}: {g}")
+                assert seen > 20, (path, width, zoom, seen)
+            ctx.close()
+    assert hidden == [], "\n".join(hidden[:20])
+
+
+SCROLL_TO = """edge => window.scrollTo({top: edge === 'Home' ? 0 : document.documentElement.scrollHeight,
+                                     behavior: 'instant'})"""
+
+
+# Tab goes through the top bar in the order it reads, left to right and top
+# to bottom, at every text size: with the links on a row of their own under search and account,
+# Tab went from the links back up to search and account.
+TAB_STOP = """() => {
+  const el = document.activeElement;
+  if (!el || !el.closest('.topbar')) return null;
+  const r = el.getBoundingClientRect();
+  return {what: (el.outerHTML || '').slice(0, 60), top: r.top, bottom: r.bottom, left: r.left,
+          right: r.right};
+}"""
+
+
+@pytest.mark.parametrize("zoom", ZOOMS)
+def test_tab_goes_through_the_top_bar_in_the_order_it_reads(chromium, server: Server, zoom: str) -> None:
+    sid = _admin(server)
+    problems: list[str] = []
+    with _session(chromium) as browser:
+        ctx = browser.new_context(viewport={"width": 1000, "height": 800})
+        ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
+        page = ctx.new_page()
+        for width in (600, 673, 717, 800, 899, 900, 920, 1000, 1280, 1440):
+            page.set_viewport_size({"width": width, "height": 800})
+            _open(page, f"{server.base}/history")
+            _zoom(page, zoom)
+            _settle(page)
+            stops = []
+            for _ in range(20):
+                page.keyboard.press("Tab")
+                g = page.evaluate(TAB_STOP)
+                if g is None and stops:
+                    break
+                if g is not None:
+                    stops.append(g)
+            where = f"@{width}px {zoom}"
+            if len(stops) < 10:  # the brand, eight links and the account button at least
+                problems.append(f"{where}: {len(stops)} stops")
+            for a, b in zip(stops, stops[1:], strict=False):
+                row = b["top"] < a["bottom"] - 1 and a["top"] < b["bottom"] - 1
+                if b["bottom"] <= a["top"] + 1 or (row and b["right"] <= a["left"] + 1):
+                    problems.append(f"{where}: {a['what']} then {b['what']}")
+    assert problems == [], "\n".join(problems)
+
+
+# With a mouse, where the bar keeps one row beside the search box, the last links
+# (History, Admin) ran under the search box, so a click there landed in the box. Nothing in the
+# bar may sit over anything else, at any width or text size, for a member or an admin.
+BAR_OVERLAP = """() => {
+  const shown = e => e.getClientRects().length > 0 && getComputedStyle(e).visibility !== 'hidden';
+  const parts = [...document.querySelectorAll(
+    '.topbar .brand .mark, .topbar nav.site a, .topbar .topsearch, .topbar nav.user > *')]
+    .filter(shown).map(e => ({what: (e.textContent || e.className || e.tagName).trim().slice(0, 20),
+                              box: e.getBoundingClientRect()}));
+  const hit = (a, b) => a.left < b.right - 1 && b.left < a.right - 1 && a.top < b.bottom - 1
+    && b.top < a.bottom - 1;
+  const out = [];
+  parts.forEach((p, i) => parts.slice(i + 1).forEach(q => {
+    if (hit(p.box, q.box)) out.push(`${p.what} / ${q.what}`); }));
+  const outside = parts.filter(p => p.box.left < -1 || p.box.right > innerWidth + 1).map(p => p.what);
+  return {overlap: out, outside, doc: document.documentElement.scrollWidth, win: innerWidth,
+          links: document.querySelectorAll('.topbar nav.site a').length};
+}"""
+
+
+@pytest.mark.parametrize("script", [True, False])
+@pytest.mark.parametrize("role", ["member", "admin"])
+def test_nothing_in_the_top_bar_sits_over_anything_else(
+    chromium, server: Server, role: str, script: bool
+) -> None:
+    sid = _admin(server) if role == "admin" else server.sign_in()
+    problems: list[str] = []
+    with _session(chromium) as browser:
+        ctx = browser.new_context(viewport={"width": 1000, "height": 800}, java_script_enabled=script)
+        ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
+        page = ctx.new_page()
+        widths = (344, 390, 600, 673, 717, 800, 899, 900, 920, 960, 1000, 1100, 1200, 1280, 1440, 1600, 1920)
+        for width in widths:
+            for zoom in [*ZOOMS, "root-110", "text-110"]:
+                page.set_viewport_size({"width": width, "height": 800})
+                _open(page, f"{server.base}/history")
+                _zoom(page, zoom)
+                _settle(page)
+                g = page.evaluate(BAR_OVERLAP)
+                if g["overlap"] or g["outside"] or g["doc"] != g["win"]:
+                    problems.append(f"@{width}px {zoom}: {g}")
+    assert problems == [], "\n".join(problems[:40]) + f"\n… {len(problems)} in all"
+
+
+LONG_NAME = "The Very Long Name Of Our Friends' Deck Gateway"
+BRAND_AND_SEARCH = """() => {
+  const word = document.querySelector('.topbar .brand .word');
+  const search = document.querySelector('.topbar .topsearch');
+  const rem = parseFloat(getComputedStyle(document.documentElement).fontSize);
+  return {cut: word.scrollWidth > word.clientWidth + 1, search: search.getBoundingClientRect().width / rem};
+}"""
+
+
+def test_a_long_server_name_gives_way_before_the_search_box_and_the_links(chromium, server: Server) -> None:
+    """The order the one-row bar gives up room in: the brand's word first
+    (an ellipsis), then the search box down to 9rem; the links never."""
+    sid = _admin(server)
+    settings = server.app.state.gateway.settings
+    short_name = settings.server_name
+    problems: list[str] = []
+    with _session(chromium) as browser:
+        ctx = browser.new_context(viewport={"width": 1280, "height": 800})
+        ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
+        page = ctx.new_page()
+
+        def measure(name: str, width: int, zoom: str) -> dict:
+            object.__setattr__(settings, "server_name", name)
+            page.set_viewport_size({"width": width, "height": 800})
+            _open(page, f"{server.base}/history")
+            _zoom(page, zoom)
+            _settle(page)
+            g = page.evaluate(BAR_OVERLAP)
+            if g["overlap"] or g["outside"] or g["doc"] != g["win"]:
+                problems.append(f"@{width}px {zoom} {name!r}: {g}")
+            return page.evaluate(BRAND_AND_SEARCH)
+
+        try:
+            for width in (900, 960, 1000, 1100, 1280, 1440, 1920):
+                for zoom in ("none", "root-110", "root-125", "text-125"):
+                    # The search box's full width depends on the browser's fonts, so it is
+                    # measured with the usual short name at the same width and text size.
+                    full = measure(short_name, width, zoom)["search"]
+                    b = measure(LONG_NAME, width, zoom)
+                    if b["search"] < 9 - 0.05 or (b["search"] < full - 0.05 and not b["cut"]):
+                        problems.append(f"@{width}px {zoom}: search box shrank first: {b}, full {full}")
+            full_1280 = measure(short_name, 1280, "none")["search"]
+            at_1280 = measure(LONG_NAME, 1280, "none")
+        finally:
+            object.__setattr__(settings, "server_name", short_name)
+    assert problems == [], "\n".join(problems)
+    assert at_1280["cut"] and at_1280["search"] >= full_1280 - 0.05, (at_1280, full_1280)  # name cut, not box
+
+
+def test_without_scripts_the_scroll_room_is_large_only_where_the_bar_wraps(chromium, server: Server) -> None:
+    """60 px over the one-row bar, 9.5rem where its links wrap."""
+    sid = _admin(server)
+    seen = {}
+    with _session(chromium) as browser:
+        ctx = browser.new_context(viewport={"width": 1280, "height": 800}, java_script_enabled=False)
+        ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
+        page = ctx.new_page()
+        for width, zoom in ((390, "none"), (717, "none"), (1280, "none"), (920, "root-150"), (717, "text")):
+            page.set_viewport_size({"width": width, "height": 800})
+            _open(page, f"{server.base}/history")
+            _zoom(page, zoom)
+            seen[(width, zoom)] = page.evaluate(
+                "() => [getComputedStyle(document.documentElement).scrollPaddingTop,"
+                " document.querySelector('.topbar').offsetHeight,"
+                " parseFloat(getComputedStyle(document.documentElement).fontSize)]"
+            )
+    for (width, zoom), (room, bar, rem) in seen.items():
+        if bar == 50:
+            assert room == "60px", (width, zoom, room)
+        else:
+            assert abs(float(room[:-2]) - 9.5 * rem) < 0.5 and float(room[:-2]) >= bar + 1, (
+                width,
+                zoom,
+                room,
+                bar,
+            )
+    assert seen[(1280, "none")][1] == 50 and seen[(920, "root-150")][1] > 50  # both kinds were seen
+
+
+# The search box's placeholder, whole, beside the links at the normal text size (at
+# 920 px it read "Search cards and d"). Large text may shrink the box further, by design.
+PLACEHOLDER_FIT = """() => {
+  const i = document.querySelector('.topbar .topsearch input');
+  const cs = getComputedStyle(i);
+  const c = document.createElement('canvas').getContext('2d');
+  c.font = cs.font;
+  return {text: c.measureText(i.placeholder).width,
+    room: i.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight),
+    bar: document.querySelector('.topbar').offsetHeight};
+}"""
+
+
+@pytest.mark.parametrize("role", ["member", "admin"])
+def test_the_search_placeholder_fits_beside_the_links_at_normal_size(
+    chromium, server: Server, role: str
+) -> None:
+    sid = _admin(server) if role == "admin" else server.sign_in()
+    problems: list[str] = []
+    with _session(chromium) as browser:
+        ctx = browser.new_context(viewport={"width": 1280, "height": 800})
+        ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
+        page = ctx.new_page()
+        for width in (900, 920, 940, 960, 980, 1000, 1010, 1023, 1024, 1040, 1100, 1280, 1920):
+            page.set_viewport_size({"width": width, "height": 800})
+            _open(page, f"{server.base}/history")
+            m = page.evaluate(PLACEHOLDER_FIT)
+            if m["text"] > m["room"] + 0.5 or m["bar"] != 50:
+                problems.append(f"@{width}px: {m}")
+    assert problems == [], "\n".join(problems)
+
+
+# With a font about 15% wider than Lato (DejaVu Sans, a monospace font) and large
+# text, an admin's one-row bar ran past the window (up to 59 px at 125%, 1024 to 1082 px; and,
+# found while fixing it, up to 48 px at 110% to 150% between 660 and 898 px). The
+# browser may lack DejaVu Sans (it then falls back), so the page's own font with wider letter
+# spacing stands in for a wide font too.
+WIDE_FONTS = ("'DejaVu Sans'", "monospace", "letter-spacing")
+WIDE_BANDS = (
+    ("root-110", range(640, 700, 6)),
+    ("root-125", range(720, 800, 6)),
+    ("root-150", range(880, 900, 4)),
+    ("root-125", range(1000, 1104, 4)),
+    ("text-125", range(1000, 1104, 4)),
+    ("root-140", range(1100, 1250, 10)),
+    ("root-150", range(1180, 1330, 10)),
+)
+
+
+@pytest.mark.parametrize("font", WIDE_FONTS)
+def test_a_wide_font_at_large_text_keeps_the_bar_inside_the_window(
+    chromium, server: Server, font: str
+) -> None:
+    sid = _admin(server)
+    rule = "*{letter-spacing:.05em}" if font == "letter-spacing" else f"*{{font-family:{font} !important}}"
+    problems: list[str] = []
+    with _session(chromium) as browser:
+        ctx = browser.new_context(viewport={"width": 1280, "height": 800})
+        ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
+        page = ctx.new_page()
+        for zoom, widths in WIDE_BANDS:
+            for width in widths:
+                page.set_viewport_size({"width": width, "height": 800})
+                _open(page, f"{server.base}/history")
+                page.evaluate(
+                    "r => { const s = document.createElement('style'); s.textContent = r;"
+                    " document.head.append(s); }",
+                    rule,
+                )
+                _zoom(page, zoom)
+                _settle(page)
+                g = page.evaluate(BAR_OVERLAP)
+                if g["overlap"] or g["outside"] or g["doc"] != g["win"]:
+                    problems.append(f"@{width}px {zoom}: {g}")
+    assert problems == [], "\n".join(problems[:40]) + f"\n… {len(problems)} in all"
+
+
+# Where the brand's word gives way, a stub such as "M." (920 px, an admin) read
+# oddly. The word now shows at least 3em ("MTG…") or none of it, and the brand keeps its height
+# with the mark in the middle either way.
+BRAND_WORD = """() => {
+  const brand = document.querySelector('.topbar .brand'), word = brand.querySelector('.word');
+  const b = brand.getBoundingClientRect(), w = word.getBoundingClientRect();
+  const m = brand.querySelector('.mark').getBoundingClientRect();
+  return {shown: getComputedStyle(word).display !== 'none' && w.top < b.bottom && w.bottom > b.top,
+    width: w.width, em: parseFloat(getComputedStyle(word).fontSize), height: b.height,
+    bar: document.querySelector('.topbar').offsetHeight,
+    middle: Math.abs((m.top + m.bottom) / 2 - (b.top + b.bottom) / 2)};
+}"""
+
+
+@pytest.mark.parametrize("touch", [False, True], ids=["mouse", "touch"])
+@pytest.mark.parametrize("role", ["member", "admin"])
+def test_the_brand_word_shows_at_least_three_letters_or_none(
+    chromium, server: Server, role: str, touch: bool
+) -> None:
+    sid = _admin(server) if role == "admin" else server.sign_in()
+    problems: list[str] = []
+    heights = set()
+    with _session(chromium) as browser:
+        ctx = browser.new_context(viewport={"width": 1280, "height": 800}, has_touch=touch)
+        ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
+        page = ctx.new_page()
+        for width in (*range(900, 1024, 6), 1023, 1024, 1100, 1280):
+            for zoom in ("none", "root-125"):
+                page.set_viewport_size({"width": width, "height": 800})
+                _open(page, f"{server.base}/history")
+                _zoom(page, zoom)
+                _settle(page)
+                g = page.evaluate(BRAND_WORD)
+                if (g["shown"] and g["width"] < 3 * g["em"] - 0.5) or g["middle"] > 0.6:
+                    problems.append(f"@{width}px {zoom}: {g}")
+                if g["bar"] == 50:
+                    heights.add((zoom, round(g["height"], 1)))
+    assert problems == [], "\n".join(problems)
+    assert len(heights) == 2, heights  # in one row, one height per text size, word shown or not
+
+
+# The app has no text links in its bar, so the one-row rules for the links leave it alone (review
+# At 344 px, the Fold's cover screen, they cut the gateway's name one letter earlier).
+# Besides the styles, where the name is cut. The bar's left side ends one gap before
+# the account side and holds the brand (and the links' empty row after it); a long name is cut
+# where the brand's room ends, and the usual name only when its whole width does not fit there.
+APP_BAR = """() => {
+  const q = sel => document.querySelector(sel), box = sel => q(sel).getBoundingClientRect();
+  const cs = sel => getComputedStyle(q(sel)), word = q('.topbar .brand .word');
+  return {app: document.body.classList.contains('app'), left: cs('.topbar .left').display,
+    pad: cs('.topbar .right').paddingLeft, shown: cs('.topbar .brand .word').display,
+    doc: document.documentElement.scrollWidth, win: innerWidth,
+    leftEnd: box('.topbar .left').right, brandEnd: box('.topbar .brand').right,
+    wordStart: box('.topbar .brand .word').left, wordEnd: box('.topbar .brand .word').right,
+    rightStart: box('.topbar .right').left, gap: parseFloat(cs('.topbar .wrap').columnGap),
+    navStart: box('.topbar nav.site').left, navEnd: box('.topbar nav.site').right,
+    leftGap: parseFloat(cs('.topbar .left').columnGap), margin: parseFloat(cs('.topbar .brand').marginRight),
+    full: word.scrollWidth, cut: word.scrollWidth > word.clientWidth + 1};
+}"""
+
+
+@pytest.mark.parametrize("width", [344, 360, 412, 884])
+def test_the_app_bar_keeps_its_own_spacing(chromium, server: Server, width: int) -> None:
+    sid = server.sign_in()
+    settings = server.app.state.gateway.settings
+    short_name = settings.server_name
+    seen = {}
+    with _session(chromium) as browser:
+        try:
+            for name in (short_name, LONG_NAME):
+                object.__setattr__(settings, "server_name", name)
+                ctx = browser.new_context(
+                    viewport={"width": width, "height": 800},
+                    has_touch=True,
+                    is_mobile=True,
+                    user_agent="Mozilla/5.0 (Linux; Android 14) MTGAssistant/0.7.27",
+                )
+                ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
+                page = ctx.new_page()
+                _open(page, f"{server.base}/decks")
+                seen[name] = page.evaluate(APP_BAR)
+                ctx.close()
+        finally:
+            object.__setattr__(settings, "server_name", short_name)
+    for name, got in seen.items():
+        assert got["app"] and got["shown"] != "none", (name, got)
+        # the brand gets the room the old way
+        assert got["left"] == "flex" and got["pad"] == "0px", (name, got)
+        assert got["doc"] == got["win"], (name, got)
+        assert got["leftEnd"] <= got["rightStart"] - got["gap"] + 0.5, (name, got)
+        assert got["navEnd"] <= got["leftEnd"] + 0.5, (name, got)  # the left side holds the brand
+        end = got["navStart"] - got["leftGap"] - got["margin"]  # where the brand's room ends
+        assert abs(got["brandEnd"] - end) <= 0.5, (name, got)
+        assert got["cut"] == (got["full"] > end - got["wordStart"] + 0.5), (name, got)
+        if got["cut"]:
+            assert abs(got["wordEnd"] - end) <= 0.5, (name, got)
+    # at 884 px the brand has about 400 px, about as wide as the long name itself (418 px in Inter,
+    # 374 px in serif), so whether it is cut there depends on the font; the check above covers it
+    if width < 800:
+        assert seen[LONG_NAME]["cut"], seen[LONG_NAME]
+
+
+# The Account page on a phone with 200% text, scripts on and off (the bottom tab bar at 344
+# and 360 px; 320 px too): nothing reaches past the window. The causes found
+# were the link disclosure's "/decks/{deck_id}" (shown open without scripts) and the
+# "Notifications" heading at 320 px; both now break instead.
+@pytest.mark.parametrize("script", [True, False], ids=["script", "no-script"])
+def test_the_account_page_fits_a_phone_at_200_percent_text(chromium, server: Server, script: bool) -> None:
+    sid = server.sign_in()
+    problems: list[str] = []
+    with _session(chromium) as browser:
+        for width in (320, 344, 360):
+            for zoom in ("root", "text"):
+                ctx = browser.new_context(
+                    viewport={"width": width, "height": 800}, java_script_enabled=script
+                )
+                ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
+                page = ctx.new_page()
+                _open(page, f"{server.base}/account")
+                _zoom(page, zoom)
+                _settle(page)
+                got = page.evaluate(
+                    "() => ({doc: document.documentElement.scrollWidth,"
+                    " win: document.documentElement.clientWidth,"
+                    " tabbar: document.querySelector('.tabbar').getBoundingClientRect().right,"
+                    " disclosure: !!document.querySelector('#archidekt-disclosure')})"
+                )
+                if got["doc"] > got["win"] or got["tabbar"] > got["win"] + 0.5 or not got["disclosure"]:
+                    problems.append(f"@{width}px {zoom}: {got}")
+                ctx.close()
+    assert problems == [], "\n".join(problems)

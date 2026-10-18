@@ -343,3 +343,54 @@ def test_the_top_bar_list_and_the_more_sheet_sit_above_the_save_bar(server: Serv
             finally:
                 browser.close()
         assert problems == [], "\n".join(problems)
+
+
+def test_save_anyway_applies_the_version_the_question_was_about(server: Server) -> None:
+    """A big save asks first; Save anyway applies that proposal with the version the answer named,
+    so a proposal another app amended meanwhile is refused instead of applied unseen."""
+    import json
+
+    from playwright.sync_api import sync_playwright
+
+    sid = _link(server)
+    server.exe = _exe()
+    sent: list[dict] = []
+    with sync_playwright() as p:
+        browser, ctx = _browser(p, server, sid, 1366, 900)
+        try:
+            page = ctx.new_page()
+            page.route(
+                re.compile(r".*/api/v1/proposals$"),
+                lambda route: route.fulfill(
+                    status=201,
+                    content_type="application/json",
+                    body=json.dumps(
+                        {
+                            "ok": True,
+                            "applied": False,
+                            "needs_confirm": True,
+                            "why": "This removes a lot.",
+                            "proposal_id": "prop_big",
+                            "version": 3,
+                        }
+                    ),
+                ),
+            )
+
+            def apply(route) -> None:
+                sent.append(route.request.post_data_json)
+                route.fulfill(
+                    status=409,
+                    content_type="application/json",
+                    body=json.dumps({"ok": False, "error": "changed", "message": "It changed."}),
+                )
+
+            page.route(re.compile(r".*/api/v1/proposals/prop_big/apply$"), apply)
+            page.goto(f"{server.base}/decks/{DECK}/edit", wait_until="networkidle")
+            _make_a_change(page)
+            page.locator("button.review").click()
+            page.get_by_role("button", name="Save anyway").click()
+            page.get_by_text("It changed.").wait_for(timeout=3000)
+            assert sent == [{"version": 3, "archidekt_backup": False}]  # the box is unticked by default
+        finally:
+            browser.close()

@@ -1,4 +1,4 @@
-/* Themed dropdown lists for every single-value <select> (R-131): the browser's own pop-up list
+/* Themed dropdown lists for every single-value <select>: the browser's own pop-up list
    is replaced by the gateway's menu panel on every page, in the Android app's WebView too. The
    native select stays in the document (the form posts it, scripts read and set its value and
    "change" still fires) but is hidden off-screen; a button in its place shows the chosen label
@@ -163,7 +163,13 @@
     }
     document.body.appendChild(list);
     if (!sheet) place(btn, list);
-    open = { select: select, btn: btn, list: list, scrim: scrim, items: built.items, active: -1, sheet: sheet };
+    // how far each box around the button was scrolled when the list opened (see the scroll closer)
+    var scrolled = [];
+    for (var el = btn.parentNode; el && el.nodeType === 1; el = el.parentNode) {
+      scrolled.push({ el: el, top: el.scrollTop, left: el.scrollLeft });
+    }
+    open = { select: select, btn: btn, list: list, scrim: scrim, items: built.items, active: -1, sheet: sheet,
+             scrolled: scrolled };
     btn.setAttribute("aria-expanded", "true");
     btn.setAttribute("aria-controls", list.id);
     var current = -1;
@@ -269,8 +275,21 @@
     // the click on its scrim (above), so the tap never reaches the page behind it
     if (open && !open.sheet && !open.list.contains(e.target) && e.target !== open.btn && !open.btn.contains(e.target)) close();
   }, true);
+  // A scroll that moves the button closes the list (it would be left floating away from it). A
+  // scroll event is sent a frame after the scroll itself, so the one from a scroll made before the
+  // list opened (the box bringing the button into view as it took focus) can arrive once the list
+  // is open: the button hasn't moved since, and the list stays.
+  // The offsets are compared, not the button's place on screen: a box that animates in moves the
+  // button without any scroll.
   document.addEventListener("scroll", function (e) {
-    if (open && !open.sheet && !open.list.contains(e.target)) close();
+    if (!open || open.sheet || open.list.contains(e.target)) return;
+    var el = e.target === document ? (document.scrollingElement || document.documentElement) : e.target;
+    for (var i = 0; i < open.scrolled.length; i++) {
+      var was = open.scrolled[i];
+      if (was.el !== el) continue;
+      if (Math.abs(el.scrollTop - was.top) > 1 || Math.abs(el.scrollLeft - was.left) > 1) close();
+      return;
+    }
   }, true);
   window.addEventListener("resize", function () { if (open) close(); });
   document.addEventListener("keydown", function (e) {

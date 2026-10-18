@@ -40,7 +40,8 @@ def test_stylesheets_apply_and_a_tap_shows_the_navigation_bar(server: Server) ->
     _chromium()
     sid = server.sign_in_and_link()
     with sync_playwright() as p:
-        browser, page, errors = _page(p, server, sid, 390)
+        # no service worker, so the page's own requests reach page.route (held below)
+        browser, page, errors = _page(p, server, sid, 390, service_workers="block")
         refused: list[str] = []
         page.on("console", lambda m: refused.append(m.text) if "Content Security Policy" in m.text else None)
         for path in PAGES:
@@ -57,7 +58,14 @@ def test_stylesheets_apply_and_a_tap_shows_the_navigation_bar(server: Server) ->
 
         page.goto(server.base + "/proposals", wait_until="load")
         assert not page.evaluate("() => document.documentElement.classList.contains('navigating')")
-        # a tap on a link to another page: the bar shows before that page has answered
+        # a tap on a link to another page: the bar shows before that page has answered. The answer
+        # is held until the check has run, so a quick /decks never replaces the page mid-check.
+        held: list = []
+
+        def hold(route) -> None:
+            held.append(route)
+
+        page.route(server.base + "/decks", hold)
         shown = page.evaluate(
             """() => new Promise(done => {
                  document.querySelector("nav.tabbar a[href='/decks']").click();
@@ -66,6 +74,13 @@ def test_stylesheets_apply_and_a_tap_shows_the_navigation_bar(server: Server) ->
                })"""
         )
         assert shown
+        for _ in range(200):  # until the held request has reached the route (10 s at most)
+            if held:
+                break
+            page.wait_for_timeout(50)
+        assert len(held) == 1
+        held[0].continue_()
+        page.unroute(server.base + "/decks", hold)
         page.wait_for_url(server.base + "/decks")
         assert not page.evaluate("() => document.documentElement.classList.contains('navigating')")
         # a link a script takes over, or an anchor on the same page, shows nothing

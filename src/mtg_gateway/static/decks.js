@@ -1,8 +1,9 @@
 /* Fills the deck-list placeholders. Home and My decks render at once when the member's deck list
    is still being read from Archidekt (a cold start): the decks area carries data-decks-src, the
    address of /api/decks/mine with the page's own filters, and the answer brings the HTML the page
-   would have rendered itself (one renderer, server side) plus the total and the folder names for
-   the toolbar. Without this script the placeholder stays; a reload shows the list. */
+   would have rendered itself (one renderer, server side: the folder's breadcrumb, its Folders and
+   Decks areas) plus the total for the toolbar. Without this script the placeholder stays; a
+   reload shows the list. */
 (function () {
   "use strict";
   var boxes = Array.prototype.slice.call(document.querySelectorAll("[data-decks-src]"));
@@ -24,22 +25,7 @@
   function fillToolbar(data) {
     var total = document.getElementById("decks-total");
     if (total && typeof data.total === "number") total.textContent = "Total decks: " + data.total;
-    var field = document.getElementById("folder-field");
-    var sel = document.getElementById("f-folder");
-    if (sel && Array.isArray(data.folders)) {
-      var current = sel.value;
-      while (sel.options.length > 1) sel.remove(1);
-      data.folders.forEach(function (name) {
-        var opt = document.createElement("option");
-        opt.value = name;
-        opt.textContent = name;
-        if (name === current) opt.selected = true;
-        sel.appendChild(opt);
-      });
-      if (field) {
-        if (data.folders.length) field.removeAttribute("hidden"); else field.setAttribute("hidden", "");
-      }
-    }
+    if (total && data.total === null) total.hidden = true; // the list couldn't be read: no count
   }
 
   boxes.forEach(function (box) {

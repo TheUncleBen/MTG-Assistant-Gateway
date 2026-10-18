@@ -90,6 +90,15 @@ def default_printing(cards: list[dict[str, Any]], finish: str | None = None) -> 
     return next((c for c in cards if good_default(c, finish)), None)
 
 
+# The printing picker's filters and sorts, as Scryfall's search writes them: ``is:foil``,
+# ``frame:2015``, ``border:borderless``; ``order=usd`` with ``dir=asc`` is cheapest first.
+PRINT_FINISHES = ("nonfoil", "foil", "etched")
+PRINT_FRAMES = ("1993", "1997", "2003", "2015", "future")
+PRINT_BORDERS = ("black", "white", "borderless", "silver", "gold")
+PRINT_ORDERS = {"newest": ("released", "desc"), "oldest": ("released", "asc"), "cheapest": ("usd", "asc")}
+PRINT_PAGES = 20  # 3,500 printings, more than any card has (a basic land has about 1,000)
+
+
 def summarize(card: dict[str, Any]) -> dict[str, Any]:
     """The subset of a Scryfall card object the gateway stores and returns."""
     faces = card.get("card_faces") or []
@@ -127,6 +136,41 @@ def summarize(card: dict[str, Any]) -> dict[str, Any]:
         out["unreleased"] = True
     if not on_paper(card):
         out["paper"] = False
+    return out
+
+
+def _cn(number: str) -> str:
+    """A collector number for Scryfall's ``cn:``: as it is when it is plain letters and digits,
+    else in double quotes (numbers such as ``1★``)."""
+    return number if re.fullmatch(r"[A-Za-z0-9]+", number) else f'"{number}"'
+
+
+def browse_row(card: dict[str, Any]) -> dict[str, Any]:
+    """A summary plus what the card search's list view and the printing picker show: prices,
+    power, toughness and loyalty, and the printing's frame, border and treatments."""
+    out = summarize(card)
+    faces = [f for f in card.get("card_faces") or [] if isinstance(f, dict)]
+    front = faces[0] if faces else {}
+    prices = card.get("prices") if isinstance(card.get("prices"), dict) else {}
+    out["prices"] = {
+        k: str(prices[k])
+        for k in ("usd", "usd_foil", "usd_etched", "eur", "eur_foil", "tix")
+        if isinstance(prices.get(k), str) and prices[k]
+    }
+    for key in ("power", "toughness", "loyalty"):
+        value = card.get(key, front.get(key))
+        if isinstance(value, str) and value:
+            out[key] = value
+    out["frame"] = str(card.get("frame") or "")
+    out["border"] = str(card.get("border_color") or "")
+    out["frame_effects"] = [e for e in card.get("frame_effects") or [] if isinstance(e, str)]
+    out["full_art"] = bool(card.get("full_art"))
+    out["promo"] = bool(card.get("promo"))
+    out["digital"] = bool(card.get("digital"))
+    out["set_type"] = str(card.get("set_type") or "")
+    rank = card.get("edhrec_rank")
+    if isinstance(rank, int) and not isinstance(rank, bool):
+        out["edhrec_rank"] = rank
     return out
 
 
@@ -233,10 +277,16 @@ class ScryfallClient:
         self.cards = _Cache(ttl=24 * 3600, max_items=5000)
         self.names = _Cache(ttl=6 * 3600, max_items=5000)
         # Cards are kept slimmed (``slim``, under 1 KB each), so 5,000 entries stay a few MB.
-        # Printing lists are summaries (about 2 KB a card in memory, up to 175 a card), in a small
-        # cache of their own so a picker browsing many cards cannot crowd out names; 60 lists stay
-        # under about 25 MB even when every one is a full page of printings.
+        # Printing lists are summaries (about 2 KB a card in memory, up to 175 a page), in a small
+        # cache of their own so a picker browsing many cards cannot crowd out names; 60 pages stay
+        # under about 25 MB even when every one is full. A later page or a filtered page of a card
+        # with more than 175 printings is a page of its own here.
         self.prints_cache = _Cache(ttl=3600, max_items=60)
+        # Card search pages (up to 175 browse rows, about 1.5 KB each in memory): 40 pages stay
+        # under about 10 MB; a quarter of an hour is long enough for paging back and a reload.
+        self.search_cache = _Cache(ttl=900, max_items=40)
+        # The set list and the type catalogs for the card search's pickers, a day at a time.
+        self.catalogs = _Cache(ttl=24 * 3600, max_items=20)
         self.requests = 0
 
     async def aclose(self) -> None:
@@ -286,10 +336,15 @@ class ScryfallClient:
         return data
 
     def _card_or_error(self, resp: httpx.Response, what: str) -> dict[str, Any]:
+        """The card in ``resp``. Only a 404 says the name is unknown (or ambiguous); any other
+        error (400, 403, 422) says nothing about the card, so it is ``unavailable``, never
+        ``not_found``, and no cache takes it for an unknown name."""
         data = self._json(resp)
-        if resp.status_code == 404 or data.get("object") == "error":
+        if resp.status_code == 404:
             kind = "ambiguous" if data.get("type") == "ambiguous" else "not_found"
             raise ScryfallError(kind, str(data.get("details") or f"No card found for {what}"))
+        if resp.status_code >= 400 or data.get("object") == "error":
+            raise ScryfallError("unavailable", f"Scryfall returned {resp.status_code} for {what}")
         if data.get("object") != "card" or not data.get("name"):
             raise ScryfallError("contract", "Scryfall returned something that is not a card")
         return data
@@ -370,35 +425,162 @@ class ScryfallClient:
             raise ScryfallError("contract", f"Scryfall's card-name catalog is too short ({len(out)})")
         return out
 
-    async def prints(self, oracle_id: str) -> dict[str, Any]:
-        """Every printing of one card (the ``prints_search_uri`` query), newest first, summarized.
+    async def prints(
+        self,
+        oracle_id: str,
+        *,
+        page: int = 1,
+        finish: str | None = None,
+        frame: str | None = None,
+        border: str | None = None,
+        order: str = "newest",
+        set_code: str | None = None,
+        number: str | None = None,
+    ) -> dict[str, Any]:
+        """One page of every printing of one card (the ``prints_search_uri`` query), summarized
+        with what the printing picker shows (``browse_row``: prices, frame, border).
 
-        Returns ``{"cards": [summaries], "has_more": bool, "total_cards": int}``. One page only
-        (Scryfall pages at 175 cards); ``has_more`` says when a card has more printings than that,
-        so a picker can say it shows the newest 175.
+        Returns ``{"cards": [rows], "has_more": bool, "total_cards": int, "page": int}``. Scryfall
+        pages at 175 cards and says ``has_more`` with a ``next_page`` link, which is this same
+        search with ``page`` one higher: the next page is asked for as ``page + 1``. ``finish``
+        (PRINT_FINISHES), ``frame`` (PRINT_FRAMES) and ``border`` (PRINT_BORDERS) narrow the
+        search on Scryfall's side and ``order`` (PRINT_ORDERS) sorts it, so a card with more
+        printings than one page is filtered and sorted over all of them; the caller checks the
+        values. Every page of every filter is kept in ``prints_cache`` (the plain first page under
+        the oracle id alone, as before). ``set_code`` with ``number`` asks for that one printing
+        (Scryfall's ``set:`` and ``cn:``), checked by the caller.
         """
+        if order not in PRINT_ORDERS:
+            raise ScryfallError("invalid", "order must be newest, oldest or cheapest")
+        terms = " ".join(
+            t
+            for t in (
+                f"is:{finish}" if finish else "",
+                f"frame:{frame}" if frame else "",
+                f"border:{border}" if border else "",
+                f"set:{set_code} cn:{_cn(number)}" if set_code and number else "",
+            )
+            if t
+        )
         key = oracle_id.lower()
+        if page != 1 or terms or order != "newest":
+            key = f"{key}|{page}|{terms}|{order}"
         if (hit := self.prints_cache.get(key)) is not None:
             return hit
-        resp = await self._request(
-            "GET",
-            "/cards/search",
-            params={"order": "released", "dir": "desc", "q": f"oracleid:{oracle_id}", "unique": "prints"},
-            interval=self.lookup_interval,
-        )
+        sort, direction = PRINT_ORDERS[order]
+        params: dict[str, Any] = {
+            "order": sort,
+            "dir": direction,
+            "q": f"oracleid:{oracle_id}" + (f" {terms}" if terms else ""),
+            "unique": "prints",
+        }
+        if page > 1:
+            params["page"] = page
+        resp = await self._request("GET", "/cards/search", params=params, interval=self.lookup_interval)
         data = self._json(resp)
         if resp.status_code == 404 or data.get("object") == "error":
+            if resp.status_code == 404 and (terms or page > 1):
+                # a filter that matches nothing (or a page past the end): an empty page, not a
+                # card that does not exist
+                empty: dict[str, Any] = {"cards": [], "has_more": False, "total_cards": 0, "page": page}
+                self.prints_cache.put(key, empty)
+                return empty
             raise ScryfallError("not_found", str(data.get("details") or "no printings found"))
         if data.get("object") != "list" or not isinstance(data.get("data"), list):
             raise ScryfallError("contract", "Scryfall search returned an unexpected body")
-        cards = [summarize(c) for c in data["data"] if isinstance(c, dict) and c.get("object") == "card"]
+        cards = [browse_row(c) for c in data["data"] if isinstance(c, dict) and c.get("object") == "card"]
         total = data.get("total_cards")
         out = {
             "cards": cards,
-            "has_more": bool(data.get("has_more")),
+            "has_more": bool(data.get("has_more")) and page < PRINT_PAGES,
             "total_cards": total if isinstance(total, int) else len(cards),
+            "page": page,
         }
         self.prints_cache.put(key, out)
+        return out
+
+    async def search(
+        self, query: str, *, order: str = "name", direction: str = "auto", page: int = 1
+    ) -> dict[str, Any]:
+        """One page of ``GET /cards/search`` (the card search page): ``{"cards": [browse rows],
+        "has_more", "total_cards", "warnings"}``. A search that matches nothing is an empty page
+        (Scryfall answers it with a 404); a search Scryfall cannot read is ``invalid`` with
+        Scryfall's own explanation. Pages are kept a while (``search_cache``), so paging back, a
+        second member's identical search and a reload cost no request."""
+        q = query.strip()
+        if not q:
+            raise ScryfallError("invalid", "nothing to search for")
+        key = f"{order}|{direction}|{page}|{q}"
+        if (hit := self.search_cache.get(key)) is not None:
+            return hit
+        params: dict[str, Any] = {"q": q, "order": order, "dir": direction}
+        if page > 1:
+            params["page"] = page
+        resp = await self._request("GET", "/cards/search", params=params, interval=self.lookup_interval)
+        data = self._json(resp)
+        if data.get("object") == "error":
+            if resp.status_code == 404:
+                out: dict[str, Any] = {"cards": [], "has_more": False, "total_cards": 0, "warnings": []}
+                self.search_cache.put(key, out)
+                return out
+            raise ScryfallError("invalid", str(data.get("details") or "Scryfall could not read that search"))
+        if data.get("object") != "list" or not isinstance(data.get("data"), list):
+            raise ScryfallError("contract", "Scryfall search returned an unexpected body")
+        total = data.get("total_cards")
+        warnings = data.get("warnings")
+        out = {
+            "cards": [
+                browse_row(c) for c in data["data"] if isinstance(c, dict) and c.get("object") == "card"
+            ],
+            "has_more": bool(data.get("has_more")),
+            "total_cards": total if isinstance(total, int) else None,
+            "warnings": [str(w) for w in warnings if isinstance(w, str)]
+            if isinstance(warnings, list)
+            else [],
+        }
+        self.search_cache.put(key, out)
+        return out
+
+    async def sets_list(self) -> list[dict[str, Any]]:
+        """Every set (``GET /sets``, one request of about 1 MB), newest first as Scryfall lists them,
+        cut to what the card search's set and block pickers show; kept a day."""
+        if (hit := self.catalogs.get("sets")) is not None:
+            return hit
+        resp = await self._request("GET", "/sets", interval=self.lookup_interval)
+        data = self._json(resp)
+        rows = data.get("data")
+        if data.get("object") != "list" or not isinstance(rows, list):
+            raise ScryfallError("contract", "Scryfall's set list has an unexpected shape")
+        out = [
+            {
+                "code": str(r["code"]).lower(),
+                "name": str(r.get("name") or r["code"]),
+                "type": str(r.get("set_type") or ""),
+                "released": str(r.get("released_at") or ""),
+                "block_code": str(r.get("block_code") or "").lower(),
+                "block": str(r.get("block") or ""),
+                "digital": bool(r.get("digital")),
+            }
+            for r in rows
+            if isinstance(r, dict) and isinstance(r.get("code"), str) and r["code"]
+        ]
+        self.catalogs.put("sets", out)
+        return out
+
+    async def catalog(self, name: str) -> list[str]:
+        """One of Scryfall's catalogs (``GET /catalog/{name}``, e.g. ``creature-types``); kept a day."""
+        if not re.fullmatch(r"[a-z-]{3,40}", name):
+            raise ScryfallError("invalid", "no such catalog")
+        key = f"catalog:{name}"
+        if (hit := self.catalogs.get(key)) is not None:
+            return hit
+        resp = await self._request("GET", f"/catalog/{name}", interval=self.lookup_interval)
+        data = self._json(resp)
+        values = data.get("data")
+        if data.get("object") != "catalog" or not isinstance(values, list):
+            raise ScryfallError("contract", f"Scryfall's {name} catalog has an unexpected shape")
+        out = [v for v in values if isinstance(v, str) and v]
+        self.catalogs.put(key, out)
         return out
 
     async def commander_names(self, query: str, *, limit: int = 10) -> list[str]:

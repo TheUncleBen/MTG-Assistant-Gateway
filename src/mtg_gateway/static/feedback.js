@@ -155,18 +155,45 @@
   // Inside the Android app: the account menu's App section calls the app through window.MtgNative
   // (the server renders those buttons from the app's user agent; the class is also set here in
   // case a proxy rewrote the user agent).
+  // The app's methods are called on window.MtgNative itself: Android's bridge refuses a method
+  // called on anything else (a copy in a variable called on its own does nothing at all).
+  // data-native-arg, when present, is passed as the one argument.
   if (window.MtgNative) {
+    var nativeApp = window.MtgNative;
+    var callNative = function (name, el) {
+      var arg = el.getAttribute("data-native-arg");
+      return arg === null ? nativeApp[name]() : nativeApp[name](arg);
+    };
     document.body.classList.add("app");
     // An app older than this page has no such action: leave its button out rather than show a dead one.
     var actions = document.querySelectorAll("[data-native]");
     for (var k = 0; k < actions.length; k++) {
-      if (typeof window.MtgNative[actions[k].getAttribute("data-native")] !== "function") actions[k].setAttribute("hidden", "");
+      if (typeof nativeApp[actions[k].getAttribute("data-native")] !== "function") actions[k].setAttribute("hidden", "");
+    }
+    // A box whose parts depend on the app's state (the Notifications card's "this phone" part):
+    // data-native-state names the method that returns it; only the children whose
+    // data-native-show matches are shown.
+    var stateBoxes = document.querySelectorAll("[data-native-state]");
+    for (var q = 0; q < stateBoxes.length; q++) {
+      var box = stateBoxes[q], method = box.getAttribute("data-native-state"), now = "";
+      if (typeof nativeApp[method] === "function") { try { now = String(callNative(method, box)); } catch (err) { now = ""; } }
+      var parts = box.querySelectorAll("[data-native-show]");
+      for (var p = 0; p < parts.length; p++) {
+        if (parts[p].getAttribute("data-native-show").split(" ").indexOf(now) < 0) parts[p].setAttribute("hidden", "");
+        else parts[p].removeAttribute("hidden");
+      }
+      // Just saved with notifications on (?connect=1): press the connect button once for the person.
+      var auto = box.querySelector("[data-native-auto]");
+      if (auto && !auto.closest("[hidden]") && /[?&]connect=1(&|$)/.test(location.search)) {
+        try { history.replaceState(null, "", location.pathname + location.search.replace(/([?&])connect=1(&|$)/, "$1").replace(/[?&]$/, "") + location.hash); } catch (err) { /* keep the address */ }
+        try { callNative(auto.getAttribute("data-native"), auto); } catch (err) { /* older app */ }
+      }
     }
     document.addEventListener("click", function (e) {
       var b = e.target instanceof Element ? e.target.closest("[data-native]") : null;
       if (!b) return;
-      var fn = window.MtgNative[b.getAttribute("data-native")];
-      if (typeof fn === "function") { e.preventDefault(); closeMenus(null); try { fn(); } catch (err) { /* older app */ } }
+      var name = b.getAttribute("data-native");
+      if (typeof nativeApp[name] === "function") { e.preventDefault(); closeMenus(null); try { callNative(name, b); } catch (err) { /* older app */ } }
     });
   } else {
     var nativeOnly = document.querySelectorAll("[data-native]");
@@ -212,17 +239,38 @@
   // 5. A card image that cannot be loaded (Scryfall down, an old link) shows the card's name on a
   //    plain tile instead of the browser's broken-image glyph. Inline onerror handlers are not
   //    allowed by the pages' script policy, so the error is caught here, on its way up.
+  //    The tile takes the picture's own classes, so it lands in the picture's place and size in
+  //    a row or grid (an editor row's 40 px thumbnail stays a 40 px cell, never an extra one);
+  //    a tile too small for words is the plain tile a row without a picture shows, its name
+  //    kept for screen readers and as a tooltip.
   document.addEventListener("error", function (e) {
     var img = e.target;
     if (!(img instanceof HTMLImageElement) || img.classList.contains("img-broken")) return;
     if (img.closest(".topbar") || img.classList.contains("av")) return;
+    var own = img.className;
     img.classList.add("img-broken");
     var ph = document.createElement("span");
-    ph.className = "ph img-fallback";
-    ph.textContent = img.getAttribute("alt") || img.getAttribute("title") || "Image unavailable";
-    ph.setAttribute("role", "img");
-    ph.setAttribute("aria-label", ph.textContent + " (image unavailable)");
-    if (img.parentNode) img.parentNode.insertBefore(ph, img.nextSibling);
+    ph.className = (own ? own + " " : "") + "ph img-fallback";
+    var name = img.getAttribute("alt") || img.getAttribute("title") || "";
+    // a decorative picture (alt="": the card's name is already in its row) stays silent for
+    // screen readers when it fails too; one with a real alt keeps that name
+    var decorative = img.hasAttribute("alt") && !img.getAttribute("alt").trim();
+    ph.textContent = name || "Image unavailable";
+    if (decorative) {
+      ph.setAttribute("aria-hidden", "true");
+    } else {
+      ph.setAttribute("role", "img");
+      ph.setAttribute("aria-label", name ? name + " (image unavailable)" : "Image unavailable");
+    }
+    if (!img.parentNode) return;
+    img.parentNode.insertBefore(ph, img.nextSibling);
+    // a thumbnail's slot (28-56 px wide in the app's rows) is too narrow for a name; a tile
+    // whose size came from its words alone keeps them (it would fold to nothing without)
+    if (ph.getBoundingClientRect().width > 0 && ph.getBoundingClientRect().width < 72) {
+      ph.classList.add("img-fallback-mini");
+      if (ph.getBoundingClientRect().height < 16) ph.classList.remove("img-fallback-mini");
+      else ph.setAttribute("title", ph.getAttribute("aria-label") || ph.textContent);
+    }
   }, true);
 
   // 6. A deep link to an element whose id carries a member's text (#cat-Ramp, #card-Sol%20Ring):

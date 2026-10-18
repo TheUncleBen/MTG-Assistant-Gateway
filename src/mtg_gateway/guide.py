@@ -16,6 +16,7 @@ box, keeps the rail's current entry in step with the reader's position and shows
 from __future__ import annotations
 
 import html
+import re
 from typing import TYPE_CHECKING
 
 from starlette.requests import Request
@@ -29,6 +30,7 @@ if TYPE_CHECKING:
     from mcp.server.mcpserver import MCPServer
 
     from .app import AppState
+    from .config import LiveSettings
 
 _esc = html.escape
 
@@ -40,6 +42,14 @@ GUIDE_CSS = """
 .gsearch label{display:block;font-weight:700;margin-bottom:.25rem}
 .gsearch input[type=search]{width:100%}
 .gsearch .status{min-height:1.2em;margin:.35rem 0 0}
+.guide .gresults{list-style:none;margin:.35rem 0 0;padding:0}
+.guide .gresults li{margin:0 0 .25rem}
+.gresults a{display:block;padding:.4rem .6rem;border-radius:var(--radius);color:var(--text);
+  text-decoration:none;border:1px solid var(--border-soft)}
+.gresults a:hover,.gresults a:focus-visible{background:var(--surface-2);color:var(--text)}
+.gresults .t{display:block;font-weight:700;overflow-wrap:anywhere}
+.gresults .snip{display:block;color:var(--text-muted);font-size:.86rem;overflow-wrap:anywhere}
+.gresults mark{background:var(--orange-tint);color:var(--text);border-radius:2px;padding:0 .1rem}
 details.gnav{margin:0 0 .5rem}
 details.gnav > summary{list-style:none;cursor:pointer;user-select:none;width:100%}
 details.gnav > summary::-webkit-details-marker{display:none}
@@ -82,11 +92,23 @@ details.gnav > summary::-webkit-details-marker{display:none}
 .guide .steps li::before{content:counter(step);flex:0 0 1.6rem;height:1.6rem;border-radius:50%;
   background:var(--orange);color:var(--on-orange);font-weight:900;display:inline-flex;align-items:center;
   justify-content:center;font-size:.9rem}
-.guide .tbl{overflow-x:auto;max-width:100%}
+.guide .tbl{overflow-x:auto;max-width:100%;container-type:inline-size}
 .guide table{border-collapse:collapse;width:100%;font-size:.95rem}
-.guide th,.guide td{text-align:left;vertical-align:top;padding:.4rem .5rem;overflow-wrap:anywhere;
+.guide th,.guide td{text-align:left;vertical-align:top;padding:.4rem .5rem;overflow-wrap:break-word;
   border-bottom:1px solid var(--border-soft)}
 .guide th{background:var(--surface-2);font-weight:700}
+/* Where four columns would squeeze to a word a line (a phone, or large text: the query is in em, so
+   it follows the text size), each row is a block and each cell sits under its column's name. The
+   roles keep it a table for screen readers; the names come from data-label, with no spoken text. */
+@container (max-width:40em){
+  .guide table,.guide tbody,.guide tr,.guide td{display:block;width:auto}
+  .guide thead{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);
+    white-space:nowrap}
+  .guide tbody tr{border-bottom:1px solid var(--border-soft);padding:.35rem 0}
+  .guide tbody td{border:0;padding:.15rem .5rem}
+  .guide td[data-label]::before{content:attr(data-label);content:attr(data-label) / "";display:block;
+    font-size:.85em;font-weight:700;color:var(--text-muted)}
+}
 .guide code,.guide kbd{font:inherit;font-size:.9em;background:var(--surface-2);border-radius:3px;
   padding:.05rem .3rem}
 .guide kbd{border:1px solid var(--border);font-weight:700;white-space:nowrap}
@@ -118,7 +140,7 @@ PARTS: list[tuple[str, str, str, str, list[tuple[str, str, str]]]] = [
             ("tut-link", "link", "Link Archidekt"),
             ("tut-connect", "report", "Connect your assistant"),
             ("tut-first-edit", "edit", "Your first deck edit"),
-            ("tut-first-sim", "stats", "Your first simulation"),
+            ("tut-first-sim", "stats", "Your first solo test"),
         ],
     ),
     (
@@ -181,6 +203,34 @@ def _h4(hid: str, label: str) -> str:
     return f"<h4 id='{hid}'>{_esc(label)}{_anchor(hid, label)}</h4>"
 
 
+def _stackable(page: str) -> str:
+    """Each reference table's cells carry their column's name (``data-label``) for the stacked layout
+    on narrow screens or large text, and the table its roles, which ``display:block`` would drop."""
+
+    def one(m: re.Match[str]) -> str:
+        head, body = m.group(1), m.group(2)
+        names = [html.unescape(re.sub(r"<[^>]+>", "", h)) for h in re.findall(r"<th>(.*?)</th>", head, re.S)]
+        head = head.replace("<tr>", "<tr role='row'>").replace("<th>", "<th role='columnheader'>")
+
+        def row(r: re.Match[str]) -> str:
+            cells = iter(names)
+            return (
+                "<tr role='row'>"
+                + re.sub(
+                    r"<td>", lambda _c: f"<td role='cell' data-label='{_esc(next(cells, ''))}'>", r.group(1)
+                )
+                + "</tr>"
+            )
+
+        body = re.sub(r"<tr>(.*?)</tr>", row, body, flags=re.S)
+        return (
+            f"<table role='table'><thead role='rowgroup'>{head}</thead>"
+            f"<tbody role='rowgroup'>{body}</tbody></table>"
+        )
+
+    return re.sub(r"<table><thead>(.*?)</thead><tbody>(.*?)</tbody></table>", one, page, flags=re.S)
+
+
 def _nav(parts: list[tuple[str, str, str, str, list[tuple[str, str, str]]]]) -> str:
     items = []
     for pid, ic, title, _lead, sections in parts:
@@ -198,24 +248,38 @@ def guide_body(
     writes_enabled: bool,
     has_collection: bool,
     max_rows: int = modes.DEFAULT_MAX_ROWS,
+    big_rows: int = modes.DEFAULT_BIG_EDIT_ROWS,
     archidekt_backups: bool = True,
     backup_folder: str = "MTG Gateway backups",
     watchlists: bool = False,
+    live: LiveSettings | None = None,
 ) -> str:
+    if live is not None:  # the approval rows as set now (live settings), over the start-up values
+        max_rows = int(live.get("auto_apply_max_rows"))
+        big_rows = int(live.get("auto_big_edit_rows"))
     folder = _esc(backup_folder)
     writes = (
         "Edits are switched on here: what you save in the app goes to Archidekt at once, and an "
         "approved proposal from your assistant is applied for you."
         if writes_enabled
-        else "Edits are switched off on this gateway for now: your saves and your assistant's proposals "
-        "are kept as proposals and applied once the person running it turns writes on."
+        else "Archidekt writes are switched off on this gateway for now: what you save in the app and "
+        "what your assistant proposes stay waiting, and can be applied once the person who runs the "
+        "gateway switches writes on."
     )
+    box_ticked = bool(live.get("archidekt_backup_box_default")) if live is not None else False
     backup_box = (
-        "The save bar has a tick box, <strong>Also keep a backup copy on Archidekt</strong>, on by "
-        "default: unticking it skips only that extra copy for that one save."
+        (
+            "The save bar has a tick box, <strong>Also keep a backup copy on Archidekt</strong>, ticked "
+            "by default on this gateway: untick it to skip that extra copy for that one save."
+            if box_ticked
+            else "The save bar has a tick box, <strong>Also keep a backup copy on Archidekt</strong>, "
+            "unticked by default on this gateway: tick it to also keep that extra copy for that one save."
+        )
         if archidekt_backups
         else "The backup copy on Archidekt is switched off on this gateway, so no tick box is offered."
     )
+    backup_assistant = "Applies made by your assistant always make the copy. " if archidekt_backups else ""
+    backup_delete = "both the snapshot and the backup copy" if archidekt_backups else "the snapshot"
     # -- Tutorials --------------------------------------------------------------------------------
     tut_start = (
         f"<p>{_esc(site)} is a private companion to <strong>Archidekt</strong>. Everything you can do on "
@@ -235,10 +299,11 @@ def guide_body(
         "<li><span>Optional: <a href='#tut-connect'><strong>connect an assistant</strong></a> from the home "
         "page and ask it to research, simulate or edit for you. An assistant's edit comes back to you as a "
         "proposal.</span></li></ol>"
-        "<p class='tip'>On a phone the tabs at the bottom are Decks, Scan, Collection, Proposals and More; "
-        "the magnifier at the top opens the search box for cards and decks. More opens Home, History, Guide "
-        "and Account (and Admin). "
-        "Unfolded or on a tablet the tabs move to a rail down the left edge, with Search among them. "
+        "<p class='tip'>On a phone the tabs at the bottom are Home, Decks, Scan, Collection and More; "
+        "the magnifier at the top opens the search box for cards and decks. More opens Proposals, History, "
+        "Guide and Account (and Admin). "
+        "Unfolded or on a tablet the tabs move to a rail down the left edge with every page on it, Search "
+        "among them, and no More. "
         "Your account menu is your picture at the top right, and a tap anywhere else closes it.</p>"
     )
     tut_link = (
@@ -318,17 +383,18 @@ def guide_body(
         f"<p class='tip'>{_esc(writes)}</p>"
     )
     tut_first_sim = (
-        "<p>A simulation tells you how the deck plays on its own: how fast the commander lands, how "
-        "often the mana flows, how much damage goldfishing deals. A deck without a commander and with 60 "
-        "or more cards plays a 60-card game instead (20 life, on the play).</p>"
+        "<p>The solo test tells you how the deck plays on its own: how fast the commander lands, how "
+        "often the mana flows, how much damage it would deal to an opponent who does nothing. A deck "
+        "without a commander "
+        "and with 60 or more cards plays a 60-card game instead (20 life, on the play).</p>"
         "<ol class='steps'>"
-        "<li><span>Open one of your decks and press <strong>Run simulation</strong>. The button says the "
-        "run takes up to a minute and shows “Simulating…” while it does.</span></li>"
+        "<li><span>Open one of your decks and press <strong>Run full test</strong>. The button says the "
+        "solo test takes up to a minute and shows “Testing…” while it does.</span></li>"
         "<li><span>The report opens: the deck, its commander, the games run and when; the headline numbers "
         "as tiles with their 95% intervals (the turn the commander lands, the chance of 40 damage or a "
         "lethal board by the last turn, mulligans, land drops); four small charts (milestones reached by "
         "turn, the turn the commander was cast, mana available and damage per turn); in plain words what "
-        "the simulation could not model, with each group's share of the deck; and the validation verdict "
+        "the solo test could not model, with each group's share of the deck; and the validation verdict "
         "as a badge with the problems listed. The raw output stays, folded away at the end.</span></li>"
         "<li><span>Keep it: the buttons download the report as <strong>Markdown</strong> or as a "
         "self-contained <strong>HTML page</strong> (light and dark, no scripts) and <strong>Copy as "
@@ -336,7 +402,7 @@ def guide_body(
         "<li><span>Find it again under <a href='/history'>History</a> (filter by type: Reports). A report "
         "reused because the deck had not changed says so.</span></li></ol>"
         "<p>It is the same run the assistant makes for “goldfish this deck”: the statistics, the "
-        "validation and the goldfish simulation (300 games), so the numbers match whichever way it is "
+        "validation and the solo test (300 games), so the numbers match whichever way it is "
         "started.</p>"
     )
 
@@ -379,7 +445,7 @@ def guide_body(
         "<li><strong>Undo</strong> and <strong>Redo</strong> (beside Select cards, and the toast's Undo) "
         "take back or redo any change saved on the page, with the editor's keys: Ctrl+Z, and Ctrl+Shift+Z "
         "or Ctrl+Y. Removing a card that has notes asks first: Archidekt gives the gateway no way to "
-        "write notes, so they do not come back. Your own stack order is kept on this device only.</li>"
+        "write notes, so they do not come back. Your own stack order is kept with your account.</li>"
         "<li><strong>Quick add</strong> types a card name and takes you to the editor with it filled "
         "in.</li></ul>"
         f"<p class='tip'>{_esc(writes)}</p>"
@@ -388,8 +454,7 @@ def guide_body(
         "<ul>"
         "<li>The <strong>More</strong> menu in a deck's banner holds Deck settings, Export (text, JSON or "
         "CSV), History, Compare, Deck stats, the deck's page on Archidekt and <strong>Delete deck</strong>, "
-        "which asks you to type the deck's name and keeps a snapshot (and the Archidekt backup copy) "
-        "first.</li>"
+        f"which asks you to type the deck's name and keeps {backup_delete} first.</li>"
         "<li><strong>Deck settings</strong> changes the name, format, bracket, description and whether the "
         "deck is private or unlisted, and also sets the deck's <strong>cover image</strong>, its "
         "<strong>tags</strong> and the <strong>folder</strong> it sits in.</li>"
@@ -404,23 +469,50 @@ def guide_body(
         "is first saved as a <strong>proposal</strong>: the exact list of what would change.</p>"
         "<ol class='steps'>"
         "<li><span>Approve on the card the assistant shows in the chat (Reject can carry a reason), or "
-        "open <a href='/proposals'>Proposals</a>, which lists what is waiting, open one to read the diff "
-        "and press <strong>Apply</strong> or <strong>Reject</strong>.</span></li>"
-        "<li><span>Before the edit is applied, the gateway checks the deck has not changed in the "
-        f"meantime, saves a snapshot and puts a backup copy of the deck in a “{folder}” folder "
-        "on your Archidekt account, then reads the deck back to confirm.</span></li>"
+        "open <a href='/proposals'>Proposals</a>, which lists what is waiting by deck, oldest first. "
+        "Open one to read the diff and press <strong>Apply</strong> or <strong>Reject</strong>, or check "
+        "several and press <strong>Apply</strong>: the gateway shows the order first, then applies them "
+        "one deck at a time. A deck's own page shows its waiting changes at the top, and asking the "
+        "assistant what is waiting shows them as a card with <strong>Apply all</strong>.</span></li>"
+        "<li><span>Before the edit is applied, the gateway checks it still fits the deck, saves a "
+        + (
+            f"snapshot and puts a backup copy of the deck in a “{folder}” folder on your Archidekt account"
+            if archidekt_backups
+            else "snapshot"
+        )
+        + ", then reads the deck back to confirm.</span></li>"
+        "<li><span>After an apply, <strong>Undo</strong> puts the deck back as it was just before; it "
+        "says first if it would also take back later changes.</span></li>"
         "<li><span>Your own saves appear under Proposals too, already applied, so every change has a "
         "record.</span></li></ol>"
-        "<p><strong>Out of date:</strong> Archidekt is the master copy of your decks. When you open the "
-        "app, and regularly while proposals are waiting (every 30 minutes unless this gateway is set "
-        "otherwise), the gateway checks your decks on Archidekt; it only reads. If a deck changed after "
-        "a proposal for it was made, on archidekt.com, in another app or by another change applied "
-        "here, the proposal is marked <strong>out of date</strong> at once: Apply would be refused and "
-        "nothing sent, so reject it and ask for a new one. The check never changes a deck, a proposal, "
-        "a snapshot or your undo history.</p>"
-        "<p>On your Account page you can pick an approval mode: Manual (every change asks you), Semi-auto "
-        "(the assistant applies small, low-risk edits itself and asks about the rest) or Full auto. "
-        "Every change keeps a snapshot either way; <a href='#ref-approval'>Approval modes and risk "
+        "<p><strong>When the deck changes first:</strong> Archidekt is the master copy of your decks. When "
+        "you open the app, and regularly while proposals are waiting (every 30 minutes unless this "
+        "gateway is set otherwise), the gateway reads your decks on Archidekt; it only reads. If a deck "
+        "changed after a proposal for it was made, on archidekt.com, in another app or by another "
+        "change applied here, the gateway works the proposal out again on the deck as it is now. When "
+        "it still makes exactly the same change it shows <strong>Updated</strong> and can be applied as "
+        "before; when it no longer fits (a card it removes is gone, a count moved) it shows "
+        "<strong>Needs a look</strong> with the reason, and Apply is refused with nothing sent until the "
+        "assistant changes it or you reject it. A change that depends on one that was rejected, withdrawn, "
+        "failed or expired shows <strong>Held</strong>, and so does one that would replace a change "
+        "already applied. The check never changes a deck, a snapshot or your undo "
+        "history.</p>"
+        "<p>On your Account page you can pick an approval mode: Manual, shown as "
+        f"<strong>{_esc(modes.MODE_LABELS['manual'])}</strong> (every change asks you), Semi-auto, shown "
+        f"as <strong>{_esc(modes.MODE_LABELS['semi'])}</strong> (the assistant applies low-risk changes "
+        "itself, such as a small edit or a private copy of a deck, and asks about the rest) or Full auto, "
+        f"shown as <strong>{_esc(modes.MODE_LABELS['auto'])}</strong> (it "
+        "also applies bigger deck and collection edits and changes to a deck's details, except a "
+        f"restore, a commander change, a new deck, an edit of more than {int(big_rows)} rows, making a "
+        "deck public or unlisted, and any edit of a description that has formatting, such as bold text, "
+        "links or pictures). "
+        "Actions on your Archidekt account (likes, follows, comments and the like) and deleting a deck "
+        "always wait for your press, and so does a held change, a change waiting for another change "
+        "first, one another app had a hand in, one that replaces another app's change, or one that "
+        "another app's waiting change would replace. "
+        "When a change waits for your press, its card and "
+        "review page say why. "
+        "Every deck change keeps a snapshot either way; <a href='#ref-approval'>Approval modes and risk "
         "levels</a> has the exact rules.</p>"
         f"<p class='tip'>{_esc(writes)}</p>"
     )
@@ -435,8 +527,8 @@ def guide_body(
         "first)</strong>. Press it to see what would change.</span></li>"
         "<li><span>Confirm. <strong>Restore</strong> puts the deck back exactly as the snapshot had it, "
         "cards and the deck's own name, description, format, bracket and privacy alike.</span></li></ol>"
-        "<p>Or ask your assistant to “undo yesterday's change”: a restore is a proposal like any other, "
-        "always high risk, so it waits for your press unless you chose Full auto.</p>"
+        "<p>Or ask your assistant to “undo yesterday's change”: the restore comes to you as a proposal, "
+        "and a restore always waits for your press, whatever approval mode you chose.</p>"
     )
     how_compare = (
         "<p><strong>Compare with another deck…</strong> (More menu on a deck) pits the deck against a "
@@ -497,7 +589,7 @@ def guide_body(
         "<a href='/collection'>collection</a>, add them to one of your decks, start a new deck from them, "
         "or save the scan for later (your assistant can pick it up too).</span></li></ol>"
         "<p>You can also type or paste names instead of using the camera, and earlier scans are listed "
-        "under <strong>Sessions</strong>. On the Android app the <strong>Scan with phone camera</strong> "
+        "under <strong>Sessions</strong>. On the Android app the <strong>Scan with the app's camera</strong> "
         "button in the account menu uses the app's own camera panel.</p>"
         "<p>A scan is a draft that stays here as long as you like, up to a whole deck: fix misread cards, "
         "printings and quantities first, then send it to your collection or a deck, which removes the "
@@ -530,13 +622,16 @@ def guide_body(
         "with London mulligans, then draw, play, tap and next turn, all in your browser. A Commander deck "
         "starts with its commander in the command zone.</p>"
         "<p><strong>Play on EDHPlay</strong> takes the deck to EDHPlay, the free online table for "
-        "Commander: it copies the deck in EDHPlay's import format and opens EDHPlay in a new tab (in the "
-        "app, your phone's browser). The list has the commander first, then the rest of the deck with "
+        "Commander. A short box asks first; its <strong>Copy and Open EDHPlay.com</strong> copies the "
+        "deck in EDHPlay's import format and opens EDHPlay. The import steps show in that box the "
+        "first time and stay folded under <strong>How to import</strong> after that. The list has "
+        "the commander first, then the rest of the deck with "
         "each card's printing, then a Sideboard section with your companion and sideboard. EDHPlay's "
         "sideboard holds 15 cards, so anything past that is left out and a note names it; your "
         "maybeboard is not sent, and EDHPlay does not take tokens from a list, so add those there by "
-        "hand. On EDHPlay choose <strong>Create Deck</strong>, then <strong>Import</strong>: paste the "
-        "list and press <strong>Import &amp; Replace</strong>. EDHPlay cannot receive a deck by link, "
+        "hand. On EDHPlay go to <strong>My Decks</strong>, choose <strong>Add Deck</strong> and open the "
+        "new deck, then press <strong>Import</strong>: paste the list and press <strong>Import &amp; "
+        "Replace</strong>. EDHPlay cannot receive a deck by link, "
         "so after a change on Archidekt press the button again.</p>"
     )
     how_layout = (
@@ -553,8 +648,8 @@ def guide_body(
     how_app = (
         "<p>The <a href='/install?for=android'>Android app</a> shows these same pages as a "
         "native-feeling app with the phone "
-        "camera built in. Sign in once, then it opens on your home page. The app's own actions (scan with "
-        "the phone camera, reload, open in browser, change gateway) sit in the account menu at the top "
+        "camera built in. Sign in once, then it opens on your home page. The app's own actions (Scan with "
+        "the app's camera, Reload, Open in browser, Change gateway) sit in the account menu at the top "
         "right. Links to Archidekt or Scryfall open in your browser; gateway links shared from other apps "
         "open in the app.</p>"
         "<p>On a foldable, the folded screen has the tabs at the bottom and the unfolded screen moves them "
@@ -630,12 +725,21 @@ def guide_body(
             "the hand path",
         ),
         (
-            "Goldfish simulation of one deck or pasted list, stored with its stats and validation (a "
-            "pasted list is returned, not stored)",
-            "<code>run_deck_report</code> (+ <code>list_deck_reports</code>, <code>get_deck_report</code>)",
+            "Solo test (300 games, no opponents) of one deck or pasted list, stored with its stats and "
+            "validation (a pasted list is returned, not stored)",
+            "<code>run_deck_report</code> (+ <code>list_deck_reports</code>, <code>get_deck_report</code>, "
+            "<code>remove_card_model</code>)",
             "stores a report",
             "hides <code>goldfish_run</code>; takes the simulator's options; the deck page's Run "
-            "simulation is the hand path",
+            "full test is the hand path",
+        ),
+        (
+            "Play more Forge games for a report whose games have finished, against the same "
+            "opponents (on a comparison, both decks get the same number)",
+            "<code>play_more_games</code>",
+            "starts Forge games",
+            "the report page's Play more games button is the hand path, with the same rules: up to 50 "
+            "games a report, and nothing starts when the member's Forge queue is full",
         ),
         (
             "Draw odds; what the engine models for a deck",
@@ -682,7 +786,7 @@ def guide_body(
             "remove tags, set its cover",
             "<code>propose_deck_details</code>",
             "proposal (high)",
-            "applied with the same verified calls as the deck settings page",
+            "applied the same way as on the deck settings page",
         ),
         (
             "Undo: snapshots and restore (cards and the deck's name, description, format, bracket, privacy)",
@@ -718,12 +822,15 @@ def guide_body(
             "fixed sentences from the gateway's own data, with or without notifications",
         ),
         (
-            "Proposals: list, read, approve with the card's code, reject (with a reason on the card), apply",
+            "Proposals: list, read, approve with the card's code, reject (with a reason on the card), "
+            "apply; show the waiting ones as a card with Apply all; tidy them (amend, withdraw, combine)",
             "<code>list_my_proposals</code>, <code>get_proposal</code>, <code>confirm_proposal</code>, "
-            "<code>reject_proposal</code>, <code>apply_proposal</code>",
+            "<code>reject_proposal</code>, <code>apply_proposal</code>, <code>show_waiting_changes</code>, "
+            "<code>confirm_waiting</code> and <code>get_apply_result</code> (the card's buttons), "
+            "<code>amend_proposal</code>, <code>withdraw_proposal</code>, <code>combine_proposals</code>",
             "apply writes",
-            "<code>apply_proposal</code> succeeds only when the mode allows; an out-of-date proposal is "
-            "refused",
+            "<code>apply_proposal</code> succeeds only when the mode allows; one that would now do "
+            "something other than what was reviewed is not sent and waits as Needs a look",
         ),
     ]
     if watchlists:
@@ -757,8 +864,8 @@ def guide_body(
         "changes it worked out itself. <strong>Both reach:</strong> reading decks and collections, "
         "statistics, creating and editing decks, deck settings (folder, tags and cover included), "
         "cloning, restoring snapshots, collection changes, scan drafts; your path applies at once, the "
-        "assistant's is a proposal under your mode. The goldfish simulation of one deck and the "
-        "comparison of two are both paths: Run simulation and Compare on the deck page for people, "
+        "assistant's is a proposal under your mode. The solo test of one deck and the "
+        "comparison of two are both paths: Run full test and Compare on the deck page for people, "
         "<code>run_deck_report</code> and <code>compare_decks</code> for the assistant, same engine and "
         "settings.</p>"
     )
@@ -779,7 +886,7 @@ def guide_body(
             "<code>/decks/&lt;id&gt;</code>",
             "views, grouping, sorting, filter, the whole card on tap, the card menu, drag to move, Undo and "
             "Redo, "
-            "Quick add, Playtest, Goldfish, Play on EDHPlay, Run simulation, statistics with Probability "
+            "Quick add, Playtest, Goldfish, Play on EDHPlay, Run full test, statistics with Probability "
             "of draw and Deck "
             "checks, "
             "description, comments, like, bookmark, follow; More: Settings, Compare, Export, History, "
@@ -866,11 +973,16 @@ def guide_body(
         "<tbody>"
         + "".join(f"<tr><td>{_esc(p)}</td><td>{a}</td><td>{w}</td></tr>" for p, a, w in page_rows)
         + "</tbody></table></div>"
-        "<p>On a phone the tabs at the bottom are Decks, Scan, Collection, Proposals and More (Home, "
+        "<p>On a phone the tabs at the bottom are Home, Decks, Scan, Collection and More (Proposals, "
         "History, Guide, Account and Admin); Search is the magnifier at the top. From 600 px on a touch "
-        "screen the tabs are a rail down the left edge; a wider browser has the links in the top bar.</p>"
+        "screen every page is a tab on a rail down the left edge, with no More; a wider browser has the "
+        "links in the top bar, Home first.</p>"
     )
-    on_review_page = "<td>you press Apply on its review page</td>"  # R-142, in every mode
+    # in every mode; since 0.7.29 the card in the chat too, but never for a deck deletion
+    on_review_page = (
+        "<td>you press Approve on the card or Apply on its review page (deleting a deck, and an edit of a "
+        "comment that has formatting: on its review page only)</td>"
+    )
     ref_approval = (
         "<p>Your approval mode on the <a href='/account'>Account</a> page says how much your assistant "
         "may change on Archidekt without asking you first. It is your own setting and applies to nobody "
@@ -884,12 +996,20 @@ def guide_body(
         "<td>the assistant applies it</td><td>you press</td>"
         f"{on_review_page}</tr>"
         f"<tr><td><strong>Full auto</strong>: {_esc(modes.MODE_LABELS['auto'])}</td>"
-        f"<td>the assistant applies it</td><td>the assistant applies it</td>{on_review_page}</tr>"
+        "<td>the assistant applies it</td><td>the assistant applies it, except a restore, a commander "
+        f"change, a new deck, an edit of more than {big_rows} rows, making a deck public or unlisted, "
+        "and any edit of a description that has formatting, such as bold text, links or pictures: you "
+        "press</td>"
+        f"{on_review_page}</tr>"
         "</tbody></table></div>"
         f"<p><strong>Low risk:</strong> {_esc(modes.low_risk_text(max_rows))} "
         f"<strong>High risk:</strong> {_esc(modes.HIGH_RISK_TEXT)} "
         f"<strong>Always your own press:</strong> {_esc(modes.MEMBER_ONLY_TEXT)} "
-        "Every applied proposal keeps a snapshot first and is read back to verify.</p>"
+        "<strong>In every mode:</strong> a held change, a change waiting for another change first, one "
+        "another app had a hand in, one that replaces another app's change, or one that another app's "
+        "waiting change would replace waits for your press; its card and review page say why. "
+        "A change to one of your decks keeps a snapshot first, and deck and collection changes are read "
+        "back to check them.</p>"
         f"<p class='tip'>{_esc(modes.AUTO_WARNING)}</p>"
         f"{_h4('ref-approval-hand', 'Your own saves')}"
         "<p>A hand save needs no approval: pressing Save is it. It still keeps a snapshot, and asks "
@@ -981,27 +1101,33 @@ def guide_body(
 
     # -- Explanation ------------------------------------------------------------------------------
     exp_approvals = (
-        "<p>A hand save and an applied proposal travel the same path: a proposal record, a snapshot, the "
-        "Archidekt write, a read-back, an audit row. That is why every change, yours or the assistant's, "
-        "has a record under Proposals and History, and why every one of them can be undone.</p>"
+        "<p>A hand save and an applied proposal travel the same path: a proposal record, a snapshot when "
+        "it changes the cards or details of one of your decks, the Archidekt write, a read-back, an audit "
+        "row. That is why every change, yours or the assistant's, has a record under Proposals and "
+        "History, and why such a change to one of your decks can be undone by restoring its snapshot "
+        "(which does not put back the deck's folder, tags or cover).</p>"
         f"{_h4('exp-approvals-proposal', 'Proposals')}"
         "<p>An assistant never writes to Archidekt directly. It proposes: the exact list of rows that "
         "would change, stored on the gateway with a review page and, in a chat that shows cards, a card "
         "with Approve and Reject. Whether the assistant may then apply the proposal itself depends only on "
         "your approval mode and the proposal's risk level (<a href='#ref-approval'>the reference</a> has "
-        "the rules); your own saves count as approved by the press. Before anything is applied the "
-        "gateway checks the deck has not changed in the meantime, and after the write it reads the deck "
+        "the rules), except that a held change, a change waiting for another change first, one another "
+        "app had a hand in, one that replaces another app's change, or one that another app's waiting "
+        "change would replace always waits for your press; your own saves count as approved by "
+        "the press. Before anything is applied the "
+        "gateway checks the change still fits the deck as it is now, and after the write it reads the deck "
         "back to confirm what landed.</p>"
         f"{_h4('exp-approvals-snapshot', 'Snapshots and the backup copy')}"
-        "<p>Every apply takes a <strong>snapshot</strong> first: the deck as it was, cards and the deck's "
-        "own name, description, format, bracket and privacy, kept on the gateway and listed under History "
+        "<p>Every apply to one of your decks takes a <strong>snapshot</strong> first: the deck as it "
+        "was, cards and the deck's own name, description, format, bracket and privacy, kept on the "
+        "gateway and listed under History "
         "with <strong>Restore</strong>. The gateway can also put a <strong>backup copy</strong> of the "
         f"whole deck in a “{folder}” folder on your Archidekt account, so you have a copy "
         "even where this gateway is not. "
-        f"{backup_box} Applies made by your assistant always make the copy. Quick edits from the deck "
+        f"{backup_box} {backup_assistant}Quick edits from the deck "
         "page (the card menu and the viewer's quantity buttons) keep the gateway snapshot only, so a "
-        "one-card change does not fill your Archidekt folder with copies; deleting a deck keeps both the "
-        "snapshot and the backup copy first.</p>"
+        "one-card change does not fill your Archidekt folder with copies; deleting a deck keeps "
+        f"{backup_delete} first.</p>"
         f"<p class='tip'>{_esc(writes)}</p>"
     )
     exp_fresh = (
@@ -1121,18 +1247,21 @@ def guide_body(
             f"<h3 id='{sid}-h'>{icon(ic)}{_esc(label)}{_anchor(sid, label)}</h3>{bodies[sid]}</section>"
         )
 
-    main = "".join(
-        f"<section class='gpart' id='{pid}' aria-labelledby='{pid}-h'><header>"
-        f"<h2 id='{pid}-h'>{icon(ic)}{_esc(title)}{_anchor(pid, title)}</h2><p>{_esc(lead)}</p></header>"
-        + "".join(section(*s) for s in sections)
-        + "</section>"
-        for pid, ic, title, lead, sections in parts
+    main = _stackable(
+        "".join(
+            f"<section class='gpart' id='{pid}' aria-labelledby='{pid}-h'><header>"
+            f"<h2 id='{pid}-h'>{icon(ic)}{_esc(title)}{_anchor(pid, title)}</h2><p>{_esc(lead)}</p></header>"
+            + "".join(section(*s) for s in sections)
+            + "</section>"
+            for pid, ic, title, lead, sections in parts
+        )
     )
     search = (
         "<div class='gsearch' hidden><label for='guide-q'>Search the guide</label>"
         "<input id='guide-q' type='search' placeholder='A word or two, such as “snapshot” or “F10”' "
         "autocomplete='off' spellcheck='false' aria-describedby='guide-status'>"
-        "<p id='guide-status' class='status muted small' role='status' aria-live='polite'></p></div>"
+        "<p id='guide-status' class='status muted small' role='status' aria-live='polite'></p>"
+        "<ul id='guide-results' class='gresults' aria-label='Matching sections' hidden></ul></div>"
     )
     return (
         f"<div class='guide' id='top'><div class='gside'>{search}{_nav(parts)}</div>"
@@ -1157,10 +1286,11 @@ def add_guide_routes(server: MCPServer, state: AppState) -> None:
             "Guide",
             guide_body(
                 site=s.server_name,
+                live=state.decks.live,
                 writes_enabled=bool(s.writes_enabled),
                 has_collection=getattr(state, "collection", None) is not None,
                 max_rows=int(getattr(s, "auto_apply_max_rows", modes.DEFAULT_MAX_ROWS)),
-                archidekt_backups=bool(getattr(s, "archidekt_backups", True)),
+                archidekt_backups=bool(state.live.get("archidekt_backups")),
                 backup_folder=s.archidekt_backup_folder,
                 watchlists=bool(s.watchlists_enabled),
             ),

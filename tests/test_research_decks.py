@@ -1,27 +1,22 @@
-"""Research tools given a deck id or link read the deck as the member sees it (B1, F34 in the
-2026-10-11 live run: goldfish_annotate said "Deck not found" for the member's own private deck,
+"""Research tools given a deck id or link read the deck as the member sees it (in the
+2026-10-11 live run, goldfish_annotate said "Deck not found" for the member's own private deck,
 because Mystic Forge reads Archidekt anonymously). Also: a simulation's text names a stored copy
-only when the gateway stored one (F26), and the tool descriptions the gateway adds (F09, F10)."""
+only when the gateway stored one, and the tool descriptions the gateway adds."""
 
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 import pytest
-from mcp import Client
 from mcp.server.mcpserver import MCPServer
 from pydantic import BaseModel, ConfigDict, Field
 
-from mtg_gateway.archidekt import ArchidektClient, Pacer
-from mtg_gateway.mf_proxy import FULL_REPORT, MysticForgeProxy, names_deck, rewrite_text
+from mtg_gateway.mf_proxy import FULL_REPORT, names_deck, rewrite_text
 from mtg_gateway.reports import STORED_NOTE
 
-from .conftest import FakeIdP, Harness, make_settings, running, sse_json
-from .fake_archidekt import FakeArchidekt
+from .conftest import Stack, StackOptions, sse_json
+from .fake_mystic_forge import _GoldfishRunInput, _ValidateDecklistInput
 from .test_decks_and_proxy import (
-    _GoldfishRunInput,
-    _ValidateDecklistInput,
     call,
     linked_user,
     mcp_token,
@@ -72,20 +67,16 @@ def research_service(seen: list[str]) -> MCPServer:
     return mf
 
 
-class Stack:
-    def __init__(self, h: Harness, ark: FakeArchidekt, seen: list[str]):
-        self.h, self.ark, self.seen = h, ark, seen
-
-
 @pytest.fixture
-async def stack(tmp_path: Path, idp: FakeIdP):
-    ark = FakeArchidekt()
+def stack_options() -> StackOptions:
+    """Writes on with the shipped approval mode, and a Mystic Forge that records the decks it is
+    sent in ``stack.seen``."""
     seen: list[str] = []
-    settings = make_settings(tmp_path, writes_enabled=True, archidekt_base="https://ark.test/api")
-    client = ArchidektClient(settings.archidekt_base, "test-agent", Pacer(0.0), http=ark.client())
-    proxy = MysticForgeProxy("http://mf.test/mcp", client_factory=lambda: Client(research_service(seen)))
-    async with running(Harness(settings, idp, archidekt=client, mf_proxy=proxy)) as h:
-        yield Stack(h, ark, seen)
+    return StackOptions(
+        settings={"writes_enabled": True},
+        mystic_forge=lambda: research_service(seen),
+        started=lambda st: setattr(st, "seen", seen),
+    )
 
 
 def _text(result: dict) -> str:

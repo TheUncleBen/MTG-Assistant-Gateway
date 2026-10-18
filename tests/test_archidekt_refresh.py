@@ -6,30 +6,18 @@ from __future__ import annotations
 import base64
 import json
 import time
-from pathlib import Path
 
 import httpx
 import pytest
 from cryptography.fernet import Fernet
-from mcp import Client
 
 from mtg_gateway.archidekt import ArchidektClient, ArchidektError, Pacer, jwt_exp
-from mtg_gateway.mf_proxy import MysticForgeProxy
 
-from .conftest import FakeIdP, Harness, make_settings, running
+from .conftest import AUTO_PROXY, Stack, stack_with
 from .fake_archidekt import FakeArchidekt
-from .test_decks_and_proxy import Stack, _client, call, fake_mystic_forge, linked_user, structured
+from .test_decks_and_proxy import call, linked_user, structured
 
-
-@pytest.fixture
-async def stack(tmp_path: Path, idp: FakeIdP):
-    ark = FakeArchidekt()
-    settings = make_settings(
-        tmp_path, writes_enabled=True, approval_mode_default="auto", archidekt_base="https://ark.test/api"
-    )
-    proxy = MysticForgeProxy("http://mf.test/mcp", client_factory=lambda: Client(fake_mystic_forge()))
-    async with running(Harness(settings, idp, archidekt=_client(settings, ark), mf_proxy=proxy)) as h:
-        yield Stack(h, ark)
+stack_options = stack_with(AUTO_PROXY)
 
 
 def _fernet(stack: Stack) -> Fernet:
@@ -153,12 +141,13 @@ async def test_reactive_refresh_on_401_then_retry_succeeds(stack: Stack) -> None
     assert _audit_events(stack, "archidekt_link_expired") == []
 
 
-async def test_expired_access_token_by_clock_is_refreshed(stack: Stack) -> None:
+async def test_expired_access_token_by_clock_is_refreshed(stack: Stack, monkeypatch) -> None:
     """The fake rejects an access token whose exp has passed, like the real site."""
     h, ark = stack.h, stack.ark
     ark.access_ttl = 1
     token = await linked_user(stack)
-    time.sleep(1.1)
+    wall = time.time
+    monkeypatch.setattr(time, "time", lambda: wall() + 1.1)  # 1.1 s on, for the gateway and the fake
     ark.access_ttl = 3600
     out = structured(await call(h, token, "list_my_decks"))
     assert out["ok"] is True, out
@@ -228,3 +217,56 @@ async def test_refresh_that_races_an_unlink_does_not_resurrect_the_link(stack: S
     assert out["ok"] is False and out["error"] == "not_linked", out
     assert h.db.get_link("user-1") is None
     assert _audit_events(stack, "archidekt_session_refreshed") == []
+
+
+async def test_a_dropped_link_is_named_when_the_read_without_it_fails_too(stack: Stack) -> None:
+    """A linked member whose session Archidekt no longer accepts loses the link, and the deck is
+    then read without a sign-in. When that read is refused as well, the member is told the link
+    stopped working and where to link again, not only that the read without a sign-in failed."""
+    from mtg_gateway.decks import DeckError
+
+    h, ark = stack.h, stack.ark
+    await linked_user(stack)
+    ark.tokens.clear()  # the session and its refresh token are gone
+    ark.inject = [(401, None)] * 3  # the deck read, the refresh, then the read without a sign-in
+    with pytest.raises(DeckError) as err:
+        await h.app.state.gateway.decks.get_any_deck("user-1", "42", fresh=True)
+    assert err.value.kind == "not_linked"
+    assert "no longer accepts the stored session" in str(err.value)
+    assert "/account" in str(err.value)
+    assert h.db.get_link("user-1") is None
+    assert not ark.inject
+
+
+async def test_a_dropped_link_is_named_when_the_read_without_it_works(stack: Stack) -> None:
+    """When the read without a sign-in works after the member's link was dropped, the deck is
+    shown and the member is still told the link stopped working and where to link again: in the
+    assistant's deck answer and on the deck page. The deck the client cached carries no notice."""
+    from .test_decks_and_proxy import Browser
+
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    ark.tokens.clear()  # the session and its refresh token are gone; deck 42 is public
+    ark.inject = [(401, None)] * 2  # the signed-in deck read, then the refresh
+    out = structured(await call(h, token, "get_deck", {"deck_ref": "42"}))
+    assert out["ok"] is True, out
+    assert "no longer accepts the stored session" in out["link_notice"]
+    assert "/account" in out["link_notice"]
+    assert h.db.get_link("user-1") is None
+    cached = await h.app.state.gateway.decks.client.get_deck(None, "42")
+    assert cached.link_notice == ""
+    assert not ark.inject
+    # still unlinked: nothing was dropped on this read
+    again = structured(await call(h, token, "get_deck", {"deck_ref": "42"}))
+    assert "link_notice" not in again
+    b = Browser(h)
+    try:
+        await b.login()
+        ark.tokens.clear()
+        await linked_user(stack)  # linked again, then dropped once more on the page's read
+        ark.tokens.clear()
+        ark.inject = [(401, None)] * 2
+        page = (await b.http.get("/decks/42", headers={"cache-control": "max-age=0"})).text
+    finally:
+        await b.aclose()
+    assert "no longer accepts the stored session" in page

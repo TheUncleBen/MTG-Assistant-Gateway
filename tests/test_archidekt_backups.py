@@ -4,7 +4,14 @@ from __future__ import annotations
 
 import pytest
 
-from mtg_gateway.archidekt import BACKUP_FOLDER_NAME, ArchidektClient, ArchidektError, Pacer, backup_name
+from mtg_gateway.archidekt import (
+    BACKUP_FOLDER_NAME,
+    ArchidektClient,
+    ArchidektError,
+    Pacer,
+    backup_name,
+    rich_doc,
+)
 from tests.fake_archidekt import FakeArchidekt
 
 
@@ -32,7 +39,7 @@ async def test_folder_is_created_once_then_found() -> None:
 
 
 async def test_folder_differing_only_in_capitals_is_reused() -> None:
-    """QA F22: "MTG Gateway Backups" sat beside "MTG Gateway backups". The folder is matched
+    """Once "MTG Gateway Backups" sat beside "MTG Gateway backups". The folder is matched
     without regard to capitals, so an existing one is reused and no second one is made."""
     ark, client, token = await _client()
     ark.folders["alice"] = [{"id": 77, "name": BACKUP_FOLDER_NAME.upper(), "private": True}]
@@ -57,7 +64,7 @@ async def test_backup_copy_keeps_every_card_and_lands_in_the_folder() -> None:
     copy = await client.get_deck(token, new_id)
     assert new_id != "42" and copy.name == name
     assert ark.deck_folder[int(new_id)] == int(folder) and int(new_id) in ark.private
-    assert ark.decks[int(new_id)]["description"] == "Backup of deck 42 before proposal p1."
+    assert ark.decks[int(new_id)]["description"] == rich_doc("Backup of deck 42 before proposal p1.")
 
     def rows(d):  # noqa: ANN001, ANN202
         return sorted((c.name, c.quantity, tuple(sorted(c.categories)), c.modifier) for c in d.cards)

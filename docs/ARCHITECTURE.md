@@ -19,9 +19,11 @@ flowchart LR
     subgraph net["Private Docker network"]
       gw["mtg-gateway<br/>:8080"]
       mf["Mystic Forge<br/>:8000, not published"]
+      ntfy["ntfy<br/>notifications, not published"]
+      forge["Forge<br/>simulations, optional, not published"]
     end
     data[("data/ (SQLite)<br/>backups/")]
-    secrets[["Docker secrets<br/>3 files"]]
+    secrets[["Docker secrets<br/>4 files"]]
   end
 
   idp["Your OIDC identity provider<br/>Authentik, Keycloak, ..."]
@@ -32,6 +34,8 @@ flowchart LR
   claude & chatgpt & android & browser -- HTTPS --> proxy
   proxy -- HTTP --> gw
   gw -- MCP --> mf
+  gw -- "members' messages" --> ntfy
+  gw -- "simulation jobs" --> forge
   gw --- data
   secrets -.-> gw
   gw -- "OIDC sign-in (browser redirect)" --> idp
@@ -51,7 +55,8 @@ Claude / ChatGPT / Android app / browser
         ▼
   mtg-gateway :8080 ──MCP──▶ Mystic Forge :8000 ──▶ Scryfall, EDHREC, Spellbook, rules
         │   ├─ SQLite in data/, nightly copies in backups/
-        │   ├─ 3 Docker secrets (encryption key, cookie key, OIDC client secret)
+        │   ├─ ntfy (members' notifications) and Forge (simulations, optional), both private
+        │   ├─ 4 Docker secrets (encryption key, cookie key, OIDC client secret, ntfy token)
         │   ├─ sign-in ──▶ your OIDC identity provider
         │   └─ deck reads and edits ──▶ archidekt.com (as the signed-in user)
 ```
@@ -62,12 +67,14 @@ Claude / ChatGPT / Android app / browser
 | --- | --- | --- |
 | **mtg-gateway** | The product. An MCP server at `/mcp`, its own OAuth 2.1 server for AI clients, the browser pages, the Archidekt connection, card scanning, and the database | No, this is the thing you're deploying |
 | **Mystic Forge** | Card search, prices, rules, EDHREC, Commander Spellbook, precons, goldfish simulation. Upstream open-source project, built from a pinned commit with small patches | Optional. Set `MTG_MYSTIC_FORGE_URL` to an empty value and remove the Mystic Forge service; the research tools disappear, deck tools, proposals and scanning still work |
+| **ntfy** | Holds each member's notifications, for up to 12 hours, until the gateway's Android app picks them up through the gateway's own address. Upstream open-source server, on a private network with no published port | Not separately: notifications need it, and the stack files run it for you |
+| **Forge** | The rules engine for deck simulations: plays real games of a deck against precons. Upstream open-source engine, unmodified, behind a small job service | Optional and off by default (`FORGE_REPLICAS=0`, or the Compose `forge` profile); without it reports have no Forge games |
 | **Reverse proxy** | Gives the gateway an `https://` address on your domain | Any proxy that forwards to an HTTP backend and keeps the `Host` header. See [REVERSE-PROXY.md](REVERSE-PROXY.md) |
 | **Identity provider** | Who may sign in. The gateway never sees passwords | Any OpenID Connect provider that can send group membership in a claim (`MTG_OIDC_GROUPS_CLAIM`), or any provider at all if it already admits only the right people and you set `MTG_ALLOW_ANY_IDP_USER=true`. Authentik is the documented one; see [IDP-OTHERS.md](IDP-OTHERS.md) for the rest |
-| **Docker host** | Runs the two containers | Docker Compose on one machine ([DEPLOY-COMPOSE.md](DEPLOY-COMPOSE.md)) or a Swarm, with or without Portainer ([DEPLOY.md](DEPLOY.md)) |
+| **Docker host** | Runs the containers | Docker Compose on one machine ([DEPLOY-COMPOSE.md](DEPLOY-COMPOSE.md)) or a Swarm, with or without Portainer ([DEPLOY.md](DEPLOY.md)) |
 
-Both images are multi-arch (`linux/amd64` and `linux/arm64`), so a
-Raspberry Pi 4 or 5 is fine. The gateway idles around 60 MB of memory and
+The project's images (the gateway, Mystic Forge and Forge) are multi-arch
+(`linux/amd64` and `linux/arm64`), so a Raspberry Pi 4 or 5 is fine. The gateway idles around 60 MB of memory and
 Mystic Forge around 115 to 170 MB, measured on test machines rather than a Pi.
 
 ## What's fixed, and why
@@ -158,11 +165,12 @@ The assistant never changes a deck directly:
 2. The person approves it: with **Approve** on the card the AI app shows
    next to the proposal (an MCP App, see below) or on the review page with
    **Apply**. A person who chose a looser **approval mode** on their Account
-   page (see below) lets the assistant apply low-risk edits, or everything,
+   page (see below) lets the assistant apply low-risk changes, or most changes,
    itself; the gateway tells the assistant which in every proposal result.
-3. The gateway checks the deck hasn't changed since, saves a snapshot, makes
-   a private backup copy of the deck on Archidekt, applies the change, and
-   reads the deck back to confirm it.
+3. The gateway checks the change still fits the deck as it is now, saves a
+   snapshot, makes a private backup copy of the deck on Archidekt when backups
+   are on (the operator's setting), applies the change, and reads the deck
+   back to confirm it.
 4. Every step lands in the audit log. Any snapshot can be restored the same
    way.
 
@@ -265,11 +273,15 @@ For the exact devices and plans tested, see
   default: ask every time), `semi` (the assistant may apply a low-risk edit
   itself: at most `MTG_AUTO_APPLY_MAX_ROWS` review rows of card adds,
   removes, quantity, category, finish, printing, color tag or custom mana
-  value changes of at most four copies each, never the commander; or a
-  clone) or `auto` (the assistant may apply every deck and collection
-  change). No mode lets an assistant apply an Archidekt account action
+  value changes of at most four copies each, never a change to which cards
+  are the commanders or to the categories of a row in the commander zone, and never fewer copies of a card that has a
+  row in the commander zone and another row, both in the deck or both in the maybeboard or sideboard; or a
+  clone) or `auto` (the assistant may apply deck and collection changes,
+  except those Full auto still leaves to the member, `modes.auto_waits`, and
+  those that wait in every mode, `DeckService.press_reason` and
+  `rewritten_by_another_app`). No mode lets an assistant apply an Archidekt account action
   (likes, votes, bookmarks, follows, comments, new folders and collaborator
-  changes) or a deck deletion (R-142). The wording every page and doc uses
+  changes) or a deck deletion. The wording every page and doc uses
   for the modes comes from `modes.py`.
   The mode is read by the member's id when an apply is attempted, so one
   member's choice never reaches another's proposals, decks or apps; the
@@ -318,7 +330,9 @@ For the exact devices and plans tested, see
   calls (120 by default) and three at a time, so a looping assistant can't
   hammer Archidekt or starve other members. Across everyone, requests go one
   at a time, at least a second apart and at most 40 a minute; 429s pause
-  every request, only reads are retried (with jittered backoff), and
+  every request (an apply waits them out, up to 6 waits and 5 minutes in all,
+  without counting them towards the breaker), only reads are retried (with
+  jittered backoff), and
   anonymous reads and card lookups are briefly cached (OPERATIONS.md,
   "Archidekt rate limiting"). Requests carry the gateway's own User-Agent and
   are never disguised. Five failed Archidekt link attempts in 15 minutes block

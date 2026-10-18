@@ -1,4 +1,4 @@
-"""Moving between pages quickly (0.7.23, R-131): every /static file a page names carries its
+"""Moving between pages quickly (0.7.23): every /static file a page names carries its
 digest and is kept by the browser for a year, text files go out gzipped and a file the browser
 already has costs a 304; the shared stylesheets are files instead of 100 KB of inline CSS on every
 page; a deck page shown again within a few seconds (another view, Back) asks Archidekt nothing,
@@ -14,9 +14,10 @@ import re
 from mtg_gateway import theme
 from mtg_gateway.deckpage import DECK_CSS
 
-from .test_decks_and_proxy import Browser, Stack, call, linked_user, stack, structured
+from .conftest import AUTO_PROXY, Stack, stack_with
+from .test_decks_and_proxy import Browser, call, linked_user, structured
 
-__all__ = ["stack"]
+stack_options = stack_with(AUTO_PROXY)
 
 NAV = {"Sec-Fetch-Mode": "navigate", "Accept": "text/html"}
 STATIC_REF = re.compile(r"(?:src|href)='(/static/[^']+)'")

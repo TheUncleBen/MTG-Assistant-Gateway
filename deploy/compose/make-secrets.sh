@@ -1,5 +1,5 @@
 #!/bin/sh
-# Creates the three secret files docker-compose.yml expects, in ./secrets/
+# Creates the four secret files docker-compose.yml expects, in ./secrets/
 # (or MTG_SECRETS_DIR from the environment or .env). Existing files are left
 # alone, so it's safe to re-run.
 #
@@ -52,6 +52,13 @@ if [ ! -s "$dir/mtg_oidc_client_secret.txt" ]; then
   mv "$dir/mtg_oidc_client_secret.txt.tmp" "$dir/mtg_oidc_client_secret.txt"
   unset secret
   echo "mtg_oidc_client_secret created."
+fi
+
+if [ ! -s "$dir/mtg_ntfy_token.txt" ]; then
+  # An ntfy access token: tk_ and 29 lowercase letters and digits.
+  printf 'tk_%s' "$(LC_ALL=C tr -dc a-z0-9 </dev/urandom | head -c 29)" > "$dir/mtg_ntfy_token.txt.tmp"
+  mv "$dir/mtg_ntfy_token.txt.tmp" "$dir/mtg_ntfy_token.txt"
+  echo "mtg_ntfy_token created."
 fi
 
 # Compose mounts these files as they are, so the container's user (PUID) must

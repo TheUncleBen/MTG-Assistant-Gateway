@@ -28,7 +28,6 @@ ul.facts li b{font-weight:600;text-align:right;overflow-wrap:anywhere}
 (function () {
   "use strict";
   var B = Bridge, el = B.el, $ = B.$;
-  var MODES = { manual: "Ask me every time", semi: "Apply small edits without asking", auto: "Apply deck and collection changes without asking" };
 
   function fact(list, k, v, cls) {
     var li = el("li"); li.appendChild(el("span", "", k));
@@ -50,10 +49,12 @@ ul.facts li b{font-weight:600;text-align:right;overflow-wrap:anywhere}
       if (!sc.linked) todo.push("link your Archidekt account");
     }
     if ("writes_enabled" in sc) {
-      fact(list, "Deck changes", sc.writes_enabled ? "on" : "off on this gateway", sc.writes_enabled ? "ok" : "warn");
-      if (!sc.writes_enabled) todo.push("ask whoever runs the gateway to turn deck writes on (MTG_WRITES_ENABLED)");
+      // one writes-off wording, no setting names
+      fact(list, "Archidekt writes", sc.writes_enabled ? "on" : "switched off on this gateway", sc.writes_enabled ? "ok" : "warn");
+      if (!sc.writes_enabled) todo.push("ask whoever runs the gateway to switch Archidekt writes on");
     }
-    if (sc.approval_mode) fact(list, "Approval mode", MODES[sc.approval_mode] || String(sc.approval_mode));
+    // the same label as the Account page and the Guide (modes.MODE_LABELS via account_status)
+    if (sc.approval_mode) fact(list, "Approval mode", String(sc.approval_mode_label || sc.approval_mode));
     if (sc.gateway_version) fact(list, "Gateway", "version " + sc.gateway_version);
     var st = $("state");
     if (todo.length) { st.textContent = "setup needed"; st.className = "badge warn"; $("summary").textContent = "To use your assistant with Archidekt: " + todo.join("; ") + "."; }

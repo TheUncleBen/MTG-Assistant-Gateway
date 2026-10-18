@@ -8,7 +8,7 @@ from urllib.parse import parse_qs, urlparse
 import pytest
 
 from mtg_gateway import __version__
-from tests.conftest import GATEWAY, FakeIdP, Harness, make_settings, running, sse_json
+from tests.conftest import GATEWAY, FakeIdP, Harness, consent_stamp, make_settings, running, sse_json
 
 
 async def test_metadata_advertises_endpoints(gw: Harness):
@@ -459,7 +459,13 @@ async def test_registered_client_needs_consent_before_the_idp(gw: Harness, idp: 
     assert len(idp.token_calls) == calls_before
     deny_csrf = re.search(r"name='csrf' value='([0-9a-f]+)'", page.text).group(1)
     deny = await gw.http.post(
-        "/authorize/confirm", data={"state": login_id, "csrf": deny_csrf, "action": "deny"}
+        "/authorize/confirm",
+        data={
+            "state": login_id,
+            "csrf": deny_csrf,
+            "action": "deny",
+            "shown": consent_stamp(gw.settings, login_id),
+        },
     )
     assert parse_qs(urlparse(deny.headers["location"]).query)["error"] == ["access_denied"]
 
@@ -471,7 +477,8 @@ async def test_consent_page_refuses_browser_logins_and_foreign_tokens(gw: Harnes
     assert (await gw.http.get("/authorize/confirm", params={"state": state})).status_code == 400
     key = gw.http.cookies.get("__Host-mtg_login")
     csrf = gw.app.state.gateway.provider.consent_csrf(state, key)
-    post = await gw.http.post("/authorize/confirm", data={"state": state, "csrf": csrf, "action": "approve"})
+    form = {"state": state, "csrf": csrf, "action": "approve", "shown": consent_stamp(gw.settings, state)}
+    post = await gw.http.post("/authorize/confirm", data=form)
     assert post.status_code == 400
     # The form token of one login does not approve another.
     client = await gw.register()
@@ -480,7 +487,8 @@ async def test_consent_page_refuses_browser_logins_and_foreign_tokens(gw: Harnes
     sa = parse_qs(urlparse(a.headers["location"]).query)["state"][0]
     sb = parse_qs(urlparse(b.headers["location"]).query)["state"][0]
     wrong = gw.app.state.gateway.provider.consent_csrf(sa, gw.http.cookies.get("__Host-mtg_login"))
-    post = await gw.http.post("/authorize/confirm", data={"state": sb, "csrf": wrong, "action": "approve"})
+    form = {"state": sb, "csrf": wrong, "action": "approve", "shown": consent_stamp(gw.settings, sb)}
+    post = await gw.http.post("/authorize/confirm", data=form)
     assert post.status_code == 403
 
 

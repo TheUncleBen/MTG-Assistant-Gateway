@@ -238,3 +238,182 @@ def test_sixty_card_goldfish_by_keyboard_and_touch(server: Server) -> None:
         _shot(page, "goldfish-60-412")
         assert errors == []
         browser.close()
+
+
+GUIDE_CONTRAST = CONTRAST.replace(
+    'var sel = ".gf-head p, .gf-head a, .gf-zone h2, .gf-zone h2 span, .gf-empty, .gf-card .tag, "\n'
+    '    + ".gf-controls button";',
+    'var sel = ".gf-guide h2, .gf-guide p, .gf-guide li span, .gf-guide button, .gf-controls button";',
+)
+
+
+def _current_step(page) -> str | None:
+    return page.evaluate(
+        "() => { const li = document.querySelector('#gf-guide li[aria-current=step]');"
+        " return li && li.dataset.step; }"
+    )
+
+
+# phone, a folded Fold's cover screen, an unfolded Fold, a laptop
+@pytest.mark.parametrize("width", [320, 344, 717, 1366])
+@pytest.mark.parametrize("scheme", ["light", "dark"])
+def test_goldfish_guide_walks_a_first_game_and_can_be_hidden(server: Server, width: int, scheme: str) -> None:
+    """The page's own guide takes a first-time player through a game, marking the step the game
+    is at; hidden, it stays hidden for the account (on reload too) until How to play brings it back.
+    Readable (4.5:1) and no wider than the window on every screen, light and dark."""
+    from playwright.sync_api import sync_playwright
+
+    assert GUIDE_CONTRAST != CONTRAST
+    _chromium()
+    sid = server.sign_in_and_link()
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, width, color_scheme=scheme)
+        page.goto(f"{server.base}/decks/42/goldfish", wait_until="networkidle")
+        guide = page.locator("#gf-guide")
+        assert guide.is_visible() and page.locator("[data-guide=show]").is_hidden()
+        assert guide.locator("li").count() == 6
+        # phones show the step the game is at, and open all six on request; wider
+        # screens show all six and no such button
+        assert guide.locator("li:visible").count() == (1 if width <= 600 else 6)
+        assert _current_step(page) == "hand"
+        all_btn = guide.locator(".gf-allsteps")
+        if width <= 600:
+            assert all_btn.is_visible() and all_btn.get_attribute("aria-expanded") == "false"
+            all_btn.click()
+            assert guide.locator("li:visible").count() == 6
+            assert all_btn.inner_text() == "Show the current step only"
+            assert all_btn.get_attribute("aria-expanded") == "true"
+            assert _overflow(page) == 0
+            _shot(page, f"goldfish-guide-all-{width}-{scheme}")
+            all_btn.click()
+            assert guide.locator("li:visible").count() == 1 and all_btn.inner_text() == "Show all steps"
+        else:
+            assert all_btn.is_hidden()
+        worst, what = page.evaluate(GUIDE_CONTRAST)
+        assert worst >= 4.5, (worst, what)
+        assert _overflow(page) == 0
+        _shot(page, f"goldfish-guide-{width}-{scheme}")
+        # a mulligan, then keeping: the bottom step, then playing
+        page.locator("[data-act=mulligan]").click()
+        page.locator("[data-act=mulligan]").click()
+        page.locator("[data-act=keep]").click()
+        assert _current_step(page) == "bottom"
+        page.locator("#gf-hand .gf-card").first.click()
+        page.locator("[data-act=bottom]").click()
+        assert _current_step(page) == "land"
+        assert "done" in (guide.locator("li[data-step=hand]").get_attribute("class") or "")
+        lands = page.evaluate(
+            "() => JSON.parse(document.getElementById('goldfish-data').textContent).library"
+            ".filter(c => c.land).map(c => c.name)"
+        )
+        hand = page.locator("#gf-hand .gf-card")
+        land_at = next(
+            (i for i in range(hand.count()) if hand.nth(i).get_attribute("data-card") in lands), None
+        )
+        if land_at is not None:
+            _open_card(page, "hand", land_at)
+            _act(page, "Play to the battlefield")
+            assert _current_step(page) == "cast"
+            _open_card(page, "battlefield")
+            _act(page, "Tap")
+            assert _current_step(page) == "next"
+        page.locator("[data-act=next]").click()
+        page.locator("[data-act=next]").click()
+        assert _current_step(page) == "again"
+        # hide it: remembered for the account
+        with page.expect_response(lambda r: r.url.endswith("/goldfish/guide")) as saved:
+            guide.locator("[data-guide=hide]").click()
+        assert saved.value.status == 200 and saved.value.json()["hidden"] is True
+        assert guide.is_hidden()
+        show = page.locator("[data-guide=show]")
+        assert show.is_visible() and page.evaluate("() => document.activeElement.dataset.guide") == "show"
+        # the same size as the game's other buttons beside it
+        assert show.bounding_box()["height"] == page.locator("[data-act=reset]").bounding_box()["height"]
+        page.reload(wait_until="networkidle")
+        assert page.locator("#gf-guide").is_hidden() and page.locator("[data-guide=show]").is_visible()
+        with page.expect_response(lambda r: r.url.endswith("/goldfish/guide")):
+            page.locator("[data-guide=show]").click()
+        assert page.locator("#gf-guide").is_visible()
+        page.reload(wait_until="networkidle")
+        assert page.locator("#gf-guide").is_visible()
+        assert errors == []
+        browser.close()
+
+
+# The card size (it applies wherever card pictures show) on the Goldfish page: the same S / M / L
+# switch as the deck page, saved to the account, at phone, Fold and desktop widths, light and dark,
+# at normal and 200% text, with nothing wider than the window and the switch's text readable.
+SIZE_STATE = """() => {
+  const c = document.querySelector('#gf-hand .gf-card');
+  const seg = document.querySelector('.gf-size .sizeseg');
+  const lum = s => { const [r, g, b] = s.match(/[\\d.]+/g).slice(0, 3).map(v => {
+      v = v / 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; });
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
+  // the background as drawn: see-through layers (the pressed button's tint) over what is under them
+  const bg = e => { const layers = [];
+    for (; e; e = e.parentElement) { const m = getComputedStyle(e).backgroundColor.match(/[\\d.]+/g);
+      const a = m.length > 3 ? +m[3] : 1; if (a > 0) layers.push([+m[0], +m[1], +m[2], a]);
+      if (a >= 1) break; }
+    let c = [255, 255, 255];
+    for (const [r, g, b, a] of layers.reverse())
+      c = [r * a + c[0] * (1 - a), g * a + c[1] * (1 - a), b * a + c[2] * (1 - a)];
+    return 'rgb(' + c.join(', ') + ')'; };
+  const ratio = e => { const a = lum(getComputedStyle(e).color), b = lum(bg(e));
+    return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05); };
+  const r = seg.getBoundingClientRect();
+  const lbl = document.querySelector('.gf-size .lbl').getBoundingClientRect();
+  const first = [...document.querySelectorAll('.gf-controls > *')].find(e => e.getClientRects().length);
+  return {size: document.documentElement.getAttribute('data-card-size'),
+    card: c.getBoundingClientRect().width,
+    segInside: r.left >= -1 && r.right <= innerWidth + 1,
+    // every button whole inside the switch, none cut off by its edge and none narrower than its
+    // letter (the L button was once cut off on a folded Fold at 200% text)
+    whole: [...seg.querySelectorAll('button')].every(b => { const q = b.getBoundingClientRect();
+      return q.left >= r.left - 0.5 && q.right <= r.right + 0.5 && b.scrollWidth <= b.clientWidth + 1; }),
+    // the label beside the buttons, and lined up with the game's buttons above
+    row: lbl.top < r.bottom - 1 && r.top < lbl.bottom - 1 && lbl.right <= r.left + 1,
+    lined: Math.abs(lbl.left - first.getBoundingClientRect().left) <= 2,
+    contrast: Math.min(...[...seg.querySelectorAll('button')].map(ratio))};
+}"""
+
+
+@pytest.mark.parametrize("width", [344, 390, 673, 1366])
+@pytest.mark.parametrize("scheme", ["light", "dark"])
+def test_goldfish_cards_follow_the_card_size(server: Server, width: int, scheme: str) -> None:
+    from playwright.sync_api import sync_playwright
+
+    from .test_text_zoom_browser import TEXT_200
+
+    _chromium()
+    sid = server.sign_in_and_link()
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, width, color_scheme=scheme)
+        page.goto(f"{server.base}/decks/42/goldfish", wait_until="networkidle")
+        seen = {"m": page.evaluate(SIZE_STATE)}
+        assert seen["m"]["size"] == "m", seen
+        for size in ("s", "l"):
+            with page.expect_response("**/api/v1/prefs") as saved:
+                page.locator(f".gf-size [data-card-size-set={size}]").click()
+            assert saved.value.ok
+            seen[size] = page.evaluate(SIZE_STATE)
+            assert seen[size]["size"] == size, seen
+            assert page.get_attribute(f".gf-size [data-card-size-set={size}]", "aria-pressed") == "true"
+        assert seen["s"]["card"] < seen["m"]["card"] < seen["l"]["card"], seen
+        assert server.db.get_pref("user-1", "card.size") == "l"
+        # the account keeps it: the next visit draws the cards large
+        page.reload(wait_until="networkidle")
+        assert page.evaluate(SIZE_STATE)["size"] == "l"
+        for zoom in (None, TEXT_200):
+            if zoom:
+                page.evaluate(zoom)
+            for size in ("s", "m", "l"):
+                page.locator(f".gf-size [data-card-size-set={size}]").click()
+                got = page.evaluate(SIZE_STATE)
+                assert got["segInside"] and got["whole"], (size, zoom is not None, got)
+                assert got["contrast"] >= 4.5, (size, zoom is not None, got)
+                assert got["lined"] and (got["row"] or zoom is not None), (size, zoom is not None, got)
+                assert _overflow(page) == 0, (size, zoom is not None)
+            _contrast_ok(page)
+        _shot(page, f"goldfish-size-{width}-{scheme}")
+        browser.close()
+    assert errors == []
