@@ -447,6 +447,38 @@ async def test_an_assistants_proposal_applied_from_the_browser_keeps_its_backup_
         await b.aclose()
 
 
+async def test_a_saved_choice_of_no_backup_copy_holds_when_applied_later(stack: Stack) -> None:  # noqa: F811
+    """A member's own save that makes no backup copy (the deck editor with its box unticked, or
+    the deck page) and is left waiting (its question unanswered, or writes off) keeps that choice
+    when it is applied later from its review page or the Proposals page, which send no box."""
+    b = await linked(stack)
+    try:
+        deck = stack.ark.decks[42]
+        names = [c["card"]["oracleCard"]["name"] for c in deck["cards"] if c["categories"] != ["Commander"]]
+        editor = {
+            "kind": "edit",
+            "deck_id": "42",
+            "changes": [{"action": "remove", "card_name": n} for n in names[:9]],
+            "apply": True,
+            "archidekt_backup": False,
+        }
+        r = await api(b, "POST", "/api/v1/proposals", editor)
+        asked_editor = r.json()
+        page = {"changes": [{"action": "remove", "card_name": n} for n in names[9:18]]}
+        r = await api(b, "POST", "/api/v1/decks/42/edit", page)
+        asked_page = r.json()
+        for d in (asked_editor, asked_page):
+            assert d["needs_confirm"] is True, d
+            waiting = (await api(b, "GET", f"/api/v1/proposals/{d['proposal_id']}")).json()
+            assert waiting["state"] == "pending" and waiting["result"] is None, waiting
+            r = await api(b, "POST", f"/api/v1/proposals/{d['proposal_id']}/apply", {"version": d["version"]})
+            a = r.json()
+            assert r.status_code == 200 and a["state"] == "applied", r.text
+            assert a["result"].get("archidekt_backup") == "skipped" and not a["result"].get("backup_url"), a
+    finally:
+        await b.aclose()
+
+
 async def test_big_removal_asks_first_then_the_proposal_id_applies_it(stack: Stack) -> None:  # noqa: F811
     b = await linked(stack)
     try:

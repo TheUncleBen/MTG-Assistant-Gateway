@@ -173,6 +173,8 @@ BACKUPS_REMEMBERED = 256  # backup copies made recently whose name and descripti
 # seconds old. Every edit still takes its own snapshot.
 BACKUP_SHARE_SECONDS = 15 * 60
 BROWSER_CLIENT = "__browser__"  # the same value as pages.BROWSER_CLIENT_ID
+# Kept in a member's own proposal's result while it waits: its save asked for no backup copy.
+NO_BACKUP_KEY = "no_backup_copy"
 # An administrator acting on a member's account from the admin pages (unlink): recorded in the
 # member's own activity log as done by an administrator, never as the member's browser.
 ADMIN_CLIENT = "__admin__"
@@ -3041,6 +3043,16 @@ class DeckService:
             ]
         return out
 
+    def keep_no_backup(self, sub: str, proposal_id: str) -> None:
+        """Record on a member's own save (the deck page, Card search, the deck editor with its
+        backup box unticked) that it makes no backup copy on Archidekt, so an apply later (writes
+        switched on, or from its review page) keeps that choice. Only the member's own proposals:
+        an assistant's always keeps its copy."""
+        row = self.db.get_proposal(proposal_id, sub)
+        if row is None or row.get("created_by_client") != BROWSER_CLIENT:
+            return
+        self.db.edit_proposal_result(proposal_id, sub, lambda r: {**(r or {}), NO_BACKUP_KEY: True})
+
     def describe(self, sub: str, proposal_id: str) -> dict[str, Any]:
         # A note closed without settling its links (a restart, a cancel, expiry) holds its
         # dependents before anything about them is shown or decided.
@@ -3113,7 +3125,9 @@ class DeckService:
                 else {}
             ),
             "snapshot_id": row["snapshot_id"],
-            "result": row["result"],
+            "result": {k: v for k, v in row["result"].items() if k != NO_BACKUP_KEY} or None
+            if isinstance(row["result"], dict)
+            else row["result"],
             "review_url": f"{self.settings.public_url}/proposals/{row['id']}",
             # Which app made it ("browser", or "app: <its name> (<client id>)"), for the review page.
             "created_by": self._creator_label(row.get("created_by_client")),
@@ -3669,6 +3683,12 @@ class DeckService:
             via = "browser"  # otherwise the review page is an ordinary browser apply
         if archidekt_backup is False and via == "browser":
             row["archidekt_backup"] = False
+        own = row.get("created_by_client") == BROWSER_CLIENT and row.get("amended_by_client") in (
+            None,
+            BROWSER_CLIENT,
+        )
+        if own and (row.get("result") or {}).get(NO_BACKUP_KEY):
+            row["archidekt_backup"] = False  # the member's own save said so (keep_no_backup)
         creator = row.get("created_by_client")
         # "mcp" is the assistant's own apply_proposal call: allowed only when this member's
         # approval mode (modes.py) lets the assistant apply a proposal of this risk itself.

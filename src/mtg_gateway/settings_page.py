@@ -75,7 +75,9 @@ TEXT: dict[str, tuple[str, str]] = {
     ),
     "archidekt_backups": (
         "Keep a backup copy on Archidekt",
-        "Before an edit is applied, the deck is copied into the member's private backup folder on Archidekt.",
+        "Before an edit is applied, the deck is copied into the member's private backup folder on Archidekt "
+        "(not for the deck page's own saves, Card search's Add to deck, or the deck editor's save with its "
+        "box unticked).",
     ),
     "archidekt_backup_copies": (
         "Backup copies kept per deck",

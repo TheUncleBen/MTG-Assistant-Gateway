@@ -375,9 +375,9 @@ own linked account. Follow every step, in order.
 - Cards already in the deck keep their categories. A card new to the deck
   gets the `category` named in its `add` change, if any. A new deck gets the
   categories from its source list.
-- Before every applied edit the gateway keeps two backups: its own snapshot
-  and a private copy of the deck in the user's "MTG Gateway backups" folder
-  on Archidekt (shown by `list_snapshots` as `backup_url`). Those copies
+- Before every applied edit the gateway keeps its own snapshot and, when
+  backups are on, a private copy of the deck in the user's "MTG Gateway
+  backups" folder on Archidekt (shown by `list_snapshots` as `backup_url`). Those copies
   stay out of `list_my_decks`; mention them only when the user asks what
   backups exist or wants to undo. If an apply answers `backup_failed`,
   nothing changed and the proposal is still pending: say so and offer to

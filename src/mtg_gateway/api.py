@@ -371,6 +371,7 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
         else:
             # the deck page's Undo of a removal puts back the row's flags (row_flags; nobody else)
             p = await decks.propose(who.sub, deck_id, data.get("changes"), row_flags=True)
+            decks.keep_no_backup(who.sub, p["proposal_id"])  # also when it is applied later
             why = modes.hand_edit_confirm("edit", p.get("rows"))
             if why and data.get("confirmed") is not True:
                 pid = p["proposal_id"]
@@ -447,6 +448,8 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
             # when the page shows the reason and sends ``confirmed: true``. Bearer tokens (apps,
             # assistants) cannot use this: their proposals wait for the approval mode as always.
             if who.via == "browser" and data.get("apply") is True:
+                if data.get("archidekt_backup") is False:
+                    decks.keep_no_backup(who.sub, p["proposal_id"])  # also when it is applied later
                 why = modes.hand_edit_confirm("edit", p.get("rows"))
                 if why and data.get("confirmed") is not True:
                     return ok({**p, "applied": False, "needs_confirm": True, "why": why}, 201)
