@@ -11,6 +11,7 @@ import threading
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 _names = Path(tempfile.mkdtemp()) / "names.txt"
 _names.write_text("Liesa, Forgotten Archangel\nFire\nIce\nLim-Dûl's Vault\nSol Ring\nForest\n", "utf-8")
@@ -437,6 +438,50 @@ class Run(unittest.TestCase):
             self.assertEqual(sorted(fs.FREE_PLACES), [0, 1])
         finally:
             fs.QUEUE = old
+
+    def test_places_giving_back_at_once_leave_one_to_finish_the_run(self):
+        # every place sees a job waiting and gives back, each one pausing just after it lets go
+        # of the lock: exactly one place stays and the run still plays all its games
+        real_lock = threading.Lock
+        asked = threading.local()
+
+        def waiting():
+            asked.yes = True
+            return True
+
+        class PausingLock:
+            # pauses after a release that follows a waiting() check, so the other places reach
+            # the same check before this one has done anything else
+            def __init__(self):
+                self.lock = real_lock()
+
+            def acquire(self, *a, **k):
+                return self.lock.acquire(*a, **k)
+
+            def release(self):
+                self.lock.release()
+                if getattr(asked, "yes", False):
+                    asked.yes = False
+                    time.sleep(0.3)
+
+            def __enter__(self):
+                self.acquire()
+                return self
+
+            def __exit__(self, *exc):
+                self.release()
+
+        fs.SLICE_GAMES = 1
+        fs.MAX_PARALLEL = 4
+        fs.FREE_PLACES[:] = [0, 1, 2, 3]
+        deck = {"commander": ["Liesa, Forgotten Archangel"], "main": [[99, "Forest"]]}
+        job = fs.Job([deck, deck], 8, "Commander", 42, 4)
+        with mock.patch.object(fs, "waiting", waiting), mock.patch.object(fs.threading, "Lock", PausingLock):
+            fs.run_job(job)
+        view = job.view()
+        self.assertEqual(view["state"], "done")
+        self.assertEqual(view["games_done"], 8)
+        self.assertEqual(sorted(fs.FREE_PLACES), [0, 1, 2, 3])
 
     def test_a_job_cancelled_while_waiting_for_a_place_never_starts(self):
         old = fs.QUEUE
