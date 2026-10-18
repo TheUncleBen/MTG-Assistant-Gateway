@@ -930,7 +930,8 @@ OK_MESSAGES = {
     "that replaces another app's change, or one that another app's waiting change would replace. When "
     "a change waits for "
     "your press, its card and review page say why. A change to one of your decks keeps a snapshot you "
-    "can restore from History.",
+    "can restore from History; a collection change keeps none. Restoring a snapshot does not put back "
+    "a deck's folder, tags or cover.",
     # 0.7.29: several waiting changes applied with one press (batch.py), and Undo
     "rejected_some": "Rejected. Nothing was sent to Archidekt.",
     "undone": "Undone. The deck is back as it was before that change.",

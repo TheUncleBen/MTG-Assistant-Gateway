@@ -16,9 +16,11 @@ decks and connected apps:
 In every mode an assistant never applies a proposal that is held (a proposal it depends on was
 rejected, withdrawn or failed) or that another app changed after it was made.
 
-Every apply still snapshots the deck first, so an auto-applied change can be undone from the
-History page. The risk tiers are decided from the proposal's stored review rows, so a
-proposal is low risk only if what the review page would show is small and safe:
+Every apply to one of the member's decks snapshots the deck first, so an auto-applied deck change
+can be restored from the History page (a restore leaves the folder, tags and cover as they are); a
+collection change, a clone and a new deck keep no snapshot. The risk tiers are decided from the
+proposal's stored review rows, so a proposal is low risk only if what the review page would show is
+small and safe:
 
 * **low**: an edit to an existing deck or to the collection with at most ``max_rows`` rows
   (default 5), where every row adds, removes, changes the quantity, moves the category or
@@ -154,9 +156,10 @@ def mode_help(mode: str, *, max_rows: int = DEFAULT_MAX_ROWS, big_rows: int = DE
 # Shown next to the semi and auto choices, because turning them on has a real cost.
 AUTO_WARNING = (
     "An assistant can be tricked by text it reads (a web page, a deck description, a pasted "
-    "list) into making changes you did not ask for. With either auto mode such a change lands "
-    "on Archidekt without your press. A change to one of your decks still keeps a snapshot you "
-    "can restore from the History page; a collection change keeps none."
+    "list) into making changes you did not ask for. If you let your assistant apply changes "
+    "without asking, such a change can land on Archidekt without your press. A change to one of "
+    "your decks still keeps a snapshot you can restore from the History page; a collection change "
+    "keeps none. Restoring a snapshot does not put back a deck's folder, tags or cover."
 )
 
 
@@ -236,7 +239,7 @@ HAND_EDIT_CONFIRM_ROWS = 8  # or removing this many distinct cards
 
 def hand_edit_confirm(kind: str, rows: list[dict[str, Any]] | None) -> str | None:
     """Why a member's own edit in the app should ask "are you sure" before it is applied, or None
-    when it can go straight to Archidekt (with its snapshot, as every apply takes one)."""
+    when it can go straight to Archidekt (with its snapshot, as every apply to a deck takes one)."""
     if kind == "restore":
         return "This replaces the whole deck with the snapshot."
     if kind != "edit" or not rows:

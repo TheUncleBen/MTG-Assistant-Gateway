@@ -664,9 +664,12 @@ Every proposal result carries `approval_mode`, `risk`, `risk_reason` and
 `apply_proposal` or hand the decision to the member. The service re-checks
 the mode and the risk inside the apply itself, over MCP and over the REST
 API alike, so there is no path around it. An assistant apply the mode does
-not allow is logged as `apply_needs_user`. Every apply, in every mode,
-snapshots the deck first and backs it up on Archidekt, so an auto-applied
-change can be undone from the History page.
+not allow is logged as `apply_needs_user`. Every apply to one of the
+member's decks, in every mode, snapshots the deck first and, with backup
+copies on (`MTG_ARCHIDEKT_BACKUPS`), backs it up on Archidekt, so an
+auto-applied deck change can be restored from the History page; a restore
+does not put back the deck's folder, tags or cover. A collection change, a
+clone and a new deck keep no snapshot.
 
 Two settings are the operator's:
 
@@ -679,7 +682,7 @@ Two settings are the operator's:
 The trade-off, which the Account page states next to the choices: an
 assistant can be tricked by text it reads (a web page, a deck description, a
 pasted list) into proposing a change the member did not ask for, and in a
-semi or auto mode such a change lands on Archidekt without their press. In
+Semi-auto or Full auto such a change can land on Archidekt without their press. In
 manual mode a person's own press always sits between anything the assistant
 read and a write to Archidekt.
 

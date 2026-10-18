@@ -668,9 +668,10 @@ def _android(ctx: Context) -> Section:
 # -- the page and the Markdown --------------------------------------------------------------------
 
 INTRO = (
-    "These steps connect your AI assistant to this site. It can then read your decks, research cards and "
-    "propose deck changes that you approve. You need the account the owner gave you. You never need a "
-    "client ID, key or token, and you must never paste a password into a chat."
+    "These steps connect your AI assistant to this site. It can then read your decks and your "
+    "collection, research cards and propose changes that you approve. You need the account the owner "
+    "gave you. You never need a client ID, key or token, and you must never paste a password into a "
+    "chat."
 )
 
 

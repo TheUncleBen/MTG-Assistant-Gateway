@@ -135,9 +135,9 @@ Custom connectors work on Claude's Free, Pro, Max, Team and Enterprise plans
    - You first see the gateway's **Connect an application** page. It says "An application wants to connect to your
      account", names the application (**Claude**) and the host it's
      "identified by", lists what it'll be able to do (read your decks and
-     propose deck changes, and apply them only when you approve, unless you
-     chose an approval mode on your account page that lets it apply changes
-     without asking), and
+     your collection, and propose changes on your Archidekt account, and
+     apply them only when you approve, unless you chose an approval mode on
+     your account page that lets it apply changes without asking), and
      shows "After sign-in you go to" a host. That host should be
      `claude.ai`, Claude's sign-in return address for its hosted apps
      (reported). If it all looks right, press **Approve and sign in**. If
@@ -261,16 +261,19 @@ Actions on your Archidekt account (likes, votes, bookmarks, follows,
 comments, new folders and collaborator changes) and deleting a deck are
 never applied by an assistant: each one waits for your own press, in every mode, on the card in the chat or on its review page (deleting a deck, and an edit of a comment that has formatting: on the review page only). It is your own setting:
 it covers only your account, your decks and the apps you connected, and
-only you can change it, in your browser. In either auto mode the assistant
-applies what the mode allows with `apply_proposal` and tells you; the card
-then shows the change without buttons. Every change to one of your decks
-still keeps a snapshot you can restore from the History page. The cost: an assistant can be
-tricked by text it reads into proposing a change you did not ask for, and
-in an auto mode that change lands without your press.
+only you can change it, in your browser. In Semi-auto and Full auto the
+assistant applies what the mode allows with `apply_proposal` and tells you;
+the card then shows the change without buttons. A change to one of your
+decks still keeps a snapshot you can restore from the History page; a
+collection change keeps none. Restoring a snapshot does not put back a
+deck's folder, tags or cover. The cost: an assistant can be tricked by text
+it reads into making changes you did not ask for. If you let your assistant
+apply changes without asking, such a change can land on Archidekt without
+your press.
 
 Claude lets you set each tool to always allow, needs approval, or blocked
-(reported). Keep `apply_proposal` on **needs approval**: in an auto mode
-that's the tool that actually changes your deck. Claude's Research mode can
+(reported). Keep `apply_proposal` on **needs approval**: in Semi-auto and
+Full auto that's the tool that actually changes your deck or collection. Claude's Research mode can
 call connector tools without asking (reported). Everything except
 `apply_proposal`, `confirm_proposal` and `confirm_waiting` (the card's own
 buttons), `reject_proposal`, `amend_proposal`, `withdraw_proposal`,
