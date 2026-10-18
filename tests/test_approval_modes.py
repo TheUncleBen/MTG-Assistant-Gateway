@@ -3,6 +3,8 @@ page only, risk tiers from the review rows, and strict per-member isolation."""
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from mtg_gateway import modes
@@ -621,6 +623,69 @@ async def test_every_commander_change_waits_for_the_members_press(
     finally:
         await b.aclose()
     assert _commanders(ark) != before
+
+
+def _second_commander_row_first(ark) -> None:
+    """Give deck 42's commander a second, main-deck row listed before its commander-zone row."""
+    deck = ark.decks[42]
+    zone_row = next(c for c in deck["cards"] if c["card"]["oracleCard"]["name"] == AESI)
+    ark.next_rel_id += 1
+    other = {**json.loads(json.dumps(zone_row)), "id": ark.next_rel_id, "categories": ["Creatures"]}
+    deck["cards"].insert(deck["cards"].index(zone_row), other)
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"action": "set_quantity", "card_name": AESI, "quantity": 1},
+        {"action": "remove", "card_name": AESI, "quantity": 1},
+    ],
+)
+@pytest.mark.parametrize("mode", ["auto", "semi"])
+async def test_a_lowered_count_on_a_commander_with_two_rows_waits_and_keeps_the_commander(
+    stack: Stack, mode: str, change: dict
+) -> None:
+    """The commander has a main-deck row listed before its commander-zone row. Taking one copy
+    away waits for the member's press with a commander row, and once applied the commander-zone
+    row is the one kept."""
+    h, ark = stack.h, stack.ark
+    _second_commander_row_first(ark)
+    token = await linked_user(stack)
+    await _set_mode(h, mode)
+    assert _commanders(ark) == [AESI]
+    p = structured(await call(h, token, "propose_deck_changes", {"deck_id": "42", "changes": [change]}))
+    assert p["ok"] and p["state"] == "pending", p
+    assert "commander" in [r.get("kind") for r in p["rows"]]
+    assert p["risk"] == "high" and p["assistant_may_apply"] is False
+    out = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
+    assert out["ok"] is False and out["error"] == "browser_required"
+    assert ark.patches == []
+    b = Browser(h)
+    try:
+        await b.login()
+        r = await b.http.post(
+            f"/api/v1/proposals/{p['proposal_id']}/apply",
+            headers={"X-CSRF-Token": await b.csrf()},
+            json={"version": p["version"]},
+        )
+        assert r.status_code == 200 and r.json()["state"] == "applied", r.text
+    finally:
+        await b.aclose()
+    rows = [c for c in ark.decks[42]["cards"] if c["card"]["oracleCard"]["name"] == AESI]
+    assert [(c["quantity"], c["categories"]) for c in rows] == [(1, ["Commander"])]
+
+
+@pytest.mark.parametrize("name", ["commander", "COMMANDER"])
+async def test_a_move_into_the_commander_zone_under_another_case_waits(stack: Stack, name: str) -> None:
+    """A category that differs from the commander zone's name only in case counts as that zone
+    for approvals, so the move waits rather than applying."""
+    h = stack.h
+    token = await linked_user(stack)
+    await _set_mode(h, "auto")
+    changes = [{"action": "set_category", "card_name": "Sol Ring", "category": name}]
+    p = structured(await call(h, token, "propose_deck_changes", {"deck_id": "42", "changes": changes}))
+    assert "commander" in [r.get("kind") for r in p["rows"]], p
+    assert p["assistant_may_apply"] is False
 
 
 async def test_a_category_move_that_leaves_the_commanders_alone_still_applies_in_auto(stack: Stack) -> None:

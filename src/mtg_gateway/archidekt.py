@@ -536,6 +536,11 @@ class Deck:
         names.add("Commander")
         return names
 
+    def premier_keys(self) -> set[str]:
+        """``premier_categories`` casefolded, for the approval checks: a category that differs from
+        the commander zone's name only in case is treated as that zone, so such a change waits."""
+        return {n.casefold() for n in self.premier_categories()}
+
     def is_commander(self, card: DeckCard) -> bool:
         """Whether the card sits in the deck's commander zone (a premier category)."""
         premier = self.premier_categories()

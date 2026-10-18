@@ -1418,8 +1418,10 @@ def plan_zones(
     # removed or a card added under Commander changes the commanders as well, so the whole list's
     # commanders before and after are compared and the difference gets a commander row too.
     if not any(r.get("kind") == "commander" for r in lines):
-        was, now = _commanders_before_after(deck, changes, cats_want, {"main": after, "side": after_side})
-        if [n.lower() for n in was] != [n.lower() for n in now]:
+        was, now, unsure = _commanders_before_after(
+            deck, changes, cats_want, {"main": after, "side": after_side}
+        )
+        if unsure or [n.lower() for n in was] != [n.lower() for n in now]:
             lines.append(
                 _row("commander", before=", ".join(was) or "(none)", after=", ".join(now) or "(none)")
             )
@@ -1428,26 +1430,51 @@ def plan_zones(
 
 def _commanders_before_after(
     deck: Deck, changes: list[Change], cats_want: dict[int, list[str]], after: dict[str, dict[str, int]]
-) -> tuple[list[str], list[str]]:
+) -> tuple[list[str], list[str], bool]:
     """The deck's commanders (cards with a row in its commander zone: every category the deck
-    marks premier, plus "Commander", ``Deck.premier_categories``) now and once ``changes`` are
-    applied: rows ``cats_want`` (``category_plan_rows``) moves into or out of that zone, cards whose
-    copies all go (``after``, per zone), and adds that make a row in it."""
-    premier = deck.premier_categories()
+    marks premier, plus "Commander", ``Deck.premier_keys``, compared without case) now and once
+    ``changes`` are applied: rows ``cats_want`` (``category_plan_rows``) moves into or out of that
+    zone, cards whose copies all go (``after``, per zone), and adds that make a row in it.
+
+    The third value is True when a card with a row in the commander zone and other rows in the
+    same zone loses copies: ``build_payload`` folds such a card into its commander-zone row
+    (``_rows_kept_first``), but a lowered count on it always gets a commander row, so the member
+    sees it whatever the rows do."""
+    premier = deck.premier_keys()
     was: dict[str, str] = {}
     now: dict[str, str] = {}
+    unsure = False
     for zone in ZONES:
         left = {n.lower() for n, q in after[zone].items() if q > 0}
+        rows: dict[str, list[Any]] = {}
         for c in deck.cards_in(zone):
-            if premier.intersection(c.categories):
+            rows.setdefault(c.name.lower(), []).append(c)
+            if _in_premier(premier, c.categories):
                 was[c.name.lower()] = c.name
             cats = cats_want.get(c.relation_id, c.categories) if c.relation_id is not None else c.categories
-            if premier.intersection(cats) and c.name.lower() in left:
+            if _in_premier(premier, cats) and c.name.lower() in left:
                 now[c.name.lower()] = c.name
+        counts = {n.lower(): q for n, q in after[zone].items()}
+        for key, cards in rows.items():
+            if len(cards) > 1 and any(_in_premier(premier, c.categories) for c in cards):
+                if counts.get(key, sum(c.quantity for c in cards)) < sum(c.quantity for c in cards):
+                    unsure = True
     for ch in changes:
-        if ch.action == "add" and premier.intersection(_all_categories([ch])):
+        if ch.action == "add" and _in_premier(premier, _all_categories([ch])):
             now.setdefault(ch.card_name.lower(), ch.card_name)
-    return sorted(was.values(), key=str.lower), sorted(now.values(), key=str.lower)
+    return sorted(was.values(), key=str.lower), sorted(now.values(), key=str.lower), unsure
+
+
+def _in_premier(premier: set[str], categories: Any) -> bool:
+    """Whether any of ``categories`` is in the commander zone (``premier``: casefolded names)."""
+    return any(isinstance(c, str) and c.casefold() in premier for c in categories or ())
+
+
+def _rows_kept_first(deck: Deck, rows: list[Any]) -> list[Any]:
+    """A card's rows in the order ``build_payload`` folds them: its commander-zone rows first, so
+    a lowered count keeps the commander-zone row and removes the others."""
+    premier = deck.premier_keys()
+    return sorted(rows, key=lambda c: not _in_premier(premier, c.categories))
 
 
 MAX_RESTORE_ENTRIES = 150
@@ -1609,7 +1636,7 @@ def build_payload(
             if qty == sum(c.quantity for c in existing):
                 continue
         if existing:
-            primary, extras = existing[0], existing[1:]
+            primary, *extras = _rows_kept_first(deck, existing)
             payload.append(_entry("modify" if qty > 0 else "remove", primary, qty))
             payload.extend(_entry("remove", extra, 0) for extra in extras)
         else:
@@ -1630,7 +1657,7 @@ def build_payload(
         if qty == sum(c.quantity for c in existing):
             continue
         if existing:
-            primary, extras = existing[0], existing[1:]
+            primary, *extras = _rows_kept_first(deck, existing)
             payload.append(_entry("modify" if qty > 0 else "remove", primary, qty))
             payload.extend(_entry("remove", extra, 0) for extra in extras)
         else:
