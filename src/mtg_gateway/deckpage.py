@@ -2289,7 +2289,9 @@ ul.rows .hover img{width:100%;height:100%;display:block}
   ul.rows .set,ul.rows .price{display:none} }
 
 /* stack order handles (deck.js): drag, or arrow keys while focused */
-.stackgrip{position:relative;width:28px;min-width:28px;height:28px;min-height:28px;padding:0;
+/* button.stackgrip, so the 28 px drawn size wins over the theme's icon-only width (the control height,
+   44 px on touch); the ::before halo below is the finger target */
+button.stackgrip{position:relative;width:28px;min-width:28px;height:28px;min-height:28px;padding:0;
   margin:0 .25rem 0 0;cursor:grab;touch-action:none;user-select:none;-webkit-user-select:none;
   -webkit-touch-callout:none;color:var(--text-muted);font-size:1rem;line-height:1;flex:none}
 /* a 44 px target for a finger without making the header taller */

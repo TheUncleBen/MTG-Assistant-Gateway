@@ -921,8 +921,8 @@ OK_MESSAGES = {
     "does a held change, a change waiting for another change first, one another app had a hand in, one "
     "that replaces another app's change, or one that another app's waiting change would replace. When "
     "a change waits for "
-    "your press, its card and review page say why. Each change keeps a snapshot you can restore from "
-    "History.",
+    "your press, its card and review page say why. A change to one of your decks keeps a snapshot you "
+    "can restore from History.",
     # 0.7.29: several waiting changes applied with one press (batch.py), and Undo
     "rejected_some": "Rejected. Nothing was sent to Archidekt.",
     "undone": "Undone. The deck is back as it was before that change.",
@@ -1726,12 +1726,14 @@ def _proposal_body(p: dict[str, Any], csrf: str | None, shown: str, *, step: boo
             )
             apply_button = ("apply", "Apply: do this on Archidekt", "primary btn-lg")
         else:
+            where = "your collection" if p.get("kind") == "collection" else "your deck"
             ask = (
                 "<div class='apply'><h2>Apply to Archidekt?</h2>"
-                "<p><strong>Applying writes these changes to your deck on Archidekt.</strong></p>"
-                "<p class='small'>The gateway re-checks that the deck is unchanged, keeps a snapshot of it "
-                "from just before the edit, then applies the change and reads the deck back. Nothing happens "
-                "until you tap Apply.</p>"
+                f"<p><strong>Applying writes these changes to {where} on Archidekt.</strong></p>"
+                "<p class='small'>The gateway applies the changes, then reads the result back from "
+                "Archidekt. For a change to one of your decks, it first checks that the deck still matches "
+                "this proposal and keeps a snapshot of it from just before the edit. Nothing happens until "
+                "you tap Apply.</p>"
             )
             apply_button = ("apply", "Apply these changes to Archidekt", "primary btn-lg")
         body += (

@@ -179,18 +179,28 @@ def test_tab_reaches_the_deck_owner_before_the_deck_buttons(server: Server) -> N
 
 
 TOUCH_TARGETS = {
+    "/": ".topbar .icon-btn, a.brand, footer.site .links a, main .btn, main button,"
+    " main input:not([type=hidden])",
     "/reports": "a.rp-deck",
     "/collection?view=list": ".coll-totals a.ext",
     "/guide": ".guide h2 .anchor",
-    "/decks/42": ".curveaxis .mv, .rowbtn",
+    "/decks/42": ".curveaxis .mv, .rowbtn, .banner .social .soc",
+    "/decks/42?view=table": "ul.rows .row",
     "/decks/42/edit": ".addbox form.addcard .go .foil",
+    "/history?deck_id=42": ".hrow a.kind, .hrow a.name, .hrow details > summary, main .msel-btn,"
+    " main input#h-q",
+    "/history/reports/rep_touch": ".report .crumbs a, .report details summary",
+    "/account": "details:not(.dd) > summary",
 }
 
 
 def test_small_links_and_buttons_are_44px_targets_on_a_touch_screen(server: Server) -> None:  # noqa: F811
     """The report list's deck names, the collection's Open on Archidekt link, the Guide's heading
     anchors, the mana curve's axis buttons, the stats panel's card-picking buttons and the editor's Foil
-    tick were 17 to 28 px tall for a finger: the touch rule makes them 44 px now."""
+    tick were 17 to 28 px tall for a finger, and the theme's older touch rule made the top bar's
+    buttons, the brand, footer links, fold-outs, list links, crumbs, the banner's social buttons and
+    the table view's rows 40 px, and every standard button, input and select was 39 px (the theme's
+    control height): the touch rule makes them all 44 px now."""
     import time
 
     from playwright.sync_api import sync_playwright
@@ -216,6 +226,7 @@ def test_small_links_and_buttons_are_44px_targets_on_a_touch_screen(server: Serv
             )
             assert found, (path, sel)
             short += [f"{path} {c}: {h}px" for c, h in found if h < 44]
+            assert page.evaluate("() => document.documentElement.scrollWidth <= innerWidth"), path
         browser.close()
     assert short == [], "\n".join(short)
 
@@ -227,7 +238,7 @@ def test_member_text_no_longer_says_verify(server: Server) -> None:  # noqa: F81
     h = httpx.Client(base_url=server.base, cookies={"mtg_session": sid}, timeout=30)
     body = h.get(f"/proposals/{pending}").text
     assert "verif" not in body.lower(), re.findall(r".{40}verif.{40}", body, re.I)
-    assert "reads the deck back" in body
+    assert "reads the result back from Archidekt" in body
 
 
 def test_the_commander_question_fits_a_phone_and_its_buttons_are_finger_sized(server: Server) -> None:  # noqa: F811
