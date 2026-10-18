@@ -155,8 +155,8 @@ def mode_help(mode: str, *, max_rows: int = DEFAULT_MAX_ROWS, big_rows: int = DE
 AUTO_WARNING = (
     "An assistant can be tricked by text it reads (a web page, a deck description, a pasted "
     "list) into making changes you did not ask for. With either auto mode such a change lands "
-    "on Archidekt without your press. Every change still keeps a snapshot you can restore from "
-    "the History page."
+    "on Archidekt without your press. A change to one of your decks still keeps a snapshot you "
+    "can restore from the History page; a collection change keeps none."
 )
 
 

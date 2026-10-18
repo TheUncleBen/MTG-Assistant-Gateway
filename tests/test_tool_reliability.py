@@ -446,6 +446,27 @@ async def test_a_manual_collection_proposal_carries_the_in_chat_card(manual: Sta
     assert "mtg/approval" not in json.dumps(res["structuredContent"])  # never in the model's context
 
 
+async def test_the_apply_line_names_the_collection_on_a_collection_proposal(manual: Stack) -> None:
+    """The review page's bold line under "Apply to Archidekt?" says what the apply writes to: the
+    collection on a collection proposal, the deck on a deck proposal."""
+    token = await linked_user(manual)
+    col = structured(await call(manual.h, token, "propose_collection_changes", {"add": ["Sol Ring"]}))
+    deck = structured(
+        await call(
+            manual.h,
+            token,
+            "propose_deck_changes",
+            {"deck_id": "42", "changes": [{"action": "add", "name": "Sol Ring", "quantity": 1}]},
+        )
+    )
+    b = Browser(manual.h)
+    await b.login(f"/proposals/{col['proposal_id']}")
+    page = await b.http.get(f"/proposals/{col['proposal_id']}")
+    assert "writes these changes to your collection on Archidekt" in page.text, page.text[-3000:]
+    page = await b.http.get(f"/proposals/{deck['proposal_id']}")
+    assert "writes these changes to your deck on Archidekt" in page.text
+
+
 # -- search -------------------------------------------------------------------------------------
 async def test_search_decks_finds_a_commander_by_part_of_its_name(stack: Stack) -> None:
     token = await mcp_token(stack.h)

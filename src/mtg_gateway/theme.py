@@ -180,6 +180,9 @@ CSS = (
   --shadow:0 3px 6px rgba(0,0,0,.5); --scrim:rgba(0,0,0,.4);
   --ctl:39px; /* phatButton / phatInput / phatDropdown height */
 }
+/* Touch screens: every standard control (buttons, inputs, selects, the custom select) is 44 px
+   tall, the release's touch-target rule; with a mouse the 39 px Archidekt height stays */
+@media (pointer:coarse){ :root{--ctl:44px} }
 @media (prefers-color-scheme: light){ :root:not([data-theme=dark]){"""
     + _LIGHT
     + """} }
@@ -344,8 +347,8 @@ pre{font-size:.86rem;line-height:1.5;background:var(--bg);border:1px solid var(-
 
 /* forms: phatInput / phatButton */
 label{display:block;margin:.9rem 0 .3rem;font-weight:700}
-input[type=text],input[type=password],input[type=email],input[type=search],input[type=number],input[type=url],
-select{width:100%;height:var(--ctl);padding:0 1rem;font:inherit;border-radius:var(--radius);
+input:not([type]),input[type=text],input[type=password],input[type=email],input[type=search],input[type=number],
+input[type=url],select{width:100%;height:var(--ctl);padding:0 1rem;font:inherit;border-radius:var(--radius);
   border:1px solid var(--control-border);background:var(--surface);color:var(--text);
   transition:background-color .2s ease-in-out}
 /* a field inside a <label> keeps its normal weight: only the label's own text is bold */
@@ -482,7 +485,7 @@ button.thumbbtn{all:unset;display:block;cursor:pointer;line-height:0;border-radi
 .exportblock .head h2{margin:0;min-width:0;overflow-wrap:anywhere}
 .exportblock textarea{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
   font-size:.85rem}
-button.thumbbtn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+button.thumbbtn:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
 .choice{display:flex;flex-direction:column;gap:.6rem;margin-top:1rem}
 /* The three choices (Apply…, Reject…, Not now) sit in one row only from 800px: narrower than
    that the row would wrap and leave "Not now" alone on a second line, so they stack full width. */
@@ -554,7 +557,7 @@ button.thumbbtn:focus-visible{outline:2px solid var(--accent);outline-offset:2px
 
 /* badges, pills and notices */
 .badge{display:inline-block;vertical-align:middle;padding:.125rem .5rem;border-radius:5px;font-size:.86rem;
-  font-weight:700;line-height:1.4;background:#6b6b6b;color:#fff}
+  font-weight:700;line-height:1.4;background:#6b6b6b;color:#fff;max-width:100%;overflow-wrap:anywhere}
 .badge.ok{background:var(--green);color:var(--on-green)}
 .badge.warn{background:var(--orange);color:var(--on-orange)}
 .badge.danger{background:var(--danger-fill)}
@@ -721,24 +724,34 @@ details.raw{margin:.5rem 0 0} details.raw summary{cursor:pointer;color:var(--tex
 .soc > span,.addbox button.tchip{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .social .confirm{max-width:100%;flex-wrap:wrap;min-width:0}
 .social .confirm > span{min-width:0;overflow-wrap:anywhere}
-/* Touch screens: every control at least 40 px tall (Material's minimum), including the small
+/* Touch screens: every control at least 44 px tall (the release's rule), including the small
    ones a mouse never minds: the editor's add-to chips, the deck page's category
    button and odds form, folded Details, footer links, the brand mark, list links, crumbs. */
 @media (pointer:coarse){
-  .addbox button.tchip,.popular a,.cardview .chip{min-height:40px}
-  .odds form.oddsform select,.odds form.oddsform input,.odds form.oddsform button{min-height:40px;height:40px}
-  details > summary{min-height:40px;display:flex;align-items:center}
-  details.dd > summary.icon-only{min-height:40px;min-width:40px}
-  footer.site .links a{display:inline-flex;align-items:center;min-height:40px;padding:0 .5rem}
-  .brand{min-height:40px;--brand-line:max(40px,1.35em)}
+  .addbox button.tchip,.popular a,.cardview .chip{min-height:44px}
+  .odds form.oddsform select,.odds form.oddsform input,.odds form.oddsform button{min-height:44px;height:44px}
+  /* kept a list item (a flex summary loses its native fold-out marker in Chromium); the padding
+     and the minimum make the 44 px */
+  details > summary{min-height:44px;padding:.6rem 0}
+  .tabbar details.more > summary{padding:0}  /* the More tab has its own 56 px; padding would grow the bar */
+  details.dd > summary.icon-only{min-height:44px;min-width:44px}
+  .topbar nav a,.topbar nav summary,.topbar nav button{height:44px}
+  .topbar .icon-btn{width:44px}
+  .msel-list [role=option]{min-height:44px}
+  .check,.addbox form.addcard .go .foil{min-height:44px}
+  .reports-page a.rp-deck,.coll-totals a.ext{display:inline-flex;align-items:center;min-height:44px}
+  .guide .anchor{display:inline-flex;align-items:center;justify-content:center;min-width:44px;min-height:44px;
+    margin-top:-.6rem;margin-bottom:-.6rem}
+  footer.site .links a{display:inline-flex;align-items:center;min-height:44px;padding:0 .5rem}
+  .brand{min-height:44px;--brand-line:max(44px,1.35em)}
   .hrow a.kind,.hrow a.name,.proposals a.name,.report .crumbs a,li > a.name{display:inline-block;
-    padding:.6rem 0}
-  .banner .social a.soc,.banner .social button.soc{height:40px;min-height:40px;border-radius:20px}
+    padding:.6rem 0;min-height:44px;box-sizing:border-box}
+  .banner .social a.soc,.banner .social button.soc{height:44px;min-height:44px;border-radius:22px}
   /* :not(._) only raises specificity: the pages' own rules (same selectors, loaded later) set
      2rem and 30px and would otherwise win */
-  .hrow details > summary:not(._),.report details summary:not(._){min-height:40px;display:flex;
+  .hrow details > summary:not(._),.report details summary:not(._){min-height:44px;display:flex;
     align-items:center}
-  ul.rows .row:not(._){height:40px}
+  ul.rows .row:not(._){height:44px}
 }
 /* A narrow window with a mouse (600 to 800 px, a half-width desktop window or an open Fold):
    the bar keeps its text links and drops the brand's word, so nothing runs under the account
