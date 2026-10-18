@@ -252,6 +252,7 @@ class _SlowClient:
 async def test_proxy_limits_calls_per_user_and_has_a_deadline() -> None:
     gate = asyncio.Event()
     proxy = MysticForgeProxy("http://x/mcp", client_factory=lambda: _SlowClient(gate))
+    proxy._listed = True  # as after a tool listing: a flat call is not refused as not ready
     running_calls = [asyncio.create_task(proxy.call("scryfall_named", {}, owner="a")) for _ in range(2)]
     await asyncio.sleep(0.01)
     busy = await proxy.call("scryfall_named", {}, owner="a")

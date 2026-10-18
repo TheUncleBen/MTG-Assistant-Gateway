@@ -468,6 +468,7 @@ class _Upstream:
 async def test_proxy_refuses_unbounded_simulation_arguments() -> None:
     seen: list = []
     proxy = MysticForgeProxy("http://x/mcp", client_factory=lambda: _Upstream(seen))
+    proxy._listed = True  # as after a tool listing: a flat call is not refused as not ready
     for name, args in (
         ("goldfish_run", {"deck": "1 Island", "n": 10**9}),
         ("goldfish_run", {"deck": "1 Island", "n": "1000000000"}),
@@ -494,6 +495,7 @@ async def test_archidekt_calls_have_a_per_member_budget(tmp_path: Path, idp: Fak
     )
     seen: list = []
     proxy = MysticForgeProxy("http://x/mcp", client_factory=lambda: _Upstream(seen))
+    proxy._listed = True  # as after a tool listing: a flat call is not refused as not ready
     async with running(Harness(settings, idp, archidekt=_client(settings, ark), mf_proxy=proxy)) as h:
         st = Stack(h, ark)
         token = await linked_user(st)  # the link itself is one call
