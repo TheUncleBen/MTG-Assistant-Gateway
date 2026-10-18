@@ -263,11 +263,11 @@ passwords behind it are what protect those decks. Recommended:
   that enrolls new users should use an enrollment flow that adds no groups,
   so a stranger with a Google or GitHub account gets an Authentik account
   at most, not gateway access.
-- **Don't link accounts by email for sources that don't verify emails.**
+- **Don't link accounts by email for sources that don't confirm emails.**
   A Source's **User matching mode** of linking to an existing user with the
   same email lets anyone who registers that email at the provider sign in
   as your user. Use identifier matching, or the email mode only for
-  providers that verify addresses.
+  providers that confirm addresses.
 
 (Menu names reported from Authentik's docs; the end-to-end tests don't
 cover MFA or Sources.)

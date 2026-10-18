@@ -32,11 +32,12 @@ What it doesn't need: websockets, sticky sessions or special headers. The
 `/mcp` endpoint answers with plain JSON, not a stream, but the Android app's
 notifications come over one long response (`/app/notifications/stream`), so
 the proxy must not hold back what the gateway sends: the gateway asks nginx
-not to buffer it (`X-Accel-Buffering: no`), and the examples turn buffering
-off anyway.
+not to buffer it (`X-Accel-Buffering: no`), and the nginx example turns
+buffering off anyway.
 
-**Never proxy Mystic Forge, Forge or ntfy.** None of them has a login of its
-own. Only the gateway should reach them.
+**Never proxy Mystic Forge, Forge or ntfy.** Mystic Forge and Forge have no
+login of their own, and ntfy accepts only the gateway's token. Only the
+gateway should reach them.
 
 ## Which example to use
 

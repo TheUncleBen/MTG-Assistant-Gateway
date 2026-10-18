@@ -104,4 +104,4 @@ that needs two rulesets, set up once by the repository's owner
    **Create**.
 2. **New tag ruleset**: name `Locked version tags`, enforcement **Active**,
    target tags **Include by pattern** `v*` and again **Include by pattern**
-   `mystic-forge-*` and `forge-*`, the same three rules. **Create**.
+   `mystic-forge-*`, and once more **Include by pattern** `forge-*`, the same three rules. **Create**.
