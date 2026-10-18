@@ -52,8 +52,8 @@ code and a human `message`:
 | `not_linked` | 409 | no Archidekt account linked yet; send the user to `/account` |
 | `changed` | 409 | the proposal changed since the page showed it (the `version` sent is out of date); `review_url` and the current version are included |
 | `not_pending` / `already_applied` / `stale` | 409 | the proposal cannot be applied in its current state |
-| `rate_limited` | 429 | the Archidekt pacer is busy, the member's Archidekt budget (`MTG_ARCHIDEKT_CALLS_PER_10_MIN`) is used up, or too many pending proposals (100 per member) |
-| `auth` | 409 | Archidekt asked for a sign-in on a deck read the gateway made without one (a stored session Archidekt no longer accepts is `not_linked` instead). Linking an account happens only on the Account page, which shows a refused username and password there, not through this API |
+| `rate_limited` | 429 | Archidekt asked the gateway to slow down, the member already has three Archidekt actions running or waiting, the member's Archidekt budget (`MTG_ARCHIDEKT_CALLS_PER_10_MIN`) is used up, the member already has two research calls running when a report is asked for, or too many pending proposals (100 per member) |
+| `auth` | 409 | Archidekt asked for a sign-in on a deck read the gateway made without one: with no account linked, or after the member's session could not read the deck. A stored session Archidekt no longer accepts is otherwise `not_linked`. Linking an account happens only on the Account page, not through this API, and a username and password Archidekt refuses are reported on that page |
 | `backup_failed` | 502 | the Archidekt backup copy could not be made before the change; nothing was changed and the proposal is still pending, so it can be applied again |
 | `verify_mismatch` | 502 | Archidekt accepted the change, but reading it back shows it doesn't match; the message names what differs and, for a change to an existing deck, the snapshot kept from before it |
 | `contract` | 502 | Archidekt refused the request with an unexpected error, or answered with something the gateway can't read |
