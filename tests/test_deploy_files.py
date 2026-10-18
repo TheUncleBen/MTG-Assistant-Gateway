@@ -173,3 +173,45 @@ def test_ntfy_has_room_for_every_phone_the_gateway_relays(name: str, service: st
     assert int(limits["NTFY_VISITOR_SUBSCRIPTION_LIMIT"]) > STREAM_MAX_TOTAL
     assert int(limits["NTFY_VISITOR_REQUEST_LIMIT_BURST"]) >= 2 * STREAM_MAX_TOTAL
     assert limits["NTFY_VISITOR_REQUEST_LIMIT_REPLENISH"] == "1s"
+
+
+def test_a_release_build_refuses_a_tree_with_the_push_test_hook(tmp_path: Path):
+    """push-test.sh --prepare writes an exported debug-only receiver into android/app/src/debug: a
+    release build stops at once while that folder exists, before any tool or download."""
+    import shutil
+    import subprocess
+
+    scripts = tmp_path / "android" / "scripts"
+    scripts.mkdir(parents=True)
+    shutil.copy(ROOT / "android/scripts/build.sh", scripts / "build.sh")
+    (tmp_path / "android/app/src/debug").mkdir(parents=True)
+    r = subprocess.run(
+        ["bash", str(scripts / "build.sh"), "release", "--throwaway"], capture_output=True, text=True
+    )
+    assert r.returncode == 1 and "android/app/src/debug exists" in r.stderr, r.stderr
+
+
+def test_the_release_manifest_check_finds_the_hook_and_never_passes_on_nothing(tmp_path: Path):
+    import subprocess
+
+    check = ROOT / "android/scripts/check-release-manifest.sh"
+    build = tmp_path / "build"
+
+    def run() -> subprocess.CompletedProcess[str]:
+        return subprocess.run(["bash", str(check), str(build), "plain"], capture_output=True, text=True)
+
+    assert run().returncode == 1  # no manifest found is a failure, not a pass
+    merged = build / "intermediates/merged_manifest/plainRelease/processPlainReleaseMainManifest"
+    merged.mkdir(parents=True)
+    (merged / "AndroidManifest.xml").write_text("<manifest><application/></manifest>")
+    assert run().returncode == 0
+    packaged = build / "intermediates/packaged_manifests/plainRelease/processPlainReleaseManifestForPackage"
+    packaged.mkdir(parents=True)
+    (packaged / "AndroidManifest.xml").write_text(
+        '<manifest><application><receiver android:name="local.mtgassistantgateway.app.PushTestHooks" />'
+        "</application></manifest>"
+    )
+    r = run()
+    assert r.returncode == 1 and "PushTestHooks" in r.stderr
+    # another flavor's manifests are not this build's
+    assert subprocess.run(["bash", str(check), str(build), "applinks"], capture_output=True).returncode == 1

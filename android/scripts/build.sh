@@ -32,6 +32,12 @@ THROWAWAY=0
 case "$MODE" in debug|release) ;; *) echo "usage: $0 debug|release [--throwaway]" >&2; exit 2;; esac
 
 log() { printf '\n==> %s\n' "$*"; }
+# push-test.sh --prepare writes a debug-only test hook (an exported receiver) into app/src/debug; a
+# release is never built from a tree that has it.
+if [ "$MODE" = "release" ] && [ -e "$ROOT/app/src/debug" ]; then
+  echo "android/app/src/debug exists (push-test.sh --prepare writes it): remove it before a release build" >&2
+  exit 1
+fi
 need() { command -v "$1" >/dev/null 2>&1 || { echo "missing tool: $1 ($2)" >&2; exit 1; }; }
 need java "install a JDK, 17 or newer"
 need curl "install curl"
@@ -110,6 +116,7 @@ RELEASE_KEYSTORE="$(cd "$(dirname "$RELEASE_KEYSTORE")" && pwd)/$(basename "$REL
 
 log "Building and signing the release APK and app bundle ($FLAVOR)"
 (cd "$ROOT" && ./gradlew -q ${GRADLE_ARGS[@]+"${GRADLE_ARGS[@]}"} ":app:assemble${Flavor}Release" ":app:bundle${Flavor}Release")
+"$HERE/check-release-manifest.sh" "$ROOT/app/build" "$FLAVOR"
 cp "$ROOT/app/build/outputs/apk/$FLAVOR/release/app-$FLAVOR-release.apk" "$OUT/$NAME-release.apk"
 cp "$ROOT/app/build/outputs/bundle/${FLAVOR}Release/app-$FLAVOR-release.aab" "$OUT/$NAME-release.aab"
 APKSIGNER="$(ls -d "$ANDROID_HOME"/build-tools/*/apksigner 2>/dev/null | sort -V | tail -1)"
