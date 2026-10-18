@@ -161,7 +161,7 @@ services:
       MTG_PLUGIN_DIR: ${MTG_PLUGIN_DIR:-}
       MTG_APP_DIR: ${MTG_APP_DIR:-}
       MTG_SCRYFALL_LOOKUP_INTERVAL: ${MTG_SCRYFALL_LOOKUP_INTERVAL:-}
-      # Archidekt API base. Leave the default; the end-to-end tests point it at a local mock.
+      # Archidekt API base. Leave the default (only the end-to-end tests change it, with the Swarm stack file).
       MTG_ARCHIDEKT_BASE: ${MTG_ARCHIDEKT_BASE:-https://archidekt.com/api}
       # Card scanning: name matching, reading and glare thresholds, and the artwork check
       # (docs/SCANNING.md). A change applies after the gateway restarts.
