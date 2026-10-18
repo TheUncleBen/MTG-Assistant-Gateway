@@ -25,9 +25,9 @@ CHANGE = [{"action": "set_quantity", "card_name": "Forest", "quantity": 3}]
 
 @pytest.fixture
 def stack_options(monkeypatch) -> StackOptions:
-    """The shared AUTO stack, with the assistant's apply answering "applying" after 0.2 s. The sync's
-    idle wait is 0.3 s, looked at every 10 ms."""
-    monkeypatch.setattr(decks_mod, "APPLY_WAIT_SECONDS", 0.2)
+    """The shared AUTO stack. The sync's idle wait is 0.3 s, looked at every 10 ms. The assistant's
+    apply keeps the shipped wait for its outcome, so a slow machine never answers "applying" where
+    a test expects the outcome."""
     monkeypatch.setattr(sync_mod, "IDLE_WAIT", 0.3)
     monkeypatch.setattr(sync_mod, "IDLE_POLL", 0.01)
     return AUTO
@@ -188,9 +188,12 @@ async def test_the_check_waits_behind_a_members_request_then_skips(stack: Stack)
     assert got["ok"] and got["name"] == "Sample Commander Deck", got
 
 
-async def test_a_check_beside_an_apply_leaves_it_to_finish_exactly_as_today(stack: Stack) -> None:
+async def test_a_check_beside_an_apply_leaves_it_to_finish_exactly_as_today(
+    stack: Stack, monkeypatch
+) -> None:
     """An apply under way on the deck is never read halfway; it ends applied, and its own
     write does not flag it."""
+    monkeypatch.setattr(decks_mod, "APPLY_WAIT_SECONDS", 0.2)  # the held apply answers "applying" after 0.2 s
     h, ark = stack.h, stack.ark
     sync = _sync(stack)
     token = await linked_user(stack)
