@@ -798,12 +798,13 @@ Google push service, and no separate notification app.
 
 How it works: the stack runs its own [ntfy](https://ntfy.sh/) server (`mtg-assistant-ntfy`, free
 and open source) on a private network with no published port and no internet access. The gateway
-is its only user: it publishes each member's messages to the member's own topic, `mtg-`, 16
-random characters and a 6-character mark made with a key kept in the gateway's database, with the
-`mtg_ntfy_token` secret, and ntfy refuses everything else. The stream refuses a topic without a
-valid mark, and at every start the gateway gives a new topic to each member whose topic has none
-(after the update to 0.7.30, and after a rollback and a new update). Changing the other secrets
-doesn't disconnect any phone. Debug logs show a topic only as `mtg-…`. The app
+is its only user: it publishes each member's messages, with the `mtg_ntfy_token` secret, to the
+member's own topic (`mtg-`, 16 random characters and a 6-character mark made with a key kept in the
+gateway's database), and ntfy refuses everything else. The gateway refuses an app connection whose
+topic has no valid mark, and at every start it gives a new topic to each member whose topic has none
+(after the update to 0.7.30, and after a rollback and a new update). The key is not one of the
+stack's secrets, so changing a secret doesn't disconnect any phone from its notifications. Debug
+logs show a topic only as `mtg-…`. The app
 holds one long request open to the gateway's own address (`/app/notifications/stream`), and the
 gateway passes the member's messages along it. ntfy keeps messages for 12 hours, in memory, so a
 phone that was offline gets them when it is back; a restart of the ntfy service drops messages not
@@ -829,8 +830,8 @@ yet picked up.
   visitor. The stacks raise ntfy's limits for that visitor to 250 subscriptions
   (`NTFY_VISITOR_SUBSCRIPTION_LIMIT`, ntfy's default 30) and a burst of 600 requests, one more
   each second (`NTFY_VISITOR_REQUEST_LIMIT_BURST` and `NTFY_VISITOR_REQUEST_LIMIT_REPLENISH`,
-  defaults 60 and 5 s). The gateway takes at most 200 app connections in all, and answers `503
-  busy` past that (the app tries again by itself), and at most 4 for one member's topic (`429`).
+  defaults 60 and 5 s). The gateway takes at most 200 app connections in all and at most 4 for
+  one member's topic; past those it answers `503 busy` and `429`, and the app tries again by itself.
 
 ## Environment reference
 

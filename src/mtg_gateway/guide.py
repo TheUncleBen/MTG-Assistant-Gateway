@@ -272,6 +272,8 @@ def guide_body(
         if archidekt_backups
         else "The backup copy on Archidekt is switched off on this gateway, so no tick box is offered."
     )
+    backup_assistant = "Applies made by your assistant always make the copy. " if archidekt_backups else ""
+    backup_delete = "both the snapshot and the backup copy" if archidekt_backups else "the snapshot"
     # -- Tutorials --------------------------------------------------------------------------------
     tut_start = (
         f"<p>{_esc(site)} is a private companion to <strong>Archidekt</strong>. Everything you can do on "
@@ -995,7 +997,8 @@ def guide_body(
         "<strong>In every mode:</strong> a held change, a change waiting for another change first, one "
         "another app had a hand in, one that replaces another app's change, or one that another app's "
         "waiting change would replace waits for your press; its card and review page say why. "
-        "Every applied proposal keeps a snapshot first and is read back to verify.</p>"
+        "A change to one of your decks keeps a snapshot first, and deck and collection changes are read "
+        "back to check them.</p>"
         f"<p class='tip'>{_esc(modes.AUTO_WARNING)}</p>"
         f"{_h4('ref-approval-hand', 'Your own saves')}"
         "<p>A hand save needs no approval: pressing Save is it. It still keeps a snapshot, and asks "
@@ -1102,15 +1105,16 @@ def guide_body(
         "gateway checks the change still fits the deck as it is now, and after the write it reads the deck "
         "back to confirm what landed.</p>"
         f"{_h4('exp-approvals-snapshot', 'Snapshots and the backup copy')}"
-        "<p>Every apply takes a <strong>snapshot</strong> first: the deck as it was, cards and the deck's "
-        "own name, description, format, bracket and privacy, kept on the gateway and listed under History "
+        "<p>Every apply to one of your decks takes a <strong>snapshot</strong> first: the deck as it "
+        "was, cards and the deck's own name, description, format, bracket and privacy, kept on the "
+        "gateway and listed under History "
         "with <strong>Restore</strong>. The gateway can also put a <strong>backup copy</strong> of the "
         f"whole deck in a “{folder}” folder on your Archidekt account, so you have a copy "
         "even where this gateway is not. "
-        f"{backup_box} Applies made by your assistant always make the copy. Quick edits from the deck "
+        f"{backup_box} {backup_assistant}Quick edits from the deck "
         "page (the card menu and the viewer's quantity buttons) keep the gateway snapshot only, so a "
-        "one-card change does not fill your Archidekt folder with copies; deleting a deck keeps both the "
-        "snapshot and the backup copy first.</p>"
+        "one-card change does not fill your Archidekt folder with copies; deleting a deck keeps "
+        f"{backup_delete} first.</p>"
         f"<p class='tip'>{_esc(writes)}</p>"
     )
     exp_fresh = (
