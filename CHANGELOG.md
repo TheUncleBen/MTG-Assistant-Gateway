@@ -12,6 +12,11 @@ with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 A documentation release: the example settings files are reorganised, and the guides are checked
 against the code and corrected. Nothing changes in how the gateway works.
 
+### Upgrade notes
+- From 0.7.30: none; update as usual ([docs/UPGRADING.md](docs/UPGRADING.md)).
+- From 0.7.26 or earlier: do the 0.7.30 steps in [docs/UPGRADING.md](docs/UPGRADING.md#0730) first.
+  They moved there from DEPLOY.md and DEPLOY-COMPOSE.md, unchanged.
+
 ### Changed
 - `deploy/stack.env.example` and `deploy/compose/.env.example` are grouped in a new order that
   reads top to bottom: images, server settings, placement and storage, standard container
@@ -21,6 +26,10 @@ against the code and corrected. Nothing changes in how the gateway works.
   example, your file keeps working as it is.
 - The images are public, and the guides now say so: no registry login, GitHub token or
   `--with-registry-auth` is needed to pull them. Step 5 of the Swarm guide is now "Images".
+- New [docs/UPGRADING.md](docs/UPGRADING.md): what to do before every update, the update steps
+  for Portainer, Swarm and Docker Compose, and the extra steps some versions need. The 0.7.30 and
+  0.7.29 steps moved there from the deployment guides, which now describe only the current
+  version. From now on each version's notes start with **Upgrade notes**.
 
 ### Fixed
 - The deployment guides, the operator plugin's deploy skill, the member guides, the API and

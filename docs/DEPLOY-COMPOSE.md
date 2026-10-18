@@ -238,55 +238,12 @@ docker compose pull
 docker compose up -d
 ```
 
-Read the [CHANGELOG](../CHANGELOG.md) first; it says when a release needs a
-settings change. The gateway upgrades its database on start and records the
+Read the [CHANGELOG](../CHANGELOG.md) first; it says when a release needs
+more than this, and [UPGRADING.md](UPGRADING.md) has those steps (0.7.30
+among them). The gateway upgrades its database on start and records the
 schema version in the file. To go back to an older release, restore the backup
 you took before updating (see [OPERATIONS.md](OPERATIONS.md#backups)) and run
 the old image on that; don't run an old image on an upgraded database.
-
-### Updating to 0.7.30 from an earlier version
-
-0.7.30 adds the stack's own notification server (ntfy). Get the new
-`docker-compose.yml` as in the 0.7.29 steps below, and the new helper with
-`curl -fsSLO "$base/make-secrets.sh"` (same `base`). Then run
-`./make-secrets.sh` again before `docker compose up -d`: it adds
-`secrets/mtg_ntfy_token.txt` and leaves your other files alone. If that file
-already exists (it held the token for an ntfy server of your own), delete it
-first so a new token is made, and revoke the old token on your old ntfy
-server. If your `.env`
-has `MTG_NTFY_URL` or `MTG_NTFY_TOKEN_FILE` with a value, delete those lines;
-an ntfy server you ran for the gateway can go, with its proxy host.
-If Forge is on, the new file pulls Forge image `2.0.15-mag3`. Then follow
-the 0.7.29 steps below, but skip the
-`mtg_ntfy_token` edits: the new file already has those lines.
-Notifications now come in the gateway's Android app (members tick **Send
-me notifications** and press **Save notifications** on their Account page in the app), not the
-ntfy app, and members need app 0.7.30 to get them. **Members on an app older than 0.7.12 must
-update the app.**
-
-### Updating to 0.7.29 from an earlier version
-
-Before the commands above, note your own edits to the old `docker-compose.yml`:
-the optional secret lines you removed the `# ` from (`mtg_authentik_api_token`,
-`mtg_ntfy_token`, each in two places) and any line you added under
-`environment:`. Then download the new file (if you cloned the repository, run
-`git checkout docker-compose.yml`, which undoes your edits to it, then
-`git pull`, instead):
-
-```bash
-base=https://raw.githubusercontent.com/TheUncleBen/MTG-Assistant-Gateway/main/deploy/compose
-curl -fsSLO "$base/docker-compose.yml"
-```
-
-This replaces your old file, so make the same edits in the new one. Without
-the Authentik lines the removed-member clean-up turns off (the admin page says
-so); without the ntfy lines the gateway won't start.
-
-The old file gives 24 of the Settings page's 47 settings a value of its own,
-which locks them on the page (greyed out with that value). An `.env` made
-from the older `.env.example` sets 17 of them. **Optional:** delete the lines
-of the ones you want to change on the Settings page. Any you keep stay
-locked: you change them in `.env`, then run `docker compose up -d`.
 
 ## Backups
 

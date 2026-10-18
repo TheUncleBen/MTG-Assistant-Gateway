@@ -629,8 +629,9 @@ def _updates_card(u: dict[str, Any]) -> str:
     tag = html.escape(found["version"]) if found else "&lt;new version&gt;"
     steps = (
         "<details><summary>How to update</summary>"
-        "<p>The gateway never updates itself. Take a backup first; it upgrades its database on start, "
-        "and going back means restoring that backup (docs/OPERATIONS.md, Restart or update).</p>"
+        "<p>The gateway never updates itself. Read the release notes of every version you move past and "
+        "do any upgrade notes they list (docs/UPGRADING.md). Take a backup first; it upgrades its "
+        "database on start, and going back means restoring that backup (docs/UPGRADING.md).</p>"
         "<p><strong>Portainer (Swarm stack)</strong>: Stacks, your stack. If "
         f"<code>MTG_TAG</code> is a version number, change it to <code>{tag}</code> in the stack's "
         "environment variables (leave <code>latest</code> as it is). Then <strong>Update the "

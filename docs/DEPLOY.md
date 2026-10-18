@@ -261,11 +261,7 @@ Portainer and Docker pull them without a registry login or a GitHub token:
 The stack's ntfy server is the official `binwiederhier/ntfy` image from
 Docker Hub, pinned in the stack file.
 
-To update later, open the stack, change `MTG_TAG` if you're moving to a new
-release, and click **Update the stack** (if your stack uses the Repository
-build method, the button is called **Pull and redeploy**). In the box that
-asks “Are you sure?”, make sure **Re-pull image and redeploy** is on, then
-click **Update**.
+Updating later is in [UPGRADING.md](UPGRADING.md).
 
 If tasks show `rejected` with `No such image: ghcr.io/...`, check the image
 name and tag: a version's tag exists only once its release is published
@@ -317,95 +313,10 @@ name and tag: a version's tag exists only once its release is published
    30 seconds. Check from a manager with
    `docker service logs mtg_mtg-assistant-gateway`.
 
-### Updating to 0.7.30 from an earlier version
+### Updating
 
-0.7.30 brings its own notification server (ntfy) into the stack, and the
-gateway's Android app gets the members' notifications from it through the
-gateway's own address.
-
-1. **Before you update the stack**, create the `mtg_ntfy_token` secret
-   (step 4, the fourth command in Option B, or Option A). The new stack file
-   needs it; without it the stack won't deploy. **If you already have an
-   `mtg_ntfy_token` secret** (it held the token for an ntfy server of your
-   own), make a new one instead, so the stack's ntfy server doesn't accept a
-   token your old server accepts too: Swarm won't remove a secret a service
-   still uses, so first run
-   `docker service update --secret-rm mtg_ntfy_token mtg_mtg-assistant-gateway`,
-   then `docker secret rm mtg_ntfy_token`, then the step 4 command. The
-   gateway can't start without its token file in between, so do this just
-   before you update the stack. Revoke the old token on your old ntfy server
-   as well.
-2. If your stack's environment has `MTG_NTFY_URL` or `MTG_NTFY_TOKEN_FILE`
-   with a value, delete those lines (empty is fine): the stack file now
-   points the gateway at its own ntfy server. If you ran an ntfy server of
-   your own for the gateway, you can stop it after the update, and delete
-   the proxy host you made for it: the new ntfy server needs none.
-3. **If Forge is on:** the new stack file pulls Forge image `2.0.15-mag3`.
-   If your variables file was copied from an older
-   `stack.env.example`, it still sets `FORGE_TAG=2.0.15-mag2`, which keeps
-   the old Forge image: change it to `FORGE_TAG=2.0.15-mag3`, or delete the
-   line. Delete its `FORGE_GAME_SECONDS=600` line too, and
-   `FORGE_MAX_PARALLEL=1` if it has one, to get the new defaults (a
-   four-minute game limit, and Forge working out how many games fit at
-   once). Its `MTG_FORGE_GAMES=10` keeps 10 games a report, locked on the
-   Settings page; delete it for the new default of 4.
-4. Update the stack with the new file, as in the 0.7.29 steps below (your
-   old `mtg_ntfy_token` lines, if you had them, are already in it).
-5. Tell the members: notifications now come in the gateway's own Android
-   app, not the ntfy app, and members need app 0.7.30 to get them. Each
-   member who wants them opens their Account page in the app, ticks **Send
-   me notifications** and presses **Save notifications**, which also connects
-   that phone (**Get notifications on this phone** stays on the card while
-   a phone isn't connected). Their old subscriptions in the ntfy
-   app stop getting messages and can be deleted. There are no notifications
-   on iPhone.
-6. **Members on an app older than 0.7.12 must update the app:** in those
-   apps, sign-in no longer starts by itself. They install the new app from the
-   gateway's Install page (uninstalling the old one first, since it was
-   signed with a different key).
-
-### Updating to 0.7.29 from an earlier version
-
-0.7.29 adds the admin Settings page. A stack file from before 0.7.29 gives 24
-of the page's 47 settings a value of its own, so the page would show them
-locked (greyed out) even with no variable set.
-
-1. **If you pasted the stack file into Portainer's Web editor:** first note
-   your own edits to the old text: the optional secret lines you removed the
-   `# ` from (`mtg_authentik_api_token`, `mtg_ntfy_token`, each in two
-   places) and any line you added under `environment:`. Then, in
-   **Stacks** → `mtg` → **Editor**, replace the whole text with the new
-   [`deploy/portainer-stack.yml`](../deploy/portainer-stack.yml) and make
-   the same edits in it. Without the Authentik lines the removed-member
-   clean-up turns off (the admin page says so); without the ntfy lines the
-   gateway won't start. With the **Repository** build method and this
-   repository, the update brings the new file. If Portainer pulls your own
-   copy of the repository instead, bring that copy up to date first and keep
-   your edits in it.
-   **Without Portainer:** in your copy of the repository, keep a copy of your
-   edited file (`cp deploy/portainer-stack.yml
-   deploy/portainer-stack.old.local.yml`). Then run
-   `git checkout deploy/portainer-stack.yml` (this undoes your edits to it),
-   then `git pull`. Make the same edits in the new
-   `deploy/portainer-stack.yml` (your saved copy shows what they were).
-2. **Optional:** for each setting you want to change on the Settings page,
-   delete its variable. A variables file made from the older
-   `stack.env.example` sets 19 of them, such as `MTG_ARCHIDEKT_BACKUPS=true`
-   and `MTG_DECK_SYNC_MINUTES=30`. Any variable you keep stays locked: the
-   Settings page shows it greyed out with its value, and you change it in
-   the stack and redeploy.
-3. If `MTG_TAG` names a version, change it to `0.7.30` first (in the stack's
-   variables, or in `mtg.env` without Portainer); otherwise you redeploy the
-   old version with the new stack file. Click **Update the stack** (if your
-   stack uses the Repository build method, the button is called **Pull and
-   redeploy**). In the box that asks “Are you sure?”, make sure **Re-pull
-   image and redeploy** is on, then click **Update**. Without Portainer: open a new shell (a variable you
-   deleted from `mtg.env` stays set in the old one), go to your copy of the
-   repository (`cd` into it), and run the last two lines under “Without
-   Portainer” again.
-
-With Docker Compose, see
-[DEPLOY-COMPOSE.md](DEPLOY-COMPOSE.md#updating-to-0729-from-an-earlier-version).
+Every update, and the extra steps some versions need (0.7.30 among them), is in
+[UPGRADING.md](UPGRADING.md).
 
 ### Without Portainer
 

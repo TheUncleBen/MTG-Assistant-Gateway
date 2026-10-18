@@ -23,8 +23,8 @@ Set `MTG_TAG=latest` (the default in `deploy/stack.env.example` and the Compose
   **Update**.
 - Compose: `docker compose pull && docker compose up -d`.
 
-Read the [CHANGELOG](../CHANGELOG.md) entry first. A major version (see below)
-can need a change on your side.
+Read the [CHANGELOG](../CHANGELOG.md) entry of every version you're moving past
+first, and do any steps it lists under **Upgrade notes** ([UPGRADING.md](UPGRADING.md)).
 
 ## Staying on one version
 
@@ -76,7 +76,12 @@ There is no separate release step. Every pull request:
    PATCH as above, and changes the version in `pyproject.toml`,
    `src/mtg_gateway/__init__.py`, `.claude-plugin/marketplace.json` and the plugin manifests to match (a unit
    test checks they agree; the Android app reads `VERSION` on its own);
-2. adds a `## [1.1.0] - YYYY-MM-DD` section to `CHANGELOG.md`.
+2. adds a `## [1.1.0] - YYYY-MM-DD` section to `CHANGELOG.md`, starting with
+   `### Upgrade notes`: "None" when the update steps are enough, otherwise
+   what changes and a link to that version's section in
+   [UPGRADING.md](UPGRADING.md), which the same pull request adds. The deployment
+   guides describe only the current version; steps for getting there from an
+   older one go in UPGRADING.md.
 
 CI refuses a pull request whose `VERSION` isn't above every released version or
 has no CHANGELOG section. When the pull request is merged, CI on `main` tests it,

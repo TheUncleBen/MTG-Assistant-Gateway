@@ -90,11 +90,9 @@ project's newest release, and when that is newer, every page shows admins a noti
 overview (**Admin**, **Updates**) shows these steps with the version filled in. It never pulls an
 image or restarts itself. `MTG_UPDATE_CHECK=false` turns the check off.
 
-Updating to 0.7.30 from an earlier version needs a step first (the new
-`mtg_ntfy_token` secret), and from before 0.7.29 a few more: see
-[DEPLOY.md](DEPLOY.md#updating-to-0730-from-an-earlier-version) (Portainer) or
-[DEPLOY-COMPOSE.md](DEPLOY-COMPOSE.md#updating-to-0730-from-an-earlier-version)
-(Compose).
+Before every update, read the release notes and take a backup. The steps for
+every update, and the extra ones some versions need (0.7.30 among them), are
+in [UPGRADING.md](UPGRADING.md).
 
 In Portainer: **Stacks** → `mtg`. With a pinned version (for example
 `0.6.6`), change `MTG_TAG` first ([VERSIONS.md](VERSIONS.md)); with
@@ -906,7 +904,7 @@ settings, each with its variable and a link to its row.
   your environment (or leave it empty) to manage one on the page. To lock one in
   the stack, set it in your environment; for a setting the stack file doesn't
   list, also add it under the gateway's `environment:`. Updating from an
-  earlier version: [DEPLOY.md](DEPLOY.md#updating-to-0729-from-an-earlier-version).
+  earlier version: [UPGRADING.md](UPGRADING.md#0729-included-in-0730).
 - **Pacing only gets gentler here.** On the page the Archidekt and Scryfall
   pacing can only be set to ask less often than the gateway's defaults. Only the
   stack can make them ask more often, within the bounds in
