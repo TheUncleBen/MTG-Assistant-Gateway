@@ -1063,7 +1063,7 @@ def _triggers_html(g: dict[str, Any]) -> str:
 FORGE_STATE_TEXT = {
     "queued": "Waiting for Forge.",
     "waiting": "Waiting for your earlier Forge run to finish.",
-    "running": "Games are being played now.",
+    "running": "Games are going now.",
     "failed": "The games could not run.",
     "timeout": "The games ran out of time before finishing.",
     "cancelled": "The games were stopped.",
