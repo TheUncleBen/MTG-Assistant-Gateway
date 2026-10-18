@@ -279,7 +279,7 @@ For the exact devices and plans tested, see
   those that wait in every mode, `DeckService.press_reason` and
   `rewritten_by_another_app`). No mode lets an assistant apply an Archidekt account action
   (likes, votes, bookmarks, follows, comments, new folders and collaborator
-  changes) or a deck deletion (R-142). The wording every page and doc uses
+  changes) or a deck deletion. The wording every page and doc uses
   for the modes comes from `modes.py`.
   The mode is read by the member's id when an apply is attempted, so one
   member's choice never reaches another's proposals, decks or apps; the

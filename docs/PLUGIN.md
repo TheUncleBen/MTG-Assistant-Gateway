@@ -67,7 +67,10 @@ claude plugin install mtg-gateway@mtg-gateway
 ```
 
 The plugin's skills show up as `/mtg-gateway:mtg-gateway` (the MTG skill)
-and `/mtg-gateway:setup-mtg-gateway`. The setup skill checks the connector, has the
+and `/mtg-gateway:setup-mtg-gateway`. With your own `MTG_SERVER_NAME`, the
+plugin's folders and text take its short name (`Deck Helper` becomes
+`deck-helper`), so the commands are `/deck-helper:deck-helper` and
+`/deck-helper:setup-mtg-gateway`: the setup skill keeps its own name. The setup skill checks the connector, has the
 person sign in through `/mcp`, calls `whoami`, and points them at `/account`
 to link Archidekt. It never asks for a password or token.
 

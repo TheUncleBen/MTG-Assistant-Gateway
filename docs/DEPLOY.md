@@ -798,8 +798,12 @@ Google push service, and no separate notification app.
 
 How it works: the stack runs its own [ntfy](https://ntfy.sh/) server (`mtg-assistant-ntfy`, free
 and open source) on a private network with no published port and no internet access. The gateway
-is its only user: it publishes each member's messages to the member's own topic, `mtg-` and 22
-random characters, with the `mtg_ntfy_token` secret, and ntfy refuses everything else. The app
+is its only user: it publishes each member's messages to the member's own topic, `mtg-`, 16
+random characters and a 6-character mark made with a key kept in the gateway's database, with the
+`mtg_ntfy_token` secret, and ntfy refuses everything else. The stream refuses a topic without a
+valid mark, and at every start the gateway gives a new topic to each member whose topic has none
+(after the update to 0.7.30, and after a rollback and a new update). Changing the other secrets
+doesn't disconnect any phone. Debug logs show a topic only as `mtg-…`. The app
 holds one long request open to the gateway's own address (`/app/notifications/stream`), and the
 gateway passes the member's messages along it. ntfy keeps messages for 12 hours, in memory, so a
 phone that was offline gets them when it is back; a restart of the ntfy service drops messages not
@@ -821,6 +825,12 @@ yet picked up.
   the member a new topic, which signs out every phone; turning notifications off ends the stream
   too. **Send test** sends one message to check it, at most once a minute.
 - **Memory:** ntfy is limited to 128 MB (`NTFY_MEMORY_LIMIT`).
+- **Connections:** every phone reaches ntfy through the gateway, so ntfy counts them all as one
+  visitor. The stacks raise ntfy's limits for that visitor to 250 subscriptions
+  (`NTFY_VISITOR_SUBSCRIPTION_LIMIT`, ntfy's default 30) and a burst of 600 requests, one more
+  each second (`NTFY_VISITOR_REQUEST_LIMIT_BURST` and `NTFY_VISITOR_REQUEST_LIMIT_REPLENISH`,
+  defaults 60 and 5 s). The gateway takes at most 200 app connections in all, and answers `503
+  busy` past that (the app tries again by itself), and at most 4 for one member's topic (`429`).
 
 ## Environment reference
 
@@ -914,7 +924,7 @@ value. Leave it out to manage it on the page.
 | `MTG_CIMD_ALLOWED_HOSTS` | no, *stack* | empty (any https host) | Comma-separated hostnames whose metadata documents are accepted, subdomains included. **Leave it empty** unless you know every client's host: listing only Claude's can lock ChatGPT out. Details in [OPERATIONS.md](OPERATIONS.md#which-ai-clients-may-connect) |
 | `MTG_NTFY_URL` | no, *stack* | the stack's own ntfy server (`http://mtg-assistant-ntfy:8080`; `http://ntfy:8080` with Docker Compose) | The ntfy server the members' notifications go through. Leave it empty to use the stack's own. See [Notifications on members' phones](#notifications-on-members-phones) |
 | `MTG_NTFY_TOKEN_FILE` | no, *stack* | `/run/secrets/mtg_ntfy_token` | File holding the token the gateway uses with ntfy (the `mtg_ntfy_token` secret); never logged |
-| `MTG_DECK_SYNC_MINUTES` | no, *stack* | `30` | Deck sync (Archidekt is the master copy): minutes between background checks of Archidekt for members with proposals waiting; a member opening the app (any signed-in page, at most once in 5 minutes) checks too. A check reads the member's deck list (one request per 50 decks) and reads a deck only when it has a waiting proposal and Archidekt says it changed, or the deck is someone else's (at most 5 per check), so a proposal made before an outside change is checked again at once: Updated when it still does what was reviewed, Needs a look when it would now do something else. Never writes to Archidekt or unlinks an account, never retries, waits behind every member's own requests and uses no member's limits. 0 to 1440; `0` turns it off |
+| `MTG_DECK_SYNC_MINUTES` | no, *stack* | `30` | Deck sync (Archidekt is the master copy): minutes between background checks of Archidekt for members with proposals waiting; a member opening the app (any signed-in page, at most once in 5 minutes) checks too. A check reads the member's deck list (one request per 50 decks, at most 4) and reads a deck in full only when it has a waiting proposal and Archidekt says it changed, or the deck is someone else's (at most every 30 minutes; one Archidekt says is gone or private is left alone for 6 hours), at most 5 per check, so a proposal made before an outside change is checked again at once: Updated when it still does what was reviewed, Needs a look when it would now do something else. Never writes to Archidekt or unlinks an account, never retries and waits behind every member's own requests. Each list or deck read spends one of the member's Archidekt actions (`MTG_ARCHIDEKT_CALLS_PER_10_MIN`), and a check stops while less than a quarter of them would be left. 0 to 1440; `0` turns it off |
 | `MTG_WATCHLISTS_ENABLED` | no, *stack* | `false` (off) | Watchlists and prices. Off by default: the Watchlist page and its links, the card viewer's price buttons and the watch tools (`watch_card`, `watch_deck`, `unwatch`, `list_watchlist`, `card_price_history`) are absent and the daily price check does not run. Turning it off keeps members' stored watches and prices; old prices are still pruned after `MTG_PRICE_HISTORY_DAYS`. Summaries through ntfy work either way, without prices when it is off |
 | `MTG_WATCH_MAX_CARDS` | no, *stack* | `200` | Cards one member may watch (0 to 5000; 0 turns card watching off) |
 | `MTG_WATCH_MAX_DECKS` | no, *stack* | `10` | Decks one member may watch (0 to 200; 0 turns deck watching off). Each watched deck is read from Archidekt once a day, paced like every read |
