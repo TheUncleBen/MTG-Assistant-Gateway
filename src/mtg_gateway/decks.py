@@ -2572,8 +2572,14 @@ class DeckService:
         async with self.archidekt_slot(sub):
             try:
                 if fresh:
-                    return await self.client.get_deck(None, deck_id, fresh=True)
-                return await self.client.get_deck(None, deck_id)
+                    deck = await self.client.get_deck(None, deck_id, fresh=True)
+                else:
+                    deck = await self.client.get_deck(None, deck_id)
+                if linked is not None and sub and self.db.get_link(sub) is None:
+                    # read without the link this request dropped: the member still hears of it (a
+                    # copy, as the client's shared read cache may hold this deck)
+                    return dataclasses.replace(deck, link_notice=str(linked))
+                return deck
             except ArchidektError as exc:
                 if linked is not None and exc.kind in ("not_found", "auth", "forbidden"):
                     # the member's link stopped working on this request: that, and how to link

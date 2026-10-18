@@ -669,9 +669,10 @@ def _android(ctx: Context) -> Section:
 
 INTRO = (
     "These steps connect your AI assistant to this site. It can then read your decks and your "
-    "collection, research cards and propose changes that you approve. You need the account the owner "
-    "gave you. You never need a client ID, key or token, and you must never paste a password into a "
-    "chat."
+    "collection, research cards and propose changes. Each change waits for your approval, unless you "
+    "pick an approval mode on your Account page that lets it apply some changes without asking. You "
+    "need the account the owner gave you. You never need a client ID, key or token, and you must "
+    "never paste a password into a chat."
 )
 
 

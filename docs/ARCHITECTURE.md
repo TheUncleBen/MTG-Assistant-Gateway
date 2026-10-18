@@ -274,7 +274,7 @@ For the exact devices and plans tested, see
   itself: at most `MTG_AUTO_APPLY_MAX_ROWS` review rows of card adds,
   removes, quantity, category, finish, printing, color tag or custom mana
   value changes of at most four copies each, never a change to which cards
-  are the commanders and never fewer copies of a commander that has another
+  are the commanders or to the categories of a row in the commander zone, and never fewer copies of a commander that has another
   row in the deck; or a
   clone) or `auto` (the assistant may apply deck and collection changes,
   except those Full auto still leaves to the member, `modes.auto_waits`, and

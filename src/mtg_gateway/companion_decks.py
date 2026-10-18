@@ -399,6 +399,8 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
         elif err_code in DECK_ERR_MESSAGES:
             # Only known codes; the text is fixed here, so a link cannot choose the words.
             notice = f"<p class='notice error'>{_esc(DECK_ERR_MESSAGES[err_code])}</p>"
+        if deck.link_notice:  # the member's link was dropped while reading this deck
+            notice = f"<p class='notice error'>{_esc(deck.link_notice)}</p>" + notice
         # Archidekt marks each deck card with the copies the signed-in member owns ("owned" on the
         # card when the deck is read with their session); the gateway's green dot is that number.
         owned = {c.name.lower(): c.owned for c in deck.cards if c.owned} if link else None

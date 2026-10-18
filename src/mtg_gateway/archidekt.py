@@ -497,6 +497,9 @@ class Deck:
     user_vote: int = 0
     bookmarked: bool = False
     comment_root: int | None = None
+    # Set by DeckService.get_any_deck on a copy of the deck it read without a sign-in because the
+    # member's link was dropped on that request: what the member is told (relink).
+    link_notice: str = field(default="", repr=False, compare=False)
 
     def _rows(self) -> list[tuple[Any, ...]]:
         return sorted(

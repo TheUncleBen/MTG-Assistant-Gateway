@@ -30,7 +30,7 @@ Low risk (`MTG_AUTO_APPLY_MAX_ROWS` sets the row limit, 5 here): A small edit
 to an existing deck or to your collection: at most 5 card rows, each a card
 added or removed, or a new quantity, category, finish, printing, color tag or
 custom mana value, no more than 4 copies a row, never a change to which cards
-are the commanders, and never fewer copies of a commander that has another row in the deck;
+are the commanders or to the categories of a row in the commander zone, and never fewer copies of a commander that has another row in the deck;
 and a private copy of a deck (a clone), which changes nothing that exists.
 High risk: Everything else: more rows than that, a commander change, a new
 deck, restoring a snapshot, and the deck's details (name, format, bracket,

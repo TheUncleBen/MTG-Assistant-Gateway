@@ -92,6 +92,7 @@ def deck_out(
         "private": getattr(deck, "private", None),
         "tags": getattr(deck, "tags", None) or [],
         "card_count": sum(c.quantity for c in deck.main_cards),
+        **({"link_notice": deck.link_notice} if getattr(deck, "link_notice", "") else {}),
         "side_count": sum(c.quantity for c in deck.side_cards),
         "commanders": [c.name for c in deck.cards if "Commander" in c.categories],
         "categories": [c.get("name") for c in deck.categories if isinstance(c.get("name"), str)],

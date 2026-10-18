@@ -236,3 +236,37 @@ async def test_a_dropped_link_is_named_when_the_read_without_it_fails_too(stack:
     assert "/account" in str(err.value)
     assert h.db.get_link("user-1") is None
     assert not ark.inject
+
+
+async def test_a_dropped_link_is_named_when_the_read_without_it_works(stack: Stack) -> None:
+    """When the read without a sign-in works after the member's link was dropped, the deck is
+    shown and the member is still told the link stopped working and where to link again: in the
+    assistant's deck answer and on the deck page. The deck the client cached carries no notice."""
+    from .test_decks_and_proxy import Browser
+
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    ark.tokens.clear()  # the session and its refresh token are gone; deck 42 is public
+    ark.inject = [(401, None)] * 2  # the signed-in deck read, then the refresh
+    out = structured(await call(h, token, "get_deck", {"deck_ref": "42"}))
+    assert out["ok"] is True, out
+    assert "no longer accepts the stored session" in out["link_notice"]
+    assert "/account" in out["link_notice"]
+    assert h.db.get_link("user-1") is None
+    cached = await h.app.state.gateway.decks.client.get_deck(None, "42")
+    assert cached.link_notice == ""
+    assert not ark.inject
+    # still unlinked: nothing was dropped on this read
+    again = structured(await call(h, token, "get_deck", {"deck_ref": "42"}))
+    assert "link_notice" not in again
+    b = Browser(h)
+    try:
+        await b.login()
+        ark.tokens.clear()
+        await linked_user(stack)  # linked again, then dropped once more on the page's read
+        ark.tokens.clear()
+        ark.inject = [(401, None)] * 2
+        page = (await b.http.get("/decks/42", headers={"cache-control": "max-age=0"})).text
+    finally:
+        await b.aclose()
+    assert "no longer accepts the stored session" in page
