@@ -391,6 +391,6 @@ def test_save_anyway_applies_the_version_the_question_was_about(server: Server) 
             page.locator("button.review").click()
             page.get_by_role("button", name="Save anyway").click()
             page.get_by_text("It changed.").wait_for(timeout=3000)
-            assert sent == [{"version": 3}]
+            assert sent == [{"version": 3, "archidekt_backup": False}]  # the box is unticked by default
         finally:
             browser.close()
