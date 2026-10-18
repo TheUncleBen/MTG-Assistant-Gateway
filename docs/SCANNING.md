@@ -239,8 +239,10 @@ live on `window.__scan` (`startContinuous()`, `stopContinuous()`,
   at startup and after every gallery build. At most 8 cards are learned at
   once; others get picked up on their next scan.
 
-These settings are read by the gateway but aren't in the example stack file,
-so add any you want to change under the gateway's `environment:`:
+These settings are also on the gateway's Settings page. Both stack files pass
+them to the gateway, and both example env files list them commented out with
+their default; set one there to lock it (the Settings page then shows it
+greyed out):
 
 | Variable | Default | What it does |
 | --- | --- | --- |

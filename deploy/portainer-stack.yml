@@ -107,6 +107,9 @@ services:
       # and MTG_FORGE_URL=http://mtg-assistant-forge:8000 (docs/DEPLOY.md).
       MTG_FORGE_URL: ${MTG_FORGE_URL:-}
       MTG_FORGE_GAMES: ${MTG_FORGE_GAMES:-}
+      # Forge games the gateway asks Forge to play at once for one report (1 to 4); FORGE_MAX_PARALLEL
+      # on the Forge service caps all runs together.
+      MTG_FORGE_PARALLEL_GAMES: ${MTG_FORGE_PARALLEL_GAMES:-}
       # Kill switch for Archidekt writes: set false to stop all writes. Missing from the
       # variables, it is false.
       MTG_WRITES_ENABLED: ${MTG_WRITES_ENABLED:-false}
@@ -116,12 +119,21 @@ services:
       MTG_APPROVAL_MODE_DEFAULT: ${MTG_APPROVAL_MODE_DEFAULT:-}
       MTG_APPROVAL_MODE_MAX: ${MTG_APPROVAL_MODE_MAX:-}
       MTG_AUTO_APPLY_MAX_ROWS: ${MTG_AUTO_APPLY_MAX_ROWS:-}
+      # In auto mode, an edit with more card rows than this waits for the member; days a waiting
+      # change stays open.
+      MTG_AUTO_BIG_EDIT_ROWS: ${MTG_AUTO_BIG_EDIT_ROWS:-}
+      MTG_PROPOSAL_EXPIRY_DAYS: ${MTG_PROPOSAL_EXPIRY_DAYS:-}
       # The Approve/Reject card an AI app shows in the chat may apply with its one-time code
       # (the assistant never has the code). false leaves only the review page.
       MTG_APPLY_IN_CHAT: ${MTG_APPLY_IN_CHAT:-}
       MTG_UPDATE_CHECK: ${MTG_UPDATE_CHECK:-}
       MTG_ARCHIDEKT_BACKUPS: ${MTG_ARCHIDEKT_BACKUPS:-}
       MTG_ARCHIDEKT_BACKUP_FOLDER: ${MTG_ARCHIDEKT_BACKUP_FOLDER:-MTG Gateway backups}
+      # Backup copies kept per deck on Archidekt, whether the editor's backup box starts ticked,
+      # and restore points kept per deck on the gateway.
+      MTG_ARCHIDEKT_BACKUP_COPIES: ${MTG_ARCHIDEKT_BACKUP_COPIES:-}
+      MTG_ARCHIDEKT_BACKUP_BOX_DEFAULT: ${MTG_ARCHIDEKT_BACKUP_BOX_DEFAULT:-}
+      MTG_SNAPSHOTS_PER_DECK: ${MTG_SNAPSHOTS_PER_DECK:-}
       # Token and session lifetimes, in seconds. Shorter is stricter.
       MTG_ACCESS_TOKEN_TTL: ${MTG_ACCESS_TOKEN_TTL:-3600}
       MTG_REFRESH_TOKEN_TTL: ${MTG_REFRESH_TOKEN_TTL:-2592000}
@@ -146,8 +158,33 @@ services:
       MTG_CIMD_ENABLED: ${MTG_CIMD_ENABLED:-true}
       # Hosts allowed to identify by Client ID Metadata Document URL. Empty = any https host.
       MTG_CIMD_ALLOWED_HOSTS: ${MTG_CIMD_ALLOWED_HOSTS:-}
+      # Only for an Android app you build yourself (docs/ANDROID.md): its package ID, and the App
+      # Links statement list served at /.well-known/assetlinks.json (one JSON list; empty = none).
+      MTG_ANDROID_PACKAGE: ${MTG_ANDROID_PACKAGE:-local.mtgassistantgateway.app}
+      MTG_ANDROID_ASSETLINKS: ${MTG_ANDROID_ASSETLINKS:-}
+      # Only with a folder you mount yourself (docs/OPERATIONS.md, docs/ANDROID.md): your own copy
+      # of the assistant plugin, or of the Android app. Empty = the copies in the image.
+      MTG_PLUGIN_DIR: ${MTG_PLUGIN_DIR:-}
+      MTG_APP_DIR: ${MTG_APP_DIR:-}
       # Seconds between single-card Scryfall lookups made for card scanning (0.1 to 5).
       MTG_SCRYFALL_LOOKUP_INTERVAL: ${MTG_SCRYFALL_LOOKUP_INTERVAL:-}
+      # Card scanning: name matching, reading and glare thresholds, and the artwork check
+      # (docs/SCANNING.md). A change applies after the gateway restarts.
+      MTG_SCAN_FUZZY_MIN_SIMILARITY: ${MTG_SCAN_FUZZY_MIN_SIMILARITY:-}
+      MTG_SCAN_FUZZY_CONFIDENT_SIMILARITY: ${MTG_SCAN_FUZZY_CONFIDENT_SIMILARITY:-}
+      MTG_SCAN_AMBIGUITY_MARGIN: ${MTG_SCAN_AMBIGUITY_MARGIN:-}
+      MTG_SCAN_AUTO_ADD_CONFIDENCE: ${MTG_SCAN_AUTO_ADD_CONFIDENCE:-}
+      MTG_SCAN_FOIL_STAR_INK_RATIO: ${MTG_SCAN_FOIL_STAR_INK_RATIO:-}
+      MTG_SCAN_GLARE_RATIO: ${MTG_SCAN_GLARE_RATIO:-}
+      MTG_SCAN_MIN_OCR_CONFIDENCE: ${MTG_SCAN_MIN_OCR_CONFIDENCE:-}
+      MTG_SCAN_ART_ENABLED: ${MTG_SCAN_ART_ENABLED:-}
+      MTG_SCAN_ART_MAX_DISTANCE: ${MTG_SCAN_ART_MAX_DISTANCE:-}
+      MTG_SCAN_ART_MIN_MARGIN: ${MTG_SCAN_ART_MIN_MARGIN:-}
+      MTG_SCAN_ART_MAX_PRINTINGS: ${MTG_SCAN_ART_MAX_PRINTINGS:-}
+      MTG_SCAN_ART_IMAGE_INTERVAL: ${MTG_SCAN_ART_IMAGE_INTERVAL:-}
+      MTG_SCAN_ART_IMAGES_PER_HOUR: ${MTG_SCAN_ART_IMAGES_PER_HOUR:-}
+      MTG_SCAN_ART_MAX_GALLERIES: ${MTG_SCAN_ART_MAX_GALLERIES:-}
+      MTG_SCAN_ART_GALLERY_IDLE_DAYS: ${MTG_SCAN_ART_GALLERY_IDLE_DAYS:-}
       PUID: ${PUID:?PUID REQUIRED}
       PGID: ${PGID:?PGID REQUIRED}
       TZ: ${TIMEZONE:-UTC}
@@ -365,6 +402,10 @@ services:
       # Forge games played at once at most (1 to 4); empty: as many as the container's CPUs and
       # memory fit (about 2 CPUs and 1.2 GB a game), so 1 inside the default limits
       FORGE_MAX_PARALLEL: ${FORGE_MAX_PARALLEL:-}
+      # Each Java's ceiling on its class data on top of FORGE_XMX, and its out-of-memory score
+      # (1000: the kernel stops a Forge game first when the machine runs out of memory; 0 = off)
+      FORGE_MAX_METASPACE: ${FORGE_MAX_METASPACE:-256m}
+      FORGE_OOM_SCORE_ADJ: ${FORGE_OOM_SCORE_ADJ:-1000}
       PUID: ${PUID:?PUID REQUIRED}
       PGID: ${PGID:?PGID REQUIRED}
       TZ: ${TIMEZONE:-UTC}

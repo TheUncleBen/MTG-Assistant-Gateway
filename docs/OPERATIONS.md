@@ -236,8 +236,8 @@ copies that to `/usr/share/mtg-gateway/plugin`, so a new image brings new
 skill text and a new plugin archive at `/plugin/mtg-gateway.zip` (or `/plugin/<slug of MTG_SERVER_NAME>.zip`).
 
 To serve your own edited copy without rebuilding, mount a folder with the
-same layout (`mtg-gateway/` inside it) and point `MTG_PLUGIN_DIR` at it
-(add it under the gateway's `environment:` in the stack file). The `/skill`
+same layout (`mtg-gateway/` inside it) into the gateway and set
+`MTG_PLUGIN_DIR` to its path in your environment variables. The `/skill`
 page, `/install` and the plugin marketplace all read from there.
 
 ## Backups
@@ -902,8 +902,7 @@ settings, each with its variable and a link to its row.
   them, and the example env files list those commented out (`# MTG_…=`) with
   the default, so out of the box the page manages them. Remove the line from
   your environment (or leave it empty) to manage one on the page. To lock one in
-  the stack, set it in your environment; for a setting the stack file doesn't
-  list, also add it under the gateway's `environment:`. Updating from an
+  the stack, set it in your environment. Updating from an
   earlier version: [UPGRADING.md](UPGRADING.md#0729-included-in-0730).
 - **Pacing only gets gentler here.** On the page the Archidekt and Scryfall
   pacing can only be set to ask less often than the gateway's defaults. Only the
