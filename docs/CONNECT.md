@@ -250,7 +250,7 @@ your press; the default), *Semi-auto* (it applies a small deck or
 collection edit itself: up to the row limit, 5 card rows by default,
 each a card added or removed, or a new quantity, category, finish,
 printing, color tag or custom mana value, no more than 4 copies a row,
-never the commander; it also makes a private copy of a deck; a new deck,
+no commander change; it also makes a private copy of a deck; a new deck,
 a restore, the deck's details and bigger edits still ask you) or *Full
 auto* (it applies the rest too, except a restore, a commander change, a new deck, an edit of more
 than 20 rows, making a deck public or unlisted, and any edit of a description that has formatting, such as bold text, links or pictures, which still wait for your press; so does a held change, a change waiting for
