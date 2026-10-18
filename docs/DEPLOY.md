@@ -180,7 +180,7 @@ The stack expects four Swarm secrets with exactly these names:
 
 | Secret name | What goes in it |
 | --- | --- |
-| `mtg_fernet_key` | A random encryption key for linked Archidekt sessions and the identity provider's tokens the gateway keeps. **Keep a copy** (password manager or similar). Lose it and every linked account has to be relinked (and everyone signs in once more), and old backups' Archidekt sessions can't be decrypted |
+| `mtg_fernet_key` | A random encryption key for linked Archidekt sessions and the identity provider's tokens the gateway keeps. **Keep a copy** (password manager or similar). Lose it and every linked account has to be relinked (and everyone signs in once more). Backups hold no Archidekt sessions or sign-in tokens, so they don't need it |
 | `mtg_session_secret` | A random string of 32+ characters that signs the browser sign-in cookie. No need to keep a copy |
 | `mtg_oidc_client_secret` | The Client Secret from the Authentik provider in step 3 |
 | `mtg_ntfy_token` | The token the gateway uses with the stack's own notification server: `tk_` and 29 random lowercase letters and digits. You don't need to keep a copy. |
@@ -249,36 +249,27 @@ take the secret out of it), delete the secret, create it again with the
 same name, and redeploy. Changing `mtg_fernet_key` means everyone relinks
 Archidekt and signs in once more.
 
-## 5. Registry login in Portainer
+## 5. Images
 
-The images live in GitHub Container Registry (GHCR) under `<owner>`. If the
-packages are private (the default for a private repository), Portainer
-needs a login to pull them. Set it up once like this and later updates need
-no new login:
+The images are public packages on GitHub Container Registry (GHCR), so
+Portainer and Docker pull them without a registry login or a GitHub token:
 
-1. On GitHub, create a classic personal access token with only the
-   `read:packages` scope.
-2. In Portainer, **Registries → Add registry → Custom**:
-   - Registry URL: exactly `ghcr.io`. Just the host, no `/<owner>` or image
-     path. Portainer hands a registry's login to a stack service only when
-     the registry URL equals the image's host, so an entry like
-     `ghcr.io/<owner>/mtg-assistant-gateway` is never used and the deploy fails.
-   - Authentication on, username your GitHub login, password that token.
-3. Deploy (step 6). Portainer stores the login with each service, so
-   whichever node runs it can pull. To update later, open the stack, change
-   `MTG_TAG` if you're moving to a new release, and click **Update the
-   stack** (if your stack uses the Repository build method, the button is
-   called **Pull and redeploy**). In the box that asks “Are you sure?”, make
-   sure **Re-pull image and redeploy** is on, then click **Update**.
+- `ghcr.io/theuncleben/mtg-assistant-gateway`
+- `ghcr.io/theuncleben/mtg-assistant-mysticforge`
+- `ghcr.io/theuncleben/mtg-assistant-forge` (only pulled if you turn Forge on)
 
-If tasks show `rejected` with `No such image: ghcr.io/<owner>/...`, check
-the image name and tag first, then the registry URL above. A `docker login`
-on the node doesn't fix it: Swarm pulls with the login stored on the
-service, not the node's own. Pulling by hand on the node gets one deploy
-going (Swarm then uses the cached image), but you'd have to repeat it for
-every new tag.
+The stack's ntfy server is the official `binwiederhier/ntfy` image from
+Docker Hub, pinned in the stack file.
 
-If the packages are public you can skip this step.
+To update later, open the stack, change `MTG_TAG` if you're moving to a new
+release, and click **Update the stack** (if your stack uses the Repository
+build method, the button is called **Pull and redeploy**). In the box that
+asks “Are you sure?”, make sure **Re-pull image and redeploy** is on, then
+click **Update**.
+
+If tasks show `rejected` with `No such image: ghcr.io/...`, check the image
+name and tag: a version's tag exists only once its release is published
+([VERSIONS.md](VERSIONS.md)).
 
 ## 6. Portainer stack
 
@@ -350,10 +341,7 @@ gateway's own address.
    your own for the gateway, you can stop it after the update, and delete
    the proxy host you made for it: the new ntfy server needs none.
 3. **If Forge is on:** the new stack file pulls Forge image `2.0.15-mag3`.
-   GitHub publishes that image only after this release is on `main` and the
-   **Forge image** workflow's run for it has finished, so check that the run
-   has finished (the repository's **Actions** tab) before you update; until
-   then the pull fails. If your variables file was copied from an older
+   If your variables file was copied from an older
    `stack.env.example`, it still sets `FORGE_TAG=2.0.15-mag2`, which keeps
    the old Forge image: change it to `FORGE_TAG=2.0.15-mag3`, or delete the
    line. Delete its `FORGE_GAME_SECONDS=600` line too, and
@@ -365,8 +353,10 @@ gateway's own address.
    old `mtg_ntfy_token` lines, if you had them, are already in it).
 5. Tell the members: notifications now come in the gateway's own Android
    app, not the ntfy app, and members need app 0.7.30 to get them. Each
-   member who wants them opens their Account page in the app and presses
-   **Get notifications on this phone**. Their old subscriptions in the ntfy
+   member who wants them opens their Account page in the app, ticks **Send
+   me notifications** and presses **Save notifications**, which also connects
+   that phone (**Get notifications on this phone** stays on the card while
+   a phone isn't connected). Their old subscriptions in the ntfy
    app stop getting messages and can be deleted. There are no notifications
    on iPhone.
 6. **Members on an app older than 0.7.12 must update the app:** in those
@@ -426,12 +416,11 @@ copes with values that contain spaces, which `. ./file` doesn't):
 ```bash
 cp deploy/stack.env.example mtg.env    # edit the REQUIRED lines
 while IFS= read -r line; do case "$line" in ''|\#*) ;; *) export "$line" ;; esac; done < mtg.env
-docker stack deploy --with-registry-auth -c deploy/portainer-stack.yml mtg
+docker stack deploy -c deploy/portainer-stack.yml mtg
 ```
 
-`--with-registry-auth` hands your `docker login ghcr.io` to the nodes, which
-private images need. To update later, change `MTG_TAG` in the file and run
-the last two lines again.
+To update later, change `MTG_TAG` in the file and run the last two lines
+again.
 
 The gateway is one Python process. In the end-to-end test (amd64, idle after
 a few sign-ins) it sat at about 60 MB. The stack caps it at
@@ -457,8 +446,9 @@ process), and it sets no process limit because older Docker and Portainer
 versions refuse the `pids` key and the stack wouldn't deploy. The Compose
 file ([DEPLOY-COMPOSE.md](DEPLOY-COMPOSE.md)) sets both.
 
-The images are built on the official Python base images by tag, so every
-gateway release picks up the base image's latest security patches. The base
+The images are built on the official Python (and, for Forge, Eclipse
+Temurin) base images, pinned by digest: a rebuild uses exactly the pinned
+base image, and newer base patches arrive when a release moves the pin. The base
 image is fetched from Google's public mirror of Docker Hub (`mirror.gcr.io`,
 the same images and digests), because Docker Hub limits anonymous pulls per
 address and shared CI runners hit that limit. As a fallback for anything a
@@ -466,8 +456,8 @@ build still fetches from Docker Hub, the image jobs sign in to Docker Hub when
 the repository secrets `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` (a
 read-only access token) exist; without them the step is skipped. The
 Mystic Forge image is built once per tag (`1.3.2-mag4`) and not rebuilt by
-later releases; a manual run of its workflow from `main` rebuilds it with
-current base patches. GitHub
+later releases; a manual run of its workflow from `main` rebuilds it from
+the base image `main` pins. GitHub
 Actions are pinned by commit, Python dependencies by version
 (`constraints.txt`), and the Android build checks its Gradle wrapper before
 running it.
@@ -483,8 +473,8 @@ For NPM, **Hosts → Proxy Hosts → Add Proxy Host**:
   service name: stack name, underscore, service; it resolves on the network
   from step 1), port `8080`
 - Turn on **Block common exploits**. Leave **Websockets support** off: the
-  gateway has no websocket endpoints (MCP uses plain HTTP and server-sent
-  events, which work without it). If you turned it on in an earlier deploy,
+  gateway has no websocket endpoints (MCP answers with plain JSON over HTTP,
+  and the Android app's notification stream is plain HTTP too). If you turned it on in an earlier deploy,
   you can turn it off.
 - SSL tab: request a Let's Encrypt certificate, turn on **Force SSL**,
   HTTP/2 and **HSTS Enabled**. HSTS makes browsers refuse plain-HTTP visits,
@@ -499,7 +489,8 @@ For NPM, **Hosts → Proxy Hosts → Add Proxy Host**:
   client_max_body_size 4m;
   ```
 
-  The first two stop long-running MCP responses getting buffered. The last
+  The first two keep NPM from holding back the Android app's notification
+  stream and from cutting off long requests. The last
   caps request bodies at 4 MB. NPM allows 2000 MB by default, and the
   gateway's largest legitimate requests (scan and CSV imports) stay under
   2 MB, so anything bigger is only a way to make the gateway run out of
@@ -571,7 +562,7 @@ A `502 Bad Gateway` from NPM means it can't reach the gateway. Check that
 NPM's stack has the network from step 1 (exact name) and was redeployed
 after you added it, and that the forward hostname is right. From a manager,
 `docker exec <npm-container> curl -s http://mtg_mtg-assistant-gateway:8080/healthz`
-should print `{"status":"ok",...}`.
+should print `{"status":"ok"}` (or `{"status":"degraded"}`, see step 8).
 
 ## 8. Check it works
 
@@ -580,9 +571,9 @@ From any machine:
 ```bash
 curl -s https://mtg.example.com/healthz
 # {"status":"ok"}
-# ("degraded" means the gateway works but the research service doesn't
-#  answer: check the Mystic Forge service. The admin page's System
-#  card shows the version and whether the research service answers.)
+# ("degraded" means the gateway works but the research service, or Forge
+#  when it's on, doesn't answer: check the Mystic Forge and Forge services.
+#  The admin page's System card shows the version and which one is down.)
 
 curl -s https://mtg.example.com/.well-known/oauth-authorization-server | head -c 300
 # JSON with "issuer":"https://mtg.example.com", "authorization_endpoint", ...
@@ -672,8 +663,7 @@ What to know about it:
   `mtg-gateway`, so NPM and other containers there can't reach it. The gateway
   still finds it as `mtg-assistant-mysticforge`. The private network isn't encrypted;
   only research queries cross it.
-- **No extra setup.** It uses the registry login from step 5. No secrets, no
-  host folders. Its `/data` lives inside the container and resets on
+- **No extra setup.** No secrets, no host folders. Its `/data` lives inside the container and resets on
   redeploy, which is fine because nothing it keeps there matters while
   watchlists are off.
 - **Price downloads and notifications are off.** The stack sets
@@ -820,7 +810,8 @@ yet picked up.
   the card that moved most. The token is read from the secret file, sent only in the
   `Authorization` header and never written to the log.
 - **Members** turn notifications on in the **Notifications** card of their Account page, in the
-  app. **Get notifications on this phone** asks once to let the app run in the background, and on
+  app: they tick **Send me notifications** and press **Save notifications**, which in the app
+  also presses **Get notifications on this phone** for them. That asks once to let the app run in the background, and on
   Android 13 and later it first asks to allow notifications. Android then shows a quiet "Always
   connected" notification while the app listens. The app is built to reconnect after the phone restarts and after an app update; that is tested on an emulator, not yet on a real phone. **Disconnect my phones** gives
   the member a new topic, which signs out every phone; turning notifications off ends the stream

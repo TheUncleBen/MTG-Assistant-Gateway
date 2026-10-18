@@ -10,7 +10,8 @@ Code, `mcp.json` for Codex and ChatGPT) and the skills under `skills/`.
   `whoami`, link Archidekt in the browser. It never asks for a secret.
 
 The copy in this repository has no gateway address: the connector URL is
-`${MTG_GATEWAY_URL:-}` until you set that variable (unset, Claude Code
-reports the server as failed with "invalid MCP url"). The running gateway serves a copy
+`${MTG_GATEWAY_URL:-}` in `.mcp.json` and `${MTG_GATEWAY_URL}` in
+`mcp.json` until you set that variable (unset, Claude Code reports the
+server as failed with "invalid MCP url"). The running gateway serves a copy
 with its own address filled in at `https://<gateway>/plugin/marketplace.json`;
 install from there and nothing needs setting. See `docs/PLUGIN.md`.

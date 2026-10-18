@@ -639,7 +639,7 @@ def _updates_card(u: dict[str, Any]) -> str:
         "<strong>Re-pull image and redeploy</strong> is on, then click <strong>Update</strong>.</p>"
         "<p><strong>Swarm without Portainer</strong>: set <code>MTG_TAG</code> in your variables "
         "file, load it into the shell as in docs/DEPLOY.md, then run "
-        "<code>docker stack deploy --with-registry-auth -c deploy/portainer-stack.yml mtg</code> "
+        "<code>docker stack deploy -c deploy/portainer-stack.yml mtg</code> "
         "again (your stack's name in place of <code>mtg</code>).</p>"
         "<p><strong>docker compose</strong>: in the folder with <code>docker-compose.yml</code>, set "
         f"<code>MTG_TAG={tag}</code> in <code>.env</code> if it is pinned, then run "

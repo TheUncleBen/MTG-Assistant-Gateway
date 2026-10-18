@@ -7,6 +7,31 @@ Notable changes for people who run or use the gateway. The format follows
 with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 (`release/1.2.3`); `latest` is always the newest.
 
+## [0.7.31] - 2026-10-18
+
+A documentation release: the example settings files are reorganised, and the guides are checked
+against the code and corrected. Nothing changes in how the gateway works.
+
+### Changed
+- `deploy/stack.env.example` and `deploy/compose/.env.example` are grouped in a new order that
+  reads top to bottom: images, server settings, placement and storage, standard container
+  settings, sign-in, notifications and watchlists, deck edits, Forge, sessions and tokens, AI
+  clients, network trust, and the lines to leave as they are. The values are the same. The
+  Compose file's example gains a Forge section (off by default). If you copied an earlier
+  example, your file keeps working as it is.
+- The images are public, and the guides now say so: no registry login, GitHub token or
+  `--with-registry-auth` is needed to pull them. Step 5 of the Swarm guide is now "Images".
+
+### Fixed
+- The deployment guides, the operator plugin's deploy skill, the member guides, the API and
+  plugin guides, the architecture and operations guides and the third-party notices are corrected
+  where they no longer matched the gateway, among them: the operator deploy skill now creates the
+  `mtg_ntfy_token` secret and checks the ntfy service; `/healthz` reports "degraded" for Forge
+  too; backups need no Fernet key; the tools marked as changing something; the Android app's
+  permissions and notification steps; the phone tabs; and the admin Card models page.
+- In the Android app, the messages about a shared link that isn't a deck link now point to
+  **Open a copied link** on the Account page's App card, where it is.
+
 ## [0.7.30] - 2026-10-18
 
 This release also includes every change listed under 0.7.27, 0.7.28 and 0.7.29 in CHANGELOG.md. Those versions were not released on their own.

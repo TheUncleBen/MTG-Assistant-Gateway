@@ -1,6 +1,6 @@
 ---
 name: deploy
-description: Guided first deployment or redeployment of the MTG Assistant Gateway stack (gateway plus Mystic Forge) on Docker Swarm with Portainer, Authentik and Nginx Proxy Manager. Use when the operator says "deploy the gateway", "set up the stack", "install the gateway on my swarm" or asks to check a deployment.
+description: Guided first deployment or redeployment of the MTG Assistant Gateway stack (gateway, Mystic Forge, ntfy and the optional Forge) on Docker Swarm with Portainer, Authentik and Nginx Proxy Manager. Use when the operator says "deploy the gateway", "set up the stack", "install the gateway on my swarm" or asks to check a deployment.
 ---
 
 # Deploy the MTG Assistant Gateway
@@ -128,37 +128,35 @@ A JSON document with `"issuer"` equal to the issuer URL means step 3 is right.
 
 Hand these over; do not run them, even over ssh. The first two generate
 and pipe the values; the Fernet key is also shown once so the operator
-can keep a copy (without it every Archidekt link, including those in old
-backups, can't be decrypted), which is exactly why it must not run from
-here. The third reads the Authentik client secret from the keyboard at a
-silent prompt:
+can keep a copy (without it every linked Archidekt account has to be
+relinked and everyone signs in once more), which is exactly why it must not
+run from here. The third reads the Authentik client secret from the keyboard at a
+silent prompt. The fourth makes the token for the stack's own ntfy server;
+the stack does not deploy without it:
 
 ```bash
 python3 -c 'import base64, os; print(base64.urlsafe_b64encode(os.urandom(32)).decode())' | tee /dev/stderr | docker secret create mtg_fernet_key -
 python3 -c 'import secrets; print(secrets.token_urlsafe(48))' | docker secret create mtg_session_secret -
 # Paste the Authentik client secret at the (silent) prompt and press Enter:
 read -rs S && printf %s "$S" | docker secret create mtg_oidc_client_secret - ; unset S
+printf 'tk_%s' "$(LC_ALL=C tr -dc a-z0-9 </dev/urandom | head -c 29)" | docker secret create mtg_ntfy_token -
 docker secret ls
 ```
 
-Check, which you may run: `docker secret ls` shows exactly those three
+Check, which you may run: `docker secret ls` shows exactly those four
 names and no values. If a manager has
 no `python3`, `openssl rand -base64 32 | tr '+/' '-_'` produces a valid
 Fernet key and `openssl rand -base64 48` a session secret.
 
-### 5. GHCR pull credential (Portainer, browser)
+### 5. Images (nothing to set up)
 
-Only needed if the GHCR packages are private. The operator creates a GitHub classic token with
-only `read:packages` and adds it in Portainer under Registries, Add
-registry, Custom, URL `ghcr.io`, with their GitHub login. The token is a
-secret: it goes into Portainer, not into this chat. The registry URL must be exactly
-`ghcr.io` (no path): Portainer only sends a registry's login when its URL
-equals the image's host, so a per-image entry like `ghcr.io/<owner>/mtg-assistant-gateway`
-is ignored and tasks end `rejected` with `No such image`. Later updates:
-Update the stack (if the stack uses the Repository build method, the button is
-called Pull and redeploy), then in the box that asks “Are you sure?” make sure Re-pull image and redeploy is on and
-click Update. A `docker login` on
-the node does not fix Swarm pulls (docs/DEPLOY.md step 5).
+The GHCR images are public: Portainer pulls them with no registry login and
+no GitHub token, so don't ask the operator for one. Later updates: Update the
+stack (if the stack uses the Repository build method, the button is called
+Pull and redeploy), then in the box that asks “Are you sure?” make sure
+Re-pull image and redeploy is on and click Update. Tasks that end `rejected`
+with `No such image` mean a wrong image name or tag, or a tag whose release
+isn't published yet (docs/DEPLOY.md step 5).
 
 ### 6. Portainer stack (browser)
 
@@ -175,11 +173,12 @@ and `MTG_APPLY_IN_CHAT`.
 Check (manager):
 
 ```bash
-docker service ps mtg_mtg-assistant-gateway mtg_mtg-assistant-mysticforge
+docker service ps mtg_mtg-assistant-gateway mtg_mtg-assistant-mysticforge mtg_mtg-assistant-ntfy
 docker service logs --tail 50 mtg_mtg-assistant-gateway
 ```
 
-Both tasks `Running` within about a minute. A gateway that exits at once
+All three tasks `Running` within about a minute (with Forge on, also
+`mtg_mtg-assistant-forge`). A gateway that exits at once
 usually names the missing variable or secret in its last log lines.
 
 ### 7. Nginx Proxy Manager host (browser)
@@ -196,7 +195,7 @@ proxy_read_timeout 300s;
 client_max_body_size 4m;
 ```
 
-No proxy host for Mystic Forge: it stays internal.
+No proxy host for Mystic Forge, ntfy or Forge: they stay internal.
 
 ### 8. Check from anywhere
 
@@ -208,7 +207,7 @@ curl -s https://<gateway host>/plugin/marketplace.json | head -c 300
 ```
 
 Expected: `{"status":"ok"}` (`"degraded"` means the gateway runs but
-Mystic Forge doesn't answer: check that service; the System card on the
+Mystic Forge, or Forge when it's on, doesn't answer: check those services; the System card on the
 admin page shows the version and the research service's state); metadata
 JSON whose `issuer` is the public
 URL; `401`; and the plugin marketplace JSON. Report each line's real

@@ -174,9 +174,14 @@ still works, it just can't scan.
 
 From 0.7.30 the app shows the member's notifications itself. There is no
 Google push service and no separate notification app. On the Account page in
-the app, **Get notifications on this phone** asks Android to allow
+the app, the member ticks **Send me notifications** and presses **Save
+notifications**. The page then presses **Get notifications on this phone**
+for them (the button stays on the card while this phone isn't connected).
+That asks Android to allow
 notifications (Android 13 and later ask; older versions allow them by
-default) and, once, to let the app run in the background. The app then runs
+default) and, once, to let the app run in the background. When the gateway
+has no notification server set up, the card says so and that the app can't
+get notifications. Once this phone is connected, the app runs
 a foreground service that holds one connection to the gateway's own address
 (`/app/notifications/stream`). Android shows its quiet **Always connected**
 notification while the service runs, as it does for every foreground
@@ -360,6 +365,9 @@ The app talks only to pages and endpoints the gateway already serves:
 | Everything else | the normal pages, loaded in the app |
 | Phone-camera scans | the `/scan` page's `window.__scan` hooks (`flattenCard`, `flatTitleRegion`, `infoRegionOf`, `scanRegion`, `showTab`, `noCardFrame`, `undoLastAdd`) and its `scan:*` events |
 | App Links (optional) | `GET /.well-known/assetlinks.json`, served from `MTG_ANDROID_ASSETLINKS` ([section 12](#12-app-links-opening-gateway-links-in-the-app)) |
+| Keeping the sign-in page in the app | `GET /.well-known/mtg-gateway` (the sign-in address the gateway advertises; an older gateway without it still works) |
+| Updates | `GET /app/latest.json` (the version, size and checksums of the APK the gateway ships), then `GET /app/mtg-assistant-gateway.apk`, both with the app's sign-in ([Updates](#updates)) |
+| Notifications | `GET /app/notifications/stream` with the phone's notification key, held open by the app's foreground service ([Notifications](#notifications)) |
 
 The pages work with any gateway version; the phone-camera hand-off needs a scan
 page that has those hooks (the edge-detection scan page with continuous mode,
@@ -388,7 +396,7 @@ Nothing here costs money or needs an account with anyone:
   `mtg-assistant-gateway-release.apk`, `mtg-assistant-gateway-release.aab` and `mtg-assistant-gateway.json` to the version's
   GitHub release when the release signing secrets are set
   ([section 9](#9-releasing-the-ci-build-and-the-gateway-image)). Anyone can
-  download them there once the repository is public.
+  download them there.
 - **Not Google Play.** Publishing there needs a developer account with a
   one-time fee, and the app's users all have accounts on a private gateway
   anyway. An app bundle is still produced in case that changes.
@@ -659,12 +667,25 @@ screen is shown without a prefill, so a link can't pick your gateway for you.
 ## 13. Privacy and security notes
 
 - The app has no server of its own and no analytics. It stores the gateway
-  address and when it last looked for an update. It asks for internet and
+  address, the sign-in address that gateway advertised, the check value of a
+  browser sign-in in progress, when it last looked for an update, your
+  notification key with the last message it got and the ones already shown,
+  and whether it has already asked Android for the notification permission
+  and to run in the background. It asks for internet and
   camera, and for the two permissions that let it install its own updates
   (`REQUEST_INSTALL_PACKAGES`, which Android grants only after you allow
   installs from this app, and `UPDATE_PACKAGES_WITHOUT_USER_ACTION`), and for
   the network state (`ACCESS_NETWORK_STATE`, granted at install without asking),
   only to notice the connection coming back while a page has failed to load.
+  For notifications it asks for `POST_NOTIFICATIONS` (to show your messages;
+  Android 13 and later ask you when you get notifications on this phone),
+  `FOREGROUND_SERVICE` and `FOREGROUND_SERVICE_SPECIAL_USE` (the service that
+  keeps the connection to the gateway open while the app is closed),
+  `RECEIVE_BOOT_COMPLETED` (to start that service again after the phone
+  restarts), `WAKE_LOCK` (to keep the phone awake for a moment while a message
+  is shown) and `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` (to ask you once to let
+  the app run in the background, so battery saving doesn't cut the
+  connection); all but `POST_NOTIFICATIONS` are granted at install.
   The update check talks to the app's own gateway only ([Updates](#updates)). Sign-in cookies live in the system WebView's cookie store
   for this app only. None of it is backed up or copied to a new phone: backup
   is off, and from Android 12 the data-extraction rules also exclude everything

@@ -22,9 +22,9 @@ assistant:
 
 | Mode | Low-risk proposal | High-risk proposal |
 | --- | --- | --- |
-| Manual (default) | the member presses Approve or Apply | the member presses |
-| Semi-auto | the assistant applies it (`apply_proposal`) | the member presses |
-| Full auto | the assistant applies it | the assistant applies it, except a restore, a commander change, a new deck, an edit of more than 20 rows, making a deck public or unlisted, and any edit of a description that has formatting, such as bold text, links or pictures: the member presses |
+| Manual, shown as "Ask me every time" (default) | the member presses Approve or Apply | the member presses |
+| Semi-auto, shown as "Apply low-risk changes without asking" | the assistant applies it (`apply_proposal`) | the member presses |
+| Full auto, shown as "Apply deck and collection changes without asking" | the assistant applies it | the assistant applies it, except a restore, a commander change, a new deck, an edit of more than 20 rows, making a deck public or unlisted, and any edit of a description that has formatting, such as bold text, links or pictures: the member presses |
 
 Low risk (`MTG_AUTO_APPLY_MAX_ROWS` sets the row limit, 5 here): A small edit
 to an existing deck or to your collection: at most 5 card rows, each a card
@@ -37,7 +37,7 @@ deck, restoring a snapshot, and the deck's details (name, format, bracket,
 description, visibility, folder, tags and cover).
 Always the member's own press: Actions on your Archidekt account (likes,
 votes, bookmarks, follows, comments, new folders and collaborator changes) and
-deleting a deck are never applied by an assistant: each one waits for your own press, in every mode, on the card in the chat or on its review page (deleting a deck, and an edit of a comment that has formatting: on the review page only).
+deleting a deck are never applied by an assistant: each one waits for your own press, in every mode, on the card in the chat or on its review page (deleting a deck, and any edit of a description or comment that has formatting: on the review page only).
 In every mode: a held change, a change waiting for another change first, one another app had a hand in, one that replaces another app's change, or one that another app's waiting change would replace waits for the member's press; its card and review page say why.
 A change to one of your decks keeps a snapshot first. Deck and collection changes are read back to check them.
 
@@ -67,16 +67,19 @@ A change to one of your decks keeps a snapshot first. Deck and collection change
 | Read a deck's comments; post, reply, edit or delete your own, vote on others' | `get_deck_comments`, `propose_comment` | proposal (consent) | the full comment text is on the review card; never applied by the assistant in any mode |
 | Delete one of your decks | `propose_delete_deck` | proposal (destructive) | never applied by the assistant in any mode; snapshot first, and a backup copy with backups on |
 | Create a folder | `propose_create_folder` | proposal (consent) | never applied by the assistant in any mode; renaming a folder stays a hand action |
-| See, add or remove a deck's collaborators (people who may edit it) | `get_deck_collaborators`, `propose_collaborator`; deck settings page | proposal (consent) | changes who can edit the deck, so it is an account action: the assistant's proposal is approved only on the review page, never applied by the assistant in any mode (the member's own form on the settings page applies after one confirmation). Only people you follow can be added, as on Archidekt |
+| See, add or remove a deck's collaborators (people who may edit it) | `get_deck_collaborators`, `propose_collaborator`; deck settings page | proposal (consent) | changes who can edit the deck, so it is an account action: the member approves the assistant's proposal on the card in the chat or on its review page, and it is never applied by the assistant in any mode (the member's own form on the settings page applies after one confirmation). Only people you follow can be added, as on Archidekt |
 | Watch cards (a name, or one printing and finish) and decks; their daily prices and values over time; price alerts | `watch_card`, `watch_deck`, `unwatch`, `list_watchlist`, `card_price_history` | the member's own watchlist (no proposal) | changes only the member's gateway data, never Archidekt; prices from Scryfall once a day; the Watchlist page is the hand path; only when the operator sets `MTG_WATCHLISTS_ENABLED=true` (off by default) |
 | A plain summary of the last day or week: watched prices and deck values (when watchlists are on), reports finished, proposals waiting and applied | `get_summary` | no | written by the gateway without AI; an assistant's scheduled task can turn it into its own words ([USING.md](USING.md#notifications-and-summaries)) |
 | Proposals: list, read, approve with the card's code, reject (with a reason on the card), apply | `list_my_proposals`, `get_proposal`, `confirm_proposal`, `reject_proposal`, `apply_proposal` | apply writes | `apply_proposal` succeeds only when the mode allows |
+| Change a waiting proposal in place, take back one of its own, or combine several of its own waiting card edits on one deck into one | `amend_proposal`, `withdraw_proposal`, `combine_proposals` | proposal | changes nothing on Archidekt; a proposal amended by another app than the one that made it always waits for the member's press; a withdrawn one stays visible and the member can bring it back; combined ones come back if the combined one is rejected |
+| Show every waiting change (one deck or all), approve or reject each, and apply several with one press | `show_waiting_changes` (+ `confirm_waiting` and `get_apply_result`, called only by the card) | Apply all writes | the waiting-changes card; `confirm_waiting` needs the card's one-time code, which the assistant never has; another app's changes are listed with their review link; the Proposals page is the hand path |
+| Remove a saved card model (the description of a card the solo test kept) | `remove_card_model` | the member's own gateway data (no proposal) | changes nothing on Archidekt and leaves stored reports as they are; only while kept card models are on |
 
 **No assistant tool exists for:** renaming folders, linking or unlinking
 Archidekt, approval modes, notification and summary settings, admin. Social actions and deleting a deck have
 tools since 0.7.17, but only as proposals, and the person applies each one
 with their own press, in every approval mode, on the card in the chat or on
-its review page (deleting a deck, and an edit of a comment that has formatting: review page only): no mode,
+its review page (deleting a deck, and any edit of a description or comment that has formatting: review page only): no mode,
 setting or batch lets an assistant apply a like, vote, bookmark, follow,
 comment, new folder, collaborator change or deck deletion. The gateway enforces this where proposals
 are applied, not only in the pages.
@@ -93,16 +96,19 @@ deleting a deck asks for its name.
 | --- | --- |
 | Home | newest decks with covers, search, tiles to every section |
 | Decks | the linked account's decks (grid or list, filter, sort), New deck (name, pasted list, CSV, the gateway's .json, a chosen file, scan), Folders (create, rename) |
-| One deck | views (text, table, brewer, stacks, scroll, grid), grouping, sorting, filter, your own stack order (drag a stack's handle or use the arrow keys; kept with your account, so every device shows it; Archidekt has no stack order; Reset puts the deck's order back), Select cards on your own deck to move, refinish, colour-tag or remove several in one save with one Undo (Color tag… and Mana value… are in the card menu too), the whole card on tap (image, every face's mana cost, type line, rules text, power/toughness or loyalty, flavour, printing, rarity, artist, price, salt, legal formats, custom mana value, the card's notes (read-only); Scryfall, mark owned, move category), drag cards between categories (0.7.24: saved to Archidekt on the drop, like the card menu and Select cards; every one of those saves has Undo and Redo: the buttons, the toast's Undo, and the editor's keys Ctrl+Z, Ctrl+Shift+Z and Ctrl+Y; the Undo of a removal puts back every category, and removing a card with notes asks first, as notes cannot be written back), Quick add, Playtest (Archidekt's own playtester in a new tab, or the phone's browser from the app, where the person's Archidekt sign-in lives), Goldfish (0.7.23: play the deck by hand in the browser: shuffle, an opening hand of seven with London mulligans, draw, play to the battlefield, graveyard or exile, tap and untap, next turn; a Commander deck starts with its commander in the command zone; nothing is sent or kept), Play on EDHPlay (0.7.25: copies the whole deck in EDHPlay's import format, commander marked, companion and sideboard up to EDHPlay's 15 copies, and opens edhplay.com; the maybeboard and tokens are not sent and a note names any cut; see [EXPORT-IMPORT.md](EXPORT-IMPORT.md)), Run full test (0.7.30, was Run simulation: the same statistics, validation and 300-game solo test as `run_deck_report`, opened and filed under History), statistics with Probability of draw and Deck checks (curve by type or category, colours as bars or a pie, lands only, pips outside the commander's identity, subtypes and keywords; a click shows only those cards), description, comments (post, edit and delete your own), like, bookmark, follow the owner; More: Settings, Compare with another deck (a precon from Archidekt's list, any deck or a pasted list; the same comparison as `compare_decks`), Export (Archidekt import text, plain text, sideboard, each with Copy; downloads as Archidekt .txt, plain .txt, .csv, .json, and one-way Arena .txt, MTGO .dek, PDF; see [EXPORT-IMPORT.md](EXPORT-IMPORT.md)), Open on Archidekt, Delete deck |
+| One deck | views (text, table, brewer, stacks, scroll, grid), grouping, sorting, filter, your own stack order (drag a stack's handle or use the arrow keys; kept with your account, so every device shows it; Archidekt has no stack order; Reset puts the deck's order back), Select cards on your own deck to move, refinish, colour-tag or remove several in one save with one Undo (Color tag… and Mana value… are in the card menu too), the whole card on tap (image, every face's mana cost, type line, rules text, power/toughness or loyalty, flavour, printing, rarity, artist, price, salt, legal formats, custom mana value, the card's notes (read-only); Scryfall, mark owned, move category), drag cards between categories (0.7.24: saved to Archidekt on the drop, like the card menu and Select cards; every one of those saves has Undo and Redo: the buttons, the toast's Undo, and the editor's keys Ctrl+Z, Ctrl+Shift+Z and Ctrl+Y; the Undo of a removal puts back every category, and removing a card with notes asks first, as notes cannot be written back), Quick add, Playtest (Archidekt's own playtester in a new tab, or the phone's browser from the app, where the person's Archidekt sign-in lives), Goldfish (0.7.23: play the deck by hand in the browser: shuffle, an opening hand of seven with London mulligans, draw, play to the battlefield, graveyard or exile, tap and untap, next turn; a Commander deck starts with its commander in the command zone; nothing is sent or kept), Play on EDHPlay (0.7.25: copies the whole deck in EDHPlay's import format, commander marked, companion and sideboard up to EDHPlay's 15 copies, and opens edhplay.com; the maybeboard and tokens are not sent and a note names any cut; see [EXPORT-IMPORT.md](EXPORT-IMPORT.md)), Run full test (0.7.30, was Run simulation: the same statistics, validation and 300-game solo test as `run_deck_report`, opened and filed under History), statistics with Probability of draw and Deck checks (curve by type or category, colours as bars or a pie, lands only, pips outside the commander's identity, subtypes and keywords; a click shows only those cards), description, comments (post, edit and delete your own), like, bookmark, follow the owner; More: Solo test only (when Forge is on: the same run without the Forge games), Settings, Compare with another deck (a precon from Archidekt's list, any deck or a pasted list; the same comparison as `compare_decks`), Export (Archidekt import text, plain text, sideboard, each with Copy; downloads as Archidekt .txt, plain .txt, .csv, .json, and one-way Arena .txt, MTGO .dek, PDF; see [EXPORT-IMPORT.md](EXPORT-IMPORT.md)), Open on Archidekt, Delete deck |
 | Editor | quantities, categories, finish, printing, add cards (deck or maybeboard), maybeboard and sideboard rows, paste a list (Archidekt's syntax: printing, `*F*`/`*E*`, `[Category]`, `# Sideboard`), the whole card from a thumbnail, remove, undo, Save changes |
 | Deck settings | name, format, bracket, description, private, unlisted; cover image; tags; folder; collaborators (add or remove, then confirm once; 0.7.24); Delete this deck (type its name) |
 | Search | public decks by name, commander, format, colours, owner; a user's profile page; Precons by set |
 | Scan | phone camera or photos to a draft; set lock, foil, printing picker; save as a new deck, into a deck, or to the collection |
 | Collection | the Archidekt Collection: filter, sort, grid or list, add, quantity, per-row details (finish, condition, language, price paid), the whole card from a thumbnail, remove, CSV export, import from a CSV or a card list (pasted or a file) |
-| Proposals | review page with Approve, Apply, Reject; the in-chat card opens the same proposal |
+| Cards | every card matching the top bar's search, with its picture; the whole card on tap; Add to deck (copies and category), saved like an edit on the deck page |
+| Proposals | review page with Approve, Apply, Reject; check several and Apply checked or Reject checked; the in-chat card opens the same proposal |
 | History | proposals, snapshots (Restore), reports (open one in full) |
+| Reports | every stored deck report, newest first (the newest 200 are kept), filter by deck, and what Forge is playing for you now |
+| My activity | everything done in your name on this gateway: sign-ins, which assistant proposed and applied what, links and unlinks, and anything an administrator did to your account |
 | Watchlist | watch cards (name, or set and number, finish) and decks; today's price and the change over 1, 7 and 30 days; a chart and a table of each price over time; price alerts; remove. The card viewer's Price history and Watch this card reach the same. Only when watchlists are on (off by default) |
-| Account | link or unlink Archidekt, approval mode, hand-edit confirmation, notifications in the Android app (on or off, which events, Get notifications on this phone, Disconnect my phones, Send test, and the summary: Off, Every day or Every week, with the latest one shown in the card), theme, sign out, delete my data |
+| Account | who you are signed in as, whether Archidekt writes are on, what your sign-in shares, Get the assistant skill, Get the Android app (in the app: the App card with Check for app updates and Open a copied link), Sign out, Sign out on all my devices, approval mode, Connected apps (Disconnect), notifications in the Android app when the gateway has a notification server (on or off, which events, Get notifications on this phone, Disconnect my phones, Send test, and the summary: Off, Every day or Every week, with the latest one shown in the card), link or unlink Archidekt, Forget my view choices, delete my data; the site theme and layout are in the account menu |
 | Admin (admin group only) | members (disable, revoke, unlink, delete data), activity, metrics; System card with the newest backup and backup copy and the research service's state |
 | Guide | tutorials, how-to guides, reference (this map in the user's words) and explanation, with a contents rail and a search box |
 
@@ -113,9 +119,12 @@ pick or press (MCP Apps: Claude on the web, desktop and phones; ChatGPT as
 reported): the proposal (Approve, Reject with a reason), the printings of a
 card, the cards read from photos or a list, a deck by category, the account's
 setup. Every pick on a card reaches the assistant as plain text, and the
-assistant then proposes as usual; the only card that acts by itself is the
+assistant then proposes as usual; the only cards that act by themselves are the
 proposal card, whose Approve and Reject (with an optional reason) both use its
-one-time code. Display-only cards draw what the tool already answered, where a
+one-time code, and the waiting-changes card (`show_waiting_changes`), which
+lists every waiting change, approves or rejects each of the assistant's own,
+and applies several with one **Apply all** press (`confirm_waiting`, with the
+card's one-time code). Display-only cards draw what the tool already answered, where a
 picture reads faster than the text: the deck read (pictures and rules text), a
 comparison (`compare_decks`), a deck's statistics (`deck_stats`: curve,
 colours, price, legality, bracket estimate), a list of decks (`list_my_decks`,
@@ -139,8 +148,9 @@ tools.
 - **Shared backend, one set of rules.** A hand save and an applied proposal
   travel the same path: a proposal record, a snapshot, the Archidekt write,
   a read-back, an audit row. The review page and the in-chat card open the
-  same proposal. Reports started from a deck's More menu and from
-  `run_deck_report` are the same reports on the same History page.
+  same proposal. Reports started from a deck's Run full test button (or
+  Solo test only in its More menu) and from `run_deck_report` are the same
+  reports on the same History page.
 - **Only the assistant does:** research lookups (Scryfall, EDHREC, combos,
   rules), the paired goldfish A/B with the simulator's options, reading card
   photos into names, proposing changes it worked out itself.
@@ -154,8 +164,8 @@ tools.
   notifications and summaries on or off, approve a
   high-risk proposal in manual or semi-auto mode, approve a like, vote,
   bookmark, follow, comment, new folder, collaborator change or deck deletion (an assistant may
-  propose these; the person approves each one on its review page, in every
-  mode), rename folders, scan with the camera, administer members.
+  propose these; the person approves each one on the card in the chat or on
+  its review page, in every mode, a deck deletion on its review page only), rename folders, scan with the camera, administer members.
 - **Both reach:** reading decks and collections, statistics, creating and
   editing decks, deck settings (folder, tags and cover included), cloning,
   restoring snapshots, collection changes, scan drafts. The person's path applies at once; the assistant's path is a

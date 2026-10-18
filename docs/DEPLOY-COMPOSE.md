@@ -130,13 +130,15 @@ chmod 700 data backups
 
 ## 4. Images
 
-The images are on GitHub Container Registry:
+The images are on GitHub Container Registry (GHCR):
 
 - `ghcr.io/theuncleben/mtg-assistant-gateway`
 - `ghcr.io/theuncleben/mtg-assistant-mysticforge`
+- `ghcr.io/theuncleben/mtg-assistant-forge` (only pulled if you turn Forge on)
 
-If the packages are private, log in once with a GitHub token that has only
-the `read:packages` scope: `docker login ghcr.io`.
+They're public: `docker compose pull` needs no `docker login` and no GitHub
+token. The ntfy server is the official `binwiederhier/ntfy` image from Docker
+Hub, pinned in the Compose file.
 
 Prefer to build them yourself? From a clone of the repository:
 
@@ -206,8 +208,8 @@ docker compose logs -f gateway
 ```bash
 curl -s https://mtg.example.com/healthz
 # {"status":"ok"}
-# ("degraded": the gateway works, the research service doesn't answer;
-#  see docker compose logs mysticforge)
+# ("degraded": the gateway works, the research service or Forge (when
+#  it's on) doesn't answer; see docker compose logs mysticforge and forge)
 
 curl -s https://mtg.example.com/.well-known/oauth-authorization-server | head -c 300
 # JSON with "issuer":"https://mtg.example.com", ...
@@ -254,13 +256,11 @@ first so a new token is made, and revoke the old token on your old ntfy
 server. If your `.env`
 has `MTG_NTFY_URL` or `MTG_NTFY_TOKEN_FILE` with a value, delete those lines;
 an ntfy server you ran for the gateway can go, with its proxy host.
-If Forge is on, the new file pulls Forge image `2.0.15-mag3`, which GitHub
-publishes only after this release is on `main` and the **Forge image**
-workflow's run for it has finished: check the repository's **Actions** tab
-before you update. Then follow the 0.7.29 steps below, but skip the
+If Forge is on, the new file pulls Forge image `2.0.15-mag3`. Then follow
+the 0.7.29 steps below, but skip the
 `mtg_ntfy_token` edits: the new file already has those lines.
-Notifications now come in the gateway's Android app (members press **Get
-notifications on this phone** on their Account page in the app), not the
+Notifications now come in the gateway's Android app (members tick **Send
+me notifications** and press **Save notifications** on their Account page in the app), not the
 ntfy app, and members need app 0.7.30 to get them. **Members on an app older than 0.7.12 must
 update the app.**
 

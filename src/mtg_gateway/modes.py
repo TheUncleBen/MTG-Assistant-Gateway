@@ -111,8 +111,8 @@ HIGH_RISK_TEXT = (
 MEMBER_ONLY_TEXT = (
     f"Actions on your Archidekt account ({ACCOUNT_ACTIONS_TEXT}) and deleting a deck are never "
     "applied by an assistant: each one waits for your own press, in every mode, on the card in the "
-    "chat or on its review page (deleting a deck, and an edit of a comment that has formatting: on the "
-    "review page only)."
+    "chat or on its review page (deleting a deck, and any edit of a description or comment that has "
+    "formatting: on the review page only)."
 )
 
 

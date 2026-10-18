@@ -61,7 +61,8 @@ that carries a new Mystic Forge tag publishes it and marks it with the git tag
 same build also moves the image's `latest` tag and adds a tag carrying the
 short commit SHA; deploy the versioned tag the stack file names.
 
-Forge, the simulation engine, works the same way: its image tag is
+Forge, the simulation engine, works the same way, except that its build adds
+no commit SHA tag: its image tag is
 `<Forge version>-mag<n>` (for example `2.0.15-mag3`), the **Forge image**
 workflow publishes it the first time `main` carries it, and the git tag is
 `forge-2.0.15-mag3`. Until that run has finished, the new tag can't be

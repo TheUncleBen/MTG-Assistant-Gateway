@@ -30,7 +30,8 @@ person has said yes to the exact change.
 - **Two kinds of people use it.**
   - The **operator** deploys it and decides who gets in.
   - **Users** connect their assistant and link their Archidekt account.
-- **What it runs on:** two Docker containers (amd64 or arm64, so a Raspberry
+- **What it runs on:** three Docker containers (the gateway, Mystic Forge
+  and ntfy), plus an optional fourth for Forge (amd64 or arm64, so a Raspberry
   Pi is fine), behind any HTTPS reverse proxy, with any OpenID Connect
   identity provider handling sign-in.
   - **Deploy with** Docker Compose on one machine, or a Docker Swarm stack
@@ -298,7 +299,7 @@ between releases ([docs/VERSIONS.md](docs/VERSIONS.md)).
 | Area | State |
 | --- | --- |
 | Sign-in, research, deck import, account linking, proposals, scanning | Built. Tested against fakes, recorded Archidekt and Scryfall responses, and a real Swarm stack with Authentik in CI |
-| Applying edits, creating decks, backups and restores on Archidekt | Built, and run live against a throwaway Archidekt account (create, add, remove, quantities, categories, commander, backup folder and copy). The code default is off (`MTG_WRITES_ENABLED=false`); the example env files turn writes on (each change is still applied only by the member's own press, the Approve button on the in-chat card or the Apply button on the review page, unless the member chose a looser approval mode on their Account page; an Archidekt account action, such as a like, comment, new folder or deck deletion, always waits for the member's own press, in every mode, on the card in the chat or on its review page; a deck deletion, and an edit of a comment that has formatting, is approved only on its review page). Try your first edit on a deck you don't care about |
+| Applying edits, creating decks, backups and restores on Archidekt | Built, and run live against a throwaway Archidekt account (create, add, remove, quantities, categories, commander, backup folder and copy). The code default is off (`MTG_WRITES_ENABLED=false`); the example env files turn writes on (each change is still applied only by the member's own press, the Approve button on the in-chat card or the Apply button on the review page, unless the member chose a looser approval mode on their Account page; an Archidekt account action, such as a like, comment, new folder or deck deletion, always waits for the member's own press, in every mode, on the card in the chat or on its review page; a deck deletion, and any edit of a description or comment that has formatting, is approved only on its review page). Try your first edit on a deck you don't care about |
 | Client and device coverage | See [docs/CONNECT.md](docs/CONNECT.md#which-apps-and-devices-work), which labels each claim as tested, reported or not tested |
 | Deck statistics, stored deck reports and history, compare, companion pages, admin page, JSON API | Built and covered by the test suite against fakes. The companion pages and admin page were also checked by the owner on his own deployment on 2026-10-10 and 2026-10-11 (speed, backup copies, the redesigned pages, edit and restore) |
 | Deck deletion, cover image, folders, tags, comment editing, collection details (0.7.2); comment votes, colour tags and the assistant's account-action proposals (likes, bookmarks, follows, comments, folders, deck deletion; 0.7.16 to 0.7.19); custom mana value and deck collaborators (0.7.20) | Built against Archidekt routes read from its own site code and covered by tests against a fake; not yet exercised live (taking a colour tag off a card is also not confirmed). Each one reads the result back and reports a mismatch rather than trusting Archidekt's answer |
@@ -393,11 +394,11 @@ Claude / ChatGPT / browser ──HTTPS──▶ reverse proxy ──▶ mtg-gate
 | `src/mtg_gateway/` | Application code |
 | `tests/` | Tests against a fake identity provider, a fake Archidekt and recorded live responses; `tests/e2e/` runs a real Swarm stack |
 | `plugin/`, `.claude-plugin/` | The assistant plugins (for users and for operators) and the repository's plugin marketplace. `plugin/mtg-gateway/` holds the MTG skill and the ChatGPT instructions; the gateway serves that plugin at `/plugin/` and its skill at `/skill` |
-| `Dockerfile`, `docker/` | Gateway and Mystic Forge container images (multi-arch, run as `PUID:PGID`) |
+| `Dockerfile`, `docker/` | Gateway, Mystic Forge (`docker/mystic-forge/`) and Forge (`docker/forge/`) container images (multi-arch, run as `PUID:PGID`) |
 | `deploy/` | The Swarm stack file and its example settings; `deploy/compose/` for plain Docker Compose; `deploy/proxy/` with Caddy, Traefik and nginx examples |
 | `android/` | The Android app (Kotlin, CameraX, WindowManager) as a Gradle project with a build script that fetches the SDK; see [docs/ANDROID.md](docs/ANDROID.md) |
 | `docs/` | The guides listed under [Documentation](#documentation), plus screenshots |
-| `.github/workflows/` | Tests, end-to-end tests, container smoke test, and the release on every merge to `main` (tag, image on GHCR, Android app, GitHub release; see [docs/VERSIONS.md](docs/VERSIONS.md)) |
+| `.github/workflows/` | Tests, end-to-end tests, container smoke test, and the release on every merge to `main` (tag, image on GHCR, Android app, GitHub release; see [docs/VERSIONS.md](docs/VERSIONS.md)); the Forge and Mystic Forge image builds; a weekly check for a newer Forge release; the Android app's notification test on an emulator; and a live research smoke test, started by hand |
 
 ## Development
 
@@ -406,7 +407,7 @@ python -m venv .venv && . .venv/bin/activate
 pip install -c constraints.txt -e ".[dev]"
 python scripts/fetch_ocr_assets.py                 # the /scan page's OCR files
 python -m playwright install --with-deps chromium  # the browser tests
-ruff check src tests scripts && ruff format --check src tests scripts && pytest -q
+ruff check src tests scripts docker/forge && ruff format --check src tests scripts docker/forge && pytest -q -n auto
 ```
 
 Without the OCR files or a Chromium the tests that need them are skipped, not

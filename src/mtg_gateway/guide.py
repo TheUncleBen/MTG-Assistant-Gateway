@@ -974,14 +974,14 @@ def guide_body(
         + "".join(f"<tr><td>{_esc(p)}</td><td>{a}</td><td>{w}</td></tr>" for p, a, w in page_rows)
         + "</tbody></table></div>"
         "<p>On a phone the tabs at the bottom are Home, Decks, Scan, Collection and More (Proposals, "
-        "History, Guide, Account and Admin); Search is the magnifier at the top. From 600 px on a touch "
-        "screen every page is a tab on a rail down the left edge, with no More; a wider browser has the "
-        "links in the top bar, Home first.</p>"
+        "History, Reports, Watchlist when it is on, Guide, Account and Admin); Search is the magnifier "
+        "at the top. From 600 px on a touch screen every page is a tab on a rail down the left edge, "
+        "with no More; a wider browser has the links in the top bar, Home first.</p>"
     )
     # in every mode; since 0.7.29 the card in the chat too, but never for a deck deletion
     on_review_page = (
-        "<td>you press Approve on the card or Apply on its review page (deleting a deck, and an edit of a "
-        "comment that has formatting: on its review page only)</td>"
+        "<td>you press Approve on the card or Apply on its review page (deleting a deck, and any edit of a "
+        "description or comment that has formatting: on its review page only)</td>"
     )
     ref_approval = (
         "<p>Your approval mode on the <a href='/account'>Account</a> page says how much your assistant "

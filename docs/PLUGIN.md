@@ -30,6 +30,7 @@ page we could read says.
 | `/install.md` | no | The same thing as Markdown, for an AI agent handed the link (an agent fetching `/install` itself gets this too, since only browser page loads are sent to sign in): every app unless `?for=` narrows it, plus rules not to retry a step or tool the platform doesn't support, and the browser fallbacks for blocked write tools |
 | `/plugin/marketplace.json` | no | A Claude Code marketplace with one plugin, source type `archive`, pinned by SHA-256 |
 | `/plugin/mtg-gateway.zip` (`/plugin/<slug of MTG_SERVER_NAME>.zip` when that is set) | no | The plugin from `plugin/mtg-gateway/`, with the gateway's own `/mcp` URL written into `.mcp.json` and `mcp.json` |
+| `/plugin/mtg-gateway-chatgpt.zip` (`/plugin/<slug>-chatgpt.zip` when `MTG_SERVER_NAME` is set) | no | The ChatGPT plugin (`chatgpt_plugin.py`): its own `plugin.json` and `mcp.json` at the root with the gateway's `/mcp` URL, the MTG skill and `assets/` with the gateway's icon. No setup skill, since its steps are Claude Code commands |
 | `/skill` | yes | Leads to `/install?for=skill`: the skill ZIP on its own (`/skill/mtg-gateway.zip`), and the ChatGPT project instructions |
 
 The archive is built once per process from the files in the image and comes
@@ -39,7 +40,7 @@ stays valid until the image changes. The marketplace is served with
 (`?v=<sha256>`), so a cached marketplace never gets paired with a newer
 archive.
 
-The archive holds the plugin manifest, the connector files, the MTG skill,
+The Claude archive holds the plugin manifest, the connector files, the MTG skill,
 the setup skill and the ChatGPT text. It's the same text as this
 repository, nothing per-user. That's why these routes don't need a sign-in:
 a Claude Code user has to fetch the marketplace before they can sign in to
@@ -76,8 +77,7 @@ to link Archidekt. It never asks for a password or token.
 
 You can also install straight from the GitHub repository:
 `claude plugin marketplace add <owner>/MTG-Assistant-Gateway`, where
-`<owner>/MTG-Assistant-Gateway` is the repository that holds this code. That needs
-read access to the repository through your own git credentials, and gives
+`<owner>/MTG-Assistant-Gateway` is the repository that holds this code. That gives
 you the same plugin without an address: its `.mcp.json` URL is
 `${MTG_GATEWAY_URL:-}`, which Claude Code fills in from the environment
 (confirmed in its docs and checked with the CLI: with the variable set,
@@ -128,8 +128,9 @@ of this was read through search summaries and is **reported**, not
 confirmed:
 
 - ChatGPT has plugins (manifest `plugin.json`, remote servers in `mcp.json`
-  with `"type": "streamable-http"`). The plugin folder carries both files,
-  so the same ZIP is in the right shape. Importing a marketplace from GitHub
+  with `"type": "streamable-http"`). The gateway serves a separate archive
+  for it, `/plugin/<name>-chatgpt.zip`, with those two files at its root,
+  the MTG skill and `assets/`, and no setup skill. Importing a marketplace from GitHub
   into ChatGPT is documented for workspace admins (Business and
   Enterprise), and the repository's `.claude-plugin/marketplace.json` is one
   of the accepted formats. The setup page therefore labels the ChatGPT ZIP
@@ -137,9 +138,11 @@ confirmed:
 - Custom MCP apps for individuals: Developer mode, web only, OAuth with
   automatic registration. Pro accounts are documented as read and fetch
   tools only. The gateway marks every tool read-only except
-  `apply_proposal`, `confirm_proposal`, `reject_proposal`, `run_deck_report`,
-  `save_scan_session` and `propose_collection_changes`, so proposing and
-  reviewing still work there.
+  `apply_proposal`, `amend_proposal`, `withdraw_proposal`,
+  `combine_proposals`, `confirm_waiting`, `confirm_proposal`,
+  `reject_proposal`, `run_deck_report`, `play_more_games`,
+  `remove_card_model`, `save_scan_session`, `watch_card`, `watch_deck` and
+  `unwatch`, so proposing and reviewing still work there.
 - Codex CLI: `codex mcp add <name> --url <url>` and
   `codex mcp login <name>` for OAuth servers.
 

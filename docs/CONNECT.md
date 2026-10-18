@@ -221,6 +221,14 @@ as the MCP Apps standard says (reported, not yet tested in a live
 session); the review page in your browser never relies on it and is linked
 from every card.
 
+Ask the assistant what is waiting and it can show the **waiting changes**
+card (`show_waiting_changes`): every change waiting for your press, oldest
+first, with **Approve** and **Reject** on each of that assistant's own
+changes and **Apply all** to apply them with one press (`confirm_waiting`,
+with the card's own one-time code). Each one is checked against the deck
+just before it is sent. Another app's changes are listed with their review
+link.
+
 ### The other cards in the chat
 
 The same mechanism shows a card wherever you have something to pick: the
@@ -245,21 +253,22 @@ session; Claude Code shows the text instead and asks about unsure names with
 a form.
 
 **Your approval mode.** On the gateway's Account page you choose how much
-your assistant may do without asking: *Manual* (every change waits for
-your press; the default), *Semi-auto* (it applies a small deck or
+your assistant may do without asking: *Manual*, shown as "Ask me every
+time" (every change waits for your press; the default), *Semi-auto*, shown
+as "Apply low-risk changes without asking" (it applies a small deck or
 collection edit itself: up to the row limit, 5 card rows by default,
 each a card added or removed, or a new quantity, category, finish,
 printing, color tag or custom mana value, no more than 4 copies a row,
 never a change to which cards are the commanders or to the categories of a row in the commander zone, and never fewer copies of
 a card that has a row in the commander zone and another row, both in the deck or both in the maybeboard or sideboard; it also makes a private copy of a deck; a new deck,
 a restore, the deck's details and bigger edits still ask you) or *Full
-auto* (it applies the rest too, except a restore, a commander change, a new deck, an edit of more
+auto*, shown as "Apply deck and collection changes without asking" (it applies the rest too, except a restore, a commander change, a new deck, an edit of more
 than 20 rows, making a deck public or unlisted, and any edit of a description that has formatting, such as bold text, links or pictures, which still wait for your press; so does a held change, a change waiting for
 another change first, one another app had a hand in, one that replaces another app's change, or one
 that another app's waiting change would replace).
 Actions on your Archidekt account (likes, votes, bookmarks, follows,
 comments, new folders and collaborator changes) and deleting a deck are
-never applied by an assistant: each one waits for your own press, in every mode, on the card in the chat or on its review page (deleting a deck, and an edit of a comment that has formatting: on the review page only). It is your own setting:
+never applied by an assistant: each one waits for your own press, in every mode, on the card in the chat or on its review page (deleting a deck, and any edit of a description or comment that has formatting: on the review page only). It is your own setting:
 it covers only your account, your decks and the apps you connected, and
 only you can change it, in your browser. In Semi-auto and Full auto the
 assistant applies what the mode allows with `apply_proposal` and tells you;
@@ -370,10 +379,11 @@ pictures.
 ### If ChatGPT blocks write tools
 
 OpenAI says some plans only get reading tools (reported). Every gateway
-tool is marked read-only except six, so all of this keeps working: research
-(Scryfall, EDHREC, rules), goldfish simulation, reading and importing decks,
-card lookups for scanning, and making deck proposals. For the write tools
-(collection changes: add or remove cards on the `/collection` page instead):
+tool is marked read-only except the eleven named in
+[Which apps and devices work](#which-apps-and-devices-work) (fourteen when
+watchlists are on), so all of this keeps working: research (Scryfall,
+EDHREC, rules), goldfish odds, reading and importing decks, card lookups
+for scanning, and making deck and collection proposals. For the write tools:
 
 - `apply_proposal`: press **Approve** on the proposal card if ChatGPT shows
   one, or open the proposal's review link (or **Proposals** on the
