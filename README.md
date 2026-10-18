@@ -189,7 +189,7 @@ Screenshots of the browser pages are in [docs/screenshots/](docs/screenshots/).
   - Undo is the same flow in reverse: `list_snapshots`, then
     `propose_restore_snapshot`, which puts every card back as it was
     (printing, foil, quantity, categories, commander, sideboard and
-    maybeboard).
+    maybeboard, color tag and custom mana value).
   - A pending proposal the user no longer wants is closed with
     `reject_proposal` or the Reject button.
   - Every step is audited and limited to the signed-in user.

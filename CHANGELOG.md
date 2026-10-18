@@ -69,6 +69,7 @@ stack.
 - A pasted or Archidekt list's copies are counted in the report's shares (they were counted once per name).
 - The bracket estimate now follows archidekt.com's own rule for combos and extra turns; it followed an older, reversed rule.
 - The Android app's colour strips under the status and navigation bars kept their full colour when Android faded the window.
+- Restoring a snapshot left each card's color tag and custom mana value, and the order of its categories (the first one decides whether the card counts in the deck), as they were, and still reported the deck restored. A restore now puts them back and checks them.
 
 ### Removed
 - The old `/decks/{id}/playtest` address. The deck page's Playtest opens Archidekt's own playtester directly.

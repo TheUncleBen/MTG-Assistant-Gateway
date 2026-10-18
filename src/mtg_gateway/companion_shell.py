@@ -39,7 +39,7 @@ def add_shell_routes(server: MCPServer, h: SimpleNamespace) -> None:
             "name": s.server_name,
             "short_name": short_name(s.server_name),
             "description": "Your Magic: The Gathering decks on Archidekt, with an assistant that proposes "
-            "changes you approve.",
+            "changes, which wait for your approval unless your approval mode lets it apply them.",
             "id": "/",
             "start_url": "/decks",
             "scope": "/",

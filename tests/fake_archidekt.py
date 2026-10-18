@@ -993,6 +993,14 @@ class FakeArchidekt:
                         "card": self.printing(self.add_rows_swap_printing.get(e["cardid"], e["cardid"])),
                         "companion": bool(e["modifications"].get("companion")),
                         "flippedDefault": bool(e["modifications"].get("flippedDefault")),
+                        # an add may carry the colour tag and the deck's own mana value, as a
+                        # modify does (a restore re-adding a row sends them; not checked live)
+                        **({"label": e["modifications"]["label"]} if "label" in e["modifications"] else {}),
+                        **(
+                            {"customCmc": e["modifications"]["customCmc"]}
+                            if "customCmc" in e["modifications"]
+                            else {}
+                        ),
                     }
                 )
                 for cat in e.get("categories") or []:

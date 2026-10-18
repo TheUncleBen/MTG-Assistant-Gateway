@@ -551,7 +551,9 @@ def test_the_semi_auto_notice_names_what_semi_auto_applies() -> None:
 
     assert OK_MESSAGES["mode_semi"] == (
         "Saved: your assistant applies low-risk changes without asking (a small deck or collection edit, "
-        "or a private copy of a deck) and asks for everything else."
+        "or a private copy of a deck) and asks for everything else. A change to one of your decks keeps "
+        "a snapshot you can restore from History; a collection change keeps none. Restoring a snapshot "
+        "does not put back a deck's folder, tags or cover."
     )
     assert "a private copy of a deck" in modes.mode_help("semi")
 
@@ -820,7 +822,7 @@ async def test_any_category_change_on_the_commanders_row_waits(
         assert commander["before"] == commander["after"] == AESI
         moved = f"{AESI}'s categories change from Commander to {', '.join(categories)}."
         assert any(line.startswith(moved) for line in p["diff"].splitlines()), p["diff"]
-        assert p["risk_reason"] == "changes the categories of a row in the commander zone"
+        assert p["risk_reason"] == "adds or changes a row with a commander-zone category"
     else:  # out of the deck: no commander is left
         assert (commander["before"], commander["after"]) == (AESI, "(none)")
         assert p["risk_reason"] == "changes the commander"
@@ -865,22 +867,90 @@ async def test_a_maybeboard_commander_moved_into_the_deck_waits(stack: Stack, mo
     assert (commander["before"], commander["after"]) == (AESI, f"{AESI}, Sol Ring")
 
 
-@pytest.mark.parametrize("mode", ["auto", "semi"])
-async def test_an_add_with_the_commander_zone_outside_the_deck_waits(stack: Stack, mode: str) -> None:
-    """An add whose primary category is the maybeboard and which also carries "Commander" makes
-    no commander, but it still counts as a commander change and waits."""
-    h = stack.h
+@pytest.mark.parametrize(
+    ("change", "says"),
+    [
+        (
+            {"action": "add", "card_name": "Arcane Signet", "zone": "side", "category": "Commander"},
+            "cannot also go in the commander zone (Commander)",
+        ),
+        (
+            {
+                "action": "add",
+                "card_name": "Arcane Signet",
+                "zone": "side",
+                "category": "Commander",
+                "categories": ["Commander", "Ramp"],
+            },
+            "cannot also go in the commander zone (Commander, Ramp)",
+        ),
+        (
+            {
+                "action": "add",
+                "card_name": "Arcane Signet",
+                "category": "Maybeboard",
+                "categories": ["Maybeboard", "Commander"],
+            },
+            "its first category, Maybeboard, is outside the deck",
+        ),
+        (
+            {"action": "add", "card_name": "Arcane Signet", "category": "Maybeboard"},
+            "its first category, Maybeboard, is outside the deck",
+        ),
+        (
+            {
+                "action": "add",
+                "card_name": "Sol Ring",
+                "category": "Sideboard",
+                "categories": ["Sideboard", "Commander"],
+            },
+            "its first category, Sideboard, is outside the deck",
+        ),
+        (
+            {"action": "add", "card_name": "Sol Ring", "category": "Commander"},
+            "is already in the deck, so adding it raises the count of its row",
+        ),
+    ],
+)
+async def test_an_add_the_write_would_not_honour_is_refused(stack: Stack, change: dict, says: str) -> None:
+    """An add is refused, with nothing proposed or written, when the row Archidekt would get is
+    not the one the review would show: the commander zone asked for in the maybeboard or
+    sideboard (the side category replaces it), a first category outside the deck (the copies
+    would be read back outside it and the apply would fail its check), or the commander zone
+    asked for a card already in the deck (the add raises that row as it is)."""
+    h, ark = stack.h, stack.ark
     token = await linked_user(stack)
-    await _set_mode(h, mode)
-    change = {
-        "action": "add",
-        "card_name": "Sol Ring",
-        "category": "Maybeboard",
-        "categories": ["Maybeboard", "Commander"],
-    }
+    await _set_mode(h, "auto")
+    p = structured(await call(h, token, "propose_deck_changes", {"deck_id": "42", "changes": [change]}))
+    assert p["ok"] is False and p["error"] == "invalid" and says in p["message"], p
+    assert ark.patches == []
+
+
+async def test_a_new_card_added_to_the_commander_zone_is_written_there(stack: Stack) -> None:
+    """A new card added with the commander zone as its category waits as a commander change, and
+    the member's press writes the row with that category, as the review shows."""
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    await _set_mode(h, "auto")
+    change = {"action": "add", "card_name": "Arcane Signet", "category": "Commander"}
     p = await _assert_waits_as_a_commander_change(stack, token, [change])
-    added = "This adds Sol Ring with a commander-zone category (Maybeboard, Commander), so it counts"
-    assert any(line.startswith(added) for line in p["diff"].splitlines()), p["diff"]
+    commander = next(r for r in p["rows"] if r["kind"] == "commander")
+    assert commander["after"] == f"{AESI}, Arcane Signet", commander
+    b = Browser(h)
+    try:
+        await b.login()
+        r = await b.http.post(
+            f"/api/v1/proposals/{p['proposal_id']}/apply",
+            headers={"X-CSRF-Token": await b.csrf()},
+            json={"version": p["version"]},
+        )
+        assert r.status_code == 200 and r.json()["state"] == "applied", r.text
+    finally:
+        await b.aclose()
+    rows = [
+        c["categories"] for c in ark.decks[42]["cards"] if c["card"]["oracleCard"]["name"] == "Arcane Signet"
+    ]
+    assert rows == [["Commander"]], rows
 
 
 async def test_a_raised_commander_with_another_row_says_the_rows_fold(stack: Stack) -> None:

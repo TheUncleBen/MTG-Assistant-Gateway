@@ -52,9 +52,8 @@ def add_gateway_routes(state: AppState, h: SimpleNamespace) -> None:
         able = (
             "read your decks and your collection, and propose changes on your Archidekt account. "
             "Nothing reaches Archidekt until you confirm on the proposal card or the review page on "
-            "this site, unless you chose an approval mode on your account page that lets it apply "
-            "changes without asking (a change to one of your decks keeps a snapshot; a collection "
-            "change keeps none)."
+            "this site, unless the approval mode on your account page lets it apply changes without "
+            "asking (a change to one of your decks keeps a snapshot; a collection change keeps none)."
         )
         body = (
             "<div class='card consent'>"

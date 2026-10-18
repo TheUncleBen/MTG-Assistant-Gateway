@@ -922,7 +922,9 @@ OK_MESSAGES = {
     "choices_forgotten": "Done. Every page starts with its usual view again, on all your devices.",
     "mode_manual": "Saved: your assistant asks you every time.",
     "mode_semi": "Saved: your assistant applies low-risk changes without asking (a small deck or collection "
-    "edit, or a private copy of a deck) and asks for everything else.",
+    "edit, or a private copy of a deck) and asks for everything else. A change to one of your decks keeps "
+    "a snapshot you can restore from History; a collection change keeps none. Restoring a snapshot does "
+    "not put back a deck's folder, tags or cover.",
     "mode_auto": "Saved: your assistant applies deck and collection changes without asking. Restoring a "
     "snapshot, a commander change, a new deck, an edit of more rows than Full auto applies by itself, "
     "making a deck public or unlisted, any edit of a description that has formatting, such as bold text, "

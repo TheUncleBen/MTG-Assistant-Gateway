@@ -136,8 +136,8 @@ Custom connectors work on Claude's Free, Pro, Max, Team and Enterprise plans
      account", names the application (**Claude**) and the host it's
      "identified by", lists what it'll be able to do (read your decks and
      your collection, and propose changes on your Archidekt account, and
-     apply them only when you approve, unless you chose an approval mode on
-     your account page that lets it apply changes without asking), and
+     apply them only when you approve, unless the approval mode on your
+     account page lets it apply changes without asking), and
      shows "After sign-in you go to" a host. That host should be
      `claude.ai`, Claude's sign-in return address for its hosted apps
      (reported). If it all looks right, press **Approve and sign in**. If

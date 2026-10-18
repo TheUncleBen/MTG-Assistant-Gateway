@@ -512,10 +512,10 @@ def commander_stays_text(stay: dict[str, Any]) -> str:
 def commander_moved_text(moved: dict[str, Any]) -> str:
     """The commander row's text for a row in, or moved into or out of, the commander zone whose
     categories change while the commanders stay."""
-    if moved.get("added"):
+    if moved.get("added"):  # plan_zones refuses the adds that get here; kept so one would wait
         return (
-            f"This adds {moved.get('name')} with a commander-zone category ({moved.get('after')}), "
-            "so it counts as a commander change."
+            f"This add asks for a commander-zone category ({moved.get('after')}), so it counts as a "
+            "commander change."
         )
     return (
         f"{moved.get('name')}'s categories change from {moved.get('before')} to {moved.get('after')}. "
@@ -1370,6 +1370,51 @@ def plan_rows(
     return before, after, rows
 
 
+def _refuse_adds_written_otherwise(deck: Deck, changes: list[Change], main_lookup: dict[str, str]) -> None:
+    """Refuse an add whose written row would not be what its review row says (the safe default:
+    nothing is proposed, and the message says what to do instead):
+
+    * an add to the maybeboard or sideboard that asks for the commander zone: such a row is
+      written under the deck's maybeboard category (``side_category_for``), without it;
+    * an add to the deck proper whose first category is outside the deck (Maybeboard,
+      Sideboard or another category the deck does not count): the copies would be planned in
+      the deck and read back outside it, so the apply would fail its check;
+    * an add that asks for the commander zone for a card already in the deck with no row
+      there: the add raises the count of the card's row (``build_payload``), whose categories
+      stay as they are."""
+    premier = deck.premier_keys()
+    main_rows: dict[str, list[Any]] = {}
+    for c in deck.main_cards:
+        main_rows.setdefault(c.name.lower(), []).append(c)
+    for ch in changes:
+        if ch.action != "add":
+            continue
+        cats = _all_categories([ch])
+        if ch.zone == "side":
+            if _in_premier(premier, cats):
+                raise DeckError(
+                    "invalid",
+                    f"'{ch.card_name}': a card added to the maybeboard or sideboard cannot also go in "
+                    f"the commander zone ({', '.join(cats)}). Add it to the deck instead.",
+                )
+            continue
+        primary = cats[0] if cats else ""
+        if cats and (not deck.categories_count(cats) or primary.casefold() in ("maybeboard", "sideboard")):
+            raise DeckError(
+                "invalid",
+                f"'{ch.card_name}': its first category, {primary}, is outside the deck, so the "
+                "copies would not count in it. Add it to the maybeboard or sideboard instead.",
+            )
+        name = main_lookup.get(ch.card_name.lower()) or main_lookup.get(front_face(ch.card_name).lower())
+        rows = main_rows.get(name.lower(), []) if name else []
+        if rows and _in_premier(premier, cats) and not any(_in_premier(premier, r.categories) for r in rows):
+            raise DeckError(
+                "invalid",
+                f"'{ch.card_name}' is already in the deck, so adding it raises the count of its row "
+                "there and cannot put it in the commander zone. Set its category to move it.",
+            )
+
+
 def plan_zones(
     deck: Deck, changes: list[Change]
 ) -> tuple[dict[str, int], dict[str, int], list[dict[str, Any]], dict[str, int], dict[str, int]]:
@@ -1385,6 +1430,7 @@ def plan_zones(
         for n in counts:  # a double-faced card is also found by its front face
             lookup.setdefault(front_face(n).lower(), n)
         lookups[zone] = lookup
+    _refuse_adds_written_otherwise(deck, changes, lookups["main"])
     after = dict(before)
     after_side = dict(before_side)
     cats_want, cat_lines = category_plan_rows(deck, changes)
@@ -1585,7 +1631,9 @@ MAX_RESTORE_ENTRIES = 150
 
 
 def _rel_key(card: Any) -> tuple[int | None, str, tuple[str, ...]]:
-    return (card.card_id, card.modifier or "Normal", tuple(sorted(card.categories)))
+    # the categories in their order: the first is the row's primary one, which decides whether
+    # the card is in the deck (Deck.categories_count), so an order change is a change
+    return (card.card_id, card.modifier or "Normal", tuple(card.categories))
 
 
 def _rel_fields(card: Any) -> dict[str, Any]:
@@ -1594,7 +1642,8 @@ def _rel_fields(card: Any) -> dict[str, Any]:
     detail = " ".join(bits)
     if (card.modifier or "Normal") != "Normal":
         detail = f"{detail}, {card.modifier}" if detail else card.modifier
-    cats = ", ".join(sorted(clean_text(c) for c in card.categories)) if card.categories else None
+    # in their order, the primary first: a restore that only reorders them shows the difference
+    cats = ", ".join(clean_text(c) for c in card.categories) if card.categories else None
     return {"name": card.name, "printing": f"({detail})" if detail else None, "category": cats}
 
 
@@ -1610,8 +1659,11 @@ def restore_steps(snapshot: Deck, current: Deck) -> tuple[list[dict[str, Any]], 
 
 def restore_rows(snapshot: Deck, current: Deck) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """PATCH entries and review rows that turn ``current`` into ``snapshot`` relation by relation:
-    the same printing (card id), finish (modifier) and categories, including Commander, Sideboard
-    and Maybeboard, which Archidekt keeps as categories. Rows that already match are untouched."""
+    the same printing (card id), finish (modifier) and categories in their order, including
+    Commander, Sideboard and Maybeboard, which Archidekt keeps as categories. A matching row is
+    then given the snapshot's quantity, colour tag and custom mana value; rows that already match
+    in all of them are untouched. The verification after a restore runs this again on the deck
+    read back, so anything left over is a mismatch."""
     want: dict[tuple[Any, ...], tuple[Any, int]] = {}
     for c in snapshot.cards:
         if c.card_id is None:
@@ -1628,12 +1680,40 @@ def restore_rows(snapshot: Deck, current: Deck) -> tuple[list[dict[str, Any]], l
     for key, (card, qty) in want.items():
         rows = have.get(key, [])
         total = sum(r.quantity for r in rows)
-        if rows and total == qty:
+        label = getattr(card, "label", "") or ""
+        cmc = getattr(card, "custom_cmc", None)
+        same_label = all(_same_label(r.label, label) for r in rows)
+        same_cmc = all(_same_mana_value(r.custom_cmc, cmc) for r in rows)
+        if rows and total == qty and same_label and same_cmc:
             continue
         if rows:
-            payload.append(_entry("modify", rows[0], qty))
+            entry = _entry("modify", rows[0], qty)
+            entry["modifications"]["label"] = label or NO_LABEL
+            if cmc is not None or rows[0].custom_cmc is not None:
+                entry["modifications"]["customCmc"] = cmc  # null takes an override off
+            payload.append(entry)
             payload.extend(_entry("remove", extra, 0) for extra in rows[1:])
-            lines.append(_rel_row("change", card, before=total, after=qty))
+            if total != qty:
+                lines.append(_rel_row("change", card, before=total, after=qty))
+            if not same_label:
+                lines.append(
+                    _row(
+                        "label",
+                        name=card.name,
+                        before=" / ".join(sorted({label_text(r.label) for r in rows})),
+                        after=label_text(label),
+                        colour=split_label(label)[1] or None,
+                    )
+                )
+            if not same_cmc:
+                lines.append(
+                    _row(
+                        "mana_value",
+                        name=card.name,
+                        before=" / ".join(sorted({mana_value_text(r.custom_cmc) for r in rows})),
+                        after=mana_value_text(cmc),
+                    )
+                )
         else:
             payload.append(
                 {
@@ -1647,6 +1727,8 @@ def restore_rows(snapshot: Deck, current: Deck) -> tuple[list[dict[str, Any]], l
                         "companion": bool(getattr(card, "companion", False)),
                         "flippedDefault": bool(getattr(card, "flipped_default", False)),
                         "modifier": card.modifier or "Normal",
+                        "label": label or NO_LABEL,
+                        **({"customCmc": cmc} if cmc is not None else {}),
                     },
                 }
             )

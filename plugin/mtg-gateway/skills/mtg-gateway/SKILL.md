@@ -386,8 +386,9 @@ own linked account. Follow every step, in order.
   `propose_restore_snapshot` with the snapshot taken before that edit. It is
   an ordinary proposal: show its diff and review link, wait for the user's
   OK, then `apply_proposal`. A restore puts every deck row back as the
-  snapshot recorded it: the same printing, foil or etched finish, quantity
-  and categories, so the commander, sideboard and maybeboard too. It also
+  snapshot recorded it: the same printing, foil or etched finish, quantity,
+  categories in their order (so the commander, sideboard and maybeboard
+  too), color tag and custom mana value. It also
   puts back the deck's name, description, format, bracket and privacy if they
   changed; folder, tags, cover and the settings of its custom categories stay
   as they are. Deleting a deck is `propose_delete_deck`, which only

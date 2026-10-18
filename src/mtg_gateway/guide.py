@@ -1093,10 +1093,10 @@ def guide_body(
     # -- Explanation ------------------------------------------------------------------------------
     exp_approvals = (
         "<p>A hand save and an applied proposal travel the same path: a proposal record, a snapshot when "
-        "it changes one of your decks, the Archidekt write, a read-back, an audit row. That is why every "
-        "change, yours or the assistant's, has a record under Proposals and History, and why a change to "
-        "one of your decks can be undone by restoring its snapshot (which does not put back the deck's "
-        "folder, tags or cover).</p>"
+        "it changes the cards or details of one of your decks, the Archidekt write, a read-back, an audit "
+        "row. That is why every change, yours or the assistant's, has a record under Proposals and "
+        "History, and why such a change to one of your decks can be undone by restoring its snapshot "
+        "(which does not put back the deck's folder, tags or cover).</p>"
         f"{_h4('exp-approvals-proposal', 'Proposals')}"
         "<p>An assistant never writes to Archidekt directly. It proposes: the exact list of rows that "
         "would change, stored on the gateway with a review page and, in a chat that shows cards, a card "

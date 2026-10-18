@@ -185,7 +185,7 @@ def effective_mode(chosen: str | None, *, default: str, cap: str) -> str:
 
 
 COMMANDER_COPIES_REASON = "changes the commander's copies"
-COMMANDER_ZONE_REASON = "changes the categories of a row in the commander zone"
+COMMANDER_ZONE_REASON = "adds or changes a row with a commander-zone category"
 
 
 def commander_reason(rows: list[dict[str, Any]]) -> str:
@@ -256,7 +256,7 @@ def hand_edit_confirm(kind: str, rows: list[dict[str, Any]] | None) -> str | Non
     if any(r.get("kind") == "commander" for r in rows):
         why = commander_reason(rows)
         if why == COMMANDER_ZONE_REASON:
-            return "This changes the categories of a row in the commander zone."
+            return "This adds or changes a row with a commander-zone category."
         if why == COMMANDER_COPIES_REASON:
             return "This changes the copies of the deck's commander."
         return "This changes the deck's commander."

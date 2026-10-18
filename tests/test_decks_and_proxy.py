@@ -1109,6 +1109,48 @@ async def test_resolve_card_prefers_named_printing() -> None:
     assert seen[-1].get("exact") is None  # the fallback substring search was tried
 
 
+async def test_a_restore_puts_back_colour_tags_mana_values_and_category_order(stack: Stack) -> None:
+    """A restore puts back what Semi-auto and Full auto can change by themselves, a row's colour tag
+    and custom mana value, and the order of its categories (the first is the primary one, which
+    decides whether the card is in the deck); the verification checks all three."""
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    deck = ark.decks[42]
+    ring = next(c for c in deck["cards"] if c["card"]["oracleCard"]["name"] == "Sol Ring")
+    ring["categories"] = ["Ramp", "Artifact"]
+    changes = [{"action": "set_quantity", "card_name": "Forest", "quantity": 14}]
+    p = structured(await call(h, token, "propose_deck_changes", {"deck_id": "42", "changes": changes}))
+    a = await apply_any(h, token, p["proposal_id"])
+    assert a["ok"] and a["state"] == "applied", a
+    # then the tag, the mana value and the primary category change (an assistant, or by hand)
+    ring = next(c for c in deck["cards"] if c["card"]["oracleCard"]["name"] == "Sol Ring")
+    ring["label"], ring["customCmc"], ring["categories"] = "Have,#37d67a", 5, ["Artifact", "Ramp"]
+    deck["updatedAt"] = "2026-10-03T01:00:00Z"
+    r = structured(await call(h, token, "propose_restore_snapshot", {"snapshot_id": a["snapshot_id"]}))
+    assert r["ok"], r
+    lines = r["diff"].splitlines()
+    assert "Sol Ring: color tag Have (#37d67a) -> no tag" not in lines  # the reordered row is re-made
+    assert any(line.startswith("+1 Sol Ring") and line.endswith("[Ramp, Artifact]") for line in lines), lines
+    assert any(line.startswith("-1 Sol Ring") and line.endswith("[Artifact, Ramp]") for line in lines), lines
+    a2 = await apply_any(h, token, r["proposal_id"])
+    assert a2["ok"] and a2["state"] == "applied" and a2["result"]["verified"] is True, a2
+    rings = [c for c in deck["cards"] if c["card"]["oracleCard"]["name"] == "Sol Ring"]
+    assert len(rings) == 1 and rings[0]["categories"] == ["Ramp", "Artifact"], rings
+    assert not (rings[0].get("label") or "").split(",")[0] and rings[0].get("customCmc") is None
+    # a tag and a mana value alone are put back on the row itself
+    rings[0]["label"], rings[0]["customCmc"] = "Want,#ff0000", 3
+    deck["updatedAt"] = "2026-10-03T02:00:00Z"
+    r = structured(await call(h, token, "propose_restore_snapshot", {"snapshot_id": a["snapshot_id"]}))
+    assert r["ok"], r
+    lines = r["diff"].splitlines()
+    assert "Sol Ring: color tag Want (#ff0000) -> no tag" in lines, lines
+    assert "Sol Ring: custom mana value 3 -> none" in lines, lines
+    a3 = await apply_any(h, token, r["proposal_id"])
+    assert a3["ok"] and a3["state"] == "applied" and a3["result"]["verified"] is True, a3
+    ring = next(c for c in deck["cards"] if c["card"]["oracleCard"]["name"] == "Sol Ring")
+    assert not (ring.get("label") or "").split(",")[0] and ring.get("customCmc") is None
+
+
 async def test_snapshots_list_and_restore_through_a_proposal(stack: Stack) -> None:
     """An applied edit leaves a snapshot; list_snapshots shows it and propose_restore_snapshot makes
     an ordinary proposal that puts every deck row back (printing, finish, categories, quantity),
