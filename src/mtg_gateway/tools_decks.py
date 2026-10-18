@@ -11,7 +11,7 @@ from mcp_types import CallToolResult
 from pydantic import Field
 
 from . import deck_stats
-from .app import ACCOUNT_STATUS_FIELDS, AppState, DeckView, _card_result, _tool_error
+from .app import ACCOUNT_STATUS_FIELDS, AppState, DeckView, _card_result, _tool_error, token_may_write
 from .approve import (
     APPLY_TOOL_META,
     APPROVE_DECISIONS,
@@ -470,7 +470,8 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
         deck_id: Annotated[str | None, Field(description="Only this deck's (id or URL).")] = None,
     ) -> CallToolResult:
         try:
-            data, meta = state.decks.waiting_board(_sub(), deck_id, in_chat=s.apply_in_chat)
+            in_chat = s.apply_in_chat and token_may_write()  # no codes for a read-only token
+            data, meta = state.decks.waiting_board(_sub(), deck_id, in_chat=in_chat)
         except DeckError as exc:
             return _card_result(_tool_error(exc), None)
         res = _card_result(data, None)
