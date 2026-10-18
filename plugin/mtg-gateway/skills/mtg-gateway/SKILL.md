@@ -377,7 +377,9 @@ own linked account. Follow every step, in order.
   categories from its source list.
 - Before every applied edit the gateway keeps its own snapshot and, when
   backups are on, a private copy of the deck in the user's "MTG Gateway
-  backups" folder on Archidekt (shown by `list_snapshots` as `backup_url`). Those copies
+  backups" folder on Archidekt (shown by `list_snapshots` as `backup_url`;
+  the user's own saves on the deck page, in Card search, or in the deck
+  editor with its backup box unticked get no copy). Those copies
   stay out of `list_my_decks`; mention them only when the user asks what
   backups exist or wants to undo. If an apply answers `backup_failed`,
   nothing changed and the proposal is still pending: say so and offer to

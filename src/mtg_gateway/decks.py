@@ -3681,12 +3681,14 @@ class DeckService:
         review_page = via == REVIEW_PAGE
         if review_page:
             via = "browser"  # otherwise the review page is an ordinary browser apply
-        if archidekt_backup is False and via == "browser":
-            row["archidekt_backup"] = False
-        # an app that changed it in any version (G5) means the copy is made after all
+        # Only the member's own save that no app changed in any version (G5) may skip the backup
+        # copy: by the box sent now, else by the choice its save recorded (keep_no_backup).
         own = row.get("created_by_client") == BROWSER_CLIENT and not self.rewritten_by_another_app(sub, row)
-        if own and (row.get("result") or {}).get(NO_BACKUP_KEY):
-            row["archidekt_backup"] = False  # the member's own save said so (keep_no_backup)
+        if own and via == "browser":
+            if archidekt_backup is False or (
+                archidekt_backup is None and (row.get("result") or {}).get(NO_BACKUP_KEY)
+            ):
+                row["archidekt_backup"] = False
         creator = row.get("created_by_client")
         # "mcp" is the assistant's own apply_proposal call: allowed only when this member's
         # approval mode (modes.py) lets the assistant apply a proposal of this risk itself.

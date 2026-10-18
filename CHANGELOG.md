@@ -75,6 +75,7 @@ stack.
 - A card added to the maybeboard or sideboard under Sideboard was filed under the deck's maybeboard category (usually Maybeboard) unless the deck marked Sideboard as outside the deck. It now goes under Sideboard.
 - When the gateway's first try to reach the research service after a start failed, a deck report asked for in the next minute came back without its solo test, and some research calls from an assistant were sent in a form the research service refused. A report's solo test is now sent in the form the research service takes. For an assistant's research call whose form the gateway does not know yet, the gateway first asks the research service again; if it still does not answer, the call is refused before anything is sent, with a message to try again in a minute.
 - The deck editor's Save anyway, after the editor asked first, made a backup copy on Archidekt even with its backup box unticked.
+- A save from the deck page or Card search, or from the deck editor with its backup box unticked, that was left waiting (its question unanswered, or writes switched off) and applied later from its review page made a backup copy on Archidekt anyway.
 
 ### Removed
 - The old `/decks/{id}/playtest` address. The deck page's Playtest opens Archidekt's own playtester directly.

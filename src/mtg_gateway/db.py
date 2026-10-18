@@ -2673,17 +2673,24 @@ class Database:
     ) -> None:
         with self.tx() as c:
             # Mid-apply updates (state 'applying', recording the snapshot or the created deck) keep
-            # the apply start time that claim_proposal set; the purge relies on it.
+            # the apply start time that claim_proposal set; the purge relies on it. A proposal that
+            # waits again keeps its own save's "no backup copy" mark (decks.NO_BACKUP_KEY) under
+            # the new result; a null mark is dropped (json_patch).
             c.execute(
                 "UPDATE proposals SET state = ?, "
                 "applied_at = CASE WHEN ? = 'applying' THEN applied_at ELSE ? END, "
                 "snapshot_id = COALESCE(?, snapshot_id), "
-                "result_json = COALESCE(?, result_json), deck_id = COALESCE(?, deck_id) WHERE id = ?",
+                "result_json = CASE WHEN ? = 'pending' AND ? IS NOT NULL THEN json_patch(?, json_object("
+                "'no_backup_copy', json_extract(result_json, '$.no_backup_copy'))) "
+                "ELSE COALESCE(?, result_json) END, deck_id = COALESCE(?, deck_id) WHERE id = ?",
                 (
                     state,
                     state,
                     int(time.time()) if state == "applied" else None,
                     snapshot_id,
+                    state,
+                    json.dumps(result) if result is not None else None,
+                    json.dumps(result) if result is not None else None,
                     json.dumps(result) if result is not None else None,
                     deck_id,
                     proposal_id,

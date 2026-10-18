@@ -515,9 +515,13 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
             raise DeckError("invalid", "Send the version of the proposal the page showed.")
         via = "browser" if who.via == "browser" else "mcp"
         backup = None
-        if via == "browser" and data.get("archidekt_backup") is False:
-            own = (state.db.get_proposal(pid, who.sub) or {}).get("created_by_client") == BROWSER_CLIENT_ID
-            backup = False if own else None
+        if via == "browser" and isinstance(data.get("archidekt_backup"), bool):
+            row = state.db.get_proposal(pid, who.sub) or {}
+            # the box of the member's own save that no app ever changed (G5), ticked or not
+            own = row.get("created_by_client") == BROWSER_CLIENT_ID and not decks.rewritten_by_another_app(
+                who.sub, row
+            )
+            backup = data["archidekt_backup"] if own else None
         return ok(await decks.apply(who.sub, pid, via=via, version=version, archidekt_backup=backup))
 
     @route("/proposals/{pid}/reject", "POST", write=True)

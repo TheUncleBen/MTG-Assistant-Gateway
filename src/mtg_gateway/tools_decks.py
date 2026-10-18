@@ -94,7 +94,8 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
             "List the decks owned by the linked Archidekt account (most recently updated first). Optional "
             "filters: name_contains, deck_format (commander, modern...), folder. This is the one tool for "
             "the member's deck list; search_decks with owner lists another user's public decks. The "
-            "gateway's own backup copies are left out (each snapshot in list_snapshots links its copy). "
+            "gateway's own backup copies are left out (a snapshot in list_snapshots links its copy when "
+            "there is one). "
             "unreadable counts decks Archidekt listed without a readable owner, which are left out; when "
             "it is above 0, note says so in words to pass on to the member."
         ),
