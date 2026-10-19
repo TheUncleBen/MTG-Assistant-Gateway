@@ -468,6 +468,21 @@ async def test_the_card_in_the_app_connects_this_phone(stack: Stack) -> None:
         await b.aclose()
 
 
+async def test_the_card_outside_the_app_says_to_tick_and_save_in_the_app(stack: Stack) -> None:
+    """Outside the app the card's hint names the steps in order: in the app, tick Send me
+    notifications and press Save notifications (saving there connects the phone). It used to say
+    only "press Get notifications on this phone", a button that shows once notifications are on.
+    The summary's choice is labelled How often, not as if it were a button that sends it."""
+    b, _key = await _member(stack, app=False)
+    try:
+        page = (await b.http.get("/account")).text
+        assert "open this page in the app, tick Send me notifications and press Save notifications." in page
+        assert "and press Get notifications on this phone" not in page
+        assert "<label for='s-every'>How often</label>" in page and "Send my summary" not in page
+    finally:
+        await b.aclose()
+
+
 def test_every_topic_the_gateway_didnt_make_is_replaced(tmp_path) -> None:
     """A topic a member typed in 0.7.26 can have the same form as one the gateway makes (mtg- and
     22 characters), so the form can't tell them apart: only the gateway's mark can. Each one stored

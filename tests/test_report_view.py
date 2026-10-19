@@ -346,6 +346,25 @@ def test_ask_button_only_on_the_signed_in_page() -> None:
     assert "&lt;b&gt;" in rv.ask_html(r | {"deck_name": "<b>"}, [{"name": "X"}])
 
 
+def test_the_copied_request_also_names_the_other_groups_as_context() -> None:
+    """Ben, 0.7.31 test round: the request for the assistant covers not only the cards played
+    without their effect but also those left out on purpose, those that never mattered and the
+    shortcuts, so the assistant can say where any of them matters."""
+    r = report(deck_url="https://archidekt.com/decks/42")
+    g = rv.parse_goldfish(r["goldfish"], deck_size=100)
+    h = g["honesty"]
+    assert h.get("out_of_scope") and h.get("low_impact") and h.get("approximations")
+    text = rv.report_body_html(r).split("id='ask-model'")[1].split("</textarea>")[0]
+    assert "left out on purpose" in text
+    assert rv.front_face(h["out_of_scope"][0]["cards"][0]["name"]) in text
+    assert "never mattered: " + rv.front_face(h["low_impact"][0]) in text
+    assert h["approximations"][0]["label"] in text
+    assert "would play differently in a real game" in text
+    # nothing to add: the request ends as before
+    plain = rv.ask_prompt("D", "u", [{"name": "X"}], honesty={})
+    assert plain.endswith("which cards you could not describe.")
+
+
 def test_left_out_groups_count_copies_as_their_heading_does() -> None:
     """A group under "Left out on purpose" counts copies, like the heading."""
     g = {

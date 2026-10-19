@@ -898,10 +898,45 @@ def kept_models_html(
 ASK_LABEL = "Copy a request for your assistant"
 
 
-def ask_prompt(deck_name: str, deck_url: str, cards: list[dict[str, Any]], *, models: bool = False) -> str:
+def _ask_context(honesty: dict[str, Any] | None) -> str:
+    """The request's closing context: the solo test's other groups (left out on purpose, played
+    but never mattered, shortcuts), so the assistant can say where any of those cards matters."""
+    h = honesty if isinstance(honesty, dict) else {}
+    parts: list[str] = []
+    left = [front_face(c["name"]) for grp in h.get("out_of_scope") or [] for c in grp.get("cards") or []]
+    if left:
+        parts.append(
+            "These cards were left out on purpose, because the solo test has no opponent for them to act "
+            f"on: {', '.join(left)}."
+        )
+    low = [front_face(n) for n in h.get("low_impact") or []]
+    if low:
+        parts.append(f"These were played with their effect but never mattered: {', '.join(low)}.")
+    approx = [f"{a['label']} ({a['cards']})" for a in h.get("approximations") or [] if a.get("cards")]
+    if approx:
+        parts.append(f"The test took these shortcuts: {'; '.join(approx)}.")
+    if not parts:
+        return ""
+    return (
+        " For context, from the same solo test: "
+        + " ".join(parts)
+        + " Tell me where any of these cards would play differently in a real game, again from their exact "
+        "Oracle text."
+    )
+
+
+def ask_prompt(
+    deck_name: str,
+    deck_url: str,
+    cards: list[dict[str, Any]],
+    *,
+    models: bool = False,
+    honesty: dict[str, Any] | None = None,
+) -> str:
     """What the member pastes into Claude or ChatGPT to have these cards modeled (the same words
     for both): the assistant reads each card's exact text and passes its models to a new run.
-    ``models``: the gateway keeps card models, so the request asks which it kept."""
+    ``models``: the gateway keeps card models, so the request asks which it kept. ``honesty``:
+    the solo test's other groups, added as context (_ask_context)."""
     names = ", ".join(front_face(c["name"]) for c in cards)
     # the last clause only while kept models are switched on
     told = (
@@ -915,17 +950,23 @@ def ask_prompt(deck_name: str, deck_url: str, cards: list[dict[str, Any]], *, mo
         "deck to see what each one needs, and write each model only from the card's exact Oracle text "
         "(the gateway's card text and rules tools), never from memory. Then run a new deck report for "
         f"the deck with your models as its annotations, and tell me what changed{told}"
+        + _ask_context(honesty)
     )
 
 
-def ask_html(r: dict[str, Any], cards: list[dict[str, Any]]) -> str:
-    """The copy button and its hidden text for the request above (export.js copies it)."""
+def ask_html(r: dict[str, Any], cards: list[dict[str, Any]], honesty: dict[str, Any] | None = None) -> str:
+    """The copy button and its hidden text for the request above (export.js copies it). ``honesty``:
+    the parsed solo test's honesty groups, which the request adds as context."""
     if not cards:
         return ""
     g = r.get("goldfish") if isinstance(r.get("goldfish"), dict) else {}
     models = card_models.SWITCHED_ON and bool(g.get("models_saved"))
     text = ask_prompt(
-        str(r.get("deck_name") or r.get("deck_id") or ""), str(r.get("deck_url") or ""), cards, models=models
+        str(r.get("deck_name") or r.get("deck_id") or ""),
+        str(r.get("deck_url") or ""),
+        cards,
+        models=models,
+        honesty=honesty,
     )
     return (
         "<div class='ask'><button type='button' class='btn small copybtn' data-copy='ask-model'>"
@@ -1646,7 +1687,8 @@ def report_body_html(
             + summary
             + "</div>"
         )
-        honesty = s["honesty"] if standalone else honesty_html(g, ask_html(r, s["unmodeled"]))
+        ask = "" if standalone else ask_html(r, s["unmodeled"], (g or {}).get("honesty"))
+        honesty = s["honesty"] if standalone else honesty_html(g, ask)
         if honesty:
             body += (
                 "<div class='card honesty'><h2>What the solo test could not model</h2>"
