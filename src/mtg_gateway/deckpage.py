@@ -2025,6 +2025,24 @@ def decks_unreadable_html(*, some_shown: bool, panel: bool = True, again: str = 
     )
 
 
+def deck_list_held_text(read_at: float, *, now: float | None = None) -> str:
+    """What My decks and Home say over a deck list shown as last read (DeckService.last_deck_list)."""
+    seconds = max(0, int((time.time() if now is None else now) - read_at))
+    # spelled out in a sentence (waiting_strip._age's "min" and "h" are for list columns)
+    n, unit = (max(1, seconds // 60), "minute") if seconds < 3600 else (seconds // 3600, "hour")
+    age = f"{n} {unit}{'' if n == 1 else 's'}"
+    return (
+        f"Your deck list can't be read from Archidekt right now, so this is how it looked {age} ago. "
+        "Decks changed since then may not show the change; reload the page in a minute or two for "
+        "the current list."
+    )
+
+
+def deck_list_held_html(read_at: float) -> str:
+    """The one notice line over a deck list shown as last read."""
+    return f"<p class='notice warn' role='status'>{esc(deck_list_held_text(read_at))}</p>"
+
+
 def deck_list_controls_html(
     *,
     q: str,
