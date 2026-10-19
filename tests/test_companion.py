@@ -1193,7 +1193,7 @@ async def test_a_used_up_archidekt_budget_is_one_shared_429_page_everywhere(stac
             r = await b.http.get(path, headers={**NAV, "Cache-Control": "max-age=0"})
             _assert_busy_page(r, path, status=429, title="Archidekt is busy", max_wait=600)
             assert "used up its Archidekt allowance for the last 10 minutes" in r.text, path
-            assert "try again in a minute or two" in r.text, path
+            assert "once there is room" in r.text, path
             assert "Your account has used its 1 Archidekt actions" in r.text, path
             assert "href='/decks'>My decks</a>" in r.text, path
         for path in BUSY_DOWNLOADS:
