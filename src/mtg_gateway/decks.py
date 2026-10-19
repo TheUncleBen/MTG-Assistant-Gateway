@@ -2551,15 +2551,36 @@ class DeckService:
             return None
         unreadable = getattr(rows, "unreadable", 0)
         known = self.db.backup_copies(sub)
+        backup_ids = await self._backup_folder_ids(sub, rows, wait=wait)
         out = []
         for d in rows:
             d = dict(d)
+            if d.get("folder_id") in backup_ids:
+                d["backup"] = True  # in the backup folder, which the listing gave by id only
             if d["id"] in known:
                 d["backup"] = True
                 d["backup_of"] = known[d["id"]]["deck_id"]
                 d["snapshot_id"] = known[d["id"]]["snapshot_id"]
             out.append(d)
         return DeckList(out, complete=getattr(rows, "complete", False) is True, unreadable=unreadable)
+
+    async def _backup_folder_ids(
+        self, sub: str, rows: list[dict[str, Any]], *, wait: float | None
+    ) -> set[int]:
+        """The ids of the backup folder and the folders inside it, for deck rows that carry their
+        folder's id but not its name (Archidekt's owner listing can leave the name out, and
+        archidekt.list_decks recognises the backup folder by name). Read from the member's folder
+        tree, cached like the deck list, only when such a row is there; empty when the tree can't
+        be read in time (the name check and the snapshots' own records still apply)."""
+        if not self.settings.archidekt_backup_folder:
+            return set()
+        if not any(d.get("folder_id") is not None and not d.get("folder") for d in rows):
+            return set()
+        try:
+            info = await self.folder_view(sub, wait=wait)
+        except DeckError:
+            return set()
+        return {f["id"] for f in (info or {}).get("folders", []) if f.get("backup")}
 
     async def list_decks_quick(self, sub: str, *, wait: float | None = None) -> list[dict[str, Any]] | None:
         """``list_decks`` that gives up waiting for a cold read after ``wait`` seconds and answers

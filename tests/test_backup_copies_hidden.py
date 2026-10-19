@@ -229,3 +229,31 @@ async def test_a_report_on_someone_elses_deck_is_not_called_gone(stack: Stack) -
         assert "<option value='43'>Amy&#x27;s deck</option>" in hist.text
     finally:
         await b.aclose()
+
+
+async def test_a_deck_in_the_backup_folder_listed_by_folder_id_only_stays_out(stack: Stack) -> None:  # noqa: F811
+    """Archidekt's owner listing can give a deck's folder by id without its name: a deck in the
+    backup folder is still kept out of the lists, found by the folder's id in the folder tree."""
+    b = await linked(stack)
+    ark = stack.ark
+    real_row = ark._listing_row
+    folder = stack.h.app.state.gateway.decks.settings.archidekt_backup_folder
+    cards = parse_export(FIXTURE.read_text(encoding="utf-8"))
+    # not named like a backup copy and not recorded on a snapshot: only its folder says what it is
+    ark.decks[77] = to_deck_json(cards[:10], deck_id=77, name="Old list", owner="alice")
+    ark.users["alice"]["decks"].append(77)
+    ark.folders["alice"] = [{"id": 5001, "name": folder, "private": True}]
+    ark.deck_folder[77] = 5001
+
+    def row(d: dict) -> dict:
+        out = real_row(d)
+        out.pop("parentFolderName")
+        return out
+
+    ark._listing_row = row
+    try:
+        ids = {d["id"] for d in (await b.http.get("/api/v1/decks")).json()["decks"]}
+        assert "42" in ids and "77" not in ids, ids
+    finally:
+        ark._listing_row = real_row
+        await b.aclose()
