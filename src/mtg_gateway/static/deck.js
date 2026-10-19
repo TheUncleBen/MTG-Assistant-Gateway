@@ -1726,11 +1726,11 @@
   // hold on a draggable card, and when the finger lets go without moving it opens the card's menu
   // but sends no dragend, so the card stayed faded and every later tap on a card was refused as
   // the end of a drop. A touch press and hold is the touch code's below (the menu, or slide to
-  // move), so the card is not draggable under a finger and a drag a touch starts anyway is refused.
+  // move), so the card is not draggable under a finger or a pen and a drag one starts is refused.
   $$(".c, .row", cards).forEach(function (c) { c.setAttribute("draggable", "true"); });
   var touchPress = false;
   cards.addEventListener("pointerdown", function (e) {
-    touchPress = e.pointerType === "touch";
+    touchPress = e.pointerType !== "mouse";  // a finger or a pen (an S Pen press and hold too)
     clearStaleDrag();
     var card = e.target.closest(".c, .row");
     if (card) card.setAttribute("draggable", touchPress ? "false" : "true");
@@ -1829,6 +1829,8 @@
     if (!card || e.touches.length !== 1 || picking) return;
     var t = e.touches[0];
     startX = t.clientX; startY = t.clientY;
+    // a hold whose touch never ended (no touchend or touchcancel came) is over now
+    if (armed && armed !== card && !touchCard) { armed.classList.remove("held"); armed = null; }
     clearTimeout(hold);
     hold = setTimeout(function () { armTouch(card); }, 350);
   }, { passive: true });
