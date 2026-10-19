@@ -395,6 +395,7 @@ def banner_html(
         more_items.append(f"<a href='/decks/{did}/settings'>{icon('settings')} Deck settings</a>")
     more_items.append(f"<a href='/decks/{did}/export'>{icon('download')} Export deck</a>")
     more_items.append(f"<a href='/history?deck_id={did}'>{icon('history')} History and snapshots</a>")
+    more_items.append(f"<a href='/proposals?deck_id={did}'>{icon('proposals')} Proposals for this deck</a>")
     if own and csrf:
         more_items.append(f"<a class='danger' href='/decks/{did}/delete'>{icon('trash')} Delete deck…</a>")
     more_items.append(f"<a href='/decks/{did}/compare'>{icon('swap')} Compare with another deck…</a>")

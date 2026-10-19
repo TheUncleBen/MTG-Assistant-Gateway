@@ -56,8 +56,9 @@ async def test_the_list_groups_waiting_changes_by_deck_with_checkboxes(stack: St
         assert "id='deck-42'" in page and "data-all='42'" in page
         assert f"name='pick' value='{one}' data-group='42'" in page
         assert f"name='v_{one}' value='1'" in page
-        assert "<span class='st wait'>Waiting</span>" in page
-        assert "<span class='st look'" in page and "Needs a look" in page  # #2 would now be 13 -> 14
+        assert re.search(r"<span class='ui-lbl orange'>(<svg.*?</svg>)?Waiting</span>", page)
+        # #2 would now be 13 -> 14
+        assert re.search(r"<span class='ui-lbl red'[^>]*>(<svg.*?</svg>)?Needs a look</span>", page)
         assert "Not tied to one of your decks" in page and f"value='{new}' data-group='untied'" in page
         assert "Apply checked" in page and "Reject checked" in page
         assert "/static/proposals.js" in page

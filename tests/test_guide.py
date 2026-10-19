@@ -98,7 +98,7 @@ def test_facts_match_the_current_pages() -> None:
         "90 seconds",  # the deck list cache
         "Markdown",  # the report exports
         "placeholder",  # Home and Decks while the list loads
-        "filter bar",  # History filters
+        "Everything, Snapshots, Restores or Reports",  # the History chips
         "7 card rows",  # the gateway's own low-risk limit
     ):
         assert fact in page, fact

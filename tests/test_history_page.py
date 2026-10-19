@@ -1,6 +1,6 @@
 """The history page and the report page over the ASGI stack: the lists are
-narrowed and paged in SQL so a deck keeps its older entries, the filter bar, the "When" presets
-(UTC calendar days), the day and deck groupings render, snapshots keep their Restore button,
+narrowed and paged in SQL so a deck keeps its older entries, the chips and filters, the "When"
+presets (UTC calendar days), the day and deck groupings render, snapshots keep their Restore button,
 and a stored report renders as a designed page with Markdown and HTML exports."""
 
 from __future__ import annotations
@@ -200,89 +200,96 @@ def test_db_lists_narrow_in_sql(tmp_path: Path) -> None:
 
 
 # -- pages -------------------------------------------------------------------------
+def _table(body: str) -> str:
+    """The History table's markup (between its opening tag and the pager)."""
+    return body.split("class='ui-table hy-table'")[1].split("<nav class='ui-pager'")[0]
+
+
+def _entries(body: str) -> list[str]:
+    """Each entry row of the History table (not its header, day or deck rows)."""
+    return [r for r in re.split(r"(?=<div class='tr)", _table(body)) if r.startswith("<div class='tr'>")]
+
+
+def _ids(body: str) -> set[str]:
+    """The snapshots (by id), restores (by proposal id) and reports a History page lists."""
+    table = _table(body)
+    return (
+        set(re.findall(r"open=s-(\w+)'", table))
+        | set(re.findall(r"open=p-(\w+)'", table))
+        | set(re.findall(r"/history/reports/(rep_\w+)'", table))
+    )
+
+
 async def test_history_page_filters_groups_and_pages(stack: Stack, monkeypatch: pytest.MonkeyPatch) -> None:
+    """History lists snapshots, restores and reports (no edit proposals: those are on Proposals),
+    narrowed and paged in SQL, with chips, a deck name search, the deck, When and Group by
+    filters, day rows, Details and Restore (review first) on every snapshot."""
     b = await linked_browser(stack)
     try:
         gw = stack.h.app.state.gateway
         sub = gw.db._one("SELECT sub FROM users", ())["sub"]
         now = page_clock(monkeypatch)
         seed_history(gw.db, sub, now=now)
+        for i in range(20):  # more snapshots of deck 42, so its own page has an older one
+            gw.db.save_snapshot(
+                f"x{i:02d}",
+                owner_sub=sub,
+                deck_id="42",
+                proposal_id=None,
+                fingerprint="f",
+                deck={"id": "42", "name": "Immortal Reckoning", "cards": []},
+            )
+            with gw.db.tx() as c:
+                c.execute("UPDATE snapshots SET taken_at = ? WHERE id = ?", (now - 30 * DAY - i, f"x{i:02d}"))
         store_report(gw.db, sub, "rep_a", taken_at=now - 100)
         store_report(gw.db, sub, "rep_b", taken_at=now - 2 * DAY)
-        # the deck's page shows its own 25 newest entries, including ones older than the user-wide 20
         page = await b.http.get("/history?deck_id=42", headers=NAV)
         assert page.status_code == 200
         body = page.text.split("<main")[1]
-        assert body.count("<li class='hrow") == 25
-        assert "/proposals/p28'" in body  # the 15th proposal of deck 42: past the old user-wide limit
-        assert "Reap the Tides" not in body.split("<section class='history'>")[1]
-        assert "Older →" in body and "← Newer" not in body
-        # day groups with sticky headings, kind icons, deck links, badges, who, folded details
-        assert "<h2 class='day'><span>Today</span>" in body and "Yesterday" in body
-        assert "class='hrow k-report'" in body and "class='hrow k-snapshot'" in body and "k-edit" in body
-        assert "href='/decks/42'" in body and "badge ok'>applied" in body and ">rejected</span>" in body
-        assert "by you" in body and "by an assistant" in body and "app-1" not in body  # no raw app id
-        assert "<details><summary>Details</summary>" in body
-        assert "Restore (review first)" in body and "the change it was taken before" in body
-        assert "2 most recent stored reports" in body and "<svg class='tspark'" in body
-        # the filter bar: themed selects in one form, the deck list from the member's history
-        assert "class='card filterbar'" in body and body.count("<select") == 5
-        # Current decks by their live Archidekt names (the history recorded "Immortal
-        # Reckoning"); a deck no longer in the member's list sits in its own group below
+        rows = _entries(body)
+        assert len(rows) == 25
+        # no edit proposal is listed: a snapshot links the change it was taken before
+        assert "+1 Sol Ring" not in body and "Rejected" not in body
+        assert "<a href='/proposals/p00'>the change</a>" in body
+        assert "Older →" in body and "1–25 of 38" in body  # 15 + 20 snapshots, the restore, 2 reports
+        assert "<div class='tr daygroup'>Today · " in body and "<div class='tr daygroup'>Yesterday · " in body
+        snaps = [r for r in rows if "open=s-" in r]
+        assert snaps and all("Restore (review first)" in r and ">Details</a>" in r for r in snaps)
+        # on a phone a row is one tap to its details, where Restore sits
+        assert all("class='sm-only chev'" in r for r in rows)
+        assert "title='Snapshots do not record who made them'>—" in snaps[0]
+        # chips with counts, a deck name search and the three filters
+        assert "Everything <span class='n'>38</span>" in body and "Reports <span class='n'>2</span>" in body
+        assert "placeholder='Deck name'" in body and body.count("<select") == 3
         assert "<option value='42' selected>Sample Commander Deck</option>" in body
         assert "Immortal Reckoning</option>" not in body
         assert (
             "<optgroup label='No longer on Archidekt'><option value='43'>Reap the Tides</option></optgroup>"
             in body
         )
-        assert (
-            "<label for='h-when'>When (UTC days)</label>" in body
-            and "<select id='h-when' name='when'>" in body
-        )
-        assert (
-            "<option value='' selected>Any time</option>" in body and "<option value='7d'>Last 7 days" in body
-        )
-        assert (
-            "<label for='h-group'>Group by</label>" in body and "<select id='h-group' name='group'>" in body
-        )
-        assert "<option value='day' selected>Day</option><option value='deck'>Deck</option>" in body
-        assert "class='form-actions'><button type='submit' class='btn-primary'>" in body
+        assert "<select name='when' aria-label='When (UTC days)'>" in body
+        assert "<option value='day' selected>Group by day</option>" in body
         # older page
-        older = await b.http.get("/history?deck_id=42&offset=25", headers=NAV)
-        obody = older.text.split("<main")[1]
-        assert older.status_code == 200 and "← Newer" in obody
-        assert 0 < obody.count("<li class='hrow") <= 25
-        first_ids = set(re.findall(r"/proposals/(p\d\d)'", body))
-        older_ids = set(re.findall(r"/proposals/(p\d\d)'", obody))
-        assert first_ids and older_ids and not first_ids & older_ids
-        # every deck-42 proposal is reachable across the pages
-        seen = first_ids | older_ids
-        more = await b.http.get("/history?deck_id=42&offset=50", headers=NAV)
-        seen |= set(re.findall(r"/proposals/(p\d\d)'", more.text))
-        assert seen == {f"p{i:02d}" for i in range(0, 60, 2)}
-        # type, state and search filters
-        changes = await b.http.get("/history?type=changes&state=applied", headers=NAV)
-        cbody = changes.text.split("<main")[1]
-        assert "k-snapshot" not in cbody and "k-report" not in cbody
-        assert cbody.count("badge ok'>applied") == cbody.count("<li class='hrow")
-        reps = await b.http.get("/history?type=reports", headers=NAV)
-        rbody = reps.text.split("<main")[1]
-        assert rbody.count("<li class='hrow") == 2 and rbody.count("k-report") == 2
-        found = await b.http.get("/history?q=counterspell", headers=NAV)
-        fbody = found.text.split("<main")[1]
-        assert "Immortal Reckoning" not in fbody.split("<section class='history'>")[1]
-        assert "value='counterspell'" in fbody
+        older = (await b.http.get("/history?deck_id=42&offset=25", headers=NAV)).text.split("<main")[1]
+        assert "← Newer" in older and "26–38 of 38" in older
+        assert not _ids(body) & _ids(older) and len(_ids(body) | _ids(older)) == 38
+        # chips and search
+        reps = (await b.http.get("/history?type=reports", headers=NAV)).text.split("<main")[1]
+        assert _ids(reps) == {"rep_a", "rep_b"}
+        restores = (await b.http.get("/history?type=restores", headers=NAV)).text.split("<main")[1]
+        assert _ids(restores) == {"p04"}
+        found = (await b.http.get("/history?q=reap", headers=NAV)).text.split("<main")[1]
+        assert "value='reap'" in found and "Nothing matches these filters" in found  # deck 43: none
         nothing = await b.http.get("/history?q=zzzz-nothing", headers=NAV)
         assert "Nothing matches these filters" in nothing.text
         # odd query values fall back to the defaults instead of failing
-        odd = await b.http.get(
-            "/history?type=bogus&state=nope&offset=abc&when=never&group=colour", headers=NAV
-        )
+        odd = await b.http.get("/history?type=bogus&offset=abc&when=never&group=colour", headers=NAV)
         assert odd.status_code == 200
         obody = odd.text.split("<main")[1]
         assert "<option value='' selected>Any time</option>" in obody
-        assert "<option value='day' selected>Day</option>" in obody and "<h2 class='day'><span>Today" in obody
-        assert "when=" not in obody and "group=" not in obody  # the pager links carry only real values
+        assert "<option value='day' selected>Group by day</option>" in obody
+        links = obody.split("<nav class='ui-chips'")[1]  # the chips, the table and the pager
+        assert "when=" not in links and "group=" not in links  # the links carry only real values
     finally:
         await b.aclose()
 
@@ -299,44 +306,32 @@ async def test_history_when_presets(stack: Stack, monkeypatch: pytest.MonkeyPatc
         midnight = now - now % DAY  # the start of today, UTC
         jan1 = int(calendar.timegm((time.gmtime(now).tm_year, 1, 1, 0, 0, 0)))
 
-        def proposal(pid: str, at: int, deck: str = "42") -> None:
-            gw.db.save_proposal(
-                {
-                    "id": pid,
-                    "owner_sub": sub,
-                    "kind": "edit",
-                    "deck_id": deck,
-                    "deck_name": "Immortal Reckoning" if deck == "42" else "Reap the Tides",
-                    "baseline_fingerprint": "f",
-                    "changes": [],
-                    "diff_text": f"+1 {pid}",
-                    "expires_at": now + 3600,
-                    "created_by_client": "__browser__",
-                }
+        def snapshot(sid: str, at: int, deck: str = "42") -> None:
+            gw.db.save_snapshot(
+                sid,
+                owner_sub=sub,
+                deck_id=deck,
+                proposal_id=None,
+                fingerprint="f",
+                deck={
+                    "id": deck,
+                    "name": "Immortal Reckoning" if deck == "42" else "Reap the Tides",
+                    "cards": [],
+                },
             )
             with gw.db.tx() as c:
-                c.execute("UPDATE proposals SET created_at = ? WHERE id = ?", (at, pid))
+                c.execute("UPDATE snapshots SET taken_at = ? WHERE id = ?", (at, sid))
 
-        proposal("p_now", now - 5)
-        proposal("p_midnight", midnight)  # the first second of today counts as today
-        proposal("p_yesterday", midnight - 1, deck="43")  # the last second of yesterday does not
-        proposal("p_6d", midnight - 6 * DAY)  # the seventh day back, still "Last 7 days"
-        proposal("p_7d", midnight - 7 * DAY - 1)  # the day before: out
-        proposal("p_29d", midnight - 29 * DAY)
-        proposal("p_89d", midnight - 89 * DAY)
-        proposal("p_100d", midnight - 100 * DAY)
-        proposal("p_jan1", jan1)
-        proposal("p_lastyear", jan1 - 1)
-        gw.db.save_snapshot(
-            "s_old",
-            owner_sub=sub,
-            deck_id="42",
-            proposal_id=None,
-            fingerprint="f",
-            deck={"id": "42", "name": "Immortal Reckoning", "cards": []},
-        )
-        with gw.db.tx() as c:
-            c.execute("UPDATE snapshots SET taken_at = ? WHERE id = 's_old'", (midnight - 10 * DAY,))
+        snapshot("s_now", now - 5)
+        snapshot("s_midnight", midnight)  # the first second of today counts as today
+        snapshot("s_yesterday", midnight - 1, deck="43")  # the last second of yesterday does not
+        snapshot("s_6d", midnight - 6 * DAY)  # the seventh day back, still "Last 7 days"
+        snapshot("s_7d", midnight - 7 * DAY - 1)  # the day before: out
+        snapshot("s_29d", midnight - 29 * DAY)
+        snapshot("s_89d", midnight - 89 * DAY)
+        snapshot("s_100d", midnight - 100 * DAY)
+        snapshot("s_jan1", jan1)
+        snapshot("s_lastyear", jan1 - 1)
         store_report(gw.db, sub, "rep_old", taken_at=midnight - 10 * DAY)
         store_report(gw.db, sub, "rep_new", taken_at=now - 50)
 
@@ -344,94 +339,76 @@ async def test_history_when_presets(stack: Stack, monkeypatch: pytest.MonkeyPatc
             page = await b.http.get(f"/history{query}", headers=NAV)
             assert page.status_code == 200
             body = page.text.split("<main")[1]
-            found = set(re.findall(r"/proposals/(p_\w+)'", body))
-            if "k-snapshot" in body:
-                found.add("s_old")
-            found |= set(re.findall(r"/history/reports/(rep_\w+)'", body))
-            return found
+            return _ids(body) if "class='ui-table hy-table'" in body else set()
 
         everything = {
-            "p_now", "p_midnight", "p_yesterday", "p_6d", "p_7d", "p_29d", "p_89d", "p_100d",
-            "p_jan1", "p_lastyear", "s_old", "rep_old", "rep_new",
+            "s_now", "s_midnight", "s_yesterday", "s_6d", "s_7d", "s_29d", "s_89d", "s_100d",
+            "s_jan1", "s_lastyear", "rep_old", "rep_new",
         }  # fmt: skip
         assert await ids("") == everything
-        assert await ids("?when=today") == {"p_now", "p_midnight", "rep_new"}
-        assert await ids("?when=7d") == {"p_now", "p_midnight", "p_yesterday", "p_6d", "rep_new"}
+        assert await ids("?when=today") == {"s_now", "s_midnight", "rep_new"}
+        assert await ids("?when=7d") == {"s_now", "s_midnight", "s_yesterday", "s_6d", "rep_new"}
         assert await ids("?when=30d") == {
-            "p_now",
-            "p_midnight",
-            "p_yesterday",
-            "p_6d",
-            "p_7d",
-            "p_29d",
-            "s_old",
+            "s_now",
+            "s_midnight",
+            "s_yesterday",
+            "s_6d",
+            "s_7d",
+            "s_29d",
             "rep_old",
             "rep_new",
         }
-        assert "p_100d" not in await ids("?when=90d") and "p_89d" in await ids("?when=90d")
-        assert "s_old" in await ids("?when=90d") and "rep_old" in await ids("?when=90d")
+        assert "s_100d" not in await ids("?when=90d") and "s_89d" in await ids("?when=90d")
         year = await ids("?when=year")
-        assert "p_jan1" in year and "p_lastyear" not in year
+        assert "s_jan1" in year and "s_lastyear" not in year
         assert await ids("?when=sometime") == everything  # unknown: "Any time"
         # the preset combines with the other filters and sits in the query string of every link
-        assert await ids("?when=7d&deck_id=43") == {"p_yesterday"}
+        assert await ids("?when=7d&deck_id=43") == {"s_yesterday"}
         assert await ids("?when=7d&type=reports") == {"rep_new"}
-        page = await b.http.get("/history?when=7d&type=changes", headers=NAV)
-        body = page.text.split("<main")[1]
+        body = (await b.http.get("/history?when=7d&type=snapshots", headers=NAV)).text.split("<main")[1]
         assert "<option value='7d' selected>Last 7 days</option>" in body
-        assert "Backup copies" not in body  # a narrowed page has no backups panel
         for i in range(30):
-            proposal(f"p_fill{i}", now - 100 - i)
-        paged = await b.http.get("/history?when=today", headers=NAV)
-        pbody = paged.text.split("<main")[1]
-        assert "href='/history?when=today&offset=25'>Older →</a>" in pbody
-        older = await b.http.get("/history?when=today&offset=25", headers=NAV)
-        obody = older.text.split("<main")[1]
-        assert "href='/history?when=today'>← Newer</a>" in obody and "p_yesterday" not in obody
+            snapshot(f"s_fill{i}", now - 100 - i)
+        pbody = (await b.http.get("/history?when=today", headers=NAV)).text.split("<main")[1]
+        assert "href='/history?when=today&amp;offset=25' rel='next'>Older →</a>" in pbody
+        obody = (await b.http.get("/history?when=today&offset=25", headers=NAV)).text.split("<main")[1]
+        assert "href='/history?when=today' rel='prev'>← Newer</a>" in obody and "s_yesterday" not in obody
     finally:
         await b.aclose()
 
 
 async def test_history_grouped_by_deck(stack: Stack) -> None:
-    """group=deck: one section per deck headed by its name (linked to the deck page and to its own
-    history with the same filters), decks in the order of their newest entry, rows newest first
-    with their day shown; the filters, folded details, Restore and the pager keep working."""
+    """group=deck: a row per deck headed by its name (linked to the deck page and to its own
+    history with the same filters), decks in the order of their newest entry, entries newest
+    first; the filters, Details, Restore and the pager keep working."""
     b = await linked_browser(stack)
     try:
         gw = stack.h.app.state.gateway
         sub = gw.db._one("SELECT sub FROM users", ())["sub"]
         now = int(time.time())
-        seed_history(gw.db, sub, now=now)  # p00 (deck 42) is the newest, p01 (deck 43) next
+        seed_history(gw.db, sub, now=now)  # the snapshots are all deck 42's
         store_report(gw.db, sub, "rep_a", deck_id="43", deck_name="Reap the Tides", taken_at=now - 10)
         page = await b.http.get("/history?group=deck", headers=NAV)
         assert page.status_code == 200
         body = page.text.split("<main")[1]
-        listing = body.split("<section class='history'>")[1].split("</section>")[0]
-        assert "<option value='deck' selected>Deck</option>" in body
-        heads = re.findall(r"<h2 class='day deck'><span><a href='/decks/(\d+)'>([^<]+)</a></span>", listing)
-        assert heads == [("43", "Reap the Tides"), ("42", "Immortal Reckoning")]
-        assert "href='/history?deck_id=43&amp;group=deck'>only this deck</a>" in listing
-        assert listing.count("<li class='hrow") == 25 and listing.count("<h2 class='day") == 2
-        # each section's rows are newest first, and no row of the other deck is inside
-        sec43, sec42 = listing.split("<h2 class='day deck'>")[1:]
-        assert "Immortal Reckoning" not in sec43.split("</h2>")[1]
-        assert "Reap the Tides" not in sec42.split("</h2>")[1]
-        assert "/history/reports/rep_a'" in sec43 and sec43.index("rep_a") < sec43.index("/proposals/p01'")
-        p42 = re.findall(r"/proposals/(p\d\d)'", sec42)
-        assert p42 == sorted(p42)
-        assert "Yesterday" not in listing and re.search(
-            r"<time datetime='\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ'>\d{4}-\d\d-\d\d \d\d:\d\d UTC</time>", listing
+        listing = _table(body)
+        assert "<option value='deck' selected>Group by deck</option>" in body
+        heads = re.findall(
+            r"<div class='tr group hy-group'><span><a href='/decks/(\d+)'>([^<]+)</a>", listing
         )
-        assert "<details><summary>Details</summary>" in listing and "Restore (review first)" in listing
-        assert "href='/history?group=deck&offset=25'>Older →</a>" in body
-        # paging stays by entries, the filters combine, and a deck's own page is one section
-        older = await b.http.get("/history?group=deck&offset=25", headers=NAV)
-        obody = older.text.split("<main")[1]
-        assert "← Newer" in obody and 0 < obody.count("<li class='hrow") <= 25
-        own = await b.http.get("/history?group=deck&deck_id=42&type=changes&state=applied", headers=NAV)
-        own_body = own.text.split("<main")[1]
-        assert own_body.count("<h2 class='day") == 1 and "only this deck" not in own_body
-        assert own_body.count("badge ok'>applied") == own_body.count("<li class='hrow") == 15
+        # deck 42's restore (p04, applied as the test began) is newer than deck 43's report
+        assert heads == [("42", "Immortal Reckoning"), ("43", "Reap the Tides")]
+        assert "href='/history?deck_id=43&amp;group=deck'>only this deck</a>" in listing
+        assert "open=p-p04'" in listing.split("<div class='tr'>")[1]  # the newest entry leads
+        assert len(_entries(body)) == 17 and "daygroup" not in listing
+        sec42, sec43 = listing.split("<div class='tr group hy-group'>")[1:]
+        assert "/history/reports/rep_a'" in sec43 and "open=s-" not in sec43
+        s42 = list(dict.fromkeys(re.findall(r"open=s-(s\d\d)'", sec42)))  # newest first
+        assert s42 == sorted(s42) and len(s42) == 15
+        assert "Restore (review first)" in sec42
+        own = (await b.http.get("/history?group=deck&deck_id=42&type=snapshots", headers=NAV)).text
+        own_body = own.split("<main")[1]
+        assert _table(own_body).count("hy-group") == 1 and "only this deck" not in own_body
         nothing = await b.http.get("/history?group=deck&q=zzzz-nothing", headers=NAV)
         assert "Nothing matches these filters" in nothing.text
     finally:
@@ -694,11 +671,11 @@ async def test_a_relinked_member_keeps_the_old_accounts_history(stack: Stack) ->
         assert "Old Account Deck" not in gone and "Old Account Other" not in gone
         assert "<option value='7001'>Old Account Deck</option>" in body
         assert "<option value='7003'>Old Account Other</option>" in body
-        snaps = re.findall(r"<li class='hrow k-snapshot.*?</li>", body, re.S)
+        snaps = [r for r in _entries(body) if "open=s-" in r]
         (old_row,) = [r for r in snaps if "Old Account Deck" in r]
         (mine_row,) = [r for r in snaps if "Mine Deleted" in r]
-        assert "action='/history/restore'" in old_row and "no longer on Archidekt" not in old_row
-        assert "action='/history/restore'" not in mine_row and "no longer on Archidekt" in mine_row
+        assert "action='/history/restore'" in old_row and "Deleted on Archidekt" not in old_row
+        assert "action='/history/restore'" not in mine_row and "Deleted on Archidekt" in mine_row
     finally:
         await b.aclose()
 

@@ -387,7 +387,8 @@ async def test_review_page_apply_is_guarded(stack: Stack):
     await b.login()
     url = f"/proposals/{pid}"
     page = await b.http.get(url)
-    guarded = page.text.split("<noscript>")[0]
+    # the proposal's panel (the waiting list beside it has a no-script button of its own)
+    guarded = page.text.split("<aside class='ui-drawer'")[1].split("<noscript>")[0]
     assert re.search(r"<button[^>]*value='apply'[^>]*disabled data-guard", guarded)
     assert re.search(r"<script src='/static/clickguard.js\?v=[0-9a-f]{12}' defer></script>", page.text)
     assert "script-src 'self'" in page.headers["content-security-policy"]

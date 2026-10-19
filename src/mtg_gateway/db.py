@@ -733,6 +733,15 @@ def _repair_card_models(conn: sqlite3.Connection) -> bool:
     return True
 
 
+def _step_15(conn: sqlite3.Connection) -> None:
+    """The Proposals page (UI standard): each closed proposal's risk tier (low, high, consent or
+    destructive), stored when it closes, so the page's Risk filter on applied, rejected and the
+    rest is a plain query. A waiting one's risk is worked out on every read (it follows the live
+    settings and its amends). Proposals already closed get theirs from the one-time backfill that
+    runs once the gateway's settings are loaded (Database.settle_risks)."""
+    _add_column(conn, "proposals", "risk", "TEXT")
+
+
 # Applied in order; ``PRAGMA user_version`` records how many have run. Append, never edit.
 MIGRATIONS = [
     _step_1,
@@ -749,6 +758,7 @@ MIGRATIONS = [
     _step_12,
     _step_13,
     _step_14,
+    _step_15,
 ]
 SCHEMA_VERSION = len(MIGRATIONS)
 
@@ -792,6 +802,9 @@ class Database:
         # setting in, snapshots_keep()).
         self.snapshots_per_deck: int | None = None
         self.snapshots_source: Callable[[], int] | None = None
+        # A closed proposal's risk tier from its stored row (get_proposal's shape), stored when it
+        # closes (settle_risks); the app wires in DeckService.stored_risk. None stores nothing.
+        self.risk_source: Callable[[dict[str, Any]], str] | None = None
         self._conn = sqlite3.connect(str(self.path), check_same_thread=False, isolation_level=None)
         self._conn.row_factory = sqlite3.Row
         with self._lock:
@@ -1335,7 +1348,7 @@ class Database:
         so an apply left running by the previous one (a crash, a redeploy) can't still be going.
         The result points at the snapshot taken before it and the deck, so the member can check."""
         with self.tx() as c:
-            return c.execute(
+            n = c.execute(
                 """UPDATE proposals SET state = 'failed',
                    result_json = COALESCE(result_json, json_object('error', 'interrupted',
                        'detail', 'the gateway restarted before the apply finished; check the deck on '
@@ -1343,6 +1356,8 @@ class Database:
                        'snapshot_id', snapshot_id, 'deck_id', deck_id))
                    WHERE state = 'applying'"""
             ).rowcount
+        self.settle_risks()
+        return n
 
     def purge_expired(self) -> int:
         """Delete what has expired and apply the retention caps.
@@ -1415,6 +1430,7 @@ class Database:
                    WHERE state = 'applying' AND COALESCE(applied_at, created_at) < ?""",
                 (now - 6 * 3600,),
             ).rowcount
+        self.settle_risks()  # the proposals that expired or failed just now
         return n
 
     def _delete_batched(self, table: str, where: str, args: tuple[Any, ...]) -> int:
@@ -2039,6 +2055,7 @@ class Database:
                     "WHERE id = ? AND state = 'pending'",
                     (int(time.time()), json.dumps({"rejected_by": "disconnected"}), pid),
                 )
+        self.settle_risks(ids)
         return ids
 
     def get_proposal(self, proposal_id: str, owner_sub: str) -> dict[str, Any] | None:
@@ -2114,6 +2131,85 @@ class Database:
         with self._lock:
             rows = self._conn.execute(sql, args).fetchall()
         return [dict(r) for r in rows]
+
+    def proposal_index(self, owner_sub: str) -> list[dict[str, Any]]:
+        """Every kept proposal of the owner (the Proposals page: waiting and past, no cap but the
+        retention), newest first. Rows carry what a list row shows (no changes or review rows):
+        the state as stored, the ``risk`` stored when a proposal closed and the result (who
+        closed it). The page narrows them itself, risk and app included."""
+        sql = (
+            "SELECT id, kind, deck_id, deck_name, state, created_at, expires_at, applied_at, "
+            "created_by_client, amended_by_client, diff_text, version, board_no, status, status_reason, "
+            "status_at, risk, snapshot_id, result_json FROM proposals WHERE owner_sub = ?"
+        )
+        args: list[Any] = [owner_sub]
+        with self._lock:
+            rows = self._conn.execute(sql + " ORDER BY created_at DESC, rowid DESC", args).fetchall()
+        out = []
+        for r in rows:
+            d = dict(r)
+            raw = d.pop("result_json", None)
+            try:
+                d["result"] = json.loads(raw) if raw else None
+            except ValueError:
+                d["result"] = None
+            out.append(d)
+        return out
+
+    def history_counts(
+        self,
+        owner_sub: str,
+        *,
+        deck_id: str | None = None,
+        search: str | None = None,
+        since: int | None = None,
+    ) -> dict[str, int]:
+        """How many snapshots, applied restores and deck reports the History page holds under its
+        filters (deck, a deck-name search, a start time): its chips and its pager."""
+
+        def narrow(time_col: str) -> tuple[str, list[Any]]:
+            where, args = " WHERE owner_sub = ?", [owner_sub]
+            if deck_id:
+                where += " AND deck_id = ?"
+                args.append(str(deck_id))
+            if search:
+                where += " AND deck_name LIKE ? ESCAPE '\\'"
+                args.append(_like(search))
+            if since is not None:
+                where += f" AND {time_col} >= ?"
+                args.append(int(since))
+            return where, args
+
+        out = {}
+        with self._lock:
+            w, a = narrow("taken_at")
+            out["snapshots"] = int(self._conn.execute("SELECT COUNT(*) FROM snapshots" + w, a).fetchone()[0])
+            has_reports = self._conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'reports'"
+            ).fetchone()
+            out["reports"] = (
+                int(self._conn.execute("SELECT COUNT(*) FROM reports" + w, a).fetchone()[0])
+                if has_reports
+                else 0
+            )
+            w, a = narrow("created_at")
+            out["restores"] = int(
+                self._conn.execute(
+                    "SELECT COUNT(*) FROM proposals" + w + " AND kind = 'restore' AND state = 'applied'", a
+                ).fetchone()[0]
+            )
+        return out
+
+    def snapshot_stats(self, owner_sub: str, deck_id: str | None = None) -> dict[str, int]:
+        """The History page's "Snapshots kept" widget: how many, on how many decks, the newest."""
+        sql = "SELECT COUNT(*), COUNT(DISTINCT deck_id), MAX(taken_at) FROM snapshots WHERE owner_sub = ?"
+        args: list[Any] = [owner_sub]
+        if deck_id:
+            sql += " AND deck_id = ?"
+            args.append(str(deck_id))
+        with self._lock:
+            n, decks, newest = self._conn.execute(sql, args).fetchone()
+        return {"count": int(n or 0), "decks": int(decks or 0), "newest": int(newest or 0)}
 
     def applied_via(self, owner_sub: str, proposal_id: str) -> str | None:
         """Where a proposal's apply was called from (``via`` of its ``proposal_applied`` audit row),
@@ -2196,6 +2292,47 @@ class Database:
                 out.add(str(r["deck_id"]))
         return out
 
+    def settle_risks(self, ids: Iterable[str] | None = None) -> int:
+        """Store the risk tier of closed proposals that have none yet (``ids``, or every one: the
+        one-time backfill at upgrade, which the app runs once its settings are loaded), worked out
+        by ``risk_source`` from the stored row with the settings in force now. A closed proposal's
+        risk can no longer change, so the Proposals page filters on the stored value. A
+        proposal that can't be judged keeps none (the page then works it out on read). Returns
+        how many were stored."""
+        if self.risk_source is None:
+            return 0
+        sql = (
+            "SELECT id, owner_sub FROM proposals WHERE risk IS NULL AND state NOT IN ('pending', 'applying')"
+        )
+        args: list[Any] = []
+        if ids is not None:
+            wanted = [str(i) for i in ids]
+            if not wanted:
+                return 0
+            sql += f" AND id IN ({_marks(wanted)})"
+            args.extend(wanted)
+        with self._lock:
+            todo = [(r["id"], r["owner_sub"]) for r in self._conn.execute(sql, args).fetchall()]
+        n = 0
+        for pid, owner in todo:
+            row = self.get_proposal(pid, owner)
+            if row is None:
+                continue
+            try:
+                risk = self.risk_source(row)
+            except Exception:  # never let one odd row stop a close or the backfill
+                logger.exception("risk of proposal %s could not be worked out", pid)
+                continue
+            if risk not in ("low", "high", "consent", "destructive"):
+                continue
+            with self.tx() as c:
+                n += c.execute(
+                    "UPDATE proposals SET risk = ? WHERE id = ? AND risk IS NULL "
+                    "AND state NOT IN ('pending', 'applying')",
+                    (risk, pid),
+                ).rowcount
+        return n
+
     def reject_proposal(
         self, proposal_id: str, owner_sub: str, closed_by: dict[str, Any] | None = None
     ) -> bool:
@@ -2209,7 +2346,10 @@ class Database:
                 "WHERE id = ? AND owner_sub = ? AND state = 'pending' AND expires_at >= ?",
                 (int(time.time()), patch, patch, proposal_id, owner_sub, int(time.time())),
             )
-            return cur.rowcount == 1
+            done = cur.rowcount == 1
+        if done:
+            self.settle_risks([proposal_id])
+        return done
 
     def pending_baselines(self, owner_sub: str | None = None) -> list[dict[str, Any]]:
         """Live pending proposals that recorded the deck as it was when they were made (a
@@ -2389,7 +2529,7 @@ class Database:
         patch = json.dumps({"closed_by": by}) if by is not None else None
         now = int(time.time())
         with self.tx() as c:
-            return (
+            done = (
                 c.execute(
                     "UPDATE proposals SET state = ?, status_reason = ?, status_at = ?, result_json = CASE "
                     "WHEN ? IS NULL THEN result_json ELSE json_patch(COALESCE(result_json, '{}'), ?) END "
@@ -2398,6 +2538,9 @@ class Database:
                 ).rowcount
                 == 1
             )
+        if done:
+            self.settle_risks([proposal_id])
+        return done
 
     def reopen_proposal(self, proposal_id: str, owner_sub: str, *, max_pending: int | None = None) -> bool:
         """Bring a withdrawn or replaced proposal back to waiting while it is unexpired (a
@@ -2419,7 +2562,8 @@ class Database:
             changed = (
                 c.execute(
                     "UPDATE proposals SET state = 'pending', status = ?, status_reason = ?, "
-                    "status_at = ? WHERE id = ? AND owner_sub = ? AND state IN ('withdrawn', 'replaced') "
+                    "status_at = ?, risk = NULL WHERE id = ? AND owner_sub = ? "
+                    "AND state IN ('withdrawn', 'replaced') "
                     "AND expires_at >= ?",
                     (
                         "held" if blocking else None,
@@ -2727,6 +2871,8 @@ class Database:
                     proposal_id,
                 ),
             )
+        if state not in ("pending", "applying"):
+            self.settle_risks([proposal_id])
 
     def save_snapshot(
         self,

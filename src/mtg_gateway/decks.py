@@ -2239,6 +2239,10 @@ class DeckService:
         # the dashboard settings with a deployment value winning (config.MANAGED_SETTINGS); read a
         # managed key through here, not through ``settings``, so a dashboard change applies
         self.live = LiveSettings(settings, db)
+        # A proposal's risk tier is stored when it closes (the Proposals page's Risk filter); the
+        # ones closed before that was stored get theirs now, once (Database.settle_risks).
+        db.risk_source = self.stored_risk
+        db.settle_risks()
         # sub -> {matched card name (lower case): what the scan read}; set when scanning is on
         self.guessed_names: Callable[[str], dict[str, str]] | None = None
         # names -> whether each is a Magic card (None: cannot tell); set when scanning is on, from
@@ -3072,6 +3076,21 @@ class DeckService:
         finally:
             no_retry.reset(quiet)
 
+    def proposal_risk(self, sub: str, row: dict[str, Any]) -> tuple[str, str]:
+        """(risk, why) of a proposal as the pages show it: its tier from its kind and review rows
+        under the live settings, raised to high when another app changed it after it was made.
+        ``row`` is a whole stored proposal (get_proposal). A waiting one is worked out on every
+        read; a closed one keeps what was stored when it closed (``stored_risk``)."""
+        kind = row.get("kind") or "edit"
+        risk, why = modes.risk_of(kind, row.get("rows"), max_rows=int(self.live.get("auto_apply_max_rows")))
+        if risk not in modes.MEMBER_ONLY and self.rewritten_by_another_app(sub, row):
+            return "high", "was changed by another app after it was made"
+        return risk, why
+
+    def stored_risk(self, row: dict[str, Any]) -> str:
+        """The risk tier stored on a proposal when it closes (Database.risk_source)."""
+        return self.proposal_risk(str(row.get("owner_sub") or ""), row)[0]
+
     def _assistant_policy(self, sub: str, row: dict[str, Any]) -> tuple[str, str, str, bool]:
         """(risk, why, mode, allowed): the proposal's risk tier and reason, the member's approval
         mode, and whether that mode lets the assistant apply it itself. On top of the tiers
@@ -3416,6 +3435,8 @@ class DeckService:
             state = "expired"
         kind = row.get("kind", "edit")
         risk, why, mode, allowed = self._assistant_policy(sub, row)
+        if state not in ("pending", "applying") and row.get("risk") in ("low", "high", *modes.MEMBER_ONLY):
+            risk = row["risk"]  # stored when it closed: the tier it was judged by then
         press = self.press_reason(sub, row) if risk not in modes.MEMBER_ONLY else None
         # "May apply now": the member's mode allows it for this risk AND the proposal is still
         # pending (risk, approval_mode and risk_reason keep the policy side either way).
@@ -5619,6 +5640,8 @@ class DeckService:
                     "created_by": self._creator_label(line.get("created_by_client")),
                     "own": bool(caller) and line.get("created_by_client") == caller,
                     "version": int(line.get("version") or 1),
+                    # the §4 risk word on the cards (Low, High, Your press, Delete)
+                    "risk": self.proposal_risk(sub, row)[0] if row else None,
                     **(
                         {
                             "changed_by": self._creator_label(amender),

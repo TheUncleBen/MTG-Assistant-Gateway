@@ -16,7 +16,7 @@ import html
 import time
 from typing import Any
 
-from . import board
+from . import board, ui
 
 LIST_SCRIPT = "/static/proposals.js"
 
@@ -39,9 +39,10 @@ def _age(seconds: float) -> str:
     return f"{seconds // 86400} d"
 
 
-def line_for(db: Any, sub: str, row: dict[str, Any]) -> dict[str, Any]:
+def line_for(db: Any, sub: str, row: dict[str, Any], *, risk: str | None = None) -> dict[str, Any]:
     """One waiting change as a list row: its number, summary, who asked and when, version, status
-    (in words too) and expiry. ``row`` is a ``Database.pending_board`` row."""
+    (in words too) and expiry. ``row`` is a ``Database.pending_board`` row; ``risk`` its risk
+    tier when the caller worked it out (DeckService.proposal_risk)."""
     from .decks import ADMIN_CLIENT, BROWSER_CLIENT, actor_label
 
     client = row.get("created_by_client")
@@ -62,29 +63,36 @@ def line_for(db: Any, sub: str, row: dict[str, Any]) -> dict[str, Any]:
         "status": row.get("status"),
         "status_text": board.status_text(db, sub, row) if row.get("status") else "",
         "link_note": board.link_note(db, sub, row),
+        **({"risk": risk} if risk else {}),
     }
 
 
-def waiting_changes(db: Any, sub: str, deck_id: int | str, *, own: bool) -> list[dict[str, Any]]:
+def waiting_changes(
+    db: Any, sub: str, deck_id: int | str, *, own: bool, risk_of: Any = None
+) -> list[dict[str, Any]]:
     """The strip's rows for this member and deck, oldest first: their own waiting changes to
-    the deck (on someone else's deck, their waiting likes, comments or follows)."""
+    the deck (on someone else's deck, their waiting likes, comments or follows). ``risk_of``
+    (DeckService.proposal_risk) adds each one's risk label."""
     if db is None:  # no database to ask: nothing waits
         return []
-    return [line_for(db, sub, r) for r in db.pending_board(sub, str(deck_id))]
-
-
-STATUS_CHIP = {
-    "updated": ("upd", "Updated"),
-    "needs_look": ("look", "Needs a look"),
-    "held": ("held", "Held"),
-}
+    out = []
+    for r in db.pending_board(sub, str(deck_id)):
+        full = db.get_proposal(r["id"], sub) if risk_of is not None else None
+        out.append(line_for(db, sub, r, risk=risk_of(sub, full)[0] if full else None))
+    return out
 
 
 def chips_html(line: dict[str, Any], now: float | None = None) -> str:
+    """The row's §4 labels: its status (Waiting, Needs a look or Held; Updated beside Waiting),
+    its risk when known, then the expiry and version notes."""
     now = time.time() if now is None else now
-    cls, label = STATUS_CHIP.get(str(line.get("status") or ""), ("wait", "Waiting"))
-    tip = f" title='{html.escape(line['status_text'])}'" if line.get("status_text") else ""
-    out = f"<span class='st {cls}'{tip}>{label}</span>"
+    status = str(line.get("status") or "")
+    tip = str(line.get("status_text") or "")
+    out = ui.status_label(status if status in ("needs_look", "held") else "waiting", title=tip)
+    if status == "updated":
+        out += ui.status_label("updated", title=tip)
+    if line.get("risk"):
+        out += ui.risk_label(str(line["risk"]))
     left = int(line.get("expires_at") or 0) - now
     if 0 < left < 2 * 86400:
         out += f"<span class='st exp'>Expires in {_age(left)}</span>"
@@ -202,9 +210,6 @@ form.guarded button.danger[aria-disabled=true]{color:var(--danger-text)}
   justify-content:center;white-space:nowrap}
 .st{display:inline-block;padding:.05rem .45rem;border-radius:3px;font-size:.8rem;font-weight:700;
   border:1px solid var(--border-soft);background:var(--surface-2);color:var(--text)}
-.st.upd{color:var(--green-text);background:var(--green-tint);border-color:var(--green)}
-.st.look{color:var(--orange-text);background:var(--orange-tint);border-color:var(--orange)}
-.st.held{color:var(--red-text);background:var(--red-tint);border-color:var(--red)}
 .st.exp,.st.ver{font-weight:400}
 .wbar{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem;padding:.6rem .75rem;margin:.75rem 0 0;
   background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-panel)}
@@ -234,7 +239,7 @@ form.guarded button.danger[aria-disabled=true]{color:var(--danger-text)}
 .wstrip .more a,.dgroup h2 > a,.results li > a{display:inline-flex;align-items:center;min-height:44px}
 .order{margin:0 0 1rem;padding-left:1.4rem}
 .order li{margin:.3rem 0;overflow-wrap:break-word}
-.order .held{display:block;color:var(--red-text);font-size:.9rem}
+.order .held{display:block;font-size:.9rem;margin-top:.2rem}
 .skips li,.results li{margin:.35rem 0;overflow-wrap:break-word}
 @media (max-width:700px){
   .wbar:not(.inline){position:fixed;left:0;right:0;bottom:0;margin:0;border-radius:0;border-width:1px 0 0;

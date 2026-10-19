@@ -127,7 +127,7 @@ def test_a_large_0_7_28_database_is_upgraded_to_13_and_keeps_every_row(
     monkeypatch.undo()
     new = Database(path)
     try:
-        assert new.schema_version == db_module.SCHEMA_VERSION == 14
+        assert new.schema_version == db_module.SCHEMA_VERSION == 15
         c = new._conn
         (count,) = c.execute("SELECT COUNT(*) FROM snapshots").fetchone()
         assert count == db_module._STEP_13_BATCH * 5 + 38
@@ -716,7 +716,7 @@ async def test_the_deck_page_asks_for_its_waiting_changes(
     """The deck route hands the strip's data to the page; empty until the strip is built."""
     asked: list[tuple] = []
 
-    def spy(db, sub, deck_id, *, own):
+    def spy(db, sub, deck_id, *, own, **_kw):
         asked.append((sub, str(deck_id), own))
         return []
 

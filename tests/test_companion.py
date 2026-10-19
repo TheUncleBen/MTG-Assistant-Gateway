@@ -182,8 +182,9 @@ async def test_reports_are_stored_and_listed(stack: Stack) -> None:
         assert got["ok"] and got["stats"]["card_count"] == rep["stats"]["card_count"]
         # pages
         page = await b.http.get("/history?deck_id=42", headers=NAV)
-        # the history timeline shows the report as a row of its own (history_view), not a "Report:" line
-        assert page.status_code == 200 and "k-report" in page.text and "Open the report" in page.text
+        # the history table shows the report as a row of its own (history_view), not a "Report:" line
+        assert page.status_code == 200 and "<span class='ui-lbl blue'>" in page.text
+        assert "Open report</a>" in page.text
         detail = await b.http.get(f"/history/reports/{rep['report_id']}", headers=NAV)
         assert detail.status_code == 200 and "Solo test (" in detail.text
         gone = await h.http.delete(f"/api/v1/reports/{rep['report_id']}", headers=auth)
@@ -799,7 +800,7 @@ async def test_deck_pages(stack: Stack) -> None:
             "export.md" in shown.text and "export.html" in shown.text and "data-copy='rep-md'" in shown.text
         )
         hist = await b.http.get("/history", headers=NAV)
-        assert hist.status_code == 200 and "k-report" in hist.text and "filterbar" in hist.text
+        assert hist.status_code == 200 and "Open report</a>" in hist.text and "class='ui-tools'" in hist.text
         act = await b.http.get("/activity", headers=NAV)
         assert act.status_code == 200 and "Archidekt account linked" in act.text
         for path in ("/decks", "/decks/42", "/history", "/activity"):

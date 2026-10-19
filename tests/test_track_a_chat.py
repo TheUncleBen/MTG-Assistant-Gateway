@@ -225,9 +225,9 @@ def test_the_history_row_shows_the_bracket_set_on_the_deck_over_the_estimate() -
     est = {"bracket_estimate": {"bracket": 3}, "card_count": 100}
     # `bracket_set` (the bracket set on the deck) is a summary field from reports.py; here the
     # summary is given it directly
-    set_one = build_events([], [], [{**row(est), "bracket_set": 2}], csrf_input="")[0]["summary"]
+    set_one = build_events([], [], [{**row(est), "bracket_set": 2}], csrf_input="")[0]["line"]
     assert "bracket 2" in set_one and "about" not in set_one
-    none_set = build_events([], [], [{**row(est), "bracket_set": None}], csrf_input="")[0]["summary"]
+    none_set = build_events([], [], [{**row(est), "bracket_set": None}], csrf_input="")[0]["line"]
     assert "bracket about 3" in none_set
 
 
