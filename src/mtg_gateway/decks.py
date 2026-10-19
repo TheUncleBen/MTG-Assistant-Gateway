@@ -545,6 +545,17 @@ def _row(kind: str, **fields: Any) -> dict[str, Any]:
     return out
 
 
+def _commander_names(*lists: list[str]) -> list[str] | None:
+    """The cards a commander row names, before and after. Its before and after are joined with
+    ", ", which many card names contain, so the names are kept apart for the board's card list."""
+    return sorted({n for names in lists for n in names}, key=str.lower) or None
+
+
+def row_cards(rows: list[dict[str, Any]] | None) -> list[str]:
+    """Every card the rows name, a commander row's too, sorted."""
+    return sorted({str(n) for r in rows or [] for n in [r.get("name"), *(r.get("names") or [])] if n})
+
+
 def _printing_label(item: dict[str, Any]) -> str | None:
     """'(CMR 472, Foil)' for a collection item that names a printing or finish, else None."""
     card = item.get("card") or {}
@@ -1324,7 +1335,12 @@ def category_plan_rows(
         new_names = sorted(set(new_commanders), key=str.lower)
         if [n.lower() for n in old_names] != [n.lower() for n in new_names]:
             lines.append(
-                _row("commander", before=", ".join(old_names) or "(none)", after=", ".join(new_names))
+                _row(
+                    "commander",
+                    before=", ".join(old_names) or "(none)",
+                    after=", ".join(new_names),
+                    names=_commander_names(old_names, new_names),
+                )
             )
     return want, lines
 
@@ -1560,7 +1576,12 @@ def plan_zones(
         )
         if [n.lower() for n in was] != [n.lower() for n in now]:
             lines.append(
-                _row("commander", before=", ".join(was) or "(none)", after=", ".join(now) or "(none)")
+                _row(
+                    "commander",
+                    before=", ".join(was) or "(none)",
+                    after=", ".join(now) or "(none)",
+                    names=_commander_names(was, now),
+                )
             )
         elif unsure or moved:
             # the commanders stay: what changes is the card's other rows (see build_payload), or
@@ -1570,6 +1591,7 @@ def plan_zones(
                     "commander",
                     before=", ".join(was),
                     after=", ".join(now),
+                    names=_commander_names(was, now),
                     stays=unsure or None,
                     moved=moved or None,
                 )
@@ -5341,9 +5363,7 @@ class DeckService:
                     ),
                     **(self._status_fields(sub, line) if line.get("status") else {"status": None}),
                     "summary": summary[:400],
-                    "cards": sorted({str(r.get("name")) for r in row.get("rows") or [] if r.get("name")})[
-                        :60
-                    ],
+                    "cards": row_cards(row.get("rows"))[:60],
                     "links": board.links_text(self.db, sub, line["id"]),
                     # the same link in the member's words, for the cards
                     "link_note": board.link_note(self.db, sub, line),

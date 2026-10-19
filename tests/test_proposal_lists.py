@@ -3,6 +3,8 @@ applied proposal was applied, and the cards a waiting change touches."""
 
 from __future__ import annotations
 
+from mtg_gateway import recheck
+
 from .conftest import Stack
 from .test_account_actions import _press
 from .test_approval_modes import _set_mode
@@ -77,3 +79,25 @@ async def test_get_proposal_says_where_an_applied_proposal_was_applied(stack: St
     await _press(h, token, res)
     got = structured(await call(h, token, "get_proposal", {"proposal_id": structured(res)["proposal_id"]}))
     assert got["state"] == "applied" and got["applied_via"] == "review_page"
+
+
+async def test_the_board_lists_the_commanders_a_commander_change_names(stack: Stack) -> None:
+    h = stack.h
+    token = await linked_user(stack)
+    await _set_mode(h, "manual")
+    p = structured(
+        await call(
+            h,
+            token,
+            "propose_deck_changes",
+            {"deck_id": "42", "changes": [{"action": "set_commander", "card_name": "Sol Ring"}]},
+        )
+    )
+    assert p["ok"], p
+    line = structured(await call(h, token, "list_my_proposals", {"pending_only": True}))["proposals"][0]
+    # the old commander's name holds a comma, so it is listed whole, not split at it
+    assert "Sol Ring" in line["cards"] and "Aesi, Tyrant of Gyre Strait" in line["cards"]
+    # a commander row saved before it listed its names still compares equal to one worked out now
+    row = next(r for r in p["rows"] if r["kind"] == "commander")
+    old = {k: v for k, v in row.items() if k != "names"}
+    assert recheck._clean([old]) == recheck._clean([row])
