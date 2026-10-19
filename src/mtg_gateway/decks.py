@@ -5991,6 +5991,98 @@ class DeckService:
             carried = self.db.set_hold(pid, sub, str(held["status_reason"])) or carried
         return {**out, **self.describe(sub, pid)} if carried else out
 
+    async def check_plan(self, sub: str, deck_id: str, raw_changes: Any) -> dict[str, Any]:
+        """A planned deck edit checked before it is proposed, so the assistant fixes it or
+        amends a waiting note instead of drawing a card for a proposal it then redoes. Saves
+        nothing and asks Archidekt nothing: the change list, the card names (the same check as
+        propose), the room for another proposal, an exact repeat of this app's waiting note,
+        and the deck's waiting notes with the cards they share with the plan. A card absent
+        from the deck is found only when the proposal reads the deck."""
+        deck = _clean_deck_id(deck_id)
+        problems: list[dict[str, Any]] = []
+        changes: list[Change] = []
+        for check in (lambda: self._token(sub), lambda: self._room_for_proposal(sub)):
+            try:
+                check()
+            except DeckError as exc:
+                problems.append({"error": exc.kind, "message": str(exc)})
+        try:
+            changes = parse_changes(raw_changes)
+        except DeckError as exc:
+            problems.append({"error": exc.kind, "message": str(exc)})
+        unknown: list[str] = []
+        adds = list(dict.fromkeys(c.card_name for c in changes if c.action == "add"))
+        if adds and self.known_cards is not None:
+            try:
+                found = await self.known_cards(adds)
+                unknown = [n for n in adds if found.get(n) is False]
+            except Exception:
+                logger.exception("card-name check failed")
+        if unknown:
+            problems.append(
+                {
+                    "error": "unknown_cards",
+                    "message": "No Magic card is called " + ", ".join(f"'{n}'" for n in unknown) + ".",
+                    "unknown_cards": unknown,
+                }
+            )
+        client = current_client.get()
+        dup = (
+            self.db.find_duplicate(
+                sub, deck_id=deck, kind="edit", changes=[c.as_dict() for c in changes], client=client
+            )
+            if changes and client not in (None, BROWSER_CLIENT, ADMIN_CLIENT)
+            else None
+        )
+        names = {c.card_name.casefold() for c in changes}
+        waiting, overlaps, amend = [], [], None
+        for line in self.board_lines(sub, deck):
+            shared = [n for n in line.get("cards") or [] if str(n).casefold() in names]
+            mine = bool(line.get("own")) and line.get("kind") == "edit" and line.get("status") != "held"
+            waiting.append(
+                {k: line.get(k) for k in ("proposal_id", "board_no", "version", "own", "status", "summary")}
+                | {"shares_cards": shared}
+            )
+            label = f"#{line.get('board_no')}" if line.get("board_no") else "a waiting change"
+            overlaps += [f"{n}: {label} changes it too." for n in shared]
+            if mine and line["proposal_id"] != dup and (amend is None or (shared and not amend[1])):
+                amend = (line, bool(shared))
+        out: dict[str, Any] = {
+            "deck_id": deck,
+            "changes": len(changes),
+            "problems": problems,
+            "waiting_on_deck": waiting,
+            **({"overlaps": overlaps} if overlaps else {}),
+        }
+        if problems:
+            out["suggest"] = "fix"
+            out["next_step"] = "Fix each problem first; a proposal now would be refused."
+        elif dup:
+            no = (self.db.get_proposal(dup, sub) or {}).get("board_no")
+            out |= {"suggest": "already_waiting", "duplicate_of": dup}
+            out["next_step"] = (
+                f"This exact change already waits as #{no}. Don't propose it again."
+                if no
+                else "This exact change already waits. Don't propose it again."
+            )
+        elif amend is not None:
+            line = amend[0]
+            out |= {
+                "suggest": "amend",
+                "amend": {"proposal_id": line["proposal_id"], "version": line["version"]},
+            }
+            out["next_step"] = (
+                f"Your #{line.get('board_no')} already waits on this deck"
+                + (" and changes some of the same cards" if amend[1] else "")
+                + ". If this belongs to the same request, call amend_proposal on it once, with its "
+                "changes and these in one list. If it replaces it, propose with replaces. Only a "
+                "separate request gets its own proposal."
+            )
+        else:
+            out["suggest"] = "propose"
+            out["next_step"] = "Nothing found against it: propose it in one call."
+        return out
+
     def link_depends(self, sub: str, proposal_id: str, others: Any) -> None:
         """Record that a new note depends on waiting notes: it is held if one of them is
         later rejected, withdrawn or fails."""

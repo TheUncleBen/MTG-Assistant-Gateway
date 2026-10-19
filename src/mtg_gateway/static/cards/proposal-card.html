@@ -109,6 +109,9 @@ button.danger:disabled{color:var(--red)}
   var MAX_IMAGES = 24;   // Scryfall thumbnails at most, over the whole card
   var COLLAPSE_AT = 8;   // a longer list shows a summary and this many rows until "Show all"
   var ARM_DELAY_MS = 700; // buttons stay disabled this long after the card is drawn
+  // While a waiting proposal's card is on screen it reads the proposal again this often, so it
+  // follows an amend, a withdraw or a press elsewhere; at most REFRESH_MAX reads in a row.
+  var REFRESH_EVERY_MS = 30000, REFRESH_MAX = 60;
   var proposal = null, approval = null, armed = false, busy = false, heldCode = null;
   var applySet = null, confirming = false;
   var request = B.request, reportSize = B.reportSize, el = B.el, $ = B.$, setStatus = B.setStatus, tellModel = B.tellModel, nudge = B.nudge;
@@ -355,6 +358,7 @@ button.danger:disabled{color:var(--red)}
     if (p.state === "failed") return "Applying this failed" + at + ". The review page shows what happened. Ask the assistant for a new proposal if you still want this change.";
     if (p.state === "applied") return "Already applied" + at + ". " + (p.applied_text || "The deck on Archidekt matches this proposal.");
     if (p.state === "replaced" && p.replace_note) return p.replace_note + " Nothing was sent to Archidekt from this one.";
+    if (p.state === "withdrawn") return "The assistant withdrew this change, so it no longer waits. Nothing was sent to Archidekt from this one.";
     return "";
   }
 
@@ -383,6 +387,12 @@ button.danger:disabled{color:var(--red)}
         var sc = (res && res.structuredContent) || {};
         if (sc.ok === false || (res && res.isError) || !sc.state) return;
         if (busy || proposal !== p || sc.proposal_id !== p.proposal_id) return;
+        if (sc.state === "pending" && newer(p, sc)) {
+          // amended since the card was drawn: draw the new version, with the new version's code
+          // when the read carries one (a code of the old version is refused, "changed")
+          render({ structuredContent: sc, _meta: (res && res._meta) || {} });
+          return;
+        }
         if (sc.state === "pending") {
           // still waiting, but held, waiting for another change or linked to a replace since the
           // card was drawn (a restart, another app): draw that, keeping this card's codes
@@ -407,6 +417,9 @@ button.danger:disabled{color:var(--red)}
     var apps = (p.changed_by_apps && p.changed_by_apps.length ? p.changed_by_apps : [p.changed_by]).map(creator);
     return apps.join(", then ");
   }
+  function newer(p, sc) {
+    return Number(sc.version || 1) > Number(p.version || 1);
+  }
   function moved(p, sc) {
     return ["status", "status_reason", "press_reason", "replace_note"].some(function (k) {
       return String(p[k] || "") !== String(sc[k] || "");
@@ -419,8 +432,29 @@ button.danger:disabled{color:var(--red)}
     return meta;
   }
   document.addEventListener("visibilitychange", function () {
-    if (document.visibilityState === "visible") refresh();
+    if (document.visibilityState === "visible") { refreshes = 0; refresh(); keepFresh(); }
   });
+  // Read again now and then while the card is on screen (a host that keeps old cards in the chat
+  // shows them current); not while it is scrolled away or the chat is in the background.
+  var refreshes = 0, refreshTimer = null, onScreen = true;
+  function keepFresh() {
+    if (refreshTimer || !onScreen || document.visibilityState === "hidden" || refreshes >= REFRESH_MAX) return;
+    if (!proposal || proposal.state !== "pending") return;
+    refreshTimer = setTimeout(function () {
+      refreshTimer = null; refreshes += 1;
+      refresh(); keepFresh();
+    }, REFRESH_EVERY_MS);
+  }
+  if (typeof IntersectionObserver === "function") {
+    new IntersectionObserver(function (seen) {
+      var now = seen.some(function (e) { return e.isIntersecting; });
+      if (now && !onScreen) { onScreen = true; refreshes = 0; refresh(); keepFresh(); }
+      else if (!now && onScreen) {
+        onScreen = false;
+        if (refreshTimer) { clearTimeout(refreshTimer); refreshTimer = null; }
+      }
+    }).observe(document.documentElement);
+  }
 
   // A large apply keeps running on the gateway after the Approve press answers; the card reads
   // its progress with get_proposal (read-only) until it ends.
@@ -686,6 +720,7 @@ button.danger:disabled{color:var(--red)}
   // this press, the card says so, and the next press approves the change as the card shows it,
   // so a host that never lets the card read can't lock Approve
   var uncheckedOk = false;
+  var UPDATED_TEXT = "This change was updated since the card was drawn. Check it above, then press Approve again if you still want it.";
   function notChecked() {
     var ok = $("approve"), no = $("reject");
     if (ok) ok.disabled = false; if (no) no.disabled = false;
@@ -714,6 +749,11 @@ button.danger:disabled{color:var(--red)}
           var sc = (res && res.structuredContent) || {};
           busy = false;
           if (sc.ok === false || (res && res.isError) || !sc.state) { notChecked(); return; }
+          if (sc.state === "pending" && proposal === shown && newer(shown, sc)) {
+            render({ structuredContent: sc, _meta: (res && res._meta) || {} });
+            setStatus(UPDATED_TEXT, "err");
+            return;
+          }
           if (sc.state === "pending" && proposal === shown && moved(shown, sc) && (sc.status === "held" || sc.press_reason)) {
             render({ structuredContent: Object.assign({}, shown, sc), _meta: codesMeta() });
             setStatus("This change has changed status since the card was drawn. Read the note above, then press Approve again if you still want it.", "err");
@@ -739,6 +779,24 @@ button.danger:disabled{color:var(--red)}
         if (sc.ok === false || (res && res.isError)) {
           var msg = sc.message || (res && res.content && res.content[0] && res.content[0].text) || "The gateway refused.";
           busy = false;
+          if (sc.error === "changed") {
+            // the code is of an older version: read the change as it is now and draw that
+            var drawn = proposal;
+            request("tools/call", { name: "get_proposal", arguments: { proposal_id: pid } })
+              .then(function (r2) {
+                var p2 = (r2 && r2.structuredContent) || {};
+                if (proposal !== drawn) return;
+                if (p2.state) render({ structuredContent: p2, _meta: (r2 && r2._meta) || {} });
+                setStatus(p2.state === "pending" ? UPDATED_TEXT : String(msg), "err");
+              })
+              .catch(function () {
+                if (proposal === drawn) render({ structuredContent: drawn, _meta: {} });
+                setStatus(String(msg), "err");
+              });
+            approval = null;
+            if (ok) ok.disabled = true; if (no) no.disabled = true;
+            return;
+          }
           if (sc.error === "now_held" && sc.status === "held") {
             // the note is drawn again from the gateway's lines, so none the hold made untrue stays
             render({ structuredContent: Object.assign({}, proposal, {
@@ -784,7 +842,7 @@ button.danger:disabled{color:var(--red)}
   }
 
   // no project name in the app's name: the file is public
-  B.start("Proposal card", function (params) { render(params); refresh(); }, {
+  B.start("Proposal card", function (params) { render(params); refresh(); keepFresh(); }, {
     connectError: "This card could not connect to the chat. Use the review page in your browser."
   });
 })();

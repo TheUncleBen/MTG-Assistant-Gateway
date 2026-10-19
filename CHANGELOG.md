@@ -7,6 +7,35 @@ Notable changes for people who run or use the gateway. The format follows
 with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 (`release/1.2.3`); `latest` is always the newest.
 
+## [0.7.34] - unreleased
+
+Approval cards in the chat stay current, and the assistants check a deck edit before they make a
+card for it.
+
+### Upgrade notes
+- From 0.7.33: no extra steps. Update as usual ([docs/UPGRADING.md](docs/UPGRADING.md)).
+
+### Added
+- `check_deck_changes`: an assistant can check a planned deck edit before it proposes it, with no
+  card in the chat, nothing saved and no request to Archidekt. It finds what a proposal would be
+  refused for, an exact repeat of a change already waiting, and the assistant's own waiting change
+  on that deck that it should amend instead of making a new one. A card missing from the deck is
+  still found only when the proposal is made.
+
+### Changed
+- A proposal card already in the chat follows its proposal. While it is on screen it reads the
+  proposal again now and then. When the assistant changed the proposal, the card shows the new
+  version, and its Approve approves that version. When the change was updated just before you
+  pressed Approve, the card shows the new version and asks you to press again. When the assistant
+  withdrew it, the card says so.
+- The assistants' guides and the deck tools' descriptions tell them that every proposal, amend or
+  combine puts a card in the chat, a refused one too, and to check a deck edit first.
+
+### Fixed
+- A proposal card drawn before the proposal was amended answered every Approve with "There is a
+  newer version of this change than this card shows", so only the review page could approve it.
+  It now shows the new version.
+
 ## [0.7.33] - unreleased
 
 Fewer cards in the chat: only the changes waiting for you and the two pickers still show one. After
