@@ -507,6 +507,135 @@ def test_press_and_hold_opens_the_menu_on_touch(server: Server) -> None:
         browser.close()
 
 
+def test_a_hold_that_also_starts_the_browsers_drag_leaves_no_card_stuck(server: Server) -> None:
+    """Chrome on Android starts its own drag and drop from a press and hold on a draggable card:
+    the touch is cancelled, dragstart fires, the menu opens where the finger lets go and dragend
+    never comes. That sequence, replayed here, used to leave the card faded (.dragging) and every
+    later tap on a card ignored. Now the card is not draggable under a finger, the drag is
+    refused, the menu still opens, and the next tap on another card opens it."""
+    from playwright.sync_api import sync_playwright
+
+    _chromium()
+    sid = server.sign_in_and_link()
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, 900, has_touch=True, is_mobile=True)
+        page.goto(f"{server.base}/decks/42?view=grid", wait_until="networkidle")
+        card = page.locator(".deckview .c[data-card='Cultivate']").first
+        card.scroll_into_view_if_needed()
+        box = card.bounding_box()
+        x, y = box["x"] + box["width"] / 2, box["y"] + 30
+        cdp = page.context.new_cdp_session(page)
+        cdp.send("Input.dispatchTouchEvent", {"type": "touchStart", "touchPoints": [{"x": x, "y": y}]})
+        page.wait_for_timeout(450)
+        assert card.get_attribute("draggable") == "false"  # no browser drag under a finger
+        # what Android does next: its drag starts (cancelling the touch) and, the finger letting
+        # go without moving, its context menu event; no dragend follows
+        refused = card.evaluate(
+            """(c) => {
+                const dt = new DataTransfer();
+                const ev = new DragEvent("dragstart", {bubbles: true, cancelable: true, dataTransfer: dt});
+                c.dispatchEvent(ev);
+                return ev.defaultPrevented;
+            }"""
+        )
+        assert refused
+        cdp.send("Input.dispatchTouchEvent", {"type": "touchCancel", "touchPoints": []})
+        card.evaluate(
+            """(c, xy) => c.dispatchEvent(new MouseEvent("contextmenu",
+                {bubbles: true, cancelable: true, clientX: xy[0], clientY: xy[1]}))""",
+            [x, y],
+        )
+        menu = page.locator(".ctxmenu[role=menu]")
+        menu.wait_for(timeout=3000)
+        assert menu.locator(".head").inner_text() == "Cultivate"
+        assert "dragging" not in (card.get_attribute("class") or "")
+        assert "carddrag" not in (page.locator(".deckview").get_attribute("class") or "")
+        # a tap outside closes the menu, and a tap on another card opens that card
+        other = page.locator(".deckview .c:not([data-card='Cultivate'])").first
+        name = other.get_attribute("data-card")
+        page.mouse.click(5, 5)
+        page.wait_for_timeout(500)
+        assert page.locator(".ctxmenu").count() == 0
+        other.scroll_into_view_if_needed()
+        ob = other.bounding_box()
+        ox, oy = ob["x"] + ob["width"] / 2, ob["y"] + 20
+        cdp.send("Input.dispatchTouchEvent", {"type": "touchStart", "touchPoints": [{"x": ox, "y": oy}]})
+        page.wait_for_timeout(80)
+        cdp.send("Input.dispatchTouchEvent", {"type": "touchEnd", "touchPoints": []})
+        page.wait_for_selector(".cardview.open", timeout=3000)
+        assert name in page.locator(".cardview.open").inner_text()
+        assert errors == []
+        browser.close()
+
+
+def test_a_pen_never_starts_the_browsers_drag_and_a_hold_left_over_ends_at_the_next_touch(
+    server: Server,
+) -> None:
+    """A pen (the Fold's S Pen) is treated like a finger: the card is not draggable under it. And a
+    hold whose touch never ended (no touchend or touchcancel came) does not stay armed: the next
+    touch on another card takes its outline away, so a slide there cannot carry the old card."""
+    from playwright.sync_api import sync_playwright
+
+    _chromium()
+    sid = server.sign_in_and_link()
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, 900, has_touch=True, is_mobile=True)
+        page.goto(f"{server.base}/decks/42?view=grid", wait_until="networkidle")
+        card = page.locator(".deckview .c[data-card='Cultivate']").first
+        other = page.locator(".deckview .c:not([data-card='Cultivate'])").first
+        card.scroll_into_view_if_needed()
+        card.dispatch_event("pointerdown", {"pointerType": "pen", "bubbles": True})
+        assert card.get_attribute("draggable") == "false"
+        touch = """(c) => {
+            const r = c.getBoundingClientRect();
+            const t = new Touch({identifier: Date.now(), target: c,
+                clientX: r.left + r.width / 2, clientY: r.top + 20});
+            c.dispatchEvent(new TouchEvent("touchstart",
+                {bubbles: true, cancelable: true, touches: [t], targetTouches: [t], changedTouches: [t]}));
+        }"""
+        card.evaluate(touch)
+        page.wait_for_timeout(450)
+        assert "held" in (card.get_attribute("class") or "")
+        other.evaluate(touch)  # the first touch never ended
+        assert "held" not in (card.get_attribute("class") or "")
+        assert errors == []
+        browser.close()
+
+
+def test_a_mouse_drag_the_browser_never_ended_is_cleared_by_the_next_press(server: Server) -> None:
+    """A mouse still drags (the card stays draggable for a mouse), and a drag the
+    browser started but never ended (no dragend) is cleared by the next press, so the card does
+    not stay faded and the next click on a card opens it."""
+    from playwright.sync_api import sync_playwright
+
+    _chromium()
+    sid = server.sign_in_and_link()
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, 1366)
+        page.goto(f"{server.base}/decks/42?view=grid", wait_until="networkidle")
+        card = page.locator(".deckview .c[data-card='Cultivate']").first
+        card.scroll_into_view_if_needed()
+        assert card.get_attribute("draggable") == "true"
+        started = card.evaluate(
+            """(c) => {
+                const dt = new DataTransfer();
+                const ev = new DragEvent("dragstart", {bubbles: true, cancelable: true, dataTransfer: dt});
+                c.dispatchEvent(ev);
+                return !ev.defaultPrevented && c.classList.contains("dragging");
+            }"""
+        )
+        assert started  # a mouse drag still starts
+        other = page.locator(".deckview .c:not([data-card='Cultivate'])").first
+        name = other.get_attribute("data-card")
+        other.scroll_into_view_if_needed()
+        other.click()
+        page.wait_for_selector(".cardview.open", timeout=3000)
+        assert name in page.locator(".cardview.open").inner_text()
+        assert "dragging" not in (card.get_attribute("class") or "")
+        assert errors == []
+        browser.close()
+
+
 def test_a_declined_confirmation_rejects_the_proposal_it_made(server: Server) -> None:
     """The edit endpoint makes the proposal before it asks "Save anyway?"; saying no (Cancel or the
     dialog's close button) rejects that proposal, so it never waits pending until it expires."""
