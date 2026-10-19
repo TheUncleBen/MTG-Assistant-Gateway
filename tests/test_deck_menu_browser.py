@@ -567,6 +567,40 @@ def test_a_hold_that_also_starts_the_browsers_drag_leaves_no_card_stuck(server: 
         browser.close()
 
 
+def test_a_pen_never_starts_the_browsers_drag_and_a_hold_left_over_ends_at_the_next_touch(
+    server: Server,
+) -> None:
+    """A pen (the Fold's S Pen) is treated like a finger: the card is not draggable under it. And a
+    hold whose touch never ended (no touchend or touchcancel came) does not stay armed: the next
+    touch on another card takes its outline away, so a slide there cannot carry the old card."""
+    from playwright.sync_api import sync_playwright
+
+    _chromium()
+    sid = server.sign_in_and_link()
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, 900, has_touch=True, is_mobile=True)
+        page.goto(f"{server.base}/decks/42?view=grid", wait_until="networkidle")
+        card = page.locator(".deckview .c[data-card='Cultivate']").first
+        other = page.locator(".deckview .c:not([data-card='Cultivate'])").first
+        card.scroll_into_view_if_needed()
+        card.dispatch_event("pointerdown", {"pointerType": "pen", "bubbles": True})
+        assert card.get_attribute("draggable") == "false"
+        touch = """(c) => {
+            const r = c.getBoundingClientRect();
+            const t = new Touch({identifier: Date.now(), target: c,
+                clientX: r.left + r.width / 2, clientY: r.top + 20});
+            c.dispatchEvent(new TouchEvent("touchstart",
+                {bubbles: true, cancelable: true, touches: [t], targetTouches: [t], changedTouches: [t]}));
+        }"""
+        card.evaluate(touch)
+        page.wait_for_timeout(450)
+        assert "held" in (card.get_attribute("class") or "")
+        other.evaluate(touch)  # the first touch never ended
+        assert "held" not in (card.get_attribute("class") or "")
+        assert errors == []
+        browser.close()
+
+
 def test_a_mouse_drag_the_browser_never_ended_is_cleared_by_the_next_press(server: Server) -> None:
     """A mouse still drags (the card stays draggable for a mouse), and a drag the
     browser started but never ended (no dragend) is cleared by the next press, so the card does
