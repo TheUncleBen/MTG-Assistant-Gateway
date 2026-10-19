@@ -79,7 +79,8 @@ def test_watchlist_inputs_are_styled_like_every_other_input(server: Server) -> N
         page.goto(f"{server.base}/watchlist", wait_until="networkidle")
         heights = page.evaluate(
             "() => [...document.querySelectorAll("
-            "'.watch input:not([type=hidden]), .watch select:not([aria-hidden=true]), .watch .msel-btn')]"
+            "'.watch-page input:not([type=hidden]), .watch-page select:not([aria-hidden=true]),"
+            " .watch-page .msel-btn')].filter(e => e.getClientRects().length && !e.closest('[hidden]'))"
             ".map(e => [e.id || e.className, Math.round(e.getBoundingClientRect().height),"
             " getComputedStyle(e).borderRadius])"
         )

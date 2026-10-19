@@ -177,7 +177,7 @@ async def test_a_watched_card_is_priced_daily_and_shows_its_history(stack: Stack
         assert "class='tspark'" in page and "role='img'" in page
         assert "Sol Ring: $1.28 on 2026-10-12, $2.00 on 2026-10-15." in page
         assert "<th scope='row'>2026-10-13</th><td>$1.40</td>" in page
-        assert "1 day: up 81.8%" in page
+        assert "1 day <span class='dl up'><span aria-hidden='true'>↑</span>up 81.8%</span>" in page
         # the card viewer's Price history reads the same, with nothing asked of Scryfall
         asked = len(stack.sf.requests)
         api = (await b.http.get("/watchlist/api/card", params={"name": "Sol Ring"})).json()
@@ -757,7 +757,7 @@ async def test_each_deck_value_names_its_price_source(stack: Stack, monkeypatch)
     try:
         assert (await _post(b, "/watchlist", {"action": "add_deck", "deck": "42"})).status_code == 303
         page = (await b.http.get("/watchlist")).text
-        assert "Sample Commander Deck" in page and "(Scryfall prices)" in page
+        assert "Sample Commander Deck" in page and "cards · Scryfall prices" in page
         deck = (await b.http.get("/decks/42")).text
         assert "(Archidekt prices)</span>" in deck and "<span>Est cost (Archidekt)</span>" in deck
     finally:
