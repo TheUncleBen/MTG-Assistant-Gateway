@@ -860,9 +860,10 @@ class Pacer:
                 wait = int(self._retry_until - now) + 1
                 raise ArchidektError(
                     "rate_limited",
-                    f"Archidekt asked the gateway to wait {wait} second{'' if wait == 1 else 's'}. "
-                    "Try again after that.",
+                    f"Archidekt asked the gateway to slow down, so it is pausing its Archidekt requests for "
+                    f"{wait} second{'' if wait == 1 else 's'}. Try again after that.",
                     sent=False,
+                    retry_after=self._retry_until - now,
                 )
             if now < self._next_allowed:
                 await asyncio.sleep(self._next_allowed - now)

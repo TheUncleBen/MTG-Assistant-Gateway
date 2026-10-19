@@ -1240,6 +1240,26 @@ async def test_an_unreachable_archidekt_is_one_shared_503_page_everywhere(stack:
         await b.aclose()
 
 
+async def test_the_busy_page_passes_on_the_wait_archidekt_asked_for(stack: Stack) -> None:
+    """Bug (found in this release's checks): a page refused for Archidekt's own 429 always sent
+    Retry-After: 60, because the seconds Archidekt asked for were dropped on the way to the busy
+    page. They now reach its header."""
+    b = await linked_browser(stack)
+    pacer = stack.h.app.state.gateway.decks.client.pacer
+    try:
+        stack.ark.inject = [(429, "45")] * 6
+        r = await b.http.get("/decks/42", headers=NAV)
+        assert r.status_code == 429 and r.headers["retry-after"] == "45", (r.headers, r.text)
+        # the next page while that pause runs is refused before anything is sent, with what is left
+        stack.ark.inject = []
+        r = await b.http.get("/decks", headers=NAV)
+        assert r.status_code == 429 and 1 <= int(r.headers["retry-after"]) <= 45, r.headers
+    finally:
+        stack.ark.inject = []
+        pacer._retry_until = 0
+        await b.aclose()
+
+
 async def test_a_missing_deck_is_still_not_found(stack: Stack) -> None:
     """The shared page is only for a busy or unreachable Archidekt; a deck that is not there
     keeps its 404 and its own words."""

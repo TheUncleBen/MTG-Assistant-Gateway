@@ -25,7 +25,6 @@ from .cards import (
     with_card,
 )
 from .decklist import DecklistError, parse_decklist, to_text
-from .deckpage import decks_unreadable_text
 from .decks import (
     APPLY_WAIT_SECONDS,
     DeckError,
@@ -46,6 +45,17 @@ MAX_PROPOSALS_PAGE = 100
 # only have no folder name
 FOLDER_NAMES_UNREAD = (
     "Folder names couldn't be read from Archidekt just now, so some decks show no folder here."
+)
+# list_my_decks' note when entries were left out because their owner couldn't be read. Such a list
+# is kept for a minute (decks.DECK_LIST_PARTIAL) and the assistant has no Try again that rereads it,
+# unlike My decks, so the note says when asking again can help.
+LIST_UNREADABLE = (
+    "Your deck list couldn't be read from Archidekt. The gateway keeps this answer for a minute; "
+    "ask again after that."
+)
+LIST_PARTLY_UNREADABLE = (
+    "Part of your deck list couldn't be read from Archidekt, so some decks may be missing. The gateway "
+    "keeps this list for a minute; ask again after that."
 )
 MAX_SNAPSHOTS_PAGE = 100
 
@@ -136,7 +146,7 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
         # entries Archidekt listed without a readable owner are left out: say so, in the
         # words My decks uses, so the assistant doesn't present a partial list as the whole one
         unreadable = int(getattr(rows, "unreadable", 0) or 0)
-        notes = [decks_unreadable_text(some_shown=len(rows) > 0)] if unreadable else []
+        notes = [LIST_PARTLY_UNREADABLE if len(rows) > 0 else LIST_UNREADABLE] if unreadable else []
         if getattr(rows, "folder_names_unread", False):
             notes.append(FOLDER_NAMES_UNREAD)  # no silent empty folder
         note = " ".join(notes) or None

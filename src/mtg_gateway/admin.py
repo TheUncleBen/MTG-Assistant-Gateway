@@ -728,7 +728,7 @@ def _cleanup_text(c: dict[str, Any]) -> str:
             f"Not working. The last check at {_when(c['at'])} failed and deleted nothing: "
             f"{html.escape(err)}. To fix: {html.escape(idp_sweep.next_step(err))}"
         )
-    return "Not started yet. Reload this page to see it."
+    return "Not started yet. Reload this page to see its first result."
 
 
 def users_data(state: Any) -> list[dict[str, Any]]:

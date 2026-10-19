@@ -119,8 +119,8 @@
   // a category whose rows sit outside the deck (Maybeboard, Sideboard...): a card added under it
   // goes to the maybeboard or sideboard with that category, never to the deck proper
   function outside(category) { return !!category && (cfg.outsideCategories || []).indexOf(category) >= 0; }
-  // Answers true when a picked printing or foil could not go with the add: the card already has a
-  // row (or an add of another printing) in that zone, so only its count grows.
+  // Answers true when a picked printing or foil could not go with the add: the card is already
+  // listed in that zone (a row of the deck, or an add not saved yet), so only its count grows.
   function addCard(name, qty, category, printing, finish, zone) {
     zone = zone === "side" || outside(category) ? "side" : "main";
     var key = keyFor(name, zone);
@@ -131,8 +131,8 @@
       return picked || foil;
     } else if (added[key]) {
       var a = added[key];
-      added[key].quantity = Math.min(99, added[key].quantity + qty);
-      return (picked && (a.set_code !== printing.set_code || a.collector_number !== printing.collector_number)) || (foil && !a.foil);
+      a.quantity = Math.min(99, a.quantity + qty);
+      return picked || foil;
     } else {
       added[key] = { name: name, zone: zone, quantity: qty, category: category || null };
       var k = known[name.toLowerCase()];
@@ -491,7 +491,7 @@
     var where = zone === "side" || outside(catIn.value) ? catIn.value || cfg.sideCategory || "Maybeboard" : (catIn.value || "the deck");
     var print = printing && printing.set_code ? " (" + printing.set_code.toUpperCase() + " #" + printing.collector_number + ")" : "";
     if (addStatus) addStatus.textContent = dropped
-      ? "Added " + parts.qty + " × " + parts.name + " to the copies already in " + (zone === "side" || outside(catIn.value) ? "the maybeboard or sideboard" : "the deck") + ", so the picked printing or foil was not used. Type the next card, or save."
+      ? "Added " + parts.qty + " × " + parts.name + " to the copies already listed for " + (zone === "side" || outside(catIn.value) ? "the maybeboard or sideboard" : "the deck") + "; they keep their own printing and finish. Type the next card, or save."
       : "Added " + parts.qty + " × " + parts.name + print + " to " + where + ". Type the next card, or save.";
     input.value = "";
     hidePrints();

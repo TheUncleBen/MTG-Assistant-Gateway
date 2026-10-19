@@ -119,10 +119,10 @@ def test_add_a_card_with_rich_suggestions(server: Server, width: int) -> None:
             page.locator(".addprints .pptile").first.click()
             status = page.locator(".addstatus").inner_text()
             # Sol Ring was just added above without a printing: the count grows, and the status line
-            # says the picked printing was not used rather than naming it
+            # says the copies keep their own printing rather than naming the picked one
             assert status == (
-                "Added 3 × Sol Ring to the copies already in the deck, so the picked printing or foil "
-                "was not used. Type the next card, or save."
+                "Added 3 × Sol Ring to the copies already listed for the deck; they keep their own printing "
+                "and finish. Type the next card, or save."
             ), status
         else:
             assert page.locator(".addprints:visible").count() == 0

@@ -2722,7 +2722,9 @@ class DeckService:
         except ArchidektError as exc:
             if exc.kind == "auth":
                 raise expire("rejected after refresh") from exc
-            raise DeckError(exc.kind, str(exc), sent=exc.sent) from exc
+            # the wait Archidekt asked for reaches the busy page's Retry-After header
+            wait = max(1, math.ceil(exc.retry_after)) if exc.retry_after else None
+            raise DeckError(exc.kind, str(exc), sent=exc.sent, retry_after=wait) from exc
         finally:
             no_retry.reset(quiet)
             _acting_sub.reset(acting)

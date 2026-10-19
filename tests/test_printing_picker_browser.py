@@ -832,11 +832,11 @@ def test_the_editor_uses_the_shared_picker_and_queues_the_change(server: Server)
         assert use.inner_text() == "Add this printing"
         use.click()
         # Sol Ring already has a row in the deck: only its count grows, and the status line says the
-        # picked printing was not used (it once named SLD #1075 while the add dropped it)
+        # copies keep their own printing (it once named SLD #1075 while the add dropped it)
         status = page.locator(".addstatus").inner_text()
         assert status == (
-            "Added 1 × Sol Ring to the copies already in the deck, so the picked printing or foil was "
-            "not used. Type the next card, or save."
+            "Added 1 × Sol Ring to the copies already listed for the deck; they keep their own printing "
+            "and finish. Type the next card, or save."
         ), status
         assert "SLD #1075" not in page.locator(".pending").text_content()
         # the same in the maybeboard, where Sol Ring has a row too
@@ -850,7 +850,7 @@ def test_the_editor_uses_the_shared_picker_and_queues_the_change(server: Server)
         page.locator(".pppreview .ppuse").click()
         status = page.locator(".addstatus").inner_text()
         assert status.startswith(
-            "Added 1 × Sol Ring to the copies already in the maybeboard or sideboard, so"
+            "Added 1 × Sol Ring to the copies already listed for the maybeboard or sideboard;"
         ), status
         assert errors == []
         browser.close()

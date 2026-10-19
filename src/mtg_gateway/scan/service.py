@@ -726,8 +726,8 @@ class ScanService:
         else:
             n = max(1, self.scryfall.retry_in())
             note = (
-                f"not looked up yet; Scryfall asked the gateway to wait {n} second{'' if n == 1 else 's'}, "
-                "try again after that"
+                "not looked up yet; Scryfall asked the gateway to slow down and its lookups are paused for "
+                f"{n} second{'' if n == 1 else 's'}; try again after that"
             )
         return Resolution(inp, "deferred", note=note)
 

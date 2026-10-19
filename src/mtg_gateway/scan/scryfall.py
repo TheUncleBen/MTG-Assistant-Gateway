@@ -304,7 +304,8 @@ class ScryfallClient:
         n = max(1, self.retry_in())
         return ScryfallError(
             "rate_limited",
-            f"Scryfall asked the gateway to wait {n} second{'' if n == 1 else 's'}. Try again after that.",
+            f"Scryfall asked the gateway to slow down, so it is pausing its Scryfall lookups for {n} "
+            f"second{'' if n == 1 else 's'}. Try again after that.",
         )
 
     async def _request(

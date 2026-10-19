@@ -69,7 +69,10 @@ Archidekt by default.
   deck deletion, and an edit of a comment that has formatting, on the review page only).
 - In the deck editor, adding a card that already has a row there, with a picked printing or Foil
   ticked, only grew that row's count, while the status line named the picked printing. It now says
-  the picked printing or foil was not used.
+  the copies already listed keep their own printing and finish.
+- When Archidekt asked the gateway to wait, the "Archidekt is busy" page always sent
+  `Retry-After: 60`. It now sends the wait Archidekt asked for, or what is left of the gateway's
+  pause after it.
 - Adding the same new card to the deck and to the maybeboard or sideboard in one change, without a
   picked printing, could give one of the two rows the other's finish (foil or etched).
 
