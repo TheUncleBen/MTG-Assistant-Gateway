@@ -288,10 +288,12 @@ class PriceService:
         alert_pct: float | None = None,
         alert_above: float | None = None,
         alert_below: float | None = None,
+        keep_alerts: bool = False,
     ) -> dict[str, Any]:
         """Watch a card (or change the alerts of one already watched). The printing is looked
         up at once, so today's price shows right away; when Scryfall is busy the watch is kept and
-        priced by the next daily check."""
+        priced by the next daily check. ``keep_alerts``: a card already watched keeps its alerts
+        (the Watch buttons, which set none)."""
         name = clean_text(name or "").strip()[:MAX_NAME]
         set_code = (set_code or "").strip().lower()
         number = (collector_number or "").strip()
@@ -344,10 +346,11 @@ class PriceService:
         with self.db.tx() as c:
             if existing:
                 wid = existing[0]["id"]
-                c.execute(
-                    "UPDATE watch_cards SET alert_pct = ?, alert_above = ?, alert_below = ? WHERE id = ?",
-                    (*alerts, wid),
-                )
+                if not keep_alerts:
+                    c.execute(
+                        "UPDATE watch_cards SET alert_pct = ?, alert_above = ?, alert_below = ? WHERE id = ?",
+                        (*alerts, wid),
+                    )
                 created = False
             else:
                 count = c.execute("SELECT COUNT(*) FROM watch_cards WHERE sub = ?", (sub,)).fetchone()[0]

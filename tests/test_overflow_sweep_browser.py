@@ -228,6 +228,9 @@ MEASURE = """
     const a = flow[i], b = flow[j];
     if (b.r.top >= a.r.bottom - 1) break;
     if (a.el.contains(b.el) || b.el.contains(a.el)) continue;
+    // Card search's Watch button sits on its picture's corner by design (K7)
+    const pa = a.el.parentElement;
+    if (pa === b.el.parentElement && pa.classList.contains('picwrap')) continue;
     const ox = Math.min(a.r.right, b.r.right) - Math.max(a.r.left, b.r.left);
     const oy = Math.min(a.r.bottom, b.r.bottom) - Math.max(a.r.top, b.r.top);
     if (ox > 1 && oy > 1)

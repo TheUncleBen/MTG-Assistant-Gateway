@@ -38,7 +38,6 @@ from .pages import (
 )
 from .report_view import (
     REPORT_CSS,
-    report_body_html,
     report_export_html,
     report_markdown,
 )
@@ -228,13 +227,12 @@ def add_history_routes(
             )
         safe = _esc(rid)
         md = report_markdown(r)
+        # the export buttons as plain buttons at the header's end (approved design K5)
         actions = (
-            "<div class='form-actions'>"
-            f"<a class='btn' href='/history/reports/{safe}/export.md' download>{icon('download')} Markdown"
-            f"</a><a class='btn' href='/history/reports/{safe}/export.html' download>{icon('download')} "
-            f"HTML page</a><button type='button' class='btn copybtn' data-copy='rep-md'>{icon('copy')} "
-            "Copy as Markdown</button>"
-            "</div>"
+            f"<a class='btn btn-plain' href='/history/reports/{safe}/export.md' download>{icon('download')} "
+            f"Markdown</a><a class='btn btn-plain' href='/history/reports/{safe}/export.html' download>"
+            f"{icon('download')} HTML page</a><button type='button' class='btn-plain copybtn' "
+            f"data-copy='rep-md'>{icon('copy')}<span class='label'>Copy as Markdown</span></button>"
             f"<textarea id='rep-md' class='sr-only' readonly aria-label='The report as Markdown'>{_esc(md)}"
             "</textarea>"
         )
@@ -258,10 +256,13 @@ def add_history_routes(
         refused = _more_notices().get(request.query_params.get("more") or "", "")
         if refused:
             notice, kind = _esc(refused), "notice warn"
-        body = (f"<p class='{kind}'>{notice}</p>" if notice else "") + report_body_html(
+        from .report_page import REPORT_PAGE_CSS, report_page_html
+
+        body = report_page_html(
             r,
             stats_html=stats_strip(r.get("stats")),
             actions_html=actions,
+            notice_html=f"<p class='{kind}'>{notice}</p>" if notice else "",
             reused=request.query_params.get("reused") == "1",
             removable=mine,
             csrf=_csrf(s, sid) or "",
@@ -272,9 +273,10 @@ def add_history_routes(
             sub=sub,
             sid=sid,
             heading=False,
-            current="/history",
+            current="/reports",
             extra_scripts=("export.js", "forge-live.js"),
-            extra_css=REPORT_CSS,
+            extra_css=REPORT_CSS + REPORT_PAGE_CSS,
+            main_class="ui-wide",
         )
 
     @server.custom_route("/history/reports/{rid}/models/remove", methods=["POST"], include_in_schema=False)

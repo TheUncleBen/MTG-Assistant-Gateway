@@ -243,6 +243,45 @@ html.cs-sheet-open,html.cs-sheet-open body{overflow:hidden}
 .toast.cards-toast .msg{flex:1 1 12rem;min-width:0;overflow-wrap:anywhere}
 .toast.cards-toast .btn,.toast.cards-toast button{margin:0}
 .toast.cards-toast .close{width:2rem;min-height:2rem;height:2rem;padding:0;border-radius:50%;font-size:1.2rem}
+/* Watch on each result (K7): a pill on the picture's top right corner, a check and "Watching"
+   when the card is watched; icon only at card size S and in the list view; 44 px on touch */
+.cs-hint{margin:0 0 .9rem}
+.picwrap{position:relative;display:block}
+.picwrap > .pic{width:100%}
+.wbtn{position:absolute;z-index:1;top:.4rem;right:.4rem;display:inline-flex;align-items:center;gap:.3rem;
+  margin:0;height:32px;min-height:32px;padding:0 .55rem;border-radius:999px;border:1px solid
+  var(--control-border);background:var(--surface);color:var(--text);font-size:.8rem;font-weight:700;
+  line-height:1;box-shadow:var(--shadow);cursor:pointer}
+.wbtn svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:2.2;flex:none}
+.wbtn:hover{border-color:var(--text-muted)}
+.wbtn.on{color:var(--green-text);border-color:var(--green-text);
+  box-shadow:inset 0 0 0 99px var(--green-tint),var(--shadow)}
+.wbtn[aria-busy=true]{opacity:.6}
+.wbtn.icon span,html[data-card-size=s] .cardgrid .wbtn span{position:absolute;width:1px;height:1px;
+  overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.wbtn.icon,html[data-card-size=s] .cardgrid .wbtn{padding:0;justify-content:center;width:32px}
+.cardlist .acts{display:flex;align-items:center;gap:.4rem}
+.cardlist .wbtn{position:static;width:var(--ctl);height:var(--ctl);min-height:var(--ctl);
+  border-radius:var(--radius);box-shadow:none}
+.cardlist .wbtn.on{box-shadow:inset 0 0 0 99px var(--green-tint)}
+@media (pointer:coarse){
+  .wbtn{height:44px;min-height:44px;min-width:44px}
+  .wbtn.icon,html[data-card-size=s] .cardgrid .wbtn{width:44px}
+  .ctxmenu.cs-menu a,.ctxmenu.cs-menu button{min-height:44px}
+}
+@media (max-width:899.98px){.cardlist .acts{grid-area:add}}
+/* the card menu on results (cardsearch.js): the deck page's menu (deck.css .ctxmenu) where the
+   pointer was; a bottom sheet over a dimmed page on a phone */
+.ctxmenu.cs-menu{display:flex;flex-direction:column;max-height:calc(100vh - 16px)}
+.cardgrid .pic img{-webkit-touch-callout:none}
+.cs-scrim{display:none}
+@media (max-width:599.98px){
+  .cs-scrim{display:block;position:fixed;inset:0;z-index:57;background:var(--scrim)}
+  .ctxmenu.cs-menu{left:0!important;right:0;top:auto!important;bottom:0;width:auto;min-width:0;
+    max-width:none;max-height:85vh;border-radius:var(--radius-sheet) var(--radius-sheet) 0 0;
+    padding-bottom:calc(.75rem + env(safe-area-inset-bottom))}
+}
+.toast.cards-toast .ok{width:18px;height:18px;flex:none;fill:none;stroke:var(--green-text);stroke-width:2.4}
 """
 
 RARITY_NAMES = dict(cq.RARITIES)
@@ -563,9 +602,52 @@ def _add_button(card: dict[str, Any], *, can_add: bool, reason: str, printing: b
     )
 
 
-def card_tile_html(card: dict[str, Any], *, can_add: bool, reason: str, printing: bool = False) -> str:
-    """One result as a tile: the picture (a button that opens the card viewer), name with mana
-    pips, type line, the printing and its price when the search is about printings, Add to deck."""
+HINT_HTML = (
+    "<p class='ui-hint cs-hint' id='cs-hint'>Watch a card with its <b>Watch</b> button, or right-click it "
+    "(press and hold on a phone) for more.</p>"
+)
+
+
+def watch_button(card: dict[str, Any], *, watched: frozenset[str], printing: bool = False) -> str:
+    """The Watch button on a result (K7): "Watch", or a check and "Watching" when the member
+    already watches the card. A printing search watches the shown printing."""
+    name = str(card.get("name") or "")
+    pin = ""
+    if printing and card.get("set") and card.get("collector_number"):
+        pin = f" data-set-code='{_esc(card['set'])}' data-number='{_esc(card['collector_number'])}'"
+    if _norm(name) in watched:
+        return (
+            f"<button type='button' class='wbtn on' data-watch='{_esc(name)}'{pin} aria-pressed='true' "
+            f"aria-label='{_esc(name)} is on your watchlist' title='On your watchlist'>"
+            f"{icon('check')}<span>Watching</span></button>"
+        )
+    return (
+        f"<button type='button' class='wbtn' data-watch='{_esc(name)}'{pin} aria-pressed='false' "
+        f"aria-label='Watch {_esc(name)}' title='Watch this card'>"
+        f"{icon('bookmark')}<span>Watch</span></button>"
+    )
+
+
+def _norm(name: str) -> str:
+    return " ".join(name.lower().split())
+
+
+def watched_names(rows: list[dict[str, Any]]) -> frozenset[str]:
+    """The names a member watches (any printing), as the Watch buttons compare them."""
+    return frozenset(_norm(str(r.get("name") or "")) for r in rows)
+
+
+def card_tile_html(
+    card: dict[str, Any],
+    *,
+    can_add: bool,
+    reason: str,
+    printing: bool = False,
+    watched: frozenset[str] | None = None,
+) -> str:
+    """One result as a tile: the picture (a button that opens the card viewer) with the Watch
+    button on its corner when watchlists are on, name with mana pips, type line, the printing and
+    its price when the search is about printings, Add to deck."""
     name = str(card.get("name") or "")
     img = card.get("image_normal") or card.get("image_small") or ""
     body = (
@@ -578,10 +660,14 @@ def card_tile_html(card: dict[str, Any], *, can_add: bool, reason: str, printing
         where = f"{str(card.get('set_name') or card.get('set') or '')} #{card.get('collector_number') or ''}"
         price = _price(card)
         extra = f"<span class='pr'>{_esc(where)}{' · ' + _esc(price) if price else ''}</span>"
+    pic = (
+        f"<button type='button' class='pic'{_pic_attrs(card)} aria-label='{_esc(name)}: show the card'>"
+        f"{body}</button>"
+    )
+    if watched is not None:
+        pic = f"<span class='picwrap'>{pic}{watch_button(card, watched=watched, printing=printing)}</span>"
     return (
-        f"<li class='cc'><button type='button' class='pic'{_pic_attrs(card)} "
-        f"aria-label='{_esc(name)}: show the card'>"
-        f"{body}</button><div class='meta'><span class='nm'><span>{_esc(name)}</span>"
+        f"<li class='cc'>{pic}<div class='meta'><span class='nm'><span>{_esc(name)}</span>"
         f"{mana_html(str(card.get('mana_cost') or ''))}</span>"
         f"<span class='ty'>{_esc(card.get('type_line') or '')}</span>{extra}</div>"
         + _add_button(card, can_add=can_add, reason=reason, printing=printing)
@@ -589,9 +675,17 @@ def card_tile_html(card: dict[str, Any], *, can_add: bool, reason: str, printing
     )
 
 
-def card_row_html(card: dict[str, Any], *, can_add: bool, reason: str, printing: bool = False) -> str:
+def card_row_html(
+    card: dict[str, Any],
+    *,
+    can_add: bool,
+    reason: str,
+    printing: bool = False,
+    watched: frozenset[str] | None = None,
+) -> str:
     """One result as a list row: a small picture, name and cost, type, set, rarity, price and
-    power/toughness, and Add to deck. Under 900px the columns fold under the name."""
+    power/toughness, the Watch button as an icon (watchlists on) and Add to deck. Under 900px the
+    columns fold under the name."""
     name = str(card.get("name") or "")
     img = card.get("image_small") or card.get("image_normal") or ""
     body = (
@@ -613,7 +707,18 @@ def card_row_html(card: dict[str, Any], *, can_add: bool, reason: str, printing:
         f"<span class='set num' title='{_esc(card.get('set_name') or '')}'>{_esc(where)}</span>"
         f"<span class='rar'>{_esc(rarity)}</span>"
         f"<span class='price num'>{_esc(price) if price else '<span class=muted>–</span>'}</span>"
-        "</span>" + _add_button(card, can_add=can_add, reason=reason, printing=printing) + "</li>"
+        "</span>"
+        + (
+            ""
+            if watched is None
+            else "<span class='acts'>"
+            + watch_button(card, watched=watched, printing=printing).replace(
+                "class='wbtn", "class='wbtn icon", 1
+            )
+        )
+        + _add_button(card, can_add=can_add, reason=reason, printing=printing)
+        + ("" if watched is None else "</span>")
+        + "</li>"
     )
 
 
@@ -624,17 +729,33 @@ LIST_HEAD = (
 
 
 def results_items_html(
-    cards: list[dict[str, Any]], *, view: str, can_add: bool, reason: str, printing: bool
+    cards: list[dict[str, Any]],
+    *,
+    view: str,
+    can_add: bool,
+    reason: str,
+    printing: bool,
+    watched: frozenset[str] | None = None,
 ) -> str:
-    """The results' rows (tiles or list rows) without their list, so a next page appends."""
+    """The results' rows (tiles or list rows) without their list, so a next page appends.
+    ``watched``: the member's watched names, or None when watchlists are off (no Watch button)."""
     one = card_row_html if view == "list" else card_tile_html
-    return "".join(one(c, can_add=can_add, reason=reason, printing=printing) for c in cards)
+    return "".join(one(c, can_add=can_add, reason=reason, printing=printing, watched=watched) for c in cards)
 
 
 def results_list_html(
-    cards: list[dict[str, Any]], *, view: str, can_add: bool, reason: str, printing: bool, linked: bool
+    cards: list[dict[str, Any]],
+    *,
+    view: str,
+    can_add: bool,
+    reason: str,
+    printing: bool,
+    linked: bool,
+    watched: frozenset[str] | None = None,
 ) -> str:
-    items = results_items_html(cards, view=view, can_add=can_add, reason=reason, printing=printing)
+    items = results_items_html(
+        cards, view=view, can_add=can_add, reason=reason, printing=printing, watched=watched
+    )
     cls = "cardlist" if view == "list" else "cardgrid"
     head = LIST_HEAD if view == "list" else ""
     return (

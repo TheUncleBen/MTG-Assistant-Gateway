@@ -66,13 +66,13 @@ def test_report_and_history_pages_fit(server: Server, width: int, scheme: str) -
                 scrollWidth: document.documentElement.scrollWidth,
                 innerWidth: window.innerWidth,
                 tiles: document.querySelectorAll('.tiles.wide .tile').length,
-                tileBg: cs ? cs.backgroundColor : null,
+                tileRule: cs ? cs.borderBottomStyle : null,
                 tileDisplay: cs ? cs.display : null,
                 charts: document.querySelectorAll('.chart svg').length,
                 svgWidth: svg ? svg.getBoundingClientRect().width : 0,
                 lineStroke: line ? getComputedStyle(line).stroke : null,
                 copy: !!document.querySelector('.copybtn[data-copy=rep-md]'),
-                actionsRow: getComputedStyle(document.querySelector('.report .form-actions')).display,
+                actionsRow: getComputedStyle(document.querySelector('.rv-head .rv-acts')).display,
                 text: document.body.innerText,
                 bodyBg: getComputedStyle(document.body).backgroundColor,
                 wide: Array.from(document.querySelectorAll('body *'))
@@ -84,7 +84,7 @@ def test_report_and_history_pages_fit(server: Server, width: int, scheme: str) -
         _shot(page, f"report-{width}-{scheme}")
         assert state["scrollWidth"] <= state["innerWidth"], state["wide"]
         assert state["tiles"] >= 5 and state["tileDisplay"] == "flex"
-        assert state["tileBg"] not in (None, "rgba(0, 0, 0, 0)", "transparent"), "tiles are styled"
+        assert state["tileRule"] == "solid", "the numbers are styled (flat, a rule between rows)"
         assert state["charts"] == 4 and 0 < state["svgWidth"] <= state["innerWidth"]
         assert state["lineStroke"] == "rgb(250, 137, 13)", state["lineStroke"]  # the theme's orange
         assert state["copy"] and state["actionsRow"] == "flex"
@@ -181,22 +181,21 @@ def test_forge_section_refreshes_itself_until_the_run_ends(server: Server) -> No
         page.on("request", lambda r: polls.append(r.url) if "/api/v1/reports/" in r.url else None)
         page.clock.install()
         page.goto(f"{server.base}/history/reports/rep_forge", wait_until="networkidle")
-        assert page.locator(".card.forge[data-forge-live]").count() == 1
-        assert "updates by itself" in page.locator(".card.forge").inner_text()
-        assert page.locator("#rep-status").inner_text().startswith("running")  # the overall status
+        assert page.locator(".forge[data-forge-live]").count() == 1
+        assert "updates by itself" in page.locator(".forge").inner_text()
+        assert page.locator("#rep-status").inner_text().startswith("Forge going")  # the overall status
         page.evaluate("window.__same_page = true")  # gone if the page reloads
         # a poll that brings nothing new leaves the live card's nodes untouched, so
         # screen readers are not told the whole card again every 5 seconds
         page.evaluate(
-            "() => { const els = [...document.querySelectorAll('.card.forge > *, #rep-status > *')];"
+            "() => { const els = [...document.querySelectorAll('.forge > *, #rep-status > *')];"
             " els.forEach(n => { n.__kept = true; }); window.__nodes = els.length; }"
         )
         with page.expect_response(lambda r: r.url.endswith("/api/v1/reports/rep_forge/forge")):
             page.clock.run_for(6000)
         time.sleep(0.5)  # the answer is read and applied (fetch is not on the page clock)
         kept = page.evaluate(
-            "() => [...document.querySelectorAll('.card.forge > *, #rep-status > *')]"
-            ".filter(n => n.__kept).length"
+            "() => [...document.querySelectorAll('.forge > *, #rep-status > *')].filter(n => n.__kept).length"
         )
         assert kept == page.evaluate("window.__nodes") > 0, kept
         set_forge(
@@ -212,15 +211,15 @@ def test_forge_section_refreshes_itself_until_the_run_ends(server: Server) -> No
             }
         )
         page.clock.run_for(16000)
-        page.wait_for_function("() => !document.querySelector('.card.forge[data-forge-live]')")
-        text = page.locator(".card.forge").inner_text()
-        assert "2 of 2\nGames played" in text and "running" not in text, text
+        page.wait_for_function("() => !document.querySelector('.forge[data-forge-live]')")
+        text = page.locator(".forge").inner_text()
+        assert "2 of 2 played" in text and "Running" not in text, text
         # It asked the small JSON status route, not the whole page, while the run played
         assert polls and all(u.endswith("/api/v1/reports/rep_forge/forge") for u in polls), polls
         # the card itself stayed, so it is still the live region screen readers announce
-        assert page.locator(".card.forge[aria-live=polite]").count() == 1
+        assert page.locator(".forge[aria-live=polite]").count() == 1
         assert page.evaluate("window.__same_page === true")
-        assert page.locator("#rep-status").inner_text().startswith("complete")  # follows the run
+        assert page.locator("#rep-status").inner_text().startswith("Complete")  # follows the run
         # Copy as Markdown too: read from the page by a second request once the card has ended, so
         # it may land after the card swap (asserting at once failed under load)
         page.wait_for_function(
@@ -367,7 +366,7 @@ FORGE_DONE = {
 @pytest.mark.parametrize("width", [320, 344, 717, 1366])
 @pytest.mark.parametrize("scheme", ["light", "dark"])
 def test_forge_results_fit_and_read(server: Server, width: int, scheme: str) -> None:
-    """Forge's games laid out as tiles, a table of the decks at the table, how the games ended
+    """Forge's games laid out as a strip of numbers, a table of the decks at the table, how the games ended
     and each game: no sideways page scroll (tables scroll in their own box), 4.5:1 text in both
     themes, and the folded game list opens with a 44px target."""
     import json
@@ -394,16 +393,16 @@ def test_forge_results_fit_and_read(server: Server, width: int, scheme: str) -> 
         errors: list[str] = []
         page.on("pageerror", lambda e: errors.append(str(e)))
         page.goto(f"{server.base}/history/reports/rep_forge", wait_until="networkidle")
-        summary = page.locator(".forge-results details.games summary")
+        summary = page.locator(".forge details.games summary")
         assert summary.bounding_box()["height"] >= 44
         summary.click()
-        page.locator(".card.forge").scroll_into_view_if_needed()
+        page.locator(".forge").scroll_into_view_if_needed()
         if SCRATCH.is_dir():
-            page.locator(".card.forge").screenshot(path=str(SCRATCH / f"forge-results-{width}-{scheme}.png"))
+            page.locator(".forge").screenshot(path=str(SCRATCH / f"forge-results-{width}-{scheme}.png"))
         state = page.evaluate(
             """(contrast) => {
               const ratio = eval(contrast);
-              const box = document.querySelector('.card.forge');
+              const box = document.querySelector('.forge');
               const texts = Array.from(box.querySelectorAll('*'))
                 .filter(e => Array.from(e.childNodes).some(n => n.nodeType === 3 && n.textContent.trim()))
                 .filter(e => e.getClientRects().length && !e.closest('.sr-only'));
@@ -415,8 +414,8 @@ def test_forge_results_fit_and_read(server: Server, width: int, scheme: str) -> 
                 cardRight: box.getBoundingClientRect().right,
                 low,
                 checked: texts.length,
-                rows: box.querySelectorAll('table.seats tbody tr').length,
-                games: box.querySelectorAll('details.games tbody tr').length,
+                rows: box.querySelectorAll('.rv-seats .tr:not(.th)').length,
+                games: box.querySelectorAll('details.games .tr:not(.th)').length,
               };
             }""",
             CONTRAST,
@@ -425,7 +424,7 @@ def test_forge_results_fit_and_read(server: Server, width: int, scheme: str) -> 
         assert state["cardRight"] <= state["innerWidth"], state
         assert state["checked"] > 30 and not state["low"], state["low"]
         assert state["rows"] == 4 and state["games"] == 10
-        text = page.locator(".card.forge").inner_text()
+        text = page.locator(".forge").inner_text()
         assert "turn 12" in text and "commander damage 2" in text and "Stopped at the time limit" in text
         assert not errors, errors
         browser.close()
@@ -434,8 +433,9 @@ def test_forge_results_fit_and_read(server: Server, width: int, scheme: str) -> 
 @pytest.mark.parametrize("width", [320, 344, 600, 640, 717, 1366])
 @pytest.mark.parametrize("scheme", ["light", "dark"])
 def test_reports_page_fits_and_reads(server: Server, width: int, scheme: str) -> None:
-    """The Reports page under More, with a Forge run playing, one waiting and a long deck
-    name: no sideways scroll, 4.5:1 text in both themes, 44px filter and trend targets."""
+    """The Reports dashboard (approved K4), with a Forge run playing, one waiting and a long deck
+    name: no sideways scroll, 4.5:1 text in both themes, 44px filter and open targets on touch
+    screens, the table's rows, and the deck filter applying as soon as it changes."""
     import json
     import os
 
@@ -488,10 +488,10 @@ def test_reports_page_fits_and_reads(server: Server, width: int, scheme: str) ->
                   .map(e => e.getBoundingClientRect().right)),
                 low,
                 checked: texts.length,
-                rows: box.querySelectorAll('.rp-row').length,
-                runs: box.querySelectorAll('.rp-runs li').length,
-                targets: [...h('.rp-trend'), ...h('.rp-filter select:not(.msel-native)'),
-                          ...h('.rp-filter .msel-btn'), ...h('.rp-filter .btn')],
+                rows: box.querySelectorAll('.rp-t .tr:not(.th)').length,
+                waiting: box.querySelector('.wdg.accent .big').textContent,
+                targets: [...h('.ui-tools .msel-btn'), ...h('.ui-tools select:not(.msel-native)'),
+                          ...h('.rp-t .act'), ...h('.wdg .go .btn')],
               };
             }""",
             CONTRAST,
@@ -499,20 +499,11 @@ def test_reports_page_fits_and_reads(server: Server, width: int, scheme: str) ->
         assert state["scrollWidth"] <= state["innerWidth"], state
         assert state["right"] <= state["innerWidth"] + 0.5, state
         assert state["checked"] > 10 and not state["low"], state["low"]
-        assert state["rows"] == 3 and state["runs"] == 2
-        assert min(state["targets"]) >= 44, state["targets"]
-        if width > 600:
-            # On wider screens the Show button stays on the select's line (at
-            # 600px and narrower the site's phone layout makes a form's button full width, below)
-            tops = page.evaluate(
-                "() => ['.rp-filter .msel-btn', '.rp-filter .btn'].map(s =>"
-                " Math.round(document.querySelector(s).getBoundingClientRect().top))"
-            )
-            assert tops[0] == tops[1], tops
-        text = page.locator(".rp-queue").inner_text()
+        assert state["rows"] == 3 and state["waiting"] == "1playing 1waiting", state["waiting"]
+        assert min(state["targets"]) >= 32, state["targets"]
+        text = page.locator(".wdg.accent").inner_text()
         # The games played so far, as the report page counts them
-        assert "With Forge: 3 of 10 games played" in text
-        assert "Waiting: number 1 in line" in text
+        assert "3 of 10 games played" in text and "Show waiting (1)" in text
         # At 200% text the deck filter still fits, inside the window
         # and its panel, at every width, and the whole page fits the window too.
         from .test_overflow_sweep_browser import MEASURE
@@ -523,9 +514,9 @@ def test_reports_page_fits_and_reads(server: Server, width: int, scheme: str) ->
             page.evaluate(zoom)
             fit = page.evaluate(
                 """() => {
-                  const panel = document.querySelector('.rp-all').getBoundingClientRect();
-                  return Array.from(document.querySelectorAll('.rp-filter, .rp-filter *'))
-                    .filter(e => e.getClientRects().length && !e.closest('.msel-native'))
+                  const panel = document.querySelector('.reports-page').getBoundingClientRect();
+                  return Array.from(document.querySelectorAll('.ui-tools, .ui-tools *'))
+                    .filter(e => e.getClientRects().length && !e.closest('.msel-native, .sr-only'))
                     .map(e => [e.tagName + '.' + e.className, e.getBoundingClientRect()])
                     .filter(([, r]) => r.width && (r.right > Math.min(window.innerWidth, panel.right) + 0.5
                                                    || r.left < Math.max(0, panel.left) - 0.5))
@@ -537,10 +528,10 @@ def test_reports_page_fits_and_reads(server: Server, width: int, scheme: str) ->
             assert found == [], (zoom[:40], found)
             if shots:
                 page.screenshot(path=f"{shots}/reports-page-{width}-{scheme}-text200.png", full_page=True)
-        page.select_option("#rp-deck", "43")
-        page.locator(".rp-filter .btn").click()
+        page.select_option("select[name=deck_id]", "43")
+        page.wait_for_url("**deck_id=43**")
         page.wait_for_load_state("networkidle")
-        assert page.locator(".rp-row").count() == 1 and "deck_id=43" in page.url
+        assert page.locator(".rp-t .tr:not(.th)").count() == 1
         assert not errors, errors
         browser.close()
 

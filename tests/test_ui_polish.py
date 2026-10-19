@@ -247,7 +247,7 @@ async def test_nav_highlights_export_and_proposals_and_copy_keeps_its_icon(stack
         )
         assert "aria-label='Archidekt import text'" in export
         proposals = (await b.http.get("/proposals", headers=NAV)).text
-        assert "<a href='/proposals' aria-current='page'>Proposals</a>" in proposals
+        assert "<a href='/proposals' aria-current='page' class=fold>Proposals</a>" in proposals
         compare = (await b.http.get("/decks/42/compare", headers=NAV)).text
         assert "<input type='text' name='with' data-suggest='static'" in compare
         search = (await b.http.get("/search", headers=NAV)).text

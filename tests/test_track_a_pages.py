@@ -246,7 +246,7 @@ async def test_the_deck_page_shows_the_strip_and_home_counts_the_decks(stack: St
         assert page.index("class='banner") < page.index("class='wstrip'") < page.index("id='cards'")
         assert "name='back' value='/decks/42'" in page
         home = (await b.http.get("/")).text
-        assert "2 waiting on 1 deck." in home
+        assert "2<small>waiting</small>" in home and "2 on 1 deck · oldest 1 min · next expires in" in home
     finally:
         await b.aclose()
 

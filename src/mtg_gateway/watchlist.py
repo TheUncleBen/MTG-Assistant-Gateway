@@ -20,12 +20,11 @@ from pydantic import Field
 from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
 
+from . import prices
 from .decks import DeckError
-from .history_view import _trend_svg
 from .pages import _csrf, browser_session, csrf_form_ok, csrf_header_ok, login_redirect, read_limited
-from .prices import money
 from .theme import display_name, render
-from .theme import esc as _esc
+from .watchlist_page import WATCH_PAGE_CSS, Query, watchlist_page_html
 
 if TYPE_CHECKING:
     from mcp.server.mcpserver import MCPServer
@@ -36,184 +35,17 @@ logger = logging.getLogger(__name__)
 
 NO_STORE = {"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"}
 MAX_FORM = 8192
-WATCH_CSS = """
-.watch form.row{display:grid;gap:.6rem 1rem;align-items:end;
-  grid-template-columns:repeat(auto-fit,minmax(min(100%,9rem),1fr))}
-.watch form.row .field{margin:0;min-width:0} .watch form.row .wide{grid-column:span 2}
-@media (max-width:480px){ .watch form.row .wide{grid-column:auto} }
-.watch form.row button{margin:0}
-.wlist{display:grid;gap:.75rem;margin:1rem 0 0}
-.wrow{border:1px solid var(--border);border-radius:3px;padding:.7rem .85rem;min-width:0}
-.wrow h3{margin:0;font-size:1rem;overflow-wrap:anywhere}
-.wrow .sub{color:var(--text-muted);font-size:.88rem;font-weight:400}
-.wrow .now{margin:.35rem 0 0;font-variant-numeric:tabular-nums}
-.wrow .now b{font-size:1.15rem}
-.wrow .chg{color:var(--text-muted);font-size:.9rem;margin:.2rem 0 0}
-.tspark{display:block;width:100%;height:36px;color:var(--orange-text);margin:.4rem 0 0}
-.tspark polyline{fill:none;stroke:currentColor;stroke-width:2;stroke-linejoin:round;stroke-linecap:round}
-.wrow details{margin-top:.4rem} .wrow details > summary{cursor:pointer;color:var(--link);min-height:2rem;
-  display:flex;align-items:center}
-.wrow .tbl{overflow-x:auto;max-width:100%;max-height:16rem;overflow-y:auto}
-.wrow table{border-collapse:collapse;font-size:.86rem;font-variant-numeric:tabular-nums}
-.wrow th,.wrow td{padding:.25rem .6rem;border-bottom:1px solid var(--border-soft);text-align:right}
-.wrow th[scope=row],.wrow thead th:first-child{text-align:left}
-.wrow .acts{display:flex;flex-wrap:wrap;gap:.5rem;margin-top:.5rem;align-items:center}
-.wrow .acts form{margin:0}
-"""
-
-OK_NOTES = {
-    "card_added": "Added to your watchlist.",
-    "card_updated": "Alerts saved.",
-    "card_removed": "Removed from your watchlist.",
-    "deck_added": "Deck added to your watchlist.",
-    "deck_removed": "Deck removed from your watchlist.",
-}
 
 
-def _pct(v: float | None) -> str:
-    return "no change" if not v else f"{'up' if v > 0 else 'down'} {abs(v):g}%"
-
-
-def _changes_html(view: dict[str, Any]) -> str:
-    parts = [
-        f"{label}: {_pct(view.get(key))}"
-        for label, key in (
-            ("1 day", "change_1d_pct"),
-            ("7 days", "change_7d_pct"),
-            ("30 days", "change_30d_pct"),
-        )
-        if view.get(key) is not None
-    ]
-    return f"<p class='chg'>{_esc(' · '.join(parts))}</p>" if parts else ""
-
-
-def history_html(view: dict[str, Any], what: str) -> str:
-    """A price over time as a sparkline (with its words for a screen reader) and as a table."""
-    hist = [h for h in view.get("history", []) if h.get("price") is not None]
-    cur = view.get("currency", "usd")
-    if not hist:
-        return "<p class='muted small'>No price yet; it comes with the next daily check.</p>"
-    out = ""
-    if len(hist) >= 2:
-        said = (
-            f"{what}: {money(hist[0]['price'], cur)} on {hist[0]['day']}, "
-            f"{money(hist[-1]['price'], cur)} on {hist[-1]['day']}."
-        )
-        out += _trend_svg([h["price"] for h in hist], said)
-    rows = "".join(
-        f"<tr><th scope='row'>{_esc(h['day'])}</th><td>{_esc(money(h['price'], cur))}</td></tr>"
-        for h in reversed(hist)
-    )
-    return out + (
-        "<details><summary>Price history table</summary>"
-        f"<div class='tbl' role='region' aria-label='{_esc(what)}, newest first' tabindex='0'>"
-        f"<table><thead><tr><th scope='col'>Day</th><th scope='col'>Price</th></tr></thead>"
-        f"<tbody>{rows}</tbody></table></div></details>"
-    )
-
-
-def _card_row(v: dict[str, Any], csrf_in: str) -> str:
-    where = " ".join(p for p in ((v.get("set") or "").upper(), v.get("collector_number") or "") if p)
-    sub = " · ".join(p for p in (where or "any printing", v["finish"]) if p)
-    price = (
-        f"<b>{_esc(money(v['price'], v['currency']))}</b> on {_esc(v['day'])}"
-        if v.get("price") is not None
-        else "<span class='muted'>No price yet</span>"
-    )
-    alerts = v.get("alerts") or {}
-    wid = _esc(v["watch_id"])
-    return (
-        f"<li class='wrow'><h3>{_esc(v['name'])} <span class='sub'>{_esc(sub)}</span></h3>"
-        f"<p class='now'>{price}</p>{_changes_html(v)}"
-        f"{history_html(v, v['name'])}"
-        "<details><summary>Price alert" + (" (on)" if alerts else "") + "</summary>"
-        f"<form method='post' class='row'>{csrf_in}<input type='hidden' name='action' value='alerts'>"
-        f"<input type='hidden' name='watch_id' value='{wid}'>"
-        + "".join(
-            f"<div class='field'><label for='{k[0]}-{wid}'>{label}</label><input id='{k[0]}-{wid}' "
-            f"name='alert_{k}' inputmode='decimal' value='{_esc(alerts.get(k, ''))}'></div>"
-            for k, label in (
-                ("pct", "Moves more than (%)"),
-                ("above", "Rises above"),
-                ("below", "Falls below"),
-            )
-        )
-        + "<button>Save alert</button></form>"
-        "<p class='muted small'>Checked once a day against the day before. Leave a box empty for no "
-        "alert. Alerts reach you through notifications (Account page).</p></details>"
-        f"<div class='acts'><a class='btn small' href='/cards?q={_esc(v['name'])}'>Open card</a>"
-        f"<form method='post'>{csrf_in}<input type='hidden' name='action' value='remove_card'>"
-        f"<input type='hidden' name='watch_id' value='{wid}'>"
-        f"<button class='danger small'>Remove</button></form></div></li>"
-    )
-
-
-def _deck_row(v: dict[str, Any], csrf_in: str) -> str:
-    price = (
-        # The deck page's "Est cost" totals Archidekt's prices; this value is Scryfall's, so each says
-        # where its prices come from.
-        f"<b>{_esc(money(v['price']))}</b> on {_esc(v['day'])} <span class='muted'>(Scryfall prices)</span>"
-        if v.get("price") is not None
-        else "<span class='muted'>No value yet</span>"
-    )
-    did = _esc(v["deck_id"])
-    return (
-        f"<li class='wrow'><h3>{_esc(v['name'] or 'Deck ' + v['deck_id'])} "
-        f"<span class='sub'>{_esc(v['cards'])} cards</span></h3>"
-        f"<p class='now'>{price}</p>{_changes_html(v)}"
-        f"{history_html(v, 'Value of ' + (v['name'] or 'the deck'))}"
-        f"<div class='acts'><a class='btn small' href='/decks/{did}'>Open deck</a>"
-        f"<form method='post'>{csrf_in}<input type='hidden' name='action' value='remove_deck'>"
-        f"<input type='hidden' name='deck_id' value='{did}'>"
-        f"<button class='danger small'>Remove</button></form></div></li>"
-    )
-
-
-def watchlist_body(state: AppState, sub: str, csrf: str | None, *, ok: str = "", err: str = "") -> str:
+def watchlist_body(
+    state: AppState, sub: str, csrf: str | None, query: Query | None = None, *, ok: str = "", err: str = ""
+) -> str:
+    """The page's body (watchlist_page.py): the member's watches with a year of prices, so the
+    opened row can say how many days its full history holds."""
     svc = state.prices
-    data = svc.overview(sub)
-    csrf_in = f"<input type='hidden' name='csrf' value='{_esc(csrf or '')}'>"
-    notice = ""
-    if ok in OK_NOTES:
-        notice = f"<div class='notice ok' role='status'>{_esc(OK_NOTES[ok])}</div>"
-    if err:
-        notice = f"<div class='notice error' role='alert'>{_esc(err)}</div>"
-    lim = data["limits"]
-    cards = "".join(_card_row(v, csrf_in) for v in data["cards"])
-    decks = "".join(_deck_row(v, csrf_in) for v in data["decks"])
-    return (
-        notice
-        + "<p class='muted'>Prices come from Scryfall (TCGplayer in dollars, Cardmarket in euros), checked "
-        f"once a day at {_esc(data['checked_daily_at_utc'])} UTC for the cards and decks you watch here. "
-        f"You may watch up to {lim['cards']} cards and {lim['decks']} decks. Your assistant can do the same "
-        "with its watch tools.</p>"
-        "<section class='card watch' aria-labelledby='wc-h'><h2 id='wc-h'>Cards</h2>"
-        f"<form method='post' class='row'>{csrf_in}<input type='hidden' name='action' value='add_card'>"
-        "<div class='field wide'><label for='w-name'>Card name</label>"
-        "<input id='w-name' name='name' maxlength='150' autocomplete='off' data-suggest='cards'></div>"
-        "<div class='field'><label for='w-set'>Set code (optional)</label>"
-        "<input id='w-set' name='set_code' maxlength='6' autocomplete='off'></div>"
-        "<div class='field'><label for='w-cn'>Number (optional)</label>"
-        "<input id='w-cn' name='collector_number' maxlength='10' autocomplete='off'></div>"
-        "<div class='field'><label for='w-fin'>Finish</label><select id='w-fin' name='finish'>"
-        "<option value='nonfoil'>Non-foil</option><option value='foil'>Foil</option>"
-        "<option value='etched'>Etched</option></select></div>"
-        "<button class='primary'>Watch card</button></form>"
-        "<p class='muted small'>A name alone follows the printing Scryfall gives for that name; add a set "
-        "code and number to follow one printing.</p>"
-        + (f"<ul class='plain wlist'>{cards}</ul>" if cards else "<p class='muted'>No cards watched yet.</p>")
-        + "</section>"
-        "<section class='card watch' aria-labelledby='wd-h'><h2 id='wd-h'>Decks</h2>"
-        f"<form method='post' class='row'>{csrf_in}<input type='hidden' name='action' value='add_deck'>"
-        "<div class='field wide'><label for='w-deck'>Archidekt deck link or number</label>"
-        "<input id='w-deck' name='deck' maxlength='200' autocomplete='off' required></div>"
-        "<button class='primary'>Watch deck</button></form>"
-        "<p class='muted small'>A watched deck is read again once a day, so its value follows its cards. "
-        "Its value uses Scryfall's prices, so it can differ from the deck page's estimated cost, which "
-        "uses Archidekt's.</p>"
-        + (f"<ul class='plain wlist'>{decks}</ul>" if decks else "<p class='muted'>No decks watched yet.</p>")
-        + "</section>"
-    )
+    data = svc.overview(sub, days=365)
+    ids = {w["id"]: w.get("scryfall_id") for w in svc.watched_cards(sub)}
+    return watchlist_page_html(data, ids, csrf, query or Query(), ok=ok, err=err, now=prices.now())
 
 
 # -- routes --------------------------------------------------------------------------------------
@@ -235,7 +67,10 @@ def add_watchlist_routes(server: MCPServer, state: AppState) -> None:
             csrf=_csrf(s, sid),
             admin=bool(s.admin_group and s.admin_group in (user.get("groups") or [])),
             current="/watchlist",
-            head_extra=f"<style>{WATCH_CSS}</style>",
+            heading=False,
+            main_class="ui-wide",
+            head_extra=f"<style>{WATCH_PAGE_CSS}</style><script src='/static/cardview.js' defer></script>"
+            "<script src='/static/watchlist.js' defer></script>",
             user=display_name(user),
         )
 
@@ -245,7 +80,8 @@ def add_watchlist_routes(server: MCPServer, state: AppState) -> None:
         if not sub:
             return login_redirect("/watchlist")
         ok = request.query_params.get("ok", "")
-        return page(watchlist_body(state, sub, _csrf(s, sid), ok=ok), sub=sub, sid=sid)
+        query = Query.parse(request.query_params)
+        return page(watchlist_body(state, sub, _csrf(s, sid), query, ok=ok), sub=sub, sid=sid)
 
     @server.custom_route("/watchlist", methods=["POST"], include_in_schema=False)
     async def watchlist_post(request: Request) -> Response:
@@ -330,8 +166,15 @@ def add_watchlist_routes(server: MCPServer, state: AppState) -> None:
                 {"ok": False, "error": "invalid", "message": "Send JSON."}, 400, headers=NO_STORE
             )
         try:
+            # a printing from Card search's art picker comes with its set code and number
             out = await state.prices.watch_card(
-                sub, str(body.get("name") or ""), finish=str(body.get("finish") or "nonfoil")
+                sub,
+                str(body.get("name") or ""),
+                set_code=str(body.get("set_code") or "") or None,
+                collector_number=str(body.get("collector_number") or "") or None,
+                finish=str(body.get("finish") or "nonfoil"),
+                # a Watch button on a card already watched must not clear its alerts
+                keep_alerts=True,
             )
         except DeckError as exc:
             status = 404 if exc.kind == "not_found" else 429 if exc.kind == "rate_limited" else 400
@@ -339,6 +182,41 @@ def add_watchlist_routes(server: MCPServer, state: AppState) -> None:
                 {"ok": False, "error": exc.kind, "message": str(exc)}, status, headers=NO_STORE
             )
         return JSONResponse({"ok": True, "watch": out}, headers=NO_STORE)
+
+    @server.custom_route("/watchlist/api/unwatch", methods=["POST"], include_in_schema=False)
+    async def unwatch_api(request: Request) -> Response:
+        """Undo of Card search's "added to your watchlist" toast: stop watching one watch by its id
+        (X-CSRF-Token as the JSON API). Only the member's own watch goes."""
+        sub, sid = browser_session(state, request)
+        if not sub:
+            return JSONResponse({"ok": False, "error": "unauthenticated"}, 401, headers=NO_STORE)
+        if not csrf_header_ok(s, sid, request):
+            return JSONResponse(
+                {"ok": False, "error": "csrf", "message": "Reload the page and retry."}, 403, headers=NO_STORE
+            )
+        raw = await read_limited(request, MAX_FORM)
+        try:
+            body = json.loads(raw or b"{}")
+            if not isinstance(body, dict):
+                raise ValueError
+        except ValueError:
+            return JSONResponse(
+                {"ok": False, "error": "invalid", "message": "Send JSON."}, 400, headers=NO_STORE
+            )
+        wid = str(body.get("watch_id") or "").strip()[:64]
+        # by id only: a name would stop every printing of the card
+        if not wid.startswith("w_"):
+            return JSONResponse(
+                {"ok": False, "error": "invalid", "message": "Send the watch's id."}, 400, headers=NO_STORE
+            )
+        try:
+            names = state.prices.unwatch_card(sub, wid)
+        except DeckError as exc:
+            status = 404 if exc.kind == "not_found" else 400
+            return JSONResponse(
+                {"ok": False, "error": exc.kind, "message": str(exc)}, status, headers=NO_STORE
+            )
+        return JSONResponse({"ok": True, "removed": names}, headers=NO_STORE)
 
 
 # -- assistant tools -----------------------------------------------------------------------------
@@ -503,4 +381,4 @@ def add_watchlist_tools(server: MCPServer, state: AppState) -> None:
         return {"ok": True, "cards": [state.prices.card_view(w, days) for w in rows]}
 
 
-__all__ = ["add_watchlist_routes", "add_watchlist_tools", "history_html"]
+__all__ = ["add_watchlist_routes", "add_watchlist_tools"]

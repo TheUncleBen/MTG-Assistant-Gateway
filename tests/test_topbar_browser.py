@@ -68,14 +68,14 @@ def _open(page, url: str) -> None:
 
 GEOMETRY = """() => {
   const r = e => { const b = e.getBoundingClientRect(); return [Math.round(b.left), Math.round(b.right)]; };
-  const links = [...document.querySelectorAll('.topbar nav.site a')]
-    .filter(a => getComputedStyle(a).display !== 'none');
+  const links = [...document.querySelectorAll('.topbar nav.site > a, .topbar nav.site > details > summary')]
+    .filter(a => getComputedStyle(a).display !== 'none' && a.getClientRects().length > 0);
   return {doc: document.documentElement.scrollWidth, win: innerWidth, links: links.length,
     last: links.length ? r(links[links.length - 1])[1] : 0,
-    avatar: r(document.querySelector('.topbar details.dd > summary'))[0]};
+    avatar: r(document.querySelector('.topbar nav.user details.dd > summary'))[0]};
 }"""
 MENU_LINK = """() => {
-  const d = document.querySelector('.topbar details.dd'); d.open = true;
+  const d = document.querySelector('.topbar nav.user details.dd'); d.open = true;
   const c = getComputedStyle(d.querySelector('.menu a'));
   const v = n => getComputedStyle(document.body).getPropertyValue(n).trim();
   d.open = false;
@@ -141,7 +141,8 @@ def test_a_narrow_window_with_a_mouse_keeps_the_links_clear_of_the_account_butto
     chromium,
     server: Server,
 ) -> None:
-    sid = _admin(server)  # eight links: Home, the six sections and Admin
+    # an admin: under 1200 px five links and More ▾ (Proposals, History, Reports and Admin under it)
+    sid = _admin(server)
     with _session(chromium) as browser:
         ctx = browser.new_context(viewport={"width": 1000, "height": 700})
         ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
@@ -156,7 +157,7 @@ def test_a_narrow_window_with_a_mouse_keeps_the_links_clear_of_the_account_butto
         page.wait_for_timeout(50)
         phone = page.evaluate(GEOMETRY)
     for width, g in seen.items():
-        assert g["links"] == 8, (width, g)
+        assert g["links"] == 6, (width, g)
         assert g["doc"] == g["win"] == width, (width, g)  # no sideways scroll
         assert g["last"] + 8 <= g["avatar"], (width, g)  # the last link ends before the account button
     assert phone["links"] == 0, phone  # the phone layout: links move to the tab bar
@@ -331,8 +332,8 @@ def test_reports_is_under_more_on_the_phone_bar_and_a_tab_on_the_rail(
 # and the account side.
 NAV_FIT = """() => {
   const box = e => e.getBoundingClientRect();
-  const shown = [...document.querySelectorAll('.topbar nav.site a')]
-    .filter(a => getComputedStyle(a).display !== 'none');
+  const shown = [...document.querySelectorAll('.topbar nav.site > a, .topbar nav.site > details > summary')]
+    .filter(a => getComputedStyle(a).display !== 'none' && a.getClientRects().length > 0);
   const right = box(document.querySelector('.topbar .right'));
   const hit = (a, b) => a.left < b.right - 1 && b.left < a.right - 1 && a.top < b.bottom - 1
     && b.top < a.bottom - 1;
@@ -356,7 +357,7 @@ NAV_FIT = """() => {
 def test_the_top_bar_links_fit_at_every_width_and_text_size(chromium, server: Server, theme: str) -> None:
     from .test_text_zoom_browser import ROOT_200, TEXT_200
 
-    sid = _admin(server)  # eight links: the most the bar carries
+    sid = _admin(server)  # nine links from 1200 px: the most the bar carries
     problems: list[str] = []
     with _session(chromium) as browser:
         for touch in (False, True):
@@ -383,9 +384,11 @@ def test_the_top_bar_links_fit_at_every_width_and_text_size(chromium, server: Se
                             problems.append(where)
                         if g["links"] and g["contrast"] < 4.5:
                             problems.append(f"contrast {where}")
-                        # a mouse from 600 px shows the links; at the normal size on one row in
+                        # a mouse from 600 px shows the links: an admin's nine from 1200 px at the
+                        # normal size, else five and More ▾ (K8); at the normal size on one row in
                         # the 50 px bar, as before
-                        if not touch and width >= 600 and g["links"] != 8:
+                        want = 9 if width >= 1200 and zoom == "none" else 6
+                        if not touch and width >= 600 and g["links"] != want:
                             problems.append(f"links {where}")
                         if (
                             not touch
@@ -496,7 +499,7 @@ def test_tab_goes_through_the_top_bar_in_the_order_it_reads(chromium, server: Se
                 if g is not None:
                     stops.append(g)
             where = f"@{width}px {zoom}"
-            if len(stops) < 10:  # the brand, eight links and the account button at least
+            if len(stops) < 8:  # the brand, five links, More ▾ and the account button at least
                 problems.append(f"{where}: {len(stops)} stops")
             for a, b in zip(stops, stops[1:], strict=False):
                 row = b["top"] < a["bottom"] - 1 and a["top"] < b["bottom"] - 1
@@ -511,7 +514,8 @@ def test_tab_goes_through_the_top_bar_in_the_order_it_reads(chromium, server: Se
 BAR_OVERLAP = """() => {
   const shown = e => e.getClientRects().length > 0 && getComputedStyle(e).visibility !== 'hidden';
   const parts = [...document.querySelectorAll(
-    '.topbar .brand .mark, .topbar nav.site a, .topbar .topsearch, .topbar nav.user > *')]
+    '.topbar .brand .mark, .topbar nav.site > a, .topbar nav.site > details > summary, ' +
+    '.topbar .topsearch, .topbar nav.user > *')]
     .filter(shown).map(e => ({what: (e.textContent || e.className || e.tagName).trim().slice(0, 20),
                               box: e.getBoundingClientRect()}));
   const hit = (a, b) => a.left < b.right - 1 && b.left < a.right - 1 && a.top < b.bottom - 1
@@ -521,7 +525,7 @@ BAR_OVERLAP = """() => {
     if (hit(p.box, q.box)) out.push(`${p.what} / ${q.what}`); }));
   const outside = parts.filter(p => p.box.left < -1 || p.box.right > innerWidth + 1).map(p => p.what);
   return {overlap: out, outside, doc: document.documentElement.scrollWidth, win: innerWidth,
-          links: document.querySelectorAll('.topbar nav.site a').length};
+          links: document.querySelectorAll('.topbar nav.site > a, .topbar nav.site summary').length};
 }"""
 
 
