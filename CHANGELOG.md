@@ -9,7 +9,8 @@ with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 
 ## [0.7.36] - unreleased
 
-A press and hold on a card in a deck no longer leaves the card faded and the page refusing taps.
+A press and hold on a card in a deck no longer leaves the card faded and the page refusing taps, and
+the Scan page's capture button is round in the Android app.
 
 ### Upgrade notes
 None.
@@ -18,6 +19,8 @@ None.
 - On a phone or tablet, a press and hold on a card on a deck page opened the card's menu but could
   leave the card faded, and after that a tap on any other card did nothing until the page was
   loaded again. The card now looks normal once the menu opens, and the other cards open with a tap.
+- In the Android app, the Scan page's capture button was stretched into an oval. It is a circle
+  again, as it is in a browser.
 
 ## [0.7.33] - 2026-10-19
 
