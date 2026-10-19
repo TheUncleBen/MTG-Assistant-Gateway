@@ -2900,7 +2900,10 @@ class DeckService:
         MAX_LIST_PAGES pages, an entry whose owner could not be read or was someone else, or a
         count that moved between pages). None means "unknown": nothing is marked gone. A list
         older than DECK_LIST_FRESH is refreshed first, waiting up to ``wait`` for it."""
-        rows = await self._deck_rows(sub, wait=wait, prefer_fresh=True)
+        return self._listed(sub, await self._deck_rows(sub, wait=wait, prefer_fresh=True))
+
+    def _listed(self, sub: str, rows: Any) -> dict[str, Any] | None:
+        """``on_archidekt``'s answer for the deck list ``rows`` (the cached list's rows)."""
         _token, link = self._token(sub)
         read_at = self.deck_lists.fetched_at(sub)
         if rows is None or read_at is None or not link.get("archidekt_user_id"):
@@ -2915,6 +2918,22 @@ class DeckService:
             "username": str(link.get("archidekt_username") or ""),
             "linked_at": int(link.get("created_at") or 0),
         }
+
+    def backup_gone(self, sub: str, backup_id: str) -> bool:
+        """Whether the member's deck list as held now (no request) says the backup copy
+        ``backup_id`` is gone from Archidekt, judged as History marks it (``mark_gone``); False
+        when it can't tell."""
+        copy = self.db.backup_copies(sub).get(str(backup_id))
+        if copy is None:
+            return False
+        snaps = self.db.list_snapshots(sub, 50, deck_id=str(copy["deck_id"]))
+        snap = next((x for x in snaps if str(x.get("backup_deck_id") or "") == str(backup_id)), None)
+        rows, _fresh = self.deck_lists.peek(sub)
+        try:
+            listed = self._listed(sub, rows)
+        except DeckError:  # not linked any more
+            return False
+        return snap is not None and bool(mark_gone([snap], listed)[0].get("backup_gone"))
 
     def decks_fetched_at(self, sub: str) -> float | None:
         """When the cached deck list was read from Archidekt (epoch seconds), None when none is."""
@@ -3376,6 +3395,15 @@ class DeckService:
 
         self.db.edit_proposal_result(proposal_id, sub, mark)
 
+    def _applied_backup_gone(self, sub: str, row: dict[str, Any]) -> bool:
+        """An applied deck deletion whose backup copy the held deck list says is gone (the text
+        is rebuilt on every view, after the member may have deleted or moved the copy)."""
+        changes = row.get("changes") if isinstance(row.get("changes"), dict) else {}
+        result = row.get("result") if isinstance(row.get("result"), dict) else {}
+        if row.get("kind") != "action" or changes.get("action") != "delete_deck":
+            return False
+        return bool(result.get("backup_deck_id")) and self.backup_gone(sub, str(result["backup_deck_id"]))
+
     def describe(self, sub: str, proposal_id: str) -> dict[str, Any]:
         # A note closed without settling its links (a restart, a cancel, expiry) holds its
         # dependents before anything about them is shown or decided.
@@ -3409,7 +3437,13 @@ class DeckService:
         stopped = (row["result"] or {}).get("error") == "rate_limited" and (
             state == "failed" or (state == "pending" and self.settings.writes_enabled and not out_of_date)
         )
-        applied = applied_text(kind, row.get("changes"), row["result"]) if state == "applied" else ""
+        applied = (
+            applied_text(
+                kind, row.get("changes"), row["result"], backup_gone=self._applied_backup_gone(sub, row)
+            )
+            if state == "applied"
+            else ""
+        )
         return {
             "proposal_id": row["id"],
             "kind": kind,
@@ -7434,10 +7468,13 @@ def formatting_review_only(row: dict[str, Any]) -> str:
     )
 
 
-def applied_text(kind: str, changes: dict[str, Any] | None, result: dict[str, Any] | None) -> str:
+def applied_text(
+    kind: str, changes: dict[str, Any] | None, result: dict[str, Any] | None, *, backup_gone: bool = False
+) -> str:
     """What an applied account action or collection change did, in one sentence for the member
     (the pages put "Done." or "Applied." before it). Empty for a deck change, whose pages keep
-    saying the deck matches the proposal."""
+    saying the deck matches the proposal. ``backup_gone``: a deck deletion's backup copy is no
+    longer on Archidekt (DeckService.backup_gone), so the text doesn't say it is there."""
     c = changes if isinstance(changes, dict) else {}
     r = result if isinstance(result, dict) else {}
     if kind == "collection":
@@ -7482,7 +7519,7 @@ def applied_text(kind: str, changes: dict[str, Any] | None, result: dict[str, An
         return "Your vote on the comment is saved on Archidekt."
     if action == "delete_deck":
         # delete_deck keeps a snapshot first, and a backup copy when backups are on
-        if r.get("backup_deck_id"):
+        if r.get("backup_deck_id") and not backup_gone:
             return (
                 "The deck is deleted on Archidekt. A snapshot was kept, and a backup copy is in your "
                 "backup folder."
