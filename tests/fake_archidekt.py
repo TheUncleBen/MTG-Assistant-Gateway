@@ -123,6 +123,7 @@ class FakeArchidekt:
         self.add_rows_lose_finish = False
         self.empty_label_ignored = False
         self.add_rows_swap_printing: dict[int, int] = {}
+        self.add_rows_lose_label = False
         self.create_returns_full_deck = True  # live Archidekt does not (verified 2026-10-05)
         self.fail_deck_reads = False  # signed-in deck reads answer 503
         self.next_rel_id = 2000
@@ -995,7 +996,11 @@ class FakeArchidekt:
                         "flippedDefault": bool(e["modifications"].get("flippedDefault")),
                         # an add may carry the colour tag and the deck's own mana value, as a
                         # modify does (a restore re-adding a row sends them; not checked live)
-                        **({"label": e["modifications"]["label"]} if "label" in e["modifications"] else {}),
+                        **(
+                            {"label": e["modifications"]["label"]}
+                            if "label" in e["modifications"] and not self.add_rows_lose_label
+                            else {}
+                        ),
                         **(
                             {"customCmc": e["modifications"]["customCmc"]}
                             if "customCmc" in e["modifications"]

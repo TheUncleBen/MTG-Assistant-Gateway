@@ -1982,6 +1982,8 @@ def new_deck_entries(
                     "modifier": (modifiers or {}).get(
                         key, c.get("finish") or ("Foil" if c.get("foil") else "Normal")
                     ),
+                    # the list's colour tag, in Archidekt's modifications.label as its editor sends it
+                    **({"label": c["label"]} if c.get("label") else {}),
                 },
             }
         )
@@ -6596,7 +6598,31 @@ def _new_deck_printing_mismatches(
             label = f"{names[key]} (printing or finish)"
             if label not in out:
                 out.append(label)
+    # The colour tags, counted per printing and tag the same way, so a tag Archidekt dropped (or
+    # one it added) is reported instead of the deck passing on its cards alone.
+    want_tags: dict[tuple[int, tuple[str, str]], int] = {}
+    tag_names: dict[int, str] = {}
+    for c, e in zip(cards, entries, strict=True):
+        key = (int(e["cardid"]), _tag_key(c.get("label") or ""))
+        want_tags[key] = want_tags.get(key, 0) + int(e["modifications"]["quantity"])
+        tag_names.setdefault(int(e["cardid"]), str(c["name"]))
+    got_tags: dict[tuple[int, tuple[str, str]], int] = {}
+    for vc in verified.cards:
+        if vc.card_id is not None and int(vc.card_id) in tag_names:
+            key = (int(vc.card_id), _tag_key(vc.label))
+            got_tags[key] = got_tags.get(key, 0) + vc.quantity
+    for key in sorted(set(want_tags) | set(got_tags)):
+        if want_tags.get(key, 0) != got_tags.get(key, 0):
+            label = f"{tag_names[key[0]]} (label)"
+            if label not in out:
+                out.append(label)
     return out
+
+
+def _tag_key(label: str) -> tuple[str, str]:
+    """A colour tag as compared after an import: its name and colour, or nothing for no tag."""
+    name, colour = split_label(label)
+    return (name, colour) if name else ("", "")
 
 
 def _printing_mismatches(verified: Deck, specs: list[dict[str, Any]]) -> list[str]:
@@ -7308,6 +7334,7 @@ def cards_from_json(text: str) -> list[dict[str, Any]]:
                 "finish": finish if finish in ("Foil", "Etched") else "",
                 "set_code": set_code,
                 "collector_number": number,
+                "label": import_label(row.get("label")),
                 # get_deck's rows say in_deck: false for a maybeboard or sideboard row
                 **({"in_deck": False} if row.get("in_deck") is False else {}),
             }
@@ -7316,6 +7343,17 @@ def cards_from_json(text: str) -> list[dict[str, Any]]:
 
 
 SIDE_CATEGORIES = ("Maybeboard", "Sideboard")
+
+
+def import_label(raw: Any) -> str:
+    """A list's colour tag ("Have,#37d67a", or a bare "Have") in the form Archidekt stores, or ""
+    for none. A bare name gets the default grey, as set_label gives it; a tag with no name (the
+    empty one Archidekt exports for an untagged row) is none. A colour that is not #rrggbb is
+    left grey rather than refusing the whole list."""
+    name, colour = split_label(clean_text(str(raw or "")))
+    if not name:
+        return ""
+    return f"{name[:MAX_LABEL]},{colour or DEFAULT_LABEL_COLOUR}"
 
 
 def normalise_cards(
@@ -7355,6 +7393,7 @@ def normalise_cards(
                         "finish": c.finish if c.finish in ("Foil", "Etched") else "",
                         "set_code": c.set_code,
                         "collector_number": c.collector_number,
+                        "label": import_label(c.label),
                         # the same rule as parse_deck_export: these two categories sit outside the deck
                         **({"in_deck": False} if c.category in ("Maybeboard", "Sideboard") else {}),
                     }
@@ -7375,6 +7414,7 @@ def normalise_cards(
                         "finish": c.finish,
                         "set_code": c.set_code,
                         "collector_number": c.collector_number,
+                        "label": import_label(c.label),
                         **({"in_deck": False} if c.zone == "side" else {}),
                         **({"no_price": True} if c.no_price else {}),
                     }

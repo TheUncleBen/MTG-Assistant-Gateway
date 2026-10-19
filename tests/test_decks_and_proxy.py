@@ -1498,6 +1498,37 @@ async def test_new_deck_verify_fails_when_a_finish_or_printing_is_lost(stack: St
     ark.add_rows_swap_printing = {}
 
 
+async def test_new_deck_keeps_colour_labels_and_verify_checks_them(stack: Stack) -> None:
+    """A pasted list's ^Name,#rrggbb^ tags, and a CSV export's Label column, go to the new deck's
+    rows; a tag Archidekt does not keep fails the read-back instead of passing on the cards."""
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    text = "1 Sol Ring (sld) 1075 ^Test,#008000^\n1 Swamp ^Proxy^\n1 Forest ^,#656565^\n"
+    csv_text = 'Quantity,Name,Label\n1,Sol Ring,"Test,#008000"\n1,Forest,\n'
+
+    async def create(**src: str) -> dict:
+        p = structured(await call(h, token, "propose_new_deck", {"name": "Labels", **src}))
+        assert p["ok"], p
+        return await apply_any(h, token, p["proposal_id"])
+
+    good = await create(decklist_text=text)
+    assert good["ok"] and good["result"]["verified"] is True, good
+    rows = {r["card"]["oracleCard"]["name"]: r for r in ark.decks[int(good["result"]["deck_id"])]["cards"]}
+    assert rows["Sol Ring"]["label"] == "Test,#008000"
+    assert rows["Swamp"]["label"] == "Proxy,#656565"  # a bare name gets the default grey
+    assert "label" not in rows["Forest"]  # Archidekt's empty tag is no tag
+    from_csv = await create(csv_text=csv_text)
+    assert from_csv["ok"] and from_csv["result"]["verified"] is True, from_csv
+    made = ark.decks[int(from_csv["result"]["deck_id"])]["cards"]
+    rows = {r["card"]["oracleCard"]["name"]: r for r in made}
+    assert rows["Sol Ring"]["label"] == "Test,#008000"
+    ark.add_rows_lose_label = True
+    lost = await create(decklist_text=text)
+    assert lost["ok"] is False and lost["error"] == "verify_mismatch", lost
+    assert "Sol Ring (label)" in lost["message"] and "Forest" not in lost["message"], lost
+    ark.add_rows_lose_label = False
+
+
 async def test_simulation_calls_take_the_shape_mystic_forge_accepts(stack: Stack) -> None:
     """The fake's goldfish_run, goldfish_ab and validate_decklist take one pydantic ``params``
     model like the real Mystic Forge, so a flat call would fail validation here as it does live.
