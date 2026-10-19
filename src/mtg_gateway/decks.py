@@ -20,6 +20,7 @@ import contextvars
 import dataclasses
 import datetime
 import hashlib
+import heapq
 import json
 import logging
 import math
@@ -61,6 +62,7 @@ from .archidekt import (
     front_face,
     jwt_exp,
     no_retry,
+    page_turn,
     parse_deck,
     patient,
     plain_text,
@@ -197,9 +199,13 @@ LINK_FAILURE_WINDOW = 15 * 60
 READ_ONLY_SCOPES = frozenset({"mtg.read", "read"})
 FULL_SCOPE = "mtg"
 # Archidekt work one member may have running or queued in the shared pacer at once (a deck
-# read, a proposal, an apply); more is refused at once (rate_limited), so one account cannot
-# queue the pacer up for every other member.
+# read, a proposal, an apply), so one account cannot queue the pacer up for every other member.
+# More waits outside the pacer for one of the member's own slots, for up to ARCHIDEKT_SLOT_WAIT
+# seconds, the member's own pages first; past that wait, or with MAX_ARCHIDEKT_WAITING_PER_USER
+# already waiting, it is refused (rate_limited).
 MAX_ARCHIDEKT_PER_USER = 3
+ARCHIDEKT_SLOT_WAIT = 20.0
+MAX_ARCHIDEKT_WAITING_PER_USER = 8
 # The member whose Archidekt slot the running task already holds, so nested calls (an apply's
 # reads and writes, get_any_deck's private retry) do not take a second one.
 _slot_holder: ContextVar[str | None] = ContextVar("_slot_holder", default=None)
@@ -402,7 +408,10 @@ class MemberCache:
         if running is not None and not running[0].done() and self._dropped.get(sub, 0.0) <= running[1]:
             return running[0]
 
+        for_page = page_turn.get() and not background
+
         async def run() -> Any:
+            page_turn.set(for_page)  # a page's read keeps its turn (the context below is fresh)
             value = await fetch()
             if self._dropped.get(sub, 0.0) <= started:  # not invalidated while it was fetched
                 self._entries[sub] = (time.monotonic(), time.time(), value)
@@ -420,7 +429,7 @@ class MemberCache:
                 logger.debug("member cache refresh failed for a member: %r", t.exception())
 
         # A fresh context: the refresh is nobody's request, so it must not inherit the caller's
-        # Archidekt slot (_slot_holder), client id or request timing.
+        # Archidekt slot (_slot_holder), client id or request timing; only a page's turn is kept.
         task = asyncio.create_task(run(), context=contextvars.Context())
         task.add_done_callback(done)
         if background:
@@ -2093,6 +2102,10 @@ class DeckService:
         # unused delete is queued; only the newest BACKUPS_REMEMBERED are kept
         self._backups_made: dict[str, dict[str, str]] = {}
         self.max_archidekt_per_user = MAX_ARCHIDEKT_PER_USER
+        self.archidekt_slot_wait = ARCHIDEKT_SLOT_WAIT
+        # sub -> waiters for one of its slots: (0 for a page, else 1; arrival; future)
+        self._slot_waiters: dict[str, list[tuple[int, int, asyncio.Future[None]]]] = {}
+        self._slot_seq = 0
         self.archidekt_budget = RateBudget(settings.archidekt_calls_per_10_min)
         # the dashboard settings with a deployment value winning (config.MANAGED_SETTINGS); read a
         # managed key through here, not through ``settings``, so a dashboard change applies
@@ -2160,32 +2173,88 @@ class DeckService:
     @asynccontextmanager
     async def archidekt_slot(self, sub: str | None) -> AsyncIterator[None]:
         """Count one unit of Archidekt work for ``sub`` while the block runs. At most
-        ``max_archidekt_per_user`` run or wait in the shared pacer per member; another is refused
-        at once (rate_limited) instead of queueing behind them for everyone. A task that already
-        holds the member's slot (an apply's reads and writes) does not take another."""
+        ``max_archidekt_per_user`` run or wait in the shared pacer per member; another waits
+        outside the pacer for one of them to end (see ARCHIDEKT_SLOT_WAIT), so it never queues
+        the pacer up for everyone. A task that already holds the member's slot (an apply's
+        reads and writes) does not take another."""
         if not sub or _slot_holder.get() == sub:
             yield
             return
-        if self._archidekt_in_flight.get(sub, 0) >= self.max_archidekt_per_user:
-            raise DeckError(
-                "rate_limited",
-                f"{self.max_archidekt_per_user} Archidekt actions for your account are still running "
-                "or waiting their turn; wait for them to finish and try again.",
-            )
-        refused = self.budget_refusal(sub)
-        if refused:
-            raise DeckError("rate_limited", refused, retry_after=self.archidekt_budget.retry_after(sub))
-        self._archidekt_in_flight[sub] = self._archidekt_in_flight.get(sub, 0) + 1
-        token = _slot_holder.set(sub)
+        await self._take_slot(sub)
         try:
-            yield
+            refused = self.budget_refusal(sub)
+            if refused:
+                raise DeckError("rate_limited", refused, retry_after=self.archidekt_budget.retry_after(sub))
+            token = _slot_holder.set(sub)
+            try:
+                yield
+            finally:
+                _slot_holder.reset(token)
         finally:
-            _slot_holder.reset(token)
-            left = self._archidekt_in_flight.get(sub, 1) - 1
-            if left > 0:
-                self._archidekt_in_flight[sub] = left
+            self._give_slot(sub)
+
+    def _slots_full(self, sub: str) -> DeckError:
+        return DeckError(
+            "rate_limited",
+            f"{self.max_archidekt_per_user} Archidekt actions for your account are still running "
+            "or waiting their turn; wait for them to finish and try again.",
+        )
+
+    async def _take_slot(self, sub: str) -> None:
+        """One of the member's slots: at once when one is free and nobody is waiting, else the
+        next one to end, the member's pages before the rest; refused after
+        ``archidekt_slot_wait`` seconds or with MAX_ARCHIDEKT_WAITING_PER_USER already waiting."""
+        waiters = self._slot_waiters.get(sub, [])
+        if self._archidekt_in_flight.get(sub, 0) < self.max_archidekt_per_user and not waiters:
+            self._archidekt_in_flight[sub] = self._archidekt_in_flight.get(sub, 0) + 1
+            return
+        if (
+            self.max_archidekt_per_user <= 0
+            or self.archidekt_slot_wait <= 0
+            or len(waiters) >= MAX_ARCHIDEKT_WAITING_PER_USER
+        ):
+            raise self._slots_full(sub)
+        fut: asyncio.Future[None] = asyncio.get_running_loop().create_future()
+        self._slot_seq += 1
+        entry = (0 if page_turn.get() else 1, self._slot_seq, fut)
+        heapq.heappush(self._slot_waiters.setdefault(sub, waiters), entry)
+        try:
+            await asyncio.wait_for(fut, self.archidekt_slot_wait)  # the slot is handed over counted
+        except BaseException as exc:
+            if fut.done() and not fut.cancelled():
+                self._give_slot(sub)  # handed a slot just as this waiter gave up: pass it on
             else:
-                self._archidekt_in_flight.pop(sub, None)
+                self._drop_waiter(sub, entry)
+            if isinstance(exc, TimeoutError):
+                raise self._slots_full(sub) from None
+            raise
+
+    def _drop_waiter(self, sub: str, entry: tuple[int, int, asyncio.Future[None]]) -> None:
+        waiters = self._slot_waiters.get(sub)
+        if waiters is None:
+            return
+        if entry in waiters:
+            waiters.remove(entry)
+            heapq.heapify(waiters)
+        if not waiters:
+            self._slot_waiters.pop(sub, None)
+
+    def _give_slot(self, sub: str) -> None:
+        """A slot of the member's ended: hand it to the next waiter, else count it free."""
+        waiters = self._slot_waiters.get(sub)
+        while waiters:
+            _line, _seq, fut = heapq.heappop(waiters)
+            if not fut.done():
+                if not waiters:
+                    self._slot_waiters.pop(sub, None)
+                fut.set_result(None)
+                return
+        self._slot_waiters.pop(sub, None)
+        left = self._archidekt_in_flight.get(sub, 1) - 1
+        if left > 0:
+            self._archidekt_in_flight[sub] = left
+        else:
+            self._archidekt_in_flight.pop(sub, None)
 
     def budget_refusal(self, sub: str) -> str | None:
         """Spend one unit of the member's Archidekt budget; the refusal to show when it is used up

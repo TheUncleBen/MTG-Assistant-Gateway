@@ -118,6 +118,7 @@ async def test_archidekt_work_is_capped_per_member(tmp_path: Path) -> None:
     settings = make_settings(tmp_path)
     slow = _SlowArchidekt()
     svc = DeckService(settings, Database(tmp_path / "t.sqlite"), slow)  # type: ignore[arg-type]
+    svc.archidekt_slot_wait = 0  # no wait for a slot (test_archidekt_turns.py covers the wait)
     held = [
         asyncio.create_task(svc.get_any_deck("alice", "42")) for _ in range(decks_mod.MAX_ARCHIDEKT_PER_USER)
     ]
