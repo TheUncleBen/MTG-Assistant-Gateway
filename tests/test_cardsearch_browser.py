@@ -163,6 +163,9 @@ def test_the_top_bar_search_lists_cards_and_decks_without_overflow(
         box.press_sequentially("aesi", delay=25)
         listbox = page.locator(".topbar [role=listbox]:visible")
         listbox.wait_for(timeout=3000)
+        # the list for the whole text: a list for a shorter text ("ae") can show first while the
+        # answer for "aesi" is still on its way, and gets its commander row too
+        page.locator("[role=option][data-name='Search decks named “aesi”']").wait_for(timeout=5000)
         # the commander row appears once the card details (type line) have come back
         page.locator("[role=option]", has_text="Decks with commander").wait_for(timeout=3000)
         heads = page.locator(".topbar .suggest-list li.head").all_text_contents()  # innerText is uppercased
@@ -208,6 +211,8 @@ def test_rows_open_the_card_page_the_deck_search_and_enter_searches_decks(server
         # the keyboard reaches the Decks rows: Down to the commander row, Enter opens the deck search
         page.locator("#site-q").click()
         page.locator("#site-q").press_sequentially("aesi", delay=25)
+        # the list for the whole text, not one for a shorter text still showing (see above)
+        page.locator("[role=option][data-name='Search decks named “aesi”']").wait_for(timeout=5000)
         page.locator("[role=option]", has_text="Decks with commander").wait_for(timeout=3000)
         for _ in range(3):
             page.locator("#site-q").press("ArrowDown")
