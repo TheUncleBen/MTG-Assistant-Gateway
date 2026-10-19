@@ -79,14 +79,15 @@ in-chat cards, deck reports and the Settings and Account pages.
 - The Account page's summary choice is labelled "How often", and outside the app the notifications
   hint gives the steps in order: open the Account page in the app, tick Send me notifications and
   press Save notifications.
-- A member's Archidekt requests made for their own pages in the browser now take their turn before
-  waiting requests from assistants and the deck sync. A fourth Archidekt action while three
+- Archidekt requests made for your own pages in the browser now take their turn before waiting
+  requests from assistants and the deck sync. A fourth Archidekt action for your account while three
   are running or waiting now waits up to 20 seconds for a turn instead of being refused at once. The
   gap between requests, the per-minute limit and each member's 10-minute allowance stay the same.
 - While Archidekt can't be asked (it asked the gateway to slow down, it can't be reached, or your
-  account's Archidekt actions or allowance leave nothing free), My decks, the home page and the
-  app show your deck list as it was last read, with a notice saying how old it is, instead of the
-  "Archidekt is busy" page. The "Archidekt is busy" page now says which of these it is.
+  account's Archidekt actions or allowance leave nothing free), My decks and the home page (in the
+  browser and the app) show your deck list as it was last read in the past day (not after a
+  restart), with a notice saying how old it is, instead of the "Archidekt is busy" page. When it
+  knows why, the "Archidekt is busy" page now says so.
 
 ### Fixed
 - 21 settings on the Settings page couldn't be set from your variables alone. The stack files
@@ -106,8 +107,9 @@ in-chat cards, deck reports and the Settings and Account pages.
   found nothing. A deck in the backup folder could also show in My decks for the same reason.
 - Looking up someone you follow read only the first 5 pages of the list, so a person further down
   was "not followed" when adding a collaborator, and a follow couldn't say whether you already followed
-  them. Both now read on until they find the person, up to 20 pages. What was read is remembered for
-  two minutes, so a lookup repeated in that time, or made at the same time, reads no page again.
+  them. Both now read on until they find the person, up to 20 pages. A lookup repeated within two
+  minutes, or made at the same time, doesn't read the same pages again, so someone you followed on
+  archidekt.com in those two minutes is found once they are up.
 - The summary counted a deck report as finished while its Forge games were still running.
 - A 60-card deck's report showed a Commander check asking for 100 cards, and a run shorter than five
   turns showed a turn-five land-drop rate.

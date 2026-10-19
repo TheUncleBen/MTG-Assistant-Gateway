@@ -7418,13 +7418,14 @@ def applied_text(kind: str, changes: dict[str, Any] | None, result: dict[str, An
     c = changes if isinstance(changes, dict) else {}
     r = result if isinstance(result, dict) else {}
     if kind == "collection":
-        # a collection change is stored as applied even when its read-back finds mismatches
-        if r.get("verified") is True:
-            return "Your collection on Archidekt has these changes now."
-        return (
-            "The changes were sent to Archidekt, but reading your collection back didn't show all "
-            "of them. The result on the review page lists which."
-        )
+        # a collection change is stored as applied even when its read-back finds mismatches; one
+        # applied before the read-back arrived has no "verified" and keeps the plain text
+        if r.get("verified") is False:
+            return (
+                "Sent to Archidekt, but the read-back didn't confirm every change. See Result on the "
+                "review page."
+            )
+        return "Your collection on Archidekt has these changes now."
     if kind != "action":
         return ""
     action = c.get("action")
