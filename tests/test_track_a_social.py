@@ -538,3 +538,59 @@ async def test_a_name_not_followed_is_looked_up_once_until_the_list_expires(
     )
     assert found[1] == (9003, "p3") and found[0] is None
     assert read == list(range(1, FOLLOWING_LOOKUP_PAGES + 1)), read
+
+
+def _slow_following(stack: Stack, monkeypatch) -> list[int]:
+    """A following list of one person a page, going on past every cap and taking a moment a page;
+    amy (78) is on page 1 once the member follows her on Archidekt. The pages read are recorded."""
+    import asyncio
+
+    client = stack.h.app.state.gateway.social.client
+    read: list[int] = []
+
+    async def pages(token: str, user_id: str, page: int = 1) -> dict[str, Any]:
+        read.append(page)
+        await asyncio.sleep(0.05)
+        if page == 1 and 78 in stack.ark.follows.get("alice", set()):
+            row = {"id": 78, "username": "amy"}
+        else:
+            row = {"id": 9000 + page, "username": f"p{page}"}
+        return {"count": 999, "next": f"page={page + 1}", "results": [row]}
+
+    monkeypatch.setattr(client, "following", pages)
+    return read
+
+
+async def test_a_deck_page_does_not_wait_behind_a_long_following_lookup(stack: Stack, monkeypatch) -> None:
+    """A deck page's read of the following list (its first pages) takes its turn between the pages
+    of an assistant's long lookup instead of waiting for all of them, and still reads no page twice."""
+    import asyncio
+
+    from mtg_gateway.social import FOLLOWING_LOOKUP_PAGES, FOLLOWING_PAGES
+
+    await linked_user(stack)
+    read = _slow_following(stack, monkeypatch)
+    social = stack.h.app.state.gateway.social
+    lookup = asyncio.create_task(social.find_followed("user-1", "nobody"))
+    await asyncio.sleep(0.01)  # the lookup is reading page 1
+    names = await social.following_names("user-1")
+    assert len(read) <= FOLLOWING_PAGES + 1 and not lookup.done(), read
+    assert len(names) >= FOLLOWING_PAGES - 1, names
+    assert await lookup is None
+    assert read == list(range(1, FOLLOWING_LOOKUP_PAGES + 1)), read
+
+
+async def test_a_follow_during_a_following_read_is_not_undone(stack: Stack, monkeypatch) -> None:
+    """A follow sent through the gateway while a following-list read is under way makes that read
+    store nothing it read before the follow: the next lookup finds the person just followed."""
+    import asyncio
+
+    await linked_user(stack)
+    read = _slow_following(stack, monkeypatch)
+    social = stack.h.app.state.gateway.social
+    lookup = asyncio.create_task(social.find_followed("user-1", "nobody"))
+    while len(read) < 2:  # page 1 was read without amy
+        await asyncio.sleep(0.01)
+    await social.follow("user-1", 78, True)
+    await lookup
+    assert await social.find_followed("user-1", "amy") == (78, "amy")

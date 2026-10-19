@@ -160,9 +160,12 @@ class SocialService:
         self._following: dict[str, tuple[float, dict[int, str]]] = {}
         # the next page of the remembered following list to read, None when it was read to the end
         self._following_next: dict[str, int | None] = {}
-        # one read of a member's following list at a time: a lookup made while another reads waits
-        # for it and starts from what it read, so parallel calls never read the same pages twice
+        # one page of a member's following list read at a time: a lookup made while another reads
+        # waits for that page and carries on from what was read, so parallel calls never read the
+        # same pages twice, and a page's short read never waits behind all of a long lookup
         self._following_locks: dict[str, asyncio.Lock] = {}
+        # bumped by every follow through the gateway: a read under way since then stores nothing
+        self._following_gen: dict[str, int] = {}
         # (sub, deck id) -> (when, the deck's comment thread root) from that member's last read, so a
         # vote or a comment write straight after the thread loaded skips reading the whole deck
         # again (one thread read and the write, not three calls per vote)
@@ -274,15 +277,26 @@ class SocialService:
         wanted is in it, carrying on from the remembered part (FOLLOWING_TTL). A part already read
         to its end or past ``pages`` reads nothing more until it expires."""
         uid, _name = self._me(sub)
-        async with self._following_locks.setdefault(sub, asyncio.Lock()):
-            hit = self._following.get(sub)
-            now = time.monotonic()
-            if hit and hit[0] > now:
-                expires, users, page = hit[0], dict(hit[1]), self._following_next.get(sub)
-            else:
-                expires, users, page = now + FOLLOWING_TTL, {}, 1
-            try:
-                while page is not None and page <= pages and not (until and until(users)):
+        lock = self._following_locks.setdefault(sub, asyncio.Lock())
+        # this call's own progress (generation, expiry, users, next page), so a read whose remembered
+        # list ran out while it was reading carries on instead of starting again
+        mine: tuple[int, float, dict[int, str], int | None] | None = None
+        while True:
+            # the lock is held for one page at a time, so a deck page's read, which needs only
+            # FOLLOWING_PAGES, takes its turn between an assistant's long lookup's pages
+            async with lock:
+                gen = self._following_gen.get(sub, 0)
+                hit = self._following.get(sub)
+                now = time.monotonic()
+                if hit and hit[0] > now:
+                    expires, users, page = hit[0], dict(hit[1]), self._following_next.get(sub)
+                elif mine is not None and mine[0] == gen:
+                    expires, users, page = mine[1], dict(mine[2]), mine[3]
+                else:
+                    expires, users, page = now + FOLLOWING_TTL, {}, 1
+                if page is None or page > pages or (until and until(users)):
+                    return users
+                try:
                     body = await self.decks._call(
                         sub, lambda t, page=page: self.client.following(t, uid, page)
                     )
@@ -290,12 +304,15 @@ class SocialService:
                         if isinstance(row, dict) and _int(row.get("id")) is not None:
                             users[int(row["id"])] = str(row.get("username") or "")
                     page = page + 1 if body.get("next") else None
-            finally:
-                # pages read on from a remembered list keep its expiry: nothing is held longer than
-                # the TTL; the pages read before a failure are kept, so a retry carries on from them
-                self._following[sub] = (expires, users)
-                self._following_next[sub] = page
-            return users
+                    mine = (gen, expires, users, page)
+                finally:
+                    # pages read on from a remembered list keep its expiry: nothing is held longer
+                    # than the TTL; the pages read before a failure are kept, so a retry carries on
+                    # from them. A follow through the gateway since this page was asked for makes
+                    # the list out of date: it is not stored, and the next turn reads it afresh.
+                    if self._following_gen.get(sub, 0) == gen:
+                        self._following[sub] = (expires, users)
+                        self._following_next[sub] = page
 
     # -- deck collaborators (Archidekt's "editors": people who may change the deck) -----------------
 
@@ -375,6 +392,7 @@ class SocialService:
         if str(user_id) == uid:
             raise DeckError("invalid", refusals.FOLLOW_SELF)
         await self.decks._call(sub, lambda t: self.client.follow_user(t, user_id, on=on))
+        self._following_gen[sub] = self._following_gen.get(sub, 0) + 1
         self._following.pop(sub, None)
         self._following_next.pop(sub, None)
         self.state.db.audit("user_followed", sub=sub, detail={"user_id": user_id, "on": on})
