@@ -407,7 +407,7 @@ def test_the_full_test_buttons_fit_every_screen_and_text_size(tmp_path: Path) ->
                                 "has a commander; saved under History. The solo test takes up to a minute; "
                                 "the result page opens when the solo test is done."
                             ), where
-                            page.locator("details.dd > summary", has_text="More").first.click()
+                            page.locator("details.dd:not(.navmore) > summary", has_text="More").first.click()
                             solo = page.locator("button", has_text="Solo test only")
                             assert solo.is_visible(), where
                             assert solo.get_attribute("data-busy-label") == "Testing…", where

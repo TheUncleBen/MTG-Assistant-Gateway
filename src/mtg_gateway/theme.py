@@ -1819,7 +1819,7 @@ def render(
             f"<a href='/account'>{icon('account')}Account</a>"
             f"<a href='/proposals'>{icon('proposals')}Proposals</a>"
             f"<a href='/history'>{icon('history')}History</a>"
-            # Reports is under More on a phone and a tab on the rail; at desktop width it is here
+            # Reports: here, in the top bar from 1200 px (its More below that), a tab on the rail
             f"<a href='/reports'>{icon('report')}Reports</a>"
             + (f"<a href='/watchlist'>{icon('stats')}Watchlist</a>" if WATCHLISTS else "")
             + f"<a href='/activity'>{icon('activity')}My activity</a>"
