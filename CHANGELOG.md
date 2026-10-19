@@ -11,8 +11,8 @@ with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 
 The example settings files now list every variable the stack files read, each marked required or
 optional, and the stack files now pass every setting on the Settings page to the gateway. This
-version also fixes what the 0.7.31 test round found in the assistants' deck tools, Card search and
-the in-chat cards.
+version also fixes what the 0.7.31 test round found in the assistants' deck tools, Card search, the
+in-chat cards, deck reports and the Settings and Account pages.
 
 ### Upgrade notes
 - From 0.7.31: the stack file and the Compose file changed; take the new ones as the update
@@ -61,17 +61,17 @@ the in-chat cards.
   and asks where any of them would play differently in a real game.
 - `list_my_proposals` and `list_snapshots` page through everything (`limit` up to 100, `offset`,
   `has_more`, `next_offset`) instead of stopping at the newest 20. `list_my_proposals` takes
-  `"collection"` for collection changes, and `list_snapshots` can keep one deck's.
+  `deck_id: "collection"` for collection changes, and `list_snapshots` can keep one deck's.
 - `get_proposal` says where an applied proposal was applied (`applied_via`).
 - An applied account action, collection change or deck deletion says what it did ("The folder is
   created on Archidekt.") instead of "The deck on Archidekt matches this proposal."
 - Collection results give each row's copies now, before, and what the proposal added or removed.
-- A deck edit that adds a name no Magic card has is refused when it is proposed, instead of failing
-  when it is applied.
+- A deck edit that adds a name no Magic card has is refused when it is proposed (when the gateway can
+  check the name), instead of failing when it is applied.
 - The in-chat cards no longer draw a border of their own inside the app's frame, which looked like a
   card within a card on ChatGPT.
-- The assistants' guides say they never need you to sign in to archidekt.com or the gateway for
-  them: they read their changes back with their own tools.
+- The assistants' guides say that, apart from linking Archidekt, they never need you to sign in to
+  archidekt.com or the gateway for them: they read their changes back with their own tools.
 - The Settings page's help for "Forge games per report" and "Forge games played at once" says which
   is the total and which is how many play side by side.
 - The Account page's summary choice is labelled "How often", and outside the app the notifications
@@ -90,18 +90,21 @@ the in-chat cards.
 - A new deck made from a list or a CSV lost each card's colour label, and the check after creating
   it still said the deck matched. Labels are now kept, and the check compares them.
 - Card search's set and type lists could take half a minute to show, and asked again and again
-  while Scryfall asked the gateway to wait. They are now read in the background and shown at once.
+  while Scryfall asked the gateway to wait. They are now read in the background as the page opens and
+  kept for a day, so they show at once.
 - `list_my_decks` gave no folder name and no cover for decks that have them, so filtering by folder
   found nothing. A deck in the backup folder could also show in My decks for the same reason.
 - Looking up someone you follow read only the first 5 pages of the list, so a person further down
-  was "not followed" for a collaborator but "already followed" for a follow. Both now read on until
-  they find the person, up to 20 pages.
+  was "not followed" when adding a collaborator, and a follow couldn't say whether you already followed
+  them. Both now read on until they find the person, up to 20 pages.
 - The summary counted a deck report as finished while its Forge games were still running.
 - A 60-card deck's report showed a Commander check asking for 100 cards, and a run shorter than five
   turns showed a turn-five land-drop rate.
 - A card named without a printing could get a printing from a set not released yet.
-- The pending changes list left out the commanders of a commander change.
-- `search_decks` answered `count: -1` when Archidekt didn't count the matches; it now answers null.
+- `list_my_proposals` with `pending_only` left the commanders of a commander change out of each
+  proposal's `cards`.
+- `search_decks` answered `count: -1` for a search that matched nothing; it now answers null, as
+  when Archidekt gives no count.
 - A deck deletion's restore point didn't name its proposal.
 - `edhrec_average_deck`'s `limit` was described as capping the cards; the average deck is always
   whole, and the description now says so.

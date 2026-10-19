@@ -98,7 +98,8 @@ def test_both_guides_say_never_to_ask_for_a_sign_in() -> None:
     """Ben, 0.7.31 test round: a ChatGPT test asked him to sign in to archidekt.com so it could
     check its own changes. Both guides say it never needs that: the tools read changes back."""
     skill = (SKILL_DIR / "SKILL.md").read_text(encoding="utf-8")
-    assert "You never need the user to sign in to archidekt.com or the" in skill
+    assert "Apart from linking Archidekt on `/account` (and the first" in skill
+    assert "you never need the user to sign in\n   to archidekt.com or the gateway for you" in skill
     assert "read it back yourself (`get_deck`, `list_my_decks`)" in skill
     block = CHATGPT.read_text(encoding="utf-8").split("```text\n", 1)[1]
-    assert "Never ask for passwords, tokens, codes or a sign-in for you." in block
+    assert "codes or a sign-in for you, except linking Archidekt at account_page" in block

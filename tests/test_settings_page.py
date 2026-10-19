@@ -324,7 +324,7 @@ def test_the_two_forge_game_rows_say_how_they_differ() -> None:
     at_once, at_once_help = settings_page.TEXT["forge_parallel_games"]
     assert "in all" in total_help and f"\u201c{at_once}\u201d" in total_help
     assert "side by side" in at_once_help and f"\u201c{total}\u201d" in at_once_help
-    assert "doesn\u2019t change how many games a report plays" in at_once_help
+    assert "doesn't change how many games a report plays" in at_once_help
 
 
 async def test_member_cannot_reach_it_signed_out(gw: Harness) -> None:

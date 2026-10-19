@@ -1403,7 +1403,8 @@ class ArchidektClient:
             row["owner"] = str(owner_obj.get("username") or "")
             row["owner_id"] = str(owner_obj["id"]) if owner_obj.get("id") is not None else None
             rows.append(row)
-        # Archidekt answers a search that matches nothing with count -1: unknown, like a missing one
+        # Archidekt answers a search that matches nothing with count -1 (seen live for a commander
+        # search); it is passed on as null, as when Archidekt gives no count
         count = body.get("count") if isinstance(body.get("count"), int) and body["count"] >= 0 else None
         return {"decks": rows, "count": count, "has_more": bool(body.get("next")), "page": page}
 

@@ -100,14 +100,14 @@ TEXT: dict[str, tuple[str, str]] = {
     "backup_keep_days": ("Days of nightly backups kept", "Older backup files are deleted."),
     "forge_games": (
         "Forge games per report",
-        "How many games one report plays in all. More games give steadier numbers and take longer. "
+        "How many games a new report plays in all. More games give steadier numbers and take longer. "
         "Play more games on a report adds this many again. "
         "\u201cForge games played at once\u201d only sets how many of them play side by side.",
     ),
     "forge_parallel_games": (
         "Forge games played at once",
-        "How many of one report\u2019s games Forge plays side by side, so the report finishes sooner. "
-        "It doesn\u2019t change how many games a report plays: that is \u201cForge games per report\u201d. "
+        "How many of one report's games Forge plays side by side, so the report finishes sooner. "
+        "It doesn't change how many games a report plays: that is \u201cForge games per report\u201d. "
         "Forge plays fewer at once when it has no room for more.",
     ),
     "watchlists_enabled": (

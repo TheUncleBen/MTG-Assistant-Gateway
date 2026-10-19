@@ -1053,7 +1053,7 @@ def honesty_html(g: dict[str, Any], ask: str = "") -> str:
 
 CONSTRUCTED_VALIDATION = (
     "Not checked: the research service's check is for Commander decks (100 cards and a commander), so "
-    "it does not apply to a 60-card deck."
+    "it does not apply to a constructed deck (60 cards or more)."
 )
 
 
