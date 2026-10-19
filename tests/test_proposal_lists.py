@@ -3,6 +3,8 @@ applied proposal was applied, and the cards a waiting change touches."""
 
 from __future__ import annotations
 
+import json
+
 from mtg_gateway import recheck
 from mtg_gateway.decks import applied_text
 
@@ -105,6 +107,30 @@ async def test_the_board_lists_the_commanders_a_commander_change_names(stack: St
     row = next(r for r in p["rows"] if r["kind"] == "commander")
     old = {k: v for k, v in row.items() if k != "names"}
     assert recheck._clean([old]) == recheck._clean([row])
+
+
+async def test_a_commander_change_saved_before_names_lists_its_commanders_once_the_deck_is_read(
+    stack: Stack,
+) -> None:
+    """A commander row stored by 0.7.31 has no names; the next local check against the deck (a
+    deck page view, a new proposal, an apply) fills them, so the board lists its commanders,
+    and the proposal's version stays."""
+    h = stack.h
+    token = await linked_user(stack)
+    await _set_mode(h, "manual")
+    change = {"action": "set_commander", "card_name": "Sol Ring"}
+    p = structured(await call(h, token, "propose_deck_changes", {"deck_id": "42", "changes": [change]}))
+    decks = h.app.state.gateway.decks
+    row = decks.db.get_proposal(p["proposal_id"], "user-1")
+    old = [{k: v for k, v in r.items() if k != "names"} for r in row["rows"]]
+    with decks.db.tx() as c:
+        c.execute("UPDATE proposals SET rows_json = ? WHERE id = ?", (json.dumps(old), p["proposal_id"]))
+    line = structured(await call(h, token, "list_my_proposals", {"pending_only": True}))["proposals"][0]
+    assert "Sol Ring" not in line["cards"]  # as 0.7.31 stored it
+    decks.recheck_waiting("user-1", await decks.get_own_deck("user-1", "42"))
+    line = structured(await call(h, token, "list_my_proposals", {"pending_only": True}))["proposals"][0]
+    assert "Sol Ring" in line["cards"] and "Aesi, Tyrant of Gyre Strait" in line["cards"], line
+    assert line["version"] == row["version"]
 
 
 async def test_search_decks_count_is_null_when_archidekt_gives_minus_one(stack: Stack) -> None:

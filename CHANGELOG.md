@@ -105,7 +105,8 @@ in-chat cards, deck reports and the Settings and Account pages.
   turns showed a turn-five land-drop rate.
 - A card named without a printing could get a printing from a set not released yet.
 - `list_my_proposals` with `pending_only` left the commanders of a commander change out of each
-  proposal's `cards`.
+  proposal's `cards`. A change made before this version lists them once the gateway next reads its
+  deck (opening the deck's page, or a new proposal or an apply on that deck).
 - `search_decks` answered `count: -1` for a search that matched nothing; it now answers null, as
   when Archidekt gives no count.
 - A deck deletion's restore point didn't name its proposal.

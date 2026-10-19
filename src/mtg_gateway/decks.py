@@ -551,6 +551,45 @@ def _commander_names(*lists: list[str]) -> list[str] | None:
     return sorted({n for names in lists for n in names}, key=str.lower) or None
 
 
+def _split_names(text: str, known: set[str]) -> list[str] | None:
+    """``text`` (names joined with ", ") split back into the ``known`` names it joins, taking the
+    longest known name at each step, since a name may itself hold ", "; None when some part is
+    no known name."""
+    parts = text.split(", ")
+    out: list[str] = []
+    i = 0
+    while i < len(parts):
+        j = next((j for j in range(len(parts), i, -1) if ", ".join(parts[i:j]) in known), None)
+        if j is None:
+            return None
+        out.append(", ".join(parts[i:j]))
+        i = j
+    return out
+
+
+def fill_commander_names(
+    rows: list[dict[str, Any]] | None, deck: Deck, changes: Any
+) -> list[dict[str, Any]] | None:
+    """The rows with ``names`` filled in on a commander row saved before rows listed them (0.7.31),
+    from the deck's card names and the names the stored changes give, as its before and after
+    join them; None when there is nothing to fill or a name can't be told apart."""
+    if not any(r.get("kind") == "commander" and not r.get("names") for r in rows or []):
+        return None
+    known = {c.name for c in deck.cards} | {
+        str(ch["card_name"]) for ch in changes or [] if isinstance(ch, dict) and ch.get("card_name")
+    }
+    out = []
+    for r in rows or []:
+        if r.get("kind") == "commander" and not r.get("names"):
+            sides = [str(r.get(k) or "") for k in ("before", "after")]
+            split = [[] if s in ("", "(none)") else _split_names(s, known) for s in sides]
+            if any(s is None for s in split):
+                return None
+            r = {**r, "names": _commander_names(*split)}  # type: ignore[arg-type]
+        out.append(r)
+    return out
+
+
 def row_cards(rows: list[dict[str, Any]] | None) -> list[str]:
     """Every card the rows name, a commander row's too, sorted."""
     return sorted({str(n) for r in rows or [] for n in [r.get("name"), *(r.get("names") or [])] if n})
@@ -4501,9 +4540,18 @@ class DeckService:
             logger.exception("re-check of waiting proposals failed")
             return out
         for line in board:
+            row = self.db.get_proposal(line["id"], sub)
+            # a commander change saved before its row listed the commanders lists them from here on
+            # (the board's card list reads them), now that the deck is at hand
+            filled = row and fill_commander_names(row.get("rows"), deck, row.get("changes"))
+            if (
+                row
+                and filled
+                and self.db.fill_proposal_rows(row["id"], sub, filled, int(row.get("version") or 1))
+            ):
+                row["rows"] = filled
             if line.get("status") == "held":
                 continue
-            row = self.db.get_proposal(line["id"], sub)
             if row is None or not row.get("baseline_fingerprint"):
                 continue
             try:

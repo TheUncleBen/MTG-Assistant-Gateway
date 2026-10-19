@@ -2544,6 +2544,22 @@ class Database:
         with self.tx() as c:
             return c.execute(sql, args).rowcount == 1
 
+    def fill_proposal_rows(
+        self, proposal_id: str, owner_sub: str, rows: list[dict[str, Any]], version: int
+    ) -> bool:
+        """Store ``rows`` in place of a waiting proposal's review rows, only while it is pending at
+        ``version`` (an amend since keeps its own rows). For details the stored rows lacked, never
+        a change to what the proposal does: the version stays. True when it was stored."""
+        with self.tx() as c:
+            return (
+                c.execute(
+                    "UPDATE proposals SET rows_json = ? WHERE id = ? AND owner_sub = ? AND state = 'pending' "
+                    "AND version = ?",
+                    (json.dumps(rows), proposal_id, owner_sub, int(version)),
+                ).rowcount
+                == 1
+            )
+
     def dependents(self, owner_sub: str, proposal_id: str) -> list[str]:
         """The owner's live waiting proposals that depend on ``proposal_id``."""
         with self._lock:
