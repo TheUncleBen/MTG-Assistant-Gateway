@@ -159,6 +159,14 @@ DESCRIPTION_NOTES: dict[str, str] = {
     "private decks too), like get_deck.",
 }
 
+# A listed tool's parameter whose upstream description says more than the tool does: the new
+# description replaces it. edhrec_average_deck shares edhrec_commander's input, whose limit caps
+# the cards per type there; the average deck is always printed whole.
+PARAM_DESCRIPTIONS: dict[tuple[str, str], str] = {
+    ("edhrec_average_deck", "limit"): "Not used by this tool: the whole average deck (about 100 "
+    "cards) is always returned.",
+}
+
 
 # Mystic Forge answers a failed upstream request (Scryfall, EDHREC, Archidekt, Commander
 # Spellbook, MTGJSON, or its own crash) with plain text and no error flag; these are the openings
@@ -548,6 +556,10 @@ class MysticForgeProxy:
                 wrapped.add(t.name)
             if t.name in ALLOWED_TOOLS:
                 d["inputSchema"] = compact_schema(flat if flat is not None else d.get("inputSchema") or {})
+                props = d["inputSchema"].get("properties")
+                for (tool, param), text in PARAM_DESCRIPTIONS.items():
+                    if tool == t.name and isinstance(props, dict) and isinstance(props.get(param), dict):
+                        props[param]["description"] = text
                 if isinstance(d.get("description"), str):
                     d["description"] = rewrite_text(d["description"])
                     if t.name == "scryfall_search":

@@ -40,7 +40,9 @@ html,body{margin:0;background:transparent}
 body{font-family:var(--font);font-size:max(var(--font-text-sm-size,.875rem),.875rem);line-height:1.4;color:var(--text);
   padding:calc(var(--pad) + var(--inset-top)) calc(var(--pad) + var(--inset-right))
           calc(var(--pad) + var(--inset-bottom)) calc(var(--pad) + var(--inset-left))}
-.card{background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:14px 14px 12px;max-width:760px}
+/* The host already draws a frame around the card (ChatGPT does), so the card draws no border of its own:
+   a second one inside it read as a card within a card. */
+.card{background:var(--bg);padding:14px 14px 12px;max-width:760px}
 :root[data-display=fullscreen] .card{max-width:none;min-height:calc(100vh - 2*var(--pad))}
 .head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:6px}
 h1{font-size:max(var(--font-heading-md-size,1rem),1rem);font-weight:600;margin:0;line-height:1.3;overflow-wrap:anywhere}

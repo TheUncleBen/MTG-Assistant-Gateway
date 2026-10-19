@@ -689,6 +689,13 @@ def _cleanup_text(c: dict[str, Any]) -> str:
         cause = c.get("cause")
         if cause == "token-unreadable":
             why = c["reason"].removeprefix("removed-member clean-up is off: ").split("; it is optional")[0]
+            if c.get("missing"):
+                return (
+                    f"Off: {why}. The likely cause: the mtg_authentik_api_token secret isn't attached "
+                    "to the gateway in the stack file, so check that its three lines there are "
+                    "uncommented and that MTG_AUTHENTIK_API_TOKEN_FILE is "
+                    f"/run/secrets/mtg_authentik_api_token, then redeploy ({setup}, steps 6 and 7)."
+                )
             return (
                 f"Off: {why}. Check the mtg_authentik_api_token Docker secret and "
                 f"MTG_AUTHENTIK_API_TOKEN_FILE, then redeploy ({setup}, steps 6 and 7)."

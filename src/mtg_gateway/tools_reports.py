@@ -285,7 +285,7 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
         description=(
             "Test a deck and keep the numbers: deck_stats plus, when the research service is available, a "
             "goldfish simulation (games, default 300; the website calls it the solo test) and a legality "
-            "check (validate_decklist). A deck with a commander "
+            "check (validate_decklist, for Commander decks only). A deck with a commander "
             "plays from the command zone at 40 life; a deck without one and with at least 60 cards "
             "(Standard, Modern, Pioneer, Legacy, Pauper and the like) plays a 60-card game: 7-card "
             "London mulligan with no free one, 20 life, on the play, sideboard left out. deck_ref is an "

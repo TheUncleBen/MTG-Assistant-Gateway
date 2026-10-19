@@ -18,7 +18,7 @@ from . import formatting, refusals
 from .archidekt import VOTE_DOWN, VOTE_NONE, VOTE_UP, drops_formatting, words_only_note
 from .decklist import clean_text
 from .decks import DeckError, _clean_deck_id, _row, needs_look_error
-from .social import FOLLOWING_PAGES
+from .social import FOLLOWING_LOOKUP_PAGES
 
 if TYPE_CHECKING:
     from .decks import DeckService
@@ -133,22 +133,30 @@ async def collaborator_target(
         raise DeckError("invalid", "username is required: the Archidekt username of the person")
     current = await social.collaborators(sub, deck.id, owned=True)
     if action == "collaborator_add":
-        people = await social.following_names(sub)
-        hits = [i for i, n in people.items() if n.casefold() == want.casefold()]
-        if not hits:  # followed a moment ago, after the short-lived list was read
-            people = await social.following_names(sub, fresh=True)
-            hits = [i for i, n in people.items() if n.casefold() == want.casefold()]
-        if not hits:
+        found = await social.find_followed(sub, want)
+        if found is None:
+            if social.following_cut(sub):
+                # the list goes on past the pages read: they may be followed further down
+                missing = (
+                    f"{want} isn't in the first {FOLLOWING_LOOKUP_PAGES} pages of the people you follow "
+                    "on Archidekt, which is as far as the gateway reads, so they can't be added here. "
+                    "Collaborators are added from the people you follow, as on Archidekt's own "
+                    "settings page: if you don't follow them yet, follow them on Archidekt first "
+                )
+            else:
+                missing = (
+                    f"{want} is not among the people you follow on Archidekt. Collaborators are added "
+                    "from the people you follow, as on Archidekt's own settings page: follow them on "
+                    "Archidekt first "
+                )
             raise DeckError(
                 "not_found",
-                f"{want} is not among the people you follow on Archidekt (the gateway reads the "
-                f"first {FOLLOWING_PAGES} pages of that list). Collaborators are added from the "
-                "people you follow, as on Archidekt's own settings page: follow them on Archidekt "
-                f"first ({profile_url(want)}), then add them.",
+                f"{missing}({profile_url(want)}), then add them. Someone you followed on "
+                "archidekt.com very recently may not be in the list the gateway last read.",
                 follow_username=want,
                 follow_url=profile_url(want),
             )
-        user_id, name = hits[0], people[hits[0]]
+        user_id, name = found
         if any(c["user_id"] == user_id for c in current):
             raise DeckError("invalid", f"{name} is already a collaborator on this deck")
         return user_id, name
@@ -257,7 +265,7 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
             raise DeckError(
                 "unavailable", "Archidekt does not say who owns this deck, so there is no one to follow"
             )
-        state = await social.follow_state(sub, owner_id)
+        state = await social.follow_state(sub, owner_id, lookup=True)
         if state["self"]:
             raise DeckError("invalid", refusals.FOLLOW_SELF)
         changes.update(user_id=owner_id, on=on)
@@ -439,7 +447,9 @@ async def apply(
             # progress: the snapshot and the backup copy are recorded as every apply's are,
             # so a stop that changed nothing deletes the copy or queues its delete
             result = {
-                **(await decks.delete_deck(sub, deck_id, deck.name, progress=progress)),
+                **(
+                    await decks.delete_deck(sub, deck_id, deck.name, progress=progress, proposal_id=row["id"])
+                ),
                 "verified": True,
             }
         except DeckError as exc:

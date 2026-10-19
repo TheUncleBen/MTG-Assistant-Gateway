@@ -656,16 +656,16 @@ default, and an install that leaves it off behaves exactly as before.
   number the machine holds (in these measurements, 2 in 1536M and 2 CPUs, not 3).
   `FORGE_GAME_SECONDS` (default 240, four minutes) is how long one game may run before Forge calls
   it a draw; such games are counted as draws in the report. Forge reads a card's rules only when a
-  game needs that card, which roughly halves each Java start (measured 7 s to 3 s on a 4-CPU PC);
-  `FORGE_LAZY_CARDS=0` makes it read them all at start again.
+  game needs that card, which roughly halves each Java start (measured 7 s to 3 s on a 4-CPU PC).
+  This is fixed in the Forge image.
 - **Memory where Docker can't cap it:** on Raspberry Pi OS the kernel's memory controller is off by
   default, so Docker drops the stack's `FORGE_MEMORY_LIMIT` and nothing caps Forge's memory. Forge
   then guards its own memory from inside, with nothing to change on the machine: the stack also
   passes `FORGE_MEMORY_LIMIT` as `FORGE_MEMORY_BUDGET`, which sizes the games at once when no limit
-  can be read; each Java gets a ceiling on its class data on top of `FORGE_XMX`
-  (`FORGE_MAX_METASPACE`, default `256m`); and each Java runs with an out-of-memory score of
-  `FORGE_OOM_SCORE_ADJ` (default 1000), so if the machine runs out of memory while Forge plays, the
-  kernel stops a Forge game before the gateway or other services. These keep Forge in bounds, but
+  can be read; each Forge game gets a cap on its extra Java memory for loaded code, on top of
+  `FORGE_XMX` (`FORGE_MAX_METASPACE`, default `256m`); and `FORGE_OOM_SCORE_ADJ` (default 1000)
+  sets how readily the kernel stops a Forge game, so if the machine runs out of memory while Forge
+  plays, the kernel stops a Forge game before the gateway or other services. These keep Forge in bounds, but
   they are not a hard limit as the kernel's memory controller is.
 - **More than one machine** (optional; one copy is the default): the gateway can use several
   copies of the Forge service, for example a Pi and an x86 PC, each playing whole runs.
@@ -729,13 +729,17 @@ yet picked up.
   connected" notification while the app listens. The app is built to reconnect after the phone restarts and after an app update; that is tested on an emulator, not yet on a real phone. **Disconnect my phones** gives
   the member a new topic, which signs out every phone; turning notifications off ends the stream
   too. **Send test** sends one message to check it, at most once a minute.
-- **Memory:** ntfy is limited to 128 MB (`NTFY_MEMORY_LIMIT`).
+- **Memory:** ntfy is limited to 128 MB. This is a setting: `NTFY_MEMORY_LIMIT` in your
+  environment, listed in both example files.
 - **Connections:** every phone reaches ntfy through the gateway, so ntfy counts them all as one
-  visitor. The stacks raise ntfy's limits for that visitor to 250 subscriptions
-  (`NTFY_VISITOR_SUBSCRIPTION_LIMIT`, ntfy's default 30) and a burst of 600 requests, one more
-  each second (`NTFY_VISITOR_REQUEST_LIMIT_BURST` and `NTFY_VISITOR_REQUEST_LIMIT_REPLENISH`,
-  defaults 60 and 5 s). The gateway takes at most 200 app connections in all and at most 4 for
-  one member's topic; past those it answers `503 busy` and `429`, and the app tries again by itself.
+  visitor. The stack files raise ntfy's limits for that visitor to 250 subscriptions (ntfy's
+  default is 30) and a burst of 600 requests, one more each second (ntfy's defaults are 60, one
+  more every 5 s). The gateway takes at most 200 app connections in all and at most 4 for one
+  member's topic; past those it answers `503 busy` and `429`, and the app tries again by itself.
+  These values are fixed, not settings: the ntfy limits are written into the ntfy service in the
+  stack files, and the gateway's limits, the 25-second keepalive and the 12 hours ntfy keeps
+  messages are fixed too. ntfy's subscription limit (250) is set above the gateway's 200
+  connections on purpose.
 
 ## Environment reference
 
@@ -751,9 +755,11 @@ itself:
 | `MTG_NETWORK_NAME` | `mtg-gateway` | The overlay network from step 1. Must exist before you deploy and match its name exactly (case-sensitive) |
 | `TIMEZONE` | `UTC` | Passed to the containers as `TZ` |
 
-**Gateway settings.** Read by the gateway. The stack file already passes
-through the ones marked *stack*; for any other, add a line under the
-gateway's `environment:` in the stack file, or it has no effect.
+**Gateway settings.** Read by the gateway. The ones marked *stack* are
+passed by the stack file and the Compose file and listed in their example env
+files. `FORGE_REPLICAS`, `FORGE_NODE` and `MTG_NODE` are Swarm-only. The ones
+marked *fixed* are not settings: the stack file or the image sets them, so
+leave them as they are.
 
 Since 0.7.29 most of the tuning settings below can also be changed by an
 admin on the gateway's Settings page (`/admin/settings`, see
@@ -768,9 +774,9 @@ value. Leave it out to manage it on the page.
 | `MTG_PUBLIC_URL` | yes, *stack* | | Public https URL, no path |
 | `MTG_OIDC_ISSUER` | yes, *stack* | | Identity provider issuer URL |
 | `MTG_OIDC_CLIENT_ID` | yes, *stack* | | OIDC client ID |
-| `MTG_OIDC_CLIENT_SECRET_FILE` | yes, *stack* | | File holding the OIDC client secret (`/run/secrets/mtg_oidc_client_secret`) |
-| `MTG_FERNET_KEY_FILE` | yes, *stack* | | File holding the encryption key (`/run/secrets/mtg_fernet_key`) |
-| `MTG_SESSION_SECRET_FILE` | yes, *stack* | | File holding a random secret of 32+ characters (`/run/secrets/mtg_session_secret`) |
+| `MTG_OIDC_CLIENT_SECRET_FILE` | yes, *fixed* | | File holding the OIDC client secret (`/run/secrets/mtg_oidc_client_secret`). Set by the stack file to the Docker secret's path; not a setting |
+| `MTG_FERNET_KEY_FILE` | yes, *fixed* | | File holding the encryption key (`/run/secrets/mtg_fernet_key`). Set by the stack file to the Docker secret's path; not a setting |
+| `MTG_SESSION_SECRET_FILE` | yes, *fixed* | | File holding a random secret of 32+ characters (`/run/secrets/mtg_session_secret`). Set by the stack file to the Docker secret's path; not a setting |
 | `MTG_OIDC_SCOPES` | no, *stack* | `openid profile email offline_access` | Scopes requested from the identity provider, used exactly as set. Keep `offline_access` in it: the provider's refresh token is what lets the gateway keep checking membership. Leave it out only for a provider that refuses it; members then sign in again whenever the provider's access token runs out |
 | `MTG_OIDC_PREVIOUS_ISSUERS` | no, *stack* | | Only when you move the identity provider to a new address: the old issuer URL(s), comma separated, with `MTG_OIDC_ISSUER` set to the new one. Members whose account was created under an old address are moved to the new one at their next sign-in. Anyone else signing in with a different issuer than their account was created with is refused, so a second provider can't take over accounts |
 | `MTG_MEMBERSHIP_CHECK_TTL` | no, *stack* | `5` | Before serving any request with a browser session or a gateway token, the gateway asks the identity provider's userinfo endpoint whether the person is still in `MTG_REQUIRED_GROUP` (and `MTG_ADMIN_GROUP`). The answer is reused for this many seconds, which is the longest a removed member can keep going. `0` asks on every request; 0 to 60. If the provider can't be reached, requests get 503 and nothing is revoked |
@@ -781,8 +787,8 @@ value. Leave it out to manage it on the page.
 | `MTG_AUTHENTIK_API_URL` | no, *stack* | the scheme and host of `MTG_OIDC_ISSUER` | Where the clean-up reaches Authentik's API. https only |
 | `MTG_OIDC_GROUPS_CLAIM` | no, *stack* | `groups` | Dot-path to the group list in the ID token (or userinfo) claims. Authentik: `groups`; Keycloak: `realm_access.roles`; Zitadel: `urn:zitadel:iam:org:project:roles` (a dict whose keys are the role names also works; a key whose value is empty or `false` does not count). The whole value is tried as one claim name first, so Auth0-style `https://example.com/groups` works too. Names are compared exactly, with no trimming. A missing or differently shaped claim means no groups, so `MTG_REQUIRED_GROUP` refuses the sign-in |
 | `MTG_OIDC_TOKEN_AUTH_METHOD` | no, *stack* | `client_secret_post` | How the gateway sends its client secret to the token endpoint: `client_secret_post` (in the form body) or `client_secret_basic` (HTTP Basic header). Match what the client is configured for in the identity provider |
-| `MTG_DATA_DIR` | no, *stack* | `/data` | Where the SQLite database lives. In the stack, the variable is the folder on the host, mounted at `/data` |
-| `MTG_BACKUP_DIR` | no, *stack* | `/backups` in the image | Where nightly backups go; empty turns them off. In the stack, the folder on the host, mounted at `/backups` |
+| `MTG_DATA_DIR` | yes with Swarm, *stack* | `/data` | Where the SQLite database lives. In the stack, the variable is the folder on the host, mounted at `/data` |
+| `MTG_BACKUP_DIR` | yes with Swarm, *stack* | `/backups` in the image | Where nightly backups go. In the stack and the Compose file, the folder on the host, mounted at `/backups`; the gateway itself always uses `/backups` there |
 | `MTG_BACKUP_HOUR_UTC` | no, *stack* | `3` | Hour (UTC) of the nightly backup, 0 to 23 |
 | `MTG_BACKUP_KEEP_DAYS` | no, *stack* | `14` | How many days of backups to keep, 1 to 3650 |
 | `MTG_BACKUP_COPY_DIR` | no, *stack* | empty (no second copy) | A host folder (another disk, or storage every node mounts at the same path) that every backup is also copied to and pruned the same way. It must already exist on `MTG_NODE`. The stack mounts it at `/backup-copy`; left empty it mounts `/dev/null` there and nothing is copied. A failed copy is logged and shown on the admin page. See [OPERATIONS.md](OPERATIONS.md#backups) |
@@ -793,16 +799,16 @@ value. Leave it out to manage it on the page.
 | `MTG_LOG_LEVEL` | no, *stack* | `INFO` | Logging level |
 | `MTG_SERVER_NAME` | no, *stack* | `MTG Assistant Gateway` | Name shown on the gateway's pages, the install page and to assistants. Set your own and the plugin's short name follows it (`Deck Helper` → `deck-helper`), and the public plugin files no longer name this project or link to its repository. Anyone who installed the plugin under the old short name installs it again from `/install`. The ChatGPT plugin file also uses this name as its developer name and author name, which OpenAI's plugin check refuses when either is over 120 characters ([plugin docs](https://developers.openai.com/plugins/llms-full.txt), `plugin_developer_name_too_long` and `plugin_author_name_too_long`, read 2026-10-16; not tested in ChatGPT). The 120 characters are counted after the same filter as `MTG_CHATGPT_NAME` below. A longer name is cut at a word there (inside the word only when the first 120 characters have no space), and the gateway says so in its log at start and on the admin page; the rest of the gateway keeps the whole name |
 | `MTG_CHATGPT_NAME` | no, *stack* | empty (`MTG_SERVER_NAME`) | The ChatGPT connector name, when it should differ from `MTG_SERVER_NAME`: the name in the ChatGPT plugin file and the name the ChatGPT install steps tell people to type. Everything else keeps `MTG_SERVER_NAME`. Letters, digits, spaces and `. _ ' -` only: any run of other characters becomes a space, and repeated spaces become one; the 80-character count below is taken after that. OpenAI's plugin docs say a plugin file whose name is over 80 characters is refused on upload ([plugin docs](https://developers.openai.com/plugins/llms-full.txt), `plugin_display_name_too_long`, read 2026-10-15 and again 2026-10-16; not tested in ChatGPT). Their 30-character limit applies only to OpenAI's public plugin directory, which the gateway doesn't use, and a name typed when adding the connector by hand has no documented limit. When the ChatGPT connector name is over 80 characters, whether from this setting or from `MTG_SERVER_NAME` with this one empty, the gateway still starts and warns in three places: its log at start, the admin page and the install page's ChatGPT plugin-file step |
-| `MTG_LISTEN_HOST`, `MTG_LISTEN_PORT` | no | `0.0.0.0`, `8080` | Address and port inside the container. Leave them; the stack, Compose file and health checks expect 8080 |
+| `MTG_LISTEN_HOST`, `MTG_LISTEN_PORT` | no, *fixed* | `0.0.0.0`, `8080` | Address and port inside the container. Not a setting: the stack, Compose file and health checks expect 8080 |
 | `MTG_MYSTIC_FORGE_URL` | no, *stack* | empty (no research tools) | Internal Mystic Forge MCP URL; the stack sets `http://mtg-assistant-mysticforge:8000/mcp` |
 | `MTG_FORGE_URL` | no, *stack* | empty (Forge off) | Internal Forge runner URL; deck reports add real Forge games when set (see the Forge section above) |
 | `MTG_FORGE_GAMES` | no, *stack* | `4` | Forge games per deck report (1 to 50); **Play more games** adds this many again |
 | `FORGE_REPLICAS`, `FORGE_NODE` | no, *stack* | `0`, empty | Copies of the Forge service, and the node they run on. `0` leaves Forge off; `1` with `FORGE_NODE` is the usual setup. For copies on several machines, place them by a node label instead of `FORGE_NODE` (see "More than one machine" in the Forge section above) |
 | *(node label)* `mtg-forge=true` | no | none | Only for Forge copies on several machines: label each machine (`docker node update --label-add mtg-forge=true <node>`) and place the Forge service by `node.labels.mtg-forge == true` instead of `FORGE_NODE` (see "More than one machine" in the Forge section above) |
-| `MTG_FORGE_PARALLEL_GAMES` | no | `4` | How many of a report's Forge games the gateway asks Forge to play at once (1 to 4). `FORGE_MAX_PARALLEL` caps it for all runs together. Also on the Settings page |
-| `FORGE_MAX_METASPACE`, `FORGE_OOM_SCORE_ADJ` | no | `256m`, `1000` | On the Forge service: each Java's ceiling on its class data on top of `FORGE_XMX`, and its out-of-memory score, 1 to 1000 (1000: the kernel stops a Forge game first when the machine runs out of memory; 0 turns this off; any other value is left out and Forge's log says why). Not in the stack files: add them to the Forge service's environment to change them |
+| `MTG_FORGE_PARALLEL_GAMES` | no, *stack* | `4` | How many of a report's Forge games the gateway asks Forge to play at once (1 to 4). `FORGE_MAX_PARALLEL` caps it for all runs together. Also on the Settings page |
+| `FORGE_MAX_METASPACE`, `FORGE_OOM_SCORE_ADJ` | no, *stack* | `256m`, `1000` | On the Forge service: each Forge game's extra Java memory for loaded code (on top of `FORGE_XMX`), and how readily the kernel stops a Forge game when the machine runs out of memory, 1 to 1000 (1000: Forge goes first; 0 turns this off; any other value is left out and Forge's log says why) |
 | `FORGE_MAX_PARALLEL` | no, *stack* | empty | On the Forge service: the most games Forge plays at once, for all runs together (1 to 4). Empty: one per 2 CPUs and 1.2 GB of the container's limits (see the Forge section above) |
-| `FORGE_IMAGE`, `FORGE_TAG` | no, *stack* | `ghcr.io/theuncleben/mtg-assistant-forge`, `2.0.15-mag3` | The Forge image and its version. Leave them out to follow the stack file's own version on every update |
+| `FORGE_IMAGE`, `FORGE_TAG` | no, *stack* | `ghcr.io/theuncleben/mtg-assistant-forge`, `2.0.15-mag3` | The Forge image and its version. The stack file names one exact Forge version, which changes only when you deploy a newer stack file. Leave these out to use it; set `FORGE_TAG` only to pin Forge on purpose, and it then stays on that version even when the stack file moves on |
 | `FORGE_XMX` | no, *stack* | `1g` | The Java heap limit (`-Xmx`) of each Forge game |
 | `FORGE_MEMORY_LIMIT`, `FORGE_CPUS` | no, *stack* | `1536M`, `2` | The Forge container's memory and CPU caps. `FORGE_MEMORY_LIMIT` is also passed to Forge as `FORGE_MEMORY_BUDGET`, which sizes the games at once where Docker can't cap memory (see the Forge section above) |
 | `FORGE_GAME_SECONDS` | no, *stack* | `240` | Seconds before Forge calls one game a draw |
@@ -811,8 +817,8 @@ value. Leave it out to manage it on the page.
 | `MTG_APPROVAL_MODE_DEFAULT` | no, *stack* | `manual` | The approval mode of a member who has not chosen one on their Account page: `manual` (every change waits for their own press), `semi` (the assistant applies low-risk changes itself, such as a small edit or a private copy of a deck) or `auto` (the assistant applies most changes itself; some still wait for the member). Members pick their own; see [OPERATIONS.md](OPERATIONS.md#approval-modes-when-the-assistant-may-apply-by-itself) |
 | `MTG_APPROVAL_MODE_MAX` | no, *stack* | `auto` | The highest mode members may choose; `auto` means no cap. A stored choice above the cap is read as the cap |
 | `MTG_AUTO_APPLY_MAX_ROWS` | no, *stack* | `5` | How many review rows an edit may have and still count as low risk in `semi` mode (1 to 100) |
-| `MTG_AUTO_BIG_EDIT_ROWS` | no | `20` | In `auto` mode, a deck or collection edit with more card rows than this waits for the member's press (1 to 100). Also on the Settings page |
-| `MTG_PROPOSAL_EXPIRY_DAYS` | no | `7` | Days a waiting change stays open for approval (1 to 30). A change nobody approves in that time expires; an assistant's amend starts the time again. Also on the Settings page |
+| `MTG_AUTO_BIG_EDIT_ROWS` | no, *stack* | `20` | In `auto` mode, a deck or collection edit with more card rows than this waits for the member's press (1 to 100). Also on the Settings page |
+| `MTG_PROPOSAL_EXPIRY_DAYS` | no, *stack* | `7` | Days a waiting change stays open for approval (1 to 30). A change nobody approves in that time expires; an assistant's amend starts the time again. Also on the Settings page |
 | `MTG_APPLY_IN_CHAT` | no, *stack* | `true` | The Approve/Reject card an AI app that renders MCP Apps shows next to a proposal. Its Approve button calls `confirm_proposal` with a one-time code the assistant never sees; The same switch turns on the other cards (printings, recognised cards, a deck, the account, comparisons, statistics, deck lists, scans) and the ten-minute signed data links they load (`GET /cards/data/`); `false` removes every card, the links and the tool, leaving the review page (and `apply_proposal` where the member's approval mode allows it) |
 | `MTG_UPDATE_CHECK` | no, *stack* | `true` | Twice a day, one anonymous request to GitHub's releases API for this project's newest release. When it is newer than the running gateway, admins see a notice on every page and the update steps on the admin overview (Portainer, Swarm, docker compose). Notice only: the gateway never pulls an image or touches Docker. `false` sends nothing |
 | `MTG_ARCHIDEKT_CALLS_PER_10_MIN` | no, *stack* | `120` | Archidekt work one member may start per 10 minutes (a deck read, a proposal, an apply, a link, and a research tool such as goldfish or precon given an Archidekt deck id or link), refilled evenly; past it the member gets `rate_limited` for a few minutes. Stops a looping assistant from keeping a steady stream of requests on Archidekt. 10 to 100000 |
@@ -823,9 +829,9 @@ value. Leave it out to manage it on the page.
 | `MTG_ARCHIDEKT_CACHE_SECONDS` | no, *stack* | `60` | How long anonymous public deck reads and deck searches are reused; cleared by any write the gateway sends (0 turns it off, up to 900). A member's deck page is also shown again from memory for up to 20 seconds (or this, if shorter) |
 | `MTG_ARCHIDEKT_CARD_CACHE_SECONDS` | no, *stack* | `3600` | How long card lookups are reused (0 to 86400) |
 | `MTG_ARCHIDEKT_BACKUPS` | no, *stack* | `true` | Before every applied edit or restore (except the deck page's own saves, Card search's Add to deck, and the deck editor's save with its backup box unticked), copy the deck as a private deck into the user's backup folder on Archidekt (using Archidekt's own copy feature, so printings, finishes and categories are kept). If the copy fails, nothing changes and the proposal stays pending |
-| `MTG_ARCHIDEKT_BACKUP_COPIES` | no | `10` | Backup copies kept per deck in that folder (1 to 50). Older ones are deleted from Archidekt one at a time, at most one a minute, once that deck gets its next new backup copy; a copy the member changed or moved on Archidekt, or one the gateway couldn't delete, is kept and no longer counts toward this number. Copies made before 0.7.29 are never deleted and don't count toward it either. Also on the Settings page |
-| `MTG_ARCHIDEKT_BACKUP_BOX_DEFAULT` | no | `false` | Whether the deck editor's "Also keep a backup copy on Archidekt" box starts ticked. Also on the Settings page |
-| `MTG_SNAPSHOTS_PER_DECK` | no | `25` | Restore points kept per deck on the gateway (5 to 100), for History > Restore. One that records a backup copy the gateway may still delete is kept too. Also on the Settings page |
+| `MTG_ARCHIDEKT_BACKUP_COPIES` | no, *stack* | `10` | Backup copies kept per deck in that folder (1 to 50). Older ones are deleted from Archidekt one at a time, at most one a minute, once that deck gets its next new backup copy; a copy the member changed or moved on Archidekt, or one the gateway couldn't delete, is kept and no longer counts toward this number. Copies made before 0.7.29 are never deleted and don't count toward it either. Also on the Settings page |
+| `MTG_ARCHIDEKT_BACKUP_BOX_DEFAULT` | no, *stack* | `false` | Whether the deck editor's "Also keep a backup copy on Archidekt" box starts ticked. Also on the Settings page |
+| `MTG_SNAPSHOTS_PER_DECK` | no, *stack* | `25` | Restore points kept per deck on the gateway (5 to 100), for History > Restore. One that records a backup copy the gateway may still delete is kept too. Also on the Settings page |
 | `MTG_ARCHIDEKT_BACKUP_FOLDER` | no, *stack* | `MTG Gateway backups` | Name of that folder (at most 100 characters), created in the account's root folder the first time. Decks in it are left out of the assistant's deck list |
 | `MTG_BROWSER_SESSION_TTL` | no, *stack* | `7200` | Browser session lifetime for `/account` and review pages, seconds (300 to 86400) |
 | `MTG_ARCHIDEKT_BASE` | no, *stack* | `https://archidekt.com/api` | Archidekt API base. Only the tests change it |
@@ -844,11 +850,11 @@ value. Leave it out to manage it on the page.
 | `MTG_PRICE_HOUR_UTC` | no, *stack* | `6` | Hour (UTC) of the daily price check and the members' summaries, 0 to 23. The check asks Scryfall only for watched printings (`POST /cards/collection`, 75 a request, at the single-lookup pace above) and makes no request at all while nobody watches anything |
 | `MTG_SCRYFALL_LOOKUP_INTERVAL` | no, *stack* | `0.5` | Seconds between single-card Scryfall lookups for card scanning, 0.1 to 5 |
 | *(no setting)* | — | — | Typed card-name suggestions come from Scryfall's card-name catalog (`GET https://api.scryfall.com/catalog/card-names`, about 700 KB), downloaded in the background at start-up and again once a day, and kept in memory (a few MB). Until it has loaded, or if Scryfall is unreachable, suggestions fall back to Scryfall's autocomplete at the interval above; nothing else changes |
-| `MTG_PLUGIN_DIR` | no | `/usr/share/mtg-gateway/plugin` | Folder holding the assistant plugin shipped in the image; serves `/skill`, `/install` and `/plugin/` |
-| `MTG_APP_DIR` | no | `/usr/share/mtg-gateway/app` | Folder holding the Android app (`mtg-assistant-gateway.apk` and `mtg-assistant-gateway.json`) that `/app` hands out; the release build puts it in the image, see [ANDROID.md](ANDROID.md) |
-| `MTG_ANDROID_ASSETLINKS` | no | empty (an empty list is served) | The Android App Links statement list served at `/.well-known/assetlinks.json`, as one JSON list (the whole `assetlinks.json` content, starting with `[`). Anything that isn't valid JSON, or isn't a list, stops the gateway at startup with a config error. Only needed if you build the app's App Links flavor for this gateway ([ANDROID.md](ANDROID.md#12-app-links-opening-gateway-links-in-the-app)) |
-| `MTG_ANDROID_PACKAGE` | no | `local.mtgassistantgateway.app` | The Android app's package ID, which the browser sign-in hands back to ([ANDROID.md](ANDROID.md#13-privacy-and-security-notes)). Change it only if you build the app with another package ID ([ANDROID.md](ANDROID.md#11-the-package-id)); anything that isn't a package ID stops the gateway at startup with a config error |
-| `PUID`, `PGID` | yes, *stack* | | User and group the process runs as |
+| `MTG_PLUGIN_DIR` | no, *stack* | `/usr/share/mtg-gateway/plugin` | Folder holding the assistant plugin shipped in the image; serves `/skill`, `/install` and `/plugin/` |
+| `MTG_APP_DIR` | no, *stack* | `/usr/share/mtg-gateway/app` | Folder holding the Android app (`mtg-assistant-gateway.apk` and `mtg-assistant-gateway.json`) that `/app` hands out; the release build puts it in the image, see [ANDROID.md](ANDROID.md) |
+| `MTG_ANDROID_ASSETLINKS` | no, *stack* | empty (an empty list is served) | The Android App Links statement list served at `/.well-known/assetlinks.json`, as one JSON list (the whole `assetlinks.json` content, starting with `[`). Anything that isn't valid JSON, or isn't a list, stops the gateway at startup with a config error. Only needed if you build the app's App Links flavor for this gateway ([ANDROID.md](ANDROID.md#12-app-links-opening-gateway-links-in-the-app)) |
+| `MTG_ANDROID_PACKAGE` | no, *stack* | `local.mtgassistantgateway.app` | The Android app's package ID, which the browser sign-in hands back to ([ANDROID.md](ANDROID.md#13-privacy-and-security-notes)). Change it only if you build the app with another package ID ([ANDROID.md](ANDROID.md#11-the-package-id)); anything that isn't a package ID stops the gateway at startup with a config error |
+| `PUID`, `PGID` | yes with Swarm (Compose: `1000`), *stack* | | User and group the process runs as |
 
 The card scanning settings (`MTG_SCAN_*`) are listed in
 [SCANNING.md](SCANNING.md#operator-notes).

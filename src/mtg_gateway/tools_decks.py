@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from types import SimpleNamespace
 from typing import Annotated, Any
 
@@ -29,6 +30,7 @@ from .decks import (
     APPLY_WAIT_SECONDS,
     DeckError,
     _clean_deck_id,
+    clean_target,
 )
 from .schemas import (
     DeckChange,
@@ -38,6 +40,30 @@ from .schemas import (
     new_deck_card_for_service,
 )
 from .views import deck_out
+
+MAX_PROPOSALS_PAGE = 100
+# list_my_decks' note when the folder tree couldn't be read, so decks Archidekt listed by folder id
+# only have no folder name
+FOLDER_NAMES_UNREAD = (
+    "Folder names couldn't be read from Archidekt just now, so some decks show no folder here."
+)
+MAX_SNAPSHOTS_PAGE = 100
+
+
+def _page(
+    key: str, fetch: Callable[[int, int], list[Any]], limit: int, offset: int, most: int
+) -> dict[str, object]:
+    """One page of a list: one row more than asked is read to know whether another page follows."""
+    limit = max(1, min(int(limit), most))
+    offset = max(0, int(offset))
+    got = fetch(limit + 1, offset)
+    more = len(got) > limit
+    return {
+        "ok": True,
+        key: got[:limit],
+        "has_more": more,
+        **({"next_offset": offset + limit} if more else {}),
+    }
 
 
 def _shown_map(shown: Any, ids: list[str]) -> dict[str, dict[str, Any]]:
@@ -95,9 +121,12 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
             "filters: name_contains, deck_format (commander, modern...), folder. This is the one tool for "
             "the member's deck list; search_decks with owner lists another user's public decks. The "
             "gateway's own backup copies are left out (a snapshot in list_snapshots links its copy when "
-            "there is one). "
+            "there is one). folder is the deck's folder name (null at the top level). "
+            "featured_scryfall_id is the cover's card when Archidekt's list carries it; it can be null "
+            "even when a cover is set, so never take null as the deck having no cover. "
             "unreadable counts decks Archidekt listed without a readable owner, which are left out; when "
-            "it is above 0, note says so in words to pass on to the member."
+            "it is above 0, note says so in words to pass on to the member. note also says when folder "
+            "names couldn't be read, so folder is null on some decks and a folder filter may miss them."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": True},
         meta=deck_list_card_meta,
@@ -106,13 +135,17 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
         name_contains: str | None = None, deck_format: str | None = None, folder: str | None = None
     ) -> dict[str, object]:
         try:
-            rows = await state.decks.list_decks(_sub())
+            # folder names filled in before the folder filter, which matches on the name
+            rows = await state.decks.list_decks(_sub(), folder_names=True)
         except DeckError as exc:
             return _tool_error(exc)
         # entries Archidekt listed without a readable owner are left out: say so, in the
         # words My decks uses, so the assistant doesn't present a partial list as the whole one
         unreadable = int(getattr(rows, "unreadable", 0) or 0)
-        note = decks_unreadable_text(some_shown=len(rows) > 0) if unreadable else None
+        notes = [decks_unreadable_text(some_shown=len(rows) > 0)] if unreadable else []
+        if getattr(rows, "folder_names_unread", False):
+            notes.append(FOLDER_NAMES_UNREAD)  # no silent empty folder
+        note = " ".join(notes) or None
         if name_contains:
             rows = [d for d in rows if name_contains.strip().lower() in str(d.get("name", "")).lower()]
         if deck_format:
@@ -286,7 +319,10 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
             "the exact printing with set_code plus collector_number (as resolve_cards returns them) and "
             "a finish; "
             "a pinned printing must exist on Archidekt and be that card, or applying refuses with "
-            "not_found and changes nothing. "
+            "not_found and changes nothing. An add naming no Magic card is usually refused with "
+            "unknown_cards (the names in unknown_cards); check the spelling with resolve_cards. A name "
+            "that can't be checked (no catalog yet, Scryfall unreachable, or past the first few "
+            "lookups) passes; if it is no card, applying fails. "
             "To add a card in a particular printing or finish, put those on the add itself: set_finish "
             "and set_printing change copies already in the deck. set_label puts Archidekt's color tag "
             "(label up to 40 characters, color #rrggbb) on every row of a card, in zone main or side; "
@@ -349,27 +385,46 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
             "The user's proposals. By default the 20 most recent of any state, newest first: kind, deck, "
             "state (pending, applied, rejected, expired, failed, withdrawn, replaced), a one-line summary, "
             "created_at and, for applied ones, applied_at (for closed ones closed_at), as Unix times. "
+            f"limit (up to {MAX_PROPOSALS_PAGE}) and offset page through all of them: has_more says "
+            "whether there are more, and next_offset is the offset to ask for next. "
             "pending_only: every waiting proposal, with no limit, as the deck's board: its number "
             "(board_no), version, status (updated, needs_look, held, with status_reason), the cards it "
             "touches, its links, and own (true when this app made it: you may apply or withdraw only "
-            "those). deck_id narrows to one deck; oldest_first puts the oldest first. get_proposal shows "
+            'those). deck_id narrows to one deck ("collection" for collection changes); oldest_first '
+            "puts the oldest first. get_proposal shows "
             "one in full. To let the user approve waiting changes in the chat, use show_waiting_changes."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": False},
     )
     async def list_my_proposals(
         pending_only: Annotated[bool, Field(description="Only the waiting ones, all of them.")] = False,
-        deck_id: Annotated[str | None, Field(description="Only this deck's (id or URL).")] = None,
+        deck_id: Annotated[
+            str | None, Field(description='Only this deck\'s (id or URL), or "collection".')
+        ] = None,
         oldest_first: Annotated[bool, Field(description="Oldest first instead of newest first.")] = False,
+        limit: Annotated[
+            int, Field(description=f"How many to return, 1 to {MAX_PROPOSALS_PAGE} (not with pending_only).")
+        ] = 20,
+        offset: Annotated[int, Field(description="How many to skip, from next_offset.")] = 0,
     ) -> dict[str, object]:
         try:
             sub = _sub()
             if pending_only:
                 lines = state.decks.board_lines(sub, deck_id)
                 return {"ok": True, "proposals": lines if oldest_first else lines[::-1]}
-            narrow = {"deck_id": _clean_deck_id(deck_id)} if deck_id else {}
-            got = [_closed_at(p) for p in state.decks.list_proposals(sub, **narrow)]
-            return {"ok": True, "proposals": got[::-1] if oldest_first else got}
+            narrow = {"deck_id": clean_target(deck_id)} if deck_id else {}
+            return _page(
+                "proposals",
+                lambda lim, off: [
+                    _closed_at(p)
+                    for p in state.decks.list_proposals(
+                        sub, limit=lim, offset=off, oldest_first=oldest_first, **narrow
+                    )
+                ],
+                limit,
+                offset,
+                MAX_PROPOSALS_PAGE,
+            )
         except DeckError as exc:
             return _tool_error(exc)
 
@@ -540,7 +595,10 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
             "Show one proposal (diff, state, review URL) belonging to the signed-in user. While a large "
             "apply is still running its state is 'applying' and 'progress' shows how far it got. A closed "
             "one has closed_at, and a rejected one closed_by when known (assistant: your own "
-            "reject_proposal; card or review_page: the user's press; api; disconnected)."
+            "reject_proposal; card or review_page: the user's press; api; disconnected). An applied one "
+            "has applied_via, where it was applied (assistant: your own apply_proposal; card, one "
+            "change or Apply all; review_page; browser: the user's other pages; api), or null when "
+            "the gateway's log no longer has it."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": False},
         # the card reads a running apply's progress with it (ChatGPT needs widgetAccessible for that)
@@ -557,13 +615,30 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
         title="List deck snapshots",
         description=(
             "List the snapshots the gateway kept of this user's decks (one is taken just before every "
-            "applied edit), newest first, with the deck and the proposal each belongs to. A snapshot "
+            "applied edit), newest first, with the deck and the proposal each belongs to. By default "
+            f"the 20 newest; limit (up to {MAX_SNAPSHOTS_PAGE}) and offset page through all of them "
+            "(has_more, next_offset), and deck_id keeps one deck's. A snapshot "
             "can be restored with propose_restore_snapshot."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": False},
     )
-    async def list_snapshots() -> dict[str, object]:
-        return {"ok": True, "snapshots": state.decks.list_snapshots(_sub())}
+    async def list_snapshots(
+        deck_id: Annotated[str | None, Field(description="Only this deck's (id or URL).")] = None,
+        limit: Annotated[int, Field(description=f"How many to return, 1 to {MAX_SNAPSHOTS_PAGE}.")] = 20,
+        offset: Annotated[int, Field(description="How many to skip, from next_offset.")] = 0,
+    ) -> dict[str, object]:
+        try:
+            sub = _sub()
+            narrow = {"deck_id": _clean_deck_id(deck_id)} if deck_id else {}
+            return _page(
+                "snapshots",
+                lambda lim, off: state.decks.list_snapshots(sub, limit=lim, offset=off, **narrow),
+                limit,
+                offset,
+                MAX_SNAPSHOTS_PAGE,
+            )
+        except DeckError as exc:
+            return _tool_error(exc)
 
     @server.tool(
         name="propose_restore_snapshot",

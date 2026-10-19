@@ -258,9 +258,8 @@ HAND_EDIT_CONFIRM_ROWS = 8  # or removing this many distinct cards
 
 def hand_edit_confirm(kind: str, rows: list[dict[str, Any]] | None) -> str | None:
     """Why a member's own edit in the app should ask "are you sure" before it is applied, or None
-    when it can go straight to Archidekt (with its snapshot, as every apply to a deck takes one)."""
-    if kind == "restore":
-        return "This replaces the whole deck with the snapshot."
+    when it can go straight to Archidekt (with its snapshot, as every apply to a deck takes one).
+    Restores never come here: they have their own review page."""
     if kind != "edit" or not rows:
         return None
     if any(r.get("kind") == "commander" for r in rows):

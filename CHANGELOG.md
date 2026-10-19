@@ -7,6 +7,127 @@ Notable changes for people who run or use the gateway. The format follows
 with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 (`release/1.2.3`); `latest` is always the newest.
 
+## [0.7.32] - unreleased
+
+The example settings files now list every variable the stack files read, each marked required or
+optional, and the stack files now pass every setting on the Settings page to the gateway. This
+version also fixes what the 0.7.31 test round found in the assistants' deck tools, Card search, the
+in-chat cards, deck reports and the Settings and Account pages.
+
+### Upgrade notes
+- From 0.7.31: the stack file and the Compose file changed; take the new ones as the update
+  steps describe ([docs/UPGRADING.md](docs/UPGRADING.md#0732)). They now pass 27 more variables
+  themselves: the 21 settings under Fixed below, `MTG_ANDROID_PACKAGE`, `MTG_ANDROID_ASSETLINKS`,
+  `MTG_PLUGIN_DIR`, `MTG_APP_DIR`, `FORGE_MAX_METASPACE` and `FORGE_OOM_SCORE_ADJ` (the Compose
+  file also passes `MTG_ARCHIDEKT_BASE`). If you added a line for any of them under
+  `environment:` in your old file, don't copy that line into the new one. Put its value in your
+  variables (Portainer's, `mtg.env` or `.env`) instead. Any of the 21 settings your variables
+  already set now reaches the gateway and locks that setting on the Settings page. Remove it from
+  your variables to manage the setting on the page. Because these values now reach the gateway,
+  one outside its range or not a number stops it from starting, so check them before you deploy;
+  the update steps list each range.
+- If you turned on the optional `mtg_authentik_api_token` lines, turn them on again in the new
+  file ([docs/UPGRADING.md](docs/UPGRADING.md#0732)).
+
+### Changed
+- `deploy/stack.env.example` and `deploy/compose/.env.example` list every variable their stack
+  file reads (the Compose example also lists the proxy overrides' variables), each with the value
+  used when it isn't set (`MTG_WRITES_ENABLED=true` is the one exception, and its note says so).
+  Each note says whether the variable is required or optional, and for an
+  optional one, whether it is on the Settings page when the file doesn't set it. Setting one of
+  those in the file locks it there. Newly listed, all commented out: `MTG_NTFY_URL`,
+  `MTG_NTFY_TOKEN_FILE`, the 21 settings under Fixed, `MTG_ANDROID_PACKAGE`, `MTG_ANDROID_ASSETLINKS`,
+  `MTG_PLUGIN_DIR`, `MTG_APP_DIR`, `FORGE_MAX_METASPACE` and `FORGE_OOM_SCORE_ADJ`. The stack
+  files now pass the last six too, so they can be set from your variables without editing the
+  stack file. The Compose file now passes `MTG_ARCHIDEKT_BASE` as the stack file does, and the
+  Compose example lists it. In the Swarm example, `FORGE_XMX`, `FORGE_MEMORY_LIMIT`, `FORGE_CPUS`,
+  `FORGE_GAME_SECONDS` and `FORGE_MAX_PARALLEL` are now commented out, as in the Compose example;
+  the stack file uses the same values, so nothing changes.
+- The Forge image notes in the examples and the environment reference now say that the stack file
+  names one exact Forge version, which changes only when you deploy a newer stack file, and that
+  setting `FORGE_TAG` pins Forge on purpose. `FORGE_XMX` is described as each Forge game's Java
+  memory.
+- The update steps in [docs/UPGRADING.md](docs/UPGRADING.md) and the removed-member clean-up steps
+  in [docs/IDP-AUTHENTIK.md](docs/IDP-AUTHENTIK.md) now say that a new stack file has the optional
+  `mtg_authentik_api_token` lines commented out again, so the edit that turns them on has to be
+  made again on each such update. They also say that the Repository build method can't keep
+  that edit.
+- When the Authentik API token file named in `MTG_AUTHENTIK_API_TOKEN_FILE` isn't there at all,
+  the admin page's removed-member clean-up line now names the likely cause: the secret isn't
+  attached to the gateway because its three lines in the stack file are still commented out.
+- The notifications section of [docs/DEPLOY.md](docs/DEPLOY.md) no longer names ntfy's per-visitor
+  limits as if they were settings. It says which values there are fixed and that
+  `NTFY_MEMORY_LIMIT` is the one limit you can set.
+- The deck report's "Copy a request for your assistant" now also lists, as context, the cards the
+  solo test left out on purpose, the ones it played that never mattered and the shortcuts it took,
+  and asks where any of them would play differently in a real game.
+- `list_my_proposals` and `list_snapshots` page through everything (`limit` up to 100, `offset`,
+  `has_more`, `next_offset`) instead of stopping at the newest 20. `list_my_proposals` takes
+  `deck_id: "collection"` for collection changes, and `list_snapshots` can keep one deck's.
+- `list_my_proposals` with `oldest_first` (and without `pending_only`) now starts from your oldest
+  proposal and pages forward from there. Before, it gave your newest 20, shown oldest first.
+- `get_proposal` says where an applied proposal was applied (`applied_via`).
+- An applied account action, collection change or deck deletion says what it did ("The folder is
+  created on Archidekt.") instead of "The deck on Archidekt matches this proposal."
+- Collection results give each row's copies now, before, and what the proposal added or removed.
+- A deck edit that adds a name no Magic card has is refused when it is proposed (when the gateway can
+  check the name), instead of failing when it is applied.
+- The in-chat cards no longer draw a border of their own inside the app's frame, which looked like a
+  card within a card on ChatGPT.
+- The assistants' guides say that, apart from linking Archidekt, they never need you to sign in to
+  archidekt.com or the gateway for them: they read their changes back with their own tools.
+- The Settings page's help for "Forge games per report" and "Forge games played at once" says which
+  is the total and which is how many play side by side.
+- The Account page's summary choice is labelled "How often", and outside the app the notifications
+  hint gives the steps in order: open the Account page in the app, tick Send me notifications and
+  press Save notifications.
+- Archidekt requests made for your own pages in the browser now take their turn before waiting
+  requests from assistants and the deck sync. A fourth Archidekt action for your account while three
+  are running or waiting now waits up to 20 seconds for a turn instead of being refused at once. The
+  gap between requests, the per-minute limit and each member's 10-minute allowance stay the same.
+- While Archidekt can't be asked (it asked the gateway to slow down, it can't be reached, or your
+  account's Archidekt actions or allowance leave nothing free), My decks and the home page (in the
+  browser and the app) show your deck list as it was last read in the past day (not after a
+  restart), with a notice saying how old it is, instead of the "Archidekt is busy" page. When it
+  knows why, the "Archidekt is busy" page now says so.
+
+### Fixed
+- 21 settings on the Settings page couldn't be set from your variables alone. The stack files
+  didn't pass them to the gateway, so a value set only in your variables did nothing until you
+  also added a line for it to the stack file. They are the approvals' big-edit rows and proposal expiry
+  (`MTG_AUTO_BIG_EDIT_ROWS`, `MTG_PROPOSAL_EXPIRY_DAYS`), the backup copies kept, the backup
+  box's default and the restore points per deck (`MTG_ARCHIDEKT_BACKUP_COPIES`,
+  `MTG_ARCHIDEKT_BACKUP_BOX_DEFAULT`, `MTG_SNAPSHOTS_PER_DECK`), Forge games at once
+  (`MTG_FORGE_PARALLEL_GAMES`) and the 15 card scanning settings (`MTG_SCAN_*`). Both stack files
+  now pass them, empty unless your variables set them.
+- A new deck made from a list or a CSV lost each card's colour label, and the check after creating
+  it still said the deck matched. Labels are now kept, and the check compares them.
+- Card search's set and type lists could take half a minute to show, and asked again and again
+  while Scryfall asked the gateway to wait. They are now read in the background as the page opens and
+  kept for a day, so they show at once.
+- `list_my_decks` gave no folder name and no cover for decks that have them, so filtering by folder
+  found nothing. A deck in the backup folder could also show in My decks for the same reason. When
+  the folder names can't be read from Archidekt, `list_my_decks` now says so.
+- Looking up someone you follow read only the first 5 pages of the list, so a person further down
+  was "not followed" when adding a collaborator, and a follow couldn't say whether you already followed
+  them. Both now read on until they find the person, up to 20 pages. A lookup repeated within two
+  minutes, or made at the same time, doesn't read the same pages again, so someone you followed on
+  archidekt.com in those two minutes is found once they are up.
+- The summary counted a deck report as finished while its Forge games were still running.
+- A 60-card deck's report showed a Commander check asking for 100 cards, and a run shorter than five
+  turns showed a turn-five land-drop rate.
+- A card named without a printing could get a printing from a set not released yet.
+- `list_my_proposals` with `pending_only` left the commanders of a commander change out of each
+  proposal's `cards`. A change made before this version lists them once the gateway next reads its
+  deck (opening the deck's page, or a new proposal or an apply on that deck).
+- `search_decks` answered `count: -1` for a search that matched nothing; it now answers null, as
+  when Archidekt gives no count.
+- A deck deletion's restore point didn't name its proposal.
+- `edhrec_average_deck`'s `limit` was described as capping the cards; the average deck is always
+  whole, and the description now says so.
+- When a decimal setting that isn't a time, such as `MTG_SCAN_GLARE_RATIO`, wasn't a number, the
+  gateway's start-up error said it must be "a number of seconds". It now says "a number".
+
 ## [0.7.31] - 2026-10-18
 
 A documentation release: the example settings files are reorganised, and the guides are checked

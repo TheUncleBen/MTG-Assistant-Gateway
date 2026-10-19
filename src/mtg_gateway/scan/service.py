@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import contextvars
 import json
 import logging
 import re
@@ -43,11 +44,16 @@ MAX_SUGGESTIONS = 8
 # retry with common OCR confusions swapped, then autocomplete on shorter prefixes.
 MAX_VARIANT_LOOKUPS = 4
 MAX_PREFIX_LOOKUPS = 5
+MAX_CARD_CHECK_LOOKUPS = 5  # Scryfall lookups per proposal for added names the catalog lacks
 MAX_RECOVERY_LOOKUPS_PER_CALL = 40  # recovery lookups per call, however many names are garbage
 MAX_LOOKUPS_PER_USER = 4  # concurrent name searches and printing lists per account; more is "busy"
 MAX_SESSION_BYTES = 600_000  # one saved scan session as stored JSON (500 full cards take about 470 KB)
 MAX_CALL_SECONDS = 40.0  # wall-clock budget per resolve call, under proxy and client timeouts
 MIN_PREFIX = 4
+# The card search's picker lists (sets, blocks, types): read again once they are a day old, and
+# a read that came back incomplete (Scryfall busy or down) is tried again after a minute.
+OPTIONS_TTL = 24 * 3600
+OPTIONS_RETRY_SECONDS = 60
 STATUSES = ("exact", "printing", "fuzzy", "ambiguous", "not_found", "deferred", "error", "conflict")
 MAX_NEWER = 3  # newer printings passed over for the default (previews, digital only) named on a result
 # one printing asked for by the picker (its own): a set code and a collector number
@@ -432,6 +438,12 @@ class ScanService:
         self.store = ScanStore(db)
         self._in_flight: set[str] = set()
         self._lookups: dict[str, int] = {}
+        # the picker lists last read (search_options), when, and the read running now
+        self._options: dict[str, Any] | None = None
+        self._options_error: ScanError | None = None
+        self._options_at = 0.0
+        self._options_next_try = 0.0
+        self._options_task: asyncio.Task[None] | None = None
 
     # -- resolution -----------------------------------------------------------
     async def resolve(self, inputs: list[CardInput], *, owner: str | None = None) -> list[Resolution]:
@@ -1044,40 +1056,85 @@ class ScanService:
         ("battle-types", "Battle types"),
     )
 
-    async def search_options(self, *, owner: str | None = None) -> dict[str, Any]:
+    def ensure_search_options(self) -> None:
+        """Start reading the picker lists in the background when there are none yet, they are a
+        day old, or the last read was incomplete. Never blocks the caller; one read at a time,
+        and Scryfall is asked only for what its own day-long cache no longer holds."""
+        if self._options_task is not None and not self._options_task.done():
+            return
+        fresh = self._options is not None and not self._options["partial"]
+        if fresh and time.monotonic() - self._options_at < OPTIONS_TTL:
+            return
+        if time.monotonic() < self._options_next_try:
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        self._options_next_try = time.monotonic() + OPTIONS_RETRY_SECONDS
+        # gateway-wide work: started outside any member's request context and lookup slot
+        self._options_task = loop.create_task(self._read_search_options(), context=contextvars.Context())
+
+    async def search_options(self) -> dict[str, Any]:
         """What the card search's set, block and type pickers list: Scryfall's set list and its
-        type catalogs, each read once a day. A catalog that cannot be read now is left out (the
-        picker still takes a typed type), and ``partial`` says so."""
+        type catalogs. The lists last read are answered at once (a read a day old is refreshed in
+        the background meanwhile); only the very first read is waited for. A catalog that cannot
+        be read now is left out (the picker still takes a typed type), and ``partial`` says so.
+        No member's lookup slot is held, so the searches a member runs never wait behind this."""
+        self.ensure_search_options()
+        if self._options is None and self._options_task is not None:
+            await asyncio.shield(self._options_task)
+        if self._options is None:
+            raise self._options_error or ScanError("unavailable", "Scryfall's lists could not be read")
+        return self._options
+
+    def close(self) -> None:
+        """Cancel the background reads still running (called when the gateway shuts down)."""
+        self.names.close()
+        if self._options_task is not None and not self._options_task.done():
+            self._options_task.cancel()
+        self._options_task = None
+
+    async def _read_search_options(self) -> None:
+        try:
+            await self._read_search_options_now()
+        except Exception as exc:  # any other failure: keep the lists from earlier, try again later
+            logger.warning("card search lists not read (%s)", exc)
+            self._options_error = ScanError("unavailable", "Scryfall's lists could not be read")
+
+    async def _read_search_options_now(self) -> None:
         partial = False
         sets: list[dict[str, Any]] = []
         groups: list[dict[str, Any]] = []
-        with self._lookup_slot(owner):
+        try:
+            sets = await self.scryfall.sets_list()
+        except ScryfallError as exc:
+            if exc.kind == "rate_limited":
+                self._options_error = ScanError(exc.kind, str(exc))
+                return
+            partial = True
+        for name, label in self.TYPE_CATALOGS:
             try:
-                sets = await self.scryfall.sets_list()
+                values = await self.scryfall.catalog(name)
             except ScryfallError as exc:
-                if exc.kind == "rate_limited":
-                    raise ScanError(exc.kind, str(exc)) from exc
                 partial = True
-            for name, label in self.TYPE_CATALOGS:
-                try:
-                    values = await self.scryfall.catalog(name)
-                except ScryfallError as exc:
-                    if exc.kind == "rate_limited":
-                        partial = True
-                        break
-                    partial = True
-                    continue
-                groups.append({"label": label, "values": values})
+                if exc.kind == "rate_limited":
+                    break
+                continue
+            groups.append({"label": label, "values": values})
         blocks: dict[str, str] = {}
         for row in sets:
             if row["block_code"] and row["block_code"] not in blocks:
                 blocks[row["block_code"]] = row["block"] or row["block_code"].upper()
-        return {
+        out = {
             "sets": [{k: row[k] for k in ("code", "name", "type", "released", "digital")} for row in sets],
             "blocks": [{"code": code, "name": name} for code, name in blocks.items()],
             "types": groups,
             "partial": partial,
         }
+        # an incomplete read never replaces complete lists from earlier
+        if self._options is None or not partial or self._options["partial"]:
+            self._options, self._options_at, self._options_error = out, time.monotonic(), None
 
     def describe(self, results: list[Resolution]) -> dict[str, Any]:
         items = [r.as_dict() for r in results]
@@ -1191,6 +1248,31 @@ class ScanService:
 
     def list_sessions(self, sub: str) -> list[dict[str, Any]]:
         return self.store.list(sub)
+
+    async def are_cards(self, names: list[str]) -> dict[str, bool | None]:
+        """Whether each of ``names`` is a Magic card, for refusing a misspelt add when it is
+        proposed: the card-name catalog first, then, for a name the catalog lacks, Scryfall's exact
+        lookup (the catalog leaves out tokens and can be a day behind a new set). Only the first
+        ``MAX_CARD_CHECK_LOOKUPS`` such names are asked, one paced lookup each, so a proposal full
+        of new cards cannot hold up everyone's Scryfall calls; the client keeps both answers a while.
+        ``None`` when nothing can tell (catalog not loaded, Scryfall unreachable, past the
+        lookups asked): the caller then refuses nothing."""
+        out: dict[str, bool | None] = {}
+        asked = 0
+        for name in names:
+            found = self.names.known(name)
+            if found is False:
+                if asked >= MAX_CARD_CHECK_LOOKUPS:
+                    found = None
+                else:
+                    asked += 1
+                    try:
+                        await self.scryfall.named(name)
+                        found = True
+                    except ScryfallError as exc:
+                        found = False if exc.kind == "not_found" else None
+            out[name] = found
+        return out
 
     def guessed_names(self, sub: str) -> dict[str, str]:
         """Card names this member's scans matched from a misread name: matched name (lower case)

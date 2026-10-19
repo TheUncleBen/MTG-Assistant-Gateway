@@ -552,6 +552,21 @@ async def test_summary_on_the_account_page_by_tool_and_on_schedule(stack: Stack,
         await b.aclose()
 
 
+async def test_summary_counts_a_report_only_once_its_forge_games_are_done(plain: Stack) -> None:
+    db = plain.gw.summaries.db
+    now = int(prices.now())
+    with db.tx() as c:
+        for rid, state in (("rep_quick", None), ("rep_playing", "running"), ("rep_played", "done")):
+            c.execute(
+                "INSERT INTO reports (id, owner_sub, deck_id, deck_name, fingerprint, taken_at, stats_json, "
+                "forge_state) VALUES (?, 'user-1', '1', 'Deck', 'f', ?, '{}', ?)",
+                (rid, now, state),
+            )
+    out = plain.gw.summaries.build("user-1", "day")
+    assert sorted(r["report_id"] for r in out["reports_finished"]) == ["rep_played", "rep_quick"]
+    assert "Deck reports finished: 2." in out["text"]
+
+
 # -- configuration ------------------------------------------------------------------------------
 
 

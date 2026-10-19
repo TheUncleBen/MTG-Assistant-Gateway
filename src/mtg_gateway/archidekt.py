@@ -18,6 +18,7 @@ import copy
 import datetime
 import email.utils
 import hashlib
+import heapq
 import http.cookiejar
 import json
 import logging
@@ -351,7 +352,9 @@ def list_row(d: dict[str, Any]) -> dict[str, Any]:
             if isinstance(t, dict) and (t.get("name") or t.get("tag"))
         ],
         "views": views if isinstance(views, int) and not isinstance(views, bool) else None,
-        "featured_scryfall_id": featured_scryfall_id(d.get("featured")),
+        # the member's chosen cover first, as parse_deck reads it: "featured" is Archidekt's own pick
+        "featured_scryfall_id": featured_scryfall_id(d.get("customFeatured"))
+        or featured_scryfall_id(d.get("featured")),
     }
 
 
@@ -675,13 +678,24 @@ def _card_matches(card: dict[str, Any], name: str) -> bool:
     return oracle.casefold() == want or front_face(oracle).casefold() == front_face(name).casefold()
 
 
+def _released(card: dict[str, Any], today: str) -> bool:
+    """Whether a search hit's printing is out already: its ``releasedAt`` (else its set's
+    ``editiondate``) is today or earlier. Archidekt lists a set that is still being previewed
+    with a date to come; a hit with no readable date counts as released."""
+    edition = card.get("edition") if isinstance(card.get("edition"), dict) else {}
+    date = str(card.get("releasedAt") or edition.get("editiondate") or "")[:10]
+    return not re.fullmatch(r"\d{4}-\d{2}-\d{2}", date) or date <= today
+
+
 def _prefer_printing(
     hits: list[dict[str, Any]], set_code: str | None, collector_number: str | None
 ) -> dict[str, Any]:
-    if not set_code and not collector_number:
-        return hits[0]
+    """The hit to use: the one matching the asked set and number best, and among equal ones a
+    printing already released before one from a set still in preview, so a card named without
+    a printing never lands as a preview copy (Archidekt lists the newest sets first)."""
+    today = datetime.datetime.now(datetime.UTC).date().isoformat()
 
-    def score(c: dict[str, Any]) -> int:
+    def score(c: dict[str, Any]) -> tuple[int, bool]:
         edition = c.get("edition") if isinstance(c.get("edition"), dict) else {}
         code = str(edition.get("editioncode", "")).casefold()
         number = str(c.get("collectorNumber", "")).casefold()
@@ -690,7 +704,7 @@ def _prefer_printing(
             s += 2
         if collector_number and number == collector_number.casefold():
             s += 1
-        return s
+        return s, _released(c, today)
 
     return max(hits, key=score)  # stable: the first hit wins ties
 
@@ -711,12 +725,20 @@ class DeckList(list):  # type: ignore[type-arg]
     came back than Archidekt's count. Only a complete list may say a deck is gone
     (DeckService.on_archidekt). ``unreadable`` counts the entries left out because their owner
     field could not be read at all: My decks then says the list couldn't be read instead of
-    showing it as whole."""
+    showing it as whole. ``last_read`` (epoch seconds) is set only on a list the pages show as last
+    read because Archidekt cannot be asked right now (DeckService.last_deck_list).
+    ``folder_names_unread`` is True when folder names were asked for (list_my_decks) but the
+    folder tree couldn't be read, so some rows' ``folder`` is None though they are in a folder."""
 
-    def __init__(self, rows: Any = (), *, complete: bool = False, unreadable: int = 0) -> None:
+    folder_names_unread = False
+
+    def __init__(
+        self, rows: Any = (), *, complete: bool = False, unreadable: int = 0, last_read: float | None = None
+    ) -> None:
         super().__init__(rows)
         self.complete = complete
         self.unreadable = unreadable
+        self.last_read = last_read
 
 
 def _owned_by(owner: Any, username: str, user_id: str | None) -> bool:
@@ -755,12 +777,61 @@ def retry_after_seconds(value: str | None, *, now: float | None = None) -> float
     return max(0.0, when.timestamp() - (time.time() if now is None else now))
 
 
+# Set while a member's own browser page is being answered (pages.browser_session), an apply pressed
+# there included: its Archidekt requests take their turn in the shared Pacer before those of
+# assistants and the deck sync that are waiting, so opening a page is not stuck behind a fast
+# assistant's queue. Only the order changes; every request still keeps the gap and the
+# per-minute cap.
+page_turn: contextvars.ContextVar[bool] = contextvars.ContextVar("archidekt_page_turn", default=False)
+
+
+class TurnLock:
+    """A lock handed to its waiters in two lines: those from a member's page (``first``) before
+    the rest, each line in arrival order. Like asyncio.Lock, a waiter that is cancelled never
+    keeps the lock: if it had just been handed the lock, it passes it on."""
+
+    def __init__(self) -> None:
+        self._held = False
+        self._waiters: list[tuple[int, int, asyncio.Future[None]]] = []
+        self._seq = 0
+
+    def locked(self) -> bool:
+        return self._held
+
+    async def acquire(self, *, first: bool = False) -> None:
+        if not self._held and all(w[2].done() for w in self._waiters):
+            self._held = True
+            return
+        fut: asyncio.Future[None] = asyncio.get_running_loop().create_future()
+        self._seq += 1
+        entry = (0 if first else 1, self._seq, fut)
+        heapq.heappush(self._waiters, entry)
+        try:
+            await fut  # resolved by release(), which hands the lock over (it stays held)
+        except BaseException:
+            if fut.done() and not fut.cancelled():
+                self.release()  # handed the lock just as this waiter was cancelled: pass it on
+            elif entry in self._waiters:
+                self._waiters.remove(entry)
+                heapq.heapify(self._waiters)
+            raise
+
+    def release(self) -> None:
+        while self._waiters:
+            _line, _seq, fut = heapq.heappop(self._waiters)
+            if not fut.done():
+                fut.set_result(None)
+                return
+        self._held = False
+
+
 class Pacer:
     """Global request pacing shared by every user: one call at a time, a minimum
     gap between calls, at most ``max_per_minute`` calls in any 60 seconds (0: no
     such cap), Retry-After respected, and a breaker that opens for a minute after
     five consecutive failures. A call past the per-minute cap waits for a slot
-    rather than failing, so a long apply slows down instead of stopping halfway."""
+    rather than failing, so a long apply slows down instead of stopping halfway.
+    A call made for a member's page (``page_turn``) goes before the waiting calls that are not."""
 
     MAX_RETRY_AFTER = 120.0  # a larger (or garbled) Retry-After must not stall every user for longer
     WINDOW = 60.0
@@ -769,14 +840,14 @@ class Pacer:
         self.min_interval = min_interval
         self.max_per_minute = max(0, int(max_per_minute))
         self._sent: deque[float] = deque()  # start times of the calls in the last WINDOW seconds
-        self._lock = asyncio.Lock()
+        self._lock = TurnLock()
         self._next_allowed = 0.0
         self._failures = 0
         self._open_until = 0.0
         self._retry_until = 0.0  # set by a 429's Retry-After: calls are refused until then
 
     async def __aenter__(self) -> None:
-        await self._lock.acquire()
+        await self._lock.acquire(first=page_turn.get())
         try:
             now = time.monotonic()
             if now < self._open_until:
@@ -1390,7 +1461,9 @@ class ArchidektClient:
             row["owner"] = str(owner_obj.get("username") or "")
             row["owner_id"] = str(owner_obj["id"]) if owner_obj.get("id") is not None else None
             rows.append(row)
-        count = body.get("count") if isinstance(body.get("count"), int) else None
+        # Archidekt answers a search that matches nothing with count -1 (seen live for a commander
+        # search); it is passed on as null, as when Archidekt gives no count
+        count = body.get("count") if isinstance(body.get("count"), int) and body["count"] >= 0 else None
         return {"decks": rows, "count": count, "has_more": bool(body.get("next")), "page": page}
 
     async def user_profile(self, username: str) -> dict[str, Any] | None:

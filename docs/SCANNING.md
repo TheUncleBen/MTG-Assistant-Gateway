@@ -239,8 +239,11 @@ live on `window.__scan` (`startContinuous()`, `stopContinuous()`,
   at startup and after every gallery build. At most 8 cards are learned at
   once; others get picked up on their next scan.
 
-These settings are read by the gateway but aren't in the example stack file,
-so add any you want to change under the gateway's `environment:`:
+These settings are also on the gateway's Settings page. Both stack files pass
+them to the gateway, and both example env files list them commented out with
+their default. Set one in your variables (Portainer's, `mtg.env` or `.env`)
+to lock it; the Settings page then shows it greyed out. A change applies
+after the gateway restarts.
 
 | Variable | Default | What it does |
 | --- | --- | --- |
@@ -255,8 +258,8 @@ so add any you want to change under the gateway's `environment:`:
 | `MTG_SCAN_ART_MAX_DISTANCE` | `380` | Largest difference (of 1024 bits) that still counts as an artwork match. Range 0 to 1024 |
 | `MTG_SCAN_ART_MIN_MARGIN` | `40` | Bits the best match must beat the next different artwork by. Raise to 60 for fewer wrong picks, at the cost of a few more "unsure" results. Range 0 to 1024 |
 | `MTG_SCAN_ART_MAX_PRINTINGS` | `250` | How many of a card's newest printings are learned (basic lands have hundreds). Range 1 to 2000 |
-| `MTG_SCAN_ART_IMAGE_INTERVAL` | `0.1` | Seconds between image fetches from `cards.scryfall.io`. Range 0.05 to 5 |
-| `MTG_SCAN_ART_IMAGES_PER_HOUR` | `1500` | Cap on image fetches per hour (about a deck's worth of new cards). One person can use at most a quarter of it, and start learning at most `MTG_SCAN_ART_MAX_GALLERIES`/20 new cards an hour; past that their cards answer busy while other people's carry on. Past the whole cap, learning pauses until the hour rolls over and the affected cards say so. Range 1 to 36000 |
+| `MTG_SCAN_ART_IMAGE_INTERVAL` | `0.1` | Seconds between image fetches from `cards.scryfall.io`. Range 0.05 to 5 (the Settings page: 0.1 to 5) |
+| `MTG_SCAN_ART_IMAGES_PER_HOUR` | `1500` | Cap on image fetches per hour (about a deck's worth of new cards). One person can use at most a quarter of it, and start learning at most `MTG_SCAN_ART_MAX_GALLERIES`/20 new cards an hour; past that their cards answer busy while other people's carry on. Past the whole cap, learning pauses until the hour rolls over and the affected cards say so. Range 1 to 36000 (the Settings page: 1 to 1500) |
 | `MTG_SCAN_ART_MAX_GALLERIES` | `500` | Cards whose learned printings are kept. Range 1 to 100000 |
 | `MTG_SCAN_ART_GALLERY_IDLE_DAYS` | `180` | Days without a scan before a card's learned printings are dropped. Range 1 to 3650 |
 

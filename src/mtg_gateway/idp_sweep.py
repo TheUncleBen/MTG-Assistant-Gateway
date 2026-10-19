@@ -201,7 +201,8 @@ class AuthentikSweep:
 
     def status(self) -> dict[str, Any]:
         """The sweep's state for the admin page: ``state`` is off, waiting (no round yet), ok or
-        failed; when off, ``cause`` is no-token, token-unreadable or no-group. Only counts, times
+        failed; when off, ``cause`` is no-token, token-unreadable or no-group, and ``missing`` is
+        true when an unreadable token's file isn't there at all. Only counts, times
         and SweepRefused's safe-to-log text: never the token."""
         if not self.enabled:
             reason = self.why_off() or (
@@ -214,7 +215,10 @@ class AuthentikSweep:
                 cause = "no-group"
             else:
                 cause = "no-token"
-            return {"state": "off", "cause": cause, "reason": reason}
+            off: dict[str, Any] = {"state": "off", "cause": cause, "reason": reason}
+            if cause == "token-unreadable" and self.settings.authentik_api_token_missing:
+                off["missing"] = True
+            return off
         if self.last["ok"] is None:
             return {"state": "waiting", "first_after_seconds": int(FIRST_DELAY)}
         if self.last["ok"]:

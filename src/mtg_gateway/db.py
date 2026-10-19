@@ -2064,8 +2064,10 @@ class Database:
         since: int | None = None,
         until: int | None = None,
         offset: int = 0,
+        oldest_first: bool = False,
     ) -> list[dict[str, Any]]:
-        """Newest first. ``deck_id``, ``kinds`` (edit, create_deck, restore), ``states`` (pending,
+        """Newest first (``oldest_first``: oldest first, so paging runs from the oldest). ``deck_id``,
+        ``kinds`` (edit, create_deck, restore), ``states`` (pending,
         applied, failed, rejected, expired: a pending proposal past its expiry counts as expired),
         ``search`` (a case-insensitive match on the deck name or the change summary) and a time
         window (``since`` inclusive, ``until`` exclusive, epoch seconds) narrow the list in SQL,
@@ -2106,11 +2108,23 @@ class Database:
         if until is not None:
             sql += " AND created_at < ?"
             args.append(int(until))
-        sql += " ORDER BY created_at DESC, rowid DESC LIMIT ? OFFSET ?"
+        order = "ASC" if oldest_first else "DESC"
+        sql += f" ORDER BY created_at {order}, rowid {order} LIMIT ? OFFSET ?"
         args += [max(0, int(limit)), max(0, int(offset))]
         with self._lock:
             rows = self._conn.execute(sql, args).fetchall()
         return [dict(r) for r in rows]
+
+    def applied_via(self, owner_sub: str, proposal_id: str) -> str | None:
+        """Where a proposal's apply was called from (``via`` of its ``proposal_applied`` audit row),
+        or None when the audit log no longer has the row."""
+        row = self._one(
+            "SELECT json_extract(detail_json, '$.via') FROM audit_log WHERE sub = ? "
+            "AND event = 'proposal_applied' AND json_valid(detail_json) "
+            "AND json_extract(detail_json, '$.proposal_id') = ? ORDER BY id DESC LIMIT 1",
+            (owner_sub, proposal_id),
+        )
+        return str(row[0]) if row and row[0] is not None else None
 
     def history_decks(self, owner_sub: str) -> dict[str, str]:
         """The decks that appear in the member's proposals and snapshots: id -> last known name,
@@ -2529,6 +2543,22 @@ class Database:
             args += (int(version),)
         with self.tx() as c:
             return c.execute(sql, args).rowcount == 1
+
+    def fill_proposal_rows(
+        self, proposal_id: str, owner_sub: str, rows: list[dict[str, Any]], version: int
+    ) -> bool:
+        """Store ``rows`` in place of a waiting proposal's review rows, only while it is pending at
+        ``version`` (an amend since keeps its own rows). For details the stored rows lacked, never
+        a change to what the proposal does: the version stays. True when it was stored."""
+        with self.tx() as c:
+            return (
+                c.execute(
+                    "UPDATE proposals SET rows_json = ? WHERE id = ? AND owner_sub = ? AND state = 'pending' "
+                    "AND version = ?",
+                    (json.dumps(rows), proposal_id, owner_sub, int(version)),
+                ).rowcount
+                == 1
+            )
 
     def dependents(self, owner_sub: str, proposal_id: str) -> list[str]:
         """The owner's live waiting proposals that depend on ``proposal_id``."""

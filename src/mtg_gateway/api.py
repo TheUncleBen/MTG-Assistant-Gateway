@@ -20,6 +20,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
 from . import deck_stats, modes
+from .archidekt import page_turn
 from .decks import (
     DeckError,
     current_client,
@@ -98,6 +99,7 @@ async def caller_for(state: AppState, request: Request, *, write: bool) -> Calle
         if access is None or not access.subject:
             return _unauth("The access token is missing, expired or revoked.")
         # load_access_token refuses disabled members and anyone outside MTG_REQUIRED_GROUP.
+        page_turn.set(False)  # an app's request, not a member's page (archidekt.page_turn)
         return Caller(access.subject, access.client_id, "api", tuple(access.scopes or ()))
     sub, sid = browser_session(state, request)
     if not sub or not sid:
@@ -526,7 +528,14 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
                 # the box at this press is the save's choice from now on, also when the apply
                 # below is refused or stopped and the save waits (writes off, a rate limit)
                 decks.keep_backup_box(who.sub, pid, version, keep=backup)
-        return ok(await decks.apply(who.sub, pid, via=via, version=version, archidekt_backup=backup))
+        # a bearer apply is checked as the assistant's ("mcp") but logged as the API's, so
+        # get_proposal's applied_via and History tell it apart
+        logged = "api" if via == "mcp" else None
+        return ok(
+            await decks.apply(
+                who.sub, pid, via=via, version=version, archidekt_backup=backup, logged_via=logged
+            )
+        )
 
     @route("/proposals/{pid}/reject", "POST", write=True)
     async def reject(request: Request, who: Caller) -> Response:

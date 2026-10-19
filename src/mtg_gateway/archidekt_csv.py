@@ -85,6 +85,7 @@ class ExportCard:
     price: float | None = None
     owned: bool | None = None
     card_text: str = ""
+    label: str = ""  # Archidekt's colour tag, "Name,#rrggbb"
     extra: dict[str, str] = field(default_factory=dict)
 
     @property
@@ -198,6 +199,7 @@ def parse_export(text: str, unknown: list[str] | None = None) -> list[ExportCard
                 price=_num(str(data.get("price", ""))),
                 owned=None if not owned_raw else owned_raw != "not owned",
                 card_text=text_cell.strip(),
+                label=_unquote(str(data.get("label", ""))),
                 extra={k[6:]: v for k, v in data.items() if k.startswith("extra:") and v},
             )
         )

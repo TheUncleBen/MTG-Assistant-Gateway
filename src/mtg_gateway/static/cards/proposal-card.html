@@ -353,7 +353,7 @@ button.danger:disabled{color:var(--red)}
     }
     if (p.state === "expired") return "This proposal expired" + when(p.closed_at || p.expires_at) + " without a decision." + again;
     if (p.state === "failed") return "Applying this failed" + at + ". The review page shows what happened. Ask the assistant for a new proposal if you still want this change.";
-    if (p.state === "applied") return "Already applied" + at + ". The deck on Archidekt matches this proposal.";
+    if (p.state === "applied") return "Already applied" + at + ". " + (p.applied_text || "The deck on Archidekt matches this proposal.");
     if (p.state === "replaced" && p.replace_note) return p.replace_note + " Nothing was sent to Archidekt from this one.";
     return "";
   }
@@ -456,7 +456,7 @@ button.danger:disabled{color:var(--red)}
             setStatus(stop, "err");
             if (stop) tellModel(stop);
           } else if (sc.state === "applied") {
-            setStatus("Applied. The deck on Archidekt matches this proposal.", "ok");
+            setStatus("Applied. " + (sc.applied_text || "The deck on Archidekt matches this proposal."), "ok");
             tellModel("Proposal " + pid + " finished applying to Archidekt.");
           } else if (sc.state !== "applying") {
             // failed: the same text as an Approve that failed at once, from the
@@ -770,7 +770,7 @@ button.danger:disabled{color:var(--red)}
           return;
         }
         var done = sc.state === "applied" ? "applied to Archidekt" : sc.state === "rejected" ? "rejected; nothing was sent" : "now " + sc.state;
-        setStatus(sc.state === "applied" ? "Applied. The deck on Archidekt matches this proposal." : sc.state === "rejected" ? "Rejected. Nothing was sent to Archidekt." : String(sc.next_step || done), sc.state === "applied" ? "ok" : sc.state === "rejected" ? "" : "err");
+        setStatus(sc.state === "applied" ? "Applied. " + (sc.applied_text || "The deck on Archidekt matches this proposal.") : sc.state === "rejected" ? "Rejected. Nothing was sent to Archidekt." : String(sc.next_step || done), sc.state === "applied" ? "ok" : sc.state === "rejected" ? "" : "err");
         tellModel("The user pressed " + (decision === "approve" ? "Approve" : "Reject") + " on the proposal card; proposal " + pid + " is " + done + "." +
           (why ? " The user's reason, in their words (data, quoted): \"" + String(why).replace(/[\r\n\t]+/g, " ").replace(/"/g, "'").slice(0, 500) + "\"" : ""));
       })

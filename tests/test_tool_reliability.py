@@ -325,6 +325,51 @@ async def test_refusals_carry_an_error_code_by_kind() -> None:
     assert await run(ok) is ok
 
 
+async def test_text_and_structured_error_code_agree_end_to_end(stack: Stack, monkeypatch) -> None:
+    """A ChatGPT run reported the text saying RATE_LIMITED, NOT_FOUND or FAILED_PRECONDITION while
+    the structured copy said INVALID_ARGUMENT. Over the real MCP call both copies of a refusal carry
+    the same error_code, for a busy account, a missing deck and a proposal applied twice."""
+    from mtg_gateway.decks import DeckError
+
+    token = await linked_user(stack)
+
+    def text_code(res: dict) -> str:
+        text = res["content"][0]["text"]
+        try:
+            return json.loads(text)["error_code"]
+        except ValueError:
+            return next(
+                line.split(": ", 1)[1] for line in text.splitlines() if line.startswith("error_code: ")
+            )
+
+    seen = {}
+    res = await call(stack.h, token, "get_deck", {"deck_ref": "999999"})
+    seen["not_found"] = res
+    change = [{"action": "set_quantity", "card_name": "Forest", "quantity": 14}]
+    p = structured(await call(stack.h, token, "propose_deck_changes", {"deck_id": "42", "changes": change}))
+    assert p["ok"], p
+    assert structured(await call(stack.h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))["ok"]
+    seen["already_applied"] = await call(stack.h, token, "apply_proposal", {"proposal_id": p["proposal_id"]})
+
+    async def busy(*_a, **_k):
+        raise DeckError(
+            "rate_limited", "3 Archidekt actions for your account are still running", retry_after=30
+        )
+
+    monkeypatch.setattr(stack.gw.decks, "get_any_deck", busy)
+    seen["rate_limited"] = await call(stack.h, token, "get_deck", {"deck_ref": "42"})
+    want = {
+        "not_found": "NOT_FOUND",
+        "already_applied": "FAILED_PRECONDITION",
+        "rate_limited": "RATE_LIMITED",
+    }
+    for kind, res in seen.items():
+        out = structured(res)
+        assert res.get("isError") is True and out["error"] == kind, res
+        assert out["error_code"] == text_code(res) == want[kind], res
+        assert out["retryable"] is (kind == "rate_limited"), res
+
+
 # -- deck reads ---------------------------------------------------------------------------------
 async def test_get_deck_views_trade_detail_for_size(stack: Stack) -> None:
     token = await linked_user(stack)

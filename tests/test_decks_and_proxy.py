@@ -18,6 +18,7 @@ from mcp.server.mcpserver import MCPServer
 from mtg_gateway.archidekt import ArchidektClient, Pacer
 from mtg_gateway.decklist import parse_decklist
 from mtg_gateway.mf_proxy import MysticForgeProxy
+from mtg_gateway.scan.scryfall import ScryfallError
 
 from .conftest import (
     AUTO_PROXY,
@@ -1160,7 +1161,11 @@ async def test_snapshots_list_and_restore_through_a_proposal(stack: Stack) -> No
     applied through the normal path. Audit rows name the OAuth client (id and name) that acted."""
     h, ark = stack.h, stack.ark
     token = await linked_user(stack)
-    assert structured(await call(h, token, "list_snapshots")) == {"ok": True, "snapshots": []}
+    assert structured(await call(h, token, "list_snapshots")) == {
+        "ok": True,
+        "snapshots": [],
+        "has_more": False,
+    }
     changes = [
         {"action": "add", "card_name": "Arcane Signet", "quantity": 1, "category": "Ramp"},
         {"action": "remove", "card_name": "Acidic Slime"},
@@ -1407,6 +1412,105 @@ async def test_pinned_printing_that_is_missing_or_another_card_refuses_the_edit(
     assert snaps == []
 
 
+async def test_a_card_no_magic_card_is_called_is_refused_when_proposed(stack: Stack) -> None:
+    """With the card-name catalog loaded, an add of a name that is no card is refused when the
+    proposal is made (and when it is amended), instead of waiting and failing at apply. A card
+    already in the deck, a double-faced card's front face and any name while the catalog is not
+    loaded still pass."""
+    h = stack.h
+    token = await linked_user(stack)
+    names = stack.h.app.state.gateway.scan.names
+    assert names.known("Sol Ring") is None  # not loaded: nothing is refused
+    names.set_names(["Island", "Swamp", "Delver of Secrets // Insectile Aberration"])
+    bad = [{"action": "add", "card_name": "Islend"}, {"action": "add", "card_name": "Swamp"}]
+    out = structured(await call(h, token, "propose_deck_changes", {"deck_id": "42", "changes": bad}))
+    assert out["ok"] is False and out["error"] == "unknown_cards", out
+    assert out["unknown_cards"] == ["Islend"] and "'Islend'" in out["message"], out
+    good = [
+        {"action": "add", "card_name": "Delver of Secrets"},
+        {"action": "add", "card_name": "Sol Ring"},  # in deck 42, though not in this catalog
+    ]
+    p = structured(await call(h, token, "propose_deck_changes", {"deck_id": "42", "changes": good}))
+    assert p["ok"], p
+    amended = structured(
+        await call(
+            h,
+            token,
+            "amend_proposal",
+            {"proposal_id": p["proposal_id"], "version": p["version"], "changes": bad},
+        )
+    )
+    assert amended["ok"] is False and amended["error"] == "unknown_cards", amended
+    # a name the catalog lacks (a token, a card from a set newer than the catalog) is asked of
+    # Scryfall before it is refused; an answer other than "not found" refuses nothing
+    scan = stack.h.app.state.gateway.scan
+    asked: list[str] = []
+
+    async def named(name: str, **_kw: object) -> dict:
+        asked.append(name)
+        if name == "Treasure":
+            return {"name": "Treasure"}
+        if name == "Offline Card":
+            raise ScryfallError("unavailable", "down")
+        raise ScryfallError("not_found", "no card")
+
+    scan.scryfall.named = named
+    for name, ok in (("Treasure", True), ("Offline Card", True), ("Islend", False)):
+        r = structured(
+            await call(
+                h,
+                token,
+                "propose_deck_changes",
+                {"deck_id": "42", "changes": [{"action": "add", "card_name": name}]},
+            )
+        )
+        assert r["ok"] is ok, (name, r)
+    assert asked == ["Treasure", "Offline Card", "Islend"]
+    assert names.known("Insectile Aberration") is True  # a back face is a card too
+
+
+async def test_the_unknown_card_check_asks_scryfall_a_few_names_and_remembers_the_answers(
+    stack: Stack,
+) -> None:
+    """Names the catalog lacks are asked of Scryfall at most five per proposal (the rest pass),
+    and each answer, found or not, is kept a while, so a retried proposal asks nothing again."""
+    import httpx
+
+    from mtg_gateway.scan.scryfall import ScryfallClient
+
+    h = stack.h
+    token = await linked_user(stack)
+    asked: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        name = request.url.params.get("exact", "")
+        asked.append(name)
+        if name == "Brand New Card" or name.startswith("New Set Card"):
+            return httpx.Response(200, json={"object": "card", "name": name})
+        return httpx.Response(404, json={"object": "error", "status": 404, "details": "no card"})
+
+    scan = h.app.state.gateway.scan
+    scan.scryfall = ScryfallClient(
+        "https://scryfall.test",
+        min_interval=0.0,
+        http=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+    scan.names.set_names(["Island", "Swamp"])
+    typos = [f"Islend {i}" for i in range(7)]
+    adds = [{"action": "add", "card_name": n} for n in ["Brand New Card", *typos]]
+    for _ in range(2):
+        out = structured(await call(h, token, "propose_deck_changes", {"deck_id": "42", "changes": adds}))
+        assert out["ok"] is False and out["unknown_cards"] == typos[:4], out
+    assert asked == ["Brand New Card", *typos[:4]]  # five asked once; the second try asks nothing
+    # a sixth name the catalog lacks is never asked and never refused, even a misspelt one
+    asked.clear()
+    news = [f"New Set Card {i}" for i in range(5)]
+    adds = [{"action": "add", "card_name": n} for n in [*news, "Sixth Typo"]]
+    out = structured(await call(h, token, "propose_deck_changes", {"deck_id": "42", "changes": adds}))
+    assert out["ok"], out
+    assert asked == news
+
+
 async def test_printing_fields_are_validated_on_the_change(stack: Stack) -> None:
     h = stack.h
     token = await linked_user(stack)
@@ -1498,6 +1602,37 @@ async def test_new_deck_verify_fails_when_a_finish_or_printing_is_lost(stack: St
     ark.add_rows_swap_printing = {}
 
 
+async def test_new_deck_keeps_colour_labels_and_verify_checks_them(stack: Stack) -> None:
+    """A pasted list's ^Name,#rrggbb^ tags, and a CSV export's Label column, go to the new deck's
+    rows; a tag Archidekt does not keep fails the read-back instead of passing on the cards."""
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    text = "1 Sol Ring (sld) 1075 ^Test,#008000^\n1 Swamp ^Proxy^\n1 Forest ^,#656565^\n"
+    csv_text = 'Quantity,Name,Label\n1,Sol Ring,"Test,#008000"\n1,Forest,\n'
+
+    async def create(**src: str) -> dict:
+        p = structured(await call(h, token, "propose_new_deck", {"name": "Labels", **src}))
+        assert p["ok"], p
+        return await apply_any(h, token, p["proposal_id"])
+
+    good = await create(decklist_text=text)
+    assert good["ok"] and good["result"]["verified"] is True, good
+    rows = {r["card"]["oracleCard"]["name"]: r for r in ark.decks[int(good["result"]["deck_id"])]["cards"]}
+    assert rows["Sol Ring"]["label"] == "Test,#008000"
+    assert rows["Swamp"]["label"] == "Proxy,#656565"  # a bare name gets the default grey
+    assert "label" not in rows["Forest"]  # Archidekt's empty tag is no tag
+    from_csv = await create(csv_text=csv_text)
+    assert from_csv["ok"] and from_csv["result"]["verified"] is True, from_csv
+    made = ark.decks[int(from_csv["result"]["deck_id"])]["cards"]
+    rows = {r["card"]["oracleCard"]["name"]: r for r in made}
+    assert rows["Sol Ring"]["label"] == "Test,#008000"
+    ark.add_rows_lose_label = True
+    lost = await create(decklist_text=text)
+    assert lost["ok"] is False and lost["error"] == "verify_mismatch", lost
+    assert "Sol Ring (label)" in lost["message"] and "Forest" not in lost["message"], lost
+    ark.add_rows_lose_label = False
+
+
 async def test_simulation_calls_take_the_shape_mystic_forge_accepts(stack: Stack) -> None:
     """The fake's goldfish_run, goldfish_ab and validate_decklist take one pydantic ``params``
     model like the real Mystic Forge, so a flat call would fail validation here as it does live.
@@ -1578,6 +1713,8 @@ async def test_sixty_card_decks_are_simulated_as_sixty_card_games(
     assert rep["goldfish"]["ok"] is True and "Format: 60-card" in rep["goldfish"]["text"], rep["goldfish"]
     ((tool, sent),) = SIM_CALLS
     assert tool == "goldfish_run" and sent["constructed"] is True, sent
+    # the research service's validation is a Commander check (100 cards): a 60-card deck skips it
+    assert rep["validation"] is None, rep["validation"]
     assert sideboard_name not in str(sent["deck"]) and "Commander" not in str(sent["deck"]), sent
     # the stored report reads back as a 60-card game
     got = structured(await call(h, token, "get_deck_report", {"report_id": rep["report_id"]}))
@@ -1603,12 +1740,14 @@ async def test_sixty_card_decks_are_simulated_as_sixty_card_games(
     rep = structured(await call(h, token, "run_deck_report", {"deck_ref": sixty, "games": 20}))
     assert rep["ok"] and rep["stored"] is False, rep
     assert SIM_CALLS[-1][1]["constructed"] is True and "Smash" not in str(SIM_CALLS[-1][1]["deck"])
+    assert rep["validation"] is None, rep["validation"]
     short = "4 Lightning Bolt\n20 Mountain\n16 Goblin Guide\n"
     rep = structured(await call(h, token, "run_deck_report", {"deck_ref": short, "games": 20}))
     assert rep["ok"] is False and "at least 60 cards" in rep["message"] and "has 40" in rep["message"], rep
     commander = "Commander\n1 Aesi, Tyrant of Gyre Strait\n\n99 Island\n"
     rep = structured(await call(h, token, "run_deck_report", {"deck_ref": commander, "games": 20}))
     assert rep["ok"] and SIM_CALLS[-1][1]["constructed"] is False, rep
+    assert rep["validation"]["ok"] is True, rep  # a Commander list is still validated
     # A 100-card paste with no commander marked is a Commander deck, not a 60-card game.
     calls = len(SIM_CALLS)
     unmarked = "1 Aesi, Tyrant of Gyre Strait\n99 Island\n"

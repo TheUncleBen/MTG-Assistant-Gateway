@@ -2,11 +2,11 @@
 
 A page that reads from Archidekt catches a DeckError (or a CollectionError, which copies its
 ``kind``). Two kinds are not about the deck or the member at all: ``rate_limited`` (the member's
-Archidekt budget, ``MTG_ARCHIDEKT_CALLS_PER_10_MIN``, or the concurrency cap is used up, or
-Archidekt asked the gateway to slow down) and ``unavailable`` (Archidekt or Mystic Forge cannot
-be reached). Every page maps those two through :func:`busy_response` to the same page, status and
-headers, so no page can call a used-up budget "Deck not found" again. The other kinds stay with
-the page's own wording.
+Archidekt budget, ``MTG_ARCHIDEKT_CALLS_PER_10_MIN``, or the concurrency cap is used up,
+Archidekt asked the gateway to slow down, or other work for the member is still running) and
+``unavailable`` (Archidekt or Mystic Forge cannot be reached). Every page maps those two through
+:func:`busy_response` to the same page, status and headers, so no page can call a used-up budget
+"Deck not found" again. The other kinds stay with the page's own wording.
 """
 
 from __future__ import annotations
@@ -21,9 +21,27 @@ from starlette.responses import JSONResponse, Response
 
 BUSY_TITLE = "Archidekt is busy"
 BUSY_TEXT = (
-    "Your account's Archidekt budget, or the gateway's, is used up for a few minutes. Nothing is "
-    "wrong with this deck or your account; the page will work again shortly."
+    "Other work for your account is still running, or one of your account's limits was reached, so "
+    "this couldn't be done right now. Nothing is wrong with your decks or your account; try again "
+    "a little later."
 )
+# The busy text when the refusal says why (DeckError.busy_cause, or Archidekt's own 429 behind it).
+BUSY_TEXTS = {
+    "member_slots": (
+        "Your account already has several Archidekt actions running or waiting, for example from an "
+        "assistant, and there was no turn free for this one. Nothing is wrong with your decks or "
+        "your account; try again once some of them have finished."
+    ),
+    "budget": (
+        "Your account has used up its Archidekt allowance for the last 10 minutes, for example "
+        "because an assistant has been busy. It refills a little at a time, and this works again "
+        "once there is room. Nothing is wrong with your decks or your account."
+    ),
+    "archidekt": (
+        "Archidekt asked the gateway to slow down, so the gateway is pausing its Archidekt requests "
+        "for a moment. Nothing is wrong with your decks or your account; try again shortly."
+    ),
+}
 UNREACHABLE_TITLE = "Archidekt can't be reached right now"
 UNREACHABLE_TEXT = (
     "The gateway could not get an answer from Archidekt (or the research service). This usually "
@@ -47,6 +65,22 @@ class BusyPlan:
     detail: str  # the refusal's own words (safe to show: DeckError's contract)
 
 
+def busy_cause(exc: BaseException) -> str | None:
+    """Why a rate_limited refusal was made: a cause the refusal names (``busy_cause``), or
+    "archidekt" when Archidekt's own 429 (or its pause) is behind it; None when it doesn't say."""
+    seen: BaseException | None = exc
+    for _ in range(5):  # a DeckError, a CollectionError made from one, and the error behind them
+        if seen is None:
+            break
+        cause = getattr(seen, "busy_cause", None)
+        if cause in BUSY_TEXTS:
+            return str(cause)
+        if type(seen).__name__ == "ArchidektError" and getattr(seen, "kind", None) == "rate_limited":
+            return "archidekt"
+        seen = seen.__cause__ or seen.__context__
+    return None
+
+
 def busy_plan(exc: BaseException) -> BusyPlan | None:
     """How to answer for ``exc``, or None when it is not an Archidekt-busy or -unreachable
     failure and the page should keep its own answer."""
@@ -56,7 +90,10 @@ def busy_plan(exc: BaseException) -> BusyPlan | None:
     retry = getattr(exc, "retry_after", None)
     if not isinstance(retry, int) or isinstance(retry, bool) or retry < 1:
         retry = DEFAULT_RETRY_AFTER
-    return BusyPlan(kind, _TITLE[kind], _TEXT[kind], _STATUS[kind], min(retry, 3600), str(exc))
+    text = _TEXT[kind]
+    if kind == "rate_limited":
+        text = BUSY_TEXTS.get(busy_cause(exc) or "", text)
+    return BusyPlan(kind, _TITLE[kind], text, _STATUS[kind], min(retry, 3600), str(exc))
 
 
 def _headers(plan: BusyPlan) -> dict[str, str]:

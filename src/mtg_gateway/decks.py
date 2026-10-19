@@ -20,6 +20,7 @@ import contextvars
 import dataclasses
 import datetime
 import hashlib
+import heapq
 import json
 import logging
 import math
@@ -46,6 +47,8 @@ from .archidekt import (
     MAX_LIST_PAGES,
     PATIENCE_SPENT,
     RATE_LIMIT_WAITS,
+    VOTE_DOWN,
+    VOTE_NONE,
     ArchidektClient,
     ArchidektError,
     Deck,
@@ -61,6 +64,7 @@ from .archidekt import (
     front_face,
     jwt_exp,
     no_retry,
+    page_turn,
     parse_deck,
     patient,
     plain_text,
@@ -197,9 +201,13 @@ LINK_FAILURE_WINDOW = 15 * 60
 READ_ONLY_SCOPES = frozenset({"mtg.read", "read"})
 FULL_SCOPE = "mtg"
 # Archidekt work one member may have running or queued in the shared pacer at once (a deck
-# read, a proposal, an apply); more is refused at once (rate_limited), so one account cannot
-# queue the pacer up for every other member.
+# read, a proposal, an apply), so one account cannot queue the pacer up for every other member.
+# More waits outside the pacer for one of the member's own slots, for up to ARCHIDEKT_SLOT_WAIT
+# seconds, the member's own pages first; past that wait, or with MAX_ARCHIDEKT_WAITING_PER_USER
+# already waiting, it is refused (rate_limited).
 MAX_ARCHIDEKT_PER_USER = 3
+ARCHIDEKT_SLOT_WAIT = 20.0
+MAX_ARCHIDEKT_WAITING_PER_USER = 8
 # The member whose Archidekt slot the running task already holds, so nested calls (an apply's
 # reads and writes, get_any_deck's private retry) do not take a second one.
 _slot_holder: ContextVar[str | None] = ContextVar("_slot_holder", default=None)
@@ -220,6 +228,10 @@ DECK_LIST_COLD_WAIT = 1.5
 # long enough for a run of view switches and a Back, short enough that a change made on
 # archidekt.com shows on the next view soon after. MTG_ARCHIDEKT_CACHE_SECONDS=0 turns it off.
 PAGE_DECK_SECONDS = 20.0
+# While Archidekt cannot be asked (a 429 pause, the breaker, the member's Archidekt work still
+# running), My decks and Home show the member's deck list as last read, for up to this long, with a
+# notice saying how old it is, instead of the busy page.
+DECK_LIST_LAST = 24 * 3600.0
 PAGE_DECKS_MAX = 200  # reads kept at most, the oldest go first
 TOUCH_LINK_INTERVAL = 60.0  # the link's last_used_at is written at most this often per member
 # Said first in a pending proposal's next_step once the deck sync (sync.py) has seen its deck change.
@@ -283,6 +295,13 @@ HELD_REPLACED_STEP = (
 ARCHIDEKT_BUDGET_WINDOW = 600
 
 
+def is_busy(exc: BaseException) -> bool:
+    """Whether ``exc`` says Archidekt cannot be asked right now (asked us to slow down, the
+    member's Archidekt work is still running, the budget is used up, or Archidekt can't be
+    reached), as opposed to something about the deck or the account."""
+    return isinstance(exc, DeckError) and exc.kind in ("rate_limited", "unavailable")
+
+
 def scopes_allow_writes(scopes: list[str] | tuple[str, ...] | None) -> bool:
     """False only for a token that has scopes and every one of them is read-only (see
     READ_ONLY_SCOPES). A token with no scope, the default "mtg" scope, or any scope that is not a
@@ -344,6 +363,9 @@ class MemberCache:
         self._limits: dict[str, float] = {}  # sub -> that shorter life, for the value kept now
         self._refreshing: dict[str, tuple[asyncio.Task[Any], float]] = {}  # task, when it started
         self._dropped: dict[str, float] = {}
+        # sub -> (wall time, value): the last value read in full, kept through ``drop`` (a write
+        # makes it out of date, not wrong to show as last read); ``forget`` removes it
+        self._last: dict[str, tuple[float, Any]] = {}
         # the deck sync's fetches (``refreshed``): read on the sync's terms, no retry and no unlink,
         # so a page that shared one which failed reads again on its own terms
         self._background: weakref.WeakSet[asyncio.Task[Any]] = weakref.WeakSet()
@@ -377,6 +399,19 @@ class MemberCache:
         self._limits.pop(sub, None)
         self._dropped[sub] = time.monotonic()
 
+    def forget(self, sub: str) -> None:
+        """``drop``, and the last value too (the member's link changed or their data was deleted)."""
+        self.drop(sub)
+        self._last.pop(sub, None)
+
+    def last(self, sub: str, max_age: float) -> tuple[float, Any] | None:
+        """(when read, epoch seconds; value) of the last value read in full, if younger than
+        ``max_age``; for a page to show as last read while a fetch cannot be made."""
+        hit = self._last.get(sub)
+        if hit is None or time.time() - hit[0] >= max_age:
+            return None
+        return hit
+
     def clear(self) -> None:
         for sub in list(self._entries):
             self.drop(sub)
@@ -402,13 +437,17 @@ class MemberCache:
         if running is not None and not running[0].done() and self._dropped.get(sub, 0.0) <= running[1]:
             return running[0]
 
+        for_page = page_turn.get() and not background
+
         async def run() -> Any:
+            page_turn.set(for_page)  # a page's read keeps its turn (the context below is fresh)
             value = await fetch()
             if self._dropped.get(sub, 0.0) <= started:  # not invalidated while it was fetched
                 self._entries[sub] = (time.monotonic(), time.time(), value)
                 limit = self.keep_for(value) if self.keep_for else None
                 if limit is None:
                     self._limits.pop(sub, None)
+                    self._last[sub] = (time.time(), value)
                 else:
                     self._limits[sub] = limit
             return value
@@ -420,7 +459,7 @@ class MemberCache:
                 logger.debug("member cache refresh failed for a member: %r", t.exception())
 
         # A fresh context: the refresh is nobody's request, so it must not inherit the caller's
-        # Archidekt slot (_slot_holder), client id or request timing.
+        # Archidekt slot (_slot_holder), client id or request timing; only a page's turn is kept.
         task = asyncio.create_task(run(), context=contextvars.Context())
         task.add_done_callback(done)
         if background:
@@ -430,6 +469,7 @@ class MemberCache:
             self._entries.clear()
             self._limits.clear()
             self._dropped.clear()
+            self._last.clear()
         return task
 
     async def get(
@@ -541,6 +581,56 @@ def _row(kind: str, **fields: Any) -> dict[str, Any]:
             value = clean_text(value)
         out[key] = value
     return out
+
+
+def _commander_names(*lists: list[str]) -> list[str] | None:
+    """The cards a commander row names, before and after. Its before and after are joined with
+    ", ", which many card names contain, so the names are kept apart for the board's card list."""
+    return sorted({n for names in lists for n in names}, key=str.lower) or None
+
+
+def _split_names(text: str, known: set[str]) -> list[str] | None:
+    """``text`` (names joined with ", ") split back into the ``known`` names it joins, taking the
+    longest known name at each step, since a name may itself hold ", "; None when some part is
+    no known name."""
+    parts = text.split(", ")
+    out: list[str] = []
+    i = 0
+    while i < len(parts):
+        j = next((j for j in range(len(parts), i, -1) if ", ".join(parts[i:j]) in known), None)
+        if j is None:
+            return None
+        out.append(", ".join(parts[i:j]))
+        i = j
+    return out
+
+
+def fill_commander_names(
+    rows: list[dict[str, Any]] | None, deck: Deck, changes: Any
+) -> list[dict[str, Any]] | None:
+    """The rows with ``names`` filled in on a commander row saved before rows listed them (0.7.31),
+    from the deck's card names and the names the stored changes give, as its before and after
+    join them; None when there is nothing to fill or a name can't be told apart."""
+    if not any(r.get("kind") == "commander" and not r.get("names") for r in rows or []):
+        return None
+    known = {c.name for c in deck.cards} | {
+        str(ch["card_name"]) for ch in changes or [] if isinstance(ch, dict) and ch.get("card_name")
+    }
+    out = []
+    for r in rows or []:
+        if r.get("kind") == "commander" and not r.get("names"):
+            sides = [str(r.get(k) or "") for k in ("before", "after")]
+            split = [[] if s in ("", "(none)") else _split_names(s, known) for s in sides]
+            if any(s is None for s in split):
+                return None
+            r = {**r, "names": _commander_names(*split)}  # type: ignore[arg-type]
+        out.append(r)
+    return out
+
+
+def row_cards(rows: list[dict[str, Any]] | None) -> list[str]:
+    """Every card the rows name, a commander row's too, sorted."""
+    return sorted({str(n) for r in rows or [] for n in [r.get("name"), *(r.get("names") or [])] if n})
 
 
 def _printing_label(item: dict[str, Any]) -> str | None:
@@ -676,7 +766,12 @@ class DeckError(Exception):
     fields the tool reply carries alongside ``error`` and ``message``. ``retry_after`` (seconds)
     is set when the refusal knows how long to wait (a used-up Archidekt budget); the browser
     pages put it in their Retry-After header. ``sent`` is False when the Archidekt request never
-    left the gateway (the pacer refused it), so nothing can have been written whatever the kind."""
+    left the gateway (the pacer refused it), so nothing can have been written whatever the kind.
+    ``busy_cause`` names why a rate_limited refusal was made, for the busy page (busy.py):
+    "member_slots" (the member's own Archidekt work fills their slots) or "budget" (the member's
+    MTG_ARCHIDEKT_CALLS_PER_10_MIN is used up); None otherwise."""
+
+    busy_cause: str | None = None
 
     def __init__(
         self,
@@ -1322,7 +1417,12 @@ def category_plan_rows(
         new_names = sorted(set(new_commanders), key=str.lower)
         if [n.lower() for n in old_names] != [n.lower() for n in new_names]:
             lines.append(
-                _row("commander", before=", ".join(old_names) or "(none)", after=", ".join(new_names))
+                _row(
+                    "commander",
+                    before=", ".join(old_names) or "(none)",
+                    after=", ".join(new_names),
+                    names=_commander_names(old_names, new_names),
+                )
             )
     return want, lines
 
@@ -1386,6 +1486,36 @@ def plan_rows(
     """``plan`` with structured review rows in place of the text lines."""
     before, after, rows, _before_side, _after_side = plan_zones(deck, changes)
     return before, after, rows
+
+
+async def unknown_card_names(
+    deck: Deck,
+    changes: list[Change],
+    known: Callable[[list[str]], Awaitable[dict[str, bool | None]]] | None,
+) -> list[str]:
+    """The names added by ``changes`` that are no Magic card at all (``known``: the scan service's
+    are_cards). Archidekt looks each name up only when the proposal is applied, so without this a
+    misspelt card waits as a proposal and fails later. A card already in the deck is never
+    looked up, and a name that cannot be judged (no catalog yet, Scryfall unreachable, or the check
+    fails) passes."""
+    if known is None:
+        return []
+    have = {c.name.casefold() for c in deck.cards} | {front_face(c.name).casefold() for c in deck.cards}
+    names: list[str] = []
+    for ch in changes:
+        name = ch.card_name
+        if ch.action != "add" or name.casefold() in have or front_face(name).casefold() in have:
+            continue
+        if name not in names:
+            names.append(name)
+    if not names:
+        return []
+    try:
+        found = await known(names)
+    except Exception:
+        logger.exception("card-name check failed")
+        return []
+    return [n for n in names if found.get(n) is False]
 
 
 def _refuse_adds_written_otherwise(deck: Deck, changes: list[Change], main_lookup: dict[str, str]) -> None:
@@ -1532,7 +1662,12 @@ def plan_zones(
         )
         if [n.lower() for n in was] != [n.lower() for n in now]:
             lines.append(
-                _row("commander", before=", ".join(was) or "(none)", after=", ".join(now) or "(none)")
+                _row(
+                    "commander",
+                    before=", ".join(was) or "(none)",
+                    after=", ".join(now) or "(none)",
+                    names=_commander_names(was, now),
+                )
             )
         elif unsure or moved:
             # the commanders stay: what changes is the card's other rows (see build_payload), or
@@ -1542,6 +1677,7 @@ def plan_zones(
                     "commander",
                     before=", ".join(was),
                     after=", ".join(now),
+                    names=_commander_names(was, now),
                     stays=unsure or None,
                     moved=moved or None,
                 )
@@ -1980,6 +2116,8 @@ def new_deck_entries(
                     "modifier": (modifiers or {}).get(
                         key, c.get("finish") or ("Foil" if c.get("foil") else "Normal")
                     ),
+                    # the list's colour tag, in Archidekt's modifications.label as its editor sends it
+                    **({"label": c["label"]} if c.get("label") else {}),
                 },
             }
         )
@@ -2093,12 +2231,20 @@ class DeckService:
         # unused delete is queued; only the newest BACKUPS_REMEMBERED are kept
         self._backups_made: dict[str, dict[str, str]] = {}
         self.max_archidekt_per_user = MAX_ARCHIDEKT_PER_USER
+        self.archidekt_slot_wait = ARCHIDEKT_SLOT_WAIT
+        # sub -> waiters for one of its slots: (0 for a page, else 1; arrival; future)
+        self._slot_waiters: dict[str, list[tuple[int, int, asyncio.Future[None]]]] = {}
+        self._slot_seq = 0
         self.archidekt_budget = RateBudget(settings.archidekt_calls_per_10_min)
         # the dashboard settings with a deployment value winning (config.MANAGED_SETTINGS); read a
         # managed key through here, not through ``settings``, so a dashboard change applies
         self.live = LiveSettings(settings, db)
         # sub -> {matched card name (lower case): what the scan read}; set when scanning is on
         self.guessed_names: Callable[[str], dict[str, str]] | None = None
+        # names -> whether each is a Magic card (None: cannot tell); set when scanning is on, from
+        # the card-name catalog the gateway keeps in memory (Scryfall asked only for a few names it
+        # lacks), so the check costs no Archidekt call
+        self.known_cards: Callable[[list[str]], Awaitable[dict[str, bool | None]]] | None = None
         # Set by collection.py: applies a ``collection`` proposal's stored changes against the
         # member's Archidekt Collection and returns the result rows (DeckService itself knows only
         # decks). None while the collection pages are not loaded.
@@ -2151,41 +2297,100 @@ class DeckService:
 
     def forget_member(self, sub: str) -> None:
         """Drop everything cached for a member (their link changed or their data was deleted)."""
-        self.deck_lists.drop(sub)
-        self.folder_trees.drop(sub)
+        self.deck_lists.forget(sub)
+        self.folder_trees.forget(sub)
         self._forget_page_decks()
         for hook in self.write_hooks:
             hook(sub, "")
 
     @asynccontextmanager
-    async def archidekt_slot(self, sub: str | None) -> AsyncIterator[None]:
+    async def archidekt_slot(self, sub: str | None, *, wait: float | None = None) -> AsyncIterator[None]:
         """Count one unit of Archidekt work for ``sub`` while the block runs. At most
-        ``max_archidekt_per_user`` run or wait in the shared pacer per member; another is refused
-        at once (rate_limited) instead of queueing behind them for everyone. A task that already
-        holds the member's slot (an apply's reads and writes) does not take another."""
+        ``max_archidekt_per_user`` run or wait in the shared pacer per member; another waits
+        outside the pacer for one of them to end (see ARCHIDEKT_SLOT_WAIT), so it never queues
+        the pacer up for everyone. ``wait`` shortens that wait (0: refused at once unless a slot is
+        free), for a best-effort read. A task that already holds the member's slot (an apply's
+        reads and writes) does not take another."""
         if not sub or _slot_holder.get() == sub:
             yield
             return
-        if self._archidekt_in_flight.get(sub, 0) >= self.max_archidekt_per_user:
-            raise DeckError(
-                "rate_limited",
-                f"{self.max_archidekt_per_user} Archidekt actions for your account are still running "
-                "or waiting their turn; wait for them to finish and try again.",
-            )
-        refused = self.budget_refusal(sub)
-        if refused:
-            raise DeckError("rate_limited", refused, retry_after=self.archidekt_budget.retry_after(sub))
-        self._archidekt_in_flight[sub] = self._archidekt_in_flight.get(sub, 0) + 1
-        token = _slot_holder.set(sub)
+        await self._take_slot(sub, wait=wait)
         try:
-            yield
+            refused = self.budget_refusal(sub)
+            if refused:
+                err = DeckError("rate_limited", refused, retry_after=self.archidekt_budget.retry_after(sub))
+                err.busy_cause = "budget"
+                raise err
+            token = _slot_holder.set(sub)
+            try:
+                yield
+            finally:
+                _slot_holder.reset(token)
         finally:
-            _slot_holder.reset(token)
-            left = self._archidekt_in_flight.get(sub, 1) - 1
-            if left > 0:
-                self._archidekt_in_flight[sub] = left
+            self._give_slot(sub)
+
+    def _slots_full(self, sub: str) -> DeckError:
+        err = DeckError(
+            "rate_limited",
+            f"{self.max_archidekt_per_user} Archidekt actions for your account are still running "
+            "or waiting their turn; wait for them to finish and try again.",
+        )
+        err.busy_cause = "member_slots"
+        return err
+
+    async def _take_slot(self, sub: str, *, wait: float | None = None) -> None:
+        """One of the member's slots: at once when one is free and nobody is waiting, else the
+        next one to end, the member's pages before the rest; refused after
+        ``archidekt_slot_wait`` seconds (or ``wait``, when shorter) or with
+        MAX_ARCHIDEKT_WAITING_PER_USER already waiting."""
+        waiters = self._slot_waiters.get(sub, [])
+        if self._archidekt_in_flight.get(sub, 0) < self.max_archidekt_per_user and not waiters:
+            self._archidekt_in_flight[sub] = self._archidekt_in_flight.get(sub, 0) + 1
+            return
+        limit = self.archidekt_slot_wait if wait is None else min(wait, self.archidekt_slot_wait)
+        if self.max_archidekt_per_user <= 0 or limit <= 0 or len(waiters) >= MAX_ARCHIDEKT_WAITING_PER_USER:
+            raise self._slots_full(sub)
+        fut: asyncio.Future[None] = asyncio.get_running_loop().create_future()
+        self._slot_seq += 1
+        entry = (0 if page_turn.get() else 1, self._slot_seq, fut)
+        heapq.heappush(self._slot_waiters.setdefault(sub, waiters), entry)
+        try:
+            await asyncio.wait_for(fut, limit)  # the slot is handed over counted
+        except BaseException as exc:
+            if fut.done() and not fut.cancelled():
+                self._give_slot(sub)  # handed a slot just as this waiter gave up: pass it on
             else:
-                self._archidekt_in_flight.pop(sub, None)
+                self._drop_waiter(sub, entry)
+            if isinstance(exc, TimeoutError):
+                raise self._slots_full(sub) from None
+            raise
+
+    def _drop_waiter(self, sub: str, entry: tuple[int, int, asyncio.Future[None]]) -> None:
+        waiters = self._slot_waiters.get(sub)
+        if waiters is None:
+            return
+        if entry in waiters:
+            waiters.remove(entry)
+            heapq.heapify(waiters)
+        if not waiters:
+            self._slot_waiters.pop(sub, None)
+
+    def _give_slot(self, sub: str) -> None:
+        """A slot of the member's ended: hand it to the next waiter, else count it free."""
+        waiters = self._slot_waiters.get(sub)
+        while waiters:
+            _line, _seq, fut = heapq.heappop(waiters)
+            if not fut.done():
+                if not waiters:
+                    self._slot_waiters.pop(sub, None)
+                fut.set_result(None)
+                return
+        self._slot_waiters.pop(sub, None)
+        left = self._archidekt_in_flight.get(sub, 1) - 1
+        if left > 0:
+            self._archidekt_in_flight[sub] = left
+        else:
+            self._archidekt_in_flight.pop(sub, None)
 
     def budget_refusal(self, sub: str) -> str | None:
         """Spend one unit of the member's Archidekt budget; the refusal to show when it is used up
@@ -2394,9 +2599,10 @@ class DeckService:
         row["_secret"] = secret
         return access, row
 
-    async def _call(self, sub: str, fn: Any, *args: Any) -> Any:
-        """``_call_unslotted`` inside the member's Archidekt slot (see ``archidekt_slot``)."""
-        async with self.archidekt_slot(sub):
+    async def _call(self, sub: str, fn: Any, *args: Any, slot_wait: float | None = None) -> Any:
+        """``_call_unslotted`` inside the member's Archidekt slot (see ``archidekt_slot``, which
+        ``slot_wait`` goes to)."""
+        async with self.archidekt_slot(sub, wait=slot_wait):
             return await self._call_unslotted(sub, fn, *args)
 
     async def _call_unslotted(self, sub: str, fn: Any, *args: Any, background: bool = False) -> Any:
@@ -2515,16 +2721,17 @@ class DeckService:
         self.db.audit(event, sub=sub, client_id=client_id, detail=detail)
 
     # -- reads ----------------------------------------------------------------
-    async def list_decks(self, sub: str) -> list[dict[str, Any]]:
+    async def list_decks(self, sub: str, *, folder_names: bool = False) -> list[dict[str, Any]]:
         """The member's decks, from the in-memory list when it is fresh (DECK_LIST_FRESH) or stale
         with a refresh running (DECK_LIST_STALE), else read from Archidekt now. Every write the
-        gateway sends for the member drops the list first, so the next read is live again."""
-        rows = await self.list_decks_quick(sub, wait=None)
+        gateway sends for the member drops the list first, so the next read is live again.
+        ``folder_names``: see ``_deck_rows``."""
+        rows = await self.list_decks_quick(sub, wait=None, folder_names=folder_names)
         assert rows is not None
         return rows
 
     async def _deck_rows(
-        self, sub: str, *, wait: float | None, prefer_fresh: bool = False
+        self, sub: str, *, wait: float | None, prefer_fresh: bool = False, folder_names: bool = False
     ) -> DeckList | None:
         """Every deck of the linked account from the member cache (or Archidekt), the gateway's
         backup copies marked ``backup: True``: those in the backup folder, those named like one,
@@ -2532,7 +2739,12 @@ class DeckService:
         listing's ``complete`` and ``unreadable`` (see archidekt.DeckList); a list of unknown origin
         is incomplete. A list with entries whose owner could not be read is kept only briefly
         (DECK_LIST_PARTIAL): My decks says so with Try again, which reads Archidekt again
-        through ``reread_deck_list``."""
+        through ``reread_deck_list``.
+
+        ``folder_names`` (list_my_decks): ``folder`` is filled in on rows that carry only the
+        folder's id, from the same one read of the folder tree the backup marks use; when that
+        tree can't be read now the rows keep ``folder`` None and the list's
+        ``folder_names_unread`` is True."""
         _token, row = self._token(sub)  # not linked: raise before touching the cache
         folder = self.settings.archidekt_backup_folder  # with backups on or off
 
@@ -2547,30 +2759,110 @@ class DeckService:
         rows = await self.deck_lists.get(sub, fetch, wait=wait, prefer_fresh=prefer_fresh)
         if rows is None:
             return None
+        # Archidekt's owner listing can leave a folder's name out and give only its id
+        unnamed = any(d.get("folder_id") is not None and not d.get("folder") for d in rows)
+        info = None
+        if unnamed and (folder_names or self.settings.archidekt_backup_folder):
+            info = await self._folder_tree_now(sub, wait=wait)
+        out = self._marked(sub, rows, self._backup_folder_ids(sub, info))
+        if folder_names and unnamed:
+            if info is None:
+                out.folder_names_unread = True
+            else:
+                names = {f["id"]: f["name"] for f in info["folders"] if f["depth"] > 0}
+                for d in out:
+                    if d.get("folder_id") is not None and not d.get("folder"):
+                        d["folder"] = names.get(d["folder_id"])
+        return out
+
+    def _marked(
+        self, sub: str, rows: list[dict[str, Any]], backup_ids: set[int], last_read: float | None = None
+    ) -> DeckList:
+        """``rows`` as fresh dicts, the backup copies marked: those in a folder of ``backup_ids``
+        and those a snapshot here records (see ``_deck_rows``)."""
         unreadable = getattr(rows, "unreadable", 0)
         known = self.db.backup_copies(sub)
         out = []
         for d in rows:
             d = dict(d)
+            if d.get("folder_id") in backup_ids:
+                d["backup"] = True  # in the backup folder, which the listing gave by id only
             if d["id"] in known:
                 d["backup"] = True
                 d["backup_of"] = known[d["id"]]["deck_id"]
                 d["snapshot_id"] = known[d["id"]]["snapshot_id"]
             out.append(d)
-        return DeckList(out, complete=getattr(rows, "complete", False) is True, unreadable=unreadable)
+        return DeckList(
+            out, complete=getattr(rows, "complete", False) is True, unreadable=unreadable, last_read=last_read
+        )
 
-    async def list_decks_quick(self, sub: str, *, wait: float | None = None) -> list[dict[str, Any]] | None:
+    def last_deck_list(self, sub: str) -> DeckList | None:
+        """For My decks and Home when Archidekt cannot be asked (``is_busy``): the member's deck
+        list as last read (at most DECK_LIST_LAST old), backup copies left out, its ``last_read``
+        set; None when there is none. Never for an assistant or for judging what is gone: a page
+        shows it with a notice saying how old it is."""
+        self._token(sub)  # not linked (any more): nothing to show
+        held = self.deck_lists.last(sub, DECK_LIST_LAST)
+        if held is None:
+            return None
+        tree = self.folder_trees.last(sub, DECK_LIST_LAST)  # never a read: Archidekt is busy
+        backup_ids = (
+            {f["id"] for f in self._flatten_folders(tree[1]).get("folders", []) if f.get("backup")}
+            if tree is not None and tree[1] is not None and self.settings.archidekt_backup_folder
+            else set()
+        )
+        rows = self._marked(sub, held[1], backup_ids, last_read=held[0])
+        return DeckList(
+            [d for d in rows if not d.get("backup")], complete=False, unreadable=0, last_read=held[0]
+        )
+
+    async def _folder_tree_now(self, sub: str, *, wait: float | None) -> dict[str, Any] | None:
+        """The member's folder tree flattened, from the member cache or read now, for naming deck
+        rows' folders; a best-effort read, so outside a page it takes one of the member's
+        Archidekt slots only when one is free (no wait behind their other work). None when it
+        can't be read now or ``wait`` ran out; never the tree as last read, which may be out of
+        date."""
+        slot_wait = None if page_turn.get() else 0.0
+
+        async def fetch() -> dict[str, Any]:
+            return await self._call(sub, self.client.folder_tree, slot_wait=slot_wait)
+
+        try:
+            tree = await self.folder_trees.get(sub, fetch, wait=wait)
+        except DeckError:
+            return None
+        return None if tree is None else self._flatten_folders(tree)
+
+    def _backup_folder_ids(self, sub: str, info: dict[str, Any] | None) -> set[int]:
+        """The ids of the backup folder and the folders inside it, for deck rows that carry their
+        folder's id but not its name (archidekt.list_decks recognises the backup folder by name):
+        from ``info`` (``_folder_tree_now``), else from the tree as last read (the backup folder's
+        id doesn't change). Empty when neither is there (the name check and the snapshots' own
+        records still apply)."""
+        if not self.settings.archidekt_backup_folder:
+            return set()
+        if info is None:
+            held = self.folder_trees.last(sub, DECK_LIST_LAST)
+            info = self._flatten_folders(held[1]) if held is not None and held[1] is not None else None
+        return {f["id"] for f in (info or {}).get("folders", []) if f.get("backup")}
+
+    async def list_decks_quick(
+        self, sub: str, *, wait: float | None = None, folder_names: bool = False
+    ) -> list[dict[str, Any]] | None:
         """``list_decks`` that gives up waiting for a cold read after ``wait`` seconds and answers
         None; the read carries on and lands in the cache for /api/decks/mine. ``wait=None``
         waits for it. The list comes back as fresh dicts, so a caller may sort or add to it. The
         gateway's backup copies are left out (``backup_copies`` lists them, History shows them).
-        It keeps the listing's ``complete`` and ``unreadable`` (archidekt.DeckList)."""
-        rows = await self._deck_rows(sub, wait=wait)
+        It keeps the listing's ``complete`` and ``unreadable`` (archidekt.DeckList), and
+        ``folder_names_unread`` (see ``_deck_rows``)."""
+        rows = await self._deck_rows(sub, wait=wait, folder_names=folder_names)
         if rows is None:
             return None
-        return DeckList(
+        out = DeckList(
             [d for d in rows if not d.get("backup")], complete=rows.complete, unreadable=rows.unreadable
         )
+        out.folder_names_unread = rows.folder_names_unread
+        return out
 
     async def backup_copies(
         self,
@@ -2608,7 +2900,10 @@ class DeckService:
         MAX_LIST_PAGES pages, an entry whose owner could not be read or was someone else, or a
         count that moved between pages). None means "unknown": nothing is marked gone. A list
         older than DECK_LIST_FRESH is refreshed first, waiting up to ``wait`` for it."""
-        rows = await self._deck_rows(sub, wait=wait, prefer_fresh=True)
+        return self._listed(sub, await self._deck_rows(sub, wait=wait, prefer_fresh=True))
+
+    def _listed(self, sub: str, rows: Any) -> dict[str, Any] | None:
+        """``on_archidekt``'s answer for the deck list ``rows`` (the cached list's rows)."""
         _token, link = self._token(sub)
         read_at = self.deck_lists.fetched_at(sub)
         if rows is None or read_at is None or not link.get("archidekt_user_id"):
@@ -2623,6 +2918,22 @@ class DeckService:
             "username": str(link.get("archidekt_username") or ""),
             "linked_at": int(link.get("created_at") or 0),
         }
+
+    def backup_gone(self, sub: str, backup_id: str) -> bool:
+        """Whether the member's deck list as held now (no request) says the backup copy
+        ``backup_id`` is gone from Archidekt, judged as History marks it (``mark_gone``); False
+        when it can't tell."""
+        copy = self.db.backup_copies(sub).get(str(backup_id))
+        if copy is None:
+            return False
+        snaps = self.db.list_snapshots(sub, 50, deck_id=str(copy["deck_id"]))
+        snap = next((x for x in snaps if str(x.get("backup_deck_id") or "") == str(backup_id)), None)
+        rows, _fresh = self.deck_lists.peek(sub)
+        try:
+            listed = self._listed(sub, rows)
+        except DeckError:  # not linked any more
+            return False
+        return snap is not None and bool(mark_gone([snap], listed)[0].get("backup_gone"))
 
     def decks_fetched_at(self, sub: str) -> float | None:
         """When the cached deck list was read from Archidekt (epoch seconds), None when none is."""
@@ -2943,6 +3254,7 @@ class DeckService:
         deck = await self.get_own_deck(sub, deck_id)
         self.recheck_waiting(sub, deck)  # the deck's other waiting proposals, at no cost
         _before, _after, rows = plan_rows(deck, changes)
+        await self._refuse_unknown_cards(deck, changes)
         pid = secrets.token_urlsafe(12)
         self._save_proposal(
             {
@@ -3043,6 +3355,17 @@ class DeckService:
             ]
         return out
 
+    async def _refuse_unknown_cards(self, deck: Deck, changes: list[Change]) -> None:
+        unknown = await unknown_card_names(deck, changes, self.known_cards)
+        if unknown:
+            raise DeckError(
+                "unknown_cards",
+                "No Magic card is called "
+                + ", ".join(f"'{n}'" for n in unknown)
+                + ". Check the spelling; nothing was proposed.",
+                unknown_cards=unknown,
+            )
+
     def keep_no_backup(self, sub: str, proposal_id: str) -> None:
         """Record on a member's own save (the deck page, Card search, the deck editor with its
         backup box unticked) that it makes no backup copy on Archidekt, so an apply later (writes
@@ -3071,6 +3394,15 @@ class DeckService:
             return out if keep else {**out, NO_BACKUP_KEY: True}
 
         self.db.edit_proposal_result(proposal_id, sub, mark)
+
+    def _applied_backup_gone(self, sub: str, row: dict[str, Any]) -> bool:
+        """An applied deck deletion whose backup copy the held deck list says is gone (the text
+        is rebuilt on every view, after the member may have deleted or moved the copy)."""
+        changes = row.get("changes") if isinstance(row.get("changes"), dict) else {}
+        result = row.get("result") if isinstance(row.get("result"), dict) else {}
+        if row.get("kind") != "action" or changes.get("action") != "delete_deck":
+            return False
+        return bool(result.get("backup_deck_id")) and self.backup_gone(sub, str(result["backup_deck_id"]))
 
     def describe(self, sub: str, proposal_id: str) -> dict[str, Any]:
         # A note closed without settling its links (a restart, a cancel, expiry) holds its
@@ -3105,9 +3437,18 @@ class DeckService:
         stopped = (row["result"] or {}).get("error") == "rate_limited" and (
             state == "failed" or (state == "pending" and self.settings.writes_enabled and not out_of_date)
         )
+        applied = (
+            applied_text(
+                kind, row.get("changes"), row["result"], backup_gone=self._applied_backup_gone(sub, row)
+            )
+            if state == "applied"
+            else ""
+        )
         return {
             "proposal_id": row["id"],
             "kind": kind,
+            # what an applied account action or collection change did (the pages and the card say it)
+            **({"applied_text": applied} if applied else {}),
             "deck_id": row["deck_id"],
             "deck_url": f"https://archidekt.com/decks/{row['deck_id']}" if row["deck_id"].isdigit() else None,
             "deck_name": row["deck_name"],
@@ -3131,6 +3472,9 @@ class DeckService:
             "created_at": row["created_at"],
             "expires_at": row["expires_at"],
             "applied_at": row["applied_at"],
+            # Where an applied proposal was applied (assistant, card, review_page, browser or api),
+            # from the audit log, which keeps a year; None when the log no longer has it.
+            **({"applied_via": self._applied_via(sub, row["id"])} if state == "applied" else {}),
             # When and by whom a closed proposal was closed (closed_by: assistant, card,
             # review_page, browser, api or disconnected; recorded since 0.7.22).
             **({"closed_at": row["applied_at"]} if state in ("rejected", "failed") else {}),
@@ -3222,6 +3566,7 @@ class DeckService:
                 ),
                 closed_by=closed_by,
                 closed_by_app=closed_by_app,
+                applied=applied,
             ),
         }
 
@@ -3236,6 +3581,22 @@ class DeckService:
         app = client and client not in (BROWSER_CLIENT, ADMIN_CLIENT)
         name = clean_text(self.db.client_name(client) or "")[:60] if app else ""
         return by, name or None
+
+    def _applied_via(self, sub: str, proposal_id: str) -> str | None:
+        """Where apply() was called from, in the words closed_by uses: the assistant's
+        apply_proposal ("mcp"), the card ("app", one change or its Apply all), the review page
+        (one change or its Apply all), the member's other pages ("browser", also the review page
+        before its applies were logged apart) or the API."""
+        via = self.db.applied_via(sub, proposal_id)
+        if via is None:
+            return None
+        return {
+            "mcp": "assistant",
+            "app": "card",
+            REVIEW_PAGE: "review_page",
+            "browser": "browser",
+            "api": "api",
+        }.get(via, "api")
 
     def _changed(self, row: dict[str, Any]) -> DeckError:
         """The refusal of an apply of a version that is no longer the proposal's."""
@@ -3357,7 +3718,7 @@ class DeckService:
 
     def list_proposals(self, sub: str, *, full: bool = False, **narrow: Any) -> list[dict[str, Any]]:
         """Newest first; ``narrow`` is passed to the database (deck_id, kinds, states, search,
-        limit, offset). With ``full`` each row keeps its whole change text as ``diff_text``."""
+        limit, offset, oldest_first). With ``full`` each row keeps its whole change text as ``diff_text``."""
         now = int(time.time())
         out = []
         for r in self.db.list_proposals(sub, **narrow):
@@ -3674,16 +4035,18 @@ class DeckService:
         version: int | None = None,
         shown_status: str | None = None,
         shown_status_at: int | None = None,
+        logged_via: str | None = None,
     ) -> dict[str, Any]:
-        """``archidekt_backup=False`` (a member's own hand edit, the save bar's tick box unticked, or a
-        quick edit on the deck page) skips the extra backup copy on Archidekt; the gateway's own
-        snapshot is always taken. The assistant's applies always keep the copy. ``version`` is the
-        version the caller showed: the apply claims only that version, and a proposal
-        amended since is refused with ``changed`` and nothing sent. ``shown_status`` is the status
-        the chat card showed with the press: a change held since is refused with
-        ``now_held`` and nothing sent, so the member sees the hold even when the card could not
-        read the change again first; with ``shown_status_at`` (when that status was set), so is a
-        held change that was held for a new cause since."""
+        """``logged_via`` is what the audit row records in place of ``via`` (the REST API's bearer applies,
+        which are checked as ``mcp`` but logged as ``api``). ``archidekt_backup=False`` (a member's own hand
+        edit, the save bar's tick box unticked, or a quick edit on the deck page) skips the extra backup copy
+        on Archidekt; the gateway's own snapshot is always taken. The assistant's applies always keep the
+        copy. ``version`` is the version the caller showed: the apply claims only that version, and a proposal
+        amended since is refused with ``changed`` and nothing sent. ``shown_status`` is the status the chat
+        card showed with the press: a change held since is refused with ``now_held`` and nothing sent, so the
+        member sees the hold even when the card could not read the change again first; with
+        ``shown_status_at`` (when that status was set), so is a held change that was held for a new cause
+        since."""
         if not self.settings.writes_enabled:
             raise DeckError("writes_disabled", refusals.WRITES_OFF_KEPT)
         row = self.db.get_proposal(proposal_id, sub)
@@ -3749,7 +4112,9 @@ class DeckService:
                     sub,
                     proposal_id,
                     row,
-                    via=via,
+                    # the audit row keeps the review page apart, for get_proposal's applied_via
+                    via=REVIEW_PAGE if review_page else via,
+                    logged_via=logged_via,
                     version=expect,
                     shown_status=shown_status,
                     shown_status_at=shown_status_at,
@@ -3953,6 +4318,7 @@ class DeckService:
         version: int | None = None,
         shown_status: str | None = None,
         shown_status_at: int | None = None,
+        logged_via: str | None = None,
     ) -> dict[str, Any]:
         if shown_status is not None:
             # checked just before the claim, with nothing awaited in between, so no hold can be
@@ -4101,7 +4467,9 @@ class DeckService:
                 raise DeckError("internal", unexpected) from exc
         finally:
             lock.release()
-        self._audit("proposal_applied", sub=sub, detail={"proposal_id": proposal_id, "via": via})
+        self._audit(
+            "proposal_applied", sub=sub, detail={"proposal_id": proposal_id, "via": logged_via or via}
+        )
         board.settle(self, sub, proposal_id, "applied")  # lifts the holds it caused
         return result
 
@@ -4378,9 +4746,18 @@ class DeckService:
             logger.exception("re-check of waiting proposals failed")
             return out
         for line in board:
+            row = self.db.get_proposal(line["id"], sub)
+            # a commander change saved before its row listed the commanders lists them from here on
+            # (the board's card list reads them), now that the deck is at hand
+            filled = row and fill_commander_names(row.get("rows"), deck, row.get("changes"))
+            if (
+                row
+                and filled
+                and self.db.fill_proposal_rows(row["id"], sub, filled, int(row.get("version") or 1))
+            ):
+                row["rows"] = filled
             if line.get("status") == "held":
                 continue
-            row = self.db.get_proposal(line["id"], sub)
             if row is None or not row.get("baseline_fingerprint"):
                 continue
             try:
@@ -5225,7 +5602,7 @@ class DeckService:
         app asking made it (``own``: it may apply or withdraw only those)."""
         caller = current_client.get()
         out = []
-        for line in self.db.pending_board(sub, None if deck_id is None else _clean_deck_id(deck_id)):
+        for line in self.db.pending_board(sub, None if deck_id is None else clean_target(deck_id)):
             row = self.db.get_proposal(line["id"], sub) or {}
             lines = str(line.get("diff_text") or "").splitlines()
             summary = "; ".join(lines[:3]) + (f" (+{len(lines) - 3} more)" if len(lines) > 3 else "")
@@ -5254,9 +5631,7 @@ class DeckService:
                     ),
                     **(self._status_fields(sub, line) if line.get("status") else {"status": None}),
                     "summary": summary[:400],
-                    "cards": sorted({str(r.get("name")) for r in row.get("rows") or [] if r.get("name")})[
-                        :60
-                    ],
+                    "cards": row_cards(row.get("rows"))[:60],
                     "links": board.links_text(self.db, sub, line["id"]),
                     # the same link in the member's words, for the cards
                     "link_note": board.link_note(self.db, sub, line),
@@ -5320,6 +5695,7 @@ class DeckService:
         if kind == "edit":
             changes = parse_changes(raw_changes)
             _before, _after, rows = plan_rows(deck, changes)
+            await self._refuse_unknown_cards(deck, changes)
             stored: Any = [c.as_dict() for c in changes]
         else:
             raw = dict(raw_changes) if isinstance(raw_changes, dict) else raw_changes
@@ -5865,13 +6241,13 @@ class DeckService:
     TAG_LOOKUP_ENTRIES = 512
     TAG_LOOKUP_NAMES = 20
 
-    def _hand_snapshot(self, sub: str, deck: Deck) -> str:
+    def _hand_snapshot(self, sub: str, deck: Deck, proposal_id: str | None = None) -> str:
         snapshot_id = secrets.token_urlsafe(12)
         if not self.db.save_snapshot(
             snapshot_id,
             owner_sub=sub,
             deck_id=deck.id,
-            proposal_id=None,
+            proposal_id=proposal_id,
             fingerprint=deck.fingerprint(),
             deck=deck.raw,
         ):
@@ -5887,21 +6263,28 @@ class DeckService:
             raise DeckError("writes_disabled", refusals.WRITES_OFF)
 
     async def delete_deck(
-        self, sub: str, deck_id: str, typed_name: str, *, progress: dict[str, Any] | None = None
+        self,
+        sub: str,
+        deck_id: str,
+        typed_name: str,
+        *,
+        progress: dict[str, Any] | None = None,
+        proposal_id: str | None = None,
     ) -> dict[str, Any]:
         """Delete one of the member's own decks after they typed its exact name. A snapshot is kept
         in the gateway and, when backups are on, a copy in the backup folder on Archidekt; the
         deletion is verified by reading the deck back (it must be gone). ``progress``: a
         delete-deck action's apply, which records the snapshot and the copy in it as every apply
         does, so an apply that stops before the deck is deleted deletes the unused
-        copy or queues its delete instead of leaving it unrecorded."""
+        copy or queues its delete instead of leaving it unrecorded. ``proposal_id``: that action's
+        proposal, which the snapshot names so the snapshot list says what it was taken for."""
         self._writes_switch()
         deck = await self.get_own_deck(sub, deck_id)
         if clean_text(typed_name).casefold() != clean_text(deck.name).casefold():
             raise DeckError(
                 "invalid", "The name you typed does not match the deck's name. Nothing was deleted."
             )
-        snapshot_id = self._hand_snapshot(sub, deck)
+        snapshot_id = self._hand_snapshot(sub, deck, proposal_id)
         if progress is not None:
             progress["snapshot_id"] = snapshot_id
         backup: dict[str, Any] = {}
@@ -5994,15 +6377,26 @@ class DeckService:
         tree = await self._call(sub, self.client.folder_tree)
         return self._flatten_folders(tree)
 
-    async def folder_view(self, sub: str, *, wait: float | None = None) -> dict[str, Any] | None:
+    async def folder_view(
+        self, sub: str, *, wait: float | None = None, last_read_ok: bool = False
+    ) -> dict[str, Any] | None:
         """``folders`` from the member cache (fresh for DECK_LIST_FRESH, then refreshed in the
         background like the deck list), for My decks. None when the tree is cold and ``wait``
-        ran out; the read carries on and lands in the cache."""
+        ran out; the read carries on and lands in the cache. ``last_read_ok`` (My decks, which
+        says how old its list is): while Archidekt can't be asked, the tree as last read, up to
+        DECK_LIST_LAST old; never for an assistant."""
 
         async def fetch() -> dict[str, Any]:
             return await self._call(sub, self.client.folder_tree)
 
-        tree = await self.folder_trees.get(sub, fetch, wait=wait)
+        try:
+            tree = await self.folder_trees.get(sub, fetch, wait=wait)
+        except DeckError as exc:
+            # Archidekt can't be asked: the tree as last read, as the deck list (last_deck_list)
+            held = self.folder_trees.last(sub, DECK_LIST_LAST) if last_read_ok and is_busy(exc) else None
+            if held is None:
+                raise
+            tree = held[1]
         return None if tree is None else self._flatten_folders(tree)
 
     def _is_backup_folder(self, name: str, depth: int) -> bool:
@@ -6551,7 +6945,31 @@ def _new_deck_printing_mismatches(
             label = f"{names[key]} (printing or finish)"
             if label not in out:
                 out.append(label)
+    # The colour tags, counted per printing and tag the same way, so a tag Archidekt dropped (or
+    # one it added) is reported instead of the deck passing on its cards alone.
+    want_tags: dict[tuple[int, tuple[str, str]], int] = {}
+    tag_names: dict[int, str] = {}
+    for c, e in zip(cards, entries, strict=True):
+        key = (int(e["cardid"]), _tag_key(c.get("label") or ""))
+        want_tags[key] = want_tags.get(key, 0) + int(e["modifications"]["quantity"])
+        tag_names.setdefault(int(e["cardid"]), str(c["name"]))
+    got_tags: dict[tuple[int, tuple[str, str]], int] = {}
+    for vc in verified.cards:
+        if vc.card_id is not None and int(vc.card_id) in tag_names:
+            key = (int(vc.card_id), _tag_key(vc.label))
+            got_tags[key] = got_tags.get(key, 0) + vc.quantity
+    for key in sorted(set(want_tags) | set(got_tags)):
+        if want_tags.get(key, 0) != got_tags.get(key, 0):
+            label = f"{tag_names[key[0]]} (label)"
+            if label not in out:
+                out.append(label)
     return out
+
+
+def _tag_key(label: str) -> tuple[str, str]:
+    """A colour tag as compared after an import: its name and colour, or nothing for no tag."""
+    name, colour = split_label(label)
+    return (name, colour) if name else ("", "")
 
 
 def _printing_mismatches(verified: Deck, specs: list[dict[str, Any]]) -> list[str]:
@@ -7000,6 +7418,14 @@ def _clean_deck_id(deck_id: Any) -> str:
     return raw
 
 
+def clean_target(deck_id: Any) -> str:
+    """A deck id, or "collection" for the member's collection proposals, which are filed under
+    that name instead of a deck number."""
+    if str(deck_id).strip().casefold() == DeckService.COLLECTION_TARGET:
+        return DeckService.COLLECTION_TARGET
+    return _clean_deck_id(deck_id)
+
+
 def _needs_press_message(press: str) -> str:
     return (
         f"This proposal {press}, so it needs the user's own press on the proposal card or the review "
@@ -7042,6 +7468,70 @@ def formatting_review_only(row: dict[str, Any]) -> str:
     )
 
 
+def applied_text(
+    kind: str, changes: dict[str, Any] | None, result: dict[str, Any] | None, *, backup_gone: bool = False
+) -> str:
+    """What an applied account action or collection change did, in one sentence for the member
+    (the pages put "Done." or "Applied." before it). Empty for a deck change, whose pages keep
+    saying the deck matches the proposal. ``backup_gone``: a deck deletion's backup copy is no
+    longer on Archidekt (DeckService.backup_gone), so the text doesn't say it is there."""
+    c = changes if isinstance(changes, dict) else {}
+    r = result if isinstance(result, dict) else {}
+    if kind == "collection":
+        # a collection change is stored as applied even when its read-back finds mismatches; one
+        # applied before the read-back arrived has no "verified" and keeps the plain text
+        if r.get("verified") is False:
+            return (
+                "Sent to Archidekt, but the read-back didn't confirm every change. See Result on the "
+                "review page."
+            )
+        return "Your collection on Archidekt has these changes now."
+    if kind != "action":
+        return ""
+    action = c.get("action")
+    on = c.get("on") is not False
+    vote = c.get("vote")
+    if action == "create_folder":
+        return "The folder is created on Archidekt."
+    if action == "deck_vote":
+        if vote == VOTE_NONE:
+            return "Your vote on the deck is taken back on Archidekt."
+        return (
+            "The deck is voted down on Archidekt." if vote == VOTE_DOWN else "The deck is liked on Archidekt."
+        )
+    if action == "deck_bookmark":
+        return "The deck is bookmarked on Archidekt." if on else "Your bookmark is removed on Archidekt."
+    if action == "follow":
+        return "You follow them on Archidekt now." if on else "You no longer follow them on Archidekt."
+    if action == "comment_post":
+        return (
+            "Your reply is posted on Archidekt."
+            if c.get("parent")
+            else "Your comment is posted on Archidekt."
+        )
+    if action == "comment_edit":
+        return "Your comment is changed on Archidekt."
+    if action == "comment_delete":
+        return "Your comment is deleted on Archidekt."
+    if action == "comment_vote":
+        if vote == VOTE_NONE:
+            return "Your vote on the comment is taken back on Archidekt."
+        return "Your vote on the comment is saved on Archidekt."
+    if action == "delete_deck":
+        # delete_deck keeps a snapshot first, and a backup copy when backups are on
+        if r.get("backup_deck_id") and not backup_gone:
+            return (
+                "The deck is deleted on Archidekt. A snapshot was kept, and a backup copy was made in "
+                "your backup folder."
+            )
+        return "The deck is deleted on Archidekt. A snapshot of it was kept."
+    if action == "collaborator_add":
+        return "They can edit your deck on Archidekt now."
+    if action == "collaborator_remove":
+        return "They can no longer edit your deck on Archidekt."
+    return ""
+
+
 def _next_step(
     state: str,
     writes_enabled: bool,
@@ -7060,10 +7550,12 @@ def _next_step(
     press_reason: str = "",
     policy_allows: bool = False,
     opens_first: str = "",
+    applied: str = "",
 ) -> str:
     """What the assistant should do next with a proposal in ``state``. ``rate_limited``: for an
     apply that stopped on Archidekt's waits, the same note its stored message ends with
-    (``_rate_limited_note``), so the two never disagree."""
+    (``_rate_limited_note``), so the two never disagree. ``applied``: ``applied_text`` for an
+    account action or collection change."""
     what = "these details" if kind == "details" else "this copy" if kind == "clone" else "this diff"
     # With the in-chat card (approve.py) the person decides on the card where the app shows one.
     card = (
@@ -7131,6 +7623,8 @@ def _next_step(
             "few minutes because the gateway paces its requests). Tell the user it is under way and "
             "check again with get_proposal in a minute. Do not apply it again or make a new proposal."
         )
+    if state == "applied" and applied:
+        return f"Done. {applied}"
     if state == "applied" and kind == "details":
         return "Done. The deck's details on Archidekt match this proposal."
     if state == "applied" and kind == "clone":
@@ -7209,6 +7703,7 @@ def cards_from_json(text: str) -> list[dict[str, Any]]:
                 "finish": finish if finish in ("Foil", "Etched") else "",
                 "set_code": set_code,
                 "collector_number": number,
+                "label": import_label(row.get("label")),
                 # get_deck's rows say in_deck: false for a maybeboard or sideboard row
                 **({"in_deck": False} if row.get("in_deck") is False else {}),
             }
@@ -7217,6 +7712,17 @@ def cards_from_json(text: str) -> list[dict[str, Any]]:
 
 
 SIDE_CATEGORIES = ("Maybeboard", "Sideboard")
+
+
+def import_label(raw: Any) -> str:
+    """A list's colour tag ("Have,#37d67a", or a bare "Have") in the form Archidekt stores, or ""
+    for none. A bare name gets the default grey, as set_label gives it; a tag with no name (the
+    empty one Archidekt exports for an untagged row) is none. A colour that is not #rrggbb is
+    left grey rather than refusing the whole list."""
+    name, colour = split_label(clean_text(str(raw or "")))
+    if not name:
+        return ""
+    return f"{name[:MAX_LABEL]},{colour or DEFAULT_LABEL_COLOUR}"
 
 
 def normalise_cards(
@@ -7256,6 +7762,7 @@ def normalise_cards(
                         "finish": c.finish if c.finish in ("Foil", "Etched") else "",
                         "set_code": c.set_code,
                         "collector_number": c.collector_number,
+                        "label": import_label(c.label),
                         # the same rule as parse_deck_export: these two categories sit outside the deck
                         **({"in_deck": False} if c.category in ("Maybeboard", "Sideboard") else {}),
                     }
@@ -7276,6 +7783,7 @@ def normalise_cards(
                         "finish": c.finish,
                         "set_code": c.set_code,
                         "collector_number": c.collector_number,
+                        "label": import_label(c.label),
                         **({"in_deck": False} if c.zone == "side" else {}),
                         **({"no_price": True} if c.no_price else {}),
                     }

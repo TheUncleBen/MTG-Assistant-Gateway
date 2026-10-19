@@ -13,9 +13,11 @@ Routes and bodies are the ones archidekt.com's own pages send (read from its bun
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 import time
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from starlette.requests import Request
@@ -34,9 +36,14 @@ if TYPE_CHECKING:
 
 MAX_COMMENT = 2000
 MAX_THREAD_DEPTH = 6
-FOLLOWING_PAGES = 5  # how far into the member's following list the follow state is looked for
+FOLLOWING_PAGES = 5  # how far into the member's following list a deck page or a settings page reads
+# How far a lookup of one person reads (a follow or collaborator proposal): it reads on from where
+# the remembered list stopped and stops at the page that has them. Each page is one paced Archidekt
+# request, so 20 pages is at most about 20 seconds, at most once per FOLLOWING_TTL: a list read to
+# its end or to this cap answers every lookup until it expires, so a name not in it (a typo, someone
+# not followed yet) costs nothing more. The deck pages, read far more often, keep to FOLLOWING_PAGES.
+FOLLOWING_LOOKUP_PAGES = 20
 FOLLOWING_TTL = 120.0  # seconds the following list is remembered after a read
-FRESH_GAP = 15.0  # seconds between forced re-reads of the following list (a collaborator lookup)
 _STATUS = {
     "csrf": 403,
     "invalid": 400,
@@ -151,9 +158,14 @@ class SocialService:
         self.decks = state.decks
         self.client = state.decks.client
         self._following: dict[str, tuple[float, dict[int, str]]] = {}
-        # whether the last read stopped at FOLLOWING_PAGES with more pages left
-        self._following_cut: dict[str, bool] = {}
-        self._following_fresh: dict[str, float] = {}  # sub -> when a fresh read was last forced
+        # the next page of the remembered following list to read, None when it was read to the end
+        self._following_next: dict[str, int | None] = {}
+        # one page of a member's following list read at a time: a lookup made while another reads
+        # waits for that page and carries on from what was read, so parallel calls never read the
+        # same pages twice, and a page's short read never waits behind all of a long lookup
+        self._following_locks: dict[str, asyncio.Lock] = {}
+        # bumped by every follow through the gateway: a read under way since then stores nothing
+        self._following_gen: dict[str, int] = {}
         # (sub, deck id) -> (when, the deck's comment thread root) from that member's last read, so a
         # vote or a comment write straight after the thread loaded skips reading the whole deck
         # again (one thread read and the write, not three calls per vote)
@@ -230,32 +242,77 @@ class SocialService:
     async def following(self, sub: str) -> set[int]:
         return set(await self.following_names(sub))
 
-    async def following_names(self, sub: str, *, fresh: bool = False) -> dict[int, str]:
-        """The people the member follows on Archidekt: user id -> username (cached briefly;
-        ``fresh`` reads Archidekt again)."""
+    async def following_names(self, sub: str) -> dict[int, str]:
+        """The people the member follows on Archidekt: user id -> username, the first
+        FOLLOWING_PAGES pages (remembered for FOLLOWING_TTL)."""
+        return await self._read_following(sub, pages=FOLLOWING_PAGES)
+
+    async def find_followed(self, sub: str, username: str) -> tuple[int, str] | None:
+        """(user id, username) of the person the member follows by that name, None when they are not
+        in the list as far as FOLLOWING_LOOKUP_PAGES (``following_cut`` says whether it went on).
+        Someone followed on archidekt.com since the list was read shows once it expires
+        (FOLLOWING_TTL); a follow through the gateway forgets it at once."""
+        want = username.casefold()
+
+        def hit(users: dict[int, str]) -> tuple[int, str] | None:
+            return next(((i, n) for i, n in users.items() if n.casefold() == want), None)
+
+        users = await self._read_following(
+            sub, pages=FOLLOWING_LOOKUP_PAGES, until=lambda u: hit(u) is not None
+        )
+        return hit(users)
+
+    def following_cut(self, sub: str) -> bool:
+        """Whether the last read of the member's following list stopped with more pages left."""
+        return self._following_next.get(sub) is not None
+
+    async def _read_following(
+        self,
+        sub: str,
+        *,
+        pages: int,
+        until: Callable[[dict[int, str]], bool] | None = None,
+    ) -> dict[int, str]:
+        """The member's following list read as far as ``pages``, or until ``until`` says what is
+        wanted is in it, carrying on from the remembered part (FOLLOWING_TTL). A part already read
+        to its end or past ``pages`` reads nothing more until it expires."""
         uid, _name = self._me(sub)
-        hit = self._following.get(sub)
-        now = time.monotonic()
-        if fresh and hit and now - self._following_fresh.get(sub, -FRESH_GAP) < FRESH_GAP:
-            fresh = False  # one forced read per FRESH_GAP: a run of typos does not re-read every page
-        if fresh:
-            self._following_fresh[sub] = now
-        if hit and hit[0] > now and not fresh:
-            return hit[1]
-        users: dict[int, str] = {}
-        page, cut = 1, False
-        while page <= FOLLOWING_PAGES:
-            body = await self.decks._call(sub, lambda t, page=page: self.client.following(t, uid, page))
-            for row in body["results"]:
-                if isinstance(row, dict) and _int(row.get("id")) is not None:
-                    users[int(row["id"])] = str(row.get("username") or "")
-            if not body.get("next"):
-                break
-            cut = page == FOLLOWING_PAGES  # more pages, but no more reads (gentle on Archidekt)
-            page += 1
-        self._following[sub] = (time.monotonic() + FOLLOWING_TTL, users)
-        self._following_cut[sub] = cut
-        return users
+        lock = self._following_locks.setdefault(sub, asyncio.Lock())
+        # this call's own progress (generation, expiry, users, next page), so a read whose remembered
+        # list ran out while it was reading carries on instead of starting again
+        mine: tuple[int, float, dict[int, str], int | None] | None = None
+        while True:
+            # the lock is held for one page at a time, so a deck page's read, which needs only
+            # FOLLOWING_PAGES, takes its turn between an assistant's long lookup's pages
+            async with lock:
+                gen = self._following_gen.get(sub, 0)
+                hit = self._following.get(sub)
+                now = time.monotonic()
+                if hit and hit[0] > now:
+                    expires, users, page = hit[0], dict(hit[1]), self._following_next.get(sub)
+                elif mine is not None and mine[0] == gen:
+                    expires, users, page = mine[1], dict(mine[2]), mine[3]
+                else:
+                    expires, users, page = now + FOLLOWING_TTL, {}, 1
+                if page is None or page > pages or (until and until(users)):
+                    return users
+                try:
+                    body = await self.decks._call(
+                        sub, lambda t, page=page: self.client.following(t, uid, page)
+                    )
+                    for row in body["results"]:
+                        if isinstance(row, dict) and _int(row.get("id")) is not None:
+                            users[int(row["id"])] = str(row.get("username") or "")
+                    page = page + 1 if body.get("next") else None
+                    mine = (gen, expires, users, page)
+                finally:
+                    # pages read on from a remembered list keep its expiry: nothing is held longer
+                    # than the TTL; the pages read before a failure are kept, so a retry carries on
+                    # from them. A follow through the gateway since this page was asked for makes
+                    # the list out of date: it is not stored, and the next turn reads it afresh.
+                    if self._following_gen.get(sub, 0) == gen:
+                        self._following[sub] = (expires, users)
+                        self._following_next[sub] = page
 
     # -- deck collaborators (Archidekt's "editors": people who may change the deck) -----------------
 
@@ -312,12 +369,18 @@ class SocialService:
             raise DeckError("verify_mismatch", "Archidekt accepted the request but the deck still lists them")
         return {"removed": True, "verified": True}
 
-    async def follow_state(self, sub: str, user_id: int) -> dict[str, Any]:
+    async def follow_state(self, sub: str, user_id: int, *, lookup: bool = False) -> dict[str, Any]:
+        """Whether the member follows ``user_id``. ``lookup`` (a follow proposal) reads as far as
+        FOLLOWING_LOOKUP_PAGES, as a collaborator lookup does, so the two never disagree; the deck
+        page's button reads FOLLOWING_PAGES."""
         uid, _name = self._me(sub)
         if str(user_id) == uid:
             return {"self": True, "following": False}
-        following = user_id in await self.following(sub)
-        if not following and self._following_cut.get(sub):
+        users = await self._read_following(
+            sub, pages=FOLLOWING_LOOKUP_PAGES if lookup else FOLLOWING_PAGES, until=lambda u: user_id in u
+        )
+        following = user_id in users
+        if not following and self.following_cut(sub):
             # The list was cut short and they are not in the part read, so whether
             # the member follows them is not known; the page offers both Follow and Unfollow
             return {"self": False, "following": False, "unknown": True}
@@ -329,7 +392,9 @@ class SocialService:
         if str(user_id) == uid:
             raise DeckError("invalid", refusals.FOLLOW_SELF)
         await self.decks._call(sub, lambda t: self.client.follow_user(t, user_id, on=on))
+        self._following_gen[sub] = self._following_gen.get(sub, 0) + 1
         self._following.pop(sub, None)
+        self._following_next.pop(sub, None)
         self.state.db.audit("user_followed", sub=sub, detail={"user_id": user_id, "on": on})
         return {"following": on}
 

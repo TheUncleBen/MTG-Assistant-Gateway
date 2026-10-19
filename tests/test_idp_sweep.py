@@ -76,6 +76,7 @@ def _settings(token: str | None = TOKEN, **over) -> SimpleNamespace:
         authentik_api_url=API,
         authentik_api_token=token,
         authentik_api_token_problem=None,
+        authentik_api_token_missing=False,
         required_group=USERS,
         admin_group=ADMINS,
     )
@@ -345,6 +346,11 @@ def test_config_reads_the_token_file_and_a_bad_one_does_not_stop_the_gateway(
     monkeypatch.setenv("MTG_AUTHENTIK_API_TOKEN_FILE", str(tmp_path / "missing"))
     s = load_settings()
     assert s.authentik_api_token is None and "cannot read" in (s.authentik_api_token_problem or "")
+    assert s.authentik_api_token_missing is True
+    (tmp_path / "empty").write_text("")
+    monkeypatch.setenv("MTG_AUTHENTIK_API_TOKEN_FILE", str(tmp_path / "empty"))
+    s = load_settings()
+    assert "is empty" in (s.authentik_api_token_problem or "") and s.authentik_api_token_missing is False
     (tmp_path / "tok").write_text(TOKEN + "\n")
     monkeypatch.setenv("MTG_AUTHENTIK_API_TOKEN_FILE", str(tmp_path / "tok"))
     s = load_settings()
@@ -441,6 +447,17 @@ def test_status_when_off_gives_the_reason() -> None:
     problem = _settings(token=None, authentik_api_token_problem="secret file is empty")
     bad = AuthentikSweep(problem, None, None)
     assert bad.status() == {"state": "off", "cause": "token-unreadable", "reason": bad.why_off()}
+    gone = AuthentikSweep(
+        _settings(token=None, authentik_api_token_problem="no such file", authentik_api_token_missing=True),
+        None,
+        None,
+    )
+    assert gone.status() == {
+        "state": "off",
+        "cause": "token-unreadable",
+        "missing": True,
+        "reason": gone.why_off(),
+    }
     assert AuthentikSweep(_settings(required_group=None), None, None).status()["cause"] == "no-group"
 
 

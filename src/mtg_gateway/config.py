@@ -196,12 +196,12 @@ def _int_env(name: str, default: int, *, lo: int, hi: int) -> int:
     return value
 
 
-def _float_env(name: str, default: float, *, lo: float, hi: float) -> float:
+def _float_env(name: str, default: float, *, lo: float, hi: float, seconds: bool = False) -> float:
     raw = _env(name, str(default)) or str(default)
     try:
         value = float(raw)
     except ValueError as exc:
-        raise ConfigError(f"{name} must be a number of seconds") from exc
+        raise ConfigError(f"{name} must be {'a number of seconds' if seconds else 'a number'}") from exc
     if not lo <= value <= hi:
         raise ConfigError(f"{name} must be between {lo} and {hi}")
     return value
@@ -340,6 +340,9 @@ class Settings:
     # address (empty = the issuer's).
     authentik_api_token: str | None = field(default=None, repr=False)
     authentik_api_token_problem: str | None = None
+    # True when the token file named is not there at all, as when the stack's secret lines are
+    # still commented out (the admin page then names that cause).
+    authentik_api_token_missing: bool = False
     authentik_api_url: str | None = None
     # Watchlists and price history (prices.py), off unless MTG_WATCHLISTS_ENABLED is true: off, the
     # Watchlist page, its links, the card viewer's price buttons, the five watch tools and the daily
@@ -409,10 +412,12 @@ def load_settings() -> Settings:
     # instead of stopping the gateway.
     sweep_token: str | None = None
     sweep_problem: str | None = None
+    sweep_missing = False
     try:
         sweep_token = _read_secret("MTG_AUTHENTIK_API_TOKEN_FILE", required=False)
     except ConfigError as exc:
         sweep_problem = str(exc)
+        sweep_missing = isinstance(exc.__cause__, FileNotFoundError)
     # Optional, like the sweep token: the ntfy access token (notify.py). Never logged.
     ntfy_token = _read_secret("MTG_NTFY_TOKEN_FILE", required=False)
     if len(session_secret) < 32:
@@ -516,10 +521,10 @@ def load_settings() -> Settings:
         archidekt_backup_box_default=_bool_env("MTG_ARCHIDEKT_BACKUP_BOX_DEFAULT", False),
         snapshots_per_deck=_int_env("MTG_SNAPSHOTS_PER_DECK", 25, lo=5, hi=100),
         archidekt_calls_per_10_min=_int_env("MTG_ARCHIDEKT_CALLS_PER_10_MIN", 120, lo=10, hi=100_000),
-        archidekt_min_interval=_float_env("MTG_ARCHIDEKT_MIN_INTERVAL", 1.0, lo=0.25, hi=10.0),
+        archidekt_min_interval=_float_env("MTG_ARCHIDEKT_MIN_INTERVAL", 1.0, lo=0.25, hi=10.0, seconds=True),
         archidekt_max_per_minute=_int_env("MTG_ARCHIDEKT_MAX_PER_MINUTE", 40, lo=1, hi=120),
         archidekt_retries=_int_env("MTG_ARCHIDEKT_RETRIES", 2, lo=0, hi=4),
-        archidekt_backoff_base=_float_env("MTG_ARCHIDEKT_BACKOFF_BASE", 1.0, lo=0.1, hi=10.0),
+        archidekt_backoff_base=_float_env("MTG_ARCHIDEKT_BACKOFF_BASE", 1.0, lo=0.1, hi=10.0, seconds=True),
         archidekt_cache_seconds=_int_env("MTG_ARCHIDEKT_CACHE_SECONDS", 60, lo=0, hi=900),
         archidekt_card_cache_seconds=_int_env("MTG_ARCHIDEKT_CARD_CACHE_SECONDS", 3600, lo=0, hi=86400),
         archidekt_backup_folder=(_env("MTG_ARCHIDEKT_BACKUP_FOLDER", "MTG Gateway backups") or "").strip()[
@@ -537,6 +542,7 @@ def load_settings() -> Settings:
         chatgpt_name=_chatgpt_name_env("MTG_CHATGPT_NAME"),
         authentik_api_token=sweep_token,
         authentik_api_token_problem=sweep_problem,
+        authentik_api_token_missing=sweep_missing,
         authentik_api_url=_authentik_api_url(oidc_issuer),
         watchlists_enabled=_bool_env("MTG_WATCHLISTS_ENABLED", False),
         watch_max_cards=_int_env("MTG_WATCH_MAX_CARDS", 200, lo=0, hi=5000),
@@ -545,7 +551,9 @@ def load_settings() -> Settings:
         price_hour_utc=_int_env("MTG_PRICE_HOUR_UTC", 6, lo=0, hi=23),
         ntfy_url=_ntfy_url_env("MTG_NTFY_URL"),
         ntfy_token=ntfy_token,
-        scryfall_lookup_interval=_float_env("MTG_SCRYFALL_LOOKUP_INTERVAL", 0.5, lo=0.1, hi=5.0),
+        scryfall_lookup_interval=_float_env(
+            "MTG_SCRYFALL_LOOKUP_INTERVAL", 0.5, lo=0.1, hi=5.0, seconds=True
+        ),
         scan_fuzzy_min_similarity=_float_env("MTG_SCAN_FUZZY_MIN_SIMILARITY", 0.65, lo=0.3, hi=1.0),
         scan_fuzzy_confident_similarity=_float_env(
             "MTG_SCAN_FUZZY_CONFIDENT_SIMILARITY", 0.8, lo=0.3, hi=1.0
@@ -559,7 +567,7 @@ def load_settings() -> Settings:
         scan_art_max_distance=_int_env("MTG_SCAN_ART_MAX_DISTANCE", 380, lo=0, hi=1024),
         scan_art_min_margin=_int_env("MTG_SCAN_ART_MIN_MARGIN", 40, lo=0, hi=1024),
         scan_art_max_printings=_int_env("MTG_SCAN_ART_MAX_PRINTINGS", 250, lo=1, hi=2000),
-        scan_art_image_interval=_float_env("MTG_SCAN_ART_IMAGE_INTERVAL", 0.1, lo=0.05, hi=5.0),
+        scan_art_image_interval=_float_env("MTG_SCAN_ART_IMAGE_INTERVAL", 0.1, lo=0.05, hi=5.0, seconds=True),
         scan_art_images_per_hour=_int_env("MTG_SCAN_ART_IMAGES_PER_HOUR", 1500, lo=1, hi=36000),
         scan_art_max_galleries=_int_env("MTG_SCAN_ART_MAX_GALLERIES", 500, lo=1, hi=100000),
         scan_art_gallery_idle_days=_int_env("MTG_SCAN_ART_GALLERY_IDLE_DAYS", 180, lo=1, hi=3650),

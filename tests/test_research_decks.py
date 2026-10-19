@@ -36,6 +36,12 @@ class _TopCardsInput(BaseModel):
     limit: int = 20
 
 
+class _CommanderInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str
+    limit: int = Field(default=10, description="Max cards per category")
+
+
 def research_service(seen: list[str]) -> MCPServer:
     """Mystic Forge's shape for the tools under test. goldfish_annotate answers a deck id the way
     the real one does for a private deck (it reads Archidekt anonymously) and echoes a list."""
@@ -51,6 +57,10 @@ def research_service(seen: list[str]) -> MCPServer:
     @mf.tool(name="edhrec_top_cards", description="Get the most popular EDH cards by time period.")
     async def edhrec_top_cards(params: _TopCardsInput) -> str:
         return "# Top Cards"
+
+    @mf.tool(name="edhrec_average_deck", description="Get the average deck for a commander.")
+    async def edhrec_average_deck(params: _CommanderInput) -> str:
+        return "# Average Deck"
 
     @mf.tool(name="goldfish_run", description="goldfish simulation")
     async def goldfish_run(params: _GoldfishRunInput) -> str:
@@ -159,6 +169,9 @@ async def test_descriptions_say_what_upstream_leaves_out(stack: Stack) -> None:
     top = tools["edhrec_top_cards"]["description"]
     assert "limit is per section" in top and "period is ignored" in top, top
     assert "private decks" in tools["goldfish_annotate"]["description"]
+    # the average deck shares the commander page's input, but prints the whole deck whatever limit
+    limit = tools["edhrec_average_deck"]["inputSchema"]["properties"]["limit"]["description"]
+    assert limit.startswith("Not used by this tool") and "per category" not in limit, limit
 
 
 def test_a_rate_limited_deck_read_keeps_its_kind_and_wait() -> None:
