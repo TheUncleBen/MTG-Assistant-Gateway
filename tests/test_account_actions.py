@@ -361,8 +361,8 @@ async def test_an_applied_action_says_what_it_did(stack: Stack) -> None:
     assert "matches this proposal" not in page
     gone = await _press(h, token, await call(h, token, "propose_delete_deck", {"deck_id": "42"}))
     assert gone["result"]["backup_deck_id"] and gone["next_step"] == (
-        "Done. The deck is deleted on Archidekt. A snapshot was kept, and a backup copy is in your "
-        "backup folder."
+        "Done. The deck is deleted on Archidekt. A snapshot was kept, and a backup copy was made in "
+        "your backup folder."
     )
 
 
@@ -375,8 +375,8 @@ async def test_a_deletion_never_says_its_backup_copy_is_there_once_it_is_gone(st
     copy = int(gone["result"]["backup_deck_id"])
     pid = gone["proposal_id"]
     with_copy = (
-        "Done. The deck is deleted on Archidekt. A snapshot was kept, and a backup copy is in your "
-        "backup folder."
+        "Done. The deck is deleted on Archidekt. A snapshot was kept, and a backup copy was made in "
+        "your backup folder."
     )
     await call(h, token, "list_my_decks")  # a list read with the copy in it
     assert structured(await call(h, token, "get_proposal", {"proposal_id": pid}))["next_step"] == with_copy

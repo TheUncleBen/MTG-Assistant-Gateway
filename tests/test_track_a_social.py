@@ -497,7 +497,10 @@ async def test_a_lookup_stops_at_its_cap_and_says_so(stack: Stack, monkeypatch) 
         await call(h, token, "propose_collaborator", {"deck_id": "42", "action": "add", "username": "amy"})
     )
     assert p["ok"] is False and p["error"] == "not_found", p
-    assert f"(the gateway reads only the first {FOLLOWING_LOOKUP_PAGES} pages of that list)" in p["message"]
+    assert (
+        f"amy isn't in the first {FOLLOWING_LOOKUP_PAGES} pages of the people you follow on Archidekt, "
+        "which is as far as the gateway reads" in p["message"]
+    ) and "if you don't follow them yet, follow them" in p["message"]
     assert read == list(range(1, FOLLOWING_LOOKUP_PAGES + 1)), read
 
 
@@ -526,7 +529,10 @@ async def test_a_name_not_followed_is_looked_up_once_until_the_list_expires(
     assert FOLLOWING_TTL == 120 and p["message"].endswith(
         "Someone you followed on archidekt.com very recently may not be in the list the gateway last read."
     )
-    assert f"(the gateway reads only the first {FOLLOWING_LOOKUP_PAGES} pages of that list)" in p["message"]
+    assert (
+        f"amy isn't in the first {FOLLOWING_LOOKUP_PAGES} pages of the people you follow on Archidekt, "
+        "which is as far as the gateway reads" in p["message"]
+    ) and "if you don't follow them yet, follow them" in p["message"]
     stack.ark.private.discard(43)  # amy's deck: a follow of its owner, whom the list does not hold
     p = structured(await call(h, token, "propose_deck_social", {"deck_id": "43", "action": "follow_owner"}))
     assert "could not check whether you already follow them" in p["rows"][0]["text"], p
@@ -597,3 +603,25 @@ async def test_a_follow_during_a_following_read_is_not_undone(stack: Stack, monk
     await social.follow("user-1", 78, True)
     await lookup
     assert await social.find_followed("user-1", "amy") == (78, "amy")
+
+
+async def test_a_name_missing_from_a_list_read_to_its_end_says_follow_them_first(
+    stack: Stack, monkeypatch
+) -> None:
+    """When the whole following list was read and the name isn't in it, the refusal says plainly
+    that they aren't followed (the capped text, which can't say that, is only for a list cut short)."""
+    client = stack.h.app.state.gateway.social.client
+
+    async def pages(token: str, user_id: str, page: int = 1) -> dict[str, Any]:
+        return {"count": 1, "next": None, "results": [{"id": 9001, "username": "p1"}]}
+
+    monkeypatch.setattr(client, "following", pages)
+    token = await linked_user(stack)
+    p = structured(
+        await call(
+            stack.h, token, "propose_collaborator", {"deck_id": "42", "action": "add", "username": "amy"}
+        )
+    )
+    assert p["ok"] is False and p["error"] == "not_found", p
+    assert p["message"].startswith("amy is not among the people you follow on Archidekt. "), p
+    assert "as far as the gateway reads" not in p["message"]

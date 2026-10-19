@@ -7521,8 +7521,8 @@ def applied_text(
         # delete_deck keeps a snapshot first, and a backup copy when backups are on
         if r.get("backup_deck_id") and not backup_gone:
             return (
-                "The deck is deleted on Archidekt. A snapshot was kept, and a backup copy is in your "
-                "backup folder."
+                "The deck is deleted on Archidekt. A snapshot was kept, and a backup copy was made in "
+                "your backup folder."
             )
         return "The deck is deleted on Archidekt. A snapshot of it was kept."
     if action == "collaborator_add":

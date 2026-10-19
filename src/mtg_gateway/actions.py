@@ -135,16 +135,23 @@ async def collaborator_target(
     if action == "collaborator_add":
         found = await social.find_followed(sub, want)
         if found is None:
-            how_far = (
-                f" (the gateway reads only the first {FOLLOWING_LOOKUP_PAGES} pages of that list)"
-                if social.following_cut(sub)
-                else ""
-            )
+            if social.following_cut(sub):
+                # the list goes on past the pages read: they may be followed further down
+                missing = (
+                    f"{want} isn't in the first {FOLLOWING_LOOKUP_PAGES} pages of the people you follow "
+                    "on Archidekt, which is as far as the gateway reads, so they can't be added here. "
+                    "Collaborators are added from the people you follow, as on Archidekt's own "
+                    "settings page: if you don't follow them yet, follow them on Archidekt first "
+                )
+            else:
+                missing = (
+                    f"{want} is not among the people you follow on Archidekt. Collaborators are added "
+                    "from the people you follow, as on Archidekt's own settings page: follow them on "
+                    "Archidekt first "
+                )
             raise DeckError(
                 "not_found",
-                f"{want} is not among the people you follow on Archidekt{how_far}. Collaborators are "
-                "added from the people you follow, as on Archidekt's own settings page: follow them "
-                f"on Archidekt first ({profile_url(want)}), then add them. Someone you followed on "
+                f"{missing}({profile_url(want)}), then add them. Someone you followed on "
                 "archidekt.com very recently may not be in the list the gateway last read.",
                 follow_username=want,
                 follow_url=profile_url(want),
