@@ -94,14 +94,15 @@ def test_report_and_history_pages_fit(server: Server, width: int, scheme: str) -
         page.goto(f"{server.base}/history?deck_id=42", wait_until="networkidle")
         hist = page.evaluate(
             """() => {
-              const day = document.querySelector('.history .day');
-              const sel = document.querySelector('.filterbar select');
+              const sel = document.querySelector('.ui-tools select');
               const spark = document.querySelector('.trend .tmetric');
+              const rows = [...document.querySelectorAll('.hy-table .tr')]
+                .filter(r => !r.matches('.th, .daygroup, .group'));
               return {
                 scrollWidth: document.documentElement.scrollWidth,
                 innerWidth: window.innerWidth,
-                rows: document.querySelectorAll('.hrow').length,
-                dayPosition: day ? getComputedStyle(day).position : null,
+                rows: rows.length,
+                days: document.querySelectorAll('.hy-table .daygroup').length,
                 selectArrow: sel ? getComputedStyle(sel).appearance : null,
                 selectWidth: sel ? sel.getBoundingClientRect().width : 0,
                 trendBorder: spark ? getComputedStyle(spark).borderTopStyle : null,
@@ -110,35 +111,44 @@ def test_report_and_history_pages_fit(server: Server, width: int, scheme: str) -
         )
         _shot(page, f"history-{width}-{scheme}")
         assert hist["scrollWidth"] <= hist["innerWidth"], hist
-        assert hist["rows"] == 25 and hist["dayPosition"] == "sticky"
+        # deck 42's 15 snapshots, its restore and the two reports, under day rows
+        assert hist["rows"] == 18 and hist["days"] >= 2, hist
         assert hist["selectArrow"] == "none" and 0 < hist["selectWidth"] <= hist["innerWidth"]
         assert hist["trendBorder"] == "solid", "trend cards are styled"
-        # a row's details open in place and the Restore button sits in a form-actions row
-        page.locator(".hrow.k-snapshot details summary").first.click()
-        restore = page.locator(".hrow.k-snapshot details[open] .form-actions button").first
+        # a snapshot's Details: the side panel on a wide screen, its own page on a phone, with
+        # Restore (review first) in it
+        details = page.locator(".hy-table a[href*='open=s-']:visible").first
+        details.click()
+        page.wait_for_load_state("networkidle")
+        restore = page.locator(".ui-drawer .hy-restore button")
         assert restore.is_visible() and "Restore (review first)" in restore.inner_text()
         assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
-        # the "When" and "Group by" selects render as themed selects (no native date input) and,
-        # like the other filters, reach the URL through the Filter button
+        # the "When" and "Group by" selects are themed selects (no native date input) and reach
+        # the URL as soon as they change
+        page.goto(f"{server.base}/history?deck_id=42", wait_until="networkidle")
         assert page.locator("input[type=date]").count() == 0
-        for sel in ("#h-when", "#h-group"):
+        for name in ("when", "group"):
+            sel = f".ui-tools select[name={name}]"
             assert (
                 page.locator(sel).is_visible()
                 and page.evaluate(f"getComputedStyle(document.querySelector('{sel}')).appearance") == "none"
             )
-        page.select_option("#h-when", "7d")
-        page.select_option("#h-group", "deck")
-        page.locator(".filterbar button[type=submit]").click()
+        with page.expect_navigation():
+            page.select_option(".ui-tools select[name=when]", "7d")
+        page.wait_for_load_state("networkidle")
+        with page.expect_navigation():
+            page.select_option(".ui-tools select[name=group]", "deck")
         page.wait_for_load_state("networkidle")
         assert "when=7d" in page.url and "group=deck" in page.url and "deck_id=42" in page.url
-        assert page.locator(".history .day.deck").count() == 1
+        assert page.locator(".hy-table .tr.group").count() == 1
         assert (
-            page.locator("#h-when").input_value() == "7d" and page.locator("#h-group").input_value() == "deck"
+            page.locator("select[name=when]").input_value() == "7d"
+            and page.locator("select[name=group]").input_value() == "deck"
         )
-        # the backups panel (when present) keeps a gap from the pager
+        # the backups table (when present) keeps a gap from the pager
         gap = page.evaluate(
             """() => {
-              const pager = document.querySelector('.pager'), backups = document.querySelector('#backups');
+              const pager = document.querySelector('.ui-pager'), backups = document.querySelector('#backups');
               if (!pager || !backups) return null;
               return backups.getBoundingClientRect().top - pager.getBoundingClientRect().bottom;
             }"""

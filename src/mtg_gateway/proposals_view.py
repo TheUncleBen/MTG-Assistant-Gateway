@@ -917,10 +917,17 @@ PROPOSALS_CSS = """
   flex:1 1 100%}
 .ui-bar .rejectask span,.ui-drawer .rejectask span{flex:1 1 10rem;font-weight:700}
 .ui-bar .rejectask button,.ui-drawer .rejectask button{min-height:44px;margin:0}
+.ui-bar .rejectask button:focus,.ui-drawer .rejectask button:focus{
+  outline:2px solid var(--focus);outline-offset:2px}
 .ui-bar button[disabled]{opacity:.55}
+.ui-bar [hidden]{display:none}
 @media (max-width:599.98px){
-  .ui-bar .count{flex:1 1 auto}
-  .ui-bar button[name=action]{flex:1 1 calc(50% - .25rem);min-width:0}
+  /* two rows: the count beside Clear, then Reject and Apply side by side; at large text sizes
+     the words wrap inside the buttons rather than out of them */
+  .ui-bar{padding:8px;gap:8px}
+  .ui-bar .count{flex:1 1 40%;min-width:0}
+  .ui-bar button{height:auto;white-space:normal;line-height:1.2;padding:6px 8px}
+  .ui-bar button[name=action]{flex:1 1 40%;min-width:0}
 }
 /* one proposal: the panel (from 1100 px) or its own page */
 .ui-drawer .dh .no{color:var(--text-muted)}
@@ -942,4 +949,14 @@ PROPOSALS_CSS = """
 .pr-full .panel-only{display:none}
 .pr-empty p{margin:0}
 .wdg .det .bar-split{flex:1 1 100%;margin-top:.25rem}
+/* a group row's meta wraps rather than push the page sideways at large text sizes */
+.ui-table .group > *{min-width:0}
+.ui-table .group .meta{white-space:normal}
+@media (min-width:900px){.ui-table .group .meta a{white-space:nowrap}}
+@media (min-width:600px){.ui-table .group .meta{text-align:right}}
+/* change titles break between words (a long card name still wraps) */
+.pr-table .title .t{overflow-wrap:break-word}
+/* a widget's number and its word wrap apart at large text sizes */
+.wdg .big{display:flex;flex-wrap:wrap;align-items:baseline;column-gap:.35rem}
+.wdg .big small{margin-left:0}
 """

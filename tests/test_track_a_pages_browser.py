@@ -244,6 +244,31 @@ WORDS_BROKEN = """(sel) => {
 }"""
 
 
+# The same, for words that would fit whole on a line of their box: on a phone at 200% text the
+# change column of the redesigned table (beside the tick box and the 44 px Review arrow) is
+# narrower than a long word such as "description:", which then has to break.
+WORDS_BROKEN_THAT_FIT = """(sel) => {
+  const out = [];
+  for (const el of document.querySelectorAll(sel)) {
+    const walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    for (let n = walk.nextNode(); n; n = walk.nextNode()) {
+      const re = /\\S+/g;
+      let m;
+      while ((m = re.exec(n.data))) {
+        const r = document.createRange();
+        r.setStart(n, m.index);
+        r.setEnd(n, m.index + m[0].length);
+        const rects = [...r.getClientRects()];
+        const lines = new Set(rects.map((b) => Math.round(b.top)));
+        const width = rects.reduce((sum, b) => sum + b.width, 0);
+        if (lines.size > 1 && width <= el.clientWidth) out.push(m[0]);
+      }
+    }
+  }
+  return out;
+}"""
+
+
 def test_the_checked_bar_at_200_percent_text_on_a_phone(server: Server) -> None:
     """At 200% text the bar stays two rows (Apply and Reject side by
     side, Clear by the count), words wrap whole, and Apply is on screen and not covered."""
@@ -267,7 +292,7 @@ def test_the_checked_bar_at_200_percent_text_on_a_phone(server: Server) -> None:
                 )
                 page = ctx.new_page()
                 page.goto(f"{server.base}/proposals", wait_until="networkidle")
-                bar = page.locator(".wbar:not(.inline)").first
+                bar = page.locator(".ui-bar").first  # the list's selection bar
                 assert not bar.locator("button.clear").is_visible(), where  # nothing checked yet
                 page.locator(f"input[name=pick][value='{ids[0]}']").check()
                 page.locator(f"input[name=pick][value='{ids[1]}']").check()
@@ -285,11 +310,11 @@ def test_the_checked_bar_at_200_percent_text_on_a_phone(server: Server) -> None:
                     [a["x"] + a["width"] / 2, a["y"] + a["height"] / 2],
                 )
                 assert hit, f"{where}: Apply is covered"
-                assert page.evaluate(WORDS_BROKEN, ".pick .what") == [], (
+                assert page.evaluate(WORDS_BROKEN_THAT_FIT, ".pr-table .title .t") == [], (
                     where,
-                    page.evaluate(WORDS_BROKEN, ".pick .what"),
+                    page.evaluate(WORDS_BROKEN_THAT_FIT, ".pr-table .title .t"),
                 )
-                _readable(page, ".wbar button, .wbar span", where)
+                _readable(page, ".ui-bar button, .ui-bar span", where)
                 _no_sideways(page, vw, where)
                 if shots:
                     page.screenshot(path=f"{shots}/a-proposals-ticked-{where}.png")
@@ -320,7 +345,7 @@ def test_reject_asks_first_on_the_list_and_the_deck_strip(server: Server) -> Non
                 errors: list[str] = []
                 page.on("pageerror", lambda e, errors=errors: errors.append(str(e)))
                 page.goto(f"{server.base}/proposals", wait_until="networkidle")
-                bar = page.locator(".wbar:not(.inline)").first
+                bar = page.locator(".ui-bar").first  # the list's selection bar
                 page.locator(f"input[name=pick][value='{ids[0]}']").check()
                 page.locator(f"input[name=pick][value='{ids[1]}']").check()
                 bar.locator("button[name=action][value=reject]").click()
@@ -332,7 +357,7 @@ def test_reject_asks_first_on_the_list_and_the_deck_strip(server: Server) -> Non
                     " text: e.textContent})"
                 )
                 assert got == {"focused": True, "ring": "solid", "text": "Reject 2"}, (where, got)
-                _readable(page, ".wbar .rejectask span, .wbar .rejectask button", where)
+                _readable(page, ".ui-bar .rejectask span, .ui-bar .rejectask button", where)
                 _no_sideways(page, vw, where)
                 ask.locator("button", has_text="Cancel").click()
                 assert ask.count() == 0 and bar.locator("button[name=action][value=reject]").is_visible()

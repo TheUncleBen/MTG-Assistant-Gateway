@@ -741,6 +741,14 @@ HISTORY_CSS = (
 .hy-copies .act .btn{display:inline-flex;align-items:center;gap:.35rem;margin:0}
 .hy-copies .act .chev svg.i{width:20px;height:20px}
 h2.hy-backups{font-size:1.2rem}
+/* a group row's meta wraps rather than push the page sideways at large text sizes */
+.ui-table .group > *{min-width:0}
+.ui-table .group .meta{white-space:normal}
+@media (min-width:900px){.ui-table .group .meta a{white-space:nowrap}}
+@media (min-width:600px){.ui-table .group .meta{text-align:right}}
+/* a widget's number and its word wrap apart at large text sizes */
+.wdg .big{display:flex;flex-wrap:wrap;align-items:baseline;column-gap:.35rem}
+.wdg .big small{margin-left:0}
 .ui-drawer pre.diff{max-height:16rem;overflow:auto}
 .ui-drawer .page-only a{display:inline-flex;align-items:center;min-height:44px}
 .hy-empty p{margin:0}

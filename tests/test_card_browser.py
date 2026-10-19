@@ -149,7 +149,7 @@ def test_card_renders_and_approve_calls_confirm_with_the_code() -> None:
             approve = card.locator("#approve")
             assert approve.is_disabled() and card.locator("#reject").is_disabled()
             assert card.locator("#title").inner_text() == "Change to Sample <b>Deck</b>"
-            assert card.locator("#state").inner_text().lower() == "pending"
+            assert card.locator("#state").inner_text().lower() == "waiting"  # the §4 word
             rows = card.locator("ul.changes li:not(.group)")
             assert (
                 rows.count() == 3 and card.locator("ul.changes li.group").count() == 3
@@ -231,7 +231,7 @@ def test_big_edit_shows_a_summary_first_and_the_auto_modes_hide_the_buttons() ->
             card.locator("#title").wait_for()
             # Summary first: the counts, the risk, the reason; then only the first rows.
             assert "12 rows" in card.locator("#summary").inner_text()
-            assert card.locator("#risk").inner_text().lower() == "high risk"
+            assert card.locator("#risk").inner_text().lower() == "high"  # the §4 word
             assert "needs your approval" in card.locator("#note").inner_text()
             assert card.locator("ul.changes li:not(.group):not(.more-row)").count() == 8
             assert card.locator("ul.changes li.group").first.inner_text().lower().startswith("added (9)")
@@ -579,7 +579,7 @@ def test_an_approve_stopped_back_to_pending_keeps_pending_and_working_buttons() 
             card.locator("#status.err").wait_for(timeout=5_000)
             status = card.locator("#status")
             assert status.inner_text() == STOPPED
-            assert card.locator("#state").inner_text().lower() == "pending"
+            assert card.locator("#state").inner_text().lower() == "waiting"  # the §4 word
             assert card.locator(".status").count() == 1
             card.locator("#approve:enabled").wait_for(timeout=5_000)
             assert card.locator("#reject").is_enabled()

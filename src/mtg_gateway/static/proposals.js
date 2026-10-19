@@ -72,8 +72,15 @@
       for (var j = 0; j < acts.length; j++) {
         // the Proposals page says what the press does: "Apply 3 changes"; the strip "Apply 3"
         var long = acts[j].hasAttribute("data-long");
-        acts[j].textContent = acts[j].getAttribute("data-label") + (n ? " " + n : "") +
-          (long && n ? (n === 1 ? " change" : " changes") : "");
+        var short = acts[j].getAttribute("data-label") + (n ? " " + n : "");
+        acts[j].textContent = short;
+        if (long && n) {
+          // the long label only where it takes no more lines than the short one (large text on
+          // a phone keeps "Apply 3")
+          var h = acts[j].offsetHeight;
+          acts[j].textContent = short + (n === 1 ? " change" : " changes");
+          if (acts[j].offsetHeight > h + 2) acts[j].textContent = short;
+        }
         acts[j].disabled = n === 0;
       }
       if (n) bar.removeAttribute("data-none");
