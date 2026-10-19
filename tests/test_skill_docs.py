@@ -92,3 +92,13 @@ def test_chatgpt_block_fits_custom_instructions() -> None:
     text = CHATGPT.read_text(encoding="utf-8")
     block = text.split("```text\n", 1)[1].split("```", 1)[0]
     assert len(block) <= 4000  # paid-plan custom instructions take 5,000 characters (reported)
+
+
+def test_both_guides_say_never_to_ask_for_a_sign_in() -> None:
+    """Ben, 0.7.31 test round: a ChatGPT test asked him to sign in to archidekt.com so it could
+    check its own changes. Both guides say it never needs that: the tools read changes back."""
+    skill = (SKILL_DIR / "SKILL.md").read_text(encoding="utf-8")
+    assert "You never need the user to sign in to archidekt.com or the" in skill
+    assert "read it back yourself (`get_deck`, `list_my_decks`)" in skill
+    block = CHATGPT.read_text(encoding="utf-8").split("```text\n", 1)[1]
+    assert "Never ask for passwords, tokens, codes or a sign-in for you." in block
