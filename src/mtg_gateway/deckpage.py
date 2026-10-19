@@ -1991,10 +1991,9 @@ def deck_list_html(
 # left out. Shown like the gateway's other "couldn't load" answers (busy.busy_body): the reason in
 # a panel and a Try again button that loads the page again with reread=1, which reads the list
 # again (a list like this is otherwise kept for a minute: decks.DECK_LIST_PARTIAL).
-DECKS_UNREADABLE = "Your deck list couldn't be read from Archidekt. Try again in a moment."
+DECKS_UNREADABLE = "Your deck list couldn't be read from Archidekt. Try again."
 DECKS_PARTLY_UNREADABLE = (
-    "Part of your deck list couldn't be read from Archidekt, so some decks may be missing here. "
-    "Try again in a moment."
+    "Part of your deck list couldn't be read from Archidekt, so some decks may be missing here. Try again."
 )
 
 

@@ -46,10 +46,10 @@ A change to one of your decks keeps a snapshot first. Deck and collection change
 
 | Capability | The one tool | Writes? | Notes |
 | --- | --- | --- | --- |
-| Who is signed in; is Archidekt linked, are writes on | `whoami`, `account_status` | no | linking itself happens only in the browser (Account page); the account card in the chat shows what is missing and opens that page |
+| Who is signed in; is Archidekt linked, are writes on | `whoami`, `account_status` | no | linking itself happens only in the browser (Account page) |
 | List my decks (private included), filter by name, format, folder | `list_my_decks` | no | |
 | Search public decks (name, commander, partial commander names, format, colours, owner), and one user's public decks (`owner`, newest first) | `search_decks` | no | hides Mystic Forge `archidekt_user_decks`; the web profile page `/users/<name>` is the hand path |
-| Read any deck, the member's own private ones included: cards (type line, power/toughness, loyalty), zones, stats, plain list, Archidekt import text, picked with `view`; rules text, faces, flavour and artist on request | `get_deck` | no | the deck card in the chat shows the deck by category with pictures and rules text; hides Mystic Forge `archidekt_deck`, `archidekt_export`; `owner` says whose deck it is |
+| Read any deck, the member's own private ones included: cards (type line, power/toughness, loyalty), zones, stats, plain list, Archidekt import text, picked with `view`; rules text, faces, flavour and artist on request | `get_deck` | no | hides Mystic Forge `archidekt_deck`, `archidekt_export`; `owner` says whose deck it is |
 | Read a pasted list or an Archidekt CSV export | `parse_decklist`, `parse_deck_export` | no | |
 | Statistics, legality, structural checks, bracket estimate; curve by type or category, land-only colour sources, pips outside the commander's identity, subtype and keyword counts (0.7.24: one legality engine, the deck page's, for every legality figure; the curve, average, grouping, sorting and draw odds use a card's custom mana value when the deck sets one; whether archidekt.com does the same in its own curve is not confirmed) | `deck_stats` | no | hides `validate_archidekt_deck` |
 | Diff two decks, snapshots or lists (precon upgrades included), with an optional paired goldfish A/B | `compare_decks` | no | hides `precon_diff`, `goldfish_ab`; the A/B takes two Commander decks or two 60-card decks; the deck page's Compare view is the hand path |
@@ -74,7 +74,8 @@ A change to one of your decks keeps a snapshot first. Deck and collection change
 | Watch cards (a name, or one printing and finish) and decks; their daily prices and values over time; price alerts | `watch_card`, `watch_deck`, `unwatch`, `list_watchlist`, `card_price_history` | the member's own watchlist (no proposal) | changes only the member's gateway data, never Archidekt; prices from Scryfall once a day; the Watchlist page is the hand path; only when the operator sets `MTG_WATCHLISTS_ENABLED=true` (off by default) |
 | A plain summary of the last day or week: watched prices and deck values (when watchlists are on), reports finished, proposals waiting and applied | `get_summary` | no | written by the gateway without AI; an assistant's scheduled task can turn it into its own words ([USING.md](USING.md#notifications-and-summaries)) |
 | Proposals: list, read, approve with the card's code, reject (with a reason on the card), apply | `list_my_proposals`, `get_proposal`, `confirm_proposal`, `reject_proposal`, `apply_proposal` | apply writes | `apply_proposal` succeeds only when the mode allows |
-| Change a waiting proposal in place, take back one of its own, or combine several of its own waiting card edits on one deck into one | `amend_proposal`, `withdraw_proposal`, `combine_proposals` | proposal | changes nothing on Archidekt; a proposal amended by another app than the one that made it always waits for the member's press; a withdrawn one stays visible and the member can bring it back; combined ones come back if the combined one is rejected |
+| Check a planned deck edit before proposing it: problems it would be refused for that can be found without the deck, the deck's waiting proposals it shares cards with, and whether to amend one of its own instead | `check_deck_changes` | read | no card in the chat, nothing saved, Archidekt not asked (a card name may be looked up on Scryfall); anything that needs the deck itself, such as a card missing from it or a deck that isn't the member's, is found only when the proposal is made |
+| Change a waiting proposal in place, take back one of its own, or combine several of its own waiting card edits on one deck into one | `amend_proposal`, `withdraw_proposal`, `combine_proposals` | proposal | changes nothing on Archidekt; a proposal amended by another app than the one that made it always waits for the member's press; a withdrawn one stays visible; combined ones come back if the combined one is rejected |
 | Show every waiting change (one deck or all), approve or reject each of this app's own, and apply several of them together | `show_waiting_changes` (+ `confirm_waiting` and `get_apply_result`, called only by the card) | Apply all writes | the waiting-changes card; `confirm_waiting` needs the card's one-time code, which the assistant never has; another app's changes are listed with their review link; the Proposals page is the hand path |
 | Remove a saved card description (a card model the solo test kept) | `remove_card_model` | the member's own gateway data (no proposal) | changes nothing on Archidekt and leaves stored reports as they are |
 
@@ -119,20 +120,21 @@ deleting a deck asks for its name.
 
 The assistant's path has **cards in the chat** wherever the person has to
 pick or press (MCP Apps: Claude on the web, desktop and phones; ChatGPT as
-reported): the proposal (Approve, Reject with a reason), the printings of a
-card, the cards read from photos or a list, a deck by category, the account's
-setup. Every pick on a card reaches the assistant as plain text, and the
+reported): the proposal (Approve, Reject with a reason), the waiting changes
+(Apply all), the printings of a card and the cards read from photos or a list.
+Every pick on a card reaches the assistant as plain text, and the
 assistant then proposes as usual; the only cards that act by themselves are the
 proposal card, whose Approve and Reject (with an optional reason) both use its
 one-time code, and the waiting-changes card (`show_waiting_changes`), which
 lists every waiting change, approves or rejects each of the assistant's own,
 and applies several in order after one confirmation with **Apply all**
-(`confirm_waiting`, with the card's one-time code). Display-only cards draw what the tool already answered, where a
-picture reads faster than the text: the deck read (pictures and rules text), a
-comparison (`compare_decks`), a deck's statistics (`deck_stats`: curve,
-colours, price, legality, bracket estimate), a list of decks (`list_my_decks`,
-`search_decks`) and a scan session (`get_scan_session`); they change nothing and
-add nothing to what the assistant reads.
+(`confirm_waiting`, with the card's one-time code). Once a proposal approved on
+its card, or a batch sent with Apply all, is applied or under way, the card
+posts "Approved, go on" as the user's message where the app allows it, so the
+assistant carries on; a row's own Approve on the waiting-changes card posts
+nothing. Since 0.7.33 every other
+answer (a deck, its statistics, a comparison, a deck list, a scan, the account)
+is text alone.
 An app without cards (Claude Code, older clients) gets the same text results,
 and a form question for ambiguous names.
 

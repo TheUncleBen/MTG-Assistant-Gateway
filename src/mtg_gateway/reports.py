@@ -897,7 +897,7 @@ class ReportService:
 
     @property
     def forge_parallel(self) -> int:
-        """Forge games a run asks to play at once (forge_parallel_games, 1-4); the Forge service
+        """Forge games a run asks to play at once (forge_parallel_games, 1-16); the Forge service
         plays as many as it has places for (FORGE_MAX_PARALLEL, else what its machine fits)."""
         return self._live("forge_parallel_games", 4)
 

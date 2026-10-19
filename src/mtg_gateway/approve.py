@@ -90,7 +90,10 @@ def card_approval(data: dict[str, Any], *, decks: Any, sub: str, in_chat: bool) 
     creator = row.get("created_by_client")
     if not creator or creator != current_client.get():
         return None, True
-    return decks.approval_for(sub, row), False
+    # the code of the version this result shows, so a card never carries a code for rows it does
+    # not show (an amend between the read and here makes it one the gateway refuses, "changed")
+    shown = data.get("version")
+    return decks.approval_for(sub, row, version=int(shown) if shown else None), False
 
 
 def proposal_tool_result(data: dict[str, Any], *, decks: Any, sub: str, in_chat: bool) -> Any:

@@ -484,7 +484,7 @@ class CimdFetcher:
         except TimeoutError as exc:
             if self._resolver is None and cf.cancel():
                 # It never got a thread: the lane is busy, this host is not to blame.
-                raise CimdBusy("metadata document fetcher is busy; try again shortly") from exc
+                raise CimdBusy("metadata document fetcher is busy; try again later") from exc
             raise CimdDnsTimeout("cannot resolve client metadata host: timed out") from exc
         if self._resolver is not None:
             return result
@@ -509,7 +509,7 @@ class CimdFetcher:
         self._all_fetches = [t for t in self._all_fetches if now - t < 60]
         if len(recent) >= SITE_FETCHES_PER_MINUTE or len(self._all_fetches) >= GLOBAL_FETCHES_PER_MINUTE:
             self._site_fetches[site] = recent
-            raise CimdThrottled("too many metadata document fetches; try again shortly")
+            raise CimdThrottled("too many metadata document fetches; try again later")
         recent.append(now)
         self._site_fetches[site] = recent
         self._all_fetches.append(now)
@@ -558,7 +558,7 @@ class CimdFetcher:
                         lock.release()
                         raise
             except TimeoutError as exc:
-                raise CimdBusy("metadata document fetcher is busy; try again shortly") from exc
+                raise CimdBusy("metadata document fetcher is busy; try again later") from exc
             try:
                 if not allowlisted:
                     # Checked again now that the slot is ours: the host may have failed meanwhile.
@@ -616,7 +616,7 @@ class CimdFetcher:
                         lock.release()
                         raise
             except TimeoutError as exc:
-                raise CimdBusy("metadata document fetcher is busy; try again shortly") from exc
+                raise CimdBusy("metadata document fetcher is busy; try again later") from exc
             try:
                 # Again now that the slot is ours: a lookup we queued behind may have just failed.
                 self._known_held_back(url, host, time.monotonic())

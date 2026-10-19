@@ -761,14 +761,12 @@
     if (lastFocus && lastFocus.focus) lastFocus.focus();
   }
   // a category whose rows sit outside the deck (Sideboard, Considering...) puts the card in the
-  // maybeboard or sideboard, which takes no pinned printing
+  // maybeboard or sideboard; a picked printing goes there too (since 0.7.33)
   function sideCat() { return !!catSel.value && (outside[catDeck] || []).indexOf(catSel.value) >= 0; }
   function showNote() {
     if (!note) return;
     var parts = [];
-    if (cardPin && sideCat()) {
-      parts.push("This printing is not kept: a card added under " + catSel.value + " goes to the maybeboard or sideboard, where a row it already has there keeps its own printing and a new row gets one Archidekt picks.");
-    } else if (cardPin) {
+    if (cardPin) {
       parts.push("This printing: " + cardPin.set_code.toUpperCase() + " #" + cardPin.collector_number + ".");
     }
     var lang = form.elements.lang ? form.elements.lang.value : "";
@@ -781,7 +779,7 @@
     var ch = { action: "add", card_name: cardName, quantity: qty };
     if (catSel.value) ch.category = catSel.value;
     if (sideCat()) ch.zone = "side";
-    else if (cardPin) { ch.set_code = cardPin.set_code; ch.collector_number = cardPin.collector_number; }
+    if (cardPin) { ch.set_code = cardPin.set_code; ch.collector_number = cardPin.collector_number; }
     return [ch];
   }
   function deckName(id) {

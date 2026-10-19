@@ -145,7 +145,10 @@ TEXT: dict[str, tuple[str, str]] = {
         "Deck reads, changes and applies one member may start.",
     ),
     "archidekt_min_interval": ("Time between Archidekt requests", "For everyone together."),
-    "archidekt_max_per_minute": ("Archidekt requests per minute", "For everyone together."),
+    "archidekt_max_per_minute": (
+        "Archidekt requests per minute",
+        "For everyone together. Fewer is gentler on Archidekt, and large changes take longer.",
+    ),
     "archidekt_retries": ("Retries of a failed Archidekt read", "Writes are never retried."),
     "archidekt_backoff_base": ("Wait before a retry", "Doubles with each retry, up to 10 seconds."),
     "archidekt_cache_seconds": ("Reuse public deck reads for", "Cleared by any change the gateway sends."),

@@ -199,7 +199,7 @@ async def test_failed_later_deletes_back_off_then_give_up(stack: Stack) -> None:
     row = h.db.get_proposal(pid, SUB)
     kept = (
         "Nothing was changed on Archidekt. The unused backup copy could not be deleted; it stays in the "
-        "backup folder. The proposal is still pending, so it can be approved again in a few minutes."
+        "backup folder. The proposal is still pending, so it can be approved again later."
     )
     assert row["result"]["detail"] == f"{ark_mod.PATIENCE_SPENT} {kept}", row["result"]["detail"]
     assert row["result"]["backup_note"] == decks_mod.BACKUP_KEPT
@@ -456,7 +456,7 @@ async def test_a_collection_apply_stopped_after_a_record_was_added_stays_failed(
     assert result["sent_entries"] == 1 and result["of_entries"] == 2, result
     assert result["detail"] == (
         f"{ark_mod.PATIENCE_SPENT} 1 of 2 collection changes had already been sent, so your collection "
-        "is partly changed. Try the rest again in a few minutes with a new proposal."
+        "is partly changed. Try the rest again later with a new proposal."
     ), result["detail"]
 
 

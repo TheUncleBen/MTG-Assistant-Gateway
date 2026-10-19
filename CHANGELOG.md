@@ -7,7 +7,109 @@ Notable changes for people who run or use the gateway. The format follows
 with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 (`release/1.2.3`); `latest` is always the newest.
 
-## [0.7.32] - unreleased
+## [0.7.34] - unreleased
+
+Approval cards in the chat keep up with their proposal, and the assistants are told to check a
+deck edit before they make a card for it.
+
+### Upgrade notes
+- From 0.7.33: no extra steps. Update as usual ([docs/UPGRADING.md](docs/UPGRADING.md)).
+
+### Added
+- `check_deck_changes`: an assistant can check a planned deck edit before it proposes it, with no
+  card in the chat, nothing saved and no request to Archidekt (a card name may be looked up on
+  Scryfall). It finds what a proposal would be refused for that can be found without the deck, an
+  exact repeat of a change already waiting, and the assistant's own waiting change on that deck
+  that it should amend instead of making a new one. Anything that needs the deck itself, such as a
+  card that isn't in it, is still found only when the proposal is made.
+
+### Changed
+- A proposal card already in the chat follows its proposal. It reads the proposal again when it
+  comes on screen, a few times while it stays there, and when you press Approve. When the
+  assistant changed the proposal, the card shows the new version with a short line saying so.
+  Where the app passes the card the new version's approval code, its Approve approves that
+  version; otherwise the card offers the review page. When the change was updated after the card
+  last read it and you press Approve, the card shows the new version and asks you to press again.
+  When the assistant withdrew it, the card says so. A change replaced by another comes back when
+  its replacement is rejected or withdrawn, and its card then shows it waiting again.
+- The assistants' guides and the deck tools' descriptions tell them that, in an app that shows
+  cards, every proposal, amend or combine puts a card in the chat, a refused one too, and to check
+  a deck edit first.
+
+### Fixed
+- A proposal card drawn before the proposal was amended answered every press with "There is a
+  newer version of this change than this card shows", so only a newer card or the review page
+  could approve it. It now shows the new version.
+
+## [0.7.33] - unreleased
+
+Fewer cards in the chat: only the changes waiting for you and the two pickers still show one. After
+you approve a proposal on its card or press Apply all, the card can now post a short message so
+the assistant carries on, where the app allows it. A card added to the maybeboard or sideboard keeps the printing you picked,
+Forge can play up to 16 games at once on a machine big enough, and the gateway is gentler on
+Archidekt by default.
+
+### Upgrade notes
+- From 0.7.32: the stack file and the Compose file name a new Forge image, `2.0.15-mag4`; take
+  the new files as the update steps describe ([docs/UPGRADING.md](docs/UPGRADING.md#0733)).
+  You need that image only to play more than 4 Forge games at once. With the older image, a
+  higher setting plays at most 4 at once.
+- The gateway now sends at most 30 Archidekt requests a minute by default, down from 40. To keep
+  40, set "Archidekt requests per minute" on the Settings page, or `MTG_ARCHIDEKT_MAX_PER_MINUTE=40`
+  in your variables.
+- If you turned on the optional `mtg_authentik_api_token` lines, turn them on again in the new
+  file ([docs/UPGRADING.md](docs/UPGRADING.md#0733)).
+
+### Changed
+- Only the changes waiting for you (a proposal with Approve and Reject, and the waiting changes
+  with Apply all) and the two pickers (a card's printings, and the cards read from your photos)
+  still come as cards in the chat. Your account, your deck list, a deck, a restore point, a deck's
+  statistics, a comparison of two decks, a deck search and a scan's results now come as the
+  assistant's own words, which keeps a long chat light. The gateway still serves the cards already
+  in older chats, so an app that shows them again can still draw them.
+- The assistants' guides ask them to finish their review before proposing: one proposal with every
+  change, amended while it is still waiting, instead of several in a row.
+- After you approve a proposal on its card, or press Apply all on a card, and the change is applied
+  or under way, the card posts a short message, "Approved, go on", in the chat so the assistant
+  carries on at once, where the app lets a card do that. Elsewhere the assistant carries on when
+  you next write, as before. A row's own Approve on the waiting changes card posts nothing, so
+  approving several rows one by one doesn't start a reply for each.
+- A card added to the maybeboard or sideboard keeps the printing you picked, from Card search, the
+  deck editor or an assistant, and the editor keeps its Foil box there too. Before, Card search and
+  the deck editor left the printing out, so a new row got one Archidekt picked, and an assistant's
+  proposal with one was refused. Undo of a removal on the deck page puts a maybeboard or sideboard
+  row back in its printing too.
+- "Forge games played at once" (`MTG_FORGE_PARALLEL_GAMES`) and `FORGE_MAX_PARALLEL` now go up to
+  16, for a machine with the CPUs and memory for them (about 2 CPUs and 1.2 GB a game). Left at
+  their defaults, a report still asks for 4 at once and Forge plays as many of those as its
+  container's CPUs and memory fit (1 inside the default limits), so nothing changes until you raise
+  "Forge games played at once" above 4 and give Forge room for more games (`FORGE_MAX_PARALLEL`, or
+  its CPU and memory limits).
+- "Archidekt requests per minute" defaults to 30 instead of 40. The Settings page still allows 1 to
+  40.
+- Busy, limit and error messages no longer promise a time, such as "try again in a minute" or "in
+  a few minutes"; they say to try again later, because the gateway can't know when Archidekt,
+  Scryfall or the sign-in service will have room again. Some messages still name a wait the gateway
+  does know, such as the seconds Archidekt or Scryfall asks for, or the minute between two
+  notification tests.
+
+### Fixed
+- On the waiting changes card, a row applied with its own Approve said "The deck on Archidekt
+  matches this change." whatever it was, such as a new folder or a collection change. It now says
+  what the change did.
+- The member guide said deleting a deck, creating a folder, likes, comments and follows have no
+  assistant tool, and that the card in the chat only opens their review page. An assistant can
+  propose each of them, and only your own press applies them, on the card or on the review page (a
+  deck deletion, and an edit of a comment that has formatting, on the review page only).
+- In the deck editor, adding a card that already has a row there, with a picked printing or Foil
+  ticked, only grew that row's count, while the status line named the picked printing. It now says
+  the copies already listed keep their own printing and finish.
+- When Archidekt asked the gateway to wait, the "Archidekt is busy" page always sent
+  `Retry-After: 60`. It now sends how long the gateway is pausing its Archidekt requests.
+- Adding the same new card to the deck and to the maybeboard or sideboard in one change, without a
+  picked printing, could give one of the two rows the other's finish (foil or etched).
+
+## [0.7.32] - 2026-10-19
 
 The example settings files now list every variable the stack files read, each marked required or
 optional, and the stack files now pass every setting on the Settings page to the gateway. This

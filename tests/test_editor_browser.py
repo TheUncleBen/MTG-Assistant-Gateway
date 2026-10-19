@@ -118,7 +118,12 @@ def test_add_a_card_with_rich_suggestions(server: Server, width: int) -> None:
             page.locator(".addprints:visible .pptile").first.wait_for(timeout=3000)
             page.locator(".addprints .pptile").first.click()
             status = page.locator(".addstatus").inner_text()
-            assert "Added 3 × Sol Ring (" in status and "to Land" in status, status
+            # Sol Ring was just added above without a printing: the count grows, and the status line
+            # says the copies keep their own printing rather than naming the picked one
+            assert status == (
+                "Added 3 × Sol Ring to the copies already listed for the deck; they keep their own printing "
+                "and finish. Type the next card, or save."
+            ), status
         else:
             assert page.locator(".addprints:visible").count() == 0
             box.press("Enter")
@@ -349,6 +354,58 @@ def test_a_category_outside_the_deck_adds_to_the_maybeboard_or_sideboard(server:
         assert got == want, got
         answer = resp.value.text()
         assert "outside the deck" not in answer, answer
+        assert errors == []
+        browser.close()
+
+
+def test_a_picked_printing_and_foil_go_with_a_maybeboard_add(server: Server) -> None:
+    """A printing clicked for a card added under a category outside the deck, and the Foil box,
+    went missing from the save (a maybeboard add took no printing). Since 0.7.33 both go with the
+    side add."""
+    import json
+
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_path()
+    if exe == "missing":
+        pytest.skip("no Chromium available for Playwright")
+    server.ark.decks[42]["categories"] += [
+        {"name": "Maybeboard", "isPremier": False, "includedInDeck": False},
+        {"name": "Considering", "isPremier": False, "includedInDeck": False},
+    ]
+    sid = _link(server)
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+        ctx = browser.new_context(viewport={"width": 1366, "height": 900})
+        ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
+        ctx.route(
+            re.compile(r"https://cards\.scryfall\.io/.*"),
+            lambda route: route.fulfill(status=200, content_type="image/png", body=PNG),
+        )
+        page = ctx.new_page()
+        errors: list[str] = []
+        page.on("pageerror", lambda e: errors.append(str(e)))
+        page.goto(f"{server.base}/decks/42/edit", wait_until="networkidle")
+        box = page.locator("#addname")
+        page.locator(".targets .tchip", has_text="Considering").first.click()
+        page.locator("input[name=foil]").check()
+        box.press_sequentially("sol r", delay=30)
+        page.locator("[role=option] mark", has_text="Sol R").first.wait_for(timeout=3000)
+        tile = page.locator(".addprints:visible .pptile").first
+        tile.wait_for(timeout=3000)
+        tile.click()
+        assert "to Considering" in page.locator(".addstatus").inner_text()
+        new = page.locator(".erow.new", has_text="Sol Ring")
+        new.wait_for(timeout=3000)
+        text = new.inner_text().lower()
+        assert "new considering card" in text and "foil" in text and "#" in text, text
+        with page.expect_response(lambda r: r.url.endswith("/api/v1/proposals")) as resp:
+            page.locator(".editbar button.review").click()
+        sent = json.loads(resp.value.request.post_data or "{}")
+        (add,) = [c for c in sent["changes"] if c["action"] == "add"]
+        assert add["zone"] == "side" and add.get("category") == "Considering", add
+        assert add.get("set_code") and add.get("collector_number") and add.get("foil") is True, add
+        assert resp.value.json().get("error") != "invalid", resp.value.text()  # recorded, not refused
         assert errors == []
         browser.close()
 

@@ -463,7 +463,10 @@ async def test_outside_an_apply_a_running_pause_refuses_at_once(clock: list[floa
     ark_mod.wait_note.set({"x": 1})  # a note alone does not make a request wait
     with pytest.raises(ArchidektError) as err:
         await client.search_decks(name="Sample")
-    assert err.value.kind == "rate_limited" and "try again in 21 s" in str(err.value)
+    assert err.value.kind == "rate_limited" and (
+        "Archidekt asked the gateway to slow down, so it is pausing its Archidekt requests for 21 seconds. "
+        "Try again after that."
+    ) in str(err.value)
     assert clock == [] and ark.calls == []
 
 
@@ -647,7 +650,7 @@ async def test_requests_carry_the_gateways_own_user_agent() -> None:
 # -- settings, stack files, admin page ----------------------------------------------------------------
 GENTLE = {
     "MTG_ARCHIDEKT_MIN_INTERVAL": ("archidekt_min_interval", 1.0),
-    "MTG_ARCHIDEKT_MAX_PER_MINUTE": ("archidekt_max_per_minute", 40),
+    "MTG_ARCHIDEKT_MAX_PER_MINUTE": ("archidekt_max_per_minute", 30),
     "MTG_ARCHIDEKT_RETRIES": ("archidekt_retries", 2),
     "MTG_ARCHIDEKT_BACKOFF_BASE": ("archidekt_backoff_base", 1.0),
     "MTG_ARCHIDEKT_CACHE_SECONDS": ("archidekt_cache_seconds", 60),

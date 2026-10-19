@@ -310,7 +310,7 @@ async def test_the_review_page_right_after_a_failed_apply_says_it_once(stack: St
     assert got["ok"] is False and got["error"] == "rate_limited" and got["state"] == "pending", got
     assert got["message"] == (
         f"{ark_mod.PATIENCE_SPENT} Nothing was changed on Archidekt. The proposal is still pending, so it "
-        "can be approved again in a few minutes."
+        "can be approved again later."
     ), got["message"]
     b = Browser(h)
     await b.login()
@@ -320,7 +320,7 @@ async def test_the_review_page_right_after_a_failed_apply_says_it_once(stack: St
     assert page.count(f">{ark_mod.PATIENCE_SPENT}") == 1
     assert (
         f"<div class='notice error'>{ark_mod.PATIENCE_SPENT} Nothing was changed on Archidekt. The "
-        "proposal is still pending, so you can apply it again in a few minutes.</div>"
+        "proposal is still pending, so you can apply it again later.</div>"
     ) in page
     assert page.count("class='notice") == 1
     assert "Waiting</span>" in page  # the §4 label of a waiting proposal

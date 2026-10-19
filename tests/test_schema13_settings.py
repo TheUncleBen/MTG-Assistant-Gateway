@@ -18,7 +18,7 @@ import pytest
 from mtg_gateway import config, waiting_strip
 from mtg_gateway import db as db_module
 from mtg_gateway import decks as decks_module
-from mtg_gateway.config import MANAGED_SETTINGS, LiveSettings, SettingError, load_settings
+from mtg_gateway.config import MANAGED_SETTINGS, ConfigError, LiveSettings, SettingError, load_settings
 from mtg_gateway.db import Database
 
 from .conftest import Stack, make_settings
@@ -510,11 +510,15 @@ def test_pacing_can_only_be_made_gentler_from_the_page() -> None:
         "scan_art_image_interval",
         "deck_sync_minutes",  # the background deck sync reads Archidekt every this many minutes
     )
+    # 0.7.33 lowered the shipped pace from 40 to 30 requests a minute; the page may still go back
+    # to 40, the pace before, and never past it.
+    top = {"archidekt_max_per_minute": 40}
+    assert MANAGED_SETTINGS["archidekt_max_per_minute"].default == 30
     for key in faster_when_higher:
         spec = MANAGED_SETTINGS[key]
-        assert spec.hi == spec.default, key
+        assert spec.hi == top.get(key, spec.default), key
         with pytest.raises(SettingError):
-            spec.parse(spec.default + 1)
+            spec.parse(spec.hi + 1)
     for key in faster_when_lower:
         spec = MANAGED_SETTINGS[key]
         assert spec.lo == spec.default, key
@@ -542,7 +546,7 @@ def test_live_settings_default_stored_and_deployment_values(tmp_path: Path) -> N
         assert live.get("forge_parallel_games") == 3 and live.source("forge_parallel_games") == "dashboard"
         assert heard == ["forge_parallel_games"]
         # a value outside the bounds, or of the wrong kind, is refused and nothing changes
-        for bad in ("0", "5", "two", True, None):
+        for bad in ("0", "17", "two", True, None):
             with pytest.raises(SettingError):
                 live.set("forge_parallel_games", bad, by="admin-1")
         assert live.get("forge_parallel_games") == 3
@@ -624,6 +628,21 @@ def _env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("MTG_REQUIRED_GROUP", "mtg-users")
     for spec in MANAGED_SETTINGS.values():
         monkeypatch.delenv(spec.env, raising=False)
+
+
+def test_forge_games_at_once_go_up_to_16(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """0.7.33 raised the top of MTG_FORGE_PARALLEL_GAMES from 4 to 16, in the stack and on the page."""
+    spec = MANAGED_SETTINGS["forge_parallel_games"]
+    assert (spec.lo, spec.hi, spec.default) == (1, 16, 4)
+    assert spec.parse("16") == 16 and spec.parse(5) == 5
+    with pytest.raises(SettingError, match="^forge_parallel_games must be between 1 and 16$"):
+        spec.parse(17)
+    _env(tmp_path, monkeypatch)
+    monkeypatch.setenv("MTG_FORGE_PARALLEL_GAMES", "16")
+    assert load_settings().forge_parallel_games == 16
+    monkeypatch.setenv("MTG_FORGE_PARALLEL_GAMES", "17")
+    with pytest.raises(ConfigError, match="MTG_FORGE_PARALLEL_GAMES must be between 1 and 16"):
+        load_settings()
 
 
 def test_the_deployment_marks_what_it_set(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

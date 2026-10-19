@@ -308,6 +308,18 @@ class FakeArchidekt:
         self.decks[deck_id]["cards"][0]["quantity"] += 1
         self.decks[deck_id]["updatedAt"] = "2026-10-02T00:00:00Z"
 
+    def know_printing(self, card_id: int, name: str, set_code: str, number: str) -> None:
+        """Make a printing no deck here holds known to the card search, as the live site knows
+        every printed card (a printing picked from Scryfall's list, say)."""
+        self._deck_printings()
+        self._known_printings[card_id] = {
+            "id": card_id,
+            "oracleCard": {"name": name},
+            "edition": {"editioncode": set_code},
+            "collectorNumber": number,
+            "options": ["Normal"],
+        }
+
     def _deck_printings(self) -> list[dict[str, Any]]:
         """The printings the decks here hold or have held, in the card-search result shape
         (``options`` as the row's finish plus Normal), deduplicated by card id. A card taken out of

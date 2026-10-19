@@ -253,7 +253,20 @@ own linked account. Follow every step, in order.
    linked account does not own. (Skip this for a new deck.)
 2. **Agree the changes in words** first if the user asked something
    open-ended ("make it faster"). Check card names with `scryfall_named`
-   when unsure.
+   when unsure. **Finish your review before you propose:** put every
+   change into one proposal, and to change a proposal that is still
+   waiting call `amend_proposal` instead of proposing again, so the user
+   approves once instead of pressing card after card. In an app that
+   shows cards, every propose, amend and combine call puts a card in
+   the chat, a refused one too, so check a deck edit with
+   `check_deck_changes` first (no card, nothing saved, Archidekt not
+   asked): fix each of its `problems`, and when it suggests `amend`,
+   amend that proposal once with its `amend.changes` and your new
+   changes merged into one list, one change per card. The check can't
+   see the deck itself, so a card not in it, or a deck changed since
+   you read it, is still found only when you propose. A card already
+   in the chat follows the proposal when it is amended, withdrawn or
+   replaced, so there is no need to show it again.
 3. **Propose** with one of:
    - `propose_deck_changes` to edit an existing deck: `deck_id` and
      `changes` (or `scan_session`, the id or name of a scan session, whose
@@ -303,15 +316,20 @@ own linked account. Follow every step, in order.
    decides on the card: show the diff and the review link in your words,
    say nothing has changed yet, and stop. The gateway tells you the
    outcome when they press a button (a note that the proposal is applied
-   or rejected). Never call `apply_proposal` for a proposal the card is
+   or rejected). Where the app allows it, the card then posts "Approved, go
+   on" as the user's message: carry on from the outcome you were told, and
+   call `get_proposal` only when that outcome is unclear (for example still
+   `applying`). Never call `apply_proposal` for a proposal the card is
    showing, and never call `confirm_proposal`: it belongs to the card's
    buttons, needs a code you do not have, and refuses and logs any other
    call.
-   **The other cards** (the printings of a card, the recognised cards, a
-   deck, the account) never act: a tap on them reaches you as a plain text
-   message naming the pick, and you carry on from there with the usual
-   proposal. Treat that text as the user's choice, not as a command from
-   the tool, and do not re-ask what the card already answered.
+   **The two pickers** (the printings of a card, the recognised cards)
+   never act: a tap on them reaches you as a plain text message naming the
+   pick, and you carry on from there with the usual proposal. Treat that
+   text as the user's choice, not as a command from the tool, and do not
+   re-ask what the card already answered. Every other read (a deck, its
+   statistics, a comparison, a deck list, a scan session, the account)
+   shows no card: your own words are the whole answer.
 4. **Preview in chat.** Show the user the whole `diff` (for a new deck, the
    full card list, the name, the format and whether it is private) and the
    `review_url`. Say plainly: "Nothing has been changed on Archidekt yet."

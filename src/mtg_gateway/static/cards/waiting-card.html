@@ -256,7 +256,7 @@ button.danger:disabled{color:var(--red)}
     return w.charAt(0).toUpperCase() + w.slice(1);
   }
 
-  var polls = 0;
+  var polls = 0, nudged = false;
   function showResult(sc) {
     var rl = $("res-list"); rl.replaceChildren();
     (sc.applied || []).forEach(function (c) { decided[c.proposal_id] = { text: "Applied", kind: "ok" }; rl.appendChild(el("li", "", "Applied: " + label(c))); });
@@ -273,6 +273,11 @@ button.danger:disabled{color:var(--red)}
       u.onclick = function (e) { e.preventDefault(); B.openLink(sc.result_url, B.setStatus); };
       a.appendChild(u);
     }
+    if (running && !nudged && polls === 0) {
+      // under way: the assistant carries on now, as after a proposal card's Approve of a large change
+      nudged = true;
+      B.tellModel("The user pressed Apply all on the waiting changes card; it is still applying to Archidekt. " + String(sc.summary || "")).then(B.nudge);
+    }
     if (running && polls < 150) {
       polls += 1;
       setTimeout(function () {
@@ -285,9 +290,13 @@ button.danger:disabled{color:var(--red)}
           .catch(function () { showResult(sc); });
       }, 4000);
     } else if (!running) {
-      B.tellModel("The user pressed Apply all on the waiting changes card. " + String(sc.summary || "") +
+      var told = B.tellModel("The user pressed Apply all on the waiting changes card. " + String(sc.summary || "") +
         ((sc.applied || []).length ? " Applied: " + sc.applied.map(function (c) { return c.proposal_id; }).join(", ") + "." : "") +
         ((sc.not_sent || []).length ? " Not sent (still waiting or closed): " + sc.not_sent.map(function (c) { return c.proposal_id; }).join(", ") + "." : ""));
+      // one nudge for the whole batch, sent when it is under way or done (whichever the card sees
+      // first); a row's own Approve sends none, so approving several rows one by one doesn't start
+      // a turn for each
+      if ((sc.applied || []).length && !nudged) { nudged = true; told.then(B.nudge); }
     }
   }
 
@@ -330,7 +339,7 @@ button.danger:disabled{color:var(--red)}
           : st === "rejected" ? { text: "Rejected", kind: "" }
           : st === "applying" ? { text: "Applying… the review page shows how it goes", kind: "" }
           : { text: "Now " + st, kind: "err" };
-        B.setStatus(st === "applied" ? "Applied. The deck on Archidekt matches this change." : st === "rejected" ? "Rejected. Nothing was sent to Archidekt." : String(sc.next_step || ""), st === "applied" ? "ok" : "");
+        B.setStatus(st === "applied" ? "Applied. " + String(sc.applied_text || "The deck on Archidekt matches this change.") : st === "rejected" ? "Rejected. Nothing was sent to Archidekt." : String(sc.next_step || ""), st === "applied" ? "ok" : "");
         draw();
         B.tellModel("The user pressed " + (decision === "approve" ? "Approve" : "Reject") + " on the waiting changes card; proposal " + x.proposal_id + " is " + (st || "unchanged") + ".");
       })

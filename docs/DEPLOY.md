@@ -307,7 +307,7 @@ name and tag: a version's tag exists only once its release is published
    | `MTG_WRITES_ENABLED` | `true` to let approved proposals change Archidekt; `false` keeps everything review-only. Make your first edit on a deck you don't care about |
    | `MTG_APPROVAL_MODE_DEFAULT` | Leave it `manual` (the example file and the code default): a member who has not chosen an approval mode has every change wait for their own press, on the Approve button of the card in the chat or on Apply on the review page. Each member picks their own mode (`manual`, `semi`: low-risk changes, such as a small edit or a private copy of a deck, apply without asking, `auto`: most changes apply without asking, but some still wait for the member) on their Account page |
    | `MTG_APPROVAL_MODE_MAX` | `auto` (no cap) lets members choose any mode; `semi` or `manual` caps what they may choose |
-   | `MTG_APPLY_IN_CHAT` | `true` (the default): Claude and ChatGPT show each proposal as a card with Approve and Reject buttons, and only the card's one-time code can apply it; the other cards (printings, recognised cards, a deck, the account, comparisons, statistics, deck lists, scans) come with it. `false` removes every card; members use the review page |
+   | `MTG_APPLY_IN_CHAT` | `true` (the default): Claude and ChatGPT show each proposal as a card with Approve and Reject buttons, and only the card's one-time code can apply it; the waiting-changes card and the two pickers (a card's printings, recognised cards) come with it. `false` removes every card; members use the review page |
 
    Everything else can stay at its default. The full list is in the
    [environment reference](#environment-reference) below.
@@ -623,7 +623,7 @@ default, and an install that leaves it off behaves exactly as before.
     `MTG_FORGE_URL=http://mtg-assistant-forge:8000`, then update the stack.
   - Docker Compose: start the `forge` profile (`COMPOSE_PROFILES=forge`) and set
     `MTG_FORGE_URL=http://forge:8000`.
-- **The image tag:** the stack files name the Forge image by `FORGE_TAG` (default `2.0.15-mag3`).
+- **The image tag:** the stack files name the Forge image by `FORGE_TAG` (default `2.0.15-mag4`).
   GitHub builds and publishes a new tag the first time `main` carries it (the Forge image
   workflow, after its test games pass on arm64 and amd64), so pulling a new tag fails until that
   run has finished. After an update that changes the tag, wait for the run, then update the stack.
@@ -637,15 +637,15 @@ default, and an install that leaves it off behaves exactly as before.
   opponents and adds them to the results (50 games a report at most; on a comparison, the same
   number to both decks). An idle Forge service holds
   no Java memory.
-- **Games at once:** each game of a run is its own Java process with its own seed, so up to 4 of a
-  run's games can play at once when Forge has room. The seed is kept with the report for the record:
+- **Games at once:** each game of a run is its own Java process with its own seed, so up to 16 of a
+  run's games can play at once when Forge has room (up to 4 with a Forge image before `2.0.15-mag4`). The seed is kept with the report for the record:
   Forge does not always replay a game exactly, so compare runs by their win rates and 95% intervals,
   not game by game. `MTG_FORGE_PARALLEL_GAMES` (default 4, or the admin Settings page) is how many
   one report asks for at once, and `FORGE_MAX_PARALLEL` on the Forge service is the most it allows,
   for all runs together: runs start in order, and a run that uses fewer lets the next one play
   beside it (with 2 or more, a Compare's second deck plays beside the first when a place is still
   free for it). Left empty (the default), Forge works the number out from its container: one game
-  per 2 CPUs and per 1.2 GB of memory, 1 to 4, which is 1 inside the default limits; its log and
+  per 2 CPUs and per 1.2 GB of memory, 1 to 16, which is 1 inside the default limits; its log and
   `/health` (`max_parallel`, `max_parallel_from`) say which. Each game takes up to `FORGE_XMX` of
   Java memory. Measured on GitHub's build machines (not a Pi) with the default limits (1536M, 2
   CPUs, 15 four-player games, one game per Java process): one at a time peaked at about 600 MiB;
@@ -805,10 +805,10 @@ value. Leave it out to manage it on the page.
 | `MTG_FORGE_GAMES` | no, *stack* | `4` | Forge games per deck report (1 to 50); **Play more games** adds this many again |
 | `FORGE_REPLICAS`, `FORGE_NODE` | no, *stack* | `0`, empty | Copies of the Forge service, and the node they run on. `0` leaves Forge off; `1` with `FORGE_NODE` is the usual setup. For copies on several machines, place them by a node label instead of `FORGE_NODE` (see "More than one machine" in the Forge section above) |
 | *(node label)* `mtg-forge=true` | no | none | Only for Forge copies on several machines: label each machine (`docker node update --label-add mtg-forge=true <node>`) and place the Forge service by `node.labels.mtg-forge == true` instead of `FORGE_NODE` (see "More than one machine" in the Forge section above) |
-| `MTG_FORGE_PARALLEL_GAMES` | no, *stack* | `4` | How many of a report's Forge games the gateway asks Forge to play at once (1 to 4). `FORGE_MAX_PARALLEL` caps it for all runs together. Also on the Settings page |
+| `MTG_FORGE_PARALLEL_GAMES` | no, *stack* | `4` | How many of a report's Forge games the gateway asks Forge to play at once (1 to 16). `FORGE_MAX_PARALLEL` caps it for all runs together. Also on the Settings page |
 | `FORGE_MAX_METASPACE`, `FORGE_OOM_SCORE_ADJ` | no, *stack* | `256m`, `1000` | On the Forge service: each Forge game's extra Java memory for loaded code (on top of `FORGE_XMX`), and how readily the kernel stops a Forge game when the machine runs out of memory, 1 to 1000 (1000: Forge goes first; 0 turns this off; any other value is left out and Forge's log says why) |
-| `FORGE_MAX_PARALLEL` | no, *stack* | empty | On the Forge service: the most games Forge plays at once, for all runs together (1 to 4). Empty: one per 2 CPUs and 1.2 GB of the container's limits (see the Forge section above) |
-| `FORGE_IMAGE`, `FORGE_TAG` | no, *stack* | `ghcr.io/theuncleben/mtg-assistant-forge`, `2.0.15-mag3` | The Forge image and its version. The stack file names one exact Forge version, which changes only when you deploy a newer stack file. Leave these out to use it; set `FORGE_TAG` only to pin Forge on purpose, and it then stays on that version even when the stack file moves on |
+| `FORGE_MAX_PARALLEL` | no, *stack* | empty | On the Forge service: the most games Forge plays at once, for all runs together (1 to 16). Empty: one per 2 CPUs and 1.2 GB of the container's limits (see the Forge section above) |
+| `FORGE_IMAGE`, `FORGE_TAG` | no, *stack* | `ghcr.io/theuncleben/mtg-assistant-forge`, `2.0.15-mag4` | The Forge image and its version. The stack file names one exact Forge version, which changes only when you deploy a newer stack file. Leave these out to use it; set `FORGE_TAG` only to pin Forge on purpose, and it then stays on that version even when the stack file moves on |
 | `FORGE_XMX` | no, *stack* | `1g` | The Java heap limit (`-Xmx`) of each Forge game |
 | `FORGE_MEMORY_LIMIT`, `FORGE_CPUS` | no, *stack* | `1536M`, `2` | The Forge container's memory and CPU caps. `FORGE_MEMORY_LIMIT` is also passed to Forge as `FORGE_MEMORY_BUDGET`, which sizes the games at once where Docker can't cap memory (see the Forge section above) |
 | `FORGE_GAME_SECONDS` | no, *stack* | `240` | Seconds before Forge calls one game a draw |
@@ -819,11 +819,11 @@ value. Leave it out to manage it on the page.
 | `MTG_AUTO_APPLY_MAX_ROWS` | no, *stack* | `5` | How many review rows an edit may have and still count as low risk in `semi` mode (1 to 100) |
 | `MTG_AUTO_BIG_EDIT_ROWS` | no, *stack* | `20` | In `auto` mode, a deck or collection edit with more card rows than this waits for the member's press (1 to 100). Also on the Settings page |
 | `MTG_PROPOSAL_EXPIRY_DAYS` | no, *stack* | `7` | Days a waiting change stays open for approval (1 to 30). A change nobody approves in that time expires; an assistant's amend starts the time again. Also on the Settings page |
-| `MTG_APPLY_IN_CHAT` | no, *stack* | `true` | The Approve/Reject card an AI app that renders MCP Apps shows next to a proposal. Its Approve button calls `confirm_proposal` with a one-time code the assistant never sees; The same switch turns on the other cards (printings, recognised cards, a deck, the account, comparisons, statistics, deck lists, scans) and the ten-minute signed data links they load (`GET /cards/data/`); `false` removes every card, the links and the tool, leaving the review page (and `apply_proposal` where the member's approval mode allows it) |
+| `MTG_APPLY_IN_CHAT` | no, *stack* | `true` | The Approve/Reject card an AI app that renders MCP Apps shows next to a proposal. Its Approve button calls `confirm_proposal` with a one-time code the assistant never sees; the same switch turns on the waiting-changes card, the two pickers (printings, recognised cards) and the ten-minute signed data link the printings card loads (`GET /cards/data/`); `false` removes every card, the links and the tool, leaving the review page (and `apply_proposal` where the member's approval mode allows it) |
 | `MTG_UPDATE_CHECK` | no, *stack* | `true` | Twice a day, one anonymous request to GitHub's releases API for this project's newest release. When it is newer than the running gateway, admins see a notice on every page and the update steps on the admin overview (Portainer, Swarm, docker compose). Notice only: the gateway never pulls an image or touches Docker. `false` sends nothing |
-| `MTG_ARCHIDEKT_CALLS_PER_10_MIN` | no, *stack* | `120` | Archidekt work one member may start per 10 minutes (a deck read, a proposal, an apply, a link, and a research tool such as goldfish or precon given an Archidekt deck id or link), refilled evenly; past it the member gets `rate_limited` for a few minutes. Stops a looping assistant from keeping a steady stream of requests on Archidekt. 10 to 100000 |
+| `MTG_ARCHIDEKT_CALLS_PER_10_MIN` | no, *stack* | `120` | Archidekt work one member may start per 10 minutes (a deck read, a proposal, an apply, a link, and a research tool such as goldfish or precon given an Archidekt deck id or link), refilled evenly; past it the member gets `rate_limited` until enough of it has refilled. Stops a looping assistant from keeping a steady stream of requests on Archidekt. 10 to 100000 |
 | `MTG_ARCHIDEKT_MIN_INTERVAL` | no, *stack* | `1.0` | Seconds between two Archidekt requests, for everyone together (0.25 to 10). See [OPERATIONS.md](OPERATIONS.md#archidekt-rate-limiting) |
-| `MTG_ARCHIDEKT_MAX_PER_MINUTE` | no, *stack* | `40` | Archidekt requests in any 60 seconds, for everyone together; past it requests wait their turn (1 to 120) |
+| `MTG_ARCHIDEKT_MAX_PER_MINUTE` | no, *stack* | `30` | Archidekt requests in any 60 seconds, for everyone together; past it requests wait their turn (1 to 120) |
 | `MTG_ARCHIDEKT_RETRIES` | no, *stack* | `2` | Retries for a read that timed out or got a server error (0 to 4). Writes and "slow down" answers are never retried |
 | `MTG_ARCHIDEKT_BACKOFF_BASE` | no, *stack* | `1.0` | Seconds; a retry waits a random time up to this x 2, 4... (capped at 10) (0.1 to 10) |
 | `MTG_ARCHIDEKT_CACHE_SECONDS` | no, *stack* | `60` | How long anonymous public deck reads and deck searches are reused; cleared by any write the gateway sends (0 turns it off, up to 900). A member's deck page is also shown again from memory for up to 20 seconds (or this, if shorter) |

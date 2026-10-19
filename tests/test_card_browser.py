@@ -57,7 +57,7 @@ window.addEventListener("message", (ev) => {
   if (m.method === "ui/initialize") {
     send({jsonrpc: "2.0", id: m.id, result: {
       protocolVersion: "2026-01-26", hostInfo: {name: "fake", version: "0"},
-      hostCapabilities: {openLinks: {}, serverTools: {}},
+      hostCapabilities: window.hostCaps || {openLinks: {}, serverTools: {}},
       hostContext: {theme: "dark", platform: "web",
                     styles: {variables: {"--color-text-primary": "rgb(1, 2, 3)"}},
                     safeAreaInsets: {top: 0, right: 0, bottom: 0, left: 0}}}});
@@ -73,7 +73,8 @@ window.addEventListener("message", (ev) => {
     const text = JSON.stringify(sc);
     send({jsonrpc: "2.0", id: m.id,
           result: {content: [{type: "text", text: text}], structuredContent: sc, isError: false}});
-  } else if (m.method === "ui/open-link" || m.method === "ui/update-model-context") {
+  } else if (m.method === "ui/open-link" || m.method === "ui/update-model-context" ||
+             m.method === "ui/message") {
     send({jsonrpc: "2.0", id: m.id, result: {}});
   } else if (m.id !== undefined && m.method) {
     send({jsonrpc: "2.0", id: m.id, error: {code: -32601, message: "nope"}});
@@ -92,16 +93,27 @@ def _open(
     get_reply: dict | None = None,
     *,
     arm_ms: int | None = None,
+    host_caps: dict | None = None,
+    openai: bool = False,
 ):
     """The card in the host page. ``arm_ms``: a longer arming delay than the card's 700 ms, for a
-    test that reads the disabled buttons, so a loaded machine cannot run past it first."""
+    test that reads the disabled buttons, so a loaded machine cannot run past it first.
+    ``host_caps``: the host's capabilities instead of the default ones. ``openai``: the card's
+    window also has ChatGPT's ``window.openai.sendFollowUpMessage``, which logs its call."""
     html = card_html()
+    if openai:
+        stub = (
+            "<script>window.openai = {sendFollowUpMessage: function (a) { parent.postMessage("
+            '{jsonrpc: "2.0", method: "openai/sendFollowUpMessage", params: a}, "*"); }};</script>'
+        )
+        html = html.replace("<head>", "<head>" + stub, 1)
     if arm_ms is not None:
         assert "var ARM_DELAY_MS = 700;" in html
         html = html.replace("var ARM_DELAY_MS = 700;", f"var ARM_DELAY_MS = {arm_ms};")
     # the card's pictures come from Scryfall: a stand-in picture keeps the test offline
     page.route("https://api.scryfall.com/**", lambda r: r.fulfill(content_type="image/png", body=PNG))
     page.set_content(HOST)
+    page.evaluate("(c) => { window.hostCaps = c; }", host_caps)
     page.evaluate("(r) => { window.toolResult = r; }", result)
     page.evaluate("(r) => { window.confirmReply = r; }", confirm_reply)
     page.evaluate("(r) => { window.getReply = r; }", get_reply)
@@ -511,9 +523,9 @@ def test_a_press_on_a_closed_proposal_shows_its_state_and_drops_the_buttons() ->
         ),
         (
             "Archidekt is busy and asked the gateway to wait longer than an apply may wait, so the apply "
-            "stopped. Nothing was changed on Archidekt. Try again in a few minutes with a new proposal.",
+            "stopped. Nothing was changed on Archidekt. Try again later with a new proposal.",
             "Archidekt is busy and asked the gateway to wait longer than an apply may wait, so the apply "
-            "stopped. Nothing was changed on Archidekt. Try again in a few minutes with a new proposal. "
+            "stopped. Nothing was changed on Archidekt. Try again later with a new proposal. "
             "The review page shows what happened.",
         ),
     ],
@@ -555,7 +567,7 @@ def test_a_failed_approve_shows_failed_with_one_message_and_no_buttons(message: 
 STOPPED = (
     "Archidekt is busy and asked the gateway to wait longer than an apply may wait, so the apply "
     "stopped. Nothing was changed on Archidekt. The proposal is still pending, so it can be approved "
-    "again in a few minutes."
+    "again later."
 )
 
 
@@ -751,5 +763,85 @@ def test_locked_buttons_read_at_full_strength(theme: str) -> None:
                 page.wait_for_timeout(100)  # the frame takes the card's height (size-changed)
                 _shot(page, f"l8-chatcard-locked-{width}-{theme}")
                 page.close()
+        finally:
+            browser.close()
+
+
+NUDGE = "Approved, go on"
+
+
+def _nudges(page) -> list[dict]:
+    """What the card posted in the chat as the person: ui/message, or ChatGPT's follow-up call."""
+    return [
+        m
+        for m in page.evaluate("() => window.log")
+        if m.get("method") in ("ui/message", "openai/sendFollowUpMessage")
+    ]
+
+
+def _press(page, card, button: str) -> None:
+    card.locator(f"#{button}:enabled").wait_for(timeout=10_000)
+    card.locator(f"#{button}").click()
+    if button == "reject":
+        card.locator("#reason").wait_for()
+        card.locator("#reject-go").click()
+    page.wait_for_function(
+        "() => window.log.some(m => m.method === 'ui/update-model-context')", timeout=5_000
+    )
+
+
+def test_approve_nudges_the_assistant_only_where_the_host_takes_a_message() -> None:
+    """Ben, 0.7.31 test round: after he pressed Approve the assistant sat still until he wrote
+    again. Where the host lets a card post a message (MCP Apps' ui/message, or ChatGPT's
+    sendFollowUpMessage), Approve now also posts "Approved, go on", after the card has told the
+    model what happened; Reject posts nothing, and a host with neither gets nothing."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_or_skip()
+    applied = {**PROPOSAL, "state": "applied", "result": {"deck_url": "https://archidekt.com/decks/42"}}
+    rejected = {**PROPOSAL, "state": "rejected"}
+    start = {"structuredContent": PROPOSAL, "_meta": {APPROVAL_META_KEY: "code-123"}}
+    with sync_playwright() as p:
+        browser = _launch(p, exe)
+        try:
+            # 1. An MCP Apps host that takes messages: one ui/message, after the model context.
+            page = browser.new_page()
+            card = _open(
+                page, start, applied, host_caps={"openLinks": {}, "serverTools": {}, "message": {"text": {}}}
+            )
+            _press(page, card, "approve")
+            page.wait_for_function("() => window.log.some(m => m.method === 'ui/message')", timeout=5_000)
+            log = page.evaluate("() => window.log")
+            sent = [m for m in log if m.get("method") == "ui/message"]
+            assert len(sent) == 1 and sent[0]["params"] == {
+                "role": "user",
+                "content": [{"type": "text", "text": NUDGE}],
+            }
+            told = next(i for i, m in enumerate(log) if m.get("method") == "ui/update-model-context")
+            assert told < log.index(sent[0])
+            page.close()
+            # 2. ChatGPT's own follow-up call, where the host doesn't list ui/message.
+            page = browser.new_page()
+            card = _open(page, start, applied, openai=True)
+            _press(page, card, "approve")
+            page.wait_for_function(
+                "() => window.log.some(m => m.method === 'openai/sendFollowUpMessage')", timeout=5_000
+            )
+            assert [m["params"] for m in _nudges(page)] == [{"prompt": NUDGE}]
+            page.close()
+            # 3. A host with neither: nothing is posted, as before.
+            page = browser.new_page()
+            card = _open(page, start, applied)
+            _press(page, card, "approve")
+            page.wait_for_timeout(300)
+            assert _nudges(page) == []
+            page.close()
+            # 4. Reject never nudges, even where the host would take it.
+            page = browser.new_page()
+            card = _open(page, start, rejected, host_caps={"message": {"text": {}}}, openai=True)
+            _press(page, card, "reject")
+            page.wait_for_timeout(300)
+            assert _nudges(page) == []
+            page.close()
         finally:
             browser.close()

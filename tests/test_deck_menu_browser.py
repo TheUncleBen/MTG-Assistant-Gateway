@@ -320,6 +320,51 @@ def test_undo_of_a_remove_puts_back_printing_finish_tag_and_mana_value(server: S
         browser.close()
 
 
+def test_undo_of_a_maybeboard_remove_puts_back_its_printing(server: Server) -> None:
+    """A maybeboard row's Undo of a removal used to leave its printing out (a maybeboard add took
+    none), so the row came back in a printing Archidekt picked. Since 0.7.33 it sends the printing."""
+    from playwright.sync_api import sync_playwright
+
+    row = next(
+        c
+        for c in server.ark.decks[42]["cards"]
+        if c["card"]["oracleCard"]["name"] == "Sol Ring" and "Maybeboard" in (c["categories"] or [])
+    )
+    row["card"] = {**row["card"], **server.ark.printing(124026)}  # SLD 1074, not the one picked by name
+    printing = (row["card"]["edition"]["editioncode"], row["card"]["collectorNumber"])
+    _chromium()
+    sid = server.sign_in_and_link()
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, 1366)
+        page.goto(f"{server.base}/decks/42?view=grid", wait_until="networkidle")
+        card = page.locator(".deckview .c[data-card='Sol Ring'][data-zone='side']").first
+        card.scroll_into_view_if_needed()
+        card.click()
+        page.wait_for_selector(".cardview.open", timeout=3000)
+        page.locator(".cardview .acts button", has_text="Remove from deck").click()
+        page.locator(".deck-toast .msg", has_text="Saved").wait_for(timeout=8000)
+        assert server.quantity("Sol Ring", side=True) == 0
+        sent: list[list[dict]] = []
+        page.on(
+            "request",
+            lambda r: sent.append(json.loads(r.post_data)["changes"]) if EDIT_URL.search(r.url) else None,
+        )
+        page.locator(".deck-toast button", has_text="Undo").click()
+        page.locator(".deck-toast .msg", has_text="Undone").wait_for(timeout=8000)
+        (first,) = sent[0]
+        assert first["zone"] == "side" and (first["set_code"], first["collector_number"]) == printing, sent
+        rows = [
+            c
+            for c in server.ark.decks[42]["cards"]
+            if c["card"]["oracleCard"]["name"] == "Sol Ring" and "Maybeboard" in (c["categories"] or [])
+        ]
+        assert [(r["card"]["edition"]["editioncode"], r["card"]["collectorNumber"]) for r in rows] == [
+            printing
+        ]
+        assert errors == []
+        browser.close()
+
+
 def test_viewer_quantity_buttons_and_remove(server: Server) -> None:
     from playwright.sync_api import sync_playwright
 

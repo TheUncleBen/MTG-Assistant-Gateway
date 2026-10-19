@@ -263,7 +263,7 @@ _AT = "<time datetime='2027-01-15T08:00:00Z'>2027-01-15 08:00 UTC</time>"
             "reached (ConnectError). To fix: Check that the gateway can reach Authentik's address "
             "(MTG_AUTHENTIK_API_URL, or the issuer's when that is empty). It tries again by itself.",
         ),
-        ({"state": "not started"}, "Not started yet. Reload this page in a minute."),
+        ({"state": "not started"}, "Not started yet. Reload this page to see its first result."),
     ],
 )
 def test_each_clean_up_state_reads_as_one_plain_line(status: dict, text: str) -> None:

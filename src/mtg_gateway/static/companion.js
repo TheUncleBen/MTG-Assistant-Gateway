@@ -119,25 +119,33 @@
   // a category whose rows sit outside the deck (Maybeboard, Sideboard...): a card added under it
   // goes to the maybeboard or sideboard with that category, never to the deck proper
   function outside(category) { return !!category && (cfg.outsideCategories || []).indexOf(category) >= 0; }
+  // Answers true when a picked printing or foil could not go with the add: the card is already
+  // listed in that zone (a row of the deck, or an add not saved yet), so only its count grows.
   function addCard(name, qty, category, printing, finish, zone) {
     zone = zone === "side" || outside(category) ? "side" : "main";
     var key = keyFor(name, zone);
+    var picked = !!(printing && printing.set_code && printing.collector_number);
+    var foil = (printing && printing.foil === true) || finish === "foil";
     if (rows[key]) {
       rows[key].after = Math.min(99, rows[key].after + qty);
+      return picked || foil;
     } else if (added[key]) {
-      added[key].quantity = Math.min(99, added[key].quantity + qty);
+      var a = added[key];
+      a.quantity = Math.min(99, a.quantity + qty);
+      return picked || foil;
     } else {
       added[key] = { name: name, zone: zone, quantity: qty, category: category || null };
       var k = known[name.toLowerCase()];
       if (k) { added[key].image = k.image_small || null; added[key].mana = k.mana_cost || ""; added[key].type = k.type_line || ""; }
       else detailsLater(key, name);
-      // a pinned printing or a foil goes to the deck proper only (the gateway refuses them for zone side)
-      if (zone === "main" && printing && printing.set_code && printing.collector_number) {
+      // a picked printing and a foil go with the add, in the deck proper or the maybeboard or sideboard
+      if (printing && printing.set_code && printing.collector_number) {
         added[key].set_code = printing.set_code;
         added[key].collector_number = printing.collector_number;
       }
-      if (zone === "main" && ((printing && printing.foil === true) || finish === "foil")) added[key].foil = true;
+      if (foil) added[key].foil = true;
     }
+    return false;
   }
   (cfg.prefill || []).forEach(function (ch) {
     if (ch.action === "add") addCard(ch.card_name, ch.quantity || 1, ch.category || null, ch);
@@ -332,7 +340,7 @@
             if (!outside(v)) { a.category = v || null; return; }
             // picked a category outside the deck: the new card moves to the maybeboard or sideboard
             delete added[k];
-            addCard(a.name, a.quantity, v, null, null, "side");
+            addCard(a.name, a.quantity, v, a.set_code ? a : null, a.foil ? "foil" : null, "side");
           });
         }, true, false, a.name),
         el("button", { type: "button", class: "mini remove", "aria-label": "Remove " + a.name, title: "Remove", onclick: function () { mutate(function () { delete added[k]; }); } }, [svg("x")])
@@ -478,10 +486,13 @@
     if (!parts.name) return;
     var zone = zoneIn.value === "side" ? "side" : "main";
     var finish = foilIn && foilIn.checked ? "foil" : null;
-    mutate(function () { addCard(parts.name, parts.qty, catIn.value || null, printing || null, finish, zone); });
+    var dropped = false;
+    mutate(function () { dropped = addCard(parts.name, parts.qty, catIn.value || null, printing || null, finish, zone); });
     var where = zone === "side" || outside(catIn.value) ? catIn.value || cfg.sideCategory || "Maybeboard" : (catIn.value || "the deck");
     var print = printing && printing.set_code ? " (" + printing.set_code.toUpperCase() + " #" + printing.collector_number + ")" : "";
-    if (addStatus) addStatus.textContent = "Added " + parts.qty + " × " + parts.name + print + " to " + where + ". Type the next card, or save.";
+    if (addStatus) addStatus.textContent = dropped
+      ? "Added " + parts.qty + " × " + parts.name + " to the copies already listed for " + (zone === "side" || outside(catIn.value) ? "the maybeboard or sideboard" : "the deck") + "; they keep their own printing and finish. Type the next card, or save."
+      : "Added " + parts.qty + " × " + parts.name + print + " to " + where + ". Type the next card, or save.";
     input.value = "";
     hidePrints();
     input.focus();

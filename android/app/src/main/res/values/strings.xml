@@ -58,7 +58,7 @@
 
     <string name="page_error">The page could not be loaded. Check your connection, then tap Retry.</string>
     <string name="page_offline">No connection to your gateway. Check that the phone is online, then tap Retry.</string>
-    <string name="gateway_down">Your gateway is not answering right now (it may be restarting). Wait a minute, then tap Retry.</string>
+    <string name="gateway_down">Your gateway is not answering right now (it may be restarting). Tap Retry to try again.</string>
     <string name="page_reloaded">The page stopped unexpectedly and was reloaded.</string>
     <string name="retry">Retry</string>
     <string name="downloading">Downloading %1$s</string>

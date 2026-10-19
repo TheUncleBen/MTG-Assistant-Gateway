@@ -388,9 +388,9 @@ def add_cardsearch_routes(server: MCPServer, state: AppState) -> None:
 
     def problem_text(exc: ScanError) -> str:
         return {
-            "rate_limited": "Scryfall asked us to wait a moment. Try again shortly.",
-            "unavailable": "Scryfall is not answering right now. Try again in a moment.",
-            "busy": "Your other card lookups are still running. Try again in a moment.",
+            "rate_limited": "Scryfall asked the gateway to wait. Try again later.",
+            "unavailable": "Scryfall is not answering right now. Try again later.",
+            "busy": "Your other card lookups are still running. Try again when they finish.",
             "invalid": f"Scryfall could not read that search: {exc}",
             "too_long": "This search is too long. Remove some filters or words.",
             "off": str(exc),

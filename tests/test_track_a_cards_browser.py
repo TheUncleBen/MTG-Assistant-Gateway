@@ -23,7 +23,7 @@ NOW = int(time.time())
 HOST = """<!DOCTYPE html><html><body style="margin:0">
 <iframe id="f" sandbox="allow-scripts" style="width:100%;height:10px;border:0"></iframe>
 <script>
-window.log = []; window.replies = {}; window.theme = "light";
+window.log = []; window.replies = {}; window.theme = "light"; window.caps = null;
 var frame = document.getElementById("f");
 window.addEventListener("message", (ev) => {
   const m = ev.data; if (!m || m.jsonrpc !== "2.0") return;
@@ -31,7 +31,8 @@ window.addEventListener("message", (ev) => {
   const send = (x) => frame.contentWindow.postMessage(x, "*");
   if (m.method === "ui/initialize") {
     send({jsonrpc: "2.0", id: m.id, result: {protocolVersion: "2026-01-26",
-      hostInfo: {name: "fake", version: "0"}, hostCapabilities: {openLinks: {}, serverTools: {}},
+      hostInfo: {name: "fake", version: "0"},
+      hostCapabilities: window.caps || {openLinks: {}, serverTools: {}},
       hostContext: {theme: window.theme, platform: "web"}}});
   } else if (m.method === "ui/notifications/initialized") {
     send({jsonrpc: "2.0", method: "ui/notifications/tool-result", params: window.toolResult});
@@ -110,8 +111,9 @@ DONE = {
 SHOTS = os.environ.get("MTG_SHOTS_DIR")  # screenshots for the reviewer, only when asked
 
 
-def _open(page, html: str, result: dict, replies: dict, theme: str = "light"):
+def _open(page, html: str, result: dict, replies: dict, theme: str = "light", caps: dict | None = None):
     page.set_content(HOST)
+    page.evaluate("(c) => { window.caps = c; }", caps)
     page.evaluate("(r) => { window.toolResult = r; }", result)
     page.evaluate("(r) => { window.replies = r; }", replies)
     page.evaluate("(t) => { window.theme = t; }", theme)
@@ -1116,3 +1118,85 @@ def test_a_low_risk_copy_is_called_a_change_not_an_edit(width: int, theme: str) 
             assert not errors, errors
         finally:
             browser.close()
+
+
+def test_apply_all_on_the_waiting_card_nudges_once_and_a_row_approve_says_what_it_did() -> None:
+    """Ben, 0.7.31 test round: after an approval the assistant sat still. Where the host takes a
+    message from a card, Apply all posts "Approved, go on" once for the whole batch (as soon as it is
+    under way); a row's own
+    Approve posts none, so approving rows one by one doesn't start a turn each. The row's result
+    is the gateway's own words for what it did (a like is not a deck that matches)."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_or_skip()
+    caps = {"openLinks": {}, "serverTools": {}, "message": {"text": {}}}
+    with sync_playwright() as p:
+        browser = _launch(p, exe)
+        try:
+            page = browser.new_page(viewport={"width": 390, "height": 900})
+            errors: list[str] = []
+            page.on("pageerror", lambda e: errors.append(str(e)))
+            liked = {
+                "ok": True,
+                "proposal_id": "p1",
+                "state": "applied",
+                "applied_text": "The deck is liked on Archidekt.",
+            }
+            card = _open(
+                page,
+                cards_html("waiting-card"),
+                {"structuredContent": WAITING, "_meta": WAITING_META},
+                {"confirm_proposal": liked},
+                caps=caps,
+            )
+            card.locator("#row-p1 button:not(.danger):not([disabled])").first.click()
+            card.locator("#row-p1 .done").wait_for()
+            page.wait_for_function("() => window.log.some(m => m.method === 'ui/update-model-context')")
+            assert card.locator("#status").inner_text() == "Applied. The deck is liked on Archidekt."
+            page.wait_for_timeout(300)
+            assert not [m for m in page.evaluate("() => window.log") if m.get("method") == "ui/message"]
+            page.close()
+            page = browser.new_page(viewport={"width": 390, "height": 900})
+            page.on("pageerror", lambda e: errors.append(str(e)))
+            card = _open(
+                page,
+                cards_html("waiting-card"),
+                {"structuredContent": WAITING, "_meta": WAITING_META},
+                {"confirm_waiting": DONE},
+                caps=caps,
+            )
+            card.locator("#apply-all:not([disabled])").click()
+            card.locator("#go:not([disabled])").click()
+            card.locator("#result:not(.hidden)").wait_for()
+            page.wait_for_function("() => window.log.some(m => m.method === 'ui/message')")
+            page.wait_for_timeout(300)
+            log = page.evaluate("() => window.log")
+            sent = [m for m in log if m.get("method") == "ui/message"]
+            assert [m["params"] for m in sent] == [
+                {"role": "user", "content": [{"type": "text", "text": "Approved, go on"}]}
+            ]
+            told = [i for i, m in enumerate(log) if m.get("method") == "ui/update-model-context"]
+            assert told and told[-1] < log.index(sent[0])
+            page.close()
+            # a large batch still applying: the one nudge goes as soon as it is under way, as on the
+            # proposal card, and the end of the batch sends no second one
+            page = browser.new_page(viewport={"width": 390, "height": 900})
+            page.on("pageerror", lambda e: errors.append(str(e)))
+            running = {**DONE, "state": "applying", "summary": "Applying 1.", "applied": [], "not_sent": []}
+            card = _open(
+                page,
+                cards_html("waiting-card"),
+                {"structuredContent": WAITING, "_meta": WAITING_META},
+                {"confirm_waiting": running, "get_apply_result": DONE},
+                caps=caps,
+            )
+            card.locator("#apply-all:not([disabled])").click()
+            card.locator("#go:not([disabled])").click()
+            page.wait_for_function("() => window.log.some(m => m.method === 'ui/message')")
+            card.locator("#status", has_text="Applied 1.").wait_for(timeout=8000)
+            page.wait_for_timeout(300)
+            sent = [m for m in page.evaluate("() => window.log") if m.get("method") == "ui/message"]
+            assert len(sent) == 1, sent
+        finally:
+            browser.close()
+    assert not errors, errors

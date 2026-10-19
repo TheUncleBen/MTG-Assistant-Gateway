@@ -39,7 +39,7 @@ from .archidekt import (
 )
 from .busy import busy_response
 from .deckpage import image_url, mana_html
-from .decks import DeckError, _writing, current_client
+from .decks import DeckError, _writing, archidekt_wait, current_client
 from .pages import (
     NO_STORE,
     _csrf,
@@ -114,7 +114,9 @@ def _wrap(exc: Exception) -> CollectionError:
             return CollectionError("auth", str(exc))
         if kind == "contract":
             return CollectionError("unavailable", "Archidekt answered in an unexpected way; try again")
-        return CollectionError(kind, str(exc), retry_after=getattr(exc, "retry_after", None))
+        # whole seconds, at least 1: a raw ArchidektError carries a float, which the busy page would
+        # otherwise drop for its 60 s default
+        return CollectionError(kind, str(exc), retry_after=archidekt_wait(exc))
     raise exc
 
 
@@ -1359,7 +1361,7 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
             "unreadable": "That text is not a collection CSV or a card list the gateway can read.",
             "expired": "This form expired. Reload the page and try again.",
             "invalid": "That was not a valid request.",
-            "lookup": "Archidekt is not answering right now. Try again in a moment.",
+            "lookup": "Archidekt is not answering right now. Try again later.",
             "link": "Link your Archidekt account on the Account page first.",
             "writes": refusals.WRITES_OFF,
         }
@@ -1848,7 +1850,7 @@ def add_collection_tools(server: MCPServer, service: CollectionService) -> None:
                 )
                 expected[_rid(r["id"])] = left
         except CollectionError as exc:
-            raise DeckError(exc.kind, str(exc)) from exc
+            raise DeckError(exc.kind, str(exc), retry_after=archidekt_wait(exc)) from exc
         result["verified"], result["mismatches"] = await _read_back(sub, expected)
         return result
 

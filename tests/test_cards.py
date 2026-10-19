@@ -33,20 +33,36 @@ from .test_approval_modes import _set_mode
 from .test_decks_and_proxy import call, linked_user, mcp_token, structured
 
 AESI = "6511f317-bd38-46d0-b800-7125a3f420da"
+# Since 0.7.33 the two pickers are the only cards here (the proposal and waiting-changes cards are in
+# test_in_chat_approve.py and test_track_a_chat.py).
 CARDED = {
-    "get_deck": DECK_CARD_URI,
-    "get_snapshot": DECK_CARD_URI,
     "card_printings": PRINTINGS_CARD_URI,
     "resolve_cards": PICKER_CARD_URI,
-    "account_status": ACCOUNT_CARD_URI,
-    "whoami": ACCOUNT_CARD_URI,
-    "compare_decks": COMPARE_CARD_URI,
-    "deck_stats": STATS_CARD_URI,
-    "list_my_decks": DECK_LIST_CARD_URI,
-    "search_decks": DECK_LIST_CARD_URI,
-    "get_scan_session": SCAN_CARD_URI,
 }
-# The display-only cards: they draw the result's own structured content, so the result is unchanged.
+# Ben, 0.7.31 test round: ChatGPT lagged on long chats full of cards, so these reads answer in text
+# alone. Their cards stay registered, unnamed, so the cards in older chats still draw.
+NO_CARD = (
+    "get_deck",
+    "get_snapshot",
+    "account_status",
+    "whoami",
+    "compare_decks",
+    "deck_stats",
+    "list_my_decks",
+    "search_decks",
+    "get_scan_session",
+)
+REGISTERED = {
+    PRINTINGS_CARD_URI,
+    PICKER_CARD_URI,
+    DECK_CARD_URI,
+    ACCOUNT_CARD_URI,
+    COMPARE_CARD_URI,
+    STATS_CARD_URI,
+    DECK_LIST_CARD_URI,
+    SCAN_CARD_URI,
+}
+# The display-only cards: they draw the result's own structured content.
 DISPLAY_ONLY = {COMPARE_CARD_URI, STATS_CARD_URI, DECK_LIST_CARD_URI, SCAN_CARD_URI}
 CARD_NAMES = (
     "printings-card",
@@ -92,15 +108,15 @@ async def test_tools_carry_their_cards_and_the_cards_declare_only_what_they_load
     for name, uri in CARDED.items():
         assert tools[name]["_meta"]["ui"]["resourceUri"] == uri, name
         assert tools[name]["_meta"]["ui/resourceUri"] == uri, name
-    for name in ("parse_decklist", "list_scan_sessions", "list_snapshots"):
+    for name in ("parse_decklist", "list_scan_sessions", "list_snapshots", *NO_CARD):
         assert "ui" not in (tools[name].get("_meta") or {}), name
     res = await _resources(stack.h, token)
-    for uri in set(CARDED.values()):
+    for uri in REGISTERED:
         assert uri in res, uri
         meta = res[uri]["_meta"]["ui"]
         assert res[uri]["mimeType"] == "text/html;profile=mcp-app"
         assert meta.get("prefersBorder") is True
-    csp = {uri: res[uri]["_meta"]["ui"].get("csp") or {} for uri in set(CARDED.values())}
+    csp = {uri: res[uri]["_meta"]["ui"].get("csp") or {} for uri in REGISTERED}
     # Pictures from Scryfall; the deck and printings cards fetch their data from the gateway; the
     # deck card reads rules text from Scryfall's API; the account card loads nothing.
     assert "https://cards.scryfall.io" in csp[PRINTINGS_CARD_URI]["resourceDomains"]
@@ -119,7 +135,7 @@ async def test_tools_carry_their_cards_and_the_cards_declare_only_what_they_load
         assert set(csp[uri]["resourceDomains"]) == {"https://api.scryfall.com", "https://cards.scryfall.io"}
     assert "frameDomains" not in json.dumps(csp)
     # The same origins under ChatGPT's own key, in its snake_case spelling.
-    for uri in set(CARDED.values()):
+    for uri in REGISTERED:
         widget = res[uri]["_meta"]["openai/widgetCSP"]
         assert widget["connect_domains"] == (csp[uri].get("connectDomains") or []), uri
         assert widget["resource_domains"] == (csp[uri].get("resourceDomains") or []), uri
@@ -128,8 +144,10 @@ async def test_tools_carry_their_cards_and_the_cards_declare_only_what_they_load
 async def test_switching_the_card_off_removes_every_card(no_card: Stack) -> None:
     token = await mcp_token(no_card.h)
     tools = await _tools(no_card.h, token)
-    for name in CARDED:
-        assert "ui" not in (tools[name].get("_meta") or {}), name
+    for name in tools:
+        assert (
+            "ui" not in (tools[name].get("_meta") or {}) or "resourceUri" not in tools[name]["_meta"]["ui"]
+        ), name
     r = await no_card.h.mcp(token, "resources/list", {}, rid=4)
     assert r.status_code == 200 and not any(
         x["uri"].startswith("ui://") for x in sse_json(r)["result"].get("resources", [])
@@ -156,135 +174,70 @@ def test_every_card_is_one_self_contained_document() -> None:
     assert "\\u003c/script" in card_html("scan-card", "https://gateway.example.com/</script>")
 
 
-async def test_display_only_cards_leave_the_tool_results_as_they_were(stack: Stack) -> None:
-    """compare_decks, deck_stats, list_my_decks, search_decks and get_scan_session: the tool names
-    its card for MCP Apps hosts (Claude, ChatGPT; the nested key and the flat one older hosts read),
-    and the result is the same JSON for the assistant, with nothing added for the card."""
+async def test_reads_answer_in_text_alone_with_nothing_for_a_card(stack: Stack) -> None:
+    """Since 0.7.33 a deck, a snapshot, statistics, a comparison, a deck list, a search, a scan
+    session and the account answer in text alone: no card is named for the host, and the result
+    carries nothing in _meta for one."""
     h = stack.h
     token = await linked_user(stack)
-    tools = await _tools(h, token)
+    await _set_mode(h, "auto")
+    p = structured(
+        await call(
+            h,
+            token,
+            "propose_deck_changes",
+            {"deck_id": "42", "changes": [{"action": "add", "card_name": "Sol Ring"}]},
+        )
+    )
+    snapshot = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))[
+        "snapshot_id"
+    ]
     saved = await call(
         h, token, "save_scan_session", {"name": "Binder <img src=x>", "text": "2 Sol Ring\n1 Zzyzx"}
     )
     sid = saved["structuredContent"]["id"]
-    for name, args in (
+    calls = (
+        ("get_deck", {"deck_ref": "42"}),
+        ("get_deck", {"deck_ref": "42", "view": "cards"}),
+        ("get_snapshot", {"snapshot_id": snapshot}),
         ("compare_decks", {"a": "42", "b_list": "1 Sol Ring\n1 Arcane Signet"}),
         ("deck_stats", {"deck_ref": "42"}),
         ("list_my_decks", {}),
         ("search_decks", {"name": "deck"}),
         ("get_scan_session", {"session": sid}),
-    ):
-        meta = tools[name]["_meta"]
-        assert meta["ui"]["resourceUri"] == meta["ui/resourceUri"] == CARDED[name], name
+        ("account_status", {}),
+        ("whoami", {}),
+    )
+    assert {name for name, _ in calls} == set(NO_CARD)
+    for name, args in calls:
         result = await call(h, token, name, args)
         sc = result["structuredContent"]
-        assert sc["ok"] is True, (name, sc)
-        assert not result.get("_meta"), name  # nothing for the card rides along
+        assert sc.get("ok") is not False, (name, sc)
+        assert not result.get("_meta"), name  # nothing for a card rides along
         assert json.loads(result["content"][0]["text"]) == sc, name
-        assert "ui://" not in result["content"][0]["text"], name
+        assert (
+            "ui://" not in result["content"][0]["text"] and LINK_PATH not in result["content"][0]["text"]
+        ), name
     scan = structured(await call(h, token, "get_scan_session", {"session": sid}))
     assert scan["name"] == "Binder <img src=x>" and scan["unresolved"] >= 1
+    # An error carries nothing either.
+    err = await call(h, token, "get_deck", {"deck_ref": "999999"})
+    assert err["structuredContent"]["ok"] is False and not err.get("_meta")
 
 
 # -- the assistant's copy versus the card's --------------------------------------------------------
 
 
-async def test_deck_reads_keep_their_text_and_carry_a_signed_link_only_in_meta(stack: Stack) -> None:
-    token = await linked_user(stack)
-    for view, key in (("text", "decklist_text"), ("cards", "cards"), ("summary", "stats")):
-        result = await call(stack.h, token, "get_deck", {"deck_ref": "42", "view": view})
-        sc = result["structuredContent"]
-        assert sc["ok"] and sc[key]  # each view keeps its own text; the card is the same
-        card = result["_meta"][CARD_META_KEY]
-        assert card["name"] == sc["name"] and card["link"].startswith("https://mtg.test" + LINK_PATH)
-        assert LINK_PATH not in result["content"][0]["text"] and LINK_PATH not in json.dumps(sc)
-        # The deck itself rides along for the card (out of the model's context), the same rows the
-        # link serves, so the card needs no connection to the gateway.
-        served = (await stack.h.http.get(card["link"][len("https://mtg.test") :])).json()
-        assert card["deck"] == {k: v for k, v in served.items() if k != "ok"}
-        assert card["deck"]["categories"] and "gateway_url" not in json.dumps(sc)
-    # An error carries no link.
-    err = await call(stack.h, token, "get_deck", {"deck_ref": "999999"})
-    assert err["structuredContent"]["ok"] is False and not (err.get("_meta") or {}).get(CARD_META_KEY)
-
-
-def _big_deck(n: int):
-    from mtg_gateway.archidekt import Deck, DeckCard
-
-    cats = ["Commander", "Ramp", "Card Draw", "Removal", "Board Wipes", "Creatures", "Synergy", "Lands"]
-    rows = [
-        DeckCard(
-            relation_id=i,
-            card_id=i,
-            name=f"Some Rather Long Legendary Card Name Number {i}",
-            quantity=1,
-            categories=[cats[i % len(cats)]],
-            modifier="Foil" if i % 7 == 0 else "Normal",
-            set_code="cmm",
-            collector_number=str(400 + i),
-            cmc=float(i % 8),
-            mana_cost="{3}{G}{G}{U}",
-            color_identity=["G", "U"],
-            types=["Legendary", "Creature"],
-            price=12.34,
-            scryfall_uid=f"0000aaaa-bbbb-cccc-dddd-{i:012d}",
-            oracle_text="x" * 400,  # rules text never travels to the card
-        )
-        for i in range(n)
-    ]
-    return Deck(
-        id="42",
-        name="Big",
-        owner="alice",
-        updated_at="",
-        cards=rows,
-        categories=[{"name": c, "includedInDeck": True} for c in cats],
-        raw={},
-        format="commander",
-    )
-
-
-def test_a_commander_deck_rides_in_the_result_and_a_huge_one_falls_back_to_the_link() -> None:
-    link = "https://mtg.test" + LINK_PATH + "tok"
-    meta = cards.deck_card_payload(_big_deck(100), link=link, public_url="https://mtg.test")
-    size = len(json.dumps(meta["deck"], separators=(",", ":")))
-    assert len(meta["deck"]["categories"]) == 8 and meta["deck"]["card_count"] == 100
-    assert size < 40_000, size  # a 100-card deck of long names is well under the inline limit
-    assert "oracle_text" not in json.dumps(meta) and meta["link"] == link
-    huge = cards.deck_card_payload(_big_deck(2000), link=link, public_url="https://mtg.test")
-    assert "deck" not in huge and huge["link"] == link and huge["name"] == "Big"
-
-
-async def test_the_deck_link_serves_the_deck_grouped_for_the_card_without_any_cookie(stack: Stack) -> None:
-    token = await linked_user(stack)
-    link = (await call(stack.h, token, "get_deck", {"deck_ref": "42"}))["_meta"][CARD_META_KEY]["link"]
-    path = link[len("https://mtg.test") :]
-    # Preflight and the read: open CORS (no credentials are ever involved), no caching, nosniff.
-    pre = await stack.h.http.options(path, headers={"Origin": "https://abc123.claudemcpcontent.com"})
-    assert pre.status_code == 204 and pre.headers["access-control-allow-origin"] == "*"
-    r = await stack.h.http.get(path, headers={"Origin": "null"})
-    assert r.status_code == 200, r.text
-    assert (
-        r.headers["access-control-allow-origin"] == "*" and r.headers["cache-control"] == "private, no-store"
-    )
-    assert r.headers["x-content-type-options"] == "nosniff" and "set-cookie" not in r.headers
-    deck = r.json()
-    assert deck["ok"] and str(deck["id"]) == "42" and deck["card_count"] > 0 and deck["categories"]
-    first = deck["categories"][0]
-    assert {"name", "count", "in_deck", "cards"} <= set(first)
-    row = first["cards"][0]
-    assert {"name", "qty", "set", "cn", "finish", "uid", "mana", "mv", "type", "in_deck"} <= set(row)
-    assert (
-        deck["gateway_url"] == "https://mtg.test/decks/42" and deck["url"] == "https://archidekt.com/decks/42"
-    )
-    assert "oracle_text" not in json.dumps(deck)  # the card reads rules text from Scryfall itself
-    assert isinstance(deck["curve"], dict)
+async def _printings_link(h) -> tuple[str, str]:
+    """A printings card's signed link for a signed-in member, and that member's sub."""
+    token = await mcp_token(h)
+    link = (await call(h, token, "card_printings", {"oracle_id": AESI}))["_meta"][CARD_META_KEY]["link"]
+    return link, h.app.state.gateway.cards.open(link.rsplit("/", 1)[1])["sub"]
 
 
 async def test_links_are_bound_to_one_member_one_object_and_expire(stack: Stack, monkeypatch) -> None:
     h = stack.h
-    token = await linked_user(stack)
-    link = (await call(h, token, "get_deck", {"deck_ref": "42"}))["_meta"][CARD_META_KEY]["link"]
+    link, _ = await _printings_link(h)
     tok = link.rsplit("/", 1)[1]
     # Tampering, truncation and made-up tokens: 404, never a 500.
     for bad in (tok[:-4] + "AAAA", tok[:20], "x" * 40, ""):
@@ -292,9 +245,9 @@ async def test_links_are_bound_to_one_member_one_object_and_expire(stack: Stack,
         assert r.status_code in (404, 405), bad
         if r.status_code == 404 and r.text.startswith("{"):
             assert r.json()["error"] in ("expired", "not_found")
-    # The token names the member: a link for one person's private deck does not open for another.
+    # The token names the member: a link for one person does not open for another.
     links: CardLinks = h.app.state.gateway.cards
-    other = links.issue("someone-else", "deck", "42")
+    other = links.issue("someone-else", "printings", AESI)
     assert links.open(other.rsplit("/", 1)[1])["sub"] == "someone-else"
     assert links.open(tok)["sub"] != "someone-else"
     # Expiry: the same token after its lifetime is refused.
@@ -306,41 +259,53 @@ async def test_links_are_bound_to_one_member_one_object_and_expire(stack: Stack,
         assert r.status_code == 404 and r.json()["error"] == "expired"
     finally:
         monkeypatch.setattr(time, "time", real_time)
-    # A kind the gateway does not issue is never accepted, even with a valid signature.
-    with pytest.raises(ValueError):
-        links.issue("x", "proposal", "p-1")
-    forged = links.fernet.encrypt(
-        json.dumps({"s": "x", "k": "proposal", "r": "p-1", "t": 0}).encode()
-    ).decode()
-    assert links.open(forged) is None
+    # A kind the gateway does not issue is never accepted, even with a valid signature: the deck
+    # and snapshot links of the cards before 0.7.33 included.
+    for kind in ("proposal", "deck", "snapshot"):
+        with pytest.raises(ValueError):
+            links.issue("x", kind, "p-1")
+        forged = links.fernet.encrypt(
+            json.dumps({"c": cards.LINK_CONTEXT, "s": "x", "k": kind, "r": "p-1", "t": 0}).encode()
+        ).decode()
+        assert links.open(forged) is None
     # A blob under the same key from another use of it (no card-link tag) is not a link either.
-    untagged = links.fernet.encrypt(json.dumps({"s": "x", "k": "deck", "r": "42", "t": 0}).encode()).decode()
+    untagged = links.fernet.encrypt(
+        json.dumps({"s": "x", "k": "printings", "r": AESI, "t": 0}).encode()
+    ).decode()
     assert links.open(untagged) is None
 
 
 async def test_a_replayed_link_is_answered_from_cache_and_runs_out(stack: Stack) -> None:
     """The link is a bearer secret handed to the host's sandbox: replaying it must not spend the
-    member's Archidekt budget, and it stops working after LINK_MAX_USES fetches."""
+    member's lookups, and it stops working after LINK_MAX_USES fetches."""
     h = stack.h
-    token = await linked_user(stack)
-    link = (await call(h, token, "get_deck", {"deck_ref": "42"}))["_meta"][CARD_META_KEY]["link"]
+    link, sub = await _printings_link(h)
     path = link[len("https://mtg.test") :]
-    before = len(stack.ark.calls)
-    first = await h.http.get(path)
-    assert first.status_code == 200
-    reads = len(stack.ark.calls) - before
-    assert reads >= 1
-    for _ in range(cards.LINK_MAX_USES - 1):
+    scan = h.app.state.gateway.scan
+    lookups: list[str] = []
+    real = scan.printings
+
+    async def counted(oracle_id, **kw):
+        lookups.append(oracle_id)
+        return await real(oracle_id, **kw)
+
+    scan.printings = counted
+    try:
+        first = await h.http.get(path)
+        assert first.status_code == 200
+        for _ in range(cards.LINK_MAX_USES - 1):
+            r = await h.http.get(path)
+            assert r.status_code == 200 and r.json() == first.json()
+        assert lookups == [AESI]  # one lookup for all of them
         r = await h.http.get(path)
-        assert r.status_code == 200 and r.json() == first.json()
-    assert len(stack.ark.calls) - before == reads  # one Archidekt read for all of them
-    r = await h.http.get(path)
-    assert r.status_code == 404 and r.json()["error"] == "expired"
-    # Error bodies are the gateway's own words, never Archidekt's.
+        assert r.status_code == 404 and r.json()["error"] == "expired"
+    finally:
+        scan.printings = real
+    # Error bodies are the gateway's own words, never Scryfall's.
     links: CardLinks = h.app.state.gateway.cards
-    gone = links.issue(links.open(link.rsplit("/", 1)[1])["sub"], "deck", "999999")
+    gone = links.issue(sub, "printings", "not-an-oracle-id")
     r = await h.http.get(gone[len("https://mtg.test") :])
-    assert r.status_code == 404 and r.json()["message"] == cards.FIXED_MESSAGES["not_found"]
+    assert r.status_code == 404 and r.json()["message"] in cards.FIXED_MESSAGES.values()
 
 
 def test_a_used_up_link_stays_used_up_when_its_counter_is_crowded_out(monkeypatch) -> None:
@@ -348,22 +313,22 @@ def test_a_used_up_link_stays_used_up_when_its_counter_is_crowded_out(monkeypatc
     whose counter was dropped but whose answer is still cached is refused, and expired counters
     are dropped before live ones."""
     links = CardLinks(Fernet.generate_key().decode(), "https://mtg.test")
-    busy = links.issue("alice", "deck", "42").rsplit("/", 1)[1]
+    busy = links.issue("alice", "printings", "42").rsplit("/", 1)[1]
     for _ in range(cards.LINK_MAX_USES):
         assert links.use(busy)
     assert not links.use(busy)
     links.remember(busy, {"ok": True})
     for n in range(cards.LINK_USES_SIZE + 10):
-        links.use(links.issue("amy", "deck", str(n)).rsplit("/", 1)[1])
+        links.use(links.issue("amy", "printings", str(n)).rsplit("/", 1)[1])
     assert busy not in links._uses  # crowded out of the counters
     assert not links.use(busy)  # still refused: its cached answer shows it was counted before
     # Expired counters go first: an old entry is dropped, a live one survives the squeeze.
     links = CardLinks(Fernet.generate_key().decode(), "https://mtg.test")
     links._uses["stale"] = (1, time.time() - cards.LINK_TTL - 5, "")
-    live = links.issue("amy", "deck", "live").rsplit("/", 1)[1]
+    live = links.issue("amy", "printings", "live").rsplit("/", 1)[1]
     links.use(live)
     for n in range(cards.LINK_USES_SIZE - 1):  # fills the table to one over its size
-        links.use(links.issue("amy", "deck", f"x{n}").rsplit("/", 1)[1])
+        links.use(links.issue("amy", "printings", f"x{n}").rsplit("/", 1)[1])
     assert "stale" not in links._uses and live in links._uses
 
 
@@ -373,17 +338,17 @@ def test_a_used_up_link_stays_used_up_when_its_counter_and_answer_are_both_crowd
     clock = [1_800_000_000.0]
     monkeypatch.setattr(cards.time, "time", lambda: clock[0])
     links = CardLinks(Fernet.generate_key().decode(), "https://mtg.test")
-    busy = links.issue("alice", "deck", "42").rsplit("/", 1)[1]
+    busy = links.issue("alice", "printings", "42").rsplit("/", 1)[1]
     for _ in range(cards.LINK_MAX_USES):
         assert links.use(busy)
     assert not links.use(busy)
     clock[0] += 1
     for n in range(cards.LINK_USES_SIZE + 10):
-        links.use(links.issue("amy", "deck", str(n)).rsplit("/", 1)[1])
+        links.use(links.issue("amy", "printings", str(n)).rsplit("/", 1)[1])
     assert busy not in links._uses and links.cached(busy) is None  # nothing left that remembers it
     assert not links.use(busy)  # still refused
     clock[0] += 1
-    fresh = links.issue("alice", "deck", "42").rsplit("/", 1)[1]
+    fresh = links.issue("alice", "printings", "42").rsplit("/", 1)[1]
     assert links.use(fresh)  # a link issued after the squeeze has its own budget
 
 
@@ -394,7 +359,7 @@ def test_a_used_up_link_stays_used_up_to_the_last_second_of_its_life(monkeypatch
     clock = [1_800_000_000.0]
     monkeypatch.setattr(cards.time, "time", lambda: clock[0])
     links = CardLinks(Fernet.generate_key().decode(), "https://mtg.test")
-    busy = links.issue("alice", "deck", "42").rsplit("/", 1)[1]
+    busy = links.issue("alice", "printings", "42").rsplit("/", 1)[1]
     clock[0] += 0.1  # first fetch a moment after issue
     for _ in range(cards.LINK_MAX_USES):
         assert links.use(busy, "alice")
@@ -403,7 +368,7 @@ def test_a_used_up_link_stays_used_up_to_the_last_second_of_its_life(monkeypatch
     assert links.open(busy) is not None
     assert not links.use(busy, "alice")
     for n in range(cards.LINK_USES_SIZE + 10):  # a squeeze at that moment keeps the live counter
-        links.use(links.issue("amy", "deck", str(n)).rsplit("/", 1)[1], "amy")
+        links.use(links.issue("amy", "printings", str(n)).rsplit("/", 1)[1], "amy")
     assert busy in links._uses and not links.use(busy, "alice")
     clock[0] = 1_800_000_000.0 + cards.LINK_TTL + 1  # whole seconds past ttl: the link has expired
     assert links.open(busy) is None
@@ -417,7 +382,7 @@ def test_one_member_filling_the_link_counters_only_crowds_out_their_own(monkeypa
     links = CardLinks(Fernet.generate_key().decode(), "https://mtg.test")
 
     def tok(sub: str, ref: str) -> str:
-        return links.issue(sub, "deck", ref).rsplit("/", 1)[1]
+        return links.issue(sub, "printings", ref).rsplit("/", 1)[1]
 
     fetched, unfetched = tok("alice", "42"), tok("alice", "43")
     assert links.use(fetched, "alice")
@@ -433,47 +398,12 @@ def test_one_member_filling_the_link_counters_only_crowds_out_their_own(monkeypa
 
 async def test_a_link_stops_working_for_a_disabled_member(stack: Stack) -> None:
     h = stack.h
-    token = await linked_user(stack)
-    link = (await call(h, token, "get_deck", {"deck_ref": "42"}))["_meta"][CARD_META_KEY]["link"]
+    link, sub = await _printings_link(h)
     path = link[len("https://mtg.test") :]
     assert (await h.http.get(path)).status_code == 200
-    sub = (
-        h.app.state.gateway.db.list_users()[0]["sub"]
-        if hasattr(h.app.state.gateway.db, "list_users")
-        else None
-    )
-    if sub is None:
-        sub = h.app.state.gateway.cards.open(link.rsplit("/", 1)[1])["sub"]
     h.app.state.gateway.db.set_user_disabled(sub, True)
     r = await h.http.get(path)
     assert r.status_code == 403 and r.json()["error"] == "forbidden"
-
-
-async def test_snapshot_reads_carry_the_deck_card_with_the_snapshot_named(stack: Stack) -> None:
-    h = stack.h
-    token = await linked_user(stack)
-    await _set_mode(h, "auto")
-    p = structured(
-        await call(
-            h,
-            token,
-            "propose_deck_changes",
-            {"deck_id": "42", "changes": [{"action": "add", "card_name": "Sol Ring"}]},
-        )
-    )
-    a = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
-    assert a["ok"] and a["snapshot_id"]
-    result = await call(h, token, "get_snapshot", {"snapshot_id": a["snapshot_id"]})
-    assert result["structuredContent"]["snapshot_id"] == a["snapshot_id"]
-    link = result["_meta"][CARD_META_KEY]["link"]
-    assert result["_meta"][CARD_META_KEY]["deck"]["snapshot"]["id"] == a["snapshot_id"]
-    r = await h.http.get(link[len("https://mtg.test") :])
-    assert r.status_code == 200 and r.json()["snapshot"]["id"] == a["snapshot_id"]
-    # Another member's link to the same snapshot id answers not found.
-    links: CardLinks = h.app.state.gateway.cards
-    other = links.issue("someone-else", "snapshot", a["snapshot_id"])
-    r = await h.http.get(other[len("https://mtg.test") :])
-    assert r.status_code in (403, 404)
 
 
 async def test_printings_link_serves_every_printing_with_pictures(stack: Stack) -> None:
@@ -482,8 +412,17 @@ async def test_printings_link_serves_every_printing_with_pictures(stack: Stack) 
     result = await call(h, token, "card_printings", {"oracle_id": AESI})
     meta = result["_meta"][CARD_META_KEY]
     assert meta["oracle_id"] == AESI and meta["total"] == 4 and meta["name"]
-    r = await h.http.get(meta["link"][len("https://mtg.test") :])
+    path = meta["link"][len("https://mtg.test") :]
+    assert LINK_PATH not in result["content"][0]["text"]
+    # Preflight and the read: open CORS (no credentials are ever involved), no caching, nosniff.
+    pre = await h.http.options(path, headers={"Origin": "https://abc123.claudemcpcontent.com"})
+    assert pre.status_code == 204 and pre.headers["access-control-allow-origin"] == "*"
+    r = await h.http.get(path, headers={"Origin": "null"})
     assert r.status_code == 200
+    assert (
+        r.headers["access-control-allow-origin"] == "*" and r.headers["cache-control"] == "private, no-store"
+    )
+    assert r.headers["x-content-type-options"] == "nosniff" and "set-cookie" not in r.headers
     data = r.json()
     assert data["ok"] and data["oracle_id"] == AESI and len(data["cards"]) == 4
     assert data["cards"][0]["image_small"].startswith("https://") and data["cards"][0]["scryfall_uri"]
@@ -656,8 +595,7 @@ async def test_a_link_stops_working_for_a_member_who_left_the_group(stack: Stack
     from mtg_gateway.membership import Membership
 
     h = stack.h
-    token = await linked_user(stack)
-    link = (await call(h, token, "get_deck", {"deck_ref": "42"}))["_meta"][CARD_META_KEY]["link"]
+    link, _ = await _printings_link(h)
     path = link[len("https://mtg.test") :]
     checker = h.app.state.gateway.membership
     assert checker is not None and (await h.http.get(path)).status_code == 200

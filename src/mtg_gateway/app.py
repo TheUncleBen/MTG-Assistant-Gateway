@@ -54,7 +54,7 @@ from .approve import (
     proposal_text,
     proposal_tool_result,
 )
-from .archidekt import ArchidektClient, Deck, Pacer, page_turn
+from .archidekt import ArchidektClient, Pacer, page_turn
 from .auth_provider import (
     BROWSER_COOKIE,
     BROWSER_KEY,
@@ -66,16 +66,8 @@ from .auth_provider import (
 from .backup import nightly_loop, purge_loop
 from .browse import add_browse_routes, add_browse_tools
 from .cards import (
-    ACCOUNT_CARD_URI,
-    COMPARE_CARD_URI,
-    DECK_CARD_URI,
-    DECK_LIST_CARD_URI,
-    STATS_CARD_URI,
     CardLinks,
     add_card_routes,
-    deck_card_payload,
-    tool_meta,
-    with_card,
 )
 from .cardsearch import add_cardsearch_routes
 from .chatgpt_plugin import add_chatgpt_plugin_route
@@ -520,7 +512,15 @@ def server_instructions(public_url: str) -> str:
         "and structure, compare_decks diffs decks and precons, run_deck_report runs goldfish games, "
         "resolve_cards turns names into exact printings. Deck edits are two "
         "steps: propose_deck_changes or propose_new_deck, then the user confirms (on the proposal card "
-        "your app may show with the result, or on the review page), then it is applied. "
+        "your app may show with the result, or on the review page), then it is applied. Finish your "
+        "review before proposing: one proposal with every change, and amend_proposal to change one "
+        "that is still waiting. Where your app shows cards, each propose, amend or combine call puts "
+        "a card in the chat, a refused one too, so check a deck edit with check_deck_changes first and "
+        "follow its suggest. "
+        "When the user presses Approve on a proposal card or Apply all, you are "
+        'told the outcome, and where the app allows it the card then posts "Approved, go on" as the user\'s '
+        "message: carry on from that outcome, and call get_proposal only when it is unclear (still "
+        "applying). "
         "Any deck can be ingested with get_deck (Archidekt id or URL), parse_decklist (pasted text) or "
         "parse_deck_export (CSV); each returns decklist_text for "
         "the simulation tools. deck_stats answers "
@@ -596,10 +596,10 @@ class MembershipMiddleware:
         outcomes = [await checker.check(sub) for sub in sorted(self._subjects(scope))]
         if Membership.UNAVAILABLE in outcomes:
             request = Request(scope)
-            message = "The sign-in service can't be reached to confirm your access. Try again shortly."
+            message = "The sign-in service can't be reached to confirm your access. Try again later."
             if _wants_page(request):
                 resp: Response = render(
-                    "Try again shortly",
+                    "Try again later",
                     f"<div class='card'><p>{message}</p></div>",
                     site=self.state.settings.server_name,
                     status=503,
@@ -771,7 +771,6 @@ def build_mcp_server(state: AppState) -> MCPServer:
             "and their account page. Nothing else about the account is shared with the assistant."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": False},
-        meta=tool_meta(ACCOUNT_CARD_URI) if s.apply_in_chat else None,
     )
     async def whoami() -> dict[str, object]:
         # Minimum disclosure: the sign-in service also sends an email address, every group the
@@ -802,31 +801,10 @@ def build_mcp_server(state: AppState) -> MCPServer:
     # The in-chat card (approve.py): proposal tools carry its ui:// resource in their _meta, and
     # a pending proposal's result carries the card's one-time code. Off with MTG_APPLY_IN_CHAT.
     card_meta = dict(CARD_TOOL_META) if s.apply_in_chat else None
-    # The other in-chat cards (cards.py) ride on the same switch: a deck read, a card's printings
-    # and the account status carry their card. The deck card draws the deck from the result's
-    # _meta (out of the model's context); a signed link stays there as the fallback for a deck too
-    # large to carry.
+    # Since 0.7.33 only the changes waiting for the member and the two pickers (a card's printings,
+    # the recognised cards) show a card in the chat; every other tool answers in text alone, which
+    # keeps a long chat light. The printings card reads its pictures through a signed link.
     state.cards = CardLinks(s.fernet_key, s.public_url) if s.apply_in_chat else None
-    deck_card_meta = tool_meta(DECK_CARD_URI) if s.apply_in_chat else None
-    account_card_meta = tool_meta(ACCOUNT_CARD_URI) if s.apply_in_chat else None
-    # Display-only cards that draw the result's own structured content: nothing is added to it.
-    deck_list_card_meta = tool_meta(DECK_LIST_CARD_URI) if s.apply_in_chat else None
-    stats_card_meta = tool_meta(STATS_CARD_URI) if s.apply_in_chat else None
-    compare_card_meta = tool_meta(COMPARE_CARD_URI) if s.apply_in_chat else None
-
-    def _deck_card(
-        data: dict[str, object], kind: str, ref: str, deck: Deck, snapshot: dict[str, Any] | None = None
-    ) -> CallToolResult:
-        """A deck read as the assistant gets it, plus what the deck card draws in _meta."""
-        card = None
-        if state.cards is not None and data.get("ok"):
-            card = deck_card_payload(
-                deck,
-                link=state.cards.issue(_sub(), kind, ref),
-                public_url=s.public_url,
-                snapshot=snapshot,
-            )
-        return with_card(data, card)
 
     def _closed_at(p: dict[str, Any]) -> dict[str, Any]:
         """A rejected proposal's closing time is kept in applied_at; show it as closed_at."""
@@ -848,18 +826,12 @@ def build_mcp_server(state: AppState) -> MCPServer:
     # registered in this order, as before the split, so tools/list keeps its order.
     h = SimpleNamespace(
         _closed_at=_closed_at,
-        _deck_card=_deck_card,
         _proposal=_proposal,
         _sub=_sub,
-        account_card_meta=account_card_meta,
         card_meta=card_meta,
-        compare_card_meta=compare_card_meta,
-        deck_card_meta=deck_card_meta,
-        deck_list_card_meta=deck_list_card_meta,
         login_cookie=login_cookie,
         s=s,
         server=server,
-        stats_card_meta=stats_card_meta,
     )
     add_deck_tools(state, h)
     add_report_tools(state, h)
@@ -1135,7 +1107,7 @@ def _friendly_errors(app: Starlette, state: AppState) -> None:
             {
                 "ok": False,
                 "error": "server_error",
-                "message": "The gateway hit an unexpected problem; it was logged. Try again in a moment.",
+                "message": "The gateway hit an unexpected problem; it was logged. Try again later.",
             },
             500,
         )
