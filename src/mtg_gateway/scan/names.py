@@ -76,6 +76,7 @@ class NameCatalog:
         self._next_try = 0.0
         self._task: asyncio.Task[None] | None = None
         self._hits: OrderedDict[str, list[int]] = OrderedDict()
+        self._known: set[str] | None = None
 
     @property
     def loaded(self) -> bool:
@@ -94,6 +95,7 @@ class NameCatalog:
         self._names = sorted(set(names), key=_sort_key)
         self._folded = [fold(n) for n in self._names]
         self._hits.clear()
+        self._known = None
         self._loaded_at = time.monotonic()
 
     def ensure(self) -> None:
@@ -127,6 +129,18 @@ class NameCatalog:
         self._next_try = 0.0
         logger.info("card-name catalog loaded: %d names", len(self._names))
         return True
+
+    def known(self, name: str) -> bool | None:
+        """Whether ``name`` is a card in the catalog, by its full name or (a double-faced or split
+        card) its front face, as Archidekt's own lookup matches it; ``None`` while the catalog is
+        not loaded, so a caller never refuses a card it cannot check."""
+        if not self._names:
+            self.ensure()
+            return None
+        if self._known is None:
+            fronts = {fold(n.split(" // ", 1)[0]) for n in self._names if " // " in n}
+            self._known = set(self._folded) | fronts
+        return fold(name) in self._known or fold(name.split(" // ", 1)[0]) in self._known
 
     def suggest(self, query: str, *, limit: int = MAX_SUGGESTIONS) -> list[str] | None:
         """Up to ``limit`` names for ``query`` (at least two characters), or ``None`` when the

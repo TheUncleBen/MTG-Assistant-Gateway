@@ -1407,6 +1407,37 @@ async def test_pinned_printing_that_is_missing_or_another_card_refuses_the_edit(
     assert snaps == []
 
 
+async def test_a_card_no_magic_card_is_called_is_refused_when_proposed(stack: Stack) -> None:
+    """With the card-name catalog loaded, an add of a name that is no card is refused when the
+    proposal is made (and when it is amended), instead of waiting and failing at apply. A card
+    already in the deck, a double-faced card's front face and any name while the catalog is not
+    loaded still pass."""
+    h = stack.h
+    token = await linked_user(stack)
+    names = stack.h.app.state.gateway.scan.names
+    assert names.known("Sol Ring") is None  # not loaded: nothing is refused
+    names.set_names(["Island", "Swamp", "Delver of Secrets // Insectile Aberration"])
+    bad = [{"action": "add", "card_name": "Islend"}, {"action": "add", "card_name": "Swamp"}]
+    out = structured(await call(h, token, "propose_deck_changes", {"deck_id": "42", "changes": bad}))
+    assert out["ok"] is False and out["error"] == "unknown_cards", out
+    assert out["unknown_cards"] == ["Islend"] and "'Islend'" in out["message"], out
+    good = [
+        {"action": "add", "card_name": "Delver of Secrets"},
+        {"action": "add", "card_name": "Sol Ring"},  # in deck 42, though not in this catalog
+    ]
+    p = structured(await call(h, token, "propose_deck_changes", {"deck_id": "42", "changes": good}))
+    assert p["ok"], p
+    amended = structured(
+        await call(
+            h,
+            token,
+            "amend_proposal",
+            {"proposal_id": p["proposal_id"], "version": p["version"], "changes": bad},
+        )
+    )
+    assert amended["ok"] is False and amended["error"] == "unknown_cards", amended
+
+
 async def test_printing_fields_are_validated_on_the_change(stack: Stack) -> None:
     h = stack.h
     token = await linked_user(stack)
