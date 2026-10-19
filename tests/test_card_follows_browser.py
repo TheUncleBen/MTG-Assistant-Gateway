@@ -77,8 +77,20 @@ window.addEventListener("message", (ev) => {
 </script></body></html>"""
 
 
-def _open(page, gets: list, confirms: list | None = None, *, every_ms: int | None = None, meta=None):
+def _open(
+    page,
+    gets: list,
+    confirms: list | None = None,
+    *,
+    every_ms: int | None = None,
+    meta=None,
+    applying_ms: int | None = None,
+    drawn: dict | None = None,
+):
     html = card_html()
+    if applying_ms is not None:
+        assert "var APPLYING_POLL_MS = 5000;" in html
+        html = html.replace("var APPLYING_POLL_MS = 5000;", f"var APPLYING_POLL_MS = {applying_ms};")
     if every_ms is not None:
         assert "var REFRESH_EVERY_MS = 30000," in html
         html = html.replace("var REFRESH_EVERY_MS = 30000,", f"var REFRESH_EVERY_MS = {every_ms},")
@@ -88,8 +100,8 @@ def _open(page, gets: list, confirms: list | None = None, *, every_ms: int | Non
     page.evaluate("(c) => { window.confirms = c; }", confirms or [])
     code = meta if meta is not None else {APPROVAL_META_KEY: "code-v2"}
     page.evaluate("(m) => { window.getMeta = m; }", code)
-    drawn = {"structuredContent": V1, "_meta": {APPROVAL_META_KEY: "code-v1"}}
-    page.evaluate("(r) => { window.toolResult = r; }", drawn)
+    first = {"structuredContent": drawn or V1, "_meta": {APPROVAL_META_KEY: "code-v1"}}
+    page.evaluate("(r) => { window.toolResult = r; }", first)
     page.evaluate("(h) => { document.getElementById('f').srcdoc = h; }", html)
     page.wait_for_function("() => window.log.some(m => m.method === 'ui/notifications/initialized')")
     return page.frame_locator("#f")
@@ -176,7 +188,7 @@ def test_a_changed_answer_draws_the_new_version_instead_of_locking_the_card() ->
     _run(test)
 
 
-def test_a_card_on_screen_reads_again_and_shows_a_withdrawn_change_a_few_more_times() -> None:
+def test_a_card_on_screen_reads_again_and_shows_a_withdrawn_change_then_stops() -> None:
     def test(page) -> None:
         card = _open(page, [V1, V1, {**V1, "state": "withdrawn"}], every_ms=300)
         card.locator("#state.withdrawn").wait_for(timeout=5_000)
@@ -185,9 +197,9 @@ def test_a_card_on_screen_reads_again_and_shows_a_withdrawn_change_a_few_more_ti
             "from this one."
         )
         assert card.locator("#approve").count() == 0
-        # withdrawn can come back, so it is still read a few times, then no more
-        page.wait_for_timeout(2_500)
-        assert len(_calls(page, "get_proposal")) == 1 + 6
+        # a withdrawn change never comes back: no more reads
+        page.wait_for_timeout(1_500)
+        assert len(_calls(page, "get_proposal")) == 3
 
     _run(test)
 
@@ -216,10 +228,11 @@ def test_a_redraw_closes_an_open_why_box_so_reject_answers_the_change_shown() ->
     _run(test)
 
 
-def test_a_withdrawn_change_brought_back_shows_again_with_its_buttons() -> None:
+def test_a_replaced_change_that_comes_back_shows_again_with_its_buttons() -> None:
     def test(page) -> None:
-        card = _open(page, [{**V1, "state": "withdrawn"}, {**V1, "state": "withdrawn"}, V1], every_ms=300)
-        card.locator("#state.withdrawn").wait_for(timeout=5_000)
+        gone = {**V1, "state": "replaced", "replace_note": "Replaced by #4."}
+        card = _open(page, [gone, gone, V1], every_ms=300)
+        card.locator("#state.replaced").wait_for(timeout=5_000)
         card.locator("#state.pending").wait_for(timeout=5_000)
         assert card.locator("#status").inner_text() == "This change is waiting again."
         card.locator("#approve:enabled").wait_for(timeout=5_000)
@@ -272,5 +285,36 @@ def test_an_expired_withdrawn_card_is_not_read_again() -> None:
         card.locator("#state.withdrawn").wait_for(timeout=5_000)
         page.wait_for_timeout(1_000)
         assert len(_calls(page, "get_proposal")) == 1  # the read when drawn only
+
+    _run(test)
+
+
+def test_a_waiting_card_past_its_old_expiry_is_still_read() -> None:
+    """An amend restarts the expiry, so a waiting card is read whatever expiry it was drawn with."""
+
+    def test(page) -> None:
+        late = {**V1, "expires_at": int(time.time()) - 60}
+        card = _open(page, [late], every_ms=100, drawn=late)
+        card.locator("#title").wait_for(timeout=5_000)
+        page.wait_for_timeout(1_500)
+        assert len(_calls(page, "get_proposal")) == 1 + 6
+
+    _run(test)
+
+
+def test_an_apply_stopped_back_to_waiting_reads_again_and_follows_an_amend() -> None:
+    """After a long apply ends back at waiting, the timed reads start again (keepFresh on every
+    draw), so a later amend is drawn."""
+
+    def test(page) -> None:
+        applying = {**V1, "state": "applying"}
+        card = _open(page, [V1], [applying], every_ms=300, applying_ms=400)
+        card.locator("#approve:enabled").wait_for(timeout=5_000)
+        card.locator("#approve").click()
+        card.locator("#state.applying").wait_for(timeout=5_000)  # the timed reads stop here
+        card.locator("#state.pending").wait_for(timeout=5_000)  # the apply stopped: waiting again
+        page.evaluate("(v) => { window.gets = [v]; }", V2)  # then the assistant amends it
+        card.locator("ul.changes li", has_text="Ponder").wait_for(timeout=5_000)
+        assert card.locator("#status").inner_text() == REDRAWN
 
     _run(test)

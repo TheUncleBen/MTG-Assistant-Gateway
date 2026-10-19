@@ -395,9 +395,9 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
             "waiting), the deck's waiting proposals with the cards each shares with this plan, and "
             "suggest: fix, already_waiting (duplicate_of), amend (amend: the proposal_id, version and "
             "whole changes list of your own waiting one; amend it with that list and this plan "
-            "together) or propose. Anything that needs the deck itself (a card not in it, a deck "
-            "that is not the user's or does not exist, a deck changed since you read it) is found "
-            "only when you propose."
+            "merged, one change per card) or propose. Anything that needs the deck itself (a card "
+            "not in it, a deck that is not the user's or does not exist, a deck changed since you "
+            "read it) is found only when you propose."
         ),
         annotations={"readOnlyHint": True, "destructiveHint": False, "openWorldHint": True},
     )

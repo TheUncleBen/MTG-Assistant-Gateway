@@ -113,6 +113,7 @@ button.danger:disabled{color:var(--red)}
   // follows an amend, a withdraw or a press elsewhere; at most REFRESH_MAX timed reads each time it
   // comes on screen (Approve reads it once more anyway).
   var REFRESH_EVERY_MS = 30000, REFRESH_MAX = 6;
+  var APPLYING_POLL_MS = 5000; // how often a running apply's progress is read
   var proposal = null, approval = null, armed = false, busy = false, heldCode = null;
   var applySet = null, confirming = false;
   var request = B.request, reportSize = B.reportSize, el = B.el, $ = B.$, setStatus = B.setStatus, tellModel = B.tellModel, nudge = B.nudge;
@@ -375,13 +376,14 @@ button.danger:disabled{color:var(--red)}
   }
 
   // The card may be drawn (or shown again by the host) long after the proposal was made, and the
-  // proposal may have been rejected, applied, amended or expired since. While it waits (or was
-  // replaced, and comes back if its replacement is rejected or withdrawn; or withdrawn), until it
-  // expires, the card reads it once more with get_proposal (read-only) and redraws it if it changed.
+  // proposal may have been rejected, applied, amended or expired since. While it waits, or was
+  // replaced (it comes back if its replacement is rejected or withdrawn) and has not expired, the
+  // card reads it once more with get_proposal (read-only) and redraws it if it changed.
   // If that read fails, the buttons stay: the gateway refuses a press on a closed proposal.
   var refreshing = false;
   function live(p) {
-    if (!p || !(p.state === "pending" || p.state === "withdrawn" || p.state === "replaced")) return false;
+    if (p && p.state === "pending") return true; // an amend restarts its expiry, so read it anyway
+    if (!p || p.state !== "replaced") return false;
     return !p.expires_at || Number(p.expires_at) * 1000 > Date.now();
   }
   function refresh() {
@@ -513,7 +515,7 @@ button.danger:disabled{color:var(--red)}
           }
         })
         .catch(function () { pollApplying(pid); });
-    }, 5000);
+    }, APPLYING_POLL_MS);
   }
 
   function renderRows(list, rows, limit) {

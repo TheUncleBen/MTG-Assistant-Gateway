@@ -243,8 +243,8 @@ class ProposalVersionsFull(Exception):
     """amend_proposal refused: the proposal already keeps MAX_PROPOSAL_VERSIONS earlier versions."""
 
 
-# Proposal states that end a proposal without applying it. ``withdrawn`` and ``replaced`` (0.7.29,
-# the assistant board) can be brought back while unexpired; all are deleted after
+# Proposal states that end a proposal without applying it. A ``replaced`` one (0.7.29, the
+# assistant board) comes back when its replacement is rejected or withdrawn; all are deleted after
 # CLOSED_PROPOSAL_RETENTION_SECONDS.
 CLOSED_PROPOSAL_STATES = ("expired", "rejected", "failed", "withdrawn", "replaced")
 # Waiting statuses of a pending proposal (0.7.29 flexible approvals): None is plain waiting.

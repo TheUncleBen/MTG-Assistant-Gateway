@@ -262,7 +262,7 @@ own linked account. Follow every step, in order.
    `check_deck_changes` first (no card, nothing saved, Archidekt not
    asked): fix each of its `problems`, and when it suggests `amend`,
    amend that proposal once with its `amend.changes` and your new
-   changes in one list. The check can't see the deck itself, so a card
+   changes merged into one list, one change per card. The check can't see the deck itself, so a card
    not in it, or a deck changed since you read it, is still found only
    when you propose. A card already in the chat follows the proposal
    when it is amended, withdrawn or replaced, so there is no need to

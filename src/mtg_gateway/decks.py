@@ -5829,7 +5829,7 @@ class DeckService:
     def withdraw(self, sub: str, proposal_id: str, reason: str) -> dict[str, Any]:
         """Close one of the calling app's own waiting notes because the user's newer request
         makes it pointless (only its own). It stays visible as withdrawn, with the
-        reason, and comes back with one tap while it has not expired."""
+        reason (``bring_back`` can reopen it, but no page or tool offers that)."""
         row = self.db.get_proposal(proposal_id, sub)
         if row is None:
             raise DeckError("not_found", "No such proposal for your account.")

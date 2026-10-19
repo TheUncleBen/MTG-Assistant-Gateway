@@ -26,12 +26,12 @@ deck edit before they make a card for it.
 ### Changed
 - A proposal card already in the chat follows its proposal. It reads the proposal again when it
   comes on screen, a few times while it stays there, and when you press Approve. When the
-  assistant changed the proposal, the card shows the new version with a short line saying so, and,
-  where the app passes the card the new version's approval, its Approve approves that version
-  (otherwise the card offers the review page). When the change was updated after the card last read it and
-  you press Approve, the card shows the new version and asks you to press again. When the assistant
-  withdrew it, the card says so. A change replaced by another comes back when its replacement is
-  rejected or withdrawn, and its card then shows it waiting again.
+  assistant changed the proposal, the card shows the new version with a short line saying so.
+  Where the app passes the card the new version's approval code, its Approve approves that
+  version; otherwise the card offers the review page. When the change was updated after the card
+  last read it and you press Approve, the card shows the new version and asks you to press again.
+  When the assistant withdrew it, the card says so. A change replaced by another comes back when
+  its replacement is rejected or withdrawn, and its card then shows it waiting again.
 - The assistants' guides and the deck tools' descriptions tell them that, in an app that shows
   cards, every proposal, amend or combine puts a card in the chat, a refused one too, and to check
   a deck edit first.
