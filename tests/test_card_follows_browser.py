@@ -306,13 +306,19 @@ def test_a_waiting_card_past_its_old_expiry_is_still_read() -> None:
 
 
 def test_an_apply_stopped_back_to_waiting_reads_again_and_follows_an_amend() -> None:
-    """After a long apply ends back at waiting, the timed reads start again (keepFresh on every
-    draw), so a later amend is drawn."""
+    """After a long apply ends back at waiting, the timed reads start again with a fresh count,
+    even when this visit's reads were all used before Approve, so a later amend is drawn."""
 
     def test(page) -> None:
         applying = {**V1, "state": "applying"}
-        card = _open(page, [V1], [applying], every_ms=300, applying_ms=400)
+        card = _open(page, [V1], [applying], every_ms=100, applying_ms=400)
         card.locator("#approve:enabled").wait_for(timeout=5_000)
+        # 7 = the read when drawn + REFRESH_MAX (6) timed reads, as pinned by the test above
+        page.wait_for_function(
+            "() => window.log.filter((m) => m.method === 'tools/call'"
+            " && m.params.name === 'get_proposal').length >= 7"
+        )
+        page.wait_for_timeout(300)  # the visit's reads are spent, as on a slow runner
         card.locator("#approve").click()
         card.locator("#state.applying").wait_for(timeout=5_000)  # the timed reads stop here
         card.locator("#state.pending").wait_for(timeout=5_000)  # the apply stopped: waiting again

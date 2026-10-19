@@ -191,6 +191,9 @@ async def test_a_name_no_magic_card_has_is_a_problem(stack: Stack) -> None:
     h.app.state.gateway.scan.names.set_names(["Island", "Swamp"])
     out = await _check(h, token, [*_change("Islend"), *_change("Swamp")])
     assert out["suggest"] == "fix" and out["problems"][0]["unknown_cards"] == ["Islend"]
+    # the deck was not read, so the line says a name in it would still pass
+    assert "passes only if the deck already has it" in out["next_step"]
+    assert "a proposal now would be refused" not in out["next_step"]
 
 
 async def test_another_apps_change_on_the_same_cards_is_named_in_the_next_step(stack: Stack) -> None:
@@ -201,6 +204,8 @@ async def test_another_apps_change_on_the_same_cards_is_named_in_the_next_step(s
     other = await mcp_token(h)
     out = await _check(h, other, [*_change("Opt"), *_change("Ponder")])
     assert out["suggest"] == "propose" and "other waiting changes share cards" in out["next_step"]
+    # the deck-level checks never ran, so the answer claims only that nothing was found
+    assert out["next_step"].startswith("Nothing found against it") and "Nothing stops" not in out["next_step"]
     url = await _check(h, other, _change("Ponder"), deck="https://archidekt.com/decks/42/sample")
     assert url["deck_id"] == "42" and len(url["waiting_on_deck"]) == 1
 

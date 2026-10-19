@@ -397,9 +397,10 @@ button.danger:disabled{color:var(--red)}
         if (sc.ok === false || (res && res.isError) || !sc.state) return;
         if (busy || proposal !== p || sc.proposal_id !== p.proposal_id) return;
         if (sc.state === "pending" && (p.state !== "pending" || newer(p, sc))) {
-          // amended since the card was drawn, or back after a withdraw or a replace: draw it as it
-          // is now, with the code the read carries for that version (an older version's code is
-          // refused, "changed"), and say so
+          // amended since the card was drawn, or a replaced change back after its replacement
+          // was rejected or withdrawn (a withdrawn one never reads again): draw it as it is now,
+          // with the code the read carries for that version (an older version's code is refused,
+          // "changed"), and say so
           askWhy(false);
           render({ structuredContent: sc, _meta: (res && res._meta) || {} });
           setStatus(p.state !== "pending" ? BACK_TEXT : REDRAWN_TEXT, "");
@@ -495,6 +496,8 @@ button.danger:disabled{color:var(--red)}
           // pending, and this card's code approves it again (the code stays valid while pending).
           var meta = {};
           if (sc.state === "pending" && heldCode) meta[APPROVAL_KEY] = heldCode;
+          // waiting again after an apply stopped: its timed reads start over, so an amend is followed
+          if (sc.state === "pending") refreshes = 0;
           render({ structuredContent: sc, _meta: meta });
           var r = sc.result || {};
           if (sc.state === "pending") {

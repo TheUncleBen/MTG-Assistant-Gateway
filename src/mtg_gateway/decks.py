@@ -5853,8 +5853,9 @@ class DeckService:
         return self.describe(sub, proposal_id)
 
     def bring_back(self, sub: str, proposal_id: str) -> dict[str, Any]:
-        """A withdrawn or replaced note back to waiting while it has not expired (one
-        tap restores it). The member's own pages only."""
+        """A withdrawn or replaced note back to waiting while it has not expired. Nothing in
+        the gateway calls it (only a test does): no page or tool offers it, and a replaced note
+        comes back through ``board.settle`` when its replacement is rejected or withdrawn."""
         if not self.db.reopen_proposal(proposal_id, sub, max_pending=MAX_PENDING_PROPOSALS):
             row = self.db.get_proposal(proposal_id, sub)
             if row is None:
@@ -6073,7 +6074,10 @@ class DeckService:
         }
         if problems:
             out["suggest"] = "fix"
-            out["next_step"] = "Fix each problem first; a proposal now would be refused."
+            out["next_step"] = (
+                "Fix each problem first; a proposal with them would be refused (a name in "
+                "unknown_cards passes only if the deck already has it)."
+            )
         elif dup:
             no = (self.db.get_proposal(dup, sub) or {}).get("board_no")
             out |= {"suggest": "already_waiting", "duplicate_of": dup}
@@ -6108,8 +6112,8 @@ class DeckService:
         else:
             out["suggest"] = "propose"
             out["next_step"] = (
-                "Nothing stops it, but other waiting changes share cards with it (overlaps): propose "
-                "it in one call and tell the user."
+                "Nothing found against it, but other waiting changes share cards with it (overlaps): "
+                "propose it in one call and tell the user."
                 if others_share
                 else "Nothing found against it: propose it in one call."
             )
