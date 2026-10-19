@@ -325,9 +325,9 @@ async def test_the_queue_outlives_a_re_apply_of_the_proposal(stack: Stack) -> No
     snaps = {s["snapshot_id"]: s for s in svc.list_snapshots(SUB)}
     assert snaps[old_snap].get("stopped_attempt") is True and not snaps[new_snap].get("stopped_attempt")
     events = build_events([], list(snaps.values()), [], csrf_input="")
-    text = {e["summary"] for e in events}
-    assert any(t.endswith(" just before an apply that stopped before it changed anything.") for t in text)
-    assert any(t.endswith(" just before a change was applied.") for t in text)
+    text = {e["line"] for e in events}  # the row's second line
+    assert any(" just before an apply that stopped before it changed anything" in t for t in text)
+    assert any(" just before a change was applied" in t for t in text)
     applied = [e for e in h.db.audit_recent(200, sub=SUB) if e["event"] == "proposal_applied"]
     stopped = [e for e in h.db.audit_recent(200, sub=SUB) if e["event"] == "proposal_apply_stopped"]
     assert len(applied) == 1 and len(stopped) == 1 and stopped[0]["detail"]["state"] == "pending"

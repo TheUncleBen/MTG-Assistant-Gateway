@@ -66,10 +66,11 @@ def test_event_sentences_and_actor_badges() -> None:
     )
     # an app that registered no name is "an assistant" (its id only in the tooltip), never "app: app-1"
     assert actor_html("app: app-1") == "<span class='badge' title='app: app-1'>an assistant</span>"
-    from mtg_gateway.history_view import _who
+    # History names who made an entry as the app chip does (the redesign's "By" column)
+    from mtg_gateway.history_view import _app
 
-    assert _who("app: Claude (c-123)") == "the assistant (Claude)" and _who("app: app-1") == "an assistant"
-    assert _who("browser") == "you"
+    assert _app("app: Claude (c-123)") == "Claude" and _app("app: app-1") == "An assistant"
+    assert _app("browser") == "You" and _app("") is None
 
 
 def test_link_preview_image_is_absolute() -> None:

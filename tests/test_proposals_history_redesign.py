@@ -223,3 +223,29 @@ async def test_one_proposal_is_a_side_panel_or_a_page(stack: Stack) -> None:
         await b.aclose()
 
 
+# -- H1 ------------------------------------------------------------------------------
+async def test_history_has_no_proposals(stack: Stack) -> None:
+    b = await linked_browser(stack)
+    try:
+        gw = stack.h.app.state.gateway
+        sub = gw.db._one("SELECT sub FROM users", ())["sub"]
+        now = int(time.time())
+        seed_history(gw.db, sub, now=now)
+        store_report(gw.db, sub, "rep_a", taken_at=now - 100)
+        body = (await b.http.get("/history", headers=NAV)).text.split("<main")[1]
+        assert "placeholder='Deck name'" in body
+        assert "Everything <span class='n'>17</span>" in body  # 15 snapshots, 1 restore, 1 report
+        assert "Snapshots <span class='n'>15</span>" in body and "Restores <span class='n'>1</span>" in body
+        # no edit proposal is listed; a snapshot links the change it was taken before
+        assert "+1 Counterspell" not in body and "Rejected" not in body
+        rows = body.count("action='/history/restore'")
+        assert rows == 15 and body.count("href='/history?open=s-") >= 30  # Details and the phone chevron
+        assert "title='Snapshots do not record who made them'>—" in body
+        assert "Snapshots kept</span>" in body and "Backup copies</span>" in body
+        details = (await b.http.get("/history?open=s-s00", headers=NAV)).text.split("<main")[1]
+        drawer = details.split("<aside class='ui-drawer'")[1]
+        assert "← Back to History" in drawer and "Restore (review first)" in drawer and "<dd>—</dd>" in drawer
+    finally:
+        await b.aclose()
+
+
