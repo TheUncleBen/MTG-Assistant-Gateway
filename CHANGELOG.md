@@ -7,7 +7,53 @@ Notable changes for people who run or use the gateway. The format follows
 with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 (`release/1.2.3`); `latest` is always the newest.
 
-## [0.7.34] - unreleased
+## [0.7.35] - unreleased
+
+The gateway's pages follow one look: the same status and risk words everywhere, tables that turn
+into two-line rows on phones, a row of widgets at the top of Proposals, History, Reports and the
+Activity pages, and searchable, paged lists. Proposals has its own page with every kept proposal,
+and History keeps snapshots, restores and deck reports. A press and hold on a card in the deck
+editor no longer leaves the page stuck.
+
+### Upgrade notes
+- From 0.7.34: no extra steps. Update as usual ([docs/UPGRADING.md](docs/UPGRADING.md)).
+- The database moves to schema 15, which only adds one column (each closed proposal's risk). The
+  upgrade is automatic. Going back to 0.7.34 needs the backup taken before the upgrade, as for
+  every schema step.
+- The Android app changes too (its launcher shortcuts), so it is rebuilt with this release.
+
+### Changed
+- **Proposals** lists every proposal the gateway keeps, waiting and past, 25 at a time, with no
+  limit of 20. Search by deck or card, and filter by state, risk and app. Waiting ones are grouped
+  by deck, and you can apply or reject several at once. Widgets at the top show what is waiting,
+  the changes that always need your press and the last apply you can undo. A proposal opens beside
+  the list on a wide screen, or on its own page.
+- **History** shows snapshots, restores and deck reports, grouped by day or by deck, with a search,
+  a deck filter and a time filter. Proposals are no longer listed there.
+- Status and risk use the same words on every page and on the chat cards: Waiting, Updated, Needs a
+  look, Held, Applying, Applied, Failed, Rejected, Expired, Withdrawn and Replaced; risk is Low,
+  High, Your press or Delete. Each label has a word, a colour and an icon.
+- Dates show as "2 hours ago" up to a week, then as "Oct 12", in your own time zone. The full date
+  and time is in the tooltip.
+- **Reports**, a report, the **Watchlist**, **Home**, **Settings**, the admin **Activity** page, **My
+  activity** and **Account** follow the same layout. On Reports, picking a filter shows the
+  matching reports at once; there is no Show button.
+- **Card search** has a Watch button on each card, and a card's menu (right-click or press and
+  hold) can open it, watch it, show its art variants or add it to a deck.
+- The top bar shows **Reports** and **Watchlist**, with **More** holding the rest on narrower
+  screens. The app's launcher shortcuts add Reports, and Watchlist while watchlists are on.
+- Settings that your stack sets show "Set in your stack", and a setting you lowered says what it
+  was before.
+- Activity names every kind of event in plain words.
+- Account has **Send it now**, which sends your daily or weekly summary to your phones straight
+  away.
+
+### Fixed
+- A press and hold on a card in the deck editor, on Android, no longer leaves the card faded and
+  the page refusing taps. A pen press works like a finger.
+- The Scan page's capture button stays round in the Android app.
+
+## [0.7.34] - 2026-10-19
 
 Approval cards in the chat keep up with their proposal, and the assistants are told to check a
 deck edit before they make a card for it.
@@ -41,7 +87,7 @@ deck edit before they make a card for it.
   newer version of this change than this card shows", so only a newer card or the review page
   could approve it. It now shows the new version.
 
-## [0.7.33] - unreleased
+## [0.7.33] - 2026-10-19
 
 Fewer cards in the chat: only the changes waiting for you and the two pickers still show one. After
 you approve a proposal on its card or press Apply all, the card can now post a short message so

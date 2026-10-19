@@ -63,7 +63,7 @@ ACCOUNT_OK = {
     "gateway's app on that phone and press Get notifications on this phone.",
     "notify_test_sent": "The test message is sent. Each phone you connected should show it.",
     "summary_saved": "Summary choice saved.",
-    "summary_sent": "The summary is sent. Each phone you connected should show it within a few seconds.",
+    "summary_sent": "The summary is sent. Each phone you connected should show it.",
 }
 ACCOUNT_ERR = {
     "notify_test_failed": "The test could not be sent. Check that notifications are on; if they are, the "

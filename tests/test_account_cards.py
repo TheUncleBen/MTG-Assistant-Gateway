@@ -145,7 +145,7 @@ async def test_notices_show_inside_the_card_they_came_from(stack: Stack) -> None
         assert notify.ACCOUNT_OK["summary_sent"] not in top
         assert (
             "<div class='notice ok' role='status'>The summary is sent. Each phone you connected should show "
-            "it within a few seconds.</div>" in _card(page, "summary")
+            "it.</div>" in _card(page, "summary")
         )
         page = (await b.http.get("/account?err=notify_test_wait")).text
         assert notify.ACCOUNT_ERR["notify_test_wait"] in _card(page, "notifications")
