@@ -418,9 +418,14 @@ async def test_the_activity_logs_say_a_setting_change_in_words(gw: Harness) -> N
     try:
         await _post(b, {"group": "approvals", "v_proposal_expiry_days": "14"})
         for path in ("/admin/activity", "/activity"):
-            text = _words((await b.http.get(path, headers=NAVIGATE)).text)
+            page = (await b.http.get(path, headers=NAVIGATE)).text
+            text = _words(page)
             assert "Days a change waits for approval: 7 days → 14 days" in text, path
-            assert '"previous"' not in text, path
+            # the stored JSON only in the admin's row details (k2 V7), never in the Detail column
+            cells = "".join(re.findall(r"<span class='c-det'>(.*?)</span><span class='c-app'>", page))
+            assert "Days a change waits" in _words(cells) and '"previous"' not in _words(cells), path
+            if path == "/activity":
+                assert '"previous"' not in text
         assert "Gateway setting changed" in _words((await b.http.get("/activity", headers=NAVIGATE)).text)
     finally:
         await b.aclose()

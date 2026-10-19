@@ -52,11 +52,6 @@ def test_event_sentences_and_actor_badges() -> None:
         companion.event_label("backup_trim_queued")
         == "Older backup copies queued for deletion from Archidekt"
     )
-    html = companion.event_detail_html(
-        {"deck_id": "42", "deck_name": "Reap", "proposal_id": "p0123456789", "via": "x"}
-    )
-    assert "<a href='/decks/42'>Reap</a>" in html and "proposal p0123456" in html and "via x" in html
-    assert "archidekt_username" not in companion.event_detail_html({"archidekt_username": "alice"})
     assert (
         actor_html("app: Claude (c-123)")
         == "<span class='badge' title='app: Claude (c-123)'>app: Claude</span>"

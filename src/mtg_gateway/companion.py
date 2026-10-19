@@ -18,7 +18,6 @@ import re
 from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
-from urllib.parse import quote
 
 from starlette.requests import Request
 from starlette.responses import RedirectResponse, Response
@@ -36,7 +35,6 @@ from .pages import (
     csrf_form_ok,
     read_limited,
 )
-from .settings_page import change_line
 from .theme import (
     ICON_DATA_URL,
     STYLESHEETS,
@@ -253,6 +251,7 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         deck_css: bool = False,
         extra_scripts: tuple[str, ...] = (),
         extra_css: str = "",
+        main_class: str = "",
     ) -> Response:
         user = state.db.get_user(sub) or {}
         admin = bool(s.admin_group and s.admin_group in (user.get("groups") or []))
@@ -268,6 +267,7 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
             wide=two_pane,
             current=current,
             heading=heading,
+            main_class=main_class,
             head_extra=(stylesheet_link("deck.css") if deck_css else "")
             + (f"<style>{extra_css}</style>" if extra_css else "")
             # ``viewer_only``: a page that shows cards but none of the deck page's own hooks
@@ -506,25 +506,51 @@ EVENT_LABELS = {
     "setting_changed": "Gateway setting changed",
     "card_model_removed": "Card model removed",
     "backup_trim_queued": "Older backup copies queued for deletion from Archidekt",
-}
-DETAIL_LABELS = {
-    "proposal_id": "proposal",
-    "deck_id": "deck",
-    "via": "via",
-    "error": "error",
-    "archidekt_username": "Archidekt account",
-    "by": "by",
-}
-
-
-# Where an action came from (an audit row's ``via``), in the words the History page shows.
-VIA_LABELS = {
-    "mcp": "assistant",
-    "app": "in-chat card",
-    "review_page": "review page",
-    "browser": "browser",
-    "api": "API",
-    "android_app": "Android app",
+    # events that had no name before the Activity redesign (k9 M4); the member's copy of an
+    # administrator's action is told apart from the acting admin's own by its client id
+    # (activity_view.FIRST_PERSON_NAMES words the admin's own copy)
+    "admin_disable": "An administrator disabled your account",
+    "admin_enable": "An administrator turned your account back on",
+    "admin_revoke": "An administrator revoked your assistants' access and your sign-ins",
+    "admin_unlink": "An administrator unlinked your Archidekt account",
+    "admin_delete_data": "An administrator deleted your data",
+    "apply_needs_user": "Left for your press on the review page",
+    "approval_mode_set": "Approval mode changed",
+    "approval_refused": "Approval refused",
+    "apps_disconnected": "Apps disconnected",
+    "archidekt_link_unsealed": "Archidekt link ended by a gateway update",
+    "backup_delete_failed": "A backup copy could not be deleted",
+    "backup_delete_given_up": "Stopped trying to delete a backup copy",
+    "backup_delete_queued": "Backup copy queued for deletion",
+    "backup_delete_skipped": "Backup copy kept",
+    "backup_deleted": "Backup copy deleted from Archidekt",
+    "backup_failed": "Backup copy failed",
+    "collaborator_added": "Collaborator added to a deck",
+    "collaborator_removed": "Collaborator removed from a deck",
+    "collection_updated": "Collection card details changed",
+    "comment_voted": "Voted on a comment",
+    "deck_comment_deleted": "Deleted a comment",
+    "deck_comment_edited": "Edited a comment",
+    "deck_cover_changed": "Deck cover changed",
+    "deck_deleted": "Deck deleted",
+    "deck_moved": "Deck moved to another folder",
+    "deck_tag_added": "Tag added to a deck",
+    "deck_tag_removed": "Tag removed from a deck",
+    "folder_renamed": "Folder renamed",
+    "issuer_repinned": "Sign-in provider address updated",
+    "proposal_amended": "Proposal changed by the app",
+    "proposal_apply_stopped": "Proposal apply stopped",
+    "proposal_reopened": "Proposal brought back",
+    "proposal_withdrawn": "Proposal withdrawn",
+    "proposals_applied_together": "Proposals applied together",
+    "scan_session_created": "Scan started",
+    "signed_out_everywhere": "Signed out on all devices",
+    "view_choices_forgotten": "View choices forgotten",
+    # never on a member's page (no member): the admin page only
+    "client_registered": "An app registered",
+    "cimd_accepted": "An app's sign-in details were accepted",
+    "cimd_rejected": "An app's sign-in details were refused",
+    "archidekt_sessions_sealed": "Stored Archidekt sign-ins sealed",
 }
 
 
@@ -546,29 +572,6 @@ def member_name(db: Any, sub: Any) -> str | None:
 
 def event_label(event: str) -> str:
     return EVENT_LABELS.get(event) or event.replace("_", " ").capitalize()
-
-
-def event_detail_html(detail: dict[str, Any], *, added_by: str | None = None) -> str:
-    """The details of an audit row in words: the deck and the proposal become links. ``added_by``:
-    for a removed card model, the name of the member who added it."""
-    bits = []
-    if said := change_line(detail) or card_model_line(detail, added_by):
-        bits.append(_esc(said))
-    for k, label in DETAIL_LABELS.items():
-        v = detail.get(k)
-        if v in (None, ""):
-            continue
-        if k == "deck_id":
-            name = detail.get("deck_name")
-            text = _esc(name) if name else f"deck {_esc(v)}"
-            bits.append(f"<a href='/decks/{quote(str(v), safe='')}'>{text}</a>")
-        elif k == "proposal_id":
-            bits.append(f"<a href='/proposals/{quote(str(v), safe='')}'>proposal {_esc(str(v)[:8])}</a>")
-        elif k == "via":
-            bits.append(f"{label} {_esc(VIA_LABELS.get(str(v), v))}")
-        else:
-            bits.append(f"{label} {_esc(v)}")
-    return " · ".join(bits)
 
 
 __all__ = ["add_companion_routes", "stats_strip"]

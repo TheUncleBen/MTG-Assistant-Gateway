@@ -132,7 +132,8 @@ async def test_admin_sees_the_pages_and_the_api(gw: Harness) -> None:
         act = await b.http.get("/admin/activity", headers=NAVIGATE)
         assert act.status_code == 200 and "tokens_issued" in act.text
         only = await b.http.get("/admin/activity?sub=user-2", headers=NAVIGATE)
-        assert only.status_code == 200 and "admin-1" not in only.text.split("<ul", 1)[1]
+        assert only.status_code == 200 and "<code>admin-1</code>" not in only.text
+        assert "<code>user-2</code>" in only.text
         gw.db.metrics_increment("2026-01-01", "user-2", "tool", "whoami", 3)
         gw.app.state.gateway.db.metrics_increment(dbmod.Database._since_day(1), "user-2", "tool", "whoami")
         m = await b.http.get("/admin/metrics", headers=NAVIGATE)

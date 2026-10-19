@@ -9,15 +9,13 @@ from typing import TYPE_CHECKING, Any
 from starlette.requests import Request
 from starlette.responses import RedirectResponse, Response
 
+from . import activity_view
 from .companion import (
     DECKS_JSON_TIMEOUT,
     _filename,
-    event_detail_html,
-    event_label,
-    member_name,
     stats_strip,
 )
-from .decks import DeckError, actor_label, current_client, mark_gone
+from .decks import DeckError, current_client, mark_gone
 from .history_view import (
     HISTORY_CSS,
     PAGE,
@@ -35,8 +33,6 @@ from .history_view import (
 from .pages import (
     BROWSER_CLIENT_ID,
     _csrf,
-    _when,
-    actor_html,
     browser_session,
     login_redirect,
 )
@@ -401,28 +397,13 @@ def add_history_routes(
         sub, sid = browser_session(state, request)
         if not sub:
             return login_redirect("/activity")
-        rows = state.db.audit_for_user(sub, 100)
-        items = []
-        for r in rows:
-            detail = r.get("detail") if isinstance(r.get("detail"), dict) else {}
-            # browser or app is decided by the client id, never by the app's chosen name
-            who = actor_label(r.get("client_id"), detail.get("client_name"))
-            removed_model = r["event"] == "card_model_removed"
-            adder = member_name(state.db, detail.get("added_by")) if removed_model else None
-            items.append(
-                f"<li><span class='name'>{_esc(event_label(r['event']))}</span>"
-                + actor_html(who)
-                + f"<span class='muted small'>{event_detail_html(detail, added_by=adder)}</span>"
-                f"<span class='when'>{_when(r['at'])}</span></li>"
-            )
-        body = (
-            "<p class='muted small'>Everything done in your name on this gateway: sign-ins, which assistant "
-            "proposed and applied what, links and unlinks, and anything an administrator did to your "
-            "account.</p>"
-            + (
-                f"<div class='card'><ul class='plain plist'>{''.join(items)}</ul></div>"
-                if items
-                else "<div class='card'><p>No activity recorded yet.</p></div>"
-            )
+        body = activity_view.member_body(state, sub, request.query_params)
+        return page(
+            "My activity",
+            body,
+            sub=sub,
+            sid=sid,
+            heading=False,
+            main_class="ui-wide",
+            extra_css=activity_view.MEMBER_CSS,
         )
-        return page("My activity", body, sub=sub, sid=sid)
