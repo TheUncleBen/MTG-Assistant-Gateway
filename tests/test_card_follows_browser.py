@@ -41,7 +41,7 @@ V2 = {
     "changed_by": "app: Claude (abc)",
     "what_changed": "now +1 Ponder",
 }
-UPDATED = "Updated since this card was drawn. Check it above, then press Approve again."
+UPDATED = "Updated since this card was drawn. Check it above, then press again."
 REDRAWN = "Updated: this card now shows the newest version."
 
 # The host: answers ui/initialize, pushes the tool result and answers each get_proposal from
@@ -247,5 +247,30 @@ def test_a_changed_answer_with_no_read_leaves_the_review_page_not_locked_buttons
         card.locator("#actions button", has_text="Approve on the review page").wait_for(timeout=5_000)
         assert card.locator("#approve").count() == 0
         assert card.locator("#status").inner_text() == "There is a newer version."
+
+    _run(test)
+
+
+def test_a_changed_answer_whose_read_finds_nothing_leaves_the_review_page() -> None:
+    changed = {"ok": False, "error": "changed", "message": "There is a newer version.", "state": "pending"}
+    gone = {"ok": False, "error": "not_found", "message": "No such proposal for your account."}
+
+    def test(page) -> None:
+        card = _open(page, [V1, V1, gone], [changed])
+        card.locator("#approve:enabled").wait_for(timeout=5_000)
+        card.locator("#approve").click()
+        card.locator("#actions button", has_text="Approve on the review page").wait_for(timeout=5_000)
+        assert card.locator("#approve").count() == 0
+
+    _run(test)
+
+
+def test_an_expired_withdrawn_card_is_not_read_again() -> None:
+    def test(page) -> None:
+        old = {**V1, "state": "withdrawn", "expires_at": int(time.time()) - 60}
+        card = _open(page, [old], every_ms=100)
+        card.locator("#state.withdrawn").wait_for(timeout=5_000)
+        page.wait_for_timeout(1_000)
+        assert len(_calls(page, "get_proposal")) == 1  # the read when drawn only
 
     _run(test)

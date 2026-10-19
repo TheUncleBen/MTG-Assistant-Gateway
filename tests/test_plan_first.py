@@ -162,6 +162,7 @@ async def test_a_held_proposal_is_never_offered_to_amend(stack: Stack) -> None:
     assert h.db.set_hold(mine["proposal_id"], SUB, "depends:x")
     out = await _check(h, token, [*_change("Opt"), *_change("Ponder")])
     assert out["suggest"] == "propose" and "amend" not in out
+    assert "other waiting changes share cards" in out["next_step"]  # not "nothing found"
 
 
 async def test_at_the_waiting_limit_an_amend_or_a_repeat_is_still_suggested(
@@ -177,6 +178,7 @@ async def test_at_the_waiting_limit_an_amend_or_a_repeat_is_still_suggested(
     monkeypatch.setattr(decks_mod, "MAX_PENDING_PROPOSALS", 1)
     out = await _check(h, token, [*_change("Opt"), *_change("Ponder")])
     assert out["suggest"] == "amend" and out["problems"] == []
+    assert out["next_step"].endswith("The waiting limit is reached, so only an amend is possible now.")
     assert (await _check(h, token, _change("Opt")))["suggest"] == "already_waiting"
     other = await mcp_token(h)  # another app: only a new proposal would do, and it has no room
     full = await _check(h, other, _change("Ponder"))
@@ -198,6 +200,13 @@ async def test_another_apps_change_on_the_same_cards_is_named_in_the_next_step(s
     await _propose(h, token, _change("Opt"))
     other = await mcp_token(h)
     out = await _check(h, other, [*_change("Opt"), *_change("Ponder")])
-    assert out["suggest"] == "propose" and "another app's waiting change shares cards" in out["next_step"]
+    assert out["suggest"] == "propose" and "other waiting changes share cards" in out["next_step"]
     url = await _check(h, other, _change("Ponder"), deck="https://archidekt.com/decks/42/sample")
     assert url["deck_id"] == "42" and len(url["waiting_on_deck"]) == 1
+
+
+def test_the_in_app_guide_lists_the_check() -> None:
+    from mtg_gateway.guide import guide_body
+
+    page = guide_body(site="Gateway", writes_enabled=True, has_collection=True)
+    assert "<code>check_deck_changes</code>" in page

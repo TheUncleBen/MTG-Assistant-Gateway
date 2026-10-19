@@ -6024,7 +6024,11 @@ class DeckService:
                     "error": "unknown_cards",
                     "message": "No Magic card is called "
                     + ", ".join(f"'{n}'" for n in unknown)
-                    + " (unless the deck already has it).",
+                    + (
+                        " (unless the deck already has it)."
+                        if len(unknown) == 1
+                        else " (unless the deck already has them)."
+                    ),
                     "unknown_cards": unknown,
                 }
             )
@@ -6048,16 +6052,18 @@ class DeckService:
             )
             label = f"#{line.get('board_no')}" if line.get("board_no") else "a waiting change"
             overlaps += [f"{n}: {label} changes it too." for n in shared]
-            others_share = others_share or bool(shared and not line.get("own"))
+            others_share = others_share or bool(shared and not mine)
             # the app's own waiting edit, the one sharing cards first: amend it instead
             if mine and line["proposal_id"] != dup and (amend is None or (shared and not amend[1])):
                 amend = (line, bool(shared))
         # a new proposal needs room; an amend or an exact repeat does not
-        if dup is None and amend is None:
-            try:
-                self._room_for_proposal(sub)
-            except DeckError as exc:
-                problems.append({"error": exc.kind, "message": str(exc)})
+        full: DeckError | None = None
+        try:
+            self._room_for_proposal(sub)
+        except DeckError as exc:
+            full = exc
+        if full is not None and dup is None and amend is None:
+            problems.append({"error": full.kind, "message": str(full)})
         out: dict[str, Any] = {
             "deck_id": deck,
             "changes": len(changes),
@@ -6094,13 +6100,15 @@ class DeckService:
                 + " already waits on this deck"
                 + (" and changes some of the same cards" if shares else "")
                 + ". If this belongs to the same request, call amend_proposal on it once with "
-                "amend.changes and this plan in one list (an amend replaces the whole list). If it "
-                "replaces it, propose with replaces. Only a separate request gets its own proposal."
+                "amend.changes and this plan merged into one list, one change per card (an amend "
+                "replaces the whole list). If it replaces it, propose with replaces. Only a separate "
+                "request gets its own proposal."
+                + (" The waiting limit is reached, so only an amend is possible now." if full else "")
             )
         else:
             out["suggest"] = "propose"
             out["next_step"] = (
-                "Nothing stops it, but another app's waiting change shares cards (overlaps): propose "
+                "Nothing stops it, but other waiting changes share cards with it (overlaps): propose "
                 "it in one call and tell the user."
                 if others_share
                 else "Nothing found against it: propose it in one call."

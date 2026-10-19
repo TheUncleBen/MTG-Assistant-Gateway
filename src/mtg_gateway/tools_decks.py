@@ -507,8 +507,8 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
         title="Withdraw your own waiting proposal",
         description=(
             "Take back one of your own waiting proposals because the user's newer request makes it "
-            "pointless (say why in reason, e.g. 'card removed in #5'). It stays visible as withdrawn and "
-            "the user can bring it back. Only the app that made a proposal may withdraw it; for anything "
+            "pointless (say why in reason, e.g. 'card removed in #5'). It stays visible as withdrawn. "
+            "Only the app that made a proposal may withdraw it; for anything "
             "else the user rejects it. Changes nothing on Archidekt."
         ),
         annotations={"readOnlyHint": False, "destructiveHint": False, "openWorldHint": False},

@@ -376,12 +376,13 @@ button.danger:disabled{color:var(--red)}
 
   // The card may be drawn (or shown again by the host) long after the proposal was made, and the
   // proposal may have been rejected, applied, amended or expired since. While it waits (or was
-  // withdrawn or replaced, which the member may undo), the card reads it once more with
-  // get_proposal (read-only) and redraws it if it changed.
+  // replaced, and comes back if its replacement is rejected or withdrawn; or withdrawn), until it
+  // expires, the card reads it once more with get_proposal (read-only) and redraws it if it changed.
   // If that read fails, the buttons stay: the gateway refuses a press on a closed proposal.
   var refreshing = false;
   function live(p) {
-    return !!p && (p.state === "pending" || p.state === "withdrawn" || p.state === "replaced");
+    if (!p || !(p.state === "pending" || p.state === "withdrawn" || p.state === "replaced")) return false;
+    return !p.expires_at || Number(p.expires_at) * 1000 > Date.now();
   }
   function refresh() {
     var p = proposal;
@@ -731,7 +732,7 @@ button.danger:disabled{color:var(--red)}
   // this press, the card says so, and the next press approves the change as the card shows it,
   // so a host that never lets the card read can't lock Approve
   var uncheckedOk = false;
-  var UPDATED_TEXT = "Updated since this card was drawn. Check it above, then press Approve again.";
+  var UPDATED_TEXT = "Updated since this card was drawn. Check it above, then press again.";
   var REDRAWN_TEXT = "Updated: this card now shows the newest version.";
   var BACK_TEXT = "This change is waiting again.";
   function notChecked() {
