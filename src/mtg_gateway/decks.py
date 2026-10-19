@@ -226,6 +226,10 @@ DECK_LIST_COLD_WAIT = 1.5
 # long enough for a run of view switches and a Back, short enough that a change made on
 # archidekt.com shows on the next view soon after. MTG_ARCHIDEKT_CACHE_SECONDS=0 turns it off.
 PAGE_DECK_SECONDS = 20.0
+# While Archidekt cannot be asked (a 429 pause, the breaker, the member's Archidekt work still
+# running), My decks and Home show the member's deck list as last read, for up to this long, with a
+# notice saying how old it is, instead of the busy page.
+DECK_LIST_LAST = 24 * 3600.0
 PAGE_DECKS_MAX = 200  # reads kept at most, the oldest go first
 TOUCH_LINK_INTERVAL = 60.0  # the link's last_used_at is written at most this often per member
 # Said first in a pending proposal's next_step once the deck sync (sync.py) has seen its deck change.
@@ -289,6 +293,13 @@ HELD_REPLACED_STEP = (
 ARCHIDEKT_BUDGET_WINDOW = 600
 
 
+def is_busy(exc: BaseException) -> bool:
+    """Whether ``exc`` says Archidekt cannot be asked right now (asked us to slow down, the
+    member's Archidekt work is still running, the budget is used up, or Archidekt can't be
+    reached), as opposed to something about the deck or the account."""
+    return isinstance(exc, DeckError) and exc.kind in ("rate_limited", "unavailable")
+
+
 def scopes_allow_writes(scopes: list[str] | tuple[str, ...] | None) -> bool:
     """False only for a token that has scopes and every one of them is read-only (see
     READ_ONLY_SCOPES). A token with no scope, the default "mtg" scope, or any scope that is not a
@@ -350,6 +361,9 @@ class MemberCache:
         self._limits: dict[str, float] = {}  # sub -> that shorter life, for the value kept now
         self._refreshing: dict[str, tuple[asyncio.Task[Any], float]] = {}  # task, when it started
         self._dropped: dict[str, float] = {}
+        # sub -> (wall time, value): the last value read in full, kept through ``drop`` (a write
+        # makes it out of date, not wrong to show as last read); ``forget`` removes it
+        self._last: dict[str, tuple[float, Any]] = {}
         # the deck sync's fetches (``refreshed``): read on the sync's terms, no retry and no unlink,
         # so a page that shared one which failed reads again on its own terms
         self._background: weakref.WeakSet[asyncio.Task[Any]] = weakref.WeakSet()
@@ -382,6 +396,19 @@ class MemberCache:
         self._entries.pop(sub, None)
         self._limits.pop(sub, None)
         self._dropped[sub] = time.monotonic()
+
+    def forget(self, sub: str) -> None:
+        """``drop``, and the last value too (the member's link changed or their data was deleted)."""
+        self.drop(sub)
+        self._last.pop(sub, None)
+
+    def last(self, sub: str, max_age: float) -> tuple[float, Any] | None:
+        """(when read, epoch seconds; value) of the last value read in full, if younger than
+        ``max_age``; for a page to show as last read while a fetch cannot be made."""
+        hit = self._last.get(sub)
+        if hit is None or time.time() - hit[0] >= max_age:
+            return None
+        return hit
 
     def clear(self) -> None:
         for sub in list(self._entries):
@@ -418,6 +445,7 @@ class MemberCache:
                 limit = self.keep_for(value) if self.keep_for else None
                 if limit is None:
                     self._limits.pop(sub, None)
+                    self._last[sub] = (time.time(), value)
                 else:
                     self._limits[sub] = limit
             return value
@@ -439,6 +467,7 @@ class MemberCache:
             self._entries.clear()
             self._limits.clear()
             self._dropped.clear()
+            self._last.clear()
         return task
 
     async def get(
@@ -685,7 +714,12 @@ class DeckError(Exception):
     fields the tool reply carries alongside ``error`` and ``message``. ``retry_after`` (seconds)
     is set when the refusal knows how long to wait (a used-up Archidekt budget); the browser
     pages put it in their Retry-After header. ``sent`` is False when the Archidekt request never
-    left the gateway (the pacer refused it), so nothing can have been written whatever the kind."""
+    left the gateway (the pacer refused it), so nothing can have been written whatever the kind.
+    ``busy_cause`` names why a rate_limited refusal was made, for the busy page (busy.py):
+    "member_slots" (the member's own Archidekt work fills their slots) or "budget" (the member's
+    MTG_ARCHIDEKT_CALLS_PER_10_MIN is used up); None otherwise."""
+
+    busy_cause: str | None = None
 
     def __init__(
         self,
@@ -2164,8 +2198,8 @@ class DeckService:
 
     def forget_member(self, sub: str) -> None:
         """Drop everything cached for a member (their link changed or their data was deleted)."""
-        self.deck_lists.drop(sub)
-        self.folder_trees.drop(sub)
+        self.deck_lists.forget(sub)
+        self.folder_trees.forget(sub)
         self._forget_page_decks()
         for hook in self.write_hooks:
             hook(sub, "")
@@ -2184,7 +2218,9 @@ class DeckService:
         try:
             refused = self.budget_refusal(sub)
             if refused:
-                raise DeckError("rate_limited", refused, retry_after=self.archidekt_budget.retry_after(sub))
+                err = DeckError("rate_limited", refused, retry_after=self.archidekt_budget.retry_after(sub))
+                err.busy_cause = "budget"
+                raise err
             token = _slot_holder.set(sub)
             try:
                 yield
@@ -2194,11 +2230,13 @@ class DeckService:
             self._give_slot(sub)
 
     def _slots_full(self, sub: str) -> DeckError:
-        return DeckError(
+        err = DeckError(
             "rate_limited",
             f"{self.max_archidekt_per_user} Archidekt actions for your account are still running "
             "or waiting their turn; wait for them to finish and try again.",
         )
+        err.busy_cause = "member_slots"
+        return err
 
     async def _take_slot(self, sub: str) -> None:
         """One of the member's slots: at once when one is free and nobody is waiting, else the
@@ -2616,6 +2654,11 @@ class DeckService:
         rows = await self.deck_lists.get(sub, fetch, wait=wait, prefer_fresh=prefer_fresh)
         if rows is None:
             return None
+        return self._marked(sub, rows)
+
+    def _marked(self, sub: str, rows: list[dict[str, Any]], last_read: float | None = None) -> DeckList:
+        """``rows`` as fresh dicts, the backup copies a snapshot here records marked (see
+        ``_deck_rows``)."""
         unreadable = getattr(rows, "unreadable", 0)
         known = self.db.backup_copies(sub)
         out = []
@@ -2626,7 +2669,23 @@ class DeckService:
                 d["backup_of"] = known[d["id"]]["deck_id"]
                 d["snapshot_id"] = known[d["id"]]["snapshot_id"]
             out.append(d)
-        return DeckList(out, complete=getattr(rows, "complete", False) is True, unreadable=unreadable)
+        return DeckList(
+            out, complete=getattr(rows, "complete", False) is True, unreadable=unreadable, last_read=last_read
+        )
+
+    def last_deck_list(self, sub: str) -> DeckList | None:
+        """For My decks and Home when Archidekt cannot be asked (``is_busy``): the member's deck
+        list as last read (at most DECK_LIST_LAST old), backup copies left out, its ``last_read``
+        set; None when there is none. Never for an assistant or for judging what is gone: a page
+        shows it with a notice saying how old it is."""
+        self._token(sub)  # not linked (any more): nothing to show
+        held = self.deck_lists.last(sub, DECK_LIST_LAST)
+        if held is None:
+            return None
+        rows = self._marked(sub, held[1], last_read=held[0])
+        return DeckList(
+            [d for d in rows if not d.get("backup")], complete=False, unreadable=0, last_read=held[0]
+        )
 
     async def list_decks_quick(self, sub: str, *, wait: float | None = None) -> list[dict[str, Any]] | None:
         """``list_decks`` that gives up waiting for a cold read after ``wait`` seconds and answers
@@ -6071,7 +6130,14 @@ class DeckService:
         async def fetch() -> dict[str, Any]:
             return await self._call(sub, self.client.folder_tree)
 
-        tree = await self.folder_trees.get(sub, fetch, wait=wait)
+        try:
+            tree = await self.folder_trees.get(sub, fetch, wait=wait)
+        except DeckError as exc:
+            # Archidekt can't be asked: the tree as last read, as the deck list (last_deck_list)
+            held = self.folder_trees.last(sub, DECK_LIST_LAST) if is_busy(exc) else None
+            if held is None:
+                raise
+            tree = held[1]
         return None if tree is None else self._flatten_folders(tree)
 
     def _is_backup_folder(self, name: str, depth: int) -> bool:

@@ -19,8 +19,8 @@ from starlette.responses import RedirectResponse, Response
 
 from . import prefs
 from .companion import DECK_CSP
-from .deckpage import covers_for, decks_unreadable_html, image_url, reread_href
-from .decks import DeckError
+from .deckpage import covers_for, deck_list_held_html, decks_unreadable_html, image_url, reread_href
+from .decks import DeckError, is_busy
 from .pages import _csrf, browser_session, login_redirect
 from .theme import display_name, icon, render
 from .waiting_strip import waiting_line
@@ -54,8 +54,15 @@ async def recent_decks(state: AppState, sub: str, *, wait: float | None) -> list
     is cold and the read has not answered within ``wait`` seconds (it carries on in the cache)."""
     try:
         rows = await asyncio.wait_for(state.decks.list_decks_quick(sub, wait=wait), DECKS_TIMEOUT)
-    except (DeckError, TimeoutError):
-        return None
+    except (DeckError, TimeoutError) as exc:
+        if isinstance(exc, DeckError) and not is_busy(exc):
+            return None
+        try:  # Archidekt can't be asked: the list as last read (its last_read says how old)
+            rows = state.decks.last_deck_list(sub)
+        except DeckError:
+            return None
+        if rows is None:
+            return None
     except Exception:  # pragma: no cover - a surprise must not take the home page down
         log.exception("home: listing decks failed")
         return None
@@ -66,17 +73,22 @@ async def recent_decks(state: AppState, sub: str, *, wait: float | None) -> list
 
 
 def recent_panel_inner(
-    decks: list[dict[str, Any]] | None, covers: dict[str, dict[str, Any]], *, unreadable: bool = False
+    decks: list[dict[str, Any]] | None,
+    covers: dict[str, dict[str, Any]],
+    *,
+    unreadable: bool = False,
+    last_read: float | None = None,
 ) -> str:
     """The inside of the home page's My decks panel: the newest covers, or why there are none.
     /api/decks/mine?shape=recent answers with the same markup for the placeholder to swap in.
     ``unreadable``: Archidekt left entries of the list unreadable, so the panel says so with the
-    /decks notice and Try again, over the covers it did read, never "No decks yet"."""
+    /decks notice and Try again, over the covers it did read, never "No decks yet". ``last_read``:
+    the list is as last read (Archidekt can't be asked), and the panel says how old it is."""
     note = (
         decks_unreadable_html(some_shown=bool(decks), panel=False, again=reread_href("/"))
         if unreadable
         else ""
-    )
+    ) + (deck_list_held_html(last_read) if last_read is not None else "")
     if decks:
         return (
             "<div class='panel-head'><h2>My decks</h2>"
@@ -175,7 +187,9 @@ def add_home_routes(server: MCPServer, state: AppState) -> None:
             unreadable = bool(getattr(decks, "unreadable", 0))  # the deck list couldn't be read, as on /decks
             recent = (
                 "<section class='panel'>"
-                + recent_panel_inner(decks, covers, unreadable=unreadable)
+                + recent_panel_inner(
+                    decks, covers, unreadable=unreadable, last_read=getattr(decks, "last_read", None)
+                )
                 + "</section>"
             )
         else:

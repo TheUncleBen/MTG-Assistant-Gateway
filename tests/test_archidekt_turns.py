@@ -1,13 +1,14 @@
 """Opening a page is not stuck behind an assistant's Archidekt work: a member's Archidekt work past
 their concurrency cap waits for one of their own slots instead of being refused at once, the
 member's pages first, and a page's requests take their turn in the shared pacer before the
-waiting requests of assistants, applies and the deck sync. The cap, the gap between requests and
+waiting requests of assistants and the deck sync. The cap, the gap between requests and
 the per-minute cap stay as they are."""
 
 from __future__ import annotations
 
 import asyncio
 import contextvars
+import time
 from pathlib import Path
 from typing import Any
 
@@ -15,13 +16,15 @@ import pytest
 
 from mtg_gateway import archidekt as archidekt_mod
 from mtg_gateway import decks as decks_mod
-from mtg_gateway.archidekt import Pacer, TurnLock, page_turn, parse_deck
+from mtg_gateway.archidekt import ArchidektError, Pacer, TurnLock, page_turn, parse_deck
+from mtg_gateway.busy import BUSY_TEXT, BUSY_TEXTS, busy_plan
 from mtg_gateway.db import Database
+from mtg_gateway.deckpage import deck_list_held_text
 from mtg_gateway.decks import DeckError, DeckService, MemberCache
 
 from .conftest import Stack, make_settings
 from .fake_archidekt import FakeArchidekt
-from .test_decks_and_proxy import Browser, call, linked_user
+from .test_decks_and_proxy import Browser, call, linked_user, mcp_token, structured
 
 
 def _deck() -> Any:
@@ -250,3 +253,143 @@ async def test_pages_take_the_page_turn_and_assistants_do_not(stack: Stack, monk
     finally:
         await b.aclose()
     assert seen and all(seen)
+
+
+# -- My decks and Home while Archidekt can't be asked --------------------------------------------
+async def _paused_after_a_read(stack: Stack) -> Browser:
+    """A linked member whose deck list and folders were read once, then dropped (as a write
+    does), with Archidekt now answering 429."""
+    b = Browser(stack.h)
+    await b.login("/account")
+    r = await b.link("alice", "pw-alice")
+    assert r.status_code == 303, r.text
+    r = await b.http.get("/decks")
+    assert r.status_code == 200 and "Sample Commander Deck" in r.text, r.text
+    stack.gw.decks.deck_lists.drop("user-1")
+    stack.gw.decks.folder_trees.drop("user-1")
+    assert stack.ark is not None
+    stack.ark.inject = [(429, "60")]
+    return b
+
+
+async def test_my_decks_shows_the_list_as_last_read_while_archidekt_is_paused(stack: Stack) -> None:
+    b = await _paused_after_a_read(stack)
+    try:
+        r = await b.http.get("/decks")
+        assert r.status_code == 200, r.text
+        assert "Sample Commander Deck" in r.text
+        assert "notice warn" in r.text and "so this is how it looked" in r.text
+        assert "Archidekt is busy" not in r.text
+        r = await b.http.get("/api/decks/mine", params={"shape": "list"})
+        body = r.json()
+        assert body["ok"] is True and "so this is how it looked" in body["html"]
+        r = await b.http.get("/api/decks/mine", params={"shape": "recent"})
+        assert "so this is how it looked" in r.json()["html"]
+        r = await b.http.get("/")
+        assert "Sample Commander Deck" in r.text and "so this is how it looked" in r.text
+    finally:
+        await b.aclose()
+
+
+async def test_the_folders_page_still_says_archidekt_is_busy(stack: Stack) -> None:
+    b = await _paused_after_a_read(stack)
+    try:
+        r = await b.http.get("/folders")
+        assert r.status_code == 429 and "Archidekt is busy" in r.text, r.text
+        assert BUSY_TEXTS["archidekt"] in r.text.replace("&#x27;", "'")
+    finally:
+        await b.aclose()
+
+
+async def test_an_assistant_never_gets_the_list_as_last_read(stack: Stack) -> None:
+    b = await _paused_after_a_read(stack)
+    await b.aclose()
+    token = await mcp_token(stack.h)
+    out = structured(await call(stack.h, token, "list_my_decks", {}))
+    assert out["ok"] is False and out["error"] == "rate_limited", out
+
+
+async def test_a_list_read_fine_shows_no_notice(stack: Stack) -> None:
+    b = Browser(stack.h)
+    await b.login("/account")
+    await b.link("alice", "pw-alice")
+    try:
+        r = await b.http.get("/decks")
+        assert "Sample Commander Deck" in r.text and "so this is how it looked" not in r.text
+    finally:
+        await b.aclose()
+
+
+async def test_the_last_read_list_is_forgotten_with_the_member(stack: Stack) -> None:
+    b = await _paused_after_a_read(stack)
+    try:
+        stack.gw.decks.forget_member("user-1")
+        assert stack.gw.decks.deck_lists.last("user-1", 3600) is None
+        r = await b.http.get("/decks")
+        assert "so this is how it looked" not in r.text
+        assert r.status_code == 429  # nothing to show: the busy page, as before
+    finally:
+        await b.aclose()
+
+
+def test_member_cache_keeps_the_last_full_value_through_drop_only() -> None:
+    cache = MemberCache(60, 600)
+    cache._last["alice"] = (time.time() - 10, [1])
+    cache.drop("alice")
+    assert cache.last("alice", 60) is not None
+    assert cache.last("alice", 5) is None  # too old for that caller
+    cache.forget("alice")
+    assert cache.last("alice", 60) is None
+
+
+async def test_a_partial_list_is_not_kept_as_last_read() -> None:
+    cache = MemberCache(60, 600, keep_for=lambda v: 30.0 if v == "partial" else None)
+
+    async def partial() -> str:
+        return "partial"
+
+    await cache.get("alice", partial)
+    assert cache.last("alice", 60) is None
+
+
+def test_deck_list_held_text_says_how_old() -> None:
+    assert "how it looked 5 minutes ago" in deck_list_held_text(1000.0, now=1300.0)
+    assert "how it looked 1 minute ago" in deck_list_held_text(1000.0, now=1010.0)
+    assert "how it looked 2 hours ago" in deck_list_held_text(0.0, now=7300.0)
+    assert "how it looked 1 hour ago" in deck_list_held_text(0.0, now=3700.0)
+
+
+# -- the busy page says why --------------------------------------------------------------------------
+def test_busy_page_names_the_members_own_limit_the_budget_and_archidekts_pause() -> None:
+    own = DeckError("rate_limited", "x")
+    own.busy_cause = "member_slots"
+    assert busy_plan(own).text == BUSY_TEXTS["member_slots"]
+    spent = DeckError("rate_limited", "x")
+    spent.busy_cause = "budget"
+    assert busy_plan(spent).text == BUSY_TEXTS["budget"]
+    try:
+        try:
+            raise ArchidektError("rate_limited", "Archidekt asked us to slow down; try again in a minute")
+        except ArchidektError as inner:
+            raise DeckError("rate_limited", str(inner)) from inner
+    except DeckError as outer:
+        assert busy_plan(outer).text == BUSY_TEXTS["archidekt"]
+    assert busy_plan(DeckError("rate_limited", "x")).text == BUSY_TEXT  # it doesn't say why
+
+
+async def test_the_slot_and_budget_refusals_name_their_cause(tmp_path: Path) -> None:
+    gated = _Gated()
+    svc = _service(tmp_path, gated)
+    svc.archidekt_slot_wait = 0
+    held = [_read(svc, str(n)) for n in range(1, decks_mod.MAX_ARCHIDEKT_PER_USER + 1)]
+    await asyncio.sleep(0.01)
+    with pytest.raises(DeckError) as err:
+        await svc.get_any_deck("alice", "99")
+    assert err.value.busy_cause == "member_slots"
+    gated.release.set()
+    await asyncio.gather(*held)
+    svc.archidekt_budget = decks_mod.RateBudget(1)
+    await svc.get_any_deck("alice", "1")
+    with pytest.raises(DeckError) as err:
+        await svc.get_any_deck("alice", "2")
+    assert err.value.busy_cause == "budget"

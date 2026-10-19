@@ -712,12 +712,16 @@ class DeckList(list):  # type: ignore[type-arg]
     came back than Archidekt's count. Only a complete list may say a deck is gone
     (DeckService.on_archidekt). ``unreadable`` counts the entries left out because their owner
     field could not be read at all: My decks then says the list couldn't be read instead of
-    showing it as whole."""
+    showing it as whole. ``last_read`` (epoch seconds) is set only on a list the pages show as last
+    read because Archidekt cannot be asked right now (DeckService.last_deck_list)."""
 
-    def __init__(self, rows: Any = (), *, complete: bool = False, unreadable: int = 0) -> None:
+    def __init__(
+        self, rows: Any = (), *, complete: bool = False, unreadable: int = 0, last_read: float | None = None
+    ) -> None:
         super().__init__(rows)
         self.complete = complete
         self.unreadable = unreadable
+        self.last_read = last_read
 
 
 def _owned_by(owner: Any, username: str, user_id: str | None) -> bool:
@@ -756,10 +760,11 @@ def retry_after_seconds(value: str | None, *, now: float | None = None) -> float
     return max(0.0, when.timestamp() - (time.time() if now is None else now))
 
 
-# Set while a member's own browser page is being answered (pages.browser_session): its Archidekt
-# requests take their turn in the shared Pacer before those of assistants, applies and the deck
-# sync that are waiting, so opening a page is not stuck behind a fast assistant's queue. Only the
-# order changes; every request still keeps the gap and the per-minute cap.
+# Set while a member's own browser page is being answered (pages.browser_session), an apply pressed
+# there included: its Archidekt requests take their turn in the shared Pacer before those of
+# assistants and the deck sync that are waiting, so opening a page is not stuck behind a fast
+# assistant's queue. Only the order changes; every request still keeps the gap and the
+# per-minute cap.
 page_turn: contextvars.ContextVar[bool] = contextvars.ContextVar("archidekt_page_turn", default=False)
 
 
