@@ -125,6 +125,8 @@ in-chat cards, deck reports and the Settings and Account pages.
 - A deck deletion's restore point didn't name its proposal.
 - `edhrec_average_deck`'s `limit` was described as capping the cards; the average deck is always
   whole, and the description now says so.
+- When a decimal setting that isn't a time, such as `MTG_SCAN_GLARE_RATIO`, wasn't a number, the
+  gateway's start-up error said it must be "a number of seconds". It now says "a number".
 
 ## [0.7.31] - 2026-10-18
 
