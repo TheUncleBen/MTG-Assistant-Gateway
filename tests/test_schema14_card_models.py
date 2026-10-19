@@ -29,7 +29,7 @@ def test_a_schema_13_database_gets_the_table_and_keeps_its_rows(
     monkeypatch.undo()
     new = Database(path)
     try:
-        assert new.schema_version == db_module.SCHEMA_VERSION == 14
+        assert new.schema_version == db_module.SCHEMA_VERSION == 15
         assert new.get_pref("u1", "card.size") == "l"
         columns = [r[1] for r in new._conn.execute("PRAGMA table_info(card_models)")]
         assert columns == [
@@ -137,7 +137,7 @@ def test_a_database_from_an_earlier_schema_14_build_is_brought_to_the_new_shape(
     for _ in range(2):  # the second start finds nothing to do
         db = Database(path)
         try:
-            assert db.schema_version == 14
+            assert db.schema_version == 15
             (kept,) = db.get_card_models(["sol ring"], "u1")
             assert kept == {
                 "card_key": "sol ring",
