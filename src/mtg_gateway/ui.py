@@ -406,7 +406,7 @@ def pager(
 
     return (
         f"<nav class='ui-pager' aria-label='Pages'><span class='info'>{info}</span><span class='btns'>"
-        f"{btn('← Newer', newer_href, 'prev')}{btn('Older →', older_href, 'next')}</span></nav>"
+        f"{btn(NEWER, newer_href, 'prev')}{btn(OLDER, older_href, 'next')}</span></nav>"
     )
 
 
