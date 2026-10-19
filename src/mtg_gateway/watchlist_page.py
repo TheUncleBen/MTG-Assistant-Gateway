@@ -435,7 +435,7 @@ def shown_cards(cards: list[dict[str, Any]], query: Query) -> list[dict[str, Any
 
 
 # -- widgets -------------------------------------------------------------------------------------
-def _due(v: dict[str, Any]) -> str:
+def due_line(v: dict[str, Any]) -> str:
     """What a card's alert says about today's price, or '' when nothing is past it."""
     alerts = v.get("alerts") or {}
     price, cur = v.get("price"), v.get("currency") or "usd"
@@ -466,7 +466,7 @@ def widgets_html(data: dict[str, Any], *, checked: str) -> str:
         )
     ]
     with_alert = [v for v in cards if v.get("alerts")]
-    due = [d for d in (_due(v) for v in with_alert) if d]
+    due = [d for d in (due_line(v) for v in with_alert) if d]
     if with_alert:
         det = (due[0] + f" · checked {checked}") if due else f"Nothing past an alert · checked {checked}"
         out.append(

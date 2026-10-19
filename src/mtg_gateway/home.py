@@ -1,8 +1,10 @@
 """The signed-in home page: a dashboard in the shape of Archidekt's landing page.
 
-Every section of the gateway is one tile (decks with their newest covers, deck search, scanning,
-the collection on the member's Archidekt account, proposals, history and the guide), the top
-navigation stays visible like on every other page, and the assistant connection details sit in a
+Under the newest decks and the deck search, Quick access has one §3a widget per section, in the
+app side bar's order (Decks, Search, Scan, Collection, Proposals, History, Reports, Watchlist,
+Guide, Account, then Admin for admins), each with at most two quick starts; on a phone they are
+compact tiles, two a row, with the label and number only. The top navigation stays visible like
+on every other page, and the assistant connection details sit in a
 collapsed panel at the end, where a member who only uses the pages never has to see them. The page
 is for signed-in members only; MCP clients use /mcp and the OAuth routes.
 """
@@ -12,18 +14,19 @@ from __future__ import annotations
 import asyncio
 import html
 import logging
+import time
 from typing import TYPE_CHECKING, Any
 
 from starlette.requests import Request
 from starlette.responses import RedirectResponse, Response
 
-from . import prefs
+from . import prefs, ui
 from .companion import DECK_CSP
 from .deckpage import covers_for, deck_list_held_html, decks_unreadable_html, image_url, reread_href
 from .decks import DeckError, is_busy
 from .pages import _csrf, browser_session, login_redirect
 from .theme import display_name, icon, render
-from .waiting_strip import waiting_line
+from .watchlist_page import due_line
 
 if TYPE_CHECKING:
     from mcp.server.mcpserver import MCPServer
@@ -36,13 +39,134 @@ RECENT = 6
 DECKS_TIMEOUT = 6.0  # seconds; the home page must not hang on Archidekt
 
 
-def tile(
-    href: str, ic: str, title: str, detail: str, *, number: int | str | None = None, cta: bool = False
+HOME_CSS = """
+/* Quick access (K8): the §3a widgets, the label is the section's link */
+.hq{grid-template-columns:repeat(auto-fill,minmax(min(100%,15.5rem),1fr))}
+.hq .wdg a.lab{color:var(--text);text-decoration:none;font-size:.95rem}
+.hq .wdg a.lab:hover{text-decoration:underline}
+.hq .wdg a.lab svg{stroke:var(--orange-text)}
+.hq .wdg .big{font-size:1.6rem}
+.home .list-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:.25rem 1rem;margin:1.5rem 0 .75rem}
+.home .list-head h2{margin:0}
+@media (min-width:600px) and (max-width:899.98px){.hq{grid-template-columns:repeat(2,minmax(0,1fr))}}
+/* phones: compact tiles, two a row, label and number only; the whole tile is the link */
+@media (max-width:599.98px){
+  .hq{grid-template-columns:1fr 1fr;gap:.5rem}
+  .hq .wdg{position:relative;padding:.6rem .7rem;min-height:64px;justify-content:center;gap:.15rem}
+  .hq .wdg .det,.hq .wdg .go{display:none}
+  .hq .wdg a.lab{text-transform:none;letter-spacing:0;font-size:1rem;min-height:28px;overflow-wrap:anywhere}
+  .hq .wdg a.lab::after{content:'';position:absolute;inset:0}
+  .hq .wdg .big{font-size:1.15rem}
+}
+"""
+
+
+def quick(
+    href: str,
+    ic: str,
+    title: str,
+    detail: str = "",
+    *,
+    big_html: str = "",
+    detail_html: str = "",
+    actions: tuple[str, ...] = (),
+    tone: str = "",
 ) -> str:
-    n = f"<span class='n'>{_esc(str(number))}</span>" if number is not None else ""
+    """One Quick access widget: the section's name as its link, a number when there is one, one
+    line and at most two quick starts (ui.button_link)."""
+    if len(actions) > 2:
+        raise ValueError("a widget has at most two quick starts")
+    det = detail_html or _esc(detail)
     return (
-        f"<a class='tile{' cta' if cta else ''}' href='{href}'>"
-        f"<span class='ti'>{icon(ic)}{_esc(title)}</span>{n}<span class='d'>{_esc(detail)}</span></a>"
+        f"<div class='wdg{' ' + tone if tone else ''}'><a class='lab' href='{_esc(href)}'>{icon(ic)}"
+        f"{_esc(title)}</a>"
+        + (f"<span class='big'>{big_html}</span>" if big_html else "")
+        + (f"<span class='det'>{det}</span>" if det else "")
+        + (f"<span class='go'>{''.join(actions)}</span>" if actions else "")
+        + "</div>"
+    )
+
+
+def _n(n: int, one: str, many: str) -> str:
+    return f"{n:,}<small>{_esc(one if n == 1 else many)}</small>"
+
+
+def _span(seconds: float) -> str:
+    """How long, in the Proposals page's words: "5 min", "20 h", "6 days"."""
+    seconds = max(0, int(seconds))
+    if seconds < 3600:
+        return f"{max(1, seconds // 60)} min"
+    if seconds < 2 * 86400:
+        return f"{seconds // 3600} h"
+    days = seconds // 86400
+    return f"{days} days"
+
+
+def proposals_line(rows: list[dict[str, Any]], *, now: float) -> str:
+    """The Proposals widget's line, the words of the Proposals page's "Waiting for you" widget:
+    "6 on 4 decks, 2 not tied to a deck · oldest 6 days · next expires in 20 h · 1 needs a look"."""
+    if not rows:
+        return "Every change is reviewed."
+    tied = [r for r in rows if str(r.get("deck_id") or "").isdigit()]
+    decks = len({str(r["deck_id"]) for r in tied})
+    loose = len(rows) - len(tied)
+    if tied:
+        first = f"{len(tied)} on {decks} deck{'' if decks == 1 else 's'}"
+        if loose:
+            first += f", {loose} not tied to a deck"
+    else:
+        first = f"{loose} not tied to a deck"
+    parts = [first]
+    made = [r["created_at"] for r in rows if r.get("created_at")]
+    if made:
+        parts.append(f"oldest {_span(now - min(made))}")
+    ends = [r["expires_at"] for r in rows if r.get("expires_at")]
+    if ends:
+        parts.append(f"next expires in {_span(min(ends) - now)}")
+    look = sum(1 for r in rows if r.get("status") == "needs_look")
+    if look:
+        parts.append(f"{look} need{'s' if look == 1 else ''} a look")
+    return " · ".join(parts)
+
+
+def reports_widget(
+    index: list[dict[str, Any]], latest: dict[str, Any] | None, going: int, *, now: float
+) -> str:
+    """Reports: Forge runs going as the number, the newest report as the line."""
+    det = "No reports yet."
+    actions: tuple[str, ...] = (ui.button_link("All reports", "/reports"),)
+    if latest is not None:
+        win = latest.get("win")
+        how = ""
+        if win and win.get("rate") is not None:
+            how = f", {100 * win['rate']:.0f}% won against precons"
+        ago = ui.when_text(latest.get("taken_at"), now=now)
+        det = f"Latest: {latest.get('deck_name') or 'Deck'}, {ago}{how}"
+        actions = (
+            ui.button_link("Open latest", f"/history/reports/{latest['report_id']}"),
+            ui.button_link("All reports", "/reports"),
+        )
+    return quick(
+        "/reports",
+        "report",
+        "Reports",
+        det,
+        big_html=_n(going, "Forge going", "Forge going") if going else "",
+        actions=actions,
+    )
+
+
+def watchlist_widget(data: dict[str, Any]) -> str:
+    """Watchlist: how many cards and decks, and today's first alert past its line."""
+    cards, decks = data.get("cards") or [], data.get("decks") or []
+    due = [d for d in (due_line(v) for v in cards if v.get("alerts")) if d]
+    return quick(
+        "/watchlist",
+        "stats",
+        "Watchlist",
+        due[0] if due else "",
+        big_html=_n(len(cards), "card", "cards") + " " + _n(len(decks), "deck", "decks"),
+        actions=(ui.button_link("Open watchlist", "/watchlist"),),
     )
 
 
@@ -202,53 +326,96 @@ def add_home_routes(server: MCPServer, state: AppState) -> None:
             "<div class='field'><label for='home-c'>Commander</label>"
             "<input id='home-c' type='text' name='commander' data-suggest='cards' autocomplete='off' "
             "placeholder='Commander'></div>"
-            f"<button class='btn-primary'>{icon('search')} Search Archidekt</button></form></section>"
+            # plain: the hero's New deck is the page's one orange button (§5)
+            f"<button class='btn-plain'>{icon('search')} Search Archidekt</button></form></section>"
         )
-        tiles = (
-            "<div class='tiles'>"
-            + "".join(
-                [
-                    tile(
-                        "/decks",
-                        "decks",
-                        "Decks",
-                        "Your decks as stacks, grid or text, with stats and edits.",
-                    ),
-                    tile("/search", "search", "Search", "Public decks by name, commander, format or owner."),
-                    tile("/precons", "box", "Precons", "Every preconstructed deck Archidekt lists, by set."),
-                    tile(
-                        "/scan",
-                        "camera",
-                        "Scan",
-                        "Point your phone at cards to build a list, a deck or your collection.",
-                        number=scans or None,
-                    ),
-                    tile(
-                        "/collection",
-                        "collection",
-                        "Collection",
-                        "The cards you own, on your Archidekt account; they get a green dot on every deck.",
-                    ),
-                    tile(
-                        "/proposals",
-                        "proposals",
-                        "Proposals",
-                        waiting_line(pending, state.db.pending_count_by_deck(sub))
-                        if pending
-                        else "Every change is reviewed.",
-                        number=pending,
-                        cta=bool(pending),
-                    ),
-                    tile("/history", "history", "History", "Snapshots, applied changes and deck reports."),
-                    tile("/guide", "guide", "Guide", "What you can do here, with or without an assistant."),
-                ]
-                + (
-                    [tile("/admin", "settings", "Admin", "Members, activity and the system.")]
-                    if admin
-                    else []
+        now = time.time()
+        board = state.db.pending_board(sub) if pending else []
+        items = [
+            quick(
+                "/decks",
+                "decks",
+                "Decks",
+                "Your decks as stacks, grid or text, with stats and edits.",
+                big_html=_n(len(decks), "deck", "decks") if isinstance(decks, list) else "",
+                actions=(ui.button_link("All decks", "/decks"),),
+            ),
+            quick(
+                "/search",
+                "search",
+                "Search",
+                "Public decks by name, commander, format or owner.",
+                actions=(ui.button_link("Card search", "/cards"), ui.button_link("Precons", "/precons")),
+            ),
+            quick(
+                "/scan",
+                "scan",
+                "Scan",
+                "Point your phone at cards to build a list, a deck or your collection.",
+                big_html=_n(scans, "open", "open") if scans else "",
+                actions=(ui.button_link("Start a scan", "/scan"),),
+            ),
+            quick(
+                "/collection",
+                "collection",
+                "Collection",
+                "The cards you own, on your Archidekt account; they get a green dot on every deck.",
+                actions=(ui.button_link("Open collection", "/collection"),),
+            ),
+            quick(
+                "/proposals",
+                "proposals",
+                "Proposals",
+                proposals_line(board, now=now),
+                big_html=_n(pending, "waiting", "waiting") if pending else "",
+                actions=(ui.button_link("Review them" if pending else "Open proposals", "/proposals"),),
+                tone="accent" if pending else "",
+            ),
+            quick(
+                "/history",
+                "history",
+                "History",
+                "Snapshots, restores, deck reports and backup copies.",
+                actions=(ui.button_link("Open history", "/history"),),
+            ),
+        ]
+        if state.reports is not None:
+            index = state.reports.index(sub)
+            latest = (state.reports.summaries(sub, [index[0]["report_id"]]) or [None])[0] if index else None
+            items.append(reports_widget(index, latest, len(state.reports.forge_queue(sub)), now=now))
+        if state.prices is not None:
+            items.append(watchlist_widget(state.prices.overview(sub, days=31)))
+        items += [
+            quick(
+                "/guide",
+                "guide",
+                "Guide",
+                "What you can do here, with or without an assistant.",
+                actions=(ui.button_link("Open guide", "/guide"),),
+            ),
+            quick(
+                "/account",
+                "account",
+                "Account",
+                "Your Archidekt link, notifications and the Android app.",
+                actions=(ui.button_link("Open account", "/account"),),
+            ),
+        ]
+        if admin:
+            items.append(
+                quick(
+                    "/admin",
+                    "settings",
+                    "Admin",
+                    "Members, activity and the system.",
+                    actions=(ui.button_link("Open admin", "/admin"),),
                 )
             )
-            + "</div>"
+        tiles = (
+            ui.list_head("Quick access", note="The same sections, in the same order, as the app's side bar")
+            + "<section class='ui-widgets hq' aria-label='Quick access'>"
+            + "".join(items)
+            + "</section>"
         )
         connect = (
             "<details class='connect panel'><summary>Connect an AI assistant "
@@ -274,7 +441,7 @@ def add_home_routes(server: MCPServer, state: AppState) -> None:
             heading=False,
             body_class="home",
             # decks.js fills the recent-decks panel; Home has none of deck.js's hooks
-            head_extra="<script src='/static/decks.js' defer></script>",
+            head_extra=f"<style>{HOME_CSS}</style><script src='/static/decks.js' defer></script>",
         )
         resp.headers["Content-Security-Policy"] = DECK_CSP  # deck covers come from Scryfall
         return resp
