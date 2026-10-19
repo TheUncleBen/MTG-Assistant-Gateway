@@ -439,7 +439,9 @@ async def apply(
             # progress: the snapshot and the backup copy are recorded as every apply's are,
             # so a stop that changed nothing deletes the copy or queues its delete
             result = {
-                **(await decks.delete_deck(sub, deck_id, deck.name, progress=progress)),
+                **(
+                    await decks.delete_deck(sub, deck_id, deck.name, progress=progress, proposal_id=row["id"])
+                ),
                 "verified": True,
             }
         except DeckError as exc:

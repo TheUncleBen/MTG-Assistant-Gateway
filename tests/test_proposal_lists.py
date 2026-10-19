@@ -4,6 +4,7 @@ applied proposal was applied, and the cards a waiting change touches."""
 from __future__ import annotations
 
 from .conftest import Stack
+from .test_account_actions import _press
 from .test_approval_modes import _set_mode
 from .test_decks_and_proxy import call, linked_user, structured
 
@@ -40,3 +41,24 @@ async def test_list_my_proposals_pages_through_all_of_them_and_takes_the_collect
         await call(h, token, "list_my_proposals", {"deck_id": "Collection", "pending_only": True})
     )
     assert [p["proposal_id"] for p in board["proposals"]] == [coll["proposal_id"]]
+
+
+async def test_a_deck_deletion_snapshot_names_its_proposal_and_snapshots_page(stack: Stack) -> None:
+    h = stack.h
+    token = await linked_user(stack)
+    await _set_mode(h, "auto")
+    edit = structured(await call(h, token, "propose_deck_changes", _add("Forest")))
+    applied = structured(await call(h, token, "apply_proposal", {"proposal_id": edit["proposal_id"]}))
+    assert applied["state"] == "applied", applied
+    res = await call(h, token, "propose_delete_deck", {"deck_id": "42"})
+    deletion = structured(res)
+    done = await _press(h, token, res)
+    snaps = structured(await call(h, token, "list_snapshots"))
+    assert snaps["has_more"] is False
+    gone = next(s for s in snaps["snapshots"] if s["snapshot_id"] == done["result"]["snapshot_id"])
+    assert gone["proposal_id"] == deletion["proposal_id"]
+    one = structured(await call(h, token, "list_snapshots", {"limit": 1}))
+    assert len(one["snapshots"]) == 1 and one["has_more"] is True and one["next_offset"] == 1
+    two = structured(await call(h, token, "list_snapshots", {"limit": 1, "offset": 1}))
+    assert two["snapshots"][0]["snapshot_id"] != one["snapshots"][0]["snapshot_id"]
+    assert structured(await call(h, token, "list_snapshots", {"deck_id": "43"}))["snapshots"] == []

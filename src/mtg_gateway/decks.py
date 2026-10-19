@@ -5937,13 +5937,13 @@ class DeckService:
     TAG_LOOKUP_ENTRIES = 512
     TAG_LOOKUP_NAMES = 20
 
-    def _hand_snapshot(self, sub: str, deck: Deck) -> str:
+    def _hand_snapshot(self, sub: str, deck: Deck, proposal_id: str | None = None) -> str:
         snapshot_id = secrets.token_urlsafe(12)
         if not self.db.save_snapshot(
             snapshot_id,
             owner_sub=sub,
             deck_id=deck.id,
-            proposal_id=None,
+            proposal_id=proposal_id,
             fingerprint=deck.fingerprint(),
             deck=deck.raw,
         ):
@@ -5959,21 +5959,28 @@ class DeckService:
             raise DeckError("writes_disabled", refusals.WRITES_OFF)
 
     async def delete_deck(
-        self, sub: str, deck_id: str, typed_name: str, *, progress: dict[str, Any] | None = None
+        self,
+        sub: str,
+        deck_id: str,
+        typed_name: str,
+        *,
+        progress: dict[str, Any] | None = None,
+        proposal_id: str | None = None,
     ) -> dict[str, Any]:
         """Delete one of the member's own decks after they typed its exact name. A snapshot is kept
         in the gateway and, when backups are on, a copy in the backup folder on Archidekt; the
         deletion is verified by reading the deck back (it must be gone). ``progress``: a
         delete-deck action's apply, which records the snapshot and the copy in it as every apply
         does, so an apply that stops before the deck is deleted deletes the unused
-        copy or queues its delete instead of leaving it unrecorded."""
+        copy or queues its delete instead of leaving it unrecorded. ``proposal_id``: that action's
+        proposal, which the snapshot names so the snapshot list says what it was taken for."""
         self._writes_switch()
         deck = await self.get_own_deck(sub, deck_id)
         if clean_text(typed_name).casefold() != clean_text(deck.name).casefold():
             raise DeckError(
                 "invalid", "The name you typed does not match the deck's name. Nothing was deleted."
             )
-        snapshot_id = self._hand_snapshot(sub, deck)
+        snapshot_id = self._hand_snapshot(sub, deck, proposal_id)
         if progress is not None:
             progress["snapshot_id"] = snapshot_id
         backup: dict[str, Any] = {}

@@ -1161,7 +1161,11 @@ async def test_snapshots_list_and_restore_through_a_proposal(stack: Stack) -> No
     applied through the normal path. Audit rows name the OAuth client (id and name) that acted."""
     h, ark = stack.h, stack.ark
     token = await linked_user(stack)
-    assert structured(await call(h, token, "list_snapshots")) == {"ok": True, "snapshots": []}
+    assert structured(await call(h, token, "list_snapshots")) == {
+        "ok": True,
+        "snapshots": [],
+        "has_more": False,
+    }
     changes = [
         {"action": "add", "card_name": "Arcane Signet", "quantity": 1, "category": "Ramp"},
         {"action": "remove", "card_name": "Acidic Slime"},

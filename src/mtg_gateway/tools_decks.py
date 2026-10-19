@@ -29,6 +29,7 @@ from .deckpage import decks_unreadable_text
 from .decks import (
     APPLY_WAIT_SECONDS,
     DeckError,
+    _clean_deck_id,
     clean_target,
 )
 from .schemas import (
@@ -601,13 +602,30 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
         title="List deck snapshots",
         description=(
             "List the snapshots the gateway kept of this user's decks (one is taken just before every "
-            "applied edit), newest first, with the deck and the proposal each belongs to. A snapshot "
+            "applied edit), newest first, with the deck and the proposal each belongs to. By default "
+            f"the 20 newest; limit (up to {MAX_SNAPSHOTS_PAGE}) and offset page through all of them "
+            "(has_more, next_offset), and deck_id keeps one deck's. A snapshot "
             "can be restored with propose_restore_snapshot."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": False},
     )
-    async def list_snapshots() -> dict[str, object]:
-        return {"ok": True, "snapshots": state.decks.list_snapshots(_sub())}
+    async def list_snapshots(
+        deck_id: Annotated[str | None, Field(description="Only this deck's (id or URL).")] = None,
+        limit: Annotated[int, Field(description=f"How many to return, 1 to {MAX_SNAPSHOTS_PAGE}.")] = 20,
+        offset: Annotated[int, Field(description="How many to skip, from next_offset.")] = 0,
+    ) -> dict[str, object]:
+        try:
+            sub = _sub()
+            narrow = {"deck_id": _clean_deck_id(deck_id)} if deck_id else {}
+            return _page(
+                "snapshots",
+                lambda lim, off: state.decks.list_snapshots(sub, limit=lim, offset=off, **narrow),
+                limit,
+                offset,
+                MAX_SNAPSHOTS_PAGE,
+            )
+        except DeckError as exc:
+            return _tool_error(exc)
 
     @server.tool(
         name="propose_restore_snapshot",
