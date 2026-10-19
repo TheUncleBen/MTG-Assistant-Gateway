@@ -20,6 +20,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
 from . import deck_stats, modes
+from .archidekt import page_turn
 from .decks import (
     DeckError,
     current_client,
@@ -98,6 +99,7 @@ async def caller_for(state: AppState, request: Request, *, write: bool) -> Calle
         if access is None or not access.subject:
             return _unauth("The access token is missing, expired or revoked.")
         # load_access_token refuses disabled members and anyone outside MTG_REQUIRED_GROUP.
+        page_turn.set(False)  # an app's request, not a member's page (archidekt.page_turn)
         return Caller(access.subject, access.client_id, "api", tuple(access.scopes or ()))
     sub, sid = browser_session(state, request)
     if not sub or not sid:

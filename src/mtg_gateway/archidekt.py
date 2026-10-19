@@ -18,6 +18,7 @@ import copy
 import datetime
 import email.utils
 import hashlib
+import heapq
 import http.cookiejar
 import json
 import logging
@@ -755,12 +756,60 @@ def retry_after_seconds(value: str | None, *, now: float | None = None) -> float
     return max(0.0, when.timestamp() - (time.time() if now is None else now))
 
 
+# Set while a member's own browser page is being answered (pages.browser_session): its Archidekt
+# requests take their turn in the shared Pacer before those of assistants, applies and the deck
+# sync that are waiting, so opening a page is not stuck behind a fast assistant's queue. Only the
+# order changes; every request still keeps the gap and the per-minute cap.
+page_turn: contextvars.ContextVar[bool] = contextvars.ContextVar("archidekt_page_turn", default=False)
+
+
+class TurnLock:
+    """A lock handed to its waiters in two lines: those from a member's page (``first``) before
+    the rest, each line in arrival order. Like asyncio.Lock, a waiter that is cancelled never
+    keeps the lock: if it had just been handed the lock, it passes it on."""
+
+    def __init__(self) -> None:
+        self._held = False
+        self._waiters: list[tuple[int, int, asyncio.Future[None]]] = []
+        self._seq = 0
+
+    def locked(self) -> bool:
+        return self._held
+
+    async def acquire(self, *, first: bool = False) -> None:
+        if not self._held and all(w[2].done() for w in self._waiters):
+            self._held = True
+            return
+        fut: asyncio.Future[None] = asyncio.get_running_loop().create_future()
+        self._seq += 1
+        entry = (0 if first else 1, self._seq, fut)
+        heapq.heappush(self._waiters, entry)
+        try:
+            await fut  # resolved by release(), which hands the lock over (it stays held)
+        except BaseException:
+            if fut.done() and not fut.cancelled():
+                self.release()  # handed the lock just as this waiter was cancelled: pass it on
+            elif entry in self._waiters:
+                self._waiters.remove(entry)
+                heapq.heapify(self._waiters)
+            raise
+
+    def release(self) -> None:
+        while self._waiters:
+            _line, _seq, fut = heapq.heappop(self._waiters)
+            if not fut.done():
+                fut.set_result(None)
+                return
+        self._held = False
+
+
 class Pacer:
     """Global request pacing shared by every user: one call at a time, a minimum
     gap between calls, at most ``max_per_minute`` calls in any 60 seconds (0: no
     such cap), Retry-After respected, and a breaker that opens for a minute after
     five consecutive failures. A call past the per-minute cap waits for a slot
-    rather than failing, so a long apply slows down instead of stopping halfway."""
+    rather than failing, so a long apply slows down instead of stopping halfway.
+    A call made for a member's page (``page_turn``) goes before the waiting calls that are not."""
 
     MAX_RETRY_AFTER = 120.0  # a larger (or garbled) Retry-After must not stall every user for longer
     WINDOW = 60.0
@@ -769,14 +818,14 @@ class Pacer:
         self.min_interval = min_interval
         self.max_per_minute = max(0, int(max_per_minute))
         self._sent: deque[float] = deque()  # start times of the calls in the last WINDOW seconds
-        self._lock = asyncio.Lock()
+        self._lock = TurnLock()
         self._next_allowed = 0.0
         self._failures = 0
         self._open_until = 0.0
         self._retry_until = 0.0  # set by a 429's Retry-After: calls are refused until then
 
     async def __aenter__(self) -> None:
-        await self._lock.acquire()
+        await self._lock.acquire(first=page_turn.get())
         try:
             now = time.monotonic()
             if now < self._open_until:
