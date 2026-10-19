@@ -156,6 +156,21 @@ def test_when_markup_has_one_form_with_a_full_tooltip() -> None:
     )
 
 
+def test_feedback_script_has_the_same_rule() -> None:
+    js = (theme.STATIC_DIR / "feedback.js").read_text()
+    for needle in (
+        "rel: function (value, now)",
+        '"just now"',
+        '" min ago"',
+        '" h ago"',
+        "age <= 7 * 86400",
+        '" day ago"',
+        '" days ago"',
+        "time[datetime][data-fmt=rel]",
+    ):
+        assert needle in js, needle
+
+
 def test_widget() -> None:
     out = ui.widget(
         "Waiting for you",
