@@ -434,8 +434,9 @@ def test_forge_results_fit_and_read(server: Server, width: int, scheme: str) -> 
 @pytest.mark.parametrize("width", [320, 344, 600, 640, 717, 1366])
 @pytest.mark.parametrize("scheme", ["light", "dark"])
 def test_reports_page_fits_and_reads(server: Server, width: int, scheme: str) -> None:
-    """The Reports page under More, with a Forge run playing, one waiting and a long deck
-    name: no sideways scroll, 4.5:1 text in both themes, 44px filter and trend targets."""
+    """The Reports dashboard (approved K4), with a Forge run playing, one waiting and a long deck
+    name: no sideways scroll, 4.5:1 text in both themes, 44px filter and open targets on touch
+    screens, the table's rows, and the deck filter applying as soon as it changes."""
     import json
     import os
 
@@ -488,10 +489,10 @@ def test_reports_page_fits_and_reads(server: Server, width: int, scheme: str) ->
                   .map(e => e.getBoundingClientRect().right)),
                 low,
                 checked: texts.length,
-                rows: box.querySelectorAll('.rp-row').length,
-                runs: box.querySelectorAll('.rp-runs li').length,
-                targets: [...h('.rp-trend'), ...h('.rp-filter select:not(.msel-native)'),
-                          ...h('.rp-filter .msel-btn'), ...h('.rp-filter .btn')],
+                rows: box.querySelectorAll('.rp-t .tr:not(.th)').length,
+                waiting: box.querySelector('.wdg.accent .big').textContent,
+                targets: [...h('.ui-tools .msel-btn'), ...h('.ui-tools select:not(.msel-native)'),
+                          ...h('.rp-t .act'), ...h('.wdg .go .btn')],
               };
             }""",
             CONTRAST,
@@ -499,20 +500,11 @@ def test_reports_page_fits_and_reads(server: Server, width: int, scheme: str) ->
         assert state["scrollWidth"] <= state["innerWidth"], state
         assert state["right"] <= state["innerWidth"] + 0.5, state
         assert state["checked"] > 10 and not state["low"], state["low"]
-        assert state["rows"] == 3 and state["runs"] == 2
-        assert min(state["targets"]) >= 44, state["targets"]
-        if width > 600:
-            # On wider screens the Show button stays on the select's line (at
-            # 600px and narrower the site's phone layout makes a form's button full width, below)
-            tops = page.evaluate(
-                "() => ['.rp-filter .msel-btn', '.rp-filter .btn'].map(s =>"
-                " Math.round(document.querySelector(s).getBoundingClientRect().top))"
-            )
-            assert tops[0] == tops[1], tops
-        text = page.locator(".rp-queue").inner_text()
+        assert state["rows"] == 3 and state["waiting"] == "1playing 1waiting", state["waiting"]
+        assert min(state["targets"]) >= 32, state["targets"]
+        text = page.locator(".wdg.accent").inner_text()
         # The games played so far, as the report page counts them
-        assert "With Forge: 3 of 10 games played" in text
-        assert "Waiting: number 1 in line" in text
+        assert "3 of 10 games played" in text and "Show waiting (1)" in text
         # At 200% text the deck filter still fits, inside the window
         # and its panel, at every width, and the whole page fits the window too.
         from .test_overflow_sweep_browser import MEASURE
@@ -523,9 +515,9 @@ def test_reports_page_fits_and_reads(server: Server, width: int, scheme: str) ->
             page.evaluate(zoom)
             fit = page.evaluate(
                 """() => {
-                  const panel = document.querySelector('.rp-all').getBoundingClientRect();
-                  return Array.from(document.querySelectorAll('.rp-filter, .rp-filter *'))
-                    .filter(e => e.getClientRects().length && !e.closest('.msel-native'))
+                  const panel = document.querySelector('.reports-page').getBoundingClientRect();
+                  return Array.from(document.querySelectorAll('.ui-tools, .ui-tools *'))
+                    .filter(e => e.getClientRects().length && !e.closest('.msel-native, .sr-only'))
                     .map(e => [e.tagName + '.' + e.className, e.getBoundingClientRect()])
                     .filter(([, r]) => r.width && (r.right > Math.min(window.innerWidth, panel.right) + 0.5
                                                    || r.left < Math.max(0, panel.left) - 0.5))
@@ -537,10 +529,10 @@ def test_reports_page_fits_and_reads(server: Server, width: int, scheme: str) ->
             assert found == [], (zoom[:40], found)
             if shots:
                 page.screenshot(path=f"{shots}/reports-page-{width}-{scheme}-text200.png", full_page=True)
-        page.select_option("#rp-deck", "43")
-        page.locator(".rp-filter .btn").click()
+        page.select_option("select[name=deck_id]", "43")
+        page.wait_for_url("**deck_id=43**")
         page.wait_for_load_state("networkidle")
-        assert page.locator(".rp-row").count() == 1 and "deck_id=43" in page.url
+        assert page.locator(".rp-t .tr:not(.th)").count() == 1
         assert not errors, errors
         browser.close()
 

@@ -1154,7 +1154,8 @@ main.wrap.ui-wide{max-width:1200px}
 .ui-tools .search svg.i{position:absolute;left:.7rem;top:50%;transform:translateY(-50%);width:16px;
   height:16px;
   color:var(--text-muted);pointer-events:none}
-.ui-tools .search input{width:100%;margin:0;padding-left:2.2rem;font-weight:400}
+.ui-tools .search input{width:100%;margin:0;padding-left:2.2rem;font-weight:400;
+  border-right:1px solid var(--control-border);border-radius:var(--radius)}
 .ui-tools .f{flex:0 1 10.5rem;min-width:8.5rem;display:flex;align-items:center}
 .ui-tools select{margin:0}
 @media (max-width:599.98px){.ui-tools .f{flex:1 1 calc(50% - .5rem)}}
@@ -1248,7 +1249,7 @@ main.wrap.ui-wide{max-width:1200px}
 .ui-pager{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:.5rem;
   margin:.5rem 0 1rem}
 .ui-pager .info{color:var(--text-muted)}
-.ui-pager .btns{display:flex;gap:.5rem}
+.ui-pager .btns{display:flex;flex-wrap:wrap;gap:.5rem}
 .ui-pager .btns .btn,.ui-pager .btns button{margin:0}
 .ui-pager button[disabled],.ui-pager .btn[aria-disabled=true]{opacity:.55}
 

@@ -661,9 +661,10 @@ async def test_forge_comparison_reads_the_other_deck_first_on_every_path(stack: 
 
 
 async def test_reports_page_lists_every_report_and_what_forge_plays(stack: Stack) -> None:
-    """/reports lists the member's reports newest first with their status, what
-    ran and a link to the deck's trend in History; a deck filter; and the Forge runs playing or
-    waiting, with their place. Signed out, it asks to sign in."""
+    """/reports (the approved K4 dashboard) lists the member's reports newest first as a table with
+    each status as a label, a deck filter, chips with counts, and the Forge now widget with the runs
+    playing or waiting and their place. The per-row "Deck trend and history" link is gone (approved
+    question 9): trends open from the widgets. Signed out, it asks to sign in."""
     from .test_forge import FakeForge
 
     h = stack.h
@@ -673,15 +674,15 @@ async def test_reports_page_lists_every_report_and_what_forge_plays(stack: Stack
     try:
         empty = await b.http.get("/reports", headers=NAV)
         assert empty.status_code == 200 and "No reports yet" in empty.text and "Run full test" in empty.text
-        assert "Forge now" not in empty.text
+        assert "Nothing plays or waits now." in empty.text
         csrf = await b.csrf("/account")
         await b.http.post("/decks/42/report", data={"csrf": csrf, "forge": "0"})
         listed = await b.http.get("/reports", headers=NAV)
-        assert "class='rp-deck' href='/history/reports/rep_" in listed.text
-        assert (
-            "Sample Commander Deck" in listed.text and "/history?deck_id=42&amp;type=reports" in listed.text
-        )
-        assert "<option value='42'" in listed.text and "<p class='rp-meta'>" in listed.text
+        assert "<a href='/history/reports/rep_" in listed.text and "class='ui-table rp-t'" in listed.text
+        assert "Sample Commander Deck" in listed.text and "Deck trend and history" not in listed.text
+        assert "/history?deck_id=42&amp;type=reports" in listed.text  # the Latest report widget's Deck trend
+        assert "<option value='42'" in listed.text and "1–1 of 1" in listed.text
+        assert "aria-current='true'>All <span class='n'>1</span>" in listed.text
         none = await b.http.get("/reports?deck_id=999", headers=NAV)
         assert "No reports for this deck yet" in none.text
         reports.forge = fake.client()
@@ -689,12 +690,11 @@ async def test_reports_page_lists_every_report_and_what_forge_plays(stack: Stack
         first = await reports.run(sub, "42", simulate=False, forge=True, options={"seed": 1})
         await reports.run(sub, "42", simulate=False, forge=True, options={"seed": 2})
         queued = await b.http.get("/reports", headers=NAV)
-        assert (
-            "Forge now" in queued.text
-            and "With Forge: 0 of" in queued.text
-            and "Waiting: number 1 in line" in queued.text
-        )
+        assert "Forge now" in queued.text and "games played" in queued.text
+        assert "Show waiting (1)" in queued.text and "class='wdg accent'" in queued.text
         assert f"href='/history/reports/{first['report_id']}'" in queued.text
+        going = await b.http.get("/reports?show=going", headers=NAV)
+        assert going.text.count("<div class='tr'>") == 2
         out = await stack.h.http.get("/reports")
         assert out.status_code in (302, 303)
     finally:
@@ -1315,12 +1315,31 @@ async def test_goldfish_guide_choice_is_kept_for_the_account(stack: Stack) -> No
 
 def test_reports_page_row_shows_the_set_bracket_over_the_estimate() -> None:
     """A bracket set on the deck is THE bracket; Archidekt's estimate shows, labelled,
-    only when none is set."""
+    only when none is set. A report without a legality check says so in its place, and a
+    constructed deck says the check is for Commander only (approved question 8)."""
     from mtg_gateway.reports_page import row_html
 
-    base = {"report_id": "rep_1", "deck_id": "42", "deck_name": "Aesi", "status": "complete"}
-    both = row_html({**base, "bracket_set": 4, "bracket_estimate": 2})
+    base = {
+        "report_id": "rep_1",
+        "deck_id": "42",
+        "deck_name": "Aesi",
+        "status": "complete",
+        "has_validation": True,
+        "has_goldfish": True,
+    }
+
+    def row(r: dict) -> str:
+        return row_html(r, {}, now=0)
+
+    both = row({**base, "bracket_set": 4, "bracket_estimate": 2})
     assert "Bracket: Optimized (4)" in both and "Core (2)" not in both and "estimate" not in both
-    est = row_html({**base, "bracket_set": None, "bracket_estimate": 2})
+    est = row({**base, "bracket_set": None, "bracket_estimate": 2})
     assert "Archidekt's estimate from cards: Core (2)" in est and "Bracket:" not in est
-    assert "racket" not in row_html(base)
+    assert "racket" not in row(base)
+    assert "No legality check" in row({**base, "has_validation": False, "bracket_set": 4})
+    assert "Commander check only" in row({**base, "constructed": True})
+    # the status as a §4 label: Partial orange with the triangle, Failed red
+    assert "class='ui-lbl orange'" in row({**base, "status": "partial"}) and "Partial" in row(
+        {**base, "status": "partial"}
+    )
+    assert "class='ui-lbl red'" in row({**base, "status": "failed"})
