@@ -677,13 +677,24 @@ def _card_matches(card: dict[str, Any], name: str) -> bool:
     return oracle.casefold() == want or front_face(oracle).casefold() == front_face(name).casefold()
 
 
+def _released(card: dict[str, Any], today: str) -> bool:
+    """Whether a search hit's printing is out already: its ``releasedAt`` (else its set's
+    ``editiondate``) is today or earlier. Archidekt lists a set that is still being previewed
+    with a date to come; a hit with no readable date counts as released."""
+    edition = card.get("edition") if isinstance(card.get("edition"), dict) else {}
+    date = str(card.get("releasedAt") or edition.get("editiondate") or "")[:10]
+    return not re.fullmatch(r"\d{4}-\d{2}-\d{2}", date) or date <= today
+
+
 def _prefer_printing(
     hits: list[dict[str, Any]], set_code: str | None, collector_number: str | None
 ) -> dict[str, Any]:
-    if not set_code and not collector_number:
-        return hits[0]
+    """The hit to use: the one matching the asked set and number best, and among equal ones a
+    printing already released before one from a set still in preview, so a card named without
+    a printing never lands as a preview copy (Archidekt lists the newest sets first)."""
+    today = datetime.datetime.now(datetime.UTC).date().isoformat()
 
-    def score(c: dict[str, Any]) -> int:
+    def score(c: dict[str, Any]) -> tuple[int, bool]:
         edition = c.get("edition") if isinstance(c.get("edition"), dict) else {}
         code = str(edition.get("editioncode", "")).casefold()
         number = str(c.get("collectorNumber", "")).casefold()
@@ -692,7 +703,7 @@ def _prefer_printing(
             s += 2
         if collector_number and number == collector_number.casefold():
             s += 1
-        return s
+        return s, _released(c, today)
 
     return max(hits, key=score)  # stable: the first hit wins ties
 
