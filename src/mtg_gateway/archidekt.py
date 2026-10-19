@@ -726,7 +726,11 @@ class DeckList(list):  # type: ignore[type-arg]
     (DeckService.on_archidekt). ``unreadable`` counts the entries left out because their owner
     field could not be read at all: My decks then says the list couldn't be read instead of
     showing it as whole. ``last_read`` (epoch seconds) is set only on a list the pages show as last
-    read because Archidekt cannot be asked right now (DeckService.last_deck_list)."""
+    read because Archidekt cannot be asked right now (DeckService.last_deck_list).
+    ``folder_names_unread`` is True when folder names were asked for (list_my_decks) but the
+    folder tree couldn't be read, so some rows' ``folder`` is None though they are in a folder."""
+
+    folder_names_unread = False
 
     def __init__(
         self, rows: Any = (), *, complete: bool = False, unreadable: int = 0, last_read: float | None = None

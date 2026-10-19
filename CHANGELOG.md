@@ -104,7 +104,8 @@ in-chat cards, deck reports and the Settings and Account pages.
   while Scryfall asked the gateway to wait. They are now read in the background as the page opens and
   kept for a day, so they show at once.
 - `list_my_decks` gave no folder name and no cover for decks that have them, so filtering by folder
-  found nothing. A deck in the backup folder could also show in My decks for the same reason.
+  found nothing. A deck in the backup folder could also show in My decks for the same reason. When
+  the folder names can't be read from Archidekt, `list_my_decks` now says so.
 - Looking up someone you follow read only the first 5 pages of the list, so a person further down
   was "not followed" when adding a collaborator, and a follow couldn't say whether you already followed
   them. Both now read on until they find the person, up to 20 pages. A lookup repeated within two

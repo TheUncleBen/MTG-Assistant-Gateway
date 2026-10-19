@@ -75,7 +75,7 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
         """(the member's folder tree, still being read). The tree is None when Archidekt could
         not give it (My decks then lists every deck flat, with a notice) or is still coming."""
         try:
-            tree = await decks.folder_view(sub, wait=wait)
+            tree = await decks.folder_view(sub, wait=wait, last_read_ok=True)
         except DeckError:
             return None, False
         return tree, tree is None

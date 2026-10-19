@@ -2304,16 +2304,17 @@ class DeckService:
             hook(sub, "")
 
     @asynccontextmanager
-    async def archidekt_slot(self, sub: str | None) -> AsyncIterator[None]:
+    async def archidekt_slot(self, sub: str | None, *, wait: float | None = None) -> AsyncIterator[None]:
         """Count one unit of Archidekt work for ``sub`` while the block runs. At most
         ``max_archidekt_per_user`` run or wait in the shared pacer per member; another waits
         outside the pacer for one of them to end (see ARCHIDEKT_SLOT_WAIT), so it never queues
-        the pacer up for everyone. A task that already holds the member's slot (an apply's
+        the pacer up for everyone. ``wait`` shortens that wait (0: refused at once unless a slot is
+        free), for a best-effort read. A task that already holds the member's slot (an apply's
         reads and writes) does not take another."""
         if not sub or _slot_holder.get() == sub:
             yield
             return
-        await self._take_slot(sub)
+        await self._take_slot(sub, wait=wait)
         try:
             refused = self.budget_refusal(sub)
             if refused:
@@ -2337,26 +2338,24 @@ class DeckService:
         err.busy_cause = "member_slots"
         return err
 
-    async def _take_slot(self, sub: str) -> None:
+    async def _take_slot(self, sub: str, *, wait: float | None = None) -> None:
         """One of the member's slots: at once when one is free and nobody is waiting, else the
         next one to end, the member's pages before the rest; refused after
-        ``archidekt_slot_wait`` seconds or with MAX_ARCHIDEKT_WAITING_PER_USER already waiting."""
+        ``archidekt_slot_wait`` seconds (or ``wait``, when shorter) or with
+        MAX_ARCHIDEKT_WAITING_PER_USER already waiting."""
         waiters = self._slot_waiters.get(sub, [])
         if self._archidekt_in_flight.get(sub, 0) < self.max_archidekt_per_user and not waiters:
             self._archidekt_in_flight[sub] = self._archidekt_in_flight.get(sub, 0) + 1
             return
-        if (
-            self.max_archidekt_per_user <= 0
-            or self.archidekt_slot_wait <= 0
-            or len(waiters) >= MAX_ARCHIDEKT_WAITING_PER_USER
-        ):
+        limit = self.archidekt_slot_wait if wait is None else min(wait, self.archidekt_slot_wait)
+        if self.max_archidekt_per_user <= 0 or limit <= 0 or len(waiters) >= MAX_ARCHIDEKT_WAITING_PER_USER:
             raise self._slots_full(sub)
         fut: asyncio.Future[None] = asyncio.get_running_loop().create_future()
         self._slot_seq += 1
         entry = (0 if page_turn.get() else 1, self._slot_seq, fut)
         heapq.heappush(self._slot_waiters.setdefault(sub, waiters), entry)
         try:
-            await asyncio.wait_for(fut, self.archidekt_slot_wait)  # the slot is handed over counted
+            await asyncio.wait_for(fut, limit)  # the slot is handed over counted
         except BaseException as exc:
             if fut.done() and not fut.cancelled():
                 self._give_slot(sub)  # handed a slot just as this waiter gave up: pass it on
@@ -2600,9 +2599,10 @@ class DeckService:
         row["_secret"] = secret
         return access, row
 
-    async def _call(self, sub: str, fn: Any, *args: Any) -> Any:
-        """``_call_unslotted`` inside the member's Archidekt slot (see ``archidekt_slot``)."""
-        async with self.archidekt_slot(sub):
+    async def _call(self, sub: str, fn: Any, *args: Any, slot_wait: float | None = None) -> Any:
+        """``_call_unslotted`` inside the member's Archidekt slot (see ``archidekt_slot``, which
+        ``slot_wait`` goes to)."""
+        async with self.archidekt_slot(sub, wait=slot_wait):
             return await self._call_unslotted(sub, fn, *args)
 
     async def _call_unslotted(self, sub: str, fn: Any, *args: Any, background: bool = False) -> Any:
@@ -2721,16 +2721,17 @@ class DeckService:
         self.db.audit(event, sub=sub, client_id=client_id, detail=detail)
 
     # -- reads ----------------------------------------------------------------
-    async def list_decks(self, sub: str) -> list[dict[str, Any]]:
+    async def list_decks(self, sub: str, *, folder_names: bool = False) -> list[dict[str, Any]]:
         """The member's decks, from the in-memory list when it is fresh (DECK_LIST_FRESH) or stale
         with a refresh running (DECK_LIST_STALE), else read from Archidekt now. Every write the
-        gateway sends for the member drops the list first, so the next read is live again."""
-        rows = await self.list_decks_quick(sub, wait=None)
+        gateway sends for the member drops the list first, so the next read is live again.
+        ``folder_names``: see ``_deck_rows``."""
+        rows = await self.list_decks_quick(sub, wait=None, folder_names=folder_names)
         assert rows is not None
         return rows
 
     async def _deck_rows(
-        self, sub: str, *, wait: float | None, prefer_fresh: bool = False
+        self, sub: str, *, wait: float | None, prefer_fresh: bool = False, folder_names: bool = False
     ) -> DeckList | None:
         """Every deck of the linked account from the member cache (or Archidekt), the gateway's
         backup copies marked ``backup: True``: those in the backup folder, those named like one,
@@ -2738,7 +2739,12 @@ class DeckService:
         listing's ``complete`` and ``unreadable`` (see archidekt.DeckList); a list of unknown origin
         is incomplete. A list with entries whose owner could not be read is kept only briefly
         (DECK_LIST_PARTIAL): My decks says so with Try again, which reads Archidekt again
-        through ``reread_deck_list``."""
+        through ``reread_deck_list``.
+
+        ``folder_names`` (list_my_decks): ``folder`` is filled in on rows that carry only the
+        folder's id, from the same one read of the folder tree the backup marks use; when that
+        tree can't be read now the rows keep ``folder`` None and the list's
+        ``folder_names_unread`` is True."""
         _token, row = self._token(sub)  # not linked: raise before touching the cache
         folder = self.settings.archidekt_backup_folder  # with backups on or off
 
@@ -2753,7 +2759,21 @@ class DeckService:
         rows = await self.deck_lists.get(sub, fetch, wait=wait, prefer_fresh=prefer_fresh)
         if rows is None:
             return None
-        return self._marked(sub, rows, await self._backup_folder_ids(sub, rows, wait=wait))
+        # Archidekt's owner listing can leave a folder's name out and give only its id
+        unnamed = any(d.get("folder_id") is not None and not d.get("folder") for d in rows)
+        info = None
+        if unnamed and (folder_names or self.settings.archidekt_backup_folder):
+            info = await self._folder_tree_now(sub, wait=wait)
+        out = self._marked(sub, rows, self._backup_folder_ids(sub, info))
+        if folder_names and unnamed:
+            if info is None:
+                out.folder_names_unread = True
+            else:
+                names = {f["id"]: f["name"] for f in info["folders"] if f["depth"] > 0}
+                for d in out:
+                    if d.get("folder_id") is not None and not d.get("folder"):
+                        d["folder"] = names.get(d["folder_id"])
+        return out
 
     def _marked(
         self, sub: str, rows: list[dict[str, Any]], backup_ids: set[int], last_read: float | None = None
@@ -2796,36 +2816,53 @@ class DeckService:
             [d for d in rows if not d.get("backup")], complete=False, unreadable=0, last_read=held[0]
         )
 
-    async def _backup_folder_ids(
-        self, sub: str, rows: list[dict[str, Any]], *, wait: float | None
-    ) -> set[int]:
+    async def _folder_tree_now(self, sub: str, *, wait: float | None) -> dict[str, Any] | None:
+        """The member's folder tree flattened, from the member cache or read now, for naming deck
+        rows' folders; a best-effort read, so outside a page it takes one of the member's
+        Archidekt slots only when one is free (no wait behind their other work). None when it
+        can't be read now or ``wait`` ran out; never the tree as last read, which may be out of
+        date."""
+        slot_wait = None if page_turn.get() else 0.0
+
+        async def fetch() -> dict[str, Any]:
+            return await self._call(sub, self.client.folder_tree, slot_wait=slot_wait)
+
+        try:
+            tree = await self.folder_trees.get(sub, fetch, wait=wait)
+        except DeckError:
+            return None
+        return None if tree is None else self._flatten_folders(tree)
+
+    def _backup_folder_ids(self, sub: str, info: dict[str, Any] | None) -> set[int]:
         """The ids of the backup folder and the folders inside it, for deck rows that carry their
-        folder's id but not its name (Archidekt's owner listing can leave the name out, and
-        archidekt.list_decks recognises the backup folder by name). Read from the member's folder
-        tree, cached like the deck list, only when such a row is there; empty when the tree can't
-        be read in time (the name check and the snapshots' own records still apply)."""
+        folder's id but not its name (archidekt.list_decks recognises the backup folder by name):
+        from ``info`` (``_folder_tree_now``), else from the tree as last read (the backup folder's
+        id doesn't change). Empty when neither is there (the name check and the snapshots' own
+        records still apply)."""
         if not self.settings.archidekt_backup_folder:
             return set()
-        if not any(d.get("folder_id") is not None and not d.get("folder") for d in rows):
-            return set()
-        try:
-            info = await self.folder_view(sub, wait=wait)
-        except DeckError:
-            return set()
+        if info is None:
+            held = self.folder_trees.last(sub, DECK_LIST_LAST)
+            info = self._flatten_folders(held[1]) if held is not None and held[1] is not None else None
         return {f["id"] for f in (info or {}).get("folders", []) if f.get("backup")}
 
-    async def list_decks_quick(self, sub: str, *, wait: float | None = None) -> list[dict[str, Any]] | None:
+    async def list_decks_quick(
+        self, sub: str, *, wait: float | None = None, folder_names: bool = False
+    ) -> list[dict[str, Any]] | None:
         """``list_decks`` that gives up waiting for a cold read after ``wait`` seconds and answers
         None; the read carries on and lands in the cache for /api/decks/mine. ``wait=None``
         waits for it. The list comes back as fresh dicts, so a caller may sort or add to it. The
         gateway's backup copies are left out (``backup_copies`` lists them, History shows them).
-        It keeps the listing's ``complete`` and ``unreadable`` (archidekt.DeckList)."""
-        rows = await self._deck_rows(sub, wait=wait)
+        It keeps the listing's ``complete`` and ``unreadable`` (archidekt.DeckList), and
+        ``folder_names_unread`` (see ``_deck_rows``)."""
+        rows = await self._deck_rows(sub, wait=wait, folder_names=folder_names)
         if rows is None:
             return None
-        return DeckList(
+        out = DeckList(
             [d for d in rows if not d.get("backup")], complete=rows.complete, unreadable=rows.unreadable
         )
+        out.folder_names_unread = rows.folder_names_unread
+        return out
 
     async def backup_copies(
         self,
@@ -6306,10 +6343,14 @@ class DeckService:
         tree = await self._call(sub, self.client.folder_tree)
         return self._flatten_folders(tree)
 
-    async def folder_view(self, sub: str, *, wait: float | None = None) -> dict[str, Any] | None:
+    async def folder_view(
+        self, sub: str, *, wait: float | None = None, last_read_ok: bool = False
+    ) -> dict[str, Any] | None:
         """``folders`` from the member cache (fresh for DECK_LIST_FRESH, then refreshed in the
         background like the deck list), for My decks. None when the tree is cold and ``wait``
-        ran out; the read carries on and lands in the cache."""
+        ran out; the read carries on and lands in the cache. ``last_read_ok`` (My decks, which
+        says how old its list is): while Archidekt can't be asked, the tree as last read, up to
+        DECK_LIST_LAST old; never for an assistant."""
 
         async def fetch() -> dict[str, Any]:
             return await self._call(sub, self.client.folder_tree)
@@ -6318,29 +6359,11 @@ class DeckService:
             tree = await self.folder_trees.get(sub, fetch, wait=wait)
         except DeckError as exc:
             # Archidekt can't be asked: the tree as last read, as the deck list (last_deck_list)
-            held = self.folder_trees.last(sub, DECK_LIST_LAST) if is_busy(exc) else None
+            held = self.folder_trees.last(sub, DECK_LIST_LAST) if last_read_ok and is_busy(exc) else None
             if held is None:
                 raise
             tree = held[1]
         return None if tree is None else self._flatten_folders(tree)
-
-    async def name_folders(self, sub: str, rows: list[dict[str, Any]]) -> None:
-        """Fill in ``folder`` on deck rows that carry only ``folder_id``: Archidekt's owner listing
-        can leave the folder's name out, so it is looked up in the member's folder tree (cached
-        like the deck list, so one read at most). A deck at the top level keeps ``folder`` None;
-        when the tree can't be read the rows are left as they are."""
-        if not any(d.get("folder_id") is not None and not d.get("folder") for d in rows):
-            return
-        try:
-            info = await self.folder_view(sub, wait=None)
-        except DeckError:
-            return
-        if info is None:
-            return
-        names = {f["id"]: f["name"] for f in info["folders"] if f["depth"] > 0}
-        for d in rows:
-            if d.get("folder_id") is not None and not d.get("folder"):
-                d["folder"] = names.get(d["folder_id"])
 
     def _is_backup_folder(self, name: str, depth: int) -> bool:
         """The gateway's backup folder: the folder the deck list treats as it (its exact name, as

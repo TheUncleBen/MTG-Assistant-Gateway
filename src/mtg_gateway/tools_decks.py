@@ -42,6 +42,12 @@ from .schemas import (
 from .views import deck_out
 
 MAX_PROPOSALS_PAGE = 100
+# list_my_decks' note when the folder tree couldn't be read, so decks Archidekt listed by folder id
+# only have no folder name
+FOLDER_NAMES_UNREAD = (
+    "Folder names couldn't be read from Archidekt just now, so some decks show no folder here. "
+    "Try again in a moment."
+)
 MAX_SNAPSHOTS_PAGE = 100
 
 
@@ -120,7 +126,8 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
             "featured_scryfall_id is the cover's card when Archidekt's list carries it; it can be null "
             "even when a cover is set, so never take null as the deck having no cover. "
             "unreadable counts decks Archidekt listed without a readable owner, which are left out; when "
-            "it is above 0, note says so in words to pass on to the member."
+            "it is above 0, note says so in words to pass on to the member. note also says when folder "
+            "names couldn't be read, so folder is null on some decks and a folder filter may miss them."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": True},
         meta=deck_list_card_meta,
@@ -129,15 +136,17 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
         name_contains: str | None = None, deck_format: str | None = None, folder: str | None = None
     ) -> dict[str, object]:
         try:
-            rows = await state.decks.list_decks(_sub())
+            # folder names filled in before the folder filter, which matches on the name
+            rows = await state.decks.list_decks(_sub(), folder_names=True)
         except DeckError as exc:
             return _tool_error(exc)
         # entries Archidekt listed without a readable owner are left out: say so, in the
         # words My decks uses, so the assistant doesn't present a partial list as the whole one
         unreadable = int(getattr(rows, "unreadable", 0) or 0)
-        note = decks_unreadable_text(some_shown=len(rows) > 0) if unreadable else None
-        # before the folder filter, which matches on the name
-        await state.decks.name_folders(_sub(), rows)
+        notes = [decks_unreadable_text(some_shown=len(rows) > 0)] if unreadable else []
+        if getattr(rows, "folder_names_unread", False):
+            notes.append(FOLDER_NAMES_UNREAD)  # no silent empty folder
+        note = " ".join(notes) or None
         if name_contains:
             rows = [d for d in rows if name_contains.strip().lower() in str(d.get("name", "")).lower()]
         if deck_format:
