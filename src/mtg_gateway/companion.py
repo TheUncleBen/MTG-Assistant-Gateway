@@ -512,6 +512,17 @@ DETAIL_LABELS = {
 }
 
 
+# Where an action came from (an audit row's ``via``), in the words the History page shows.
+VIA_LABELS = {
+    "mcp": "assistant",
+    "app": "in-chat card",
+    "review_page": "review page",
+    "browser": "browser",
+    "api": "API",
+    "android_app": "Android app",
+}
+
+
 def card_model_line(detail: Any, added_by: str | None) -> str | None:
     """A ``card_model_removed`` audit entry in words ("Sol Ring (added by alice)"); ``added_by``: the
     adder's name now, None when that account is gone. None when it isn't such an entry. Plain text."""
@@ -548,6 +559,8 @@ def event_detail_html(detail: dict[str, Any], *, added_by: str | None = None) ->
             bits.append(f"<a href='/decks/{quote(str(v), safe='')}'>{text}</a>")
         elif k == "proposal_id":
             bits.append(f"<a href='/proposals/{quote(str(v), safe='')}'>proposal {_esc(str(v)[:8])}</a>")
+        elif k == "via":
+            bits.append(f"{label} {_esc(VIA_LABELS.get(str(v), v))}")
         else:
             bits.append(f"{label} {_esc(v)}")
     return " · ".join(bits)

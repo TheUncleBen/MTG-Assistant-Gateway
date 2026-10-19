@@ -3345,9 +3345,13 @@ class DeckService:
         via = self.db.applied_via(sub, proposal_id)
         if via is None:
             return None
-        return {"mcp": "assistant", "app": "card", REVIEW_PAGE: "review_page", "browser": "browser"}.get(
-            via, "api"
-        )
+        return {
+            "mcp": "assistant",
+            "app": "card",
+            REVIEW_PAGE: "review_page",
+            "browser": "browser",
+            "api": "api",
+        }.get(via, "api")
 
     def _changed(self, row: dict[str, Any]) -> DeckError:
         """The refusal of an apply of a version that is no longer the proposal's."""
@@ -3786,16 +3790,18 @@ class DeckService:
         version: int | None = None,
         shown_status: str | None = None,
         shown_status_at: int | None = None,
+        logged_via: str | None = None,
     ) -> dict[str, Any]:
-        """``archidekt_backup=False`` (a member's own hand edit, the save bar's tick box unticked, or a
-        quick edit on the deck page) skips the extra backup copy on Archidekt; the gateway's own
-        snapshot is always taken. The assistant's applies always keep the copy. ``version`` is the
-        version the caller showed: the apply claims only that version, and a proposal
-        amended since is refused with ``changed`` and nothing sent. ``shown_status`` is the status
-        the chat card showed with the press: a change held since is refused with
-        ``now_held`` and nothing sent, so the member sees the hold even when the card could not
-        read the change again first; with ``shown_status_at`` (when that status was set), so is a
-        held change that was held for a new cause since."""
+        """``logged_via`` is what the audit row records in place of ``via`` (the REST API's bearer applies,
+        which are checked as ``mcp`` but logged as ``api``). ``archidekt_backup=False`` (a member's own hand
+        edit, the save bar's tick box unticked, or a quick edit on the deck page) skips the extra backup copy
+        on Archidekt; the gateway's own snapshot is always taken. The assistant's applies always keep the
+        copy. ``version`` is the version the caller showed: the apply claims only that version, and a proposal
+        amended since is refused with ``changed`` and nothing sent. ``shown_status`` is the status the chat
+        card showed with the press: a change held since is refused with ``now_held`` and nothing sent, so the
+        member sees the hold even when the card could not read the change again first; with
+        ``shown_status_at`` (when that status was set), so is a held change that was held for a new cause
+        since."""
         if not self.settings.writes_enabled:
             raise DeckError("writes_disabled", refusals.WRITES_OFF_KEPT)
         row = self.db.get_proposal(proposal_id, sub)
@@ -3863,6 +3869,7 @@ class DeckService:
                     row,
                     # the audit row keeps the review page apart, for get_proposal's applied_via
                     via=REVIEW_PAGE if review_page else via,
+                    logged_via=logged_via,
                     version=expect,
                     shown_status=shown_status,
                     shown_status_at=shown_status_at,
@@ -4066,6 +4073,7 @@ class DeckService:
         version: int | None = None,
         shown_status: str | None = None,
         shown_status_at: int | None = None,
+        logged_via: str | None = None,
     ) -> dict[str, Any]:
         if shown_status is not None:
             # checked just before the claim, with nothing awaited in between, so no hold can be
@@ -4214,7 +4222,9 @@ class DeckService:
                 raise DeckError("internal", unexpected) from exc
         finally:
             lock.release()
-        self._audit("proposal_applied", sub=sub, detail={"proposal_id": proposal_id, "via": via})
+        self._audit(
+            "proposal_applied", sub=sub, detail={"proposal_id": proposal_id, "via": logged_via or via}
+        )
         board.settle(self, sub, proposal_id, "applied")  # lifts the holds it caused
         return result
 

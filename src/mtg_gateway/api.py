@@ -526,7 +526,14 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
                 # the box at this press is the save's choice from now on, also when the apply
                 # below is refused or stopped and the save waits (writes off, a rate limit)
                 decks.keep_backup_box(who.sub, pid, version, keep=backup)
-        return ok(await decks.apply(who.sub, pid, via=via, version=version, archidekt_backup=backup))
+        # a bearer apply is checked as the assistant's ("mcp") but logged as the API's, so
+        # get_proposal's applied_via and History tell it apart
+        logged = "api" if via == "mcp" else None
+        return ok(
+            await decks.apply(
+                who.sub, pid, via=via, version=version, archidekt_backup=backup, logged_via=logged
+            )
+        )
 
     @route("/proposals/{pid}/reject", "POST", write=True)
     async def reject(request: Request, who: Caller) -> Response:

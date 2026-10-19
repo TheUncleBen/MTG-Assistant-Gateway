@@ -9,8 +9,10 @@ from mtg_gateway.decks import applied_text
 from .conftest import Stack
 from .test_account_actions import _press
 from .test_approval_modes import _set_mode
-from .test_decks_and_proxy import call, linked_user, structured
+from .test_decks_and_proxy import Browser, call, linked_user, structured
 from .test_tool_reliability import mcp_token
+
+NAV = {"Sec-Fetch-Mode": "navigate", "Accept": "text/html"}
 
 
 def _add(card: str) -> dict:
@@ -122,3 +124,26 @@ def test_an_applied_collection_change_says_so_only_when_the_read_back_found_it()
             "The changes were sent to Archidekt, but reading your collection back didn't show all "
             "of them. The result on the review page lists which."
         )
+
+
+async def test_an_api_apply_reads_api_and_activity_names_where_each_was_applied(stack: Stack) -> None:
+    """A bearer-token apply over the REST API is checked like the assistant's but logged as the
+    API's, and the Activity page says where each proposal was applied in words."""
+    h = stack.h
+    token = await linked_user(stack)
+    await _set_mode(h, "auto")
+    edit = structured(await call(h, token, "propose_deck_changes", _add("Forest")))
+    r = await h.http.post(
+        f"/api/v1/proposals/{edit['proposal_id']}/apply", headers={"Authorization": f"Bearer {token}"}
+    )
+    assert r.status_code == 200 and r.json()["state"] == "applied", r.text
+    got = structured(await call(h, token, "get_proposal", {"proposal_id": edit["proposal_id"]}))
+    assert got["applied_via"] == "api"
+    await _press(h, token, await call(h, token, "propose_delete_deck", {"deck_id": "42"}))
+    b = Browser(h)
+    try:
+        await b.login()
+        page = (await b.http.get("/activity", headers=NAV)).text
+    finally:
+        await b.aclose()
+    assert "via API" in page and "via review page" in page and "review_page" not in page
