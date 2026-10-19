@@ -479,7 +479,9 @@ def tiles_for(g: dict[str, Any]) -> list[dict[str, Any]]:
         )
     oc = m.get("on_curve") if isinstance(m.get("on_curve"), dict) else {}
     r = _rate(oc.get("pct_all_drops_through_t5"))
-    if r:
+    # The simulator names this "through turn 5" whatever the last turn played; a shorter run
+    # never got that far, so the tile would claim turns that were not played.
+    if r and (not isinstance(g.get("until_turn"), int) or g["until_turn"] >= 5):
         out.append(
             {"label": "Every land drop through turn 5", "value": _pct(r["value"]), "rate": r, "note": ""}
         )
@@ -898,10 +900,45 @@ def kept_models_html(
 ASK_LABEL = "Copy a request for your assistant"
 
 
-def ask_prompt(deck_name: str, deck_url: str, cards: list[dict[str, Any]], *, models: bool = False) -> str:
+def _ask_context(honesty: dict[str, Any] | None) -> str:
+    """The request's closing context: the solo test's other groups (left out on purpose, played
+    but never mattered, shortcuts), so the assistant can say where any of those cards matters."""
+    h = honesty if isinstance(honesty, dict) else {}
+    parts: list[str] = []
+    left = [front_face(c["name"]) for grp in h.get("out_of_scope") or [] for c in grp.get("cards") or []]
+    if left:
+        parts.append(
+            "These cards were left out on purpose, because the solo test has no opponent for them to act "
+            f"on: {', '.join(left)}."
+        )
+    low = [front_face(n) for n in h.get("low_impact") or []]
+    if low:
+        parts.append(f"These were played with their effect but never mattered: {', '.join(low)}.")
+    approx = [f"{a['label']} ({a['cards']})" for a in h.get("approximations") or [] if a.get("cards")]
+    if approx:
+        parts.append(f"The test took these shortcuts: {'; '.join(approx)}.")
+    if not parts:
+        return ""
+    return (
+        " For context, from the same solo test: "
+        + " ".join(parts)
+        + " Tell me where any of these cards would play differently in a real game, again from their exact "
+        "Oracle text."
+    )
+
+
+def ask_prompt(
+    deck_name: str,
+    deck_url: str,
+    cards: list[dict[str, Any]],
+    *,
+    models: bool = False,
+    honesty: dict[str, Any] | None = None,
+) -> str:
     """What the member pastes into Claude or ChatGPT to have these cards modeled (the same words
     for both): the assistant reads each card's exact text and passes its models to a new run.
-    ``models``: the gateway keeps card models, so the request asks which it kept."""
+    ``models``: the gateway keeps card models, so the request asks which it kept. ``honesty``:
+    the solo test's other groups, added as context (_ask_context)."""
     names = ", ".join(front_face(c["name"]) for c in cards)
     # the last clause only while kept models are switched on
     told = (
@@ -915,17 +952,23 @@ def ask_prompt(deck_name: str, deck_url: str, cards: list[dict[str, Any]], *, mo
         "deck to see what each one needs, and write each model only from the card's exact Oracle text "
         "(the gateway's card text and rules tools), never from memory. Then run a new deck report for "
         f"the deck with your models as its annotations, and tell me what changed{told}"
+        + _ask_context(honesty)
     )
 
 
-def ask_html(r: dict[str, Any], cards: list[dict[str, Any]]) -> str:
-    """The copy button and its hidden text for the request above (export.js copies it)."""
+def ask_html(r: dict[str, Any], cards: list[dict[str, Any]], honesty: dict[str, Any] | None = None) -> str:
+    """The copy button and its hidden text for the request above (export.js copies it). ``honesty``:
+    the parsed solo test's honesty groups, which the request adds as context."""
     if not cards:
         return ""
     g = r.get("goldfish") if isinstance(r.get("goldfish"), dict) else {}
     models = card_models.SWITCHED_ON and bool(g.get("models_saved"))
     text = ask_prompt(
-        str(r.get("deck_name") or r.get("deck_id") or ""), str(r.get("deck_url") or ""), cards, models=models
+        str(r.get("deck_name") or r.get("deck_id") or ""),
+        str(r.get("deck_url") or ""),
+        cards,
+        models=models,
+        honesty=honesty,
     )
     return (
         "<div class='ask'><button type='button' class='btn small copybtn' data-copy='ask-model'>"
@@ -1006,6 +1049,12 @@ def honesty_html(g: dict[str, Any], ask: str = "") -> str:
             f"<dl class='meta approx'>{rows}</dl></div>"
         )
     return "".join(parts)
+
+
+CONSTRUCTED_VALIDATION = (
+    "Not checked: the research service's check is for Commander decks (100 cards and a commander), so "
+    "it does not apply to a constructed deck (60 cards or more)."
+)
 
 
 def _validation_badge(v: dict[str, Any] | None) -> str:
@@ -1533,11 +1582,16 @@ def report_sections(r: dict[str, Any]) -> dict[str, Any]:
     """Everything the page, the Markdown and the HTML export share, computed once."""
     stats = r.get("stats") if isinstance(r.get("stats"), dict) else {}
     g = parse_goldfish(r.get("goldfish"), deck_size=_int(stats.get("card_count")))
-    v = parse_validation(r.get("validation"))
+    settings = r.get("settings") if isinstance(r.get("settings"), dict) else {}
+    constructed = (g or {}).get("format") == "constructed" or settings.get("mode") == "constructed"
+    # The research service's validation is a Commander check (100 cards, a commander): a 60-card
+    # deck is not sent to it, and one an older report sent is not shown.
+    v = None if constructed else parse_validation(r.get("validation"))
     commander = (g or {}).get("commander") or ((stats.get("commanders") or [None])[0] if stats else None)
     return {
         "goldfish": g,
         "validation": v,
+        "constructed": constructed,
         "commander": commander,
         "tiles": tiles_for(g) if g else [],
         "charts": charts_for(g) if g else [],
@@ -1600,7 +1654,7 @@ def report_body_html(
     body = head + engine_html(r, live=not standalone)
     if not standalone:
         body += more_games_html(r.get("forge"), csrf, str(r.get("report_id") or ""))
-    if g is None and v is None:
+    if g is None and v is None and not s["constructed"]:
         body += (
             f"<div class='card'><h2>{_esc(solo_heading(g))}</h2><p class='muted'>The research service "
             "was not configured when this report ran, so there is no solo test and no validation: only "
@@ -1646,14 +1700,19 @@ def report_body_html(
             + summary
             + "</div>"
         )
-        honesty = s["honesty"] if standalone else honesty_html(g, ask_html(r, s["unmodeled"]))
+        ask = "" if standalone else ask_html(r, s["unmodeled"], (g or {}).get("honesty"))
+        honesty = s["honesty"] if standalone else honesty_html(g, ask)
         if honesty:
             body += (
                 "<div class='card honesty'><h2>What the solo test could not model</h2>"
                 "<p class='muted small'>Read the numbers above with this in mind: the more of the deck sits "
                 "here, the less the solo test says about it.</p>" + honesty + "</div>"
             )
-    if g is not None or v is not None:
+    if s["constructed"]:
+        body += (
+            f"<div class='card'><h2>Validation</h2><p class='muted'>{_esc(CONSTRUCTED_VALIDATION)}</p></div>"
+        )
+    elif g is not None or v is not None:
         body += f"<div class='card'><h2>Validation {_validation_badge(v)}</h2>{validation_html(v)}</div>"
     if stats_html:
         body += f"<div class='card'><h2>Deck statistics</h2>{stats_html}</div>"
@@ -1746,7 +1805,9 @@ def report_markdown(r: dict[str, Any]) -> str:
             )
             lines.append(", ".join(front_face(n) for n in h["low_impact"]))
             lines.append("")
-    if v is not None:
+    if s["constructed"]:
+        lines += ["## Validation", "", CONSTRUCTED_VALIDATION, ""]
+    elif v is not None:
         verdict = {"passed": "passed", "issues": "issues found", "failed": "not run"}.get(
             v["verdict"] or "", ""
         )

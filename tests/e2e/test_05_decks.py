@@ -429,7 +429,7 @@ def test_apply_over_mcp_only_in_auto_mode(clients, env: Env):
     copy_backup(c, out, copy)
     db = sqlite3.connect(copy)
     applied = db.execute("SELECT detail_json FROM audit_log WHERE event='proposal_applied'").fetchall()
-    assert any('"via": "browser"' in d for (d,) in applied) and any(
+    assert any('"via": "review_page"' in d for (d,) in applied) and any(
         '"via": "mcp"' in d for (d,) in applied
     ), applied
     events = {row[0] for row in db.execute("SELECT DISTINCT event FROM audit_log")}

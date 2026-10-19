@@ -29,7 +29,7 @@ from .deckpage import (
     LIST_ORDERS,
     money,
 )
-from .decks import DeckError
+from .decks import DeckError, is_busy
 from .pages import (
     _csrf,
     _err_code,
@@ -294,17 +294,22 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         return csrf_form_ok(s, sid, data)
 
     async def my_decks(
-        sub: str, *, wait: float | None = None
+        sub: str, *, wait: float | None = None, last_read_ok: bool = False
     ) -> tuple[list[dict[str, Any]] | None, str | None, DeckError | None]:
         """(decks, problem, failure) where problem is a short message when the list is unavailable
         and failure the DeckError behind it (for the shared busy page). With ``wait``, decks is
         None when the list is cold and Archidekt has not answered in time: the page then renders a
-        placeholder that decks.js fills from /api/decks/mine."""
+        placeholder that decks.js fills from /api/decks/mine. With ``last_read_ok``, while Archidekt
+        cannot be asked, the list as last read (its ``last_read`` set), when there is one, instead
+        of the failure."""
         try:
             return await decks.list_decks_quick(sub, wait=wait), None, None
         except DeckError as exc:
             if exc.kind == "not_linked":
                 return [], "not_linked", exc
+            held = decks.last_deck_list(sub) if last_read_ok and is_busy(exc) else None
+            if held is not None:
+                return held, None, None
             return [], str(exc), exc
 
     def arrange_decks(
@@ -512,6 +517,17 @@ DETAIL_LABELS = {
 }
 
 
+# Where an action came from (an audit row's ``via``), in the words the History page shows.
+VIA_LABELS = {
+    "mcp": "assistant",
+    "app": "in-chat card",
+    "review_page": "review page",
+    "browser": "browser",
+    "api": "API",
+    "android_app": "Android app",
+}
+
+
 def card_model_line(detail: Any, added_by: str | None) -> str | None:
     """A ``card_model_removed`` audit entry in words ("Sol Ring (added by alice)"); ``added_by``: the
     adder's name now, None when that account is gone. None when it isn't such an entry. Plain text."""
@@ -548,6 +564,8 @@ def event_detail_html(detail: dict[str, Any], *, added_by: str | None = None) ->
             bits.append(f"<a href='/decks/{quote(str(v), safe='')}'>{text}</a>")
         elif k == "proposal_id":
             bits.append(f"<a href='/proposals/{quote(str(v), safe='')}'>proposal {_esc(str(v)[:8])}</a>")
+        elif k == "via":
+            bits.append(f"{label} {_esc(VIA_LABELS.get(str(v), v))}")
         else:
             bits.append(f"{label} {_esc(v)}")
     return " · ".join(bits)

@@ -35,6 +35,7 @@ from .archidekt import (
     _pt,
     condition_code,
     language_code,
+    page_turn,
 )
 from .busy import busy_response
 from .deckpage import image_url, mana_html
@@ -542,6 +543,7 @@ class CollectionService:
                 finish = _finish_of(options[0])  # a printing sold in one finish is that finish
             key = (printing["id"], finish)
             have = existing.get(key)
+            before = int(have.get("quantity") or 0) if have is not None else 0
             if have is not None:
                 if lang_of.get(key, "EN") != opts["language"]:
                     merged.append(
@@ -578,6 +580,9 @@ class CollectionService:
                 lang_of[key] = opts["language"]
             existing[key] = rec
             row = row_out(rec)
+            # the row's quantity is what the record holds now; these say what this add changed
+            row["previous_quantity"] = before
+            row["added_quantity"] = int(row["quantity"]) - before
             if spec["scryfall_id"] and not row.get("scryfall_id"):
                 row["scryfall_id"] = spec["scryfall_id"]
                 row["image_small"] = image_url(spec["scryfall_id"], "small")
@@ -1728,6 +1733,7 @@ def add_collection_tools(server: MCPServer, service: CollectionService) -> None:
         # The proposing client is recorded on the proposal, and only that client may apply it
         # over MCP: without this the assistant could never apply its own collection proposal.
         current_client.set(token.client_id)
+        page_turn.set(False)  # an app's request, not a member's page (archidekt.page_turn)
         return token.subject
 
     def _err(exc: CollectionError) -> dict[str, Any]:
@@ -1828,8 +1834,19 @@ def add_collection_tools(server: MCPServer, service: CollectionService) -> None:
                     service.scan.store.delete(str(session_id), sub)
             for r in changes.get("remove") or []:
                 gone = await service.remove(sub, _rid(r["id"]), int(r["quantity"]), progress=progress)
-                result["removed"].append(gone["removed"])
-                expected[_rid(r["id"])] = int(gone["row"]["quantity"]) if gone.get("row") else None
+                left = int(gone["row"]["quantity"]) if gone.get("row") else None
+                before = int(gone["removed"]["quantity"])
+                # as an added row: quantity is what the record holds now (0 once it is gone),
+                # with the copies it held before and the copies this removal took
+                result["removed"].append(
+                    {
+                        **gone["removed"],
+                        "quantity": left or 0,
+                        "previous_quantity": before,
+                        "removed_quantity": before - (left or 0),
+                    }
+                )
+                expected[_rid(r["id"])] = left
         except CollectionError as exc:
             raise DeckError(exc.kind, str(exc)) from exc
         result["verified"], result["mismatches"] = await _read_back(sub, expected)
@@ -1883,7 +1900,9 @@ def add_collection_tools(server: MCPServer, service: CollectionService) -> None:
             "card per line, e.g. '2 Sol Ring (CMR) 472 *F*'; scan_session: the id or name of a scan "
             "session, every matched card in it is added and the session is removed once applied; remove: "
             "a list of {id (from list_collection) | name, quantity?} (no quantity removes every copy). At "
-            "most 100 cards each way per proposal."
+            "most 100 cards each way per proposal. Once applied, each row of the result's added and "
+            "removed lists has quantity (the copies the record holds now, 0 when it is gone), "
+            "previous_quantity, and added_quantity or removed_quantity (what this proposal changed)."
         ),
         annotations={"readOnlyHint": True, "destructiveHint": False, "openWorldHint": True},
         meta=dict(CARD_TOOL_META) if in_chat else None,

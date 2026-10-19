@@ -339,6 +339,57 @@ async def test_create_folder_waits_for_the_members_press(stack: Stack) -> None:
     assert p["ok"] is False and "already" in p["message"]
 
 
+async def test_an_applied_action_says_what_it_did(stack: Stack) -> None:
+    """After an account action the assistant, the review page and the card say what was done,
+    not that a deck matches the proposal (which is still said for a deck edit)."""
+    import html
+
+    h = stack.h
+    token = await linked_user(stack)
+    await _set_mode(h, "semi")
+    done = await _press(h, token, await call(h, token, "propose_create_folder", {"name": "Brews"}))
+    assert done["applied_text"] == "The folder is created on Archidekt."
+    assert done["next_step"] == "Done. The folder is created on Archidekt."
+    b = Browser(h)
+    try:
+        await b.login()
+        page = (await b.http.get(f"/proposals/{done['proposal_id']}?ok=applied")).text
+    finally:
+        await b.aclose()
+    assert html.escape("Applied. The folder is created on Archidekt.") in page
+    assert html.escape("Done. The folder is created on Archidekt.") in page
+    assert "matches this proposal" not in page
+    gone = await _press(h, token, await call(h, token, "propose_delete_deck", {"deck_id": "42"}))
+    assert gone["result"]["backup_deck_id"] and gone["next_step"] == (
+        "Done. The deck is deleted on Archidekt. A snapshot was kept, and a backup copy was made in "
+        "your backup folder."
+    )
+
+
+async def test_a_deletion_never_says_its_backup_copy_is_there_once_it_is_gone(stack: Stack) -> None:
+    """A deck deletion's text is rebuilt on every view: once the member's deck list read after it
+    no longer holds the backup copy (deleted on Archidekt), it doesn't say the copy is there."""
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    gone = await _press(h, token, await call(h, token, "propose_delete_deck", {"deck_id": "42"}))
+    copy = int(gone["result"]["backup_deck_id"])
+    pid = gone["proposal_id"]
+    with_copy = (
+        "Done. The deck is deleted on Archidekt. A snapshot was kept, and a backup copy was made in "
+        "your backup folder."
+    )
+    await call(h, token, "list_my_decks")  # a list read with the copy in it
+    assert structured(await call(h, token, "get_proposal", {"proposal_id": pid}))["next_step"] == with_copy
+    ark.decks.pop(copy)  # the member deletes the copy on archidekt.com
+    for user in ark.users.values():
+        if copy in user.get("decks", []):
+            user["decks"].remove(copy)
+    h.app.state.gateway.decks.deck_lists.drop("user-1")
+    await call(h, token, "list_my_decks")  # the next read of the list
+    p = structured(await call(h, token, "get_proposal", {"proposal_id": pid}))
+    assert p["next_step"] == "Done. The deck is deleted on Archidekt. A snapshot of it was kept.", p
+
+
 async def test_a_folder_named_like_the_backup_folder_is_refused_when_proposed(stack: Stack) -> None:
     """The assistant's new-folder proposal with the backup folder's name is
     refused when it is made, so the assistant can pick another name at once; the apply checks again."""
@@ -612,7 +663,7 @@ async def test_collaborators_are_listed_added_and_removed_on_the_members_press(
 ) -> None:
     from mtg_gateway import social
 
-    monkeypatch.setattr(social, "FRESH_GAP", 0.0)  # the member follows amy straight after the miss
+    monkeypatch.setattr(social, "FOLLOWING_TTL", 0.0)  # the member follows amy straight after the miss
     h, ark = stack.h, stack.ark
     token = await linked_user(stack)
     await _set_mode(h, "auto")
@@ -1306,7 +1357,7 @@ async def test_an_action_whose_write_landed_is_never_put_back_to_pending(
         return None
 
     monkeypatch.setattr(ArchidektClient, "_wait_out", no_wait)
-    monkeypatch.setattr(social, "FRESH_GAP", 0.0)
+    monkeypatch.setattr(social, "FOLLOWING_TTL", 0.0)
     h, ark = stack.h, stack.ark
     token = await linked_user(stack)
     if case == "collaborator_add":

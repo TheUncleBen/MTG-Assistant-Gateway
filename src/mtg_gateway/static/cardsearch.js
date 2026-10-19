@@ -5,8 +5,8 @@
    one), puts the HTML it answers in place and writes the filters into the address, so Back, a
    reload and a shared link show the same search. The next page loads by itself when the end of
    the list comes into view, or with "Load more cards". The pickers (type, set, block, criteria)
-   read their lists from /cards/api/options when first opened. Under 600 px the filters are a
-   full-screen panel; "Show cards" closes it.
+   read their lists from /cards/api/options once, as soon as the page loads. Under 600 px the
+   filters are a full-screen panel; "Show cards" closes it.
 
    A picture opens the shared card viewer (static/cardview.js) with an Add to deck action, and
    Add to deck opens a small dialog that picks one of the member's decks (the cached list behind
@@ -339,22 +339,29 @@
   });
 
   // -- pickers: a box that searches a list, chosen values as chips ------------------------------
-  var options = null, optionsLoad = null;
+  // Read once, as soon as the page loads. Incomplete lists (Scryfall busy) are used as they are
+  // and asked for again at most once a minute, when a picker is opened; never once per keystroke.
+  // A failed read is told again for a few seconds rather than asked again at every keystroke.
+  var options = null, optionsLoad = null, optionsRetryAt = 0, optionsErr = null;
   function loadOptions() {
-    if (options) return Promise.resolve(options);
+    if (options && !(options.partial && Date.now() >= optionsRetryAt)) return Promise.resolve(options);
+    if (!options && optionsErr && Date.now() < optionsRetryAt) return Promise.reject(optionsErr);
     if (optionsLoad) return optionsLoad;
     optionsLoad = fetch("/cards/api/options", { credentials: "same-origin" })
       .then(function (r) { return r.json(); })
       .then(function (d) {
         optionsLoad = null;
         if (!d.ok) throw new Error(d.message || "The lists could not be read.");
-        if (!d.partial) options = d;
+        optionsErr = null;
+        if (!options || !d.partial || options.partial) options = d;
+        if (d.partial) optionsRetryAt = Date.now() + 60000;
         nameChips(d);
         return d;
       })
-      .catch(function (e) { optionsLoad = null; throw e; });
+      .catch(function (e) { optionsLoad = null; optionsErr = e; optionsRetryAt = Date.now() + 5000; throw e; });
     return optionsLoad;
   }
+  loadOptions().catch(function () { /* shown when a picker is opened */ });
   var SET_TYPES = { expansion: "Expansions", core: "Core sets", masters: "Masters", draft_innovation: "Draft innovation",
     commander: "Commander", funny: "Funny", promo: "Promos", token: "Tokens", memorabilia: "Memorabilia",
     box: "Box sets", duel_deck: "Duel decks", from_the_vault: "From the Vault", masterpiece: "Masterpiece",
@@ -412,6 +419,7 @@
         loadOptions().then(render, function (e) { list.textContent = ""; list.appendChild(el("li", "none", e.message || "The list could not be read.")); });
         return;
       }
+      if (options.partial && Date.now() >= optionsRetryAt) loadOptions().then(function () { if (!list.hidden) render(); }, function () {});
       var chosen = {};
       $$(".chips li", pk).forEach(function (li) { chosen[li.getAttribute("data-v")] = 1; });
       var all = itemsFor(source, options).filter(function (it) { return !chosen[it.v]; });

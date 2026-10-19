@@ -28,6 +28,7 @@ from .deckpage import (
     VIEWS,
     covers_for,
     deck_list_controls_html,
+    deck_list_held_html,
     deck_page_html,
     decks_unreadable_html,
     featured,
@@ -74,7 +75,7 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
         """(the member's folder tree, still being read). The tree is None when Archidekt could
         not give it (My decks then lists every deck flat, with a notice) or is still coming."""
         try:
-            tree = await decks.folder_view(sub, wait=wait)
+            tree = await decks.folder_view(sub, wait=wait, last_read_ok=True)
         except DeckError:
             return None, False
         return tree, tree is None
@@ -94,13 +95,14 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
             return RedirectResponse("/decks" + (f"?{rest}" if rest else ""), 303)
         chosen, remember = prefs.view_choice(state.db, sub, request, "decks", LIST_VIEWS, "grid")
         q, order, view, folder = list_query(qp, chosen)
-        rows, problem, failure = await my_decks(sub, wait=decks.deck_list_wait)
+        rows, problem, failure = await my_decks(sub, wait=decks.deck_list_wait, last_read_ok=True)
         if failure is not None and (busy := busy_response(failure, request, page, sub=sub, sid=sid)):
             return busy
         pending = rows is None  # cold start: the shell goes out now, decks.js fills the list
         unreadable = bool(getattr(rows, "unreadable", 0))  # entries Archidekt left unreadable
+        last_read = getattr(rows, "last_read", None)  # Archidekt can't be asked: the list as last read
         hidden = 0  # the gateway's backup copies, kept out of this list; the list is warm now
-        if not pending and not problem and not unreadable:  # unreadable: the list is not kept
+        if not pending and not problem and not unreadable and last_read is None:
             try:
                 hidden = len(await decks.backup_copies(sub, wait=0.0) or [])
             except DeckError:
@@ -116,7 +118,7 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
             folder = str(folder_id) if folder_id is not None else ""
         unread_html = (
             decks_unreadable_html(some_shown=total > 0, again=reread_href("/decks", qp)) if unreadable else ""
-        )
+        ) + (deck_list_held_html(last_read) if last_read is not None else "")
         open_form = (
             "<form method='get' action='/decks/open' class='openform'>"
             "<label for='ref'>Open any Archidekt deck</label>"
@@ -206,6 +208,16 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
             rows, problem = None, ("unavailable", "Archidekt did not answer in time.")
         else:
             problem = None
+        if problem is not None and problem[0] in ("rate_limited", "unavailable"):
+            # Archidekt can't be asked: the list as last read, with the notice saying how old it is
+            try:
+                held = decks.last_deck_list(sub)
+            except DeckError:
+                held = None
+            if held is not None:
+                rows, problem = held, None
+        last_read = getattr(rows, "last_read", None)
+        held_html = deck_list_held_html(last_read) if last_read is not None else ""
         fetched_at = decks.decks_fetched_at(sub)
         out: dict[str, Any] = {
             "ok": problem is None,
@@ -220,7 +232,10 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
             recent = sorted(rows or [], key=lambda d: d.get("updated_at") or "", reverse=True)
             covers = covers_for(recent, state.db.deck_covers([str(d["id"]) for d in recent]))
             out["html"] = recent_panel_inner(
-                None if problem else recent, covers, unreadable=bool(getattr(rows, "unreadable", 0))
+                None if problem else recent,
+                covers,
+                unreadable=bool(getattr(rows, "unreadable", 0)),
+                last_read=last_read,
             )
             out["count"] = len(recent)
         else:
@@ -231,10 +246,14 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
             level = arrange(rows or [], tree, folder_id=resolve_folder(tree, folder), q=q, order=order)
             shown, total = level.decks, level.total
             covers = covers_for(shown, state.db.deck_covers([str(d["id"]) for d in shown]))
-            out["html"] = (f"<p class='notice error'>{_esc(problem[1])}</p>" if problem else "") + (
-                decks_unreadable_html(some_shown=total > 0, again=reread_href("/decks", qp))
-                if unreadable
-                else ""
+            out["html"] = (
+                (f"<p class='notice error'>{_esc(problem[1])}</p>" if problem else "")
+                + (
+                    decks_unreadable_html(some_shown=total > 0, again=reread_href("/decks", qp))
+                    if unreadable
+                    else ""
+                )
+                + held_html
             )
             if not (unreadable and not total):
                 out["html"] += level_html(level, covers=covers, q=q, view=view, order=order)

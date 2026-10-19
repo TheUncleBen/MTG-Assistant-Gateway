@@ -668,3 +668,16 @@ async def test_a_link_stops_working_for_a_member_who_left_the_group(stack: Stack
     monkeypatch.setattr(checker, "check", revoked)
     r = await h.http.get(path)
     assert r.status_code == 403 and r.json()["error"] == "forbidden"
+
+
+def test_cards_draw_no_frame_of_their_own() -> None:
+    """Ben, 0.7.31 test round: on ChatGPT the card looked like a card within a card, because the
+    host frames the card and the card drew its own border and rounded corners inside that frame."""
+    import re
+
+    from mtg_gateway.cards import STATIC
+
+    base = (STATIC / "_base.css").read_text(encoding="utf-8")
+    rule = re.search(r"^\.card\{([^}]*)\}", base, re.M)
+    assert rule and "padding" in rule.group(1)
+    assert "border" not in rule.group(1)

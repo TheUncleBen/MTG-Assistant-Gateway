@@ -317,6 +317,16 @@ def test_every_setting_has_page_text() -> None:
     assert {spec.group for spec in MANAGED_SETTINGS.values()} <= groups
 
 
+def test_the_two_forge_game_rows_say_how_they_differ() -> None:
+    """The total games of a report and how many of them play side by side are easy to mix
+    up, so each row's help says what it is and names the other row."""
+    total, total_help = settings_page.TEXT["forge_games"]
+    at_once, at_once_help = settings_page.TEXT["forge_parallel_games"]
+    assert "in all" in total_help and f"\u201c{at_once}\u201d" in total_help
+    assert "side by side" in at_once_help and f"\u201c{total}\u201d" in at_once_help
+    assert "doesn't change how many games a report plays" in at_once_help
+
+
 async def test_member_cannot_reach_it_signed_out(gw: Harness) -> None:
     b = Browser(gw)
     try:

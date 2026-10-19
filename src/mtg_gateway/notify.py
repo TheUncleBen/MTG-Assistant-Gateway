@@ -808,7 +808,7 @@ def _summary_html(state: AppState, sub: str, p: dict[str, Any], csrf_in: str) ->
         "through your notifications when they are on. Your assistant can read it too and write you "
         "its own version on a schedule.</p>"
         f"<form method='post'>{csrf_in}<input type='hidden' name='action' value='summary_save'>"
-        "<label for='s-every'>Send my summary</label>"
+        "<label for='s-every'>How often</label>"
         f"<select id='s-every' name='summary_every'>{opts}</select>"
         f"<button class='primary'>Save summary</button></form>{latest}</div>"
     )
@@ -876,7 +876,8 @@ def account_card_html(state: AppState, sub: str, csrf_in: str) -> str:
         phone = (
             "<p class='muted small'>Notifications arrive in the gateway's Android app, also while it is "
             "closed. To get them, install the app from the <a href='/install?for=android'>Android app</a> "
-            "page, sign in, open this page in the app and press Get notifications on this phone.</p>"
+            "page and sign in. Then open this page in the app, tick Send me notifications and press Save "
+            "notifications.</p>"
         )
     test = (
         f"<form method='post'>{csrf_in}<input type='hidden' name='action' value='notify_test'>"

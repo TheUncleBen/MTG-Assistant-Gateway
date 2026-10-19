@@ -14,6 +14,8 @@ from urllib.parse import parse_qs
 
 import httpx
 
+from mtg_gateway.archidekt_csv import parse_export
+
 FIXTURES = Path(__file__).parent / "fixtures" / "scan"
 
 
@@ -54,6 +56,37 @@ def _split(query: str) -> list[str]:
     return out
 
 
+def _archidekt_cards() -> dict[str, dict[str, Any]]:
+    """Every card the fake Archidekt knows (its card pool and the sample deck), as Scryfall
+    cards keyed by normalised name. Real Scryfall knows every card Archidekt has, so an exact
+    lookup of one of them must not say "no such card" (the deck tools refuse an add that Scryfall
+    says is no card). Built from the sample deck's export where it has the card, else name only."""
+    from .fake_archidekt import CARD_DB, FIXTURE, PRINTINGS
+
+    out: dict[str, dict[str, Any]] = {}
+    for c in parse_export(FIXTURE.read_text(encoding="utf-8")):
+        out[_norm(c.name)] = {
+            "object": "card",
+            "id": c.scryfall_id,
+            "name": c.name,
+            "set": c.set_code,
+            "collector_number": c.collector_number,
+            "mana_cost": "".join(f"{{{s}}}" for s in c.mana_cost),
+            "cmc": c.mana_value,
+            "type_line": c.types,
+            "oracle_text": c.card_text,
+            "rarity": c.rarity,
+        }
+    for name in [v["oracleCard"]["name"] for v in CARD_DB.values()] + [
+        p["oracleCard"]["name"] for p in PRINTINGS
+    ]:
+        out.setdefault(_norm(name), {"object": "card", "name": name})
+    # an exact lookup by a double-faced card's front face finds the card, as on Scryfall
+    for card in list(out.values()):
+        out.setdefault(_norm(card["name"].split("//")[0]), card)
+    return out
+
+
 class FakeScryfall:
     def __init__(self) -> None:
         self.cards: list[dict[str, Any]] = []
@@ -65,6 +98,7 @@ class FakeScryfall:
                 if isinstance(c, dict) and c.get("object") == "card" and c["id"] not in seen:
                     seen.add(c["id"])
                     self.cards.append(c)
+        self.archidekt_cards = _archidekt_cards()
         self.fuzzy = {
             "sol rng": _load("named_fuzzy_sol_rng.json"),  # Scryfall really answers Oathsworn Giant
             "aesi": _load("named_fuzzy_aesi_ambiguous.json"),
@@ -291,6 +325,8 @@ class FakeScryfall:
         if path == "/cards/named":
             if "exact" in q:
                 card = self.by_name(q["exact"], q.get("set"))
+                if card is None and not q.get("set"):
+                    card = self.archidekt_cards.get(_norm(q["exact"]))
                 return (
                     httpx.Response(200, json=card)
                     if card

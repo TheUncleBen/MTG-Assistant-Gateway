@@ -236,8 +236,9 @@ copies that to `/usr/share/mtg-gateway/plugin`, so a new image brings new
 skill text and a new plugin archive at `/plugin/mtg-gateway.zip` (or `/plugin/<slug of MTG_SERVER_NAME>.zip`).
 
 To serve your own edited copy without rebuilding, mount a folder with the
-same layout (`mtg-gateway/` inside it) and point `MTG_PLUGIN_DIR` at it
-(add it under the gateway's `environment:` in the stack file). The `/skill`
+same layout (`mtg-gateway/` inside it) into the gateway (a `volumes:` entry
+in the stack or Compose file) and set `MTG_PLUGIN_DIR` to its path inside the
+container in your variables. The `/skill`
 page, `/install` and the plugin marketplace all read from there.
 
 ## Backups
@@ -718,7 +719,11 @@ The gateway is built to be light on Archidekt. For everyone together:
 - one Archidekt request at a time, at least `MTG_ARCHIDEKT_MIN_INTERVAL`
   (1 second) apart, and at most `MTG_ARCHIDEKT_MAX_PER_MINUTE` (40) in any
   minute. A request past that waits its turn, so a long apply slows down
-  instead of stopping halfway;
+  instead of stopping halfway. Requests made for a member's own pages in the
+  browser (an apply pressed on the review page included) take their turn
+  before waiting requests from assistants and the deck sync, so opening a
+  page isn't stuck behind an assistant's work; the gap and the per-minute
+  limit stay the same for every request;
 - if Archidekt says "slow down" (HTTP 429), every request stops for the time
   it asks (at most 2 minutes), and nothing is retried meanwhile. A member's
   apply is the one exception: it waits Archidekt's pause out (the full time
@@ -729,6 +734,13 @@ The gateway is built to be light on Archidekt. For everyone together:
   proposal stays pending (it can be approved again later) and its unused
   backup copy is deleted again. An apply's 429s don't count towards the
   five failures below, so they never pause the gateway for everyone;
+- while Archidekt can't be asked (requests are paused, Archidekt can't be
+  reached, or the member's own Archidekt actions or 10-minute allowance
+  leave nothing free), My decks and the home page show the member's deck
+  list as it was last read (up to a day old, kept in memory only, so not
+  after a restart), with a notice saying how old
+  it is, instead of the "Archidekt is busy" page. An assistant asking for
+  the list still gets the refusal (`rate_limited` or `unavailable`);
 - an unused backup copy whose delete Archidekt refuses for a while (a pause
   running, a 429, a server or network error) is deleted later by the
   gateway itself: one copy per minute at most, for everyone together, never
@@ -810,7 +822,11 @@ checks the change against the deck as it is now before sending anything.
 Each member also has their own limits, so one looping assistant can't keep
 Archidekt busy for everyone:
 
-- at most three Archidekt actions running or waiting at once;
+- at most three Archidekt actions running or waiting their turn at once. A
+  fourth waits for one of them to finish, up to 20 seconds, with the
+  member's own pages ahead of their assistants' work. It gets
+  `rate_limited` only when that wait runs out or eight others are already
+  waiting;
 - at most `MTG_ARCHIDEKT_CALLS_PER_10_MIN` (120 by default) started per 10
   minutes, refilled evenly. Deck reads, proposals, applies, links and
   research tools (goldfish, precon) given an Archidekt deck id or link all
@@ -902,8 +918,7 @@ settings, each with its variable and a link to its row.
   them, and the example env files list those commented out (`# MTG_…=`) with
   the default, so out of the box the page manages them. Remove the line from
   your environment (or leave it empty) to manage one on the page. To lock one in
-  the stack, set it in your environment; for a setting the stack file doesn't
-  list, also add it under the gateway's `environment:`. Updating from an
+  the stack, set it in your environment. Updating from an
   earlier version: [UPGRADING.md](UPGRADING.md#0729-included-in-0730).
 - **Pacing only gets gentler here.** On the page the Archidekt and Scryfall
   pacing can only be set to ask less often than the gateway's defaults. Only the

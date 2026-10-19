@@ -22,7 +22,7 @@ def test_hand_edit_confirmation_rule() -> None:
     many = [{"kind": "remove", "name": f"Card {i}", "qty": 1} for i in range(8)]
     assert "8 different cards" in (modes.hand_edit_confirm("edit", many) or "")
     assert "commander" in (modes.hand_edit_confirm("edit", [{"kind": "commander"}]) or "")
-    assert modes.hand_edit_confirm("restore", [{"kind": "restore"}])
+    assert modes.hand_edit_confirm("restore", [{"kind": "restore"}]) is None
     assert modes.hand_edit_confirm("clone", [{"kind": "clone"}]) is None
 
 

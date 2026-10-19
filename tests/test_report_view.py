@@ -144,6 +144,27 @@ def test_sixty_card_run_reads_as_a_sixty_card_game() -> None:
     assert speed["commander_cast_median_turn"] is None and speed["kill_pct"] == 62.7
     # A Commander run keeps its 40.
     assert rv.parse_goldfish({"ok": True, "text": GOLDFISH_PRECON})["format"] is None
+    # The research service's validation checks a Commander deck: a 60-card report does not show
+    # it (an older report still has one stored) and says why instead.
+    r = report(goldfish=text, validation=VALIDATION_PASSED, stats={"card_count": 60})
+    page = rv.report_body_html(r)
+    assert rv.CONSTRUCTED_VALIDATION.replace("'", "&#x27;") in page and "Deck size: 100" not in page
+    md = rv.report_markdown(r)
+    assert rv.CONSTRUCTED_VALIDATION in md and "Deck size: 100" not in md
+    commander_page = rv.report_body_html(report(goldfish=GOLDFISH_PRECON, validation=VALIDATION_PASSED))
+    assert "Deck size: 100" in commander_page and rv.CONSTRUCTED_VALIDATION not in commander_page
+
+
+def test_a_short_run_claims_no_turn_it_did_not_play() -> None:
+    """The simulator's land-drop rate is named "through turn 5" whatever the last turn: a run that
+    stopped before turn 5 does not show it."""
+    g = rv.parse_goldfish({"ok": True, "text": GOLDFISH_PRECON})
+    assert "Every land drop through turn 5" in {t["label"] for t in rv.tiles_for(g)}
+    short = rv.parse_goldfish(
+        {"ok": True, "text": GOLDFISH_PRECON.replace("through turn 10", "through turn 2")}
+    )
+    assert short["until_turn"] == 2
+    assert "Every land drop through turn 5" not in {t["label"] for t in rv.tiles_for(short)}
 
 
 def test_page_speaks_plainly_and_shows_every_panel() -> None:
@@ -344,6 +365,25 @@ def test_ask_button_only_on_the_signed_in_page() -> None:
     assert rv.ask_html(r, []) == ""
     # names are escaped in the hidden text
     assert "&lt;b&gt;" in rv.ask_html(r | {"deck_name": "<b>"}, [{"name": "X"}])
+
+
+def test_the_copied_request_also_names_the_other_groups_as_context() -> None:
+    """Ben, 0.7.31 test round: the request for the assistant covers not only the cards played
+    without their effect but also those left out on purpose, those that never mattered and the
+    shortcuts, so the assistant can say where any of them matters."""
+    r = report(deck_url="https://archidekt.com/decks/42")
+    g = rv.parse_goldfish(r["goldfish"], deck_size=100)
+    h = g["honesty"]
+    assert h.get("out_of_scope") and h.get("low_impact") and h.get("approximations")
+    text = rv.report_body_html(r).split("id='ask-model'")[1].split("</textarea>")[0]
+    assert "left out on purpose" in text
+    assert rv.front_face(h["out_of_scope"][0]["cards"][0]["name"]) in text
+    assert "never mattered: " + rv.front_face(h["low_impact"][0]) in text
+    assert h["approximations"][0]["label"] in text
+    assert "would play differently in a real game" in text
+    # nothing to add: the request ends as before
+    plain = rv.ask_prompt("D", "u", [{"name": "X"}], honesty={})
+    assert plain.endswith("which cards you could not describe.")
 
 
 def test_left_out_groups_count_copies_as_their_heading_does() -> None:

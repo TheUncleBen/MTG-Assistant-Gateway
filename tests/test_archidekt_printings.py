@@ -60,6 +60,34 @@ async def test_bad_set_code_is_not_sent() -> None:
     assert [c for c in ark.calls if c[1] == "/api/cards/v2/"] == [("GET", "/api/cards/v2/")]  # name-only
 
 
+async def test_name_only_skips_a_printing_still_in_preview() -> None:
+    """Archidekt lists the newest set first, and a set still being previewed has a release date
+    to come: a card named without a printing gets the newest released one instead."""
+    ark, client, token = await _client()
+    ark.newer_printings["island"] = [
+        {
+            "id": 99001,
+            "oracleCard": {"name": "Island"},
+            "edition": {"editioncode": "trk", "editiondate": "2999-01-01"},
+            "collectorNumber": "319",
+            "releasedAt": "2999-01-01",
+        },
+        {
+            "id": 99002,
+            "oracleCard": {"name": "Island"},
+            "edition": {"editioncode": "fdn", "editiondate": "2024-11-15"},
+            "collectorNumber": "279",
+            "releasedAt": "2024-11-15",
+        },
+    ]
+    card = await client.resolve_card(token, "Island")
+    assert card["id"] == 99002 and card["set_code"] == "fdn", card
+    # a card with only a preview printing is still found, not refused
+    ark.newer_printings["wastes"] = [{**ark.newer_printings["island"][0], "oracleCard": {"name": "Wastes"}}]
+    card = await client.resolve_card(token, "Wastes")
+    assert card["id"] == 99001, card
+
+
 def test_finish_modifier() -> None:
     assert finish_modifier(["Normal", "Foil"], foil=True) == "Foil"
     assert finish_modifier(["Normal", "Foil"]) == "Normal"

@@ -33,7 +33,12 @@ so, shows its admins a notice with these steps ([OPERATIONS.md](OPERATIONS.md#re
 ([VERSIONS.md](VERSIONS.md)); with `MTG_TAG=latest` the update pulls the newest version. If the
 release notes say the stack file changed, replace the stack's text with the new
 [`deploy/portainer-stack.yml`](../deploy/portainer-stack.yml) (with the **Repository** build
-method, the update brings it). Then click **Update the stack** (with the Repository build method
+method, the update brings it). Before you replace it, note your own edits to the old text and
+make them again in the new one: the new file has the optional secret lines commented out again
+(such as the three `mtg_authentik_api_token` lines from
+[IDP-AUTHENTIK.md](IDP-AUTHENTIK.md#12-optional-removed-member-clean-up), step 7). Without
+them, `MTG_AUTHENTIK_API_TOKEN_FILE` names a file that isn't there, and the admin page says the
+removed-member clean-up is off because the token can't be read. Then click **Update the stack** (with the Repository build method
 the button is called **Pull and redeploy**), and in the box that asks “Are you sure?” make sure
 **Re-pull image and redeploy** is on, then click **Update**.
 
@@ -66,6 +71,70 @@ This list starts at 0.7.29. Only versions that need more than the update steps a
 first, and a version from 0.7.29 on that is not listed needs nothing extra. If you are updating from
 an older version, also read each version's notes in the CHANGELOG. Sections stay here at least until
 version 1.0.0.
+
+### 0.7.32
+
+The stack file and the Compose file now pass 27 more variables to the gateway and Forge
+themselves: the 21 settings `MTG_AUTO_BIG_EDIT_ROWS`, `MTG_PROPOSAL_EXPIRY_DAYS`,
+`MTG_ARCHIDEKT_BACKUP_COPIES`, `MTG_ARCHIDEKT_BACKUP_BOX_DEFAULT`, `MTG_SNAPSHOTS_PER_DECK`,
+`MTG_FORGE_PARALLEL_GAMES` and the 15 `MTG_SCAN_*` settings, and also `MTG_ANDROID_PACKAGE`,
+`MTG_ANDROID_ASSETLINKS`, `MTG_PLUGIN_DIR`, `MTG_APP_DIR`, `FORGE_MAX_METASPACE` and
+`FORGE_OOM_SCORE_ADJ`. The Compose file passes `MTG_ARCHIDEKT_BASE` too. Before 0.7.32 the guides
+said to add a line under `environment:` in the stack file for these.
+
+1. When you make your own edits again in the new file (the update steps above), **don't copy a
+   line you added under `environment:` for any of these variables.** The new file already has
+   that name there, and Docker refuses a file that names a variable twice under `environment:`.
+   Put the value in your variables instead: Portainer's variables, `mtg.env`, or `.env` with
+   Docker Compose.
+2. Any of the 21 settings that your variables already set now reaches the gateway, and it locks
+   that setting on the Settings page (greyed out with that value). To change the setting on the
+   page instead, remove it from your variables.
+3. If you turned on the optional `mtg_authentik_api_token` lines in the old file, turn them on
+   again in the new one, as in
+   [IDP-AUTHENTIK.md](IDP-AUTHENTIK.md#12-optional-removed-member-clean-up) step 7. The new file
+   has them commented out. If your Portainer stack uses the **Repository** build method, the
+   stack file comes from the repository as it is, so the lines stay commented out: use the
+   **Web editor** method, or a copy of the repository you keep yourself with the lines turned
+   on. Without them the admin page says the removed-member clean-up is off because the token
+   can't be read.
+4. **Check the values of those 21 settings in your variables before you deploy.** The 0.7.31
+   stack file didn't pass them, so a value there had no effect. Now it reaches the gateway, which
+   checks it when it starts: a value outside its range, or one that isn't a number (or isn't a
+   whole number where the range is in whole numbers), stops the gateway from starting. Each start
+   then logs one line naming the first such setting, such as `configuration error:
+   MTG_FORGE_PARALLEL_GAMES must be between 1 and 4`, and the gateway keeps restarting (Swarm
+   restarts the service; Compose restarts the container). To fix it, change the value to one in
+   range, or remove it from your variables to manage the setting on the Settings page, then deploy
+   the stack again. The allowed values:
+
+   | Variable | Allowed |
+   |---|---|
+   | `MTG_AUTO_BIG_EDIT_ROWS` | 1 to 100 |
+   | `MTG_PROPOSAL_EXPIRY_DAYS` | 1 to 30 |
+   | `MTG_ARCHIDEKT_BACKUP_COPIES` | 1 to 50 |
+   | `MTG_ARCHIDEKT_BACKUP_BOX_DEFAULT` | `true` or `false` |
+   | `MTG_SNAPSHOTS_PER_DECK` | 5 to 100 |
+   | `MTG_FORGE_PARALLEL_GAMES` | 1 to 4 |
+   | `MTG_SCAN_FUZZY_MIN_SIMILARITY` | 0.3 to 1.0 |
+   | `MTG_SCAN_FUZZY_CONFIDENT_SIMILARITY` | 0.3 to 1.0 |
+   | `MTG_SCAN_AMBIGUITY_MARGIN` | 0.0 to 0.5 |
+   | `MTG_SCAN_AUTO_ADD_CONFIDENCE` | 0.0 to 100.0 |
+   | `MTG_SCAN_FOIL_STAR_INK_RATIO` | 0.01 to 0.9 |
+   | `MTG_SCAN_GLARE_RATIO` | 0.005 to 0.9 |
+   | `MTG_SCAN_MIN_OCR_CONFIDENCE` | 0.0 to 100.0 |
+   | `MTG_SCAN_ART_ENABLED` | `true` or `false` |
+   | `MTG_SCAN_ART_MAX_DISTANCE` | 0 to 1024 |
+   | `MTG_SCAN_ART_MIN_MARGIN` | 0 to 1024 |
+   | `MTG_SCAN_ART_MAX_PRINTINGS` | 1 to 2000 |
+   | `MTG_SCAN_ART_IMAGE_INTERVAL` | 0.05 to 5.0 |
+   | `MTG_SCAN_ART_IMAGES_PER_HOUR` | 1 to 36000 |
+   | `MTG_SCAN_ART_MAX_GALLERIES` | 1 to 100000 |
+   | `MTG_SCAN_ART_GALLERY_IDLE_DAYS` | 1 to 3650 |
+
+   For `true` or `false`, the gateway reads `1`, `true` or `yes` (any case) as true and any other
+   value as false (an empty one keeps the default), so a mistyped value there doesn't stop it: it
+   turns the setting off.
 
 ### 0.7.30
 
@@ -150,7 +219,8 @@ locked (greyed out) even with no variable set.
 1. **If you pasted the stack file into Portainer's Web editor:** first note
    your own edits to the old text: the optional secret lines you removed the
    `# ` from (`mtg_authentik_api_token`, `mtg_ntfy_token`, each in two
-   places) and any line you added under `environment:`. Then, in
+   places) and any line you added under `environment:` (leave out the ones
+   [0.7.32](#0732) lists). Then, in
    **Stacks** → `mtg` → **Editor**, replace the whole text with the new
    [`deploy/portainer-stack.yml`](../deploy/portainer-stack.yml) and make
    the same edits in it. Without the Authentik lines the removed-member
@@ -186,7 +256,7 @@ locked (greyed out) even with no variable set.
 Before the update commands ([Docker Compose](#docker-compose) above), note your own edits to the old `docker-compose.yml`:
 the optional secret lines you removed the `# ` from (`mtg_authentik_api_token`,
 `mtg_ntfy_token`, each in two places) and any line you added under
-`environment:`. Then download the new file (if you cloned the repository, run
+`environment:` (leave out the ones [0.7.32](#0732) lists). Then download the new file (if you cloned the repository, run
 `git checkout docker-compose.yml`, which undoes your edits to it, then
 `git pull`, instead):
 

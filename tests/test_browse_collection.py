@@ -352,6 +352,8 @@ async def test_collection_tools(stack: Stack) -> None:
         a = applied.json()
         assert a.get("state") == "applied", a
         assert [r["quantity"] for r in a["result"]["added"]] == [2, 1], a
+        changed = [(r["previous_quantity"], r["added_quantity"]) for r in a["result"]["added"]]
+        assert changed == [(0, 2), (0, 1)], a
         out = structured(await call(stack.h, token, "list_collection", {}))
         assert out["ok"] is True and out["count"] == 2
         # removing is a proposal too, resolved against the collection so the diff names the card
@@ -365,12 +367,22 @@ async def test_collection_tools(stack: Stack) -> None:
             headers={"X-CSRF-Token": csrf},
             json={"version": p2["version"]},
         )
-        assert a2.status_code == 200 and a2.json()["result"]["removed"][0]["quantity"] == 2
+        assert a2.status_code == 200, a2.text
+        # the result says what the removal took and what is left, not only the record's old count
+        gone = a2.json()["result"]["removed"][0]
+        assert (gone["previous_quantity"], gone["removed_quantity"], gone["quantity"]) == (2, 1, 1), gone
         assert sorted(r["quantity"] for r in stack.ark.collections["alice"].values()) == [1, 1]
         # the assistant cannot apply it itself in manual mode
         p3 = structured(await call(stack.h, token, "propose_collection_changes", {"add": ["Sol Ring"]}))
         refused = structured(await call(stack.h, token, "apply_proposal", {"proposal_id": p3["proposal_id"]}))
         assert refused["ok"] is False and refused["error"] == "browser_required"
+        a3 = await b.http.post(
+            f"/api/v1/proposals/{p3['proposal_id']}/apply",
+            headers={"X-CSRF-Token": csrf},
+            json={"version": p3["version"]},
+        )
+        grown = a3.json()["result"]["added"][0]  # one more copy on the record that holds one
+        assert (grown["previous_quantity"], grown["added_quantity"], grown["quantity"]) == (1, 1, 2), grown
         # social actions only exist as proposals the member approves each time,
         # and no tool writes the collection directly
         listing = sse_json(await stack.h.mcp(token, "tools/list"))

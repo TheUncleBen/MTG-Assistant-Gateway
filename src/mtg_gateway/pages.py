@@ -20,7 +20,7 @@ from starlette.requests import Request
 from starlette.responses import RedirectResponse, Response
 
 from . import app_signin, link_disclosure, modes, notify, prefs
-from .archidekt import PATIENCE_SPENT
+from .archidekt import PATIENCE_SPENT, page_turn
 from .auth_provider import BROWSER_COOKIE, LoginError, cookie_name
 from .avatars import initials_svg
 from .clickguard import form_stamp, guarded_form, submitted_too_soon
@@ -694,6 +694,9 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         on_top = _failure_on_top(p, err)
         # the stored proposal's own words only, never the URL's, so a crafted link adds nothing
         notice = _err(_page_step(p)) if on_top else _notice(request.query_params.get("ok"), err)
+        if not on_top and request.query_params.get("ok") == "applied" and p.get("applied_text"):
+            # an account action or collection change says what it did, not that a deck matches
+            notice = f"<div class='notice ok'>{html.escape('Applied. ' + p['applied_text'])}</div>"
         title = (
             f"New deck: {p['deck_name']}"
             if p.get("kind") == "create_deck"
@@ -886,6 +889,9 @@ def browser_session(state: Any, request: Request) -> tuple[str | None, str | Non
     if sync is not None:
         sync.opened(sub)  # opening the app checks the member's decks on Archidekt (sync.py)
     set_card_size(state.db.get_pref(sub, prefs.CARD_SIZE))  # drawn on <html> (theme.render)
+    # this request is the member's own page: its Archidekt reads go first (archidekt.page_turn);
+    # set after sync.opened, so the deck sync's check started above does not take that turn
+    page_turn.set(True)
     return sub, sid
 
 
@@ -1536,6 +1542,8 @@ def _page_step(p: dict[str, Any]) -> str:
             "Archidekt is being updated a step at a time to stay within its limits. You can leave "
             "this page; it refreshes by itself until the change is done."
         )
+    if state == "applied" and p.get("applied_text"):
+        return f"Done. {p['applied_text']}"
     if state == "applied":
         return "Done. Archidekt matches this proposal."
     if state == "failed" and result.get("error") == "rate_limited":
