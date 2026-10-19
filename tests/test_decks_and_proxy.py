@@ -18,6 +18,7 @@ from mcp.server.mcpserver import MCPServer
 from mtg_gateway.archidekt import ArchidektClient, Pacer
 from mtg_gateway.decklist import parse_decklist
 from mtg_gateway.mf_proxy import MysticForgeProxy
+from mtg_gateway.scan.scryfall import ScryfallError
 
 from .conftest import (
     AUTO_PROXY,
@@ -1436,6 +1437,32 @@ async def test_a_card_no_magic_card_is_called_is_refused_when_proposed(stack: St
         )
     )
     assert amended["ok"] is False and amended["error"] == "unknown_cards", amended
+    # a name the catalog lacks (a token, a card from a set newer than the catalog) is asked of
+    # Scryfall before it is refused; an answer other than "not found" refuses nothing
+    scan = stack.h.app.state.gateway.scan
+    asked: list[str] = []
+
+    async def named(name: str, **_kw: object) -> dict:
+        asked.append(name)
+        if name == "Treasure":
+            return {"name": "Treasure"}
+        if name == "Offline Card":
+            raise ScryfallError("unavailable", "down")
+        raise ScryfallError("not_found", "no card")
+
+    scan.scryfall.named = named
+    for name, ok in (("Treasure", True), ("Offline Card", True), ("Islend", False)):
+        r = structured(
+            await call(
+                h,
+                token,
+                "propose_deck_changes",
+                {"deck_id": "42", "changes": [{"action": "add", "card_name": name}]},
+            )
+        )
+        assert r["ok"] is ok, (name, r)
+    assert asked == ["Treasure", "Offline Card", "Islend"]
+    assert names.known("Insectile Aberration") is True  # a back face is a card too
 
 
 async def test_printing_fields_are_validated_on_the_change(stack: Stack) -> None:

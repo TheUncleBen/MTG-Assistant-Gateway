@@ -1248,6 +1248,20 @@ class ScanService:
     def list_sessions(self, sub: str) -> list[dict[str, Any]]:
         return self.store.list(sub)
 
+    async def is_card(self, name: str) -> bool | None:
+        """Whether ``name`` is a Magic card, for refusing a misspelt add when it is proposed: the
+        card-name catalog first, then, for a name the catalog lacks, Scryfall's exact lookup (the
+        catalog leaves out tokens and can be a day behind a new set). ``None`` when neither can
+        tell (catalog not loaded, Scryfall unreachable): the caller then refuses nothing."""
+        found = self.names.known(name)
+        if found is not False:
+            return found
+        try:
+            await self.scryfall.named(name)
+        except ScryfallError as exc:
+            return False if exc.kind == "not_found" else None
+        return True
+
     def guessed_names(self, sub: str) -> dict[str, str]:
         """Card names this member's scans matched from a misread name: matched name (lower case)
         -> what was read. A proposal adding one of these cards says the name was guessed."""

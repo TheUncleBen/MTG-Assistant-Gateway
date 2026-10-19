@@ -77,7 +77,7 @@ def add_scan(server: MCPServer, state: AppState, *, scryfall: ScryfallClient | N
     # proposals that add a card a scan matched from a misread name say so (decks._save_proposal)
     state.decks.guessed_names = service.guessed_names  # type: ignore[attr-defined]
     # a proposal that adds a card no Magic card is called is refused when made (decks.propose)
-    state.decks.known_card = service.names.known  # type: ignore[attr-defined]
+    state.decks.known_card = service.is_card  # type: ignore[attr-defined]
     add_scan_tools(server, service, links=getattr(state, "cards", None))
     add_scan_routes(server, state, service)
     return service

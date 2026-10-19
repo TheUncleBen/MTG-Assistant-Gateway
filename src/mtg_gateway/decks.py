@@ -1390,13 +1390,14 @@ def plan_rows(
     return before, after, rows
 
 
-def unknown_card_names(
-    deck: Deck, changes: list[Change], known: Callable[[str], bool | None] | None
+async def unknown_card_names(
+    deck: Deck, changes: list[Change], known: Callable[[str], Awaitable[bool | None]] | None
 ) -> list[str]:
-    """The names added by ``changes`` that are no Magic card at all, by the card-name catalog
-    (``known``). Archidekt looks each name up only when the proposal is applied, so without this a
+    """The names added by ``changes`` that are no Magic card at all (``known``: the scan service's
+    is_card). Archidekt looks each name up only when the proposal is applied, so without this a
     misspelt card waits as a proposal and fails later. A card already in the deck is never
-    looked up, and a name the catalog cannot judge (not loaded yet, or the check fails) passes."""
+    looked up, and a name that cannot be judged (no catalog yet, Scryfall unreachable, or the check
+    fails) passes."""
     if known is None:
         return []
     have = {c.name.casefold() for c in deck.cards} | {front_face(c.name).casefold() for c in deck.cards}
@@ -1406,7 +1407,7 @@ def unknown_card_names(
         if ch.action != "add" or name.casefold() in have or front_face(name).casefold() in have:
             continue
         try:
-            found = known(name)
+            found = await known(name)
         except Exception:
             logger.exception("card-name check failed")
             found = None
@@ -2128,9 +2129,10 @@ class DeckService:
         self.live = LiveSettings(settings, db)
         # sub -> {matched card name (lower case): what the scan read}; set when scanning is on
         self.guessed_names: Callable[[str], dict[str, str]] | None = None
-        # name -> whether it is a Magic card (None: cannot tell yet); set when scanning is on, from
-        # the card-name catalog the gateway keeps in memory, so the check costs no Archidekt call
-        self.known_card: Callable[[str], bool | None] | None = None
+        # name -> whether it is a Magic card (None: cannot tell); set when scanning is on, from the
+        # card-name catalog the gateway keeps in memory (Scryfall asked only for a name it lacks),
+        # so the check costs no Archidekt call
+        self.known_card: Callable[[str], Awaitable[bool | None]] | None = None
         # Set by collection.py: applies a ``collection`` proposal's stored changes against the
         # member's Archidekt Collection and returns the result rows (DeckService itself knows only
         # decks). None while the collection pages are not loaded.
@@ -2996,7 +2998,7 @@ class DeckService:
         deck = await self.get_own_deck(sub, deck_id)
         self.recheck_waiting(sub, deck)  # the deck's other waiting proposals, at no cost
         _before, _after, rows = plan_rows(deck, changes)
-        self._refuse_unknown_cards(deck, changes)
+        await self._refuse_unknown_cards(deck, changes)
         pid = secrets.token_urlsafe(12)
         self._save_proposal(
             {
@@ -3097,8 +3099,8 @@ class DeckService:
             ]
         return out
 
-    def _refuse_unknown_cards(self, deck: Deck, changes: list[Change]) -> None:
-        unknown = unknown_card_names(deck, changes, self.known_card)
+    async def _refuse_unknown_cards(self, deck: Deck, changes: list[Change]) -> None:
+        unknown = await unknown_card_names(deck, changes, self.known_card)
         if unknown:
             raise DeckError(
                 "unknown_cards",
@@ -5389,7 +5391,7 @@ class DeckService:
         if kind == "edit":
             changes = parse_changes(raw_changes)
             _before, _after, rows = plan_rows(deck, changes)
-            self._refuse_unknown_cards(deck, changes)
+            await self._refuse_unknown_cards(deck, changes)
             stored: Any = [c.as_dict() for c in changes]
         else:
             raw = dict(raw_changes) if isinstance(raw_changes, dict) else raw_changes

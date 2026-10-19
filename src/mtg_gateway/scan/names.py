@@ -131,15 +131,15 @@ class NameCatalog:
         return True
 
     def known(self, name: str) -> bool | None:
-        """Whether ``name`` is a card in the catalog, by its full name or (a double-faced or split
-        card) its front face, as Archidekt's own lookup matches it; ``None`` while the catalog is
-        not loaded, so a caller never refuses a card it cannot check."""
+        """Whether ``name`` is a card in the catalog, by its full name or one face of a double-faced
+        or split card; ``None`` while the catalog is not loaded, so a caller never refuses a card it
+        cannot check."""
         if not self._names:
             self.ensure()
             return None
         if self._known is None:
-            fronts = {fold(n.split(" // ", 1)[0]) for n in self._names if " // " in n}
-            self._known = set(self._folded) | fronts
+            faces = {fold(f) for n in self._names if " // " in n for f in n.split(" // ")}
+            self._known = set(self._folded) | faces
         return fold(name) in self._known or fold(name.split(" // ", 1)[0]) in self._known
 
     def suggest(self, query: str, *, limit: int = MAX_SUGGESTIONS) -> list[str] | None:
