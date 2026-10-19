@@ -339,6 +339,33 @@ async def test_create_folder_waits_for_the_members_press(stack: Stack) -> None:
     assert p["ok"] is False and "already" in p["message"]
 
 
+async def test_an_applied_action_says_what_it_did(stack: Stack) -> None:
+    """After an account action the assistant, the review page and the card say what was done,
+    not that a deck matches the proposal (which is still said for a deck edit)."""
+    import html
+
+    h = stack.h
+    token = await linked_user(stack)
+    await _set_mode(h, "semi")
+    done = await _press(h, token, await call(h, token, "propose_create_folder", {"name": "Brews"}))
+    assert done["applied_text"] == "The folder is created on Archidekt."
+    assert done["next_step"] == "Done. The folder is created on Archidekt."
+    b = Browser(h)
+    try:
+        await b.login()
+        page = (await b.http.get(f"/proposals/{done['proposal_id']}?ok=applied")).text
+    finally:
+        await b.aclose()
+    assert html.escape("Applied. The folder is created on Archidekt.") in page
+    assert html.escape("Done. The folder is created on Archidekt.") in page
+    assert "matches this proposal" not in page
+    gone = await _press(h, token, await call(h, token, "propose_delete_deck", {"deck_id": "42"}))
+    assert gone["result"]["backup_deck_id"] and gone["next_step"] == (
+        "Done. The deck is deleted on Archidekt. The gateway kept a snapshot of it from just before "
+        "and a backup copy on Archidekt."
+    )
+
+
 async def test_a_folder_named_like_the_backup_folder_is_refused_when_proposed(stack: Stack) -> None:
     """The assistant's new-folder proposal with the backup folder's name is
     refused when it is made, so the assistant can pick another name at once; the apply checks again."""

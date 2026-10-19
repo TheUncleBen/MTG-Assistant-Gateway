@@ -46,6 +46,8 @@ from .archidekt import (
     MAX_LIST_PAGES,
     PATIENCE_SPENT,
     RATE_LIMIT_WAITS,
+    VOTE_DOWN,
+    VOTE_NONE,
     ArchidektClient,
     ArchidektError,
     Deck,
@@ -3105,9 +3107,12 @@ class DeckService:
         stopped = (row["result"] or {}).get("error") == "rate_limited" and (
             state == "failed" or (state == "pending" and self.settings.writes_enabled and not out_of_date)
         )
+        applied = applied_text(kind, row.get("changes"), row["result"]) if state == "applied" else ""
         return {
             "proposal_id": row["id"],
             "kind": kind,
+            # what an applied account action or collection change did (the pages and the card say it)
+            **({"applied_text": applied} if applied else {}),
             "deck_id": row["deck_id"],
             "deck_url": f"https://archidekt.com/decks/{row['deck_id']}" if row["deck_id"].isdigit() else None,
             "deck_name": row["deck_name"],
@@ -3222,6 +3227,7 @@ class DeckService:
                 ),
                 closed_by=closed_by,
                 closed_by_app=closed_by_app,
+                applied=applied,
             ),
         }
 
@@ -7060,6 +7066,56 @@ def formatting_review_only(row: dict[str, Any]) -> str:
     )
 
 
+def applied_text(kind: str, changes: dict[str, Any] | None, result: dict[str, Any] | None) -> str:
+    """What an applied account action or collection change did, in one sentence for the member
+    (the pages put "Done." or "Applied." before it). Empty for a deck change, whose pages keep
+    saying the deck matches the proposal."""
+    c = changes if isinstance(changes, dict) else {}
+    r = result if isinstance(result, dict) else {}
+    if kind == "collection":
+        return "Your collection on Archidekt has these changes now."
+    if kind != "action":
+        return ""
+    action = c.get("action")
+    on = c.get("on") is not False
+    vote = c.get("vote")
+    if action == "create_folder":
+        return "The folder is created on Archidekt."
+    if action == "deck_vote":
+        if vote == VOTE_NONE:
+            return "Your vote on the deck is taken back on Archidekt."
+        return (
+            "The deck is voted down on Archidekt." if vote == VOTE_DOWN else "The deck is liked on Archidekt."
+        )
+    if action == "deck_bookmark":
+        return "The deck is bookmarked on Archidekt." if on else "Your bookmark is removed on Archidekt."
+    if action == "follow":
+        return "You follow them on Archidekt now." if on else "You no longer follow them on Archidekt."
+    if action == "comment_post":
+        return (
+            "Your reply is posted on Archidekt."
+            if c.get("parent")
+            else "Your comment is posted on Archidekt."
+        )
+    if action == "comment_edit":
+        return "Your comment is changed on Archidekt."
+    if action == "comment_delete":
+        return "Your comment is deleted on Archidekt."
+    if action == "comment_vote":
+        if vote == VOTE_NONE:
+            return "Your vote on the comment is taken back on Archidekt."
+        return "Your vote on the comment is saved on Archidekt."
+    if action == "delete_deck":
+        # delete_deck keeps a snapshot first, and a backup copy when backups are on
+        kept = " and a backup copy on Archidekt" if r.get("backup_deck_id") else ""
+        return f"The deck is deleted on Archidekt. The gateway kept a snapshot of it from just before{kept}."
+    if action == "collaborator_add":
+        return "They can edit your deck on Archidekt now."
+    if action == "collaborator_remove":
+        return "They can no longer edit your deck on Archidekt."
+    return ""
+
+
 def _next_step(
     state: str,
     writes_enabled: bool,
@@ -7078,10 +7134,12 @@ def _next_step(
     press_reason: str = "",
     policy_allows: bool = False,
     opens_first: str = "",
+    applied: str = "",
 ) -> str:
     """What the assistant should do next with a proposal in ``state``. ``rate_limited``: for an
     apply that stopped on Archidekt's waits, the same note its stored message ends with
-    (``_rate_limited_note``), so the two never disagree."""
+    (``_rate_limited_note``), so the two never disagree. ``applied``: ``applied_text`` for an
+    account action or collection change."""
     what = "these details" if kind == "details" else "this copy" if kind == "clone" else "this diff"
     # With the in-chat card (approve.py) the person decides on the card where the app shows one.
     card = (
@@ -7149,6 +7207,8 @@ def _next_step(
             "few minutes because the gateway paces its requests). Tell the user it is under way and "
             "check again with get_proposal in a minute. Do not apply it again or make a new proposal."
         )
+    if state == "applied" and applied:
+        return f"Done. {applied}"
     if state == "applied" and kind == "details":
         return "Done. The deck's details on Archidekt match this proposal."
     if state == "applied" and kind == "clone":

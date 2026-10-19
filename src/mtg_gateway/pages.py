@@ -694,6 +694,9 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         on_top = _failure_on_top(p, err)
         # the stored proposal's own words only, never the URL's, so a crafted link adds nothing
         notice = _err(_page_step(p)) if on_top else _notice(request.query_params.get("ok"), err)
+        if not on_top and request.query_params.get("ok") == "applied" and p.get("applied_text"):
+            # an account action or collection change says what it did, not that a deck matches
+            notice = f"<div class='notice ok'>{html.escape('Applied. ' + p['applied_text'])}</div>"
         title = (
             f"New deck: {p['deck_name']}"
             if p.get("kind") == "create_deck"
@@ -1536,6 +1539,8 @@ def _page_step(p: dict[str, Any]) -> str:
             "Archidekt is being updated a step at a time to stay within its limits. You can leave "
             "this page; it refreshes by itself until the change is done."
         )
+    if state == "applied" and p.get("applied_text"):
+        return f"Done. {p['applied_text']}"
     if state == "applied":
         return "Done. Archidekt matches this proposal."
     if state == "failed" and result.get("error") == "rate_limited":
