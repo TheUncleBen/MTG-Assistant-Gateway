@@ -55,9 +55,9 @@ Archidekt by default.
   40.
 - Busy, limit and error messages no longer promise a time, such as "try again in a minute" or "in
   a few minutes"; they say to try again later, because the gateway can't know when Archidekt,
-  Scryfall or the sign-in service will have room again. Where the gateway does know the wait, such
-  as the seconds Archidekt or Scryfall asks for, or the minute between two notification tests, the
-  message still names it.
+  Scryfall or the sign-in service will have room again. Some messages still name a wait the gateway
+  does know, such as the seconds Archidekt or Scryfall asks for, or the minute between two
+  notification tests.
 
 ### Fixed
 - On the waiting changes card, a row applied with its own Approve said "The deck on Archidekt

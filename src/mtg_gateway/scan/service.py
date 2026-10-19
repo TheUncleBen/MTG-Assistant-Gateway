@@ -724,8 +724,9 @@ class ScanService:
         if why == "budget":
             note = "not looked up yet; this call's lookup time is used up, resolve the remaining names again"
         else:
+            n = max(1, self.scryfall.retry_in())
             note = (
-                f"not looked up yet; Scryfall asked the gateway to wait {self.scryfall.retry_in()} seconds, "
+                f"not looked up yet; Scryfall asked the gateway to wait {n} second{'' if n == 1 else 's'}, "
                 "try again after that"
             )
         return Resolution(inp, "deferred", note=note)

@@ -60,8 +60,7 @@ ACCOUNT_OK = {
     "notify_off": "Notifications are off.",
     "notify_topic": "Your phones are disconnected. To connect a phone again, open the Account page in the "
     "gateway's app on that phone and press Get notifications on this phone.",
-    "notify_test_sent": "The test message is sent. Each phone you connected should show it within a few "
-    "seconds.",
+    "notify_test_sent": "The test message is sent. Each phone you connected should show it.",
     "summary_saved": "Summary choice saved.",
 }
 ACCOUNT_ERR = {

@@ -857,9 +857,10 @@ class Pacer:
                     sent=False,
                 )
             if now < self._retry_until:
+                wait = int(self._retry_until - now) + 1
                 raise ArchidektError(
                     "rate_limited",
-                    f"Archidekt asked the gateway to wait {int(self._retry_until - now) + 1} seconds. "
+                    f"Archidekt asked the gateway to wait {wait} second{'' if wait == 1 else 's'}. "
                     "Try again after that.",
                     sent=False,
                 )
@@ -1261,7 +1262,7 @@ class ArchidektClient:
                 self.pacer.record(False, asked, breaker=patient.get() is None)
                 raise ArchidektError(
                     "rate_limited",
-                    "Archidekt asked us to slow down; try again later",
+                    "Archidekt asked the gateway to slow down; try again later",
                     retry_after=asked,
                 )
             if resp.status_code == 401:
