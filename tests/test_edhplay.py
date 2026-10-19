@@ -704,7 +704,7 @@ def test_the_box_shows_only_the_approved_messages(server: Server, width: int, sc
 
     _chromium()
     sid = server.sign_in_and_link()
-    busy = "Archidekt is busy right now; try again in a minute."
+    busy = "Archidekt is busy right now; try again later."
     with sync_playwright() as p:
         browser, page, errors = _page(p, server, sid, width, color_scheme=scheme)
         page.goto(f"{server.base}/decks/42", wait_until="networkidle")

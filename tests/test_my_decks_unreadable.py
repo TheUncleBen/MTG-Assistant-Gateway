@@ -8,6 +8,7 @@ import html
 import json
 from typing import Any
 
+from mtg_gateway import tools_decks
 from mtg_gateway.archidekt import ArchidektClient, Pacer
 
 from .conftest import COLLECTION, Stack, stack_with
@@ -17,10 +18,9 @@ from .test_decks_and_proxy import call, linked_user, structured
 
 stack_options = stack_with(COLLECTION)
 
-NONE_READ = html.escape("Your deck list couldn't be read from Archidekt. Try again in a moment.")
+NONE_READ = html.escape("Your deck list couldn't be read from Archidekt. Try again.")
 SOME_READ = html.escape(
-    "Part of your deck list couldn't be read from Archidekt, so some decks may be missing here. "
-    "Try again in a moment."
+    "Part of your deck list couldn't be read from Archidekt, so some decks may be missing here. Try again."
 )
 # Try again asks for a real re-read (a partial list is otherwise kept for a minute)
 TRY_AGAIN = "<a class='btn btn-primary' href='/decks?reread=1'>Try again</a>"
@@ -227,12 +227,16 @@ async def test_list_my_decks_tool_says_when_entries_could_not_be_read(stack: Sta
         svc.deck_lists.drop(_sub(stack))
         out = structured(await call(h, token, "list_my_decks"))
         assert out["ok"] and [d["id"] for d in out["decks"]] == ["42"] and out["count"] == 1
-        assert out["unreadable"] == 1 and out["note"] == html.unescape(SOME_READ)
+        assert (
+            out["unreadable"] == 1
+            and out["note"] == tools_decks.LIST_PARTLY_UNREADABLE
+            and out["note"].endswith("The gateway keeps this list for a minute; ask again after that.")
+        )
         ark._listing_row = lambda d: {**real_row(d), "owner": None}
         svc.deck_lists.drop(_sub(stack))
         out = structured(await call(h, token, "list_my_decks"))
         assert out["ok"] and out["decks"] == [] and out["count"] == 0
-        assert out["unreadable"] == 2 and out["note"] == html.unescape(NONE_READ)
+        assert out["unreadable"] == 2 and out["note"] == tools_decks.LIST_UNREADABLE
     finally:
         ark._listing_row = real_row
         ark.decks.pop(44, None)

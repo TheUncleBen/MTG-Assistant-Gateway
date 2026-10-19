@@ -295,7 +295,7 @@ CALL_DEADLINE_SECONDS = 120.0
 LIST_DEADLINE_SECONDS = 10.0
 LIST_RETRY_SECONDS = 60.0
 # A call whose shape is unknown because Mystic Forge's tool listing has not succeeded yet.
-NOT_READY_TEXT = "the research service is not ready yet and nothing was sent; try again in a minute"
+NOT_READY_TEXT = "the research service is not ready yet and nothing was sent; try again later"
 HEALTH_DEADLINE_SECONDS = 3.0  # the health check's own probe: short, so /healthz stays quick
 HEALTH_CACHE_SECONDS = 30.0  # one probe per half minute at most, however often /healthz is asked
 # A failed probe is held for a few seconds only, so a Mystic Forge that was still starting (it

@@ -39,13 +39,13 @@ BUSY_TEXTS = {
     ),
     "archidekt": (
         "Archidekt asked the gateway to slow down, so the gateway is pausing its Archidekt requests "
-        "for a moment. Nothing is wrong with your decks or your account; try again shortly."
+        "for now. Nothing is wrong with your decks or your account; try again later."
     ),
 }
 UNREACHABLE_TITLE = "Archidekt can't be reached right now"
 UNREACHABLE_TEXT = (
     "The gateway could not get an answer from Archidekt (or the research service). This usually "
-    "clears by itself within a minute or two."
+    "clears by itself."
 )
 # The wait to advise when the refusal does not say (a concurrency cap, Archidekt's own 429, an
 # unreachable Archidekt): the pacer's breaker and Archidekt's typical Retry-After are about this long.

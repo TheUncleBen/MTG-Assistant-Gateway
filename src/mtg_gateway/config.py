@@ -245,8 +245,8 @@ class Settings:
     forge_url: str | None = None
     # Games per Forge run: four-player Commander games are slow on a Pi, so runs stay short.
     forge_games: int = 4
-    # Forge games a report asks to play at the same time (1 to 4); the Forge service plays as many as
-    # its machine has places for, so the default asks for all of them.
+    # Forge games a report asks to play at the same time (1 to 16); the Forge service plays as many as
+    # its machine has places for. The default asks for as many as a report has games by default.
     forge_parallel_games: int = 4
     cimd_enabled: bool = True
     cimd_allowed_hosts: list[str] = field(default_factory=list)
@@ -290,7 +290,7 @@ class Settings:
     # asks, waits at least archidekt_min_interval after the previous one, and no more than
     # archidekt_max_per_minute go out in any 60 seconds.
     archidekt_min_interval: float = 1.0
-    archidekt_max_per_minute: int = 40
+    archidekt_max_per_minute: int = 30
     # GETs that time out or get a 5xx are retried this many times, after a random wait of up to
     # archidekt_backoff_base * 2**attempt seconds (capped at 10). Writes and 429s are never retried.
     archidekt_retries: int = 2
@@ -500,7 +500,7 @@ def load_settings() -> Settings:
         mystic_forge_url=(_env("MTG_MYSTIC_FORGE_URL", "") or None),
         forge_url=(_env("MTG_FORGE_URL", "") or None),
         forge_games=_int_env("MTG_FORGE_GAMES", 4, lo=1, hi=50),
-        forge_parallel_games=_int_env("MTG_FORGE_PARALLEL_GAMES", 4, lo=1, hi=4),
+        forge_parallel_games=_int_env("MTG_FORGE_PARALLEL_GAMES", 4, lo=1, hi=16),
         cimd_enabled=_bool_env("MTG_CIMD_ENABLED", True),
         cimd_allowed_hosts=[
             h.strip() for h in (_env("MTG_CIMD_ALLOWED_HOSTS", "") or "").split(",") if h.strip()
@@ -522,7 +522,7 @@ def load_settings() -> Settings:
         snapshots_per_deck=_int_env("MTG_SNAPSHOTS_PER_DECK", 25, lo=5, hi=100),
         archidekt_calls_per_10_min=_int_env("MTG_ARCHIDEKT_CALLS_PER_10_MIN", 120, lo=10, hi=100_000),
         archidekt_min_interval=_float_env("MTG_ARCHIDEKT_MIN_INTERVAL", 1.0, lo=0.25, hi=10.0, seconds=True),
-        archidekt_max_per_minute=_int_env("MTG_ARCHIDEKT_MAX_PER_MINUTE", 40, lo=1, hi=120),
+        archidekt_max_per_minute=_int_env("MTG_ARCHIDEKT_MAX_PER_MINUTE", 30, lo=1, hi=120),
         archidekt_retries=_int_env("MTG_ARCHIDEKT_RETRIES", 2, lo=0, hi=4),
         archidekt_backoff_base=_float_env("MTG_ARCHIDEKT_BACKOFF_BASE", 1.0, lo=0.1, hi=10.0, seconds=True),
         archidekt_cache_seconds=_int_env("MTG_ARCHIDEKT_CACHE_SECONDS", 60, lo=0, hi=900),
@@ -759,7 +759,7 @@ MANAGED_SETTINGS: dict[str, SettingSpec] = {
         ),
         # simulation
         _spec("forge_games", "MTG_FORGE_GAMES", "int", 4, "simulation", "C", lo=1, hi=50),
-        _spec("forge_parallel_games", "MTG_FORGE_PARALLEL_GAMES", "int", 4, "simulation", "C", lo=1, hi=4),
+        _spec("forge_parallel_games", "MTG_FORGE_PARALLEL_GAMES", "int", 4, "simulation", "C", lo=1, hi=16),
         # watchlists and prices
         _spec("watchlists_enabled", "MTG_WATCHLISTS_ENABLED", "bool", False, "watchlists", "B", restart=True),
         _spec("watch_max_cards", "MTG_WATCH_MAX_CARDS", "int", 200, "watchlists", "B", lo=0, hi=200),
@@ -829,7 +829,7 @@ MANAGED_SETTINGS: dict[str, SettingSpec] = {
             "archidekt_max_per_minute",
             "MTG_ARCHIDEKT_MAX_PER_MINUTE",
             "int",
-            40,
+            30,
             "pacing",
             "B",
             lo=1,

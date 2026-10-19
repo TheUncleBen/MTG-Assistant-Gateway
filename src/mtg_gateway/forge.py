@@ -49,6 +49,9 @@ PINNED_SILENCE_SECONDS = 120.0
 SILENT_CANCEL_SECONDS = 1800.0
 
 
+OLD_FORGE_PARALLEL = 4  # the most games at once a Forge image before 2.0.15-mag4 accepts
+
+
 class ForgeError(Exception):
     def __init__(self, kind: str, message: str, detail: dict[str, Any] | None = None):
         super().__init__(message)
@@ -376,7 +379,15 @@ class ForgeClient:
             body["seed"] = seed
         if parallel > 1:  # a Forge image before 0.7.30 ignores it and plays one game at a time
             body["parallel"] = parallel
-        return await self._call("POST", "/jobs", body)
+        try:
+            return await self._call("POST", "/jobs", body)
+        except ForgeError as exc:
+            # A Forge image before 2.0.15-mag4 refuses more than 4 at once, and never had more than
+            # 4 places to play them on, so asking for 4 there plays the run the same way.
+            if parallel <= OLD_FORGE_PARALLEL or exc.kind != "invalid" or "parallel" not in str(exc):
+                raise
+            body["parallel"] = OLD_FORGE_PARALLEL
+            return await self._call("POST", "/jobs", body)
 
     async def job(self, job_id: str) -> dict[str, Any]:
         return await self._call("GET", f"/jobs/{job_id}")

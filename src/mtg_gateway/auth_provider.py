@@ -114,7 +114,7 @@ EXCHANGE_FAILED = {
     ),
     "unreachable": (
         "Sign-in could not be completed: the gateway got no usable answer from the identity "
-        "provider. Try again in a minute. If it keeps happening, the gateway's admin should check "
+        "provider. Try again later. If it keeps happening, the gateway's admin should check "
         "that the gateway can reach the provider." + _ADMIN_LOG
     ),
     "other": "Sign-in could not be completed with the identity provider. Try again." + _ADMIN_LOG,
@@ -143,7 +143,7 @@ LOGIN_STARTS_PER_MINUTE = 30
 # This many different browsers starting sign-ins from one address logs a warning (once per
 # address) that the address may be an untrusted proxy.
 SHARED_SOURCE_WARN_BROWSERS = 50
-TOO_MANY_LOGINS = "Too many sign-in attempts from your network. Wait a minute and try again."
+TOO_MANY_LOGINS = "Too many sign-in attempts from your network. Try again later."
 
 
 class LoginThrottled(Exception):
@@ -559,7 +559,7 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
         try:
             return await self._idp_url(login_id, session["oidc_nonce"], challenge)
         except AuthorizeError as exc:
-            raise LoginError("The identity provider is unavailable. Try again in a minute.", 503) from exc
+            raise LoginError("The identity provider is unavailable. Try again later.", 503) from exc
 
     async def finish_idp_leg(
         self, *, state: str | None, code: str | None, error: str | None, cookie_value: str | None
@@ -708,9 +708,7 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
                 state=login_id, nonce=nonce, code_challenge=challenge, prompt="login" if force_login else None
             )
         except OIDCError as exc:
-            raise LoginError(
-                "The identity provider is unavailable right now. Try again shortly.", 502
-            ) from exc
+            raise LoginError("The identity provider is unavailable right now. Try again later.", 502) from exc
 
     async def _require_member(self, sub: str) -> None:
         """Refuse the token request unless the identity provider says ``sub`` is still in."""
@@ -723,7 +721,7 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
             raise TokenError("invalid_grant", "this account has been disabled on this gateway")
         outcome = await self.membership.check(sub)
         if outcome is Membership.UNAVAILABLE:
-            raise TokenError("invalid_request", "the identity provider can't be reached; try again shortly")
+            raise TokenError("invalid_request", "the identity provider can't be reached; try again later")
         if outcome is Membership.REVOKED:
             raise TokenError("invalid_grant", "sign in again to keep using this service")
 

@@ -607,26 +607,28 @@ for the member when the assistant calls `apply_proposal`.
 
 ### The other cards in the chat
 
-The same switch covers the cards that show and relay rather than apply:
-the printings of a card (`card_printings`), the cards read from photos or a
-list (`resolve_cards`), a deck by category (`get_deck`,
-`get_snapshot`) and the account's setup (`whoami`, `account_status`), and
-four that only display the tool's own answer, with nothing added to it: a
-comparison (`compare_decks`), a deck's statistics (`deck_stats`), a list of
-decks (`list_my_decks`, `search_decks`) and a scan session
-(`get_scan_session`). A tap on them reaches the assistant as plain text, or
-opens a page; they call no tool. A deck's
-rows or a card's printings are too big for a tool result, so the card gets
-a signed link to `GET /cards/data/<token>`: the token names the member, what
-it is for and which deck, snapshot or card, and expires after ten minutes
-(`mtg_fernet_key` signs it). The endpoint serves the member's own data only,
-to a member who still exists, is enabled and still in the required group,
+The same switch covers the two pickers, which show and relay rather than
+apply: the printings of a card (`card_printings`) and the cards read from
+photos or a list (`resolve_cards`). A tap on them reaches the assistant as
+plain text, or opens a page; they call no tool. Since 0.7.33 no other tool
+shows a card; the deck, account, comparison, statistics, deck-list and scan
+cards stay registered so that older chats can still draw them. After a
+proposal approved on its card, or a batch sent with Apply all, is applied or
+under way, the card posts the fixed text "Approved, go on" as the user's
+message where the app allows it (MCP Apps `ui/message`, or ChatGPT's own
+follow-up call); it carries no data. A row's own Approve on the
+waiting-changes card posts nothing. A card's printings are too big for a tool result,
+so the printings card gets a signed link to `GET /cards/data/<token>`: the
+token names the member, what it is for and which card, and expires after
+ten minutes (`mtg_fernet_key` signs it). The endpoint serves the member's
+own data only, to a member who still exists, is enabled and still in the
+required group,
 without cookies; an expired, forged or used-up token (twenty fetches)
-answers 404 `expired`, a removed member 403 `forbidden`, a deck or card
-that is gone or not theirs 404 `not_found`, an exhausted Archidekt budget
-429 `rate_limited`, an unreachable Archidekt or Scryfall 503 `unavailable`,
-and each hit is a `card` metric. The first answer is kept for the link's lifetime, so a
-replayed link costs no Archidekt or Scryfall call. The token is the URL's
+answers 404 `expired`, a removed member 403 `forbidden`, a card that is
+gone 404 `not_found`, Scryfall asking the gateway to wait 429
+`rate_limited`, an unreachable Scryfall 503 `unavailable`, the member's
+other card lookups still running 503 `busy`, and each hit is a `card` metric. The first answer is kept for the link's lifetime, so a
+replayed link costs no Scryfall call. The token is the URL's
 last path segment, so a reverse proxy that logs request paths keeps it for
 as long as it keeps its access log; that is acceptable: the link expires
 ten minutes after the tool call, answers twenty fetches at most, and
@@ -637,8 +639,8 @@ against anyone. The gateway's own request log names the route,
 keep it out of the log: NPM's generated `proxy.conf` already carries the
 `proxy_pass` for the host, and the extra block took a gateway offline
 (0.7.4's optional step, withdrawn in 0.7.9). The AI app loads
-each card's pictures and rules text from Scryfall directly, never through
-the gateway. `MTG_APPLY_IN_CHAT=false` removes every card and this endpoint.
+each card's pictures from Scryfall directly, never through the gateway.
+`MTG_APPLY_IN_CHAT=false` removes every card and this endpoint.
 
 ### Approval modes: when the assistant may apply by itself
 
@@ -717,7 +719,7 @@ collection changes), apply, confirm, reject, run reports or save scans
 The gateway is built to be light on Archidekt. For everyone together:
 
 - one Archidekt request at a time, at least `MTG_ARCHIDEKT_MIN_INTERVAL`
-  (1 second) apart, and at most `MTG_ARCHIDEKT_MAX_PER_MINUTE` (40) in any
+  (1 second) apart, and at most `MTG_ARCHIDEKT_MAX_PER_MINUTE` (30) in any
   minute. A request past that waits its turn, so a long apply slows down
   instead of stopping halfway. Requests made for a member's own pages in the
   browser (an apply pressed on the review page included) take their turn
@@ -769,9 +771,10 @@ The gateway is built to be light on Archidekt. For everyone together:
 - searches fetch one page per call, and a collection export stops at 50
   pages.
 
-Because of this pacing a large apply takes minutes: about 70 seconds for a
-40-change edit and 4 to 5 minutes for a new 100-card deck (one lookup and one
-write per card). An assistant app doesn't wait that long for one tool call,
+Because of this pacing a large apply takes minutes: about 80 seconds for a
+40-change edit of cards already in the deck, up to about 2½ minutes when all
+40 are new to it, and 6 to 7 minutes for a new deck of 100 different cards
+(one lookup and one write per card). An assistant app doesn't wait that long for one tool call,
 so after 20 seconds the apply answers "applying" with how far it got and
 carries on in the background. `get_proposal`, the proposal's review page
 (which refreshes itself) and the in-chat card all show its progress until it
@@ -831,7 +834,7 @@ Archidekt busy for everyone:
   minutes, refilled evenly. Deck reads, proposals, applies, links and
   research tools (goldfish, precon) given an Archidekt deck id or link all
   count. Past it the member gets
-  `rate_limited` and waits a few minutes;
+  `rate_limited` until enough of the allowance has refilled;
 - at most five failed Archidekt link attempts (wrong username or password)
   in 15 minutes, so the Account page can't be used to guess Archidekt
   passwords from the gateway's address. The attempted username isn't

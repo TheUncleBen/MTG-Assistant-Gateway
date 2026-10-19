@@ -369,7 +369,7 @@ def test_busy_page_names_the_members_own_limit_the_budget_and_archidekts_pause()
     assert busy_plan(spent).text == BUSY_TEXTS["budget"]
     try:
         try:
-            raise ArchidektError("rate_limited", "Archidekt asked us to slow down; try again in a minute")
+            raise ArchidektError("rate_limited", "Archidekt asked us to slow down; try again later")
         except ArchidektError as inner:
             raise DeckError("rate_limited", str(inner)) from inner
     except DeckError as outer:

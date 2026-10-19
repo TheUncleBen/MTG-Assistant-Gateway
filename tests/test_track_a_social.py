@@ -279,7 +279,7 @@ async def test_a_reply_says_when_archidekt_is_busy_instead_of_not_in_thread(
     from mtg_gateway.social import SocialService
 
     async def busy(*a, **k):
-        raise DeckError("rate_limited", "Archidekt asked us to slow down; try again in a minute.")
+        raise DeckError("rate_limited", "Archidekt asked us to slow down; try again later.")
 
     b = await linked(stack)
     try:

@@ -84,6 +84,8 @@ OOM_SCORE_ADJ, OOM_SCORE_OFF = oom_score(os.environ.get("FORGE_OOM_SCORE_ADJ", "
 # the safe figure until a Pi has been measured.
 GAME_CPUS = 2.0
 GAME_MEMORY = 1.2e9
+# The most Forge processes one container runs at once, whatever its size or FORGE_MAX_PARALLEL.
+MAX_PLACES = 16
 
 
 def _read(path: str) -> str:
@@ -131,17 +133,17 @@ def machine_memory() -> int | None:
 
 
 def places_for(cpus: float, memory: int | None) -> int:
-    """How many Forge processes fit: one per GAME_CPUS and GAME_MEMORY, from 1 to 4."""
+    """How many Forge processes fit: one per GAME_CPUS and GAME_MEMORY, from 1 to MAX_PLACES."""
     by_memory = int(memory // GAME_MEMORY) if memory else 1
-    return max(1, min(4, int(cpus // GAME_CPUS), by_memory))
+    return max(1, min(MAX_PLACES, int(cpus // GAME_CPUS), by_memory))
 
 
 def max_parallel(setting: str | None) -> tuple[int, str]:
     """Forge processes that may run at once, shared by all jobs in order, and where the number
-    came from: FORGE_MAX_PARALLEL when set (1 to 4), else what the container's CPUs and memory fit
+    came from: FORGE_MAX_PARALLEL when set (1 to MAX_PLACES), else what the container's CPUs and memory fit
     (places_for). Each process takes up to FORGE_XMX of heap plus Java's own memory."""
     if setting and setting.strip():
-        return max(1, min(4, int(setting))), "FORGE_MAX_PARALLEL"
+        return max(1, min(MAX_PLACES, int(setting))), "FORGE_MAX_PARALLEL"
     return places_for(machine_cpus(), machine_memory()), "machine"
 
 
@@ -773,8 +775,12 @@ class Handler(BaseHTTPRequestHandler):
                     # Forge reads an argument starting with "-" as a flag, so seeds are never negative.
                     raise ValueError("seed must be a whole number from 0 to 2**63 - 1")
                 parallel = body.get("parallel", 1)
-                if not isinstance(parallel, int) or isinstance(parallel, bool) or not 1 <= parallel <= 4:
-                    raise ValueError("parallel must be a whole number from 1 to 4")
+                if (
+                    not isinstance(parallel, int)
+                    or isinstance(parallel, bool)
+                    or not 1 <= parallel <= MAX_PLACES
+                ):
+                    raise ValueError(f"parallel must be a whole number from 1 to {MAX_PLACES}")
                 # More than FORGE_MAX_PARALLEL is not refused: the job plays as many at once as allowed.
                 job = Job(decks, games, fmt, seed, parallel)
                 with JOBS_LOCK:

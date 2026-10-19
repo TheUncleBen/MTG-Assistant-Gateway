@@ -857,10 +857,13 @@ class Pacer:
                     sent=False,
                 )
             if now < self._retry_until:
+                wait = int(self._retry_until - now) + 1
                 raise ArchidektError(
                     "rate_limited",
-                    f"Archidekt asked us to slow down; try again in {int(self._retry_until - now) + 1} s",
+                    f"Archidekt asked the gateway to slow down, so it is pausing its Archidekt requests for "
+                    f"{wait} second{'' if wait == 1 else 's'}. Try again after that.",
                     sent=False,
+                    retry_after=self._retry_until - now,
                 )
             if now < self._next_allowed:
                 await asyncio.sleep(self._next_allowed - now)
@@ -1260,8 +1263,9 @@ class ArchidektClient:
                 self.pacer.record(False, asked, breaker=patient.get() is None)
                 raise ArchidektError(
                     "rate_limited",
-                    "Archidekt asked us to slow down; try again in a minute",
-                    retry_after=asked,
+                    "Archidekt asked the gateway to slow down; try again later",
+                    # what Archidekt asked for, or longer when this 429 opened the breaker
+                    retry_after=max(asked, self.pacer.pause_left()),
                 )
             if resp.status_code == 401:
                 self.pacer.record(True)

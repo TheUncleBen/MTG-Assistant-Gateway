@@ -235,26 +235,23 @@ their review link.
 
 ### The other cards in the chat
 
-The same mechanism shows a card wherever you have something to pick: the
+The same mechanism shows a card where you have something to pick: the
 **printings** of a card as pictures in a grid (tap the one you mean, filter by
-set or finish, expand it), the **cards read from your photos or list** with a
-tick per row and suggestions for names it was unsure about (press **Use these
-cards** when the list is right), a **deck** by category with pictures and
-rules text when you tap a card, and your **account** with what still needs
-setting up. Four more only show what the tool answered, so you can read it at
-a glance: a **comparison** of two decks (the cards in one only, the other
-only or both, and the statistics that differ), a deck's **statistics** (mana
-curve, colours, price, legality and the bracket estimate), a **list of decks**
-(yours, or a search) with covers and links to open each one, and a **scan**
-with the cards it recognised and the ones that need a look, linking the Scan
-page. A tap on these cards is sent to the assistant as plain text and
-it carries on from there, with a proposal if anything is to change; none of
-them changes anything by itself. The pictures and rules text come from
-Scryfall; the deck rows and printings come from the gateway through a link
-that is yours alone and expires after ten minutes. All of this is tested
-in a browser test against the cards themselves, not yet in a live Claude
-session; Claude Code shows the text instead and asks about unsure names with
-a form.
+set or finish, expand it), and the **cards read from your photos or list**
+with a tick per row and suggestions for names it was unsure about (press
+**Use these cards** when the list is right). A tap on these cards is sent to
+the assistant as plain text and it carries on from there, with a proposal if
+anything is to change; neither changes anything by itself. The pictures come
+from Scryfall; the printings come from the gateway through a link that is
+yours alone and expires after ten minutes. Both cards are tested in a browser
+test against the cards themselves, not yet in a live Claude session; Claude
+Code shows the text instead and asks about unsure names with a form.
+
+Since 0.7.33 no other answer shows a card: a deck, its statistics, a
+comparison of two decks, a list of decks, a scan and your account's setup
+come as the assistant's own words. A chat with many cards grew slow in
+ChatGPT when it was tried with this gateway, so only the cards you act on
+stay.
 
 **Your approval mode.** On the gateway's Account page you choose how much
 your assistant may do without asking: *Manual*, shown as "Ask me every
@@ -369,17 +366,17 @@ Who can install it:
 
 Start a new chat on the web, open the tools menu next to the message box,
 and pick the MTG Assistant Gateway app (in developer mode it may be under a developer
-mode or apps entry). Then ask it to call `whoami`. (Not tested.)
+mode or apps entry). Then ask it to call `whoami`.
 
 OpenAI says ChatGPT asks for confirmation before write actions by default,
 and may block some risky ones (reported). OpenAI also says ChatGPT renders
-MCP Apps (reported), so a proposal should appear as a card with Approve and
-Reject buttons like in Claude; this hasn't been tried with ChatGPT yet. If
+MCP Apps (reported), and the cards did show in ChatGPT when it was tried
+with this gateway, so a proposal should appear as a card with Approve and Reject
+buttons like in Claude. If
 no card appears and ChatGPT refuses or hides `apply_proposal`, ask for the
-proposal's review link and press Apply there. The other cards (printings,
-recognised cards, a deck, the account, a comparison, statistics, a deck list,
-a scan) follow the same standard and should
-appear the same way (reported, not yet tried); without them, the assistant's
+proposal's review link and press Apply there. The other cards (the waiting
+changes, printings and recognised cards) follow the same standard and
+should appear the same way; without them, the assistant's
 text has everything, and it asks which set you mean instead of showing the
 pictures.
 
@@ -435,7 +432,7 @@ assistant read and edit your own decks, link Archidekt once in a browser at
 | The sign-in page (for example Authentik) says you don't have access to the application | The owner hasn't added your account to the gateway's group yet. Ask them. |
 | "Your account is not in the group that may use this service" | Same thing, reported by the gateway. Ask the owner. |
 | "This sign-in link has expired or was already used" | Go back to the AI app and press Connect again. Sign-in links last ten minutes, including time spent on the confirmation page. |
-| Claude shows an error right after you picked **Use Claude's published identity**, before any gateway page appears | The gateway couldn't fetch or accept Claude's published description, or the owner has limited which ones it accepts. Wait a minute (a failed fetch isn't retried sooner) and try again, or remove the connector and add it with **Register automatically**. Tell the owner either way. |
+| Claude shows an error right after you picked **Use Claude's published identity**, before any gateway page appears | The gateway couldn't fetch or accept Claude's published description, or the owner has limited which ones it accepts. Try again later (a failed fetch isn't retried right away), or remove the connector and add it with **Register automatically**. Tell the owner either way. |
 | "This sign-in was started in a different browser" | The AI app opened sign-in in one browser and you finished it in another. Try again and keep the whole sign-in in one browser window. On a phone this can happen when a link opens in a different browser app. |
 | The connector worked before but now wants you to sign in again | Normal. By default the gateway asks you to sign in again about once a week (the owner can change that), and also after about 30 days of not using it, and if the owner revoked your access. Reconnect it in the app's connector settings. |
 

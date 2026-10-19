@@ -108,17 +108,23 @@ class Places(unittest.TestCase):
         self.assertEqual(fs.places_for(2, 1536 * 2**20), 1)  # the stack's default limits
         self.assertEqual(fs.places_for(4, 8 * gib), 2)  # a Pi 4 or 5 with 8 GB, no limits
         self.assertEqual(fs.places_for(4, 2 * gib), 1)  # memory decides
-        self.assertEqual(fs.places_for(16, 64 * gib), 4)  # never more than 4
+        self.assertEqual(fs.places_for(16, 32 * gib), 8)  # a 16-CPU, 32 GB machine: CPUs decide
+        self.assertEqual(fs.places_for(8, 16 * gib), 4)
+        self.assertEqual(fs.places_for(32, 64 * gib), 16)
+        self.assertEqual(fs.places_for(64, 256 * gib), 16)  # never more than 16
+        self.assertEqual(fs.places_for(32, 5 * gib), 4)  # memory decides
         self.assertEqual(fs.places_for(1, 16 * gib), 1)  # never fewer than 1
         self.assertEqual(fs.places_for(8, None), 1)  # memory unknown: one at a time
 
     def test_the_setting_wins_over_the_machine(self):
         self.assertEqual(fs.max_parallel("3"), (3, "FORGE_MAX_PARALLEL"))
-        self.assertEqual(fs.max_parallel("9"), (4, "FORGE_MAX_PARALLEL"))
+        self.assertEqual(fs.max_parallel("9"), (9, "FORGE_MAX_PARALLEL"))
+        self.assertEqual(fs.max_parallel("16"), (16, "FORGE_MAX_PARALLEL"))
+        self.assertEqual(fs.max_parallel("40"), (16, "FORGE_MAX_PARALLEL"))
         self.assertEqual(fs.max_parallel("0"), (1, "FORGE_MAX_PARALLEL"))
         places, source = fs.max_parallel("")
         self.assertEqual(source, "machine")
-        self.assertTrue(1 <= places <= 4)
+        self.assertTrue(1 <= places <= 16)
         self.assertEqual(fs.max_parallel(None)[1], "machine")
 
     def test_the_container_limits_are_read(self):

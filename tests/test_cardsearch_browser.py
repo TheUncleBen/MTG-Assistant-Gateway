@@ -472,10 +472,10 @@ def test_a_category_outside_the_deck_adds_to_the_maybeboard_or_sideboard(
     assert [(r["quantity"], r["categories"]) for r in rows] == [(1, [category])], rows
 
 
-def test_a_printing_tile_says_its_printing_is_not_kept_outside_the_deck(server: Server) -> None:
-    """A printing picked on its tile and then a category outside the deck: the maybeboard or
-    sideboard takes no pinned printing, so the sheet no longer shows "This printing" but says it
-    is not kept, and the add goes without it."""
+def test_a_printing_tile_keeps_its_printing_outside_the_deck(server: Server) -> None:
+    """A printing picked on its tile and then a category outside the deck: since 0.7.33 the
+    maybeboard or sideboard keeps a picked printing too, so the sheet still shows "This printing"
+    and the add carries it to the side row."""
     from playwright.sync_api import sync_playwright
 
     exe = _chromium()
@@ -494,6 +494,7 @@ def test_a_printing_tile_says_its_printing_is_not_kept_outside_the_deck(server: 
         page.wait_for_selector("#cardgrid[data-printing]", timeout=5000)
         first = page.locator("#cardgrid button[data-add]").first
         code, number = first.get_attribute("data-set-code"), first.get_attribute("data-number")
+        server.ark.know_printing(880001, "Sol Ring", code, number)  # Archidekt has it too
         first.click()
         sheet = page.locator(".addsheet.open")
         sheet.wait_for(timeout=3000)
@@ -514,11 +515,7 @@ def test_a_printing_tile_says_its_printing_is_not_kept_outside_the_deck(server: 
             )
             return sheet.locator(".note").inner_text()
 
-        assert pick("Sideboard") == (
-            "This printing is not kept: a card added under Sideboard goes to the maybeboard or "
-            "sideboard, where a row it already has there keeps its own printing and a new row gets one "
-            "Archidekt picks."
-        )
+        assert f"This printing: {code.upper()} #{number}." in pick("Sideboard")
         assert f"This printing: {code.upper()} #{number}." in pick(""), "back to the deck: the printing shows"
         pick("Sideboard")
         sheet.locator("button[type=submit]").click()
@@ -526,4 +523,12 @@ def test_a_printing_tile_says_its_printing_is_not_kept_outside_the_deck(server: 
         assert errors == [], errors
         browser.close()
     (sent,) = bodies[0]["changes"]
-    assert sent.get("zone") == "side" and "set_code" not in sent, sent
+    assert sent.get("zone") == "side" and (sent["set_code"], sent["collector_number"]) == (code, number), sent
+    rows = [
+        c
+        for c in server.ark.decks[42]["cards"]
+        if c["card"]["oracleCard"]["name"] == "Sol Ring" and "Sideboard" in (c["categories"] or [])
+    ]
+    assert [(r["card"]["edition"]["editioncode"], r["card"]["collectorNumber"]) for r in rows] == [
+        (code, number)
+    ], rows

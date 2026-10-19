@@ -108,7 +108,7 @@ services:
       # and MTG_FORGE_URL=http://mtg-assistant-forge:8000 (docs/DEPLOY.md).
       MTG_FORGE_URL: ${MTG_FORGE_URL:-}
       MTG_FORGE_GAMES: ${MTG_FORGE_GAMES:-}
-      # Forge games the gateway asks Forge to play at once for one report (1 to 4); FORGE_MAX_PARALLEL
+      # Forge games the gateway asks Forge to play at once for one report (1 to 16); FORGE_MAX_PARALLEL
       # on the Forge service caps all runs together.
       MTG_FORGE_PARALLEL_GAMES: ${MTG_FORGE_PARALLEL_GAMES:-}
       # Kill switch for Archidekt writes: set false to stop all writes. Missing from the
@@ -387,7 +387,7 @@ services:
   # sees each copy's address, so with more than one copy every run stays on the copy that started
   # it (one copy works the same either way). For several machines see DEPLOY.md.
   mtg-assistant-forge:
-    image: ${FORGE_IMAGE:-ghcr.io/theuncleben/mtg-assistant-forge}:${FORGE_TAG:-2.0.15-mag3}
+    image: ${FORGE_IMAGE:-ghcr.io/theuncleben/mtg-assistant-forge}:${FORGE_TAG:-2.0.15-mag4}
     logging:
       driver: json-file
       options:
@@ -400,7 +400,7 @@ services:
       FORGE_MEMORY_BUDGET: ${FORGE_MEMORY_LIMIT:-1536M}
       FORGE_MAX_GAMES: ${FORGE_MAX_GAMES:-50}
       FORGE_GAME_SECONDS: ${FORGE_GAME_SECONDS:-240}
-      # Forge games played at once at most (1 to 4); empty: as many as the container's CPUs and
+      # Forge games played at once at most (1 to 16); empty: as many as the container's CPUs and
       # memory fit (about 2 CPUs and 1.2 GB a game), so 1 inside the default limits
       FORGE_MAX_PARALLEL: ${FORGE_MAX_PARALLEL:-}
       # Each Forge game's extra Java memory for loaded code (on top of FORGE_XMX), and how readily
