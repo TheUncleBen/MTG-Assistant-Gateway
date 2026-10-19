@@ -131,6 +131,21 @@ class Summaries:
         out["text"] = text(out)
         return out
 
+    async def send(self, sub: str, period: str) -> bool:
+        """Build the member's summary of the ``period`` and send it through their notifications;
+        True when the notification server took it. The schedule (send_due) and the Account page's
+        Send it now both send this way, so the phone gets the same message either way."""
+        if self.notifier is None or not self.notifier.enabled:
+            return False
+        summary = self.build(sub, period)
+        return await self.notifier.send(
+            sub,
+            "summary",
+            f"Your {'daily' if summary['period'] == 'day' else 'weekly'} summary",
+            short_text(summary),
+            "/account#summary",
+        )
+
     async def send_due(self, day: str) -> int:
         """Send the summary to every member who chose one that is due on ``day`` (daily ones every
         day, weekly ones on Mondays) and has ntfy notifications on. Returns how many were sent."""
@@ -149,14 +164,7 @@ class Summaries:
                 continue
             period = "day" if r["summary_every"] == "daily" else "week"
             try:
-                summary = self.build(r["sub"], period)
-                ok = await self.notifier.send(
-                    r["sub"],
-                    "summary",
-                    f"Your {'daily' if period == 'day' else 'weekly'} summary",
-                    short_text(summary),
-                    "/account#summary",
-                )
+                ok = await self.send(r["sub"], period)
             except Exception:  # one member's summary must not stop the others
                 logger.exception("summary failed for one member")
                 continue
@@ -166,6 +174,13 @@ class Summaries:
         return sent
 
 
+def _day(day: str, today: str) -> str:
+    """A day as the pages write dates: "Oct 18", with the year only when it is not this year's."""
+    d = _dt.date.fromisoformat(day)
+    shown = f"{d.strftime('%b')} {d.day}"
+    return shown if d.year == _dt.date.fromisoformat(today).year else f"{shown}, {d.year}"
+
+
 def _signed(pct: float | None) -> str:
     return "no change" if not pct else f"{pct:+g}%"
 
@@ -173,7 +188,7 @@ def _signed(pct: float | None) -> str:
 def text(s: dict[str, Any]) -> str:
     """The summary in plain sentences (what the Account page shows and get_summary returns)."""
     span = "today" if s["period"] == "day" else "this week"
-    lines = [f"Summary for {s['from_day']} to {s['to_day']}."]
+    lines = [f"Summary for {_day(s['from_day'], s['to_day'])} to {_day(s['to_day'], s['to_day'])}."]
     if s.get("watchlists") is False:
         pass  # watchlists are off on this gateway: no prices to report
     elif s["cards"]:

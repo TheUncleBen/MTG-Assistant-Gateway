@@ -292,8 +292,14 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         sub, sid = current(request)
         if not sub:
             return to_login("/account")
-        notice = _notice(request.query_params.get("ok"), request.query_params.get("err"))
-        return page("Account", notice + _account_body(state, sub, _csrf(s, sid)), sub=sub, sid=sid)
+        ok, err = request.query_params.get("ok"), request.query_params.get("err")
+        # The Notifications and Summary cards show their own notices inside them (where the
+        # redirect lands); every other notice stays at the top of the page.
+        notice = _notice(
+            None if ok in notify.CARD_NOTICES else ok, None if err in notify.CARD_NOTICES else err
+        )
+        body = _account_body(state, sub, _csrf(s, sid), ok=ok, err=err)
+        return page("Account", notice + body, sub=sub, sid=sid)
 
     @server.custom_route("/account/avatar", methods=["GET"], include_in_schema=False)
     async def account_avatar(request: Request) -> Response:
@@ -435,7 +441,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             return RedirectResponse("/account?ok=linked", status_code=303)
         done = await notify.account_action(state, sub, action or "", data)
         if done is not None:
-            anchor = "#summary" if action == "summary_save" else "#notifications"
+            anchor = "#summary" if action in ("summary_save", "summary_send") else "#notifications"
             return RedirectResponse(f"/account?{done}{anchor}", status_code=303)
         return page("Account", _err("Unknown action."), status=400, sub=sub, sid=sid)
 
@@ -1066,7 +1072,15 @@ def _app_card() -> str:
     )
 
 
-def _account_body(state: Any, sub: str, csrf: str | None, *, disclosure_read: bool = False) -> str:
+def _account_body(
+    state: Any,
+    sub: str,
+    csrf: str | None,
+    *,
+    disclosure_read: bool = False,
+    ok: str | None = None,
+    err: str | None = None,
+) -> str:
     info = state.decks.status(sub)
     user = state.db.get_user(sub) or {}
     who = html.escape(user.get("preferred_username") or user.get("email") or sub)
@@ -1096,7 +1110,8 @@ def _account_body(state: Any, sub: str, csrf: str | None, *, disclosure_read: bo
     out.append(_mode_card(state, sub, csrf_in))
     out.append(_apps_card(state, sub, csrf_in))
     if state.summaries is not None:
-        out.append(notify.account_card_html(state, sub, csrf_in))  # the summary is inside, with ntfy on
+        # the Notifications card, and with ntfy on the Summary card after it
+        out.append(notify.account_card_html(state, sub, csrf_in, ok=ok, err=err))
     if info["linked"]:
         expires = _when(info.get("link_expires_at"))
         out.append(
@@ -1201,7 +1216,7 @@ def _apps_card(state: Any, sub: str, csrf_in: str) -> str:
     apps = state.db.user_clients(sub)
     if not apps:
         return (
-            "<div class='card'><h2>Connected apps</h2><p class='muted'>No assistant is connected "
+            "<div class='card' id='apps'><h2>Connected apps</h2><p class='muted'>No assistant is connected "
             "to your account.</p></div>"
         )
     items = "".join(
@@ -1215,7 +1230,7 @@ def _apps_card(state: Any, sub: str, csrf_in: str) -> str:
         for a in apps
     )
     return (
-        "<div class='card'><h2>Connected apps</h2>"
+        "<div class='card' id='apps'><h2>Connected apps</h2>"
         "<p class='muted small'>Assistants that can use your account now. Disconnect any you don't "
         "recognize; it then has to be connected and approved again.</p>"
         f"<ul class='plain plist'>{items}</ul>"
@@ -1235,9 +1250,10 @@ def _forget_choices_card(csrf_in: str) -> str:
         "<p>Your views, card size, stack orders, stats choices and dismissed tips follow your "
         "account to every device. Light or dark mode stays on each device.</p>"
         f"<form method='post'>{csrf_in}<input type='hidden' name='action' value='forget_choices'>"
-        "<label class='check'><input type='checkbox' name='confirm' value='yes' required> "
-        "Yes, forget my view choices on every device</label>"
-        "<button>Forget my view choices</button></form></div>"
+        # the tick on its own 44 px row, the button under it
+        "<div class='ui-checks'><label><input type='checkbox' name='confirm' value='yes' required>"
+        "<span>Yes, forget my view choices on every device</span></label></div>"
+        "<div class='ui-actions'><button>Forget my view choices</button></div></form></div>"
     )
 
 
@@ -1256,9 +1272,9 @@ def _delete_card(csrf_in: str, backup_days: int | None = None) -> str:
         "connected apps and your sign-in. Your decks on "
         f"Archidekt are not touched. This can't be undone.{kept}</p>"
         f"<form method='post'>{csrf_in}<input type='hidden' name='action' value='delete_data'>"
-        "<label class='check'><input type='checkbox' name='confirm' value='yes' required> "
-        "Yes, delete my data from this gateway</label>"
-        "<button class='danger'>Delete my data</button></form></div>"
+        "<div class='ui-checks'><label><input type='checkbox' name='confirm' value='yes' required>"
+        "<span>Yes, delete my data from this gateway</span></label></div>"
+        "<div class='ui-actions'><button class='danger'>Delete my data</button></div></form></div>"
     )
 
 

@@ -718,7 +718,7 @@ async def test_watchlists_off_with_ntfy_keep_the_summary_without_prices(
             r = await _post(b, "/account", {"action": "summary_save", "summary_every": "daily"})
             assert r.headers["location"] == "/account?ok=summary_saved#summary"
             page = (await b.http.get("/account")).text
-            assert "<pre>Summary for" in page and "Watched cards" not in page
+            assert "<pre class='sum-text'>Summary for" in page and "Watched cards" not in page
         finally:
             await b.aclose()
         clock.next_day()
