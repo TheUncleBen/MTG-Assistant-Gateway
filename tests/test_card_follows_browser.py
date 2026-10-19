@@ -41,7 +41,8 @@ V2 = {
     "changed_by": "app: Claude (abc)",
     "what_changed": "now +1 Ponder",
 }
-UPDATED = "This change was updated since the card was drawn."
+UPDATED = "Updated since this card was drawn. Check it above, then press Approve again."
+REDRAWN = "Updated: this card now shows the newest version."
 
 # The host: answers ui/initialize, pushes the tool result and answers each get_proposal from
 # window.gets (a queue; the last one stays), with window.getMeta as its _meta; "refuse" refuses
@@ -123,6 +124,7 @@ def test_an_older_card_draws_the_amended_version_and_approves_it_with_its_code()
         card = _open(page, [V2], [{**V2, "state": "rejected"}])
         card.locator("ul.changes li", has_text="Ponder").wait_for(timeout=5_000)
         assert "Changed by Claude. Last change: now +1 Ponder." in card.locator("#note").inner_text()
+        assert card.locator("#status").inner_text() == REDRAWN
         card.locator("#reject:enabled").wait_for(timeout=5_000)
         card.locator("#reject").click()
         card.locator("#reject-go").click()
@@ -174,7 +176,7 @@ def test_a_changed_answer_draws_the_new_version_instead_of_locking_the_card() ->
     _run(test)
 
 
-def test_a_card_on_screen_reads_again_and_shows_a_withdrawn_change() -> None:
+def test_a_card_on_screen_reads_again_and_shows_a_withdrawn_change_a_few_more_times() -> None:
     def test(page) -> None:
         card = _open(page, [V1, V1, {**V1, "state": "withdrawn"}], every_ms=300)
         card.locator("#state.withdrawn").wait_for(timeout=5_000)
@@ -183,9 +185,9 @@ def test_a_card_on_screen_reads_again_and_shows_a_withdrawn_change() -> None:
             "from this one."
         )
         assert card.locator("#approve").count() == 0
-        reads = len(_calls(page, "get_proposal"))
-        page.wait_for_timeout(1_000)  # closed: no more reads
-        assert len(_calls(page, "get_proposal")) == reads
+        # withdrawn can come back, so it is still read a few times, then no more
+        page.wait_for_timeout(2_500)
+        assert len(_calls(page, "get_proposal")) == 1 + 6
 
     _run(test)
 
@@ -197,5 +199,53 @@ def test_a_newer_version_read_without_a_code_offers_the_review_page_only() -> No
         page.wait_for_timeout(900)  # past the arming delay
         assert card.locator("#approve").count() == 0
         assert card.locator("#actions button", has_text="Approve on the review page").count() == 1
+
+    _run(test)
+
+
+def test_a_redraw_closes_an_open_why_box_so_reject_answers_the_change_shown() -> None:
+    def test(page) -> None:
+        card = _open(page, [V1, V2], [{**V2, "state": "rejected"}], every_ms=1_500)
+        card.locator("#reject:enabled").wait_for(timeout=5_000)
+        card.locator("#reject").click()
+        assert "hidden" not in (card.locator("#why").get_attribute("class") or "")
+        card.locator("ul.changes li", has_text="Ponder").wait_for(timeout=5_000)  # the timed read
+        assert "hidden" in (card.locator("#why").get_attribute("class") or "")
+        assert _calls(page, "confirm_proposal") == []
+
+    _run(test)
+
+
+def test_a_withdrawn_change_brought_back_shows_again_with_its_buttons() -> None:
+    def test(page) -> None:
+        card = _open(page, [{**V1, "state": "withdrawn"}, {**V1, "state": "withdrawn"}, V1], every_ms=300)
+        card.locator("#state.withdrawn").wait_for(timeout=5_000)
+        card.locator("#state.pending").wait_for(timeout=5_000)
+        assert card.locator("#status").inner_text() == "This change is waiting again."
+        card.locator("#approve:enabled").wait_for(timeout=5_000)
+
+    _run(test)
+
+
+def test_the_timed_reads_stop_after_a_few() -> None:
+    def test(page) -> None:
+        card = _open(page, [V1], every_ms=100)
+        card.locator("#approve:enabled").wait_for(timeout=5_000)
+        page.wait_for_timeout(1_500)
+        assert len(_calls(page, "get_proposal")) == 1 + 6  # the read when drawn, then six timed
+
+    _run(test)
+
+
+def test_a_changed_answer_with_no_read_leaves_the_review_page_not_locked_buttons() -> None:
+    changed = {"ok": False, "error": "changed", "message": "There is a newer version.", "state": "pending"}
+
+    def test(page) -> None:
+        card = _open(page, [V1, V1, "refuse"], [changed])
+        card.locator("#approve:enabled").wait_for(timeout=5_000)
+        card.locator("#approve").click()
+        card.locator("#actions button", has_text="Approve on the review page").wait_for(timeout=5_000)
+        assert card.locator("#approve").count() == 0
+        assert card.locator("#status").inner_text() == "There is a newer version."
 
     _run(test)

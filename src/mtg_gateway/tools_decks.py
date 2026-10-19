@@ -36,6 +36,7 @@ from .schemas import (
     DeckChange,
     DeckFormat,
     NewDeckCard,
+    change_for_assistant,
     deck_change_for_service,
     new_deck_card_for_service,
 )
@@ -333,8 +334,8 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
             "set_commander move every copy of a card (set_category creates the category if the deck "
             "has none of that name). "
             "One card takes one kind of change per proposal. Put one request of the user in one proposal. "
-            "Each call puts an approval card in the chat, a refused one too: plan the whole request and "
-            "check it with check_deck_changes first. "
+            "In an app that shows cards, each call puts a card in the chat, a refused one too: plan the "
+            "whole request and check it with check_deck_changes first. "
             "The result lists the deck's other waiting proposals (waiting_on_deck) and, card by card, "
             "where this one overlaps them (overlaps): tidy up in the same turn with amend_proposal, "
             "replaces, withdraw_proposal or combine_proposals rather than stacking proposals. "
@@ -386,14 +387,17 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
         name="check_deck_changes",
         title="Check a planned deck edit before proposing it",
         description=(
-            "Every propose, amend and combine call puts an approval card in the chat, a refused one "
-            "too. Plan the whole edit first, then check it here: no card, nothing saved, and "
-            "Archidekt is not asked. Same deck_id and changes as propose_deck_changes. Returns "
-            "problems a proposal would be refused for (the change list, card names that are no Magic "
-            "card, no Archidekt link, too many waiting), the deck's waiting proposals with the cards "
-            "each shares with this plan, and suggest: fix, already_waiting (duplicate_of), amend "
-            "(amend: the proposal_id and version of your own waiting one to amend instead) or "
-            "propose. A card missing from the deck is found only when you propose."
+            "In an app that shows cards, every propose, amend and combine call puts a card in the "
+            "chat, a refused one too. Plan the whole edit first, then check it here: no card, nothing "
+            "saved, and Archidekt is not asked (a card name may be looked up on Scryfall). Same "
+            "deck_id and changes as propose_deck_changes. Returns problems it can find without the "
+            "deck (the change list, card names that are no Magic card, no Archidekt link, too many "
+            "waiting), the deck's waiting proposals with the cards each shares with this plan, and "
+            "suggest: fix, already_waiting (duplicate_of), amend (amend: the proposal_id, version and "
+            "whole changes list of your own waiting one; amend it with that list and this plan "
+            "together) or propose. Anything that needs the deck itself (a card not in it, a deck "
+            "that is not the user's or does not exist, a deck changed since you read it) is found "
+            "only when you propose."
         ),
         annotations={"readOnlyHint": True, "destructiveHint": False, "openWorldHint": True},
     )
@@ -405,7 +409,10 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
     ) -> dict[str, object]:
         try:
             raw = [deck_change_for_service(c) for c in changes]
-            return {"ok": True, **(await state.decks.check_plan(_sub(), deck_id, raw))}
+            out = await state.decks.check_plan(_sub(), deck_id, raw)
+            if "amend" in out:  # in the spelling amend_proposal takes
+                out["amend"]["changes"] = [change_for_assistant(c) for c in out["amend"]["changes"]]
+            return {"ok": True, **out}
         except DeckError as exc:
             return _tool_error(exc)
 
@@ -470,9 +477,9 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
             "version: the version you last saw; a proposal changed since is refused with changed. Any "
             "app may amend any waiting proposal, but one amended by an app other than the one that made "
             "it always waits for the user's own press. At its version limit (versions_full) make a new "
-            "proposal that replaces it instead. Each call puts a card in the chat, so amend once with "
-            "the whole new list; cards already in the chat for it show the new version. Changes nothing "
-            "on Archidekt."
+            "proposal that replaces it instead. In an app that shows cards, each call puts a card in the "
+            "chat, so amend once with the whole new list; cards already in the chat for it show the new "
+            "version. Changes nothing on Archidekt."
         ),
         annotations={"readOnlyHint": False, "destructiveHint": False, "openWorldHint": True},
         meta=card_meta,

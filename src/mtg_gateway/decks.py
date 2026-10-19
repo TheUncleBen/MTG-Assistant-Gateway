@@ -5994,18 +5994,18 @@ class DeckService:
     async def check_plan(self, sub: str, deck_id: str, raw_changes: Any) -> dict[str, Any]:
         """A planned deck edit checked before it is proposed, so the assistant fixes it or
         amends a waiting note instead of drawing a card for a proposal it then redoes. Saves
-        nothing and asks Archidekt nothing: the change list, the card names (the same check as
-        propose), the room for another proposal, an exact repeat of this app's waiting note,
-        and the deck's waiting notes with the cards they share with the plan. A card absent
-        from the deck is found only when the proposal reads the deck."""
+        nothing and asks Archidekt nothing: the link, the change list, the card names (propose's
+        check without the deck, so a name already in it is looked up too), the room for another
+        proposal, an exact repeat of this app's waiting note, and the deck's waiting notes with
+        the cards they share with the plan. Whatever needs the deck itself (a card not in it, a
+        deck that is not the member's or does not exist) is found only when the proposal reads it."""
         deck = _clean_deck_id(deck_id)
         problems: list[dict[str, Any]] = []
         changes: list[Change] = []
-        for check in (lambda: self._token(sub), lambda: self._room_for_proposal(sub)):
-            try:
-                check()
-            except DeckError as exc:
-                problems.append({"error": exc.kind, "message": str(exc)})
+        try:
+            self._token(sub)
+        except DeckError as exc:
+            problems.append({"error": exc.kind, "message": str(exc)})
         try:
             changes = parse_changes(raw_changes)
         except DeckError as exc:
@@ -6022,7 +6022,9 @@ class DeckService:
             problems.append(
                 {
                     "error": "unknown_cards",
-                    "message": "No Magic card is called " + ", ".join(f"'{n}'" for n in unknown) + ".",
+                    "message": "No Magic card is called "
+                    + ", ".join(f"'{n}'" for n in unknown)
+                    + " (unless the deck already has it).",
                     "unknown_cards": unknown,
                 }
             )
@@ -6035,7 +6037,8 @@ class DeckService:
             else None
         )
         names = {c.card_name.casefold() for c in changes}
-        waiting, overlaps, amend = [], [], None
+        waiting, overlaps, others_share = [], [], False
+        amend: tuple[dict[str, Any], bool] | None = None
         for line in self.board_lines(sub, deck):
             shared = [n for n in line.get("cards") or [] if str(n).casefold() in names]
             mine = bool(line.get("own")) and line.get("kind") == "edit" and line.get("status") != "held"
@@ -6045,8 +6048,16 @@ class DeckService:
             )
             label = f"#{line.get('board_no')}" if line.get("board_no") else "a waiting change"
             overlaps += [f"{n}: {label} changes it too." for n in shared]
+            others_share = others_share or bool(shared and not line.get("own"))
+            # the app's own waiting edit, the one sharing cards first: amend it instead
             if mine and line["proposal_id"] != dup and (amend is None or (shared and not amend[1])):
                 amend = (line, bool(shared))
+        # a new proposal needs room; an amend or an exact repeat does not
+        if dup is None and amend is None:
+            try:
+                self._room_for_proposal(sub)
+            except DeckError as exc:
+                problems.append({"error": exc.kind, "message": str(exc)})
         out: dict[str, Any] = {
             "deck_id": deck,
             "changes": len(changes),
@@ -6066,21 +6077,34 @@ class DeckService:
                 else "This exact change already waits. Don't propose it again."
             )
         elif amend is not None:
-            line = amend[0]
+            line, shares = amend
+            row = self.db.get_proposal(line["proposal_id"], sub) or {}
             out |= {
                 "suggest": "amend",
-                "amend": {"proposal_id": line["proposal_id"], "version": line["version"]},
+                # its whole stored list: an amend replaces it, so it goes in again with the plan
+                "amend": {
+                    "proposal_id": line["proposal_id"],
+                    "version": line["version"],
+                    "changes": row.get("changes") or [],
+                },
             }
+            no = line.get("board_no")
             out["next_step"] = (
-                f"Your #{line.get('board_no')} already waits on this deck"
-                + (" and changes some of the same cards" if amend[1] else "")
-                + ". If this belongs to the same request, call amend_proposal on it once, with its "
-                "changes and these in one list. If it replaces it, propose with replaces. Only a "
-                "separate request gets its own proposal."
+                (f"Your #{no}" if no else "Your waiting change")
+                + " already waits on this deck"
+                + (" and changes some of the same cards" if shares else "")
+                + ". If this belongs to the same request, call amend_proposal on it once with "
+                "amend.changes and this plan in one list (an amend replaces the whole list). If it "
+                "replaces it, propose with replaces. Only a separate request gets its own proposal."
             )
         else:
             out["suggest"] = "propose"
-            out["next_step"] = "Nothing found against it: propose it in one call."
+            out["next_step"] = (
+                "Nothing stops it, but another app's waiting change shares cards (overlaps): propose "
+                "it in one call and tell the user."
+                if others_share
+                else "Nothing found against it: propose it in one call."
+            )
         return out
 
     def link_depends(self, sub: str, proposal_id: str, others: Any) -> None:

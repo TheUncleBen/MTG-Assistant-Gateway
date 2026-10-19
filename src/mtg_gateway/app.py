@@ -514,8 +514,9 @@ def server_instructions(public_url: str) -> str:
         "steps: propose_deck_changes or propose_new_deck, then the user confirms (on the proposal card "
         "your app may show with the result, or on the review page), then it is applied. Finish your "
         "review before proposing: one proposal with every change, and amend_proposal to change one "
-        "that is still waiting. Each propose, amend or combine call puts an approval card in the chat, "
-        "so check a deck edit with check_deck_changes first and follow its suggest. "
+        "that is still waiting. Where your app shows cards, each propose, amend or combine call puts "
+        "a card in the chat, a refused one too, so check a deck edit with check_deck_changes first and "
+        "follow its suggest. "
         "When the user presses Approve on a proposal card or Apply all, you are "
         'told the outcome, and where the app allows it the card then posts "Approved, go on" as the user\'s '
         "message: carry on from that outcome, and call get_proposal only when it is unclear (still "

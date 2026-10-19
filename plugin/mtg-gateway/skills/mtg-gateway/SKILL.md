@@ -256,13 +256,17 @@ own linked account. Follow every step, in order.
    when unsure. **Finish your review before you propose:** put every
    change into one proposal, and to change a proposal that is still
    waiting call `amend_proposal` instead of proposing again, so the user
-   approves once instead of pressing card after card. Every propose,
-   amend and combine call puts an approval card in the chat, a refused
-   one too, so check a deck edit with `check_deck_changes` first (no
-   card, nothing saved): fix each of its `problems`, and when it
-   suggests `amend`, amend that proposal once with the whole new list.
-   A card already in the chat follows the proposal when it is amended,
-   withdrawn or replaced, so there is no need to show it again.
+   approves once instead of pressing card after card. In an app that
+   shows cards, every propose, amend and combine call puts a card in
+   the chat, a refused one too, so check a deck edit with
+   `check_deck_changes` first (no card, nothing saved, Archidekt not
+   asked): fix each of its `problems`, and when it suggests `amend`,
+   amend that proposal once with its `amend.changes` and your new
+   changes in one list. The check can't see the deck itself, so a card
+   not in it, or a deck changed since you read it, is still found only
+   when you propose. A card already in the chat follows the proposal
+   when it is amended, withdrawn or replaced, so there is no need to
+   show it again.
 3. **Propose** with one of:
    - `propose_deck_changes` to edit an existing deck: `deck_id` and
      `changes` (or `scan_session`, the id or name of a scan session, whose

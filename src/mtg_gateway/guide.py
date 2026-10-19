@@ -821,6 +821,15 @@ def guide_body(
             "fixed sentences from the gateway's own data, with or without notifications",
         ),
         (
+            "Check a planned deck edit before proposing it: what it would be refused for that can be "
+            "found without the deck, the waiting changes it shares cards with, and whether to amend one "
+            "of its own instead",
+            "<code>check_deck_changes</code>",
+            "no",
+            "no card in the chat, nothing saved and Archidekt not asked; anything that needs the deck "
+            "itself, such as a card missing from it, is found only when the proposal is made",
+        ),
+        (
             "Proposals: list, read, approve with the card's code, reject (with a reason on the card), "
             "apply; show the waiting ones as a card with Apply all; tidy them (amend, withdraw, combine)",
             "<code>list_my_proposals</code>, <code>get_proposal</code>, <code>confirm_proposal</code>, "
