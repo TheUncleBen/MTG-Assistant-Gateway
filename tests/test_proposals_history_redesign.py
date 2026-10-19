@@ -249,3 +249,21 @@ async def test_history_has_no_proposals(stack: Stack) -> None:
         await b.aclose()
 
 
+async def test_deck_menu_links_its_proposals(stack: Stack) -> None:
+    b = await linked_browser(stack)
+    try:
+        page = (await b.http.get("/decks/42", headers=NAV)).text
+        assert "<a href='/proposals?deck_id=42'>" in page and "Proposals for this deck</a>" in page
+    finally:
+        await b.aclose()
+
+
+def test_cards_use_the_standard_risk_words() -> None:
+    cards = Path(__file__).parents[1] / "src" / "mtg_gateway" / "static" / "cards"
+    proposal = (cards / "proposal-card.html").read_text()
+    assert 'consent: "Your press", destructive: "Delete"' in proposal
+    assert "Needs your approval" not in proposal and "Destructive: deletes a deck" not in proposal
+    assert "No press needed" in proposal
+    assert 'pending: "Waiting"' not in proposal and '"Waiting"' in proposal
+    waiting = (cards / "waiting-card.html").read_text()
+    assert 'low: "Low", high: "High", consent: "Your press", destructive: "Delete"' in waiting

@@ -378,8 +378,8 @@ def guide_body(
         "in one go, after a snapshot of the deck as it was; only a big removal (many cards at once) asks "
         "you to confirm first.</span></li>"
         "<li><span>Back on the deck page the card is there. Under <a href='/history'>History</a> the "
-        "change and its snapshot are filed, with <strong>Restore</strong> if you ever want the deck back "
-        "as it was.</span></li></ol>"
+        "snapshot taken just before the change is filed, with <strong>Restore (review first)</strong> if "
+        "you ever want the deck back as it was.</span></li></ol>"
         f"<p class='tip'>{_esc(writes)}</p>"
     )
     tut_first_sim = (
@@ -399,7 +399,7 @@ def guide_body(
         "<li><span>Keep it: the buttons download the report as <strong>Markdown</strong> or as a "
         "self-contained <strong>HTML page</strong> (light and dark, no scripts) and <strong>Copy as "
         "Markdown</strong> puts it on the clipboard.</span></li>"
-        "<li><span>Find it again under <a href='/history'>History</a> (filter by type: Reports). A report "
+        "<li><span>Find it again under <a href='/history'>History</a> (the Reports chip). A report "
         "reused because the deck had not changed says so.</span></li></ol>"
         "<p>It is the same run the assistant makes for “goldfish this deck”: the statistics, the "
         "validation and the solo test (300 games), so the numbers match whichever way it is "
@@ -518,13 +518,15 @@ def guide_body(
     )
     how_restore = (
         "<ol class='steps'>"
-        "<li><span>Open <a href='/history'>History</a>. Entries are grouped by day (or by deck, with "
-        "<strong>Group by</strong>); the filter bar narrows them by deck, type (Changes, Snapshots, "
-        "Reports), state, when (today, the last 7, 30 or 90 days or this year, counted in UTC days) and "
-        "a search over deck names and change text, and <strong>Older</strong> pages through the rest 25 "
-        "at a time.</span></li>"
+        "<li><span>Open <a href='/history'>History</a>: snapshots, restores and deck reports, newest "
+        "first and grouped by day (or by deck, with <strong>Group by</strong>). The chips pick "
+        "Everything, Snapshots, Restores or Reports; the filters narrow by deck name, deck and when "
+        "(today, the last 7, 30 or 90 days or this year, counted in UTC days), and <strong>Older</strong> "
+        "pages through the rest 25 at a time. Changes your assistants proposed, applied or not, are on "
+        "<a href='/proposals?show=all'>Proposals</a>.</span></li>"
         "<li><span>A snapshot row links to the change it was taken before and has <strong>Restore (review "
-        "first)</strong>. Press it to see what would change.</span></li>"
+        "first)</strong> (on a phone, under <strong>Details</strong>). Press it to see what would "
+        "change.</span></li>"
         "<li><span>Confirm. <strong>Restore</strong> puts the deck back exactly as the snapshot had it, "
         "cards and the deck's own name, description, format, bracket and privacy alike.</span></li></ol>"
         "<p>Or ask your assistant to “undo yesterday's change”: the restore comes to you as a proposal, "
@@ -937,12 +939,13 @@ def guide_body(
         (
             "Proposals",
             "<code>/proposals</code>",
-            "what is waiting, out-of-date ones marked; the review page with Approve, Apply, Reject",
+            "what waits for you, grouped by deck, to apply or reject one at a time or several at once; "
+            "every change proposed, newest first, under All",
         ),
         (
             "History",
             "<code>/history</code>",
-            "changes, snapshots (Restore) and reports as a timeline with a filter bar; a report at "
+            "snapshots (Restore), restores and reports, newest first, with filters; a report at "
             "<code>/history/reports/&lt;id&gt;</code> with its Markdown and HTML exports",
         ),
         ("My activity", "<code>/activity</code>", "what your account and its connected apps did"),
