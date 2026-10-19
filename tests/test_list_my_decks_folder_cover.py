@@ -111,6 +111,10 @@ async def test_list_my_decks_never_names_folders_from_the_tree_as_last_read(stac
         out = structured(await call(h, token, "list_my_decks"))
         assert out["ok"] and out["decks"][0]["folder"] is None, out
         assert out["note"] == FOLDER_NAMES_UNREAD, out
+        # no time promise in it
+        assert FOLDER_NAMES_UNREAD == (
+            "Folder names couldn't be read from Archidekt just now, so some decks show no folder here."
+        )
         ark.inject = [(429, "60")]
         with pytest.raises(DeckError):
             await svc.folder_view("user-1")

@@ -45,8 +45,7 @@ MAX_PROPOSALS_PAGE = 100
 # list_my_decks' note when the folder tree couldn't be read, so decks Archidekt listed by folder id
 # only have no folder name
 FOLDER_NAMES_UNREAD = (
-    "Folder names couldn't be read from Archidekt just now, so some decks show no folder here. "
-    "Try again in a moment."
+    "Folder names couldn't be read from Archidekt just now, so some decks show no folder here."
 )
 MAX_SNAPSHOTS_PAGE = 100
 
