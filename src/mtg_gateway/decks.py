@@ -761,6 +761,13 @@ REVIEW_PAGE = "review_page"
 REJECTED_BY = ("assistant", "card", "review_page", "browser", "api", "disconnected")
 
 
+def archidekt_wait(exc: BaseException) -> int | None:
+    """The wait an ArchidektError knows (Archidekt's Retry-After, or what is left of the gateway's
+    pause after one) in whole seconds, at least 1, for the busy page's Retry-After header."""
+    asked = getattr(exc, "retry_after", None)
+    return max(1, math.ceil(asked)) if asked else None
+
+
 class DeckError(Exception):
     """A user-facing failure: the message is safe to show as is. ``extra`` holds structured
     fields the tool reply carries alongside ``error`` and ``message``. ``retry_after`` (seconds)
@@ -2468,7 +2475,7 @@ class DeckService:
                 # counted against MAX_LINK_FAILURES; the attempted login name is not recorded
                 self._audit("archidekt_link_failed", sub=sub, detail={"error": exc.kind})
                 raise DeckError("auth", "Archidekt did not accept that username and password.") from exc
-            raise DeckError(exc.kind, str(exc)) from exc
+            raise DeckError(exc.kind, str(exc), retry_after=archidekt_wait(exc)) from exc
         return session
 
     async def link(self, sub: str, login: str, password: str) -> dict[str, Any]:
@@ -2683,7 +2690,7 @@ class DeckService:
                 if exc.kind == "auth":
                     raise expire(f"{reason}, refresh rejected") from exc
                 # the session could not be refreshed, so the call it was for was never sent
-                raise DeckError(exc.kind, str(exc), sent=False) from exc
+                raise DeckError(exc.kind, str(exc), sent=False, retry_after=archidekt_wait(exc)) from exc
             new_enc = self._seal(sub, access, refresh)
             if not self.db.update_link_secret(sub, new_enc, only_secret=stored["secret_enc"]):
                 # Unlinked, revoked or relinked while the refresh was in flight: never resurrect
@@ -2723,8 +2730,7 @@ class DeckService:
             if exc.kind == "auth":
                 raise expire("rejected after refresh") from exc
             # the wait Archidekt asked for reaches the busy page's Retry-After header
-            wait = max(1, math.ceil(exc.retry_after)) if exc.retry_after else None
-            raise DeckError(exc.kind, str(exc), sent=exc.sent, retry_after=wait) from exc
+            raise DeckError(exc.kind, str(exc), sent=exc.sent, retry_after=archidekt_wait(exc)) from exc
         finally:
             no_retry.reset(quiet)
             _acting_sub.reset(acting)
@@ -3043,7 +3049,7 @@ class DeckService:
                     # the member's link stopped working on this request: that, and how to link
                     # again, is what they need to hear, not why the read without it failed
                     raise DeckError(linked.kind, str(linked)) from exc
-                raise DeckError(exc.kind, str(exc)) from exc
+                raise DeckError(exc.kind, str(exc), retry_after=archidekt_wait(exc)) from exc
 
     # -- the deck sync's reads (sync.py) ----------------------------------------
     def archidekt_busy(self) -> bool:
@@ -3110,7 +3116,7 @@ class DeckService:
         try:
             return await self.client.get_deck(None, deck_id, fresh=True)
         except ArchidektError as exc:
-            raise DeckError(exc.kind, str(exc)) from exc
+            raise DeckError(exc.kind, str(exc), retry_after=archidekt_wait(exc)) from exc
         finally:
             no_retry.reset(quiet)
 
@@ -3272,7 +3278,7 @@ class DeckService:
             try:
                 return await self.client.search_decks(**query)
             except ArchidektError as exc:
-                raise DeckError(exc.kind, str(exc)) from exc
+                raise DeckError(exc.kind, str(exc), retry_after=archidekt_wait(exc)) from exc
 
     async def user_profile(self, sub: str | None, username: str) -> dict[str, Any] | None:
         username = re.sub(r"[^A-Za-z0-9_.@ -]", "", str(username or "")).strip()[:60]
@@ -3282,7 +3288,7 @@ class DeckService:
             try:
                 return await self.client.user_profile(username)
             except ArchidektError as exc:
-                raise DeckError(exc.kind, str(exc)) from exc
+                raise DeckError(exc.kind, str(exc), retry_after=archidekt_wait(exc)) from exc
 
     # -- proposals ------------------------------------------------------------
     @_dedupe
@@ -6756,7 +6762,7 @@ class DeckService:
             except ArchidektError as exc:
                 if cached:
                     return cached[1]
-                raise DeckError(exc.kind, str(exc)) from exc
+                raise DeckError(exc.kind, str(exc), retry_after=archidekt_wait(exc)) from exc
         self._precon_cache = (now, listing)
         return listing
 

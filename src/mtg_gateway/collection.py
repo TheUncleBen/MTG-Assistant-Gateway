@@ -39,7 +39,7 @@ from .archidekt import (
 )
 from .busy import busy_response
 from .deckpage import image_url, mana_html
-from .decks import DeckError, _writing, current_client
+from .decks import DeckError, _writing, archidekt_wait, current_client
 from .pages import (
     NO_STORE,
     _csrf,
@@ -1848,7 +1848,7 @@ def add_collection_tools(server: MCPServer, service: CollectionService) -> None:
                 )
                 expected[_rid(r["id"])] = left
         except CollectionError as exc:
-            raise DeckError(exc.kind, str(exc)) from exc
+            raise DeckError(exc.kind, str(exc), retry_after=archidekt_wait(exc)) from exc
         result["verified"], result["mismatches"] = await _read_back(sub, expected)
         return result
 

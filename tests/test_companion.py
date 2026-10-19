@@ -1247,6 +1247,13 @@ async def test_the_busy_page_passes_on_the_wait_archidekt_asked_for(stack: Stack
     b = await linked_browser(stack)
     pacer = stack.h.app.state.gateway.decks.client.pacer
     try:
+        for path in BUSY_PAGES:  # the member's own pages, public decks, profiles, search, collection
+            pacer._retry_until = 0
+            stack.ark.inject = [(429, "45")] * 20
+            r = await b.http.get(path, headers={**NAV, "Cache-Control": "max-age=0"})
+            assert r.status_code == 429 and r.headers["retry-after"] == "45", (path, r.status_code)
+            pacer._failures = pacer._open_until = 0  # one page at a time: the breaker stays shut
+        pacer._retry_until = 0
         stack.ark.inject = [(429, "45")] * 6
         r = await b.http.get("/decks/42", headers=NAV)
         assert r.status_code == 429 and r.headers["retry-after"] == "45", (r.headers, r.text)
@@ -1256,7 +1263,7 @@ async def test_the_busy_page_passes_on_the_wait_archidekt_asked_for(stack: Stack
         assert r.status_code == 429 and 1 <= int(r.headers["retry-after"]) <= 45, r.headers
     finally:
         stack.ark.inject = []
-        pacer._retry_until = 0
+        pacer._retry_until = pacer._failures = pacer._open_until = 0
         await b.aclose()
 
 

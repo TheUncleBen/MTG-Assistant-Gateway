@@ -29,6 +29,7 @@ from .decks import (
     APPLY_WAIT_SECONDS,
     DeckError,
     _clean_deck_id,
+    archidekt_wait,
     clean_target,
 )
 from .schemas import (
@@ -143,8 +144,8 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
             rows = await state.decks.list_decks(_sub(), folder_names=True)
         except DeckError as exc:
             return _tool_error(exc)
-        # entries Archidekt listed without a readable owner are left out: say so, in the
-        # words My decks uses, so the assistant doesn't present a partial list as the whole one
+        # entries Archidekt listed without a readable owner are left out: say so, and when asking
+        # again can help, so the assistant doesn't present a partial list as the whole one
         unreadable = int(getattr(rows, "unreadable", 0) or 0)
         notes = [LIST_PARTLY_UNREADABLE if len(rows) > 0 else LIST_UNREADABLE] if unreadable else []
         if getattr(rows, "folder_names_unread", False):
@@ -791,7 +792,7 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
         try:
             return state.scan.find_session(sub, ref)
         except ScanError as exc:
-            raise DeckError(exc.kind, str(exc)) from exc
+            raise DeckError(exc.kind, str(exc), retry_after=archidekt_wait(exc)) from exc
 
     @server.tool(
         name="reject_proposal",
