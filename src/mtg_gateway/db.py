@@ -2115,6 +2115,17 @@ class Database:
             rows = self._conn.execute(sql, args).fetchall()
         return [dict(r) for r in rows]
 
+    def applied_via(self, owner_sub: str, proposal_id: str) -> str | None:
+        """Where a proposal's apply was called from (``via`` of its ``proposal_applied`` audit row),
+        or None when the audit log no longer has the row."""
+        row = self._one(
+            "SELECT json_extract(detail_json, '$.via') FROM audit_log WHERE sub = ? "
+            "AND event = 'proposal_applied' AND json_valid(detail_json) "
+            "AND json_extract(detail_json, '$.proposal_id') = ? ORDER BY id DESC LIMIT 1",
+            (owner_sub, proposal_id),
+        )
+        return str(row[0]) if row and row[0] is not None else None
+
     def history_decks(self, owner_sub: str) -> dict[str, str]:
         """The decks that appear in the member's proposals and snapshots: id -> last known name,
         for a history filter."""

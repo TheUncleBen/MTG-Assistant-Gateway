@@ -62,3 +62,18 @@ async def test_a_deck_deletion_snapshot_names_its_proposal_and_snapshots_page(st
     two = structured(await call(h, token, "list_snapshots", {"limit": 1, "offset": 1}))
     assert two["snapshots"][0]["snapshot_id"] != one["snapshots"][0]["snapshot_id"]
     assert structured(await call(h, token, "list_snapshots", {"deck_id": "43"}))["snapshots"] == []
+
+
+async def test_get_proposal_says_where_an_applied_proposal_was_applied(stack: Stack) -> None:
+    h = stack.h
+    token = await linked_user(stack)
+    await _set_mode(h, "auto")
+    edit = structured(await call(h, token, "propose_deck_changes", _add("Forest")))
+    assert "applied_via" not in edit  # only an applied one says it
+    await call(h, token, "apply_proposal", {"proposal_id": edit["proposal_id"]})
+    got = structured(await call(h, token, "get_proposal", {"proposal_id": edit["proposal_id"]}))
+    assert got["state"] == "applied" and got["applied_via"] == "assistant"
+    res = await call(h, token, "propose_delete_deck", {"deck_id": "42"})
+    await _press(h, token, res)
+    got = structured(await call(h, token, "get_proposal", {"proposal_id": structured(res)["proposal_id"]}))
+    assert got["state"] == "applied" and got["applied_via"] == "review_page"

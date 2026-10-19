@@ -3201,6 +3201,9 @@ class DeckService:
             "created_at": row["created_at"],
             "expires_at": row["expires_at"],
             "applied_at": row["applied_at"],
+            # Where an applied proposal was applied (assistant, card, review_page, browser or api),
+            # from the audit log, which keeps a year; None when the log no longer has it.
+            **({"applied_via": self._applied_via(sub, row["id"])} if state == "applied" else {}),
             # When and by whom a closed proposal was closed (closed_by: assistant, card,
             # review_page, browser, api or disconnected; recorded since 0.7.22).
             **({"closed_at": row["applied_at"]} if state in ("rejected", "failed") else {}),
@@ -3307,6 +3310,18 @@ class DeckService:
         app = client and client not in (BROWSER_CLIENT, ADMIN_CLIENT)
         name = clean_text(self.db.client_name(client) or "")[:60] if app else ""
         return by, name or None
+
+    def _applied_via(self, sub: str, proposal_id: str) -> str | None:
+        """Where apply() was called from, in the words closed_by uses: the assistant's
+        apply_proposal ("mcp"), the card ("app", one change or its Apply all), the review page
+        (one change or its Apply all), the member's other pages ("browser", also the review page
+        before its applies were logged apart) or the API."""
+        via = self.db.applied_via(sub, proposal_id)
+        if via is None:
+            return None
+        return {"mcp": "assistant", "app": "card", REVIEW_PAGE: "review_page", "browser": "browser"}.get(
+            via, "api"
+        )
 
     def _changed(self, row: dict[str, Any]) -> DeckError:
         """The refusal of an apply of a version that is no longer the proposal's."""
@@ -3820,7 +3835,8 @@ class DeckService:
                     sub,
                     proposal_id,
                     row,
-                    via=via,
+                    # the audit row keeps the review page apart, for get_proposal's applied_via
+                    via=REVIEW_PAGE if review_page else via,
                     version=expect,
                     shown_status=shown_status,
                     shown_status_at=shown_status_at,

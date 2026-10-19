@@ -585,7 +585,10 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
             "Show one proposal (diff, state, review URL) belonging to the signed-in user. While a large "
             "apply is still running its state is 'applying' and 'progress' shows how far it got. A closed "
             "one has closed_at, and a rejected one closed_by when known (assistant: your own "
-            "reject_proposal; card or review_page: the user's press; api; disconnected)."
+            "reject_proposal; card or review_page: the user's press; api; disconnected). An applied one "
+            "has applied_via, where it was applied (assistant: your own apply_proposal; card, one "
+            "change or Apply all; review_page; browser: the user's other pages; api), or null when "
+            "the gateway's log no longer has it."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": False},
         # the card reads a running apply's progress with it (ChatGPT needs widgetAccessible for that)
