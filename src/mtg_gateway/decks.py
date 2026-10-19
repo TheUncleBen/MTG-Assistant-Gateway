@@ -3428,7 +3428,7 @@ class DeckService:
 
     def list_proposals(self, sub: str, *, full: bool = False, **narrow: Any) -> list[dict[str, Any]]:
         """Newest first; ``narrow`` is passed to the database (deck_id, kinds, states, search,
-        limit, offset). With ``full`` each row keeps its whole change text as ``diff_text``."""
+        limit, offset, oldest_first). With ``full`` each row keeps its whole change text as ``diff_text``."""
         now = int(time.time())
         out = []
         for r in self.db.list_proposals(sub, **narrow):
@@ -5296,7 +5296,7 @@ class DeckService:
         app asking made it (``own``: it may apply or withdraw only those)."""
         caller = current_client.get()
         out = []
-        for line in self.db.pending_board(sub, None if deck_id is None else _clean_deck_id(deck_id)):
+        for line in self.db.pending_board(sub, None if deck_id is None else clean_target(deck_id)):
             row = self.db.get_proposal(line["id"], sub) or {}
             lines = str(line.get("diff_text") or "").splitlines()
             summary = "; ".join(lines[:3]) + (f" (+{len(lines) - 3} more)" if len(lines) > 3 else "")
@@ -7112,6 +7112,14 @@ def _clean_deck_id(deck_id: Any) -> str:
     if not (raw.isascii() and raw.isdigit()) or len(raw) > 12:
         raise DeckError("invalid", NOT_A_DECK_ID)
     return raw
+
+
+def clean_target(deck_id: Any) -> str:
+    """A deck id, or "collection" for the member's collection proposals, which are filed under
+    that name instead of a deck number."""
+    if str(deck_id).strip().casefold() == DeckService.COLLECTION_TARGET:
+        return DeckService.COLLECTION_TARGET
+    return _clean_deck_id(deck_id)
 
 
 def _needs_press_message(press: str) -> str:

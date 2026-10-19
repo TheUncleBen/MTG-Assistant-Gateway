@@ -2064,8 +2064,10 @@ class Database:
         since: int | None = None,
         until: int | None = None,
         offset: int = 0,
+        oldest_first: bool = False,
     ) -> list[dict[str, Any]]:
-        """Newest first. ``deck_id``, ``kinds`` (edit, create_deck, restore), ``states`` (pending,
+        """Newest first (``oldest_first``: oldest first, so paging runs from the oldest). ``deck_id``,
+        ``kinds`` (edit, create_deck, restore), ``states`` (pending,
         applied, failed, rejected, expired: a pending proposal past its expiry counts as expired),
         ``search`` (a case-insensitive match on the deck name or the change summary) and a time
         window (``since`` inclusive, ``until`` exclusive, epoch seconds) narrow the list in SQL,
@@ -2106,7 +2108,8 @@ class Database:
         if until is not None:
             sql += " AND created_at < ?"
             args.append(int(until))
-        sql += " ORDER BY created_at DESC, rowid DESC LIMIT ? OFFSET ?"
+        order = "ASC" if oldest_first else "DESC"
+        sql += f" ORDER BY created_at {order}, rowid {order} LIMIT ? OFFSET ?"
         args += [max(0, int(limit)), max(0, int(offset))]
         with self._lock:
             rows = self._conn.execute(sql, args).fetchall()

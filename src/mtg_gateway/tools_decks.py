@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from types import SimpleNamespace
 from typing import Annotated, Any
 
@@ -28,7 +29,7 @@ from .deckpage import decks_unreadable_text
 from .decks import (
     APPLY_WAIT_SECONDS,
     DeckError,
-    _clean_deck_id,
+    clean_target,
 )
 from .schemas import (
     DeckChange,
@@ -38,6 +39,25 @@ from .schemas import (
     new_deck_card_for_service,
 )
 from .views import deck_out
+
+MAX_PROPOSALS_PAGE = 100
+MAX_SNAPSHOTS_PAGE = 100
+
+
+def _page(
+    key: str, fetch: Callable[[int, int], list[Any]], limit: int, offset: int, most: int
+) -> dict[str, object]:
+    """One page of a list: one row more than asked is read to know whether another page follows."""
+    limit = max(1, min(int(limit), most))
+    offset = max(0, int(offset))
+    got = fetch(limit + 1, offset)
+    more = len(got) > limit
+    return {
+        "ok": True,
+        key: got[:limit],
+        "has_more": more,
+        **({"next_offset": offset + limit} if more else {}),
+    }
 
 
 def _shown_map(shown: Any, ids: list[str]) -> dict[str, dict[str, Any]]:
@@ -354,27 +374,46 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
             "The user's proposals. By default the 20 most recent of any state, newest first: kind, deck, "
             "state (pending, applied, rejected, expired, failed, withdrawn, replaced), a one-line summary, "
             "created_at and, for applied ones, applied_at (for closed ones closed_at), as Unix times. "
+            f"limit (up to {MAX_PROPOSALS_PAGE}) and offset page through all of them: has_more says "
+            "whether there are more, and next_offset is the offset to ask for next. "
             "pending_only: every waiting proposal, with no limit, as the deck's board: its number "
             "(board_no), version, status (updated, needs_look, held, with status_reason), the cards it "
             "touches, its links, and own (true when this app made it: you may apply or withdraw only "
-            "those). deck_id narrows to one deck; oldest_first puts the oldest first. get_proposal shows "
+            'those). deck_id narrows to one deck ("collection" for collection changes); oldest_first '
+            "puts the oldest first. get_proposal shows "
             "one in full. To let the user approve waiting changes in the chat, use show_waiting_changes."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": False},
     )
     async def list_my_proposals(
         pending_only: Annotated[bool, Field(description="Only the waiting ones, all of them.")] = False,
-        deck_id: Annotated[str | None, Field(description="Only this deck's (id or URL).")] = None,
+        deck_id: Annotated[
+            str | None, Field(description='Only this deck\'s (id or URL), or "collection".')
+        ] = None,
         oldest_first: Annotated[bool, Field(description="Oldest first instead of newest first.")] = False,
+        limit: Annotated[
+            int, Field(description=f"How many to return, 1 to {MAX_PROPOSALS_PAGE} (not with pending_only).")
+        ] = 20,
+        offset: Annotated[int, Field(description="How many to skip, from next_offset.")] = 0,
     ) -> dict[str, object]:
         try:
             sub = _sub()
             if pending_only:
                 lines = state.decks.board_lines(sub, deck_id)
                 return {"ok": True, "proposals": lines if oldest_first else lines[::-1]}
-            narrow = {"deck_id": _clean_deck_id(deck_id)} if deck_id else {}
-            got = [_closed_at(p) for p in state.decks.list_proposals(sub, **narrow)]
-            return {"ok": True, "proposals": got[::-1] if oldest_first else got}
+            narrow = {"deck_id": clean_target(deck_id)} if deck_id else {}
+            return _page(
+                "proposals",
+                lambda lim, off: [
+                    _closed_at(p)
+                    for p in state.decks.list_proposals(
+                        sub, limit=lim, offset=off, oldest_first=oldest_first, **narrow
+                    )
+                ],
+                limit,
+                offset,
+                MAX_PROPOSALS_PAGE,
+            )
         except DeckError as exc:
             return _tool_error(exc)
 
