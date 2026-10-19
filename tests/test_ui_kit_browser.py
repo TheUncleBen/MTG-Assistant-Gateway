@@ -118,6 +118,12 @@ def _list(now: float) -> str:
         + ui.day_row("Today")
         + rows
         + "</div>"
+        + "<details class='rv-det'><summary>Show the details</summary><p>Details</p></details>"
+        + ui.table_open("minmax(0,1fr) 6.5rem", "minmax(0,1fr) 6.5rem", "1fr", cls="act-table")
+        + "<div class='tr ev'><span class='c-ev'><span class='evt'>"
+        + ui.label_for("refused")
+        + f"<span class='en'>{theme.icon('shield')}Approval refused</span></span></span>"
+        + f"<span class='c-when'>{ui.when(now - 3600)}</span></div></div>"
         + ui.pager(
             0, 51, newer_href=None, older_href="/ui-kit?page=2", note="past proposals are kept 30 days"
         )
@@ -212,7 +218,7 @@ CONTRAST_JS = """
 TARGETS_JS = """
 () => [...document.querySelectorAll(
     'main a.btn, main button, main .ui-chip, main .linkbtn, main select, main .msel-btn, '
-    + 'main input[type=search], main .chk, main .close')]
+    + 'main input[type=search], main .chk, main .close, main details > summary')]
   .filter(el => el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden'
     && !el.closest('noscript') && el.offsetParent !== null && !el.classList.contains('msel-native'))
   .map(el => { const r = el.getBoundingClientRect();
@@ -270,6 +276,11 @@ def test_components_fit_touch_and_read_at_every_size(kit: KitServer) -> None:
                         assert page.evaluate("matchMedia('(pointer:coarse)').matches")
                         targets = page.evaluate(TARGETS_JS)
                         assert len(targets) >= (20 if path == "/ui-kit" else 2), (where, targets)
+                    if path == "/ui-kit":  # the Activity pages' short label beside the event's name
+                        h = page.evaluate(
+                            "document.querySelector('.act-table .evt .ui-lbl').getBoundingClientRect().height"
+                        )
+                        assert abs(h - 22) < 0.5, (where, h)
                         for name, tw, th in targets:
                             assert th >= 44 - 0.5 and tw >= 44 - 0.5, (where, name, tw, th)
                     # 200% text: nothing in the page runs past the window's edge
@@ -393,7 +404,7 @@ def test_selection_bar_stays_above_the_phone_tab_bar(kit: KitServer) -> None:
         ctx = _ctx(browser, kit, sid, 390, 844, True, "light")
         page = ctx.new_page()
         page.goto(kit.base + "/ui-kit", wait_until="networkidle")
-        page.locator(".ui-table").scroll_into_view_if_needed()
+        page.locator(".ui-table").first.scroll_into_view_if_needed()
         bar = page.locator(".ui-bar").bounding_box()
         tabs = page.locator(".tabbar").bounding_box()
         assert bar and tabs

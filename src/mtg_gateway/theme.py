@@ -1416,6 +1416,27 @@ ul.ui-chg{padding:0;border:1px solid var(--card-border);border-radius:var(--radi
     font-size:.86rem}
   .wdg.wide-sm{grid-column:1 / -1}
 }
+@media (min-width:600px){.wdg .go .btn,.wdg .go button{width:auto}}
+/* a fold-out under a row or a section (a report's details, a watched card's history) */
+.rv-det > summary{cursor:pointer;display:flex;flex-wrap:wrap;align-items:center;gap:.2rem .75rem;
+  min-height:44px;font-weight:700;color:var(--link)}
+
+/* the Activity pages (admin Activity, My activity): a search on its own line on narrow screens,
+   and each event as a short label then its name as plain text that wraps. Each page sets its own
+   .act-tools and .act-table columns. */
+.act-tools .search{position:relative;display:block;margin:0}
+.act-tools .search svg.i{position:absolute;left:.75rem;top:50%;transform:translateY(-50%);
+  color:var(--text-muted)}
+.act-tools .search input{padding-left:2.3rem;width:100%}
+.act-tools .f{min-width:0}
+.act-table .c-ev,.act-table .c-det{min-width:0}
+.act-table .none,.act-table .gone{color:var(--text-muted)}
+.act-table .gone{font-style:italic}
+.act-table .evt{display:flex;flex-wrap:wrap;align-items:center;gap:.25rem .45rem;min-width:0}
+.act-table .evt .ui-lbl{height:22px;font-size:.78rem;flex:none}
+.act-table .evt .en{display:inline-flex;align-items:flex-start;gap:.35rem;font-weight:700;font-size:.92rem;
+  line-height:1.3;overflow-wrap:anywhere;min-width:0}
+.act-table .evt .en svg.i{width:16px;height:16px;margin-top:.1rem;color:var(--text-muted)}
 """
 CSS += UI_CSS
 
