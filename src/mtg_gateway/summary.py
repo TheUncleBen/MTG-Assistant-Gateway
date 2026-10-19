@@ -16,6 +16,7 @@ import logging
 from typing import TYPE_CHECKING, Any, Literal
 
 from . import prices as _prices
+from .forge import FINAL_STATES
 from .prices import day_of, days_before, money, pct_change
 
 if TYPE_CHECKING:
@@ -83,6 +84,9 @@ class Summaries:
                     "change_pct": pct_change(before, rows[-1]["usd"]),
                 }
             )
+        # A report is finished only once its Forge games are too: no Forge run, or one that
+        # reached a final state (the quick simulation is done when the report is stored).
+        finals = tuple(FINAL_STATES)
         with self.db._lock:
             c = self.db._conn
             present = {r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
@@ -91,8 +95,9 @@ class Summaries:
                     dict(r)
                     for r in c.execute(
                         "SELECT id AS report_id, deck_id, deck_name, taken_at FROM reports "
-                        "WHERE owner_sub = ? AND taken_at >= ? ORDER BY taken_at DESC LIMIT 20",
-                        (sub, since_ts),
+                        "WHERE owner_sub = ? AND taken_at >= ? AND (forge_state IS NULL OR forge_state IN "
+                        f"({','.join('?' * len(finals))})) ORDER BY taken_at DESC LIMIT 20",
+                        (sub, since_ts, *finals),
                     )
                 ]
                 if "reports" in present
