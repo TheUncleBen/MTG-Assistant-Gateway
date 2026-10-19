@@ -17,7 +17,16 @@ from mtg_gateway import reports as reports_module
 from mtg_gateway.archidekt import parse_deck
 from mtg_gateway.db import Database
 from mtg_gateway.decks import DeckError
-from mtg_gateway.forge import ForgeClient, forge_deck, pick_opponents, refresh, start_run, summarise, wilson
+from mtg_gateway.forge import (
+    ForgeClient,
+    ForgeError,
+    forge_deck,
+    pick_opponents,
+    refresh,
+    start_run,
+    summarise,
+    wilson,
+)
 from mtg_gateway.report_view import FORGE_DRIFT_NOTE, forge_lines
 from mtg_gateway.reports import ReportService
 
@@ -38,6 +47,7 @@ class FakeForge:
         self.up = True
         self.health_probes = 0
         self.max_parallel: int | None = None  # the engine's places, listed in each job when set
+        self.parallel_cap: int | None = None  # a Forge image before 2.0.15-mag4 refuses more than 4
 
     def handler(self, request: httpx.Request) -> httpx.Response:
         path = request.url.path
@@ -75,6 +85,9 @@ class FakeForge:
             )
         if path == "/jobs" and request.method == "POST":
             body = json.loads(request.content)
+            if self.parallel_cap is not None and body.get("parallel", 1) > self.parallel_cap:
+                text = f"parallel must be a whole number from 1 to {self.parallel_cap}"
+                return httpx.Response(400, json={"error": text})
             self.started.append(body)
             jid = f"{len(self.jobs):016x}"
             self.jobs[jid] = {"id": jid, "state": "running", "games_requested": body["games"], "results": []}
@@ -999,6 +1012,23 @@ class _Live:
 
     def get(self, key: str) -> Any:
         return self.values[key]
+
+
+async def test_more_than_four_at_once_falls_back_to_four_on_an_older_forge_image() -> None:
+    """Up to 16 games at once since 0.7.33; a Forge image before 2.0.15-mag4 refuses more than 4
+    (and never had more than 4 places), so the run is asked again with 4 instead of failing."""
+    fake = FakeForge()
+    fake.parallel_cap = 4
+    section = await start_run(fake.client(), DECK_TEXT, "Liesa", games=12, parallel=12)
+    assert section["state"] == "running" and [s["parallel"] for s in fake.started] == [4]
+    fake.parallel_cap = 16  # a 2.0.15-mag4 image takes all 12
+    await start_run(fake.client(), DECK_TEXT, "Liesa", games=12, parallel=12)
+    assert fake.started[-1]["parallel"] == 12
+    # a refusal of 4 or fewer is not retried
+    fake.parallel_cap = 2
+    with pytest.raises(ForgeError, match="parallel"):
+        await fake.client().start([{"precon": "Precon 1"}], 3, parallel=3)
+    assert len(fake.started) == 2
 
 
 async def test_forge_reads_its_settings_live_and_its_own_seed(tmp_path: Path) -> None:

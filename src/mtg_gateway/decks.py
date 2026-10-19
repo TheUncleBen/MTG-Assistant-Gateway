@@ -53,6 +53,7 @@ from .archidekt import (
     ArchidektError,
     Deck,
     DeckList,
+    Pacer,
     Patience,
     QuillDoc,
     _owned_by,
@@ -761,6 +762,17 @@ REVIEW_PAGE = "review_page"
 REJECTED_BY = ("assistant", "card", "review_page", "browser", "api", "disconnected")
 
 
+def archidekt_wait(exc: BaseException) -> int | None:
+    """How long the gateway is pausing its Archidekt requests after an ArchidektError (Archidekt's
+    Retry-After, capped as the pacer caps it, or what is left of that pause) in whole seconds, at
+    least 1, for the busy page's Retry-After header. A Retry-After of 0 (or a date already past)
+    pauses nothing, so it is 1, never the busy page's default."""
+    asked = getattr(exc, "retry_after", None)
+    if asked is None:
+        return None
+    return max(1, math.ceil(min(asked, Pacer.MAX_RETRY_AFTER)))
+
+
 class DeckError(Exception):
     """A user-facing failure: the message is safe to show as is. ``extra`` holds structured
     fields the tool reply carries alongside ``error`` and ``message``. ``retry_after`` (seconds)
@@ -959,10 +971,6 @@ def parse_changes(raw: Any, *, row_flags: bool = False) -> list[Change]:
             raise DeckError("invalid", f"change {i}: set_code must be a set code such as cmr")
         if number and not _COLLECTOR_NUMBER.fullmatch(number):
             raise DeckError("invalid", f"change {i}: collector_number looks wrong")
-        if zone == "side" and set_code:
-            raise DeckError(
-                "invalid", f"change {i}: a pinned printing is added to the deck proper, not zone side"
-            )
         flags = {}
         for flag in ("companion", "flipped_default") if row_flags else ():
             given = item.get(flag)
@@ -976,18 +984,29 @@ def parse_changes(raw: Any, *, row_flags: bool = False) -> list[Change]:
         out.append(
             Change(action, name, qty, cat, set_code, number, finish, zone=zone, categories=cats, **flags)
         )
-    pinned = [ch.card_name.lower() for ch in out if ch.pinned]
+    # Per zone: the deck proper and the maybeboard or sideboard each take one pinned printing of a card.
+    pinned = [(ch.zone, ch.card_name.lower()) for ch in out if ch.pinned]
     if len(pinned) != len(set(pinned)):
-        raise DeckError("invalid", "one pinned printing per card name per proposal")
-    # A pinned add next to a remove or set_quantity of the same card would make the writes
-    # (add that printing, then shrink the rest) differ from the net count the diff shows.
-    pinned_faces = {front_face(n) for n in pinned}
+        raise DeckError(
+            "invalid",
+            "one pinned printing per card name in each zone (deck or maybeboard/sideboard) per proposal",
+        )
+    # A pinned add next to a remove or set_quantity of the same card in the same zone would make
+    # the writes (add that printing, then shrink the rest) differ from the net count the diff shows.
+    pinned_faces = {(zone, front_face(n)) for zone, n in pinned}
     for ch in out:
-        if ch.action in ("remove", "set_quantity") and front_face(ch.card_name.lower()) in pinned_faces:
+        if (
+            ch.action in ("remove", "set_quantity")
+            and (
+                ch.zone,
+                front_face(ch.card_name.lower()),
+            )
+            in pinned_faces
+        ):
             raise DeckError(
                 "invalid",
                 f"'{ch.card_name}' has a pinned printing added and is also removed or set in the same "
-                "proposal; propose the removal and the pinned add separately",
+                "zone in the same proposal; propose the removal and the pinned add separately",
             )
 
     # Names compare by front face, as the plans match them, so "Fire" and "Fire // Ice" clash.
@@ -1912,6 +1931,8 @@ def build_payload(
     side_categories: dict[str, list[str]] | None = None,
     flags: dict[str, tuple[bool, bool]] | None = None,
     side_flags: dict[str, tuple[bool, bool]] | None = None,
+    side_pinned: dict[str, dict[str, Any]] | None = None,
+    side_modifiers: dict[str, str] | None = None,
 ) -> list[dict[str, Any]]:
     """Per-card entries for PATCH modifyCards/v2, one entry per request.
 
@@ -1940,7 +1961,9 @@ def build_payload(
     ``modifiers`` names the finish of a card added by name; ``pinned`` holds, per card name,
     the exact printing an add asked for (``cardid``, ``modifier``, ``quantity``,
     ``categories``): that printing goes in as its own row unless the deck already has a row
-    with the same printing and finish, which then grows by the added quantity.
+    with the same printing and finish, which then grows by the added quantity. ``side_pinned`` does
+    the same for a maybeboard or sideboard add, among that card's rows there (its ``categories``
+    are the side categories the add goes in), and ``side_modifiers`` names a side add's finish.
     """
     by_name: dict[str, list[Any]] = {}
     for c in deck.main_cards:  # never touch maybeboard or sideboard rows
@@ -1953,31 +1976,7 @@ def build_payload(
             continue
         pin = (pinned or {}).get(name)
         if pin:
-            same = [
-                c
-                for c in existing
-                if c.card_id == pin["cardid"] and (c.modifier or "Normal") == pin["modifier"]
-            ]
-            if same:
-                payload.append(_entry("modify", same[0], same[0].quantity + int(pin["quantity"])))
-                qty -= same[0].quantity + int(pin["quantity"])
-            else:
-                payload.append(
-                    _add_entry(
-                        pin["cardid"],
-                        int(pin["quantity"]),
-                        pin.get("categories"),
-                        pin["modifier"],
-                        (flags or {}).get(name, (False, False)),
-                    )
-                )
-                qty -= int(pin["quantity"])
-            if qty < sum(c.quantity for c in existing if c not in same):
-                # parse_changes refuses the combinations that get here; never send writes that
-                # shrink other rows below what the reviewed diff says
-                raise DeckError("invalid", f"the pinned add of '{name}' does not match the planned count")
-            # whatever the proposal's other changes do to this card's remaining rows
-            existing = [c for c in existing if c not in same]
+            qty, existing = _pinned_entries(payload, name, qty, existing, pin, (flags or {}).get(name))
             if qty == sum(c.quantity for c in existing):
                 continue
         if existing:
@@ -2001,6 +2000,13 @@ def build_payload(
         existing = side_by_name.get(name.lower(), [])
         if qty == sum(c.quantity for c in existing):
             continue
+        pin = (side_pinned or {}).get(name)
+        if pin:
+            qty, existing = _pinned_entries(
+                payload, name, qty, existing, pin, (side_flags or {}).get(name), side=True
+            )
+            if qty == sum(c.quantity for c in existing):
+                continue
         if existing:
             primary, *extras = _rows_kept_first(deck, existing)
             payload.append(_entry("modify" if qty > 0 else "remove", primary, qty))
@@ -2011,7 +2017,7 @@ def build_payload(
                     resolve[name],
                     qty,
                     (side_categories or {}).get(name) or [deck.side_category()],
-                    (modifiers or {}).get(name, "Normal"),
+                    (side_modifiers or {}).get(name, "Normal"),
                     (side_flags or {}).get(name, (False, False)),
                 )
             )
@@ -2019,6 +2025,52 @@ def build_payload(
         if card.relation_id in (recategorise or {}):
             payload.append(_entry("modify", card, card.quantity, categories=recategorise[card.relation_id]))
     return payload
+
+
+def _pinned_entries(
+    payload: list[dict[str, Any]],
+    name: str,
+    qty: int,
+    existing: list[Any],
+    pin: dict[str, Any],
+    flags: tuple[bool, bool] | None,
+    side: bool = False,
+) -> tuple[int, list[Any]]:
+    """Append the write for a pinned add of ``name`` (one zone's rows in ``existing``): the row
+    with the same printing and finish grows, or the printing goes in as a new row. In the
+    maybeboard or sideboard (``side``) only a row filed under the add's own category grows, so a
+    Maybeboard add never adds to the Sideboard's count. Returns the count still to reach and the
+    card's other rows, for the zone's remaining changes."""
+    # categories compare as Archidekt does, ignoring case: a typed "sideboard" is the Sideboard
+    want_cat = str((pin.get("categories") or [""])[0] or "").casefold() if side else None
+    same = [
+        c
+        for c in existing
+        if c.card_id == pin["cardid"]
+        and (c.modifier or "Normal") == pin["modifier"]
+        and (want_cat is None or str((c.categories or [""])[0] or "").casefold() == want_cat)
+    ]
+    if same:
+        payload.append(_entry("modify", same[0], same[0].quantity + int(pin["quantity"])))
+        qty -= same[0].quantity + int(pin["quantity"])
+    else:
+        payload.append(
+            _add_entry(
+                pin["cardid"],
+                int(pin["quantity"]),
+                pin.get("categories"),
+                pin["modifier"],
+                flags or (False, False),
+            )
+        )
+        qty -= int(pin["quantity"])
+    rest = [c for c in existing if c not in same]
+    if qty < sum(c.quantity for c in rest):
+        # parse_changes refuses the combinations that get here; never send writes that
+        # shrink other rows below what the reviewed diff says
+        raise DeckError("invalid", f"the pinned add of '{name}' does not match the planned count")
+    # whatever the proposal's other changes do to this card's remaining rows
+    return qty, rest
 
 
 def _add_entry(
@@ -2400,7 +2452,7 @@ class DeckService:
             return None
         return (
             f"Your account has used its {self.archidekt_budget.per_window} Archidekt actions for "
-            f"the last {ARCHIDEKT_BUDGET_WINDOW // 60} minutes; wait a few minutes and try again."
+            f"the last {ARCHIDEKT_BUDGET_WINDOW // 60} minutes; try again later."
         )
 
     def _sync_spend(self, sub: str) -> None:
@@ -2428,7 +2480,7 @@ class DeckService:
                 # counted against MAX_LINK_FAILURES; the attempted login name is not recorded
                 self._audit("archidekt_link_failed", sub=sub, detail={"error": exc.kind})
                 raise DeckError("auth", "Archidekt did not accept that username and password.") from exc
-            raise DeckError(exc.kind, str(exc)) from exc
+            raise DeckError(exc.kind, str(exc), retry_after=archidekt_wait(exc)) from exc
         return session
 
     async def link(self, sub: str, login: str, password: str) -> dict[str, Any]:
@@ -2643,7 +2695,7 @@ class DeckService:
                 if exc.kind == "auth":
                     raise expire(f"{reason}, refresh rejected") from exc
                 # the session could not be refreshed, so the call it was for was never sent
-                raise DeckError(exc.kind, str(exc), sent=False) from exc
+                raise DeckError(exc.kind, str(exc), sent=False, retry_after=archidekt_wait(exc)) from exc
             new_enc = self._seal(sub, access, refresh)
             if not self.db.update_link_secret(sub, new_enc, only_secret=stored["secret_enc"]):
                 # Unlinked, revoked or relinked while the refresh was in flight: never resurrect
@@ -2682,7 +2734,8 @@ class DeckService:
         except ArchidektError as exc:
             if exc.kind == "auth":
                 raise expire("rejected after refresh") from exc
-            raise DeckError(exc.kind, str(exc), sent=exc.sent) from exc
+            # the wait Archidekt asked for reaches the busy page's Retry-After header
+            raise DeckError(exc.kind, str(exc), sent=exc.sent, retry_after=archidekt_wait(exc)) from exc
         finally:
             no_retry.reset(quiet)
             _acting_sub.reset(acting)
@@ -3001,7 +3054,7 @@ class DeckService:
                     # the member's link stopped working on this request: that, and how to link
                     # again, is what they need to hear, not why the read without it failed
                     raise DeckError(linked.kind, str(linked)) from exc
-                raise DeckError(exc.kind, str(exc)) from exc
+                raise DeckError(exc.kind, str(exc), retry_after=archidekt_wait(exc)) from exc
 
     # -- the deck sync's reads (sync.py) ----------------------------------------
     def archidekt_busy(self) -> bool:
@@ -3068,7 +3121,7 @@ class DeckService:
         try:
             return await self.client.get_deck(None, deck_id, fresh=True)
         except ArchidektError as exc:
-            raise DeckError(exc.kind, str(exc)) from exc
+            raise DeckError(exc.kind, str(exc), retry_after=archidekt_wait(exc)) from exc
         finally:
             no_retry.reset(quiet)
 
@@ -3230,7 +3283,7 @@ class DeckService:
             try:
                 return await self.client.search_decks(**query)
             except ArchidektError as exc:
-                raise DeckError(exc.kind, str(exc)) from exc
+                raise DeckError(exc.kind, str(exc), retry_after=archidekt_wait(exc)) from exc
 
     async def user_profile(self, sub: str | None, username: str) -> dict[str, Any] | None:
         username = re.sub(r"[^A-Za-z0-9_.@ -]", "", str(username or "")).strip()[:60]
@@ -3240,7 +3293,7 @@ class DeckService:
             try:
                 return await self.client.user_profile(username)
             except ArchidektError as exc:
-                raise DeckError(exc.kind, str(exc)) from exc
+                raise DeckError(exc.kind, str(exc), retry_after=archidekt_wait(exc)) from exc
 
     # -- proposals ------------------------------------------------------------
     @_dedupe
@@ -4494,9 +4547,15 @@ class DeckService:
         recategorise, _cat_lines = category_plan(deck, changes)
         # Every printing is looked up before anything is written or backed up, so a printing
         # that does not exist (or is another card) refuses the proposal with nothing changed.
-        resolve, modifiers, pinned, new_cats, side_cats = await self._resolve_adds(
-            sub, deck, changes, after, after_side
-        )
+        (
+            resolve,
+            modifiers,
+            pinned,
+            new_cats,
+            side_cats,
+            side_pinned,
+            side_modifiers,
+        ) = await self._resolve_adds(sub, deck, changes, after, after_side)
         payload = build_payload(
             deck,
             after,
@@ -4509,6 +4568,8 @@ class DeckService:
             side_cats,
             add_flags(changes, after, "main"),
             add_flags(changes, after_side, "side"),
+            side_pinned,
+            side_modifiers,
         )
         specs, _print_lines = printing_plan_rows(deck, changes)
         payload += await self._printing_entries(sub, deck, specs)
@@ -4548,12 +4609,20 @@ class DeckService:
         after: dict[str, int],
         after_side: dict[str, int] | None = None,
     ) -> tuple[
-        dict[str, int], dict[str, str], dict[str, dict[str, Any]], dict[str, list[str]], dict[str, list[str]]
+        dict[str, int],
+        dict[str, str],
+        dict[str, dict[str, Any]],
+        dict[str, list[str]],
+        dict[str, list[str]],
+        dict[str, dict[str, Any]],
+        dict[str, str],
     ]:
         """Printing ids and finishes for the cards an edit adds, keyed by the spelling used in
         ``after`` (and ``after_side`` for maybeboard adds, whose categories come back as the fifth
-        value). A pinned printing (set code + collector number) is required to exist and to be
-        that card: the client raises ``not_found`` otherwise and nothing is added."""
+        value, their pinned printings as the sixth and their finishes as the seventh, kept apart
+        from the deck proper's so a finish on one zone's add never reaches the other's). A pinned
+        printing (set code + collector number) is required to exist and to be that card: the
+        client raises ``not_found`` otherwise and nothing is added."""
         after_side = after_side or {}
 
         def key_for(name: str, counts: dict[str, int]) -> str:
@@ -4573,15 +4642,45 @@ class DeckService:
         pinned: dict[str, dict[str, Any]] = {}
         new_cats: dict[str, list[str]] = {}
         side_cats: dict[str, list[str]] = {}
+        side_pinned: dict[str, dict[str, Any]] = {}
+        side_modifiers: dict[str, str] = {}
+
+        async def pin_for(ch: Change, cats: list[str]) -> dict[str, Any]:
+            card = await self._call(
+                sub,
+                lambda token, *_: self.client.resolve_card(
+                    token,
+                    ch.card_name,
+                    set_code=ch.set_code,
+                    collector_number=ch.collector_number,
+                    require_printing=True,
+                ),
+            )
+            return {
+                "cardid": card["id"],
+                "modifier": finish_modifier(
+                    card["options"], foil=ch.finish == "Foil", etched=ch.finish == "Etched"
+                ),
+                "quantity": ch.quantity or 1,
+                "categories": cats,
+            }
+
         for key, chs in side_adds.items():
             # an add naming every category (an Undo of a removal) keeps the others beside it
             side_cats[key] = _side_categories(deck, chs)
-            if after_side.get(key, 0) > 0 and key.lower() not in have_side:
+            for ch in (c for c in chs if c.pinned):
+                side_pinned[key] = await pin_for(ch, side_cats[key])
+            plain = [c for c in chs if not c.pinned]
+            if (
+                after_side.get(key, 0) > 0
+                and key.lower() not in have_side
+                and (key not in side_pinned or plain)
+            ):
                 card = await self._call(sub, self.client.resolve_card, key)
                 resolve[key] = card["id"]
-                finish = next((c.finish for c in chs if c.finish), None)
+                finish = next((c.finish for c in plain if c.finish), None)
                 if finish:
-                    modifiers[key] = finish_modifier(
+                    side_modifiers[key] = finish_modifier(
                         card["options"], foil=finish == "Foil", etched=finish == "Etched"
                     )
         for key, chs in adds.items():
@@ -4589,24 +4688,7 @@ class DeckService:
             if cats:
                 new_cats[key] = cats
             for ch in (c for c in chs if c.pinned):
-                card = await self._call(
-                    sub,
-                    lambda token, *_, ch=ch: self.client.resolve_card(
-                        token,
-                        ch.card_name,
-                        set_code=ch.set_code,
-                        collector_number=ch.collector_number,
-                        require_printing=True,
-                    ),
-                )
-                pinned[key] = {
-                    "cardid": card["id"],
-                    "modifier": finish_modifier(
-                        card["options"], foil=ch.finish == "Foil", etched=ch.finish == "Etched"
-                    ),
-                    "quantity": ch.quantity or 1,
-                    "categories": new_cats.get(key, []),
-                }
+                pinned[key] = await pin_for(ch, new_cats.get(key, []))
         for name, qty in after.items():
             plain = [c for c in adds.get(name, []) if not c.pinned]
             if qty > 0 and name.lower() not in have and (name not in pinned or plain):
@@ -4617,7 +4699,7 @@ class DeckService:
                     modifiers[name] = finish_modifier(
                         card["options"], foil=finish == "Foil", etched=finish == "Etched"
                     )
-        return resolve, modifiers, pinned, new_cats, side_cats
+        return resolve, modifiers, pinned, new_cats, side_cats, side_pinned, side_modifiers
 
     async def _printing_entries(
         self, sub: str, deck: Deck, specs: list[dict[str, Any]]
@@ -6685,7 +6767,7 @@ class DeckService:
             except ArchidektError as exc:
                 if cached:
                     return cached[1]
-                raise DeckError(exc.kind, str(exc)) from exc
+                raise DeckError(exc.kind, str(exc), retry_after=archidekt_wait(exc)) from exc
         self._precon_cache = (now, listing)
         return listing
 
@@ -7219,20 +7301,20 @@ def _rate_limited_note(
         return _partial_note(progress, clone=True)
     if progress.get("sent_entries") or progress.get("deck_id"):
         note = _partial_note(progress, collection=collection)
-        return f"{note} Try the rest again in a few minutes with a new proposal."
+        return f"{note} Try the rest again later with a new proposal."
     if progress.get("deck_written"):
         where = "your collection" if collection else "the deck"
         return (
             f"Part of this change had already reached Archidekt, so check {where}. Try the rest again "
-            "in a few minutes with a new proposal."
+            "later with a new proposal."
         )
     kept = f" {progress['backup_note']}" if progress.get("backup_note") else ""
     if pending:
         return (
             f"Nothing was changed on Archidekt.{kept} The proposal is still pending, so it can be "
-            "approved again in a few minutes."
+            "approved again later."
         )
-    return f"Nothing was changed on Archidekt.{kept} Try again in a few minutes with a new proposal."
+    return f"Nothing was changed on Archidekt.{kept} Try again later with a new proposal."
 
 
 def next_tag_position(positions: list[Any]) -> str:

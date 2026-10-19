@@ -103,3 +103,48 @@ def test_both_guides_say_never_to_ask_for_a_sign_in() -> None:
     assert "read it back yourself (`get_deck`, `list_my_decks`)" in skill
     block = CHATGPT.read_text(encoding="utf-8").split("```text\n", 1)[1]
     assert "codes or a sign-in for you, except linking Archidekt at account_page" in block
+
+
+def test_every_guide_says_to_finish_the_review_before_proposing() -> None:
+    """Ben, 0.7.31 test round: a card came up after every Approve, one after another. Claude's skill,
+    the ChatGPT block and the server instructions every app gets all say to propose once, after the
+    review, and to amend a waiting proposal instead of proposing again."""
+    from mtg_gateway.app import server_instructions
+
+    skill = " ".join((SKILL_DIR / "SKILL.md").read_text(encoding="utf-8").split())
+    assert "**Finish your review before you propose:** put every change into one proposal" in skill
+    assert "call `amend_proposal` instead of proposing again" in skill
+    block = CHATGPT.read_text(encoding="utf-8").split("```text\n", 1)[1]
+    assert (
+        "Finish your review, then propose once with every change; to change a waiting one, amend_proposal."
+        in block
+    )
+    told = server_instructions("https://gateway.example.com")
+    assert "Finish your review before proposing: one proposal with every change, and amend_proposal" in told
+
+
+def test_every_guide_says_what_approved_go_on_means() -> None:
+    """A card's "Approved, go on" reads like the user saying they applied it, and the guides said to
+    call get_proposal then, which draws the proposal card a second time. Each guide now says to
+    carry on from the outcome the card passed in and to read the proposal only when that is unclear."""
+    from mtg_gateway.app import server_instructions
+
+    skill = " ".join((SKILL_DIR / "SKILL.md").read_text(encoding="utf-8").split())
+    assert 'posts "Approved, go on" as the user\'s message: carry on from the outcome you were told' in skill
+    block = CHATGPT.read_text(encoding="utf-8").split("```text\n", 1)[1]
+    assert 'On "Approved, go on" or their word, use the outcome given; get_proposal only if unclear.' in block
+    told = server_instructions("https://gateway.example.com")
+    assert "carry on from that outcome, and call get_proposal only when it is unclear" in told
+
+
+def test_no_doc_still_names_the_cards_0_7_33_took_away() -> None:
+    """Since 0.7.33 a deck, the account, statistics, comparisons, deck lists and scans come as text;
+    the docs and the assistants' guides once listed their cards in a dozen places."""
+    stale = re.compile(
+        r"a deck, the account|the same account card|deck card for the snapshot|same deck list card"
+        r"|a deck by category|\(`deck`, `snapshot`, `printings`\)",
+        re.IGNORECASE,
+    )
+    files = [*(ROOT / "docs").glob("*.md"), *(ROOT / "plugin").rglob("*.md"), ROOT / "README.md"]
+    found = [f"{p.relative_to(ROOT)}: {m.group(0)}" for p in files for m in stale.finditer(p.read_text())]
+    assert not found, found

@@ -269,7 +269,7 @@ else your gateway serves. A few things are native:
   next tap after the owner removes you from the gateway's group (the
   gateway checks with the sign-in service every few seconds), and once
   after the owner upgrades the gateway to 0.6.1. If the sign-in service
-  can't be reached, pages say so and ask you to try again shortly.
+  can't be reached, pages say so and ask you to try again later.
 - **Downloads** (CSV export, the skill zip) land in your Downloads folder. If
   your sign-in has ended in the meantime, the app says so instead of saving a
   sign-in page; reload, sign in and download again.

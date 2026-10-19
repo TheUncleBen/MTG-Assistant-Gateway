@@ -1523,7 +1523,7 @@ def _page_step(p: dict[str, Any]) -> str:
         kept = f" {result['backup_note']}" if result.get("backup_note") else ""
         return (
             f"{PATIENCE_SPENT} Nothing was changed on Archidekt.{kept} The proposal is still pending, "
-            "so you can apply it again in a few minutes."
+            "so you can apply it again later."
         )
     if state == "pending":
         retry = (
@@ -1581,7 +1581,7 @@ def _page_step(p: dict[str, Any]) -> str:
 def _rate_limited_step(p: dict[str, Any], result: dict[str, Any]) -> str:
     """The review page's one message for an apply that stopped because Archidekt asked the gateway
     to wait longer than an apply may: why, how far it got, and to try again later."""
-    again = "Try again in a few minutes: ask your assistant for a new proposal."
+    again = "Try again later: ask your assistant for a new proposal."
     where = "your collection" if p.get("kind") == "collection" else "the deck"
     undo = (
         " The snapshot taken just before it can be restored from History."
