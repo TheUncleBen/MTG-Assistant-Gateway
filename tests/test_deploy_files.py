@@ -317,3 +317,42 @@ def test_the_release_manifest_check_finds_the_hook_and_never_passes_on_nothing(t
     assert r.returncode == 1 and "PushTestHooks" in r.stderr
     # another flavor's manifests are not this build's
     assert subprocess.run(["bash", str(check), str(build), "applinks"], capture_output=True).returncode == 1
+
+
+def test_upgrading_lists_the_range_of_every_setting_the_0732_stack_newly_passes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The 0.7.32 upgrade note lists each of the 21 settings the stack file now passes with the
+    values the gateway accepts at start, and those are the values load_settings accepts."""
+    from mtg_gateway.config import ConfigError, load_settings
+
+    from .test_admin import _env
+
+    text = (ROOT / "docs" / "UPGRADING.md").read_text(encoding="utf-8")
+    section = text.split("### 0.7.32", 1)[1].split("\n### ", 1)[0]
+    rows = dict(re.findall(r"^\s*\| `(MTG_[A-Z_]+)` \| (.+?) \|$", section, re.M))
+    newly = {
+        "MTG_AUTO_BIG_EDIT_ROWS",
+        "MTG_PROPOSAL_EXPIRY_DAYS",
+        "MTG_ARCHIDEKT_BACKUP_COPIES",
+        "MTG_ARCHIDEKT_BACKUP_BOX_DEFAULT",
+        "MTG_SNAPSHOTS_PER_DECK",
+        "MTG_FORGE_PARALLEL_GAMES",
+    } | {n for n in rows if n.startswith("MTG_SCAN_")}
+    assert set(rows) == newly and len(rows) == 21, sorted(rows)
+    _env(tmp_path, monkeypatch)
+    for name, allowed in rows.items():
+        if allowed == "`true` or `false`":
+            continue
+        lo, hi = allowed.split(" to ")
+        step = "1" if "." not in hi else "0.001"
+        above = str(float(hi) + float(step)) if "." in hi else str(int(hi) + 1)
+        below = str(float(lo) - float(step)) if "." in lo else str(int(lo) - 1)
+        for ok in (lo, hi):
+            monkeypatch.setenv(name, ok)
+            load_settings()
+        for bad in (above, below):
+            monkeypatch.setenv(name, bad)
+            with pytest.raises(ConfigError, match=name):
+                load_settings()
+        monkeypatch.delenv(name)

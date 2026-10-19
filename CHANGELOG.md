@@ -23,7 +23,8 @@ in-chat cards, deck reports and the Settings and Account pages.
   `environment:` in your old file, don't copy that line into the new one. Put its value in your
   variables (Portainer's, `mtg.env` or `.env`) instead. Any of the 21 settings your variables
   already set now reaches the gateway and locks that setting on the Settings page. Remove it from
-  your variables to manage the setting on the page.
+  your variables to manage the setting on the page. A value outside its range now stops the
+  gateway from starting, so check them before you deploy; the update steps list each range.
 - If you turned on the optional `mtg_authentik_api_token` lines, turn them on again in the new
   file ([docs/UPGRADING.md](docs/UPGRADING.md#0732)).
 
