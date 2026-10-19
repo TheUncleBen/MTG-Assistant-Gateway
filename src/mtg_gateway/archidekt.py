@@ -1403,7 +1403,8 @@ class ArchidektClient:
             row["owner"] = str(owner_obj.get("username") or "")
             row["owner_id"] = str(owner_obj["id"]) if owner_obj.get("id") is not None else None
             rows.append(row)
-        count = body.get("count") if isinstance(body.get("count"), int) else None
+        # Archidekt answers a search that matches nothing with count -1: unknown, like a missing one
+        count = body.get("count") if isinstance(body.get("count"), int) and body["count"] >= 0 else None
         return {"decks": rows, "count": count, "has_more": bool(body.get("next")), "page": page}
 
     async def user_profile(self, username: str) -> dict[str, Any] | None:

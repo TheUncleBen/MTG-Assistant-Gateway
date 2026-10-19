@@ -9,6 +9,7 @@ from .conftest import Stack
 from .test_account_actions import _press
 from .test_approval_modes import _set_mode
 from .test_decks_and_proxy import call, linked_user, structured
+from .test_tool_reliability import mcp_token
 
 
 def _add(card: str) -> dict:
@@ -101,3 +102,9 @@ async def test_the_board_lists_the_commanders_a_commander_change_names(stack: St
     row = next(r for r in p["rows"] if r["kind"] == "commander")
     old = {k: v for k, v in row.items() if k != "names"}
     assert recheck._clean([old]) == recheck._clean([row])
+
+
+async def test_search_decks_count_is_null_when_archidekt_gives_minus_one(stack: Stack) -> None:
+    token = await mcp_token(stack.h)
+    nothing = structured(await call(stack.h, token, "search_decks", {"commander": "Nobody At All"}))
+    assert nothing["ok"] and nothing["decks"] == [] and nothing["count"] is None
