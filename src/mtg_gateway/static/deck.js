@@ -1342,6 +1342,7 @@
     var card = e.target.closest(".c, .row");
     if (!card || !cards.contains(card)) return;
     e.preventDefault();  // never the browser's image menu over a card
+    clearStaleDrag();
     if (picking || (menu && menuCard === card)) return;  // a touch hold already opened it
     // a finger still holding the card: Android's own long press must not open the menu under it,
     // or the slide that follows scrolls the page in place of moving the card (letting go opens it)
@@ -1384,6 +1385,16 @@
   var isStacks = cards.classList.contains("stacks");
   var dragged = null;
   var swallowClick = false;
+  // A mouse drag the browser never finished (no dragend): the card no longer looks lifted and taps
+  // on the cards work again. The touch drag below keeps its own state and is never cleared here.
+  function clearStaleDrag() {
+    if (!dragged || dragged !== nativeDrag) return;
+    dragged.classList.remove("dragging");
+    cards.classList.remove("carddrag");
+    $$(".stack.dropping", cards).forEach(function (s) { s.classList.remove("dropping"); });
+    dragged = null; nativeDrag = null;
+  }
+  var nativeDrag = null;
   cards.addEventListener("click", function (e) {
     var card = e.target.closest(".c, .row");
     if (!card || !cards.contains(card) || dragged || swallowClick) return;
@@ -1711,13 +1722,26 @@
   }
 
   // mouse drag (native drag and drop)
+  // A finger never starts the browser's own drag: Chrome on Android starts one from a press and
+  // hold on a draggable card, and when the finger lets go without moving it opens the card's menu
+  // but sends no dragend, so the card stayed faded and every later tap on a card was refused as
+  // the end of a drop. A touch press and hold is the touch code's below (the menu, or slide to
+  // move), so the card is not draggable under a finger and a drag a touch starts anyway is refused.
   $$(".c, .row", cards).forEach(function (c) { c.setAttribute("draggable", "true"); });
+  var touchPress = false;
+  cards.addEventListener("pointerdown", function (e) {
+    touchPress = e.pointerType === "touch";
+    clearStaleDrag();
+    var card = e.target.closest(".c, .row");
+    if (card) card.setAttribute("draggable", touchPress ? "false" : "true");
+  }, true);
   cards.addEventListener("dragstart", function (e) {
     var card = e.target.closest(".c, .row");
     if (!card) return;
-    if (picking) { e.preventDefault(); return; }
+    if (picking || touchPress) { e.preventDefault(); return; }
     closeMenu();
     dragged = card;
+    nativeDrag = card;
     card.classList.add("dragging");
     // The stack under the pointer fans out below its stack's box, over the top of the stack
     // directly below, and a native drag keeps it open: a drop there would land on the card's own
@@ -1745,6 +1769,7 @@
   });
   cards.addEventListener("dragend", function () {
     if (dragged) dragged.classList.remove("dragging");
+    nativeDrag = null;
     cards.classList.remove("carddrag");
     $$(".stack.dropping", cards).forEach(function (s) { s.classList.remove("dropping"); });
     setTimeout(function () { dragged = null; }, 0);  // swallow the click that follows a drop

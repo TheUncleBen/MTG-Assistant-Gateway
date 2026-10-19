@@ -7,7 +7,19 @@ Notable changes for people who run or use the gateway. The format follows
 with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 (`release/1.2.3`); `latest` is always the newest.
 
-## [0.7.33] - unreleased
+## [0.7.36] - unreleased
+
+A press and hold on a card in a deck no longer leaves the card faded and the page refusing taps.
+
+### Upgrade notes
+None.
+
+### Fixed
+- On a phone or tablet, a press and hold on a card on a deck page opened the card's menu but could
+  leave the card faded, and after that a tap on any other card did nothing until the page was
+  loaded again. The card now looks normal once the menu opens, and the other cards open with a tap.
+
+## [0.7.33] - 2026-10-19
 
 Fewer cards in the chat: only the changes waiting for you and the two pickers still show one. After
 you approve a proposal on its card or press Apply all, the card can now post a short message so
