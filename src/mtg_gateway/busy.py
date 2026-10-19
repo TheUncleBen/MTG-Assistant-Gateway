@@ -23,19 +23,19 @@ BUSY_TITLE = "Archidekt is busy"
 BUSY_TEXT = (
     "Other work for your account is still running, or one of your account's limits was reached, so "
     "this couldn't be done right now. Nothing is wrong with your decks or your account; try again "
-    "in a minute or two."
+    "a little later."
 )
 # The busy text when the refusal says why (DeckError.busy_cause, or Archidekt's own 429 behind it).
 BUSY_TEXTS = {
     "member_slots": (
         "Your account already has several Archidekt actions running or waiting, for example from an "
         "assistant, and there was no turn free for this one. Nothing is wrong with your decks or "
-        "your account; try again in a moment."
+        "your account; try again once some of them have finished."
     ),
     "budget": (
         "Your account has used up its Archidekt allowance for the last 10 minutes, for example "
-        "because an assistant has been busy. It refills a little at a time. Nothing is wrong with "
-        "your decks or your account; try again in a minute or two."
+        "because an assistant has been busy. It refills a little at a time, and this works again "
+        "once there is room. Nothing is wrong with your decks or your account."
     ),
     "archidekt": (
         "Archidekt asked the gateway to slow down, so the gateway is pausing its Archidekt requests "

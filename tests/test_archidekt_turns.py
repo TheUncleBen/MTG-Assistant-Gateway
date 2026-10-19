@@ -278,15 +278,15 @@ async def test_my_decks_shows_the_list_as_last_read_while_archidekt_is_paused(st
         r = await b.http.get("/decks")
         assert r.status_code == 200, r.text
         assert "Sample Commander Deck" in r.text
-        assert "notice warn" in r.text and "so this is how it looked" in r.text
+        assert "notice warn" in r.text and "this is how it was" in r.text
         assert "Archidekt is busy" not in r.text
         r = await b.http.get("/api/decks/mine", params={"shape": "list"})
         body = r.json()
-        assert body["ok"] is True and "so this is how it looked" in body["html"]
+        assert body["ok"] is True and "this is how it was" in body["html"]
         r = await b.http.get("/api/decks/mine", params={"shape": "recent"})
-        assert "so this is how it looked" in r.json()["html"]
+        assert "this is how it was" in r.json()["html"]
         r = await b.http.get("/")
-        assert "Sample Commander Deck" in r.text and "so this is how it looked" in r.text
+        assert "Sample Commander Deck" in r.text and "this is how it was" in r.text
     finally:
         await b.aclose()
 
@@ -315,7 +315,7 @@ async def test_a_list_read_fine_shows_no_notice(stack: Stack) -> None:
     await b.link("alice", "pw-alice")
     try:
         r = await b.http.get("/decks")
-        assert "Sample Commander Deck" in r.text and "so this is how it looked" not in r.text
+        assert "Sample Commander Deck" in r.text and "this is how it was" not in r.text
     finally:
         await b.aclose()
 
@@ -326,7 +326,7 @@ async def test_the_last_read_list_is_forgotten_with_the_member(stack: Stack) -> 
         stack.gw.decks.forget_member("user-1")
         assert stack.gw.decks.deck_lists.last("user-1", 3600) is None
         r = await b.http.get("/decks")
-        assert "so this is how it looked" not in r.text
+        assert "this is how it was" not in r.text
         assert r.status_code == 429  # nothing to show: the busy page, as before
     finally:
         await b.aclose()
@@ -353,10 +353,10 @@ async def test_a_partial_list_is_not_kept_as_last_read() -> None:
 
 
 def test_deck_list_held_text_says_how_old() -> None:
-    assert "how it looked 5 minutes ago" in deck_list_held_text(1000.0, now=1300.0)
-    assert "how it looked 1 minute ago" in deck_list_held_text(1000.0, now=1010.0)
-    assert "how it looked 2 hours ago" in deck_list_held_text(0.0, now=7300.0)
-    assert "how it looked 1 hour ago" in deck_list_held_text(0.0, now=3700.0)
+    assert "how it was 5 minutes ago" in deck_list_held_text(1000.0, now=1300.0)
+    assert "how it was 1 minute ago" in deck_list_held_text(1000.0, now=1010.0)
+    assert "how it was 2 hours ago" in deck_list_held_text(0.0, now=7300.0)
+    assert "how it was 1 hour ago" in deck_list_held_text(0.0, now=3700.0)
 
 
 # -- the busy page says why --------------------------------------------------------------------------

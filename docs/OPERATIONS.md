@@ -736,7 +736,8 @@ The gateway is built to be light on Archidekt. For everyone together:
 - while Archidekt can't be asked (requests are paused, Archidekt can't be
   reached, or the member's own Archidekt actions or 10-minute allowance
   leave nothing free), My decks and the home page show the member's deck
-  list as it was last read (up to a day old), with a notice saying how old
+  list as it was last read (up to a day old, kept in memory only, so not
+  after a restart), with a notice saying how old
   it is, instead of the "Archidekt is busy" page. An assistant asking for
   the list still gets the refusal (`rate_limited` or `unavailable`);
 - an unused backup copy whose delete Archidekt refuses for a while (a pause

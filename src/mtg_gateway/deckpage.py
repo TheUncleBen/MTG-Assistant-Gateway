@@ -2031,11 +2031,7 @@ def deck_list_held_text(read_at: float, *, now: float | None = None) -> str:
     # spelled out in a sentence (waiting_strip._age's "min" and "h" are for list columns)
     n, unit = (max(1, seconds // 60), "minute") if seconds < 3600 else (seconds // 3600, "hour")
     age = f"{n} {unit}{'' if n == 1 else 's'}"
-    return (
-        f"Your deck list can't be read from Archidekt right now, so this is how it looked {age} ago. "
-        "Decks changed since then may not show the change; reload the page in a minute or two for "
-        "the current list."
-    )
+    return f"Your deck list can't be read from Archidekt right now; this is how it was {age} ago."
 
 
 def deck_list_held_html(read_at: float) -> str:
