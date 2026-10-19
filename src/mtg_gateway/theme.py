@@ -1083,61 +1083,11 @@ html[data-card-size=l] .printpick .ppgrid{grid-template-columns:repeat(auto-fill
   html[data-card-size=s] ul.decklist.grid{grid-template-columns:repeat(2,minmax(0,1fr))} }
 """
 
-# The top bar's search box (cards and decks, static/suggest.js in its site mode): in the bar from
-# 900 px and on the touch rail (600 to 899 px); under 600 px folded behind the magnifier
-# (static/sitesearch.js opens it under the bar). A narrow window with a mouse (600 to 899 px)
-# keeps its text links, Search among them, and has no room for the box.
-_TOPSEARCH_CSS = """
-.topbar .topsearch{display:none;margin:0;flex:0 1 20rem;min-width:9rem}
-.topbar .topsearch .box{position:relative;display:block}
-.topbar .topsearch .box > svg.i{position:absolute;left:.75rem;top:50%;transform:translateY(-50%);z-index:1;
-  color:var(--navbar-muted);pointer-events:none}
-.topbar .topsearch .suggest > input{height:36px;padding:0 .9rem 0 2.3rem;border-radius:18px;
-  background:rgba(255,255,255,.1);border-color:rgba(255,255,255,.2);color:var(--navbar-text)}
-.topbar .topsearch .suggest > input::placeholder{color:var(--navbar-muted)}
-.topbar .topsearch .suggest > input:focus{background:var(--surface);color:var(--text);
-  border-color:var(--orange);outline-offset:1px}
-.topbar .topsearch .suggest > input:focus::placeholder{color:var(--text-muted)}
-.topbar .topsearch .box:focus-within > svg.i{color:var(--orange)}
-/* the list keeps the page's text colour and weight, not the bar's white bold */
-.topbar .topsearch .suggest-list{left:auto;right:0;width:min(27rem,calc(100vw - 2rem));
-  max-height:min(26rem,70vh);color:var(--text);font-weight:400;text-align:left}
-@media (min-width:600px) and (max-width:899.98px) and ((pointer:coarse) or (hover:none)){
-  .topbar .topsearch{display:block} }
-@media (min-width:600px){ body.app .topbar .topsearch{display:block} }
-@media (min-width:900px){ .topbar .topsearch{display:block} .topbar .searchbtn{display:none} }
-@media (max-width:599.98px){
-  body.search-open .topbar .topsearch{display:block;position:absolute;left:0;right:0;top:100%;
-    padding:.5rem max(1rem,env(safe-area-inset-right)) .6rem max(1rem,env(safe-area-inset-left));
-    background:var(--navbar-bg);box-shadow:var(--shadow);flex:none;min-width:0}
-  body.search-open .topbar .topsearch .suggest-list{left:0;right:0;width:auto}
-  body.search-open .topbar .searchbtn{color:var(--orange)} }
-/* the site search's groups in the suggestion list */
-.suggest-list li.head{padding:.5rem 1rem .2rem;font-size:.78rem;font-weight:700;text-transform:uppercase;
-  letter-spacing:.04em;color:var(--menu-head);cursor:default}
-.suggest-list li.head:hover{background:none}
-.suggest-list li.head:not(:first-child){border-top:1px solid var(--border-soft);margin-top:.25rem;
-  padding-top:.6rem}
-.suggest-list li.go{display:flex;align-items:center;gap:.6rem}
-.suggest-list li.go svg.i{color:var(--orange);flex:none}
-"""
-CSS += _TOPSEARCH_CSS
-
-# The navigation bar (static/feedback.js): a thin line along the top of the window from the tap on
-# a link to another page until that page replaces this one, so a slow answer never looks like a
-# missed tap. It creeps towards the end and never finishes on its own.
-CSS += """
-.navprogress{position:fixed;top:0;left:0;right:0;height:3px;z-index:1000;pointer-events:none;
-  background:var(--orange);transform-origin:0 50%;transform:scaleX(0);opacity:0}
-html.navigating .navprogress{opacity:1;animation:navprogress 8s cubic-bezier(.1,.7,.3,1) forwards}
-@keyframes navprogress{from{transform:scaleX(.08)}to{transform:scaleX(.92)}}
-@media (prefers-reduced-motion:reduce){html.navigating .navprogress{animation:none;transform:scaleX(.6)}}
-"""
-
 # UI standard v1 (docs: UI-STANDARD.md §3-§5): the shared pieces of the dashboard and list pages,
 # drawn by ui.py. Theme tokens only. Names that the theme or a page already uses for something
 # else carry a ui- prefix (ui-lbl, ui-app, ui-when, ui-chip, ui-chg, ui-locked); the rest keep the
-# approved mockup's names.
+# approved mockup's names. It comes before the top bar's search rules: the desktop (900 px)
+# layout never keys off a touch screen (tests/test_social_layout.py).
 UI_CSS = """
 /* §3 width: lists and tables are wide, up to 1200 px (render(main_class='ui-wide')) */
 main.wrap.ui-wide{max-width:1200px}
@@ -1439,6 +1389,58 @@ ul.ui-chg{padding:0;border:1px solid var(--card-border);border-radius:var(--radi
 .act-table .evt .en svg.i{width:16px;height:16px;margin-top:.1rem;color:var(--text-muted)}
 """
 CSS += UI_CSS
+
+
+# The top bar's search box (cards and decks, static/suggest.js in its site mode): in the bar from
+# 900 px and on the touch rail (600 to 899 px); under 600 px folded behind the magnifier
+# (static/sitesearch.js opens it under the bar). A narrow window with a mouse (600 to 899 px)
+# keeps its text links, Search among them, and has no room for the box.
+_TOPSEARCH_CSS = """
+.topbar .topsearch{display:none;margin:0;flex:0 1 20rem;min-width:9rem}
+.topbar .topsearch .box{position:relative;display:block}
+.topbar .topsearch .box > svg.i{position:absolute;left:.75rem;top:50%;transform:translateY(-50%);z-index:1;
+  color:var(--navbar-muted);pointer-events:none}
+.topbar .topsearch .suggest > input{height:36px;padding:0 .9rem 0 2.3rem;border-radius:18px;
+  background:rgba(255,255,255,.1);border-color:rgba(255,255,255,.2);color:var(--navbar-text)}
+.topbar .topsearch .suggest > input::placeholder{color:var(--navbar-muted)}
+.topbar .topsearch .suggest > input:focus{background:var(--surface);color:var(--text);
+  border-color:var(--orange);outline-offset:1px}
+.topbar .topsearch .suggest > input:focus::placeholder{color:var(--text-muted)}
+.topbar .topsearch .box:focus-within > svg.i{color:var(--orange)}
+/* the list keeps the page's text colour and weight, not the bar's white bold */
+.topbar .topsearch .suggest-list{left:auto;right:0;width:min(27rem,calc(100vw - 2rem));
+  max-height:min(26rem,70vh);color:var(--text);font-weight:400;text-align:left}
+@media (min-width:600px) and (max-width:899.98px) and ((pointer:coarse) or (hover:none)){
+  .topbar .topsearch{display:block} }
+@media (min-width:600px){ body.app .topbar .topsearch{display:block} }
+@media (min-width:900px){ .topbar .topsearch{display:block} .topbar .searchbtn{display:none} }
+@media (max-width:599.98px){
+  body.search-open .topbar .topsearch{display:block;position:absolute;left:0;right:0;top:100%;
+    padding:.5rem max(1rem,env(safe-area-inset-right)) .6rem max(1rem,env(safe-area-inset-left));
+    background:var(--navbar-bg);box-shadow:var(--shadow);flex:none;min-width:0}
+  body.search-open .topbar .topsearch .suggest-list{left:0;right:0;width:auto}
+  body.search-open .topbar .searchbtn{color:var(--orange)} }
+/* the site search's groups in the suggestion list */
+.suggest-list li.head{padding:.5rem 1rem .2rem;font-size:.78rem;font-weight:700;text-transform:uppercase;
+  letter-spacing:.04em;color:var(--menu-head);cursor:default}
+.suggest-list li.head:hover{background:none}
+.suggest-list li.head:not(:first-child){border-top:1px solid var(--border-soft);margin-top:.25rem;
+  padding-top:.6rem}
+.suggest-list li.go{display:flex;align-items:center;gap:.6rem}
+.suggest-list li.go svg.i{color:var(--orange);flex:none}
+"""
+CSS += _TOPSEARCH_CSS
+
+# The navigation bar (static/feedback.js): a thin line along the top of the window from the tap on
+# a link to another page until that page replaces this one, so a slow answer never looks like a
+# missed tap. It creeps towards the end and never finishes on its own.
+CSS += """
+.navprogress{position:fixed;top:0;left:0;right:0;height:3px;z-index:1000;pointer-events:none;
+  background:var(--orange);transform-origin:0 50%;transform:scaleX(0);opacity:0}
+html.navigating .navprogress{opacity:1;animation:navprogress 8s cubic-bezier(.1,.7,.3,1) forwards}
+@keyframes navprogress{from{transform:scaleX(.08)}to{transform:scaleX(.92)}}
+@media (prefers-reduced-motion:reduce){html.navigating .navprogress{animation:none;transform:scaleX(.6)}}
+"""
 
 
 # Own inline icons (simple 24-unit strokes). None is an Archidekt or Font Awesome path.
