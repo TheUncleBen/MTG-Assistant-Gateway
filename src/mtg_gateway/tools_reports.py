@@ -53,9 +53,7 @@ NOT_DECK_OR_SNAPSHOT = (
 def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
     """Register the statistics, compare and deck report tools."""
     _sub = h._sub
-    compare_card_meta = h.compare_card_meta
     server = h.server
-    stats_card_meta = h.stats_card_meta
 
     @server.tool(
         name="deck_stats",
@@ -85,7 +83,6 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
             "structure; validate_decklist checks a pasted list card by card."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": True},
-        meta=stats_card_meta,
     )
     async def deck_stats_tool(
         deck_ref: Annotated[
@@ -189,7 +186,6 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
             "Compare page does the same with its Forge button)."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": True},
-        meta=compare_card_meta,
     )
     async def compare_decks(
         a: Annotated[

@@ -46,10 +46,10 @@ A change to one of your decks keeps a snapshot first. Deck and collection change
 
 | Capability | The one tool | Writes? | Notes |
 | --- | --- | --- | --- |
-| Who is signed in; is Archidekt linked, are writes on | `whoami`, `account_status` | no | linking itself happens only in the browser (Account page); the account card in the chat shows what is missing and opens that page |
+| Who is signed in; is Archidekt linked, are writes on | `whoami`, `account_status` | no | linking itself happens only in the browser (Account page) |
 | List my decks (private included), filter by name, format, folder | `list_my_decks` | no | |
 | Search public decks (name, commander, partial commander names, format, colours, owner), and one user's public decks (`owner`, newest first) | `search_decks` | no | hides Mystic Forge `archidekt_user_decks`; the web profile page `/users/<name>` is the hand path |
-| Read any deck, the member's own private ones included: cards (type line, power/toughness, loyalty), zones, stats, plain list, Archidekt import text, picked with `view`; rules text, faces, flavour and artist on request | `get_deck` | no | the deck card in the chat shows the deck by category with pictures and rules text; hides Mystic Forge `archidekt_deck`, `archidekt_export`; `owner` says whose deck it is |
+| Read any deck, the member's own private ones included: cards (type line, power/toughness, loyalty), zones, stats, plain list, Archidekt import text, picked with `view`; rules text, faces, flavour and artist on request | `get_deck` | no | hides Mystic Forge `archidekt_deck`, `archidekt_export`; `owner` says whose deck it is |
 | Read a pasted list or an Archidekt CSV export | `parse_decklist`, `parse_deck_export` | no | |
 | Statistics, legality, structural checks, bracket estimate; curve by type or category, land-only colour sources, pips outside the commander's identity, subtype and keyword counts (0.7.24: one legality engine, the deck page's, for every legality figure; the curve, average, grouping, sorting and draw odds use a card's custom mana value when the deck sets one; whether archidekt.com does the same in its own curve is not confirmed) | `deck_stats` | no | hides `validate_archidekt_deck` |
 | Diff two decks, snapshots or lists (precon upgrades included), with an optional paired goldfish A/B | `compare_decks` | no | hides `precon_diff`, `goldfish_ab`; the A/B takes two Commander decks or two 60-card decks; the deck page's Compare view is the hand path |

@@ -1,35 +1,28 @@
-"""In-chat cards beyond Approve: the pictures and long lists an AI app can show next to a tool
-result (MCP Apps), without any of it passing through the model.
+"""In-chat cards beyond Approve: the pictures and lists an AI app can show next to a tool result
+(MCP Apps), without any of it passing through the model.
+
+Since 0.7.33 only the two pickers carry a card: ``printings-card`` (card_printings: browse every
+printing's picture, tap to pick) and ``picker-card`` (resolve_cards: confirm or drop the recognised
+cards, pick among ambiguous names), beside the proposal and waiting-changes cards (approve.py,
+show_waiting_changes). Every other tool answers in text alone, which keeps a long chat light in the
+host. The other cards (``deck-card``, ``account-card``, ``compare-card``, ``stats-card``,
+``deck-list-card``, ``scan-card``) stay registered so the cards already in older chats still draw
+from what their results carried; no tool names them any more.
 
 Every card follows the same rules:
 
 * The tool result's text and structured content stay what the assistant needs: a summary it can
-  act on without the card. Pictures come from Scryfall into the card. A deck reaches the deck
-  card in the result's ``_meta``, which the host hands to the card and never to the model, so the
-  card needs no connection to the gateway. A long list (a deck too large to carry, the printings
-  of a card) reaches the card through a **signed link** in the result's ``_meta``: a
-  Fernet token naming the member, what to read and when it was issued. The card fetches it from
+  act on without the card. Pictures come from Scryfall into the card. A long list (the printings
+  of a card) reaches the card through a **signed link** in the result's ``_meta``: a Fernet token
+  naming the member, what to read and when it was issued. The card fetches it from
   ``/cards/data/<token>``; nothing about it is in the model's context. The link is read-only,
-  bound to one member and one object, and expires after ``LINK_TTL`` seconds. Private decks are
-  served only through a link issued to their owner.
+  bound to one member and one object, and expires after ``LINK_TTL`` seconds.
 * A card that picks something (a printing, which of the recognised cards to keep) writes
   nothing: the pick goes back to the assistant as text through ``ui/update-model-context``, and
-  the assistant then proposes the change, which the member approves as always. The only card
-  that changes anything is still the proposal card (approve.py), through its one-time code.
+  the assistant then proposes the change, which the member approves as always. The only cards
+  that change anything are the proposal and waiting-changes cards, through their one-time codes.
 * Every card has a text fallback: the result's summary carries the same information, and a host
   that does not render MCP Apps (Claude Code, older clients) ignores the card metadata.
-
-The cards: ``printings-card`` (card_printings: browse every printing's picture, tap to pick),
-``picker-card`` (resolve_cards: confirm or drop the recognised cards, pick among ambiguous
-names), ``deck-card`` (get_deck, get_snapshot: the deck by category with pictures
-and rules text on tap), ``account-card`` (account_status, whoami: one tap to the Account
-page when Archidekt is not linked, writes are off or no approval mode is chosen), and four that
-only display what the result already says: ``compare-card`` (compare_decks: the cards in one deck
-only, the other only or both with a changed count, and the key statistics that differ),
-``stats-card`` (deck_stats: the mana curve, colours, price, legality and bracket estimate),
-``deck-list-card`` (list_my_decks, search_decks: one row per deck with its cover, a tap opens it)
-and ``scan-card`` (get_scan_session: the recognised cards and the items that need a look, with a
-link to the Scan page). These read the result's structured content itself; nothing is added to it.
 """
 
 from __future__ import annotations
@@ -57,7 +50,6 @@ if TYPE_CHECKING:
     from mcp.server.mcpserver import MCPServer
 
     from .app import AppState
-    from .archidekt import Deck
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +68,7 @@ LINK_TTL = 600  # seconds a signed link stays valid
 LINK_PATH = "/cards/data/"
 SCRYFALL_API = "https://api.scryfall.com"  # the deck card reads rules text from Scryfall itself
 STATIC = Path(__file__).parent / "static" / "cards"
-LINK_KINDS = ("deck", "snapshot", "printings")
+LINK_KINDS = ("printings",)
 
 
 def tool_meta(uri: str) -> dict[str, Any]:
@@ -361,95 +353,10 @@ def with_card(data: dict[str, Any], card: dict[str, Any] | None) -> CallToolResu
     )
 
 
-# -- the data a card fetches ---------------------------------------------------------------------
-
-
-def deck_card_data(deck: Deck, *, public_url: str, snapshot: dict[str, Any] | None = None) -> dict[str, Any]:
-    """The deck as the deck card draws it: rows grouped by category, with what a picture and a
-    rules-text lookup need (the Scryfall id) and nothing else."""
-    groups: dict[str, list[dict[str, Any]]] = {}
-    order: list[str] = [c["name"] for c in deck.categories if isinstance(c.get("name"), str)]
-    for c in deck.cards:
-        cat = c.categories[0] if c.categories else (c.default_category or "Uncategorized")
-        groups.setdefault(cat, []).append(
-            {
-                "name": c.name,
-                "qty": c.quantity,
-                "set": c.set_code,
-                "cn": c.collector_number,
-                "finish": c.modifier if c.modifier and c.modifier.lower() != "normal" else "",
-                "uid": c.scryfall_uid or "",
-                "mana": c.mana_cost or "",
-                "mv": c.cmc,
-                "type": ", ".join(c.types) if c.types else "",
-                "price": c.price,
-                "in_deck": deck.in_deck(c),
-                "commander": deck.is_commander(c),
-            }
-        )
-    for name in groups:
-        if name not in order:
-            order.append(name)
-    categories = [
-        {
-            "name": name,
-            "count": sum(r["qty"] for r in groups[name]),
-            "in_deck": any(r["in_deck"] for r in groups[name]),
-            "cards": sorted(
-                groups[name], key=lambda r: (r["mv"] if isinstance(r["mv"], (int, float)) else 99, r["name"])
-            ),
-        }
-        for name in order
-        if name in groups
-    ]
-    curve: dict[str, int] = {}
-    for c in deck.main_cards:
-        if "Land" in (c.types or []):
-            continue
-        mv = int(c.cmc) if isinstance(c.cmc, (int, float)) else 0
-        key = "7+" if mv >= 7 else str(mv)
-        curve[key] = curve.get(key, 0) + c.quantity
-    out: dict[str, Any] = {
-        "id": deck.id,
-        "name": deck.name,
-        "owner": deck.owner,
-        "format": getattr(deck, "format", None),
-        "url": f"https://archidekt.com/decks/{deck.id}",
-        "gateway_url": f"{public_url}/decks/{deck.id}",
-        "card_count": sum(c.quantity for c in deck.main_cards),
-        "side_count": sum(c.quantity for c in deck.side_cards),
-        "commanders": [c.name for c in deck.cards if deck.is_commander(c)],
-        "colour_identity": sorted({col for c in deck.main_cards for col in (c.color_identity or [])}),
-        "curve": curve,
-        "categories": categories,
-    }
-    if snapshot:
-        out["snapshot"] = snapshot
-    return out
-
-
-# The deck travels in the tool result's _meta up to this size (JSON bytes); a larger one is left to
-# the signed link, so a very long list never bloats a result.
-DECK_INLINE_MAX = 300_000
-
-
-def deck_card_payload(
-    deck: Deck, *, link: str, public_url: str, snapshot: dict[str, Any] | None = None
-) -> dict[str, Any]:
-    """The deck card's part of a deck read's ``_meta``: the deck as the card draws it (the same
-    rows the signed link serves), so the card fetches nothing from the gateway, and the link as the
-    fallback for a deck too large to carry. A host hands ``_meta`` to the card, never to the model."""
-    data = deck_card_data(deck, public_url=public_url, snapshot=snapshot)
-    out: dict[str, Any] = {"link": link, "name": deck.name}
-    if len(pydantic_core.to_json(data, fallback=str)) <= DECK_INLINE_MAX:
-        out["deck"] = data
-    return out
-
-
 # The endpoint answers with its own words, never with Archidekt's or Scryfall's.
 FIXED_MESSAGES = {
-    "not_found": "The deck, snapshot or card behind this link no longer exists.",
-    "invalid": "The deck, snapshot or card behind this link no longer exists.",
+    "not_found": "The card behind this link no longer exists.",
+    "invalid": "The card behind this link no longer exists.",
     "not_linked": "No Archidekt account is linked; link one on the Account page.",
     "rate_limited": "The gateway is busy for this account; try again in a minute.",
     "unavailable": "The data behind this link could not be loaded right now.",
@@ -465,7 +372,6 @@ def add_card_routes(server: MCPServer, state: AppState, links: CardLinks) -> Non
     the link. No cookie or bearer token is read; the token is the whole proof. Answered with an
     open CORS header because the card runs on the host's sandbox origin (``*.claudemcpcontent.com``,
     a WebView on the phone) and never with credentials."""
-    s = state.settings
     headers = {
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Allow-Methods": "GET, OPTIONS",
@@ -502,36 +408,17 @@ def add_card_routes(server: MCPServer, state: AppState, links: CardLinks) -> Non
         cached = links.cached(token)
         if cached is not None:
             return JSONResponse({"ok": True, **cached}, headers=headers)
-        from .decks import DeckError
+        scan = state.scan  # a printings link, the one kind issued
+        if scan is None:
+            return fail("unavailable", "Card lookups are not available on this gateway.", 503)
+        from .scan.service import ScanError
 
         try:
-            if link["kind"] == "deck":
-                deck = await state.decks.get_any_deck(sub, link["ref"])
-                data = deck_card_data(deck, public_url=s.public_url)
-            elif link["kind"] == "snapshot":
-                from .archidekt import parse_deck
-
-                snap = state.decks.snapshot(sub, link["ref"])
-                data = deck_card_data(
-                    parse_deck(snap["deck"]),
-                    public_url=s.public_url,
-                    snapshot={"id": snap["id"], "taken_at": snap["taken_at"]},
-                )
-            else:  # printings
-                scan = state.scan
-                if scan is None:
-                    return fail("unavailable", "Card lookups are not available on this gateway.", 503)
-                from .scan.service import ScanError
-
-                try:
-                    out = await scan.printings(link["ref"], owner=sub)
-                except ScanError as exc:
-                    kind = str(exc.kind)
-                    return fail(kind, FIXED_MESSAGES.get(kind, FIXED_MESSAGES["unavailable"]), _status(kind))
-                data = {"oracle_id": link["ref"], **out}
-        except DeckError as exc:
-            kind = "not_found" if exc.kind == "forbidden" else exc.kind  # forbidden means "member gone" here
+            out = await scan.printings(link["ref"], owner=sub)
+        except ScanError as exc:
+            kind = str(exc.kind)
             return fail(kind, FIXED_MESSAGES.get(kind, FIXED_MESSAGES["unavailable"]), _status(kind))
+        data = {"oracle_id": link["ref"], **out}
         links.remember(token, data)
         return JSONResponse({"ok": True, **data}, headers=headers)
 
@@ -616,8 +503,6 @@ __all__ = [
     "ask_choices",
     "card_html",
     "client_elicits_forms",
-    "deck_card_data",
-    "deck_card_payload",
     "tool_meta",
     "with_card",
 ]

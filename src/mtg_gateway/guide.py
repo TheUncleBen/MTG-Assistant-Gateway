@@ -460,8 +460,9 @@ def guide_body(
         "<strong>tags</strong> and the <strong>folder</strong> it sits in.</li>"
         "<li><strong>Folders</strong> on the Decks page creates and renames folders.</li>"
         "<li>Your assistant can propose moving a deck to another folder, changing its tags or its cover "
-        "(a settings change you approve, like any other), but deleting a deck and creating or renaming "
-        "folders are yours alone: they have no assistant tool at all.</li></ul>"
+        "(a settings change you approve, like any other). It can also propose deleting a deck or "
+        "creating a folder, which only your own press applies. Renaming folders has no assistant "
+        "tool.</li></ul>"
     )
     how_approve = (
         "<p>Your own saves in the app go to Archidekt at once: pressing Save is your approval. An "
@@ -677,8 +678,7 @@ def guide_body(
             "Who is signed in; is Archidekt linked, are writes on",
             "<code>whoami</code>, <code>account_status</code>",
             "no",
-            "linking itself happens only in the browser (Account page); the account card in the chat "
-            "shows what is missing and opens that page",
+            "linking itself happens only in the browser (Account page)",
         ),
         (
             "List my decks (private included), filter by name, format, folder",
@@ -700,9 +700,8 @@ def guide_body(
             "faces, flavour and artist on request",
             "<code>get_deck</code>",
             "no",
-            "the deck card in the chat shows the deck by category with pictures and rules text; hides "
-            "Mystic Forge <code>archidekt_deck</code>, <code>archidekt_export</code>; <code>owner</code> "
-            "says whose deck it is",
+            "hides Mystic Forge <code>archidekt_deck</code>, <code>archidekt_export</code>; "
+            "<code>owner</code> says whose deck it is",
         ),
         (
             "Read a pasted list or an Archidekt CSV export",
@@ -855,8 +854,7 @@ def guide_body(
         + "".join(f"<tr><td>{c}</td><td>{t}</td><td>{w}</td><td>{n}</td></tr>" for c, t, w, n in cap_rows)
         + "</tbody></table></div>"
         f"<p><strong>Your own approval, every time:</strong> {_esc(modes.MEMBER_ONLY_TEXT)} An "
-        "assistant can propose them, but its in-chat card only opens that review page, and no "
-        "setting lets an assistant apply them. "
+        "assistant can propose them, and no setting lets an assistant apply them. "
         "<strong>No assistant tool exists for:</strong> renaming "
         "folders, linking or unlinking Archidekt, approval modes, admin.</p>"
         "<p><strong>Only the assistant does:</strong> research lookups (Scryfall, EDHREC, combos, rules), "
@@ -1151,20 +1149,20 @@ def guide_body(
     exp_assistant = (
         "<p>In Claude on the web, desktop and phones (and ChatGPT, as its maker reports), the things "
         "you have to pick or press come as <strong>cards in the chat</strong>: a proposal with Approve "
-        "and Reject (Reject can carry a reason), the printings of a card as pictures to tap, the cards "
-        "read from your photos to keep or drop, a deck by category with pictures and rules text, and "
-        "your account's setup. A comparison of two decks, a deck's statistics, a list of decks and a "
-        "scan's recognized cards show as cards too, to read at a glance. "
-        "A tap is passed to the assistant as text and it carries on from there; "
-        "nothing changes until a proposal you approve. The only card that acts by itself is the proposal "
-        "card, whose Approve and Reject both use its one-time code. Claude Code and older apps show the "
+        "and Reject (Reject can carry a reason), the changes waiting for you with <strong>Apply "
+        "all</strong>, the printings of a card as pictures to tap, and the cards read from your photos "
+        "to keep or drop. Everything else, such as a deck, its statistics, a comparison, a list of "
+        "decks or your account's setup, comes as the assistant's own words, which keeps a long chat "
+        "light. A tap on a picker is passed to the assistant as text and it carries on from there; "
+        "nothing changes until a proposal you approve. Only Approve, Reject and Apply all act by "
+        "themselves, and each uses the card's one-time code. Claude Code and older apps show the "
         "text instead and ask about unsure names with a short form.</p>"
         "<p>Every job has exactly one tool, so the assistant never guesses between two ways of doing "
         "the same thing. It can propose moving a deck to another folder, changing its tags or its cover "
         "(a settings change you approve, like any other). Some things are yours alone: deleting a deck, "
-        "creating or renaming folders, likes, comments and follows, linking Archidekt and choosing your "
-        "approval mode have no assistant tool at all. <a href='#ref-assistant'>What the assistant can "
-        "do, by tool</a> is the full map.</p>"
+        "creating a folder, likes, comments and follows wait for your own press every time, and renaming "
+        "folders, linking Archidekt and choosing your approval mode have no assistant tool at all. "
+        "<a href='#ref-assistant'>What the assistant can do, by tool</a> is the full map.</p>"
         "<p class='tip'>The <a href='/install?for=skill'>assistant skill</a> teaches your assistant "
         "the house rules: "
         "look things up instead of guessing, show the diff before changing anything, never ask for a "

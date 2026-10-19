@@ -421,7 +421,7 @@ async def test_editor_edits_maybeboard_rows_and_adds_to_the_maybeboard(stack: St
         assert main_after == main_before  # the deck proper is untouched
         rows_out = r.json()["result"]["rows"]
         assert any(x.get("zone") == "side" for x in rows_out), rows_out
-        # a commander or a pinned printing cannot go to the maybeboard
+        # a commander cannot go to the maybeboard
         r = await api(
             b,
             "POST",

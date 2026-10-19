@@ -717,7 +717,7 @@ collection changes), apply, confirm, reject, run reports or save scans
 The gateway is built to be light on Archidekt. For everyone together:
 
 - one Archidekt request at a time, at least `MTG_ARCHIDEKT_MIN_INTERVAL`
-  (1 second) apart, and at most `MTG_ARCHIDEKT_MAX_PER_MINUTE` (40) in any
+  (1 second) apart, and at most `MTG_ARCHIDEKT_MAX_PER_MINUTE` (30) in any
   minute. A request past that waits its turn, so a long apply slows down
   instead of stopping halfway. Requests made for a member's own pages in the
   browser (an apply pressed on the review page included) take their turn
@@ -769,8 +769,8 @@ The gateway is built to be light on Archidekt. For everyone together:
 - searches fetch one page per call, and a collection export stops at 50
   pages.
 
-Because of this pacing a large apply takes minutes: about 70 seconds for a
-40-change edit and 4 to 5 minutes for a new 100-card deck (one lookup and one
+Because of this pacing a large apply takes minutes: about 80 seconds for a
+40-change edit and 6 to 7 minutes for a new 100-card deck (one lookup and one
 write per card). An assistant app doesn't wait that long for one tool call,
 so after 20 seconds the apply answers "applying" with how far it got and
 carries on in the background. `get_proposal`, the proposal's review page

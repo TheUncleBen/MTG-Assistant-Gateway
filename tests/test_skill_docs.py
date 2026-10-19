@@ -103,3 +103,21 @@ def test_both_guides_say_never_to_ask_for_a_sign_in() -> None:
     assert "read it back yourself (`get_deck`, `list_my_decks`)" in skill
     block = CHATGPT.read_text(encoding="utf-8").split("```text\n", 1)[1]
     assert "codes or a sign-in for you, except linking Archidekt at account_page" in block
+
+
+def test_every_guide_says_to_finish_the_review_before_proposing() -> None:
+    """Ben, 0.7.31 test round: a card came up after every Approve, one after another. Claude's skill,
+    the ChatGPT block and the server instructions every app gets all say to propose once, after the
+    review, and to amend a waiting proposal instead of proposing again."""
+    from mtg_gateway.app import server_instructions
+
+    skill = " ".join((SKILL_DIR / "SKILL.md").read_text(encoding="utf-8").split())
+    assert "**Finish your review before you propose:** put every change into one proposal" in skill
+    assert "call `amend_proposal` instead of proposing again" in skill
+    block = CHATGPT.read_text(encoding="utf-8").split("```text\n", 1)[1]
+    assert (
+        "Finish your review, then propose once with every change; to change a waiting one, amend_proposal."
+        in block
+    )
+    told = server_instructions("https://gateway.example.com")
+    assert "Finish your review before proposing: one proposal with every change, and amend_proposal" in told

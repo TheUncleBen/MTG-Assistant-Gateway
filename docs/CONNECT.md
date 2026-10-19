@@ -235,23 +235,20 @@ their review link.
 
 ### The other cards in the chat
 
-The same mechanism shows a card wherever you have something to pick: the
+The same mechanism shows a card where you have something to pick: the
 **printings** of a card as pictures in a grid (tap the one you mean, filter by
-set or finish, expand it), the **cards read from your photos or list** with a
-tick per row and suggestions for names it was unsure about (press **Use these
-cards** when the list is right), a **deck** by category with pictures and
-rules text when you tap a card, and your **account** with what still needs
-setting up. Four more only show what the tool answered, so you can read it at
-a glance: a **comparison** of two decks (the cards in one only, the other
-only or both, and the statistics that differ), a deck's **statistics** (mana
-curve, colours, price, legality and the bracket estimate), a **list of decks**
-(yours, or a search) with covers and links to open each one, and a **scan**
-with the cards it recognised and the ones that need a look, linking the Scan
-page. A tap on these cards is sent to the assistant as plain text and
-it carries on from there, with a proposal if anything is to change; none of
-them changes anything by itself. The pictures and rules text come from
-Scryfall; the deck rows and printings come from the gateway through a link
-that is yours alone and expires after ten minutes. All of this is tested
+set or finish, expand it), and the **cards read from your photos or list**
+with a tick per row and suggestions for names it was unsure about (press
+**Use these cards** when the list is right). A tap on these cards is sent to
+the assistant as plain text and it carries on from there, with a proposal if
+anything is to change; neither changes anything by itself. The pictures come
+from Scryfall; the printings come from the gateway through a link that is
+yours alone and expires after ten minutes.
+
+Since 0.7.33 nothing else shows a card: a deck, its statistics, a comparison
+of two decks, a list of decks, a scan and your account's setup come as the
+assistant's own words. A chat with many cards grew slow in ChatGPT, so only
+the cards you act on stay. All of this is tested
 in a browser test against the cards themselves, not yet in a live Claude
 session; Claude Code shows the text instead and asks about unsure names with
 a form.

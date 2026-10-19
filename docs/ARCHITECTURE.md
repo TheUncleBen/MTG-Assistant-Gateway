@@ -334,7 +334,7 @@ For the exact devices and plans tested, see
 - **Archidekt load** is capped per member: `MTG_ARCHIDEKT_CALLS_PER_10_MIN`
   calls (120 by default) and three at a time, so a looping assistant can't
   hammer Archidekt or starve other members. Across everyone, requests go one
-  at a time, at least a second apart and at most 40 a minute; 429s pause
+  at a time, at least a second apart and at most 30 a minute; 429s pause
   every request (an apply waits them out, up to 6 waits and 5 minutes in all,
   without counting them towards the breaker), only reads are retried (with
   jittered backoff), and

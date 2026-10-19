@@ -72,6 +72,22 @@ first, and a version from 0.7.29 on that is not listed needs nothing extra. If y
 an older version, also read each version's notes in the CHANGELOG. Sections stay here at least until
 version 1.0.0.
 
+### 0.7.33
+
+The stack file and the Compose file name a new Forge image, `2.0.15-mag4`, which can play up to 16
+games at once (the older `2.0.15-mag3` plays at most 4).
+
+1. Take the new stack file or Compose file as the update steps above describe. If your variables
+   set `FORGE_TAG`, Forge stays on that version: change it to `2.0.15-mag4`, or remove it to follow
+   the stack file. With the older image the gateway still works, and a "Forge games played at
+   once" above 4 plays 4 at once.
+2. If you turned on the optional `mtg_authentik_api_token` lines in the old file, turn them on
+   again in the new one, as for [0.7.32](#0732) step 3.
+3. The gateway now sends at most 30 Archidekt requests a minute by default instead of 40, which
+   makes large changes take a little longer. To keep 40, set "Archidekt requests per minute" on the
+   Settings page, or `MTG_ARCHIDEKT_MAX_PER_MINUTE=40` in your variables (which locks it on the
+   page).
+
 ### 0.7.32
 
 The stack file and the Compose file now pass 27 more variables to the gateway and Forge
@@ -103,7 +119,7 @@ said to add a line under `environment:` in the stack file for these.
    checks it when it starts: a value outside its range, or one that isn't a number (or isn't a
    whole number where the range is in whole numbers), stops the gateway from starting. Each start
    then logs one line naming the first such setting, such as `configuration error:
-   MTG_FORGE_PARALLEL_GAMES must be between 1 and 4`, and the gateway keeps restarting (Swarm
+   MTG_SNAPSHOTS_PER_DECK must be between 5 and 100`, and the gateway keeps restarting (Swarm
    restarts the service; Compose restarts the container). To fix it, change the value to one in
    range, or remove it from your variables to manage the setting on the Settings page, then deploy
    the stack again. The allowed values:
@@ -115,7 +131,7 @@ said to add a line under `environment:` in the stack file for these.
    | `MTG_ARCHIDEKT_BACKUP_COPIES` | 1 to 50 |
    | `MTG_ARCHIDEKT_BACKUP_BOX_DEFAULT` | `true` or `false` |
    | `MTG_SNAPSHOTS_PER_DECK` | 5 to 100 |
-   | `MTG_FORGE_PARALLEL_GAMES` | 1 to 4 |
+   | `MTG_FORGE_PARALLEL_GAMES` | 1 to 16 |
    | `MTG_SCAN_FUZZY_MIN_SIMILARITY` | 0.3 to 1.0 |
    | `MTG_SCAN_FUZZY_CONFIDENT_SIMILARITY` | 0.3 to 1.0 |
    | `MTG_SCAN_AMBIGUITY_MARGIN` | 0.0 to 0.5 |
@@ -135,6 +151,9 @@ said to add a line under `environment:` in the stack file for these.
    For `true` or `false`, the gateway reads `1`, `true` or `yes` (any case) as true and any other
    value as false (an empty one keeps the default), so a mistyped value there doesn't stop it: it
    turns the setting off.
+
+   The table gives the values the current version accepts: 0.7.32 itself accepted 1 to 4 for
+   `MTG_FORGE_PARALLEL_GAMES`, and 0.7.33 raised the top to 16.
 
 ### 0.7.30
 

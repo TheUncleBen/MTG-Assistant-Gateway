@@ -131,12 +131,12 @@
       var k = known[name.toLowerCase()];
       if (k) { added[key].image = k.image_small || null; added[key].mana = k.mana_cost || ""; added[key].type = k.type_line || ""; }
       else detailsLater(key, name);
-      // a pinned printing or a foil goes to the deck proper only (the gateway refuses them for zone side)
-      if (zone === "main" && printing && printing.set_code && printing.collector_number) {
+      // a picked printing and a foil go with the add, in the deck proper or the maybeboard or sideboard
+      if (printing && printing.set_code && printing.collector_number) {
         added[key].set_code = printing.set_code;
         added[key].collector_number = printing.collector_number;
       }
-      if (zone === "main" && ((printing && printing.foil === true) || finish === "foil")) added[key].foil = true;
+      if ((printing && printing.foil === true) || finish === "foil") added[key].foil = true;
     }
   }
   (cfg.prefill || []).forEach(function (ch) {
@@ -332,7 +332,7 @@
             if (!outside(v)) { a.category = v || null; return; }
             // picked a category outside the deck: the new card moves to the maybeboard or sideboard
             delete added[k];
-            addCard(a.name, a.quantity, v, null, null, "side");
+            addCard(a.name, a.quantity, v, a.set_code ? a : null, a.foil ? "foil" : null, "side");
           });
         }, true, false, a.name),
         el("button", { type: "button", class: "mini remove", "aria-label": "Remove " + a.name, title: "Remove", onclick: function () { mutate(function () { delete added[k]; }); } }, [svg("x")])

@@ -87,13 +87,9 @@ def _shown_map(shown: Any, ids: list[str]) -> dict[str, dict[str, Any]]:
 def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
     """Register the deck, proposal and snapshot tools."""
     _closed_at = h._closed_at
-    _deck_card = h._deck_card
     _proposal = h._proposal
     _sub = h._sub
-    account_card_meta = h.account_card_meta
     card_meta = h.card_meta
-    deck_card_meta = h.deck_card_meta
-    deck_list_card_meta = h.deck_list_card_meta
     s = h.s
     server = h.server
 
@@ -107,7 +103,6 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
             "the account page."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": False},
-        meta=account_card_meta,
     )
     async def account_status() -> dict[str, object]:
         status = state.decks.status(_sub())
@@ -129,7 +124,6 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
             "names couldn't be read, so folder is null on some decks and a folder filter may miss them."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": True},
-        meta=deck_list_card_meta,
     )
     async def list_my_decks(
         name_contains: str | None = None, deck_format: str | None = None, folder: str | None = None
@@ -180,7 +174,6 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
             "Archidekt deck."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": True},
-        meta=deck_card_meta,
     )
     async def get_deck(
         deck_ref: Annotated[
@@ -197,9 +190,7 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
             deck = await state.decks.get_any_deck(_sub(), deck_ref)
         except DeckError as exc:
             return with_card(_tool_error(exc), None)
-        return _deck_card(
-            deck_out(deck, include_text=bool(include_text), view=view), "deck", str(deck.id), deck
-        )
+        return with_card(deck_out(deck, include_text=bool(include_text), view=view), None)
 
     @server.tool(
         name="parse_decklist",
@@ -317,7 +308,7 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
             "when assistant_may_apply is true). changes: a list of {action, name, quantity?, category?, "
             "set_code?, collector_number?, finish?, zone?, label?, color?, mana_value?}. add may pin "
             "the exact printing with set_code plus collector_number (as resolve_cards returns them) and "
-            "a finish; "
+            "a finish, in zone main or side; "
             "a pinned printing must exist on Archidekt and be that card, or applying refuses with "
             "not_found and changes nothing. An add naming no Magic card is usually refused with "
             "unknown_cards (the names in unknown_cards); check the spelling with resolve_cards. A name "
@@ -816,7 +807,6 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
             "like before an edit, or pass its snapshot_id to compare_decks."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": False},
-        meta=deck_card_meta,
     )
     async def get_snapshot(
         snapshot_id: Annotated[str, Field(description="The snapshot id from list_snapshots.")],
@@ -834,6 +824,4 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
             "taken_at": snap["taken_at"],
             "backup_url": snap.get("backup_url"),
         }
-        return _deck_card(
-            data, "snapshot", str(snap["id"]), deck, snapshot={"id": snap["id"], "taken_at": snap["taken_at"]}
-        )
+        return with_card(data, None)

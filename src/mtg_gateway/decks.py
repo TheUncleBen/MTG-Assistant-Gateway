@@ -959,10 +959,6 @@ def parse_changes(raw: Any, *, row_flags: bool = False) -> list[Change]:
             raise DeckError("invalid", f"change {i}: set_code must be a set code such as cmr")
         if number and not _COLLECTOR_NUMBER.fullmatch(number):
             raise DeckError("invalid", f"change {i}: collector_number looks wrong")
-        if zone == "side" and set_code:
-            raise DeckError(
-                "invalid", f"change {i}: a pinned printing is added to the deck proper, not zone side"
-            )
         flags = {}
         for flag in ("companion", "flipped_default") if row_flags else ():
             given = item.get(flag)
@@ -976,14 +972,22 @@ def parse_changes(raw: Any, *, row_flags: bool = False) -> list[Change]:
         out.append(
             Change(action, name, qty, cat, set_code, number, finish, zone=zone, categories=cats, **flags)
         )
-    pinned = [ch.card_name.lower() for ch in out if ch.pinned]
+    # Per zone: the deck proper and the maybeboard or sideboard each take one pinned printing of a card.
+    pinned = [(ch.zone, ch.card_name.lower()) for ch in out if ch.pinned]
     if len(pinned) != len(set(pinned)):
         raise DeckError("invalid", "one pinned printing per card name per proposal")
-    # A pinned add next to a remove or set_quantity of the same card would make the writes
-    # (add that printing, then shrink the rest) differ from the net count the diff shows.
-    pinned_faces = {front_face(n) for n in pinned}
+    # A pinned add next to a remove or set_quantity of the same card in the same zone would make
+    # the writes (add that printing, then shrink the rest) differ from the net count the diff shows.
+    pinned_faces = {(zone, front_face(n)) for zone, n in pinned}
     for ch in out:
-        if ch.action in ("remove", "set_quantity") and front_face(ch.card_name.lower()) in pinned_faces:
+        if (
+            ch.action in ("remove", "set_quantity")
+            and (
+                ch.zone,
+                front_face(ch.card_name.lower()),
+            )
+            in pinned_faces
+        ):
             raise DeckError(
                 "invalid",
                 f"'{ch.card_name}' has a pinned printing added and is also removed or set in the same "
@@ -1912,6 +1916,7 @@ def build_payload(
     side_categories: dict[str, list[str]] | None = None,
     flags: dict[str, tuple[bool, bool]] | None = None,
     side_flags: dict[str, tuple[bool, bool]] | None = None,
+    side_pinned: dict[str, dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """Per-card entries for PATCH modifyCards/v2, one entry per request.
 
@@ -1940,7 +1945,9 @@ def build_payload(
     ``modifiers`` names the finish of a card added by name; ``pinned`` holds, per card name,
     the exact printing an add asked for (``cardid``, ``modifier``, ``quantity``,
     ``categories``): that printing goes in as its own row unless the deck already has a row
-    with the same printing and finish, which then grows by the added quantity.
+    with the same printing and finish, which then grows by the added quantity. ``side_pinned`` does
+    the same for a maybeboard or sideboard add, among that card's rows there (its ``categories``
+    are the side categories the add goes in).
     """
     by_name: dict[str, list[Any]] = {}
     for c in deck.main_cards:  # never touch maybeboard or sideboard rows
@@ -1953,31 +1960,7 @@ def build_payload(
             continue
         pin = (pinned or {}).get(name)
         if pin:
-            same = [
-                c
-                for c in existing
-                if c.card_id == pin["cardid"] and (c.modifier or "Normal") == pin["modifier"]
-            ]
-            if same:
-                payload.append(_entry("modify", same[0], same[0].quantity + int(pin["quantity"])))
-                qty -= same[0].quantity + int(pin["quantity"])
-            else:
-                payload.append(
-                    _add_entry(
-                        pin["cardid"],
-                        int(pin["quantity"]),
-                        pin.get("categories"),
-                        pin["modifier"],
-                        (flags or {}).get(name, (False, False)),
-                    )
-                )
-                qty -= int(pin["quantity"])
-            if qty < sum(c.quantity for c in existing if c not in same):
-                # parse_changes refuses the combinations that get here; never send writes that
-                # shrink other rows below what the reviewed diff says
-                raise DeckError("invalid", f"the pinned add of '{name}' does not match the planned count")
-            # whatever the proposal's other changes do to this card's remaining rows
-            existing = [c for c in existing if c not in same]
+            qty, existing = _pinned_entries(payload, name, qty, existing, pin, (flags or {}).get(name))
             if qty == sum(c.quantity for c in existing):
                 continue
         if existing:
@@ -2001,6 +1984,11 @@ def build_payload(
         existing = side_by_name.get(name.lower(), [])
         if qty == sum(c.quantity for c in existing):
             continue
+        pin = (side_pinned or {}).get(name)
+        if pin:
+            qty, existing = _pinned_entries(payload, name, qty, existing, pin, (side_flags or {}).get(name))
+            if qty == sum(c.quantity for c in existing):
+                continue
         if existing:
             primary, *extras = _rows_kept_first(deck, existing)
             payload.append(_entry("modify" if qty > 0 else "remove", primary, qty))
@@ -2019,6 +2007,41 @@ def build_payload(
         if card.relation_id in (recategorise or {}):
             payload.append(_entry("modify", card, card.quantity, categories=recategorise[card.relation_id]))
     return payload
+
+
+def _pinned_entries(
+    payload: list[dict[str, Any]],
+    name: str,
+    qty: int,
+    existing: list[Any],
+    pin: dict[str, Any],
+    flags: tuple[bool, bool] | None,
+) -> tuple[int, list[Any]]:
+    """Append the write for a pinned add of ``name`` (one zone's rows in ``existing``): the row
+    with the same printing and finish grows, or the printing goes in as a new row. Returns the
+    count still to reach and the card's other rows, for the zone's remaining changes."""
+    same = [c for c in existing if c.card_id == pin["cardid"] and (c.modifier or "Normal") == pin["modifier"]]
+    if same:
+        payload.append(_entry("modify", same[0], same[0].quantity + int(pin["quantity"])))
+        qty -= same[0].quantity + int(pin["quantity"])
+    else:
+        payload.append(
+            _add_entry(
+                pin["cardid"],
+                int(pin["quantity"]),
+                pin.get("categories"),
+                pin["modifier"],
+                flags or (False, False),
+            )
+        )
+        qty -= int(pin["quantity"])
+    rest = [c for c in existing if c not in same]
+    if qty < sum(c.quantity for c in rest):
+        # parse_changes refuses the combinations that get here; never send writes that
+        # shrink other rows below what the reviewed diff says
+        raise DeckError("invalid", f"the pinned add of '{name}' does not match the planned count")
+    # whatever the proposal's other changes do to this card's remaining rows
+    return qty, rest
 
 
 def _add_entry(
@@ -4494,7 +4517,7 @@ class DeckService:
         recategorise, _cat_lines = category_plan(deck, changes)
         # Every printing is looked up before anything is written or backed up, so a printing
         # that does not exist (or is another card) refuses the proposal with nothing changed.
-        resolve, modifiers, pinned, new_cats, side_cats = await self._resolve_adds(
+        resolve, modifiers, pinned, new_cats, side_cats, side_pinned = await self._resolve_adds(
             sub, deck, changes, after, after_side
         )
         payload = build_payload(
@@ -4509,6 +4532,7 @@ class DeckService:
             side_cats,
             add_flags(changes, after, "main"),
             add_flags(changes, after_side, "side"),
+            side_pinned,
         )
         specs, _print_lines = printing_plan_rows(deck, changes)
         payload += await self._printing_entries(sub, deck, specs)
@@ -4548,12 +4572,18 @@ class DeckService:
         after: dict[str, int],
         after_side: dict[str, int] | None = None,
     ) -> tuple[
-        dict[str, int], dict[str, str], dict[str, dict[str, Any]], dict[str, list[str]], dict[str, list[str]]
+        dict[str, int],
+        dict[str, str],
+        dict[str, dict[str, Any]],
+        dict[str, list[str]],
+        dict[str, list[str]],
+        dict[str, dict[str, Any]],
     ]:
         """Printing ids and finishes for the cards an edit adds, keyed by the spelling used in
         ``after`` (and ``after_side`` for maybeboard adds, whose categories come back as the fifth
-        value). A pinned printing (set code + collector number) is required to exist and to be
-        that card: the client raises ``not_found`` otherwise and nothing is added."""
+        value and whose pinned printings as the sixth). A pinned printing (set code + collector
+        number) is required to exist and to be that card: the client raises ``not_found``
+        otherwise and nothing is added."""
         after_side = after_side or {}
 
         def key_for(name: str, counts: dict[str, int]) -> str:
@@ -4573,13 +4603,42 @@ class DeckService:
         pinned: dict[str, dict[str, Any]] = {}
         new_cats: dict[str, list[str]] = {}
         side_cats: dict[str, list[str]] = {}
+        side_pinned: dict[str, dict[str, Any]] = {}
+
+        async def pin_for(ch: Change, cats: list[str]) -> dict[str, Any]:
+            card = await self._call(
+                sub,
+                lambda token, *_: self.client.resolve_card(
+                    token,
+                    ch.card_name,
+                    set_code=ch.set_code,
+                    collector_number=ch.collector_number,
+                    require_printing=True,
+                ),
+            )
+            return {
+                "cardid": card["id"],
+                "modifier": finish_modifier(
+                    card["options"], foil=ch.finish == "Foil", etched=ch.finish == "Etched"
+                ),
+                "quantity": ch.quantity or 1,
+                "categories": cats,
+            }
+
         for key, chs in side_adds.items():
             # an add naming every category (an Undo of a removal) keeps the others beside it
             side_cats[key] = _side_categories(deck, chs)
-            if after_side.get(key, 0) > 0 and key.lower() not in have_side:
+            for ch in (c for c in chs if c.pinned):
+                side_pinned[key] = await pin_for(ch, side_cats[key])
+            plain = [c for c in chs if not c.pinned]
+            if (
+                after_side.get(key, 0) > 0
+                and key.lower() not in have_side
+                and (key not in side_pinned or plain)
+            ):
                 card = await self._call(sub, self.client.resolve_card, key)
                 resolve[key] = card["id"]
-                finish = next((c.finish for c in chs if c.finish), None)
+                finish = next((c.finish for c in plain if c.finish), None)
                 if finish:
                     modifiers[key] = finish_modifier(
                         card["options"], foil=finish == "Foil", etched=finish == "Etched"
@@ -4589,24 +4648,7 @@ class DeckService:
             if cats:
                 new_cats[key] = cats
             for ch in (c for c in chs if c.pinned):
-                card = await self._call(
-                    sub,
-                    lambda token, *_, ch=ch: self.client.resolve_card(
-                        token,
-                        ch.card_name,
-                        set_code=ch.set_code,
-                        collector_number=ch.collector_number,
-                        require_printing=True,
-                    ),
-                )
-                pinned[key] = {
-                    "cardid": card["id"],
-                    "modifier": finish_modifier(
-                        card["options"], foil=ch.finish == "Foil", etched=ch.finish == "Etched"
-                    ),
-                    "quantity": ch.quantity or 1,
-                    "categories": new_cats.get(key, []),
-                }
+                pinned[key] = await pin_for(ch, new_cats.get(key, []))
         for name, qty in after.items():
             plain = [c for c in adds.get(name, []) if not c.pinned]
             if qty > 0 and name.lower() not in have and (name not in pinned or plain):
@@ -4617,7 +4659,7 @@ class DeckService:
                     modifiers[name] = finish_modifier(
                         card["options"], foil=finish == "Foil", etched=finish == "Etched"
                     )
-        return resolve, modifiers, pinned, new_cats, side_cats
+        return resolve, modifiers, pinned, new_cats, side_cats, side_pinned
 
     async def _printing_entries(
         self, sub: str, deck: Deck, specs: list[dict[str, Any]]

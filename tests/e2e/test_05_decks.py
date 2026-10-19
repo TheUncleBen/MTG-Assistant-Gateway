@@ -397,7 +397,7 @@ def test_apply_over_mcp_only_in_auto_mode(clients, env: Env):
         # The CSV deck (72 rows) is created in full from the review page: every printing it names
         # exists on the mock (its decks' printings count as known cards), each row goes as one paced
         # request, and the deck is read back and checked by name, count, printing and finish. At the
-        # default pacing (one second apart, 40 a minute) that takes a few minutes, so the page
+        # default pacing (one second apart, 30 a minute) that takes a few minutes, so the page
         # answers "applying" and the apply finishes in the background.
         async with browser_page() as page:
             await gateway_browser_sign_in(page, env, "alice-test", f"/proposals/{STATE['create']}")

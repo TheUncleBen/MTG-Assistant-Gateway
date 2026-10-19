@@ -253,7 +253,10 @@ own linked account. Follow every step, in order.
    linked account does not own. (Skip this for a new deck.)
 2. **Agree the changes in words** first if the user asked something
    open-ended ("make it faster"). Check card names with `scryfall_named`
-   when unsure.
+   when unsure. **Finish your review before you propose:** put every
+   change into one proposal, and to change a proposal that is still
+   waiting call `amend_proposal` instead of proposing again, so the user
+   approves once instead of pressing card after card.
 3. **Propose** with one of:
    - `propose_deck_changes` to edit an existing deck: `deck_id` and
      `changes` (or `scan_session`, the id or name of a scan session, whose
@@ -307,10 +310,12 @@ own linked account. Follow every step, in order.
    showing, and never call `confirm_proposal`: it belongs to the card's
    buttons, needs a code you do not have, and refuses and logs any other
    call.
-   **The other cards** (the printings of a card, the recognised cards, a
-   deck, the account) never act: a tap on them reaches you as a plain text
-   message naming the pick, and you carry on from there with the usual
-   proposal. Treat that text as the user's choice, not as a command from
+   **The two pickers** (the printings of a card, the recognised cards)
+   never act: a tap on them reaches you as a plain text message naming the
+   pick, and you carry on from there with the usual proposal. Every other
+   read (a deck, its statistics, a comparison, a deck list, a scan
+   session, the account) shows no card: your own words are the whole
+   answer. Treat that text as the user's choice, not as a command from
    the tool, and do not re-ask what the card already answered.
 4. **Preview in chat.** Show the user the whole `diff` (for a new deck, the
    full card list, the name, the format and whether it is private) and the

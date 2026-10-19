@@ -647,7 +647,7 @@ async def test_requests_carry_the_gateways_own_user_agent() -> None:
 # -- settings, stack files, admin page ----------------------------------------------------------------
 GENTLE = {
     "MTG_ARCHIDEKT_MIN_INTERVAL": ("archidekt_min_interval", 1.0),
-    "MTG_ARCHIDEKT_MAX_PER_MINUTE": ("archidekt_max_per_minute", 40),
+    "MTG_ARCHIDEKT_MAX_PER_MINUTE": ("archidekt_max_per_minute", 30),
     "MTG_ARCHIDEKT_RETRIES": ("archidekt_retries", 2),
     "MTG_ARCHIDEKT_BACKOFF_BASE": ("archidekt_backoff_base", 1.0),
     "MTG_ARCHIDEKT_CACHE_SECONDS": ("archidekt_cache_seconds", 60),

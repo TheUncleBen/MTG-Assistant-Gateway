@@ -255,12 +255,12 @@ Screenshots of the browser pages are in [docs/screenshots/](docs/screenshots/).
 - **Cards in the chat.** Where a person has to pick or press, the tool result
   comes with an interactive card (MCP Apps; Claude on the web, desktop and
   phones, ChatGPT as reported): the printings of a card as pictures to tap,
-  the cards read from photos or a list to keep or drop, a deck by category
-  with pictures and rules text, the account's setup, and the proposal with
-  Approve and Reject. Comparisons, deck statistics, deck lists and scan
-  sessions show as read-only cards too. A pick on a card goes back to the assistant as plain
-  text; it never changes anything by itself. Bulky data reaches the card
-  through a ten-minute signed link, not through the model.
+  the cards read from photos or a list to keep or drop, the proposal with
+  Approve and Reject, and the waiting changes with Apply all. Other answers
+  come as plain text, so a long chat stays light. A pick on a card goes back
+  to the assistant as plain text; it never changes anything by itself. Bulky
+  data reaches the card through a ten-minute signed link, not through the
+  model.
 - **Card scanning.** The `/scan` page reads physical cards with your phone
   camera. Text recognition runs on the phone, no third-party app needed.
   The scanned list goes into your collection, into one of your decks or
