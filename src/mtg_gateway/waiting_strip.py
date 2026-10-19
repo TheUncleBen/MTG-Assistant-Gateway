@@ -1,5 +1,5 @@
-"""Waiting changes as rows with checkboxes: the Proposals page's deck groups, the deck page's
-"Waiting changes" strip and the Home tile's line.
+"""Waiting changes as rows with checkboxes: the Proposals page's deck groups and the deck page's
+"Waiting changes" strip.
 Owned by the approvals work.
 
 The deck route (companion_decks.py) asks ``waiting_changes`` for the strip's data and hands it to
@@ -19,15 +19,6 @@ from typing import Any
 from . import board, ui
 
 LIST_SCRIPT = "/static/proposals.js"
-
-
-def waiting_line(pending: int, by_deck: dict[str, int]) -> str:
-    """The Home tile's line: "3 waiting on 2 decks" (FLEX §3). Changes not tied to a deck (a new
-    deck, the collection, a folder) count only in the number."""
-    decks = sum(1 for d in by_deck if str(d).isdigit())
-    if not decks:
-        return f"{pending} waiting for your approval."
-    return f"{pending} waiting on {decks} deck{'s' if decks != 1 else ''}."
 
 
 def _age(seconds: float) -> str:

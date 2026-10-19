@@ -261,3 +261,10 @@ def test_a_row_with_no_recorded_app_has_no_stray_comma() -> None:
     assert "<span class='by'>1 min ago</span>" in out, out
     line["created_by"] = "browser"
     assert "<span class='by'>you, 1 min ago</span>" in waiting_strip.row_html(line, now=1060)
+
+
+def test_no_unused_home_tile_line_left_in_the_waiting_strip() -> None:
+    # Home's Proposals widget uses home.proposals_line; the old one-line helper went with the old tile.
+    from mtg_gateway import waiting_strip
+
+    assert not hasattr(waiting_strip, "waiting_line")
