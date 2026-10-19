@@ -13,7 +13,7 @@ PROMISE = re.compile(
     r"try again (?:in a (?:minute|moment|few)|shortly)|try the rest again in a few"
     r"|again in a few minutes|within a minute or two|reload (?:this page |the page )?in a (?:minute|moment)"
     r"|wait a few minutes and try|wait a minute(?:,| and| \()|for a few minutes\.|waits a few minutes"
-    r"|refills over a few minutes",
+    r"|refills over a few minutes|try again in [{0-9]",
     re.IGNORECASE,
 )
 

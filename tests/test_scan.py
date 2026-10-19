@@ -570,7 +570,10 @@ async def test_rate_limit_midway_keeps_resolved_cards_and_defers_the_rest(stack:
     assert [c["status"] for c in out["cards"]] == ["exact", "printing", "deferred", "deferred"]
     assert out["cards"][0]["card"]["name"] == "Sol Ring" and out["card_count"] == 3
     assert out["deferred"] == 2 and 1 <= out["retry_in"] <= 30
-    assert "not looked up yet" in out["cards"][2]["note"] and "try again in" in out["cards"][2]["note"]
+    assert (
+        "not looked up yet" in out["cards"][2]["note"]
+        and "Scryfall asked the gateway to wait 30 seconds, try again after that" in out["cards"][2]["note"]
+    )
     assert out["needs_review"] == [2, 3] and "2 of 4 names were not looked up" in out["message"]
     assert seen["n"] == 3  # nothing else was attempted after the 429
 

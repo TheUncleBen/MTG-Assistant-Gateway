@@ -302,7 +302,9 @@ class ScryfallClient:
 
     def _rate_limited(self) -> ScryfallError:
         n = self.retry_in()
-        return ScryfallError("rate_limited", f"Scryfall asked us to slow down; try again in {n} s")
+        return ScryfallError(
+            "rate_limited", f"Scryfall asked the gateway to wait {n} seconds. Try again after that."
+        )
 
     async def _request(
         self, method: str, path: str, *, interval: float | None = None, **kw: Any

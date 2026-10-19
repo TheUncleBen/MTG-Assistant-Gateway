@@ -859,7 +859,8 @@ class Pacer:
             if now < self._retry_until:
                 raise ArchidektError(
                     "rate_limited",
-                    f"Archidekt asked us to slow down; try again in {int(self._retry_until - now) + 1} s",
+                    f"Archidekt asked the gateway to wait {int(self._retry_until - now) + 1} seconds. "
+                    "Try again after that.",
                     sent=False,
                 )
             if now < self._next_allowed:

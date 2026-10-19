@@ -724,7 +724,10 @@ class ScanService:
         if why == "budget":
             note = "not looked up yet; this call's lookup time is used up, resolve the remaining names again"
         else:
-            note = f"not looked up yet; Scryfall asked us to wait, try again in {self.scryfall.retry_in()} s"
+            note = (
+                f"not looked up yet; Scryfall asked the gateway to wait {self.scryfall.retry_in()} seconds, "
+                "try again after that"
+            )
         return Resolution(inp, "deferred", note=note)
 
     async def _resolve_one(self, inp: CardInput, budget: _Budget | None = None) -> Resolution:
