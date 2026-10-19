@@ -101,3 +101,125 @@ def test_proposal_index_and_history_counts(tmp_path: Path) -> None:
     assert stats["count"] == 15 and stats["decks"] == 1
 
 
+# -- P1, P2, P3 --------------------------------------------------------------------
+async def test_waiting_dashboard(stack: Stack) -> None:
+    b = await linked_browser(stack)
+    try:
+        gw = stack.h.app.state.gateway
+        sub = gw.db._one("SELECT sub FROM users", ())["sub"]
+        seed_history(gw.db, sub, now=int(time.time()))
+        r = await b.http.get("/proposals", headers=NAV)
+        body = r.text.split("<main")[1]
+        for lab in (
+            "Waiting for you",
+            "Needs a look",
+            "Always need your press",
+            "Last 7 days",
+            "Waiting by app",
+        ):
+            assert re.search(rf"<span class='lab'>(<svg.*?</svg>)?{lab}</span>", body)
+        assert "Undo last apply" not in body or "action='/proposals/undo'" in body
+        # chips with counts; the filters, "The administrator" among From
+        assert (
+            "<a class='ui-chip' href='/proposals' aria-current='true'>Waiting <span class='n'>15</span>"
+            in body
+        )
+        assert "All <span class='n'>60</span>" in body
+        assert "placeholder='Search deck or card'" in body
+        assert "<option value='admin'>The administrator</option>" in body
+        assert (
+            "<select name='risk' aria-label='Risk'>" in body
+            and "<select name='when' aria-label='When'>" in body
+        )
+        # a grouped table with tick boxes and the selection bar
+        assert "class='tr group'" in body and "id='deck-43'" in body
+        assert body.count("name='pick'") == 15
+        assert "class='ui-bar" in body and "data-long" in body
+        assert "(deck 4" not in body
+        # the deck filter narrows the table
+        one = (await b.http.get("/proposals?deck_id=42", headers=NAV)).text.split("<main")[1]
+        assert one.count("name='pick'") == 0
+    finally:
+        await b.aclose()
+
+
+async def test_check_all_low_risk_only_ticks_rows(stack: Stack) -> None:
+    b = await linked_browser(stack)
+    try:
+        gw = stack.h.app.state.gateway
+        sub = gw.db._one("SELECT sub FROM users", ())["sub"]
+        for pid, rows in (("lo", LOW_ROWS), ("hi", None)):
+            gw.db.save_proposal(
+                {
+                    "id": pid,
+                    "owner_sub": sub,
+                    "kind": "edit",
+                    "deck_id": "42",
+                    "deck_name": "Sample Commander Deck",
+                    "baseline_fingerprint": "f",
+                    "changes": [],
+                    "diff_text": "+1 Sol Ring",
+                    "expires_at": int(time.time()) + 3600,
+                    "created_by_client": "__browser__",
+                    **({"rows": rows} if rows else {}),
+                }
+            )
+        page = (await b.http.get("/proposals", headers=NAV)).text
+        assert "Check all low-risk (1)" in page and "check=low" in page
+        ticked = (await b.http.get("/proposals?check=low", headers=NAV)).text
+        boxes = {
+            m[0]: " checked" in m[1]
+            for m in re.findall(r"<input type='checkbox' id='pk-(\w+)'([^>]*)>", ticked)
+        }
+        assert boxes == {"lo": True, "hi": False}
+        assert gw.db.get_proposal("lo", sub)["state"] == "pending"  # nothing applied
+    finally:
+        await b.aclose()
+
+
+async def test_all_view_pages_newest_first(stack: Stack) -> None:
+    b = await linked_browser(stack)
+    try:
+        gw = stack.h.app.state.gateway
+        sub = gw.db._one("SELECT sub FROM users", ())["sub"]
+        seed_history(gw.db, sub, now=int(time.time()))
+        body = (await b.http.get("/proposals?show=all", headers=NAV)).text.split("<main")[1]
+        assert "To apply or reject several at once, open <a href='/proposals'>Waiting</a>." in body
+        assert "name='pick'" not in body  # no tick boxes on All
+        ids = re.findall(r"href='/proposals/(p\d\d)\?show=all'", body)
+        assert ids[:3] == ["p00", "p01", "p02"] and len(set(ids)) == 25
+        assert "1–25 of 60" in body and "offset=25" in body and "Earlier" not in body
+        older = (await b.http.get("/proposals?show=all&offset=25", headers=NAV)).text
+        assert "26–50 of 60" in older and "/proposals/p25?show=all" in older
+        assert re.search(r"<span class='ui-lbl grey'>(<svg.*?</svg>)?Rejected</span>", body)
+        assert "Archidekt refused it" in body  # a failed one says why
+        assert "(deck 4" not in body
+    finally:
+        await b.aclose()
+
+
+async def test_one_proposal_is_a_side_panel_or_a_page(stack: Stack) -> None:
+    b = await linked_browser(stack)
+    try:
+        gw = stack.h.app.state.gateway
+        sub = gw.db._one("SELECT sub FROM users", ())["sub"]
+        seed_history(gw.db, sub, now=int(time.time()))
+        gw.db.finish_proposal("p00", state="applied", result={"snapshot_id": "s00", "ok": True})
+        panel = (await b.http.get("/proposals/p01", headers=NAV)).text.split("<main")[1]
+        # the list stays beside the panel, which a narrow screen shows as the page itself
+        assert "class='ui-split with-panel'" in panel and "<aside class='ui-drawer'" in panel
+        assert "← Back to Proposals" in panel and "href='/proposals/p01?full=1'>Open as a full page" in panel
+        assert "name='pick'" in panel.split("<aside")[0]
+        assert "(deck 4" not in panel
+        assert "14 other changes also wait on this deck." in panel and "Review all 15" in panel
+        full = (await b.http.get("/proposals/p01?full=1", headers=NAV)).text.split("<main")[1]
+        assert "class='pr-full'" in full and "name='pick'" not in full
+        # a closed one: back to All, no expiry, its result data folded under Technical details
+        closed = (await b.http.get("/proposals/p00", headers=NAV)).text.split("<main")[1]
+        assert "href='/proposals?show=all'>← Back to Proposals" in closed
+        assert "<dt>Expires</dt>" not in closed
+        assert "<summary>Technical details</summary>" in closed
+    finally:
+        await b.aclose()
+
+

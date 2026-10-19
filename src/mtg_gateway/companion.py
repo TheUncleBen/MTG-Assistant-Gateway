@@ -253,6 +253,7 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         deck_css: bool = False,
         extra_scripts: tuple[str, ...] = (),
         extra_css: str = "",
+        main_class: str = "",
     ) -> Response:
         user = state.db.get_user(sub) or {}
         admin = bool(s.admin_group and s.admin_group in (user.get("groups") or []))
@@ -268,6 +269,7 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
             wide=two_pane,
             current=current,
             heading=heading,
+            main_class=main_class,
             head_extra=(stylesheet_link("deck.css") if deck_css else "")
             + (f"<style>{extra_css}</style>" if extra_css else "")
             # ``viewer_only``: a page that shows cards but none of the deck page's own hooks

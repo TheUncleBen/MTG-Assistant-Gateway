@@ -159,7 +159,9 @@ async def test_a_held_change_held_for_a_new_cause_records_it_shows_it_and_refuse
     finally:
         await br.aclose()
     assert (
-        "<dt>Held</dt><dd>It depends on #1, which you rejected. It would replace #2, which was applied.</dd>"
+        # under the Held label (the redesigned proposal panel)
+        "<p class='ui-why pr-held'>It depends on #1, which you rejected. "
+        "It would replace #2, which was applied.</p>"
     ) in page
     # a card showing both causes applies it (the member's own press)
     done = await _press(h, a, pid, code, shown_status="held", shown_status_at=now["status_at"])

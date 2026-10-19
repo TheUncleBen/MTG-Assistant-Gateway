@@ -437,7 +437,9 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
             sort=qp.get("sort") or "name",
             q=(qp.get("q") or "").strip()[:80],
             notice=notice,
-            waiting=waiting_changes(state.db, sub, deck.id, own=own),  # waiting_strip.py
+            waiting=waiting_changes(
+                state.db, sub, deck.id, own=own, risk_of=decks.proposal_risk
+            ),  # waiting_strip.py
         ) + prefs.page_prefs(state.db, sub, f"{prefs.STACK}{deck.id}:", prefs.EDHPLAY_STEPS, prefs.DECKSTATS)
         resp = page(
             deck.name or f"Deck {deck.id}",

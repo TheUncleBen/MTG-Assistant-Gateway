@@ -19,7 +19,7 @@ from urllib.parse import parse_qs, quote
 from starlette.requests import Request
 from starlette.responses import RedirectResponse, Response
 
-from . import app_signin, link_disclosure, modes, notify, prefs
+from . import app_signin, link_disclosure, modes, notify, prefs, proposals_view, ui
 from .archidekt import PATIENCE_SPENT, page_turn
 from .auth_provider import BROWSER_COOKIE, LoginError, cookie_name
 from .avatars import initials_svg
@@ -35,6 +35,7 @@ from .decks import (
     tag_change_text,
 )
 from .formatting import DOC_CSS, doc_html
+from .proposals_view import PROPOSALS_CSS
 from .refusals import WRITES_OFF_KEPT, WRITES_OFF_KEPT_MANY
 from .theme import (
     LAYOUT_COOKIE,
@@ -51,8 +52,7 @@ from .theme import (
     theme_from_cookie,
     time_html,
 )
-from .waiting_strip import LIST_CSS, LIST_SCRIPT, action_bar, line_for, row_html
-from .waiting_strip import _age as age_text
+from .waiting_strip import LIST_CSS
 
 if TYPE_CHECKING:
     from mcp.server.mcpserver import MCPServer
@@ -78,6 +78,8 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         sid: str | None = None,
         head_extra: str = "",
         current: str | None = None,
+        main_class: str = "",
+        heading: bool = True,
     ) -> Response:
         return render(
             title,
@@ -90,6 +92,8 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             head_extra=head_extra,
             current=current,
             user=display_name(state.db.get_user(sub)) if sub else None,
+            main_class=main_class,
+            heading=heading,
         )
 
     def _is_admin(sub: str | None) -> bool:
@@ -446,8 +450,18 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         if not sub:
             return to_login("/proposals")
         notice = _notice(request.query_params.get("ok"), request.query_params.get("err"))
-        body = notice + _proposals_body(state, sub, _csrf(s, sid))
-        return page("Proposals", body, sub=sub, sid=sid, current="/proposals", head_extra=LIST_STYLE)
+        query = proposals_view.read_query(request.query_params)
+        body = proposals_view.list_html(state, sub, _csrf(s, sid), query, notice=notice)
+        return page(
+            "Proposals",
+            ui.split(body),
+            sub=sub,
+            sid=sid,
+            current="/proposals",
+            head_extra=LIST_STYLE + PROPOSALS_STYLE,
+            main_class="ui-wide",
+            heading=False,
+        )
 
     @server.custom_route("/proposals/select", methods=["POST"], include_in_schema=False)
     async def proposals_select(request: Request) -> Response:
@@ -518,7 +532,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             "Apply these changes?",
             "<div class='card'>"
             + _err(str(exc))
-            + f"<p><a class='btn' href='{html.escape(back)}'>Back</a></p></div>",
+            + f"<p><a class='btn btn-plain' href='{html.escape(back)}'>Back</a></p></div>",
             status=409,
             sub=sub,
             sid=sid,
@@ -652,7 +666,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
                     "Undo",
                     "<div class='card'>"
                     + _err(str(exc))
-                    + "<p><a class='btn' href='/proposals'>Back to Proposals</a></p></div>",
+                    + "<p><a class='btn btn-plain' href='/proposals'>Back to Proposals</a></p></div>",
                     status=409,
                     sub=sub,
                     sid=sid,
@@ -703,12 +717,46 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             else f"Proposal for {p['deck_name'] or p['deck_id']}"
         )
         stamp = form_stamp(s.session_secret, f"proposal:{sub}:{pid}")
+        query = proposals_view.read_query(request.query_params)
+        if "show" not in request.query_params and p["state"] != "pending":
+            query["show"] = "all"  # a closed one is in the All list, not under Waiting
+        others = (
+            [r for r in state.db.pending_board(sub, str(p["deck_id"])) if r["id"] != pid]
+            if p["state"] == "pending" and str(p.get("deck_id") or "").isdigit()
+            else []
+        )
+        if p["state"] == "replaced":
+            p["replaced_by"] = _replacement(state, sub, pid)
+        close = proposals_view.panel_close_href(query)
+        full = request.query_params.get("full") == "1"
+        no = f"#{p['board_no']} " if p["state"] == "pending" and p.get("board_no") else ""
+        where = p.get("deck_name") or "your account"
+        panel = ui.side_panel(
+            proposal_heading(p),
+            notice
+            + _proposal_body(p, _csrf(s, sid), stamp, step=not on_top, others=others)
+            + (
+                ""
+                if full
+                else f"<p class='ui-hint panel-only'><a href='/proposals/{quote(pid, safe='')}?full=1'>"
+                "Open as a full page</a></p>"
+            ),
+            label=f"Proposal {no}for {where}",
+            close_href=close,
+            back_text="Back to Proposals",
+        )
+        if full:
+            body = f"<div class='pr-full'>{ui.split('', panel)}</div>"
+        else:
+            body = ui.split(proposals_view.list_html(state, sub, _csrf(s, sid), query, open_id=pid), panel)
         return page(
             title,
-            notice + _proposal_body(p, _csrf(s, sid), stamp, step=not on_top),
+            body,
             sub=sub,
             sid=sid,
             current="/proposals",
+            main_class="ui-wide",
+            heading=False,
             # While a long apply runs in the background the page reloads itself to show progress.
             # It reloads the plain page, so the "Applying" notice of ?ok=applying goes once it ends.
             head_extra=(
@@ -716,7 +764,9 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
                 if p["state"] == "applying"
                 else ""
             )
-            + DOC_STYLE,
+            + DOC_STYLE
+            + LIST_STYLE
+            + PROPOSALS_STYLE,
         )
 
     @server.custom_route("/proposals/{pid}", methods=["POST"], include_in_schema=False)
@@ -1626,152 +1676,232 @@ def _progress_html(p: dict[str, Any]) -> str:
     return f"<p class='notice warn' role='status'>{html.escape(text)}</p>"
 
 
-def _risk_badge(risk: str) -> str:
-    return "danger" if risk == "destructive" else "warn" if risk in ("high", "consent") else ""
+def _risk_words(p: dict[str, Any]) -> str:
+    """ "Low: 2 card rows, no commander change": the §4 word and the one-line reason."""
+    key = ui.ALIASES.get(str(p.get("risk")), str(p.get("risk")))
+    word = ui.LABELS[key].word if key in ui.RISK_KEYS else str(p.get("risk"))
+    why = str(p.get("risk_reason") or "").strip()
+    return f"{word}: {why}" if why else word
 
 
-def _proposal_body(p: dict[str, Any], csrf: str | None, shown: str, *, step: bool = True) -> str:
-    """``step=False``: what happens next is already in the error box above (_failure_on_top)."""
+def _future(ts: int | None, now: float) -> str:
+    """ "in 7 days (date)" or, once past, "2 days ago (date)": the review page's Made and Expires."""
+    if not ts:
+        return ""
+    left = int(ts) - int(now)
+    if left > 0:
+        from .proposals_view import _span
+
+        rel = f"in {_span(left)}"
+    else:
+        rel = ui.when_text(ts, now=now)
+    return f"{html.escape(rel)} ({time_html(ts)})"
+
+
+def _deck_meta(p: dict[str, Any]) -> tuple[str, str]:
+    """The Deck (or Target) row: a new deck, the collection, the account, or the deck's link."""
+    if p.get("kind") == "create_deck" and p["deck_id"] == "new":
+        return "Deck", "Creates a new deck"
+    if p.get("kind") == "collection":
+        return "Target", "Your Archidekt collection"
+    if p.get("kind") == "action" and p["deck_id"] == "account":
+        return "Target", "Your Archidekt account"
+    return (
+        "Deck",
+        f"<a href='/decks/{quote(str(p['deck_id']), safe='')}'>"
+        f"{html.escape(str(p.get('deck_name') or p['deck_id']))}</a>",
+    )
+
+
+def proposal_heading(p: dict[str, Any]) -> str:
+    """The panel's heading: "#1 +1 Arcane Signet, −1 Counterspell" ("New deck: {name}" for a new
+    deck). The number shows while it waits, as on the list."""
+    if p.get("kind") == "create_deck":
+        return html.escape(f"New deck: {p['deck_name']}")
+    lines = str(p.get("diff") or "").splitlines()
+    text = ", ".join(lines[:4]) + (f" (+{len(lines) - 4} more)" if len(lines) > 4 else "")
+    text = text[:300] or str(p.get("deck_name") or "Proposal")
+    no = (
+        f"<span class='no'>#{int(p['board_no'])}</span> "
+        if p.get("state") == "pending" and p.get("board_no")
+        else ""
+    )
+    return no + html.escape(text)
+
+
+def _also_waiting(p: dict[str, Any], others: list[dict[str, Any]] | None) -> str:
+    """ "#2 and #3 also wait on this deck. Review all 3": the deck's other waiting changes."""
+    if not others or p.get("state") != "pending":
+        return ""
+    nos = [f"#{o['board_no']}" for o in others if o.get("board_no")]
+    if nos and len(nos) <= 3:  # more than three: "14 other changes also wait"
+        who = nos[0] if len(nos) == 1 else ", ".join(nos[:-1]) + " and " + nos[-1]
+        text = f"{who} also wait{'s' if len(nos) == 1 else ''} on this deck."
+    else:
+        n = len(others)
+        text = f"{n} other change{'s' if n != 1 else ''} also wait{'s' if n == 1 else ''} on this deck."
+    href = f"/proposals?deck_id={quote(str(p['deck_id']), safe='')}"
+    return (
+        f"<p class='ui-hint pr-also'>{html.escape(text)} "
+        f"<a href='{href}'>Review all {len(others) + 1}</a></p>"
+    )
+
+
+def _proposal_body(
+    p: dict[str, Any],
+    csrf: str | None,
+    shown: str,
+    *,
+    step: bool = True,
+    others: list[dict[str, Any]] | None = None,
+) -> str:
+    """One proposal's review: the panel beside the list from 1100 px, its own page below that
+    (UI-STANDARD §3 U9). ``step=False``: what happens next is already in the error box above
+    (_failure_on_top). ``others``: the deck's other waiting changes."""
     if p.get("kind") == "details":
         rows, total = _detail_rows(p.get("rows"), p["diff"])
-        summary = [f"<span>{total} deck detail{'s' if total != 1 else ''} changed; no cards change</span>"]
+        summary = [
+            f"<span class='ui-lbl grey'>{total} deck detail{'s' if total != 1 else ''} changed; "
+            "no cards change</span>"
+        ]
         heading, aria = "Deck details that will change", "Deck details"
     else:
         rows, counts, net = _change_rows(p.get("rows"), p["diff"])
         total = sum(counts.values())
-        summary = [f"<span>{total} change{'s' if total != 1 else ''}</span>"]
+        summary = [f"<span class='ui-lbl grey'>{total} change{'s' if total != 1 else ''}</span>"]
         if counts["add"]:
-            summary.append(f"<span class='add'>{counts['add']} added</span>")
+            summary.append(f"<span class='ui-lbl green'>{counts['add']} added</span>")
         if counts["del"]:
-            summary.append(f"<span class='del'>{counts['del']} removed</span>")
+            summary.append(f"<span class='ui-lbl red'>{counts['del']} removed</span>")
         if counts["chg"]:
-            summary.append(f"<span class='chg'>{plural(counts['chg'], 'count')} changed</span>")
+            summary.append(f"<span class='ui-lbl orange'>{plural(counts['chg'], 'count')} changed</span>")
         if counts["cat"]:
-            summary.append(f"<span class='chg'>{counts['cat']} recategorized</span>")
-        summary.append(f"<span>Net {'+' if net > 0 else ''}{net} card{'s' if abs(net) != 1 else ''}</span>")
+            summary.append(f"<span class='ui-lbl orange'>{counts['cat']} recategorized</span>")
+        summary.append(
+            f"<span class='ui-lbl grey'>Net {'+' if net > 0 else ''}{net} "
+            f"card{'s' if abs(net) != 1 else ''}</span>"
+        )
         heading, aria = "What will change", "Card changes"
         if p.get("kind") == "action":  # an Archidekt account action: no cards change
-            summary = [f"<span>{total} Archidekt action{'s' if total != 1 else ''}; no cards change</span>"]
+            summary = [
+                f"<span class='ui-lbl grey'>{total} Archidekt action{'s' if total != 1 else ''}; "
+                "no cards change</span>"
+            ]
             heading, aria = "What will happen", "Archidekt action"
     raw = "<pre class='diff'>" + html.escape(p["diff"]) + "</pre>"
-    meta = (
-        "<dl class='meta'>"
-        f"<dt>State</dt><dd><span class='badge {_badge(p['state'])}'>{html.escape(p['state'])}</span></dd>"
-        + (
-            "<dt>Deck</dt><dd>Creates a new deck</dd>"
-            if p.get("kind") == "create_deck" and p["deck_id"] == "new"
-            else "<dt>Target</dt><dd>Your Archidekt collection</dd>"
-            if p.get("kind") == "collection"
-            else "<dt>Target</dt><dd>Your Archidekt account</dd>"
-            if p.get("kind") == "action" and p["deck_id"] == "account"
-            else f"<dt>Deck</dt><dd><a href='/decks/{quote(str(p['deck_id']), safe='')}'>"
-            f"{html.escape(str(p.get('deck_name') or p['deck_id']))}</a>"
-            + (
-                f" <span class='muted small'>(deck {html.escape(str(p['deck_id']))})</span>"
-                if p.get("deck_name")
-                else ""
+    import time as _time
+
+    now = _time.time()
+    state = str(p.get("state") or "")
+    pending = state == "pending"
+    status = p.get("status") if pending else None
+    # §4 labels: the status (Waiting, Needs a look, Held; Updated beside Waiting), then the risk
+    pills = [
+        ui.status_label(
+            status if status in ("needs_look", "held") else ("waiting" if pending else state),
+            title=str(p.get("status_reason") or "") if status else "",
+        )
+    ]
+    if status == "updated":
+        pills.append(ui.status_label("updated", title=str(p.get("status_reason") or "")))
+    if p.get("risk") and ui.ALIASES.get(str(p["risk"]), str(p["risk"])) in ui.RISK_KEYS:
+        pills.append(ui.risk_label(str(p["risk"]), title=str(p.get("risk_reason") or "")))
+    under = []
+    if p.get("risk"):
+        under.append(f"<p class='ui-why pr-why'>{html.escape(_risk_words(p))}</p>")
+    if pending and status == "held" and p.get("status_reason"):
+        # every cause it is held for, as the card's "Held." note says them
+        under.append(f"<p class='ui-why pr-held'>{html.escape(str(p['status_reason']))}</p>")
+    if pending and (p.get("press_reason") or p.get("replace_note")):
+        # why it waits for the member's own press, and a replace that waits
+        waits = " ".join(
+            x
+            for x in (
+                p.get("replace_note") or "",
+                # the Held line above already says why: said once
+                "It needs your press."
+                if p.get("press_reason") and status == "held" and _held_repeat(p["press_reason"])
+                else f"This one {p['press_reason']}, so it needs your press."
+                if p.get("press_reason")
+                else "",
             )
-            + "</dd>"
+            if x
         )
-        + (
-            f"<dt>Archidekt account</dt><dd>{html.escape(str(p['changes']['archidekt_username']))}</dd>"
-            if p.get("kind") == "create_deck"
-            and isinstance(p.get("changes"), dict)
-            and p["changes"].get("archidekt_username")
-            else ""
-        )
-        + (f"<dt>Proposed by</dt><dd>{actor_html(p['created_by'])}</dd>" if p.get("created_by") else "")
-        + (  # an amended change says who changed it and what
-            f"<dt>Version</dt><dd>{int(p['version'])}, changed by {_changed_by_names(p)}"
-            + (f". Last change: {html.escape(p['what_changed'])}" if p.get("what_changed") else "")
-            + "</dd>"
-            if p.get("changed_by")
-            else ""
-        )
-        + (
-            f"<dt>Risk</dt><dd><span class='badge {_risk_badge(p['risk'])}'>"
-            f"{html.escape(p['risk'])}</span> <span class='small muted'>"
-            f"{html.escape(p['risk_reason'])}</span></dd>"
-            if p.get("risk")
-            else ""
-        )
-        + (
-            # every cause it is held for, as the card's "Held." note says them
-            f"<dt>Held</dt><dd>{html.escape(str(p['status_reason']))}</dd>"
-            if p.get("state") == "pending" and p.get("status") == "held" and p.get("status_reason")
-            else ""
-        )
-        + (
-            # why it waits for the member's own press, and a replace that waits
-            "<dt>Waits for you</dt><dd>"
-            + html.escape(
-                " ".join(
-                    x
-                    for x in (
-                        p.get("replace_note") if p.get("state") == "pending" else "",
-                        # the Held row above already says why: said once
-                        "It needs your press."
-                        if p.get("press_reason")
-                        and p.get("status") == "held"
-                        and _held_repeat(p["press_reason"])
-                        else f"This one {p['press_reason']}, so it needs your press."
-                        if p.get("press_reason")
-                        else "",
-                    )
-                    if x
-                )
+        under.append(f"<p class='ui-why pr-waits'>{html.escape(waits)}</p>")
+    deck_key, deck_val = _deck_meta(p)
+    meta_rows: list[tuple[str, str]] = [(deck_key, deck_val)]
+    if (
+        p.get("kind") == "create_deck"
+        and isinstance(p.get("changes"), dict)
+        and p["changes"].get("archidekt_username")
+    ):
+        meta_rows.append(("Archidekt account", html.escape(str(p["changes"]["archidekt_username"]))))
+    if p.get("created_by"):
+        meta_rows.append(("Proposed by", ui.app_chip(_chip_name(str(p["created_by"])))))
+    meta_rows.append(("Made", _future(p.get("created_at"), now)))
+    if p.get("state") == "pending":  # a closed one no longer expires
+        meta_rows.append(("Expires", _future(p.get("expires_at"), now)))
+    elif p.get("state") == "applied" and p.get("applied_at"):
+        meta_rows.append(("Applied", _future(p.get("applied_at"), now)))
+    if p.get("changed_by"):  # an amended change says who changed it and what
+        meta_rows.append(
+            (
+                "Version",
+                f"{int(p['version'])}, changed by {_changed_by_names(p)}"
+                + (f". Last change: {html.escape(p['what_changed'])}" if p.get("what_changed") else ""),
             )
-            + "</dd>"
-            if p.get("state") == "pending" and (p.get("press_reason") or p.get("replace_note"))
-            else ""
         )
-        + f"<dt>Created</dt><dd>{_when(p['created_at'])}</dd>"
-        f"<dt>Expires</dt><dd>{_when(p['expires_at'])}</dd></dl>"
-    )
+    else:
+        meta_rows.append(("Version", str(int(p.get("version") or 1))))
     stale = (
         f"<p class='notice warn' role='status'>{html.escape(OUT_OF_DATE_PAGE)}</p>"
-        if p["state"] == "pending" and p.get("out_of_date")
+        if pending and p.get("out_of_date")
         else ""
     )
     body = (
-        f"<div class='card'>{stale}{meta}<h2>{heading}</h2>"
-        f"<div class='summary'>{''.join(summary)}</div>"
-        f"<ul class='changes' aria-label='{aria}'>{rows}</ul>"
-        f"<details class='raw'><summary>Plain-text diff</summary>{raw}</details>"
-        + (f"<p class='muted'>{html.escape(_page_step(p))}</p>" if step else "")
+        f"<div class='pills'>{''.join(pills)}</div>"
+        + "".join(under)
+        + (f"<p class='ui-next'>{_step_html(p)}</p>" if step else "")
         + _progress_html(p)
+        + ui.meta(meta_rows)
+        + stale
+        + f"<h3 class='ui-section'>{heading}</h3>"
+        f"<div class='pills summary-pills'>{''.join(summary)}</div>"
+        f"<ul class='changes' aria-label='{aria}'>{rows}</ul>"
+        f"<details class='raw'><summary>Plain-text diff</summary>{raw}</details>" + _also_waiting(p, others)
     )
-    if p["state"] == "pending" and p["writes_enabled"]:
+    if pending and p["writes_enabled"]:
         destroy = p.get("risk") == "destructive"
         if destroy:
             ask = (
-                "<div class='apply destroy'><h2>Delete this deck on Archidekt?</h2>"
+                "<div class='apply destroy'><h3 class='ui-section'>Delete this deck on Archidekt?</h3>"
                 "<p class='notice error'><strong>This deletes the deck from your Archidekt account. "
                 "Archidekt itself has no undo.</strong></p>"
                 "<p class='small'>The gateway checks that the deck is unchanged since this proposal and "
                 "keeps a snapshot of it first. Only you can approve this, in every approval mode. "
                 "Nothing happens until you tap Delete.</p>"
             )
-            apply_button = ("apply", "Delete this deck on Archidekt", "danger btn-lg")
+            # a red outline first; static/proposals.js asks once more with the solid red button
+            apply_button = ("apply", "Delete this deck on Archidekt", "btn-outline-danger pr-ask")
         elif p.get("kind") == "action":
             ask = (
-                "<div class='apply'><h2>Do this on Archidekt?</h2>"
+                "<div class='apply'><h3 class='ui-section'>Do this on Archidekt?</h3>"
                 "<p><strong>This acts on your Archidekt account, under your name.</strong></p>"
                 "<p class='small'>Only you can approve it, every time, in every approval mode. Nothing "
                 "happens until you tap Apply.</p>"
             )
-            apply_button = ("apply", "Apply: do this on Archidekt", "primary btn-lg")
+            apply_button = ("apply", "Apply: do this on Archidekt", "primary btn-primary")
         else:
             where = "your collection" if p.get("kind") == "collection" else "your deck"
             ask = (
-                "<div class='apply'><h2>Apply to Archidekt?</h2>"
-                f"<p><strong>Applying writes these changes to {where} on Archidekt.</strong></p>"
-                "<p class='small'>The gateway applies the changes, then reads the result back from "
+                "<div class='apply'><h3 class='ui-section'>Apply to Archidekt?</h3>"
+                f"<p>Applying writes these changes to {where} on Archidekt. "
+                "The gateway applies the changes, then reads the result back from "
                 "Archidekt. For a change to one of your decks, it first checks that the deck still matches "
                 "this proposal and keeps a snapshot of it from just before the edit. Nothing happens until "
                 "you tap Apply.</p>"
             )
-            apply_button = ("apply", "Apply these changes to Archidekt", "primary btn-lg")
+            apply_button = ("apply", "Apply these changes to Archidekt", "primary btn-primary")
         body += (
             ask
             # Apply and Reject stay disabled until the click guard sees the page in use: a
@@ -1789,50 +1919,80 @@ def _proposal_body(p: dict[str, Any], csrf: str | None, shown: str, *, step: boo
                 },
                 buttons=[
                     apply_button,
-                    ("reject", "Reject this proposal", "btn" if destroy else "danger"),
+                    ("reject", "Reject this proposal", "btn-outline-danger"),
                 ],
-                extra="<a class='btn' href='/proposals'>Not now</a>",
+                extra="<a class='btn btn-plain' href='/proposals'>Not now</a>",
             )
             + "</div>"
         )
-    elif p["state"] == "pending":
+    elif pending:
         body += (
             "<form method='post' class='reject'>"
             f"<input type='hidden' name='csrf' value='{html.escape(csrf or '')}'>"
             f"<input type='hidden' name='shown' value='{html.escape(shown)}'>"
             "<input type='hidden' name='action' value='reject'>"
-            "<button class='btn'>Reject this proposal</button></form>"
+            "<button class='btn-outline-danger'>Reject this proposal</button></form>"
         )
+    actions = []
     if (
-        p["state"] == "applied"
+        state == "applied"
         and p.get("kind") in ("edit", "details", "restore")
         and p.get("snapshot_id")
         and csrf
     ):
         # Flow G: one tap shows what Undo would put back, then asks once
-        body += (
+        actions.append(
             "<form method='post' action='/proposals/undo' class='undo'>"
             f"<input type='hidden' name='csrf' value='{html.escape(csrf)}'>"
             "<input type='hidden' name='action' value='preview'>"
             f"<input type='hidden' name='snapshot' value='{html.escape(str(p['snapshot_id']))}'>"
             f"<input type='hidden' name='applied' value='{html.escape(p['proposal_id'])}'>"
             f"<input type='hidden' name='after' value='{int(p.get('applied_at') or 0)}'>"
-            "<button class='btn'>Undo this change</button></form>"
+            "<button class='btn-plain'>Undo this change</button></form>"
         )
     # who rejected it (closed_by, said above) is not a result worth a box of its own
     result = p.get("result")
     if isinstance(result, dict):
         result = {k: v for k, v in result.items() if k not in ("rejected_by", "client")}
+    url = result.get("deck_url") if isinstance(result, dict) and result else None
+    if url:
+        actions.append(
+            f"<a class='btn btn-plain' href='{html.escape(url)}' rel='noreferrer'>"
+            "Open the deck on Archidekt</a>"
+        )
+    if actions:
+        body += f"<div class='ui-actions'>{''.join(actions)}</div>"
     if result:
-        url = result.get("deck_url") if isinstance(result, dict) else None
-        if url:
-            link = (
-                f"<a class='btn btn-primary' href='{html.escape(url)}' rel='noreferrer'>"
-                "Open the deck on Archidekt</a>"
-            )
-            body += f"<p>{link}</p>"
-        body += f"<h2>Result</h2><pre>{html.escape(_pretty(result))}</pre>"
-    return body + "</div>"
+        # the raw record stays one tap away, not as member text (approved: "Technical details")
+        body += (
+            "<details class='raw pr-tech'><summary>Technical details</summary>"
+            f"<pre>{html.escape(_pretty(result))}</pre></details>"
+        )
+    return body
+
+
+def _step_html(p: dict[str, Any]) -> str:
+    """The next-step line; on a replaced proposal its "Replaced by #n." links the newer one."""
+    text = _page_step(p)
+    rb = p.get("replaced_by")
+    if p.get("state") == "replaced" and isinstance(rb, dict) and rb.get("board_no"):
+        no = f"#{rb['board_no']}"
+        if text == f"Replaced by {no}.":
+            return f"Replaced by <a href='/proposals/{quote(str(rb['id']), safe='')}'>{html.escape(no)}</a>."
+    return html.escape(text)
+
+
+def _chip_name(label: str) -> str | None:
+    """An actor label as the app chip names it: the app's name ("app: Claude (id)" -> Claude),
+    "You" for the member's own browser, "The administrator"; never a client id."""
+    m = re.fullmatch(r"app: (.+) \((.+)\)", label)
+    if m:
+        return m.group(1)
+    if label.startswith("app: "):
+        return "An assistant"
+    return {"browser": "You", "administrator": "The administrator", "admin": "The administrator"}.get(
+        label, label or None
+    )
 
 
 def _pretty(obj: Any) -> str:
@@ -1846,6 +2006,7 @@ def _pretty(obj: Any) -> str:
 MAX_PICKS = 100  # one press may apply every change a member can have waiting (decks.MAX_SELECTION)
 BATCH_WAIT_SECONDS = 8.0  # the confirm's Apply waits this long for the result, then shows progress
 LIST_STYLE = f"<style>{LIST_CSS}</style>"
+PROPOSALS_STYLE = f"<style>{PROPOSALS_CSS}</style>"
 # A document drawn with its formatting; the review page's toggles are 44 px tall
 DOC_STYLE = (
     f"<style>{DOC_CSS}main details > summary{{min-height:44px;padding:.6rem 0;cursor:pointer}}</style>"
@@ -1884,11 +2045,6 @@ def _formatted_preview(r: dict[str, Any]) -> str:
         "text.</span></p>"
         f"<div class='qdoc'>{doc_html(r['after_doc'])}</div>{gone}"
     )
-
-
-# Changes that are not edits to one of the member's decks (FLEX §3 "Not tied to one of your decks").
-_UNTIED_KINDS = ("create_deck", "clone", "collection")
-_DECK_ACTIONS = ("collaborator_add", "collaborator_remove", "delete_deck")
 
 
 def _app_name(label: str) -> str:
@@ -1936,7 +2092,7 @@ def _reject_confirm(picks: list[str], versions: dict[str, int], back: str, csrf:
         f"{hidden}<p class='actions'>"
         f"<button type='submit' name='action' value='reject' class='danger'>"
         f"{'Reject' if len(picks) == 1 else f'Reject {len(picks)}'}</button> "
-        f"<a class='btn' href='{html.escape(back)}'>Cancel</a></p></form>"
+        f"<a class='btn btn-plain' href='{html.escape(back)}'>Cancel</a></p></form>"
     )
 
 
@@ -1980,89 +2136,20 @@ def _picked_shown(data: dict[str, str], picks: list[str]) -> dict[str, dict[str,
     return out
 
 
-def _untied(state: Any, sub: str, row: dict[str, Any]) -> bool:
-    if row.get("kind") in _UNTIED_KINDS or not str(row.get("deck_id") or "").isdigit():
-        return True
-    if row.get("kind") == "action":
-        full = state.db.get_proposal(row["id"], sub) or {}
-        action = (full.get("changes") or {}).get("action") if isinstance(full.get("changes"), dict) else None
-        return action not in _DECK_ACTIONS
-    return False
+def _replacement(state: Any, sub: str, proposal_id: str) -> dict[str, Any] | None:
+    """The proposal that replaced ``proposal_id`` (its id and board number), or None."""
+    for link in state.db.proposal_links(sub, [proposal_id]):
+        if link["other_id"] == proposal_id and link["kind"] == "replaces":
+            new = state.db.get_proposal(link["proposal_id"], sub)
+            if new is not None:
+                return {"id": new["id"], "board_no": new.get("board_no")}
+    return None
 
 
-def _proposals_body(state: Any, sub: str, csrf: str | None) -> str:
-    """The Proposals page (FLEX §3): the waiting changes grouped by deck, the deck with the oldest
-    first, each with checkboxes and a whole-deck box; then those not tied to one of the member's
-    decks; the bar that applies or rejects the checked ones; then the closed ones."""
-    import time
-
-    now = time.time()
-    waiting = state.db.pending_board(sub)
-    groups: dict[str, list[dict[str, Any]]] = {}
-    untied: list[dict[str, Any]] = []
-    for row in waiting:
-        line = line_for(state.db, sub, row)
-        if _untied(state, sub, row):
-            untied.append(line)
-        else:
-            groups.setdefault(line["deck_id"], []).append(line)
-    parts: list[str] = []
-    for deck_id, lines in groups.items():  # pending_board is oldest first, so is this order
-        n = len(lines)
-        name = lines[0]["deck_name"]
-        oldest = age_text(now - min(x["created_at"] for x in lines))
-        parts.append(
-            f"<section class='card dgroup' id='deck-{html.escape(deck_id)}'><h2>"
-            f"<label class='pick'><input type='checkbox' class='all' data-all='{html.escape(deck_id)}' "
-            f"aria-label='All waiting changes to {html.escape(name)}'></label>"
-            f"<a href='/decks/{html.escape(deck_id)}'>{html.escape(name)}</a>"
-            f"<span class='meta2'>{n} waiting · oldest {oldest}</span></h2>"
-            + "<ul class='wlist'>"
-            + "".join(row_html(x, now=now, group=deck_id) for x in lines)
-            + "</ul>"
-            "</section>"
-        )
-    if untied:
-        parts.append(
-            "<section class='card dgroup' id='untied'><h2>"
-            "<label class='pick'><input type='checkbox' class='all' data-all='untied' "
-            "aria-label='All changes not tied to one of your decks'></label>"
-            f"Not tied to one of your decks<span class='meta2'>{len(untied)} waiting</span></h2>"
-            + "<ul class='wlist'>"
-            + "".join(row_html(x, now=now, group="untied") for x in untied)
-            + "</ul>"
-            "</section>"
-        )
-    if parts:
-        body = (
-            "<form method='post' action='/proposals/select' class='wform'>"
-            f"<input type='hidden' name='csrf' value='{html.escape(csrf or '')}'>"
-            "<input type='hidden' name='back' value='/proposals'>"
-            "<p class='muted'>Check the changes to apply or reject, on any decks and in any order. They "
-            "are applied oldest first, each checked against the deck as it is just before it is sent; "
-            "one that would now do something else is not sent and waits as Needs a look.</p>"
-            + "".join(parts)
-            + action_bar()
-            + "</form>"
-            f"<script src='{LIST_SCRIPT}' defer></script>"
-        )
-    else:
-        body = (
-            "<div class='card'><p>Nothing is waiting for your approval. Ask your assistant to propose a "
-            "deck change and it will appear here for review.</p></div>"
-        )
-    closed = [r for r in state.decks.list_proposals(sub) if r["state"] != "pending"]
-    if closed:
-        items = "".join(
-            f"<li><a class='name' href='/proposals/{html.escape(r['id'])}'>"
-            f"{html.escape(r['deck_name'] or r['deck_id'])}</a>"
-            f"<span class='badge {_badge(r['state'])}'>{html.escape(r['state'])}</span>"
-            + actor_html(r.get("created_by"))
-            + f"<span class='when'>{_when(r['created_at'])}</span></li>"
-            for r in closed
-        )
-        body += f"<h2>Earlier</h2><div class='card'><ul class='plain plist'>{items}</ul></div>"
-    return body
+def _held_line(text: str) -> str:
+    """The confirm's "Held: {reason}" with the §4 Held label in place of the word."""
+    rest = text[len("Held:") :].strip() if text.startswith("Held:") else text.removeprefix("Held.").strip()
+    return f"<span class='held'>{ui.status_label('held')} {html.escape(rest)}</span>"
 
 
 def _confirm_body(
@@ -2089,7 +2176,7 @@ def _confirm_body(
         out.append(f"<h2>{html.escape(deck['deck_name'])}</h2><ol class='order'>")
         for c in deck["changes"]:
             no = f"#{c['board_no']} " if c.get("board_no") else ""
-            held = f"<span class='held'>{html.escape(c['held'])}</span>" if c.get("held") else ""
+            held = _held_line(str(c["held"])) if c.get("held") else ""
             out.append(f"<li><b>{html.escape(no)}</b>{html.escape(c['summary'])}{held}</li>")
         out.append("</ol>")
         if deck.get("older_text"):
@@ -2106,7 +2193,7 @@ def _confirm_body(
     if not plan["count"]:
         out.append(
             "<p>None of these can be applied together.</p>"
-            f"<p><a class='btn' href='{html.escape(back)}'>Back</a></p>"
+            f"<p><a class='btn btn-plain' href='{html.escape(back)}'>Back</a></p>"
         )
         return "".join(out) + "</div>"
     if not writes_enabled:
@@ -2125,9 +2212,9 @@ def _confirm_body(
     out.append(
         guarded_form(
             hidden=hidden,
-            buttons=[("apply", f"Apply {n} change{'s' if n != 1 else ''}", "primary btn-lg")],
+            buttons=[("apply", f"Apply {n} change{'s' if n != 1 else ''}", "primary btn-primary btn-lg")],
             action="/proposals/apply",
-            extra=f"<a class='btn' href='{html.escape(back)}'>Not now</a>",
+            extra=f"<a class='btn btn-plain' href='{html.escape(back)}'>Not now</a>",
             tab_reachable=True,
         )
     )
@@ -2159,9 +2246,9 @@ def _result_body(run: dict[str, Any], csrf: str | None) -> str:
         return "<ul class='results'>" + "".join(lis) + "</ul>"
 
     if run["applied"]:
-        out.append("<h2>Applied</h2>" + items(run["applied"], False))
+        out.append(f"<h2 class='ui-section'>{ui.status_label('applied')}</h2>" + items(run["applied"], False))
     if run["failed"]:
-        out.append("<h2>Failed</h2>" + items(run["failed"], True))
+        out.append(f"<h2 class='ui-section'>{ui.status_label('failed')}</h2>" + items(run["failed"], True))
     if run["not_sent"]:
         out.append(
             "<h2>Not sent</h2><p class='muted'>These are still waiting; open one to fix or reject it.</p>"
@@ -2175,9 +2262,9 @@ def _result_body(run: dict[str, Any], csrf: str | None) -> str:
             f"<input type='hidden' name='snapshot' value='{html.escape(u['snapshot_id'])}'>"
             f"<input type='hidden' name='applied' value='{html.escape(','.join(u['applied']))}'>"
             f"<input type='hidden' name='after' value='{int(u['after_at'])}'>"
-            f"<button class='btn'>Undo on {html.escape(u['deck_name'])}</button></form>"
+            f"<button class='btn btn-plain'>Undo on {html.escape(u['deck_name'])}</button></form>"
         )
-    out.append("<p><a class='btn' href='/proposals'>Back to Proposals</a></p>")
+    out.append("<p><a class='btn btn-plain' href='/proposals'>Back to Proposals</a></p>")
     return "".join(out) + "</div>"
 
 
@@ -2186,7 +2273,7 @@ def _undo_body(look: dict[str, Any], csrf: str | None, shown: str, applied: list
     out = [f"<div class='card'><h2>{html.escape(look['deck_name'])}</h2>"]
     if look["nothing"]:
         out.append("<p>The deck already matches how it was before that change. There is nothing to undo.</p>")
-        return "".join(out) + "<p><a class='btn' href='/proposals'>Back</a></p></div>"
+        return "".join(out) + "<p><a class='btn btn-plain' href='/proposals'>Back</a></p></div>"
     if look["warning"]:
         out.append(f"<p class='notice warn'>{html.escape(look['warning'])}</p>")
     out.append("<p>Undo puts the deck back as it was before that change:</p><ul class='results'>")
@@ -2203,9 +2290,9 @@ def _undo_body(look: dict[str, Any], csrf: str | None, shown: str, applied: list
                 "applied": ",".join(applied),
                 "after": str(after_at),
             },
-            buttons=[("undo", "Undo: put the deck back", "primary")],
+            buttons=[("undo", "Undo: put the deck back", "primary btn-primary")],
             action="/proposals/undo",
-            extra="<a class='btn' href='/proposals'>Not now</a>",
+            extra="<a class='btn btn-plain' href='/proposals'>Not now</a>",
             tab_reachable=True,
         )
     )
