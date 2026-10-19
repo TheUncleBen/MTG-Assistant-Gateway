@@ -129,3 +129,35 @@ def test_reports_dashboard_pages_by_25(server: Server) -> None:
     second = h.get("/reports?offset=25").text
     assert _rows(second) == 5 and "26–30 of 30" in second
     assert h.get("/reports?offset=50").text.count("No older reports.") == 1
+
+
+@pytest.mark.parametrize("width", [390, 1280])
+def test_a_filter_applies_on_pick_with_no_show_button(server: Server, width: int) -> None:
+    """Ben's request (2026-10-19, 22:16Z): a drop-down filter applies as soon as an option is
+    picked; the toolbar has no Show (or Search) button for a member with scripts."""
+    from playwright.sync_api import sync_playwright
+
+    from .test_scan_browser import _chromium_path
+
+    exe = _chromium_path()
+    if exe == "missing":
+        pytest.skip("no Chromium available for Playwright")
+    h = _seed(server)
+    sid = h.cookies["mtg_session"]
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+        touch = {"has_touch": True, "is_mobile": True} if width < 600 else {}
+        ctx = browser.new_context(viewport={"width": width, "height": 900}, **touch)
+        ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
+        page = ctx.new_page()
+        page.goto(f"{server.base}/reports", wait_until="networkidle")
+        visible = page.evaluate(
+            "[...document.querySelectorAll('.ui-tools button:not(.msel-btn), .ui-tools [type=submit]')]"
+            ".filter(e => e.getClientRects().length).map(e => e.textContent.trim())"
+        )
+        assert visible == []
+        page.locator(".ui-tools .msel-btn").first.click()
+        page.locator(".msel-list:visible [role=option]", has_text="Atraxa Superfriends").click()
+        page.wait_for_url("**deck_id=44**", timeout=5000)
+        assert "Atraxa Superfriends" in page.locator(".ui-tools .msel-btn").first.inner_text()
+        browser.close()
