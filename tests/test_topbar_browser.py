@@ -525,7 +525,7 @@ BAR_OVERLAP = """() => {
     if (hit(p.box, q.box)) out.push(`${p.what} / ${q.what}`); }));
   const outside = parts.filter(p => p.box.left < -1 || p.box.right > innerWidth + 1).map(p => p.what);
   return {overlap: out, outside, doc: document.documentElement.scrollWidth, win: innerWidth,
-          links: document.querySelectorAll('.topbar nav.site > a, .topbar nav.site > summary').length};
+          links: document.querySelectorAll('.topbar nav.site > a, .topbar nav.site summary').length};
 }"""
 
 

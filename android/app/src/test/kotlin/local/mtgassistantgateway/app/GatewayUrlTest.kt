@@ -21,8 +21,13 @@ class GatewayUrlTest {
     @Test fun noHostRejected() = assertEquals(GatewayUrl.Problem.INVALID, bad("https:///scan").reason)
 
     @Test fun shortcutsMatchTheWebManifest() {
-        // The same three as /app.webmanifest (companion.py), each a page on the configured gateway.
-        assertEquals(listOf("/decks", "/scan", "/proposals"), GatewayUrl.SHORTCUTS.map { it.second })
+        // As /app.webmanifest (companion_shell.py) lists them, in its order, each a page on the
+        // configured gateway; Watchlist only while the gateway's watchlists are on.
+        assertEquals(
+            listOf("/decks", "/scan", "/proposals", "/reports", "/watchlist"),
+            GatewayUrl.SHORTCUTS.map { it.second },
+        )
+        assertEquals(setOf("watchlist"), GatewayUrl.DYNAMIC_SHORTCUTS)
         assertEquals(GatewayUrl.SHORTCUTS.size, GatewayUrl.SHORTCUTS.map { it.first }.toSet().size)
         for ((_, path) in GatewayUrl.SHORTCUTS) {
             val url = GatewayUrl.join("https://mtg.example.com:8443", path)
@@ -35,6 +40,8 @@ class GatewayUrlTest {
         assertEquals("/decks", GatewayUrl.shortcutPath("decks"))
         assertEquals("/scan", GatewayUrl.shortcutPath("scan"))
         assertEquals("/proposals", GatewayUrl.shortcutPath("proposals"))
+        assertEquals("/reports", GatewayUrl.shortcutPath("reports"))
+        assertEquals("/watchlist", GatewayUrl.shortcutPath("watchlist"))
         assertNull(GatewayUrl.shortcutPath(null))
         assertNull(GatewayUrl.shortcutPath(""))
         assertNull(GatewayUrl.shortcutPath("/decks"))
@@ -45,7 +52,9 @@ class GatewayUrlTest {
         // res/xml/shortcuts.xml (Gradle runs unit tests from the app module's folder).
         val xml = java.io.File("src/main/res/xml/shortcuts.xml").readText()
         val pages = Regex("<extra android:name=\"${GatewayUrl.SHORTCUT_PAGE}\" android:value=\"([^\"]+)\"").findAll(xml).map { it.groupValues[1] }.toList()
-        assertEquals(GatewayUrl.SHORTCUTS.map { it.first }, pages)
+        // the static ones: every shortcut but the ones the app adds itself
+        assertEquals(GatewayUrl.SHORTCUTS.map { it.first }.filter { it !in GatewayUrl.DYNAMIC_SHORTCUTS }, pages)
+        assertTrue(GatewayUrl.DYNAMIC_SHORTCUTS.none { GatewayUrl.dynamicShortcutId(it) in shortcutIds(xml) })
         assertEquals(pages.size, Regex("android:action=\"${Regex.escape(GatewayUrl.SHORTCUT_ACTION)}\"").findAll(xml).count())
         // Not the IDs the dynamic shortcuts of earlier versions used: Android would skip those.
         val ids = Regex("android:shortcutId=\"([^\"]+)\"").findAll(xml).map { it.groupValues[1] }.toList()
@@ -55,6 +64,19 @@ class GatewayUrlTest {
         val appId = java.io.File("application-id.txt").readText().trim()
         val targets = Regex("android:targetPackage=\"([^\"]+)\"").findAll(xml).map { it.groupValues[1] }.toList()
         assertEquals(List(pages.size) { appId }, targets)
+    }
+
+    private fun shortcutIds(xml: String) = Regex("android:shortcutId=\"([^\"]+)\"").findAll(xml).map { it.groupValues[1] }.toList()
+
+    @Test fun watchlistShortcutFollowsThePage() {
+        assertEquals(true, GatewayUrl.watchlistShortcutWanted("\"on\""))
+        assertEquals(false, GatewayUrl.watchlistShortcutWanted("\"off\""))
+        // the sign-in page, a blank answer or a failed script leave the shortcut as it is
+        assertNull(GatewayUrl.watchlistShortcutWanted("\"\""))
+        assertNull(GatewayUrl.watchlistShortcutWanted("null"))
+        assertNull(GatewayUrl.watchlistShortcutWanted(null))
+        assertEquals("page_watchlist", GatewayUrl.dynamicShortcutId("watchlist"))
+        assertTrue(GatewayUrl.WATCHLIST_PROBE.contains("data-watchlist"))
     }
 
     @Test fun originOfHandlesPorts() {

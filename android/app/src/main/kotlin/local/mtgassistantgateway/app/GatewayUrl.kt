@@ -86,12 +86,44 @@ object GatewayUrl {
     fun join(origin: String, path: String): String = origin.trimEnd('/') + (if (path.startsWith("/")) path else "/$path")
 
     /**
-     * The launcher shortcuts, the same three as the gateway's web manifest (`/app.webmanifest`):
-     * id to gateway path. They are static (res/xml/shortcuts.xml), so they show on a long press of
-     * the icon even before the app has run; each names its page in [SHORTCUT_PAGE] and the app
-     * opens that path on the saved gateway ([shortcutPath]).
+     * The launcher shortcuts, the same as the gateway's web manifest (`/app.webmanifest`), in its
+     * order: id to gateway path. All but [DYNAMIC_SHORTCUTS] are static (res/xml/shortcuts.xml), so
+     * they show on a long press of the icon even before the app has run; each names its page in
+     * [SHORTCUT_PAGE] and the app opens that path on the saved gateway ([shortcutPath]).
      */
-    val SHORTCUTS: List<Pair<String, String>> = listOf("decks" to "/decks", "scan" to "/scan", "proposals" to "/proposals")
+    val SHORTCUTS: List<Pair<String, String>> = listOf(
+        "decks" to "/decks",
+        "scan" to "/scan",
+        "proposals" to "/proposals",
+        "reports" to "/reports",
+        "watchlist" to "/watchlist",
+    )
+
+    /**
+     * Shortcuts the app adds itself, only while the gateway has the page: Watchlist, when the
+     * gateway's watchlists are on (its pages carry `data-watchlist` on <body>). A static shortcut
+     * cannot ask. Android lists dynamic shortcuts after the static ones, so the order holds.
+     */
+    val DYNAMIC_SHORTCUTS: Set<String> = setOf("watchlist")
+
+    /** A dynamic shortcut's ID: not a bare page name, which earlier versions used and then removed. */
+    fun dynamicShortcutId(page: String): String = "page_$page"
+
+    /**
+     * What a gateway page says about the watchlist shortcut, from [WATCHLIST_PROBE]'s answer as
+     * WebView hands it back (a JSON string): true to show it, false to remove it, null to leave it
+     * (a page that is not a signed-in gateway page, such as the sign-in page, says nothing).
+     */
+    fun watchlistShortcutWanted(probeResult: String?): Boolean? = when (probeResult) {
+        "\"on\"" -> true
+        "\"off\"" -> false
+        else -> null
+    }
+
+    /** Read on each gateway page that finishes loading: "on", "off" or "" (not a signed-in page). */
+    const val WATCHLIST_PROBE =
+        "(function(){var b=document.body;if(!b||!document.querySelector('.tabbar'))return '';" +
+            "return b.hasAttribute('data-watchlist')?'on':'off';})()"
 
     /** The action and extra of a launcher shortcut's intent (res/xml/shortcuts.xml). */
     const val SHORTCUT_ACTION = "local.mtgassistantgateway.app.OPEN_PAGE"
