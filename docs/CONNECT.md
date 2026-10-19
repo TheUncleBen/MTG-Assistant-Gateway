@@ -370,12 +370,13 @@ mode or apps entry). Then ask it to call `whoami`. (Not tested.)
 
 OpenAI says ChatGPT asks for confirmation before write actions by default,
 and may block some risky ones (reported). OpenAI also says ChatGPT renders
-MCP Apps (reported), so a proposal should appear as a card with Approve and
-Reject buttons like in Claude; this hasn't been tried with ChatGPT yet. If
+MCP Apps (reported), and the cards did show in ChatGPT when it was tried
+with this gateway, so a proposal should appear as a card with Approve and Reject
+buttons like in Claude. If
 no card appears and ChatGPT refuses or hides `apply_proposal`, ask for the
 proposal's review link and press Apply there. The other cards (the waiting
-changes, printings and recognised cards) follow the same standard and should
-appear the same way (reported, not yet tried); without them, the assistant's
+changes, printings and recognised cards) follow the same standard and
+appear the same way; without them, the assistant's
 text has everything, and it asks which set you mean instead of showing the
 pictures.
 

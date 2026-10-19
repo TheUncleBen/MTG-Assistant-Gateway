@@ -165,3 +165,28 @@ async def test_a_finish_on_a_side_add_stays_on_the_side_row(stack: Stack) -> Non
         ("side" if "Maybeboard" in e["categories"] else "main"): e["modifications"]["modifier"] for e in sent
     }
     assert by_zone == {"side": "Foil", "main": "Normal"}, sent
+
+
+async def test_a_pinned_side_add_typed_in_lower_case_grows_its_category_row(stack: Stack) -> None:
+    """A category typed "sideboard" is the deck's Sideboard: the add grows that row of the printing
+    instead of making a second one beside it."""
+    h, ark = stack.h, stack.ark
+    ark.add_side_row(42, "Sol Ring", category="Sideboard")
+    side = next(c for c in ark.decks[42]["cards"] if "Sideboard" in (c["categories"] or []))
+    side["card"] = ark.printing(124026)
+    side["modifier"] = "Etched"
+    token = await linked_user(stack)
+    change = {
+        "action": "add",
+        "card_name": "Sol Ring",
+        "zone": "side",
+        "category": "sideboard",
+        "set_code": "sld",
+        "collector_number": "1074",
+    }
+    p = structured(await call(h, token, "propose_deck_changes", {"deck_id": "42", "changes": [change]}))
+    assert p["ok"], p
+    a = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
+    assert a["ok"] and a["result"]["verified"], a
+    (sent,) = (pt["cards"][0] for pt in ark.patches)
+    assert sent["action"] == "modify" and sent["deckRelationId"] == side["id"], sent

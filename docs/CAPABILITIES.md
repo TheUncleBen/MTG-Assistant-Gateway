@@ -127,9 +127,11 @@ proposal card, whose Approve and Reject (with an optional reason) both use its
 one-time code, and the waiting-changes card (`show_waiting_changes`), which
 lists every waiting change, approves or rejects each of the assistant's own,
 and applies several in order after one confirmation with **Apply all**
-(`confirm_waiting`, with the card's one-time code). Once a change approved there
-is applied or under way, the card posts "Approved, go on" as the user's message
-where the app allows it, so the assistant carries on. Since 0.7.33 every other
+(`confirm_waiting`, with the card's one-time code). Once a proposal approved on
+its card, or a batch sent with Apply all, is applied or under way, the card
+posts "Approved, go on" as the user's message where the app allows it, so the
+assistant carries on; a row's own Approve on the waiting-changes card posts
+nothing. Since 0.7.33 every other
 answer (a deck, its statistics, a comparison, a deck list, a scan, the account)
 is text alone.
 An app without cards (Claude Code, older clients) gets the same text results,

@@ -96,8 +96,8 @@ Request bodies are JSON objects of at most 2 MB.
 The printings card an AI app shows in the chat loads a card's printings from `GET /cards/data/{token}`,
 outside `/api/v1` and outside the session: the token (a ten-minute Fernet token the gateway hands to
 the card in a tool result's `_meta`) names the member, the kind (`printings`, the one kind issued
-since 0.7.33) and the card, and the answer is that member's own data as JSON (`Access-Control-Allow-Origin: *`, no cookies,
-`Cache-Control: private, no-store`). An expired, forged or used-up token (twenty fetches) answers 404 `expired`; a member who
+since 0.7.33) and the card, and the answer is that member's own data as JSON
+(`Access-Control-Allow-Origin: *`, no cookies, `Cache-Control: private, no-store`). An expired, forged or used-up token (twenty fetches) answers 404 `expired`; a member who
 was disabled or removed from the group since, 403 `forbidden`; a card Scryfall no longer has, 404
 `not_found`; Scryfall asking the gateway to wait, 429 `rate_limited`; Scryfall unreachable, 503
 `unavailable`. Error messages are the gateway's own fixed words. The route exists only with

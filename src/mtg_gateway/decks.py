@@ -2029,13 +2029,14 @@ def _pinned_entries(
     maybeboard or sideboard (``side``) only a row filed under the add's own category grows, so a
     Maybeboard add never adds to the Sideboard's count. Returns the count still to reach and the
     card's other rows, for the zone's remaining changes."""
-    want_cat = (pin.get("categories") or [None])[0] if side else None
+    # categories compare as Archidekt does, ignoring case: a typed "sideboard" is the Sideboard
+    want_cat = str((pin.get("categories") or [""])[0] or "").casefold() if side else None
     same = [
         c
         for c in existing
         if c.card_id == pin["cardid"]
         and (c.modifier or "Normal") == pin["modifier"]
-        and (want_cat is None or (c.categories or [None])[0] == want_cat)
+        and (want_cat is None or str((c.categories or [""])[0] or "").casefold() == want_cat)
     ]
     if same:
         payload.append(_entry("modify", same[0], same[0].quantity + int(pin["quantity"])))

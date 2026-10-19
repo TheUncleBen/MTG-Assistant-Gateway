@@ -305,7 +305,9 @@ For the exact devices and plans tested, see
   removes the card, the code and the tool.
   The waiting-changes card (`static/cards/waiting-card.html`) works the same
   way: its buttons call `confirm_proposal` and `confirm_waiting`. Once a
-  change approved on either card is applied or under way, the card posts the
+  proposal approved on its card, or a batch sent with Apply all, is applied
+  or under way (a row's own Approve on the waiting-changes card sends
+  nothing), the card posts the
   fixed text "Approved, go on" as a user message where the host allows it
   (`ui/message` when the host declares `message`, else ChatGPT's
   `sendFollowUpMessage`), so the assistant carries on; it carries no data

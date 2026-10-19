@@ -61,8 +61,8 @@ Archidekt by default.
   assistant tool, and that the card in the chat only opens their review page. An assistant can
   propose each of them, and only your own press applies them, on the card or on the review page (a
   deck deletion on the review page only).
-- A plain add of a new card with a finish to the maybeboard or sideboard, next to a plain add of
-  the same card to the deck, could give the deck's row that finish too.
+- Adding the same new card to the deck and to the maybeboard or sideboard in one change, without a
+  picked printing, could give one of the two rows the other's finish (foil or etched).
 
 ## [0.7.32] - 2026-10-19
 

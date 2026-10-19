@@ -613,10 +613,11 @@ photos or a list (`resolve_cards`). A tap on them reaches the assistant as
 plain text, or opens a page; they call no tool. Since 0.7.33 no other tool
 shows a card; the deck, account, comparison, statistics, deck-list and scan
 cards stay registered so that older chats can still draw them. After a
-change approved on the proposal or waiting-changes card is applied or under
-way, that card posts the fixed text "Approved, go on" as the user's message
-where the app allows it (MCP Apps `ui/message`, or ChatGPT's own follow-up
-call); it carries no data. A card's printings are too big for a tool result,
+proposal approved on its card, or a batch sent with Apply all, is applied or
+under way, the card posts the fixed text "Approved, go on" as the user's
+message where the app allows it (MCP Apps `ui/message`, or ChatGPT's own
+follow-up call); it carries no data. A row's own Approve on the
+waiting-changes card posts nothing. A card's printings are too big for a tool result,
 so the printings card gets a signed link to `GET /cards/data/<token>`: the
 token names the member, what it is for and which card, and expires after
 ten minutes (`mtg_fernet_key` signs it). The endpoint serves the member's
@@ -625,9 +626,9 @@ required group,
 without cookies; an expired, forged or used-up token (twenty fetches)
 answers 404 `expired`, a removed member 403 `forbidden`, a card that is
 gone 404 `not_found`, Scryfall asking the gateway to wait 429
-`rate_limited`, an unreachable Scryfall 503 `unavailable`, and each hit is a `card` metric. The first
-answer is kept for the link's lifetime, so a replayed link costs no
-Scryfall call. The token is the URL's
+`rate_limited`, an unreachable Scryfall 503 `unavailable`, and each hit is
+a `card` metric. The first answer is kept for the link's lifetime, so a
+replayed link costs no Scryfall call. The token is the URL's
 last path segment, so a reverse proxy that logs request paths keeps it for
 as long as it keeps its access log; that is acceptable: the link expires
 ten minutes after the tool call, answers twenty fetches at most, and
@@ -638,7 +639,8 @@ against anyone. The gateway's own request log names the route,
 keep it out of the log: NPM's generated `proxy.conf` already carries the
 `proxy_pass` for the host, and the extra block took a gateway offline
 (0.7.4's optional step, withdrawn in 0.7.9). The AI app loads
-each card's pictures from Scryfall directly, never through the gateway. `MTG_APPLY_IN_CHAT=false` removes every card and this endpoint.
+each card's pictures from Scryfall directly, never through the gateway.
+`MTG_APPLY_IN_CHAT=false` removes every card and this endpoint.
 
 ### Approval modes: when the assistant may apply by itself
 
