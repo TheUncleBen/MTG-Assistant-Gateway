@@ -10,15 +10,16 @@ with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 ## [0.7.33] - unreleased
 
 Fewer cards in the chat: only the changes waiting for you and the two pickers still show one. After
-you approve on a card, the assistant can now carry on by itself where the app allows it. A card
-added to the maybeboard or sideboard keeps the printing you picked, Forge can play up to 16 games
-at once on a machine big enough, and the gateway is gentler on Archidekt by default.
+you approve a change on a card, the card can now post a short message so the assistant carries on,
+where the app allows it. A card added to the maybeboard or sideboard keeps the printing you picked,
+Forge can play up to 16 games at once on a machine big enough, and the gateway is gentler on
+Archidekt by default.
 
 ### Upgrade notes
 - From 0.7.32: the stack file and the Compose file name a new Forge image, `2.0.15-mag4`; take
   the new files as the update steps describe ([docs/UPGRADING.md](docs/UPGRADING.md#0733)).
   You need that image only to play more than 4 Forge games at once. With the older image, a
-  higher setting plays 4 at once.
+  higher setting plays at most 4 at once.
 - The gateway now sends at most 30 Archidekt requests a minute by default, down from 40. To keep
   40, set "Archidekt requests per minute" on the Settings page, or `MTG_ARCHIDEKT_MAX_PER_MINUTE=40`
   in your variables.
@@ -30,21 +31,25 @@ at once on a machine big enough, and the gateway is gentler on Archidekt by defa
   with Apply all) and the two pickers (a card's printings, and the cards read from your photos)
   still come as cards in the chat. Your account, your deck list, a deck, a restore point, a deck's
   statistics, a comparison of two decks, a deck search and a scan's results now come as the
-  assistant's own words, which keeps a long chat light. Cards already in older chats still show.
+  assistant's own words, which keeps a long chat light. The gateway still serves the cards already
+  in older chats, so an app that shows them again can still draw them.
 - The assistants' guides ask them to finish their review before proposing: one proposal with every
   change, amended while it is still waiting, instead of several in a row.
-- After you approve a proposal on its card, or press Apply all on the waiting changes card, the
-  card asks the assistant to carry on, where the app lets a card do that. Elsewhere the assistant
-  carries on when you next write, as before. A row's own Approve on the waiting changes card
-  doesn't ask, so approving several rows one by one doesn't start a reply for each.
+- After you approve a proposal on its card, or press Apply all on a card, and the change is applied
+  or under way, the card posts a short message, "Approved, go on", in the chat so the assistant
+  carries on at once, where the app lets a card do that. Elsewhere the assistant carries on when
+  you next write, as before. A row's own Approve on the waiting changes card posts nothing, so
+  approving several rows one by one doesn't start a reply for each.
 - A card added to the maybeboard or sideboard keeps the printing you picked, from Card search, the
-  deck editor or an assistant, and the editor keeps its Foil box there too. Before, the printing
-  was left out and a new row got one Archidekt picked. Undo of a removal on the deck page puts a
-  maybeboard or sideboard row back in its printing too.
+  deck editor or an assistant, and the editor keeps its Foil box there too. Before, Card search and
+  the deck editor left the printing out, so a new row got one Archidekt picked, and an assistant's
+  proposal with one was refused. Undo of a removal on the deck page puts a maybeboard or sideboard
+  row back in its printing too.
 - "Forge games played at once" (`MTG_FORGE_PARALLEL_GAMES`) and `FORGE_MAX_PARALLEL` now go up to
-  16, for a machine with the CPUs and memory for them (about 2 CPUs and 1.2 GB a game). With
-  neither set, Forge still plays as many as its container's CPUs and memory fit, so nothing changes
-  on a small machine.
+  16, for a machine with the CPUs and memory for them (about 2 CPUs and 1.2 GB a game). Left at
+  their defaults, a report still asks for 4 at once and Forge plays as many of those as its
+  container's CPUs and memory fit (1 inside the default limits), so nothing changes until you raise
+  both.
 - "Archidekt requests per minute" defaults to 30 instead of 40. The Settings page still allows 1 to
   40.
 
@@ -52,8 +57,12 @@ at once on a machine big enough, and the gateway is gentler on Archidekt by defa
 - On the waiting changes card, a row applied with its own Approve said "The deck on Archidekt
   matches this change." whatever it was, such as a new folder or a collection change. It now says
   what the change did.
-- The member guide said deleting a deck and creating a folder have no assistant tool. An assistant
-  can propose both, and only your own press applies them.
+- The member guide said deleting a deck, creating a folder, likes, comments and follows have no
+  assistant tool, and that the card in the chat only opens their review page. An assistant can
+  propose each of them, and only your own press applies them, on the card or on the review page (a
+  deck deletion on the review page only).
+- A plain add of a new card with a finish to the maybeboard or sideboard, next to a plain add of
+  the same card to the deck, could give the deck's row that finish too.
 
 ## [0.7.32] - 2026-10-19
 

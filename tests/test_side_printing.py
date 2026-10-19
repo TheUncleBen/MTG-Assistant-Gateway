@@ -117,3 +117,51 @@ async def test_a_pinned_side_add_beside_another_side_printing_is_its_own_row(sta
     assert a["ok"] and a["result"]["verified"], a
     rows = sorted((r["card"]["id"], r["quantity"]) for r in _side_rows(ark, "Sol Ring"))
     assert rows == sorted([(old_id, 1), (124026, 1)]), rows
+
+
+async def test_a_pinned_maybeboard_add_never_grows_the_sideboard_row(stack: Stack) -> None:
+    """The same printing under Sideboard stays as it is: the Maybeboard add is its own row, so the
+    sideboard's count (which the format checks read) does not rise."""
+    h, ark = stack.h, stack.ark
+    ark.add_side_row(42, "Sol Ring", category="Sideboard")
+    side = next(c for c in ark.decks[42]["cards"] if "Sideboard" in (c["categories"] or []))
+    side["card"] = ark.printing(124026)
+    side["modifier"] = "Etched"
+    ark.decks[42]["categories"].append({"name": "Maybeboard", "isPremier": False, "includedInDeck": False})
+    token = await linked_user(stack)
+    change = {
+        "action": "add",
+        "card_name": "Sol Ring",
+        "zone": "side",
+        "category": "Maybeboard",
+        "set_code": "sld",
+        "collector_number": "1074",
+    }
+    p = structured(await call(h, token, "propose_deck_changes", {"deck_id": "42", "changes": [change]}))
+    assert p["ok"], p
+    a = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
+    assert a["ok"] and a["result"]["verified"], a
+    (sent,) = (pt["cards"][0] for pt in ark.patches)
+    assert sent["action"] == "add" and sent["categories"] == ["Maybeboard"], sent
+    assert side["quantity"] == 1
+
+
+async def test_a_finish_on_a_side_add_stays_on_the_side_row(stack: Stack) -> None:
+    """A foil maybeboard add and a plain deck add of the same new card: only the maybeboard row is
+    foil (the finishes were looked up under one name for both zones, so the deck row came out foil
+    too)."""
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    changes = [
+        {"action": "add", "card_name": "Swamp", "zone": "side", "foil": True},
+        {"action": "add", "card_name": "Swamp"},
+    ]
+    p = structured(await call(h, token, "propose_deck_changes", {"deck_id": "42", "changes": changes}))
+    assert p["ok"], p
+    a = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
+    assert a["ok"], a
+    sent = [pt["cards"][0] for pt in ark.patches]
+    by_zone = {
+        ("side" if "Maybeboard" in e["categories"] else "main"): e["modifications"]["modifier"] for e in sent
+    }
+    assert by_zone == {"side": "Foil", "main": "Normal"}, sent

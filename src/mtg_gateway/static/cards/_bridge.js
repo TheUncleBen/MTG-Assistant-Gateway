@@ -118,7 +118,8 @@ var Bridge = (function () {
   // where the host says a card may post messages (MCP Apps ui/message), or through ChatGPT's own
   // follow-up call; anywhere else nothing is sent, and the assistant hears of the press with the
   // person's next message, as before. Call it after tellModel has settled: the host hands the
-  // assistant that context along with the message.
+  // assistant that context along with the message. One rule on every card: it is sent once, as
+  // soon as the change is applied or under way (a large change still applying), never on Reject.
   var NUDGE = "Approved, go on";
   function nudge() {
     if (hostCaps.message) {

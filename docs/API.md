@@ -93,15 +93,14 @@ Request bodies are JSON objects of at most 2 MB.
 | `GET /api/v1/prefs` | Browser session only: the choices kept on the member's account for the pages (views, card size, stack orders, deck stats toggles, dismissed tips) as `prefs`. A bearer token gets `403 browser_required` |
 | `POST /api/v1/prefs` | Browser session only (CSRF header): `{"set": {name: value or null}}` saves each choice (null forgets it); `{"copy": {...}}` saves only the names the account doesn't have yet. Answers `saved` and `refused` |
 
-The cards an AI app shows in the chat load their bulky data from `GET /cards/data/{token}`, outside
-`/api/v1` and outside the session: the token (a ten-minute Fernet token the gateway hands to the
-card in a tool result's `_meta`) names the member, the kind (`deck`, `snapshot`, `printings`) and the
-id, and the answer is that member's own data as JSON (`Access-Control-Allow-Origin: *`, no cookies,
+The printings card an AI app shows in the chat loads a card's printings from `GET /cards/data/{token}`,
+outside `/api/v1` and outside the session: the token (a ten-minute Fernet token the gateway hands to
+the card in a tool result's `_meta`) names the member, the kind (`printings`, the one kind issued
+since 0.7.33) and the card, and the answer is that member's own data as JSON (`Access-Control-Allow-Origin: *`, no cookies,
 `Cache-Control: private, no-store`). An expired, forged or used-up token (twenty fetches) answers 404 `expired`; a member who
-was disabled or removed from the group since, 403 `forbidden`; a deck, snapshot or card that no longer
-exists or is not that member's, 404 `not_found`; the member's Archidekt budget used up, 429
-`rate_limited`; Archidekt or Scryfall unreachable, 503 `unavailable` (503 `not_linked` when the link
-needs an Archidekt account that was unlinked since). Error messages are the gateway's own fixed words. The route exists only with
+was disabled or removed from the group since, 403 `forbidden`; a card Scryfall no longer has, 404
+`not_found`; Scryfall asking the gateway to wait, 429 `rate_limited`; Scryfall unreachable, 503
+`unavailable`. Error messages are the gateway's own fixed words. The route exists only with
 `MTG_APPLY_IN_CHAT` on. It is not a public API: the token is the only credential and it cannot be
 requested.
 

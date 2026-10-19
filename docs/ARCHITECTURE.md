@@ -304,13 +304,19 @@ For the exact devices and plans tested, see
   assistant does not in a host that follows the standard. `MTG_APPLY_IN_CHAT=false`
   removes the card, the code and the tool.
   The waiting-changes card (`static/cards/waiting-card.html`) works the same
-  way: its buttons call `confirm_proposal` and `confirm_waiting`.
-  The other cards (`src/mtg_gateway/cards.py`, HTML in `static/cards/`:
-  printings, picker, deck, deck list, compare, stats, scan, account) only
-  show and relay: a tap sends the
+  way: its buttons call `confirm_proposal` and `confirm_waiting`. Once a
+  change approved on either card is applied or under way, the card posts the
+  fixed text "Approved, go on" as a user message where the host allows it
+  (`ui/message` when the host declares `message`, else ChatGPT's
+  `sendFollowUpMessage`), so the assistant carries on; it carries no data
+  and nothing in it comes from the page.
+  The two pickers (`src/mtg_gateway/cards.py`, HTML in `static/cards/`:
+  printings, picker) only show and relay: a tap sends the
   pick to the assistant as text through the host (`ui/update-model-context`),
-  and nothing on them calls a tool. A card that needs more data than the tool
-  result carries (a deck's rows, a card's printings) gets a link to
+  and nothing on them calls a tool. The deck, deck list, compare, stats,
+  scan and account cards stay registered for older chats, but since 0.7.33
+  no tool names them. A card's printings are more data than the tool result
+  carries, so the printings card gets a link to
   `GET /cards/data/{token}`: a Fernet token under `mtg_fernet_key` naming the
   member, the kind and the id, valid ten minutes, handed to the card in
   `_meta` and never to the model. The endpoint serves JSON to any origin

@@ -514,7 +514,10 @@ def server_instructions(public_url: str) -> str:
         "steps: propose_deck_changes or propose_new_deck, then the user confirms (on the proposal card "
         "your app may show with the result, or on the review page), then it is applied. Finish your "
         "review before proposing: one proposal with every change, and amend_proposal to change one "
-        "that is still waiting. "
+        "that is still waiting. When the user presses Approve or Apply all on a card, you are told the "
+        'outcome, and where the app allows it the card then posts "Approved, go on" as the user\'s '
+        "message: carry on from that outcome, and call get_proposal only when it is unclear (still "
+        "applying). "
         "Any deck can be ingested with get_deck (Archidekt id or URL), parse_decklist (pasted text) or "
         "parse_deck_export (CSV); each returns decklist_text for "
         "the simulation tools. deck_stats answers "

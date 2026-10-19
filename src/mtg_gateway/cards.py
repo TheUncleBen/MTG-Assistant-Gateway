@@ -66,7 +66,7 @@ WAITING_CARD_URI = URI_BASE + "waiting-card"  # show_waiting_changes (0.7.29)
 CARD_META_KEY = "mtg/card"  # tool-result _meta key a card reads its link or data from
 LINK_TTL = 600  # seconds a signed link stays valid
 LINK_PATH = "/cards/data/"
-SCRYFALL_API = "https://api.scryfall.com"  # the deck card reads rules text from Scryfall itself
+SCRYFALL_API = "https://api.scryfall.com"  # the deck card (older chats) reads rules text from Scryfall
 STATIC = Path(__file__).parent / "static" / "cards"
 LINK_KINDS = ("printings",)
 

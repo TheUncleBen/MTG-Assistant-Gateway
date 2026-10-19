@@ -257,10 +257,11 @@ Screenshots of the browser pages are in [docs/screenshots/](docs/screenshots/).
   phones, ChatGPT as reported): the printings of a card as pictures to tap,
   the cards read from photos or a list to keep or drop, the proposal with
   Approve and Reject, and the waiting changes with Apply all. Other answers
-  come as plain text, so a long chat stays light. A pick on a card goes back
-  to the assistant as plain text; it never changes anything by itself. Bulky
-  data reaches the card through a ten-minute signed link, not through the
-  model.
+  come as plain text, so a long chat stays light. A pick on the printings or
+  recognised-cards card goes back to the assistant as plain text and never
+  changes anything by itself; only Approve, Reject and Apply all act, each
+  with the card's one-time code. Bulky data reaches the card through a
+  ten-minute signed link, not through the model.
 - **Card scanning.** The `/scan` page reads physical cards with your phone
   camera. Text recognition runs on the phone, no third-party app needed.
   The scanned list goes into your collection, into one of your decks or

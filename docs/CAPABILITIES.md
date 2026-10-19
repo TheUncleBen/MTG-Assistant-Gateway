@@ -119,20 +119,19 @@ deleting a deck asks for its name.
 
 The assistant's path has **cards in the chat** wherever the person has to
 pick or press (MCP Apps: Claude on the web, desktop and phones; ChatGPT as
-reported): the proposal (Approve, Reject with a reason), the printings of a
-card, the cards read from photos or a list, a deck by category, the account's
-setup. Every pick on a card reaches the assistant as plain text, and the
+reported): the proposal (Approve, Reject with a reason), the waiting changes
+(Apply all), the printings of a card and the cards read from photos or a list.
+Every pick on a card reaches the assistant as plain text, and the
 assistant then proposes as usual; the only cards that act by themselves are the
 proposal card, whose Approve and Reject (with an optional reason) both use its
 one-time code, and the waiting-changes card (`show_waiting_changes`), which
 lists every waiting change, approves or rejects each of the assistant's own,
 and applies several in order after one confirmation with **Apply all**
-(`confirm_waiting`, with the card's one-time code). Display-only cards draw what the tool already answered, where a
-picture reads faster than the text: the deck read (pictures and rules text), a
-comparison (`compare_decks`), a deck's statistics (`deck_stats`: curve,
-colours, price, legality, bracket estimate), a list of decks (`list_my_decks`,
-`search_decks`) and a scan session (`get_scan_session`); they change nothing and
-add nothing to what the assistant reads.
+(`confirm_waiting`, with the card's one-time code). Once a change approved there
+is applied or under way, the card posts "Approved, go on" as the user's message
+where the app allows it, so the assistant carries on. Since 0.7.33 every other
+answer (a deck, its statistics, a comparison, a deck list, a scan, the account)
+is text alone.
 An app without cards (Claude Code, older clients) gets the same text results,
 and a form question for ambiguous names.
 

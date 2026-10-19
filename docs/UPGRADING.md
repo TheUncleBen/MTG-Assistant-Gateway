@@ -80,7 +80,7 @@ games at once (the older `2.0.15-mag3` plays at most 4).
 1. Take the new stack file or Compose file as the update steps above describe. If your variables
    set `FORGE_TAG`, Forge stays on that version: change it to `2.0.15-mag4`, or remove it to follow
    the stack file. With the older image the gateway still works, and a "Forge games played at
-   once" above 4 plays 4 at once.
+   once" above 4 plays at most 4 at once.
 2. If you turned on the optional `mtg_authentik_api_token` lines in the old file, turn them on
    again in the new one, as for [0.7.32](#0732) step 3.
 3. The gateway now sends at most 30 Archidekt requests a minute by default instead of 40, which

@@ -243,15 +243,15 @@ with a tick per row and suggestions for names it was unsure about (press
 the assistant as plain text and it carries on from there, with a proposal if
 anything is to change; neither changes anything by itself. The pictures come
 from Scryfall; the printings come from the gateway through a link that is
-yours alone and expires after ten minutes.
+yours alone and expires after ten minutes. Both cards are tested in a browser
+test against the cards themselves, not yet in a live Claude session; Claude
+Code shows the text instead and asks about unsure names with a form.
 
-Since 0.7.33 nothing else shows a card: a deck, its statistics, a comparison
-of two decks, a list of decks, a scan and your account's setup come as the
-assistant's own words. A chat with many cards grew slow in ChatGPT, so only
-the cards you act on stay. All of this is tested
-in a browser test against the cards themselves, not yet in a live Claude
-session; Claude Code shows the text instead and asks about unsure names with
-a form.
+Since 0.7.33 no other answer shows a card: a deck, its statistics, a
+comparison of two decks, a list of decks, a scan and your account's setup
+come as the assistant's own words. A chat with many cards grew slow in
+ChatGPT when it was tried with this gateway, so only the cards you act on
+stay.
 
 **Your approval mode.** On the gateway's Account page you choose how much
 your assistant may do without asking: *Manual*, shown as "Ask me every
@@ -373,9 +373,8 @@ and may block some risky ones (reported). OpenAI also says ChatGPT renders
 MCP Apps (reported), so a proposal should appear as a card with Approve and
 Reject buttons like in Claude; this hasn't been tried with ChatGPT yet. If
 no card appears and ChatGPT refuses or hides `apply_proposal`, ask for the
-proposal's review link and press Apply there. The other cards (printings,
-recognised cards, a deck, the account, a comparison, statistics, a deck list,
-a scan) follow the same standard and should
+proposal's review link and press Apply there. The other cards (the waiting
+changes, printings and recognised cards) follow the same standard and should
 appear the same way (reported, not yet tried); without them, the assistant's
 text has everything, and it asks which set you mean instead of showing the
 pictures.
