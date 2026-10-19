@@ -278,11 +278,14 @@ def test_a_changed_answer_whose_read_finds_nothing_leaves_the_review_page() -> N
     _run(test)
 
 
-def test_an_expired_withdrawn_card_is_not_read_again() -> None:
+def test_an_expired_replaced_card_is_not_read_again() -> None:
+    """A replaced change comes back only before it expires, so an expired one is not read again."""
+
     def test(page) -> None:
-        old = {**V1, "state": "withdrawn", "expires_at": int(time.time()) - 60}
+        gone = int(time.time()) - 60
+        old = {**V1, "state": "replaced", "replace_note": "Replaced by #4.", "expires_at": gone}
         card = _open(page, [old], every_ms=100)
-        card.locator("#state.withdrawn").wait_for(timeout=5_000)
+        card.locator("#state.replaced").wait_for(timeout=5_000)
         page.wait_for_timeout(1_000)
         assert len(_calls(page, "get_proposal")) == 1  # the read when drawn only
 
