@@ -534,6 +534,9 @@ PHONE_WIDGETS_CSS = """
 }
 /* a label in a narrow table cell wraps (large text) instead of running out of its column */
 .gb-dash .ui-table .ui-lbl{white-space:normal;height:auto;min-height:24px;line-height:1.2}
+/* a widget's line with a long unbroken name (a deck's) wraps inside the widget: a phone page that
+   scrolled sideways widened the layout viewport, and the tab bar's More sheet ran past the edge */
+.gb-dash .wdg .det > *{min-width:0;max-width:100%;overflow-wrap:anywhere}
 """
 
 REPORTS_PAGE_CSS = (

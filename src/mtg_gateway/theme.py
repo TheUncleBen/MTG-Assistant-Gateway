@@ -762,6 +762,15 @@ details.raw{margin:.5rem 0 0} details.raw summary{cursor:pointer;color:var(--tex
    leaves, and a long MTG_SERVER_NAME shortens the brand's word (an ellipsis). */
 .topbar .left{flex:1 1 0}
 .topbar nav.site{flex:none}
+/* More ▾ on a computer narrower than 85.7em of the bar's 14 px text (1200 px at the normal size;
+   a container query, so large text folds the links too): Proposals and the links after it go
+   under it */
+.topbar nav.site .navmore{display:none}
+.topbar nav.site .navmore > summary.on{color:var(--orange)}
+.topbar nav.site .navmore > summary span{font-size:.8em}
+@container topbar (width < 85.7em){
+  body:not(.app) .topbar nav.site a.fold{display:none}
+  body:not(.app) .topbar nav.site .navmore{display:block} }
 .topbar .right{flex:0 1 auto}
 .brand{min-width:0}
 /* Where it has them (600 px and wider, not the app): the brand, the links and the account side
@@ -918,6 +927,7 @@ footer.site .legal{color:#ababab;max-width:60rem}
 # query cannot see a body class, so the rules are emitted per condition). {b} prefixes selectors
 # on <body>.
 _MOBILE_RULES = """
+  body{b} .topbar nav.site .navmore{display:none !important}
   body{b} .topbar .wrap{padding:0 1rem;gap:.5rem;padding-left:max(1rem,env(safe-area-inset-left));
     padding-right:max(1rem,env(safe-area-inset-right))}
   body{b} .topbar nav.site a:not(.keep){display:none}
@@ -956,6 +966,7 @@ _MOBILE_RULES = """
 # More; on a short screen it scrolls. The body is padded by the rail's width so every page
 # re-centres in the remaining space.
 _RAIL_RULES = """
+  body{b} .topbar nav.site .navmore{display:none !important}
   body{b} .topbar nav.site a:not(.keep){display:none}
   body{b}.has-tabbar{padding-left:calc(80px + env(safe-area-inset-left))}
   body{b} .topbar .wrap{padding:0 1.25rem;padding-right:max(1.25rem,env(safe-area-inset-right))}
@@ -1661,7 +1672,12 @@ NAV_LINKS = [
     ("/scan", "Scan", "scan"),
     ("/proposals", "Proposals", "proposals"),
     ("/history", "History", "history"),
+    ("/reports", "Reports", "report"),
+    ("/watchlist", "Watchlist", "stats"),
 ]
+# On a computer the links from Proposals on fold into "More ▾" while the bar is narrower than
+# 85.7em (1200 px at the normal text size): the More menu lists the phone's More sheet.
+NAV_FOLD_FROM = "/proposals"
 # The tabs, as Material's navigation bar (3 to 5 destinations) has them: on a compact screen Home,
 # Decks, Scan, Collection and More, with Search as the icon in the top bar. More opens a sheet with
 # the remaining pages (Proposals, History, Reports, Watchlist, Guide, Account, Admin) so nothing
@@ -1773,13 +1789,15 @@ def render(
     cur = current or ""
     if signed_in:
         csrf_in = f"<input type='hidden' name='csrf' value='{html.escape(csrf or '')}'>"
-        links = list(NAV_LINKS)
+        links = [x for x in NAV_LINKS if WATCHLISTS or x[0] != "/watchlist"]
         if admin:
             links.append(("/admin", "Admin", "settings"))
+        fold_at = [x[0] for x in links].index(NAV_FOLD_FROM)
 
-        def a(href: str, label: str, keep: bool = False) -> str:
+        def a(href: str, label: str, keep: bool = False, fold: bool = False) -> str:
             aria = " aria-current='page'" if cur == href else ""
-            return f"<a href='{href}'{aria}{' class=keep' if keep else ''}>{label}</a>"
+            cls = "keep" if keep else "fold" if fold else ""
+            return f"<a href='{href}'{aria}{f' class={cls}' if cls else ''}>{label}</a>"
 
         theme_items = "".join(
             f"<button name='theme' value='{t}'{' class=on' if theme == t else ''} "
@@ -1839,10 +1857,22 @@ def render(
             f"<button data-busy-text='Signing out…'>{icon('x')}Sign out</button></form>"
             "</div></details>"
         )
+        more_links = [m for m in MORE_LINKS if WATCHLISTS or m[0] != "/watchlist"] + (
+            [("/admin", "Admin", "settings")] if admin else []
+        )
+        more_open = cur in {href for href, _l, _i in more_links}
         nav = (
             "<nav class='site' aria-label='Site'>"
-            + "".join(a(href, label) for href, label, _ic in links)
-            + "</nav>"
+            + "".join(a(href, label, fold=i >= fold_at) for i, (href, label, _ic) in enumerate(links))
+            # the folded links (and Guide and Account) under More ▾ on a narrower computer screen
+            + "<details class='dd navmore'><summary"
+            + (" class='on'" if more_open else "")
+            + ">More<span aria-hidden='true'>▾</span></summary><div class='menu'>"
+            + "".join(
+                f"<a href='{href}'{' aria-current=page' if cur == href else ''}>{icon(ic)}{label}</a>"
+                for href, label, ic in more_links
+            )
+            + "</div></details></nav>"
         )
         search_btn = (
             f"<a class='icon-btn searchbtn' href='/search' aria-label='Search cards and decks'"
@@ -1859,10 +1889,6 @@ def render(
             "autocomplete='off' enterkeyhint='search'></span></form>"
         )
         right = f"{search_form}<nav class='user' aria-label='Account'>{search_btn}{account_menu}</nav>"
-        more_links = [m for m in MORE_LINKS if WATCHLISTS or m[0] != "/watchlist"] + (
-            [("/admin", "Admin", "settings")] if admin else []
-        )
-        more_open = cur in {href for href, _l, _i in more_links}
         # The More pages are tabs on the rail too (railonly: hidden on the phone bar, which has More)
         rail_more = [(href, label, ic, "railonly") for href, label, ic in more_links]
         tabbar = (
