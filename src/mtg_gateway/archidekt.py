@@ -1264,7 +1264,8 @@ class ArchidektClient:
                 raise ArchidektError(
                     "rate_limited",
                     "Archidekt asked the gateway to slow down; try again later",
-                    retry_after=asked,
+                    # what Archidekt asked for, or longer when this 429 opened the breaker
+                    retry_after=max(asked, self.pacer.pause_left()),
                 )
             if resp.status_code == 401:
                 self.pacer.record(True)

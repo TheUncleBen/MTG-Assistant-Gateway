@@ -53,6 +53,7 @@ from .archidekt import (
     ArchidektError,
     Deck,
     DeckList,
+    Pacer,
     Patience,
     QuillDoc,
     _owned_by,
@@ -762,10 +763,14 @@ REJECTED_BY = ("assistant", "card", "review_page", "browser", "api", "disconnect
 
 
 def archidekt_wait(exc: BaseException) -> int | None:
-    """The wait an ArchidektError knows (Archidekt's Retry-After, or what is left of the gateway's
-    pause after one) in whole seconds, at least 1, for the busy page's Retry-After header."""
+    """How long the gateway is pausing its Archidekt requests after an ArchidektError (Archidekt's
+    Retry-After, capped as the pacer caps it, or what is left of that pause) in whole seconds, at
+    least 1, for the busy page's Retry-After header. A Retry-After of 0 (or a date already past)
+    pauses nothing, so it is 1, never the busy page's default."""
     asked = getattr(exc, "retry_after", None)
-    return max(1, math.ceil(asked)) if asked else None
+    if asked is None:
+        return None
+    return max(1, math.ceil(min(asked, Pacer.MAX_RETRY_AFTER)))
 
 
 class DeckError(Exception):

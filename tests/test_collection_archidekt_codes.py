@@ -110,3 +110,20 @@ async def test_import_and_export_round_trip_archidekt_codes(stack: Stack) -> Non
         assert [c["language"] for c in forest] == [1]  # English
     finally:
         await b.aclose()
+
+
+def test_a_raw_archidekt_wait_reaches_the_busy_page_in_whole_seconds() -> None:
+    """Archidekt's wait on a collection call is a float of seconds: it becomes whole seconds, at
+    least 1, as for the deck pages, never dropped for the busy page's 60 s default."""
+    from mtg_gateway.archidekt import ArchidektError
+    from mtg_gateway.busy import busy_plan
+    from mtg_gateway.collection import _wrap
+
+    err = _wrap(ArchidektError("rate_limited", "slow down", retry_after=44.2))
+    assert err.retry_after == 45 and busy_plan(err).retry_after == 45
+    assert _wrap(ArchidektError("rate_limited", "slow down", retry_after=0.3)).retry_after == 1
+    assert _wrap(ArchidektError("rate_limited", "slow down")).retry_after is None
+    # a longer wait than the gateway pauses for (Pacer.MAX_RETRY_AFTER) says the gateway's pause
+    assert _wrap(ArchidektError("rate_limited", "slow down", retry_after=300.0)).retry_after == 120
+    # a Retry-After of 0 (or a date already past) pauses nothing: 1, not the busy page's 60 s default
+    assert _wrap(ArchidektError("rate_limited", "slow down", retry_after=0.0)).retry_after == 1

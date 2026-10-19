@@ -1267,6 +1267,28 @@ async def test_the_busy_page_passes_on_the_wait_archidekt_asked_for(stack: Stack
         await b.aclose()
 
 
+async def test_the_busy_page_header_matches_the_gateways_real_pause(stack: Stack) -> None:
+    """The header says how long the gateway is pausing its Archidekt requests: a 429 that opens
+    the breaker (the fifth failure in a row) pauses everything for 60 s, longer than the 10 s
+    Archidekt asked for; a Retry-After of 0 pauses nothing, so the header says 1, not the 60 s
+    default."""
+    b = await linked_browser(stack)
+    pacer = stack.h.app.state.gateway.decks.client.pacer
+    try:
+        pacer._failures = 4
+        stack.ark.inject = [(429, "10")]
+        r = await b.http.get("/decks/42", headers={**NAV, "Cache-Control": "max-age=0"})
+        assert r.status_code == 429 and 59 <= int(r.headers["retry-after"]) <= 60, r.headers
+        pacer._retry_until = pacer._failures = pacer._open_until = 0
+        stack.ark.inject = [(429, "0")] * 6
+        r = await b.http.get("/decks/42", headers={**NAV, "Cache-Control": "max-age=0"})
+        assert r.status_code == 429 and r.headers["retry-after"] == "1", r.headers
+    finally:
+        stack.ark.inject = []
+        pacer._retry_until = pacer._failures = pacer._open_until = 0
+        await b.aclose()
+
+
 async def test_a_missing_deck_is_still_not_found(stack: Stack) -> None:
     """The shared page is only for a busy or unreachable Archidekt; a deck that is not there
     keeps its 404 and its own words."""

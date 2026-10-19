@@ -114,7 +114,9 @@ def _wrap(exc: Exception) -> CollectionError:
             return CollectionError("auth", str(exc))
         if kind == "contract":
             return CollectionError("unavailable", "Archidekt answered in an unexpected way; try again")
-        return CollectionError(kind, str(exc), retry_after=getattr(exc, "retry_after", None))
+        # whole seconds, at least 1: a raw ArchidektError carries a float, which the busy page would
+        # otherwise drop for its 60 s default
+        return CollectionError(kind, str(exc), retry_after=archidekt_wait(exc))
     raise exc
 
 
