@@ -451,3 +451,51 @@ async def test_a_follow_the_gateway_could_not_check_says_so(stack: Stack, monkey
     p = structured(await call(h, token, "propose_deck_social", {"deck_id": "43", "action": "follow_owner"}))
     assert p["rows"][0]["text"].endswith("(the gateway could not check whether you already follow them)"), p
     assert ark.follows.get("alice", set()) == set()
+
+
+def _long_following(stack: Stack, monkeypatch, *, amy_on: int | None) -> list[int]:
+    """A following list of one person a page, going on past every cap, with amy (78) on page
+    ``amy_on``; the pages read are recorded."""
+    client = stack.h.app.state.gateway.social.client
+    read: list[int] = []
+
+    async def pages(token: str, user_id: str, page: int = 1) -> dict[str, Any]:
+        read.append(page)
+        row = {"id": 78, "username": "amy"} if page == amy_on else {"id": 9000 + page, "username": f"p{page}"}
+        return {"count": 999, "next": f"page={page + 1}", "results": [row]}
+
+    monkeypatch.setattr(client, "following", pages)
+    return read
+
+
+async def test_a_followed_person_past_the_first_pages_is_found_by_both_lookups(
+    stack: Stack, monkeypatch
+) -> None:
+    """Someone on page 8 of the member's following list can be added as a collaborator, and a follow
+    proposal for them says they are already followed: both read on until they are found, no further."""
+    h = stack.h
+    token = await linked_user(stack)
+    read = _long_following(stack, monkeypatch, amy_on=8)
+    p = structured(
+        await call(h, token, "propose_collaborator", {"deck_id": "42", "action": "add", "username": "amy"})
+    )
+    assert p.get("ok") is not False and p["rows"][0]["text"].startswith("Let amy edit"), p
+    assert read == list(range(1, 9)), read  # stopped at the page that has amy
+    stack.ark.private.discard(43)  # amy's deck: its owner is the one followed
+    p = structured(await call(h, token, "propose_deck_social", {"deck_id": "43", "action": "follow_owner"}))
+    assert p["rows"][0]["text"] == "Follow amy on Archidekt (already the case; applying changes nothing)", p
+    assert read == list(range(1, 9)), read  # the remembered pages answered it
+
+
+async def test_a_lookup_stops_at_its_cap_and_says_so(stack: Stack, monkeypatch) -> None:
+    from mtg_gateway.social import FOLLOWING_LOOKUP_PAGES
+
+    h = stack.h
+    token = await linked_user(stack)
+    read = _long_following(stack, monkeypatch, amy_on=None)
+    p = structured(
+        await call(h, token, "propose_collaborator", {"deck_id": "42", "action": "add", "username": "amy"})
+    )
+    assert p["ok"] is False and p["error"] == "not_found", p
+    assert f"(the gateway reads only the first {FOLLOWING_LOOKUP_PAGES} pages of that list)" in p["message"]
+    assert read == list(range(1, FOLLOWING_LOOKUP_PAGES + 1)), read

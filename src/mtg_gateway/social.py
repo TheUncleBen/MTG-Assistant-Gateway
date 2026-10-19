@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import re
 import time
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from starlette.requests import Request
@@ -34,7 +35,12 @@ if TYPE_CHECKING:
 
 MAX_COMMENT = 2000
 MAX_THREAD_DEPTH = 6
-FOLLOWING_PAGES = 5  # how far into the member's following list the follow state is looked for
+FOLLOWING_PAGES = 5  # how far into the member's following list a deck page or a settings page reads
+# How far a lookup of one person reads (a follow or collaborator proposal): it reads on from where
+# the remembered list stopped and stops at the page that has them. Each page is one paced Archidekt
+# request, so 20 pages is at most about 20 seconds and half of one minute's request budget, once
+# per FOLLOWING_TTL; the deck pages, read far more often, keep to FOLLOWING_PAGES.
+FOLLOWING_LOOKUP_PAGES = 20
 FOLLOWING_TTL = 120.0  # seconds the following list is remembered after a read
 FRESH_GAP = 15.0  # seconds between forced re-reads of the following list (a collaborator lookup)
 _STATUS = {
@@ -151,8 +157,8 @@ class SocialService:
         self.decks = state.decks
         self.client = state.decks.client
         self._following: dict[str, tuple[float, dict[int, str]]] = {}
-        # whether the last read stopped at FOLLOWING_PAGES with more pages left
-        self._following_cut: dict[str, bool] = {}
+        # the next page of the remembered following list to read, None when it was read to the end
+        self._following_next: dict[str, int | None] = {}
         self._following_fresh: dict[str, float] = {}  # sub -> when a fresh read was last forced
         # (sub, deck id) -> (when, the deck's comment thread root) from that member's last read, so a
         # vote or a comment write straight after the thread loaded skips reading the whole deck
@@ -231,8 +237,44 @@ class SocialService:
         return set(await self.following_names(sub))
 
     async def following_names(self, sub: str, *, fresh: bool = False) -> dict[int, str]:
-        """The people the member follows on Archidekt: user id -> username (cached briefly;
-        ``fresh`` reads Archidekt again)."""
+        """The people the member follows on Archidekt: user id -> username, the first
+        FOLLOWING_PAGES pages (cached briefly; ``fresh`` reads Archidekt again)."""
+        return (await self._read_following(sub, pages=FOLLOWING_PAGES, fresh=fresh))[0]
+
+    async def find_followed(self, sub: str, username: str, *, fresh: bool = False) -> tuple[int, str] | None:
+        """(user id, username) of the person the member follows by that name, None when they are not
+        in the list as far as FOLLOWING_LOOKUP_PAGES (``following_cut`` says whether it went on).
+        A name not found in a remembered list is looked for again in a fresh read, at most once
+        per FRESH_GAP, in case they were followed on Archidekt since."""
+        want = username.casefold()
+
+        def hit(users: dict[int, str]) -> tuple[int, str] | None:
+            return next(((i, n) for i, n in users.items() if n.casefold() == want), None)
+
+        users, remembered = await self._read_following(
+            sub, pages=FOLLOWING_LOOKUP_PAGES, fresh=fresh, until=lambda u: hit(u) is not None
+        )
+        if hit(users) is None and remembered and not fresh:
+            users, _ = await self._read_following(
+                sub, pages=FOLLOWING_LOOKUP_PAGES, fresh=True, until=lambda u: hit(u) is not None
+            )
+        return hit(users)
+
+    def following_cut(self, sub: str) -> bool:
+        """Whether the last read of the member's following list stopped with more pages left."""
+        return self._following_next.get(sub) is not None
+
+    async def _read_following(
+        self,
+        sub: str,
+        *,
+        pages: int,
+        fresh: bool = False,
+        until: Callable[[dict[int, str]], bool] | None = None,
+    ) -> tuple[dict[int, str], bool]:
+        """The member's following list read as far as ``pages``, or until ``until`` says what is
+        wanted is in it, carrying on from the remembered part (FOLLOWING_TTL) unless ``fresh``.
+        Also says whether the read started from a remembered list (which may be out of date)."""
         uid, _name = self._me(sub)
         hit = self._following.get(sub)
         now = time.monotonic()
@@ -240,22 +282,21 @@ class SocialService:
             fresh = False  # one forced read per FRESH_GAP: a run of typos does not re-read every page
         if fresh:
             self._following_fresh[sub] = now
-        if hit and hit[0] > now and not fresh:
-            return hit[1]
-        users: dict[int, str] = {}
-        page, cut = 1, False
-        while page <= FOLLOWING_PAGES:
+        remembered = bool(hit and hit[0] > now and not fresh)
+        if remembered and hit:
+            expires, users, page = hit[0], dict(hit[1]), self._following_next.get(sub)
+        else:
+            expires, users, page = now + FOLLOWING_TTL, {}, 1
+        while page is not None and page <= pages and not (until and until(users)):
             body = await self.decks._call(sub, lambda t, page=page: self.client.following(t, uid, page))
             for row in body["results"]:
                 if isinstance(row, dict) and _int(row.get("id")) is not None:
                     users[int(row["id"])] = str(row.get("username") or "")
-            if not body.get("next"):
-                break
-            cut = page == FOLLOWING_PAGES  # more pages, but no more reads (gentle on Archidekt)
-            page += 1
-        self._following[sub] = (time.monotonic() + FOLLOWING_TTL, users)
-        self._following_cut[sub] = cut
-        return users
+            page = page + 1 if body.get("next") else None
+        # pages read on from a remembered list keep its expiry: nothing is held longer than the TTL
+        self._following[sub] = (expires, users)
+        self._following_next[sub] = page
+        return users, remembered
 
     # -- deck collaborators (Archidekt's "editors": people who may change the deck) -----------------
 
@@ -312,12 +353,18 @@ class SocialService:
             raise DeckError("verify_mismatch", "Archidekt accepted the request but the deck still lists them")
         return {"removed": True, "verified": True}
 
-    async def follow_state(self, sub: str, user_id: int) -> dict[str, Any]:
+    async def follow_state(self, sub: str, user_id: int, *, lookup: bool = False) -> dict[str, Any]:
+        """Whether the member follows ``user_id``. ``lookup`` (a follow proposal) reads as far as
+        FOLLOWING_LOOKUP_PAGES, as a collaborator lookup does, so the two never disagree; the deck
+        page's button reads FOLLOWING_PAGES."""
         uid, _name = self._me(sub)
         if str(user_id) == uid:
             return {"self": True, "following": False}
-        following = user_id in await self.following(sub)
-        if not following and self._following_cut.get(sub):
+        users, _ = await self._read_following(
+            sub, pages=FOLLOWING_LOOKUP_PAGES if lookup else FOLLOWING_PAGES, until=lambda u: user_id in u
+        )
+        following = user_id in users
+        if not following and self.following_cut(sub):
             # The list was cut short and they are not in the part read, so whether
             # the member follows them is not known; the page offers both Follow and Unfollow
             return {"self": False, "following": False, "unknown": True}
@@ -330,6 +377,7 @@ class SocialService:
             raise DeckError("invalid", refusals.FOLLOW_SELF)
         await self.decks._call(sub, lambda t: self.client.follow_user(t, user_id, on=on))
         self._following.pop(sub, None)
+        self._following_next.pop(sub, None)
         self.state.db.audit("user_followed", sub=sub, detail={"user_id": user_id, "on": on})
         return {"following": on}
 
