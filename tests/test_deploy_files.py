@@ -356,3 +356,24 @@ def test_upgrading_lists_the_range_of_every_setting_the_0732_stack_newly_passes(
             with pytest.raises(ConfigError, match=name):
                 load_settings()
         monkeypatch.delenv(name)
+
+
+def test_a_setting_that_is_not_a_number_names_seconds_only_for_a_time(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A non-number in a decimal setting stops the gateway with a message that says what is
+    wanted: a number of seconds for the pacing gaps, a plain number for a ratio or score."""
+    from mtg_gateway.config import ConfigError, load_settings
+
+    from .test_admin import _env
+
+    _env(tmp_path, monkeypatch)
+    monkeypatch.setenv("MTG_SCAN_GLARE_RATIO", "lots")
+    with pytest.raises(ConfigError) as err:
+        load_settings()
+    assert str(err.value) == "MTG_SCAN_GLARE_RATIO must be a number"
+    monkeypatch.delenv("MTG_SCAN_GLARE_RATIO")
+    monkeypatch.setenv("MTG_SCRYFALL_LOOKUP_INTERVAL", "soon")
+    with pytest.raises(ConfigError) as err:
+        load_settings()
+    assert str(err.value) == "MTG_SCRYFALL_LOOKUP_INTERVAL must be a number of seconds"

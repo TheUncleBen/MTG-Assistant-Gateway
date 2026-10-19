@@ -100,11 +100,13 @@ said to add a line under `environment:` in the stack file for these.
    can't be read.
 4. **Check the values of those 21 settings in your variables before you deploy.** The 0.7.31
    stack file didn't pass them, so a value there had no effect. Now it reaches the gateway, which
-   checks it when it starts: a value outside its range stops the gateway from starting. Its log
-   then shows one line such as `configuration error: MTG_FORGE_PARALLEL_GAMES must be between 1
-   and 4`, and Portainer keeps restarting the service. To fix it, change the value to one in
-   range, or remove it from your variables to manage the setting on the Settings page, then
-   update the stack again. The allowed values:
+   checks it when it starts: a value outside its range, or one that isn't a number (or isn't a
+   whole number where the range is in whole numbers), stops the gateway from starting. Each start
+   then logs one line naming the first such setting, such as `configuration error:
+   MTG_FORGE_PARALLEL_GAMES must be between 1 and 4`, and the gateway keeps restarting (Swarm
+   restarts the service; Compose restarts the container). To fix it, change the value to one in
+   range, or remove it from your variables to manage the setting on the Settings page, then deploy
+   the stack again. The allowed values:
 
    | Variable | Allowed |
    |---|---|
@@ -130,9 +132,9 @@ said to add a line under `environment:` in the stack file for these.
    | `MTG_SCAN_ART_MAX_GALLERIES` | 1 to 100000 |
    | `MTG_SCAN_ART_GALLERY_IDLE_DAYS` | 1 to 3650 |
 
-   Whole numbers only where the range is in whole numbers. For `true` or `false`, the gateway reads
-   `1`, `true` or `yes` (any case) as true and anything else as false, so a mistyped value there
-   doesn't stop it: it turns the setting off.
+   For `true` or `false`, the gateway reads `1`, `true` or `yes` (any case) as true and any other
+   value as false (an empty one keeps the default), so a mistyped value there doesn't stop it: it
+   turns the setting off.
 
 ### 0.7.30
 
