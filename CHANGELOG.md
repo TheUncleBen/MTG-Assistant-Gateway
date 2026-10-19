@@ -7,6 +7,40 @@ Notable changes for people who run or use the gateway. The format follows
 with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 (`release/1.2.3`); `latest` is always the newest.
 
+## [0.7.34] - unreleased
+
+Approval cards in the chat keep up with their proposal, and the assistants are told to check a
+deck edit before they make a card for it.
+
+### Upgrade notes
+- From 0.7.33: no extra steps. Update as usual ([docs/UPGRADING.md](docs/UPGRADING.md)).
+
+### Added
+- `check_deck_changes`: an assistant can check a planned deck edit before it proposes it, with no
+  card in the chat, nothing saved and no request to Archidekt (a card name may be looked up on
+  Scryfall). It finds what a proposal would be refused for that can be found without the deck, an
+  exact repeat of a change already waiting, and the assistant's own waiting change on that deck
+  that it should amend instead of making a new one. Anything that needs the deck itself, such as a
+  card that isn't in it, is still found only when the proposal is made.
+
+### Changed
+- A proposal card already in the chat follows its proposal. It reads the proposal again when it
+  comes on screen, a few times while it stays there, and when you press Approve. When the
+  assistant changed the proposal, the card shows the new version with a short line saying so.
+  Where the app passes the card the new version's approval code, its Approve approves that
+  version; otherwise the card offers the review page. When the change was updated after the card
+  last read it and you press Approve, the card shows the new version and asks you to press again.
+  When the assistant withdrew it, the card says so. A change replaced by another comes back when
+  its replacement is rejected or withdrawn, and its card then shows it waiting again.
+- The assistants' guides and the deck tools' descriptions tell them that, in an app that shows
+  cards, every proposal, amend or combine puts a card in the chat, a refused one too, and to check
+  a deck edit first.
+
+### Fixed
+- A proposal card drawn before the proposal was amended answered every press with "There is a
+  newer version of this change than this card shows", so only a newer card or the review page
+  could approve it. It now shows the new version.
+
 ## [0.7.33] - unreleased
 
 Fewer cards in the chat: only the changes waiting for you and the two pickers still show one. After
