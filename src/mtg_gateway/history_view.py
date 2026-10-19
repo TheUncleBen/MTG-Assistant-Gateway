@@ -457,7 +457,7 @@ def backup_copies_html(
     if copies is None:
         return (
             "<section class='card backups' id='backups'><h2>Backup copies on Archidekt</h2>"
-            "<p class='muted'>Your Archidekt decks are still being read; reload in a moment to see the "
+            "<p class='muted'>Your Archidekt decks are still being read; reload the page to see the "
             "backup copies.</p></section>"
         )
     if not copies:

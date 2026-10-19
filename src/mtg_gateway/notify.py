@@ -67,7 +67,8 @@ ACCOUNT_OK = {
 ACCOUNT_ERR = {
     "notify_test_failed": "The test could not be sent. Check that notifications are on; if they are, the "
     "notification server did not accept it (the operator can see why in the gateway's log).",
-    "notify_test_wait": "A test was just sent. Wait a minute before sending another.",
+    "notify_test_wait": "A test was just sent. The gateway sends one test a minute, so wait before sending "
+    "another.",
     "summary_invalid": "Choose Off, Every day or Every week.",
     "summary_off": "Summaries are sent through notifications, and this gateway has no notification server.",
 }
@@ -717,9 +718,9 @@ def add_stream_route(state: AppState, server: Any) -> None:
             if outcome is Membership.REVOKED:
                 return _refuse(401, "unknown_key", "This phone's notification key is no longer valid.")
             if outcome is Membership.UNAVAILABLE:
-                return _refuse(503, "unavailable", "The sign-in service isn't answering. Try again shortly.")
+                return _refuse(503, "unavailable", "The sign-in service isn't answering. Try again later.")
         if n.full():  # the app tries again later, like any refusal but these three
-            return _refuse(503, "busy", "The gateway has too many phones connected. Try again shortly.")
+            return _refuse(503, "busy", "The gateway has too many phones connected. Try again later.")
         if not n.claim(key):
             return _refuse(429, "too_many", "This key already has too many connections open.")
         since = request.query_params.get("since", "")
@@ -730,7 +731,7 @@ def add_stream_route(state: AppState, server: Any) -> None:
             raise
         if upstream is None:
             n.release(key)
-            return _refuse(503, "unavailable", "The notification server isn't answering. Try again shortly.")
+            return _refuse(503, "unavailable", "The notification server isn't answering. Try again later.")
         finished = False
 
         async def finish() -> None:

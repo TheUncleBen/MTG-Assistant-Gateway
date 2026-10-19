@@ -10,8 +10,8 @@ with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 ## [0.7.33] - unreleased
 
 Fewer cards in the chat: only the changes waiting for you and the two pickers still show one. After
-you approve a change on a card, the card can now post a short message so the assistant carries on,
-where the app allows it. A card added to the maybeboard or sideboard keeps the printing you picked,
+you approve a proposal on its card or press Apply all, the card can now post a short message so
+the assistant carries on, where the app allows it. A card added to the maybeboard or sideboard keeps the printing you picked,
 Forge can play up to 16 games at once on a machine big enough, and the gateway is gentler on
 Archidekt by default.
 
@@ -49,9 +49,15 @@ Archidekt by default.
   16, for a machine with the CPUs and memory for them (about 2 CPUs and 1.2 GB a game). Left at
   their defaults, a report still asks for 4 at once and Forge plays as many of those as its
   container's CPUs and memory fit (1 inside the default limits), so nothing changes until you raise
-  both.
+  "Forge games played at once" above 4 and give Forge room for more games (`FORGE_MAX_PARALLEL`, or
+  its CPU and memory limits).
 - "Archidekt requests per minute" defaults to 30 instead of 40. The Settings page still allows 1 to
   40.
+- Busy, limit and error messages no longer promise a time, such as "try again in a minute" or "in
+  a few minutes"; they say to try again later, because the gateway can't know when Archidekt,
+  Scryfall or the sign-in service will have room again. Where the gateway does know the wait, such
+  as the seconds Archidekt or Scryfall asks for, or the minute between two notification tests, the
+  message still names it.
 
 ### Fixed
 - On the waiting changes card, a row applied with its own Approve said "The deck on Archidekt
@@ -60,7 +66,10 @@ Archidekt by default.
 - The member guide said deleting a deck, creating a folder, likes, comments and follows have no
   assistant tool, and that the card in the chat only opens their review page. An assistant can
   propose each of them, and only your own press applies them, on the card or on the review page (a
-  deck deletion on the review page only).
+  deck deletion, and an edit of a comment that has formatting, on the review page only).
+- In the deck editor, adding a card that already has a row there, with a picked printing or Foil
+  ticked, only grew that row's count, while the status line named the picked printing. It now says
+  the picked printing or foil was not used.
 - Adding the same new card to the deck and to the maybeboard or sideboard in one change, without a
   picked printing, could give one of the two rows the other's finish (foil or etched).
 

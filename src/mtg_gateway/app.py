@@ -593,10 +593,10 @@ class MembershipMiddleware:
         outcomes = [await checker.check(sub) for sub in sorted(self._subjects(scope))]
         if Membership.UNAVAILABLE in outcomes:
             request = Request(scope)
-            message = "The sign-in service can't be reached to confirm your access. Try again shortly."
+            message = "The sign-in service can't be reached to confirm your access. Try again later."
             if _wants_page(request):
                 resp: Response = render(
-                    "Try again shortly",
+                    "Try again later",
                     f"<div class='card'><p>{message}</p></div>",
                     site=self.state.settings.server_name,
                     status=503,
@@ -1104,7 +1104,7 @@ def _friendly_errors(app: Starlette, state: AppState) -> None:
             {
                 "ok": False,
                 "error": "server_error",
-                "message": "The gateway hit an unexpected problem; it was logged. Try again in a moment.",
+                "message": "The gateway hit an unexpected problem; it was logged. Try again later.",
             },
             500,
         )

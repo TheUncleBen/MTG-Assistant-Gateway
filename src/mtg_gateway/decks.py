@@ -2440,7 +2440,7 @@ class DeckService:
             return None
         return (
             f"Your account has used its {self.archidekt_budget.per_window} Archidekt actions for "
-            f"the last {ARCHIDEKT_BUDGET_WINDOW // 60} minutes; wait a few minutes and try again."
+            f"the last {ARCHIDEKT_BUDGET_WINDOW // 60} minutes; try again later."
         )
 
     def _sync_spend(self, sub: str) -> None:
@@ -7288,20 +7288,20 @@ def _rate_limited_note(
         return _partial_note(progress, clone=True)
     if progress.get("sent_entries") or progress.get("deck_id"):
         note = _partial_note(progress, collection=collection)
-        return f"{note} Try the rest again in a few minutes with a new proposal."
+        return f"{note} Try the rest again later with a new proposal."
     if progress.get("deck_written"):
         where = "your collection" if collection else "the deck"
         return (
             f"Part of this change had already reached Archidekt, so check {where}. Try the rest again "
-            "in a few minutes with a new proposal."
+            "later with a new proposal."
         )
     kept = f" {progress['backup_note']}" if progress.get("backup_note") else ""
     if pending:
         return (
             f"Nothing was changed on Archidekt.{kept} The proposal is still pending, so it can be "
-            "approved again in a few minutes."
+            "approved again later."
         )
-    return f"Nothing was changed on Archidekt.{kept} Try again in a few minutes with a new proposal."
+    return f"Nothing was changed on Archidekt.{kept} Try again later with a new proposal."
 
 
 def next_tag_position(positions: list[Any]) -> str:

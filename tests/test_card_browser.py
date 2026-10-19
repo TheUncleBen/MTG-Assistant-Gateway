@@ -523,9 +523,9 @@ def test_a_press_on_a_closed_proposal_shows_its_state_and_drops_the_buttons() ->
         ),
         (
             "Archidekt is busy and asked the gateway to wait longer than an apply may wait, so the apply "
-            "stopped. Nothing was changed on Archidekt. Try again in a few minutes with a new proposal.",
+            "stopped. Nothing was changed on Archidekt. Try again later with a new proposal.",
             "Archidekt is busy and asked the gateway to wait longer than an apply may wait, so the apply "
-            "stopped. Nothing was changed on Archidekt. Try again in a few minutes with a new proposal. "
+            "stopped. Nothing was changed on Archidekt. Try again later with a new proposal. "
             "The review page shows what happened.",
         ),
     ],
@@ -567,7 +567,7 @@ def test_a_failed_approve_shows_failed_with_one_message_and_no_buttons(message: 
 STOPPED = (
     "Archidekt is busy and asked the gateway to wait longer than an apply may wait, so the apply "
     "stopped. Nothing was changed on Archidekt. The proposal is still pending, so it can be approved "
-    "again in a few minutes."
+    "again later."
 )
 
 

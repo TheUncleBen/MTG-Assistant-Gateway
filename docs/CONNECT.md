@@ -366,7 +366,7 @@ Who can install it:
 
 Start a new chat on the web, open the tools menu next to the message box,
 and pick the MTG Assistant Gateway app (in developer mode it may be under a developer
-mode or apps entry). Then ask it to call `whoami`. (Not tested.)
+mode or apps entry). Then ask it to call `whoami`.
 
 OpenAI says ChatGPT asks for confirmation before write actions by default,
 and may block some risky ones (reported). OpenAI also says ChatGPT renders
@@ -432,7 +432,7 @@ assistant read and edit your own decks, link Archidekt once in a browser at
 | The sign-in page (for example Authentik) says you don't have access to the application | The owner hasn't added your account to the gateway's group yet. Ask them. |
 | "Your account is not in the group that may use this service" | Same thing, reported by the gateway. Ask the owner. |
 | "This sign-in link has expired or was already used" | Go back to the AI app and press Connect again. Sign-in links last ten minutes, including time spent on the confirmation page. |
-| Claude shows an error right after you picked **Use Claude's published identity**, before any gateway page appears | The gateway couldn't fetch or accept Claude's published description, or the owner has limited which ones it accepts. Wait a minute (a failed fetch isn't retried sooner) and try again, or remove the connector and add it with **Register automatically**. Tell the owner either way. |
+| Claude shows an error right after you picked **Use Claude's published identity**, before any gateway page appears | The gateway couldn't fetch or accept Claude's published description, or the owner has limited which ones it accepts. Try again later (a failed fetch isn't retried right away), or remove the connector and add it with **Register automatically**. Tell the owner either way. |
 | "This sign-in was started in a different browser" | The AI app opened sign-in in one browser and you finished it in another. Try again and keep the whole sign-in in one browser window. On a phone this can happen when a link opens in a different browser app. |
 | The connector worked before but now wants you to sign in again | Normal. By default the gateway asks you to sign in again about once a week (the owner can change that), and also after about 30 days of not using it, and if the owner revoked your access. Reconnect it in the app's connector settings. |
 

@@ -60,7 +60,7 @@ code and a human `message`:
 | `verify_mismatch` | 502 | Archidekt accepted the change, but reading it back shows it doesn't match; the message names what differs and, for a change to an existing deck, the snapshot kept from before it |
 | `contract` | 502 | Archidekt refused the request with an unexpected error, or answered with something the gateway can't read |
 | `unavailable` | 503 | Archidekt or Mystic Forge is unreachable |
-| `idp_unavailable` | 503 | the identity provider can't be reached to confirm the caller is still a member; nothing was revoked, try again shortly (`Retry-After: 30`) |
+| `idp_unavailable` | 503 | the identity provider can't be reached to confirm the caller is still a member; nothing was revoked, try again later (the answer carries `Retry-After: 30`) |
 
 Request bodies are JSON objects of at most 2 MB.
 
@@ -100,7 +100,7 @@ since 0.7.33) and the card, and the answer is that member's own data as JSON
 (`Access-Control-Allow-Origin: *`, no cookies, `Cache-Control: private, no-store`). An expired, forged or used-up token (twenty fetches) answers 404 `expired`; a member who
 was disabled or removed from the group since, 403 `forbidden`; a card Scryfall no longer has, 404
 `not_found`; Scryfall asking the gateway to wait, 429 `rate_limited`; Scryfall unreachable, 503
-`unavailable`. Error messages are the gateway's own fixed words. The route exists only with
+`unavailable`; the member's other card lookups still running, 503 `busy`. Error messages are the gateway's own fixed words. The route exists only with
 `MTG_APPLY_IN_CHAT` on. It is not a public API: the token is the only credential and it cannot be
 requested.
 

@@ -358,7 +358,7 @@ FIXED_MESSAGES = {
     "not_found": "The card behind this link no longer exists.",
     "invalid": "The card behind this link no longer exists.",
     "not_linked": "No Archidekt account is linked; link one on the Account page.",
-    "rate_limited": "Scryfall asked the gateway to wait; ask for the data again.",
+    "rate_limited": "Scryfall asked the gateway to wait. Ask your assistant for the printings again.",
     "unavailable": "The data behind this link could not be loaded right now.",
 }
 

@@ -626,8 +626,8 @@ required group,
 without cookies; an expired, forged or used-up token (twenty fetches)
 answers 404 `expired`, a removed member 403 `forbidden`, a card that is
 gone 404 `not_found`, Scryfall asking the gateway to wait 429
-`rate_limited`, an unreachable Scryfall 503 `unavailable`, and each hit is
-a `card` metric. The first answer is kept for the link's lifetime, so a
+`rate_limited`, an unreachable Scryfall 503 `unavailable`, the member's
+other card lookups still running 503 `busy`, and each hit is a `card` metric. The first answer is kept for the link's lifetime, so a
 replayed link costs no Scryfall call. The token is the URL's
 last path segment, so a reverse proxy that logs request paths keeps it for
 as long as it keeps its access log; that is acceptable: the link expires
@@ -834,7 +834,7 @@ Archidekt busy for everyone:
   minutes, refilled evenly. Deck reads, proposals, applies, links and
   research tools (goldfish, precon) given an Archidekt deck id or link all
   count. Past it the member gets
-  `rate_limited` and waits a few minutes;
+  `rate_limited` until enough of the allowance has refilled;
 - at most five failed Archidekt link attempts (wrong username or password)
   in 15 minutes, so the Account page can't be used to guess Archidekt
   passwords from the gateway's address. The attempted username isn't

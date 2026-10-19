@@ -355,8 +355,7 @@ async def test_a_copy_whose_post_meets_a_429_is_made_once(stack: Stack) -> None:
 # -- Archidekt's 429s during an apply and the backup copy ---------------------
 # A stop that changed nothing leaves the proposal pending
 NOTHING_CHANGED = (
-    "Nothing was changed on Archidekt. The proposal is still pending, so it can be approved again in a "
-    "few minutes."
+    "Nothing was changed on Archidekt. The proposal is still pending, so it can be approved again later."
 )
 
 
@@ -426,7 +425,7 @@ async def test_an_apply_that_runs_out_of_patience_with_nothing_sent_drops_its_ba
     page = await _review_page(h, p["proposal_id"])
     assert (
         f"{ark_mod.PATIENCE_SPENT} Nothing was changed on Archidekt. The proposal is still pending, so "
-        "you can apply it again in a few minutes."
+        "you can apply it again later."
     ) in page
     assert "paused after repeated failures" not in page and "new proposal" not in page
 
@@ -445,7 +444,7 @@ async def test_an_apply_that_runs_out_of_patience_partway_keeps_its_backup(
     result = row["result"]
     assert row["state"] == "failed" and result["error"] == "rate_limited", result
     assert result["detail"].startswith(ark_mod.PATIENCE_SPENT + " 1 of 3 deck row changes had already")
-    assert result["detail"].endswith("Try the rest again in a few minutes with a new proposal.")
+    assert result["detail"].endswith("Try the rest again later with a new proposal.")
     assert result.get("backup_deck_id") and not result.get("backup_deleted") and ark.deleted == []
     page = await _review_page(h, p["proposal_id"])
     assert "1 of 3 changes reached Archidekt first, so the deck is partly changed. Check the deck." in page
@@ -575,8 +574,8 @@ def _every_tag_post_429(ark: FakeArchidekt) -> None:
 
 
 PARTLY = (
-    "Part of this change had already reached Archidekt, so check the deck. Try the rest again in a "
-    "few minutes with a new proposal."
+    "Part of this change had already reached Archidekt, so check the deck. Try the rest again "
+    "later with a new proposal."
 )
 
 
@@ -624,7 +623,7 @@ async def test_a_stop_after_the_new_deck_was_made_says_so_to_the_assistant(
     assert row["state"] == "failed" and result["error"] == "rate_limited" and result["deck_id"], result
     made = (
         f"The new deck {result['deck_id']} was created on Archidekt, but no cards were added. Try the "
-        "rest again in a few minutes with a new proposal."
+        "rest again later with a new proposal."
     )
     assert result["detail"] == f"{ark_mod.PATIENCE_SPENT} {made}", result["detail"]
     got = structured(await call(h, token, "get_proposal", {"proposal_id": p["proposal_id"]}))
@@ -681,7 +680,7 @@ async def test_a_details_stop_after_other_details_were_written_still_says_they_w
 LATER = (
     "Nothing was changed on Archidekt. The unused backup copy will be deleted from the backup folder "
     "by itself once Archidekt allows it. The proposal is still pending, so it can be approved again "
-    "in a few minutes."
+    "later."
 )
 
 
@@ -728,7 +727,7 @@ async def test_a_stop_whose_backup_copy_could_not_be_deleted_queues_its_delete(
     assert (
         f"{ark_mod.PATIENCE_SPENT} Nothing was changed on Archidekt. The unused backup copy will be "
         "deleted from the backup folder by itself once Archidekt allows it. The proposal is still "
-        "pending, so you can apply it again in a few minutes."
+        "pending, so you can apply it again later."
     ) in page
 
 

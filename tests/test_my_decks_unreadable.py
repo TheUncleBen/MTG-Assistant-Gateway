@@ -17,10 +17,9 @@ from .test_decks_and_proxy import call, linked_user, structured
 
 stack_options = stack_with(COLLECTION)
 
-NONE_READ = html.escape("Your deck list couldn't be read from Archidekt. Try again in a moment.")
+NONE_READ = html.escape("Your deck list couldn't be read from Archidekt. Try again.")
 SOME_READ = html.escape(
-    "Part of your deck list couldn't be read from Archidekt, so some decks may be missing here. "
-    "Try again in a moment."
+    "Part of your deck list couldn't be read from Archidekt, so some decks may be missing here. Try again."
 )
 # Try again asks for a real re-read (a partial list is otherwise kept for a minute)
 TRY_AGAIN = "<a class='btn btn-primary' href='/decks?reread=1'>Try again</a>"

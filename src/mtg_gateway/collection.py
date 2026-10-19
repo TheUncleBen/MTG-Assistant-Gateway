@@ -1359,7 +1359,7 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
             "unreadable": "That text is not a collection CSV or a card list the gateway can read.",
             "expired": "This form expired. Reload the page and try again.",
             "invalid": "That was not a valid request.",
-            "lookup": "Archidekt is not answering right now. Try again in a moment.",
+            "lookup": "Archidekt is not answering right now. Try again later.",
             "link": "Link your Archidekt account on the Account page first.",
             "writes": refusals.WRITES_OFF,
         }

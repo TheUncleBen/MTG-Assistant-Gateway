@@ -1260,7 +1260,7 @@ class ArchidektClient:
                 self.pacer.record(False, asked, breaker=patient.get() is None)
                 raise ArchidektError(
                     "rate_limited",
-                    "Archidekt asked us to slow down; try again in a minute",
+                    "Archidekt asked us to slow down; try again later",
                     retry_after=asked,
                 )
             if resp.status_code == 401:
