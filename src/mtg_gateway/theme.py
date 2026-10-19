@@ -1104,6 +1104,9 @@ UI_CSS = """
 main.wrap.ui-wide{max-width:1200px}
 .ui-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:.25rem 1rem;margin:0 0 .25rem}
 .ui-head h1{margin:0}
+/* enlarged text on a phone: the heading shrinks with the screen so a short word stays whole
+   (overflow-wrap still breaks a word too long for any screen) */
+@media (max-width:599.98px){.ui-head h1{font-size:min(2rem,14vw)}}
 .ui-sub{color:var(--text-muted);margin:.1rem 0 1rem;font-size:.93rem}
 
 /* §4 labels: a word, a colour and an icon */
@@ -1370,7 +1373,9 @@ ul.ui-chg{padding:0;border:1px solid var(--card-border);border-radius:var(--radi
   .wdg.wide-sm{grid-column:1 / -1}
 }
 @media (max-width:599.98px){
-  .ui-widgets{grid-template-columns:1fr 1fr;gap:.5rem}
+  /* two a row, or one a row when enlarged text leaves a half too narrow for 8.5rem */
+  .ui-widgets{grid-template-columns:repeat(auto-fit,minmax(min(100%,max(8.5rem,calc(50% - .25rem))),1fr));
+    gap:.5rem}
   .wdg{padding:.6rem .7rem}
   .wdg .big{font-size:1.5rem}
   .wdg .det{font-size:.82rem}

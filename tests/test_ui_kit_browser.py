@@ -470,3 +470,50 @@ def test_dates_follow_the_rule_in_the_viewers_time_zone(kit: KitServer) -> None:
         noscript.close()
         ctx.close()
         browser.close()
+
+
+PHONE_FIT_JS = """
+() => {
+  const i = getComputedStyle(document.querySelector('.ui-tools .search input'));
+  const h = document.querySelector('.ui-head h1');
+  const r = document.createRange(); r.selectNodeContents(h);
+  const lines = new Set([...r.getClientRects()].map(x => Math.round(x.top))).size;
+  const grid = document.querySelector('.ui-widgets');
+  const cols = getComputedStyle(grid).gridTemplateColumns.split(' ').length;
+  const clipped = [...grid.querySelectorAll('.wdg .lab, .wdg .big, .wdg .det')]
+    .filter(e => e.getClientRects().length)
+    .filter(e => [...e.getClientRects()].some(x => x.right > e.closest('.wdg').getBoundingClientRect().right + .5)
+      || e.scrollWidth > e.clientWidth + 1)
+    .map(e => e.textContent.trim().slice(0, 24));
+  return {border: ['Top', 'Right', 'Bottom', 'Left'].map(s => i['border' + s + 'Width']),
+    radius: [i.borderTopLeftRadius, i.borderTopRightRadius, i.borderBottomRightRadius, i.borderBottomLeftRadius],
+    theme: getComputedStyle(document.documentElement).getPropertyValue('--radius').trim(),
+    lines, cols, clipped};
+}
+"""
+
+
+def test_phone_search_box_heading_and_widgets_at_200_percent_text(kit: KitServer) -> None:
+    """Below 600 px the toolbar's search box keeps its full border and the theme's corners; at
+    200% text on a 344-390 px phone the page title stays whole on one line and the widgets go one
+    a row instead of clipping their labels; at normal text they stay two a row."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _exe()
+    sid = kit.sign_in()
+    with sync_playwright() as p:
+        browser = _browser(p, exe)
+        for w in (344, 360, 390):
+            ctx = _ctx(browser, kit, sid, w, 800, True, "light")
+            page = ctx.new_page()
+            page.goto(kit.base + "/ui-kit", wait_until="networkidle")
+            got = page.evaluate(PHONE_FIT_JS)
+            assert got["border"] == ["1px"] * 4, (w, got)
+            assert got["radius"] == [got["theme"]] * 4 and got["theme"] not in ("", "0px"), (w, got)
+            assert got["lines"] == 1 and got["cols"] == 2, (w, got)
+            page.evaluate("document.documentElement.style.fontSize = '32px'")
+            got = page.evaluate(PHONE_FIT_JS)
+            assert got["lines"] == 1, (w, "200%", got)
+            assert got["cols"] == 1 and not got["clipped"], (w, "200%", got)
+            ctx.close()
+        browser.close()
