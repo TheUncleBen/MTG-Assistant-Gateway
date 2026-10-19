@@ -257,3 +257,39 @@ async def test_a_deck_in_the_backup_folder_listed_by_folder_id_only_stays_out(st
     finally:
         ark._listing_row = real_row
         await b.aclose()
+
+
+async def test_a_backup_folder_deck_stays_out_of_the_list_as_last_read(stack: Stack) -> None:  # noqa: F811
+    """While Archidekt can't be asked, My decks shows the list as last read: a deck in the backup
+    folder that the listing gave by folder id only stays out of it, found in the folder tree as
+    last read (no read of Archidekt is made for it)."""
+    b = await linked(stack)
+    ark = stack.ark
+    real_row = ark._listing_row
+    decks = stack.h.app.state.gateway.decks
+    cards = parse_export(FIXTURE.read_text(encoding="utf-8"))
+    ark.decks[77] = to_deck_json(cards[:10], deck_id=77, name="Old list", owner="alice")
+    ark.users["alice"]["decks"].append(77)
+    ark.folders["alice"] = [{"id": 5001, "name": decks.settings.archidekt_backup_folder, "private": True}]
+    ark.deck_folder[77] = 5001
+
+    def row(d: dict) -> dict:
+        out = real_row(d)
+        out.pop("parentFolderName")
+        return out
+
+    ark._listing_row = row
+    try:
+        r = await b.http.get("/decks")
+        assert r.status_code == 200 and "Old list" not in r.text, r.text
+        decks.deck_lists.drop("user-1")
+        decks.folder_trees.drop("user-1")
+        ark.inject = [(429, "60")]
+        r = await b.http.get("/decks")
+        assert r.status_code == 200 and "this is how it was" in r.text, r.text
+        assert "Old list" not in r.text
+        held = decks.last_deck_list("user-1")
+        assert held is not None and [d["name"] for d in held] == ["Sample Commander Deck"], held
+    finally:
+        ark._listing_row = real_row
+        await b.aclose()

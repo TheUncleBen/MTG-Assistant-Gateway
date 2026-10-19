@@ -2753,14 +2753,15 @@ class DeckService:
         rows = await self.deck_lists.get(sub, fetch, wait=wait, prefer_fresh=prefer_fresh)
         if rows is None:
             return None
-        return self._marked(sub, rows)
+        return self._marked(sub, rows, await self._backup_folder_ids(sub, rows, wait=wait))
 
-    def _marked(self, sub: str, rows: list[dict[str, Any]], last_read: float | None = None) -> DeckList:
-        """``rows`` as fresh dicts, the backup copies a snapshot here records marked (see
-        ``_deck_rows``)."""
+    def _marked(
+        self, sub: str, rows: list[dict[str, Any]], backup_ids: set[int], last_read: float | None = None
+    ) -> DeckList:
+        """``rows`` as fresh dicts, the backup copies marked: those in a folder of ``backup_ids``
+        and those a snapshot here records (see ``_deck_rows``)."""
         unreadable = getattr(rows, "unreadable", 0)
         known = self.db.backup_copies(sub)
-        backup_ids = await self._backup_folder_ids(sub, rows, wait=wait)
         out = []
         for d in rows:
             d = dict(d)
@@ -2784,7 +2785,13 @@ class DeckService:
         held = self.deck_lists.last(sub, DECK_LIST_LAST)
         if held is None:
             return None
-        rows = self._marked(sub, held[1], last_read=held[0])
+        tree = self.folder_trees.last(sub, DECK_LIST_LAST)  # never a read: Archidekt is busy
+        backup_ids = (
+            {f["id"] for f in self._flatten_folders(tree[1]).get("folders", []) if f.get("backup")}
+            if tree is not None and tree[1] is not None and self.settings.archidekt_backup_folder
+            else set()
+        )
+        rows = self._marked(sub, held[1], backup_ids, last_read=held[0])
         return DeckList(
             [d for d in rows if not d.get("backup")], complete=False, unreadable=0, last_read=held[0]
         )
