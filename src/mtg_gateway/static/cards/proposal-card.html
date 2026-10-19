@@ -109,6 +109,11 @@ button.danger:disabled{color:var(--red)}
   var MAX_IMAGES = 24;   // Scryfall thumbnails at most, over the whole card
   var COLLAPSE_AT = 8;   // a longer list shows a summary and this many rows until "Show all"
   var ARM_DELAY_MS = 700; // buttons stay disabled this long after the card is drawn
+  // While a waiting proposal's card is on screen it reads the proposal again this often, so it
+  // follows an amend, a withdraw or a press elsewhere; at most REFRESH_MAX timed reads each time it
+  // comes on screen (Approve reads it once more anyway).
+  var REFRESH_EVERY_MS = 30000, REFRESH_MAX = 6;
+  var APPLYING_POLL_MS = 5000; // how often a running apply's progress is read
   var proposal = null, approval = null, armed = false, busy = false, heldCode = null;
   var applySet = null, confirming = false;
   var request = B.request, reportSize = B.reportSize, el = B.el, $ = B.$, setStatus = B.setStatus, tellModel = B.tellModel, nudge = B.nudge;
@@ -325,6 +330,7 @@ button.danger:disabled{color:var(--red)}
     renderAlso();
     if (sc.state === "applying") { setStatus(progressText(sc), ""); pollApplying(sc.proposal_id); }
     else setStatus(closedText(sc), "");
+    keepFresh();
   }
 
   // What happened to a proposal that is no longer pending, and who closed it, in one plain line.
@@ -355,6 +361,7 @@ button.danger:disabled{color:var(--red)}
     if (p.state === "failed") return "Applying this failed" + at + ". The review page shows what happened. Ask the assistant for a new proposal if you still want this change.";
     if (p.state === "applied") return "Already applied" + at + ". " + (p.applied_text || "The deck on Archidekt matches this proposal.");
     if (p.state === "replaced" && p.replace_note) return p.replace_note + " Nothing was sent to Archidekt from this one.";
+    if (p.state === "withdrawn") return "The assistant withdrew this change, so it no longer waits. Nothing was sent to Archidekt from this one.";
     return "";
   }
 
@@ -369,13 +376,19 @@ button.danger:disabled{color:var(--red)}
   }
 
   // The card may be drawn (or shown again by the host) long after the proposal was made, and the
-  // proposal may have been rejected, applied or expired since. While it shows Approve and Reject,
-  // it reads the proposal once more with get_proposal (read-only) and redraws it if it closed.
+  // proposal may have been rejected, applied, amended or expired since. While it waits, or was
+  // replaced (it comes back if its replacement is rejected or withdrawn) and has not expired, the
+  // card reads it once more with get_proposal (read-only) and redraws it if it changed.
   // If that read fails, the buttons stay: the gateway refuses a press on a closed proposal.
   var refreshing = false;
+  function live(p) {
+    if (p && p.state === "pending") return true; // an amend restarts its expiry, so read it anyway
+    if (!p || p.state !== "replaced") return false;
+    return !p.expires_at || Number(p.expires_at) * 1000 > Date.now();
+  }
   function refresh() {
     var p = proposal;
-    if (!p || p.state !== "pending" || !p.proposal_id || refreshing || busy) return;
+    if (!live(p) || !p.proposal_id || refreshing || busy) return;
     refreshing = true;
     request("tools/call", { name: "get_proposal", arguments: { proposal_id: p.proposal_id } })
       .then(function (res) {
@@ -383,6 +396,16 @@ button.danger:disabled{color:var(--red)}
         var sc = (res && res.structuredContent) || {};
         if (sc.ok === false || (res && res.isError) || !sc.state) return;
         if (busy || proposal !== p || sc.proposal_id !== p.proposal_id) return;
+        if (sc.state === "pending" && (p.state !== "pending" || newer(p, sc))) {
+          // amended since the card was drawn, or a replaced change back after its replacement
+          // was rejected or withdrawn (a withdrawn one never reads again): draw it as it is now,
+          // with the code the read carries for that version (an older version's code is refused,
+          // "changed"), and say so
+          askWhy(false);
+          render({ structuredContent: sc, _meta: (res && res._meta) || {} });
+          setStatus(p.state !== "pending" ? BACK_TEXT : REDRAWN_TEXT, "");
+          return;
+        }
         if (sc.state === "pending") {
           // still waiting, but held, waiting for another change or linked to a replace since the
           // card was drawn (a restart, another app): draw that, keeping this card's codes
@@ -390,6 +413,8 @@ button.danger:disabled{color:var(--red)}
           render({ structuredContent: Object.assign({}, p, sc), _meta: codesMeta() });
           return;
         }
+        if (sc.state === p.state) return; // still withdrawn or replaced
+        askWhy(false);
         approval = null;
         render({ structuredContent: sc, _meta: {} });
       })
@@ -407,6 +432,9 @@ button.danger:disabled{color:var(--red)}
     var apps = (p.changed_by_apps && p.changed_by_apps.length ? p.changed_by_apps : [p.changed_by]).map(creator);
     return apps.join(", then ");
   }
+  function newer(p, sc) {
+    return Number(sc.version || 1) > Number(p.version || 1);
+  }
   function moved(p, sc) {
     return ["status", "status_reason", "press_reason", "replace_note"].some(function (k) {
       return String(p[k] || "") !== String(sc[k] || "");
@@ -419,8 +447,29 @@ button.danger:disabled{color:var(--red)}
     return meta;
   }
   document.addEventListener("visibilitychange", function () {
-    if (document.visibilityState === "visible") refresh();
+    if (document.visibilityState === "visible") { refreshes = 0; refresh(); keepFresh(); }
   });
+  // Read again now and then while the card is on screen (a host that keeps old cards in the chat
+  // shows them current); not while it is scrolled away or the chat is in the background.
+  var refreshes = 0, refreshTimer = null, onScreen = true;
+  function keepFresh() {
+    if (refreshTimer || !onScreen || document.visibilityState === "hidden" || refreshes >= REFRESH_MAX) return;
+    if (!live(proposal)) return;
+    refreshTimer = setTimeout(function () {
+      refreshTimer = null; refreshes += 1;
+      refresh(); keepFresh();
+    }, REFRESH_EVERY_MS);
+  }
+  if (typeof IntersectionObserver === "function") {
+    new IntersectionObserver(function (seen) {
+      var now = seen.some(function (e) { return e.isIntersecting; });
+      if (now && !onScreen) { onScreen = true; refreshes = 0; refresh(); keepFresh(); }
+      else if (!now && onScreen) {
+        onScreen = false;
+        if (refreshTimer) { clearTimeout(refreshTimer); refreshTimer = null; }
+      }
+    }).observe(document.documentElement);
+  }
 
   // A large apply keeps running on the gateway after the Approve press answers; the card reads
   // its progress with get_proposal (read-only) until it ends.
@@ -447,6 +496,8 @@ button.danger:disabled{color:var(--red)}
           // pending, and this card's code approves it again (the code stays valid while pending).
           var meta = {};
           if (sc.state === "pending" && heldCode) meta[APPROVAL_KEY] = heldCode;
+          // waiting again after an apply stopped: its timed reads start over, so an amend is followed
+          if (sc.state === "pending") refreshes = 0;
           render({ structuredContent: sc, _meta: meta });
           var r = sc.result || {};
           if (sc.state === "pending") {
@@ -467,7 +518,7 @@ button.danger:disabled{color:var(--red)}
           }
         })
         .catch(function () { pollApplying(pid); });
-    }, 5000);
+    }, APPLYING_POLL_MS);
   }
 
   function renderRows(list, rows, limit) {
@@ -686,6 +737,9 @@ button.danger:disabled{color:var(--red)}
   // this press, the card says so, and the next press approves the change as the card shows it,
   // so a host that never lets the card read can't lock Approve
   var uncheckedOk = false;
+  var UPDATED_TEXT = "Updated since this card was drawn. Check it above, then press again.";
+  var REDRAWN_TEXT = "Updated: this card now shows the newest version.";
+  var BACK_TEXT = "This change is waiting again.";
   function notChecked() {
     var ok = $("approve"), no = $("reject");
     if (ok) ok.disabled = false; if (no) no.disabled = false;
@@ -714,6 +768,11 @@ button.danger:disabled{color:var(--red)}
           var sc = (res && res.structuredContent) || {};
           busy = false;
           if (sc.ok === false || (res && res.isError) || !sc.state) { notChecked(); return; }
+          if (sc.state === "pending" && proposal === shown && newer(shown, sc)) {
+            render({ structuredContent: sc, _meta: (res && res._meta) || {} });
+            setStatus(UPDATED_TEXT, "err");
+            return;
+          }
           if (sc.state === "pending" && proposal === shown && moved(shown, sc) && (sc.status === "held" || sc.press_reason)) {
             render({ structuredContent: Object.assign({}, shown, sc), _meta: codesMeta() });
             setStatus("This change has changed status since the card was drawn. Read the note above, then press Approve again if you still want it.", "err");
@@ -739,6 +798,25 @@ button.danger:disabled{color:var(--red)}
         if (sc.ok === false || (res && res.isError)) {
           var msg = sc.message || (res && res.content && res.content[0] && res.content[0].text) || "The gateway refused.";
           busy = false;
+          if (sc.error === "changed") {
+            // the code is of an older version: read the change as it is now and draw that
+            var drawn = proposal;
+            request("tools/call", { name: "get_proposal", arguments: { proposal_id: pid } })
+              .then(function (r2) {
+                var p2 = (r2 && r2.structuredContent) || {};
+                if (proposal !== drawn) return;
+                if (p2.state) render({ structuredContent: p2, _meta: (r2 && r2._meta) || {} });
+                else render({ structuredContent: drawn, _meta: {} }); // unread: the review page
+                setStatus(p2.state === "pending" ? UPDATED_TEXT : String(msg), "err");
+              })
+              .catch(function () {
+                if (proposal === drawn) render({ structuredContent: drawn, _meta: {} });
+                setStatus(String(msg), "err");
+              });
+            approval = null;
+            if (ok) ok.disabled = true; if (no) no.disabled = true;
+            return;
+          }
           if (sc.error === "now_held" && sc.status === "held") {
             // the note is drawn again from the gateway's lines, so none the hold made untrue stays
             render({ structuredContent: Object.assign({}, proposal, {
