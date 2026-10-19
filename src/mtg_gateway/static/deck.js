@@ -1061,6 +1061,50 @@
       onPick: function (p, info) { if (card.isConnected) savePrinting(card, p, info); }
     });
   }
+  // -- Watch this card / Art variants… (K7): the watchlist's own JSON calls; Undo stops the watch
+  // again by its id. The deck is not changed.
+  function scryFinishOf(card) {
+    var f = (card.getAttribute("data-finish") || "").toLowerCase();
+    return f === "foil" || f === "etched" ? f : "nonfoil";
+  }
+  function watchCard(card, printing, finish) {
+    var name = card.getAttribute("data-card") || "";
+    var body = { name: name, finish: finish || scryFinishOf(card) };
+    if (printing) { body.set_code = printing.set; body.collector_number = printing.collector_number; }
+    return api("/watchlist/api/watch", body).then(function (d) {
+      if (!d.ok) { toast(d.message || "The card could not be watched.", { error: true }); throw new Error("refused"); }
+      var w = d.watch || {};
+      var open = el("a", "", "Open the watchlist");
+      open.href = "/watchlist?q=" + enc(w.name || name);
+      if (!w.created) { toast((w.name || name) + " is on your watchlist.", { actions: [open] }); return w; }
+      var undo = el("button", "", "Undo");
+      undo.type = "button";
+      undo.addEventListener("click", function () {
+        undo.disabled = true;
+        api("/watchlist/api/unwatch", { watch_id: w.watch_id }).then(function (u) {
+          if (!u.ok && u.status !== 404) { toast(u.message || "The watch could not be undone.", { error: true }); return; }
+          toast((w.name || name) + " is no longer on your watchlist.");
+        }).catch(function () { toast("No connection; the card is still watched.", { error: true }); });
+      });
+      toast((w.name || name) + " added to your watchlist.", { actions: [open, undo] });
+      return w;
+    }, function (err) { toast("No connection; the card was not watched.", { error: true }); throw err; });
+  }
+  function artVariants(card) {
+    var Pick = window.MtgPrintPick;
+    if (!Pick || !card.isConnected) return;
+    var pr = (card.getAttribute("data-set") || "").trim().split(/\s+/);
+    var opts = {
+      name: card.getAttribute("data-card") || "",
+      current: pr.length === 2 && pr[0] ? { set: pr[0].toLowerCase(), number: pr[1] } : null,
+      finish: card.getAttribute("data-finish") || "Normal",
+      returnFocus: card,
+      onWatch: function (p, finish) { return watchCard(card, p, finish); }
+    };
+    // on the member's own deck the same picker can also put the printing in the deck
+    if (own && deckId && zoneOf(card) === "main") opts.onPick = function (p, info) { if (card.isConnected) savePrinting(card, p, info); };
+    Pick.open(opts);
+  }
   var FINISH_WORDS = { normal: "non-foil", foil: "foil", etched: "etched" };
   // "SLD 1075" (the page's data-set) as the picker writes it: "SLD #1075"
   function printLabel(set) { return String(set || "").trim().replace(/\s+/, " #"); }
@@ -1224,6 +1268,11 @@
     var head = el("div", "head", name);
     m.appendChild(head);
     m.appendChild(menuItem("Open card", "eye", function () { closeMenu(); openViewer(card); }));
+    if (document.body.hasAttribute("data-watchlist")) {
+      // K7: watch the card's price, or browse its printings and watch one (the picker's browse mode)
+      m.appendChild(menuItem("Watch this card", "bookmark", function () { closeMenu(); watchCard(card, null); }));
+      if (window.MtgPrintPick) m.appendChild(menuItem("Art variants…", "image", function () { closeMenu(); artVariants(card); }));
+    }
     if (own && deckId) {
       var row = el("div", "item qtyrow");
       row.setAttribute("role", "none");

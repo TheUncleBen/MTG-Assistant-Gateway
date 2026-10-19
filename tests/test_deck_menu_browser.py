@@ -41,7 +41,7 @@ class Server:
     """The gateway with writes on, over a real port, with alice's Commander deck 42 (a Sol Ring on
     its maybeboard too, so a side row is on the page)."""
 
-    def __init__(self, tmp_path: Path):
+    def __init__(self, tmp_path: Path, **over: object):
         self.port = _free_port()
         self.base = f"http://127.0.0.1:{self.port}"
         settings = make_settings(
@@ -50,6 +50,7 @@ class Server:
             allowed_hosts=["127.0.0.1", f"127.0.0.1:{self.port}"],
             archidekt_base="https://ark.test/api",
             writes_enabled=True,
+            **over,
         )
         self.db = Database(settings.db_path)
         oidc = OIDCClient(IDP, CLIENT_ID, CLIENT_SECRET, settings.callback_url, settings.oidc_scopes)

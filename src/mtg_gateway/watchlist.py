@@ -173,6 +173,8 @@ def add_watchlist_routes(server: MCPServer, state: AppState) -> None:
                 set_code=str(body.get("set_code") or "") or None,
                 collector_number=str(body.get("collector_number") or "") or None,
                 finish=str(body.get("finish") or "nonfoil"),
+                # a Watch button on a card already watched must not clear its alerts
+                keep_alerts=True,
             )
         except DeckError as exc:
             status = 404 if exc.kind == "not_found" else 429 if exc.kind == "rate_limited" else 400
