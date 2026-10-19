@@ -276,6 +276,9 @@ class ScryfallClient:
         self._retry_until = 0.0
         self.cards = _Cache(ttl=24 * 3600, max_items=5000)
         self.names = _Cache(ttl=6 * 3600, max_items=5000)
+        # Exact names Scryfall answered 404 for, so a misspelt name tried again and again (a
+        # proposal retried) is asked once in ten minutes; only a 404 is kept (_card_or_error).
+        self.misses = _Cache(ttl=600, max_items=2000)
         # Cards are kept slimmed (``slim``, under 1 KB each), so 5,000 entries stay a few MB.
         # Printing lists are summaries (about 2 KB a card in memory, up to 175 a page), in a small
         # cache of their own so a picker browsing many cards cannot crowd out names; 60 pages stay
@@ -354,11 +357,19 @@ class ScryfallClient:
         key = f"named:{'f' if fuzzy else 'e'}:{(set_code or '').lower()}:{name.strip().lower()}"
         if (hit := self.cards.get(key)) is not None:
             return hit
+        if (missed := self.misses.get(key)) is not None:
+            raise ScryfallError("not_found", missed)
         params = {"fuzzy" if fuzzy else "exact": name.strip()}
         if set_code:
             params["set"] = set_code.lower()
         resp = await self._request("GET", "/cards/named", params=params, interval=self.lookup_interval)
-        card = slim(self._card_or_error(resp, name))
+        try:
+            raw = self._card_or_error(resp, name)
+        except ScryfallError as exc:
+            if exc.kind == "not_found" and not fuzzy:
+                self.misses.put(key, str(exc))
+            raise
+        card = slim(raw)
         self.cards.put(key, card)
         return card
 

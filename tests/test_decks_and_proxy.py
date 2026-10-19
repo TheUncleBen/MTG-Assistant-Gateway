@@ -1469,6 +1469,41 @@ async def test_a_card_no_magic_card_is_called_is_refused_when_proposed(stack: St
     assert names.known("Insectile Aberration") is True  # a back face is a card too
 
 
+async def test_the_unknown_card_check_asks_scryfall_a_few_names_and_remembers_the_answers(
+    stack: Stack,
+) -> None:
+    """Names the catalog lacks are asked of Scryfall at most five per proposal (the rest pass),
+    and each answer, found or not, is kept a while, so a retried proposal asks nothing again."""
+    import httpx
+
+    from mtg_gateway.scan.scryfall import ScryfallClient
+
+    h = stack.h
+    token = await linked_user(stack)
+    asked: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        name = request.url.params.get("exact", "")
+        asked.append(name)
+        if name == "Brand New Card":
+            return httpx.Response(200, json={"object": "card", "name": name})
+        return httpx.Response(404, json={"object": "error", "status": 404, "details": "no card"})
+
+    scan = h.app.state.gateway.scan
+    scan.scryfall = ScryfallClient(
+        "https://scryfall.test",
+        min_interval=0.0,
+        http=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+    scan.names.set_names(["Island", "Swamp"])
+    typos = [f"Islend {i}" for i in range(7)]
+    adds = [{"action": "add", "card_name": n} for n in ["Brand New Card", *typos]]
+    for _ in range(2):
+        out = structured(await call(h, token, "propose_deck_changes", {"deck_id": "42", "changes": adds}))
+        assert out["ok"] is False and out["unknown_cards"] == typos[:4], out
+    assert asked == ["Brand New Card", *typos[:4]]  # five asked once; the second try asks nothing
+
+
 async def test_printing_fields_are_validated_on_the_change(stack: Stack) -> None:
     h = stack.h
     token = await linked_user(stack)

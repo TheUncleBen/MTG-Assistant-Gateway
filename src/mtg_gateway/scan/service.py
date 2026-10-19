@@ -44,6 +44,7 @@ MAX_SUGGESTIONS = 8
 # retry with common OCR confusions swapped, then autocomplete on shorter prefixes.
 MAX_VARIANT_LOOKUPS = 4
 MAX_PREFIX_LOOKUPS = 5
+MAX_CARD_CHECK_LOOKUPS = 5  # Scryfall lookups per proposal for added names the catalog lacks
 MAX_RECOVERY_LOOKUPS_PER_CALL = 40  # recovery lookups per call, however many names are garbage
 MAX_LOOKUPS_PER_USER = 4  # concurrent name searches and printing lists per account; more is "busy"
 MAX_SESSION_BYTES = 600_000  # one saved scan session as stored JSON (500 full cards take about 470 KB)
@@ -1248,19 +1249,30 @@ class ScanService:
     def list_sessions(self, sub: str) -> list[dict[str, Any]]:
         return self.store.list(sub)
 
-    async def is_card(self, name: str) -> bool | None:
-        """Whether ``name`` is a Magic card, for refusing a misspelt add when it is proposed: the
-        card-name catalog first, then, for a name the catalog lacks, Scryfall's exact lookup (the
-        catalog leaves out tokens and can be a day behind a new set). ``None`` when neither can
-        tell (catalog not loaded, Scryfall unreachable): the caller then refuses nothing."""
-        found = self.names.known(name)
-        if found is not False:
-            return found
-        try:
-            await self.scryfall.named(name)
-        except ScryfallError as exc:
-            return False if exc.kind == "not_found" else None
-        return True
+    async def are_cards(self, names: list[str]) -> dict[str, bool | None]:
+        """Whether each of ``names`` is a Magic card, for refusing a misspelt add when it is
+        proposed: the card-name catalog first, then, for a name the catalog lacks, Scryfall's exact
+        lookup (the catalog leaves out tokens and can be a day behind a new set). Only the first
+        ``MAX_CARD_CHECK_LOOKUPS`` such names are asked, one paced lookup each, so a proposal full
+        of new cards cannot hold up everyone's Scryfall calls; the client keeps both answers a while.
+        ``None`` when nothing can tell (catalog not loaded, Scryfall unreachable, past the
+        lookups asked): the caller then refuses nothing."""
+        out: dict[str, bool | None] = {}
+        asked = 0
+        for name in names:
+            found = self.names.known(name)
+            if found is False:
+                if asked >= MAX_CARD_CHECK_LOOKUPS:
+                    found = None
+                else:
+                    asked += 1
+                    try:
+                        await self.scryfall.named(name)
+                        found = True
+                    except ScryfallError as exc:
+                        found = False if exc.kind == "not_found" else None
+            out[name] = found
+        return out
 
     def guessed_names(self, sub: str) -> dict[str, str]:
         """Card names this member's scans matched from a misread name: matched name (lower case)
