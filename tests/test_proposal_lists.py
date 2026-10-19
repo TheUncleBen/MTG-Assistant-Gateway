@@ -4,6 +4,7 @@ applied proposal was applied, and the cards a waiting change touches."""
 from __future__ import annotations
 
 from mtg_gateway import recheck
+from mtg_gateway.decks import applied_text
 
 from .conftest import Stack
 from .test_account_actions import _press
@@ -108,3 +109,16 @@ async def test_search_decks_count_is_null_when_archidekt_gives_minus_one(stack: 
     token = await mcp_token(stack.h)
     nothing = structured(await call(stack.h, token, "search_decks", {"commander": "Nobody At All"}))
     assert nothing["ok"] and nothing["decks"] == [] and nothing["count"] is None
+
+
+def test_an_applied_collection_change_says_so_only_when_the_read_back_found_it() -> None:
+    """A collection change is stored as applied even when reading the collection back finds
+    mismatches, so its text says every change is there only when the read-back did."""
+    assert applied_text("collection", {}, {"verified": True}) == (
+        "Your collection on Archidekt has these changes now."
+    )
+    for result in ({"verified": False, "mismatches": [{"name": "Sol Ring"}]}, {}, None):
+        assert applied_text("collection", {}, result) == (
+            "The changes were sent to Archidekt, but reading your collection back didn't show all "
+            "of them. The result on the review page lists which."
+        )

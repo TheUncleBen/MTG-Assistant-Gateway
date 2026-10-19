@@ -361,8 +361,8 @@ async def test_an_applied_action_says_what_it_did(stack: Stack) -> None:
     assert "matches this proposal" not in page
     gone = await _press(h, token, await call(h, token, "propose_delete_deck", {"deck_id": "42"}))
     assert gone["result"]["backup_deck_id"] and gone["next_step"] == (
-        "Done. The deck is deleted on Archidekt. The gateway kept a snapshot of it from just before "
-        "and a backup copy on Archidekt."
+        "Done. The deck is deleted on Archidekt. A snapshot was kept, and a backup copy is in your "
+        "backup folder."
     )
 
 

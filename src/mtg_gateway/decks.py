@@ -7214,7 +7214,13 @@ def applied_text(kind: str, changes: dict[str, Any] | None, result: dict[str, An
     c = changes if isinstance(changes, dict) else {}
     r = result if isinstance(result, dict) else {}
     if kind == "collection":
-        return "Your collection on Archidekt has these changes now."
+        # a collection change is stored as applied even when its read-back finds mismatches
+        if r.get("verified") is True:
+            return "Your collection on Archidekt has these changes now."
+        return (
+            "The changes were sent to Archidekt, but reading your collection back didn't show all "
+            "of them. The result on the review page lists which."
+        )
     if kind != "action":
         return ""
     action = c.get("action")
@@ -7248,8 +7254,12 @@ def applied_text(kind: str, changes: dict[str, Any] | None, result: dict[str, An
         return "Your vote on the comment is saved on Archidekt."
     if action == "delete_deck":
         # delete_deck keeps a snapshot first, and a backup copy when backups are on
-        kept = " and a backup copy on Archidekt" if r.get("backup_deck_id") else ""
-        return f"The deck is deleted on Archidekt. The gateway kept a snapshot of it from just before{kept}."
+        if r.get("backup_deck_id"):
+            return (
+                "The deck is deleted on Archidekt. A snapshot was kept, and a backup copy is in your "
+                "backup folder."
+            )
+        return "The deck is deleted on Archidekt. A snapshot of it was kept."
     if action == "collaborator_add":
         return "They can edit your deck on Archidekt now."
     if action == "collaborator_remove":
