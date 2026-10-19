@@ -6005,6 +6005,24 @@ class DeckService:
         tree = await self.folder_trees.get(sub, fetch, wait=wait)
         return None if tree is None else self._flatten_folders(tree)
 
+    async def name_folders(self, sub: str, rows: list[dict[str, Any]]) -> None:
+        """Fill in ``folder`` on deck rows that carry only ``folder_id``: Archidekt's owner listing
+        can leave the folder's name out, so it is looked up in the member's folder tree (cached
+        like the deck list, so one read at most). A deck at the top level keeps ``folder`` None;
+        when the tree can't be read the rows are left as they are."""
+        if not any(d.get("folder_id") is not None and not d.get("folder") for d in rows):
+            return
+        try:
+            info = await self.folder_view(sub, wait=None)
+        except DeckError:
+            return
+        if info is None:
+            return
+        names = {f["id"]: f["name"] for f in info["folders"] if f["depth"] > 0}
+        for d in rows:
+            if d.get("folder_id") is not None and not d.get("folder"):
+                d["folder"] = names.get(d["folder_id"])
+
     def _is_backup_folder(self, name: str, depth: int) -> bool:
         """The gateway's backup folder: the folder the deck list treats as it (its exact name, as
         archidekt.list_decks compares), or the one ensure_folder would reuse (the same name in

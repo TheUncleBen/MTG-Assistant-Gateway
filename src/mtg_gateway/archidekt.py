@@ -351,7 +351,9 @@ def list_row(d: dict[str, Any]) -> dict[str, Any]:
             if isinstance(t, dict) and (t.get("name") or t.get("tag"))
         ],
         "views": views if isinstance(views, int) and not isinstance(views, bool) else None,
-        "featured_scryfall_id": featured_scryfall_id(d.get("featured")),
+        # the member's chosen cover first, as parse_deck reads it: "featured" is Archidekt's own pick
+        "featured_scryfall_id": featured_scryfall_id(d.get("customFeatured"))
+        or featured_scryfall_id(d.get("featured")),
     }
 
 

@@ -95,7 +95,9 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
             "filters: name_contains, deck_format (commander, modern...), folder. This is the one tool for "
             "the member's deck list; search_decks with owner lists another user's public decks. The "
             "gateway's own backup copies are left out (a snapshot in list_snapshots links its copy when "
-            "there is one). "
+            "there is one). folder is the deck's folder name (null at the top level). "
+            "featured_scryfall_id is the cover's card when Archidekt's list carries it; it can be null "
+            "even when a cover is set, so never take null as the deck having no cover. "
             "unreadable counts decks Archidekt listed without a readable owner, which are left out; when "
             "it is above 0, note says so in words to pass on to the member."
         ),
@@ -113,6 +115,8 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
         # words My decks uses, so the assistant doesn't present a partial list as the whole one
         unreadable = int(getattr(rows, "unreadable", 0) or 0)
         note = decks_unreadable_text(some_shown=len(rows) > 0) if unreadable else None
+        # before the folder filter, which matches on the name
+        await state.decks.name_folders(_sub(), rows)
         if name_contains:
             rows = [d for d in rows if name_contains.strip().lower() in str(d.get("name", "")).lower()]
         if deck_format:
