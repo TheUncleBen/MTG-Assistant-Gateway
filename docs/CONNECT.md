@@ -376,7 +376,7 @@ buttons like in Claude. If
 no card appears and ChatGPT refuses or hides `apply_proposal`, ask for the
 proposal's review link and press Apply there. The other cards (the waiting
 changes, printings and recognised cards) follow the same standard and
-appear the same way; without them, the assistant's
+should appear the same way; without them, the assistant's
 text has everything, and it asks which set you mean instead of showing the
 pictures.
 
