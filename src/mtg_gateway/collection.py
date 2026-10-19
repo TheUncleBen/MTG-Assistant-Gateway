@@ -35,6 +35,7 @@ from .archidekt import (
     _pt,
     condition_code,
     language_code,
+    page_turn,
 )
 from .busy import busy_response
 from .deckpage import image_url, mana_html
@@ -1732,6 +1733,7 @@ def add_collection_tools(server: MCPServer, service: CollectionService) -> None:
         # The proposing client is recorded on the proposal, and only that client may apply it
         # over MCP: without this the assistant could never apply its own collection proposal.
         current_client.set(token.client_id)
+        page_turn.set(False)  # an app's request, not a member's page (archidekt.page_turn)
         return token.subject
 
     def _err(exc: CollectionError) -> dict[str, Any]:

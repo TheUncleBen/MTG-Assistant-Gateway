@@ -54,7 +54,7 @@ from .approve import (
     proposal_text,
     proposal_tool_result,
 )
-from .archidekt import ArchidektClient, Deck, Pacer
+from .archidekt import ArchidektClient, Deck, Pacer, page_turn
 from .auth_provider import (
     BROWSER_COOKIE,
     BROWSER_KEY,
@@ -796,6 +796,7 @@ def build_mcp_server(state: AppState) -> MCPServer:
         if token is None or not token.subject:
             raise RuntimeError("no authenticated user on this request")
         current_client.set(token.client_id)  # named in the audit rows this request writes
+        page_turn.set(False)  # an app's request, not a member's page (archidekt.page_turn)
         return token.subject
 
     # The in-chat card (approve.py): proposal tools carry its ui:// resource in their _meta, and

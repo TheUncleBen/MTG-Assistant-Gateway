@@ -29,7 +29,7 @@ from .deckpage import (
     LIST_ORDERS,
     money,
 )
-from .decks import DeckError
+from .decks import DeckError, is_busy
 from .pages import (
     _csrf,
     _err_code,
@@ -294,17 +294,22 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         return csrf_form_ok(s, sid, data)
 
     async def my_decks(
-        sub: str, *, wait: float | None = None
+        sub: str, *, wait: float | None = None, last_read_ok: bool = False
     ) -> tuple[list[dict[str, Any]] | None, str | None, DeckError | None]:
         """(decks, problem, failure) where problem is a short message when the list is unavailable
         and failure the DeckError behind it (for the shared busy page). With ``wait``, decks is
         None when the list is cold and Archidekt has not answered in time: the page then renders a
-        placeholder that decks.js fills from /api/decks/mine."""
+        placeholder that decks.js fills from /api/decks/mine. With ``last_read_ok``, while Archidekt
+        cannot be asked, the list as last read (its ``last_read`` set), when there is one, instead
+        of the failure."""
         try:
             return await decks.list_decks_quick(sub, wait=wait), None, None
         except DeckError as exc:
             if exc.kind == "not_linked":
                 return [], "not_linked", exc
+            held = decks.last_deck_list(sub) if last_read_ok and is_busy(exc) else None
+            if held is not None:
+                return held, None, None
             return [], str(exc), exc
 
     def arrange_decks(
