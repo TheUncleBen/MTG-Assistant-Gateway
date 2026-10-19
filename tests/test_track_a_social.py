@@ -523,7 +523,10 @@ async def test_a_name_not_followed_is_looked_up_once_until_the_list_expires(
         )
         assert p["ok"] is False and p["error"] == "not_found", p
     assert read == list(range(1, FOLLOWING_LOOKUP_PAGES + 1)), read  # the second call read nothing
-    assert FOLLOWING_TTL == 120 and "remembers that list for two minutes" in p["message"]
+    assert FOLLOWING_TTL == 120 and p["message"].endswith(
+        "Someone you followed on archidekt.com very recently may not be in the list the gateway last read."
+    )
+    assert f"(the gateway reads only the first {FOLLOWING_LOOKUP_PAGES} pages of that list)" in p["message"]
     stack.ark.private.discard(43)  # amy's deck: a follow of its owner, whom the list does not hold
     p = structured(await call(h, token, "propose_deck_social", {"deck_id": "43", "action": "follow_owner"}))
     assert "could not check whether you already follow them" in p["rows"][0]["text"], p
