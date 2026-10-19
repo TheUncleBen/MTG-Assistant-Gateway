@@ -62,6 +62,8 @@ in-chat cards, deck reports and the Settings and Account pages.
 - `list_my_proposals` and `list_snapshots` page through everything (`limit` up to 100, `offset`,
   `has_more`, `next_offset`) instead of stopping at the newest 20. `list_my_proposals` takes
   `deck_id: "collection"` for collection changes, and `list_snapshots` can keep one deck's.
+- `list_my_proposals` with `oldest_first` (and without `pending_only`) now starts from your oldest
+  proposal and pages forward from there. Before, it gave your newest 20, shown oldest first.
 - `get_proposal` says where an applied proposal was applied (`applied_via`).
 - An applied account action, collection change or deck deletion says what it did ("The folder is
   created on Archidekt.") instead of "The deck on Archidekt matches this proposal."
