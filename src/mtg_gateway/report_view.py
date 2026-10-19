@@ -857,14 +857,14 @@ def more_games_html(f: Any, csrf: str, report_id: str) -> str:
     )
 
 
-def _remove_form(u: dict[str, Any], csrf: str, report_id: str) -> str:
-    """The adder's Remove button for a saved description."""
+def _remove_form(u: dict[str, Any], csrf: str, report_id: str, button: str = "btn small") -> str:
+    """The adder's Remove button for a saved description (``button``: its classes)."""
     card = front_face(u["name"])
     return (
         f"<form method='post' action='/history/reports/{_esc(report_id)}/models/remove' class='inline'>"
         f"<input type='hidden' name='csrf' value='{_esc(csrf)}'>"
         f"<input type='hidden' name='card' value='{_esc(u['name'])}'>"
-        f"<button type='submit' class='btn small' aria-label='Remove the saved description of {_esc(card)}'>"
+        f"<button type='submit' class='{button}' aria-label='Remove the saved description of {_esc(card)}'>"
         f"{REMOVE_MODEL_LABEL}</button></form>"
     )
 
@@ -875,16 +875,18 @@ def kept_models_html(
     removable: frozenset[str] = frozenset(),
     csrf: str = "",
     report_id: str = "",
+    button: str = "btn small",
 ) -> str:
     """The saved descriptions this run played. ``removable`` holds the cards (front face, case
-    aside) whose saved description is now the member's own: those get a Remove button."""
+    aside) whose saved description is now the member's own: those get a Remove button
+    (``button``: its classes; the signed-in page draws it as a red outline)."""
     if not used:
         return ""
     items = "".join(
         f"<li>{_esc(front_face(u['name']))}"
         + (f" <i>{_esc(_kept_who(u))}</i>" if _kept_who(u) else "")
         + (
-            " " + _remove_form(u, csrf, report_id)
+            " " + _remove_form(u, csrf, report_id, button)
             if csrf and report_id and front_face(u["name"]).casefold() in removable
             else ""
         )
@@ -956,9 +958,17 @@ def ask_prompt(
     )
 
 
-def ask_html(r: dict[str, Any], cards: list[dict[str, Any]], honesty: dict[str, Any] | None = None) -> str:
+def ask_html(
+    r: dict[str, Any],
+    cards: list[dict[str, Any]],
+    honesty: dict[str, Any] | None = None,
+    *,
+    cls: str = "btn small",
+    button: str = "",
+) -> str:
     """The copy button and its hidden text for the request above (export.js copies it). ``honesty``:
-    the parsed solo test's honesty groups, which the request adds as context."""
+    the parsed solo test's honesty groups, which the request adds as context. ``cls`` and
+    ``button``: the button's classes and its inside (its words by default)."""
     if not cards:
         return ""
     g = r.get("goldfish") if isinstance(r.get("goldfish"), dict) else {}
@@ -971,8 +981,8 @@ def ask_html(r: dict[str, Any], cards: list[dict[str, Any]], honesty: dict[str, 
         honesty=honesty,
     )
     return (
-        "<div class='ask'><button type='button' class='btn small copybtn' data-copy='ask-model'>"
-        f"{_esc(ASK_LABEL)}</button><span id='ask-model-status' class='small muted' role='status' "
+        f"<div class='ask'><button type='button' class='{cls} copybtn' data-copy='ask-model'>"
+        f"{button or _esc(ASK_LABEL)}</button><span id='ask-model-status' class='small muted' role='status' "
         "aria-live='polite'></span>"
         f"<textarea id='ask-model' class='sr-only' readonly aria-label='{_esc(ASK_LABEL)}'>{_esc(text)}"
         "</textarea></div>"
@@ -993,28 +1003,29 @@ def solo_heading(g: dict[str, Any] | None) -> str:
     return f"{SOLO_NAME} (no opponents)"
 
 
-def honesty_html(g: dict[str, Any], ask: str = "") -> str:
-    """The "what the simulation could not model" panel body, or '' when there is nothing to say.
-    ``ask`` is the copy-a-request block (ask_html) the signed-in page puts under the cards played
-    without their effect."""
+def honesty_groups(g: dict[str, Any], ask: str = "") -> list[tuple[str, str, str, str]]:
+    """The groups of the "what the simulation could not model" panel, in order, as (key, heading,
+    count words, body): the cards played without their effect (with ``ask`` under their names),
+    those left out on purpose, those played but never mattered, and the model's shortcuts. The
+    export draws them as headed blocks (honesty_html), the signed-in page as folds."""
     h = g.get("honesty") or {}
     size = g.get("deck_size")
-    parts: list[str] = []
-    if (h.get("unrecognized") or h.get("out_of_scope")) and coverage_text(g):
-        parts.append(f"<p class='b coverage'>{_esc(coverage_text(g))}</p>")
+    out: list[tuple[str, str, str, str]] = []
     unrec = h.get("unrecognized") or []
     if unrec:
         # The simulator found these cards (their exact text comes from Scryfall; a name it cannot
         # find is a warning above); "unrecognized" is its word for "no effect model yet".
-        parts.append(
-            f"<div class='group unmodeled'><h3>{UNMODELED_HEADING} <small>"
-            f"{_esc(_share(_copies(unrec), size))}</small></h3>"
-            f"<p>{UNMODELED_TEXT}"
-            + (f" {UNMODELED_SAVED_TEXT}" if g.get("models_saved") and card_models.SWITCHED_ON else "")
-            + "</p>"
-            + _names(unrec)
-            + ask
-            + "</div>"
+        out.append(
+            (
+                "unmodeled",
+                UNMODELED_HEADING,
+                _share(_copies(unrec), size),
+                f"<p>{UNMODELED_TEXT}"
+                + (f" {UNMODELED_SAVED_TEXT}" if g.get("models_saved") and card_models.SWITCHED_ON else "")
+                + "</p>"
+                + _names(unrec)
+                + ask,
+            )
         )
     oos = h.get("out_of_scope") or []
     if oos:
@@ -1023,31 +1034,55 @@ def honesty_html(g: dict[str, Any], ask: str = "") -> str:
             f"<h4>{_esc(grp['label'])} <small>{_copies(grp['cards'])}</small></h4>" + _names(grp["cards"])
             for grp in oos
         )
-        parts.append(
-            f"<div class='group'><h3>Left out on purpose <small>{_esc(_share(total, size))}</small></h3>"
-            "<p>The simulator plays against an opponent who does nothing, so removal, counterspells and "
-            "protection have nothing to act on. These cards sat in hand.</p>" + groups + "</div>"
+        out.append(
+            (
+                "",
+                "Left out on purpose",
+                _share(total, size),
+                "<p>The simulator plays against an opponent who does nothing, so removal, counterspells and "
+                "protection have nothing to act on. These cards sat in hand.</p>" + groups,
+            )
         )
     low = h.get("low_impact") or []
     if low:
-        parts.append(
-            "<div class='group'><h3>Played with their effect but never mattered "
-            f"<small>{_esc(_share(len(low), size))}</small></h3>"
-            "<p>These cards were understood, drawn and played, and nothing they do changed a solo test game. "
-            "A solo test game has no opponent and no interaction, so this says nothing about how the card "
-            "does at a real table.</p>" + _names([{"name": n} for n in low]) + "</div>"
+        out.append(
+            (
+                "",
+                "Played with their effect but never mattered",
+                _share(len(low), size),
+                "<p>These cards were understood, drawn and played, and nothing they do changed a solo test "
+                "game. A solo test game has no opponent and no interaction, so this says nothing about how "
+                "the card does at a real table.</p>" + _names([{"name": n} for n in low]),
+            )
         )
-    approx = h.get("approximations") or []
+    approx = [a for a in h.get("approximations") or [] if a.get("cards")]
     if approx:
-        rows = "".join(
-            f"<dt>{_esc(a['label'])}</dt><dd>{_esc(a['cards'])}</dd>" for a in approx if a.get("cards")
+        rows = "".join(f"<dt>{_esc(a['label'])}</dt><dd>{_esc(a['cards'])}</dd>" for a in approx)
+        out.append(
+            (
+                "approx",
+                "Shortcuts the model takes",
+                str(len(approx)),
+                "<p>Simplifications applied to these cards; they play a little better or worse than in a "
+                f"real game.</p><dl class='meta approx'>{rows}</dl>",
+            )
         )
-        parts.append(
-            "<div class='group'><h3>Shortcuts the model takes</h3>"
-            "<p>Simplifications applied to these cards; they play a little better or worse than in a real "
-            "game.</p>"
-            f"<dl class='meta approx'>{rows}</dl></div>"
-        )
+    return out
+
+
+def honesty_html(g: dict[str, Any], ask: str = "") -> str:
+    """The "what the simulation could not model" panel body, or '' when there is nothing to say.
+    ``ask`` is the copy-a-request block (ask_html) the signed-in page puts under the cards played
+    without their effect."""
+    h = g.get("honesty") or {}
+    parts: list[str] = []
+    if (h.get("unrecognized") or h.get("out_of_scope")) and coverage_text(g):
+        parts.append(f"<p class='b coverage'>{_esc(coverage_text(g))}</p>")
+    for key, heading, count, body in honesty_groups(g, ask):
+        cls = "group unmodeled" if key == "unmodeled" else "group"
+        # the shortcuts' count is the page's fold summary only
+        small = f" <small>{_esc(count)}</small>" if count and key != "approx" else ""
+        parts.append(f"<div class='{cls}'><h3>{heading}{small}</h3>{body}</div>")
     return "".join(parts)
 
 
@@ -1378,9 +1413,14 @@ def forge_lines(f: dict[str, Any], *, results: bool = True) -> list[str]:
 def forge_html(f: Any, *, live: bool = False, report_id: Any = None) -> str:
     """The Forge card: real games against precons (forge.py), or why there are none yet. ``live``
     (the signed-in page, not an export) marks an unfinished run for forge-live.js, which refreshes
-    the card until the run ends."""
+    the card until the run ends; the signed-in page draws it as its Forge section
+    (report_page.forge_section_html)."""
     if not isinstance(f, dict):
         return ""
+    if live:
+        from .report_page import forge_section_html
+
+        return forge_section_html(f, live=True, report_id=report_id)
     state = str(f.get("state") or "")
     if state == "skipped":
         return preflight_html(f)
@@ -1561,6 +1601,18 @@ def status_html(status: Any) -> str:
     return f"<dt>Status</dt><dd id='rep-status'>{inner}</dd>" if inner else ""
 
 
+def _live_forge_html(r: dict[str, Any]) -> str:
+    from .report_page import forge_section_html
+
+    return forge_section_html(r.get("forge"), live=True, report_id=r.get("report_id"))
+
+
+def _live_status_html(status: Any) -> str:
+    from .report_page import status_label_html
+
+    return status_label_html(status)
+
+
 def forge_status(r: dict[str, Any]) -> dict[str, Any]:
     """What the report page's live view needs while the Forge games play: the run's state
     and section, the report's overall status, and the Forge card and the status as the page draws
@@ -1573,8 +1625,8 @@ def forge_status(r: dict[str, Any]) -> dict[str, Any]:
         "state": state,
         "live": state in ("queued", "running"),
         "forge": f,
-        "forge_html": engine_html(r, live=True),
-        "status_html": status_inner(r.get("status")),
+        "forge_html": _live_forge_html(r),
+        "status_html": _live_status_html(r.get("status")),
     }
 
 
@@ -1611,9 +1663,16 @@ def report_body_html(
     removable: frozenset[str] = frozenset(),
     csrf: str = "",
 ) -> str:
-    """The report page's body. ``stats_html`` is the deck statistics strip (companion.stats_strip)
-    and ``actions_html`` the export buttons row; ``standalone`` leaves out everything that needs
-    the live site (links into it, the copy area)."""
+    """The report's body. ``stats_html`` is the deck statistics strip (companion.stats_strip)
+    and ``actions_html`` the export buttons row. The signed-in page is report_page.report_page_html;
+    ``standalone`` (the HTML export) draws the plain layout below, without anything that needs the
+    live site (links into it, the copy area)."""
+    if not standalone:
+        from .report_page import report_page_html
+
+        return report_page_html(
+            r, stats_html=stats_html, actions_html=actions_html, reused=reused, removable=removable, csrf=csrf
+        )
     s = report_sections(r)
     g, v = s["goldfish"], s["validation"]
     name = _esc(r.get("deck_name") or r.get("deck_id"))

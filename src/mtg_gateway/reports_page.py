@@ -553,6 +553,9 @@ REPORTS_PAGE_CSS = (
 .reports-page .kd-trend .dl.up{color:var(--red-text)}
 .reports-page .rp-prog{width:100%}
 .reports-page .rp-t .title .t a{font-weight:700}
+/* the deck name is a finger-sized link on a touch screen */
+@media (pointer:coarse){.reports-page .rp-t .title .t a{display:inline-flex;align-items:center;
+  min-height:44px}}
 .reports-page .rp-t .title .deck .muted{color:var(--text-muted)}
 .reports-page .rp-t .wr{display:none;flex-direction:column;gap:.2rem;font-variant-numeric:tabular-nums}
 @media (min-width:900px){.reports-page .rp-t .wr{display:flex}}
