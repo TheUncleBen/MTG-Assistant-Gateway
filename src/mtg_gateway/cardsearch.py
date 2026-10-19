@@ -481,7 +481,8 @@ def add_cardsearch_routes(server: MCPServer, state: AppState) -> None:
     @server.custom_route("/cards/api/options", methods=["GET"], include_in_schema=False)
     async def options_api(request: Request) -> Response:
         """The pickers' lists (sets, blocks, types from Scryfall, a day at a time; the criteria
-        are Scryfall's fixed list), read when a picker is first opened."""
+        are Scryfall's fixed list). The page asks for them as soon as it loads; the gateway
+        answers the lists it already holds at once (ScanService.search_options)."""
         sub, _sid = browser_session(state, request)
         if not sub:
             return JSONResponse({"ok": False, "error": "unauthenticated"}, 401, headers=NO_STORE)
@@ -493,7 +494,7 @@ def add_cardsearch_routes(server: MCPServer, state: AppState) -> None:
                 headers=NO_STORE,
             )
         try:
-            out = await scan.search_options(owner=sub)
+            out = dict(await scan.search_options())
         except ScanError as exc:
             status = {"rate_limited": 429, "busy": 429}.get(exc.kind, 503)
             return JSONResponse(
@@ -510,6 +511,9 @@ def add_cardsearch_routes(server: MCPServer, state: AppState) -> None:
         sub, sid = browser_session(state, request)
         if not sub:
             return login_redirect("/cards" + (f"?{request.url.query}" if request.url.query else ""))
+        if state.scan is not None:
+            # the pickers' lists start loading now, so they are ready when a picker is opened
+            state.scan.ensure_search_options()
         f = cq.parse(request.query_params)
         view, remember = view_of(request, sub)
         linked, reason = add_reason(sub)

@@ -735,7 +735,7 @@ def build_mcp_server(state: AppState) -> MCPServer:
             if state.notifier is not None:
                 await state.notifier.drain()
             if state.scan is not None:
-                state.scan.names.close()
+                state.scan.close()  # the card-name catalog and picker lists still loading
                 await state.scan.scryfall.aclose()
             state.db.close()
 

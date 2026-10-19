@@ -365,6 +365,38 @@ async def test_the_options_list_sets_blocks_types_and_criteria_once_a_day(stack:
         await b.aclose()
 
 
+async def test_the_options_never_wait_on_scryfall_or_a_lookup_slot(stack: Stack) -> None:
+    """The type picker took about 30 seconds to fill. Opening the page starts the read in the
+    background; the lists held are answered at once, also while the member's lookups are all in
+    use and while a day-old read is refreshed (Scryfall failing meanwhile keeps the old lists)."""
+    import asyncio
+
+    scan = stack.gw.scan
+    b = await linked(stack)
+    try:
+        assert (await b.http.get("/cards")).status_code == 200
+        assert scan._options_task is not None  # the page load started the read
+        await asyncio.wait_for(asyncio.shield(scan._options_task), 5)
+        assert any(u.endswith("/sets") for _m, u in stack.sf.requests)
+        # every lookup slot of this member taken (searches running): the lists still come
+        scan._lookups["user-1"] = 4
+        d = (await b.http.get("/cards/api/options")).json()
+        assert d["ok"] and not d["partial"] and d["sets"], d
+        scan._lookups.pop("user-1")
+        # a day later, with Scryfall down: answered at once from the lists held, read again behind
+        scan._options_at -= 2 * 24 * 3600
+        stack.gw.scan.scryfall.catalogs._items.clear()
+        stack.sf.fail_with = 503
+        d = (await b.http.get("/cards/api/options")).json()
+        assert d["ok"] and not d["partial"] and {s["code"] for s in d["sets"]} == {"c16", "ice", "csp"}
+        await asyncio.wait_for(asyncio.shield(scan._options_task), 5)
+        d = (await b.http.get("/cards/api/options")).json()
+        assert not d["partial"] and d["types"], d  # an incomplete read never replaces complete lists
+    finally:
+        stack.sf.fail_with = None
+        await b.aclose()
+
+
 async def test_the_page_keeps_every_filter_in_its_controls(stack: Stack) -> None:
     b = await linked(stack)
     try:
