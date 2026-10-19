@@ -1485,7 +1485,7 @@ async def test_the_unknown_card_check_asks_scryfall_a_few_names_and_remembers_th
     def handler(request: httpx.Request) -> httpx.Response:
         name = request.url.params.get("exact", "")
         asked.append(name)
-        if name == "Brand New Card":
+        if name == "Brand New Card" or name.startswith("New Set Card"):
             return httpx.Response(200, json={"object": "card", "name": name})
         return httpx.Response(404, json={"object": "error", "status": 404, "details": "no card"})
 
@@ -1502,6 +1502,13 @@ async def test_the_unknown_card_check_asks_scryfall_a_few_names_and_remembers_th
         out = structured(await call(h, token, "propose_deck_changes", {"deck_id": "42", "changes": adds}))
         assert out["ok"] is False and out["unknown_cards"] == typos[:4], out
     assert asked == ["Brand New Card", *typos[:4]]  # five asked once; the second try asks nothing
+    # a sixth name the catalog lacks is never asked and never refused, even a misspelt one
+    asked.clear()
+    news = [f"New Set Card {i}" for i in range(5)]
+    adds = [{"action": "add", "card_name": n} for n in [*news, "Sixth Typo"]]
+    out = structured(await call(h, token, "propose_deck_changes", {"deck_id": "42", "changes": adds}))
+    assert out["ok"], out
+    assert asked == news
 
 
 async def test_printing_fields_are_validated_on_the_change(stack: Stack) -> None:
