@@ -1578,6 +1578,8 @@ async def test_sixty_card_decks_are_simulated_as_sixty_card_games(
     assert rep["goldfish"]["ok"] is True and "Format: 60-card" in rep["goldfish"]["text"], rep["goldfish"]
     ((tool, sent),) = SIM_CALLS
     assert tool == "goldfish_run" and sent["constructed"] is True, sent
+    # the research service's validation is a Commander check (100 cards): a 60-card deck skips it
+    assert rep["validation"] is None, rep["validation"]
     assert sideboard_name not in str(sent["deck"]) and "Commander" not in str(sent["deck"]), sent
     # the stored report reads back as a 60-card game
     got = structured(await call(h, token, "get_deck_report", {"report_id": rep["report_id"]}))
@@ -1603,12 +1605,14 @@ async def test_sixty_card_decks_are_simulated_as_sixty_card_games(
     rep = structured(await call(h, token, "run_deck_report", {"deck_ref": sixty, "games": 20}))
     assert rep["ok"] and rep["stored"] is False, rep
     assert SIM_CALLS[-1][1]["constructed"] is True and "Smash" not in str(SIM_CALLS[-1][1]["deck"])
+    assert rep["validation"] is None, rep["validation"]
     short = "4 Lightning Bolt\n20 Mountain\n16 Goblin Guide\n"
     rep = structured(await call(h, token, "run_deck_report", {"deck_ref": short, "games": 20}))
     assert rep["ok"] is False and "at least 60 cards" in rep["message"] and "has 40" in rep["message"], rep
     commander = "Commander\n1 Aesi, Tyrant of Gyre Strait\n\n99 Island\n"
     rep = structured(await call(h, token, "run_deck_report", {"deck_ref": commander, "games": 20}))
     assert rep["ok"] and SIM_CALLS[-1][1]["constructed"] is False, rep
+    assert rep["validation"]["ok"] is True, rep  # a Commander list is still validated
     # A 100-card paste with no commander marked is a Commander deck, not a 60-card game.
     calls = len(SIM_CALLS)
     unmarked = "1 Aesi, Tyrant of Gyre Strait\n99 Island\n"

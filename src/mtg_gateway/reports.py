@@ -284,9 +284,10 @@ class ReportService:
             # The research service reads names through Scryfall's collection lookup, which
             # knows double-faced cards by their front face only.
             sim_text, sim_commander = front_faces(main), _front_face(commander)
-            validation = await self._mf(
-                sub, "validate_decklist", {"decklist": sim_text, "commander": sim_commander}
-            )
+            if mode != "constructed":  # a Commander check: see _run
+                validation = await self._mf(
+                    sub, "validate_decklist", {"decklist": sim_text, "commander": sim_commander}
+                )
             if simulate and mode not in SIM_MODES:
                 goldfish = {"tool": "goldfish_run", "ok": False, "text": mode}
             elif simulate:
@@ -355,7 +356,12 @@ class ReportService:
             # Front faces only: see run_text.
             text = front_faces(deck_to_text(deck))
             commander = _front_face((stats.get("commanders") or [None])[0])
-            validation = await self._mf(sub, "validate_decklist", {"decklist": text, "commander": commander})
+            # validate_decklist checks a Commander deck (100 cards, the commander's colors): a
+            # 60-card deck would only be told it is short, so it is not sent there.
+            if mode != "constructed":
+                validation = await self._mf(
+                    sub, "validate_decklist", {"decklist": text, "commander": commander}
+                )
             if simulate and mode not in SIM_MODES:
                 goldfish = {"tool": "goldfish_run", "ok": False, "text": mode}
             elif simulate:

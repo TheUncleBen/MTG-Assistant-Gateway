@@ -479,7 +479,9 @@ def tiles_for(g: dict[str, Any]) -> list[dict[str, Any]]:
         )
     oc = m.get("on_curve") if isinstance(m.get("on_curve"), dict) else {}
     r = _rate(oc.get("pct_all_drops_through_t5"))
-    if r:
+    # The simulator names this "through turn 5" whatever the last turn played; a shorter run
+    # never got that far, so the tile would claim turns that were not played.
+    if r and (not isinstance(g.get("until_turn"), int) or g["until_turn"] >= 5):
         out.append(
             {"label": "Every land drop through turn 5", "value": _pct(r["value"]), "rate": r, "note": ""}
         )
@@ -1049,6 +1051,12 @@ def honesty_html(g: dict[str, Any], ask: str = "") -> str:
     return "".join(parts)
 
 
+CONSTRUCTED_VALIDATION = (
+    "Not checked: the research service's check is for Commander decks (100 cards and a commander), so "
+    "it does not apply to a 60-card deck."
+)
+
+
 def _validation_badge(v: dict[str, Any] | None) -> str:
     if v is None:
         return ""
@@ -1574,11 +1582,16 @@ def report_sections(r: dict[str, Any]) -> dict[str, Any]:
     """Everything the page, the Markdown and the HTML export share, computed once."""
     stats = r.get("stats") if isinstance(r.get("stats"), dict) else {}
     g = parse_goldfish(r.get("goldfish"), deck_size=_int(stats.get("card_count")))
-    v = parse_validation(r.get("validation"))
+    settings = r.get("settings") if isinstance(r.get("settings"), dict) else {}
+    constructed = (g or {}).get("format") == "constructed" or settings.get("mode") == "constructed"
+    # The research service's validation is a Commander check (100 cards, a commander): a 60-card
+    # deck is not sent to it, and one an older report sent is not shown.
+    v = None if constructed else parse_validation(r.get("validation"))
     commander = (g or {}).get("commander") or ((stats.get("commanders") or [None])[0] if stats else None)
     return {
         "goldfish": g,
         "validation": v,
+        "constructed": constructed,
         "commander": commander,
         "tiles": tiles_for(g) if g else [],
         "charts": charts_for(g) if g else [],
@@ -1641,7 +1654,7 @@ def report_body_html(
     body = head + engine_html(r, live=not standalone)
     if not standalone:
         body += more_games_html(r.get("forge"), csrf, str(r.get("report_id") or ""))
-    if g is None and v is None:
+    if g is None and v is None and not s["constructed"]:
         body += (
             f"<div class='card'><h2>{_esc(solo_heading(g))}</h2><p class='muted'>The research service "
             "was not configured when this report ran, so there is no solo test and no validation: only "
@@ -1695,7 +1708,11 @@ def report_body_html(
                 "<p class='muted small'>Read the numbers above with this in mind: the more of the deck sits "
                 "here, the less the solo test says about it.</p>" + honesty + "</div>"
             )
-    if g is not None or v is not None:
+    if s["constructed"]:
+        body += (
+            f"<div class='card'><h2>Validation</h2><p class='muted'>{_esc(CONSTRUCTED_VALIDATION)}</p></div>"
+        )
+    elif g is not None or v is not None:
         body += f"<div class='card'><h2>Validation {_validation_badge(v)}</h2>{validation_html(v)}</div>"
     if stats_html:
         body += f"<div class='card'><h2>Deck statistics</h2>{stats_html}</div>"
@@ -1788,7 +1805,9 @@ def report_markdown(r: dict[str, Any]) -> str:
             )
             lines.append(", ".join(front_face(n) for n in h["low_impact"]))
             lines.append("")
-    if v is not None:
+    if s["constructed"]:
+        lines += ["## Validation", "", CONSTRUCTED_VALIDATION, ""]
+    elif v is not None:
         verdict = {"passed": "passed", "issues": "issues found", "failed": "not run"}.get(
             v["verdict"] or "", ""
         )
