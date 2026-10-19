@@ -314,6 +314,7 @@ def add_admin_routes(server: MCPServer, state: AppState) -> None:
         notice: str = "",
         focus: str | None = None,
         status: int = 200,
+        locked_only: bool = False,
     ) -> Response:
         body = settings_page.settings_body(
             state.live,
@@ -326,6 +327,7 @@ def add_admin_routes(server: MCPServer, state: AppState) -> None:
             outcome=outcome,
             notice=notice,
             focus=focus,
+            locked_only=locked_only,
         )
         return page(
             "Admin: settings",
@@ -333,7 +335,8 @@ def add_admin_routes(server: MCPServer, state: AppState) -> None:
             status=status,
             sid=sid,
             sid_sub=sub,
-            head_extra=f"<style>{settings_page.SETTINGS_CSS}</style>",
+            head_extra=f"<style>{settings_page.SETTINGS_CSS}</style>"
+            "<script src='/static/settings.js' defer></script>",
         )
 
     @server.custom_route("/admin/settings", methods=["GET"], include_in_schema=False)
@@ -354,7 +357,9 @@ def add_admin_routes(server: MCPServer, state: AppState) -> None:
             except ValueError:
                 since = 0
             notice = settings_page.changes_notice(_saved_changes(state, sub, since))
-        return settings_page_response(sub, sid, notice=notice, focus=focus)
+        return settings_page_response(
+            sub, sid, notice=notice, focus=focus, locked_only=q.get("locked") == "1"
+        )
 
     @server.custom_route("/admin/settings", methods=["POST"], include_in_schema=False)
     async def settings_post(request: Request) -> Response:
