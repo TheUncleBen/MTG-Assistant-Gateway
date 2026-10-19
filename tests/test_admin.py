@@ -615,3 +615,30 @@ async def test_admin_tab_titles_name_the_admin_area(gw: Harness) -> None:
             assert "Signed in as <b>" in page.text
     finally:
         await b.aclose()
+
+
+async def test_every_admin_page_has_the_same_even_tab_bar_with_the_current_tab_not_orange(
+    gw: Harness,
+) -> None:
+    """One admin tab bar on all six pages: links in .adm-nav, the current one marked aria-current
+    and tinted, never the orange main button (UI standard §5)."""
+    b = await admin_browser(gw)
+    try:
+        paths = (
+            "/admin",
+            "/admin/users",
+            "/admin/activity",
+            "/admin/metrics",
+            "/admin/settings",
+            "/admin/models",
+        )
+        for path in paths:
+            page = await b.http.get(path, headers={"Accept": "text/html"})
+            assert page.status_code == 200, path
+            nav = page.text.split("<nav class='adm-nav' aria-label='Admin'>", 1)[1].split("</nav>", 1)[0]
+            assert [h for h in paths if f"href='{h}'" in nav] == list(paths), path
+            assert nav.count("aria-current='page'") == 1, path
+            assert f"<a href='{path}' aria-current='page'>" in nav, path
+            assert "btn-primary" not in nav and "class='btn" not in nav, path
+    finally:
+        await b.aclose()

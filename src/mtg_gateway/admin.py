@@ -740,7 +740,12 @@ def users_data(state: Any) -> list[dict[str, Any]]:
 
 
 # -- HTML -------------------------------------------------------------------------
+CURRENT = " aria-current='page'"
+
+
 def _nav(active: str) -> str:
+    """The admin pages' own tabs (all six pages): even links in full rows, the current one tinted
+    and marked aria-current, not a second orange button (UI standard §5)."""
     links = (("/admin", "Overview"), ("/admin/users", "Users"), ("/admin/activity", "Activity"))
     links += (
         ("/admin/metrics", "Metrics"),
@@ -748,12 +753,9 @@ def _nav(active: str) -> str:
         ("/admin/models", "Card models"),
     )
     return (
-        "<div class='actions' role='navigation' aria-label='Admin'>"
-        + "".join(
-            f"<a class='btn{' btn-primary' if href == active else ''}' href='{href}'>{label}</a>"
-            for href, label in links
-        )
-        + "</div>"
+        "<nav class='adm-nav' aria-label='Admin'>"
+        + "".join(f"<a href='{href}'{CURRENT if href == active else ''}>{label}</a>" for href, label in links)
+        + "</nav>"
     )
 
 
