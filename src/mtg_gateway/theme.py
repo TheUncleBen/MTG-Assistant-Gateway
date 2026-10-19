@@ -1134,6 +1134,291 @@ html.navigating .navprogress{opacity:1;animation:navprogress 8s cubic-bezier(.1,
 @media (prefers-reduced-motion:reduce){html.navigating .navprogress{animation:none;transform:scaleX(.6)}}
 """
 
+# UI standard v1 (docs: UI-STANDARD.md §3-§5): the shared pieces of the dashboard and list pages,
+# drawn by ui.py. Theme tokens only. Names that the theme or a page already uses for something
+# else carry a ui- prefix (ui-lbl, ui-app, ui-when, ui-chip, ui-chg, ui-locked); the rest keep the
+# approved mockup's names.
+UI_CSS = """
+/* §3 width: lists and tables are wide, up to 1200 px (render(main_class='ui-wide')) */
+main.wrap.ui-wide{max-width:1200px}
+.ui-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:.25rem 1rem;margin:0 0 .25rem}
+.ui-head h1{margin:0}
+.ui-sub{color:var(--text-muted);margin:.1rem 0 1rem;font-size:.93rem}
+
+/* §4 labels: a word, a colour and an icon */
+.ui-lbl{display:inline-flex;align-items:center;gap:.3rem;height:24px;padding:0 .55rem 0 .45rem;
+  border-radius:999px;font-size:.82rem;font-weight:700;line-height:1;white-space:nowrap;
+  border:1px solid transparent;background:var(--surface-2);color:var(--text);vertical-align:middle}
+.ui-lbl svg.i{width:15px;height:15px;stroke-width:2.2;vertical-align:0}
+.ui-lbl.orange{background:var(--orange-tint);color:var(--orange-text)}
+.ui-lbl.green{background:var(--green-tint);color:var(--green-text)}
+.ui-lbl.red{background:var(--red-tint);color:var(--red-text)}
+.ui-lbl.blue{background:var(--blue-tint);color:var(--blue-text)}
+.ui-lbl.grey{background:transparent;color:var(--text-muted);border-color:var(--card-border)}
+.ui-lbl.plain{background:var(--surface-2);color:var(--text)}
+/* the app a row came from: its name with a letter tile; a dash when none is recorded */
+.ui-app{display:inline-flex;align-items:center;gap:.35rem;color:var(--text);font-size:.9rem;
+  white-space:nowrap}
+.ui-app i{display:inline-grid;place-items:center;width:20px;height:20px;border-radius:4px;font-style:normal;
+  font-size:.7rem;font-weight:900;background:var(--surface-2);color:var(--text)}
+.ui-app.none{color:var(--text-muted)}
+/* §3 dates: relative within 7 days, then the date; the full date and time in the tooltip */
+.ui-when{color:var(--text-muted);font-size:.9rem;white-space:nowrap;font-variant-numeric:tabular-nums}
+
+/* tabs with counts */
+.ui-tabs{display:flex;gap:.25rem;border-bottom:1px solid var(--card-border);margin:0 0 .75rem;overflow-x:auto}
+.ui-tabs a{display:inline-flex;align-items:center;gap:.45rem;min-height:44px;padding:0 1rem;
+  color:var(--text-muted);font-weight:700;text-decoration:none;border-bottom:3px solid transparent;
+  margin-bottom:-1px;white-space:nowrap}
+.ui-tabs a[aria-current]{color:var(--text);border-bottom-color:var(--orange)}
+.ui-tabs .n{display:inline-grid;place-items:center;min-width:22px;height:22px;padding:0 6px;
+  border-radius:999px;
+  background:var(--surface-2);color:var(--text);font-size:.8rem}
+
+/* quick-filter chips with counts */
+.ui-chips{display:flex;flex-wrap:wrap;gap:.4rem;margin:0 0 .6rem}
+.ui-chip{display:inline-flex;align-items:center;gap:.35rem;min-height:36px;padding:0 .8rem;
+  border-radius:999px;
+  border:1px solid var(--control-border);color:var(--text);font-weight:700;font-size:.9rem;
+  text-decoration:none;
+  background:transparent}
+.ui-chip:hover{color:var(--text);background:var(--surface-2)}
+@media (pointer:coarse){.ui-chip{min-height:44px}}
+.ui-chip[aria-pressed=true],.ui-chip[aria-current]{background:var(--orange-tint);
+  border-color:var(--orange-text);
+  color:var(--orange-text)}
+.ui-chip .n{color:var(--text-muted);font-weight:700}
+.ui-chip[aria-pressed=true] .n,.ui-chip[aria-current] .n{color:inherit}
+.ui-chip svg.i{width:15px;height:15px}
+.list-head{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:.25rem 1rem;
+  margin:0 0 .5rem}
+.list-head h2{margin:0;font-size:1.2rem}
+.list-head h2 .ui-sub{font-size:1rem;margin:0}
+.list-head > .ui-sub{margin:0}
+
+/* toolbar: one search box, then the filters */
+.ui-tools{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;margin:0 0 .75rem}
+.ui-tools .search{flex:1 1 16rem;position:relative;min-width:0;align-self:stretch;display:flex;
+  align-items:center}
+.ui-tools label.search{margin:0;font-weight:400}
+.ui-tools .search svg.i{position:absolute;left:.7rem;top:50%;transform:translateY(-50%);width:16px;
+  height:16px;
+  color:var(--text-muted);pointer-events:none}
+.ui-tools .search input{width:100%;margin:0;padding-left:2.2rem;font-weight:400}
+.ui-tools .f{flex:0 1 10.5rem;min-width:8.5rem;display:flex;align-items:center}
+.ui-tools select{margin:0}
+@media (max-width:599.98px){.ui-tools .f{flex:1 1 calc(50% - .5rem)}}
+.ui-note{color:var(--text-muted);font-size:.88rem;margin:.25rem 0 .75rem}
+
+/* §3 the table: lined-up columns from 900 px (--cols); 600-899 px the low-priority columns
+   (.md-hide) fold into a second line (.sub) under the title (--cols-md); below 600 px two-line rows
+   (--cols-sm) with the status label beside the title (.stin) */
+.ui-table{border:1px solid var(--card-border);border-radius:var(--radius-panel);background:var(--surface);
+  margin:0 0 1rem}
+.ui-table .tr{display:grid;grid-template-columns:var(--cols);align-items:center;gap:0 .75rem;min-height:44px;
+  padding:.45rem .75rem;border-top:1px solid var(--border-soft)}
+.ui-table .tr:first-child{border-top:0}
+.ui-table .th{font-size:.8rem;font-weight:700;color:var(--text-muted);text-transform:uppercase;
+  letter-spacing:.03em;background:var(--surface-2);min-height:36px}
+.ui-table .th button{all:unset;cursor:pointer;display:inline-flex;align-items:center;gap:.2rem}
+.ui-table .th button:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+.ui-table .group{background:var(--surface-2);font-weight:700;grid-template-columns:32px 1fr auto}
+.ui-table .group a{font-weight:700}
+.ui-table .group .meta{color:var(--text-muted);font-weight:400;font-size:.88rem;white-space:nowrap}
+.ui-table .tr.sel{background:var(--orange-tint)}
+.ui-table .tr.open{box-shadow:inset 3px 0 0 var(--orange)}
+.ui-table .title{min-width:0}
+.ui-table .title .t{display:block;overflow-wrap:anywhere}
+.ui-table .title .no{color:var(--text-muted);font-weight:700;margin-right:.35rem;
+  font-variant-numeric:tabular-nums}
+.ui-table .title .deck{display:block;color:var(--text-muted);font-size:.86rem}
+.ui-table .sub{display:none;margin-top:.3rem;gap:.35rem .6rem;flex-wrap:wrap;align-items:center}
+.ui-table .stin{display:none}
+.ui-table .chk{display:grid;place-items:center;width:32px;height:44px;margin:-.45rem 0;cursor:pointer}
+.ui-table .chk input{width:20px;height:20px;margin:0;accent-color:var(--orange-ctl)}
+.ui-table .act{justify-self:end}
+.ui-table .act .acts{display:inline-flex;gap:.4rem}
+.ui-table .act .btn,.ui-table .act button{white-space:nowrap;display:inline-flex;align-items:center;
+  gap:.35rem}
+.ui-table .act .chev{display:none}
+.ui-table .flag{display:block;color:var(--text-muted);font-size:.84rem;margin-top:.15rem}
+.ui-table .flag b{color:var(--red-text)}
+.ui-table .sm-only{display:none}
+.daygroup,.ui-table .tr.daygroup{background:transparent;color:var(--text-muted);font-weight:700;
+  font-size:.85rem;
+  grid-template-columns:1fr;min-height:32px}
+@media (pointer:coarse){
+  /* the tick box's cell is the 44 px target; it overhangs its 32 px column into the padding */
+  .ui-table .chk{width:44px;margin:-.45rem -6px}
+  .ui-table .th button,.ui-table .group a{display:inline-flex;align-items:center;min-height:44px}
+}
+@media (max-width:899.98px){
+  .ui-table .tr{grid-template-columns:var(--cols-md)}
+  .ui-table .md-hide{display:none}
+  .ui-table .sub{display:flex}
+}
+@media (max-width:599.98px){
+  .ui-table .tr{grid-template-columns:var(--cols-sm);padding:.55rem .6rem}
+  .ui-table .th{display:none}
+  .ui-table .sm-hide,.ui-table .act .sm-hide{display:none}
+  .ui-table .stin{display:inline-flex;margin-left:.35rem;vertical-align:middle}
+  .ui-table .group{grid-template-columns:32px 1fr}
+  .ui-table .group .meta{grid-column:2;white-space:normal}
+  .ui-table .sm-only{display:inline;color:var(--text-muted);font-size:.84rem;flex-basis:100%}
+  .ui-table .act .btn,.ui-table .act button{padding:0 .6rem;font-size:.86rem}
+  .ui-table .act .chev{display:inline-grid;place-items:center;width:44px;height:44px;font-size:1.7rem;
+    line-height:1;color:var(--text);flex-basis:auto}
+  .ui-table .act.linkbtn{padding:0}
+}
+
+/* §5 buttons: one orange main button; Reject, Delete and Remove as a red outline; the rest plain */
+.btn-outline-danger,button.btn-outline-danger{background:transparent;color:var(--danger-text);
+  border:1px solid var(--danger-text);font-weight:700}
+.btn-outline-danger:hover,button.btn-outline-danger:hover{background:var(--red-tint);color:var(--danger-text)}
+.btn-plain,button.btn-plain{background:transparent;border:1px solid var(--control-border);color:var(--text);
+  font-weight:700}
+.linkbtn{display:inline-flex;align-items:center;min-height:44px;padding:0 .4rem;font-weight:700}
+@media (pointer:fine){.linkbtn{min-height:32px}}
+
+/* the sticky action bar while a list has a selection */
+.ui-bar{position:sticky;bottom:.75rem;z-index:20;display:flex;flex-wrap:wrap;
+  align-items:center;gap:.5rem;padding:.6rem .75rem;margin:.5rem 0 1rem;background:var(--surface);
+  border:1px solid var(--card-border);border-radius:var(--radius-lg);box-shadow:var(--shadow)}
+.ui-bar[hidden]{display:none}
+.ui-bar .count{font-weight:700;margin-right:auto}
+.ui-bar button,.ui-bar .btn{margin:0}
+/* it stays above the phone's bottom tab bar (--tab-room: its real height, static/topbar.js; 4rem
+   without scripts covers it at 200% text) */
+.has-tabbar .ui-bar{bottom:calc(var(--tab-room,0px) + .75rem)}
+@media (max-width:599.98px){
+  .has-tabbar .ui-bar{bottom:calc(var(--tab-room,calc(max(56px,
+  4rem) + env(safe-area-inset-bottom))) + .5rem)} }
+
+/* paging: "1-25 of 51", Newer and Older */
+.ui-pager{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:.5rem;
+  margin:.5rem 0 1rem}
+.ui-pager .info{color:var(--text-muted)}
+.ui-pager .btns{display:flex;gap:.5rem}
+.ui-pager .btns .btn,.ui-pager .btns button{margin:0}
+.ui-pager button[disabled],.ui-pager .btn[aria-disabled=true]{opacity:.55}
+
+/* §3 opening one item: from 1100 px a side panel beside the list (a split, not an overlay: the
+   list folds to its 600-899 layout and stays in view); narrower, the item is its own page */
+.ui-split{position:relative}
+.ui-drawer{display:none}
+@media (min-width:1100px){
+  main.wrap.ui-wide:has(.ui-split.with-panel){max-width:1440px}
+  .ui-split.with-panel{display:grid;grid-template-columns:minmax(0,1fr) 440px;gap:1rem;align-items:start}
+  .ui-split.with-panel .ui-drawer{display:block;position:sticky;top:var(--bar-room,60px);
+    max-height:calc(100vh - var(--bar-room,60px) - 12px);overflow:auto;background:var(--surface);
+    border:1px solid var(--card-border);border-radius:var(--radius-panel);padding:1rem 1.25rem 1.5rem;
+    box-shadow:var(--shadow)}
+  .ui-split.with-panel .page-only{display:none}
+  .with-panel .ui-table .tr{grid-template-columns:var(--cols-md)}
+  .with-panel .ui-table .md-hide{display:none}
+  .with-panel .ui-table .sub{display:flex}
+  .with-panel .ui-widgets{grid-template-columns:repeat(auto-fit,minmax(min(100%,11rem),1fr))}
+}
+@media (max-width:1099.98px){
+  .ui-split.with-panel .list-only{display:none}
+  .ui-split.with-panel .ui-drawer{display:block}
+  .ui-split.with-panel .panel-only{display:none}
+}
+.ui-drawer .dh{display:flex;align-items:flex-start;gap:.5rem;margin:0 0 .5rem}
+.ui-drawer .dh h2{margin:0;flex:1;font-size:1.3rem;overflow-wrap:anywhere}
+.ui-drawer .close{min-width:44px;min-height:44px;display:inline-grid;place-items:center;
+  background:transparent;
+  border:1px solid var(--control-border);padding:0;color:var(--text);text-decoration:none}
+.ui-drawer .pills{display:flex;flex-wrap:wrap;gap:.4rem;margin:0 0 .75rem}
+.ui-meta{display:grid;grid-template-columns:auto 1fr;gap:.35rem 1rem;margin:0 0 1rem;font-size:.95rem}
+.ui-meta dt{color:var(--text-muted)} .ui-meta dd{margin:0;overflow-wrap:anywhere}
+.ui-why{color:var(--text-muted);font-size:.88rem}
+/* a proposal's changes: ADD / REMOVE / QTY, the card and the count */
+ul.ui-chg{padding:0;border:1px solid var(--card-border);border-radius:var(--radius-panel);
+  margin:.5rem 0 .75rem}
+.ui-chg li{display:grid;grid-template-columns:5.5rem 1fr auto;align-items:center;gap:.6rem;min-height:40px;
+  padding:.3rem .6rem;border-top:1px solid var(--border-soft);list-style:none;margin:0}
+.ui-chg li:first-child{border-top:0}
+.ui-chg .k{font-size:.75rem;font-weight:900;text-align:center;border-radius:3px;padding:.15rem 0;
+  letter-spacing:.04em}
+.ui-chg .add .k{color:var(--green-text);border:1px solid var(--green-text)}
+.ui-chg .rm .k{color:var(--red-text);border:1px solid var(--red-text)}
+.ui-chg .qty .k{color:var(--blue-text);border:1px solid var(--blue-text)}
+.ui-chg .rm .n{text-decoration:line-through}
+.ui-chg .d{font-weight:900;font-variant-numeric:tabular-nums}
+.ui-chg .add .d{color:var(--green-text)} .ui-chg .rm .d{color:var(--red-text)}
+.ui-actions{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;margin:.75rem 0 .25rem}
+.ui-actions button,.ui-actions .btn,.ui-actions form > button{margin:0}
+.ui-actions form{display:contents}
+.ui-hint{color:var(--text-muted);font-size:.84rem;margin:.25rem 0 0}
+.ui-section{margin:1.25rem 0 .5rem;font-size:1.05rem}
+.ui-next{margin:0 0 .75rem;padding:.5rem .75rem;border-left:3px solid var(--blue-text);
+  background:var(--surface-2)}
+
+/* forms (Account, Settings): rows that line up, one panel per topic, in the 52rem column */
+.ui-form{max-width:52rem}
+.ui-card{border:1px solid var(--card-border);border-radius:var(--radius-panel);background:var(--surface);
+  padding:1rem;margin:0 0 1rem}
+.ui-card > h2{margin:0 0 .25rem;font-size:1.15rem}
+.ui-card > .ui-sub{margin:0 0 .75rem}
+.ui-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,16rem);gap:.25rem 1rem;align-items:center;
+  padding:.6rem 0;border-top:1px solid var(--border-soft)}
+.ui-row:first-of-type{border-top:0}
+.ui-row .lab{font-weight:700;margin:0} .ui-row .help{grid-column:1;color:var(--text-muted);font-size:.86rem}
+.ui-row .ctl{grid-column:2;grid-row:1 / span 2;min-width:0}
+@media (max-width:599.98px){.ui-row{grid-template-columns:1fr}.ui-row .ctl{grid-column:1;grid-row:auto}}
+.ui-checks{display:flex;flex-direction:column;gap:.25rem}
+.ui-checks label{display:flex;align-items:center;gap:.6rem;min-height:44px;margin:0;font-weight:400}
+.ui-checks input{width:20px;height:20px;margin:0;accent-color:var(--orange-ctl)}
+.ui-locked{display:inline-flex;align-items:center;gap:.3rem;color:var(--text-muted);font-size:.84rem}
+/* the admin pages' own tabs: even, wrapping in full rows; the current one tinted */
+.adm-nav{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,6.4rem),1fr));gap:.35rem;
+  margin:0 0 .75rem}
+.adm-nav a{display:flex;align-items:center;justify-content:center;min-height:var(--ctl);padding:0 .4rem;
+  border:1px solid var(--card-border);border-radius:var(--radius);background:var(--surface);color:var(--text);
+  font-weight:700;text-decoration:none;white-space:nowrap}
+.adm-nav a[aria-current]{background:var(--orange-tint);border-color:var(--orange-text);
+  color:var(--orange-text)}
+
+/* §3a dashboard pages: a row of widgets (quick starts), then the full list */
+.ui-widgets{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,13rem),1fr));gap:.75rem;
+  margin:0 0 1.25rem}
+.wdg{display:flex;flex-direction:column;gap:.35rem;min-width:0;padding:.85rem 1rem;background:var(--surface);
+  border:1px solid var(--card-border);border-radius:var(--radius-panel)}
+.wdg .lab{display:flex;align-items:center;gap:.4rem;color:var(--text-muted);font-size:.85rem;font-weight:700;
+  text-transform:uppercase;letter-spacing:.03em}
+.wdg .lab svg.i{width:16px;height:16px}
+.wdg .big{font-size:2rem;font-weight:900;line-height:1.1;font-variant-numeric:tabular-nums}
+.wdg .big small{font-size:.95rem;font-weight:700;color:var(--text-muted);margin-left:.35rem}
+.wdg .det{color:var(--text-muted);font-size:.88rem;display:flex;flex-wrap:wrap;gap:.3rem .5rem;
+  align-items:center}
+.wdg .det .tx{display:inline}
+.wdg .det a{font-weight:700}
+.wdg .det .ui-lbl{height:22px;font-size:.78rem}
+.wdg .go{margin-top:auto;padding-top:.35rem;display:flex;flex-wrap:wrap;gap:.4rem}
+.wdg .go .btn,.wdg .go button,.wdg .go a.btn-plain{min-height:var(--ctl);padding:0 .8rem;font-size:.92rem;
+  margin:0}
+.wdg .go form{display:contents}
+.wdg.accent{border-top:3px solid var(--orange)}
+.wdg.alert{border-top:3px solid var(--red-text)}
+.bar-split{display:flex;height:8px;border-radius:4px;overflow:hidden;background:var(--surface-2)}
+.bar-split i{display:block;height:100%}
+@media (min-width:600px) and (max-width:899.98px){
+  .ui-widgets{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .wdg.wide-sm{grid-column:1 / -1}
+}
+@media (max-width:599.98px){
+  .ui-widgets{grid-template-columns:1fr 1fr;gap:.5rem}
+  .wdg{padding:.6rem .7rem}
+  .wdg .big{font-size:1.5rem}
+  .wdg .det{font-size:.82rem}
+  .wdg .go .btn,.wdg .go button,.wdg .go a.btn-plain{width:100%;justify-content:center;padding:0 .4rem;
+    font-size:.86rem}
+  .wdg.wide-sm{grid-column:1 / -1}
+}
+"""
+CSS += UI_CSS
+
 
 # Own inline icons (simple 24-unit strokes). None is an Archidekt or Font Awesome path.
 ICONS = {
@@ -1211,6 +1496,20 @@ ICONS = {
     "<circle cx='15' cy='12' r='1.3' fill='currentColor'/>"
     "<circle cx='9' cy='18' r='1.3' fill='currentColor'/>"
     "<circle cx='15' cy='18' r='1.3' fill='currentColor'/>",
+    # UI standard §4 labels, widgets and actions (ui.py)
+    "clock": "<circle cx='12' cy='12' r='9'/><path d='M12 7v5l3 2'/>",
+    "alert": "<circle cx='12' cy='12' r='9'/><path d='M12 7v6M12 16.5v.5'/>",
+    "pause": "<path d='M9 6v12M15 6v12'/>",
+    "hourglass": "<path d='M7 3h10M7 21h10M8 3c0 5 8 6 8 9s-8 4-8 9M16 3c0 5-8 6-8 9'/>",
+    "shield": "<path d='M12 3l7 3v6c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z'/>",
+    "triangle": "<path d='M12 4l9 16H3z'/><path d='M12 10v4M12 17v.5'/>",
+    "hand": "<path d='M8 13V6a1.5 1.5 0 0 1 3 0v5M11 11V4.5a1.5 1.5 0 0 1 3 0V11M14 11V6a1.5 1.5 0 0 1 3 0v7"
+    "c0 4-2.5 7-6 7-2.5 0-4-1.5-5.5-3.5L4 13.5a1.5 1.5 0 0 1 2.3-1.9L8 13'/>",
+    "spinner": "<path d='M12 3a9 9 0 1 0 9 9'/>",
+    "arrows": "<path d='M4 8h13l-3-3M20 16H7l3 3'/>",
+    "back": "<path d='M9 14L4 9l5-5'/><path d='M4 9h10a6 6 0 0 1 0 12h-3'/>",
+    "bell": "<path d='M6 16V11a6 6 0 0 1 12 0v5l2 2H4z'/><path d='M10 21h4'/>",
+    "send": "<path d='M4 12l16-8-6 16-2-7z'/>",
 }
 
 
@@ -1429,6 +1728,7 @@ def render(
     heading: bool = True,
     head_extra: str = "",
     body_class: str = "",
+    main_class: str = "",
     user: str | None = None,
 ) -> HTMLResponse:
     """Render a page. ``form_action`` adds exact origins a form on this page may submit or be
@@ -1436,7 +1736,8 @@ def render(
     Scripts load only from the gateway's own origin (``script-src 'self'``; inline script stays
     forbidden). ``current`` names the nav link to mark as the current page (its path);
     ``heading=False`` leaves the <h1> to the body (deck banner). ``user`` is the signed-in
-    member's name for the account menu's "Signed in as" line."""
+    member's name for the account menu's "Signed in as" line. ``main_class`` adds classes to
+    <main> (``ui-wide`` for the UI standard's 1200 px list pages)."""
     theme = current_theme()
     app = in_app()
     # "Use desktop layout": a wide fixed viewport, as a browser's "Desktop site" switch
@@ -1629,7 +1930,8 @@ def render(
         f"<span class='mark'>{icon('brand')}</span>"
         f"<span class='word'>{html.escape(site)}</span></a>{nav}</div>"
         f"<div class='right'>{right}</div></div></header>"
-        f"<main class='wrap' id='main' tabindex='-1'>{h1}{body}</main>"
+        f"<main class='{html.escape(' '.join(('wrap', main_class)).strip())}' id='main' tabindex='-1'>"
+        f"{h1}{body}</main>"
         + (
             # The website footer; the Android app has no footer (its pages end at the tab bar).
             "<footer class='site'><div class='links'>"
