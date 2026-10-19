@@ -79,6 +79,14 @@ in-chat cards, deck reports and the Settings and Account pages.
 - The Account page's summary choice is labelled "How often", and outside the app the notifications
   hint gives the steps in order: open the Account page in the app, tick Send me notifications and
   press Save notifications.
+- A member's Archidekt requests made for their own pages in the browser now take their turn before
+  waiting requests from assistants and the deck sync. A fourth Archidekt action while three
+  are running or waiting now waits up to 20 seconds for a turn instead of being refused at once. The
+  gap between requests, the per-minute limit and each member's 10-minute allowance stay the same.
+- While Archidekt can't be asked (it asked the gateway to slow down, it can't be reached, or your
+  account's Archidekt actions or allowance leave nothing free), My decks, the home page and the
+  app show your deck list as it was last read, with a notice saying how old it is, instead of the
+  "Archidekt is busy" page. The "Archidekt is busy" page now says which of these it is.
 
 ### Fixed
 - 21 settings on the Settings page couldn't be set from your variables alone. The stack files
