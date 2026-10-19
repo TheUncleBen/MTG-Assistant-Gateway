@@ -98,7 +98,8 @@ in-chat cards, deck reports and the Settings and Account pages.
   found nothing. A deck in the backup folder could also show in My decks for the same reason.
 - Looking up someone you follow read only the first 5 pages of the list, so a person further down
   was "not followed" when adding a collaborator, and a follow couldn't say whether you already followed
-  them. Both now read on until they find the person, up to 20 pages.
+  them. Both now read on until they find the person, up to 20 pages. What was read is remembered for
+  two minutes, so a lookup repeated in that time, or made at the same time, reads no page again.
 - The summary counted a deck report as finished while its Forge games were still running.
 - A 60-card deck's report showed a Commander check asking for 100 cards, and a run shorter than five
   turns showed a turn-five land-drop rate.

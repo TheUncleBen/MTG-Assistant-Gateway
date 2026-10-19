@@ -499,3 +499,42 @@ async def test_a_lookup_stops_at_its_cap_and_says_so(stack: Stack, monkeypatch) 
     assert p["ok"] is False and p["error"] == "not_found", p
     assert f"(the gateway reads only the first {FOLLOWING_LOOKUP_PAGES} pages of that list)" in p["message"]
     assert read == list(range(1, FOLLOWING_LOOKUP_PAGES + 1)), read
+
+
+async def test_a_name_not_followed_is_looked_up_once_until_the_list_expires(
+    stack: Stack, monkeypatch
+) -> None:
+    """A lookup that read the following list to its cap (or its end) answers every lookup until
+    the list expires: a retried misspelt collaborator and a follow proposal for someone not
+    followed read no page again, and two lookups at once read each page once."""
+    import asyncio
+
+    from mtg_gateway.social import FOLLOWING_LOOKUP_PAGES, FOLLOWING_TTL
+
+    h = stack.h
+    token = await linked_user(stack)
+    read = _long_following(stack, monkeypatch, amy_on=None)
+    p = {}
+    for _ in range(2):
+        p = structured(
+            await call(
+                h, token, "propose_collaborator", {"deck_id": "42", "action": "add", "username": "amy"}
+            )
+        )
+        assert p["ok"] is False and p["error"] == "not_found", p
+    assert read == list(range(1, FOLLOWING_LOOKUP_PAGES + 1)), read  # the second call read nothing
+    assert FOLLOWING_TTL == 120 and "remembers that list for two minutes" in p["message"]
+    stack.ark.private.discard(43)  # amy's deck: a follow of its owner, whom the list does not hold
+    p = structured(await call(h, token, "propose_deck_social", {"deck_id": "43", "action": "follow_owner"}))
+    assert "could not check whether you already follow them" in p["rows"][0]["text"], p
+    assert len(read) == FOLLOWING_LOOKUP_PAGES  # answered by the remembered list
+    # once it expires, two lookups at once share one read
+    social = h.app.state.gateway.social
+    social._following.clear()
+    social._following_next.clear()
+    read.clear()
+    found = await asyncio.gather(
+        social.find_followed("user-1", "nobody"), social.find_followed("user-1", "p3")
+    )
+    assert found[1] == (9003, "p3") and found[0] is None
+    assert read == list(range(1, FOLLOWING_LOOKUP_PAGES + 1)), read

@@ -639,7 +639,7 @@ async def test_collaborators_are_listed_added_and_removed_on_the_members_press(
 ) -> None:
     from mtg_gateway import social
 
-    monkeypatch.setattr(social, "FRESH_GAP", 0.0)  # the member follows amy straight after the miss
+    monkeypatch.setattr(social, "FOLLOWING_TTL", 0.0)  # the member follows amy straight after the miss
     h, ark = stack.h, stack.ark
     token = await linked_user(stack)
     await _set_mode(h, "auto")
@@ -1333,7 +1333,7 @@ async def test_an_action_whose_write_landed_is_never_put_back_to_pending(
         return None
 
     monkeypatch.setattr(ArchidektClient, "_wait_out", no_wait)
-    monkeypatch.setattr(social, "FRESH_GAP", 0.0)
+    monkeypatch.setattr(social, "FOLLOWING_TTL", 0.0)
     h, ark = stack.h, stack.ark
     token = await linked_user(stack)
     if case == "collaborator_add":

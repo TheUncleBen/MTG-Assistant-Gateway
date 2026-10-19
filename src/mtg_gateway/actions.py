@@ -144,7 +144,9 @@ async def collaborator_target(
                 "not_found",
                 f"{want} is not among the people you follow on Archidekt{how_far}. Collaborators are "
                 "added from the people you follow, as on Archidekt's own settings page: follow them "
-                f"on Archidekt first ({profile_url(want)}), then add them.",
+                f"on Archidekt first ({profile_url(want)}), then add them. The gateway remembers that "
+                "list for two minutes, so someone you followed on archidekt.com just now shows up after "
+                "that.",
                 follow_username=want,
                 follow_url=profile_url(want),
             )
