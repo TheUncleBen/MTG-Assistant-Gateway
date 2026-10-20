@@ -102,13 +102,15 @@ def test_view_as_is_remembered_after_leaving_and_coming_back(server: Server, wid
         # the deck list: Grid by default, List picked, then away (Collection) and back (Decks)
         _nav(page, "/decks")
         assert page.locator("ul.decklist.grid").count() == 1
-        _pick(page, "f-view", "List")
-        assert page.locator("ul.decklist.list").count() == 1
+        # My decks' view is the search panel's Grid or List switch, which redraws the list in place
+        page.locator("#listform .segc.view label[title=List]").click()
+        page.wait_for_selector("ul.decklist.list")
+        page.wait_for_load_state("networkidle")
         _nav(page, "/collection")
         _nav(page, "/decks")
         assert page.url == f"{server.base}/decks", page.url
         assert page.locator("ul.decklist.list").count() == 1, "the deck list went back to Grid"
-        assert "<option value='list' selected>" in page.request.get(f"{server.base}/decks").text()
+        assert "value='list' checked>" in page.request.get(f"{server.base}/decks").text()
         # the deck page keeps its own choice: the two do not share one setting
         page.goto(f"{server.base}/decks/{DECK}", wait_until="networkidle")
         assert page.locator("#cards.deckview.stacks").count() == 1

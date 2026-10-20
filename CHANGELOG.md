@@ -45,6 +45,8 @@ pages fit phones, an open Fold, tablets and computers the same way.
   phone the filters open in a sheet.
 - Every filter where you can pick several (rarity, for example) is a drop-down with checkboxes.
 - Card search's Commander colors can match within, exactly or including the colors you pick.
+  Deck search and My decks match decks including, exactly or at most the colors you pick, and deck
+  search sorts in either direction.
 - An open Fold and tablets get the side rail, in the app and in a touch browser up to 1279 px
   wide; a computer browser keeps the top bar.
 - The Scan page is one column at every width, with its options on one row and a round capture

@@ -271,7 +271,12 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
         for d in rows or []:
             d.setdefault("url", f"https://archidekt.com/decks/{d['id']}")
         out["decks"] = rows or []
-        return JSONResponse(out, headers={"Cache-Control": "no-store"})
+        resp = JSONResponse(out, headers={"Cache-Control": "no-store"})
+        if shape == "list" and qp.get("view") in LIST_VIEWS:
+            # the panel's Grid or List switch redraws the list in place: it is remembered as the
+            # page's own address would remember it
+            return prefs.remember_view(state.db, sub, resp, "decks", view, secure=secure)
+        return resp
 
     @server.custom_route("/decks/open", methods=["GET"], include_in_schema=False)
     async def open_deck(request: Request) -> Response:

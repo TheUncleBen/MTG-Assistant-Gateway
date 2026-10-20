@@ -310,7 +310,7 @@ def test_my_decks_filters_in_the_browser_as_you_type_and_pick(server: Server, wi
             page.wait_for_function("() => !document.querySelector('#decks-list[aria-busy]')", timeout=5000)
             assert _names(page) == ["Sample Commander Deck", "Fresh brew", "Another sample deck"]
             page.locator("#f-format").select_option("Modern")
-            page.wait_for_function("() => location.search.includes('format=Modern')", timeout=5000)
+            page.wait_for_function("() => location.search.includes('format=modern')", timeout=5000)
             page.wait_for_function("() => !document.querySelector('#decks-list[aria-busy]')", timeout=5000)
             assert page.locator("#decks-total").inner_text() == "0 decks"
         # Clear filters is a link back to the plain list
