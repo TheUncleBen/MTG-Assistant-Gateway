@@ -1,4 +1,4 @@
-"""The two Activity pages as §3a dashboards (UI standard mapping k2 and k9): the admin's Activity
+"""The two Activity pages as dashboards: the admin's Activity
 (/admin/activity, everyone's audit rows) and the member's My activity (/activity, their own).
 
 Both read the audit log in pages of 25 with the filters in SQL (no silent cap: a row is kept a
@@ -145,7 +145,7 @@ ICONS = {
     "card_model_removed": "trash",
 }
 
-# The error a failed row stores, in words (k9 M15); the code goes only in the row's details.
+# The error a failed row stores, in words; the code goes only in the row's details.
 ERROR_WORDS = {
     "rate_limited": "Archidekt asked the gateway to slow down",
     "unavailable": "Archidekt can't be reached right now",
@@ -159,7 +159,7 @@ GONE_DECK = "a deck that was removed"
 NO_DETAIL = "No detail"
 NO_NAME = "a member with no name"  # a member with neither a username nor an email on record
 
-# Detail keys as words on the admin page (k2 V7); keys that only name a row elsewhere are left to
+# Detail keys as words on the admin page; keys that only name a row elsewhere are left to
 # the row's details. Unmapped keys show as stored.
 DETAIL_WORDS = {
     "deck_id": "deck",
@@ -518,7 +518,7 @@ def is_refused(event: str, detail: Mapping[str, Any]) -> bool:
 
 
 def status_html(event: str, detail: Mapping[str, Any], *, title: str = "") -> str:
-    """The short §4 label before an event's name, or "" for an event without a status."""
+    """The short status label before an event's name, or "" for an event without a status."""
     if is_refused(event, detail):
         return ui.label_for("refused", title=title)
     if event in FAILED_EVENTS:
@@ -676,7 +676,7 @@ def _deck_html(names: Names, sub: str | None, deck_id: Any, *, link: bool, own: 
 
 
 def member_detail_html(row: Mapping[str, Any], names: Names) -> str:
-    """A row's detail on My activity (k9 M6): the deck and what to open, never an id."""
+    """A row's detail on My activity: the deck and what to open, never an id."""
     event, d, sub = row["event"], _detail(row), row.get("sub")
     said = change_line(d) if event == "setting_changed" else None
     if event == "card_model_removed":
@@ -735,7 +735,7 @@ def _value(v: Any) -> str:
 
 
 def admin_detail_html(row: Mapping[str, Any], names: Names) -> str:
-    """A row's detail on the admin page (k2 V5-V7): the setting and card-model sentences as
+    """A row's detail on the admin page: the setting and card-model sentences as
     today, any other detail as "key value" pairs in words."""
     event, d, sub = row["event"], _detail(row), row.get("sub")
     if event == "setting_changed" and (said := change_line(d)):
@@ -1034,7 +1034,7 @@ HEAD_ADMIN = f"<style>{ADMIN_CSS}</style><script src='/static/activity.js' defer
 
 
 def admin_body(state: Any, params: Mapping[str, str], *, nav: str, now: float | None = None) -> str:
-    """/admin/activity (k2): widgets, chips, search, filters, the lined-up list (rows open in
+    """/admin/activity: widgets, chips, search, filters, the lined-up list (rows open in
     place) and paging; every row the log keeps, none capped."""
     now = time.time() if now is None else now
     path = "/admin/activity"
@@ -1247,7 +1247,7 @@ def _admin_row(r: dict[str, Any], log: Log, names: Names, query: Query, path: st
 
 
 def member_body(state: Any, sub: str, params: Mapping[str, str], *, now: float | None = None) -> str:
-    """/activity (k9): the member's whole kept log as a dashboard; no ids in member text."""
+    """/activity: the member's whole kept log as a dashboard; no ids in member text."""
     now = time.time() if now is None else now
     path = "/activity"
     db = state.db

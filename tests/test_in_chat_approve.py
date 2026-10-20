@@ -323,7 +323,7 @@ async def test_the_review_page_right_after_a_failed_apply_says_it_once(stack: St
         "proposal is still pending, so you can apply it again later.</div>"
     ) in page
     assert page.count("class='notice") == 1
-    assert "Waiting</span>" in page  # the §4 label of a waiting proposal
+    assert "Waiting</span>" in page  # the status label of a waiting proposal
     assert "Apply these changes to Archidekt" in page
     stack.ark.transport.handler = orig  # Archidekt allows it again: the same code approves it
     again = structured(

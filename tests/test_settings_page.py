@@ -86,7 +86,7 @@ async def test_the_page_lists_every_setting_and_locks_the_deployments(gw: Harnes
 async def test_the_stack_box_is_gone_and_each_locked_row_and_group_says_so(
     tmp_path: Path, idp: FakeIdP, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Approved k1 S2/S3 (question 23): no stack box. Each locked row has a grey "Set in your stack"
+    """No stack box. Each locked row has a grey "Set in your stack"
     label beside its name (its lock line keeps the variable), each group heading counts its locked
     rows, and the chip "Set in your stack {n}" (a link to ?locked=1 without scripts) shows only
     them, opening the folded group that holds one. No chip when the stack sets nothing."""
@@ -151,7 +151,7 @@ async def test_the_stack_box_is_gone_and_each_locked_row_and_group_says_so(
 
 
 async def test_confirm_ticks_carry_what_the_script_needs_and_show_after_a_refused_save(gw: Harness) -> None:
-    """Approved k1 S23/S24 (question 24): each of the three ticks (CONFIRM) is in an orange box the
+    """Each of the three ticks (CONFIRM) is in an orange box the
     script shows only once the value goes down or off (data-confirm, data-from); without scripts
     it shows as before. After a refused save the box says what was lowered, and saving still
     needs the tick."""
@@ -429,7 +429,7 @@ async def test_the_activity_logs_say_a_setting_change_in_words(gw: Harness) -> N
             page = (await b.http.get(path, headers=NAVIGATE)).text
             text = _words(page)
             assert "Days a change waits for approval: 7 days → 14 days" in text, path
-            # the stored JSON only in the admin's row details (k2 V7), never in the Detail column
+            # the stored JSON only in the admin's row details, never in the Detail column
             cells = "".join(re.findall(r"<span class='c-det'>(.*?)</span><span class='c-app'>", page))
             assert "Days a change waits" in _words(cells) and '"previous"' not in _words(cells), path
             if path == "/activity":

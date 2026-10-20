@@ -1,5 +1,5 @@
-"""The UI standard's shared pieces (ui.py, theme.UI_CSS): §4 labels from one table, the app chip,
-the §3 date rule and its 7-day boundary, widgets, chips, the toolbar, the table, paging, the
+"""The shared dashboard and list pieces (ui.py, theme.UI_CSS): status labels from one table, the app chip,
+the list date rule and its 7-day boundary, widgets, chips, the toolbar, the table, paging, the
 selection bar and the side panel."""
 
 from __future__ import annotations
@@ -35,7 +35,7 @@ def test_served_comments_carry_no_internal_ids() -> None:
 NOW = calendar.timegm((2026, 10, 19, 15, 36, 0))
 MIN, HOUR, DAY = 60, 3600, 86400
 
-# UI-STANDARD.md v1.3 §4, word for word: label, colour, icon
+# The status table, word for word: label, colour, icon
 STATUS_TABLE = [
     ("waiting", "Waiting", "orange", "clock"),
     ("needs_look", "Needs a look", "red", "alert"),
@@ -147,7 +147,7 @@ def test_app_chip_names_the_app_and_never_guesses() -> None:
         (6 * DAY + 23 * HOUR, "6 days ago"),
         (7 * DAY, "7 days ago"),  # the boundary is in: up to and including 7 days
         (7 * DAY + 1, "Oct 12"),  # then the date
-        (7 * DAY + 90 * MIN, "Oct 12"),  # K9-8: 7 days and 1.5 hours reads Oct 12
+        (7 * DAY + 90 * MIN, "Oct 12"),  # 7 days and 1.5 hours reads Oct 12
         (8 * DAY, "Oct 11"),
         (280 * DAY, "Jan 12"),
     ],

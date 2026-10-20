@@ -5734,7 +5734,7 @@ class DeckService:
                     "created_by": self._creator_label(line.get("created_by_client")),
                     "own": bool(caller) and line.get("created_by_client") == caller,
                     "version": int(line.get("version") or 1),
-                    # the §4 risk word on the cards (Low, High, Your press, Delete)
+                    # the risk word on the cards (Low, High, Your press, Delete)
                     "risk": self.proposal_risk(sub, row)[0] if row else None,
                     **(
                         {

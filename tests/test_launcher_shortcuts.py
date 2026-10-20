@@ -1,4 +1,4 @@
-"""The launcher shortcuts in the web manifest (K8, approved question 10): My decks, Scan page,
+"""The launcher shortcuts in the web manifest: My decks, Scan page,
 Proposals, Reports and, only while watchlists are on, Watchlist, in that order; the Android app's
 GatewayUrl.SHORTCUTS lists the same pages (GatewayUrlTest)."""
 

@@ -1,4 +1,4 @@
-"""The top bar on a computer (K8, approved question 11): from 1200 px (85.7em of the bar's 14 px text)
+"""The top bar on a computer: from 1200 px (85.7em of the bar's 14 px text)
 it lists Reports and Watchlist after History; narrower, Proposals and the links after it fold into
 "More ▾", which lists the phone's More sheet (Proposals, History, Reports, Watchlist, Guide,
 Account). Large text folds them too. Phones and the touch rail have no More ▾ in the bar."""

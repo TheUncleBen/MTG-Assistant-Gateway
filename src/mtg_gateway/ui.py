@@ -1,5 +1,5 @@
-"""The UI standard's shared pieces (UI-STANDARD.md v1.3, §3 to §5), as HTML strings for the list and
-dashboard pages: §4 labels, the app a row came from, §3 dates, widgets, chips with counts, the
+"""The shared pieces of the dashboard and list pages, as HTML strings for the list and
+dashboard pages: status labels, the app a row came from, list dates, widgets, chips with counts, the
 search toolbar, the table's header, paging, the selection bar and the side panel.
 
 The look is theme.UI_CSS (in the shared site.css); the few behaviours (the dates in the viewer's own
@@ -16,7 +16,7 @@ from typing import NamedTuple
 
 from .theme import esc, icon
 
-# --- §4 labels: a word, a colour and an icon -------------------------------------------------
+# --- status labels: a word, a colour and an icon -------------------------------------------------
 
 
 class Label(NamedTuple):
@@ -27,7 +27,7 @@ class Label(NamedTuple):
 
 
 # One table for every page, the chat cards' words included. Proposal status, then risk, then the
-# Activity pages' extra word (UI-STANDARD §4 and the approved Settings mapping, "Refused").
+# Activity pages' extra word ("Refused").
 LABELS: dict[str, Label] = {
     "waiting": Label("Waiting", "orange", "clock", "Waiting for your press."),
     "needs_look": Label(
@@ -85,7 +85,7 @@ COLOURS = ("orange", "green", "red", "blue", "grey", "plain")
 
 
 def label(word: str, colour: str, icon_name: str, *, title: str = "", cls: str = "") -> str:
-    """A §4-shaped label for any status (a report's Running, a watch's Alert sent): the word, the
+    """A status label for any status (a report's Running, a watch's Alert sent): the word, the
     colour (orange waiting or running, green done, red failed, grey closed, blue informational) and
     an icon. Use ``status_label`` / ``risk_label`` for the standard's own words."""
     if colour not in COLOURS:
@@ -151,7 +151,7 @@ def app_chip(name: str | None) -> str:
     return f"<span class='ui-app'><i aria-hidden='true'>{esc(letter)}</i>{esc(name)}</span>"
 
 
-# --- §3 dates ---------------------------------------------------------------------------------
+# --- list dates ---------------------------------------------------------------------------------
 
 _MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
 RELATIVE_DAYS = 7  # relative up to and including 7 days, then the date
@@ -167,7 +167,7 @@ def _gm(ts: int | float | None) -> time.struct_time | None:
 
 
 def when_text(ts: int | float | None, *, now: float | None = None) -> str:
-    """§3's one date format, as plain text in UTC (the page rewrites it in the viewer's time zone):
+    """The one list date format, as plain text in UTC (the page rewrites it in the viewer's time zone):
     "just now", "40 min ago", "2 h ago", "1 day ago" to "7 days ago", then "Oct 12", with the year
     only when it isn't this year ("Oct 12, 2025"). static/feedback.js (MtgText.rel) is its twin."""
     t = _gm(ts)
@@ -198,7 +198,7 @@ def full_text(ts: int | float | None) -> str:
 
 
 def when(ts: int | float | None, *, now: float | None = None, cls: str = "") -> str:
-    """A §3 date for a list or widget: ``<time data-fmt=rel>`` with the relative text (or the date
+    """A list date for a list or widget: ``<time data-fmt=rel>`` with the relative text (or the date
     after 7 days) and the full date and time as its tooltip. Without scripts both read in UTC;
     static/feedback.js rewrites them in the viewer's time zone and keeps the relative text current."""
     t = _gm(ts)
@@ -216,20 +216,20 @@ def when(ts: int | float | None, *, now: float | None = None, cls: str = "") -> 
 
 
 def page_head(title: str, sub: str = "") -> str:
-    """The title with one line saying what the page holds (§3a 1). Render with heading=False."""
+    """The title with one line saying what the page holds. Render with heading=False."""
     line = f"<p class='ui-sub'>{esc(sub)}</p>" if sub else ""
     return f"<div class='ui-head'><h1>{esc(title)}</h1></div>{line}"
 
 
 def list_head(title: str, total: int | None = None, note: str = "") -> str:
-    """The full list's heading with its total count (§3a 3), and an optional note beside it."""
+    """The full list's heading with its total count, and an optional note beside it."""
     count = f" <span class='ui-sub'>{total:,}</span>" if total is not None else ""
     side = f"<span class='ui-sub'>{esc(note)}</span>" if note else ""
     return f"<div class='list-head'><h2>{esc(title)}{count}</h2>{side}</div>"
 
 
 def button_link(text: str, href: str, *, kind: str = "plain", cls: str = "") -> str:
-    """A link drawn as a §5 button: ``plain`` (bordered, no fill), ``primary`` (the one orange main
+    """A link drawn as a button: ``plain`` (bordered, no fill), ``primary`` (the one orange main
     button) or ``danger`` (a red outline)."""
     kinds = {"plain": "btn-plain", "primary": "btn-primary", "danger": "btn-outline-danger"}
     extra = f" {esc(cls)}" if cls else ""
@@ -249,7 +249,7 @@ def widget(
     wide_sm: bool = False,
     big_html: str = "",
 ) -> str:
-    """One §3a widget: a label with an icon, one big number (``unit`` small beside it), one detail
+    """One dashboard widget: a label with an icon, one big number (``unit`` small beside it), one detail
     line and at most two quick starts (``actions``: button or link markup, see button_link).
     ``tone``: ``accent`` (orange top edge, something waits) or ``alert`` (red, a problem).
     ``wide_sm`` gives it a whole row where widgets go two a row (phones, the open Fold)."""
@@ -440,7 +440,7 @@ def side_panel(
     close_href: str,
     back_text: str,
 ) -> str:
-    """One item opened from a list (§3 U9): from 1100 px a panel beside the list with a × that
+    """One item opened from a list: from 1100 px a panel beside the list with a × that
     closes it (Esc too); narrower, the same markup is the item's own page with a back link. The
     × and the back link both go to ``close_href`` (the list); put the result in ``split``."""
     return (

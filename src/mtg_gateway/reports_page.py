@@ -1,9 +1,9 @@
-"""The Reports page (/reports): a dashboard of the member's stored deck reports (UI-STANDARD §3a).
+"""The Reports page (/reports): a dashboard of the member's stored deck reports.
 
 Four widgets (what Forge plays or waits for now, the latest report, the partial or failed ones,
 the decks tested with their newest lethal turn), then every report as a table: chips with counts,
 a search over deck and commander, filters for the deck, who asked and when, and paging. Each row
-shows the status as a §4 label, Forge's win rate against precons with its 95% interval, the solo
+shows the status as a label, Forge's win rate against precons with its 95% interval, the solo
 test's median turn for lethal damage, the app that asked and when it ran. History lists the
 reports too. Reads the gateway's own database only: Archidekt is never asked.
 
@@ -25,8 +25,8 @@ PAGE = ui.PER_PAGE
 BROWSER_CLIENT = "__browser__"  # decks.BROWSER_CLIENT: the member's own browser
 YOU = "You"
 
-# A report's overall status (reports.report_status) as its §4 label: Complete green, Forge going or
-# waiting orange (running), Partial orange (partly done, approved question 7), Failed red.
+# A report's overall status (reports.report_status) as its status label: Complete green, Forge going or
+# waiting orange (running), Partial orange (partly done), Failed red.
 STATUS_LABEL = {
     "complete": ("Complete", "green", "check"),
     "running": ("Forge going", "orange", "spinner"),
@@ -525,9 +525,9 @@ def reports_page_html(
     )
 
 
-# Phones: two widgets a row as §3a draws them, one a row when the text is so large that half the
+# Phones: two widgets a row as the widgets draw them, one a row when the text is so large that half the
 # width cannot hold a word (the column's minimum is in the widgets' own text size, so it grows
-# with a phone's font scale or a text-only zoom). Shared by the group B dashboards.
+# with a phone's font scale or a text-only zoom). Shared by the dashboard pages.
 PHONE_WIDGETS_CSS = """
 @media (max-width:599.98px){
   .gb-dash .ui-widgets{grid-template-columns:repeat(auto-fit,minmax(min(100%,8.5em),1fr))}

@@ -1,4 +1,4 @@
-"""The Account page's Notifications and Summary cards (k3): one orange button per card, the
+"""The Account page's Notifications and Summary cards: one orange button per card, the
 summary in its own card with Send it now, each tick on its own row, the notices inside the card
 they came from, and the tick-then-button pattern of Your view choices and Delete my data."""
 

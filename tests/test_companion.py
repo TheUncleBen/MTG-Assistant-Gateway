@@ -662,7 +662,7 @@ async def test_forge_comparison_reads_the_other_deck_first_on_every_path(stack: 
 
 
 async def test_reports_page_lists_every_report_and_what_forge_plays(stack: Stack) -> None:
-    """/reports (the approved K4 dashboard) lists the member's reports newest first as a table with
+    """/reports (the dashboard) lists the member's reports newest first as a table with
     each status as a label, a deck filter, chips with counts, and the Forge now widget with the runs
     playing or waiting and their place. The per-row "Deck trend and history" link is gone (approved
     question 9): trends open from the widgets. Signed out, it asks to sign in."""
@@ -1366,7 +1366,7 @@ async def test_goldfish_guide_choice_is_kept_for_the_account(stack: Stack) -> No
 def test_reports_page_row_shows_the_set_bracket_over_the_estimate() -> None:
     """A bracket set on the deck is THE bracket; Archidekt's estimate shows, labelled,
     only when none is set. A report without a legality check says so in its place, and a
-    constructed deck says the check is for Commander only (approved question 8)."""
+    constructed deck says the check is for Commander only."""
     from mtg_gateway.reports_page import row_html
 
     base = {
@@ -1388,7 +1388,7 @@ def test_reports_page_row_shows_the_set_bracket_over_the_estimate() -> None:
     assert "racket" not in row(base)
     assert "No legality check" in row({**base, "has_validation": False, "bracket_set": 4})
     assert "Commander check only" in row({**base, "constructed": True})
-    # the status as a §4 label: Partial orange with the triangle, Failed red
+    # the status as a status label: Partial orange with the triangle, Failed red
     assert "class='ui-lbl orange'" in row({**base, "status": "partial"}) and "Partial" in row(
         {**base, "status": "partial"}
     )

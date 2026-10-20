@@ -139,7 +139,7 @@ def _seed_watchlist(server: Server) -> None:
 
 @pytest.mark.parametrize("width", [344, 390, 673, 1280])
 def test_watchlist_rows_open_in_place_and_draw_the_full_history(server: Server, width: int) -> None:
-    """K6: "Details" opens one row in place (the other closes, no page load), "Full history (45
+    """On the Watchlist, "Details" opens one row in place (the other closes, no page load), "Full history (45
     days)" draws the year's points from /watchlist/api/card and "30 days" brings the month back; a
     deck draws its own; nothing scrolls sideways at 100% or 200% text, in light and dark."""
     from playwright.sync_api import sync_playwright

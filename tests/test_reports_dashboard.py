@@ -1,4 +1,4 @@
-"""The Reports page as the approved dashboard (K4): widgets, chips with counts, the search over
+"""The Reports page as a dashboard: widgets, chips with counts, the search over
 deck and commander, the deck, asked-by and when filters, the order, paging, and each row's
 numbers (Forge's win rate, the solo test's lethal turn, the app that asked)."""
 

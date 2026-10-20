@@ -612,7 +612,7 @@ HINT_HTML = (
 
 
 def watch_button(card: dict[str, Any], *, watched: frozenset[str], printing: bool = False) -> str:
-    """The Watch button on a result (K7): "Watch", or a check and "Watching" when the member
+    """The Watch button on a result: "Watch", or a check and "Watching" when the member
     already watches the card. A printing search watches the shown printing."""
     name = str(card.get("name") or "")
     pin = ""

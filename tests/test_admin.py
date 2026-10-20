@@ -622,7 +622,7 @@ async def test_every_admin_page_has_the_same_even_tab_bar_with_the_current_tab_n
     gw: Harness,
 ) -> None:
     """One admin tab bar on all six pages: links in .adm-nav, the current one marked aria-current
-    and tinted, never the orange main button (UI standard §5)."""
+    and tinted, never the orange main button (one orange main button per page)."""
     b = await admin_browser(gw)
     try:
         paths = (

@@ -1,6 +1,6 @@
 """The signed-in home page: a dashboard in the shape of Archidekt's landing page.
 
-Under the newest decks and the deck search, Quick access has one §3a widget per section, in the
+Under the newest decks and the deck search, Quick access has one widget per section, in the
 app side bar's order (Decks, Search, Scan, Collection, Proposals, History, Reports, Watchlist,
 Guide, Account, then Admin for admins), each with at most two quick starts; on a phone they are
 compact tiles, two a row, with the label and number only. The top navigation stays visible like
@@ -326,7 +326,7 @@ def add_home_routes(server: MCPServer, state: AppState) -> None:
             "<div class='field'><label for='home-c'>Commander</label>"
             "<input id='home-c' type='text' name='commander' data-suggest='cards' autocomplete='off' "
             "placeholder='Commander'></div>"
-            # plain: the hero's New deck is the page's one orange button (§5)
+            # plain: the hero's New deck is the page's one orange button
             f"<button class='btn-plain'>{icon('search')} Search Archidekt</button></form></section>"
         )
         now = time.time()

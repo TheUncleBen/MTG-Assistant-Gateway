@@ -456,7 +456,7 @@ async def test_browser_reject_closes_a_pending_proposal(stack: Stack) -> None:
     r = await b.http.post(url, data={**await b.review_form(url), "action": "reject"})
     assert r.status_code == 303 and r.headers["location"].endswith("?ok=rejected")
     page = await b.http.get(url + "?ok=rejected")
-    # the §4 label word on the proposal
+    # the status label word on the proposal
     assert (
         "Rejected." in page.text
         and "Rejected</span>" in page.text

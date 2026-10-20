@@ -1,4 +1,4 @@
-"""Watch this card from Card search (K7): a Watch button on each result's picture ("Watching"
+"""Watch this card from Card search: a Watch button on each result's picture ("Watching"
 with a check when the card is already watched; an icon in the list view), the page hint, the
 card menu (right-click, press and hold, the Menu key or Shift+F10) with Open card, Watch this card,
 Art variants…, Add to deck… and Open on Scryfall, the toast with Undo, and nothing of it when

@@ -74,7 +74,7 @@ def waiting_changes(
 
 
 def chips_html(line: dict[str, Any], now: float | None = None) -> str:
-    """The row's §4 labels: its status (Waiting, Needs a look or Held; Updated beside Waiting),
+    """The row's status and risk labels: its status (Waiting, Needs a look or Held; Updated beside Waiting),
     its risk when known, then the expiry and version notes."""
     now = time.time() if now is None else now
     status = str(line.get("status") or "")
@@ -128,7 +128,7 @@ def row_html(line: dict[str, Any], *, now: float | None = None, group: str = "")
 
 
 def action_bar(*, inline: bool = False) -> str:
-    """The bar that stays on screen while anything is checked (FLEX §3): Apply N, Reject N, Clear.
+    """The bar that stays on screen while anything is checked: Apply N, Reject N, Clear.
     Without JavaScript it is always there and acts on the checked rows."""
     return (
         f"<div class='wbar{' inline' if inline else ''}' role='group' aria-label='Checked changes'>"

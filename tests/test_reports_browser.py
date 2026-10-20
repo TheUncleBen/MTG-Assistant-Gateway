@@ -443,7 +443,7 @@ def test_forge_results_fit_and_read(server: Server, width: int, scheme: str) -> 
 @pytest.mark.parametrize("width", [320, 344, 600, 640, 717, 1366])
 @pytest.mark.parametrize("scheme", ["light", "dark"])
 def test_reports_page_fits_and_reads(server: Server, width: int, scheme: str) -> None:
-    """The Reports dashboard (approved K4), with a Forge run playing, one waiting and a long deck
+    """The Reports dashboard, with a Forge run playing, one waiting and a long deck
     name: no sideways scroll, 4.5:1 text in both themes, 44px filter and open targets on touch
     screens, the table's rows, and the deck filter applying as soon as it changes."""
     import json

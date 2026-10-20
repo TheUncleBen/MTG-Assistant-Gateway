@@ -385,7 +385,7 @@ def test_the_top_bar_links_fit_at_every_width_and_text_size(chromium, server: Se
                         if g["links"] and g["contrast"] < 4.5:
                             problems.append(f"contrast {where}")
                         # a mouse from 600 px shows the links: an admin's nine from 1200 px at the
-                        # normal size, else five and More ▾ (K8); at the normal size on one row in
+                        # normal size, else five and More ▾; at the normal size on one row in
                         # the 50 px bar, as before
                         want = 9 if width >= 1200 and zoom == "none" else 6
                         if not touch and width >= 600 and g["links"] != want:

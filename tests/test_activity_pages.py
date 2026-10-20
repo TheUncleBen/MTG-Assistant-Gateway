@@ -1,4 +1,4 @@
-"""The two Activity pages as dashboards (UI standard mappings k2 and k9): every row the log keeps in
+"""The two Activity pages as dashboards: every row the log keeps in
 pages of 25 (no silent cap), plain event names with the Activity labels, the app only when a client
 id is recorded, an admin's action on a member's account once on the admin page, and no ids in the
 member's own text."""
@@ -79,7 +79,7 @@ async def member_browser(h: Harness, sub: str = "user-2") -> Browser:
 
 
 async def test_admin_activity_pages_through_every_row_with_no_cap(gw: Harness) -> None:
-    """k2 V1: today's 200-row cap goes; 25 a page, "1–25 of N", Newer and Older."""
+    """Today's 200-row cap goes; 25 a page, "1–25 of N", Newer and Older."""
     b = await admin_browser(gw)
     _members(gw)
     _rows(gw, [(i * 60, "user-2", BROWSER, "browser_login", None) for i in range(230)])
@@ -101,7 +101,7 @@ async def test_admin_activity_pages_through_every_row_with_no_cap(gw: Harness) -
 
 
 async def test_admin_activity_names_labels_apps_and_members(gw: Harness) -> None:
-    """k2 V2-V4, V7: plain names with the Activity labels (the code only in the tooltip and the
+    """Plain names with the Activity labels (the code only in the tooltip and the
     details), admin actions with the shield and no label, the member by username (a link that
     filters), an app only when a client id is recorded, the detail as words."""
     b = await admin_browser(gw)
@@ -169,7 +169,7 @@ async def test_admin_activity_names_labels_apps_and_members(gw: Harness) -> None
 
 
 async def test_admin_activity_chips_filters_search_and_widgets(gw: Harness) -> None:
-    """k2 (new): chips with counts, search over member, event and detail, the app and time
+    """Chips with counts, search over member, event and detail, the app and time
     filters, and the widgets counted from the rows."""
     b = await admin_browser(gw)
     _members(gw)
@@ -242,7 +242,7 @@ async def test_admin_activity_chips_filters_search_and_widgets(gw: Harness) -> N
 
 
 async def test_my_activity_has_every_row_in_words_without_ids(gw: Harness) -> None:
-    """k9: no 100-row cap, 25 a page; "Open the proposal" for a proposal id, "a deck that was
+    """No 100-row cap, 25 a page; "Open the proposal" for a proposal id, "a deck that was
     removed" for a deck no longer in the member's list, the error in words, an administrator's
     action said for the member, the app only when a client id is recorded."""
     _members(gw)
@@ -305,7 +305,7 @@ async def test_my_activity_has_every_row_in_words_without_ids(gw: Harness) -> No
 
 
 async def test_the_acting_admins_copy_is_worded_first_person(gw: Harness) -> None:
-    """K9-13: an admin's own copy of an action (browser client) reads "You disabled a member's
+    """An admin's own copy of an action (browser client) reads "You disabled a member's
     account"; the member's copy keeps "An administrator ..." (and the admin page "Account disabled")."""
     b = await admin_browser(gw)
     _members(gw)
@@ -368,7 +368,7 @@ def test_the_approved_admin_labels() -> None:
 
 
 def test_every_event_the_code_writes_has_a_name() -> None:
-    """k9 M4: no event shows its code with spaces; the list goes to the proofread."""
+    """No event shows its code with spaces; the list goes to the proofread."""
     src = Path(activity_view.__file__).parent
     found = set()
     for f in src.rglob("*.py"):

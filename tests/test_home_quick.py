@@ -1,4 +1,4 @@
-"""Home's Quick access (K8): one §3a widget per section in the app side bar's order, the label
+"""Home's Quick access: one widget per section in the app side bar's order, the label
 as the section's link, at most two quick starts each; the Proposals widget in the Proposals
 page's words with an orange edge while changes wait; Reports and Watchlist widgets (Watchlist
 only with watchlists on); "Search Archidekt" plain, so New deck is the one orange button; on a

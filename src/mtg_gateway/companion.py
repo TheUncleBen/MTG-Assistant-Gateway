@@ -506,7 +506,7 @@ EVENT_LABELS = {
     "setting_changed": "Gateway setting changed",
     "card_model_removed": "Card model removed",
     "backup_trim_queued": "Older backup copies queued for deletion from Archidekt",
-    # events that had no name before the Activity redesign (k9 M4); the member's copy of an
+    # events that had no name before the Activity redesign; the member's copy of an
     # administrator's action is told apart from the acting admin's own by its client id
     # (activity_view.FIRST_PERSON_NAMES words the admin's own copy)
     "admin_disable": "An administrator disabled your account",

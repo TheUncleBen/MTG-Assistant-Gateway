@@ -1,4 +1,4 @@
-"""One report as the approved page (K5): crumbs with All reports, the status as a §4 label in
+"""One report as a page: crumbs with All reports, the status as a label in
 the meta line, six key-number widgets, the section links, flat sections, the "could not model"
 groups folded with the first open, the validation label, a red-outline Remove and one orange
 Play more games button; the nav marks Reports."""
@@ -50,7 +50,7 @@ def test_six_widgets_from_the_report() -> None:
     ], titles
     assert "40%<small>of 10 games</small>" in widgets and "class='ci-w'" in widgets
     assert "95% interval 17% to 69% · against 3 precons" in widgets
-    # under 70% of the deck played with its effect: the orange warning edge (approved question 6)
+    # under 70% of the deck played with its effect: the orange warning edge
     assert "<div class='wdg accent'><span class='lab'>" in widgets and "50%<small>49 of 98 cards" in widgets
     assert "32 played without their effect · 17 left out on purpose" in widgets
     # issues found: a red edge and the count

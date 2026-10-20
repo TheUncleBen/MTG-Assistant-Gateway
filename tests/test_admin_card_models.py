@@ -54,7 +54,7 @@ async def test_admins_see_who_added_each_model_and_can_remove_any(gw: Harness) -
         # both activity logs say it in words, with whose model it was
         for path in ("/admin/activity", "/activity"):
             text = html.unescape((await b.http.get(path, headers=NAVIGATE)).text)
-            # the stored JSON is only in the admin page's row details (k2 V7), never the Detail column
+            # the stored JSON is only in the admin page's row details, never the Detail column
             cells = "".join(re.findall(r"<span class='c-det'>(.*?)</span><span class='c-app'>", text))
             assert "Sol Ring (added by bram)" in cells and '"card_key"' not in cells, path
         assert "Card model removed" in html.unescape((await b.http.get("/activity", headers=NAVIGATE)).text)

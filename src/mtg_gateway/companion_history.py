@@ -78,7 +78,7 @@ def add_history_routes(
     # -- history --------------------------------------------------------------
     @server.custom_route("/history", methods=["GET"], include_in_schema=False)
     async def history(request: Request) -> Response:
-        """Snapshots, applied restores and reports as one list (UI standard §3a), newest first,
+        """Snapshots, applied restores and reports as one list, newest first,
         grouped by day (or by deck), narrowed by deck, a "When" preset of UTC days and a deck-name
         search, 25 at a time, under a row of widgets; each row's Details beside the list or on its
         own page; then the backup copies on Archidekt. Each kind is narrowed and paged in SQL, so
@@ -255,7 +255,7 @@ def add_history_routes(
     def _history_widgets(
         sub: str, deck_id: str | None, copies: list[dict[str, Any]] | None, *, now: float
     ) -> str:
-        """Snapshots kept, the last restore, reports this month and the backup copies (§3a)."""
+        """Snapshots kept, the last restore, reports this month and the backup copies."""
         st = state.db.snapshot_stats(sub, deck_id)
         newest = f" · newest {ui.when_text(st['newest'], now=now)}" if st["newest"] else ""
         w1 = ui.widget(
@@ -365,7 +365,7 @@ def add_history_routes(
             )
         safe = _esc(rid)
         md = report_markdown(r)
-        # the export buttons as plain buttons at the header's end (approved design K5)
+        # the export buttons as plain buttons at the header's end
         actions = (
             f"<a class='btn btn-plain' href='/history/reports/{safe}/export.md' download>{icon('download')} "
             f"Markdown</a><a class='btn btn-plain' href='/history/reports/{safe}/export.html' download>"

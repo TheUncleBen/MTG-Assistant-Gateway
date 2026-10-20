@@ -755,7 +755,7 @@ CURRENT = " aria-current='page'"
 
 def _nav(active: str) -> str:
     """The admin pages' own tabs (all six pages): even links in full rows, the current one tinted
-    and marked aria-current, not a second orange button (UI standard §5)."""
+    and marked aria-current, not a second orange button (one orange main button per page)."""
     links = (("/admin", "Overview"), ("/admin/users", "Users"), ("/admin/activity", "Activity"))
     links += (
         ("/admin/metrics", "Metrics"),

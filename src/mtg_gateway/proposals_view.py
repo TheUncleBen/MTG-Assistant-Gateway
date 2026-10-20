@@ -1,4 +1,4 @@
-"""The Proposals page (UI-STANDARD.md §3a and §6): a row of widgets, then every kept proposal,
+"""The Proposals page: a row of widgets, then every kept proposal,
 waiting and past, with quick-filter chips and their counts, a search, filter drop-downs and paging.
 
 The Waiting chip (the default) shows the waiting changes grouped by deck, oldest deck first, with
@@ -35,7 +35,7 @@ SHOWS = (
     ("failed", "Failed"),
     ("all", "All"),
 )
-# Risk filter: the §4 words. ``press`` (Your press or Delete) is what the "Always need your
+# Risk filter: the risk words. ``press`` (Your press or Delete) is what the "Always need your
 # press" widget's Show them sets; the drop-down shows it only then.
 RISKS = (
     ("", "Any risk"),
@@ -83,12 +83,12 @@ UNTIED = "Not tied to one of your decks"
 UPDATED_SHORT = "Updated: still does what was reviewed"
 EXPIRE_SOON = 2 * 86400  # an "expires in" flag under two days left, as before
 
-# Changes that are not edits to one of the member's decks (FLEX §3 "Not tied to one of your decks").
+# Changes that are not edits to one of the member's decks ("Not tied to one of your decks").
 _UNTIED_KINDS = ("create_deck", "clone", "collection")
 _DECK_ACTIONS = ("collaborator_add", "collaborator_remove", "delete_deck")
 UNDO_KINDS = ("edit", "details", "restore")
 
-# Waiting table: tick box, change, risk, status, from, made, the open link (UI-STANDARD §3).
+# Waiting table: tick box, change, risk, status, from, made, the open link.
 WAIT_COLS = (
     "32px minmax(0,1fr) 7.5rem 10rem 6.5rem 6.5rem 5rem",
     "32px minmax(0,1fr) 10rem 5rem",
@@ -138,7 +138,7 @@ def query_string(query: dict[str, Any], **override: Any) -> str:
 
 
 def _span(seconds: float) -> str:
-    """A length of time in the §3 words: "40 min", "20 h", "1 day", "6 days"."""
+    """A length of time in list-date words: "40 min", "20 h", "1 day", "6 days"."""
     s = max(0, int(seconds))
     if s < 3600:
         return f"{max(1, s // 60)} min"

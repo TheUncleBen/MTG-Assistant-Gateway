@@ -1,4 +1,4 @@
-"""The Watchlist as the approved dashboard (K6): widgets, the "Watch a card" panel, chips with
+"""The Watchlist as a dashboard: widgets, the "Watch a card" panel, chips with
 counts, search, finish filter and sort, the cards table with pictures, changes as an arrow and a
 word, alerts as blue labels, one row opened in place with "30 days" and "Full history (N days)",
 red-outline Remove and the plain "Watch deck"; the JSON unwatch behind Card search's Undo, and the

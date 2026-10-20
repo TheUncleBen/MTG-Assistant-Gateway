@@ -1,6 +1,6 @@
-"""One stored report as the signed-in page (``/history/reports/{id}``, approved design K5).
+"""One stored report as the signed-in page (``/history/reports/{id}``).
 
-Crumbs, a header (the deck as the title, the status as a §4 label, the meta line, the export
+Crumbs, a header (the deck as the title, the status as a label, the meta line, the export
 buttons), six key-number widgets, a sticky row of section links, then the sections as flat blocks
 with one heading each: Forge games, Solo test, What the solo test could not model (its groups
 folded, the first open), Validation, Deck statistics and the raw output (folded). One orange
@@ -53,8 +53,7 @@ from .report_view import (
 from .reports_page import PHONE_WIDGETS_CSS, STATUS_LABEL, status_label
 from .theme import icon
 
-# The "Played with their effect" widget takes the orange edge below this share of the deck
-# (approved question 6).
+# The "Played with their effect" widget takes the orange edge below this share of the deck.
 COVERAGE_WARN = 70
 VALIDATION_LABEL = {
     "passed": ("Passed", "green", "check"),
@@ -634,7 +633,7 @@ def _jump_html(
 
 
 def status_label_html(status: Any) -> str:
-    """The report's overall status as its §4 label (the same words as the Reports list)."""
+    """The report's overall status as its status label (the same words as the Reports list)."""
     return status_label(status) if isinstance(status, str) and status in STATUS_LABEL else ""
 
 

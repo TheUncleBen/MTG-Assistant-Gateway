@@ -1094,7 +1094,7 @@ html[data-card-size=l] .printpick .ppgrid{grid-template-columns:repeat(auto-fill
   html[data-card-size=s] ul.decklist.grid{grid-template-columns:repeat(2,minmax(0,1fr))} }
 """
 
-# UI standard v1 (docs: UI-STANDARD.md §3-§5): the shared pieces of the dashboard and list pages,
+# The shared pieces of the dashboard and list pages,
 # drawn by ui.py. Theme tokens only. Names that the theme or a page already uses for something
 # else carry a ui- prefix (ui-lbl, ui-app, ui-when, ui-chip, ui-chg, ui-locked); the rest keep the
 # approved mockup's names. It comes before the top bar's search rules: the desktop (900 px)
@@ -1597,7 +1597,7 @@ ICONS = {
     "<circle cx='15' cy='12' r='1.3' fill='currentColor'/>"
     "<circle cx='9' cy='18' r='1.3' fill='currentColor'/>"
     "<circle cx='15' cy='18' r='1.3' fill='currentColor'/>",
-    # UI standard §4 labels, widgets and actions (ui.py)
+    # Status labels, widgets and actions (ui.py)
     "clock": "<circle cx='12' cy='12' r='9'/><path d='M12 7v5l3 2'/>",
     "alert": "<circle cx='12' cy='12' r='9'/><path d='M12 7v6M12 16.5v.5'/>",
     "pause": "<path d='M9 6v12M15 6v12'/>",

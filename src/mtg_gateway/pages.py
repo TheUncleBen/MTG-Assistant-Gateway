@@ -1693,7 +1693,7 @@ def _progress_html(p: dict[str, Any]) -> str:
 
 
 def _risk_words(p: dict[str, Any]) -> str:
-    """ "Low: 2 card rows, no commander change": the §4 word and the one-line reason."""
+    """ "Low: 2 card rows, no commander change": the status word and the one-line reason."""
     key = ui.ALIASES.get(str(p.get("risk")), str(p.get("risk")))
     word = ui.LABELS[key].word if key in ui.RISK_KEYS else str(p.get("risk"))
     why = str(p.get("risk_reason") or "").strip()
@@ -1772,7 +1772,7 @@ def _proposal_body(
     others: list[dict[str, Any]] | None = None,
 ) -> str:
     """One proposal's review: the panel beside the list from 1100 px, its own page below that
-    (UI-STANDARD §3 U9). ``step=False``: what happens next is already in the error box above
+    (a side panel on wide screens). ``step=False``: what happens next is already in the error box above
     (_failure_on_top). ``others``: the deck's other waiting changes."""
     if p.get("kind") == "details":
         rows, total = _detail_rows(p.get("rows"), p["diff"])
@@ -1811,7 +1811,7 @@ def _proposal_body(
     state = str(p.get("state") or "")
     pending = state == "pending"
     status = p.get("status") if pending else None
-    # §4 labels: the status (Waiting, Needs a look, Held; Updated beside Waiting), then the risk
+    # Status and risk labels: the status (Waiting, Needs a look, Held; Updated beside Waiting), then the risk
     pills = [
         ui.status_label(
             status if status in ("needs_look", "held") else ("waiting" if pending else state),
@@ -2165,7 +2165,7 @@ def _replacement(state: Any, sub: str, proposal_id: str) -> dict[str, Any] | Non
 
 
 def _held_line(text: str) -> str:
-    """The confirm's "Held: {reason}" with the §4 Held label in place of the word."""
+    """The confirm's "Held: {reason}" with the Held label in place of the word."""
     rest = text[len("Held:") :].strip() if text.startswith("Held:") else text.removeprefix("Held.").strip()
     return f"<span class='held'>{ui.status_label('held')} {html.escape(rest)}</span>"
 

@@ -1,7 +1,7 @@
 """The UI standard's shared pieces (ui.py, theme.UI_CSS, static/feedback.js) in headless Chromium,
 on a small page built from them: no sideways scroll, 44 px touch targets, label contrast in both
 themes, the table's three layouts (900 / 600 / below 600 px), the side panel beside the list from
-1100 px and its own page below, the sticky selection bar above the phone's tab bar, and the §3
+1100 px and its own page below, the sticky selection bar above the phone's tab bar, and the list
 dates in the viewer's own time zone. Skipped without a Chromium build."""
 
 from __future__ import annotations

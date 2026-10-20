@@ -2440,7 +2440,7 @@ class Database:
         baseline_fingerprint: str | None = None,
     ) -> int | None:
         """Replace a waiting proposal's content with a new version, keeping its id, date and board
-        number (§4). The version being replaced is kept in ``proposal_versions`` with
+        number. The version being replaced is kept in ``proposal_versions`` with
         who made it. Only while it is pending, unexpired and still at ``expect_version`` (so two
         amends, or an amend and an apply that claimed it first, cannot both win). Its waiting
         status is cleared, except a hold that a rejected note it depends on put there: that

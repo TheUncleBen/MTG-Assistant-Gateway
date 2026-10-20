@@ -172,5 +172,5 @@ async def test_an_api_apply_reads_api_and_activity_names_where_each_was_applied(
         page = (await b.http.get("/activity", headers=NAV)).text
     finally:
         await b.aclose()
-    # My activity says where each was applied in words (k9 M6), never the stored code
+    # My activity says where each was applied in words, never the stored code
     assert "through the API" in page and "on the review page" in page and "review_page" not in page

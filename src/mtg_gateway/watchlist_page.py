@@ -1,4 +1,4 @@
-"""The Watchlist page (``/watchlist``) as the approved dashboard (K6, UI-STANDARD §3a).
+"""The Watchlist page (``/watchlist``) as a dashboard.
 
 The intro, four widgets (cards watched, alerts, the biggest 7-day move, decks watched), a
 "Watch a card" panel, then the cards as the standard table (chips with counts, a search, a finish
@@ -108,7 +108,7 @@ class Query:
 
 # -- words ------------------------------------------------------------------------------------
 def day_text(day: str | None, today: str) -> str:
-    """A price's day as §3 writes a date: "today", else "Oct 12" (with the year when not this one)."""
+    """A price's day as list dates write it: "today", else "Oct 12" (with the year when not this one)."""
     if not day:
         return ""
     if day == today:
@@ -229,7 +229,7 @@ def spark_html(hist: list[dict[str, Any]], currency: str, what: str) -> str:
 
 
 def _range_buttons(full_days: int) -> str:
-    """ "30 days" and "Full history (N days)" (approved question 14); only "30 days" while there is
+    """ "30 days" and "Full history (N days)"; only "30 days" while there is
     no more."""
     full = (
         "<button type='button' data-range='full' aria-pressed='false'>"

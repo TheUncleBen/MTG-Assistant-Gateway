@@ -1,4 +1,4 @@
-"""The History page (``/history``, UI-STANDARD.md §3a and §6): a row of widgets, then the member's
+"""The History page (``/history``): a row of widgets, then the member's
 snapshots, applied restores and deck reports as one list, newest first, grouped by day (or by
 deck), with chips and their counts, a deck-name search, filter drop-downs, paging, and each row's
 Details beside the list (from 1100 px) or on its own page; then the backup copies on Archidekt.
@@ -273,7 +273,7 @@ def build_events(
     return events
 
 
-# Type labels (§4 shape): Snapshot grey, Restore green, Report blue; a report's status beside it
+# Type labels (status label shape): Snapshot grey, Restore green, Report blue; a report's status beside it
 KIND_LABELS = {
     "snapshot": ("Snapshot", "grey", "bookmark"),
     "restore": ("Restore", "green", "undo"),

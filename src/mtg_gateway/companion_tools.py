@@ -186,7 +186,7 @@ def add_deck_tool_routes(
             "outsideCategories": outside,
         }
         side_name = _esc(deck.side_category())
-        # K7 / Q9: each suggestion in the add box has the card menu (static/cardmenu.js); with
+        # Each suggestion in the add box has the card menu (static/cardmenu.js); with
         # watchlists on also a Watch button, "Watching" for the names the member watches already
         watch_attr = " data-suggest-menu"
         if state.prices is not None:

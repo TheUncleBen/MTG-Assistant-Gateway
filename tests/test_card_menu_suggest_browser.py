@@ -1,4 +1,4 @@
-"""The card menu and Watch on suggestions (K7, mapping C-11 and Q9), in headless Chromium: the
+"""The card menu and Watch on suggestions, in headless Chromium: the
 deck editor's add box has the same Watch button (icon, "Watching" for cards already watched) and
 card menu as Card search, without "Add to deck…" (its rows already add to this deck); the top
 bar's "Search cards and decks" suggestions get only the menu, no Watch button. With watchlists

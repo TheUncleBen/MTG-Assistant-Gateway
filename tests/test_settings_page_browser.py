@@ -303,7 +303,7 @@ def test_a_setting_the_stack_sets_shows_greyed_out_and_cannot_be_changed(
         assert rows["server_name"]["shown"] == ["Our Table"]
         assert "WARNING" in rows["log_level"]["shown"]
         assert rows["deck_sync_minutes"]["shown"] == ["60"]
-        # no stack box (approved k1 S2): each locked row says so beside its name, and the chip shows
+        # no stack box: each locked row says so beside its name, and the chip shows
         # only those rows, then everything again
         assert page.locator(".set-stack").count() == 0
         for key in LOCKED:
@@ -433,7 +433,7 @@ CONFIRMS = """
 def test_a_confirmation_tick_shows_only_after_lowering_or_turning_off(
     server: Server, width: int, theme: str
 ) -> None:
-    """Approved k1 S23 (question 24): the three ticks are hidden until their setting is lowered or
+    """The three ticks are hidden until their setting is lowered or
     switched off, then shown with what changed; back up, gone again. The group says how many
     changes are not saved yet, and saving a lowered value still needs the tick."""
     from playwright.sync_api import sync_playwright
