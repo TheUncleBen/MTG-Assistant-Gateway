@@ -318,7 +318,8 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
             "</select></div>"
             f"<div class='actions'><button class='primary'>{icon('plus')} Create deck</button>"
             "<a class='btn' href='/decks'>Cancel</a></div>"
-            "<p class='muted small'>The deck is created on Archidekt straight away and opens here.</p>"
+            "<p class='muted small'>The deck is created on Archidekt when you press Create deck, and opens "
+            "here.</p>"
             "</form>"
         )
 

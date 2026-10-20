@@ -236,6 +236,8 @@ DECK_LIST_LAST = 24 * 3600.0
 PAGE_DECKS_MAX = 200  # reads kept at most, the oldest go first
 TOUCH_LINK_INTERVAL = 60.0  # the link's last_used_at is written at most this often per member
 # Said first in a pending proposal's next_step once the deck sync (sync.py) has seen its deck change.
+# The reason beside a closed proposal's stored risk tier (the live one may no longer agree).
+STORED_RISK_REASON = "judged when it closed"
 OUT_OF_DATE_STEP = (
     "Needs a look: the deck changed after this proposal was made and it would now do something "
     "other than what was reviewed, so applying it will be refused and nothing will be sent. Amend "
@@ -3141,7 +3143,11 @@ class DeckService:
         return risk, why
 
     def stored_risk(self, row: dict[str, Any]) -> str:
-        """The risk tier stored on a proposal when it closes (Database.risk_source)."""
+        """The risk tier stored on a proposal when it closes (Database.risk_source). A closed edit
+        with no review rows (stored before they existed) has nothing to judge it by: it keeps no
+        tier (``modes.UNJUDGED``) rather than reading High for want of evidence."""
+        if (row.get("kind") or "edit") in ("edit", "collection") and row.get("rows") is None:
+            return modes.UNJUDGED
         return self.proposal_risk(str(row.get("owner_sub") or ""), row)[0]
 
     def _assistant_policy(self, sub: str, row: dict[str, Any]) -> tuple[str, str, str, bool]:
@@ -3488,8 +3494,14 @@ class DeckService:
             state = "expired"
         kind = row.get("kind", "edit")
         risk, why, mode, allowed = self._assistant_policy(sub, row)
-        if state not in ("pending", "applying") and row.get("risk") in ("low", "high", *modes.MEMBER_ONLY):
-            risk = row["risk"]  # stored when it closed: the tier it was judged by then
+        if state not in ("pending", "applying"):
+            stored = row.get("risk")
+            if stored in ("low", "high", *modes.MEMBER_ONLY):
+                # stored when it closed: the tier it was judged by then, so the reason worked out
+                # under today's settings may contradict it and is not shown
+                risk, why = stored, STORED_RISK_REASON
+            elif stored == modes.UNJUDGED:
+                risk, why = None, ""  # nothing to judge it by: no risk label, a dash
         press = self.press_reason(sub, row) if risk not in modes.MEMBER_ONLY else None
         # "May apply now": the member's mode allows it for this risk AND the proposal is still
         # pending (risk, approval_mode and risk_reason keep the policy side either way).

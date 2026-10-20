@@ -258,7 +258,7 @@ def damage_cell(r: dict[str, Any]) -> tuple[str, str]:
 def row_html(r: dict[str, Any], apps: dict[str, str], *, now: float) -> str:
     rid = esc(r["report_id"])
     href = f"/history/reports/{rid}"
-    name = esc(r.get("deck_name") or f"Deck {r.get('deck_id')}")
+    name = esc(r.get("deck_name") or "Unnamed deck")
     won, won_short = won_cell(r)
     dmg, dmg_short = damage_cell(r)
     who = asked_by(r, apps)
@@ -409,7 +409,7 @@ def decks_widget(index: list[dict[str, Any]], trends: list[dict[str, Any]]) -> s
 
 def toolbar_html(query: Query, decks: dict[str, str], apps_seen: list[str]) -> str:
     deck_opts = [("", "All decks")] + [
-        (did, name or f"Deck {did}")
+        (did, name or "Unnamed deck")
         for did, name in sorted(decks.items(), key=lambda kv: (str(kv[1]).casefold(), kv[0]))
     ]
     by_opts = [("", "Anyone")] + [(n.casefold(), n) for n in apps_seen]
@@ -471,7 +471,7 @@ def reports_page_html(
         ui.Column("Deck"),
         ui.Column("Status", "sm-hide"),
         ui.Column("Won vs precons", "md-hide"),
-        ui.Column("40 damage", "md-hide"),
+        ui.Column("Lethal by", "md-hide"),
         ui.Column("Asked by", "md-hide"),
         ui.Column("Ran", "md-hide", html=sort),
         ui.Column(""),
@@ -542,7 +542,7 @@ PHONE_WIDGETS_CSS = """
 REPORTS_PAGE_CSS = (
     PHONE_WIDGETS_CSS
     + """
-/* group B: the Reports page (k4) */
+/* the Reports page */
 .reports-page .kd-trend{list-style:none;margin:0;padding:0;font-size:.88rem;width:100%}
 .reports-page .kd-trend li{display:grid;grid-template-columns:minmax(0,1fr) auto 2.4rem;gap:.5rem;
   align-items:baseline;padding:.15rem 0;border-top:1px solid var(--border-soft)}

@@ -295,12 +295,12 @@ def add_history_routes(
             n_month,
             unit="this month",
             detail=(
-                f"Latest: {latest[0].get('deck_name') or latest[0].get('deck_id')}, "
+                f"Latest: {latest[0].get('deck_name') or 'an unnamed deck'}, "
                 f"{ui.when_text(latest[0].get('taken_at'), now=now)}"
                 if latest
                 else "No report yet."
             ),
-            actions=[ui.button_link("Open Reports", "/reports")],
+            actions=[ui.button_link("All reports", "/reports")],
         )
         n_copies = len(copies or [])
         w4 = ui.widget(

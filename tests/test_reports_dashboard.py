@@ -97,6 +97,9 @@ def test_reports_dashboard_widgets_chips_filters_and_rows(server: Server) -> Non
     # each row: the status label, the win rate with its interval, the lethal turn, who asked
     assert "class='ui-lbl orange'" in page and ">Partial</span>" in page
     assert "95% interval" in page and "turn 10" in page
+    # the column header does not assume 40 damage: a constructed deck's report counts 20
+    head = page.split("class='ui-table rp-t'")[1].split("<div class='tr'>")[0]
+    assert ">Lethal by<" in head and "40 damage" not in head
     assert "<i aria-hidden='true'>C</i>Claude" in page and "<i aria-hidden='true'>Y</i>You" in page
     assert "no solo test" in page and "did not run" in page
     assert "Deck trend and history" not in page
@@ -116,6 +119,16 @@ def test_reports_dashboard_widgets_chips_filters_and_rows(server: Server) -> Non
     none = h.get("/reports?q=nothing+like+this").text
     assert "No reports match. Clear the search or the filters to see them all." in none
     assert "<option value='claude'>Claude</option>" in page and "<option value='you'>You</option>" in page
+
+
+def test_a_report_with_no_stored_name_is_an_unnamed_deck(server: Server) -> None:
+    """A report stores its own deck name; when none was stored the row and the Deck filter say
+    "Unnamed deck", never the deck's id."""
+    h = _seed(server)
+    store_report(server.db, "user-1", "r_none", deck_id="99", deck_name="", taken_at=int(time.time()) - 30)
+    page = h.get("/reports").text
+    assert "href='/history/reports/r_none'>Unnamed deck</a>" in page
+    assert "<option value='99'>Unnamed deck</option>" in page and "Deck 99" not in page
 
 
 def test_reports_dashboard_pages_by_25(server: Server) -> None:

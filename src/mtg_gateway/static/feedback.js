@@ -234,7 +234,7 @@
   };
   window.MtgText = MtgText;
   // Every <time datetime> the server rendered in UTC is shown in the viewer's time zone.
-  // data-fmt=rel (ui.when): the §3 list date, with the full local date and time as its tooltip,
+  // data-fmt=rel (ui.when): the list date, with the full local date and time as its tooltip,
   // kept current while the page stays open.
   var times = document.querySelectorAll("time[datetime]");
   for (var t = 0; t < times.length; t++) {

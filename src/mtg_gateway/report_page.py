@@ -726,7 +726,7 @@ def report_page_html(
 REPORT_PAGE_CSS = (
     PHONE_WIDGETS_CSS
     + """
-/* group B: one report (k5) */
+/* one report */
 .rv-page .rv-crumbs{display:flex;flex-wrap:wrap;gap:.25rem .5rem;align-items:center;margin:0 0 .25rem;
   font-size:.93rem}
 .rv-page .rv-crumbs a{display:inline-flex;align-items:center;min-height:32px}

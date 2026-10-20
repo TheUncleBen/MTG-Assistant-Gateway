@@ -274,6 +274,7 @@ def _row(
     is_open: bool,
     details: str,
     more_label: str,
+    query: Query,
 ) -> str:
     cur = view.get("currency") or "usd"
     price = view.get("price")
@@ -287,7 +288,9 @@ def _row(
         + (f"{change_html(seven)}<span class='kv'>in 7 days</span>" if seven is not None else "")
         + alert
     )
-    href = f"?open={quote(key)}#wr-{esc(key)}"
+    # without the script, Details is a link to the page with this row open: it keeps the chip, the
+    # search, the filters and the page (query.href), as History's Details does
+    href = f"{query.href(open=key)}#wr-{esc(key)}"
     return (
         f"<div class='tr{' open' if is_open else ''}' id='wr-{esc(key)}'>{thumb}"
         f"<span class='title'><span class='t'>{title}</span><span class='deck'>{esc(line)}</span>"
@@ -317,7 +320,7 @@ def _wx_chart(view: dict[str, Any], today: str, what: str, heading: str, *, extr
     )
 
 
-def card_row(v: dict[str, Any], uid: str | None, csrf_in: str, today: str, *, is_open: bool) -> str:
+def card_row(v: dict[str, Any], uid: str | None, csrf_in: str, today: str, *, query: Query) -> str:
     wid = v["watch_id"]
     name = v["name"]
     alerts = v.get("alerts") or {}
@@ -361,13 +364,14 @@ def card_row(v: dict[str, Any], uid: str | None, csrf_in: str, today: str, *, is
         today=today,
         what=name,
         alert=alert_label(v),
-        is_open=is_open,
+        is_open=query.open == wid,
         details=details,
         more_label=f"{name}: chart and alert",
+        query=query,
     )
 
 
-def deck_row(v: dict[str, Any], csrf_in: str, today: str, *, is_open: bool) -> str:
+def deck_row(v: dict[str, Any], csrf_in: str, today: str, *, query: Query) -> str:
     did = str(v["deck_id"])
     name = v.get("name") or f"Deck {did}"
     full = [[h["day"], h["price"]] for h in _priced(v.get("history") or [])]
@@ -400,9 +404,10 @@ def deck_row(v: dict[str, Any], csrf_in: str, today: str, *, is_open: bool) -> s
         today=today,
         what=f"Value of {name}",
         alert="",
-        is_open=is_open,
+        is_open=query.open == f"d{did}",
         details=details,
         more_label=f"{name}: chart",
+        query=query,
     )
 
 
@@ -613,10 +618,7 @@ def watchlist_page_html(
         ]
     )
     if page_rows:
-        body = "".join(
-            card_row(v, ids.get(v["watch_id"]), csrf_in, today, is_open=query.open == v["watch_id"])
-            for v in page_rows
-        )
+        body = "".join(card_row(v, ids.get(v["watch_id"]), csrf_in, today, query=query) for v in page_rows)
     elif cards:
         body = "<p class='ui-empty'>No cards match. Clear the search or the filters to see them all.</p>"
     else:
@@ -652,7 +654,7 @@ def watchlist_page_html(
         ]
     )
     deck_body = (
-        "".join(deck_row(v, csrf_in, today, is_open=query.open == f"d{v['deck_id']}") for v in decks)
+        "".join(deck_row(v, csrf_in, today, query=query) for v in decks)
         if decks
         else "<p class='ui-empty'>No decks watched yet.</p>"
     )
@@ -685,7 +687,7 @@ def watchlist_page_html(
 WATCH_PAGE_CSS = (
     PHONE_WIDGETS_CSS
     + """
-/* group B: the Watchlist (k6) */
+/* the Watchlist */
 @media (min-width:900px){.watch-page .w-t .chgs{display:flex}}
 .watch-page .w-add{margin:0 0 1.25rem}
 .watch-page .w-add h2{font-size:1.1rem;margin:0 0 .5rem}

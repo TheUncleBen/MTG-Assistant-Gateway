@@ -84,7 +84,7 @@ async def test_the_page_lists_every_setting_and_locks_the_deployments(gw: Harnes
 
 
 async def test_the_stack_box_is_gone_and_each_locked_row_and_group_says_so(
-    tmp_path: Path, idp: FakeIdP
+    tmp_path: Path, idp: FakeIdP, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Approved k1 S2/S3 (question 23): no stack box. Each locked row has a grey "Set in your stack"
     label beside its name (its lock line keeps the variable), each group heading counts its locked
@@ -125,6 +125,14 @@ async def test_the_stack_box_is_gone_and_each_locked_row_and_group_says_so(
             )
             scan = r.text.split("id='g-scan'", 1)[1].split("</summary>", 1)[0]
             assert "<span class='ui-sub'>15 settings</span>" in scan and "1 set in your stack" in scan
+            # a folded group of one setting reads "1 setting"
+            keys_of = settings_page.group_keys
+            monkeypatch.setattr(
+                settings_page, "group_keys", lambda g: keys_of(g)[:1] if g == "scan" else keys_of(g)
+            )
+            one = (await b.http.get("/admin/settings", headers=NAVIGATE)).text
+            assert "<span class='ui-sub'>1 setting</span>" in one.split("id='g-scan'", 1)[1]
+            monkeypatch.setattr(settings_page, "group_keys", keys_of)
             assert "class='set-page'" in r.text and "only-locked" not in r.text.split("<main", 1)[1]
             # without scripts: the link shows the same, the folded group open, the chip pressed
             r = await b.http.get("/admin/settings?locked=1", headers=NAVIGATE)

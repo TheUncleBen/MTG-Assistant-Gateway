@@ -218,7 +218,7 @@ def needs_confirm(key: str, before: Any, after: Any) -> bool:
 
 
 SETTINGS_CSS = """
-/* the admin Settings page (UI standard mapping k1): one flat card per group, one row per setting,
+/* the admin Settings page: one flat card per group, one row per setting,
    every control in the same 16rem column so the boxes, switches and lists line up */
 .set-nav{margin:0 0 1rem}
 .set-nav .ui-chip{background:var(--surface);min-height:var(--ctl)}
@@ -501,7 +501,8 @@ def settings_body(
             inner = (
                 f"<details{' open' if opened else ''}><summary><span class='sum'>"
                 f"<span class='h2'>{html.escape(title)}</span>"
-                f"<span class='ui-sub'>{len(keys)} settings</span>{stack}</span>{icon('chev')}</summary>"
+                f"<span class='ui-sub'>{len(keys)} setting{'' if len(keys) == 1 else 's'}</span>"
+                f"{stack}</span>{icon('chev')}</summary>"
                 f"{intro_html}{form}</details>"
             )
         else:

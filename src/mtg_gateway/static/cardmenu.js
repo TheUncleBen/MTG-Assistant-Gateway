@@ -1,4 +1,4 @@
-/* The card menu and the Watch button (K7), shared by Card search (static/cardsearch.js), the deck
+/* The card menu and the Watch button, shared by Card search (static/cardsearch.js), the deck
    editor's add box and the top bar's "Search cards and decks" suggestions (static/suggest.js).
 
    The menu: right-click, press and hold, the ContextMenu key or Shift+F10 on a card opens Open
@@ -82,7 +82,7 @@
     b.classList.toggle("on", on);
     b.setAttribute("aria-pressed", on ? "true" : "false");
     b.setAttribute("aria-label", on ? name + " is on your watchlist" : "Watch " + name);
-    b.title = on ? "On your watchlist" : "Watch this card";
+    b.title = on ? "On your watchlist" : "Watch " + name;
     b.textContent = "";
     b.appendChild(icon(on ? "check" : "bookmark"));
     b.appendChild(el("span", null, on ? "Watching" : "Watch"));

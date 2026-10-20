@@ -40,7 +40,7 @@ def test_tiles_have_a_watch_button_only_with_watchlists_on() -> None:
     assert "<span class='picwrap'><button type='button' class='pic'" in on
     assert (
         "<button type='button' class='wbtn' data-watch='Sol Ring' aria-pressed='false' "
-        "aria-label='Watch Sol Ring' title='Watch this card'>" in on
+        "aria-label='Watch Sol Ring' title='Watch Sol Ring'>" in on
     )
     assert "<span>Watch</span></button></span><div class='meta'>" in on
     watched = cv.card_tile_html(

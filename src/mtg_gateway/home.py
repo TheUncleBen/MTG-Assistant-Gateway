@@ -40,7 +40,7 @@ DECKS_TIMEOUT = 6.0  # seconds; the home page must not hang on Archidekt
 
 
 HOME_CSS = """
-/* Quick access (K8): the §3a widgets, the label is the section's link */
+/* Quick access: the dashboard widgets, the label is the section's link */
 .hq{grid-template-columns:repeat(auto-fill,minmax(min(100%,15.5rem),1fr))}
 .hq .wdg a.lab{color:var(--text);text-decoration:none;font-size:.95rem}
 .hq .wdg a.lab:hover{text-decoration:underline}
@@ -106,7 +106,7 @@ def proposals_line(rows: list[dict[str, Any]], *, now: float) -> str:
     """The Proposals widget's line, the words of the Proposals page's "Waiting for you" widget:
     "6 on 4 decks, 2 not tied to a deck · oldest 6 days · next expires in 20 h · 1 needs a look"."""
     if not rows:
-        return "Every change is reviewed."
+        return "Nothing is waiting."
     tied = [r for r in rows if str(r.get("deck_id") or "").isdigit()]
     decks = len({str(r["deck_id"]) for r in tied})
     loose = len(rows) - len(tied)

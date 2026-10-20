@@ -21,6 +21,7 @@ from urllib.parse import urlencode
 from . import ui
 from .decks import ADMIN_CLIENT, BROWSER_CLIENT
 from .history_view import when_since
+from .modes import UNJUDGED
 from .theme import esc, icon
 from .waiting_strip import line_for
 
@@ -55,6 +56,13 @@ WHENS = (("", "Any time"), ("today", "Today"), ("7d", "Last 7 days"), ("30d", "L
 YOU, ADMIN = "you", "admin"
 FROM_YOU, FROM_ADMIN = "You", "The administrator"
 NO_APP_NAME = "An assistant"  # an app with no registered name: never its client id
+# A failed apply's stored error when Archidekt answered and said no (ArchidektError kinds, and the
+# gateway's own refusals of what it was about to send); anything else (the gateway restarted, a
+# network error or a timeout, the backup copy) is "could not be applied", not a refusal.
+ARCHIDEKT_REFUSALS = frozenset(
+    {"auth", "forbidden", "not_found", "rate_limited", "contract", "invalid", "edit", "verify_mismatch"}
+)
+NOT_APPLIED = "Could not be applied"
 
 PAGE_SUB = (
     "Every change your assistants proposed, waiting and past. Past proposals stay here for 30 days "
@@ -194,9 +202,12 @@ def gather(state: Any, sub: str, *, now: float | None = None) -> dict[str, Any]:
     for r in db.proposal_index(sub):
         seen = "expired" if r["state"] == "pending" and int(r["expires_at"] or 0) < now else r["state"]
         risk, why = r.get("risk"), ""
-        if r["state"] in ("pending", "applying") or not risk:
+        if r["state"] in ("pending", "applying"):
             full = db.get_proposal(r["id"], sub)
             risk, why = decks.proposal_risk(sub, full) if full else ("high", "")
+        elif not risk:  # closed before its tier was stored: as the close would judge it
+            full = db.get_proposal(r["id"], sub)
+            risk = decks.stored_risk(full) if full else UNJUDGED
         app = names.of(r.get("created_by_client"))
         item = {
             "id": r["id"],
@@ -301,7 +312,7 @@ def widgets_html(data: dict[str, Any], query: dict[str, Any], csrf: str | None, 
         if soon:
             det += f" · next expires in {_span(min(soon) - now)}"
     else:
-        det = "Every change is reviewed."
+        det = "Nothing is waiting."
     low = sum(1 for it in waiting if _low_checkable(it))
     acts = (
         [
@@ -411,6 +422,8 @@ def _status_label(it: dict[str, Any]) -> str:
 
 
 def _risk_label(it: dict[str, Any]) -> str:
+    if it["risk"] == UNJUDGED:
+        return ui.no_risk_label()
     return ui.risk_label(it["risk"], title=it.get("risk_why") or "")
 
 
@@ -528,7 +541,10 @@ def _closing_html(
             esc(f"Withdrawn by {it['app']}") if it["app"] and it["app"] not in (FROM_YOU, FROM_ADMIN) else ""
         )
     if st == "failed":
-        return f"Archidekt refused it · <a href='/proposals/{esc(it['id'])}'>Why</a>"
+        said = (
+            "Archidekt refused it" if (it["result"] or {}).get("error") in ARCHIDEKT_REFUSALS else NOT_APPLIED
+        )
+        return f"{said} · <a href='/proposals/{esc(it['id'])}'>Why</a>"
     return ""
 
 

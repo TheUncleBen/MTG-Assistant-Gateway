@@ -72,7 +72,8 @@ ACCOUNT_ERR = {
     "another.",
     "summary_invalid": "Choose Off, Every day or Every week.",
     "summary_off": "Summaries are sent through notifications, and this gateway has no notification server.",
-    "summary_send_wait": "A summary was just sent. Wait a minute before sending another.",
+    "summary_send_wait": "A summary was just sent. The gateway sends one a minute, so wait before sending "
+    "another.",
     "summary_send_failed": "The summary could not be sent. Check that notifications are on; if they are, "
     "the notification server did not accept it (the operator can see why in the gateway's log).",
 }
@@ -795,7 +796,7 @@ class _Stream(StreamingResponse):
 # -- Account page: the Notifications card, with the summary ----------------------------------------
 
 ACCOUNT_CSS = """<style>
-/* the Account page's Notifications and Summary cards (k3) */
+/* the Account page's Notifications and Summary cards */
 .nf-card .gh{display:flex;flex-wrap:wrap;align-items:center;gap:.4rem .75rem;margin:0 0 .35rem}
 .nf-card .gh h2{margin:0}
 .nf-card .intro{margin:0 0 .75rem;line-height:1.45}

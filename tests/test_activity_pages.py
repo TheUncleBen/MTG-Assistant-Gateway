@@ -270,7 +270,8 @@ async def test_my_activity_has_every_row_in_words_without_ids(gw: Harness) -> No
         assert "Open the proposal" in words and "pABCDEFG" not in words and "proposal p" not in words
         assert "<a href='/decks/42'>Meren</a>" in table
         assert "<span class='gone'>a deck that was removed</span>" in table and "31337" not in words
-        assert "<span title='rate_limited'>Archidekt asked the gateway to slow down</span>" in table
+        assert "Archidekt asked the gateway to slow down" in words
+        assert "rate_limited" not in table  # the code is not even a tooltip on the member's page
         assert "Open the proposal to see why" in words and "error rate_limited" not in words
         assert "An administrator revoked your assistants' access and your sign-ins" in words
         assert "By an administrator" in words and "<i aria-hidden='true'>A</i>Administrator</span>" in table
@@ -291,6 +292,13 @@ async def test_my_activity_has_every_row_in_words_without_ids(gw: Harness) -> No
         assert _table(byadmin).count("<div class='tr ev") == 1
         found = (await b.http.get("/activity?q=Meren", headers=NAVIGATE)).text
         assert _table(found).count("<div class='tr ev") == 3  # created, rejected, refused on deck 42
+        # "No app" is found by its own words (or their start), never by any letters it contains
+        for q in ("no+a", "No+app"):
+            rows_no_app = _table((await b.http.get(f"/activity?q={q}", headers=NAVIGATE)).text)
+            n = rows_no_app.count("<div class='tr ev")
+            assert n >= 2 and n == rows_no_app.count("title='No app'"), q  # the seeded two and the sign-in
+        pp = _table((await b.http.get("/activity?q=pp", headers=NAVIGATE)).text)
+        assert pp.count("<div class='tr ev") >= 1 and "title='No app'" not in pp  # the letters of "no app"
         assert "<span class='evt' title=" not in page  # no technical names on the member's page
     finally:
         await b.aclose()
@@ -315,6 +323,48 @@ async def test_the_acting_admins_copy_is_worded_first_person(gw: Harness) -> Non
         assert any(r["event"] == "admin_disable" and r["client_id"] == ADMIN_CLIENT for r in rows)
     finally:
         await b.aclose()
+
+
+async def test_admin_page_names_a_nameless_member_and_a_deck_it_cannot_name(gw: Harness) -> None:
+    """A member with neither a username nor an email reads "a member with no name" (the widget's
+    button then says "Show this member only"), and a deck the gateway cannot name is "a deck that
+    was removed" in the cell: its id stays in the opened row's details."""
+    b = await admin_browser(gw)
+    _members(gw)
+    gw.db.upsert_user("user-9", email=None, name=None, preferred_username=None, groups=[])
+    rows = [(1000 + i, "user-9", BROWSER, "browser_login", None) for i in range(12)]
+    rows.append((700, "user-9", BROWSER, "proposal_rejected", {"proposal_id": "p7", "deck_id": "31337"}))
+    _rows(gw, rows)
+    try:
+        page = (await b.http.get("/admin/activity", headers=NAVIGATE)).text
+        widgets = page.split("<section class='ui-widgets'", 1)[1].split("</section>", 1)[0]
+        assert "Most active: a member with no name, 13 events" in widgets
+        assert ">Show this member only</a>" in widgets and "no username or email" not in page
+        rejected = _row(page, "proposal_rejected")
+        assert ">Show this member only</a>" in rejected and "Show a member with no name only" not in page
+        cell = rejected.split("<span class='c-det'>", 1)[1].split("<span class='c-app'>", 1)[0]
+        assert "<span class='gone'>a deck that was removed</span>" in cell and "31337" not in cell
+        assert "&quot;deck_id&quot;: &quot;31337&quot;" in rejected  # the opened row's details carry it
+    finally:
+        await b.aclose()
+
+
+def test_the_approved_admin_labels() -> None:
+    assert activity_view.ADMIN_PAGE_NAMES["admin_revoke"] == "Assistants' access and sign-ins revoked"
+    assert activity_view.ADMIN_ACTION_WORDS["admin_revoke"] == (
+        "member's access revoked",
+        "members' access revoked",
+    )
+    from mtg_gateway import companion
+
+    assert (
+        companion.EVENT_LABELS["archidekt_sessions_sealed"]
+        == "Stored Archidekt sign-ins tied to their owners"
+    )
+    assert (
+        companion.EVENT_LABELS["proposal_apply_stopped"]
+        == "Applying a proposal stopped before any change; it waits again"
+    )
 
 
 def test_every_event_the_code_writes_has_a_name() -> None:

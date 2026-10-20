@@ -11,8 +11,8 @@ with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 
 The gateway's pages follow one look: the same status and risk words everywhere, tables that turn
 into two-line rows on phones, a row of widgets at the top of Proposals, History, Reports and the
-Activity pages, and searchable, paged lists. Proposals has its own page with every kept proposal,
-and History keeps snapshots, restores and deck reports. A press and hold on a card in the deck
+Activity pages, and searchable, paged lists. Proposals lists every kept proposal and, on a wide
+screen, opens one beside the list; History keeps snapshots, restores and deck reports. A press and hold on a card in the deck
 editor no longer leaves the page stuck.
 
 ### Upgrade notes
@@ -33,21 +33,22 @@ editor no longer leaves the page stuck.
 - Status and risk use the same words on every page and on the chat cards: Waiting, Updated, Needs a
   look, Held, Applying, Applied, Failed, Rejected, Expired, Withdrawn and Replaced; risk is Low,
   High, Your press or Delete. Each label has a word, a colour and an icon.
-- Dates show as "2 hours ago" up to a week, then as "Oct 12", in your own time zone. The full date
+- Dates show as "2 h ago" up to a week, then as "Oct 12", in your own time zone. The full date
   and time is in the tooltip.
 - **Reports**, a report, the **Watchlist**, **Home**, **Settings**, the admin **Activity** page, **My
   activity** and **Account** follow the same layout. On Reports, picking a filter shows the
   matching reports at once; there is no Show button.
 - **Card search** has a Watch button on each card, and a card's menu (right-click or press and
   hold) can open it, watch it, show its art variants or add it to a deck. The deck editor's card
-  search has the same Watch button and menu, and the top bar's card suggestions have the menu.
-- The top bar shows **Reports** and **Watchlist**, with **More** holding the rest on narrower
-  screens. The app's launcher shortcuts add Reports, and Watchlist while watchlists are on.
+  search has the same Watch button and a card menu of its own (no Add to deck, since a row already
+  adds to this deck), and the top bar's card suggestions have the menu.
+- The top bar shows **Reports**, and **Watchlist** while watchlists are on, with **More** holding
+  the rest on narrower screens. The app's launcher shortcuts add Reports, and Watchlist while watchlists are on.
 - Settings that your stack sets show "Set in your stack", and a setting you lowered says what it
   was before.
 - Activity names every kind of event in plain words.
-- Account has **Send it now**, which sends your daily or weekly summary to your phones straight
-  away.
+- Account has **Send it now**, which sends your daily or weekly summary to your phones when you
+  press it.
 
 ### Fixed
 - A press and hold on a card in the deck editor, on Android, no longer leaves the card faded and

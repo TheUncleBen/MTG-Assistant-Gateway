@@ -539,7 +539,7 @@ EVENT_LABELS = {
     "folder_renamed": "Folder renamed",
     "issuer_repinned": "Sign-in provider address updated",
     "proposal_amended": "Proposal changed by the app",
-    "proposal_apply_stopped": "Proposal apply stopped",
+    "proposal_apply_stopped": "Applying a proposal stopped before any change; it waits again",
     "proposal_reopened": "Proposal brought back",
     "proposal_withdrawn": "Proposal withdrawn",
     "proposals_applied_together": "Proposals applied together",
@@ -550,7 +550,7 @@ EVENT_LABELS = {
     "client_registered": "An app registered",
     "cimd_accepted": "An app's sign-in details were accepted",
     "cimd_rejected": "An app's sign-in details were refused",
-    "archidekt_sessions_sealed": "Stored Archidekt sign-ins sealed",
+    "archidekt_sessions_sealed": "Stored Archidekt sign-ins tied to their owners",
 }
 
 

@@ -10,6 +10,7 @@ import time
 from pathlib import Path
 
 from mtg_gateway.db import Database
+from mtg_gateway.modes import UNJUDGED
 
 from .conftest import Stack, stack_with
 from .test_companion import COMPANION, NAV, linked_browser
@@ -84,7 +85,93 @@ def test_backfill_stores_the_risk_of_closed_proposals_once(tmp_path: Path) -> No
 
     db.risk_source = odd
     assert db.settle_risks() == 1  # one odd row does not stop the rest
-    assert _risk(db, "a") == "low" and _risk(db, "b") is None and _risk(db, "c") is None
+    # the odd row keeps the sentinel, so no later scan judges it (and logs) again
+    assert _risk(db, "a") == "low" and _risk(db, "b") == UNJUDGED and _risk(db, "c") is None
+    asked: list[str] = []
+
+    def counting(row: dict) -> str:
+        asked.append(row["id"])
+        return "low"
+
+    db.risk_source = counting
+    assert db.settle_risks() == 0 and asked == []
+    db.risk_source = lambda row: "odd"  # no tier at all: the same sentinel
+    db.close_proposal("c", "u", "withdrawn")
+    assert _risk(db, "c") == UNJUDGED
+
+
+def test_the_closers_settle_only_the_rows_they_closed(tmp_path: Path) -> None:
+    """purge_expired and fail_interrupted_applies judge the proposals they closed just now, never
+    every closed row with no tier (that is the one-time backfill, DeckService at startup)."""
+    db = _db(tmp_path)
+    _save(db, "a", rows=LOW_ROWS)
+    _save(db, "b", rows=LOW_ROWS)
+    _save(db, "c", rows=LOW_ROWS)
+    db.finish_proposal("a", state="applied", result={})  # closed before the upgrade: no tier
+    asked: list[str] = []
+
+    def counting(row: dict) -> str:
+        asked.append(row["id"])
+        return "low"
+
+    db.risk_source = counting
+    with db.tx() as c:
+        c.execute("UPDATE proposals SET expires_at = ? WHERE id = 'b'", (int(time.time()) - 10,))
+        c.execute("UPDATE proposals SET state = 'applying' WHERE id = 'c'")
+    db.purge_expired()
+    assert asked == ["b"] and _risk(db, "b") == "low" and _risk(db, "a") is None
+    assert db.fail_interrupted_applies() == 1
+    assert asked == ["b", "c"] and _risk(db, "c") == "low" and _risk(db, "a") is None
+    db.purge_expired()
+    assert asked == ["b", "c"]  # a tick with nothing closed judges nothing
+    assert db.settle_risks() == 1 and asked == ["b", "c", "a"]  # the backfill takes the rest
+
+
+async def test_a_stored_tier_keeps_no_live_reason_and_an_unjudged_one_is_a_dash(stack: Stack) -> None:
+    """A closed proposal shows the tier stored when it closed, with no reason worked out under
+    today's settings (which may contradict it). One with nothing to judge it by (no review rows)
+    shows a dash, not High, and the Risk filter never counts it as High."""
+    b = await linked_browser(stack)
+    try:
+        gw = stack.h.app.state.gateway
+        sub = gw.db._one("SELECT sub FROM users", ())["sub"]
+        two = LOW_ROWS + [{"kind": "add", "name": "Arcane Signet", "qty": 1, "before": 0, "after": 1}]
+        for pid, rows in (("lo", two), ("nr", None)):
+            gw.db.save_proposal(
+                {
+                    "id": pid,
+                    "owner_sub": sub,
+                    "kind": "edit",
+                    "deck_id": "42",
+                    "deck_name": "Immortal Reckoning",
+                    "baseline_fingerprint": "f",
+                    "changes": [],
+                    "diff_text": "+1 Sol Ring",
+                    "expires_at": int(time.time()) + 3600,
+                    "created_by_client": "__browser__",
+                    **({"rows": rows} if rows is not None else {}),
+                }
+            )
+            gw.db.finish_proposal(pid, state="applied", result={})
+        assert _risk(gw.db, "lo") == "low" and _risk(gw.db, "nr") == UNJUDGED
+        gw.live.set("auto_apply_max_rows", 1, by="admin-1")  # today it would read High
+        assert gw.decks.proposal_risk(sub, gw.db.get_proposal("lo", sub))[0] == "high"
+        shown = gw.decks.describe(sub, "lo")
+        assert (shown["risk"], shown["risk_reason"]) == ("low", "judged when it closed")
+        unjudged = gw.decks.describe(sub, "nr")
+        assert unjudged["risk"] is None and unjudged["risk_reason"] == ""
+        body = (await b.http.get("/proposals?show=all", headers=NAV)).text.split("<main")[1]
+        rows = {m[0]: m[1] for m in re.findall(r"href='/proposals/(lo|nr)\?show=all'(.*?)</div>", body)}
+        assert "Low</span>" in rows["lo"] and "High" not in rows["lo"]
+        assert "Risk not judged" in rows["nr"] and "High" not in rows["nr"]
+        high = (await b.http.get("/proposals?show=all&risk=high", headers=NAV)).text.split("<main")[1]
+        assert "/proposals/nr?" not in high and "/proposals/lo?" not in high
+        low = (await b.http.get("/proposals?show=all&risk=low", headers=NAV)).text.split("<main")[1]
+        assert "/proposals/lo?" in low and "/proposals/nr?" not in low
+        page = (await b.http.get("/proposals/nr", headers=NAV)).text.split("<aside")[1]
+        assert "Risk not judged" in page and "High" not in page
+    finally:
+        await b.aclose()
 
 
 def test_proposal_index_and_history_counts(tmp_path: Path) -> None:
@@ -96,6 +183,12 @@ def test_proposal_index_and_history_counts(tmp_path: Path) -> None:
     assert {"risk", "board_no", "snapshot_id", "result"} <= set(index[0])
     counts = db.history_counts("u", deck_id=None, search="", since=None)
     assert counts["snapshots"] == 15 and counts["restores"] == 1  # p04, an applied restore
+    # the search counts as the rows match: a restore by its deck's name or its change summary
+    for q in ("immortal", "sol ring", "card 4", "reap"):
+        rows = db.list_proposals("u", limit=100, kinds=["restore"], states=["applied"], search=q)
+        assert db.history_counts("u", search=q)["restores"] == len(rows), q
+    assert db.history_counts("u", search="sol ring")["restores"] == 1
+    assert db.history_counts("u", search="sol ring")["snapshots"] == 0  # a snapshot has no summary
     assert db.history_counts("u", deck_id="43", search="", since=None)["snapshots"] == 0
     stats = db.snapshot_stats("u")
     assert stats["count"] == 15 and stats["decks"] == 1
@@ -192,7 +285,9 @@ async def test_all_view_pages_newest_first(stack: Stack) -> None:
         older = (await b.http.get("/proposals?show=all&offset=25", headers=NAV)).text
         assert "26–50 of 60" in older and "/proposals/p25?show=all" in older
         assert re.search(r"<span class='ui-lbl grey'>(<svg.*?</svg>)?Rejected</span>", body)
-        assert "Archidekt refused it" in body  # a failed one says why
+        # a failed one says why; the seeded ones store no error, so Archidekt did not refuse them
+        assert "Could not be applied · <a href='/proposals/p03'>Why</a>" in body
+        assert "Archidekt refused it" not in body
         assert "(deck 4" not in body
     finally:
         await b.aclose()
@@ -223,6 +318,31 @@ async def test_one_proposal_is_a_side_panel_or_a_page(stack: Stack) -> None:
         await b.aclose()
 
 
+def test_a_failed_row_says_refused_only_when_archidekt_refused() -> None:
+    """Archidekt's own no (a 4xx, a contract it did not keep) reads "Archidekt refused it"; the
+    gateway restarting, a network error or a timeout and the backup copy read "Could not be
+    applied", each with the Why link to the proposal."""
+    from mtg_gateway.proposals_view import _closing_html
+
+    def line(error: str | None) -> str:
+        it = {
+            "id": "f1",
+            "state": "failed",
+            "result": {"error": error} if error else {},
+            "app": None,
+            "applied_at": 0,
+            "status_at": 0,
+            "created_at": 0,
+            "expires_at": 0,
+        }
+        return _closing_html(it, csrf=None, replaced_by=None, now=0.0)
+
+    for refused in ("forbidden", "not_found", "auth", "rate_limited", "contract", "verify_mismatch"):
+        assert line(refused) == "Archidekt refused it · <a href='/proposals/f1'>Why</a>", refused
+    for other in ("interrupted", "unavailable", "internal", "backup_failed", None):
+        assert line(other) == "Could not be applied · <a href='/proposals/f1'>Why</a>", other
+
+
 # -- H1 ------------------------------------------------------------------------------
 async def test_history_has_no_proposals(stack: Stack) -> None:
     b = await linked_browser(stack)
@@ -232,9 +352,13 @@ async def test_history_has_no_proposals(stack: Stack) -> None:
         now = int(time.time())
         seed_history(gw.db, sub, now=now)
         store_report(gw.db, sub, "rep_a", taken_at=now - 100)
+        store_report(gw.db, sub, "rep_z", deck_id="99", deck_name="", taken_at=now - 10)
         body = (await b.http.get("/history", headers=NAV)).text.split("<main")[1]
         assert "placeholder='Deck name'" in body
-        assert "Everything <span class='n'>17</span>" in body  # 15 snapshots, 1 restore, 1 report
+        # the Reports widget: the newest report's stored name, never its deck id; "All reports"
+        assert "Latest: an unnamed deck, just now" in body and ">All reports</a>" in body
+        assert "Deck 99" not in body and "Open Reports" not in body
+        assert "Everything <span class='n'>18</span>" in body  # 15 snapshots, 1 restore, 2 reports
         assert "Snapshots <span class='n'>15</span>" in body and "Restores <span class='n'>1</span>" in body
         # no edit proposal is listed; a snapshot links the change it was taken before
         assert "+1 Counterspell" not in body and "Rejected" not in body
@@ -245,6 +369,15 @@ async def test_history_has_no_proposals(stack: Stack) -> None:
         details = (await b.http.get("/history?open=s-s00", headers=NAV)).text.split("<main")[1]
         drawer = details.split("<aside class='ui-drawer'")[1]
         assert "← Back to History" in drawer and "Restore (review first)" in drawer and "<dd>—</dd>" in drawer
+    finally:
+        await b.aclose()
+
+
+async def test_an_empty_waiting_widget_says_nothing_is_waiting(stack: Stack) -> None:
+    b = await linked_browser(stack)
+    try:
+        body = (await b.http.get("/proposals", headers=NAV)).text.split("<main")[1]
+        assert "Nothing is waiting." in body and "Every change is reviewed." not in body
     finally:
         await b.aclose()
 

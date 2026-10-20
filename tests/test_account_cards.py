@@ -151,7 +151,10 @@ async def test_notices_show_inside_the_card_they_came_from(stack: Stack) -> None
         assert notify.ACCOUNT_ERR["notify_test_wait"] in _card(page, "notifications")
         assert notify.ACCOUNT_ERR["notify_test_wait"] not in page.split("id='notifications'", 1)[0]
         page = (await b.http.get("/account?err=summary_send_wait")).text
-        assert "A summary was just sent. Wait a minute before sending another." in _card(page, "summary")
+        assert (
+            "A summary was just sent. The gateway sends one a minute, so wait before sending another."
+            in _card(page, "summary")
+        )
         # other notices stay at the top
         page = (await b.http.get("/account?err=confirm_forget")).text
         assert page.index("Nothing was forgotten.") < page.index("id='notifications'")

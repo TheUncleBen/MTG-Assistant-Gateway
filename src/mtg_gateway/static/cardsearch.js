@@ -815,7 +815,7 @@
       setMsg(d.message || "The card could not be added.", true);
     }).catch(function () { busy(false); setMsg("No connection; nothing was changed.", true); });
   }
-  // -- Watch (K7): the Watch button on each result, the card menu and Art variants… -------------
+  // -- Watch: the Watch button on each result, the card menu and Art variants… -------------
   // Only with watchlists on: the server draws the Watch buttons and the page hint then. A watch
   // goes through the shared static/cardmenu.js (a printing search sends the shown printing), as
   // do the menu and its toast with Undo.

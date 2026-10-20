@@ -31,7 +31,7 @@ def test_the_proposals_line_in_the_proposals_page_words() -> None:
         == "3 on 2 decks, 1 not tied to a deck · oldest 6 days · next expires in 20 h · 1 needs a look"
     )
     assert home.proposals_line(rows[3:], now=NOW).startswith("1 not tied to a deck · oldest 1 min")
-    assert home.proposals_line([], now=NOW) == "Every change is reviewed."
+    assert home.proposals_line([], now=NOW) == "Nothing is waiting."
 
 
 def test_reports_and_watchlist_widgets() -> None:
