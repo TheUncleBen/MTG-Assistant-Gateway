@@ -370,8 +370,9 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
         )
         # the deck's name and the note for the box the forms ask in first (static/menus.js); the
         # confirmation page does the same without scripts
+        deck_label = deck.name or "Unnamed deck"
         return (
-            f"<section class='panel collabbox' id='collaborators' data-deck-name='{_esc(deck.name)}' "
+            f"<section class='panel collabbox' id='collaborators' data-deck-name='{_esc(deck_label)}' "
             f"data-note='{_esc(COLLABORATOR_NOTE)}'><h2>Collaborators</h2>"
             + listing
             + f"<form method='post' action='/decks/{did}/collaborators#collaborators' class='addtag'>"

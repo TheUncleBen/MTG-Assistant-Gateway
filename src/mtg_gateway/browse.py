@@ -80,7 +80,7 @@ COLOURS = (("W", "White"), ("U", "Blue"), ("B", "Black"), ("R", "Red"), ("G", "G
 COLOUR_MODES = sp.DECK_COLOUR_MODES
 # the sort direction: Automatic is Archidekt's own way for the order (newest first, the biggest
 # first, the lowest bracket first); the other way sends the order without its leading "-" (the
-# ordering parameter's standard form, so far unverified live)
+# ordering parameter's standard form, so far not tried live with this gateway)
 DIRECTIONS = sp.DIRECTIONS
 MAX_PAGES = 17  # Archidekt caps a search at 1000 rows, 60 a page
 LIMIT_NOTE = "Archidekt lists at most 1,000 decks for one search. Narrow the search to see other decks."

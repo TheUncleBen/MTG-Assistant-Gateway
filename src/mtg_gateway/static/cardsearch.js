@@ -52,7 +52,7 @@
       opts.body = JSON.stringify(body);
     }
     return fetch(path, opts).then(function (r) {
-      return r.json().then(function (d) { d.status = r.status; return d; }, function () { return { ok: false, status: r.status, message: "The gateway answered oddly; nothing was changed." }; });
+      return r.json().then(function (d) { d.status = r.status; return d; }, function () { return { ok: false, status: r.status, message: "The gateway sent an answer this page could not read. Reload the page to see whether the change was made." }; });
     });
   }
 

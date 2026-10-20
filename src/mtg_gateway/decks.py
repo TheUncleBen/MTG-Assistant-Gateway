@@ -6834,8 +6834,12 @@ class DeckService:
         if folder.get("backup"):  # the gateway's backup folder and what is in it
             raise _no_such_folder(info, folder["name"])
 
-    def _not_being_deleted(self, sub: str, folder_id: int) -> None:
+    def _not_being_deleted(self, sub: str, folder_id: int, *, moving: bool = False) -> None:
+        """Refused while a running folder delete holds ``folder_id``: as the place something goes
+        into, or (``moving``) as the folder being moved."""
         if folder_id in self._deleting.get(sub, set()):
+            if moving:
+                raise DeckError("busy", "That folder is being deleted, so it can't be moved now.")
             raise DeckError("busy", "That folder is being deleted, so nothing can go into it now.")
 
     async def move_folder(self, sub: str, folder_id: int, parent_id: int | None) -> dict[str, Any]:
@@ -6860,7 +6864,7 @@ class DeckService:
                 f"the backup folder out of “{folder['name']}” on Archidekt first.",
             )
         self._not_being_deleted(sub, target_id)
-        self._not_being_deleted(sub, folder["id"])
+        self._not_being_deleted(sub, folder["id"], moving=True)
         if folder["parent"] == target_id:
             return {**folder, "changed": False}
         if any(
@@ -7095,13 +7099,19 @@ class DeckService:
                 "deck's snapshot is under History.",
             ) from exc
         state["step"] = "Checking that everything is gone"
-        after = await self._waiting_out_limits(state, lambda: self.folders(sub))
+        try:
+            after = await self._waiting_out_limits(state, lambda: self.folders(sub))
+            listed = {
+                str(d.get("id")) for d in await self._waiting_out_limits(state, lambda: self.list_decks(sub))
+            }
+        except DeckError as exc:
+            # the delete was sent: the answer must not read as if nothing happened
+            raise DeckError(
+                exc.kind, f"{str(exc).rstrip('.')}. Check the folder on Archidekt to see what was deleted."
+            ) from exc
         left_folders = [
             f for f in [folder, *inside["folders"]] if any(g["id"] == f["id"] for g in after["folders"])
         ]
-        listed = {
-            str(d.get("id")) for d in await self._waiting_out_limits(state, lambda: self.list_decks(sub))
-        }
         left_decks = [d for d in inside["decks"] if d["id"] in listed]
         ok = not left_folders and not left_decks
         self._audit(

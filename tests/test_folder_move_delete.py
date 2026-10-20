@@ -635,3 +635,43 @@ def test_my_decks_format_filter_matches_by_format() -> None:
 
     assert pick("historicbrawl") == ["2"] and pick("paupercommander") == ["3"]
     assert pick("Pauper EDH") == ["3"]  # a link from before still carries the name
+
+
+async def test_the_collaborator_box_names_an_unnamed_deck(stack: Stack) -> None:
+    await linked_user(stack)
+    stack.ark.decks[42]["name"] = ""
+    b, _csrf = await _browser(stack)
+    try:
+        r = await b.http.get("/decks/42/settings")
+    finally:
+        await b.aclose()
+    assert "data-deck-name='Unnamed deck'" in r.text
+
+
+async def test_the_folder_being_deleted_does_not_move(stack: Stack) -> None:
+    await linked_user(stack)
+    ids = _setup(stack)
+    decks = stack.h.app.state.gateway.decks
+    decks._deleting[SUB] = {ids["brews"]}
+    with pytest.raises(DeckError) as exc:
+        await decks.move_folder(SUB, ids["brews"], ids["archive"])
+    assert str(exc.value) == "That folder is being deleted, so it can't be moved now."
+
+
+async def test_a_failed_read_back_after_the_delete_says_to_look_on_archidekt(stack: Stack) -> None:
+    await linked_user(stack)
+    ids = _setup(stack)
+    decks = stack.h.app.state.gateway.decks
+    real = decks.list_decks
+
+    async def unreadable(sub, *a, **kw):  # type: ignore[no-untyped-def]
+        if stack.ark.folder_deletes:
+            raise DeckError("unavailable", "Archidekt can't be reached right now.")
+        return await real(sub, *a, **kw)
+
+    decks.list_decks = unreadable  # type: ignore[method-assign]
+    with pytest.raises(DeckError) as exc:
+        await decks.delete_folder(SUB, ids["precons"], "Precons", {"decks": 1, "packages": 1, "folders": 0})
+    assert str(exc.value) == (
+        "Archidekt can't be reached right now. Check the folder on Archidekt to see what was deleted."
+    )

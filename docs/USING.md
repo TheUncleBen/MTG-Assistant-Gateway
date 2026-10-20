@@ -69,7 +69,7 @@ and folders that is and asks you to type the folder's name. The gateway first
 makes a snapshot of every deck (and a copy in your backup folder when backups
 are on) and stops if any of them fails; card packages get no snapshot or copy.
 The backup folder can't be moved or deleted, and a folder holding it can't be
-deleted. The assistant can't move or delete folders.
+moved or deleted. The assistant can't move or delete folders.
 
 One deck:
 

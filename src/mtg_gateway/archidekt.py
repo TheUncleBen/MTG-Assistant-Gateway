@@ -1435,7 +1435,7 @@ class ArchidektClient:
         only ``page`` is sent. Anonymous: only public decks come back."""
         # an order the site offers, either way round (the deck search's direction sends the order
         # without its "-" for the other way; that form is the ordering parameter's standard one,
-        # so far unverified live)
+        # so far not tried live with this gateway)
         known = {k.lstrip("-") for k in SEARCH_ORDERS}
         params: dict[str, Any] = {"orderBy": order_by if order_by.lstrip("-") in known else "-updatedAt"}
         if name:

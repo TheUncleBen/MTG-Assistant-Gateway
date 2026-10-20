@@ -29,7 +29,7 @@ pages fit phones, an open Fold, tablets and computers the same way.
   packages and folders are inside and asks you to type the folder's name; every deck gets a
   snapshot (and a copy in your backup folder when backups are on) before anything is deleted, and
   the delete stops if one of them fails. Card packages get no snapshot or copy. The backup folder
-  is never moved or deleted, and a folder holding it can't be deleted. The assistant can't move or
+  is never moved or deleted, and a folder holding it can't be moved or deleted. The assistant can't move or
   delete folders.
 - My decks filters by colors and format, sorts in either direction and shows the number of decks.
 - Deck search opens an Archidekt deck from a link or deck ID typed in its name box, and shows more
