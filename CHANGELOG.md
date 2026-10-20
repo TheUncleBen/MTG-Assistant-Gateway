@@ -39,7 +39,8 @@ editor no longer leaves the page stuck.
   activity** and **Account** follow the same layout. On Reports, picking a filter shows the
   matching reports at once; there is no Show button.
 - **Card search** has a Watch button on each card, and a card's menu (right-click or press and
-  hold) can open it, watch it, show its art variants or add it to a deck.
+  hold) can open it, watch it, show its art variants or add it to a deck. The deck editor's card
+  search has the same Watch button and menu, and the top bar's card suggestions have the menu.
 - The top bar shows **Reports** and **Watchlist**, with **More** holding the rest on narrower
   screens. The app's launcher shortcuts add Reports, and Watchlist while watchlists are on.
 - Settings that your stack sets show "Set in your stack", and a setting you lowered says what it
