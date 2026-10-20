@@ -458,7 +458,8 @@ def guide_body(
         "<li><strong>Deck settings</strong> changes the name, format, bracket, description and whether the "
         "deck is private or unlisted, and also sets the deck's <strong>cover image</strong>, its "
         "<strong>tags</strong> and the <strong>folder</strong> it sits in.</li>"
-        "<li><strong>Folders</strong> on the Decks page creates and renames folders.</li>"
+        "<li><strong>+ New folder</strong> on My decks makes a folder; a folder tile's menu (its ⋮, a "
+        "right-click, or press and hold on a phone) renames, moves or deletes it.</li>"
         "<li>Your assistant can propose moving a deck to another folder, changing its tags or its cover "
         "(a settings change you approve, like any other). It can also propose deleting a deck or "
         "creating a folder, but only your own press applies either one (a deletion on its review page "
@@ -917,7 +918,11 @@ def guide_body(
             "<code>/decks/&lt;id&gt;/goldfish</code>",
             "play the deck by hand in your browser: opening hand, mulligans, draw, play, next turn",
         ),
-        ("Folders", "<code>/folders</code>", "your Archidekt folders: a new folder, rename one"),
+        (
+            "Folders",
+            "<code>/decks</code>",
+            "your Archidekt folders on My decks: a new folder, rename, move or delete one",
+        ),
         ("Search", "<code>/search</code>", "public decks by name, commander, format, colors, owner"),
         ("Cards", "<code>/cards</code>", "cards by name, with picture, cost and type; add one to a deck"),
         (

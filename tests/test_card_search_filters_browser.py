@@ -193,7 +193,7 @@ def test_a_type_chip_narrows_and_flips_to_not_and_clear_empties_everything(serve
         box.press("Escape")
         box.fill("")
         # Clear filters empties the chips, the name and the results
-        page.locator(".cs-actions .cs-clear").click()
+        page.locator(".rbar .sp-clear").click()
         assert page.locator("[data-picker=t] .chips li").count() == 0
         assert page.locator("#c-q").input_value() == ""
         page.wait_for_function("() => /Find a card/.test(document.getElementById('cs-results').innerText)")
@@ -220,7 +220,7 @@ def test_scrolling_loads_the_next_page_and_the_list_view_and_sort_stay_in_the_se
         assert names == [f"Test Land {i:02d}" for i in range(30)], names
         assert page.locator("#cs-more [data-more]").is_hidden()
         # the list view: rows, chosen in the results head, kept in a cookie for the next visit
-        page.locator(".seg label[title=List]").click()
+        page.locator(".segc label[title=List]").click()
         page.wait_for_selector("#cardgrid.cardlist", timeout=5000)
         assert page.evaluate(MEASURE) == []
         page.goto(f"{server.base}/cards?q=sol", wait_until="networkidle")
@@ -250,33 +250,33 @@ def test_the_filters_fit_every_width_and_the_phone_panel_opens_and_closes(
         assert page.evaluate(MEASURE) == []
         if width < 600:
             # the filters wait behind a button that counts the ones in use
-            assert page.locator("#cs-filters").is_hidden() or not page.locator("#p-t").is_visible()
-            assert page.locator(".cs-open .n").inner_text().strip() == "2"
-            page.locator(".cs-open").click()
-            panel = page.locator("#cs-filters.open")
+            assert page.locator("#sp-filters").is_hidden() or not page.locator("#p-t").is_visible()
+            assert page.locator(".sp-open .n").inner_text().strip() == "2"
+            page.locator(".sp-open").click()
+            panel = page.locator("#sp-filters.open")
             panel.wait_for(timeout=3000)
             box = panel.bounding_box()
             assert box and box["width"] >= width - 1 and box["x"] <= 1, box
-            assert page.evaluate(CONTROLS, "#cs-filters.open") == []
+            assert page.evaluate(CONTROLS, "#sp-filters.open") == []
             assert page.evaluate(MEASURE) == []
             if SHOTS:
                 page.screenshot(path=str(Path(SHOTS) / f"filters-panel-{width}-{theme}.png"))
             # the panel's button names the count and closes it
-            page.locator(".cs-show").click()
-            page.wait_for_function("() => !document.getElementById('cs-filters').classList.contains('open')")
-            assert page.evaluate("document.activeElement.classList.contains('cs-open')")
+            page.locator(".sp-show").click()
+            page.wait_for_function("() => !document.getElementById('sp-filters').classList.contains('open')")
+            assert page.evaluate("document.activeElement.classList.contains('sp-open')")
             # Escape closes it too
-            page.locator(".cs-open").click()
+            page.locator(".sp-open").click()
             panel.wait_for(timeout=3000)
             page.keyboard.press("Escape")
-            page.wait_for_function("() => !document.getElementById('cs-filters').classList.contains('open')")
+            page.wait_for_function("() => !document.getElementById('sp-filters').classList.contains('open')")
         else:
             assert page.locator("#p-t").is_visible()
             assert page.evaluate(CONTROLS, "#cs-form") == []
         # the open More filters fits as well
         if width < 600:
-            page.locator(".cs-open").click()
-        page.locator(".cs-more summary").click()
+            page.locator(".sp-open").click()
+        page.locator(".cs-more summary:visible, [data-more-filters]:visible").first.click()
         page.locator("#f-o").wait_for(state="visible", timeout=3000)
         assert page.evaluate(MEASURE) == []
         texts = ".cs .chips li .nm, .cs label, .cs legend, .cs .hint, .cs summary"
@@ -465,13 +465,13 @@ def test_a_tap_above_a_dropdown_sheet_in_the_phone_panel_only_closes_it(server: 
     with sync_playwright() as p:
         browser, page, errors = _page(p, server, sid, 360, "light", exe)
         page.goto(f"{server.base}/cards?q=sol", wait_until="networkidle")
-        page.locator(".cs-open").click()
-        page.locator("#cs-filters.open").wait_for(timeout=3000)
-        colour = page.locator("#cs-filters input[name=c]").first
+        page.locator(".sp-open").click()
+        page.locator("#sp-filters.open").wait_for(timeout=3000)
+        colour = page.locator("#sp-filters input[name=c]").first
         colour.scroll_into_view_if_needed()
         box = colour.bounding_box()
         assert box is not None
-        page.locator("#cs-filters .msel-btn[aria-label='Format']").click()
+        page.locator("#sp-filters .msel-btn[aria-label='Format']").click()
         sheet = page.locator(".msel-list.sheet")
         sheet.wait_for(timeout=3000)
         top = sheet.bounding_box()
@@ -494,15 +494,15 @@ def test_one_escape_closes_the_dropdown_sheet_and_not_the_filters_panel(server: 
     with sync_playwright() as p:
         browser, page, errors = _page(p, server, sid, 360, "light", exe)
         page.goto(f"{server.base}/cards?q=sol", wait_until="networkidle")
-        page.locator(".cs-open").click()
-        panel = page.locator("#cs-filters.open")
+        page.locator(".sp-open").click()
+        panel = page.locator("#sp-filters.open")
         panel.wait_for(timeout=3000)
-        page.locator("#cs-filters .msel-btn[aria-label='Format']").click()
+        page.locator("#sp-filters .msel-btn[aria-label='Format']").click()
         page.locator(".msel-list.sheet").wait_for(timeout=3000)
         page.keyboard.press("Escape")
         assert page.locator(".msel-list").count() == 0
         assert panel.count() == 1, "one Escape closed the Filters panel too"
         page.keyboard.press("Escape")
-        page.wait_for_function("() => !document.getElementById('cs-filters').classList.contains('open')")
+        page.wait_for_function("() => !document.getElementById('sp-filters').classList.contains('open')")
         assert errors == [], errors
         browser.close()

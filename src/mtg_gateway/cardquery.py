@@ -45,6 +45,11 @@ COLOR_NAMES = {"W": "White", "U": "Blue", "B": "Black", "R": "Red", "G": "Green"
 # Scryfall's three colour comparisons, by the short names the page's address uses
 COLOR_COMPARE = {"eq": ("=", "Exactly these colors"), "ge": (">=", "Including these colors"),
                  "le": ("<=", "At most these colors")}  # fmt: skip
+# How the commander colours match (Scryfall's identity comparisons, its syntax page read
+# 2026-10-20): "within" is commander:, cards that fit a commander of these colours (today's one
+# meaning, the default); "exact" is id=; "incl" is id>=.
+IDENTITY_COMPARE = {"within": ("commander:", "Within these"), "exact": ("id=", "Exactly these"),
+                    "incl": ("id>=", "Including these")}  # fmt: skip
 STATS = (("cmc", "Mana value"), ("pow", "Power"), ("tou", "Toughness"), ("loy", "Loyalty"))
 COMPARE = (
     ("eq", "=", "equal to"),
@@ -293,6 +298,7 @@ class Filters:
     colors: list[str] = field(default_factory=list)
     color_cmp: str = "ge"
     identity: list[str] = field(default_factory=list)
+    identity_cmp: str = "within"
     mana: str = ""
     mv_min: str = ""  # the quick "Mana value from … to …" (the stat rows can say more)
     mv_max: str = ""
@@ -362,6 +368,8 @@ class Filters:
         if self.colors and self.color_cmp != "ge":
             out.append(("cmp", self.color_cmp))
         out += [("id", c) for c in self.identity]
+        if self.identity and self.identity_cmp != "within":
+            out.append(("idm", self.identity_cmp))
         if self.mv_min:
             out.append(("mv", self.mv_min))
         if self.mv_max:
@@ -474,6 +482,8 @@ def parse(params: Any) -> Filters:
     cmp = _first(params, "cmp")
     f.color_cmp = cmp if cmp in COLOR_COMPARE else "ge"
     f.identity = [c for c in COLORS if c in {v.strip().upper() for v in _getall(params, "id")}]
+    idm = _first(params, "idm")
+    f.identity_cmp = idm if idm in IDENTITY_COMPARE else "within"
     f.mv_min = _number(_first(params, "mv")) or ""
     f.mv_max = _number(_first(params, "mvx")) or ""
     stats = zip(_getall(params, "st"), _getall(params, "sto"), _getall(params, "stv"), strict=False)
@@ -604,7 +614,7 @@ def scryfall_query(f: Filters) -> str:
     if f.colors:
         parts.append(f"color{COLOR_COMPARE[f.color_cmp][0]}{''.join(f.colors)}")
     if f.identity:
-        parts.append(f"commander:{''.join(f.identity)}")
+        parts.append(f"{IDENTITY_COMPARE[f.identity_cmp][0]}{''.join(f.identity)}")
     if f.mana:
         mana = re.sub(r"[^0-9A-Za-z{}/]", "", f.mana)
         if mana:

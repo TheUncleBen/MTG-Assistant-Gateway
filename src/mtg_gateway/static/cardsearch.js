@@ -6,7 +6,8 @@
    reload and a shared link show the same search. The next page loads by itself when the end of
    the list comes into view, or with "Load more cards". The pickers (type, set, block, criteria)
    read their lists from /cards/api/options once, as soon as the page loads. Under 600 px the
-   filters are a full-screen panel; "Show cards" closes it.
+   filters are a full-screen sheet (static/searchpanel.js, the panel the search pages share);
+   "Show cards" closes it.
 
    A picture opens the shared card viewer (static/cardview.js) with an Add to deck action, and
    Add to deck opens a small dialog that picks one of the member's decks (the cached list behind
@@ -81,6 +82,7 @@
     });
     // the defaults stay out of the address
     if (out.get("cmp") === "ge" || !out.getAll("c").length) out.delete("cmp");
+    if (out.get("idm") === "within" || !out.getAll("id").length) out.delete("idm");
     if (out.get("order") === "name") out.delete("order");
     if (out.get("dir") === "auto") out.delete("dir");
     var games = out.getAll("g").filter(function (g) { return g !== "any"; });
@@ -93,7 +95,7 @@
   function chosenCount(p) {
     var n = 0, seen = {};
     p.forEach(function (v, k) {
-      if (["q", "order", "dir", "view", "cmp", "tany", "isany"].indexOf(k) >= 0) return;
+      if (["q", "order", "dir", "view", "cmp", "idm", "tany", "isany"].indexOf(k) >= 0) return;
       if (k === "sto" || k === "stv" || k === "po" || k === "pv" || k === "fs") return;
       if (k === "c" || k === "id" || k === "r" || k === "g") { if (seen[k]) return; seen[k] = 1; }
       n += 1;
@@ -104,7 +106,7 @@
   // -- live results ----------------------------------------------------------------------------
   var countEl = $("#cs-count"), statusEl = $("#cs-status"), moreWrap = $("#cs-more");
   var moreBtn = moreWrap ? $("[data-more]", moreWrap) : null;
-  var openBtn = $(".cs-open", form), badge = openBtn ? $(".n", openBtn) : null;
+  var openBtn = $(".sp-open", form), badge = openBtn ? $(".n", openBtn) : null;
   // lastQs: the search last asked for (an unchanged form asks nothing again). shownQs: the search
   // whose tiles are on screen; "Load more" asks for its next page, never the form's newer text.
   var timer = null, ctrl = null, moreCtrl = null, page = 1, hasMore = false, loadingMore = false;
@@ -125,7 +127,7 @@
     if (!badge) return;
     var n = chosenCount(p);
     badge.textContent = n ? String(n) : "";
-    var show = $(".cs-show", form);
+    var show = $(".sp-show", form);
     if (show) show.textContent = countEl && /\d/.test(countEl.textContent) ? "Show " + countEl.textContent : "Show cards";
   }
   function showMore(on) {
@@ -255,6 +257,7 @@
   updateBadge(params());
 
   form.addEventListener("submit", function (e) { e.preventDefault(); run(true); closePanel(); });
+  // the sort, direction and view sit in the results bar at the panel's foot, inside the form
   form.addEventListener("input", function (e) {
     if (e.target.closest && e.target.closest("[data-picker]") && e.target.type === "text") return;
     run(e.target.type !== "text" && e.target.type !== "search");
@@ -263,8 +266,6 @@
     if (e.target.closest && e.target.closest("[data-picker]") && e.target.type === "text") return;
     run(e.target.type !== "text" && e.target.type !== "search");
   });
-  // the sort, direction and view sit outside the form's element (form="cs-form")
-  $$("[form=cs-form]").forEach(function (f) { f.addEventListener("change", function () { run(true); }); });
 
   // -- rows: stats, prices and formats; "Add" copies the last row, × removes one ----------------
   form.addEventListener("click", function (e) {
@@ -293,9 +294,7 @@
       run(true);
       return;
     }
-    if (e.target.closest(".cs-clear")) { clearAll(); return; }
-    if (e.target.closest(".cs-open")) { openPanel(); return; }
-    if (e.target.closest(".cs-sheet-head .close") || e.target.closest(".cs-show")) { closePanel(); return; }
+    if (e.target.closest(".sp-clear")) { clearAll(); return; }
   });
   function clearAll() {
     $$("[data-picker] .chips", form).forEach(function (c) { c.textContent = ""; });
@@ -304,6 +303,7 @@
     $$("select", form).forEach(function (s) {
       if (s.name === "fs") s.value = "legal";
       else if (s.name === "cmp") s.value = "ge";
+      else if (s.name === "idm") s.value = "within";
       else if (s.name === "pc") s.value = "usd";
       else if (s.name === "po") s.value = "le";
       else if (s.name === "st") s.value = "pow";
@@ -313,30 +313,13 @@
     });
     $$("[data-rows] .rows", form).forEach(function (rows) { while (rows.children.length > 1) rows.lastElementChild.remove(); });
     $$("[data-add-row]", form).forEach(function (b) { b.hidden = false; });
+    $$(".pickm", form).forEach(function (d) { d.dispatchEvent(new Event("change", { bubbles: true })); });
     run(true);
   }
 
-  // -- the phone panel ---------------------------------------------------------------------------
-  var panel = $("#cs-filters");
-  function openPanel() {
-    panel.classList.add("open");
-    document.documentElement.classList.add("cs-sheet-open");
-    if (openBtn) openBtn.setAttribute("aria-expanded", "true");
-    var c = $(".cs-sheet-head .close", panel);
-    if (c) c.focus();
-  }
-  function closePanel() {
-    if (!panel.classList.contains("open")) return;
-    panel.classList.remove("open");
-    document.documentElement.classList.remove("cs-sheet-open");
-    if (openBtn) { openBtn.setAttribute("aria-expanded", "false"); openBtn.focus(); }
-  }
-  document.addEventListener("keydown", function (e) {
-    // an Escape a dropdown already used (to close its list or sheet) leaves the panel open
-    if (e.defaultPrevented) return;
-    if (e.key === "Escape" && panel.classList.contains("open") && !(window.MtgSelect && window.MtgSelect.isOpen())
-        && !document.querySelector(".cs .opts:not([hidden])")) closePanel();
-  });
+  // -- the phone sheet (static/searchpanel.js opens and closes it) -----------------------------
+  var Panel = window.MtgSearchPanel;
+  function closePanel() { if (Panel) Panel.closeSheet(); }
 
   // -- pickers: a box that searches a list, chosen values as chips ------------------------------
   // Read once, as soon as the page loads. Incomplete lists (Scryfall busy) are used as they are
@@ -871,6 +854,7 @@
       } : null,
       onAdd: function () { openSheet(name, addBtn ? pinOf(addBtn) : null); },
       addDisabled: linked ? "" : "Link your Archidekt account on the Account page to add cards to a deck.",
+      collect: true,
       scry: pic.getAttribute("data-scry"),
       focusBack: pic
     }, x, y);
@@ -879,5 +863,19 @@
     var li = target && target.closest ? target.closest("li") : null;
     return li && results.contains(li) && !li.classList.contains("hd") && li.querySelector(".pic") ? li : null;
   }
-  Menu.bind(results, { itemOf: itemOf, skip: ".wbtn, button[data-add]", open: openMenu });
+  Menu.bind(results, { itemOf: itemOf, skip: ".wbtn, button[data-add]", button: ".kebab", open: openMenu });
+  // the ⋮ of a tile (by its name) and of a row (with its Watch and Add): the same menu
+  function kebabs() {
+    if (!window.MtgMenu) return;
+    Array.prototype.slice.call(results.querySelectorAll("li .pic[data-card]")).forEach(function (pic) {
+      var li = pic.closest("li");
+      if (!li || li.querySelector(".kebab")) return;
+      var k = window.MtgMenu.kebab("Menu for " + (pic.getAttribute("data-card") || "this card"));
+      k.classList.add("inline");
+      var slot = li.querySelector(".nm, .nmc");
+      if (slot) slot.appendChild(k); else li.appendChild(k);
+    });
+  }
+  kebabs();
+  new MutationObserver(kebabs).observe(results, { childList: true });
 })();

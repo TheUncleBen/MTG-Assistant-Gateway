@@ -1,4 +1,5 @@
-"""Companion pages: a deck's settings (details, cover, tags, folder, collaborators, delete) and folders."""
+"""Companion pages: a deck's settings (details, cover, tags, folder, collaborators, delete), and the
+form behind My decks' folder boxes without scripts (POST /folders)."""
 
 from __future__ import annotations
 
@@ -13,12 +14,11 @@ from starlette.responses import JSONResponse, RedirectResponse, Response
 from .actions import COLLABORATOR_NOTE, collaborator_by_hand, collaborator_target, profile_url
 from .archidekt import FORMAT_IDS, ArchidektError, Deck, featured_scryfall_id, format_label, rich_text
 from .busy import busy_response
-from .companion import DECK_CSP, FORMAT_CHOICES, INDENT, LIST_OK_MESSAGES, SETTINGS_OK_MESSAGES
+from .companion import DECK_CSP, FORMAT_CHOICES, INDENT, SETTINGS_OK_MESSAGES
 from .deckpage import (
     card_image,
 )
 from .decks import DeckError, current_client
-from .folderview import visible_folders
 from .pages import (
     BROWSER_CLIENT_ID,
     _csrf,
@@ -60,8 +60,6 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
     check_csrf = h.check_csrf
     decks = h.decks
     form = h.form
-    link_prompt = h.link_prompt
-    my_decks = h.my_decks
     page = h.page
     s = h.s
 
@@ -300,8 +298,8 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
             f"<span class='sel'><select id='folder_id' name='folder_id'>{opts}</select></span></div>"
             f"<button>{icon('folder')} Move</button></form>"
             + note
-            + "<p class='muted small'>Folders are created and renamed from <a href='/folders'>My decks "
-            "› Folders</a>.</p></section>"
+            + "<p class='muted small'>Folders are made, renamed, moved and deleted from "
+            "<a href='/decks'>My decks</a>.</p></section>"
         )
 
     def collaborator_section(
@@ -370,8 +368,11 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
             if people
             else "placeholder='Archidekt username' "
         )
+        # the deck's name and the note for the box the forms ask in first (static/menus.js); the
+        # confirmation page does the same without scripts
         return (
-            "<section class='panel collabbox' id='collaborators'><h2>Collaborators</h2>"
+            f"<section class='panel collabbox' id='collaborators' data-deck-name='{_esc(deck.name)}' "
+            f"data-note='{_esc(COLLABORATOR_NOTE)}'><h2>Collaborators</h2>"
             + listing
             + f"<form method='post' action='/decks/{did}/collaborators#collaborators' class='addtag'>"
             f"{csrf_in}<input type='hidden' name='action' value='add'>"
@@ -694,81 +695,27 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
             )
         return RedirectResponse("/decks?ok=deleted", status_code=303)
 
-    # -- folders (create, rename) ---------------------------------------------------------------
-    def folders_form(folders: dict[str, Any] | None, csrf: str | None, error: str = "", ok: str = "") -> str:
-        csrf_in = f"<input type='hidden' name='csrf' value='{_esc(csrf)}'>"
-        if not folders:
-            return (
-                "<div class='panel'><p>Your folders could not be read from Archidekt right now.</p>"
-                "<a class='btn' href='/decks'>Back to My decks</a></div>"
-            )
-        rows = visible_folders(folders)  # never the gateway's backup folder
-        tree = "".join(
-            f"<li style='--depth:{f['depth']}'><span class='name'>{icon('folder')} {_esc(f['name'])}</span>"
-            + ("<span class='badge'>private</span>" if f["private"] else "")
-            + (f"<a class='btn' href='/decks?folder={f['id']}'>Show decks</a>" if f["depth"] else "")
-            + "</li>"
-            for f in rows
-        )
-        parent_opts = "".join(
-            f"<option value='{f['id']}'>{_esc(INDENT * f['depth'] + f['name'])}</option>" for f in rows
-        )
-        rename_opts = "".join(
-            f"<option value='{f['id']}'>{_esc(INDENT * (f['depth'] - 1) + f['name'])}</option>"
-            for f in rows
-            if f["depth"]
-        )
-        return (
-            (f"<p class='notice error'>{_esc(error)}</p>" if error else "")
-            + (f"<p class='notice ok'>{_esc(LIST_OK_MESSAGES[ok])}</p>" if ok in LIST_OK_MESSAGES else "")
-            + f"<section class='panel'><h2>Your folders</h2><ul class='plain plist foldertree'>{tree}</ul>"
-            "<p class='muted small'>A deck is moved between folders from its settings page.</p></section>"
-            f"<form method='post' action='/folders' class='panel folderform'>{csrf_in}"
-            "<input type='hidden' name='action' value='create'><h2>New folder</h2>"
-            "<div class='row'><div class='field grow'><label for='fname'>Name</label>"
-            "<input id='fname' type='text' name='name' maxlength='100' required></div>"
-            "<div class='field'><label for='fparent'>Inside</label><span class='sel'>"
-            f"<select id='fparent' name='parent_id'>{parent_opts}</select></span></div></div>"
-            f"<div class='actions'><button class='primary'>{icon('plus')} Create folder</button></div></form>"
-            + (
-                f"<form method='post' action='/folders' class='panel folderform'>{csrf_in}"
-                "<input type='hidden' name='action' value='rename'><h2>Rename a folder</h2>"
-                "<div class='row'><div class='field'><label for='rfolder'>Folder</label><span class='sel'>"
-                f"<select id='rfolder' name='folder_id'>{rename_opts}</select></span></div>"
-                "<div class='field grow'><label for='rname'>New name</label>"
-                "<input id='rname' type='text' name='name' maxlength='100' required></div></div>"
-                f"<div class='actions'><button>{icon('edit')} Rename</button></div></form>"
-                if rename_opts
-                else ""
-            )
-            + "<p class='muted small'>Folders live on Archidekt; deleting one is done there.</p>"
-        )
-
+    # -- folders: the old Folders page's address, and its form for a browser without scripts ----
     @server.custom_route("/folders", methods=["GET"], include_in_schema=False)
     async def folders_page(request: Request) -> Response:
-        sub, sid = browser_session(state, request)
-        if not sub:
-            return login_redirect("/folders")
-        _rows, problem, failure = await my_decks(sub)
-        if failure is not None and (busy := busy_response(failure, request, page, sub=sub, sid=sid)):
-            return busy
-        if problem == "not_linked":
-            return page("Folders", link_prompt(), sub=sub, sid=sid, current="/decks")
-        ok = request.query_params.get("ok") or ""
-        return page(
-            "Folders",
-            folders_form(await folders_or_none(sub), _csrf(s, sid), ok=ok),
-            sub=sub,
-            sid=sid,
-            current="/decks",
-            deck_css=True,
+        """The Folders page is gone: folders are made, renamed, moved and deleted from My decks'
+        boxes (static/menus.js on companion_folders.py's routes). Its old address goes there."""
+        return RedirectResponse("/decks", status_code=303)
+
+    def folders_problem(message: str) -> str:
+        return (
+            f"<p class='notice error'>{_esc(message)}</p>"
+            "<p><a class='btn' href='/decks'>Back to My decks</a></p>"
         )
 
     @server.custom_route("/folders", methods=["POST"], include_in_schema=False)
     async def folders_post(request: Request) -> Response:
+        """A new folder (one press, then a confirmation page) or a rename, as a plain form: the
+        same checks as the boxes' JSON routes, and My decks with the notice when it is done. The
+        boxes themselves use companion_folders.py; this stays for a browser without scripts."""
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect("/folders")
+            return login_redirect("/decks")
         data = await form(request)
         if not check_csrf(sid, data):
             return page("Folders", EXPIRED, sub=sub, sid=sid, status=403)
@@ -791,24 +738,16 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
                         _csrf(s, sid),
                         {"action": "create", "name": name, "parent_id": str(inside["id"])},
                         f"Create the folder “{name}” in {where} on Archidekt?",
-                        "Folders live on Archidekt; deleting one is done there.",
+                        "",
                         "Create folder",
-                        "/folders",
+                        "/decks",
                     )
                     return page("Confirm new folder", body, sub=sub, sid=sid, current="/decks", deck_css=True)
                 await decks.create_folder(sub, data.get("name") or "", parent)
                 ok = "folder_created"
         except DeckError as exc:
-            return page(
-                "Folders",
-                folders_form(await folders_or_none(sub), _csrf(s, sid), error=str(exc)),
-                sub=sub,
-                sid=sid,
-                status=400,
-                current="/decks",
-                deck_css=True,
-            )
-        return RedirectResponse(f"/folders?ok={ok}", status_code=303)
+            return page("Folders", folders_problem(str(exc)), sub=sub, sid=sid, status=400, current="/decks")
+        return RedirectResponse(f"/decks?ok={ok}", status_code=303)
 
     @server.custom_route("/decks/{deck_id}/settings", methods=["POST"], include_in_schema=False)
     async def settings_post(request: Request) -> Response:

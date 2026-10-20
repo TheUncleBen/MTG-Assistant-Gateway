@@ -126,7 +126,7 @@ async def test_a_gateway_write_drops_the_members_deck_list(stack: Stack) -> None
     b = await _linked(stack, "/decks")
     try:
         r = await b.http.get("/decks", headers=NAV)
-        assert "Total decks: 1" in r.text and _lists(stack) == 1
+        assert ">1 deck</h2>" in r.text and _lists(stack) == 1
         csrf = await b.csrf("/decks")
         made = await b.http.post(
             "/decks/new",
@@ -134,7 +134,7 @@ async def test_a_gateway_write_drops_the_members_deck_list(stack: Stack) -> None
         )
         assert made.status_code == 303, made.text
         r = await b.http.get("/decks", headers=NAV)
-        assert "Fresh brew" in r.text and "Total decks: 2" in r.text
+        assert "Fresh brew" in r.text and ">2 decks</h2>" in r.text
         assert _lists(stack) == 2  # read again after the write, once
     finally:
         await b.aclose()
@@ -188,11 +188,8 @@ async def test_cold_pages_render_a_placeholder_and_the_json_endpoint_fills_it(st
     try:
         r = await b.http.get("/decks?order=name&view=list", headers=NAV)
         assert r.status_code == 200
-        assert (
-            "data-decks-src='/api/decks/mine?shape=list&amp;q=&amp;order=name&amp;view=list&amp;folder='"
-            in r.text
-        )
-        assert "decklist list skeleton" in r.text and "Total decks: …" in r.text
+        assert "data-decks-src='/api/decks/mine?shape=list&amp;order=name&amp;view=list'" in r.text
+        assert "decklist list skeleton" in r.text and ">Decks</h2>" in r.text
         assert "folder-field" not in r.text and "/static/decks.js" in r.text  # no Folder dropdown
         assert "Sample Commander Deck" not in r.text
         assert "script-src 'self'" in r.headers["content-security-policy"]

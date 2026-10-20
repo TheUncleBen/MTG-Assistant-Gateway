@@ -141,17 +141,16 @@ def test_commander_box_suggests_from_a_themed_listbox(server: Server) -> None:
         # nothing was asked of Scryfall for any of it
         assert _scryfall_calls(server) == 0
         assert errors == []
-        # the form's buttons: one row, one height, inside the panel
+        # the name row: the box, its Search decks button and Search cards instead on one row, one
+        # height, inside the panel
         rects = page.evaluate(
-            "() => [...document.querySelectorAll('#searchform .form-actions > *')].map(b => {"
+            "() => [...document.querySelectorAll('#searchform .srow input, #searchform .srow button,"
+            " #searchform .srow a.xlink')].filter(b => b.offsetParent).map(b => {"
             " const r = b.getBoundingClientRect();"
             " return [Math.round(r.top), Math.round(r.height), Math.round(r.right)]; })"
         )
-        # Search decks, Clear and Search cards
         assert len(rects) == 3 and len({r[0] for r in rects}) == 1 and len({r[1] for r in rects}) == 1, rects
-        panel_right = page.evaluate(
-            "() => document.querySelector('.searchbar').getBoundingClientRect().right"
-        )
+        panel_right = page.evaluate("() => document.querySelector('.spanel').getBoundingClientRect().right")
         assert max(r[2] for r in rects) <= panel_right
         browser.close()
 
@@ -251,8 +250,9 @@ def test_sign_out_acts_on_the_first_click_and_says_so(server: Server) -> None:
 
 
 def test_desktop_layout_switch_gives_a_phone_the_computer_layout(server: Server) -> None:
-    """With the Desktop layout cookie a phone gets a 1100 px viewport (as a browser's Desktop
-    site switch would), so the width queries show the top bar instead of the bottom tab bar."""
+    """With the Desktop layout cookie a phone gets a 1280 px viewport (as a browser's Desktop
+    site switch would; the touch rail reaches 1279 px), so the width queries show the top bar
+    instead of the bottom tab bar."""
     from playwright.sync_api import sync_playwright
 
     exe = _chromium_path()
@@ -269,8 +269,8 @@ def test_desktop_layout_switch_gives_a_phone_the_computer_layout(server: Server)
         assert page.locator(".tabbar").is_visible() and not page.locator(".topbar nav a").first.is_visible()
         ctx.add_cookies([{"name": "mtg_layout", "value": "desktop", "url": server.base}])
         page.goto(f"{server.base}/decks", wait_until="networkidle")
-        assert page.evaluate("() => document.documentElement.clientWidth") == 1100
+        assert page.evaluate("() => document.documentElement.clientWidth") == 1280
         assert not page.locator(".tabbar").is_visible() and page.locator(".topbar nav a").first.is_visible()
-        # a one-pixel rounding of the 1100 -> 390 scaling is not an overflow (no element crosses the edge)
-        assert page.evaluate("() => document.documentElement.scrollWidth") <= 1101
+        # a one-pixel rounding of the 1280 -> 390 scaling is not an overflow (no element crosses the edge)
+        assert page.evaluate("() => document.documentElement.scrollWidth") <= 1281
         browser.close()

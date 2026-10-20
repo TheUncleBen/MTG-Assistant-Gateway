@@ -250,7 +250,11 @@ def recent_html(decks: list[dict[str, Any]], covers: dict[str, dict[str, Any]]) 
         did = _esc(str(d["id"]))
         art = image_url((covers.get(str(d["id"])) or {}).get("scryfall_uid"), "art_crop")
         style = f" style=\"background-image:url('{_esc(art)}')\"" if art else ""
-        out.append(f"<a href='/decks/{did}'{style}><span>{_esc(d.get('name') or 'Deck')}</span></a>")
+        name = _esc(d.get("name") or "Unnamed deck")
+        out.append(
+            f"<a href='/decks/{did}' data-deck-id='{did}' data-deck-name='{name}'{style}>"
+            f"<span>{name}</span></a>"
+        )
     return "<div class='recent'>" + "".join(out) + "</div>"
 
 

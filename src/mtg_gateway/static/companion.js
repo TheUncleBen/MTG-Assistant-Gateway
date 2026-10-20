@@ -50,6 +50,28 @@
     return btn;
   }
   var rowEls = {}; // lower name -> the <li> of an existing card
+  // the rows' menu: Open card, Change printing…, Remove from deck, then the card items every page has
+  if (window.MtgCardMenu && window.MtgMenu) (function () {
+    var Menu = window.MtgMenu, Card = window.MtgCardMenu;
+    function rowOf(t) {
+      var li = t && t.closest ? t.closest("li.erow") : null;
+      return li && li.mtgMenu ? li : null;
+    }
+    Menu.bind(root, {
+      itemOf: rowOf,
+      skip: "button, input, select, summary, details.rowmenu",
+      open: function (li, x, y) {
+        var m = li.mtgMenu, before = [];
+        before.push(Menu.item("Change printing…", "swap", m.printing));
+        before.push(Menu.item("Remove from deck", "x", m.remove, { danger: true }));
+        Card.open({
+          name: m.name, onOpen: m.open, collect: true,
+          watch: Menu.enabled() ? { watched: false, onWatch: function () { Card.watch({ name: m.name }).catch(function () {}); } } : null,
+          before: before, focusBack: m.focus
+        }, x, y);
+      }
+    });
+  })();
   var history = []; // snapshots for Undo
   var future = [];  // snapshots for Redo: what Undo took back, until the next new change
 
@@ -432,8 +454,9 @@
       ]);
       var nameEl = el("span", { class: "name", text: c.name, title: c.name });
       if (r.mana && window.MtgMana) nameEl.appendChild(window.MtgMana.mana(r.mana));
+      var thumbEl = thumb(r, c.name);
       var li = el("li", { class: "erow" + (c.in_deck ? "" : " side"), id: "card-" + c.name }, [
-        thumb(r, c.name),
+        thumbEl,
         el("span", { class: "main" }, [
           nameEl,
           el("span", { class: "meta", text: (r.set ? r.set.toUpperCase() + " #" + r.number : "") + (r.finish !== "normal" ? " · " + r.finish : "") + (r.price != null ? " · $" + Number(r.price).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "") }),
@@ -443,6 +466,13 @@
         cfg.canCategorise ? categorySelect(r.setCategory || shownCategory(r), function (v) { mutate(function () { r.setCategory = v; }); }, false, false, c.name) : el("span", { class: "s", text: shownCategory(r) }),
         more
       ]);
+      // the row's menu (static/menus.js's layer): a right-click, a press and hold or Shift+F10
+      li.mtgMenu = {
+        name: c.name, focus: thumbEl,
+        open: function () { if (thumbEl.click) thumbEl.click(); },
+        printing: function () { openPicker(r); },
+        remove: function () { mutate(function () { r.after = 0; }); }
+      };
       rowEls[key] = li;
       ul.appendChild(li);
     });

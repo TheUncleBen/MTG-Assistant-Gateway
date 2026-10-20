@@ -39,7 +39,7 @@ from starlette.responses import FileResponse, JSONResponse, RedirectResponse, Re
 
 from .. import prefs
 from ..pages import NO_STORE, _csrf, _safe_next, browser_session, csrf_header_ok, read_limited
-from ..theme import display_name, render
+from ..theme import ICONS, display_name, render
 from .service import ScanError, ScanService, parse_cards
 
 if TYPE_CHECKING:
@@ -48,6 +48,28 @@ if TYPE_CHECKING:
     from ..app import AppState
 
 STATIC_DIR = Path(__file__).parent / "static"
+# The icons the page's script draws (theme.py's set): the capture bar, the options row, the
+# torch, the sliders, the list rows and their menus.
+SCAN_ICONS = (
+    "camera",
+    "image",
+    "edit",
+    "sun",
+    "alert",
+    "search",
+    "undo",
+    "x",
+    "chev",
+    "more",
+    "eye",
+    "copy",
+    "external",
+    "trash",
+    "plus",
+    "minus",
+    "collection",
+    "bookmark",
+)
 SCAN_CSP = (
     "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; "
     "style-src 'self' 'unsafe-inline'; img-src 'self' blob: data: https://cards.scryfall.io; "
@@ -146,6 +168,8 @@ def add_scan_routes(server: MCPServer, state: AppState, service: ScanService) ->
             "version": version,
             "static": "/scan/static",
             "thresholds": service.t.as_dict(),
+            # the page draws its controls with the site's own icons
+            "icons": {k: ICONS[k] for k in SCAN_ICONS},
         }
         body_html = (
             "<link rel='stylesheet' href='/scan/static/scan.css?v=" + version + "'>"

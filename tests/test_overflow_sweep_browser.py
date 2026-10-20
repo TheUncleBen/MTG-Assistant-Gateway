@@ -129,7 +129,6 @@ def _pages(server: Server, pending: str) -> list[str]:
         "/decks/new",
         "/decks/42/export",
         "/decks/42/compare",
-        "/folders",
         "/collection?view=grid",
         "/collection?view=list",
         "/search",

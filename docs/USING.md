@@ -52,13 +52,24 @@ assistant** at the end holds the connector URL and the guided setup.
 
 ## Your decks
 
-**Decks** lists the decks of your linked Archidekt account with their cover
-art (the image you chose on Archidekt, else the commander). Filter by name or
-folder, grid or list, sort by last updated, created, name or format. **New
-deck** creates one from a name, a pasted list, a CSV export, the gateway's
-own .json export, a file you choose (.txt, .csv or .json) or a scan.
-**Folders** creates and renames your Archidekt folders; a deck is moved
-between them from its settings page.
+**My decks** lists the decks of your linked Archidekt account with their cover
+art (the image you chose on Archidekt, else the commander), folder by folder.
+Filter by name, colors or format, sort by last updated, created, name or
+format in either direction, and show a grid or a list in three card sizes.
+**New deck** creates one from a name, a pasted list, a CSV export, the
+gateway's own .json export, a file you choose (.txt, .csv or .json) or a scan.
+**New folder** makes an Archidekt folder.
+
+Every deck, folder and card has a menu: right-click it, press and hold it on a
+phone, or use its ⋮ button (Shift+F10 on a keyboard). A deck's menu opens,
+renames, moves, exports, compares, clones or deletes it; a folder's menu makes
+a folder inside it, renames, moves or deletes it. Deleting a folder deletes
+everything inside it on Archidekt: the box lists how many decks, card packages
+and folders that is and asks you to type the folder's name. The gateway first
+makes a snapshot of every deck (and a copy in your backup folder when backups
+are on) and stops if any of them fails; card packages get no snapshot or copy.
+The backup folder can't be moved or deleted, and a folder holding it can't be
+deleted. The assistant can't move or delete folders.
 
 One deck:
 
@@ -463,7 +474,7 @@ until a proposal you approve. The [assistant skill](SKILL.md) teaches
 the house rules. The assistant can also propose moving a deck to another
 folder, changing its tags or its cover (a settings change you approve). It
 can also suggest deleting a deck or creating a folder, but only your own
-press applies those; renaming folders is yours alone.
+press applies those; renaming, moving and deleting folders is yours alone.
 [CAPABILITIES.md](CAPABILITIES.md) lists every tool the
 assistant has, which one owns each job, everything you can do by hand, and
 what only one of the two paths can do.

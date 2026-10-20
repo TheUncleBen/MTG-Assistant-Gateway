@@ -77,15 +77,15 @@ def test_cold_deck_pages_fill_their_placeholders(server: Server) -> None:
         page.on("pageerror", lambda e: errors.append(str(e)))
         # the shell first: the placeholder list and a blank total...
         _goto_held(page, f"{server.base}/decks", "ul.decklist.skeleton")
-        assert page.locator("#decks-total").inner_text().startswith("Total decks:")
+        assert page.locator("#decks-total").inner_text() == "Decks"
         # ...then the list itself, as the server renders it, and the toolbar filled in
         page.wait_for_selector("ul.decklist li.deck", timeout=10_000)
         assert page.locator("ul.decklist.skeleton").count() == 0
         assert page.locator("[aria-busy=true]").count() == 0
         assert "Sample Commander Deck" in page.locator("ul.decklist").inner_text()
-        assert page.locator("#decks-total").inner_text() == "Total decks: 1"
+        assert page.locator("#decks-total").inner_text() == "1 deck"
         assert page.locator("#folder-field").count() == 0  # opening folders replaced the dropdown
-        assert page.locator(".listbar a[href='/folders']").inner_text().strip() == "Manage folders"
+        assert page.locator(".ui-head [data-new-folder]").inner_text().strip() == "New folder"
         # home, cold again
         svc.deck_lists.drop("user-1")
         _goto_held(page, f"{server.base}/", ".recent.skeleton")
@@ -131,7 +131,7 @@ def test_a_deck_list_that_cannot_be_read_says_so_with_try_again(server: Server) 
             again.click()
         page.wait_for_selector("ul.decklist li.deck")
         assert page.locator(".decks-unreadable").count() == 0
-        assert page.locator("#decks-total").inner_text() == "Total decks: 1"
+        assert page.locator("#decks-total").inner_text() == "1 deck"
         assert errors == [], errors
         browser.close()
 

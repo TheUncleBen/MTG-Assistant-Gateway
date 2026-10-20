@@ -7,6 +7,52 @@ Notable changes for people who run or use the gateway. The format follows
 with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 (`release/1.2.3`); `latest` is always the newest.
 
+## [0.7.36] - unreleased
+
+Decks, folders and cards get a menu on every page (right-click, press and hold, or the ⋮
+button), and the actions that had a page of their own open as a box instead. Folders can be moved
+and deleted from My decks. Card search, deck search and My decks share one search panel, and the
+pages fit phones, an open Fold, tablets and computers the same way.
+
+### Upgrade notes
+- From 0.7.35: no extra steps. Update as usual ([docs/UPGRADING.md](docs/UPGRADING.md)).
+- No database or stack change.
+- The Android app changes too (its camera screen), so it is rebuilt with this release.
+- Deleting a folder is a new kind of Archidekt write: it deletes everything inside the folder on
+  Archidekt in one step. The gateway saves every deck first and asks for the folder's name.
+
+### Added
+- **Menus** on decks, folders and cards everywhere they show: right-click, press and hold on a
+  phone, the ⋮ button, or Shift+F10 on a keyboard. Rows on Proposals, History, Reports, the
+  Watchlist, the Collection and the Scan list have one too.
+- **Move** and **Delete** a folder from its menu on My decks. A delete lists how many decks, card
+  packages and folders are inside and asks you to type the folder's name; every deck gets a
+  snapshot (and a copy in your backup folder when backups are on) before anything is deleted, and
+  the delete stops if one of them fails. Card packages get no snapshot or copy. The backup folder
+  is never moved or deleted, and a folder holding it can't be deleted. The assistant can't move or
+  delete folders.
+- My decks filters by colors and format, sorts in either direction and shows the number of decks.
+- Deck search opens an Archidekt deck from a link or deck ID typed in its name box, and shows more
+  decks with **Load more decks**.
+
+### Changed
+- Renaming, moving, exporting, comparing and deleting a deck, and making or renaming a folder, open
+  as a box over the page. The old page addresses still work.
+- The Folders page is gone: its address opens My decks, where folders are made, renamed, moved and
+  deleted.
+- Card search, deck search and My decks share one search panel: the name box, the filters, and a
+  bar at its foot with the count, sort, direction, grid or list, card size and Clear filters. On a
+  phone the filters open in a sheet.
+- Every filter where you can pick several (rarity, for example) is a drop-down with checkboxes.
+- Card search's Commander colors can match within, exactly or including the colors you pick.
+- An open Fold and tablets get the side rail, in the app and in a touch browser up to 1279 px
+  wide; a computer browser keeps the top bar.
+- The Scan page is one column at every width, with its options on one row and a round capture
+  button. The app's camera screen has the same round button.
+
+### Fixed
+- A saved scan could write its list into another tab after you switched tabs.
+
 ## [0.7.35] - unreleased
 
 The gateway's pages follow one look: the same status and risk words everywhere, tables that turn

@@ -77,9 +77,10 @@ def test_folders_open_the_breadcrumb_goes_back_and_the_filter_searches_everywher
         page.wait_for_selector("nav.crumbs li[aria-current] >> text=Precons")
         assert _names(page) == ["Atraxa precon"]
         assert page.locator("ul.folderlist").count() == 0  # no subfolders: no Folders area
-        # Order by keeps the open folder
-        with page.expect_navigation():
-            page.locator("#f-order").select_option("name")
+        # Sort by keeps the open folder (the list refreshes in place; the address follows)
+        page.locator("#f-order").select_option("name")
+        page.wait_for_function("() => location.search.includes('order=name')", timeout=5000)
+        page.wait_for_function("() => !document.querySelector('#decks-list[aria-busy]')", timeout=5000)
         assert "folder=502" in page.url and "order=name" in page.url, page.url
         assert _names(page) == ["Atraxa precon"]
         # the breadcrumb goes back up, keeping the order
@@ -136,8 +137,8 @@ def test_my_decks_by_folder_fits_every_width(server: Server, width: int, theme: 
 def test_the_backup_folder_name_is_refused_and_reads_everywhere(
     tmp_path: Path, width: int, theme: str
 ) -> None:
-    """Manage folders refuses renaming a folder to the backup folder's name; the refusal fits
-    and keeps a 4.5:1 contrast at every size."""
+    """The Rename folder box (a folder tile's menu, static/menus.js) refuses the backup folder's
+    name; the refusal fits in the box and keeps a 4.5:1 contrast at every size."""
     server = Server(tmp_path, writes_enabled=True)
     server.ark.folders["alice"] = [
         {"id": 501, "name": "Commander", "private": False},
@@ -157,19 +158,21 @@ def _backup_name_refused(server: Server, width: int, theme: str) -> None:
     sid = _link(server)
     with sync_playwright() as p:
         browser, page, errors = _page(p, server, sid, width, theme, exe)
-        page.goto(f"{server.base}/folders", wait_until="networkidle")
-        page.select_option("#rfolder", "504")
-        page.fill("#rname", "mtg gateway backups")
-        with page.expect_navigation(wait_until="networkidle"):
-            page.locator("form.folderform button", has_text="Rename").click()
-        note = page.locator(".notice.error")
+        page.goto(f"{server.base}/decks", wait_until="networkidle")
+        page.locator("li.folder[data-folder-id='504'] button.kebab").click()
+        page.locator(".ctxmenu[role=menu] [role=menuitem]", has_text="Rename…").click()
+        box = page.locator(".mtgbox[role=dialog]")
+        box.wait_for(timeout=3000)
+        box.locator("input#mb-fname").fill("mtg gateway backups")
+        box.locator(".acts button", has_text="Rename").click()
+        note = box.locator(".notice.error")
+        note.wait_for(timeout=5000)
         assert note.inner_text() == (
             "'mtg gateway backups' is the name of the gateway's backup folder. Pick another name."
         )
         assert page.evaluate(MEASURE) == []
-        assert page.evaluate(CONTRAST, ".notice.error") == []
+        assert page.evaluate(CONTRAST, ".mtgbox .notice.error") == []
         if SHOTS:
-            note.scroll_into_view_if_needed()
             page.screenshot(path=str(Path(SHOTS) / f"backup-name-{width}-{theme}.png"))
         assert [f["name"] for f in server.ark.folders["alice"]] == ["Commander", "Archive"]
         assert errors == [], errors
