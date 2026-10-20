@@ -128,6 +128,6 @@ async def test_an_account_without_a_name_is_not_called_deleted(gw: Harness) -> N
     b = await admin_browser(gw)
     try:
         text = html.unescape((await b.http.get("/admin/activity", headers=NAVIGATE)).text)
-        assert "Opt (added by an account with no username or email)" in text
+        assert "Opt (added by a member with no name)" in text
     finally:
         await b.aclose()
