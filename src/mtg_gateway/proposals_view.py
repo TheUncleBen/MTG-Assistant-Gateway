@@ -507,7 +507,9 @@ def _closing_html(
             return esc(UPDATED_SHORT)
         return esc(_version_line(it, now))
     if st == "applied":
-        return _undo_form(it, csrf, "Undo", "linkbtn inline") if _undoable(it, csrf) else ""
+        at = it["applied_at"] or it["status_at"] or it["created_at"]
+        undo = " · " + _undo_form(it, csrf, "Undo", "linkbtn inline") if _undoable(it, csrf) else ""
+        return f"Applied {ui.when(at, now=now)}{undo}"
     if st == "rejected":
         by = (it["result"] or {}).get("rejected_by")
         if by == "assistant":

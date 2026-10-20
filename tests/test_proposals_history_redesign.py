@@ -267,3 +267,29 @@ def test_cards_use_the_standard_risk_words() -> None:
     assert 'pending: "Waiting"' not in proposal and '"Waiting"' in proposal
     waiting = (cards / "waiting-card.html").read_text()
     assert 'low: "Low", high: "High", consent: "Your press", destructive: "Delete"' in waiting
+
+
+def test_applied_rows_close_with_the_date_and_undo() -> None:
+    from mtg_gateway import proposals_view, ui
+
+    now = 1_800_000_000
+    it = {
+        "id": "p1",
+        "state": "applied",
+        "kind": "edit",
+        "applied_at": now - 3 * 86400,
+        "status_at": 0,
+        "created_at": now - 5 * 86400,
+        "snapshot_id": "s1",
+    }
+    when = ui.when(now - 3 * 86400, now=now)
+    out = proposals_view._closing_html(it, csrf="tok", replaced_by=None, now=now)
+    assert out.startswith(f"Applied {when} · <form method='post' action='/proposals/undo'")
+    assert ">3 days ago</time>" in when and ">Undo</button></form>" in out
+    # no snapshot: the date alone; an old row without applied_at falls back to when it closed
+    plain = proposals_view._closing_html({**it, "snapshot_id": None}, csrf="tok", replaced_by=None, now=now)
+    assert plain == f"Applied {when}"
+    old = {**it, "applied_at": 0, "status_at": now - 9 * 86400, "snapshot_id": None}
+    assert proposals_view._closing_html(old, csrf="tok", replaced_by=None, now=now) == (
+        f"Applied {ui.when(now - 9 * 86400, now=now)}"
+    )
