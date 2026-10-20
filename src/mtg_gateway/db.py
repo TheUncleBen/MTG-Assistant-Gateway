@@ -22,6 +22,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from .cimd import site_of
+from .modes import UNJUDGED
 
 logger = logging.getLogger(__name__)
 
@@ -1348,6 +1349,7 @@ class Database:
         so an apply left running by the previous one (a crash, a redeploy) can't still be going.
         The result points at the snapshot taken before it and the deck, so the member can check."""
         with self.tx() as c:
+            ids = [r[0] for r in c.execute("SELECT id FROM proposals WHERE state = 'applying'")]
             n = c.execute(
                 """UPDATE proposals SET state = 'failed',
                    result_json = COALESCE(result_json, json_object('error', 'interrupted',
@@ -1356,7 +1358,7 @@ class Database:
                        'snapshot_id', snapshot_id, 'deck_id', deck_id))
                    WHERE state = 'applying'"""
             ).rowcount
-        self.settle_risks()
+        self.settle_risks(ids)  # only the ones failed just now
         return n
 
     def purge_expired(self) -> int:
@@ -1403,6 +1405,8 @@ class Database:
         n += self._delete_batched("price_points", "day < ?", (oldest_day,))
         n += self._delete_batched("deck_values", "day < ?", (oldest_day,))
         with self.tx() as c:
+            expiring = "SELECT id FROM proposals WHERE state = 'pending' AND expires_at < ?"
+            closed = [r[0] for r in c.execute(expiring, (now,))]
             n += c.execute(
                 "UPDATE proposals SET state = 'expired' WHERE state = 'pending' AND expires_at < ?", (now,)
             ).rowcount
@@ -1422,6 +1426,10 @@ class Database:
         # under a busy pacer takes many minutes, so only one started six hours ago counts as
         # stuck: mark it failed and point at the snapshot (and the created deck id).
         with self.tx() as c:
+            stuck = (
+                "SELECT id FROM proposals WHERE state = 'applying' AND COALESCE(applied_at, created_at) < ?"
+            )
+            closed += [r[0] for r in c.execute(stuck, (now - 6 * 3600,))]
             n += c.execute(
                 """UPDATE proposals SET state = 'failed',
                    result_json = COALESCE(result_json, json_object('error', 'interrupted',
@@ -1430,7 +1438,9 @@ class Database:
                    WHERE state = 'applying' AND COALESCE(applied_at, created_at) < ?""",
                 (now - 6 * 3600,),
             ).rowcount
-        self.settle_risks()  # the proposals that expired or failed just now
+        # only the proposals that expired or failed just now: the full scan is the one-time
+        # backfill at startup (DeckService wires it in), never a tick's work
+        self.settle_risks(closed)
         return n
 
     def _delete_batched(self, table: str, where: str, args: tuple[Any, ...]) -> int:
@@ -2140,11 +2150,11 @@ class Database:
         sql = (
             "SELECT id, kind, deck_id, deck_name, state, created_at, expires_at, applied_at, "
             "created_by_client, amended_by_client, diff_text, version, board_no, status, status_reason, "
-            "status_at, risk, snapshot_id, result_json FROM proposals WHERE owner_sub = ?"
+            "status_at, risk, snapshot_id, result_json FROM proposals WHERE owner_sub = ? "
+            "ORDER BY created_at DESC, rowid DESC"
         )
-        args: list[Any] = [owner_sub]
         with self._lock:
-            rows = self._conn.execute(sql + " ORDER BY created_at DESC, rowid DESC", args).fetchall()
+            rows = self._conn.execute(sql, (owner_sub,)).fetchall()
         out = []
         for r in rows:
             d = dict(r)
@@ -2297,8 +2307,9 @@ class Database:
         one-time backfill at upgrade, which the app runs once its settings are loaded), worked out
         by ``risk_source`` from the stored row with the settings in force now. A closed proposal's
         risk can no longer change, so the Proposals page filters on the stored value. A
-        proposal that can't be judged keeps none (the page then works it out on read). Returns
-        how many were stored."""
+        proposal that can't be judged (``risk_source`` raises or answers no tier) stores
+        ``modes.UNJUDGED`` so it is never looked at again; the pages show it as a dash. Returns
+        how many got a tier."""
         if self.risk_source is None:
             return 0
         sql = (
@@ -2322,15 +2333,17 @@ class Database:
                 risk = self.risk_source(row)
             except Exception:  # never let one odd row stop a close or the backfill
                 logger.exception("risk of proposal %s could not be worked out", pid)
-                continue
+                risk = UNJUDGED
             if risk not in ("low", "high", "consent", "destructive"):
-                continue
+                risk = UNJUDGED
             with self.tx() as c:
-                n += c.execute(
+                stored = c.execute(
                     "UPDATE proposals SET risk = ? WHERE id = ? AND risk IS NULL "
                     "AND state NOT IN ('pending', 'applying')",
                     (risk, pid),
                 ).rowcount
+            if risk != UNJUDGED:
+                n += stored
         return n
 
     def reject_proposal(

@@ -1126,6 +1126,8 @@ main.wrap.ui-wide{max-width:1200px}
 .ui-app i{display:inline-grid;place-items:center;width:20px;height:20px;border-radius:4px;font-style:normal;
   font-size:.7rem;font-weight:900;background:var(--surface-2);color:var(--text)}
 .ui-app.none{color:var(--text-muted)}
+/* a dash where a row has no risk label */
+.ui-none{color:var(--text-muted)}
 /* §3 dates: relative within 7 days, then the date; the full date and time in the tooltip */
 .ui-when{color:var(--text-muted);font-size:.9rem;white-space:nowrap;font-variant-numeric:tabular-nums}
 

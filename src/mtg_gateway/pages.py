@@ -1822,6 +1822,8 @@ def _proposal_body(
         pills.append(ui.status_label("updated", title=str(p.get("status_reason") or "")))
     if p.get("risk") and ui.ALIASES.get(str(p["risk"]), str(p["risk"])) in ui.RISK_KEYS:
         pills.append(ui.risk_label(str(p["risk"]), title=str(p.get("risk_reason") or "")))
+    elif not p.get("risk"):  # closed with nothing to judge it by
+        pills.append(ui.no_risk_label())
     under = []
     if p.get("risk"):
         under.append(f"<p class='ui-why pr-why'>{html.escape(_risk_words(p))}</p>")

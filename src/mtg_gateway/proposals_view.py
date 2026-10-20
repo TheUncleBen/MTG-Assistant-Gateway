@@ -21,6 +21,7 @@ from urllib.parse import urlencode
 from . import ui
 from .decks import ADMIN_CLIENT, BROWSER_CLIENT
 from .history_view import when_since
+from .modes import UNJUDGED
 from .theme import esc, icon
 from .waiting_strip import line_for
 
@@ -194,9 +195,12 @@ def gather(state: Any, sub: str, *, now: float | None = None) -> dict[str, Any]:
     for r in db.proposal_index(sub):
         seen = "expired" if r["state"] == "pending" and int(r["expires_at"] or 0) < now else r["state"]
         risk, why = r.get("risk"), ""
-        if r["state"] in ("pending", "applying") or not risk:
+        if r["state"] in ("pending", "applying"):
             full = db.get_proposal(r["id"], sub)
             risk, why = decks.proposal_risk(sub, full) if full else ("high", "")
+        elif not risk:  # closed before its tier was stored: as the close would judge it
+            full = db.get_proposal(r["id"], sub)
+            risk = decks.stored_risk(full) if full else UNJUDGED
         app = names.of(r.get("created_by_client"))
         item = {
             "id": r["id"],
@@ -411,6 +415,8 @@ def _status_label(it: dict[str, Any]) -> str:
 
 
 def _risk_label(it: dict[str, Any]) -> str:
+    if it["risk"] == UNJUDGED:
+        return ui.no_risk_label()
     return ui.risk_label(it["risk"], title=it.get("risk_why") or "")
 
 

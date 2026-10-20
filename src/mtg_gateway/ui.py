@@ -111,6 +111,18 @@ def status_label(status: str, *, title: str = "", cls: str = "") -> str:
     return label_for(key, title=title, cls=cls)
 
 
+NO_RISK = "Risk not judged"
+
+
+def no_risk_label() -> str:
+    """A closed proposal whose risk could not be judged: a muted dash, never High for want of
+    evidence; a screen reader hears why."""
+    return (
+        f"<span class='ui-none' title='{NO_RISK}'><span aria-hidden='true'>—</span>"
+        f"<span class='sr-only'>{NO_RISK}</span></span>"
+    )
+
+
 def risk_label(risk: str, *, title: str = "", cls: str = "") -> str:
     """A proposal's risk label (Low, High, Your press, Delete); the stored codes ``consent`` and
     ``destructive`` read Your press and Delete."""

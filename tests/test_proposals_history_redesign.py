@@ -10,6 +10,7 @@ import time
 from pathlib import Path
 
 from mtg_gateway.db import Database
+from mtg_gateway.modes import UNJUDGED
 
 from .conftest import Stack, stack_with
 from .test_companion import COMPANION, NAV, linked_browser
@@ -84,7 +85,93 @@ def test_backfill_stores_the_risk_of_closed_proposals_once(tmp_path: Path) -> No
 
     db.risk_source = odd
     assert db.settle_risks() == 1  # one odd row does not stop the rest
-    assert _risk(db, "a") == "low" and _risk(db, "b") is None and _risk(db, "c") is None
+    # the odd row keeps the sentinel, so no later scan judges it (and logs) again
+    assert _risk(db, "a") == "low" and _risk(db, "b") == UNJUDGED and _risk(db, "c") is None
+    asked: list[str] = []
+
+    def counting(row: dict) -> str:
+        asked.append(row["id"])
+        return "low"
+
+    db.risk_source = counting
+    assert db.settle_risks() == 0 and asked == []
+    db.risk_source = lambda row: "odd"  # no tier at all: the same sentinel
+    db.close_proposal("c", "u", "withdrawn")
+    assert _risk(db, "c") == UNJUDGED
+
+
+def test_the_closers_settle_only_the_rows_they_closed(tmp_path: Path) -> None:
+    """purge_expired and fail_interrupted_applies judge the proposals they closed just now, never
+    every closed row with no tier (that is the one-time backfill, DeckService at startup)."""
+    db = _db(tmp_path)
+    _save(db, "a", rows=LOW_ROWS)
+    _save(db, "b", rows=LOW_ROWS)
+    _save(db, "c", rows=LOW_ROWS)
+    db.finish_proposal("a", state="applied", result={})  # closed before the upgrade: no tier
+    asked: list[str] = []
+
+    def counting(row: dict) -> str:
+        asked.append(row["id"])
+        return "low"
+
+    db.risk_source = counting
+    with db.tx() as c:
+        c.execute("UPDATE proposals SET expires_at = ? WHERE id = 'b'", (int(time.time()) - 10,))
+        c.execute("UPDATE proposals SET state = 'applying' WHERE id = 'c'")
+    db.purge_expired()
+    assert asked == ["b"] and _risk(db, "b") == "low" and _risk(db, "a") is None
+    assert db.fail_interrupted_applies() == 1
+    assert asked == ["b", "c"] and _risk(db, "c") == "low" and _risk(db, "a") is None
+    db.purge_expired()
+    assert asked == ["b", "c"]  # a tick with nothing closed judges nothing
+    assert db.settle_risks() == 1 and asked == ["b", "c", "a"]  # the backfill takes the rest
+
+
+async def test_a_stored_tier_keeps_no_live_reason_and_an_unjudged_one_is_a_dash(stack: Stack) -> None:
+    """A closed proposal shows the tier stored when it closed, with no reason worked out under
+    today's settings (which may contradict it). One with nothing to judge it by (no review rows)
+    shows a dash, not High, and the Risk filter never counts it as High."""
+    b = await linked_browser(stack)
+    try:
+        gw = stack.h.app.state.gateway
+        sub = gw.db._one("SELECT sub FROM users", ())["sub"]
+        two = LOW_ROWS + [{"kind": "add", "name": "Arcane Signet", "qty": 1, "before": 0, "after": 1}]
+        for pid, rows in (("lo", two), ("nr", None)):
+            gw.db.save_proposal(
+                {
+                    "id": pid,
+                    "owner_sub": sub,
+                    "kind": "edit",
+                    "deck_id": "42",
+                    "deck_name": "Immortal Reckoning",
+                    "baseline_fingerprint": "f",
+                    "changes": [],
+                    "diff_text": "+1 Sol Ring",
+                    "expires_at": int(time.time()) + 3600,
+                    "created_by_client": "__browser__",
+                    **({"rows": rows} if rows is not None else {}),
+                }
+            )
+            gw.db.finish_proposal(pid, state="applied", result={})
+        assert _risk(gw.db, "lo") == "low" and _risk(gw.db, "nr") == UNJUDGED
+        gw.live.set("auto_apply_max_rows", 1, by="admin-1")  # today it would read High
+        assert gw.decks.proposal_risk(sub, gw.db.get_proposal("lo", sub))[0] == "high"
+        shown = gw.decks.describe(sub, "lo")
+        assert (shown["risk"], shown["risk_reason"]) == ("low", "judged when it closed")
+        unjudged = gw.decks.describe(sub, "nr")
+        assert unjudged["risk"] is None and unjudged["risk_reason"] == ""
+        body = (await b.http.get("/proposals?show=all", headers=NAV)).text.split("<main")[1]
+        rows = {m[0]: m[1] for m in re.findall(r"href='/proposals/(lo|nr)\?show=all'(.*?)</div>", body)}
+        assert "Low</span>" in rows["lo"] and "High" not in rows["lo"]
+        assert "Risk not judged" in rows["nr"] and "High" not in rows["nr"]
+        high = (await b.http.get("/proposals?show=all&risk=high", headers=NAV)).text.split("<main")[1]
+        assert "/proposals/nr?" not in high and "/proposals/lo?" not in high
+        low = (await b.http.get("/proposals?show=all&risk=low", headers=NAV)).text.split("<main")[1]
+        assert "/proposals/lo?" in low and "/proposals/nr?" not in low
+        page = (await b.http.get("/proposals/nr", headers=NAV)).text.split("<aside")[1]
+        assert "Risk not judged" in page and "High" not in page
+    finally:
+        await b.aclose()
 
 
 def test_proposal_index_and_history_counts(tmp_path: Path) -> None:
