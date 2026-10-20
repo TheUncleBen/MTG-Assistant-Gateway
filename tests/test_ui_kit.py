@@ -6,10 +6,31 @@ from __future__ import annotations
 
 import calendar
 import re
+from pathlib import Path
 
 import pytest
 
 from mtg_gateway import theme, ui
+
+SRC = Path(__file__).resolve().parent.parent / "src" / "mtg_gateway"
+# a mockup or builder-group id, or a section mark of the internal standard, in a comment
+INTERNAL_MARK = re.compile(r"\((?:K|k)\d\)|\bK\d:|mapping k\d|group [A-Z]:|§\d")
+
+
+def test_served_comments_carry_no_internal_ids() -> None:
+    """What a member's browser downloads (the static scripts, the pages' CSS) names no mockup id,
+    builder group or section of the internal standard in its comments."""
+    found = []
+    for path in [*SRC.rglob("*.js"), *SRC.rglob("*.css"), *SRC.rglob("*.html")]:
+        for i, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            if INTERNAL_MARK.search(line):
+                found.append(f"{path.name}:{i}: {line.strip()}")
+    for path in SRC.rglob("*.py"):  # the CSS strings in the page modules (their comments are /* */)
+        for i, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            if "/*" in line and INTERNAL_MARK.search(line):
+                found.append(f"{path.name}:{i}: {line.strip()}")
+    assert not found, found
+
 
 NOW = calendar.timegm((2026, 10, 19, 15, 36, 0))
 MIN, HOUR, DAY = 60, 3600, 86400

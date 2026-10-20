@@ -121,6 +121,16 @@ def test_reports_dashboard_widgets_chips_filters_and_rows(server: Server) -> Non
     assert "<option value='claude'>Claude</option>" in page and "<option value='you'>You</option>" in page
 
 
+def test_a_report_with_no_stored_name_is_an_unnamed_deck(server: Server) -> None:
+    """A report stores its own deck name; when none was stored the row and the Deck filter say
+    "Unnamed deck", never the deck's id."""
+    h = _seed(server)
+    store_report(server.db, "user-1", "r_none", deck_id="99", deck_name="", taken_at=int(time.time()) - 30)
+    page = h.get("/reports").text
+    assert "href='/history/reports/r_none'>Unnamed deck</a>" in page
+    assert "<option value='99'>Unnamed deck</option>" in page and "Deck 99" not in page
+
+
 def test_reports_dashboard_pages_by_25(server: Server) -> None:
     sid = server.sign_in_and_link()
     now = int(time.time())

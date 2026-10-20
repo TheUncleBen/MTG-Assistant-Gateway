@@ -687,7 +687,7 @@ def watchlist_page_html(
 WATCH_PAGE_CSS = (
     PHONE_WIDGETS_CSS
     + """
-/* group B: the Watchlist (k6) */
+/* the Watchlist */
 @media (min-width:900px){.watch-page .w-t .chgs{display:flex}}
 .watch-page .w-add{margin:0 0 1.25rem}
 .watch-page .w-add h2{font-size:1.1rem;margin:0 0 .5rem}

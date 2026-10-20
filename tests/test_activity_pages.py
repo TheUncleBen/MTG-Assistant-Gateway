@@ -325,6 +325,48 @@ async def test_the_acting_admins_copy_is_worded_first_person(gw: Harness) -> Non
         await b.aclose()
 
 
+async def test_admin_page_names_a_nameless_member_and_a_deck_it_cannot_name(gw: Harness) -> None:
+    """A member with neither a username nor an email reads "a member with no name" (the widget's
+    button then says "Show this member only"), and a deck the gateway cannot name is "a deck that
+    was removed" in the cell: its id stays in the opened row's details."""
+    b = await admin_browser(gw)
+    _members(gw)
+    gw.db.upsert_user("user-9", email=None, name=None, preferred_username=None, groups=[])
+    rows = [(1000 + i, "user-9", BROWSER, "browser_login", None) for i in range(12)]
+    rows.append((700, "user-9", BROWSER, "proposal_rejected", {"proposal_id": "p7", "deck_id": "31337"}))
+    _rows(gw, rows)
+    try:
+        page = (await b.http.get("/admin/activity", headers=NAVIGATE)).text
+        widgets = page.split("<section class='ui-widgets'", 1)[1].split("</section>", 1)[0]
+        assert "Most active: a member with no name, 13 events" in widgets
+        assert ">Show this member only</a>" in widgets and "no username or email" not in page
+        rejected = _row(page, "proposal_rejected")
+        assert ">Show this member only</a>" in rejected and "Show a member with no name only" not in page
+        cell = rejected.split("<span class='c-det'>", 1)[1].split("<span class='c-app'>", 1)[0]
+        assert "<span class='gone'>a deck that was removed</span>" in cell and "31337" not in cell
+        assert "&quot;deck_id&quot;: &quot;31337&quot;" in rejected  # the opened row's details carry it
+    finally:
+        await b.aclose()
+
+
+def test_the_approved_admin_labels() -> None:
+    assert activity_view.ADMIN_PAGE_NAMES["admin_revoke"] == "Assistants' access and sign-ins revoked"
+    assert activity_view.ADMIN_ACTION_WORDS["admin_revoke"] == (
+        "member's access revoked",
+        "members' access revoked",
+    )
+    from mtg_gateway import companion
+
+    assert (
+        companion.EVENT_LABELS["archidekt_sessions_sealed"]
+        == "Stored Archidekt sign-ins tied to their owners"
+    )
+    assert (
+        companion.EVENT_LABELS["proposal_apply_stopped"]
+        == "Applying a proposal stopped before any change; it waits again"
+    )
+
+
 def test_every_event_the_code_writes_has_a_name() -> None:
     """k9 M4: no event shows its code with spaces; the list goes to the proofread."""
     src = Path(activity_view.__file__).parent

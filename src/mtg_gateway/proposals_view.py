@@ -312,7 +312,7 @@ def widgets_html(data: dict[str, Any], query: dict[str, Any], csrf: str | None, 
         if soon:
             det += f" · next expires in {_span(min(soon) - now)}"
     else:
-        det = "Every change is reviewed."
+        det = "Nothing is waiting."
     low = sum(1 for it in waiting if _low_checkable(it))
     acts = (
         [

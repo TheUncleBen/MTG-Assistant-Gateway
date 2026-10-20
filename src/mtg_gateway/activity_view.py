@@ -77,7 +77,7 @@ ADMIN_ONCE = ("setting_changed", "card_model_removed")
 ADMIN_PAGE_NAMES = {
     "admin_disable": "Account disabled",
     "admin_enable": "Account turned back on",
-    "admin_revoke": "Tokens and sessions revoked",
+    "admin_revoke": "Assistants' access and sign-ins revoked",
     "admin_unlink": "Archidekt link removed",
     "admin_delete_data": "Former member's data deleted",
 }
@@ -96,7 +96,7 @@ ADMIN_ACTION_WORDS = {
     "card_model_removed": ("card model removed", "card models removed"),
     "admin_disable": ("account disabled", "accounts disabled"),
     "admin_enable": ("account turned back on", "accounts turned back on"),
-    "admin_revoke": ("access revoked", "accesses revoked"),
+    "admin_revoke": ("member's access revoked", "members' access revoked"),
     "admin_unlink": ("Archidekt link removed", "Archidekt links removed"),
     "admin_delete_data": ("member's data deleted", "members' data deleted"),
 }
@@ -157,6 +157,7 @@ ERROR_WORDS = {
 OTHER_ERROR = "Something went wrong"
 GONE_DECK = "a deck that was removed"
 NO_DETAIL = "No detail"
+NO_NAME = "a member with no name"  # a member with neither a username nor an email on record
 
 # Detail keys as words on the admin page (k2 V7); keys that only name a row elsewhere are left to
 # the row's details. Unmapped keys show as stored.
@@ -670,7 +671,8 @@ def _deck_html(names: Names, sub: str | None, deck_id: Any, *, link: bool, own: 
         return f"<span class='gone'>{GONE_DECK}</span>"
     if name:
         return f"<a href='{href}'>{esc(name)}</a>" if link else esc(name)
-    return f"<a href='{href}'>Open the deck</a>" if link else f"<code>{esc(deck_id)}</code>"
+    # the admin page: the deck's id stays in the opened row's details, never in the cell
+    return f"<a href='{href}'>Open the deck</a>" if link else f"<span class='gone'>{GONE_DECK}</span>"
 
 
 def member_detail_html(row: Mapping[str, Any], names: Names) -> str:
@@ -1049,9 +1051,7 @@ def admin_body(state: Any, params: Mapping[str, str], *, nav: str, now: float | 
             "ORDER BY COALESCE(preferred_username, email, sub)"
         ).fetchall()
     for p in people:
-        names._members[str(p["sub"])] = (
-            str(p["preferred_username"] or p["email"] or "") or "an account with no username or email"
-        )
+        names._members[str(p["sub"])] = str(p["preferred_username"] or p["email"] or "") or NO_NAME
 
     # widgets
     week = log.since(7 * 86400, now)
@@ -1114,7 +1114,12 @@ def admin_body(state: Any, params: Mapping[str, str], *, nav: str, now: float | 
             detail=f"Most active: {top_name}, {top[1]} event{'' if top[1] == 1 else 's'}"
             if top and top_name
             else "",
-            actions=[ui.button_link(f"Show {top_name} only", query.href(path, sub=top[0]))]
+            actions=[
+                ui.button_link(
+                    "Show this member only" if top_name == NO_NAME else f"Show {top_name} only",
+                    query.href(path, sub=top[0]),
+                )
+            ]
             if top and top_name
             else (),
         ),
@@ -1208,7 +1213,8 @@ def _admin_row(r: dict[str, Any], log: Log, names: Names, query: Query, path: st
     raw = json.dumps(r.get("detail"), sort_keys=True) if r.get("detail") is not None else ""
     actions = []
     if sub and who_name:
-        actions.append(ui.button_link(f"Show {who_name} only", query.href(path, sub=sub)))
+        only = "Show this member only" if who_name == NO_NAME else f"Show {who_name} only"
+        actions.append(ui.button_link(only, query.href(path, sub=sub)))
     if event == "setting_changed" and isinstance(d.get("key"), str):
         spec = MANAGED_SETTINGS.get(d["key"])
         if spec is not None:

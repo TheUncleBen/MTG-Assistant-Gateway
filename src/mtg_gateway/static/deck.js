@@ -1061,7 +1061,7 @@
       onPick: function (p, info) { if (card.isConnected) savePrinting(card, p, info); }
     });
   }
-  // -- Watch this card / Art variants… (K7): the watchlist's own JSON calls; Undo stops the watch
+  // -- Watch this card / Art variants…: the watchlist's own JSON calls; Undo stops the watch
   // again by its id. The deck is not changed.
   function scryFinishOf(card) {
     var f = (card.getAttribute("data-finish") || "").toLowerCase();
@@ -1269,7 +1269,7 @@
     m.appendChild(head);
     m.appendChild(menuItem("Open card", "eye", function () { closeMenu(); openViewer(card); }));
     if (document.body.hasAttribute("data-watchlist")) {
-      // K7: watch the card's price, or browse its printings and watch one (the picker's browse mode)
+      // watch the card's price, or browse its printings and watch one (the picker's browse mode)
       m.appendChild(menuItem("Watch this card", "bookmark", function () { closeMenu(); watchCard(card, null); }));
       if (window.MtgPrintPick) m.appendChild(menuItem("Art variants…", "image", function () { closeMenu(); artVariants(card); }));
     }

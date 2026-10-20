@@ -95,7 +95,7 @@ def test_the_editor_add_box_has_watch_buttons_and_the_card_menu(tmp_path: Path, 
             assert "on" in (sol_btn.get_attribute("class") or "")
             btn = talisman.locator(".wbtn.icon")
             assert btn.get_attribute("aria-label") == "Watch Sol Talisman"
-            assert btn.get_attribute("title") == "Watch this card"
+            assert btn.get_attribute("title") == "Watch Sol Talisman"
             b = btn.bounding_box()
             r = talisman.bounding_box()
             assert b and r and b["x"] + b["width"] <= r["x"] + r["width"] + 0.5

@@ -266,7 +266,7 @@ html.cs-sheet-open,html.cs-sheet-open body{overflow:hidden}
     border-radius:var(--radius-panel) var(--radius-panel) 0 0;
     padding-bottom:calc(1.25rem + env(safe-area-inset-bottom))}
   .addsheet .acts button{flex:1 1 auto} }
-/* Watch on each result (K7): a pill on the picture's top right corner, a check and "Watching"
+/* Watch on each result: a pill on the picture's top right corner, a check and "Watching"
    when the card is watched; icon only at card size S and in the list view; 44 px on touch */
 .cs-hint{margin:0 0 .9rem}
 .picwrap{position:relative;display:block}
@@ -626,7 +626,7 @@ def watch_button(card: dict[str, Any], *, watched: frozenset[str], printing: boo
         )
     return (
         f"<button type='button' class='wbtn' data-watch='{_esc(name)}'{pin} aria-pressed='false' "
-        f"aria-label='Watch {_esc(name)}' title='Watch this card'>"
+        f"aria-label='Watch {_esc(name)}' title='Watch {_esc(name)}'>"
         f"{icon('bookmark')}<span>Watch</span></button>"
     )
 

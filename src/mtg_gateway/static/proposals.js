@@ -13,7 +13,7 @@
   if (strip && window.matchMedia && window.matchMedia("(min-width: 701px)").matches) strip.open = true;
 
   // A deck deletion: the red outline button first, then "Delete this deck on Archidekt?" with
-  // the solid red one (UI-STANDARD §5), in place.
+  // the solid red one, in place.
   document.addEventListener("click", function (e) {
     var ask = e.target instanceof Element ? e.target.closest("button.pr-ask") : null;
     if (!ask || e.defaultPrevented || ask.disabled || ask.getAttribute("aria-disabled") === "true") return;

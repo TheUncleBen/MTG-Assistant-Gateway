@@ -352,9 +352,13 @@ async def test_history_has_no_proposals(stack: Stack) -> None:
         now = int(time.time())
         seed_history(gw.db, sub, now=now)
         store_report(gw.db, sub, "rep_a", taken_at=now - 100)
+        store_report(gw.db, sub, "rep_z", deck_id="99", deck_name="", taken_at=now - 10)
         body = (await b.http.get("/history", headers=NAV)).text.split("<main")[1]
         assert "placeholder='Deck name'" in body
-        assert "Everything <span class='n'>17</span>" in body  # 15 snapshots, 1 restore, 1 report
+        # the Reports widget: the newest report's stored name, never its deck id; "All reports"
+        assert "Latest: an unnamed deck, just now" in body and ">All reports</a>" in body
+        assert "Deck 99" not in body and "Open Reports" not in body
+        assert "Everything <span class='n'>18</span>" in body  # 15 snapshots, 1 restore, 2 reports
         assert "Snapshots <span class='n'>15</span>" in body and "Restores <span class='n'>1</span>" in body
         # no edit proposal is listed; a snapshot links the change it was taken before
         assert "+1 Counterspell" not in body and "Rejected" not in body
@@ -365,6 +369,15 @@ async def test_history_has_no_proposals(stack: Stack) -> None:
         details = (await b.http.get("/history?open=s-s00", headers=NAV)).text.split("<main")[1]
         drawer = details.split("<aside class='ui-drawer'")[1]
         assert "← Back to History" in drawer and "Restore (review first)" in drawer and "<dd>—</dd>" in drawer
+    finally:
+        await b.aclose()
+
+
+async def test_an_empty_waiting_widget_says_nothing_is_waiting(stack: Stack) -> None:
+    b = await linked_browser(stack)
+    try:
+        body = (await b.http.get("/proposals", headers=NAV)).text.split("<main")[1]
+        assert "Nothing is waiting." in body and "Every change is reviewed." not in body
     finally:
         await b.aclose()
 

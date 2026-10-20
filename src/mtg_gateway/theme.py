@@ -1100,7 +1100,7 @@ html[data-card-size=l] .printpick .ppgrid{grid-template-columns:repeat(auto-fill
 # approved mockup's names. It comes before the top bar's search rules: the desktop (900 px)
 # layout never keys off a touch screen (tests/test_social_layout.py).
 UI_CSS = """
-/* §3 width: lists and tables are wide, up to 1200 px (render(main_class='ui-wide')) */
+/* width: lists and tables are wide, up to 1200 px (render(main_class='ui-wide')) */
 main.wrap.ui-wide{max-width:1200px}
 .ui-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:.25rem 1rem;margin:0 0 .25rem}
 .ui-head h1{margin:0}
@@ -1109,7 +1109,7 @@ main.wrap.ui-wide{max-width:1200px}
 @media (max-width:599.98px){.ui-head h1{font-size:min(2rem,14vw)}}
 .ui-sub{color:var(--text-muted);margin:.1rem 0 1rem;font-size:.93rem}
 
-/* §4 labels: a word, a colour and an icon */
+/* labels: a word, a colour and an icon */
 .ui-lbl{display:inline-flex;align-items:center;gap:.3rem;height:24px;padding:0 .55rem 0 .45rem;
   border-radius:999px;font-size:.82rem;font-weight:700;line-height:1;white-space:nowrap;
   border:1px solid transparent;background:var(--surface-2);color:var(--text);vertical-align:middle}
@@ -1128,7 +1128,7 @@ main.wrap.ui-wide{max-width:1200px}
 .ui-app.none{color:var(--text-muted)}
 /* a dash where a row has no risk label */
 .ui-none{color:var(--text-muted)}
-/* §3 dates: relative within 7 days, then the date; the full date and time in the tooltip */
+/* dates: relative within 7 days, then the date; the full date and time in the tooltip */
 .ui-when{color:var(--text-muted);font-size:.9rem;white-space:nowrap;font-variant-numeric:tabular-nums}
 
 /* tabs with counts */
@@ -1177,7 +1177,7 @@ main.wrap.ui-wide{max-width:1200px}
 @media (max-width:599.98px){.ui-tools .f{flex:1 1 calc(50% - .5rem)}}
 .ui-note{color:var(--text-muted);font-size:.88rem;margin:.25rem 0 .75rem}
 
-/* §3 the table: lined-up columns from 900 px (--cols); 600-899 px the low-priority columns
+/* the table: lined-up columns from 900 px (--cols); 600-899 px the low-priority columns
    (.md-hide) fold into a second line (.sub) under the title (--cols-md); below 600 px two-line rows
    (--cols-sm) with the status label beside the title (.stin) */
 .ui-table{border:1px solid var(--card-border);border-radius:var(--radius-panel);background:var(--surface);
@@ -1238,7 +1238,7 @@ main.wrap.ui-wide{max-width:1200px}
   .ui-table .act.linkbtn{padding:0}
 }
 
-/* §5 buttons: one orange main button; Reject, Delete and Remove as a red outline; the rest plain */
+/* buttons: one orange main button; Reject, Delete and Remove as a red outline; the rest plain */
 .btn-outline-danger,button.btn-outline-danger{background:transparent;color:var(--danger-text);
   border:1px solid var(--danger-text);font-weight:700}
 .btn-outline-danger:hover,button.btn-outline-danger:hover{background:var(--red-tint);color:var(--danger-text)}
@@ -1269,7 +1269,7 @@ main.wrap.ui-wide{max-width:1200px}
 .ui-pager .btns .btn,.ui-pager .btns button{margin:0}
 .ui-pager button[disabled],.ui-pager .btn[aria-disabled=true]{opacity:.55}
 
-/* §3 opening one item: from 1100 px a side panel beside the list (a split, not an overlay: the
+/* opening one item: from 1100 px a side panel beside the list (a split, not an overlay: the
    list folds to its 600-899 layout and stays in view); narrower, the item is its own page */
 .ui-split{position:relative}
 .ui-drawer{display:none}
@@ -1347,7 +1347,7 @@ ul.ui-chg{padding:0;border:1px solid var(--card-border);border-radius:var(--radi
 .adm-nav a[aria-current]{background:var(--orange-tint);border-color:var(--orange-text);
   color:var(--orange-text)}
 
-/* §3a dashboard pages: a row of widgets (quick starts), then the full list */
+/* dashboard pages: a row of widgets (quick starts), then the full list */
 .ui-widgets{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,13rem),1fr));gap:.75rem;
   margin:0 0 1.25rem}
 .wdg{display:flex;flex-direction:column;gap:.35rem;min-width:0;padding:.85rem 1rem;background:var(--surface);
@@ -1434,7 +1434,7 @@ CARD_MENU_CSS = """
     max-width:none;max-height:85vh;border-radius:var(--radius-sheet) var(--radius-sheet) 0 0;
     padding-bottom:calc(.75rem + env(safe-area-inset-bottom))}
 }
-/* Watch (K7): a pill, a check and "Watching" when the card is watched; .icon is the icon alone */
+/* Watch: a pill, a check and "Watching" when the card is watched; .icon is the icon alone */
 .wbtn{display:inline-flex;align-items:center;gap:.3rem;
   margin:0;height:32px;min-height:32px;padding:0 .55rem;border-radius:999px;border:1px solid
   var(--control-border);background:var(--surface);color:var(--text);font-size:.8rem;font-weight:700;
