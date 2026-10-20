@@ -55,12 +55,14 @@
     plural: (n, w) => n + ' ' + (Number(n) === 1 ? w : w + 's'),
     when: (v) => new Date(v).toLocaleString()
   };
-  const cameraIcon = () => {
+  // The gateway's own icons (theme.py's set), their paths handed over in the page's config.
+  const icon = (name) => {
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     svg.setAttribute('viewBox', '0 0 24 24'); svg.setAttribute('aria-hidden', 'true'); svg.setAttribute('class', 'i');
-    svg.innerHTML = "<path d='M4 8h4l2-3h4l2 3h4v11H4z'/><circle cx='12' cy='13' r='3'/>";
+    svg.innerHTML = (cfg.icons && cfg.icons[name]) || '';
     return svg;
   };
+  const cameraIcon = () => icon('camera');
   const h = (tag, attrs, ...children) => {
     const el = document.createElement(tag);
     if (attrs) {
@@ -181,7 +183,7 @@
         step(1, 'Scan.', 'Hold a card in the frame with its title in the dashed box and tap the shutter, or switch on Auto and show cards one after another. No camera handy? Use the Type tab.'),
         step(2, 'Check the list.', 'Fix a wrong match, pick the exact printing or foil, change quantities.'),
         step(3, 'Choose what to do with the cards.', 'Save them to your collection, add them to one of your decks, start a new deck, or keep the scan for later (your assistant can pick it up too).')),
-      h('div', { class: 'list-actions' }, h('button', { class: 'primary', onclick: () => { if (window.MtgPrefs) window.MtgPrefs.set(INTRO_KEY, true); box.remove(); } }, 'Got it')));
+      h('div', { class: 'list-actions' }, h('button', { onclick: () => { if (window.MtgPrefs) window.MtgPrefs.set(INTRO_KEY, true); box.remove(); } }, 'Got it')));
     return box;
   }
 
@@ -192,10 +194,9 @@
       tabButton('camera', 'Camera'), tabButton('type', 'Type'), tabButton('list', 'List'), tabButton('sessions', 'Sessions'));
     root.append(tabs);
     root.append(h('div', { id: 'panel' }));
-    root.append(h('p', { class: 'muted' }, 'Signed in as ', h('strong', { text: cfg.user }), '. ',
-      'Scanned cards stay on this gateway until you delete them. ',
+    root.append(h('p', { class: 'muted snote' }, 'Scanned cards stay on this gateway until you delete them. ',
       h('a', { href: '#intro', onclick: (e) => { e.preventDefault(); if (!$('#intro')) root.prepend(introCard()); window.scrollTo(0, 0); } }, 'How it works')));
-    const installBtn = h('button', { class: 'secondary install', id: 'install-btn', onclick: install }, 'Add to home screen');
+    const installBtn = h('button', { class: 'install', id: 'install-btn', onclick: install }, 'Add to home screen');
     root.append(installBtn);
     if (state.installPrompt) installBtn.classList.add('show');
     showTab(state.tab);
@@ -228,14 +229,18 @@
   };
   const SET_CODE = /^[A-Z0-9]{2,6}$/;
 
+  /* One row that never wraps: the Set box (its × inside; "Set code, blank for any" is its tooltip,
+     and the help line is read out, not shown), the Foil and Auto toggles and, inside the Android
+     app, the phone camera button at the end. */
+  const SET_HELP = 'Set code, blank for any';
   function renderScanOptions() {
     const bar = h('div', { class: 'scan-opts', role: 'group', 'aria-label': 'Scan options' });
     const input = h('input', { type: 'text', id: 'set-lock', maxlength: '6', autocapitalize: 'characters', autocomplete: 'off',
-      spellcheck: 'false', placeholder: 'Any', 'aria-describedby': 'set-lock-help', value: scanOpts.setLock() });
-    const help = h('span', { id: 'set-lock-help', class: 'help', text: 'Set code, blank for any' });
-    const field = h('label', { class: 'set-field', for: 'set-lock' }, h('span', { class: 'lbl', text: 'Set' }), input);
-    const clear = h('button', { type: 'button', class: 'secondary clear', 'aria-label': 'Clear set lock', title: 'Clear set lock',
-      onclick: () => { input.value = ''; applySet(); input.focus(); } }, '×');
+      spellcheck: 'false', placeholder: 'Any', title: SET_HELP, 'aria-describedby': 'set-lock-help', value: scanOpts.setLock() });
+    const help = h('span', { id: 'set-lock-help', class: 'sr', text: SET_HELP });
+    const clear = h('button', { type: 'button', class: 'clear', 'aria-label': 'Clear set', title: 'Clear set',
+      onclick: () => { input.value = ''; applySet(); input.focus(); } }, icon('x'));
+    const field = h('div', { class: 'setbox' }, h('label', { class: 'pre', for: 'set-lock', text: 'Set' }), input, clear);
     const applySet = () => {
       const code = input.value.toUpperCase().replace(/[^A-Z0-9]/g, '');
       input.value = code;
@@ -243,7 +248,8 @@
       input.setAttribute('aria-invalid', ok ? 'false' : 'true');
       bar.classList.toggle('invalid', !ok);
       bar.classList.toggle('locked', ok && code !== '');
-      help.textContent = !ok ? 'Use 2 to 6 letters or digits' : code ? 'Only ' + code + ' printings' : 'Set code, blank for any';
+      help.textContent = !ok ? 'Use 2 to 6 letters or digits' : code ? 'Only ' + code + ' printings' : SET_HELP;
+      input.title = help.textContent;
       if (ok) scanOpts.setSetLock(code);
     };
     input.addEventListener('input', () => { input.value = input.value.toUpperCase(); });
@@ -251,15 +257,22 @@
     input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); applySet(); input.blur(); } });
     const sw = h('button', { type: 'button', id: 'foil-switch', class: 'switch', role: 'switch', 'aria-checked': scanOpts.foil() ? 'true' : 'false',
       onclick: () => { const on = sw.getAttribute('aria-checked') !== 'true'; sw.setAttribute('aria-checked', on ? 'true' : 'false'); scanOpts.setFoil(on); } },
-      h('span', { class: 'knob' }), h('span', { class: 'lbl', text: 'Foil' }));
+      'Foil');
     const auto = h('button', { type: 'button', id: 'auto-switch', class: 'switch auto', role: 'switch', 'aria-checked': state.continuous ? 'true' : 'false',
       onclick: () => { if (state.continuous) stopContinuous(); else if (!startContinuous()) setStatus('Open the camera first to scan continuously.'); } },
-      h('span', { class: 'knob' }), h('span', { class: 'lbl', text: 'Auto' }));
+      'Auto');
     document.addEventListener('scan:continuous', (e) => {
       auto.setAttribute('aria-checked', e.detail && e.detail.on ? 'true' : 'false');
       const sh = $('#shutter'); if (sh) sh.classList.toggle('live', !!(e.detail && e.detail.on));
     }, camSignal());
-    bar.append(field, clear, help, sw, auto);
+    bar.append(field, help, sw, auto);
+    // Inside the Android app, its own camera (torch brightness, zoom) is one tap away. The app
+    // provides window.MtgNative; a browser has no such object and sees no button.
+    const native = window.MtgNative;
+    if (native && typeof native.openCamera === 'function') {
+      bar.append(h('button', { type: 'button', id: 'phone-camera', 'aria-label': 'Phone camera', title: 'Phone camera',
+        onclick: () => native.openCamera() }, icon('camera')));
+    }
     applySet();
     return bar;
   }
@@ -276,11 +289,11 @@
     const torch = h('button', { type: 'button', class: 'torch', id: 'torch', hidden: true, 'aria-pressed': 'false',
       'aria-label': 'Torch', title: 'Torch',
       onclick: () => setTorch(!getTorch()).then(() => torch.setAttribute('aria-pressed', getTorch() ? 'true' : 'false')) },
-      h('span', { class: 'ico', 'aria-hidden': 'true', text: '⚡' }), h('span', { class: 'lbl', text: 'Torch' }));
+      icon('sun'), h('span', { class: 'lbl', text: 'Torch' }));
     // The glare pill sits over the bottom of the viewfinder, where the eye already is, and shows
     // whenever the status text carries the glare warning.
     const glare = h('span', { class: 'glare-hint', id: 'glare-hint', role: 'status', hidden: true },
-      h('span', { class: 'ico', 'aria-hidden': 'true', text: '☀' }), 'Glare: tilt the card away from the light');
+      icon('alert'), 'Glare: tilt the card away from the light');
     const cam = h('div', { class: 'camera', id: 'camera' }, video,
       h('div', { class: 'guide' }, h('div', { class: 'title' })),
       h('div', { class: 'hint', text: 'Fit the card in the frame, name in the dashed box' }),
@@ -290,15 +303,11 @@
       onchange: (e) => e.target.files[0] && scanFile(e.target.files[0]) });
     const shutter = h('button', { class: 'shutter', id: 'shutter', title: 'Scan card', 'aria-label': 'Scan card',
       onclick: () => captureFrame(video) }, cameraIcon(), h('span', { class: 'sr', text: 'Scan' }));
+    // Photo, the capture button in the middle, Type: one row (the app's phone camera button sits
+    // in the options row, so nothing pushes Type onto a row of its own).
     const controls = h('div', { class: 'controls' },
-      h('label', { class: 'btn ctl', for: 'photo-file', title: 'Scan a photo from your pictures' }, 'Photo'), shutter,
-      h('button', { class: 'ctl', title: 'Type the card name instead', onclick: () => showTab('type') }, 'Type'));
-    // Inside the Android app, its own camera (torch brightness, zoom) is one tap away. The app
-    // provides window.MtgNative; a browser has no such object and sees no button.
-    const native = window.MtgNative;
-    if (native && typeof native.openCamera === 'function') {
-      controls.insertBefore(h('button', { class: 'ctl', id: 'phone-camera', onclick: () => native.openCamera() }, 'Phone camera'), shutter);
-    }
+      h('label', { class: 'btn ctl', for: 'photo-file', title: 'Scan a photo from your pictures' }, icon('image'), h('span', { text: 'Photo' })), shutter,
+      h('button', { class: 'ctl', title: 'Type the card name instead', onclick: () => showTab('type') }, icon('edit'), h('span', { text: 'Type' })));
     // Status and the match result sit between the preview and the control bar,
     // so on a phone the thing to confirm is right above the thumb.
     panel.append(h('div', { class: 'cam-panel' }, renderScanOptions(), cam, status, h('div', { id: 'result' }), controls, file));
@@ -356,11 +365,11 @@
         const chips = h('div', { class: 'chips' });
         (u.suggestions || []).slice(0, 4).forEach((name) => chips.append(h('button', { type: 'button', class: 'secondary',
           onclick: () => { dropUnidentified(u); pickName(name); } }, name)));
-        const typeBtn = h('button', { type: 'button', class: 'primary', onclick: () => {
+        const typeBtn = h('button', { type: 'button', class: 'typebtn', onclick: () => {
           dropUnidentified(u); showTab('type');
           const inp = $('#type-input'); if (inp) { inp.value = u.text || ''; inp.dispatchEvent(new Event('input')); inp.focus(); }
         } }, 'Type the name');
-        const dismiss = h('button', { type: 'button', class: 'secondary', 'aria-label': 'Dismiss', title: 'Dismiss', onclick: () => dropUnidentified(u) }, '×');
+        const dismiss = h('button', { type: 'button', class: 'dismiss', 'aria-label': 'Dismiss', title: 'Dismiss', onclick: () => dropUnidentified(u) }, icon('x'));
         list.append(h('li', null,
           u.strip ? h('img', { class: 'strip', src: u.strip, alt: 'Title strip as read' }) : '',
           h('div', { class: 'read' }, h('span', { class: 'ocr', text: u.text ? 'read: ' + u.text : 'nothing readable' }), chips,
@@ -378,8 +387,8 @@
     const ranges = cameraRanges();
     box.textContent = '';
     const specs = [
-      { key: 'zoom', label: 'Zoom', ico: '🔍', fmt: (v) => v.toFixed(1) + '×', reset: (r) => r.min },
-      { key: 'exposureCompensation', label: 'Brightness', ico: '☀', fmt: (v) => (v > 0 ? '+' : '') + v.toFixed(1),
+      { key: 'zoom', label: 'Zoom', ico: 'search', fmt: (v) => v.toFixed(1) + 'x', reset: (r) => r.min },
+      { key: 'exposureCompensation', label: 'Brightness', ico: 'sun', fmt: (v) => (v > 0 ? '+' : '') + v.toFixed(1),
         reset: (r) => Math.min(r.max, Math.max(r.min, 0)) },
     ];
     specs.forEach((sp) => {
@@ -389,9 +398,9 @@
         value: String(r.value), 'aria-label': sp.label,
         oninput: (e) => { out.textContent = sp.fmt(parseFloat(e.target.value)); },
         onchange: (e) => { setCamera({ [sp.key]: parseFloat(e.target.value) }); } });
-      const reset = h('button', { type: 'button', class: 'secondary reset', 'aria-label': 'Reset ' + sp.label.toLowerCase(),
-        onclick: () => { const v = sp.reset(r); input.value = String(v); out.textContent = sp.fmt(v); setCamera({ [sp.key]: v }); } }, '↺');
-      box.append(h('label', { class: 'ctl' }, h('span', { class: 'ico', 'aria-hidden': 'true', text: sp.ico }),
+      const reset = h('button', { type: 'button', class: 'reset', 'aria-label': 'Reset ' + sp.label.toLowerCase(), title: 'Reset ' + sp.label.toLowerCase(),
+        onclick: () => { const v = sp.reset(r); input.value = String(v); out.textContent = sp.fmt(v); setCamera({ [sp.key]: v }); } }, icon('undo'));
+      box.append(h('label', { class: 'ctl' }, h('span', { class: 'ico', 'aria-hidden': 'true' }, icon(sp.ico)),
         h('span', { class: 'lbl', text: sp.label }), input, out, reset));
     });
     box.hidden = !box.children.length;
@@ -1056,7 +1065,8 @@
       meta.append(h('div', { class: 'suggest-label', text: 'Did you mean:' }), chips);
     }
     const actions = h('div', { class: 'actions' });
-    if (card) actions.append(stepper, h('button', { class: 'primary', onclick: () => handlers.onAdd(parseInt(qty.value, 10) || 1) }, 'Add'));
+    // Add is plain: the page's one orange button is the capture button (the list's Save scan on its tab).
+    if (card) actions.append(stepper, h('button', { class: 'add', onclick: () => handlers.onAdd(parseInt(qty.value, 10) || 1) }, 'Add'));
     actions.append(h('button', { class: 'secondary', onclick: handlers.onOther }, card ? 'Not this card' : 'Type the name'));
     meta.append(actions);
     const wrap = h('div', { class: 'card result is-' + res.status });
@@ -1069,7 +1079,7 @@
     const line = h('div', { class: 'printing' });
     if (card && card.set) line.append(h('span', { class: 'setcode', text: card.set.toUpperCase() + ' ' + (card.collector_number || '') }));
     if (foil) line.append(h('span', { class: 'foil', text: 'Foil' }));
-    if (card && onChange) line.append(h('button', { type: 'button', class: 'secondary printings', onclick: onChange }, 'Other printings'));
+    if (card && onChange) line.append(h('button', { type: 'button', class: 'printings', onclick: onChange }, 'Other printings'));
     return line;
   }
 
@@ -1101,8 +1111,8 @@
     const filter = h('input', { type: 'search', id: 'pick-filter', placeholder: 'Filter by set code or name', autocomplete: 'off', 'aria-label': 'Filter printings' });
     const foilSw = h('button', { type: 'button', class: 'switch', role: 'switch', 'aria-checked': foil ? 'true' : 'false',
       onclick: () => { foil = !foil; foilSw.setAttribute('aria-checked', foil ? 'true' : 'false'); } },
-      h('span', { class: 'knob' }), h('span', { class: 'lbl', text: 'Foil' }));
-    const close = h('button', { type: 'button', class: 'secondary icon close', 'aria-label': 'Close', title: 'Close', onclick: closePicker }, '✕');
+      'Foil');
+    const close = h('button', { type: 'button', class: 'close', 'aria-label': 'Close', title: 'Close', onclick: closePicker }, icon('x'));
     const sheet = h('div', { class: 'sheet', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Choose a printing' },
       h('div', { class: 'sheet-head' }, h('div', { class: 'ttl' }, h('h3', { text: 'Choose a printing' }), h('div', { class: 'muted', text: card.name || '' })), close),
       h('div', { class: 'sheet-tools' }, filter, foilSw), status, h('div', { class: 'sheet-body' }, grid));
@@ -1211,6 +1221,7 @@
     });
     input.addEventListener('blur', () => setTimeout(() => { names = []; renderList(); }, 150));
     const ta = h('textarea', { id: 'paste-input', placeholder: 'Or paste a list, one card per line:\n2 Sol Ring (CMR) 472\n1 Aesi, Tyrant of Gyre Strait' });
+    // The Type tab's one orange button: a result's Add is plain.
     const pasteBtn = h('button', { class: 'primary', onclick: async () => {
       const text = ta.value.trim(); if (!text) return;
       const lines = text.split(/\r?\n/).filter((l) => l.trim());
@@ -1239,6 +1250,140 @@
       onOther: () => { const i = $('#type-input'); if (i) i.focus(); } }));
   }
 
+  // -------------------------------------------------------------- row menus
+  /* The list's cards and the saved scans each have a menu, in the site's look (the shared .menu
+     panel, a bottom sheet on phones): it opens on a right-click, a press and hold, the ⋮ button
+     or Shift+F10 / the ContextMenu key on a focused row; Escape, a press outside, scrolling and
+     the phone's Back button close it, and focus goes back to where it came from. The ways in are
+     static/cardmenu.js's (the site's), the menu itself is this page's. */
+  let menu = null, menuScrim = null, menuBack = null, menuPushed = false, ignorePop = false, menuOpenedAt = 0;
+  const phone = () => window.matchMedia('(max-width:599.98px)').matches;
+  function closeMenu(focusBack, fromHistory) {
+    if (!menu) return;
+    const m = menu, back = menuBack;
+    menu = null; menuBack = null;
+    m.remove();
+    if (menuScrim) { menuScrim.remove(); menuScrim = null; }
+    if (menuPushed && !fromHistory) {
+      // going back over the menu's entry fires popstate later; that one is ours, not a Back press
+      menuPushed = false; ignorePop = true;
+      try { history.back(); } catch (e) { ignorePop = false; }
+    }
+    menuPushed = false;
+    // focusBack: the element, or a function finding it now (the row may have been redrawn meanwhile)
+    const el = typeof back === 'function' ? back() : back;
+    if (focusBack && el && el.isConnected) { try { el.focus(); } catch (e) { /* ignore */ } }
+  }
+  /* spec: {name, items: [{text, icon, onClick, danger, href, ext} | {qty: {get, set}} | 'sep'], focusBack} */
+  function openMenu(spec, x, y) {
+    closeMenu(false);
+    const m = h('div', { class: 'menu ctxmenu cs-menu scan-menu', role: 'menu', 'aria-label': spec.label || spec.name });
+    m.append(h('div', { class: 'head', text: spec.name }));
+    spec.items.forEach((it) => {
+      if (it === 'sep') { m.append(h('div', { class: 'sep' })); return; }
+      if (it.qty) {
+        const n = h('b', { text: String(it.qty.get()) });
+        const step = (d) => { const v = Math.max(1, Math.min(999, it.qty.get() + d)); it.qty.set(v); n.textContent = String(v); };
+        m.append(h('div', { class: 'qty' }, h('span', { text: 'Quantity' }),
+          h('button', { type: 'button', role: 'menuitem', 'aria-label': 'One fewer', onclick: () => step(-1) }, icon('minus')), n,
+          h('button', { type: 'button', role: 'menuitem', 'aria-label': 'One more', onclick: () => step(1) }, icon('plus'))));
+        return;
+      }
+      if (it.href) {
+        m.append(h('a', { role: 'menuitem', href: it.href, target: it.ext ? '_blank' : null, rel: it.ext ? 'noreferrer noopener' : null,
+          onclick: () => closeMenu(false) }, icon(it.icon), it.text));
+        return;
+      }
+      m.append(h('button', { type: 'button', role: 'menuitem', class: it.danger ? 'danger' : null,
+        onclick: (e) => { e.preventDefault(); closeMenu(!!it.focusBack); it.onClick(); } }, icon(it.icon), it.text));
+    });
+    m.addEventListener('keydown', (e) => {
+      const items = Array.from(m.querySelectorAll('[role=menuitem]:not([disabled])'));
+      const i = items.indexOf(document.activeElement);
+      if (e.key === 'Escape') { e.preventDefault(); closeMenu(true); }
+      else if (e.key === 'ArrowDown') { e.preventDefault(); (items[i + 1] || items[0]).focus(); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); (items[i - 1] || items[items.length - 1]).focus(); }
+      else if (e.key === 'Home') { e.preventDefault(); items[0].focus(); }
+      else if (e.key === 'End') { e.preventDefault(); items[items.length - 1].focus(); }
+      else if (e.key === 'Tab') { closeMenu(false); }
+    });
+    m.addEventListener('contextmenu', (e) => e.preventDefault());
+    menuScrim = h('div', { class: 'cs-scrim', onclick: () => closeMenu(true) });
+    document.body.append(menuScrim);
+    m.style.visibility = 'hidden';
+    document.body.append(m);
+    const pad = 8, w = m.offsetWidth, hh = m.offsetHeight;
+    m.style.left = Math.max(pad, Math.min(x, window.innerWidth - w - pad)) + 'px';
+    m.style.top = Math.max(pad, Math.min(y, window.innerHeight - hh - pad)) + 'px';
+    m.style.visibility = '';
+    menu = m; menuBack = spec.focusBack || null; menuOpenedAt = Date.now();
+    const first = m.querySelector('[role=menuitem]:not([disabled])');
+    if (first) first.focus();
+    if (phone()) { try { history.pushState({ menu: 1, scan: 1 }, ''); menuPushed = true; } catch (e) { menuPushed = false; } }
+  }
+  document.addEventListener('pointerdown', (e) => { if (menu && !menu.contains(e.target) && e.target !== menuScrim) closeMenu(false); }, true);
+  // A scroll closes it, except the one that focusing the row or the menu itself may cause as it opens.
+  window.addEventListener('scroll', (e) => {
+    if (!menu || Date.now() - menuOpenedAt < 400 || menu.contains(e.target)) return;
+    closeMenu(false);
+  }, { capture: true, passive: true });
+  window.addEventListener('resize', () => { if (menu) closeMenu(false); });
+  window.addEventListener('popstate', () => {
+    if (ignorePop) { ignorePop = false; return; }
+    if (menu) closeMenu(true, true);
+  });
+  /* The ways in on a list: the site's (cardmenu.js: right-click, press and hold, the keys); without
+     it, the right-click and the keys alone. itemOf(target) gives the row; open(row, x, y). */
+  function bindRows(root, itemOf, open) {
+    const CM = window.MtgCardMenu;
+    if (CM && CM.bind) { CM.bind(root, { itemOf, skip: 'button,input,a', open }); return; }
+    root.addEventListener('contextmenu', (e) => { const it = itemOf(e.target); if (!it) return; e.preventDefault(); open(it, e.clientX, e.clientY); });
+    root.addEventListener('keydown', (e) => {
+      if (!(e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10'))) return;
+      const it = itemOf(e.target); if (!it) return;
+      e.preventDefault();
+      const r = it.getBoundingClientRect();
+      open(it, r.left + Math.min(r.width / 2, 40), r.top + Math.min(r.height / 2, 40));
+    });
+  }
+  function kebab(name, onOpen) {
+    const b = h('button', { type: 'button', class: 'kebab', 'aria-label': 'Menu for ' + name, title: 'Menu', 'aria-haspopup': 'menu',
+      onclick: (e) => { e.stopPropagation(); const r = b.getBoundingClientRect(); onOpen(r.left, r.bottom, b); } }, icon('more'));
+    return b;
+  }
+  /* What was done, in the site's toast when its script is on the page; else as a notice in `box`. */
+  function told(box, text) {
+    const CM = window.MtgCardMenu;
+    if (CM && CM.toast) { CM.toast(text, { ok: true }); return; }
+    if (box) { box.textContent = ''; box.append(h('div', { class: 'notice ok', text })); }
+  }
+  const scryfallLink = (it) => (it.card && it.card.scryfall_uri) || ('https://scryfall.com/search?q=' + encodeURIComponent('!"' + (it.name || '') + '"'));
+
+  /* A box (dialog) on the page: a centred card, a sheet from the bottom on phones. Escape and
+     Cancel close it; focus goes into it and back to the opener. body: elements; ok: {label,
+     onOk(box) -> promise or value; a thrown error shows in the box} */
+  function openBox(title, body, ok, opener) {
+    const back = opener || document.activeElement;
+    const msg = h('div');
+    const box = h('div', { class: 'scan-box', role: 'dialog', 'aria-modal': 'true', 'aria-label': title }, h('h2', { text: title }), ...body, msg);
+    const scrim = h('div', { class: 'scan-box-scrim' }, box);
+    const close = () => { scrim.remove(); document.removeEventListener('keydown', onKey); if (back && back.isConnected) { try { back.focus(); } catch (e) { /* ignore */ } } };
+    const onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); close(); } };
+    const cancel = h('button', { type: 'button', onclick: close }, 'Cancel');
+    const go = h('button', { type: 'button', class: 'primary', onclick: async () => {
+      go.disabled = true; msg.textContent = '';
+      try { await ok.onOk(box); close(); }
+      catch (err) { msg.append(h('div', { class: 'notice error', text: why(err) })); go.disabled = false; }
+    } }, ok.label);
+    box.append(h('div', { class: 'acts' }, cancel, go));
+    scrim.addEventListener('click', (e) => { if (e.target === scrim) close(); });
+    document.addEventListener('keydown', onKey);
+    document.body.append(scrim);
+    const first = box.querySelector('input,select,textarea,button');
+    if (first) first.focus();
+    return box;
+  }
+
   // ------------------------------------------------------------------- list
   function renderList(panel) {
     const name = h('input', { type: 'text', id: 'session-name', placeholder: 'Name this scan (e.g. Trade binder, Aesi upgrades)', value: state.sessionName,
@@ -1246,27 +1391,59 @@
     const ul = h('ul', { class: 'items', id: 'items' });
     const summary = h('p', { class: 'muted summary', id: 'summary' });
     const msg = h('div', { id: 'list-msg' });
+    const changed = () => { state.dirty = true; saveDraft(); draw(); renderBadge(); };
+    const remove = (it) => { const i = state.items.indexOf(it); if (i >= 0) state.items.splice(i, 1); changed(); };
+    // The card's menu: Open card, Add to deck…, Add to collection, Watch this card (watchlists
+    // on), Change printing…, the quantity, Copy name, Open on Scryfall, Remove. Add to deck,
+    // Add to collection and Watch are the card menu's own items (cardmenu.js), as on every page.
+    const rowMenu = (li, x, y, back) => {
+      const it = state.items[Number(li.dataset.index)]; if (!it) return;
+      const name = it.name || '?';
+      const CM = window.MtgCardMenu;
+      const items = [{ text: 'Open card', icon: 'eye', onClick: () => { location.href = '/cards?q=' + encodeURIComponent(name); } },
+        { text: 'Add to deck…', icon: 'plus', href: '/cards?q=' + encodeURIComponent(name) }];
+      if (CM && CM.collect) items.push({ text: 'Add to collection', icon: 'collection', onClick: () => CM.collect(name) });
+      if (CM && CM.watch && document.body.hasAttribute('data-watchlist')) {
+        items.push({ text: 'Watch this card', icon: 'bookmark', onClick: () => CM.watch({ name }, { was: false }).catch(() => {}) });
+      }
+      if (it.card) items.push({ text: 'Change printing…', icon: 'image', onClick: () => openPicker(it) });
+      items.push({ qty: { get: () => it.quantity, set: (v) => { it.quantity = v; changed(); } } },
+        { text: 'Copy name', icon: 'copy', focusBack: true, onClick: async () => {
+          try { await navigator.clipboard.writeText(name); told(msg, 'Name copied.'); }
+          catch (e) { msg.textContent = ''; msg.append(h('pre', { text: name })); }
+        } },
+        { text: 'Open on Scryfall', icon: 'external', href: scryfallLink(it), ext: true },
+        'sep',
+        { text: 'Remove', icon: 'x', danger: true, onClick: () => { remove(it); told(msg, 'Removed ' + name + '.'); } });
+      // the row is redrawn after a quantity step, so its ⋮ is looked up when the menu closes
+      const backTo = () => { const i = state.items.indexOf(it); return i < 0 ? null : ul.querySelector('li[data-index="' + i + '"] .kebab'); };
+      openMenu({ name, label: 'Card: ' + name, items, focusBack: back || backTo }, x, y);
+    };
+    bindRows(ul, (t) => (t && t.closest ? t.closest('ul.items > li[data-index]') : null), (li, x, y) => rowMenu(li, x, y, null));
     const draw = () => {
       ul.textContent = '';
       state.items.forEach((it, idx) => {
         const card = it.card || {};
-        const li = h('li', null,
+        const li = h('li', { 'data-index': String(idx), 'data-name': it.name || '' },
           card.image_small ? h('img', { src: card.image_small, alt: '' }) : h('span', { class: 'thumb' }),
           h('div', { class: 'name' }, h('span', { text: it.name || '?' }),
             h('small', null, h('span', { class: 'status-' + it.status, text: statusLabel(it) }),
               card.set ? h('button', { type: 'button', class: 'setbtn', 'aria-label': 'Change printing of ' + (it.name || 'card') + ', now ' + card.set.toUpperCase() + ' ' + card.collector_number,
                 onclick: () => openPicker(it) },
-                h('span', { class: 'setcode', text: card.set.toUpperCase() + ' ' + card.collector_number }), ' ▾') : '',
+                h('span', { class: 'setcode', text: card.set.toUpperCase() + ' ' + card.collector_number }), icon('chev')) : '',
               it.foil ? h('span', { class: 'foil', text: 'Foil' }) : '')),
           h('div', { class: 'stepper', role: 'group', 'aria-label': 'Quantity' },
-            h('button', { type: 'button', class: 'minus', 'aria-label': 'fewer', onclick: () => { it.quantity -= 1; if (it.quantity <= 0) state.items.splice(idx, 1); state.dirty = true; saveDraft(); draw(); renderBadge(); } }, '−'),
+            h('button', { type: 'button', class: 'minus', 'aria-label': 'fewer', onclick: () => { it.quantity -= 1; if (it.quantity <= 0) state.items.splice(idx, 1); changed(); } }, '−'),
             h('input', { type: 'number', min: '1', max: '999', value: String(it.quantity), 'aria-label': 'Quantity of ' + (it.name || 'card'),
-              onchange: (e) => { const v = parseInt(e.target.value, 10); it.quantity = Math.max(1, Math.min(999, v || 1)); state.dirty = true; saveDraft(); draw(); renderBadge(); } }),
-            h('button', { type: 'button', class: 'plus', 'aria-label': 'more', onclick: () => { it.quantity = Math.min(999, it.quantity + 1); state.dirty = true; saveDraft(); draw(); renderBadge(); } }, '+')));
+              onchange: (e) => { const v = parseInt(e.target.value, 10); it.quantity = Math.max(1, Math.min(999, v || 1)); changed(); } }),
+            h('button', { type: 'button', class: 'plus', 'aria-label': 'more', onclick: () => { it.quantity = Math.min(999, it.quantity + 1); changed(); } }, '+')),
+          kebab(it.name || 'card', (x, y, b) => rowMenu(li, x, y, b)));
         ul.append(li);
       });
       const unresolved = state.items.filter((it) => !it.card).length;
-      summary.textContent = state.items.length ? totalCards() + ' cards, ' + state.items.length + ' distinct' + (unresolved ? ', ' + unresolved + ' unresolved' : '') + (state.sessionId ? ' · saved as ' + state.sessionId + (state.dirty ? ' (unsaved changes)' : '') : ' · not saved yet') : 'Nothing scanned yet.';
+      // The saved scan is named, never numbered, here.
+      const saved = state.sessionId ? ' · saved' + (state.sessionName ? ' as ' + state.sessionName : '') + (state.dirty ? ' (unsaved changes)' : '') : ' · not saved yet';
+      summary.textContent = state.items.length ? totalCards() + ' cards, ' + state.items.length + ' distinct' + (unresolved ? ', ' + unresolved + ' unresolved' : '') + saved : 'Nothing scanned yet.';
     };
     draw();
     const save = h('button', { id: 'save-btn', class: 'primary', onclick: async () => {
@@ -1278,7 +1455,7 @@
           : await api('/scan/api/sessions', 'POST', payload);
         state.sessionId = out.id; state.sessionName = out.name; state.dirty = false; saveDraft(); draw();
         name.value = out.name;
-        msg.append(h('div', { class: 'notice ok' }, 'Saved as ', h('strong', { text: out.name }), ' (', h('code', { text: out.id }), '). ',
+        msg.append(h('div', { class: 'notice ok' }, 'Saved as ', h('strong', { text: out.name }), '. ',
           'In Claude or ChatGPT, say: “get my scan session ', h('em', { text: out.name }), '” to use these cards.'));
         buzz(30);
       } catch (err) { msg.append(h('div', { class: 'notice error', text: 'Save failed: ' + why(err) })); }
@@ -1290,7 +1467,8 @@
       try { await navigator.clipboard.writeText(text); msg.textContent = ''; msg.append(h('div', { class: 'notice ok', text: 'Decklist copied.' })); }
       catch (e) { msg.textContent = ''; msg.append(h('pre', { text: text })); }
     } }, 'Copy decklist');
-    const clear = h('button', { class: 'danger', onclick: () => {
+    // A red outline: it only clears the local list (the confirm bar's Yes is the final, solid red step).
+    const clear = h('button', { class: 'btn-outline-danger', onclick: () => {
       if (!state.items.length && !state.sessionId) return;
       askConfirm(actions, 'Start a new, empty scan? The saved session (if any) stays on the gateway.', () => {
         state.items = []; state.sessionId = null; state.sessionName = ''; state.dirty = false; saveDraft(); name.value = ''; draw(); renderBadge(); msg.textContent = '';
@@ -1359,21 +1537,53 @@
     panel.append(h('p', { class: 'muted', text: 'Loading…' }));
     try {
       const out = await api('/scan/api/sessions');
+      if (state.tab !== 'sessions') return; // another tab took the panel while the list loaded
       panel.textContent = '';
       if (!out.sessions.length) { panel.append(h('div', { class: 'card', text: 'No saved scans yet.' })); return; }
       const ul = h('ul', { class: 'sessions items' });
-      out.sessions.forEach((s) => ul.append(h('li', null,
-        h('a', { href: '#', onclick: async (e) => { e.preventDefault(); const full = await api('/scan/api/sessions/' + encodeURIComponent(s.id)); state.items = full.items; state.sessionId = full.id; state.sessionName = full.name; state.dirty = false; saveDraft(); renderBadge(); showTab('list'); } },
-          h('strong', { text: s.name, title: s.name }), h('small', { style: 'display:block', class: 'muted', text: text.plural(s.card_count, 'card') + ' · ' + s.status + (s.unresolved ? ' · ' + s.unresolved + ' unresolved' : '') + ' · ' + text.when(s.updated_at * 1000) })),
-        h('button', { class: 'danger icon', 'aria-label': 'Delete ' + s.name, title: 'Delete', onclick: (e) => {
-          askConfirm(e.currentTarget, 'Delete “' + s.name + '” from the gateway?', async () => {
-            await api('/scan/api/sessions/' + encodeURIComponent(s.id), 'DELETE', {});
-            if (state.sessionId === s.id) { state.sessionId = null; state.dirty = true; saveDraft(); }
-            showTab('sessions');
-          });
-        } }, '✕'))));
+      const byId = {};
+      const open = async (s) => { const full = await api('/scan/api/sessions/' + encodeURIComponent(s.id)); state.items = full.items; state.sessionId = full.id; state.sessionName = full.name; state.dirty = false; saveDraft(); renderBadge(); showTab('list'); };
+      // Delete keeps its yes/no bar, next to the row's own delete button.
+      const del = (s, anchor) => askConfirm(anchor, 'Delete “' + s.name + '” from the gateway?', async () => {
+        await api('/scan/api/sessions/' + encodeURIComponent(s.id), 'DELETE', {});
+        if (state.sessionId === s.id) { state.sessionId = null; state.dirty = true; saveDraft(); }
+        showTab('sessions');
+      });
+      const rename = (s, opener) => {
+        const input = h('input', { type: 'text', id: 'rename-input', maxlength: '200', value: s.name, 'aria-label': 'New name' });
+        openBox('Rename scan', [h('div', null, h('label', { for: 'rename-input', text: 'New name' }), input)], { label: 'Rename', onOk: async () => {
+          const name = input.value.trim(); if (!name) throw new Error('Give the scan a name.');
+          const out = await api('/scan/api/sessions/' + encodeURIComponent(s.id), 'PUT', { name });
+          if (state.sessionId === s.id) { state.sessionName = out.name; saveDraft(); }
+          showTab('sessions');
+        } }, opener);
+      };
+      // The row's menu: Open, Rename…, Delete….
+      const rowMenu = (li, x, y, back) => {
+        const s = byId[li.dataset.id]; if (!s) return;
+        const delBtn = li.querySelector('.btn-outline-danger');
+        openMenu({ name: s.name, label: 'Scan: ' + s.name, items: [
+          { text: 'Open', icon: 'eye', onClick: () => open(s) },
+          { text: 'Rename…', icon: 'edit', onClick: () => rename(s, back || li.querySelector('.kebab')) },
+          'sep',
+          { text: 'Delete…', icon: 'trash', danger: true, onClick: () => del(s, delBtn) },
+        ], focusBack: back || li.querySelector('.kebab') }, x, y);
+      };
+      bindRows(ul, (t) => (t && t.closest ? t.closest('ul.sessions > li[data-id]') : null), (li, x, y) => rowMenu(li, x, y, null));
+      out.sessions.forEach((s) => {
+        byId[s.id] = s;
+        const li = h('li', { 'data-id': s.id },
+          h('a', { href: '#', onclick: (e) => { e.preventDefault(); open(s); } },
+            h('strong', { text: s.name, title: s.name }), h('small', { style: 'display:block', class: 'muted', text: text.plural(s.card_count, 'card') + ' · ' + s.status + (s.unresolved ? ' · ' + s.unresolved + ' unresolved' : '') + ' · ' + text.when(s.updated_at * 1000) })),
+          h('button', { class: 'btn-outline-danger', 'aria-label': 'Delete ' + s.name, title: 'Delete', onclick: (e) => del(s, e.currentTarget) }, icon('trash')),
+          kebab(s.name, (x, y, b) => rowMenu(li, x, y, b)));
+        ul.append(li);
+      });
       panel.append(h('div', { class: 'card' }, ul));
-    } catch (err) { panel.textContent = ''; panel.append(h('div', { class: 'notice error', text: 'Could not load sessions: ' + why(err) })); }
+    } catch (err) {
+      if (state.tab !== 'sessions') return;
+      panel.textContent = ''; panel.append(h('div', { class: 'notice error', text: 'Could not load sessions: ' + why(err) }));
+    }
   }
 
   // ---------------------------------------------------------------- install

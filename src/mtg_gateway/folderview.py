@@ -17,7 +17,9 @@ from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlencode
 
+from .archidekt import format_label
 from .deckpage import deck_list_html
+from .searchpanel import DECK_COLOUR_MODES, DIRECTIONS, colour_match
 from .theme import esc, icon
 
 SEP = " › "
@@ -43,18 +45,62 @@ def resolve_folder(info: dict[str, Any] | None, raw: str) -> int | None:
     return next((f["id"] for f in shown if f["name"] == raw), None)
 
 
-def sort_decks(rows: list[dict[str, Any]], order: str) -> list[dict[str, Any]]:
-    """The deck order the toolbar asks for (the list arrives newest change first)."""
+def sort_decks(rows: list[dict[str, Any]], order: str, direction: str = "auto") -> list[dict[str, Any]]:
+    """The deck order the toolbar asks for (the list arrives newest change first). ``direction``
+    "auto" is each order's own way (names A to Z, dates newest first); "asc" and "desc" force one."""
     rows = list(rows)
     if order == "name":
         rows.sort(key=lambda d: str(d.get("name", "")).lower())
+        natural = "asc"
     elif order == "created":
         rows.sort(key=lambda d: str(d.get("created_at") or ""), reverse=True)
+        natural = "desc"
     elif order == "format":
         rows.sort(key=lambda d: (str(d.get("format_name") or ""), str(d.get("name", "")).lower()))
+        natural = "asc"
     else:
         rows.sort(key=lambda d: str(d.get("updated_at") or ""), reverse=True)
+        natural = "desc"
+    if direction in ("asc", "desc") and direction != natural:
+        rows.reverse()
     return rows
+
+
+def read_filters(qp: Any) -> dict[str, str]:
+    """The deck list's filters beyond the name, order and view, each limited to its known values:
+    the sort direction (``dir``), the colours (``c``, repeated) with how they match (``cm``) and the
+    format (``format``, a format name)."""
+    picked = [v.upper() for v in (qp.getlist("c") if hasattr(qp, "getlist") else [])]
+    colors = "".join(c for c in "WUBRGC" if c in picked)
+    return {
+        "direction": qp.get("dir") if qp.get("dir") in dict(DIRECTIONS) else "auto",
+        "colors": colors,
+        "colour_mode": qp.get("cm") if qp.get("cm") in dict(DECK_COLOUR_MODES) else "incl",
+        "fmt": (qp.get("format") or "").strip()[:40],
+    }
+
+
+def filter_params(
+    q: str, order: str, view: str, folder: str, filters: dict[str, str]
+) -> list[tuple[str, str]]:
+    """The deck list's address parameters for these controls, the defaults left out."""
+    params: list[tuple[str, str]] = []
+    if q:
+        params.append(("q", q))
+    if order and order != "updated":
+        params.append(("order", order))
+    if filters.get("direction", "auto") != "auto":
+        params.append(("dir", filters["direction"]))
+    params.extend(("c", c) for c in filters.get("colors", ""))
+    if filters.get("colors") and filters.get("colour_mode", "incl") != "incl":
+        params.append(("cm", filters["colour_mode"]))
+    if filters.get("fmt"):
+        params.append(("format", filters["fmt"]))
+    if view and view != "grid":
+        params.append(("view", view))
+    if folder:
+        params.append(("folder", folder))
+    return params
 
 
 @dataclass
@@ -67,6 +113,7 @@ class Level:
     folders: list[dict[str, Any]] = field(default_factory=list)
     decks: list[dict[str, Any]] = field(default_factory=list)
     searching: bool = False
+    filtered: bool = False  # a colour or format filter (every level, like a name)
     tree: bool = True
     current: dict[str, Any] | None = None
     total: int = 0
@@ -79,15 +126,31 @@ def arrange(
     folder_id: int | None,
     q: str,
     order: str,
+    direction: str = "auto",
+    colors: str = "",
+    colour_mode: str = "incl",
+    fmt: str = "",
 ) -> Level:
-    """One level of My decks from the member's decks (backups already left out) and folder tree."""
+    """One level of My decks from the member's decks (backups already left out) and folder tree.
+    A name, a colour or a format filter searches every folder."""
     needle = q.strip().casefold()
-    level = Level(searching=bool(needle), total=len(rows))
+    filtered = bool(colors or fmt)
+
+    def keep(d: dict[str, Any]) -> bool:
+        if needle and needle not in str(d.get("name", "")).casefold():
+            return False
+        if colors and not colour_match(d.get("colors"), colors, colour_mode):
+            return False
+        if not fmt:
+            return True
+        slug = str(d.get("format_name") or "")
+        # the drop-down sends the format's slug; a link from before it may still carry its name
+        return slug.casefold() == fmt.casefold() or format_label(slug).casefold() == fmt.casefold()
+
+    level = Level(searching=bool(needle) or filtered, filtered=filtered, total=len(rows))
     if info is None:  # no tree: every deck, flat, as before 0.7.28 (with no decks, nothing to say)
         level.tree = not rows
-        level.decks = sort_decks(
-            [d for d in rows if not needle or needle in str(d.get("name", "")).casefold()], order
-        )
+        level.decks = sort_decks([d for d in rows if keep(d)], order, direction)
         return level
     root = info["root_id"]
     every = info.get("folders", [])
@@ -136,17 +199,17 @@ def arrange(
     level.crumbs = [(None, "Decks")] + [
         (p["id"], p["name"]) for p in path(current["id"] if current else None)
     ]
-    if needle:  # every level, each match with the folder it is in
-        found = [f for f in shown if needle in f["name"].casefold()]
+    if needle or filtered:  # every level, each match with the folder it is in
+        found = [f for f in shown if needle and needle in f["name"].casefold()]
         level.folders = [tile(f, with_path=True) for f in sorted(found, key=_folder_key)]
         decks = []
         for d in rows:
-            if needle in str(d.get("name", "")).casefold():
+            if keep(d):
                 d = dict(d)
                 fid = home(d)
                 d["folder"] = SEP.join(p["name"] for p in path(fid)) if fid is not None else None
                 decks.append(d)
-        level.decks = sort_decks(decks, order)
+        level.decks = sort_decks(decks, order, direction)
         return level
     here = current["id"] if current else None
     kids = [f for f in shown if (None if f["parent"] == root else f["parent"]) == here]
@@ -157,7 +220,7 @@ def arrange(
             d = dict(d)
             d["folder"] = None  # every deck here is in this folder: the breadcrumb says which
             decks.append(d)
-    level.decks = sort_decks(decks, order)
+    level.decks = sort_decks(decks, order, direction)
     return level
 
 
@@ -202,17 +265,29 @@ def breadcrumb_html(level: Level, *, order: str) -> str:
 
 def folder_tile_html(t: dict[str, Any], *, order: str) -> str:
     counts = _count_text(t["decks"], t["subfolders"])
-    lock = (
-        f"<span class='lock' title='Private folder'>{icon('lock')}<span class='sr-only'>Private</span></span>"
+    # a private folder shows a lock in place of the folder icon, so the tile's end stays clear
+    # for its ⋮
+    ic = (
+        f"<span class='ic lock' title='Private folder'>{icon('lock')}"
+        "<span class='sr-only'>Private</span></span>"
         if t["private"]
-        else ""
+        else f"<span class='ic'>{icon('folder')}</span>"
     )
     where = f"<span class='where' title='{esc(t['where'])}'>In {esc(t['where'])}</span>" if t["where"] else ""
+    # the tile's ⋮: static/menus.js opens the folder's menu from it (and from a right-click, a
+    # press and hold or Shift+F10 on the tile); the tile itself stays a link. The gateway's backup
+    # folder is never listed here (visible_folders); were it, its menu offers no Move or Delete.
+    kebab = (
+        f"<button type='button' class='kebab' aria-label='Menu for {esc(t['name'])}' aria-haspopup='menu' "
+        f"title='Menu'>{icon('more')}</button>"
+    )
+    backup = " data-backup" if t.get("backup") else ""
     return (
-        f"<li class='folder'><a href='{esc(level_href(t['id'], order=order))}'>"
-        f"<span class='ic'>{icon('folder')}</span>"
+        f"<li class='folder' data-folder-id='{esc(str(t['id']))}' data-folder-name='{esc(t['name'])}'"
+        f"{backup}>"
+        f"<a href='{esc(level_href(t['id'], order=order))}'>{ic}"
         f"<span class='text'><span class='name' title='{esc(t['name'])}'>{esc(t['name'])}</span>"
-        f"<span class='sub'>{esc(counts)}</span>{where}</span>{lock}</a></li>"
+        f"<span class='sub'>{esc(counts)}</span>{where}</span></a>{kebab}</li>"
     )
 
 
@@ -236,9 +311,11 @@ def level_html(
             f"<ul class='plain folderlist {esc(view)}'>{tiles}</ul></section>"
         )
     if level.decks:
-        listing = deck_list_html(level.decks, covers=covers, q=q, view=view)
-    elif level.searching:
+        listing = deck_list_html(level.decks, covers=covers, q=q, view=view, own=True)
+    elif level.searching and q:
         listing = f"<p class='empty'>No decks matching “{esc(q)}” in any folder.</p>"
+    elif level.searching:
+        listing = "<p class='empty'>No decks match these filters in any folder.</p>"
     elif level.current is not None:
         listing = (
             "<p class='empty'>No decks in this folder.</p>"
@@ -250,7 +327,7 @@ def level_html(
             "<p class='empty'>No decks yet. Create one with New deck, or ask your assistant to propose a "
             "new deck.</p>"
         )
-    heading = f"Decks matching “{esc(q)}”" if level.searching else "Decks"
+    heading = f"Decks matching “{esc(q)}”" if q else "Matching decks" if level.searching else "Decks"
     out += (
         "<section class='fv-area' aria-labelledby='fv-decks'>"
         f"<h2 id='fv-decks'>{heading} <span class='n'>{len(level.decks)}</span></h2>{listing}</section>"
@@ -259,8 +336,9 @@ def level_html(
 
 
 FOLDER_CSS = """
-/* My decks by folder (folderview.py): breadcrumb, then outlined Folders and Decks areas */
-.crumbs{margin:0 0 1rem}
+/* My decks by folder (folderview.py): breadcrumb, then the Folders and Decks areas, each a
+   heading with its count over the tiles (8 px inside a group, 12 to 16 px between) */
+.crumbs{margin:0 0 8px}
 .crumbs ol{display:flex;flex-wrap:wrap;align-items:center;gap:.25rem .4rem;margin:0;padding:0;list-style:none;
   font-size:1.05rem}
 .crumbs li{display:inline-flex;align-items:center;gap:.4rem;min-width:0;max-width:100%}
@@ -268,15 +346,14 @@ FOLDER_CSS = """
 .crumbs a,.crumbs span{overflow-wrap:anywhere}
 .crumbs a{display:inline-flex;align-items:center;min-height:44px;color:var(--link,var(--text))}
 .crumbs li[aria-current] span{font-weight:700}
-.fv-area{border:1px solid var(--border);border-radius:var(--radius-panel,8px);padding:1rem;margin:0 0 1.25rem;
-  background:var(--surface)}
-.fv-area > h2{display:flex;align-items:center;gap:.5rem;margin:0 0 .9rem;font-size:1.15rem;
+.fv-area{margin:0 0 14px}
+.fv-area > h2{display:flex;align-items:center;gap:.45rem;margin:0 0 8px;font-size:1.05rem;
   overflow-wrap:anywhere}
-.fv-area > h2 .n{font-size:.85rem;font-weight:700;color:var(--text-muted);background:var(--surface-2);
-  border:1px solid var(--border);border-radius:1rem;padding:0 .55rem;line-height:1.6}
+.fv-area > h2 .n{font-size:.8rem;font-weight:700;color:var(--text-muted);
+  border:1px solid var(--border);border-radius:10px;padding:0 .45rem;line-height:1.6}
 .fv-area .empty{margin:0;color:var(--text-muted)}
 .fv-area ul.decklist{margin-bottom:0}
-ul.folderlist{display:grid;gap:.75rem;margin:0}
+ul.folderlist{display:grid;gap:10px;margin:0}
 ul.folderlist.grid{grid-template-columns:repeat(auto-fill,minmax(min(100%,15rem),1fr))}
 ul.folderlist.list{grid-template-columns:minmax(0,1fr);gap:.5rem}
 ul.folderlist .folder,ul.folderlist .folder a,ul.folderlist .text{min-width:0}
@@ -294,6 +371,4 @@ ul.folderlist .text{display:flex;flex-direction:column;gap:.1rem;flex:1}
 ul.folderlist .name{font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 ul.folderlist .sub,ul.folderlist .where{font-size:.86rem;color:var(--text-muted);white-space:nowrap;
   overflow:hidden;text-overflow:ellipsis}
-ul.folderlist .lock{flex:none;display:inline-flex;color:var(--text-muted);font-size:1.05rem}
-@media (max-width:600px){ .fv-area{padding:.75rem;margin-left:0;margin-right:0} }
 """

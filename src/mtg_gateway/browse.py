@@ -1,8 +1,11 @@
 """Browsing Archidekt the way its site does: deck search and public profiles.
 
 ``/search`` is the gateway's counterpart of archidekt.com/search/decks: filter public decks by
-name, commander, owner, format, colour identity and sort order, page through them and open any
-of them on the gateway's own deck page. ``/users/{username}`` is a public profile: that person's
+name, commander, owner, format, colour identity and sort order (the search panel the card search
+and My decks share, searchpanel.py), load more of them a page at a time and open any of them on
+the gateway's own deck page. The name box also takes an Archidekt deck link or deck ID, which
+opens that deck. ``/search/api/decks`` is one page of results as JSON for the page's "Load more
+decks" (static/search.js). ``/users/{username}`` is a public profile: that person's
 public decks. Both read Archidekt anonymously (only public decks come back) through the member's
 Archidekt budget, and both need the gateway sign-in like every other page. The same search is
 offered as the ``search_decks`` MCP tool (``owner`` for one user's public decks) and under ``/api/v1``.
@@ -19,12 +22,21 @@ from urllib.parse import urlencode
 
 from pydantic import Field
 from starlette.requests import Request
-from starlette.responses import Response
+from starlette.responses import JSONResponse, Response
 
+from . import prefs
+from . import searchpanel as sp
 from .archidekt import FORMAT_IDS, FORMAT_NAMES, SEARCH_ORDERS, format_label, list_row
 from .busy import busy_response
-from .deckpage import WRITES_OFF_FOLLOW, WRITES_OFF_TITLE, avatar_html, covers_for, deck_list_html
-from .decks import DeckError
+from .deckpage import (
+    WRITES_OFF_FOLLOW,
+    WRITES_OFF_TITLE,
+    avatar_html,
+    covers_for,
+    deck_card_html,
+    deck_list_html,
+)
+from .decks import DeckError, _clean_deck_id
 from .pages import _csrf, browser_session, login_redirect
 from .theme import display_name, icon, render, stylesheet_link
 from .theme import esc as _esc
@@ -59,45 +71,27 @@ SEARCH_CSP = (
     "img-src 'self' https://cards.scryfall.io; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
 )
 COLOURS = (("W", "White"), ("U", "Blue"), ("B", "Black"), ("R", "Red"), ("G", "Green"), ("C", "Colorless"))
+# how the colours match (searchpanel.DECK_COLOUR_MODES, the three My decks offers): "At most
+# these" is Archidekt's colorIdentity search (decks within the colours); "Exactly these" asks
+# Archidekt the same and the gateway keeps only the decks whose colour identity is exactly those
+# colours; "Including these" (the default) searches without Archidekt's colour filter and keeps
+# the decks whose colours include every picked colour, from each page's colour pips (Archidekt has
+# no search for either).
+COLOUR_MODES = sp.DECK_COLOUR_MODES
+# the sort direction: Automatic is Archidekt's own way for the order (newest first, the biggest
+# first, the lowest bracket first); the other way sends the order without its leading "-" (the
+# ordering parameter's standard form, so far not tried live with this gateway)
+DIRECTIONS = sp.DIRECTIONS
+MAX_PAGES = 17  # Archidekt caps a search at 1000 rows, 60 a page
+LIMIT_NOTE = "Archidekt lists at most 1,000 decks for one search. Narrow the search to see other decks."
+VIEWS = ("grid", "list")
 FORMAT_OPTIONS = sorted(
     ((str(i), format_label(FORMAT_NAMES[i])) for i in sorted(FORMAT_NAMES)), key=lambda kv: kv[1].lower()
 )
 BROWSE_CSS = """
-/* The deck search form: one grid of equal-height controls, labels on one baseline, the colour
-   toggles and the buttons on a closing row that stacks on a phone. */
-.searchbar{padding:1.1rem 1.1rem 1rem}
-.searchbar .controls{display:grid;gap:.85rem 1rem;align-items:start;
-  grid-template-columns:repeat(auto-fit,minmax(min(100%,12rem),1fr))}
-.searchbar .controls .field{margin:0;gap:.3rem}
-.searchbar .field > label,.searchbar .field .lbl{display:block;font-size:.93rem;font-weight:700;margin:0;
-  line-height:1.3;color:var(--text)}
-.searchbar .field .lbl{margin-bottom:.3rem}
-.searchbar .field input,.searchbar .field .sel,.searchbar .field select{height:var(--ctl);margin:0}
-.searchbar .field .suggest{display:block}
-.searchbar .foot{grid-column:1 / -1;display:flex;flex-wrap:wrap;align-items:center;
-  justify-content:space-between;gap:.75rem 1.5rem;margin-top:.15rem;padding-top:.9rem;
-  border-top:1px solid var(--border-soft)}
-.searchbar .foot .field{flex:1 1 min(100%,20rem);min-width:0}
-.searchbar .colours{display:flex;flex-wrap:wrap;align-items:center;gap:.4rem .5rem}
-.searchbar .colours label{display:inline-flex;align-items:center;gap:.35rem;margin:0;cursor:pointer;
-  font-weight:400;height:34px;padding:0 .75rem 0 .5rem;border:1px solid var(--border);border-radius:17px;
-  background:var(--surface);transition:border-color .2s ease,background-color .2s ease;user-select:none}
-.searchbar .colours label:hover{border-color:var(--orange)}
-.searchbar .colours label:has(input:checked){border-color:var(--orange);background:var(--orange-tint)}
-.searchbar .colours label:has(input:focus-visible){outline:2px solid var(--focus);outline-offset:2px}
-.searchbar .colours input{position:absolute;width:1px;height:1px;margin:-1px;padding:0;border:0;
-  overflow:hidden;clip:rect(0,0,0,0);opacity:0}
-.searchbar .form-actions{margin:0;flex:0 0 auto;max-width:100%;flex-wrap:wrap;justify-content:flex-end;
-  gap:.5rem}
-.searchbar .form-actions .btn,.searchbar .form-actions button{margin:0;height:var(--ctl)}
-.searchbar .form-actions .btn-primary{min-width:11rem}
-.searchbar .form-actions .cards{gap:.4rem}
-@media (min-width:1200px){ .searchbar .controls{
-  grid-template-columns:minmax(0,2fr) minmax(0,2fr) minmax(0,1.5fr) minmax(10rem,1fr) minmax(10rem,1fr)} }
-@media (max-width:600px){ .searchbar .foot{flex-direction:column;align-items:stretch}
-  .searchbar .foot .field{flex:0 0 auto}
-  .searchbar .form-actions{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,9rem),1fr))}
-  .searchbar .form-actions .btn-primary{grid-column:1 / -1;min-width:0} }
+/* the deck search: the shared panel (theme.SEARCH_PANEL_CSS); its Commander and Owner boxes */
+.spanel .fgrid > .fg.cmd{--gw:220px}
+.spanel .fgrid > .fg.who{--gw:160px}
 .results-head{display:flex;justify-content:space-between;align-items:baseline;gap:1rem;flex-wrap:wrap;
   margin:0 0 .75rem}
 .results-head .muted{margin:0}
@@ -145,14 +139,44 @@ BROWSE_CSS = """
 """
 
 
+def deck_ref(text: str) -> str | None:
+    """The deck ID when ``text`` is an Archidekt deck link or a deck ID, else None."""
+    if not text or not (text.isdigit() or "archidekt.com" in text.lower()):
+        return None
+    try:
+        return _clean_deck_id(text)
+    except DeckError:
+        return None
+
+
+def matching_colours(rows: list[dict[str, Any]], colors: str, mode: str) -> list[dict[str, Any]]:
+    """The rows whose colour identity matches ``colors`` the way ``mode`` says (searchpanel.
+    colour_match: exactly those, or including every one of them; C alone: colourless decks)."""
+    return [r for r in rows if sp.colour_match(r.get("colors"), colors, mode)]
+
+
+def archidekt_order(order_by: str, direction: str) -> str:
+    """Archidekt's ``orderBy`` for the order and the direction: its own way unchanged
+    (``auto``), else the order with ("desc") or without ("asc") its leading ``-``."""
+    base = order_by.lstrip("-")
+    if direction == "desc":
+        return "-" + base
+    if direction == "asc":
+        return base
+    return order_by
+
+
 def read_query(qp: Any) -> dict[str, Any]:
     """The search form's fields, cleaned: unknown values fall back to the defaults."""
     fmt = (qp.get("format") or "").strip()
+    picked = [v.upper() for v in (qp.getlist("c") if hasattr(qp, "getlist") else [])]
     colors = "".join(
-        c for c, _n in COLOURS if qp.get(f"c{c}") == "1" or c in (qp.get("colors") or "").upper()
+        c
+        for c, _n in COLOURS
+        if c in picked or qp.get(f"c{c}") == "1" or c in (qp.get("colors") or "").upper()
     )
     try:
-        page = max(1, min(int(qp.get("page") or 1), 17))  # Archidekt caps a listing at 1000 rows
+        page = max(1, min(int(qp.get("page") or 1), MAX_PAGES))
     except ValueError:
         page = 1
     return {
@@ -161,9 +185,22 @@ def read_query(qp: Any) -> dict[str, Any]:
         "owner": (qp.get("owner") or "").strip()[:120],  # a profile's username comes through here too
         "deck_format": int(fmt) if fmt.isdigit() and int(fmt) in FORMAT_NAMES else None,
         "colors": colors,
+        "colour_mode": qp.get("cm") if qp.get("cm") in dict(COLOUR_MODES) and colors else "incl",
         "order_by": qp.get("order") if qp.get("order") in SEARCH_ORDERS else "-viewCount",
+        "direction": qp.get("dir") if qp.get("dir") in dict(DIRECTIONS) else "auto",
         "page": page,
     }
+
+
+def archidekt_query(query: dict[str, Any]) -> dict[str, Any]:
+    """The part of a cleaned query ArchidektClient.search_decks takes: "Including these" colours
+    are not Archidekt's filter (the gateway keeps the matching decks itself), and the direction
+    goes into the order."""
+    out = {k: query[k] for k in ("name", "commander", "owner", "deck_format", "colors", "page")}
+    if query.get("colour_mode") == "incl":
+        out["colors"] = ""
+    out["order_by"] = archidekt_order(query["order_by"], query.get("direction", "auto"))
+    return out
 
 
 def search_link(query: dict[str, Any], **over: Any) -> str:
@@ -177,61 +214,153 @@ def search_link(query: dict[str, Any], **over: Any) -> str:
         params["owner"] = q["owner"]
     if q.get("deck_format") is not None:
         params["format"] = q["deck_format"]
-    for c in q.get("colors") or "":
-        params[f"c{c}"] = "1"
+    if q.get("colors"):
+        params["c"] = list(q["colors"])
+        if q.get("colour_mode", "incl") != "incl":
+            params["cm"] = q["colour_mode"]
     if q.get("order_by") and q["order_by"] != "-viewCount":
         params["order"] = q["order_by"]
+    if q.get("direction", "auto") != "auto":
+        params["dir"] = q["direction"]
     if q.get("page", 1) > 1:
         params["page"] = q["page"]
-    return "/search" + ("?" + urlencode(params) if params else "")
+    return "/search" + ("?" + urlencode(params, doseq=True) if params else "")
 
 
-def search_form_html(query: dict[str, Any]) -> str:
-    fmt_opts = "<option value=''>Any format</option>" + "".join(
-        f"<option value='{v}'{' selected' if str(query['deck_format']) == v else ''}>{_esc(n)}</option>"
-        for v, n in FORMAT_OPTIONS
-    )
-    order_opts = "".join(
-        f"<option value='{_esc(k)}'{' selected' if k == query['order_by'] else ''}>{_esc(v)}</option>"
-        for k, v in SEARCH_ORDERS.items()
-    )
-    colours = "".join(
-        f"<label><input type='checkbox' name='c{c}' value='1'{' checked' if c in query['colors'] else ''}>"
-        f"<i class='pip pip-{c}' aria-hidden='true'></i>{n}</label>"
-        for c, n in COLOURS
-    )
+def count_text(found: dict[str, Any] | None, query: dict[str, Any], *, shown: int = 0) -> str:
+    """The results bar's count: "About 1,000 decks" at Archidekt's cap, "N decks" otherwise; with
+    the colour modes the gateway filters itself ("Exactly these", "Including these") the decks
+    kept so far, since Archidekt counts the wider search."""
+    if found is None:
+        return "Decks"
+    if query.get("colors") and query.get("colour_mode") != "atmost":
+        return f"{shown} deck{'' if shown == 1 else 's'}"
+    count = found.get("count")
+    if not isinstance(count, int):
+        return "Decks"
+    return f"About {count:,} decks" if count >= 1000 else f"{count} deck{'' if count == 1 else 's'}"
+
+
+def search_form_html(
+    query: dict[str, Any], *, view: str = "grid", found: dict[str, Any] | None = None, shown: int = 0
+) -> str:
+    """The search panel (searchpanel.py): the name box (a deck name, or an Archidekt deck link or
+    ID, which shows "Open this deck" under it), Colors with its match drop-down, Format, Commander
+    and Owner, and the results bar: the count, Sort by with its direction, Grid or List, the card
+    size and Clear filters."""
     # the card search for the same text: a commander's name is a card name, a deck name may be
     cards_q = query["commander"] or query["name"]
     cards_link = "/cards" + (f"?{urlencode({'q': cards_q})}" if cards_q else "")
+    ref = deck_ref(query["name"])
+    under = sp.open_hint_html(ref, f"/decks/open?{urlencode({'ref': ref})}") if ref else ""
+    groups = sp.filter_grid(
+        [
+            sp.colours_group(
+                label="Colors",
+                name="c",
+                chosen=query["colors"],
+                mode_name="cm",
+                mode_options=COLOUR_MODES,
+                mode_value=query["colour_mode"],
+            ),
+            sp.select_group(
+                label="Format",
+                name="format",
+                options=[("", "Any format"), *FORMAT_OPTIONS],
+                value="" if query["deck_format"] is None else str(query["deck_format"]),
+                input_id="s-format",
+            ),
+            sp.text_group(
+                label="Commander",
+                name="commander",
+                value=query["commander"],
+                input_id="s-cmd",
+                placeholder="Card name, e.g. Atraxa, Praetors' Voice",
+                attrs=" data-suggest='cards' maxlength='120'",
+                cls="cmd",
+            ),
+            sp.text_group(
+                label="Owner",
+                name="owner",
+                value=query["owner"],
+                input_id="s-owner",
+                placeholder="Archidekt username",
+                attrs=" maxlength='120'",
+                cls="who",
+            ),
+        ]
+    )
+    bar = sp.results_bar(
+        count_html=sp.count_html(count_text(found, query, shown=shown), count_id="s-count"),
+        sort_html=sp.sort_group(
+            order_name="order",
+            orders=SEARCH_ORDERS.items(),
+            order=query["order_by"],
+            order_id="s-order",
+            dir_name="dir",
+            direction=query["direction"],
+        ),
+        view_html=sp.view_group(view),
+        clear_html="<a class='btn sp-clear clr' href='/search'>Clear filters</a>",
+        cls="pub",
+    )
     return (
-        "<section class='panel searchbar'><form method='get' "
-        "action='/search' class='controls' id='searchform'>"
-        "<div class='field'><label for='s-name'>Deck name</label>"
-        "<input id='s-name' type='search' name='name' "
-        f"value='{_esc(query['name'])}' placeholder='Any part of the name'></div>"
-        "<div class='field'><label for='s-cmd'>Commander</label>"
-        f"<input id='s-cmd' type='text' name='commander' value='{_esc(query['commander'])}' "
-        "placeholder='Card name, e.g. Atraxa, Praetors&#39; Voice' data-suggest='cards' "
-        "autocomplete='off'></div>"
-        "<div class='field'><label for='s-owner'>Owner</label>"
-        "<input id='s-owner' type='text' name='owner' "
-        f"value='{_esc(query['owner'])}' placeholder='Archidekt username'></div>"
-        f"<div class='field'><label for='s-format'>Format</label><span class='sel'>{icon('decks')}"
-        f"<select id='s-format' name='format'>{fmt_opts}</select></span></div>"
-        f"<div class='field'><label for='s-order'>Sort by</label><span class='sel'>{icon('sort')}"
-        f"<select id='s-order' name='order'>{order_opts}</select></span></div>"
-        "<div class='foot'><div class='field'><span class='lbl'>Color "
-        f"identity</span><div class='colours'>{colours}</div></div>"
-        "<div class='form-actions'><button type='submit' "
-        f"class='btn-primary'>{icon('search')} Search decks</button>"
-        "<a class='btn' href='/search'>Clear</a>"
-        f"<a class='btn cards' href='{_esc(cards_link)}' title='Find a card and add it to a deck'>"
-        f"{icon('image')} Search cards</a></div></div>"
-        "</form></section>"
+        "<section class='panel spanel'><form method='get' action='/search' id='searchform' "
+        "data-apply='submit'>"
+        + sp.name_row(
+            label="Deck name, or an Archidekt link or deck ID",
+            name="name",
+            value=query["name"],
+            placeholder="Deck name, link or ID",
+            input_id="s-name",
+            search_label="Search decks",
+            cross_html=sp.cross_link("Search cards instead", cards_link, "image"),
+            under_html=under,
+            attrs=" maxlength='120'",
+        )
+        + sp.filters_sheet(
+            groups,
+            show_html="<button type='submit' class='btn-primary sp-show'>Show results</button>",
+            clear_html="<a class='btn sp-clear' href='/search'>Clear filters</a>",
+        )
+        + bar
+        + "</form></section>"
+    )
+
+
+def deck_items_html(rows: list[dict[str, Any]]) -> str:
+    """The tiles of one page of results, without the list around them (Load more appends them)."""
+    covers = covers_for(rows)
+    return "".join(
+        deck_card_html(d, cover=covers.get(str(d["id"])), selected=False, show_owner=True) for d in rows
+    )
+
+
+def search_results_html(found: dict[str, Any], query: dict[str, Any], *, view: str) -> str:
+    """The first page of a search, then "Load more decks" (static/search.js appends the next
+    page), which says so when Archidekt's cap is reached."""
+    rows = found["decks"]
+    if not rows:
+        return (
+            "<section class='panel'><p class='muted'>No public decks match. Try fewer filters.</p></section>"
+        )
+    more = bool(found.get("has_more"))
+    at_cap = more and query["page"] >= MAX_PAGES
+    # the search these results are of, for Load more (the form may change without being sent)
+    shown_qs = search_link(query, page=1).partition("?")[2]
+    return (
+        deck_list_html(rows, covers=covers_for(rows), view=view, show_owner=True)
+        + f"<div class='loadmore' id='s-more' data-page='{query['page']}' data-max='{MAX_PAGES}' "
+        f"data-qs='{_esc(shown_qs)}'"
+        + ("" if more else " hidden")
+        + f"><button type='button' class='btn' data-more{' hidden' if at_cap else ''}>Load more decks"
+        "</button>"
+        f"<p class='muted'{'' if at_cap else ' hidden'}>{_esc(LIMIT_NOTE)}</p></div>"
     )
 
 
 def results_html(found: dict[str, Any], query: dict[str, Any], *, heading: str) -> str:
+    """A profile's decks: the heading with the count, the tiles and the page links."""
     rows = found["decks"]
     covers = {
         r["id"]: {"scryfall_uid": r.get("featured_scryfall_id")}
@@ -254,7 +383,7 @@ def results_html(found: dict[str, Any], query: dict[str, Any], *, heading: str) 
     if query["page"] > 1:
         pager += f"<a class='btn' href='{_esc(search_link(query, page=query['page'] - 1))}'>Previous</a>"
     pager += f"<span class='muted small'>Page {query['page']}</span>"
-    if found.get("has_more") and query["page"] < 17:
+    if found.get("has_more") and query["page"] < MAX_PAGES:
         pager += f"<a class='btn' href='{_esc(search_link(query, page=query['page'] + 1))}'>Next</a>"
     pager += "</nav>"
     return head + body + pager
@@ -289,6 +418,9 @@ def add_browse_routes(server: MCPServer, state: AppState) -> None:
             current=current,
             head_extra=f"{stylesheet_link('deck.css')}<style>{BROWSE_CSS}</style>"
             "<script src='/static/deck.js' defer></script>"
+            # the search panel's drop-downs and phone sheet, then Load more and Open this deck
+            "<script src='/static/searchpanel.js' defer></script>"
+            "<script src='/static/search.js' defer></script>"
             # the user page's Follow button (static/social.js, the social actions' own file)
             + ("<script src='/static/social.js' defer></script>" if social else ""),
         )
@@ -302,12 +434,34 @@ def add_browse_routes(server: MCPServer, state: AppState) -> None:
         }.get(exc.kind, "The search could not be run: " + str(exc))
         return f"<p class='notice error'>{_esc(text)}</p>"
 
+    async def run_search(sub: str, query: dict[str, Any]) -> dict[str, Any]:
+        """One page from Archidekt; with "Exactly these" or "Including these" colours only the
+        decks whose colours match (Archidekt's own filter is "At most these")."""
+        found = await decks.search_decks(sub, **archidekt_query(query))
+        if query["colors"] and query["colour_mode"] != "atmost":
+            found = {
+                **found,
+                "decks": matching_colours(found["decks"], query["colors"], query["colour_mode"]),
+            }
+        return found
+
+    def view_of(request: Request, sub: str) -> tuple[str, bool]:
+        return prefs.view_choice(state.db, sub, request, "search", VIEWS, "grid")
+
+    def remembered(resp: Response, sub: str, view: str, remember: bool) -> Response:
+        if remember:
+            return prefs.remember_view(
+                state.db, sub, resp, "search", view, secure=s.public_url.startswith("https://")
+            )
+        return resp
+
     @server.custom_route("/search", methods=["GET"], include_in_schema=False)
     async def search_page(request: Request) -> Response:
         sub, sid = browser_session(state, request)
         if not sub:
             return login_redirect("/search" + (f"?{request.url.query}" if request.url.query else ""))
         query = read_query(request.query_params)
+        view, remember = view_of(request, sub)
         asked = bool(
             query["name"]
             or query["commander"]
@@ -315,17 +469,20 @@ def add_browse_routes(server: MCPServer, state: AppState) -> None:
             or query["deck_format"] is not None
             or query["colors"]
         )
-        body = search_form_html(query)
+        # a deck link in the name box opens that deck ("Open this deck" under the box): no search
+        if deck_ref(query["name"]) and not query["name"].isdigit():
+            asked = False
+        body = ""
         if asked:
             note = ""
             try:
-                found = await decks.search_decks(sub, **query)
+                found = await run_search(sub, query)
                 if query["commander"] and not found["decks"]:
                     names = await commander_names(state, query["commander"])
                     if not any(n.casefold() == query["commander"].casefold() for n in names):
                         if len(names) == 1:
                             query = {**query, "commander": names[0]}
-                            found = await decks.search_decks(sub, **query)
+                            found = await run_search(sub, query)
                             note = f"<p class='notice'>Showing decks led by {_esc(names[0])}.</p>"
                         elif names:
                             links = ", ".join(
@@ -339,13 +496,15 @@ def add_browse_routes(server: MCPServer, state: AppState) -> None:
             except DeckError as exc:
                 if busy := busy_response(exc, request, page, sub=sub, sid=sid):
                     return busy
-                body += problem(exc)
+                body += search_form_html(query, view=view) + problem(exc)
             else:
-                body += note
-                bits = [b for b in (query["name"], query["commander"], query["owner"]) if b]
-                heading = "Decks" + (" matching " + ", ".join(bits) if bits else "")
-                body += results_html(found, query, heading=heading)
+                body += (
+                    search_form_html(query, view=view, found=found, shown=len(found["decks"]))
+                    + note
+                    + search_results_html(found, query, view=view)
+                )
         else:
+            body += search_form_html(query, view=view)
             popular = "".join(
                 f"<a href='{_esc(search_link(read_query({}), **q))}'>{_esc(label)}</a>"
                 for label, q in (
@@ -369,7 +528,35 @@ def add_browse_routes(server: MCPServer, state: AppState) -> None:
                 f"<a class='precons' href='/precons'>{icon('box')} Preconstructed decks by set</a></div>"
                 "</section>"
             )
-        return page("Search decks", body, sub=sub, sid=sid)
+        return remembered(page("Search decks", body, sub=sub, sid=sid), sub, view, remember)
+
+    @server.custom_route("/search/api/decks", methods=["GET"], include_in_schema=False)
+    async def search_api(request: Request) -> Response:
+        """One page of the search in the address, for "Load more decks": ``{ok, html, count,
+        page, has_more, at_cap}``; ``html`` is the tiles only, which the page appends."""
+        sub, _sid = browser_session(state, request)
+        if not sub:
+            return JSONResponse({"ok": False, "error": "sign in first"}, status_code=401)
+        query = read_query(request.query_params)
+        try:
+            found = await run_search(sub, query)
+        except DeckError as exc:
+            return JSONResponse(
+                {"ok": False, "error": problem(exc)}, status_code=503 if exc.kind != "invalid" else 400
+            )
+        more = bool(found.get("has_more"))
+        return JSONResponse(
+            {
+                "ok": True,
+                "html": deck_items_html(found["decks"]),
+                "count": found.get("count"),
+                "shown": len(found["decks"]),
+                "page": query["page"],
+                "has_more": more and query["page"] < MAX_PAGES,
+                "at_cap": more and query["page"] >= MAX_PAGES,
+            },
+            headers={"Cache-Control": "no-store"},
+        )
 
     @server.custom_route("/precons", methods=["GET"], include_in_schema=False)
     async def precons_page(request: Request) -> Response:
@@ -448,7 +635,7 @@ def add_browse_routes(server: MCPServer, state: AppState) -> None:
             else "-updatedAt"
         )
         try:
-            found = await decks.search_decks(sub, **query)
+            found = await decks.search_decks(sub, **archidekt_query(query))
         except DeckError as exc:
             if busy := busy_response(exc, request, page, sub=sub, sid=sid):
                 return busy

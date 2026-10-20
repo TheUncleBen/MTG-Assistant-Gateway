@@ -380,7 +380,9 @@ def add_cardsearch_routes(server: MCPServer, state: AppState) -> None:
                 "<script src='/static/cardview.js' defer></script>"
                 # Art variants… in the card menu: the shared printing picker, in its browse mode
                 + ("<script src='/static/printpick.js' defer></script>" if state.prices is not None else "")
-                + "<script src='/static/cardsearch.js' defer></script>"
+                # the shared panel's drop-downs and phone sheet (static/searchpanel.js), then the page
+                + "<script src='/static/searchpanel.js' defer></script>"
+                "<script src='/static/cardsearch.js' defer></script>"
             ),
         )
         resp.headers["Content-Security-Policy"] = CARDS_CSP
@@ -533,13 +535,6 @@ def add_cardsearch_routes(server: MCPServer, state: AppState) -> None:
         f = cq.parse(request.query_params)
         view, remember = view_of(request, sub)
         linked, reason = add_reason(sub)
-        body = f"<section class='panel cs-panel'>{cv.filters_html(f, view=view)}"
-        if not linked:
-            body += (
-                f"<p class='readonly'>{icon('link')}<span>Cards can be read but not added: no Archidekt "
-                "account is linked.</span><a href='/account'>Link it on the Account page</a></p>"
-            )
-        body += "</section>"
         results = ""
         total: int | None = None
         has_more = False
@@ -567,6 +562,13 @@ def add_cardsearch_routes(server: MCPServer, state: AppState) -> None:
                 )
         else:
             results = START_HTML
+        body = f"<section class='panel spanel cs-panel'>{cv.filters_html(f, view=view, total=total)}"
+        if not linked:
+            body += (
+                f"<p class='readonly'>{icon('link')}<span>Cards can be read but not added: no Archidekt "
+                "account is linked.</span><a href='/account'>Link it on the Account page</a></p>"
+            )
+        body += "</section>"
         more = (
             "<div class='cs-more-wrap' id='cs-more'"
             + ("" if has_more else " hidden")
@@ -574,7 +576,6 @@ def add_cardsearch_routes(server: MCPServer, state: AppState) -> None:
         )
         body += (
             "<section class='cs-out'>"
-            + cv.results_head_html(f, view=view, total=total, shown=f.chosen())
             + (cv.HINT_HTML if state.prices is not None else "")
             + f"<div id='cs-status' class='cs-status' role='status'>{status_html}</div>"
             + f"<div id='cs-results' class='cs-results' data-linked='{'1' if linked else ''}'>{results}</div>"

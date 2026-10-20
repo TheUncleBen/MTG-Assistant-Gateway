@@ -599,7 +599,9 @@ def test_a_long_server_name_gives_way_before_the_search_box_and_the_links(chromi
         finally:
             object.__setattr__(settings, "server_name", short_name)
     assert problems == [], "\n".join(problems)
-    assert at_1280["cut"] and at_1280["search"] >= full_1280 - 0.05, (at_1280, full_1280)  # name cut, not box
+    # at 1280 the closer links leave room: with a browser's narrower fonts the long name may fit
+    # whole, else it is the name that is cut; the box keeps its full width either way
+    assert at_1280["search"] >= full_1280 - 0.05, (at_1280, full_1280)
 
 
 def test_without_scripts_the_scroll_room_is_large_only_where_the_bar_wraps(chromium, server: Server) -> None:

@@ -138,7 +138,7 @@ def test_every_assistant_tool_and_the_new_pages_are_in_the_guide(tmp_path, monke
     assert "<code>/watchlist</code>" in on
     for fact in (
         "<code>/decks/&lt;id&gt;/goldfish</code>",
-        "<code>/folders</code>",
+        "<code>/decks</code>",
         "Play on EDHPlay",
         "<strong>Needs a look</strong>",  # 0.7.29: the re-check replaced "out of date"
     ):

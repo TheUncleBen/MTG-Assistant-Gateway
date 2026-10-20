@@ -64,10 +64,15 @@ def test_deck_page_columns_on_a_phone_and_my_decks_on_a_wide_screen(server: Serv
             assert (size, page.evaluate(MEASURE)) == (size, [])
         browser.close()
         browser, page, errors2 = _page(p, server, sid, 1600)
-        for size, across in (("s", 6), ("m", 5), ("l", 4)):
+        for size, least in (("s", 160), ("m", 220), ("l", 300)):
             _size(server, size)
             page.goto(f"{server.base}/decks?view=grid", wait_until="networkidle")
-            assert page.evaluate(COLS, "ul.decklist.grid") == across, size
+            widths = page.evaluate(
+                "s => getComputedStyle(document.querySelector(s)).gridTemplateColumns.split(' ')"
+                ".map(parseFloat)",
+                "ul.decklist.grid",
+            )
+            assert all(w >= least for w in widths) and len(widths) >= 1600 // (least + 25) - 1, (size, widths)
         browser.close()
     assert errors == [] and errors2 == []
 
@@ -241,23 +246,30 @@ def test_collection_my_decks_and_card_search_show_the_switch_with_the_grid_only(
     with sync_playwright() as p:
         browser, page, errors = _page(p, server, sid, width, theme=theme)
         for path, bar in (
-            ("/decks?view=grid", ".listbar"),
+            ("/decks?view=grid", ".rbar"),
             ("/collection?view=grid", ".collbar"),
-            ("/cards?q=sol&view=grid", ".cs-head"),
+            ("/cards?q=sol&view=grid", ".rbar.cards"),
         ):
             page.goto(f"{server.base}{path}", wait_until="networkidle")
+            sheet = width < 600 and bar.startswith(".rbar")  # phones: the switch is in the Filters sheet
+            if sheet:
+                page.locator(".sp-open").click()
+                page.locator("#sp-filters.open").wait_for(timeout=3000)
+                bar = "#sp-filters .sheet-size"
             assert page.locator(f"{bar} .sizeseg").is_visible(), path
             assert page.get_attribute(f"{bar} [data-card-size-set=l]", "aria-pressed") == "true"
             assert (path, page.evaluate(MEASURE)) == (path, [])
-            assert page.evaluate(CONTRAST, ".sizeseg button, .cardsize .lbl") == []
+            assert page.evaluate(CONTRAST, f"{bar} .sizeseg button, {bar} .cardsize .lbl") == []
             _shot(page, f"{path[1:].split('?')[0]}-{width}-{theme}.png")
+            if sheet:
+                page.locator(".sp-show").click()
         page.goto(f"{server.base}/decks?view=list", wait_until="networkidle")
-        assert page.locator(".listbar .sizeseg").count() == 0
+        assert page.locator(".rbar .sizeseg").is_hidden()
         page.goto(f"{server.base}/collection?view=list", wait_until="networkidle")
         assert page.locator(".collbar .sizeseg").count() == 0
         page.goto(f"{server.base}/cards?q=sol&view=grid", wait_until="networkidle")
-        page.locator(".cs-head .seg label", has_text="List").click()
-        page.wait_for_function("() => !document.querySelector('.cs-head .cardsize').offsetParent")
+        page.locator(".rbar.cards .segc label", has_text="List").click()
+        page.wait_for_function("() => !document.querySelector('.rbar.cards .cardsize').offsetParent")
         browser.close()
     assert errors == []
 

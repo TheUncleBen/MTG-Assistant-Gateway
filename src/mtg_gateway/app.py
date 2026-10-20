@@ -139,6 +139,7 @@ class AppState:
     summaries: Summaries | None = None  # members' plain summaries (summary.py)
     app_signins: AppSignins = field(default_factory=AppSignins)  # the Android app's browser sign-in
     sync: DeckSync | None = None  # automatic Archidekt -> gateway deck sync (sync.py)
+    folder_jobs: Any = None  # folder deletes from My decks (companion_folders.py)
 
     @property
     def live(self) -> LiveSettings:
@@ -728,6 +729,8 @@ def build_mcp_server(state: AppState) -> MCPServer:
             for task in tasks:
                 with contextlib.suppress(asyncio.CancelledError):
                     await task
+            if state.folder_jobs is not None:
+                await state.folder_jobs.aclose()
             await state.decks.aclose()  # an apply still running is given a moment, then recorded
             await state.oidc.aclose()
             await state.provider.cimd.aclose()

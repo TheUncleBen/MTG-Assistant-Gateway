@@ -96,7 +96,7 @@ class CameraPanel(
     private val exposureBar: SeekBar = view.findViewById(R.id.exposure)
     private val exposureRow: View = view.findViewById(R.id.exposure_row)
     private val autoToggle: ToggleButton = view.findViewById(R.id.auto_toggle)
-    private val shoot: Button = view.findViewById(R.id.shoot)
+    private val shoot: View = view.findViewById(R.id.shoot) // the round capture button (an ImageButton)
 
     private var provider: ProcessCameraProvider? = null
     private var camera: Camera? = null

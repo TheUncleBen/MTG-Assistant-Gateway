@@ -81,21 +81,24 @@
                 android:minHeight="48dp" android:contentDescription="@string/exposure" />
         </LinearLayout>
 
+        <!-- The same row as the Scan page's capture bar: Done on the left, the round capture
+             button in the middle, Auto on the right. -->
         <LinearLayout
             android:layout_width="match_parent" android:layout_height="wrap_content"
             android:layout_marginStart="16dp" android:layout_marginEnd="16dp"
-            android:orientation="horizontal" android:layout_marginTop="8dp" android:layout_marginBottom="16dp">
+            android:orientation="horizontal" android:gravity="center_vertical"
+            android:layout_marginTop="8dp" android:layout_marginBottom="16dp">
             <Button android:id="@+id/done"
                 android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
-                android:minHeight="56dp" android:text="@string/done" />
+                android:minHeight="48dp" android:text="@string/done" />
+            <ImageButton android:id="@+id/shoot"
+                android:layout_width="72dp" android:layout_height="72dp"
+                android:layout_marginStart="12dp" android:layout_marginEnd="12dp"
+                android:background="@drawable/shutter_bg" android:src="@drawable/ic_camera"
+                android:scaleType="center" android:contentDescription="@string/shoot" android:enabled="false" />
             <ToggleButton android:id="@+id/auto_toggle"
                 android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
-                android:minHeight="56dp" android:layout_marginStart="12dp" android:textOn="@string/auto_mode" android:textOff="@string/auto_mode" />
-            <Button android:id="@+id/shoot"
-                android:layout_width="0dp" android:layout_weight="2" android:layout_height="wrap_content"
-                android:minHeight="56dp" android:layout_marginStart="12dp" android:text="@string/shoot" android:enabled="false"
-                android:backgroundTint="@color/button_primary_fill" android:textColor="@color/button_primary_text"
-                android:textStyle="bold" android:textSize="18sp" />
+                android:minHeight="48dp" android:textOn="@string/auto_mode" android:textOff="@string/auto_mode" />
         </LinearLayout>
     </LinearLayout>
     </ScrollView>

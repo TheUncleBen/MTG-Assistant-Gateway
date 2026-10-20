@@ -172,7 +172,7 @@ def test_navigation_has_three_tiers_in_the_stylesheet() -> None:
     assert ".tabbar{display:grid" in compact.split("}\n@media", 1)[0]
     rail = CSS[
         CSS.index(
-            "@media (min-width:600px) and (max-width:899.98px) and ((pointer:coarse) or (hover:none)){"
+            "@media (min-width:600px) and (max-width:1279.98px) and ((pointer:coarse) or (hover:none)){"
         ) :
     ]
     assert ".tabbar{display:flex;flex-direction:column" in rail
@@ -181,8 +181,8 @@ def test_navigation_has_three_tiers_in_the_stylesheet() -> None:
     assert "body.app .tabbar{display:flex;flex-direction:column" in app
     assert "body.app footer.site{display:none}" in CSS
     # nothing keys the layout off a phone user agent: a browser's "Desktop site" switch widens the
-    # viewport past 900px and gets the desktop bar from the same rules
-    assert "min-width:900px" not in CSS or "pointer:coarse" not in CSS[CSS.index("min-width:900px") :]
+    # viewport to 1280px and gets the desktop bar from the same rules
+    assert "min-width:1280px" not in CSS or "pointer:coarse" not in CSS[CSS.index("min-width:1280px") :]
 
 
 async def test_app_and_browser_get_the_same_tab_bar_markup(stack: Stack) -> None:

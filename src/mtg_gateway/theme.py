@@ -32,6 +32,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from . import __version__, update_check
 from .mana import SPRITE
+from .menus import MENUS_CSS
 
 THEME_COOKIE = "mtg_theme"
 # "auto" (unset) follows the window width; "desktop" asks a phone or the app for the computer layout.
@@ -377,7 +378,7 @@ select.msel-native{position:absolute;width:1px;height:1px;margin:-1px;padding:0;
   background-repeat:no-repeat;background-position:right .75rem center;background-size:10px 6px;
   transition:background-color .2s ease-in-out}
 .msel-btn:hover,.menu button.msel-btn:hover,details.dd .menu button.msel-btn:hover{
-  background-color:var(--surface-2);color:var(--text)}
+  background-color:var(--surface-2);background-image:url(/static/chevron.svg);color:var(--text)}
 .msel-btn:focus-visible,.menu button.msel-btn:focus-visible,details.dd .menu button.msel-btn:focus-visible{
   outline:2px solid var(--focus);outline-offset:1px;
   border-color:var(--orange);background-color:var(--surface)}
@@ -469,7 +470,8 @@ button[aria-busy=true]::after,.btn[aria-busy=true]::after{content:'';width:.9em;
 @media (prefers-reduced-motion:reduce){
   button[aria-busy=true]::after,.btn[aria-busy=true]::after{animation:none} }
 .btn-primary,button.primary{background:var(--orange);border-color:var(--orange);color:var(--on-orange)}
-.btn-primary:hover,button.primary:hover{background:var(--orange);color:var(--on-orange);filter:brightness(1.1)}
+.btn-primary:hover,button.primary:hover{background:var(--orange);color:var(--on-orange);
+  filter:brightness(1.1)}
 button.danger,.btn-danger{background:var(--danger-fill);border-color:var(--danger-fill);color:#fff}
 button.danger:hover,.btn-danger:hover{background:var(--danger-fill);color:#fff;filter:brightness(1.1)}
 button.secondary,.btn-ghost{background:transparent;border-color:transparent}
@@ -708,9 +710,10 @@ details.raw{margin:.5rem 0 0} details.raw summary{cursor:pointer;color:var(--tex
 /* and with large text (a raised font size, a text zoom) from 1024 px, while the bar is narrower
    than 68em: a font about 15% wider than Lato (DejaVu Sans, a monospace font) needs up to 65em
    for an admin's one row with the full-size links, and at most 57.5em with these, so the row
-   fits until the links wrap at 58em (below; the wrapped rows keep the full size). 68em is 952 px
-   at the normal size, so there the 1024 px rule above still decides. */
-@media (width >= 1024px){ @container topbar (58em <= width < 68em){
+   fits until the links wrap at 58em (below; the wrapped rows keep the full size). At the normal
+   size the bar is 91.4em at 1280 px, where the full-size links of an admin with a watchlist
+   (nine) cut the brand's word, so the closer links stay until 100em (1400 px). */
+@media (width >= 1024px){ @container topbar (58em <= width < 100em){
   body:not(.app) .topbar nav.site a{padding:0 .4rem;font-size:.93rem}
   body:not(.app) .topbar .brand{margin-right:.25rem} } }
 /* The proposal review's three choices sit at one height, and the deck banner's
@@ -866,10 +869,11 @@ ul.decklist.skeleton>li{height:230px;list-style:none}
 @keyframes skeleton{50%{opacity:.55}}
 @media (prefers-reduced-motion:reduce){ .skeleton>*{animation:none} }
 /* Adaptive navigation after Android's window size classes. Compact (under 600px, any device): a
-   bottom tab bar (Archidekt's floatingToolbar). Medium (600 to 899px) on a touch screen, such as
+   bottom tab bar (Archidekt's floatingToolbar). Medium (600 to 1279px) on a touch screen, such as
    an unfolded foldable or a tablet in a browser, and the Android app at every width from 600px:
-   a navigation rail down the left edge. Wider browsers, or a browser whose "Desktop site" switch
-   widens the viewport past 900px: the desktop top bar. Media queries track the live viewport, so
+   a navigation rail down the left edge. Wider touch browsers, a browser whose "Desktop site"
+   switch widens the viewport past 1280px, and a fine pointer at every width: the desktop top
+   bar. Media queries track the live viewport, so
    folding, rotating, split screen and pop-up windows re-flow at once; see _MOBILE_RULES and
    _RAIL_RULES below. */
 .tabbar{display:none}
@@ -955,7 +959,8 @@ _MOBILE_RULES = """
   body{b} .tabbar details.more summary svg{width:22px;height:22px}
   /* large text (a phone's font scale): a label wraps inside its tab and the bar grows */
   body{b} .tabbar > a,body{b} .tabbar details.more summary{min-width:0;height:auto;min-height:56px;
-    text-align:center;line-height:1.15;overflow-wrap:anywhere;hyphens:auto}
+    text-align:center;line-height:1.15}
+  body{b} .tabbar > a > .lbl{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   body{b} .tabbar details.more summary.on,
   body{b} .tabbar details.more[open] summary{color:var(--toolbar-active)}
   body{b} details.dd .menu{min-width:min(14rem,calc(100vw - 16px))}
@@ -979,6 +984,8 @@ _RAIL_RULES = """
     justify-content:center;gap:.3rem;height:64px;flex:none;color:var(--toolbar-text);text-decoration:none;
     font-weight:700;font-size:11px;-webkit-tap-highlight-color:transparent}
   body{b} .tabbar > a svg{width:24px;height:24px;position:relative;z-index:1}
+  body{b} .tabbar > a > .lbl{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+    padding:0 2px}
   body{b} .tabbar > a::before{content:'';position:absolute;top:7px;left:50%;width:56px;height:32px;
     margin-left:-28px;border-radius:16px;background:transparent;transition:background .15s ease}
   body{b} .tabbar > a:hover::before,
@@ -992,7 +999,7 @@ CSS = CSS.replace(
     "__MOBILE__",
     "@media (max-width:599.98px){ .topbar .brand .word{display:none} "
     + _MOBILE_RULES.replace("{b}", "")
-    + "}\n@media (min-width:600px) and (max-width:899.98px) and ((pointer:coarse) or (hover:none)){"
+    + "}\n@media (min-width:600px) and (max-width:1279.98px) and ((pointer:coarse) or (hover:none)){"
     + _RAIL_RULES.replace("{b}", "")
     + "}\n@media (min-width:600px){"
     + _RAIL_RULES.replace("{b}", ".app")
@@ -1030,22 +1037,19 @@ CSS += """
 .sizeseg{display:inline-flex;border:1px solid var(--control-border);border-radius:var(--radius);
   overflow:hidden;vertical-align:middle}
 .sizeseg button{margin:0;min-width:2.75rem;min-height:calc(var(--ctl) - 2px);height:auto;padding:0 .75rem;
-  border:0;border-radius:0;background:transparent;color:var(--text);font:inherit;font-weight:400;box-shadow:none}
+  border:0;border-radius:0;background:transparent;color:var(--text);font:inherit;font-weight:400;
+    box-shadow:none}
 .sizeseg button + button{border-left:1px solid var(--control-border)}
 .sizeseg button[aria-pressed=true]{background:var(--orange-tint);font-weight:700}
 .sizeseg button:focus-visible{outline:2px solid var(--focus);outline-offset:-2px}
 @media (pointer:coarse){ .sizeseg button{min-height:44px;min-width:44px} }
 .field.cardsize .sizeseg{display:flex;width:max-content}
-.cs-head .cardsize{display:inline-flex;align-items:center;gap:.5rem}
-.cs-head .cardsize .lbl{font-weight:400;color:var(--text-muted)}
 @media (min-width:1000.02px){
   .listbar .controls:has(.cardsize){
     grid-template-columns:1fr minmax(140px,auto) auto minmax(140px,auto) auto} }
-/* card search switches Grid / List without a reload: the size switch goes with the Grid view */
-.cs-head:has(input[name=view][value=list]:checked) .cardsize{display:none}
 /* the deck page: stacks, grid and scroll */
-html[data-card-size=s] .deckview.stacks{grid-template-columns:repeat(auto-fill,minmax(150px,1fr))}
-html[data-card-size=l] .deckview.stacks{grid-template-columns:repeat(auto-fill,minmax(270px,1fr))}
+html[data-card-size=s] .deckview.stacks{grid-template-columns:repeat(auto-fill,minmax(min(100%,140px),1fr))}
+html[data-card-size=l] .deckview.stacks{grid-template-columns:repeat(auto-fill,minmax(min(100%,240px),1fr))}
 html[data-card-size=s] .deckview.grid .cards{grid-template-columns:repeat(auto-fill,minmax(128px,1fr))}
 html[data-card-size=l] .deckview.grid .cards{grid-template-columns:repeat(auto-fill,minmax(230px,1fr))}
 html[data-card-size=s] .deckview.scroll .c{flex-basis:clamp(105px,16.5vw,150px)}
@@ -1056,9 +1060,9 @@ html[data-card-size=s] .deckview.stacks .stackhead .title{
   order:2;flex:1 0 100%;white-space:normal;overflow-wrap:anywhere;hyphens:auto;-webkit-hyphens:auto}
 html[data-card-size=s] .deckview .c .ph{padding-top:max(12%,34px)}
 html[data-card-size=l] .deckview.scroll .c{flex-basis:clamp(190px,30vw,270px)}
-/* My decks and the folders in it */
-html[data-card-size=s] ul.decklist.grid{grid-template-columns:repeat(6,minmax(0,1fr))}
-html[data-card-size=l] ul.decklist.grid{grid-template-columns:repeat(4,minmax(0,1fr))}
+/* My decks and the folders in it: as many deck tiles as fit (S 160, M 220, L 300 px at least) */
+html[data-card-size=s] ul.decklist.grid{grid-template-columns:repeat(auto-fill,minmax(min(100%,160px),1fr))}
+html[data-card-size=l] ul.decklist.grid{grid-template-columns:repeat(auto-fill,minmax(min(100%,300px),1fr))}
 html[data-card-size=s] ul.decklist .thumb{height:140px}
 html[data-card-size=l] ul.decklist .thumb{height:220px}
 html[data-card-size=s] ul.folderlist.grid{
@@ -1066,8 +1070,8 @@ html[data-card-size=s] ul.folderlist.grid{
 html[data-card-size=l] ul.folderlist.grid{
   grid-template-columns:repeat(auto-fill,minmax(min(100%,20.25rem),1fr))}
 /* card search, the collection and the printing picker */
-html[data-card-size=s] .cardgrid{grid-template-columns:repeat(auto-fill,minmax(min(100%,7.9rem),1fr))}
-html[data-card-size=l] .cardgrid{grid-template-columns:repeat(auto-fill,minmax(min(100%,14.2rem),1fr))}
+html[data-card-size=s] .cardgrid{grid-template-columns:repeat(auto-fill,minmax(min(100%,126px),1fr))}
+html[data-card-size=l] .cardgrid{grid-template-columns:repeat(auto-fill,minmax(min(100%,227px),1fr))}
 html[data-card-size=s] ul.collgrid{
   grid-template-columns:repeat(auto-fill,minmax(min(100%,max(128px,9rem)),1fr))}
 html[data-card-size=l] ul.collgrid{
@@ -1467,10 +1471,12 @@ CARD_MENU_CSS = """
 .toast.cards-toast .ok{width:18px;height:18px;flex:none;fill:none;stroke:var(--green-text);stroke-width:2.4}
 """
 CSS += CARD_MENU_CSS
+# the deck, folder and row menus and the boxes (static/menus.js)
+CSS += MENUS_CSS
 
 
 # The top bar's search box (cards and decks, static/suggest.js in its site mode): in the bar from
-# 900 px and on the touch rail (600 to 899 px); under 600 px folded behind the magnifier
+# 900 px and on the touch rail (600 to 1279 px); under 600 px folded behind the magnifier
 # (static/sitesearch.js opens it under the bar). A narrow window with a mouse (600 to 899 px)
 # keeps its text links, Search among them, and has no room for the box.
 _TOPSEARCH_CSS = """
@@ -1480,6 +1486,7 @@ _TOPSEARCH_CSS = """
   color:var(--navbar-muted);pointer-events:none}
 .topbar .topsearch .suggest > input{height:36px;padding:0 .9rem 0 2.3rem;border-radius:18px;
   background:rgba(255,255,255,.1);border-color:rgba(255,255,255,.2);color:var(--navbar-text)}
+@media (pointer:coarse){ .topbar .topsearch .suggest > input{height:44px;border-radius:22px} }
 .topbar .topsearch .suggest > input::placeholder{color:var(--navbar-muted)}
 .topbar .topsearch .suggest > input:focus{background:var(--surface);color:var(--text);
   border-color:var(--orange);outline-offset:1px}
@@ -1488,7 +1495,7 @@ _TOPSEARCH_CSS = """
 /* the list keeps the page's text colour and weight, not the bar's white bold */
 .topbar .topsearch .suggest-list{left:auto;right:0;width:min(27rem,calc(100vw - 2rem));
   max-height:min(26rem,70vh);color:var(--text);font-weight:400;text-align:left}
-@media (min-width:600px) and (max-width:899.98px) and ((pointer:coarse) or (hover:none)){
+@media (min-width:600px) and (max-width:1279.98px) and ((pointer:coarse) or (hover:none)){
   .topbar .topsearch{display:block} }
 @media (min-width:600px){ body.app .topbar .topsearch{display:block} }
 @media (min-width:900px){ .topbar .topsearch{display:block} .topbar .searchbtn{display:none} }
@@ -1508,6 +1515,193 @@ _TOPSEARCH_CSS = """
 .suggest-list li.go svg.i{color:var(--orange);flex:none}
 """
 CSS += _TOPSEARCH_CSS
+
+# The search panel card search, deck search and My decks share (searchpanel.py): the name row,
+# the filter groups in a fluid wrapping row, and the results bar at the panel's foot. The groups
+# never wrap apart: whole groups move to the next row (8 px inside a group, 12 to 16 px between).
+# The panel and its Colours group are size containers, so the rules measure the group, not the
+# window: the colour mode goes under the buttons when the group is narrower than buttons and
+# drop-down together, and the buttons sit three and three narrower still (phones).
+SEARCH_PANEL_CSS = """
+.spanel{container:sp/inline-size;padding:14px;display:flex;flex-direction:column;gap:14px;margin:0 0 14px}
+/* the panel's form is no box of its own, so the panel's gap parts the name row, the filter grid
+   and the results bar (14 px) on every search page */
+.spanel > form{display:contents}
+.spanel .srow{display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end}
+.spanel .sp-name{flex:1 1 16rem;min-width:0}
+.spanel .sp-name > label{display:block;font-weight:700;margin:0 0 .35rem}
+.spanel .sp-name .search{margin:0}
+.spanel .sp-name .search > input{flex:1 1 auto;min-width:0}
+.spanel .sp-name .search button{height:var(--ctl);min-height:var(--ctl);width:var(--ctl);padding:0;flex:none;
+  display:inline-flex;align-items:center;justify-content:center}
+.spanel .sp-name .under:empty{display:none}
+.spanel .openhint{display:flex;align-items:center;gap:.6rem;margin-top:.5rem;padding:.35rem .35rem
+  .35rem .7rem;
+  border-radius:var(--radius);background:var(--orange-tint)}
+.spanel .openhint span{flex:1;min-width:0;overflow-wrap:anywhere}
+.spanel .openhint .btn{margin:0;flex:none}
+.spanel .xlink{margin:0;height:var(--ctl);white-space:nowrap;flex:none;display:inline-flex;align-items:center;
+  gap:.4rem}
+.spanel .fbtn{display:none;margin:0;flex:none;height:var(--ctl);white-space:nowrap;gap:.4rem}
+.spanel .fbtn .n{display:inline-flex;align-items:center;justify-content:center;min-width:1.4rem;height:1.4rem;
+  padding:0 .35rem;border-radius:.7rem;background:var(--orange);color:var(--on-orange);font-size:.8rem;
+  font-weight:700}
+.spanel .fbtn .n:empty{display:none}
+/* the filter groups: whole groups in a fluid row, each at least --gw wide, growing to fill its row */
+.spanel .fgrid{display:flex;flex-wrap:wrap;gap:12px 16px;align-items:flex-start}
+.spanel .fgrid > *{flex:1 1 var(--gw,150px);min-width:0;margin:0}
+.spanel fieldset.fg{border:0;padding:0;margin:0;min-width:0;min-inline-size:0}
+.spanel .fg .l{display:block;font-weight:700;margin:0 0 .35rem;padding:0}
+.spanel .fg .l .hint{display:inline;font-weight:400;color:var(--text-muted);font-size:.86rem;margin:0}
+.spanel .fg input,.spanel .fg select{margin:0}
+.spanel .range{display:flex;gap:8px;align-items:center}
+.spanel .range span{color:var(--text-muted)}
+.spanel .range input{flex:1 1 0;min-width:0;width:auto}
+/* the Colours group: today's colour buttons (a pill with the mana symbol and the colour name), then
+   the match drop-down 10 px after them, taking a little of the group's spare width */
+.spanel .colors{container:colors/inline-size;--gw:var(--cw,700px)}
+.spanel .colors .in{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-start}
+.spanel .pills{display:flex;flex-wrap:wrap;gap:8px;flex:none;max-width:100%}
+.spanel .tog{margin:0;position:relative;display:inline-flex;align-items:center;gap:.4rem;
+  min-height:var(--ctl);
+  padding:.25rem .65rem .25rem .4rem;border:1px solid var(--control-border);
+    border-radius:calc(var(--ctl) / 2);
+  background:var(--surface);cursor:pointer;font-weight:400;user-select:none;white-space:nowrap}
+.spanel .tog input{position:absolute;opacity:0;inset:0;width:100%;height:100%;margin:0;cursor:pointer}
+.spanel .tog > span{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.spanel .tog .pip{width:1.5rem;height:1.5rem}
+.spanel .tog:has(input:checked){border-color:var(--orange-ctl);background:var(--orange-tint);font-weight:700}
+.spanel .tog:has(input:focus-visible){outline:2px solid var(--focus);outline-offset:2px}
+.spanel .tog:hover{border-color:var(--text-muted)}
+.spanel .colors .slot{flex:1 1 10em;min-width:0;max-width:20em;position:relative;display:block}
+@container colors (max-width:689.98px){
+  .spanel .colors .in{flex-direction:column;flex-wrap:nowrap;align-items:stretch}
+  .spanel .pills{max-width:max-content}
+  .spanel .colors .slot{flex:none;width:100%;max-width:none} }
+@container colors (max-width:519.98px){ .spanel .pills{display:grid;max-width:none;
+  grid-template-columns:repeat(3,minmax(0,1fr))}
+  .spanel .tog{gap:.3rem;padding:.25rem .45rem .25rem .3rem} }
+/* a pick-several filter: a drop-down that opens a checkbox list and shows what is picked */
+.spanel .pickm{position:relative}
+.spanel .pickm-btn{display:flex;align-items:center;gap:.4rem;width:100%;height:var(--ctl);padding:0
+  .6rem 0 1rem;
+  border:1px solid var(--control-border);border-radius:var(--radius);background:var(--surface);
+    color:var(--text);
+  cursor:pointer;list-style:none;font-weight:400;box-sizing:border-box}
+.spanel .pickm-btn::-webkit-details-marker{display:none}
+.spanel .pickm-btn .v{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.spanel .pickm-btn svg{transition:transform .15s}
+.spanel .pickm[open] > .pickm-btn{border-color:var(--orange)}
+.spanel .pickm[open] > .pickm-btn svg{transform:rotate(180deg)}
+.spanel .pickm-btn:hover{background:var(--surface-2)}
+.spanel .pickm-pop{position:absolute;left:0;top:calc(100% + 4px);z-index:25;min-width:100%;
+  background:var(--surface-2);
+  border:1px solid var(--border);border-radius:var(--radius-panel);box-shadow:var(--shadow);padding:4px 0}
+.spanel .pickm-pop label{display:flex;align-items:center;gap:.6rem;min-height:40px;padding:0 .9rem;margin:0;
+  white-space:nowrap;cursor:pointer;font-weight:400}
+.spanel .pickm-pop label:hover{background:var(--border)}
+@media (pointer:coarse){ .spanel .pickm-pop label{min-height:44px} }
+.pickm-scrim{position:fixed;inset:0;z-index:199;background:var(--scrim)}
+.spanel .pickm.sheet .pickm-pop{position:fixed;left:0;right:0;top:auto;bottom:0;z-index:200;min-width:0;
+  max-height:min(70vh,70dvh);overflow:auto;overscroll-behavior:contain;border-bottom:0;
+  border-radius:var(--radius-sheet) var(--radius-sheet) 0 0;padding:.5rem 0 calc(.5rem +
+    env(safe-area-inset-bottom))}
+.spanel .pickm.sheet .pickm-pop label{min-height:44px}
+/* the results bar at the panel's foot: the count at the left, the control groups at the right, each
+   group one piece; the bar breaks after Sort when it is narrow, so no group is ever alone on a row */
+.spanel .rbar{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:8px 12px;
+  border-top:1px solid var(--border-soft);padding-top:12px}
+.spanel .rbar .cnt{font-size:1.15rem;font-weight:900;margin:0 auto 0 0;white-space:nowrap}
+.spanel .rbar .g{display:inline-flex;align-items:center;gap:8px;flex:none;margin:0}
+.spanel .rbar .lbl{font-weight:400;color:var(--text-muted);margin:0;white-space:nowrap}
+.spanel .rbar .sortw,.spanel .rbar .dirw,.spanel .rbar .sortcw{position:relative;display:block;min-width:0}
+.spanel .rbar .sortw select,.spanel .rbar .dirw select,.spanel .rbar .sortcw select,
+.spanel .rbar .sortw .msel-btn,.spanel .rbar .dirw .msel-btn,.spanel .rbar .sortcw .msel-btn{width:auto;
+  max-width:100%;margin:0}
+.spanel .rbar .sortw .msel-btn{min-width:8rem} .spanel .rbar .dirw .msel-btn{min-width:7rem}
+.spanel .rbar .brk,.spanel .rbar .brka{display:none;flex-basis:100%;height:0;margin-top:-8px}
+@container sp (max-width:799.98px){ .spanel .rbar .brk{display:block} }
+@container sp (max-width:879.98px){ .spanel .rbar.cards .brk{display:block} }
+@container sp (max-width:499.98px){ .spanel .rbar.cards .brk{display:none} .spanel .rbar.cards
+  .brka{display:block} }
+.spanel .rbar .sortcw{display:none}
+.spanel .rbar .more{margin:0 0 0 -.3rem;font-weight:700;padding:0 .6rem 0 .3rem;display:inline-flex;
+  align-items:center;gap:.3rem;border-color:transparent;background:transparent}
+.spanel .rbar .more:hover{background:var(--surface-2)}
+.spanel .rbar .more svg{transform:rotate(-90deg);transition:transform .15s}
+.spanel .rbar .more[aria-expanded=true] svg{transform:none}
+.spanel .rbar .clr{margin:0;white-space:nowrap}
+.spanel .segc{display:inline-flex;border:1px solid var(--control-border);border-radius:var(--radius);
+  overflow:hidden;flex:none}
+.spanel .segc label{position:relative;display:inline-flex;align-items:center;justify-content:center;
+  gap:.35rem;
+  margin:0;padding:0 .75rem;min-height:calc(var(--ctl) - 2px);cursor:pointer;font-weight:400;
+    color:var(--text)}
+.spanel .segc label + label{border-left:1px solid var(--control-border)}
+.spanel .segc input{position:absolute;opacity:0;inset:0;margin:0;width:100%;height:100%;cursor:pointer}
+.spanel .segc label:has(input:checked){background:var(--orange-tint);font-weight:700}
+.spanel .segc label:has(input:focus-visible){outline:2px solid var(--focus);outline-offset:-2px}
+.spanel .rbar .cardsize{display:inline-flex;align-items:center;gap:.5rem}
+.spanel .rbar .cardsize .lbl{display:none}
+/* Grid or List switches without a reload: the size switch goes with the Grid view */
+.spanel .rbar:has(input[name=view][value=list]:checked) .cardsize{display:none}
+@media (max-width:1279.98px){ .spanel .rbar .view .tx{display:none}
+  .spanel .rbar .view label{width:calc(var(--ctl) - 2px);padding:0} }
+/* phones: the filter groups wait in a full-screen sheet behind the Filters button; the name row
+   stays; the bar keeps the count, one Sort drop-down and the view */
+.spanel .sp-sheet-head,.spanel .sp-sheet-foot,.spanel .sheet-size{display:none}
+.spanel .sp-filters{display:contents}
+@media (max-width:599.98px){
+  .spanel .fbtn{display:inline-flex}
+  /* the name box beside Filters (a 344 px phone leaves the panel 286 px: 10em and the button
+     fit); at large text Filters goes under it rather than over it */
+  .spanel .sp-name{flex:1 1 10em}
+  .spanel .xlink,.spanel .rbar .more,.spanel .rbar .dirw,.spanel .rbar .size,.spanel .rbar .lbl,
+  .spanel .rbar .clr,.spanel .rbar .brk,.spanel .rbar .brka,.spanel .rbar.cards .brka{display:none}
+  .spanel .rbar .sort:has(.sortcw) .sortw{display:none}
+  .spanel .rbar .sortcw{display:block;flex:1 1 7em;min-width:0}
+  .spanel .rbar .g.sort{flex:1 1 7em;min-width:7em}
+  .spanel .rbar .sortw,.spanel .rbar .sortw select,.spanel .rbar .sortw .msel-btn,
+  .spanel .rbar .sortcw select,.spanel .rbar .sortcw .msel-btn{width:100%;flex:1 1 auto}
+  .spanel .rbar .sortcw .msel-btn{padding:.4rem 1.6rem .4rem .6rem;background-position:right .5rem center;
+    height:auto;min-height:var(--ctl);white-space:normal}
+  /* at large text the chosen order wraps onto a second line, whole, instead of being cut */
+  .spanel .rbar .sortcw .msel-btn .msel-txt{white-space:normal;overflow:visible;text-overflow:clip}
+  .spanel .sp-filters{display:none;position:fixed;inset:0;z-index:80;margin:0;background:var(--bg);
+    overflow:auto;
+    overscroll-behavior:contain;padding:0 1rem calc(5.5rem + env(safe-area-inset-bottom))}
+  .spanel .sp-filters.open{display:block}
+  .spanel .sp-filters .fgrid{display:flex;flex-direction:column;flex-wrap:nowrap;align-items:stretch}
+  .spanel .sp-filters .fgrid > *{flex:none}
+  .spanel .sp-sheet-head{display:flex;align-items:center;justify-content:space-between;gap:.75rem;
+    position:sticky;
+    top:0;z-index:2;background:var(--bg);padding:.75rem 0;border-bottom:1px solid var(--border);margin:0
+      0 .75rem}
+  .spanel .sp-sheet-head h2{margin:0;font-size:1.2rem}
+  .spanel .sp-sheet-head .close{margin:0;width:2.75rem;min-height:2.75rem;height:2.75rem;padding:0;
+    border-radius:50%;display:inline-flex;align-items:center;justify-content:center}
+  .spanel .sheet-size{display:block;margin:14px 0 0}
+  .spanel .sheet-size .cardsize{display:flex;flex-direction:column;align-items:flex-start;gap:.35rem}
+  .spanel .sheet-size .cardsize .lbl{font-weight:700}
+  .spanel .sp-sheet-foot{display:flex;gap:.5rem;position:fixed;left:0;right:0;bottom:0;z-index:3;
+    background:var(--bg);
+    border-top:1px solid var(--border);padding:.75rem 1rem calc(.75rem + env(safe-area-inset-bottom))}
+  .spanel .sp-sheet-foot button,.spanel .sp-sheet-foot .btn{margin:0;flex:1 1 auto;min-height:2.9rem;
+    display:inline-flex;align-items:center;justify-content:center}
+  .spanel .sp-sheet-foot .btn-primary{flex:2 1 auto}
+  .spanel .fmtrow .in button .tx{display:none}
+  .spanel .fmtrow .in button{width:var(--ctl);padding:0} }
+/* the narrowest phones (a 344 px screen leaves the panel 286 px; a 390 px one 332): a long count
+   ("About 16 decks") gets its own line, Sort and the view under it */
+@container sp (max-width:299.98px){ .spanel .rbar.pub .brka{display:block} }
+html.sp-sheet-open,html.sp-sheet-open body{overflow:hidden}
+/* Load more under a list: the button, and a line saying when there is no more to load */
+.loadmore{display:flex;flex-direction:column;align-items:center;gap:.5rem;margin:.5rem 0 1.5rem}
+.loadmore[hidden],.loadmore [hidden]{display:none}
+.loadmore .muted{font-size:.9rem;margin:0}
+.loadmore button{margin:0;min-width:12rem}
+"""
+CSS += SEARCH_PANEL_CSS
 
 # The navigation bar (static/feedback.js): a thin line along the top of the window from the tap on
 # a link to another page until that page replaces this one, so a slow answer never looks like a
@@ -1697,7 +1891,7 @@ def layout_from_cookie(value: str | None) -> str:
 # from 0.7.29 (prefs.py). Before that it was a cookie per browser with these names; prefs.py
 # copies a cookie's value to the account once and removes the cookie.
 VIEW_COOKIE = "mtg_view_"
-VIEW_KINDS = ("deck", "decks", "collection", "cards")
+VIEW_KINDS = ("deck", "decks", "collection", "cards", "search")
 
 
 def current_layout() -> str:
@@ -1962,7 +2156,7 @@ def render(
             "<nav class='tabbar' aria-label='Sections'>"
             + "".join(
                 f"<a href='{href}' class='{cls}'{' aria-current=page' if cur == href else ''}>"
-                f"{icon(ic)}{label}</a>"
+                f"{icon(ic)}<span class='lbl'>{label}</span></a>"
                 for href, label, ic, cls in TAB_LINKS + rail_more
             )
             + "<details class='dd more'><summary"
@@ -2000,7 +2194,9 @@ def render(
         )
         if c
     )
-    viewport = "width=1100" if desktop else "width=device-width, initial-scale=1, viewport-fit=cover"
+    # Desktop layout: a viewport past the touch rail's range (600 to 1279 px), as a browser's Desktop
+    # site switch would give, so the width queries pick the top bar
+    viewport = "width=1280" if desktop else "width=device-width, initial-scale=1, viewport-fit=cover"
     # a page with its own web app (the scanner) names its own manifest; a second one would win
     manifest = "" if "rel='manifest'" in head_extra else "<link rel='manifest' href='/app.webmanifest'>"
     # The browser's own chrome follows the top bar: the light bar is #313131, the dark one #111111.
@@ -2042,6 +2238,8 @@ def render(
         # static/cardmenu.js: the card menu and Watch button the pages and the top bar share,
         # before the page scripts that use it
         + ("<script src='/static/cardmenu.js' defer></script>" if signed_in else "")
+        # static/menus.js: the deck, folder, card and row menus and their boxes, on top of it
+        + ("<script src='/static/menus.js' defer></script>" if signed_in else "")
         + f"{head_extra}</head>"
         f"<body class='{classes}'{' data-watchlist' if WATCHLISTS else ''}>"
         f"<a class='skip' href='#main'>Skip to content</a>{SPRITE}"

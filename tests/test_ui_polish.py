@@ -252,7 +252,7 @@ async def test_nav_highlights_export_and_proposals_and_copy_keeps_its_icon(stack
         compare = (await b.http.get("/decks/42/compare", headers=NAV)).text
         assert "<input type='text' name='with' data-suggest='static'" in compare
         search = (await b.http.get("/search", headers=NAV)).text
-        assert "name='cC' value='1'" in search and "Colorless" in search and "Color identity" in search
+        assert "name='c' value='C'" in search and "Colorless" in search and "At most these" in search
         deck = (await b.http.get("/decks/42", headers=NAV)).text
         assert (
             "<div class='stackhead'><h2>" in deck

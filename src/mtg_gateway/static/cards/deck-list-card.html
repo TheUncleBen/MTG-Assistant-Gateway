@@ -63,7 +63,7 @@
       if (uid && i < MAX_IMAGES) li.appendChild(B.picture(B.scryfallImage(uid, "", "art_crop"), "cover"));
       else li.appendChild(el("span", "cover none"));
       var body = el("div");
-      body.appendChild(el("span", "name", String(d.name || "Untitled deck")));
+      body.appendChild(el("span", "name", String(d.name || "Unnamed deck")));
       var bits = [];
       var fmt = d.format_name || (typeof d.format === "string" ? d.format : "");
       if (fmt) bits.push(String(fmt));

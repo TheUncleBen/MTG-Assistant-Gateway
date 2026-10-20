@@ -205,7 +205,7 @@ async def test_my_decks_opens_folders_and_hides_the_backup_folder(stack: Stack) 
         top = (await b.http.get("/decks", headers=NAV)).text
         assert "Folders <span class='n'>1</span>" in top and ">Commander</span>" in top
         assert "MTG Gateway backups" not in top and "folder-field" not in top
-        assert "Manage folders" in top and "Precon in a folder" not in top
+        assert "data-new-folder" in top and "Precon in a folder" not in top
         inside = (await b.http.get("/decks?folder=502", headers=NAV)).text
         assert re.search(r"<li><a href='/decks\?folder=501'>Commander</a></li>", inside)
         assert "Precon in a folder" in inside and "Sample Commander Deck" not in inside
@@ -216,8 +216,9 @@ async def test_my_decks_opens_folders_and_hides_the_backup_folder(stack: Stack) 
         assert ">Precons</span>" in api["html"] and "title='Private folder'" in api["html"]
         # the tree was read once for all of that: it is kept like the deck list
         assert ark.calls.count(("GET", "/api/decks/folderTree/")) == 1
-        folders_page = (await b.http.get("/folders", headers=NAV)).text
-        assert "MTG Gateway backups" not in folders_page and "href='/decks?folder=502'" in folders_page
+        # the old Folders page's address goes to My decks (its boxes do the folder work now)
+        gone = await b.http.get("/folders", headers=NAV)
+        assert gone.status_code == 303 and gone.headers["location"] == "/decks"
         assert root  # the top level is never a tile
     finally:
         await b.aclose()
@@ -242,8 +243,8 @@ async def test_the_backup_folder_stays_hidden_with_backups_switched_off(stack: S
         assert "Folders <span class='n'>1</span>" in top and ">Commander</span>" in top
         assert "MTG Gateway backups" not in top and "Copy in the backup folder" not in top
         assert "MTG Gateway backups" not in (await b.http.get("/decks?folder=503", headers=NAV)).text
-        folders_page = (await b.http.get("/folders", headers=NAV)).text
-        assert "MTG Gateway backups" not in folders_page and ">Commander<" in folders_page
+        tree = (await b.http.get("/decks/api/folders")).json()
+        assert [f["name"] for f in tree["folders"] if f["depth"]] == ["Commander"]
         assert [d["id"] for d in await decks.backup_copies("user-1")] == ["46"]  # conftest's member
     finally:
         await b.aclose()

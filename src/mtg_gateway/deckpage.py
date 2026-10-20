@@ -22,8 +22,18 @@ from collections import Counter
 from typing import Any
 from urllib.parse import quote, urlencode
 
+from . import searchpanel as sp
 from . import waiting_strip
-from .archidekt import VOTE_DOWN, VOTE_UP, Deck, DeckCard, featured_scryfall_id, format_label, rich_text
+from .archidekt import (
+    FORMAT_NAMES,
+    VOTE_DOWN,
+    VOTE_UP,
+    Deck,
+    DeckCard,
+    featured_scryfall_id,
+    format_label,
+    rich_text,
+)
 from .bracket_view import banner_bracket_html, checks_bracket_row, deck_card_bracket_text, stats_bracket_html
 from .deck_stats import (
     CURVE_BUCKETS,
@@ -597,9 +607,13 @@ def toolbar_html(deck: Deck, *, own: bool, view: str, group: str, sort: str, q: 
         "autocomplete='off'>"
         f"<button type='submit' aria-label='Apply filter' title='Apply filter'>{icon('search')}</button>"
         "</span></div>"
-        "<noscript><button type='submit' class='apply'>Apply</button></noscript>"
+        + (f"<p class='hint'>{DRAG_HINT}</p>" if own and view in PICTURE_VIEWS else "")
+        + "<noscript><button type='submit' class='apply'>Apply</button></noscript>"
         "</form></div></section>"
     )
+
+
+DRAG_HINT = "Drag a card onto another category to move it; on touch, hold it first."
 
 
 def _finish_badge(card: DeckCard) -> str:
@@ -1898,9 +1912,26 @@ def colour_bar_html(colors: dict[str, Any] | None) -> str:
 
 
 def deck_card_html(
-    d: dict[str, Any], *, cover: dict[str, Any] | None, selected: bool, show_owner: bool = False
+    d: dict[str, Any],
+    *,
+    cover: dict[str, Any] | None,
+    selected: bool,
+    show_owner: bool = False,
+    own: bool = False,
 ) -> str:
+    """One deck tile: a link to the deck, and after it the tile's ⋮ (static/menus.js opens the
+    deck's menu from it, a right-click, a press and hold or Shift+F10). ``own``: the member's own
+    deck, whose menu has Edit deck, Rename, Move to folder, Delete deck and the rest."""
     did = esc(d["id"])
+    name = d.get("name") or "Unnamed deck"
+    folder_id = d.get("folder_id")
+    data = f" data-deck-id='{did}' data-deck-name='{esc(name)}' data-own='{1 if own else 0}'" + (
+        f" data-folder='{esc(str(folder_id))}'" if folder_id is not None else ""
+    )
+    kebab = (
+        f"<button type='button' class='kebab' aria-label='Menu for {esc(name)}' aria-haspopup='menu' "
+        f"title='Menu'>{icon('more')}</button>"
+    )
     art = image_url((cover or {}).get("scryfall_uid"), "art_crop")
     style = f" style=\"background-image:url('{esc(art)}')\"" if art else ""
     fmt = format_label(d.get("format_name")) if d.get("format_name") else ""
@@ -1925,18 +1956,18 @@ def deck_card_html(
     if ago(d.get("updated_at") or ""):
         sub_bits.append(ago(d.get("updated_at") or ""))
     return (
-        f"<li class='deck{' selected' if selected else ''}'><a href='/decks/{did}'>"
+        f"<li class='deck{' selected' if selected else ''}'{data}><a href='/decks/{did}'>"
         f"<span class='thumb{' noart' if not art else ''}'{style}><span class='ini'>{initial}</span>"
         + (f"<span class='views'>{plural(size, 'card')}</span>" if size else "")
         + colour_bar_html(d.get("colors"))
         + "</span>"
         "<span class='info'>"
         f"{avatar_html(d.get('owner') or '', 'sm')}"
-        f"<span class='text'><span class='name' title='{esc(d.get('name'))}'>{esc(d.get('name'))}</span>"
+        f"<span class='text'><span class='name' title='{esc(name)}'>{esc(name)}</span>"
         f"<span class='fmt' title='{esc(line)}'>{esc(line)}</span>"
         f"<span class='sub' title='{esc(' · '.join(sub_bits))}'>{esc(' · '.join(sub_bits))}</span>"
         "</span></span>"
-        f"<span class='tags'>{tags_html}</span></a></li>"
+        f"<span class='tags'>{tags_html}</span></a>{kebab}</li>"
     )
 
 
@@ -1962,7 +1993,10 @@ def deck_list_html(
     view: str = "grid",
     show_owner: bool = False,
     folder: str = "",
+    own: bool = False,
 ) -> str:
+    """The deck tiles. ``own``: the member's own decks (My decks, Home), whose tiles' menus carry
+    the owner's actions; a listing of other members' decks leaves it off."""
     if not decks:
         if folder:
             return (
@@ -1981,6 +2015,7 @@ def deck_list_html(
             cover=(covers or {}).get(str(d["id"])),
             selected=bool(selected and str(d["id"]) == str(selected)),
             show_owner=show_owner,
+            own=own,
         )
         for d in decks
     )
@@ -2039,6 +2074,13 @@ def deck_list_held_html(read_at: float) -> str:
     return f"<p class='notice warn' role='status'>{esc(deck_list_held_text(read_at))}</p>"
 
 
+def deck_count_text(total: int | None, *, pending: bool = False) -> str:
+    """The count in the deck list's results bar ("3 decks"); blank while the list is being read."""
+    if pending or total is None:
+        return "Decks"
+    return f"{total} deck{'' if total == 1 else 's'}"
+
+
 def deck_list_controls_html(
     *,
     q: str,
@@ -2047,29 +2089,73 @@ def deck_list_controls_html(
     folder: str,
     total: int | None,
     pending: bool = False,
+    direction: str = "auto",
+    colors: str = "",
+    colour_mode: str = "incl",
+    fmt: str = "",
 ) -> str:
-    """The toolbar over the deck list. ``folder``: the open folder's id ("" at the top level),
-    kept when the toolbar is sent so Order by and View as stay in that folder (the name filter
-    searches every folder). ``pending``: the list is still being read (the total is left
-    blank; decks.js fills it). ``total`` None: the list couldn't be read, so no count."""
+    """The filter panel over the deck list (searchpanel.py, the panel the search pages share):
+    the name box, Colors and Format (static/decks.js filters the list as they change), and the
+    results bar with the count, Sort by and its direction, Grid or List, the card size and Clear
+    filters. ``folder``: the open folder's id ("" at the top level), kept so the sort and the view
+    stay in that folder (a name, colour or format filter searches every folder). ``pending``: the
+    list is still being read (no count yet; decks.js fills it). ``total`` None: the list couldn't
+    be read, so no count."""
+    here = f"/decks?{urlencode({'folder': folder})}" if folder else "/decks"
+    formats = sorted({(n, format_label(n)) for n in FORMAT_NAMES.values()}, key=lambda f: f[1].lower())
+    groups = sp.filter_grid(
+        [
+            sp.colours_group(
+                label="Colors",
+                name="c",
+                chosen=colors,
+                mode_name="cm",
+                mode_options=sp.DECK_COLOUR_MODES,
+                mode_value=colour_mode,
+            ),
+            sp.select_group(
+                label="Format",
+                name="format",
+                options=[("", "Any format"), *formats],
+                # a link from before the drop-down sent slugs may carry the format's name
+                value=next((n for n, label in formats if fmt.casefold() in (n, label.casefold())), fmt),
+                input_id="f-format",
+            ),
+        ]
+    )
+    bar = sp.results_bar(
+        count_html=sp.count_html(deck_count_text(total, pending=pending), count_id="decks-total"),
+        sort_html=sp.sort_group(
+            order_name="order",
+            orders=LIST_ORDERS.items(),
+            order=order,
+            order_id="f-order",
+            dir_name="dir",
+            direction=direction,
+        ),
+        view_html=sp.view_group(view),
+        clear_html=f"<a class='btn sp-clear clr' href='{esc(here)}'>Clear filters</a>",
+    )
     return (
-        "<section class='panel listbar'><form method='get' action='/decks' class='controls' id='listform'>"
+        "<section class='panel spanel'><form method='get' action='/decks' id='listform' "
+        "data-live>"
         + (f"<input type='hidden' name='folder' value='{esc(folder)}'>" if folder else "")
-        + "<div class='field grow'><label for='q'>Filter deck name</label><span class='search'>"
-        f"<input id='q' type='search' name='q' value='{esc(q)}' placeholder='Example deck name'>"
-        f"<button type='submit' aria-label='Filter' title='Filter'>{icon('search')}</button></span></div>"
-        + _select(
-            "view", {"grid": "Grid", "list": "List"}, view, "View as", "list" if view == "list" else "grid"
+        + sp.name_row(
+            label="Filter deck name",
+            name="q",
+            value=q,
+            placeholder="Example deck name",
+            input_id="q",
+            search_label="Filter",
+            attrs=" maxlength='80'",
         )
-        + (card_size_control() if view == "grid" else "")
-        + _select("order", LIST_ORDERS, order, "Order by", "sort")
-        + "<div class='field'><span class='lbl' id='decks-total'"
-        + (" hidden" if total is None and not pending else "")
-        + f">Total decks: {'…' if pending or total is None else total}</span>"
-        f"<a class='btn' href='/folders'>{icon('folder')} Manage folders</a>"
-        f"<a class='btn btn-primary' href='/decks/new'>{icon('plus')} New deck</a></div>"
-        "<noscript><button type='submit' class='apply'>Apply</button></noscript>"
-        "</form></section>"
+        + sp.filters_sheet(
+            groups,
+            show_html="<button type='submit' class='btn-primary sp-show'>Show decks</button>",
+            clear_html=f"<a class='btn sp-clear' href='{esc(here)}'>Clear filters</a>",
+        )
+        + bar
+        + "</form></section>"
     )
 
 
@@ -2232,6 +2318,7 @@ h3 .count{font-weight:400;color:var(--text-muted);font-size:.9rem}
 .toolbar .views{display:grid;grid-template-columns:repeat(3,minmax(0,1fr)) minmax(10rem,1.4fr);
   gap:.5rem 1rem;margin:0}
 .toolbar .views .field{margin:0}
+.toolbar .views .hint{grid-column:1 / -1;margin:0;color:var(--text-muted);font-size:.9rem;align-self:center}
 /* with the card size switch (0.7.29) next to View as: it takes only its own width. Above 1200 px the
    boxes share one row while they fit and wrap onto the next row when large text makes them wider
    (one grid row let Group by and Sort by run over each other at 200% text) */
@@ -2239,7 +2326,8 @@ h3 .count{font-weight:400;color:var(--text-muted);font-size:.9rem}
   .toolbar .views:has(.cardsize){display:flex;flex-wrap:wrap;align-items:flex-end}
   .toolbar .views:has(.cardsize) > .field{flex:1 1 8rem;min-width:max-content}
   .toolbar .views:has(.cardsize) > .field.cardsize{flex:0 0 auto}
-  .toolbar .views:has(.cardsize) > .field.filter{flex:1.4 1 10rem;min-width:10rem} }
+  .toolbar .views:has(.cardsize) > .field.filter{flex:1.4 1 10rem;min-width:10rem}
+  .toolbar .views:has(.cardsize) > .hint{flex:1 1 240px;min-width:0} }
 .field .sel{position:relative;display:block}
 .field .sel > svg{position:absolute;left:.75rem;top:50%;transform:translateY(-50%);color:var(--orange);
   pointer-events:none}
@@ -2388,7 +2476,7 @@ ul.rows .row.brew{display:flex;align-items:flex-start;gap:.6rem;height:auto;padd
 .deckview.scroll .c{flex:0 0 clamp(140px,22vw,200px);scroll-snap-align:start}
 /* image cards: stacks and grid (basicCard 5:7, 4.5% radius, 2px border, corner quantity) */
 .deckview.stacks,.deckview.grid{display:grid;gap:1rem;align-items:start}
-.deckview.stacks{grid-template-columns:repeat(auto-fill,minmax(200px,1fr))}
+.deckview.stacks{grid-template-columns:repeat(auto-fill,minmax(min(100%,170px),1fr))}
 .deckview.grid{grid-template-columns:1fr}
 .deckview .c{position:relative;aspect-ratio:5/7;border-radius:4.5%;border:2px solid var(--card-border);
   overflow:hidden;background:var(--surface-2);transition:transform .3s ease-in-out}
@@ -2406,6 +2494,11 @@ ul.rows .row.brew{display:flex;align-items:flex-start;gap:.6rem;height:auto;padd
 .deckview .c .ph .ty{color:var(--text-muted);font-size:.72rem}
 .deckview.stacks .cards{display:flex;flex-direction:column}
 .deckview.stacks .c + .c{margin-top:-123%}
+.deckview.stacks .c .ph{padding:3% 6% 8% 42px}
+.deckview.stacks .c .ph .t{align-items:center;min-height:0}
+.deckview.stacks .c .ph .nm{flex:1 1 auto;min-width:0;white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis}
+.deckview.stacks .c .ph .mana{flex:none}
 .deckview .c{cursor:pointer}
 .deckview .c:focus-visible{outline:3px solid var(--orange);outline-offset:2px}
 /* a stack fans out below the card under the pointer (Archidekt's hover); on touch screens a tap on the
@@ -2692,11 +2785,9 @@ table.qty td:last-child{text-align:right;font-variant-numeric:tabular-nums;font-
 .decks-unreadable .actions .btn{min-height:44px}
 /* minmax(0,1fr), never 1fr: a long deck name (the "Copy of - …" names the app itself makes) must shrink
    and ellipsise inside its tile, not widen the track and scroll the page sideways. */
-ul.decklist.grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:25px;margin-bottom:1.25rem}
-@media (max-width:1500px){ ul.decklist.grid{grid-template-columns:repeat(4,minmax(0,1fr))} }
-@media (max-width:1200px){ ul.decklist.grid{grid-template-columns:repeat(3,minmax(0,1fr))} }
-@media (max-width:1000px){ ul.decklist.grid{grid-template-columns:repeat(2,minmax(0,1fr))} }
-@media (max-width:600px){ ul.decklist.grid{grid-template-columns:minmax(0,1fr);gap:1rem} }
+ul.decklist.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,220px),1fr));gap:25px;
+  margin-bottom:1.25rem}
+@media (max-width:600px){ ul.decklist.grid{gap:1rem} }
 ul.decklist .deck,ul.decklist .deck a,ul.decklist .info{min-width:0}
 ul.decklist .deck a{display:flex;flex-direction:column;color:var(--text);text-decoration:none;
   border-radius:5px;overflow:hidden;border:1px solid var(--border);background:var(--surface)}
@@ -3027,6 +3118,10 @@ html.printpick-open{overflow:hidden}
      buttons, the legend and the dialog strip's buttons: 44 px, set here, after their own rules
      above, so the touch size wins */
   .rowbtn,.curveaxis .mv,.slegend button{min-height:44px}
+  .statctl button{min-height:44px}
+  /* the curve's axis buttons share the box's width (a phone's 320 px holds no eight 44 px
+     columns without a sideways scroll): 44 px high, as wide as the box lets them; the stack
+     handle keeps its 28 px drawing inside the 44 px finger area its ::before draws */
   .deck-toast .acts button,.deck-toast .acts .btn{min-height:44px}
   .deck-toast .close{width:44px;height:44px;min-height:44px}
   .printpick .close{width:44px;min-height:44px;height:44px}

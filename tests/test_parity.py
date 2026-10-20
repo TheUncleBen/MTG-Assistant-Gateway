@@ -57,7 +57,7 @@ async def test_theme_cookie_and_shell(stack: Stack) -> None:
         r = await b.http.post("/layout", data={"csrf": csrf, "layout": "desktop", "next": "/decks"})
         assert r.status_code == 303 and "mtg_layout=desktop" in r.headers["set-cookie"]
         page = await b.http.get("/decks", headers=NAV)
-        assert "<meta name='viewport' content='width=1100'>" in page.text
+        assert "<meta name='viewport' content='width=1280'>" in page.text
         assert "desktop" in page.text.split("<body class='")[1].split("'")[0]
         app_ua = {**NAV, "User-Agent": "Mozilla/5.0 (Linux; Android 14) MTGAssistant/1"}
         in_app = await b.http.get("/decks", headers=app_ua)
@@ -84,7 +84,7 @@ async def test_deck_list_controls_and_views(stack: Stack) -> None:
     try:
         lst = await b.http.get("/decks", headers=NAV)
         assert lst.status_code == 200
-        assert "Total decks: 1" in lst.text and "decklist grid'" in lst.text
+        assert ">1 deck</h2>" in lst.text and "decklist grid'" in lst.text
         assert "class='cbar'" in lst.text and "/decks/new" in lst.text and "Sample Commander Deck" in lst.text
         rows = await b.http.get("/decks?view=list&order=name&q=sample", headers=NAV)
         assert rows.status_code == 200 and "decklist list'" in rows.text

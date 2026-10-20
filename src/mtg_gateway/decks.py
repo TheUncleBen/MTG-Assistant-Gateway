@@ -45,6 +45,7 @@ from .approve import approval_code, approval_matches, approval_set_code
 from .archidekt import (
     FORMAT_IDS,
     MAX_LIST_PAGES,
+    NOT_ACTED_ON,
     PATIENCE_SPENT,
     RATE_LIMIT_WAITS,
     VOTE_DOWN,
@@ -75,6 +76,7 @@ from .archidekt import (
     written_text,
 )
 from .archidekt_csv import CsvError, parse_export
+from .busy import BUSY_TEXTS
 from .config import LiveSettings, Settings
 from .db import MAX_PROPOSAL_VERSIONS, Database, ProposalVersionsFull
 from .decklist import (
@@ -2274,6 +2276,9 @@ class DeckService:
         self.client = client
         self.fernet = Fernet(settings.fernet_key.encode())
         self._deck_locks: dict[str, asyncio.Lock] = {}
+        # the folders (with all inside) a member's running folder delete will delete: nothing is
+        # moved or made in them meanwhile
+        self._deleting: dict[str, set[int]] = {}
         # Applies running in the background (proposal id -> task) and what each got done so far.
         self._running: dict[str, asyncio.Task[Any]] = {}
         self._progress: dict[str, dict[str, Any]] = {}
@@ -6525,7 +6530,9 @@ class DeckService:
         proposal, which the snapshot names so the snapshot list says what it was taken for."""
         self._writes_switch()
         deck = await self.get_own_deck(sub, deck_id)
-        if clean_text(typed_name).casefold() != clean_text(deck.name).casefold():
+        # a deck with no name shows as "Unnamed deck", so that is what the member types
+        expected = clean_text(deck.name) or "Unnamed deck"
+        if clean_text(typed_name).casefold() != expected.casefold():
             raise DeckError(
                 "invalid", "The name you typed does not match the deck's name. Nothing was deleted."
             )
@@ -6710,9 +6717,10 @@ class DeckService:
             raise DeckError("not_found", "That parent folder is not in your Archidekt account.")
         if found.get("backup"):  # no new folder in the gateway's backup folder
             raise _no_such_folder(info, found["name"])
+        self._not_being_deleted(sub, parent)
         self._not_the_backup_name(name, found["depth"] + 1)
         if any(f["parent"] == parent and f["name"].casefold() == name.casefold() for f in info["folders"]):
-            raise DeckError("invalid", f"There is already a folder called '{name}' there.")
+            raise DeckError("invalid", f"There is already a folder called “{name}” there.")
         return name, found
 
     def _not_the_backup_name(self, name: str, depth: int) -> None:
@@ -6780,6 +6788,7 @@ class DeckService:
         hidden = next((f for f in info["folders"] if f["id"] == target and f.get("backup")), None)
         if hidden is not None:  # never into the gateway's backup folder, as by name
             raise _no_such_folder(info, hidden["name"])
+        self._not_being_deleted(sub, target)
         # the item archidekt.com's folder page sends for its "Move" (its bundle, read 2026-10-14)
         await _writing(
             progress,
@@ -6800,6 +6809,332 @@ class DeckService:
                 "verify_mismatch", "Archidekt accepted the request but the deck is not in that folder."
             )
         return {"deck_id": deck.id, "folder_id": target, "changed": True}
+
+    # Moving and deleting a folder: the member's own presses on My decks only, never an
+    # assistant's tool or proposal. Both are kinds of Archidekt writes the gateway did not send
+    # before; the routes are those of archidekt.com's own folder page (its bundle, read
+    # 2026-10-20) and no session has sent them live yet, so each is checked by reading back.
+    FOLDER_PAGES = 40  # pages of one folder's listing read before the count counts as unknown
+    TOO_MUCH_TO_LIST = "The folder holds more than the gateway can list, so it can't be deleted here."
+
+    @staticmethod
+    def _inside(info: dict[str, Any], folder_id: int) -> list[dict[str, Any]]:
+        """Every folder below ``folder_id`` in the flattened tree, at any depth."""
+        below: list[dict[str, Any]] = []
+        parents = {int(folder_id)}
+        for f in info["folders"]:  # parents come before their children (``_flatten_folders``)
+            if f["parent"] in parents:
+                below.append(f)
+                parents.add(f["id"])
+        return below
+
+    def _movable_folder(self, info: dict[str, Any], folder: dict[str, Any]) -> None:
+        if folder["depth"] == 0:
+            raise DeckError("invalid", "Your top level can't be moved or deleted.")
+        if folder.get("backup"):  # the gateway's backup folder and what is in it
+            raise _no_such_folder(info, folder["name"])
+
+    def _not_being_deleted(self, sub: str, folder_id: int, *, moving: bool = False) -> None:
+        """Refused while a running folder delete holds ``folder_id``: as the place something goes
+        into, or (``moving``) as the folder being moved."""
+        if folder_id in self._deleting.get(sub, set()):
+            if moving:
+                raise DeckError("busy", "That folder is being deleted, so it can't be moved now.")
+            raise DeckError("busy", "That folder is being deleted, so nothing can go into it now.")
+
+    async def move_folder(self, sub: str, folder_id: int, parent_id: int | None) -> dict[str, Any]:
+        """Put one of the member's folders, with everything inside it, into another folder
+        (``None`` = the top level). Refused into itself or one of its own folders, for the
+        backup folder, and into the backup folder. Checked by reading the tree back."""
+        self._writes_switch()
+        info, folder = await self._folder_in(sub, int(folder_id))
+        self._movable_folder(info, folder)
+        target_id = int(parent_id) if parent_id is not None else int(info["root_id"])
+        target = next((f for f in info["folders"] if f["id"] == target_id), None)
+        if target is None:
+            raise DeckError("not_found", "That folder is not in your Archidekt account.")
+        if target_id == folder["id"] or target_id in {f["id"] for f in self._inside(info, folder["id"])}:
+            raise DeckError("invalid", "A folder can't go inside itself or one of its own folders.")
+        if target.get("backup"):
+            raise _no_such_folder(info, target["name"])
+        if any(f.get("backup") for f in self._inside(info, folder["id"])):
+            raise DeckError(
+                "backup_inside",
+                f"The gateway's backup folder is inside “{folder['name']}”, so it can't be moved. Move "
+                f"the backup folder out of “{folder['name']}” on Archidekt first.",
+            )
+        self._not_being_deleted(sub, target_id)
+        self._not_being_deleted(sub, folder["id"], moving=True)
+        if folder["parent"] == target_id:
+            return {**folder, "changed": False}
+        if any(
+            f["parent"] == target_id and f["name"].casefold() == folder["name"].casefold()
+            for f in info["folders"]
+        ):
+            raise DeckError("invalid", f"There is already a folder called “{folder['name']}” there.")
+        # a folder sitting directly under the top level with the backup folder's name would be
+        # taken for it
+        self._not_the_backup_name(folder["name"], target["depth"] + 1)
+        await self._call(
+            sub,
+            lambda token, *_: self.client.mass_update(
+                token, [{"type": "folder", "id": folder["id"], "patch": {"parentFolder": target_id}}]
+            ),
+        )
+        _after, now = await self._folder_in(sub, folder["id"])
+        ok = now["parent"] == target_id
+        self._audit(
+            "folder_moved", sub=sub, detail={"folder_id": folder["id"], "parent": target_id, "verified": ok}
+        )
+        if not ok:
+            raise DeckError("verify_mismatch", "Archidekt accepted the request but the folder did not move.")
+        return {**now, "changed": True}
+
+    async def _folder_items(
+        self, sub: str, folder_id: int
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], set[int]]:
+        """(decks, card packages, the ids of the folders) directly in one folder, every page of its
+        listing read now. Anything that can't be read completely raises: a delete never goes
+        ahead on a part list."""
+        decks: list[dict[str, Any]] = []
+        packages: list[dict[str, Any]] = []
+        subfolders: set[int] = set()
+        for page in range(1, self.FOLDER_PAGES + 1):
+            body = await self._call(
+                sub, lambda token, *_, page=page: self.client.folder_details(token, folder_id, page)
+            )
+            for d in body["decks"]:
+                item = {"id": str(d["id"]), "name": clean_text(str(d.get("name") or ""))}
+                (packages if d.get("cardPackage") else decks).append(item)
+            subs = body.get("subfolders")
+            if not isinstance(subs, list) or not all(isinstance(f, dict) and "id" in f for f in subs):
+                raise DeckError("unavailable", self.TOO_MUCH_TO_LIST)
+            subfolders |= {int(f["id"]) for f in subs}
+            if not body.get("next"):
+                return decks, packages, subfolders
+        raise DeckError("unavailable", self.TOO_MUCH_TO_LIST)
+
+    async def folder_contents(self, sub: str, folder_id: int) -> dict[str, Any]:
+        """What deleting a folder would delete on Archidekt: its decks and card packages, those of
+        every folder inside it, and those folders. Refused for the top level, the backup folder,
+        and a folder with the backup folder anywhere inside it (one delete would take the backup
+        copies with it)."""
+        info, folder = await self._folder_in(sub, int(folder_id))
+        self._movable_folder(info, folder)
+        below = self._inside(info, folder["id"])
+        if any(f.get("backup") for f in below):
+            raise DeckError(
+                "backup_inside",
+                f"The gateway's backup folder is inside “{folder['name']}”, and deleting it would delete "
+                "the backup copies too. Move the backup folder out of "
+                f"“{folder['name']}” on Archidekt first.",
+            )
+        decks: list[dict[str, Any]] = []
+        packages: list[dict[str, Any]] = []
+        for f in [folder, *below]:
+            d, p, subs = await self._folder_items(sub, f["id"])
+            decks += d
+            packages += p
+            # the folder tree is read up to a limit: a folder Archidekt lists inside that the tree
+            # left out would be deleted unseen, with no snapshot of its decks
+            if subs != {g["id"] for g in below if g["parent"] == f["id"]}:
+                raise DeckError("unavailable", self.TOO_MUCH_TO_LIST)
+        return {"folder": folder, "decks": decks, "packages": packages, "folders": below}
+
+    LIMIT_WAITS = 30  # waits for the member's own Archidekt limit within one folder delete
+
+    async def _waiting_out_limits(self, state: dict[str, Any], run: Any) -> Any:
+        """``await run()``, waiting and trying again while the member's own Archidekt limit (their
+        actions per 10 minutes, or their actions already running) refuses it: a folder delete
+        makes several calls for every deck inside, more than the limit lets through at once. The
+        wait shows in ``state["step"]``, which is put back afterwards."""
+        for _ in range(self.LIMIT_WAITS):
+            try:
+                return await run()
+            except DeckError as exc:
+                # Archidekt does not act on a request it answers with a 429, so sending it again
+                # can't do anything twice
+                if exc.kind != "rate_limited":
+                    raise
+                wait = max(1, min(int(exc.retry_after or 5), 60))
+                step = state.get("step")
+                if exc.busy_cause == "budget":
+                    state["step"] = BUSY_TEXTS["budget"]
+                elif exc.busy_cause == "member_slots":
+                    state["step"] = (
+                        "Your account already has several Archidekt actions running or waiting, so "
+                        "the folder delete is waiting for a free turn."
+                    )
+                else:
+                    state["step"] = (
+                        "Archidekt asked the gateway to slow down, so it is pausing the folder delete "
+                        f"for {wait} second{'' if wait == 1 else 's'}."
+                    )
+                await asyncio.sleep(wait)
+                state["step"] = step
+        return await run()
+
+    async def delete_folder(
+        self,
+        sub: str,
+        folder_id: int,
+        typed_name: str,
+        shown: dict[str, Any],
+        *,
+        progress: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Delete one of the member's folders with everything inside it, after they typed its name
+        (case ignored) in a box that showed the counts in ``shown`` ({decks, packages, folders}).
+        Everything inside is listed again first and must still match those counts. Every deck
+        gets a snapshot, and a backup copy when backups are on, before anything is deleted; the
+        first failure stops the delete. Then one Archidekt call deletes the folder with all it
+        holds (it can't be stopped or partly undone), and the folder and its decks are read back
+        to check they are gone. Card packages get no snapshot or copy. ``progress`` (the job's)
+        gets ``step``, ``done`` and ``total`` as it goes."""
+        self._writes_switch()
+        state = progress if progress is not None else {}
+        state.update(step="Reading what is inside the folder", done=0, total=0)
+        inside = await self.folder_contents(sub, int(folder_id))
+        folder = inside["folder"]
+        if clean_text(typed_name).casefold() != folder["name"].casefold():
+            raise DeckError(
+                "invalid", "The name you typed does not match the folder's name. Nothing was deleted."
+            )
+        now = {k: len(inside[k]) for k in ("decks", "packages", "folders")}
+        if any(_count_of(shown.get(k)) != now[k] for k in now):
+            raise DeckError(
+                "changed",
+                "What is inside the folder changed since you looked. Nothing was deleted; check the new "
+                "counts and confirm again.",
+                counts=now,
+            )
+        held = {folder["id"], *(f["id"] for f in inside["folders"])}
+        if self._deleting.get(sub):
+            raise DeckError("busy", "A folder of yours is already being deleted. Wait for it to finish.")
+        self._deleting[sub] = held
+        try:
+            return await self._delete_folder_held(sub, inside, now, state)
+        finally:
+            self._deleting.pop(sub, None)
+
+    async def _delete_folder_held(
+        self, sub: str, inside: dict[str, Any], now: dict[str, int], state: dict[str, Any]
+    ) -> dict[str, Any]:
+        """delete_folder once the counts matched, with nothing moved into the folder meanwhile."""
+        folder = inside["folder"]
+        snapshots: list[dict[str, Any]] = []
+        state.update(total=len(inside["decks"]))
+        backups = bool(self.live.get("archidekt_backups"))
+        for n, item in enumerate(inside["decks"], 1):
+            state["step"] = (
+                f"Snapshot and backup copy {n} of {len(inside['decks'])}"
+                if backups
+                else f"Snapshot {n} of {len(inside['decks'])}"
+            )
+            try:
+                deck = await self._waiting_out_limits(
+                    state, lambda deck_id=item["id"]: self.get_own_deck(sub, deck_id)
+                )
+                snapshot_id = self._hand_snapshot(sub, deck)
+                made: dict[str, Any] = {"deck_id": deck.id, "name": deck.name, "snapshot_id": snapshot_id}
+                if backups:
+                    made.update(
+                        await self._waiting_out_limits(
+                            state,
+                            lambda deck=deck, snapshot_id=snapshot_id: self._backup_copy(
+                                sub, deck, snapshot_id, reason="before its folder was deleted"
+                            ),
+                        )
+                    )
+            except DeckError as exc:
+                self._audit(
+                    "folder_delete_stopped",
+                    sub=sub,
+                    detail={
+                        "folder_id": folder["id"],
+                        "deck_id": item["id"],
+                        "error": exc.kind,
+                        "made": len(snapshots),
+                    },
+                )
+                which = f"The deck “{item['name']}”" if item["name"] else "An unnamed deck"
+                why = str(exc).rstrip(".") or "Archidekt did not answer"
+                kept = "; the snapshots and backup copies already made are kept." if snapshots else "."
+                raise DeckError(
+                    "backup_failed", f"{which} could not be saved first ({why}). Nothing was deleted{kept}"
+                ) from exc
+            snapshots.append(made)
+            state["done"] = n
+        # read again just before the step that can't be undone: anything that arrived while the
+        # snapshots were made would be deleted without one
+        state["step"] = "Reading what is inside the folder"
+        again = await self._waiting_out_limits(state, lambda: self.folder_contents(sub, folder["id"]))
+        if any(
+            {x["id"] for x in again[k]} != {x["id"] for x in inside[k]}
+            for k in ("decks", "packages", "folders")
+        ):
+            raise DeckError(
+                "changed",
+                "What is inside the folder changed while the decks were being saved. Nothing was "
+                "deleted; the snapshots and backup copies already made are kept. Check the new counts "
+                "and confirm again.",
+                counts={k: len(again[k]) for k in ("decks", "packages", "folders")},
+            )
+        state["step"] = "Deleting the folder on Archidekt"
+        state["delete_sent"] = True  # from here on a failure may have deleted something
+        try:
+            await self._waiting_out_limits(
+                state,
+                lambda: self._call(sub, lambda token, *_: self.client.delete_folders(token, [folder["id"]])),
+            )
+        except DeckError as exc:
+            if not exc.sent or exc.kind in NOT_ACTED_ON:
+                state["delete_sent"] = False
+                raise DeckError(
+                    exc.kind, f"{str(exc).rstrip('.')}. Nothing was deleted.", sent=False
+                ) from exc
+            raise DeckError(
+                "unknown",
+                "Archidekt did not say whether the folder was deleted. Check it on Archidekt; every "
+                "deck's snapshot is under History.",
+            ) from exc
+        state["step"] = "Checking that everything is gone"
+        try:
+            after = await self._waiting_out_limits(state, lambda: self.folders(sub))
+            listed = {
+                str(d.get("id")) for d in await self._waiting_out_limits(state, lambda: self.list_decks(sub))
+            }
+        except DeckError as exc:
+            # the delete was sent: the answer must not read as if nothing happened
+            raise DeckError(
+                exc.kind, f"{str(exc).rstrip('.')}. Check the folder on Archidekt to see what was deleted."
+            ) from exc
+        left_folders = [
+            f for f in [folder, *inside["folders"]] if any(g["id"] == f["id"] for g in after["folders"])
+        ]
+        left_decks = [d for d in inside["decks"] if d["id"] in listed]
+        ok = not left_folders and not left_decks
+        self._audit(
+            "folder_deleted",
+            sub=sub,
+            detail={
+                "folder_id": folder["id"],
+                "decks": now["decks"],
+                "packages": now["packages"],
+                "folders": now["folders"],
+                "snapshots": [s["snapshot_id"] for s in snapshots],
+                "verified": ok,
+            },
+        )
+        if not ok:
+            names = [f["name"] for f in left_folders] + [d["name"] or "Unnamed deck" for d in left_decks]
+            raise DeckError(
+                "verify_mismatch",
+                "Archidekt accepted the request but these are still there: "
+                + ", ".join(names[:10])
+                + ". Check them on Archidekt. Every deck's snapshot is under History.",
+            )
+        return {"folder": folder, "counts": now, "snapshots": snapshots}
 
     # Tags --------------------------------------------------------------------------------------
     @staticmethod
@@ -7253,6 +7588,14 @@ def _printing_mismatches(verified: Deck, specs: list[dict[str, Any]]) -> list[st
         if not ok:
             out.append(spec["name"])
     return out
+
+
+def _count_of(value: Any) -> int:
+    """A count a page sent back (a folder delete's shown counts), -1 when it isn't one."""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return -1
 
 
 def _shown_folders(info: dict[str, Any]) -> list[dict[str, Any]]:

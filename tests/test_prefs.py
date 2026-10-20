@@ -136,7 +136,7 @@ async def test_view_as_moves_from_the_cookie_to_the_account(stack: Stack) -> Non
     try:
         b.http.cookies.set("mtg_view_cards", "list")
         r = await b.http.get("/cards", params={"q": "sol"})
-        assert "value='list' form='cs-form' checked" in r.text
+        assert "value='list' checked" in r.text
         assert stack.h.db.get_pref(SUB, "view.cards") == "list"
         assert 'mtg_view_cards=""' in r.headers.get("set-cookie", "")
     finally:
@@ -144,7 +144,7 @@ async def test_view_as_moves_from_the_cookie_to_the_account(stack: Stack) -> Non
     other = await linked(stack)  # another browser, no cookie
     try:
         r = await other.http.get("/cards", params={"q": "sol"})
-        assert "value='list' form='cs-form' checked" in r.text and "set-cookie" not in r.headers
+        assert "value='list' checked" in r.text and "set-cookie" not in r.headers
         await other.http.get("/cards", params={"q": "sol", "view": "grid"})
         assert stack.h.db.get_pref(SUB, "view.cards") == "grid"
     finally:
@@ -162,7 +162,7 @@ async def test_a_link_from_another_site_shows_a_view_but_never_saves_it(stack: S
             r = await b.http.get(
                 "/cards", params={"q": "sol", "view": "list"}, headers={"Sec-Fetch-Site": site}
             )
-            assert "value='list' form='cs-form' checked" in r.text
+            assert "value='list' checked" in r.text
             assert stack.h.db.get_pref(SUB, "view.cards") == "grid"
         decks = stack.h.app.state.gateway.decks
         dropped: list[str] = []
@@ -242,7 +242,7 @@ async def test_forget_my_view_choices(stack: Stack) -> None:
         assert r.json()["ok"] is True and r.json()["saved"] == []
         b.http.cookies.set("mtg_view_cards", "list")
         page = await b.http.get("/cards", params={"q": "sol"})
-        assert "value='list' form='cs-form' checked" not in page.text
+        assert "value='list' checked" not in page.text
         assert 'mtg_view_cards=""' in page.headers.get("set-cookie", "")
         assert db.get_pref(SUB, "stack:42:type") is None and db.get_pref(SUB, "view.cards") != "list"
         # a choice made after forgetting is kept as usual, and the marker isn't a choice

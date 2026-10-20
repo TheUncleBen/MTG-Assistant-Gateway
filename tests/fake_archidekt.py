@@ -135,6 +135,12 @@ class FakeArchidekt:
         self.next_folder_id = 500
         self.folders: dict[str, list[dict[str, Any]]] = {}  # username -> folders under their root
         self.deck_folder: dict[int, int] = {}  # deck id -> folder id (decks not listed sit in root)
+        # card packages: folder id -> [{id, name}] (Archidekt lists them with a folder's decks,
+        # flagged cardPackage); a folder's listing comes back folder_page_size rows a page
+        self.packages: dict[int, list[dict[str, Any]]] = {}
+        self.folder_page_size = 60
+        self.folder_deletes: list[dict[str, Any]] = []
+        self.folder_details_fail: set[int] = set()  # folders whose listing answers 500
         self.fail_deck_update = False
         self.updates: list[dict[str, Any]] = []  # bodies of PATCH /decks/{id}/update/, with deck_id
         self.fail_backup = False  # POST /decks/copy/ answers 503
@@ -149,6 +155,7 @@ class FakeArchidekt:
         self.username_listing_hides_private = False
         self.list_auth_schemes: list[str] = []  # Authorization scheme of each /decks/v3/ call
         self.search_params: list[dict[str, str]] = []  # query of each /decks/v3/ call
+        self.search_page_size = 0  # 0: a search comes on one page; else paged like Archidekt (60)
         # The member's Collection (username -> record id -> record in the v2 listing shape), and the
         # social state: follows (username -> user ids), bookmarks (username -> deck ids), votes
         # ((username, comment root) -> 1 up / 2 down) and comment threads (root id -> comments).
@@ -353,7 +360,7 @@ class FakeArchidekt:
             # Listing extras as the live v3 rows carry them (seen 2026-10-05).
             "size": sum(c["quantity"] for c in d["cards"]),
             "edhBracket": d.get("edhBracket"),
-            "colors": {"W": 0, "U": 12, "B": 0, "R": 0, "G": 14},
+            "colors": d.get("colors") or {"W": 0, "U": 12, "B": 0, "R": 0, "G": 14},
             "featured": d.get("featured") or "",
             "tags": ([{"id": 1, "name": "ramp"}, {"id": 2, "name": "sea monsters"}] if d["id"] == 42 else []),
         }
@@ -466,8 +473,69 @@ class FakeArchidekt:
                         return httpx.Response(404, json={"detail": "Not found."})
                     if "name" in patch:
                         folder["name"] = patch["name"]
+                    if "parentFolder" in patch:
+                        # the site's own check ("Cannot move folder into itself")
+                        if patch["parentFolder"] not in own or patch["parentFolder"] == folder["id"]:
+                            return httpx.Response(400, json={"parentFolder": ["Invalid folder."]})
+                        folder["parent"] = patch["parentFolder"]
                 else:
                     return httpx.Response(400, json={"items": ["Unknown type."]})
+            return httpx.Response(200, json={"ok": True})
+        if (
+            len(parts) == 4
+            and parts[1:3] == ["decks", "folders"]
+            and parts[3].isdigit()
+            and request.method == "GET"
+        ):
+            fid = int(parts[3])
+            mine = self.folders.get(who, [])
+            root = 1000 + self.users[who]["id"]
+            if fid != root and not any(f["id"] == fid for f in mine):
+                return httpx.Response(404, json={"detail": "Not found."})
+            if fid in self.folder_details_fail:
+                return httpx.Response(500, json={"detail": "Server error."})
+            rows = [
+                {"id": d["id"], "name": d["name"], "cardPackage": False}
+                for d in self.decks.values()
+                if d["owner"]["username"] == who and self.deck_folder.get(d["id"], root) == fid
+            ] + [{**p, "cardPackage": True} for p in self.packages.get(fid, [])]
+            page = int(request.url.params.get("page") or 1)
+            size = self.folder_page_size
+            chunk = rows[(page - 1) * size : page * size]
+            subs = [{"id": f["id"], "name": f["name"]} for f in mine if f.get("parent", root) == fid]
+            more = page * size < len(rows)
+            return httpx.Response(
+                200,
+                json={
+                    "id": fid,
+                    "subfolders": subs,
+                    "decks": chunk,
+                    "count": len(rows),
+                    "next": "more" if more else None,
+                },
+            )
+        if path == "/api/decks/folders/deleteItems/" and request.method == "POST":
+            body = json.loads(request.content)
+            self.folder_deletes.append(body)
+            mine = self.folders.get(who, [])
+            root = 1000 + self.users[who]["id"]
+            for item in body.get("items", []):
+                if item.get("type") != "folder" or not any(f["id"] == item.get("id") for f in mine):
+                    return httpx.Response(400, json={"items": ["Invalid."]})
+                gone = {item["id"]}
+                grew = True
+                while grew:
+                    grew = False
+                    for f in mine:
+                        if f.get("parent", root) in gone and f["id"] not in gone:
+                            gone.add(f["id"])
+                            grew = True
+                for did in [d for d, f in self.deck_folder.items() if f in gone]:
+                    self.decks.pop(did, None)
+                    self.deck_folder.pop(did, None)
+                for fid in gone:
+                    self.packages.pop(fid, None)
+                self.folders[who] = [f for f in mine if f["id"] not in gone]
             return httpx.Response(200, json={"ok": True})
         if path == "/api/decks/tags/v2/" and request.method == "GET":
             q = (request.url.params.get("q") or "").lower()
@@ -622,6 +690,25 @@ class FakeArchidekt:
                     return httpx.Response(200, json={"count": -1, "results": []})
             self.search_params.append(dict(request.url.params))
             results = [self._listing_row(d) for d in chosen]
+            # orderBy sorts the listing: a "-" first means the biggest or newest first; without
+            # it the other way round (the ordering parameter's two forms)
+            order = request.url.params.get("orderBy") or "-updatedAt"
+            field = order.lstrip("-")
+            results.sort(
+                key=lambda r: (r.get(field) is None, r.get(field) or 0), reverse=order.startswith("-")
+            )
+            if self.search_page_size:
+                page = int(request.url.params.get("page") or 1)
+                size = self.search_page_size
+                more = len(results) > page * size
+                return httpx.Response(
+                    200,
+                    json={
+                        "count": len(results),
+                        "next": f"https://archidekt.com/api/decks/v3/?page={page + 1}" if more else None,
+                        "results": results[(page - 1) * size : page * size],
+                    },
+                )
             return httpx.Response(200, json={"count": len(results), "results": results})
         if path == "/api/cards/v2/":
             # name= is a substring search over a huge card pool; exact=true returns exact oracle

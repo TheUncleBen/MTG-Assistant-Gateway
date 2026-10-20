@@ -36,7 +36,6 @@ PAGES = [
     "/decks/42/export",
     "/decks/42/compare",
     f"/decks?folder={FOLDERS[0]}",
-    "/folders",
     "/collection?view=grid",
     "/collection?view=list",
     "/search",
@@ -110,9 +109,8 @@ def test_main_pages_hold_together_at_200_percent_text(server: Server, zoom: str)
 
 
 # The Scan page's preview: the box keeps its 3:4 shape and the dashed card guide (with the card
-# name box at its top) stays inside it, in one column and in two, with and without a result.
-# Two columns start at a 700 px window at the normal text size, with a mouse or with touch,
-# and at 200% text only where the scan area has room for them.
+# name box at its top) stays inside it, with and without a result. The page is one column at
+# every width and text size.
 SCAN_PREVIEW = """
 () => {
   const panel = document.querySelector('.scan .cam-panel'), cam = panel.querySelector('.camera');
@@ -155,11 +153,10 @@ def test_the_scan_preview_keeps_its_shape_and_the_card_guide_inside_it(
                 if zoom != "none":
                     page.evaluate(ROOT_200 if zoom == "root" else TEXT_200)
                 page.wait_for_timeout(30)
-                two = w >= 700 if zoom == "none" else w >= 1280
                 for m in page.evaluate(SCAN_PREVIEW):
                     where = f"{w}px {zoom} {'with' if m['result'] else 'without'} a result"
-                    if (m["cols"] == "grid") != two:
-                        problems.append(f"{where}: {m['cols']}, expected {'two' if two else 'one'} column(s)")
+                    if m["cols"] == "grid":
+                        problems.append(f"{where}: {m['cols']}, expected one column")
                     if abs(m["ratio"] - 0.75) > 0.01:
                         problems.append(f"{where}: preview ratio {m['ratio']:.2f}, not 3:4")
                     if not m["inside"]:

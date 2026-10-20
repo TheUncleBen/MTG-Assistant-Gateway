@@ -163,7 +163,15 @@ def test_watch_toast_undo_and_the_card_menu(server: Server, width: int) -> None:
         menu = page.locator(".ctxmenu.cs-menu")
         menu.wait_for(timeout=3000)
         items = [t.strip() for t in menu.locator("[role=menuitem]").all_inner_texts()]
-        assert items == ["Open card", "Watch this card", "Art variants…", "Add to deck…", "Open on Scryfall"]
+        assert items == [
+            "Open card",
+            "Add to deck…",
+            "Add to collection",
+            "Watch this card",
+            "Art variants…",
+            "Copy name",
+            "Open on Scryfall",
+        ]
         mb = menu.bounding_box()
         vw = page.evaluate("document.documentElement.clientWidth")
         assert mb and mb["x"] >= 0 and mb["x"] + mb["width"] <= vw + 1

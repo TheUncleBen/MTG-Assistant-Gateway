@@ -1,127 +1,116 @@
-/* Scan page. Inherits the site theme from theme.py's shell; every colour below
-   resolves through the shell's variables (either the original names or the
-   Archidekt-style names) with a plain fallback, so a theme change cannot
-   leave the page unstyled.
+/* Scan page. Inherits the site theme from theme.py's shell: every colour below is one of the
+   shell's tokens (no colour of its own), the control height is the shell's --ctl (39px with a
+   mouse, 44px on touch) and panels are the shell's flat 3px cards.
 
-   Layout rules: one column on phones with the camera controls in a bar that
-   sticks to the bottom of the screen (thumb reach, one-handed), two columns
-   from 700px (an unfolded foldable or a desktop) with the camera on the left
-   and the result on the right. Every tap target is at least 44px. */
-.scan{
-  --s-accent:var(--orange,var(--accent,#fa890d)); --s-accent-hover:var(--accent-hover,var(--orange,#fa890d));
-  --s-on-accent:var(--on-orange,#181818); --s-raised:var(--surface,var(--bg-raised,#232323));
-  --s-raised-2:var(--surface-2,var(--bg-raised,#383838));
-  --s-input:var(--bg,var(--bg-input,#181818)); --s-border:var(--control-border,#868686);
-  --s-border-soft:var(--border-soft,var(--border,#323232));
-  --s-text:var(--text,#e3e3e3); --s-muted:var(--text-muted,#a8a8a8); --s-radius:var(--radius,5px);
-  --s-radius-lg:var(--radius-lg,8px);
-  --s-ok:var(--green-text,var(--ok,#1ebb6c)); --s-ok-line:var(--green,var(--ok,#1ebb6c));
-  --s-warn:var(--orange-text,var(--warn,#fa890d)); --s-warn-line:var(--orange,var(--warn,#fa890d));
-  --s-danger:var(--red-text,var(--danger,#ff555b)); --s-danger-line:var(--red,var(--danger,#ff555b));
-  --s-ok-tint:var(--green-tint,rgba(30,187,108,.14)); --s-warn-tint:var(--orange-tint,rgba(250,137,13,.14));
-  --s-danger-tint:var(--red-tint,rgba(255,85,91,.14));
-  --tap:2.75rem; /* 44px at 16px, 38.5px at the shell's 14px root: min-height below is in px */
-}
-main.wrap:has(.scan){max-width:64rem}
-/* The camera panel's one or two columns follow the scan area's own width in its own text size
-   (a container query), not the window's: at 200% text a 717 px window has no room for two. */
+   Layout: one column at the standard's form width at every size (the shell's main.wrap), the
+   blocks in a fixed order: tabs, the options row (Set, Foil, Auto and, in the Android app, the
+   phone camera), the viewfinder, status, result, then the capture bar (Photo, the round capture
+   button in the middle, Type). The options row and the capture bar are each one row that never
+   wraps; on phones the capture bar sticks to the bottom of the screen (thumb reach). */
 .scan{display:flex;flex-direction:column;gap:.75rem;container-type:inline-size}
 .scan .row{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}
 .scan .grow{flex:1 1 auto}
-.scan button,.scan .btn{margin-top:0;min-height:44px;min-width:44px;width:auto}
+.scan button,.scan .btn{margin-top:0;min-height:var(--ctl);min-width:var(--ctl);width:auto}
 .scan button.big{font-size:1.05rem;padding:.8rem 1.2rem;min-width:9rem}
 .scan button.icon{padding:.45rem .7rem;line-height:1}
-.scan .muted{color:var(--s-muted);font-size:.9em}
+.scan .muted{color:var(--text-muted);font-size:.9em}
 .scan .hidden{display:none !important}
 .scan .sr{position:absolute;left:-9999px}
+.scan svg.i{width:1.1em;height:1.1em;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;
+  stroke-linejoin:round;flex:none}
+.scan button svg.i+span,.scan .btn svg.i+span{margin-left:.4rem}
+.scan .snote{text-align:center;margin:0}
 
-/* tabs */
-.scan .tabs{display:flex;gap:.25rem;border-bottom:1px solid var(--s-border-soft);position:sticky;top:0;z-index:4;
-  background:var(--bg,#181818);margin:0 -1rem;padding:0 1rem;flex-wrap:wrap}  /* a second row at large text sizes */
-.scan .tabs button{flex:1 1 auto;min-width:0;background:transparent;border:0;border-bottom:3px solid transparent;color:var(--s-muted);
-  border-radius:0;padding:.6rem .4rem;font-weight:700;min-height:48px;line-height:1.15}
-.scan .tabs button:hover{background:var(--s-raised);color:var(--s-text)}
-.scan .tabs button[aria-selected=true]{color:var(--s-text);border-bottom-color:var(--s-accent)}
-.scan .tabs .badge{margin-left:.25rem;padding:0 .45rem;font-size:.78rem;background:var(--s-accent);
-  color:var(--s-on-accent);border-color:var(--s-accent)}
-@media (min-width:700px){ .scan .tabs{position:static;margin:0;padding:0} .scan .tabs button{flex:0 1 auto;padding:.6rem 1.1rem} }
+/* tabs: one row, the open tab underlined in orange; sticky on phones */
+.scan .tabs{display:flex;gap:.25rem;border-bottom:1px solid var(--border-soft);flex-wrap:wrap}  /* a second row at large text sizes */
+.scan .tabs button{flex:1 1 auto;min-width:0;background:transparent;border:0;border-bottom:3px solid transparent;color:var(--text-muted);
+  border-radius:0;padding:.5rem .4rem;font-weight:700;min-height:var(--ctl);line-height:1.15}
+.scan .tabs button:hover{background:var(--surface);color:var(--text)}
+.scan .tabs button[aria-selected=true]{color:var(--text);border-bottom-color:var(--orange)}
+.scan .tabs .badge{margin-left:.25rem;padding:0 .45rem;font-size:.78rem;background:var(--orange);
+  color:var(--on-orange);border-color:var(--orange)}
+@media (max-width:599.98px){ .scan .tabs{position:sticky;top:0;z-index:4;background:var(--bg);margin:0 -1rem;padding:0 1rem} }
 
-/* scan options: set lock and foil default, one 44px row above the camera */
-.scan .scan-opts{display:flex;align-items:center;flex-wrap:wrap;gap:.5rem .6rem;padding:.4rem .6rem;
-  border:1px solid var(--s-border-soft);border-radius:var(--s-radius);background:var(--s-raised)}
-.scan .scan-opts .set-field{display:inline-flex;align-items:center;gap:.5rem;margin:0;font-weight:700}
-.scan .scan-opts .set-field .lbl{color:var(--s-muted)}
-.scan .scan-opts input#set-lock{width:5.6rem;min-height:44px;padding:.4rem .6rem;font-size:1.05rem;font-weight:700;
-  letter-spacing:.08em;text-transform:uppercase;text-align:center;font-family:ui-monospace,Menlo,Consolas,monospace}
-.scan .scan-opts.locked input#set-lock{border-color:var(--s-accent);background:var(--s-warn-tint);color:var(--s-warn)}
-.scan .scan-opts.invalid input#set-lock{border-color:var(--s-danger-line);background:var(--s-danger-tint);color:var(--s-danger)}
-.scan .scan-opts .clear{min-width:44px;padding:0;font-size:1.3rem;line-height:1;display:none}
-.scan .scan-opts.locked .clear,.scan .scan-opts.invalid .clear{display:inline-flex}
-.scan .scan-opts .help{flex:1 1 8rem;font-size:.86rem;color:var(--s-muted)}
-.scan .scan-opts.invalid .help{color:var(--s-danger);font-weight:700}
-.scan .switch{display:inline-flex;align-items:center;gap:.5rem;min-height:44px;padding:.3rem .9rem .3rem .4rem;
-  border-radius:999px;font-weight:700;margin-left:auto}
-.scan .switch .knob{position:relative;width:2.6rem;height:1.5rem;border-radius:999px;background:var(--s-raised-2);
-  border:1px solid var(--s-border);transition:background-color .15s;flex:0 0 auto}
-.scan .switch .knob::after{content:"";position:absolute;top:2px;left:2px;width:calc(1.5rem - 6px);height:calc(1.5rem - 6px);
-  border-radius:50%;background:#fff;transition:transform .15s}
-.scan .switch[aria-checked=true] .knob{background:var(--s-accent);border-color:var(--s-accent)}
-.scan .switch[aria-checked=true] .knob::after{transform:translateX(1.1rem)}
-.scan .switch[aria-checked=true] .lbl{color:var(--s-warn)}
-.scan .switch.auto{margin-left:0}
+/* the options row: the Set box with its × inside, the Foil and Auto toggles, and in the app the
+   phone camera button at the end; one row at every width */
+.scan .scan-opts{display:flex;align-items:center;flex-wrap:wrap;gap:8px}
+.scan .scan-opts > *{margin:0}
+/* the Set box draws the edge; the label, the field and the × sit inside it side by side */
+.scan .setbox{position:relative;display:flex;align-items:center;width:max(128px,9em);flex:none;height:var(--ctl);box-sizing:content-box;
+  border:1px solid var(--control-border);border-radius:var(--radius);background:var(--surface)}
+.scan .setbox:focus-within{outline:2px solid var(--focus);outline-offset:2px}
+.scan .setbox .pre{flex:none;padding:0 0 0 10px;font-weight:700;color:var(--text-muted);margin:0}
+.scan .setbox input#set-lock{flex:1 1 auto;width:100%;min-width:3.5em;height:100%;min-height:0;padding:0 2px 0 6px;border:0;border-radius:0;
+  background:transparent;color:inherit;font-weight:700;font-size:.95rem;letter-spacing:.04em;text-transform:uppercase;
+  font-family:ui-monospace,Menlo,Consolas,monospace}
+.scan .setbox input#set-lock:focus,.scan .setbox input#set-lock:focus-visible{outline:none;box-shadow:none}
+.scan .setbox input#set-lock::placeholder{text-transform:none;letter-spacing:0;font-family:inherit;font-weight:400}
+.scan .scan-opts.locked .setbox{border-color:var(--orange);background:var(--orange-tint);color:var(--orange-text)}
+.scan .scan-opts.invalid .setbox{border-color:var(--danger-text);background:var(--red-tint);color:var(--danger-text)}
+/* the × at the box's right end: a full-height target, no edge of its own */
+.scan .setbox .clear{flex:none;width:var(--ctl);height:100%;min-width:0;min-height:0;padding:0;margin:0;
+  border:0;border-radius:0 var(--radius) var(--radius) 0;background:transparent;color:var(--text-muted)}
+.scan .setbox .clear:hover{background:var(--surface-2);color:var(--text)}
+/* the toggles (Foil, Auto, the picker's Foil): a pill, filled with the orange tint when on */
+.scan .switch{display:inline-flex;align-items:center;justify-content:center;min-height:var(--ctl);padding:0 .75rem;
+  border-radius:22px;font-weight:700;border:1px solid var(--control-border);background:var(--surface);color:var(--text)}
+.scan .switch:hover{background:var(--surface-2)}
+.scan .switch[aria-checked=true]{background:var(--orange-tint);border-color:var(--orange);color:var(--orange-text)}
+.scan .scan-opts .switch{flex:1 1 auto;min-width:0}
+.scan .scan-opts #phone-camera{flex:none;width:var(--ctl);padding:0}
 .scan .shutter.live{animation:scan-live 1.2s ease-in-out infinite}
-@keyframes scan-live{0%,100%{box-shadow:0 0 0 0 rgba(250,137,13,.7)}50%{box-shadow:0 0 0 10px rgba(250,137,13,0)}}
+@keyframes scan-live{0%,100%{outline:3px solid transparent;outline-offset:3px}50%{outline:3px solid var(--orange-select);outline-offset:9px}}
 
 /* continuous mode: the auto-add toast over the viewfinder, and the unidentified tray */
 .scan .toast{position:absolute;left:.6rem;right:.6rem;bottom:.6rem;z-index:3;display:flex;align-items:center;gap:.6rem;
-  min-height:48px;padding:.4rem .5rem .4rem .9rem;border-radius:var(--s-radius-lg);font-weight:700;color:#fff;
-  background:rgba(17,17,17,.88);border-left:5px solid var(--s-ok-line);box-shadow:0 2px 8px rgba(0,0,0,.5)}
+  min-height:var(--ctl);padding:.4rem .5rem .4rem .9rem;border-radius:var(--radius);font-weight:700;color:var(--text);
+  background:var(--surface-2);border:1px solid var(--border);box-shadow:var(--shadow)}
 .scan .toast[hidden]{display:none}
 .scan .toast .txt{flex:1 1 auto;min-width:0;overflow-wrap:anywhere}
-.scan .toast .undo{min-height:44px;min-width:5rem;background:var(--s-accent);border-color:var(--s-accent);color:var(--s-on-accent)}
+.scan .toast .undo{min-height:var(--ctl);min-width:5rem}
 .scan .toast .undo[hidden]{display:none}
 .scan .camera:has(.toast:not([hidden])) .glare-hint{bottom:4.2rem}
 .scan .unid{display:flex;flex-direction:column;align-items:center;gap:.5rem}
-.scan .unid-toggle{border-radius:999px;border-color:var(--s-danger-line);color:var(--s-danger);background:var(--s-danger-tint)}
+.scan .unid-toggle{border-radius:22px;border-color:var(--danger-text);color:var(--danger-text);background:var(--red-tint)}
 .scan .unid-toggle[hidden]{display:none}
-.scan .unid-toggle .count{display:inline-block;min-width:1.6em;margin-right:.35rem;padding:0 .4rem;border-radius:999px;
-  background:var(--s-danger-line);color:#fff;text-align:center}
-.scan .unid-tray{width:100%;padding:.6rem .75rem;border:1px solid var(--s-danger-line);border-radius:var(--s-radius-lg);
-  background:var(--s-raised)}
+.scan .unid-toggle .count{display:inline-block;min-width:1.6em;margin-right:.35rem;padding:0 .4rem;border-radius:22px;
+  background:var(--danger-fill);color:var(--navbar-text);text-align:center}
+.scan .unid-tray{width:100%;padding:.6rem .75rem;border:1px solid var(--border);border-radius:var(--radius-panel);
+  background:var(--surface)}
 .scan .unid-tray[hidden]{display:none}
 .scan .unid-tray > p{margin:0 0 .5rem}
-.scan .unid-list li{display:flex;flex-direction:column;gap:.4rem;padding:.6rem 0;border-top:1px solid var(--s-border-soft)}
-.scan .unid-list img.strip{width:100%;max-width:22rem;border-radius:4px;background:#fff;border:1px solid var(--s-border)}
+.scan .unid-list li{display:flex;flex-direction:column;gap:.4rem;padding:.6rem 0;border-top:1px solid var(--border-soft)}
+.scan .unid-list img.strip{width:100%;max-width:22rem;border-radius:var(--radius-panel);background:var(--surface);border:1px solid var(--border)}
 .scan .unid-list .actions{margin-top:.25rem}
-.scan .unid-list .actions .primary{flex:1 1 9rem}
-.scan .unid-list .actions .secondary{flex:0 0 auto;min-width:44px}
-@media (max-width:479px){ .scan .scan-opts .help{flex:1 1 100%;order:9;margin:0 .1rem} }
+.scan .unid-list .actions .typebtn{flex:1 1 9rem}
+.scan .unid-list .actions .dismiss{flex:0 0 auto;width:var(--ctl);padding:0}
 
 /* printing line: set code and number, plus a foil mark */
 .scan .printing{display:flex;flex-wrap:wrap;gap:.4rem;align-items:center;margin:.1rem 0 .3rem}
-.scan .setcode{display:inline-block;padding:.1rem .5rem;border-radius:4px;font-family:ui-monospace,Menlo,Consolas,monospace;
-  font-weight:700;font-size:.9rem;letter-spacing:.05em;background:var(--s-raised);border:1px solid var(--s-border)}
-.scan .foil{display:inline-block;padding:.1rem .55rem;border-radius:999px;font-size:.78rem;font-weight:900;
-  text-transform:uppercase;letter-spacing:.06em;color:#181818;border:1px solid var(--s-accent);
-  background:linear-gradient(110deg,#f6d365,#fda085 35%,#a1c4fd 70%,#c2e9fb)}
+.scan .setcode{display:inline-block;padding:.1rem .5rem;border-radius:var(--radius-panel);font-family:ui-monospace,Menlo,Consolas,monospace;
+  font-weight:700;font-size:.9rem;letter-spacing:.05em;background:var(--surface);border:1px solid var(--border)}
+/* the foil mark keeps its sheen from the theme's tints over the page (no colour of its own) */
+.scan .foil{display:inline-block;padding:.1rem .55rem;border-radius:22px;font-size:.78rem;font-weight:900;
+  text-transform:uppercase;letter-spacing:.06em;color:var(--text);border:1px solid var(--orange);
+  background:linear-gradient(110deg,var(--orange-tint),var(--green-tint) 35%,var(--blue-tint) 70%,var(--orange-tint)) var(--surface)}
 .scan .foil::before{content:"✦ "}
 .scan ul.items small .foil{margin-left:.4rem;vertical-align:middle}
-.scan .printing .printings{min-height:36px;padding:.3rem .7rem;font-size:.85rem;margin-left:auto}
+.scan .printing .printings{min-height:var(--ctl);padding:0 .7rem;font-size:.9rem;margin-left:auto}
 .scan ul.items small{display:flex;flex-wrap:wrap;align-items:center;gap:.35rem}
-.scan ul.items .setbtn{min-height:44px;min-width:44px;padding:0 .35rem 0 0;background:transparent;border:0;color:var(--s-muted);
+.scan ul.items .setbtn{min-height:var(--ctl);min-width:var(--ctl);padding:0 .35rem 0 0;background:transparent;border:0;color:var(--text-muted);
   font-weight:700;font-size:.9rem;display:inline-flex;align-items:center;gap:.25rem}
-.scan ul.items .setbtn:hover .setcode{border-color:var(--s-accent);color:var(--s-accent)}
+.scan ul.items .setbtn:hover .setcode{border-color:var(--orange);color:var(--orange-text)}
 .scan ul.items .stepper{flex:0 0 auto}
 
 /* printing picker: a bottom sheet on phones, a dialog on wide screens, tiles with the card picture */
-.scan .picker{position:fixed;inset:0;z-index:20;background:rgba(0,0,0,.6);display:flex;align-items:flex-end;justify-content:center}
-.scan .sheet{width:100%;max-height:88vh;display:flex;flex-direction:column;background:var(--s-raised);color:var(--s-text);
-  border:1px solid var(--s-border);border-bottom:0;border-radius:var(--s-radius-lg) var(--s-radius-lg) 0 0;
-  box-shadow:0 -8px 30px rgba(0,0,0,.5);padding:.75rem 1rem calc(.75rem + env(safe-area-inset-bottom))}
+.scan .picker{position:fixed;inset:0;z-index:20;background:var(--scrim);display:flex;align-items:flex-end;justify-content:center}
+.scan .sheet{width:100%;max-height:88vh;display:flex;flex-direction:column;background:var(--surface);color:var(--text);
+  border:1px solid var(--border);border-bottom:0;border-radius:var(--radius-sheet) var(--radius-sheet) 0 0;
+  box-shadow:var(--shadow);padding:.75rem 1rem calc(.75rem + env(safe-area-inset-bottom))}
 .scan .sheet-head{display:flex;align-items:flex-start;gap:.75rem}
 .scan .sheet-head .ttl{flex:1 1 auto;min-width:0}
 .scan .sheet-head h3{margin:0;font-size:1.15rem}
-.scan .sheet-head .close{flex:0 0 auto;font-size:1.2rem}
+.scan .sheet-head .close{flex:0 0 auto;width:var(--ctl);padding:0}
 .scan .sheet-tools{display:flex;gap:.6rem;align-items:center;margin:.6rem 0 .25rem}
 .scan .sheet-tools input{flex:1 1 auto;min-width:0}
 .scan .sheet-tools .switch{margin-left:0;flex:0 0 auto}
@@ -132,140 +121,125 @@ main.wrap:has(.scan){max-width:64rem}
 .scan .sheet-body{flex:1 1 auto;min-height:0;overflow:auto;overscroll-behavior:contain;padding:2px}
 .scan .tiles{--tile:7.6rem;--pic:calc((var(--tile) - .8rem - 4px) * 88 / 63);display:grid;
   grid-template-columns:repeat(auto-fill,var(--tile));justify-content:center;gap:.6rem}
-.scan .tile{display:block;padding:.4rem;min-height:44px;
-  background:var(--s-input);border:2px solid var(--s-border-soft);border-radius:var(--s-radius-lg);color:var(--s-text);text-align:left;
+.scan .tile{display:block;padding:.4rem;min-height:var(--ctl);
+  background:var(--bg);border:2px solid var(--border-soft);border-radius:var(--radius);color:var(--text);text-align:left;
   cursor:pointer;box-sizing:border-box}
-.scan .tile:hover{border-color:var(--s-border);background:var(--s-raised-2)}
-.scan .tile:focus-visible{outline:2px solid var(--s-accent);outline-offset:2px}
-.scan .tile.current{border-color:var(--s-accent);box-shadow:0 0 0 1px var(--s-accent)}
+.scan .tile:hover{border-color:var(--border);background:var(--surface-2)}
+.scan .tile:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+.scan .tile.current{border-color:var(--orange);box-shadow:0 0 0 1px var(--orange)}
 /* The picture box takes its height from the card ratio, not the image, so a tile is the same size before
    and after its image loads (lazy) and a button's quirks around replaced children cannot shrink it. */
-.scan .tile .pic{position:relative;display:block;height:var(--pic);margin-bottom:.3rem;border-radius:5px;
-  overflow:hidden;background:var(--s-raised-2)}
+.scan .tile .pic{position:relative;display:block;height:var(--pic);margin-bottom:.3rem;border-radius:var(--radius);
+  overflow:hidden;background:var(--surface-2)}
 .scan .tile .pic img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
 .scan .tile .tag{position:absolute;left:0;right:0;bottom:0;padding:.2rem .3rem;text-align:center;font-size:.72rem;font-weight:900;
   text-transform:uppercase;letter-spacing:.05em}
-.scan .tile .tag.now{background:var(--s-accent);color:var(--s-on-accent)}
+.scan .tile .tag.now{background:var(--orange);color:var(--on-orange)}
 .scan .tile .setcode{font-size:.85rem}
-.scan .tile .setname{display:block;margin:.3rem 0;font-size:.8rem;line-height:1.25;color:var(--s-muted);overflow-wrap:anywhere}
+.scan .tile .setname{display:block;margin:.3rem 0;font-size:.8rem;line-height:1.25;color:var(--text-muted);overflow-wrap:anywhere}
 .scan .tile .fin{display:flex;flex-wrap:wrap;gap:.25rem;align-items:center}
-.scan .tile .year{font-size:.75rem;color:var(--s-muted);margin-right:.1rem}
+.scan .tile .year{font-size:.75rem;color:var(--text-muted);margin-right:.1rem}
 .scan .tile .chip{font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em;padding:.1rem .4rem;
-  border-radius:999px;border:1px solid var(--s-border);color:var(--s-muted)}
-.scan .tile .chip.foil,.scan .tile .chip.etched{color:#181818;border-color:var(--s-accent);
-  background:linear-gradient(110deg,#f6d365,#fda085 35%,#a1c4fd 70%,#c2e9fb)}
+  border-radius:22px;border:1px solid var(--border);color:var(--text-muted)}
+.scan .tile .chip.foil,.scan .tile .chip.etched{color:var(--text);border-color:var(--orange);
+  background:linear-gradient(110deg,var(--orange-tint),var(--green-tint) 35%,var(--blue-tint) 70%,var(--orange-tint)) var(--surface)}
 body.picker-open{overflow:hidden}
 @media (min-width:700px){
   .scan .picker{align-items:center;padding:1.5rem}
-  .scan .sheet{max-width:56rem;max-height:86vh;border-bottom:1px solid var(--s-border);border-radius:var(--s-radius-lg);padding:1rem 1.25rem}
+  .scan .sheet{max-width:56rem;max-height:86vh;border-bottom:1px solid var(--border);border-radius:var(--radius-panel);padding:1rem 1.25rem}
   .scan .tiles{--tile:8.6rem}
 }
 
-/* camera panel: one column, controls stick to the bottom on phones */
+/* camera panel: one column */
 .scan .cam-panel{display:flex;flex-direction:column;gap:.75rem}
-.scan .camera{position:relative;background:#000;border-radius:var(--s-radius-lg);overflow:hidden;
+.scan .camera{position:relative;background:var(--navbar-bg);border-radius:var(--radius);overflow:hidden;
   aspect-ratio:3/4;max-height:54vh;width:min(100%,calc(54vh * 3 / 4));margin:0 auto}
 .scan .camera video{width:100%;height:100%;object-fit:cover;display:block}
-/* once there is a match to confirm, the preview gives up room so the result shows above the controls */
-/* Shrinking by width keeps the 3:4 box and the guide's 78% width, which scan.js relies on for the crop
-   (and keeps the guide's card name box inside the preview). The one-column rules apply below a 700 px
-   window and, at large text, wherever the scan area is too narrow for two columns: the same block
-   twice, as CSS can't join a media and a container query with "or". */
-@media (max-width:699px){
-  .scan .cam-panel.has-result .camera{width:min(100%,calc(30vh * 3 / 4));max-height:30vh}
-  .scan .cam-panel.has-result .camera .hint{display:none}
-}
-@container (width < 42.25em){
-  .scan .cam-panel.has-result .camera{width:min(100%,calc(30vh * 3 / 4));max-height:30vh}
-  .scan .cam-panel.has-result .camera .hint{display:none}
-}
+/* once there is a match to confirm, the preview gives up room so the result shows above the controls.
+   Shrinking by width keeps the 3:4 box and the guide's 78% width, which scan.js relies on for the crop
+   (and keeps the guide's card name box inside the preview). */
+.scan .cam-panel.has-result .camera{width:min(100%,calc(30vh * 3 / 4));max-height:30vh}
+.scan .cam-panel.has-result .camera .hint{display:none}
 .scan .camera .guide{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
-  width:78%;aspect-ratio:63/88;border:2px solid rgba(255,255,255,.9);border-radius:4.5%/3.3%;
-  box-shadow:0 0 0 999px rgba(0,0,0,.55);pointer-events:none}
+  width:78%;aspect-ratio:63/88;border:2px solid var(--navbar-text);border-radius:4.5%/3.3%;
+  box-shadow:0 0 0 999px var(--scrim);pointer-events:none}
 .scan .camera .guide::before,.scan .camera .guide::after{content:"";position:absolute;width:14%;height:10%;
-  border:3px solid var(--s-accent);pointer-events:none}
+  border:3px solid var(--orange);pointer-events:none}
 .scan .camera .guide::before{left:-3px;top:-3px;border-right:0;border-bottom:0;border-top-left-radius:6px}
 .scan .camera .guide::after{right:-3px;bottom:-3px;border-left:0;border-top:0;border-bottom-right-radius:6px}
 .scan .camera .guide .title{position:absolute;left:4%;right:4%;top:4%;height:8.5%;
-  border:2px dashed var(--s-accent);border-radius:4px;background:rgba(250,137,13,.12)}
+  border:2px dashed var(--orange);border-radius:var(--radius-panel);background:var(--orange-tint)}
 .scan .camera .guide .title::after{content:"card name";position:absolute;left:0;right:0;top:50%;transform:translateY(-50%);
-  text-align:center;color:#fff;font-weight:700;font-size:.8rem;letter-spacing:.08em;text-transform:uppercase;
-  text-shadow:0 1px 2px #000;opacity:.9}
-.scan .camera .hint{position:absolute;left:0;right:0;top:0;padding:.45rem .75rem;text-align:center;color:#fff;
-  font-size:.86rem;font-weight:700;background:linear-gradient(rgba(0,0,0,.7),rgba(0,0,0,0));text-shadow:0 1px 2px #000}
+  text-align:center;color:var(--navbar-text);font-weight:700;font-size:.8rem;letter-spacing:.08em;text-transform:uppercase;
+  text-shadow:0 1px 2px var(--navbar-bg);opacity:.9}
+.scan .camera .hint{position:absolute;left:0;right:0;top:0;padding:.45rem .75rem;text-align:center;color:var(--navbar-text);
+  font-size:.86rem;font-weight:700;background:linear-gradient(var(--banner-a),transparent);text-shadow:0 1px 2px var(--navbar-bg)}
 .scan .camera.busy video{filter:brightness(.5)}
 .scan .camera.busy::after{content:"Reading…";position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
-  color:#fff;font-weight:900;font-size:1.1rem;text-shadow:0 1px 3px #000}
-.scan .camera .flash{position:absolute;inset:0;background:#fff;opacity:0;pointer-events:none;transition:opacity .25s}
+  color:var(--navbar-text);font-weight:900;font-size:1.1rem;text-shadow:0 1px 3px var(--navbar-bg)}
+.scan .camera .flash{position:absolute;inset:0;background:var(--navbar-text);opacity:0;pointer-events:none;transition:opacity .25s}
 .scan .camera .flash.on{opacity:.6;transition:none}
 
-.scan .controls{position:sticky;bottom:0;z-index:3;display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);align-items:center;
-  gap:.75rem;padding:.6rem 1rem calc(.6rem + env(safe-area-inset-bottom));margin:0 -1rem;
-  background:var(--bg,#181818);border-top:1px solid var(--s-border-soft)}
+/* the capture bar: Photo, the round capture button in the middle, Type; one row at every width */
+.scan .controls{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);align-items:center;gap:1rem;padding:.6rem 0}
 .scan .controls > :first-child{justify-self:end} .scan .controls > :last-child{justify-self:start}
-.scan .controls button,.scan .controls .btn{width:auto}
-/* always a circle: the rule above must not size it, and inside the Android app a fourth button
-   ("Phone camera") puts it in a wide column, where it used to stretch into an oval */
-.scan .controls .shutter{width:min(4.75rem,20vw);flex:none;justify-self:center;aspect-ratio:1}
-.scan .shutter{width:min(4.75rem,20vw);height:min(4.75rem,20vw);min-width:min(4.75rem,20vw);border-radius:50%;border:4px solid #fff;
-  background:var(--s-accent);box-shadow:0 0 0 3px var(--s-accent),0 2px 8px rgba(0,0,0,.5);padding:0;
-  color:var(--s-on-accent);transition:transform .1s;display:inline-flex;align-items:center;justify-content:center}
-.scan .shutter svg.i{width:2rem;height:2rem;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;
-  stroke-linejoin:round}
-/* the two buttons either side of the shutter look alike: bordered, one height, text labels */
-.scan .controls .ctl,.scan .controls label.ctl{min-height:44px;height:auto;max-width:100%;padding:0 min(1.1rem,3vw);
-  margin:0;min-width:0;
-  display:inline-flex;align-items:center;justify-content:center;font-weight:700;border:1px solid var(--s-border);
-  background:var(--s-raised);color:var(--s-text);border-radius:var(--s-radius);cursor:pointer}
-.scan .controls .ctl:hover{background:var(--s-raised-2)}
+/* always a circle: a fixed size of its own, never the width of its grid column */
+.scan .shutter{width:72px;height:72px;min-width:72px;aspect-ratio:1;flex:none;justify-self:center;border-radius:50%;
+  border:4px solid var(--surface);background:var(--orange);box-shadow:0 0 0 3px var(--orange);padding:0;
+  color:var(--on-orange);transition:transform .1s;display:inline-flex;align-items:center;justify-content:center}
+.scan .shutter svg.i{width:30px;height:30px}
+/* the two buttons either side of the shutter look alike: bordered, one height, an icon and a text label */
+.scan .controls .ctl,.scan .controls label.ctl{width:100%;max-width:104px;min-height:var(--ctl);height:auto;padding:0 .5rem;
+  margin:0;min-width:0;display:inline-flex;align-items:center;justify-content:center;font-weight:700;
+  border:1px solid var(--border);background:var(--surface);color:var(--text);border-radius:var(--radius);cursor:pointer}
+.scan .controls .ctl:hover{background:var(--surface-2)}
 /* a yes/no question in place of the browser's confirm box */
 .scan .confirmbar{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;margin:.5rem 0;padding:.5rem .75rem;
-  background:var(--s-raised-2);border-left:4px solid var(--s-danger-line);border-radius:var(--s-radius)}
+  background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-panel)}
 .scan .confirmbar span{flex:1 1 12rem}
-.scan .confirmbar button{min-height:40px}
-/* phones: the sticky control bar sits above the site's tab bar */
+.scan .confirmbar button{min-height:var(--ctl)}
+/* phones: the capture bar sticks to the bottom of the screen, above the site's tab bar */
 @media (max-width:599.98px){
+  .scan .controls{position:sticky;bottom:0;z-index:3;padding:.6rem 1rem calc(.6rem + env(safe-area-inset-bottom));margin:0 -1rem;
+    background:var(--bg);border-top:1px solid var(--border-soft)}
   .has-tabbar .scan .controls{bottom:calc(56px + env(safe-area-inset-bottom));padding-bottom:.6rem}
 }
-.scan .shutter:hover{background:var(--s-accent);filter:brightness(1.1)}
+.scan .shutter:hover{background:var(--orange);filter:brightness(1.1)}
 .scan .shutter:active{transform:scale(.94)}
 .scan .shutter:disabled{opacity:.45;box-shadow:none}
 .scan #cam-status{margin:0;min-height:1.4em;text-align:center}
 .scan .glare-hint{position:absolute;left:0;right:0;bottom:.6rem;margin:0 auto;width:max-content;z-index:2;
   max-width:calc(100% - 1.2rem);
-  display:inline-flex;align-items:center;gap:.4rem;min-height:44px;padding:.4rem .9rem;border-radius:999px;font-weight:700;
-  color:#181818;background:var(--s-accent);border:1px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.5);text-align:left}
+  display:inline-flex;align-items:center;gap:.4rem;min-height:var(--ctl);padding:.4rem .9rem;border-radius:22px;font-weight:700;
+  color:var(--on-orange);background:var(--orange);border:1px solid var(--surface);box-shadow:var(--shadow);text-align:left}
 .scan .glare-hint[hidden]{display:none}
-.scan .glare-hint .ico{font-size:1.2rem;line-height:1}
-.scan .camera.glare{box-shadow:0 0 0 3px var(--s-warn-line)}
+.scan .camera.glare{box-shadow:0 0 0 3px var(--orange)}
 /* torch: a 44px toggle in the viewfinder's top-right corner, only where the camera reports one */
-.scan .torch{position:absolute;right:.5rem;top:.5rem;z-index:2;min-height:44px;min-width:44px;padding:.4rem .7rem;
-  border-radius:999px;border:1px solid rgba(255,255,255,.6);background:rgba(0,0,0,.55);color:#fff;font-weight:700;
+.scan .torch{position:absolute;right:.5rem;top:.5rem;z-index:2;min-height:var(--ctl);min-width:var(--ctl);padding:.4rem .7rem;
+  border-radius:22px;border:1px solid var(--navbar-muted);background:var(--banner-a);color:var(--navbar-text);font-weight:700;
   display:inline-flex;align-items:center;gap:.35rem;backdrop-filter:blur(2px)}
 .scan .torch[hidden]{display:none}
-.scan .torch:hover{background:rgba(0,0,0,.75);color:#fff}
-.scan .torch[aria-pressed=true]{background:var(--s-accent);border-color:var(--s-accent);color:var(--s-on-accent)}
-.scan .torch .ico{font-size:1.1rem;line-height:1}
+.scan .torch:hover{background:var(--navbar-bg);color:var(--navbar-text)}
+.scan .torch[aria-pressed=true]{background:var(--orange);border-color:var(--orange);color:var(--on-orange)}
 .scan .camera:has(.torch:not([hidden])) .hint{padding-right:6rem}
 /* camera controls: zoom and brightness sliders, 44px rows, only when the camera reports them */
-.scan .cam-ctl{display:flex;flex-direction:column;gap:.35rem;padding:.4rem .6rem;border:1px solid var(--s-border-soft);
-  border-radius:var(--s-radius);background:var(--s-raised)}
+.scan .cam-ctl{display:flex;flex-direction:column;gap:.35rem}
 .scan .cam-ctl[hidden]{display:none}
-.scan .cam-ctl .ctl{display:grid;grid-template-columns:auto 5.2rem minmax(0,1fr) 3.4rem 44px;align-items:center;gap:.5rem;
-  min-height:44px;margin:0;font-weight:700}
-.scan .cam-ctl .ico{font-size:1.1rem;line-height:1}
-.scan .cam-ctl .lbl{color:var(--s-muted)}
-.scan .cam-ctl output{text-align:right;font-variant-numeric:tabular-nums;color:var(--s-warn)}
-.scan .cam-ctl .reset{min-width:44px;padding:0;font-size:1.2rem;line-height:1}
-.scan .cam-ctl input[type=range]{width:100%;min-height:44px;margin:0;accent-color:var(--s-accent);background:transparent}
-.scan .cam-ctl input[type=range]::-webkit-slider-runnable-track{height:6px;border-radius:3px;background:var(--s-raised-2)}
+.scan .cam-ctl .ctl{display:grid;grid-template-columns:auto 5.2rem minmax(0,1fr) 3.4rem var(--ctl);align-items:center;gap:.5rem;
+  min-height:var(--ctl);margin:0;font-weight:700}
+.scan .cam-ctl .ico{display:inline-flex;color:var(--text-muted)}
+.scan .cam-ctl .lbl{color:var(--text-muted)}
+.scan .cam-ctl output{text-align:right;font-variant-numeric:tabular-nums;color:var(--orange-text)}
+.scan .cam-ctl .reset{min-width:var(--ctl);padding:0}
+.scan .cam-ctl input[type=range]{width:100%;min-height:var(--ctl);margin:0;accent-color:var(--orange);background:transparent}
+.scan .cam-ctl input[type=range]::-webkit-slider-runnable-track{height:6px;border-radius:3px;background:var(--surface-2)}
 .scan .cam-ctl input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:28px;height:28px;margin-top:-11px;
-  border-radius:50%;background:var(--s-accent);border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.4)}
-.scan .cam-ctl input[type=range]::-moz-range-track{height:6px;border-radius:3px;background:var(--s-raised-2)}
-.scan .cam-ctl input[type=range]::-moz-range-thumb{width:28px;height:28px;border-radius:50%;background:var(--s-accent);border:2px solid #fff}
-.scan .cam-ctl input[type=range]:focus-visible{outline:2px solid var(--s-accent);outline-offset:2px}
-@media (max-width:420px){ .scan .cam-ctl .ctl{grid-template-columns:auto minmax(0,1fr) 3.4rem 44px} .scan .cam-ctl .lbl{display:none} }
-/* on phones the sliders must fit between the preview and the sticky control bar */
+  border-radius:50%;background:var(--orange);border:2px solid var(--surface);box-shadow:var(--shadow)}
+.scan .cam-ctl input[type=range]::-moz-range-track{height:6px;border-radius:3px;background:var(--surface-2)}
+.scan .cam-ctl input[type=range]::-moz-range-thumb{width:28px;height:28px;border-radius:50%;background:var(--orange);border:2px solid var(--surface)}
+.scan .cam-ctl input[type=range]:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+@media (max-width:420px){ .scan .cam-ctl .ctl{grid-template-columns:auto minmax(0,1fr) 3.4rem var(--ctl)} .scan .cam-ctl .lbl{display:none} }
+/* on phones the sliders must fit between the preview and the sticky capture bar */
 @media (max-width:699px){
   .scan .cam-panel:has(.cam-ctl:not([hidden])) .camera{max-height:40vh;width:min(100%,calc(40vh * 3 / 4))}
   .scan .cam-panel:has(.cam-ctl:not([hidden])) .camera .hint{display:none}
@@ -273,119 +247,117 @@ body.picker-open{overflow:hidden}
   .scan .cam-panel:has(#auto-switch[aria-checked=true]) .camera{max-height:40vh;width:min(100%,calc(40vh * 3 / 4))}
   .scan .cam-panel:has(#auto-switch[aria-checked=true]) .camera .hint{display:none}
 }
-@container (width < 42.25em){
-  .scan .cam-panel:has(.cam-ctl:not([hidden])) .camera{max-height:40vh;width:min(100%,calc(40vh * 3 / 4))}
-  .scan .cam-panel:has(.cam-ctl:not([hidden])) .camera .hint{display:none}
-  /* while Auto scanning the preview shrinks so the add toast and Undo sit clear of the shutter bar */
-  .scan .cam-panel:has(#auto-switch[aria-checked=true]) .camera{max-height:40vh;width:min(100%,calc(40vh * 3 / 4))}
-  .scan .cam-panel:has(#auto-switch[aria-checked=true]) .camera .hint{display:none}
-}
 
-/* two columns from an unfolded foldable up (a 700 px window), camera left, status and result right,
-   when the scan area also has room for them in its own text size: at 200% text a 717-900 px window
-   keeps one column */
-@media (min-width:700px){ @container (width >= 42.25em){
-  .scan .cam-panel{display:grid;grid-template-columns:minmax(0,22rem) minmax(0,1fr);grid-template-areas:
-    "camera opts" "camera status" "camera unid" "camera result" "ctl result" "controls result";align-items:start;column-gap:1.25rem}
-  .scan .unid{grid-area:unid;align-items:flex-start}
-  .scan .scan-opts{grid-area:opts}
-  .scan .cam-ctl{grid-area:ctl}
-  .scan .camera{grid-area:camera;max-height:none;width:100%}
-  .scan .controls{grid-area:controls;position:static;margin:0;padding:.5rem 0 0;border:0;background:transparent}
-  .scan #cam-status{grid-area:status;text-align:left}
-  .scan #result{grid-area:result}
-} }
-
-/* match result: the confirm or fix step */
-.scan .result{display:flex;gap:.9rem;align-items:flex-start;border-left:5px solid var(--s-border)}
-.scan .result.is-exact,.scan .result.is-printing{border-left-color:var(--s-ok-line)}
-.scan .result.is-fuzzy{border-left-color:var(--s-warn-line)}
-.scan .result.is-ambiguous,.scan .result.is-not_found,.scan .result.is-error{border-left-color:var(--s-danger-line)}
-.scan .result img{width:6.5rem;border-radius:6px;background:var(--s-input);flex:0 0 auto}
+/* match result: the confirm or fix step (the status pill carries the colour) */
+.scan .result{display:flex;gap:.9rem;align-items:flex-start}
+.scan .result img{width:6.5rem;border-radius:var(--radius);background:var(--bg);flex:0 0 auto}
 .scan .result .meta{flex:1 1 auto;min-width:0;display:block;margin:0}
 .scan .result h3{margin:0 0 .3rem;font-size:1.25rem;line-height:1.25;overflow-wrap:anywhere}
-.scan .result .status{display:inline-block;margin:.15rem 0 .35rem;padding:.15rem .6rem;border-radius:999px;
+.scan .result .status{display:inline-block;margin:.15rem 0 .35rem;padding:.15rem .6rem;border-radius:22px;
   font-size:.8rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em;border:1px solid}
-.scan .status-exact,.scan .status-printing{color:var(--s-ok);border-color:var(--s-ok-line);background:var(--s-ok-tint)}
-.scan .status-fuzzy{color:var(--s-warn);border-color:var(--s-warn-line);background:var(--s-warn-tint)}
-.scan .status-not_found,.scan .status-ambiguous,.scan .status-error{color:var(--s-danger);border-color:var(--s-danger-line);
-  background:var(--s-danger-tint)}
-.scan .ocr{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.82em;color:var(--s-muted);word-break:break-all}
-.scan .result .note{margin:.1rem 0 .35rem;font-weight:700;color:var(--s-warn)}
+.scan .status-exact,.scan .status-printing{color:var(--green-text);border-color:var(--green);background:var(--green-tint)}
+.scan .status-fuzzy{color:var(--orange-text);border-color:var(--orange);background:var(--orange-tint)}
+.scan .status-not_found,.scan .status-ambiguous,.scan .status-error{color:var(--danger-text);border-color:var(--danger-text);
+  background:var(--red-tint)}
+.scan .ocr{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.82em;color:var(--text-muted);word-break:break-all}
+.scan .result .note{margin:.1rem 0 .35rem;font-weight:700;color:var(--orange-text)}
 .scan .suggest-label{margin:.6rem 0 .3rem;font-weight:700}
 .scan .chips{display:flex;flex-wrap:wrap;gap:.5rem;margin:0 0 .5rem}
-.scan .chips button{width:auto;border-radius:999px;padding:.5rem .9rem;font-weight:700;white-space:normal;text-align:left}
+.scan .chips button{width:auto;border-radius:22px;padding:.5rem .9rem;font-weight:700;white-space:normal;text-align:left}
 .scan .actions{display:flex;flex-wrap:wrap;gap:.6rem;align-items:center;margin-top:.75rem}
-.scan .actions .primary{flex:1 1 9rem;min-height:48px;font-size:1.05rem}
+.scan .actions .add{flex:1 1 9rem;min-height:var(--ctl)}
 .scan .actions .secondary{flex:1 1 9rem}
 
 /* quantity stepper: big buttons either side of the number */
-.scan .stepper{display:inline-flex;align-items:stretch;border:1px solid var(--s-border);border-radius:var(--s-radius);
-  overflow:hidden;background:var(--s-input)}
-.scan .stepper button{min-width:44px;min-height:44px;border:0;border-radius:0;background:var(--s-raised);font-size:1.3rem;
+.scan .stepper{display:inline-flex;align-items:stretch;border:1px solid var(--border);border-radius:var(--radius);
+  overflow:hidden;background:var(--bg)}
+.scan .stepper button{min-width:var(--ctl);min-height:var(--ctl);border:0;border-radius:0;background:var(--surface);font-size:1.3rem;
   font-weight:900;padding:0 .8rem;line-height:1}
-.scan .stepper button:hover{background:var(--s-raised-2)}
-.scan .stepper button.minus{color:var(--s-danger)} .scan .stepper button.plus{color:var(--s-ok)}
-.scan .stepper input[type=number]{width:3.6rem;min-height:44px;border:0;border-left:1px solid var(--s-border);
-  border-right:1px solid var(--s-border);border-radius:0;background:transparent;color:var(--s-text);text-align:center;
+.scan .stepper button:hover{background:var(--surface-2)}
+.scan .stepper button.minus{color:var(--danger-text)} .scan .stepper button.plus{color:var(--green-text)}
+.scan .stepper input[type=number]{width:3.6rem;min-height:var(--ctl);border:0;border-left:1px solid var(--border);
+  border-right:1px solid var(--border);border-radius:0;background:transparent;color:var(--text);text-align:center;
   font-size:1.1rem;font-weight:700;padding:0;-moz-appearance:textfield}
 .scan .stepper input::-webkit-outer-spin-button,.scan .stepper input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
-.scan .stepper input:focus{outline:2px solid var(--s-accent);outline-offset:-2px;border-color:var(--s-border)}
+.scan .stepper input:focus{outline:2px solid var(--focus);outline-offset:-2px;border-color:var(--border)}
 
 /* type tab */
 .scan .suggest{position:relative}
 .scan .suggest ul{position:absolute;z-index:5;left:0;right:0;margin:.25rem 0 0;padding:.25rem 0;list-style:none;
-  background:var(--s-raised);border:1px solid var(--s-border);border-radius:var(--s-radius);max-height:16rem;overflow:auto;
-  box-shadow:0 6px 18px rgba(0,0,0,.4)}
-.scan .suggest li{padding:.7rem .9rem;min-height:44px;cursor:pointer;font-weight:700;border-bottom:1px solid var(--s-border-soft)}
+  background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-panel);max-height:16rem;overflow:auto;
+  box-shadow:var(--shadow)}
+.scan .suggest li{padding:.7rem .9rem;min-height:var(--ctl);cursor:pointer;font-weight:700;border-bottom:1px solid var(--border-soft)}
 .scan .suggest li:last-child{border-bottom:0}
-.scan .suggest li:hover,.scan .suggest li[aria-selected=true]{background:var(--s-raised-2)}
-.scan input[type=search],.scan input[type=text]{width:100%;min-height:48px;padding:.6rem .9rem;font-size:1.05rem;
-  border-radius:var(--s-radius);border:1px solid var(--s-border);background:var(--s-input);color:var(--s-text)}
-.scan textarea{width:100%;min-height:8rem;background:var(--s-input);color:var(--s-text);border:1px solid var(--s-border);
-  border-radius:var(--s-radius);padding:.6rem .8rem;font:inherit;font-size:1rem;line-height:1.5}
+.scan .suggest li:hover,.scan .suggest li[aria-selected=true]{background:var(--border)}
+.scan input[type=search],.scan input[type=text]{width:100%}
+.scan textarea{width:100%;min-height:8rem;background:var(--surface);color:var(--text);border:1px solid var(--control-border);
+  border-radius:var(--radius);padding:.6rem .8rem;font:inherit;font-size:1rem;line-height:1.5}
 .scan label{margin-top:0}
 .scan .card > label:first-child{margin-top:0}
 
-/* list tab */
+/* list tab: rows with a ⋮ (the row's menu opens on it, on a right-click or a press and hold too) */
 .scan ul.items{list-style:none;margin:0;padding:0}
-.scan ul.items li{display:flex;gap:.7rem;align-items:center;padding:.6rem 0;border-bottom:1px solid var(--s-border-soft)}
+.scan ul.items li{display:flex;gap:.7rem;align-items:center;padding:.6rem 0;border-bottom:1px solid var(--border-soft);
+  -webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
 .scan ul.items li:last-child{border-bottom:0}
-.scan ul.items img,.scan ul.items .thumb{width:2.6rem;height:3.6rem;border-radius:3px;background:var(--s-input);flex:0 0 auto}
+.scan ul.items img,.scan ul.items .thumb{width:2.6rem;height:3.6rem;border-radius:var(--radius-panel);background:var(--bg);flex:0 0 auto}
 .scan ul.items .name{flex:1 1 auto;min-width:0;font-weight:700;overflow-wrap:anywhere}
-.scan ul.items .name small{display:block;color:var(--s-muted);font-weight:400;font-size:.85rem}
+.scan ul.items .name small{display:block;color:var(--text-muted);font-weight:400;font-size:.85rem}
 .scan ul.items .name small [class^=status-]{font-weight:700}
+.scan .kebab{flex:none;width:var(--ctl);min-width:var(--ctl);min-height:var(--ctl);padding:0;border:0;background:transparent;color:var(--text-muted)}
+.scan .kebab:hover{background:var(--surface-2);color:var(--text)}
 .scan .summary{margin:.5rem 0 .25rem}
 .scan .list-actions{display:grid;grid-template-columns:1fr 1fr;gap:.6rem;margin-top:1rem}
-.scan .list-actions .primary{grid-column:1 / -1;min-height:48px;font-size:1.05rem}
+.scan .list-actions .primary{grid-column:1 / -1;min-height:var(--ctl)}
 .scan .list-actions button{width:100%}
 .scan progress{width:100%}
 
 /* sessions tab */
-.scan .sessions li{display:flex;gap:.6rem;padding:.4rem 0;border-bottom:1px solid var(--s-border-soft);align-items:center}
+.scan .sessions li{display:flex;gap:.6rem;padding:.4rem 0;border-bottom:1px solid var(--border-soft);align-items:center}
 .scan .sessions li:last-child{border-bottom:0}
-.scan .sessions li a{flex:1 1 auto;min-width:0;display:block;padding:.5rem 0;min-height:44px;text-decoration:none;color:var(--s-text)}
+.scan .sessions li a{flex:1 1 auto;min-width:0;display:block;padding:.5rem 0;min-height:var(--ctl);text-decoration:none;color:var(--text)}
 .scan .sessions li a strong{display:block;font-size:1.05rem}
-.scan .sessions li a small{display:block;color:var(--s-muted);font-size:.85rem}
-.scan .sessions li a:hover strong{color:var(--s-accent)}
+.scan .sessions li a small{display:block;color:var(--text-muted);font-size:.85rem}
+.scan .sessions li a:hover strong{color:var(--orange-text)}
 .scan .sessions li button{flex:0 0 auto}
+.scan .sessions li .btn-outline-danger{width:var(--ctl);padding:0}
 
-.scan .install{display:none}
+/* the row menus (on body, the site's .menu look): the quantity row of a list item's menu */
+.ctxmenu.scan-menu .qty{display:flex;align-items:center;gap:.5rem;padding:0 1rem;min-height:44px}
+.ctxmenu.scan-menu .qty span{flex:1 1 auto}
+.ctxmenu.scan-menu .qty button{width:44px;min-width:44px;min-height:44px;padding:0;border:1px solid var(--border);border-radius:var(--radius);
+  background:var(--surface);color:var(--text);font-weight:900;flex:none}
+.ctxmenu.scan-menu .qty b{min-width:2ch;text-align:center}
+/* boxes (Rename…): a centred card on wide screens, a sheet from the bottom on phones */
+.scan-box-scrim{position:fixed;inset:0;z-index:60;background:var(--scrim);display:flex;align-items:flex-start;justify-content:center;padding:70px 16px}
+.scan-box{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-panel);box-shadow:var(--shadow);
+  width:min(30rem,100%);padding:16px;display:grid;gap:12px;color:var(--text)}
+.scan-box h2{margin:0;font-size:1.25rem}
+.scan-box label{display:block;font-weight:700;margin:0 0 .3rem}
+.scan-box input{width:100%}
+.scan-box .acts{display:flex;justify-content:flex-end;gap:.5rem;flex-wrap:wrap}
+.scan-box .notice{margin:0}
+@media (max-width:599.98px){
+  .scan-box-scrim{align-items:flex-end;padding:0}
+  .scan-box{width:100%;border-radius:var(--radius-sheet) var(--radius-sheet) 0 0;padding-bottom:calc(16px + env(safe-area-inset-bottom))}
+}
+
+.scan .install{display:none;margin:0 auto}
 .scan .install.show{display:inline-flex}
-@media (prefers-reduced-motion:reduce){ .scan .shutter,.scan .camera .flash{transition:none} .scan .shutter.live{animation:none;box-shadow:0 0 0 6px rgba(250,137,13,.5)} }
+@media (prefers-reduced-motion:reduce){ .scan .shutter,.scan .camera .flash{transition:none} .scan .shutter.live{animation:none;outline:3px solid var(--orange-select);outline-offset:6px} }
 
 /* first-visit intro and the "what next" block of the list tab */
 .scan .intro h2,.scan .next h2{margin:0 0 .5rem;font-size:1.15rem}
 .scan .intro .steps{list-style:none;margin:0;padding:0;display:grid;gap:.5rem}
 .scan .intro .steps li{display:flex;gap:.6rem;align-items:flex-start;line-height:1.4}
-.scan .intro .num{flex:0 0 1.6rem;height:1.6rem;border-radius:50%;background:var(--s-accent);color:var(--s-on-accent);
+.scan .intro .num{flex:0 0 1.6rem;height:1.6rem;border-radius:50%;background:var(--orange);color:var(--on-orange);
   font-weight:900;display:inline-flex;align-items:center;justify-content:center;font-size:.9rem}
 .scan .intro .list-actions{grid-template-columns:1fr}
 .scan .next .nextrow{display:flex;gap:.75rem;align-items:center;justify-content:space-between;
-  padding:.6rem 0;border-top:1px solid var(--s-border-soft)}
+  padding:.6rem 0;border-top:1px solid var(--border-soft)}
 .scan .next .nextrow:first-of-type{border-top:0}
 .scan .next .what{display:flex;flex-direction:column;gap:.2rem;min-width:0;flex:1 1 auto}
 .scan .next .what small{display:block}
 .scan .next select{max-width:100%;margin-top:.25rem}
-.scan .next button{flex:0 0 auto;min-height:44px}
+.scan .next button{flex:0 0 auto;min-height:var(--ctl)}
 @media (max-width:480px){.scan .next .nextrow{flex-direction:column;align-items:stretch}}

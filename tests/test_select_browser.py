@@ -90,15 +90,15 @@ def test_decks_filter_opens_a_themed_list_and_a_pick_applies(server: Server) -> 
         assert active and listbox.locator(f"#{active}").get_attribute("aria-selected") == "true"
         before = page.locator("#f-order").input_value()
         page.keyboard.press("ArrowDown")
-        with page.expect_navigation():
-            page.keyboard.press("Enter")
-        page.wait_for_load_state("networkidle")
+        page.keyboard.press("Enter")
+        page.wait_for_function("() => location.search.includes('order=')", timeout=5000)
         after = page.locator("#f-order").input_value()
-        assert after != before and f"order={after}" in page.url
+        assert after != before and f"order={after}" in page.url  # My decks sorts in place (0.7.36)
         assert (
             page.locator("#f-order-btn").inner_text() == page.locator("#f-order option:checked").inner_text()
         )
-        # a click outside closes without a change; a click on a row applies
+        # a click outside closes without a change; a click on a row applies (the deck page's View as)
+        page.goto(f"{server.base}/decks/42?view=grid", wait_until="networkidle")
         page.locator("#f-view-btn").click()
         listbox.wait_for(state="visible", timeout=3000)
         page.mouse.click(5, 5)
@@ -107,9 +107,9 @@ def test_decks_filter_opens_a_themed_list_and_a_pick_applies(server: Server) -> 
         page.locator("#f-view-btn").click()
         listbox.wait_for(state="visible", timeout=3000)
         with page.expect_navigation():
-            listbox.locator("[role=option]", has_text="List").click()
+            listbox.locator("[role=option]", has_text="Text").click()
         page.wait_for_load_state("networkidle")
-        assert page.locator("#f-view").input_value() == "list" and "view=list" in page.url
+        assert page.locator("#f-view").input_value() == "text" and "view=text" in page.url
         assert errors == []
         browser.close()
 
@@ -170,7 +170,8 @@ def test_phone_width_opens_a_bottom_sheet(server: Server) -> None:
     with sync_playwright() as p:
         browser, page, errors = _browser(p, exe, server, 360, sid)
         page.goto(f"{server.base}/decks", wait_until="networkidle")
-        page.locator("#f-order-btn").click()
+        # on a phone My decks folds Sort by and its direction into one drop-down (0.7.36)
+        page.locator(".rbar .sortcw .msel-btn").click()
         listbox = page.locator("#msel-list[role=listbox].sheet")
         listbox.wait_for(state="visible", timeout=3000)
         page.wait_for_timeout(300)  # the sheet slides in
@@ -183,18 +184,18 @@ def test_phone_width_opens_a_bottom_sheet(server: Server) -> None:
         )
         assert box["left"] == 0 and box["right"] == 360 and box["bottom"] == 800, box
         assert box["scrim"] and box["rows"] and min(box["rows"]) >= 40, box
-        assert "Order" in box["title"]
+        assert "Sort" in box["title"]
         assert page.evaluate("() => document.documentElement.scrollWidth") <= 360
         # a tap on the scrim closes the sheet; a tap on a row picks
         page.mouse.click(180, 20)
         assert page.locator("#msel-list").count() == 0
-        page.locator("#f-order-btn").click()
+        page.locator(".rbar .sortcw .msel-btn").click()
         listbox.wait_for(state="visible", timeout=3000)
-        with page.expect_navigation():
-            listbox.locator("[role=option]").last.click()
-        page.wait_for_load_state("networkidle")
+        listbox.locator("[role=option]").last.click()
+        page.wait_for_function("() => location.search.includes('order=')", timeout=5000)
         assert (
-            page.locator("#f-order-btn").inner_text() == page.locator("#f-order option:checked").inner_text()
+            page.locator(".rbar .sortcw .msel-btn").inner_text()
+            == page.locator(".rbar .sortcw option:checked").inner_text()
         )
         assert errors == []
         browser.close()
@@ -276,7 +277,7 @@ def test_natives_stay_and_triggers_take_the_focus(server: Server) -> None:
     exe = _exe()
     with sync_playwright() as p:
         browser, page, errors = _browser(p, exe, server, 1366, sid)
-        for path in ("/collection", "/search", "/history", "/folders", "/decks/42/settings", "/decks/42"):
+        for path in ("/collection", "/search", "/history", "/decks/42/settings", "/decks/42"):
             page.goto(f"{server.base}{path}", wait_until="networkidle")
             html_count = page.evaluate("() => document.querySelectorAll('select').length")
             natives = page.evaluate(ENHANCED)
@@ -334,7 +335,8 @@ def test_a_tap_outside_the_touch_sheet_only_closes_it(server: Server, width: int
         )
         page = ctx.new_page()
         page.goto(f"{server.base}/decks", wait_until="networkidle")
-        btn = page.locator("#f-order-btn").bounding_box()
+        # the sort drop-down: on a phone the combined one, else Sort by itself (0.7.36)
+        btn = page.locator(".rbar .sortcw .msel-btn:visible, #f-order-btn:visible").first.bounding_box()
         assert btn is not None
         page.touchscreen.tap(btn["x"] + btn["width"] / 2, btn["y"] + btn["height"] / 2)
         listbox = page.locator("#msel-list[role=listbox].sheet")
@@ -352,9 +354,8 @@ def test_a_tap_outside_the_touch_sheet_only_closes_it(server: Server, width: int
         page.wait_for_timeout(300)
         row = listbox.locator("[role=option]").last.bounding_box()
         assert row is not None
-        with page.expect_navigation():
-            page.touchscreen.tap(row["x"] + row["width"] / 2, row["y"] + row["height"] / 2)
-        page.wait_for_load_state("networkidle")
+        page.touchscreen.tap(row["x"] + row["width"] / 2, row["y"] + row["height"] / 2)
+        page.wait_for_function("() => location.search.includes('order=')", timeout=5000)  # sorted in place
         assert "order=" in page.url
         browser.close()
 

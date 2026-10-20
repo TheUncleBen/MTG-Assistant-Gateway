@@ -67,7 +67,8 @@ def test_add_to_deck_buttons_share_a_row_bottom_edge_on_a_computer(server: Serve
         page.goto(f"{server.base}/cards?q=s", wait_until="networkidle")
         # the page's end is near: the second page comes by itself, the third once Load more is in view
         page.wait_for_function("() => document.querySelectorAll('#cardgrid .cc').length >= 8", timeout=5000)
-        page.locator("#cs-more").scroll_into_view_if_needed()
+        if page.locator("#cs-more").is_visible():  # the third page may have come by itself too
+            page.locator("#cs-more").scroll_into_view_if_needed()
         page.wait_for_function("() => document.querySelectorAll('#cardgrid .cc').length >= 9", timeout=5000)
         rows = page.evaluate(ROWS_JS)
         assert len(rows) >= 2 and len(rows[0]) == 7  # the first row holds cards from two pages
@@ -85,25 +86,30 @@ FILTERS_JS = """
 () => {
   const r = e => { const b = e.getBoundingClientRect(); return {t: Math.round(b.top), l: Math.round(b.left),
     r: Math.round(b.right), b: Math.round(b.bottom)}; };
-  const pills = [...document.querySelectorAll('.cs-main .colors .tog')].map(r);
-  const modeEl = document.querySelector('.cs-main .colors .msel-btn') || document.querySelector('select.cmp');
-  const mode = r(modeEl);
-  const ident = [...document.querySelectorAll('.cs-main .ident .tog')].map(r);
-  const seg = r(document.querySelector('.cs-head .seg'));
-  const size = r(document.querySelector('.cs-head .cardsize'));
-  const label = document.querySelector('.cs-head .cardsize .lbl');
-  return {pills, mode, ident, seg, size, label: label && getComputedStyle(label).display !== 'none',
+  const groups = document.querySelectorAll('.spanel .colors');
+  const pills = [...groups[0].querySelectorAll('.tog')].map(r);
+  const mode = r(groups[0].querySelector('.msel-btn') || groups[0].querySelector('select'));
+  const ident = [...groups[1].querySelectorAll('.tog')].map(r);
+  const seg = r(document.querySelector('.rbar .segc.view'));
+  const sizeEl = document.querySelector('.rbar .cardsize'), size = r(sizeEl);
+  const sheetSize = document.querySelector('#sp-filters .sheet-size .cardsize');
+  const label = document.querySelector('.rbar .cardsize .lbl');
+  const rbar = r(document.querySelector('.rbar')), panel = r(document.querySelector('.spanel'));
+  return {pills, mode, ident, seg, size, sizeShown: !!sizeEl.offsetParent,
+    sheetSize: !!(sheetSize && sheetSize.offsetParent),
+    label: label && getComputedStyle(label).display !== 'none', rbar, panel,
     sw: document.documentElement.scrollWidth, vw: document.documentElement.clientWidth};
 }
 """
 
 
-@pytest.mark.parametrize("width", [344, 390, 673, 1280])
+@pytest.mark.parametrize("width", [344, 390, 673, 810, 1024, 1280])
 def test_filter_controls_keep_their_rows(server: Server, width: int) -> None:
     """From 600 px the six colour pills (White to Colorless) share one row, as do the commander
-    colours; the colour mode sits to the right of the pills at 1280 px and under them at 673 px.
-    On phones the pills form a grid: two across at 344 px, three across at 390 px. The S M L size
-    control stays on the View row at every width; nothing scrolls sideways."""
+    colours; the colour mode sits to the right of the pills where the group is wide enough and
+    under them where it is not. On phones the pills form two rows of three. The results bar sits
+    inside the panel, with the S M L size control on the view's row from 600 px and in the Filters
+    sheet on phones; nothing scrolls sideways."""
     from playwright.sync_api import sync_playwright
 
     exe = _chromium()
@@ -111,8 +117,8 @@ def test_filter_controls_keep_their_rows(server: Server, width: int) -> None:
         browser, page, errors = _page(p, server, width, exe)
         page.goto(f"{server.base}/cards?q=s", wait_until="networkidle")
         if width < 600:
-            page.locator(".cs-open").click()
-            page.locator(".cs-filters.open").wait_for(timeout=3000)
+            page.locator(".sp-open").click()
+            page.locator("#sp-filters.open").wait_for(timeout=3000)
         got = page.evaluate(FILTERS_JS)
         assert got["sw"] <= got["vw"], got
         pills, mode = got["pills"], got["mode"]
@@ -124,12 +130,14 @@ def test_filter_controls_keep_their_rows(server: Server, width: int) -> None:
                 assert mode["t"] < pills[5]["b"] and mode["l"] > pills[5]["r"], (pills, mode)
             else:
                 assert mode["t"] >= pills[5]["b"], (pills, mode)
+            # the results bar is the panel's foot, the size control on the view's row
+            assert got["panel"]["t"] < got["rbar"]["t"] and got["rbar"]["b"] <= got["panel"]["b"], got
+            assert abs(got["seg"]["t"] - got["size"]["t"]) <= 1, got
+            assert got["sizeShown"], got
         else:
-            across = 2 if width < 360 else 3
-            assert len({p["l"] for p in pills}) == across, pills
-            assert len({p["t"] for p in pills}) == 6 // across, pills
+            assert len({p["l"] for p in pills}) == 3, pills
+            assert len({p["t"] for p in pills}) == 2, pills
             assert mode["t"] >= pills[5]["b"] and mode["r"] - mode["l"] >= pills[5]["r"] - pills[0]["l"] - 1
-        assert abs(got["seg"]["t"] - got["size"]["t"]) <= 1, got
-        assert got["label"] is (width >= 360)
+            assert not got["sizeShown"] and got["sheetSize"], got
         assert errors == []
         browser.close()

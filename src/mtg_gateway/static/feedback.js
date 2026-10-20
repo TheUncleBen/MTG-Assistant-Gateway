@@ -90,9 +90,10 @@
   // before it lands, so two entries or two backs can never be in flight), so Back never leaves
   // the page while a menu is open and never goes back twice.
   var pushed = false, popping = false;
+  // a phone, a touch screen in the rail range (to 1279.98 px, as theme.py draws the rail) or the app
   function phoneLike() {
     return window.matchMedia("(max-width: 599.98px)").matches ||
-      window.matchMedia("(max-width: 899.98px) and ((pointer: coarse) or (hover: none))").matches ||
+      window.matchMedia("(max-width: 1279.98px) and ((pointer: coarse) or (hover: none))").matches ||
       document.body.classList.contains("app");
   }
   function takeEntry() {

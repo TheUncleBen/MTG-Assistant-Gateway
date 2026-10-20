@@ -315,7 +315,7 @@ async def test_the_list_view_is_drawn_and_remembered(stack: Stack) -> None:
         assert stack.h.db.get_pref("user-1", "view.cards") == "list"  # on the account (0.7.29)
         r = await b.http.get("/cards", params={"q": "sol"})
         assert "class='cardlist'" in r.text  # the remembered view
-        assert "value='list' form='cs-form' checked" in r.text
+        assert "value='list' checked" in r.text
     finally:
         await b.aclose()
 
@@ -424,7 +424,9 @@ async def test_the_page_keeps_every_filter_in_its_controls(stack: Stack) -> None
         assert "name='prints' value='1' checked" in t
         assert "<option value='cmc' selected>Mana value</option>" in t
         assert "name='stv' value='4'" in t
-        assert "<details class='cs-more' open>" in t  # a field under More filters is in use
+        assert (
+            "<details class='cs-more' id='cs-more-filters' open>" in t
+        )  # a field under More filters is in use
     finally:
         await b.aclose()
 
