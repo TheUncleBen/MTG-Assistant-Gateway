@@ -165,6 +165,17 @@ def test_an_opened_row_has_its_chart_range_alert_and_remove() -> None:
     assert "data-full='" in deck and ">Open deck</a>" in deck and "btn-outline-danger" in deck
 
 
+def test_details_keeps_the_chip_search_filters_and_page() -> None:
+    """Without the script, Details is a link to the page with that row open; it carries the
+    list's query state, so the filters and the page survive the open (as on History)."""
+    page = _page(show="alert", q="a", finish="nonfoil", sort="price", offset=0)
+    assert "href='/watchlist?show=alert&q=a&finish=nonfoil&sort=price&open=w_b#wr-w_b'" in page
+    paged = _page(offset=25)
+    assert "href='/watchlist?offset=25&open=d42#wr-d42'" in paged
+    plain = _page()
+    assert "href='/watchlist?open=w_a#wr-w_a'" in plain
+
+
 async def test_unwatch_api_is_the_undo_and_the_watch_api_takes_a_printing(stack: Stack, monkeypatch) -> None:
     Clock(monkeypatch)
     b = await _browser(stack)
