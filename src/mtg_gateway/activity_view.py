@@ -701,7 +701,7 @@ def member_detail_html(row: Mapping[str, Any], names: Names) -> str:
         "archidekt_link_failed",
         "backup_failed",
     ):
-        bits.append(f"<span title='{esc(d['error'])}'>{esc(error_words(d['error']))}</span>")
+        bits.append(esc(error_words(d["error"])))  # in words only: the code stays off a member's page
     pid = d.get("proposal_id")
     if pid:
         href = f"/proposals/{quote(str(pid), safe='')}"
@@ -890,7 +890,7 @@ def _search(
         if clients:
             parts.append(f"client_id IN ({_marks(clients)})")
             args += clients
-        if low in "no app":
+        if low == "no app" or (len(low) >= 2 and "no app".startswith(low)):
             parts.append("client_id IS NULL")
         if admin_page:
             with log.db._lock:

@@ -270,7 +270,8 @@ async def test_my_activity_has_every_row_in_words_without_ids(gw: Harness) -> No
         assert "Open the proposal" in words and "pABCDEFG" not in words and "proposal p" not in words
         assert "<a href='/decks/42'>Meren</a>" in table
         assert "<span class='gone'>a deck that was removed</span>" in table and "31337" not in words
-        assert "<span title='rate_limited'>Archidekt asked the gateway to slow down</span>" in table
+        assert "Archidekt asked the gateway to slow down" in words
+        assert "rate_limited" not in table  # the code is not even a tooltip on the member's page
         assert "Open the proposal to see why" in words and "error rate_limited" not in words
         assert "An administrator revoked your assistants' access and your sign-ins" in words
         assert "By an administrator" in words and "<i aria-hidden='true'>A</i>Administrator</span>" in table
@@ -291,6 +292,13 @@ async def test_my_activity_has_every_row_in_words_without_ids(gw: Harness) -> No
         assert _table(byadmin).count("<div class='tr ev") == 1
         found = (await b.http.get("/activity?q=Meren", headers=NAVIGATE)).text
         assert _table(found).count("<div class='tr ev") == 3  # created, rejected, refused on deck 42
+        # "No app" is found by its own words (or their start), never by any letters it contains
+        for q in ("no+a", "No+app"):
+            rows_no_app = _table((await b.http.get(f"/activity?q={q}", headers=NAVIGATE)).text)
+            n = rows_no_app.count("<div class='tr ev")
+            assert n >= 2 and n == rows_no_app.count("title='No app'"), q  # the seeded two and the sign-in
+        pp = _table((await b.http.get("/activity?q=pp", headers=NAVIGATE)).text)
+        assert pp.count("<div class='tr ev") >= 1 and "title='No app'" not in pp  # the letters of "no app"
         assert "<span class='evt' title=" not in page  # no technical names on the member's page
     finally:
         await b.aclose()
