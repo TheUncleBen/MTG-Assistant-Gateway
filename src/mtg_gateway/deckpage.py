@@ -2492,14 +2492,7 @@ html.cardview-open{overflow:hidden}
   .cardview .acts .btn,.cardview .acts button{flex:1 1 100%} }
 @media (min-width:1400px){
   .cardview .box{width:min(100%,66rem);grid-template-columns:minmax(16rem,27rem) minmax(0,1fr)} }
-/* the card menu (deck.js): the shared .menu panel, fixed where the pointer or finger was */
-.ctxmenu{position:fixed;z-index:58;min-width:220px;max-width:min(20rem,calc(100vw - 1rem));overflow:auto;
-  overscroll-behavior:contain;border:1px solid var(--border)}
-.ctxmenu .head{text-transform:none;letter-spacing:0;font-size:.9rem;color:var(--text);white-space:normal;
-  overflow-wrap:anywhere;padding-bottom:.35rem;border-bottom:1px solid var(--border);margin-bottom:.25rem}
-.ctxmenu .ic,.ctxmenu .i{width:18px;height:18px;flex:none;color:var(--orange);fill:none;stroke:currentColor;
-  stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
-.ctxmenu a,.ctxmenu button,.ctxmenu .item{white-space:normal;min-height:38px}
+/* the card menu (deck.js): its base is theme.CARD_MENU_CSS */
 .ctxmenu .qtyrow{display:flex;align-items:center;gap:.5rem;min-height:38px;padding:0 1rem;cursor:default}
 .ctxmenu .qtyrow .lbl{flex:1}
 .ctxmenu .mvform{display:flex;flex-direction:column;gap:.4rem;padding:.25rem .75rem .5rem}
@@ -2517,9 +2510,6 @@ html.cardview-open{overflow:hidden}
 .ctxmenu .qtyrow .n{min-width:1.6rem;text-align:center;font-variant-numeric:tabular-nums}
 .ctxmenu .more .chev{margin-left:auto;color:var(--text-muted);font-size:1.2rem;line-height:1}
 .ctxmenu .more[aria-expanded=true] .chev{transform:rotate(90deg)}
-/* The menu scrolls as a whole when the window is short; its items never shrink to make room (a
-   "Move to" list opened near the bottom of the window was squeezed to 2 px and could not be used) */
-.ctxmenu > *{flex-shrink:0}
 .ctxmenu .sub{display:flex;flex-direction:column;background:var(--surface);border-top:1px solid var(--border);
   border-bottom:1px solid var(--border);max-height:40vh;overflow:auto}
 .ctxmenu .sub[hidden]{display:none}

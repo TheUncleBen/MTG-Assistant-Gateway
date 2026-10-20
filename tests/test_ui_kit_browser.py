@@ -482,11 +482,12 @@ PHONE_FIT_JS = """
   const cols = getComputedStyle(grid).gridTemplateColumns.split(' ').length;
   const clipped = [...grid.querySelectorAll('.wdg .lab, .wdg .big, .wdg .det')]
     .filter(e => e.getClientRects().length)
-    .filter(e => [...e.getClientRects()].some(x => x.right > e.closest('.wdg').getBoundingClientRect().right + .5)
-      || e.scrollWidth > e.clientWidth + 1)
+    .filter(e => { const edge = e.closest('.wdg').getBoundingClientRect().right + .5;
+      return [...e.getClientRects()].some(x => x.right > edge) || e.scrollWidth > e.clientWidth + 1; })
     .map(e => e.textContent.trim().slice(0, 24));
   return {border: ['Top', 'Right', 'Bottom', 'Left'].map(s => i['border' + s + 'Width']),
-    radius: [i.borderTopLeftRadius, i.borderTopRightRadius, i.borderBottomRightRadius, i.borderBottomLeftRadius],
+    radius: [i.borderTopLeftRadius, i.borderTopRightRadius, i.borderBottomRightRadius,
+      i.borderBottomLeftRadius],
     theme: getComputedStyle(document.documentElement).getPropertyValue('--radius').trim(),
     lines, cols, clipped};
 }

@@ -1408,6 +1408,65 @@ ul.ui-chg{padding:0;border:1px solid var(--card-border);border-radius:var(--radi
 CSS += UI_CSS
 
 
+# The card menu and the Watch button (static/cardmenu.js): Card search's results, the deck page,
+# the deck editor's add box and the top bar's suggestions. The deck page adds its own items'
+# styles in deck.css. Kept before the first 900 px rule (test_social_layout).
+CARD_MENU_CSS = """
+/* the card menu: the shared .menu panel, fixed where the pointer or finger was; a bottom sheet
+   over a dimmed page on a phone (.cs-menu) */
+.ctxmenu{position:fixed;z-index:58;min-width:220px;max-width:min(20rem,calc(100vw - 1rem));overflow:auto;
+  overscroll-behavior:contain;border:1px solid var(--border)}
+.ctxmenu .head{text-transform:none;letter-spacing:0;font-size:.9rem;color:var(--text);white-space:normal;
+  overflow-wrap:anywhere;padding-bottom:.35rem;border-bottom:1px solid var(--border);margin-bottom:.25rem}
+.ctxmenu .ic,.ctxmenu .i{width:18px;height:18px;flex:none;color:var(--orange);fill:none;stroke:currentColor;
+  stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.ctxmenu a,.ctxmenu button,.ctxmenu .item{white-space:normal;min-height:38px}
+/* The menu scrolls as a whole when the window is short; its items never shrink to make room (a
+   "Move to" list opened near the bottom of the window was squeezed to 2 px and could not be used) */
+.ctxmenu > *{flex-shrink:0}
+.ctxmenu.cs-menu{display:flex;flex-direction:column;max-height:calc(100vh - 16px)}
+.cs-scrim{display:none}
+@media (max-width:599.98px){
+  .cs-scrim{display:block;position:fixed;inset:0;z-index:57;background:var(--scrim)}
+  .ctxmenu.cs-menu{left:0!important;right:0;top:auto!important;bottom:0;width:auto;min-width:0;
+    max-width:none;max-height:85vh;border-radius:var(--radius-sheet) var(--radius-sheet) 0 0;
+    padding-bottom:calc(.75rem + env(safe-area-inset-bottom))}
+}
+/* Watch (K7): a pill, a check and "Watching" when the card is watched; .icon is the icon alone */
+.wbtn{display:inline-flex;align-items:center;gap:.3rem;
+  margin:0;height:32px;min-height:32px;padding:0 .55rem;border-radius:999px;border:1px solid
+  var(--control-border);background:var(--surface);color:var(--text);font-size:.8rem;font-weight:700;
+  line-height:1;box-shadow:var(--shadow);cursor:pointer}
+.wbtn svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:2.2;flex:none}
+.wbtn:hover{border-color:var(--text-muted)}
+.wbtn.on{color:var(--green-text);border-color:var(--green-text);
+  box-shadow:inset 0 0 0 99px var(--green-tint),var(--shadow)}
+.wbtn[aria-busy=true]{opacity:.6}
+.wbtn.icon span{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.wbtn.icon{padding:0;justify-content:center;width:32px}
+/* a press and hold on a card row opens its menu: no text selection or image callout under it */
+.suggest-list li[role=option][data-name]{-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
+/* the deck editor's suggestions: the Watch button at the row's end */
+.suggest-list li.watchable{position:relative;padding-right:3.25rem}
+.suggest-list li.watchable > .wbtn{position:absolute;right:.5rem;top:50%;transform:translateY(-50%);
+  box-shadow:none}
+.suggest-list li.watchable > .wbtn.on{box-shadow:inset 0 0 0 99px var(--green-tint)}
+@media (pointer:coarse){
+  .wbtn{height:44px;min-height:44px;min-width:44px}
+  .wbtn.icon{width:44px}
+  .suggest-list li.watchable{padding-right:4rem}
+  .ctxmenu.cs-menu a,.ctxmenu.cs-menu button{min-height:44px}
+}
+/* the toast after a watch (and after an add on Card search) */
+.toast.cards-toast{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem .75rem;z-index:95}
+.toast.cards-toast .msg{flex:1 1 12rem;min-width:0;overflow-wrap:anywhere}
+.toast.cards-toast .btn,.toast.cards-toast button{margin:0}
+.toast.cards-toast .close{width:2rem;min-height:2rem;height:2rem;padding:0;border-radius:50%;font-size:1.2rem}
+.toast.cards-toast .ok{width:18px;height:18px;flex:none;fill:none;stroke:var(--green-text);stroke-width:2.4}
+"""
+CSS += CARD_MENU_CSS
+
+
 # The top bar's search box (cards and decks, static/suggest.js in its site mode): in the bar from
 # 900 px and on the touch rail (600 to 899 px); under 600 px folded behind the magnifier
 # (static/sitesearch.js opens it under the bar). A narrow window with a mouse (600 to 899 px)
@@ -1885,13 +1944,14 @@ def render(
             f"{' aria-current=page' if cur == '/search' else ''}>{icon('search')}</a>"
         )
         # The site search (cards and decks; cardsearch.py, static/suggest.js): Enter on plain text
-        # is the deck search, a card row opens /cards for it. Folded behind the magnifier on phones.
+        # is the deck search, a card row opens /cards for it, and a right-click or a press and hold
+        # on one opens the card menu (static/cardmenu.js). Folded behind the magnifier on phones.
         search_form = (
             "<form class='topsearch' id='topsearch' role='search' method='get' action='/search'>"
             "<label for='site-q' class='sr-only'>Search cards and decks</label>"
             f"<span class='box'>{icon('search')}<input id='site-q' type='search' name='q' maxlength='100' "
             "placeholder='Search cards and decks' data-suggest='cards' data-suggest-site='/cards?q=' "
-            "autocomplete='off' enterkeyhint='search'></span></form>"
+            "data-suggest-menu autocomplete='off' enterkeyhint='search'></span></form>"
         )
         right = f"{search_form}<nav class='user' aria-label='Account'>{search_btn}{account_menu}</nav>"
         # The More pages are tabs on the rail too (railonly: hidden on the phone bar, which has More)
@@ -1977,6 +2037,9 @@ def render(
         + ("<script src='/static/prefs.js' defer></script>" if signed_in else "")
         # static/topbar.js: the scroll room above a focused element follows the bar's height
         + "<script src='/static/topbar.js' defer></script>"
+        # static/cardmenu.js: the card menu and Watch button the pages and the top bar share,
+        # before the page scripts that use it
+        + ("<script src='/static/cardmenu.js' defer></script>" if signed_in else "")
         + f"{head_extra}</head>"
         f"<body class='{classes}'{' data-watchlist' if WATCHLISTS else ''}>"
         f"<a class='skip' href='#main'>Skip to content</a>{SPRITE}"

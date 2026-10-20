@@ -13,6 +13,7 @@ from starlette.responses import JSONResponse, RedirectResponse, Response
 from . import deck_stats
 from .archidekt import Deck
 from .busy import _headers, busy_body, busy_json_response, busy_plan, busy_response, busy_text_response
+from .cardsearch_view import watched_names
 from .companion import DECK_CSP, DECK_ERR_MESSAGES, EDITOR_CSP, TEXT_PLAIN, _filename, _json_for_html
 from .decklist import DecklistError, parse_decklist
 from .deckpage import (
@@ -185,6 +186,12 @@ def add_deck_tool_routes(
             "outsideCategories": outside,
         }
         side_name = _esc(deck.side_category())
+        # K7 / Q9: each suggestion in the add box has the card menu (static/cardmenu.js); with
+        # watchlists on also a Watch button, "Watching" for the names the member watches already
+        watch_attr = " data-suggest-menu"
+        if state.prices is not None:
+            watched = sorted(watched_names(state.prices.watched_cards(sub)))[:200]
+            watch_attr = f" data-suggest-watch='{_esc(json.dumps(watched))}'"
         body = (
             f"<script id='editor-config' type='application/json'>{_json_for_html(config)}</script>"
             "<div id='editor' class='editor'>"
@@ -241,7 +248,7 @@ def add_deck_tool_routes(
             f"{side_name}</button></div>"
             "<div class='field grow'><label for='addname'>Card name</label>"
             "<input id='addname' type='text' name='card' data-suggest='cards' data-suggest-submit "
-            "data-suggest-rich data-suggest-qty placeholder='Type a card name; Enter adds one, "
+            f"data-suggest-rich data-suggest-qty{watch_attr} placeholder='Type a card name; Enter adds one, "
             "“3 sol ring” adds three' autocomplete='off' required>"
             "<div class='addprints' hidden aria-label='Printings' role='group'></div></div>"
             f"<div class='field go'><button class='btn-primary'>{icon('plus')} Add</button>"

@@ -37,11 +37,7 @@
     var paths = {
       plus: "<path d='M12 5v14M5 12h14'/>",
       x: "<path d='M6 6l12 12M18 6L6 18'/>",
-      external: "<path d='M14 4h6v6M20 4l-9 9'/><path d='M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5'/>",
-      bookmark: "<path d='M6 3h12v18l-6-4-6 4z'/>",
-      check: "<path d='M5 12l4 4L19 6'/>",
-      eye: "<path d='M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12z'/><circle cx='12' cy='12' r='3'/>",
-      image: "<path d='M4 5h16v14H4z'/><circle cx='9' cy='10' r='1.5'/><path d='M4 17l5-5 4 4 3-3 4 4'/>"
+      external: "<path d='M14 4h6v6M20 4l-9 9'/><path d='M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5'/>"
     };
     var span = el("span");
     span.innerHTML = "<svg class='i' viewBox='0 0 24 24' aria-hidden='true'>" + (paths[name] || "") + "</svg>";
@@ -500,25 +496,10 @@
   // chips the page came with show their full names once the lists are known (cheap after a day)
   if ($$("[data-picker] .chips li", form).length) loadOptions().catch(function () { /* codes stay */ });
 
-  // -- toast: what was saved, with a link to the deck; errors stay until dismissed ---------------
-  var toastEl = null, toastTimer = null;
-  function dismissToast() { if (toastEl) toastEl.remove(); toastEl = null; clearTimeout(toastTimer); }
-  function toast(text, opts) {
-    opts = opts || {};
-    dismissToast();
-    toastEl = el("div", "toast cards-toast" + (opts.error ? " error" : ""));
-    toastEl.setAttribute("role", opts.error ? "alert" : "status");
-    if (opts.ok) { var ok = icon("check"); ok.setAttribute("class", "i ok"); toastEl.appendChild(ok); }
-    toastEl.appendChild(el("span", "msg", text));
-    (opts.actions || []).forEach(function (a) { toastEl.appendChild(a); });
-    var x = el("button", "close icon-only", "×");
-    x.type = "button";
-    x.setAttribute("aria-label", "Dismiss");
-    x.addEventListener("click", dismissToast);
-    toastEl.appendChild(x);
-    document.body.appendChild(toastEl);
-    if (!opts.error) toastTimer = setTimeout(dismissToast, opts.ms || 9000);
-  }
+  // -- toast: what was saved, with a link to the deck; errors stay until dismissed (the shared
+  // one, static/cardmenu.js) ------------------------------------------------------------------
+  var Menu = window.MtgCardMenu;
+  function toast(text, opts) { Menu.toast(text, opts); }
 
   // -- the card viewer: the picture button's data attributes, plus Add to deck and Scryfall ------
   function viewerActions(node) {
@@ -836,64 +817,21 @@
   }
   // -- Watch (K7): the Watch button on each result, the card menu and Art variants… -------------
   // Only with watchlists on: the server draws the Watch buttons and the page hint then. A watch
-  // goes through /watchlist/api/watch (a printing search sends the shown printing); the toast's
-  // Undo stops that one watch again through /watchlist/api/unwatch, by its id.
-  var norm = function (n) { return String(n || "").toLowerCase().replace(/\s+/g, " ").trim(); };
+  // goes through the shared static/cardmenu.js (a printing search sends the shown printing), as
+  // do the menu and its toast with Undo.
+  var norm = Menu.norm;
   function setWatched(name, on) {
     $$(".wbtn[data-watch]", results).forEach(function (b) {
       var n = b.getAttribute("data-watch");
-      if (norm(n) !== norm(name)) return;
-      b.classList.toggle("on", on);
-      b.setAttribute("aria-pressed", on ? "true" : "false");
-      b.setAttribute("aria-label", on ? n + " is on your watchlist" : "Watch " + n);
-      b.title = on ? "On your watchlist" : "Watch this card";
-      b.textContent = "";
-      b.appendChild(icon(on ? "check" : "bookmark"));
-      b.appendChild(el("span", null, on ? "Watching" : "Watch"));
+      if (norm(n) === norm(name)) Menu.drawButton(b, n, on);
     });
   }
   function isWatched(name) {
     return $$(".wbtn.on[data-watch]", results).some(function (b) { return norm(b.getAttribute("data-watch")) === norm(name); });
   }
-  function listLink(name) {
-    var a = el("a", null, "Open the watchlist");
-    a.href = "/watchlist?q=" + enc(name);
-    return a;
-  }
   // what: {name, set_code, collector_number, finish}; resolves with the watch, rejects on a refusal
   function watch(what, btn) {
-    if (btn) { btn.disabled = true; btn.setAttribute("aria-busy", "true"); }
-    var was = isWatched(what.name);
-    var done = function () { if (btn) { btn.disabled = false; btn.removeAttribute("aria-busy"); } };
-    var body = { name: what.name, finish: what.finish || "nonfoil" };
-    if (what.set_code && what.collector_number) { body.set_code = what.set_code; body.collector_number = what.collector_number; }
-    return api("POST", "/watchlist/api/watch", body).then(function (d) {
-      done();
-      if (!d.ok) {
-        toast(d.message || "The card could not be watched.", { error: true });
-        throw new Error("refused");
-      }
-      var w = d.watch || {};
-      var name = w.name || what.name;
-      setWatched(what.name, true);
-      if (!w.created) { toast(name + " is on your watchlist.", { ok: true, actions: [listLink(name)] }); return w; }
-      var undo = el("button", "btn-plain", "Undo");
-      undo.type = "button";
-      undo.addEventListener("click", function () {
-        undo.disabled = true;
-        api("POST", "/watchlist/api/unwatch", { watch_id: w.watch_id }).then(function (u) {
-          if (!u.ok && u.status !== 404) { toast(u.message || "The watch could not be undone.", { error: true }); return; }
-          if (!was) setWatched(what.name, false);
-          toast(name + " is no longer on your watchlist.");
-        }).catch(function () { toast("No connection; the card is still watched.", { error: true }); });
-      });
-      toast(name + " added to your watchlist.", { ok: true, actions: [listLink(name), undo] });
-      return w;
-    }, function (err) {
-      done();
-      toast("No connection; the card was not watched.", { error: true });
-      throw err;
-    });
+    return Menu.watch(what, { btn: btn, was: isWatched(what.name), onState: function (on) { setWatched(what.name, on); } });
   }
   function watchOf(btn) {
     var p = pinOf(btn) || {};
@@ -906,146 +844,40 @@
     e.stopPropagation();
     if (b.classList.contains("on")) {
       var n = b.getAttribute("data-watch");
-      toast(n + " is on your watchlist.", { ok: true, actions: [listLink(n)] });
+      toast(n + " is on your watchlist.", { ok: true, actions: [Menu.listLink(n)] });
       return;
     }
     watch(watchOf(b), b).catch(function () { /* the toast said why */ });
   }, true);
 
-  function artVariants(pic) {
-    var Pick = window.MtgPrintPick;
-    if (!Pick) return;
-    Pick.open({
-      name: pic.getAttribute("data-card") || "",
-      current: null,
-      finish: "nonfoil",
-      returnFocus: pic,
-      onWatch: function (p, finish) {
-        return watch({ name: p.name || pic.getAttribute("data-card"), set_code: p.set, collector_number: p.collector_number, finish: finish });
-      }
-    });
-  }
-
   // the card menu: right-click, press and hold, the Menu key or Shift+F10 on a result
-  var menu = null, menuPic = null, scrim = null;
-  function closeMenu(focusBack) {
-    if (!menu) return;
-    menu.remove();
-    if (scrim) scrim.remove();
-    menu = null; scrim = null;
-    if (focusBack && menuPic && menuPic.isConnected) menuPic.focus();
-    menuPic = null;
-  }
-  function menuItem(text, ic, onClick) {
-    var b = el("button", null, "");
-    b.type = "button";
-    b.setAttribute("role", "menuitem");
-    b.appendChild(icon(ic));
-    b.appendChild(document.createTextNode(text));
-    b.addEventListener("click", function (e) { e.preventDefault(); onClick(); });
-    return b;
-  }
-  function menuLink(text, ic, href, ext) {
-    var a = el("a", null, "");
-    a.setAttribute("role", "menuitem");
-    a.href = href;
-    if (ext) { a.target = "_blank"; a.rel = "noreferrer noopener"; }
-    a.appendChild(icon(ic));
-    a.appendChild(document.createTextNode(text));
-    return a;
-  }
   function openMenu(item, x, y) {
-    closeMenu(false);
     var pic = item.querySelector(".pic");
     if (!pic) return;
     var name = pic.getAttribute("data-card") || "";
     var wbtn = item.querySelector(".wbtn[data-watch]");
     var addBtn = item.querySelector("button[data-add]");
-    var m = el("div", "menu ctxmenu cs-menu");
-    m.setAttribute("role", "menu");
-    m.setAttribute("aria-label", "Card: " + name);
-    m.appendChild(el("div", "head", name));
-    m.appendChild(menuItem("Open card", "eye", function () { closeMenu(false); openViewer(pic); }));
-    if (wbtn) {
-      if (wbtn.classList.contains("on")) m.appendChild(menuLink("On your watchlist", "check", "/watchlist?q=" + enc(name)));
-      else m.appendChild(menuItem("Watch this card", "bookmark", function () { closeMenu(true); watch(watchOf(wbtn), wbtn).catch(function () {}); }));
-      if (window.MtgPrintPick) m.appendChild(menuItem("Art variants…", "image", function () { closeMenu(false); artVariants(pic); }));
-    }
-    var add = menuItem("Add to deck…", "plus", function () { closeMenu(false); openSheet(name, addBtn ? pinOf(addBtn) : null); });
-    if (!linked) { add.disabled = true; add.title = "Link your Archidekt account on the Account page to add cards to a deck."; }
-    m.appendChild(add);
-    m.appendChild(el("div", "sep"));
-    var scry = pic.getAttribute("data-scry") || "https://scryfall.com/search?q=" + enc("!\"" + name + "\"");
-    m.appendChild(menuLink("Open on Scryfall", "external", scry, true));
-    m.addEventListener("keydown", function (e) {
-      var items = $$("[role=menuitem]:not([disabled])", m);
-      var i = items.indexOf(document.activeElement);
-      if (e.key === "Escape") { e.preventDefault(); closeMenu(true); }
-      else if (e.key === "ArrowDown") { e.preventDefault(); (items[i + 1] || items[0]).focus(); }
-      else if (e.key === "ArrowUp") { e.preventDefault(); (items[i - 1] || items[items.length - 1]).focus(); }
-      else if (e.key === "Home") { e.preventDefault(); items[0].focus(); }
-      else if (e.key === "End") { e.preventDefault(); items[items.length - 1].focus(); }
-      else if (e.key === "Tab") { closeMenu(false); }
-    });
-    m.addEventListener("contextmenu", function (e) { e.preventDefault(); });
-    scrim = el("div", "cs-scrim");
-    scrim.addEventListener("click", function () { closeMenu(true); });
-    document.body.appendChild(scrim);
-    m.style.visibility = "hidden";
-    document.body.appendChild(m);
-    var pad = 8, w = m.offsetWidth, h = m.offsetHeight;
-    m.style.left = Math.max(pad, Math.min(x, window.innerWidth - w - pad)) + "px";
-    m.style.top = Math.max(pad, Math.min(y, window.innerHeight - h - pad)) + "px";
-    m.style.visibility = "";
-    menu = m;
-    menuPic = pic;
-    var first = $("[role=menuitem]:not([disabled])", m);
-    if (first) first.focus();
+    Menu.open({
+      name: name,
+      onOpen: function () { openViewer(pic); },
+      watch: wbtn ? {
+        watched: wbtn.classList.contains("on"),
+        onWatch: function () { watch(watchOf(wbtn), wbtn).catch(function () {}); },
+        onArt: function () {
+          Menu.artVariants(pic.getAttribute("data-card") || "", {
+            returnFocus: pic, onState: function (on) { setWatched(name, on); }, was: function () { return isWatched(name); }
+          });
+        }
+      } : null,
+      onAdd: function () { openSheet(name, addBtn ? pinOf(addBtn) : null); },
+      addDisabled: linked ? "" : "Link your Archidekt account on the Account page to add cards to a deck.",
+      scry: pic.getAttribute("data-scry"),
+      focusBack: pic
+    }, x, y);
   }
   function itemOf(target) {
     var li = target && target.closest ? target.closest("li") : null;
     return li && results.contains(li) && !li.classList.contains("hd") && li.querySelector(".pic") ? li : null;
   }
-  // a press and hold opens it on a phone (Android sends contextmenu itself; iOS does not)
-  var hold = null, held = false;
-  // the finger lifted after a hold that opened the menu: that is not a tap on the picture
-  results.addEventListener("click", function (e) {
-    if (!held) return;
-    held = false;
-    e.preventDefault();
-    e.stopPropagation();
-  }, true);
-  results.addEventListener("pointerdown", function (e) {
-    held = false;
-    if (e.pointerType !== "touch") return;
-    var li = itemOf(e.target);
-    if (!li || e.target.closest(".wbtn, button[data-add]")) return;
-    var x = e.clientX, y = e.clientY;
-    clearTimeout(hold);
-    hold = setTimeout(function () { hold = null; held = true; openMenu(li, x, y); }, 550);
-  });
-  ["pointerup", "pointercancel", "pointermove"].forEach(function (t) {
-    results.addEventListener(t, function (e) {
-      if (t === "pointermove" && hold === null) return;
-      if (t !== "pointermove" || Math.abs(e.movementX) + Math.abs(e.movementY) > 6) { clearTimeout(hold); hold = null; }
-    });
-  });
-  results.addEventListener("contextmenu", function (e) {
-    var li = itemOf(e.target);
-    if (!li) return;
-    e.preventDefault();
-    if (menu) return;  // the hold already opened it
-    clearTimeout(hold); hold = null;
-    openMenu(li, e.clientX, e.clientY);
-  });
-  results.addEventListener("keydown", function (e) {
-    if (!(e.key === "ContextMenu" || (e.shiftKey && e.key === "F10"))) return;
-    var li = itemOf(e.target);
-    if (!li) return;
-    e.preventDefault();
-    var r = e.target.getBoundingClientRect();
-    openMenu(li, r.left + Math.min(r.width / 2, 40), r.top + Math.min(r.height / 2, 40));
-  });
-  document.addEventListener("pointerdown", function (e) { if (menu && !menu.contains(e.target) && e.target !== scrim) closeMenu(false); }, true);
-  window.addEventListener("resize", function () { closeMenu(false); });
+  Menu.bind(results, { itemOf: itemOf, skip: ".wbtn, button[data-add]", open: openMenu });
 })();

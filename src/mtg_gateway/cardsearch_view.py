@@ -48,6 +48,25 @@ CARDS_CSS = """
 .cs .wide{grid-column:1/-1}
 /* colour and rarity toggles: a checkbox under each pip, the whole pill pressable */
 .cs .toggles{display:flex;flex-wrap:wrap;gap:.4rem}
+/* The main filters. The six colour pills sit on one row (White to Colorless), the colour mode
+   beside them where there is room: from 1000 px the grid has five columns, Type takes one and
+   Colors the other four, then Commander colors three with Mana value and Rarity beside it.
+   600-999 px: Type, Colors and Commander colors take a whole row each and the mode sits under
+   the pills. Phones: the pills form a grid of equal columns, two across on a 344 px screen,
+   three from 360 px (one at 200% text), with the mode below at full width. */
+.cs .crow{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem}
+.cs .crow .toggles{flex:0 1 auto;min-width:0}
+.cs .crow .cmp,.cs .crow .msel-btn{width:auto;flex:0 1 auto;min-width:0;max-width:100%}
+@media (min-width:600px) and (max-width:999.98px){
+  .cs-main > [data-picker=t],.cs-main > .colors,.cs-main > .ident{grid-column:1/-1} }
+@media (min-width:1000px){
+  .cs-grid.cs-main{grid-template-columns:repeat(5,minmax(0,1fr));
+    grid-template-areas:"type colors colors colors colors" "ident ident ident mv rar"}
+  .cs-main > [data-picker=t]{grid-area:type}
+  .cs-main > .colors{grid-area:colors}
+  .cs-main > .ident{grid-area:ident}
+  .cs-main > .mv{grid-area:mv}
+  .cs-main > .rar{grid-area:rar} }
 .cs .tog{margin:0;position:relative;display:inline-flex;align-items:center;gap:.4rem;min-height:2.5rem;
   padding:.25rem .65rem .25rem .4rem;border:1px solid var(--control-border);border-radius:1.25rem;
   background:var(--surface);cursor:pointer;font-weight:400;user-select:none}
@@ -117,6 +136,7 @@ details.cs-more > .cs-grid{margin:.5rem 0 0}
 .cs-head .sort{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem}
 .cs-head .sort label{margin:0;font-weight:400;color:var(--text-muted)}
 .cs-head .sort select,.cs-head .sort .msel-btn{width:auto;min-width:8rem;margin:0}
+.cs-head .views{display:inline-flex;flex-wrap:wrap;align-items:center;gap:.5rem;min-width:0}
 .cs-head .seg{display:inline-flex;border:1px solid var(--control-border);border-radius:var(--radius);
   overflow:hidden}
 .cs-head .seg label{position:relative;display:inline-flex;align-items:center;gap:.35rem;margin:0;
@@ -151,7 +171,8 @@ details.cs-more > .cs-grid{margin:.5rem 0 0}
   overflow-wrap:anywhere;min-width:0}
 .cardgrid .ty,.cardgrid .pr{font-size:.86rem;color:var(--text-muted);overflow-wrap:anywhere}
 .cardgrid .add,.cardlist .add{margin:0;min-width:0}
-.cardgrid .add{width:100%}
+/* every card of a row is as tall as the tallest, its Add to deck on the row's bottom edge */
+.cardgrid .add{width:100%;margin-top:auto}
 .cardgrid .add > span,.cardlist .add > span{min-width:0;overflow:hidden;text-overflow:ellipsis;
   white-space:nowrap}
 /* the list view: one row a card, columns that fold under the name on narrow screens */
@@ -208,9 +229,15 @@ details.cs-more > .cs-grid{margin:.5rem 0 0}
   .cs-sheet-foot .btn-primary{flex:2 1 auto}
   .cs-actions{display:none}
   .cs .row3{grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(0,5rem) auto}
+  .cs .toggles{display:grid;grid-template-columns:repeat(auto-fill,minmax(7.6rem,1fr))}
+  .cs .crow > *,.cs .crow .toggles{flex:1 1 100%}
+  .cs .crow .cmp,.cs .crow .msel-btn{width:100%}
+  /* the results head: Sort by with its two drop-downs, then View and Card size on a row of
+     their own (its label goes below 360 px; the group keeps its name) */
   .cs-head .sort{width:100%}
   .cs-head .sort select,.cs-head .sort .msel-btn{flex:1 1 8rem}
 }
+@media (max-width:359.98px){.cs-head .cardsize .lbl{display:none}}
 html.cs-sheet-open,html.cs-sheet-open body{overflow:hidden}
 /* Add to deck: a small dialog over the page (a bottom sheet on phones), themed like the card viewer */
 .addsheet{position:fixed;inset:0;z-index:90;display:none;align-items:center;justify-content:center;
@@ -239,49 +266,23 @@ html.cs-sheet-open,html.cs-sheet-open body{overflow:hidden}
     border-radius:var(--radius-panel) var(--radius-panel) 0 0;
     padding-bottom:calc(1.25rem + env(safe-area-inset-bottom))}
   .addsheet .acts button{flex:1 1 auto} }
-.toast.cards-toast{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem .75rem;z-index:95}
-.toast.cards-toast .msg{flex:1 1 12rem;min-width:0;overflow-wrap:anywhere}
-.toast.cards-toast .btn,.toast.cards-toast button{margin:0}
-.toast.cards-toast .close{width:2rem;min-height:2rem;height:2rem;padding:0;border-radius:50%;font-size:1.2rem}
 /* Watch on each result (K7): a pill on the picture's top right corner, a check and "Watching"
    when the card is watched; icon only at card size S and in the list view; 44 px on touch */
 .cs-hint{margin:0 0 .9rem}
 .picwrap{position:relative;display:block}
 .picwrap > .pic{width:100%}
-.wbtn{position:absolute;z-index:1;top:.4rem;right:.4rem;display:inline-flex;align-items:center;gap:.3rem;
-  margin:0;height:32px;min-height:32px;padding:0 .55rem;border-radius:999px;border:1px solid
-  var(--control-border);background:var(--surface);color:var(--text);font-size:.8rem;font-weight:700;
-  line-height:1;box-shadow:var(--shadow);cursor:pointer}
-.wbtn svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:2.2;flex:none}
-.wbtn:hover{border-color:var(--text-muted)}
-.wbtn.on{color:var(--green-text);border-color:var(--green-text);
-  box-shadow:inset 0 0 0 99px var(--green-tint),var(--shadow)}
-.wbtn[aria-busy=true]{opacity:.6}
-.wbtn.icon span,html[data-card-size=s] .cardgrid .wbtn span{position:absolute;width:1px;height:1px;
+.wbtn{position:absolute;z-index:1;top:.4rem;right:.4rem}
+html[data-card-size=s] .cardgrid .wbtn span{position:absolute;width:1px;height:1px;
   overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
-.wbtn.icon,html[data-card-size=s] .cardgrid .wbtn{padding:0;justify-content:center;width:32px}
+html[data-card-size=s] .cardgrid .wbtn{padding:0;justify-content:center;width:32px}
 .cardlist .acts{display:flex;align-items:center;gap:.4rem}
 .cardlist .wbtn{position:static;width:var(--ctl);height:var(--ctl);min-height:var(--ctl);
   border-radius:var(--radius);box-shadow:none}
 .cardlist .wbtn.on{box-shadow:inset 0 0 0 99px var(--green-tint)}
-@media (pointer:coarse){
-  .wbtn{height:44px;min-height:44px;min-width:44px}
-  .wbtn.icon,html[data-card-size=s] .cardgrid .wbtn{width:44px}
-  .ctxmenu.cs-menu a,.ctxmenu.cs-menu button{min-height:44px}
-}
+@media (pointer:coarse){html[data-card-size=s] .cardgrid .wbtn{width:44px}}
 @media (max-width:899.98px){.cardlist .acts{grid-area:add}}
-/* the card menu on results (cardsearch.js): the deck page's menu (deck.css .ctxmenu) where the
-   pointer was; a bottom sheet over a dimmed page on a phone */
-.ctxmenu.cs-menu{display:flex;flex-direction:column;max-height:calc(100vh - 16px)}
+/* the card menu on results: theme.CARD_MENU_CSS (static/cardmenu.js) */
 .cardgrid .pic img{-webkit-touch-callout:none}
-.cs-scrim{display:none}
-@media (max-width:599.98px){
-  .cs-scrim{display:block;position:fixed;inset:0;z-index:57;background:var(--scrim)}
-  .ctxmenu.cs-menu{left:0!important;right:0;top:auto!important;bottom:0;width:auto;min-width:0;
-    max-width:none;max-height:85vh;border-radius:var(--radius-sheet) var(--radius-sheet) 0 0;
-    padding-bottom:calc(.75rem + env(safe-area-inset-bottom))}
-}
-.toast.cards-toast .ok{width:18px;height:18px;flex:none;fill:none;stroke:var(--green-text);stroke-width:2.4}
 """
 
 RARITY_NAMES = dict(cq.RARITIES)
@@ -404,7 +405,7 @@ def filters_html(f: cq.Filters, *, view: str) -> str:
     price_rows = [_price_row(*row) for row in f.prices] or [_price_row("usd", "le", "")]
     format_rows = [_format_row(*row) for row in f.formats] or [_format_row("legal", "")]
     main = (
-        "<div class='cs-grid'>"
+        "<div class='cs-grid cs-main'>"
         + _picker(
             "t",
             "Type",
@@ -413,20 +414,21 @@ def filters_html(f: cq.Filters, *, view: str) -> str:
             signed=True,
             placeholder="Creature, Goblin, Equipment…",
         )
-        + f"<fieldset><legend>Colors</legend><div class='toggles'>{colors}</div>"
+        + "<fieldset class='colors'><legend>Colors</legend><div class='crow'>"
+        f"<div class='toggles'>{colors}</div>"
         f"<select name='cmp' aria-label='How the colors match' class='cmp'>"
         + _opts([(k, label) for k, (_op, label) in cq.COLOR_COMPARE.items()], f.color_cmp)
-        + "</select></fieldset>"
-        f"<fieldset><legend>Commander colors</legend><div class='toggles'>{identity}</div>"
+        + "</select></div></fieldset>"
+        f"<fieldset class='ident'><legend>Commander colors</legend><div class='toggles'>{identity}</div>"
         "<span class='hint'>Cards that fit a commander of these colors.</span></fieldset>"
-        "<fieldset><legend>Mana value</legend><div class='range'>"
+        "<fieldset class='mv'><legend>Mana value</legend><div class='range'>"
         f"<input type='text' inputmode='decimal' name='mv' value='{_esc(f.mv_min)}' "
         "aria-label='Mana value from' "
         "placeholder='From' maxlength='5'><span>to</span>"
         f"<input type='text' inputmode='decimal' name='mvx' value='{_esc(f.mv_max)}' "
         "aria-label='Mana value to' "
         "placeholder='To' maxlength='5'></div></fieldset>"
-        f"<fieldset><legend>Rarity</legend><div class='toggles'>{rarity}</div></fieldset>"
+        f"<fieldset class='rar'><legend>Rarity</legend><div class='toggles'>{rarity}</div></fieldset>"
         + _rows("format", "Format", format_rows, "Add a format")
         + _picker("s", "Set", f.sets, source="sets", signed=False, placeholder="Set name or code")
         + "</div>"
@@ -542,7 +544,8 @@ def results_head_html(f: cq.Filters, *, view: str, total: int | None, shown: boo
         "<div class='sort'><label for='f-order'>Sort by</label>"
         f"<select id='f-order' name='order' form='cs-form'>{_opts(cq.ORDERS, f.order)}</select>"
         f"<select name='dir' form='cs-form' aria-label='Direction'>{_opts(cq.DIRECTIONS, f.dir)}</select>"
-        "<span class='seg' role='radiogroup' aria-label='View'>"
+        # View and Card size move as one group, so the size control never leaves the View row
+        "<span class='views'><span class='seg' role='radiogroup' aria-label='View'>"
         + "".join(
             f"<label title='{label}'><input type='radio' name='view' value='{v}' form='cs-form'"
             f"{' checked' if v == view else ''}>{icon(v)}<span>{label}</span></label>"
@@ -551,7 +554,7 @@ def results_head_html(f: cq.Filters, *, view: str, total: int | None, shown: boo
         + "</span>"
         # card size (0.7.29): shown with the Grid view only (cs-head[data-view], cardsearch.js)
         + card_size_control().replace("class='field cardsize'", "class='cardsize'")
-        + "</div></div>"
+        + "</span></div></div>"
     )
 
 

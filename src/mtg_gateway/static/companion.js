@@ -501,6 +501,11 @@
     ev.preventDefault();
     addTyped(input.value, pendingPrint());
   });
+  // the card menu on a suggestion (static/cardmenu.js): Art variants… adds the printing picked
+  // there, with the typed count, like "All printings…"
+  input.mtgCardMenu = {
+    pick: function (name, printing) { rememberSet(printing.set_code || ""); addTyped(input.value, printing, name); }
+  };
 
   // printings beside the suggestion list (wide screens): the highlighted card's printings as the
   // shared picker's tiles (static/printpick.js, its default list: released paper printings in
