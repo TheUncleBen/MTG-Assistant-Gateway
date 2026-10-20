@@ -48,7 +48,7 @@
   }
 
   // -- forms that apply on change ----------------------------------------------------------
-  $$("#viewform, #listform, #searchform").forEach(function (form) {
+  $$("#viewform, #listform").forEach(function (form) {
     $$("select", form).forEach(function (sel) {
       sel.addEventListener("change", function () { form.requestSubmit ? form.requestSubmit() : form.submit(); });
     });
@@ -135,9 +135,10 @@
   var grouping = cards.getAttribute("data-grouping");
   var byCategory = grouping === "category";
   var touch = window.matchMedia("(hover: none)").matches;
+  // a phone, a touch screen in the rail range (to 1279.98 px, as theme.py draws the rail) or the app
   var phone = function () {
     return window.matchMedia("(max-width: 599.98px)").matches ||
-      window.matchMedia("(max-width: 899.98px) and ((pointer: coarse) or (hover: none))").matches ||
+      window.matchMedia("(max-width: 1279.98px) and ((pointer: coarse) or (hover: none))").matches ||
       document.body.classList.contains("app");
   };
   var enc = encodeURIComponent;
@@ -1273,6 +1274,9 @@
       m.appendChild(menuItem("Watch this card", "bookmark", function () { closeMenu(); watchCard(card, null); }));
       if (window.MtgPrintPick) m.appendChild(menuItem("Art variants…", "image", function () { closeMenu(); artVariants(card); }));
     }
+    // one copy into the collection, as the viewer's "I own this card" (the shared layer's call)
+    var Shared = window.MtgMenu;
+    if (Shared) m.appendChild(menuItem("Add to collection", "collection", function () { closeMenu(); Shared.collect(name); }));
     if (own && deckId) {
       var row = el("div", "item qtyrow");
       row.setAttribute("role", "none");
@@ -1334,6 +1338,7 @@
       m.appendChild(menuItem("Mana value…", "edit", function () { manaValueForm(card, m); }));
       m.appendChild(menuItem("Remove from deck", "x", function () { removeCard(card); }, "danger"));
       m.appendChild(el("div", "sep"));
+      if (Shared) m.appendChild(menuItem("Copy name", "copy", function () { closeMenu(); Shared.copyAndSay(name, "Name copied."); }));
       var editLink = el("a", "", "");
       editLink.setAttribute("role", "menuitem");
       editLink.href = "/decks/" + enc(deckId) + "/edit#card-" + enc(name);
@@ -1341,6 +1346,7 @@
       editLink.appendChild(document.createTextNode("Edit in deck editor"));
       m.appendChild(editLink);
     } else {
+      if (Shared) m.appendChild(menuItem("Copy name", "copy", function () { closeMenu(); Shared.copyAndSay(name, "Name copied."); }));
       var scry = scryfallLink(name, "");
       scry.setAttribute("role", "menuitem");
       scry.insertBefore(icon("external"), scry.firstChild);

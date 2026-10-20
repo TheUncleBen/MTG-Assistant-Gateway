@@ -291,12 +291,15 @@ async def test_my_decks_shows_the_list_as_last_read_while_archidekt_is_paused(st
         await b.aclose()
 
 
-async def test_the_folders_page_still_says_archidekt_is_busy(stack: Stack) -> None:
+async def test_the_old_folders_address_goes_to_my_decks_even_while_archidekt_is_busy(stack: Stack) -> None:
+    """The Folders page is gone (its work is in My decks' boxes): its address goes to My decks
+    without asking Archidekt anything."""
     b = await _paused_after_a_read(stack)
     try:
+        calls = len(stack.ark.calls)
         r = await b.http.get("/folders")
-        assert r.status_code == 429 and "Archidekt is busy" in r.text, r.text
-        assert BUSY_TEXTS["archidekt"] in r.text.replace("&#x27;", "'")
+        assert r.status_code == 303 and r.headers["location"] == "/decks"
+        assert len(stack.ark.calls) == calls
     finally:
         await b.aclose()
 

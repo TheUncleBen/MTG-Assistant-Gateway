@@ -189,10 +189,15 @@ SETTINGS_OK_MESSAGES = {
 }
 # Notices My decks shows (?ok=).
 LIST_OK_MESSAGES = {
+    "saved": "Deck renamed on Archidekt.",
+    "moved": "Deck moved on Archidekt.",
     "deleted": "Deck deleted on Archidekt. Its last snapshot is under History; when backups are on, a copy "
     "is in your backup folder.",
     "folder_created": "Folder created on Archidekt.",
     "folder_renamed": "Folder renamed on Archidekt.",
+    "folder_moved": "Folder moved on Archidekt.",
+    "folder_deleted": "Folder deleted on Archidekt. Each deck's last snapshot is under History; when "
+    "backups are on, a copy of each deck is in your backup folder.",
 }
 DECK_ERR_MESSAGES = {
     "report_failed": "The deck report could not be made. Try again later.",
@@ -358,6 +363,7 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
 
     # The route modules import this module's helpers, so they are imported here, not at the top.
     from .companion_decks import add_deck_routes
+    from .companion_folders import add_folder_routes
     from .companion_history import add_history_routes
     from .companion_settings import add_settings_routes
     from .companion_shell import add_shell_routes
@@ -380,6 +386,7 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         s=s,
         secure=secure,
     )
+    state.folder_jobs = add_folder_routes(server, state)
     add_deck_routes(server, state, h)
     add_settings_routes(server, state, h)
     add_deck_tool_routes(server, state, reports, h)
@@ -536,6 +543,9 @@ EVENT_LABELS = {
     "deck_moved": "Deck moved to another folder",
     "deck_tag_added": "Tag added to a deck",
     "deck_tag_removed": "Tag removed from a deck",
+    "folder_delete_stopped": "Folder delete stopped before anything was deleted",
+    "folder_deleted": "Folder deleted with everything inside it",
+    "folder_moved": "Folder moved",
     "folder_renamed": "Folder renamed",
     "issuer_repinned": "Sign-in provider address updated",
     "proposal_amended": "Proposal changed by the app",

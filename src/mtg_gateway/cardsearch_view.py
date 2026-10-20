@@ -11,33 +11,22 @@ from __future__ import annotations
 from typing import Any
 
 from . import cardquery as cq
+from . import searchpanel as sp
 from .deckpage import mana_html
-from .mana import pip_html
-from .theme import card_size_control, icon
 from .theme import esc as _esc
+from .theme import icon
 
 VIEWS = ("grid", "list")
 
 CARDS_CSS = """
-.cs-panel{padding-bottom:1rem}
-.cs-top{display:flex;flex-wrap:wrap;align-items:end;gap:.75rem 1rem}
-.cs-top .field{margin:0;flex:1 1 18rem;min-width:0}
-.cs-top .search{margin:0}
-.cs-top .search > input{border-radius:var(--radius) 0 0 var(--radius);border-right:0;flex:1 1 auto;
-  min-width:0}
-.cs-top .search button{height:var(--ctl);min-height:var(--ctl);padding:0 .9rem}
-.cs-top > .btn{margin:0;height:var(--ctl);white-space:nowrap}
-.cs-open{display:none}
-.cs-open .n{display:inline-flex;align-items:center;justify-content:center;min-width:1.4rem;height:1.4rem;
-  padding:0 .35rem;border-radius:.7rem;background:var(--orange-ctl);color:#fff;font-size:.8rem;
-  font-weight:700}
-.cs-open .n:empty{display:none}
-.cs-filters{margin:1rem 0 0}
-.cs-sheet-head,.cs-sheet-foot{display:none}
+/* the panel is the shared search panel (theme.SEARCH_PANEL_CSS); the form inside it lays out as
+   the panel's own rows */
+.cs-panel > form.cs{display:contents}
+.cs-panel > .readonly{margin:0}
 .cs-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,15.5rem),1fr));gap:1rem 1.25rem;
   align-items:start}
 .cs-grid > .field,.cs-grid > fieldset{margin:0;min-width:0}
-/* the rows of three or two controls need two columns' room where there are two */
+/* the rows of three controls need two columns' room where there are two */
 /* the whole row, not two columns: at a large text size the grid has one column, and a span of two
    would add an empty second one beside it */
 @media (min-width:600px){.cs-grid > .rowset{grid-column:1 / -1}}
@@ -46,41 +35,11 @@ CARDS_CSS = """
 .cs legend,.cs .lbl{display:block;font-weight:700;margin:0 0 .35rem;padding:0}
 .cs .hint{display:block;color:var(--text-muted);font-size:.86rem;margin:.3rem 0 0}
 .cs .wide{grid-column:1/-1}
-/* colour and rarity toggles: a checkbox under each pip, the whole pill pressable */
+/* the Games toggles under More filters: a checkbox under each word, the whole pill pressable */
 .cs .toggles{display:flex;flex-wrap:wrap;gap:.4rem}
-/* The main filters. The six colour pills sit on one row (White to Colorless), the colour mode
-   beside them where there is room: from 1000 px the grid has five columns, Type takes one and
-   Colors the other four, then Commander colors three with Mana value and Rarity beside it.
-   600-999 px: Type, Colors and Commander colors take a whole row each and the mode sits under
-   the pills. Phones: the pills form a grid of equal columns, two across on a 344 px screen,
-   three from 360 px (one at 200% text), with the mode below at full width. */
-.cs .crow{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem}
-.cs .crow .toggles{flex:0 1 auto;min-width:0}
-.cs .crow .cmp,.cs .crow .msel-btn{width:auto;flex:0 1 auto;min-width:0;max-width:100%}
-@media (min-width:600px) and (max-width:999.98px){
-  .cs-main > [data-picker=t],.cs-main > .colors,.cs-main > .ident{grid-column:1/-1} }
-@media (min-width:1000px){
-  .cs-grid.cs-main{grid-template-columns:repeat(5,minmax(0,1fr));
-    grid-template-areas:"type colors colors colors colors" "ident ident ident mv rar"}
-  .cs-main > [data-picker=t]{grid-area:type}
-  .cs-main > .colors{grid-area:colors}
-  .cs-main > .ident{grid-area:ident}
-  .cs-main > .mv{grid-area:mv}
-  .cs-main > .rar{grid-area:rar} }
-.cs .tog{margin:0;position:relative;display:inline-flex;align-items:center;gap:.4rem;min-height:2.5rem;
-  padding:.25rem .65rem .25rem .4rem;border:1px solid var(--control-border);border-radius:1.25rem;
-  background:var(--surface);cursor:pointer;font-weight:400;user-select:none}
 .cs .tog.txt{padding:.25rem .8rem}
-.cs .tog input{position:absolute;opacity:0;inset:0;width:100%;height:100%;margin:0;cursor:pointer}
-.cs .tog .pip{width:1.5rem;height:1.5rem}
-.cs .tog:has(input:checked){border-color:var(--orange-ctl);background:var(--orange-tint);font-weight:700}
-.cs .tog:has(input:focus-visible){outline:2px solid var(--focus);outline-offset:2px}
-.cs .tog:hover{border-color:var(--text-muted)}
 .cs .inline{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem}
 .cs .inline select,.cs .inline input,.cs .inline .msel-btn{width:auto;flex:1 1 7rem;min-width:0}
-.cs .range{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);gap:.5rem;align-items:center}
-.cs .range span{color:var(--text-muted)}
-.cs .range input{width:100%;min-width:0}
 .cs .rows{display:flex;flex-direction:column;gap:.5rem}
 .cs .row3{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr) minmax(0,.8fr) auto;gap:.4rem;
   align-items:center}
@@ -88,6 +47,15 @@ CARDS_CSS = """
 .cs .rm{margin:0;width:var(--ctl);min-height:var(--ctl);height:var(--ctl);padding:0;display:inline-flex;
   align-items:center;justify-content:center}
 .cs .add-row{margin:.5rem 0 0;align-self:flex-start}
+/* the Format group: legality, the format and Add a format in one row (more rows under it) */
+.spanel .fmtrow{--gw:30em}
+.spanel .fmtrow .body{display:flex;flex-wrap:wrap;gap:8px;align-items:flex-start}
+.spanel .fmtrow .rows{flex:1 1 280px;min-width:0}
+.spanel .fmtrow .add-row{flex:none;margin:0;display:inline-flex;align-items:center;gap:.3rem;
+  height:var(--ctl)}
+.spanel .fmtrow .row2{grid-template-columns:minmax(0,1fr) minmax(0,1.6fr) auto}
+.spanel .fgrid > .cs-pick{--gw:220px}
+.spanel .fgrid > .fg.mv{--gw:12em}
 /* pickers: chosen values as chips (with IS / NOT where Scryfall has it) above a search box */
 .cs .cs-pick{position:relative;min-width:0}
 .cs .chips{display:flex;flex-wrap:wrap;gap:.35rem;margin:0 0 .4rem;padding:0;list-style:none}
@@ -117,7 +85,8 @@ CARDS_CSS = """
 .cs .opts li[aria-selected=true],.cs .opts li.opt:hover{background:var(--surface-2)}
 .cs .opts li.none{cursor:default;color:var(--text-muted)}
 .cs .checks{display:flex;flex-wrap:wrap;gap:.5rem 1.25rem}
-details.cs-more{margin:1.25rem 0 0;border-top:1px solid var(--border);padding-top:.25rem}
+/* More filters: opened from the results bar (its own summary shows without scripts and on phones) */
+details.cs-more{margin:0;border-top:1px solid var(--border-soft);padding-top:.25rem}
 details.cs-more > summary{cursor:pointer;font-weight:700;min-height:2.75rem;display:flex;
   align-items:center;gap:.4rem;
   list-style:none;width:max-content;max-width:100%}
@@ -125,27 +94,10 @@ details.cs-more > summary::-webkit-details-marker{display:none}
 details.cs-more > summary .chev{transition:transform .15s;transform:rotate(-90deg)}
 details.cs-more[open] > summary .chev{transform:none}
 details.cs-more > .cs-grid{margin:.5rem 0 0}
+@media (min-width:600px){ details.cs-more.jsx{border-top:0;padding-top:0}
+  details.cs-more.jsx > summary{display:none} details.cs-more.jsx:not([open]){display:none} }
 .cs h3.sub{grid-column:1/-1;margin:.75rem 0 0;font-size:1rem;color:var(--menu-head);border-bottom:1px solid
   var(--border-soft);padding-bottom:.3rem}
-.cs-actions{display:flex;flex-wrap:wrap;gap:.5rem;justify-content:flex-end;margin:1rem 0 0}
-.cs-actions button{margin:0}
-/* the results head: count, then sort, direction and view */
-.cs-head{display:flex;flex-wrap:wrap;align-items:center;gap:.6rem 1rem;margin:0 0 .9rem}
-.cs-head h2{margin:0;font-size:1.15rem;flex:1 1 12rem;min-width:0}
-.cs-head h2 .muted{font-weight:400}
-.cs-head .sort{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem}
-.cs-head .sort label{margin:0;font-weight:400;color:var(--text-muted)}
-.cs-head .sort select,.cs-head .sort .msel-btn{width:auto;min-width:8rem;margin:0}
-.cs-head .views{display:inline-flex;flex-wrap:wrap;align-items:center;gap:.5rem;min-width:0}
-.cs-head .seg{display:inline-flex;border:1px solid var(--control-border);border-radius:var(--radius);
-  overflow:hidden}
-.cs-head .seg label{position:relative;display:inline-flex;align-items:center;gap:.35rem;margin:0;
-  padding:0 .75rem;
-  min-height:var(--ctl);cursor:pointer;font-weight:400;color:var(--text)}
-.cs-head .seg label + label{border-left:1px solid var(--control-border)}
-.cs-head .seg input{position:absolute;opacity:0;inset:0;margin:0;width:100%;height:100%;cursor:pointer}
-.cs-head .seg label:has(input:checked){background:var(--orange-tint);font-weight:700}
-.cs-head .seg label:has(input:focus-visible){outline:2px solid var(--focus);outline-offset:-2px}
 .cs-results[aria-busy=true]{opacity:.55;transition:opacity .2s}
 .cs-status{margin:0 0 .9rem}
 .cs-status:empty{display:none}
@@ -154,7 +106,8 @@ details.cs-more > .cs-grid{margin:.5rem 0 0}
 .cs-more-wrap[hidden]{display:none}
 .cs-more-wrap .muted{font-size:.9rem}
 .cs-more-wrap button{margin:0;min-width:12rem}
-.cardgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,10.5rem),1fr));gap:1rem .9rem;
+/* the tile grid: as many tiles of the chosen size as fit (M 168 px at least; S and L in the theme) */
+.cardgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,168px),1fr));gap:1rem .9rem;
   list-style:none;margin:0 0 1rem;padding:0}
 .cardgrid .cc{display:flex;flex-direction:column;gap:.5rem;min-width:0}
 .cardgrid .pic,.cardlist .pic{all:unset;display:block;cursor:pointer;position:relative;aspect-ratio:5/7;
@@ -167,8 +120,16 @@ details.cs-more > .cs-grid{margin:.5rem 0 0}
   justify-content:center;padding:.5rem;text-align:center;font-weight:700;color:var(--text-muted);
   overflow-wrap:anywhere;font-size:.85rem}
 .cardgrid .meta{display:flex;flex-direction:column;gap:.15rem;min-width:0}
-.cardgrid .nm{display:flex;flex-wrap:wrap;align-items:center;gap:.2rem .4rem;font-weight:700;line-height:1.25;
-  overflow-wrap:anywhere;min-width:0}
+/* the name and its ⋮ share the first row, the mana cost the second (a row every tile keeps, so
+   a land's type line sits level with its neighbours'); a long name stops at two lines, and a
+   short one keeps two lines' room, so every tile of a row keeps the same height */
+.cardgrid .nm{display:grid;grid-template-columns:minmax(0,1fr) auto;
+  grid-template-rows:auto minmax(1.4em,auto);align-items:start;gap:.2rem .4rem;font-weight:700;
+  line-height:1.25;overflow-wrap:anywhere;min-width:0}
+.cardgrid .nm > span:first-child{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;
+  overflow:hidden;grid-column:1;grid-row:1;min-width:0;min-height:2.5em}
+.cardgrid .nm .mana{grid-column:1 / -1;grid-row:2;min-width:0;flex-wrap:wrap;white-space:normal}
+.cardgrid .nm .kebab{grid-column:2;grid-row:1}
 .cardgrid .ty,.cardgrid .pr{font-size:.86rem;color:var(--text-muted);overflow-wrap:anywhere}
 .cardgrid .add,.cardlist .add{margin:0;min-width:0}
 /* every card of a row is as tall as the tallest, its Add to deck on the row's bottom edge */
@@ -205,40 +166,11 @@ details.cs-more > .cs-grid{margin:.5rem 0 0}
   .cardlist .ty,.cardlist .set,.cardlist .rar,.cardlist .price{display:contents}
 }
 @media (min-width:900px){ .cardlist .info{display:contents} }
-/* phones: the filters open as a full-screen panel with "Show cards" at the bottom */
+/* phones: the stat rows keep three boxes a row; the Games toggles form a grid */
 @media (max-width:599.98px){
-  .cs-open{display:inline-flex}
-  .cs-top > .btn.decks{display:none}
-  .cs-top .field{flex-basis:100%}
-  /* the search box and Filters share a row; at a large text size Filters drops below it */
-  .cs-top{flex-wrap:wrap;gap:.5rem}
-  .cs-top .field{flex:1 1 12rem}
-  .cs-top .cs-open{flex:none}
-  .cs-filters{display:none;position:fixed;inset:0;z-index:80;margin:0;background:var(--bg);overflow:auto;
-    overscroll-behavior:contain;padding:0 1rem calc(5.5rem + env(safe-area-inset-bottom))}
-  .cs-filters.open{display:block}
-  .cs-sheet-head{display:flex;align-items:center;justify-content:space-between;gap:.75rem;
-  position:sticky;top:0;
-    z-index:2;background:var(--bg);padding:.75rem 0;border-bottom:1px solid var(--border);margin:0 0 .75rem}
-  .cs-sheet-head h2{margin:0;font-size:1.2rem}
-  .cs-sheet-head .close{margin:0;width:2.75rem;min-height:2.75rem;height:2.75rem;padding:0;border-radius:50%;
-    display:inline-flex;align-items:center;justify-content:center}
-  .cs-sheet-foot{display:flex;gap:.5rem;position:fixed;left:0;right:0;bottom:0;z-index:3;background:var(--bg);
-    border-top:1px solid var(--border);padding:.75rem 1rem calc(.75rem + env(safe-area-inset-bottom))}
-  .cs-sheet-foot button{margin:0;flex:1 1 auto;min-height:2.9rem}
-  .cs-sheet-foot .btn-primary{flex:2 1 auto}
-  .cs-actions{display:none}
   .cs .row3{grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(0,5rem) auto}
   .cs .toggles{display:grid;grid-template-columns:repeat(auto-fill,minmax(7.6rem,1fr))}
-  .cs .crow > *,.cs .crow .toggles{flex:1 1 100%}
-  .cs .crow .cmp,.cs .crow .msel-btn{width:100%}
-  /* the results head: Sort by with its two drop-downs, then View and Card size on a row of
-     their own (its label goes below 360 px; the group keeps its name) */
-  .cs-head .sort{width:100%}
-  .cs-head .sort select,.cs-head .sort .msel-btn{flex:1 1 8rem}
 }
-@media (max-width:359.98px){.cs-head .cardsize .lbl{display:none}}
-html.cs-sheet-open,html.cs-sheet-open body{overflow:hidden}
 /* Add to deck: a small dialog over the page (a bottom sheet on phones), themed like the card viewer */
 .addsheet{position:fixed;inset:0;z-index:90;display:none;align-items:center;justify-content:center;
   background:var(--scrim-strong,rgba(0,0,0,.72));padding:1rem}
@@ -295,12 +227,11 @@ def _opts(choices: Any, chosen: str) -> str:
     )
 
 
-def _toggle(name: str, value: str, label: str, checked: bool, *, pip: bool = False) -> str:
-    inner = pip_html(value) if pip else ""
-    cls = "tog" if pip else "tog txt"
+def _toggle(name: str, value: str, label: str, checked: bool) -> str:
+    """A word toggle (the Games under More filters); the colours use the shared colour buttons."""
     return (
-        f"<label class='{cls}'><input type='checkbox' name='{name}' value='{_esc(value)}'"
-        f"{' checked' if checked else ''}>{inner}<span>{_esc(label)}</span></label>"
+        f"<label class='tog txt'><input type='checkbox' name='{name}' value='{_esc(value)}'"
+        f"{' checked' if checked else ''}><span>{_esc(label)}</span></label>"
     )
 
 
@@ -383,58 +314,74 @@ def _format_row(status: str, fmt: str) -> str:
     )
 
 
-def _rows(kind: str, label: str, rows_html: list[str], add_label: str) -> str:
+def _rows(kind: str, label: str, rows_html: list[str], add_label: str, *, group: bool = False) -> str:
+    """Rows that can be added to (stats, prices, formats). ``group``: as one filter group of the
+    shared panel, the Add button beside the rows (the Format row)."""
+    cls = "fg fmtrow rowset" if group else "rowset"
+    legend = "l" if group else ""
     return (
-        f"<fieldset class='rowset' data-rows='{kind}' data-max='{cq.MAX_ROWS}'><legend>{_esc(label)}</legend>"
-        f"<div class='rows'>{''.join(rows_html)}</div>"
+        f"<fieldset class='{cls}' data-rows='{kind}' data-max='{cq.MAX_ROWS}'>"
+        f"<legend class='{legend}'>{_esc(label)}</legend>"
+        + ("<div class='body'>" if group else "")
+        + f"<div class='rows'>{''.join(rows_html)}</div>"
         f"<button type='button' class='add-row' data-add-row='{kind}'>{icon('plus')} "
-        f"{_esc(add_label)}</button>"
-        "</fieldset>"
+        f"<span class='tx'>{_esc(add_label)}</span></button>" + ("</div>" if group else "") + "</fieldset>"
     )
 
 
-def filters_html(f: cq.Filters, *, view: str) -> str:
-    """The search form: the name box, the main filters, "More filters" with the rest of
-    Scryfall's fields, and the phone panel's head and foot. Sort, direction and view sit in
-    the results head (results_head_html) and belong to this form by its id."""
-    colors = "".join(_toggle("c", c, cq.COLOR_NAMES[c], c in f.colors, pip=True) for c in cq.COLORS)
-    identity = "".join(_toggle("id", c, cq.COLOR_NAMES[c], c in f.identity, pip=True) for c in cq.COLORS)
-    rarity = "".join(_toggle("r", r, label, r in f.rarity) for r, label in cq.RARITIES)
+def filters_html(f: cq.Filters, *, view: str, total: int | None = None) -> str:
+    """The search form, from the shared panel (searchpanel.py): the name row, the main filter
+    groups, "More filters" with the rest of Scryfall's fields, and the results bar at the foot.
+    Phones open the filters as a sheet. ``total``: the count the bar shows (None: no search yet)."""
     games = "".join(_toggle("g", g, label, g in f.games) for g, label in cq.GAMES)
     stat_rows = [_stat_row(*row) for row in f.stats] or [_stat_row("pow", "ge", "")]
     price_rows = [_price_row(*row) for row in f.prices] or [_price_row("usd", "le", "")]
     format_rows = [_format_row(*row) for row in f.formats] or [_format_row("legal", "")]
-    main = (
-        "<div class='cs-grid cs-main'>"
-        + _picker(
-            "t",
-            "Type",
-            f.types,
-            source="types",
-            signed=True,
-            placeholder="Creature, Goblin, Equipment…",
-        )
-        + "<fieldset class='colors'><legend>Colors</legend><div class='crow'>"
-        f"<div class='toggles'>{colors}</div>"
-        f"<select name='cmp' aria-label='How the colors match' class='cmp'>"
-        + _opts([(k, label) for k, (_op, label) in cq.COLOR_COMPARE.items()], f.color_cmp)
-        + "</select></div></fieldset>"
-        f"<fieldset class='ident'><legend>Commander colors</legend><div class='toggles'>{identity}</div>"
-        "<span class='hint'>Cards that fit a commander of these colors.</span></fieldset>"
-        "<fieldset class='mv'><legend>Mana value</legend><div class='range'>"
-        f"<input type='text' inputmode='decimal' name='mv' value='{_esc(f.mv_min)}' "
-        "aria-label='Mana value from' "
-        "placeholder='From' maxlength='5'><span>to</span>"
-        f"<input type='text' inputmode='decimal' name='mvx' value='{_esc(f.mv_max)}' "
-        "aria-label='Mana value to' "
-        "placeholder='To' maxlength='5'></div></fieldset>"
-        f"<fieldset class='rar'><legend>Rarity</legend><div class='toggles'>{rarity}</div></fieldset>"
-        + _rows("format", "Format", format_rows, "Add a format")
-        + _picker("s", "Set", f.sets, source="sets", signed=False, placeholder="Set name or code")
-        + "</div>"
+    main = sp.filter_grid(
+        [
+            sp.colours_group(
+                label="Colors",
+                name="c",
+                chosen=f.colors,
+                mode_name="cmp",
+                mode_options=[(k, label) for k, (_op, label) in cq.COLOR_COMPARE.items()],
+                mode_value=f.color_cmp,
+            ),
+            _picker(
+                "t",
+                "Type",
+                f.types,
+                source="types",
+                signed=True,
+                placeholder="Creature, Goblin, Equipment…",
+            ),
+            sp.group(
+                "Mana value",
+                "<div class='range'>"
+                f"<input type='text' inputmode='decimal' name='mv' value='{_esc(f.mv_min)}' "
+                "aria-label='Mana value from' placeholder='From' maxlength='5'><span>to</span>"
+                f"<input type='text' inputmode='decimal' name='mvx' value='{_esc(f.mv_max)}' "
+                "aria-label='Mana value to' placeholder='To' maxlength='5'></div>",
+                cls="mv",
+            ),
+            sp.colours_group(
+                label="Commander colors",
+                name="id",
+                chosen=f.identity,
+                mode_name="idm",
+                mode_options=[(k, label) for k, (_op, label) in cq.IDENTITY_COMPARE.items()],
+                mode_value=f.identity_cmp,
+                hint="cards that fit a commander of these colors",
+            ),
+            _rows("format", "Format", format_rows, "Add a format", group=True),
+            sp.pick_group(
+                label="Rarity", name="r", options=cq.RARITIES, chosen=f.rarity, none_text="Any rarity"
+            ),
+            _picker("s", "Set", f.sets, source="sets", signed=False, placeholder="Set name or code"),
+        ]
     )
     more = (
-        "<details class='cs-more'"
+        "<details class='cs-more' id='cs-more-filters'"
         + (" open" if _more_used(f) else "")
         + f"><summary>{icon('chev', cls='i chev')} More filters</summary><div class='cs-grid'>"
         "<h3 class='sub'>Card text</h3>"
@@ -489,25 +436,27 @@ def filters_html(f: cq.Filters, *, view: str) -> str:
         )
         + "</div></details>"
     )
+    sheet = sp.filters_sheet(
+        main + more,
+        show_html="<button type='button' class='btn-primary sp-show'>Show cards</button>",
+        clear_html="<button type='button' class='sp-clear'>Clear filters</button>",
+    )
     return (
-        f"<form id='cs-form' class='cs' method='get' action='/cards' role='search' data-view='{_esc(view)}'>"
-        "<div class='cs-top'><div class='field'><label for='c-q'>Card name</label><span class='search'>"
-        f"<input id='c-q' type='search' name='q' value='{_esc(f.name)}' maxlength='{cq.MAX_TEXT}' "
-        "placeholder='Any part of a card name' autocomplete='off' enterkeyhint='search'>"
-        f"<button type='submit' aria-label='Search cards'>{icon('search')}</button></span></div>"
-        f"<button type='button' class='btn cs-open' aria-controls='cs-filters' aria-expanded='false'>"
-        f"{icon('filter')} Filters <span class='n'></span></button>"
-        f"<a class='btn decks' href='/search'>{icon('decks')} Search decks instead</a></div>"
-        "<div id='cs-filters' class='cs-filters'>"
-        "<div class='cs-sheet-head'><h2>Filters</h2>"
-        f"<button type='button' class='close' aria-label='Close filters'>{icon('x')}</button></div>"
-        + main
-        + more
-        + "<div class='cs-actions'><button type='button' class='cs-clear'>Clear filters</button>"
-        "<noscript><button type='submit' class='btn-primary'>Search</button></noscript></div>"
-        "<div class='cs-sheet-foot'><button type='button' class='cs-clear'>Clear</button>"
-        "<button type='button' class='btn-primary cs-show'>Show cards</button></div>"
-        "</div></form>"
+        f"<form id='cs-form' class='cs' method='get' action='/cards' role='search' data-view='{_esc(view)}' "
+        "data-count-own>"
+        + sp.name_row(
+            label="Card name",
+            name="q",
+            value=f.name,
+            placeholder="Any part of a card name",
+            input_id="c-q",
+            search_label="Search cards",
+            cross_html=sp.cross_link("Search decks instead", "/search", "decks"),
+            attrs=f" maxlength='{cq.MAX_TEXT}'",
+        )
+        + sheet
+        + results_bar_html(f, view=view, total=total)
+        + "<noscript><button type='submit' class='btn-primary'>Search</button></noscript></form>"
     )
 
 
@@ -534,27 +483,35 @@ def _more_used(f: cq.Filters) -> bool:
     )
 
 
-def results_head_html(f: cq.Filters, *, view: str, total: int | None, shown: bool) -> str:
-    count = ""
+def count_text(total: int | None, *, shown: bool) -> str:
+    """The count in the results bar: "N cards", or "Cards" before a search."""
     if shown and total is not None:
-        count = f"{total:,} card{'' if total == 1 else 's'}"
-    return (
-        "<div class='cs-head'>"
-        f"<h2 id='cs-count' aria-live='polite'>{_esc(count) if count else 'Cards'}</h2>"
-        "<div class='sort'><label for='f-order'>Sort by</label>"
-        f"<select id='f-order' name='order' form='cs-form'>{_opts(cq.ORDERS, f.order)}</select>"
-        f"<select name='dir' form='cs-form' aria-label='Direction'>{_opts(cq.DIRECTIONS, f.dir)}</select>"
-        # View and Card size move as one group, so the size control never leaves the View row
-        "<span class='views'><span class='seg' role='radiogroup' aria-label='View'>"
-        + "".join(
-            f"<label title='{label}'><input type='radio' name='view' value='{v}' form='cs-form'"
-            f"{' checked' if v == view else ''}>{icon(v)}<span>{label}</span></label>"
-            for v, label in (("grid", "Grid"), ("list", "List"))
-        )
-        + "</span>"
-        # card size (0.7.29): shown with the Grid view only (cs-head[data-view], cardsearch.js)
-        + card_size_control().replace("class='field cardsize'", "class='cardsize'")
-        + "</span></div></div>"
+        return f"{total:,} card{'' if total == 1 else 's'}"
+    return "Cards"
+
+
+def results_bar_html(f: cq.Filters, *, view: str, total: int | None) -> str:
+    """The results controls at the panel's foot: More filters, the count, Sort by with its
+    direction, Grid or List, the card size (Grid only) and Clear filters."""
+    more = (
+        "<button type='button' class='btn more' data-more-filters aria-controls='cs-more-filters' "
+        f"aria-expanded='false' hidden>{icon('chev')} More filters</button>"
+    )
+    return sp.results_bar(
+        count_html=sp.count_html(count_text(total, shown=f.chosen()), count_id="cs-count"),
+        sort_html=sp.sort_group(
+            order_name="order",
+            orders=cq.ORDERS,
+            order=f.order,
+            order_id="f-order",
+            dir_name="dir",
+            dirs=cq.DIRECTIONS,
+            direction=f.dir,
+        ),
+        view_html=sp.view_group(view),
+        clear_html="<button type='button' class='btn sp-clear clr'>Clear filters</button>",
+        more_html=more,
+        cls="cards",
     )
 
 

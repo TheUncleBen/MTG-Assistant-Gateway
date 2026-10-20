@@ -44,7 +44,7 @@ async def test_my_decks_says_the_list_could_not_be_read(stack: Stack) -> None:  
             assert page.status_code == 200, shape
             assert NONE_READ in page.text and TRY_AGAIN in page.text, shape
             assert "No decks yet" not in page.text, shape
-            assert "Total decks: 0" not in page.text, shape  # a count it doesn't know
+            assert ">0 decks</h2>" not in page.text, shape  # a count it doesn't know
             assert "href='/decks/new'" in page.text, shape  # New deck still there
             # the placeholder's JSON (a cold start) brings the same notice, and no total
             data = (await b.http.get("/api/decks/mine?shape=list")).json()
@@ -131,7 +131,7 @@ async def test_a_partly_read_list_is_kept_briefly_and_try_again_reads_it_again(s
         del ark.decks[44]
         page = await b.http.get("/decks", headers=NAV)
         assert listings() == read + 3
-        assert "be read from Archidekt" not in page.text and "Total decks: 1" in page.text
+        assert "be read from Archidekt" not in page.text and ">1 deck</h2>" in page.text
         # the list read fine: Try again (an old link) sends nothing more, and it is kept as usual
         again = await b.http.get("/decks?reread=1", headers=NAV)
         assert again.status_code == 303
@@ -148,7 +148,7 @@ async def test_a_readable_list_shows_no_notice(stack: Stack) -> None:  # noqa: F
     try:
         page = await b.http.get("/decks", headers=NAV)
         assert "be read from Archidekt" not in page.text and ">Try again</a>" not in page.text
-        assert "Total decks: 1" in page.text
+        assert ">1 deck</h2>" in page.text
     finally:
         await b.aclose()
 

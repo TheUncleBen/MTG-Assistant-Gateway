@@ -1150,7 +1150,6 @@ BUSY_PAGES = (
     "/decks/42/edit",
     "/decks/42/settings",
     "/decks/42/delete",
-    "/folders",
     "/collection",
     "/users/alice",
     "/search?name=Sample",

@@ -469,6 +469,13 @@ def _no(it: dict[str, Any]) -> str:
     return f"#{int(it['board_no'])}" if it["state"] == "pending" and it.get("board_no") else ""
 
 
+def _deck_attr(it: dict[str, Any]) -> str:
+    """The row's deck, for its menu's "Open the deck" (static/menus.js); none for an untied change."""
+    if it.get("untied") or not str(it.get("deck_id") or "").isdigit():
+        return ""
+    return f" data-deck='{esc(it['deck_id'])}'"
+
+
 def waiting_row(it: dict[str, Any], *, group: str, now: float, checked: bool, open_id: str, qs: str) -> str:
     """One waiting change: a tick box (the whole row is its target), the change and its flags,
     risk, status, the app, when, and Review (the panel or the page)."""
@@ -491,7 +498,7 @@ def waiting_row(it: dict[str, Any], *, group: str, now: float, checked: bool, op
     )
     cls = "tr" + (" sel" if checked else "") + (" open" if it["id"] == open_id else "")
     return (
-        f"<div class='{cls}'>{chk}{title}"
+        f"<div class='{cls}'{_deck_attr(it)}>{chk}{title}"
         f"<label class='md-hide' for='{esc(box)}'>{_risk_label(it)}</label>"
         f"<label class='sm-hide' for='{esc(box)}'>{_status_label(it)}</label>"
         f"<label class='md-hide' for='{esc(box)}'>{ui.app_chip(it['app'])}</label>"
@@ -566,7 +573,8 @@ def list_row(
     flag = f"<span class='flag'>{closing}</span>" if closing else ""
     cls = "tr" + (" open" if it["id"] == open_id else "")
     return (
-        f"<div class='{cls}'><span class='title'><a class='t' href='/proposals/{esc(it['id'])}{esc(qs)}'>"
+        f"<div class='{cls}'{_deck_attr(it)}><span class='title'>"
+        f"<a class='t' href='/proposals/{esc(it['id'])}{esc(qs)}'>"
         f"{num}{esc(it['summary'])}</a><span class='deck'>{esc(_deck_line(it))}"
         f"<span class='stin'>{_status_label(it)}</span></span>"
         f"<span class='sub'>{_risk_label(it)}{ui.app_chip(it['app'])}{ui.when(it['created_at'], now=now)}{sm}"

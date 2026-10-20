@@ -1433,7 +1433,11 @@ class ArchidektClient:
         ``orderBy`` (``-updatedAt``, ``-createdAt``, ``-viewCount``, ``-size``, ``edhBracket``).
         Archidekt returns 60 rows a page whatever ``pageSize`` says and caps ``count`` at 1000, so
         only ``page`` is sent. Anonymous: only public decks come back."""
-        params: dict[str, Any] = {"orderBy": order_by if order_by in SEARCH_ORDERS else "-updatedAt"}
+        # an order the site offers, either way round (the deck search's direction sends the order
+        # without its "-" for the other way; that form is the ordering parameter's standard one,
+        # so far not tried live with this gateway)
+        known = {k.lstrip("-") for k in SEARCH_ORDERS}
+        params: dict[str, Any] = {"orderBy": order_by if order_by.lstrip("-") in known else "-updatedAt"}
         if name:
             params["name"] = name[:120]
         if commander:
@@ -2050,6 +2054,31 @@ class ArchidektClient:
         """PATCH /massUpdate/ {"items": [{id, type: "deck" | "folder", patch: {...}}]}:
         the folder page's move (patch ``parentFolder``) and rename (patch ``name``) (reported)."""
         return await self._request("PATCH", "/massUpdate/", token=token, json_body={"items": items})
+
+    async def folder_details(self, token: str, folder_id: int, page: int = 1) -> dict[str, Any]:
+        """GET /decks/folders/{id}/?page=N: one page of what a folder holds, as archidekt.com's
+        folder page reads it (``decks`` with a ``cardPackage`` flag on card packages,
+        ``subfolders``, ``count`` and ``next``; its bundle, read 2026-10-20; reported)."""
+        params = {"page": int(page)} if page > 1 else None
+        body = await self._request("GET", f"/decks/folders/{int(folder_id)}/", token=token, params=params)
+        if (
+            not isinstance(body, dict)
+            or not isinstance(body.get("decks"), list)
+            or not all(isinstance(d, dict) and "id" in d for d in body["decks"])
+        ):
+            raise ArchidektError("contract", "unexpected folder shape")
+        return body
+
+    async def delete_folders(self, token: str, folder_ids: list[int]) -> Any:
+        """POST /decks/folders/deleteItems/ {"items": [{id, type: "folder"}]}: the folder page's
+        delete, which deletes each folder with every deck, card package and folder inside it (its
+        bundle, read 2026-10-20; reported)."""
+        if not folder_ids:
+            raise ArchidektError("contract", "no folder to delete")
+        items = [{"id": int(f), "type": "folder"} for f in folder_ids]
+        return await self._request(
+            "POST", "/decks/folders/deleteItems/", token=token, json_body={"items": items}
+        )
 
     async def search_tags(self, token: str, query: str) -> list[dict[str, Any]]:
         """GET /decks/tags/v2/?q=: the site's tag picker lookup ({id, name} rows; reported). Deck tags

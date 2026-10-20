@@ -57,7 +57,7 @@ async def test_matching_cards_are_listed_with_viewer_data_and_a_live_add_button(
         assert "connect-src 'self'" in r.headers["content-security-policy"]
         # the box keeps the text, has no dropdown any more (live tiles), offers the deck search
         assert "id='c-q' type='search' name='q' value='sol'" in t
-        assert "data-suggest" not in t.split("cs-top")[1]
+        assert "data-suggest" not in t.split("id='c-q'")[1].split(">")[0]
         assert "href='/search'" in t
     finally:
         await b.aclose()
@@ -155,8 +155,7 @@ async def test_enter_on_plain_text_is_the_deck_search_and_the_deck_search_links_
     try:
         r = await b.http.get("/search?q=Aesi")  # what the top bar's form sends
         assert r.status_code == 200
-        assert "Decks matching Aesi" in r.text
-        assert "value='Aesi' placeholder='Any part of the name'" in r.text
+        assert "id='s-name' type='search' name='name' value='Aesi'" in r.text
         assert "href='/cards?q=Aesi'" in r.text
         r = await b.http.get("/search", params={"commander": "Aesi, Tyrant of Gyre Strait"})
         assert r.status_code == 200

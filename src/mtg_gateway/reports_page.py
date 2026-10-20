@@ -266,9 +266,11 @@ def row_html(r: dict[str, Any], apps: dict[str, str], *, now: float) -> str:
     ran = ui.when(r.get("taken_at"), now=now)
     kill = f"{r.get('kill_damage') or 40} damage"
     line = deck_line(r)
+    # the row's deck, for its menu's "Open the deck" (static/menus.js)
+    deck = f" data-deck='{esc(str(r['deck_id']))}'" if r.get("deck_id") else ""
     return (
         "<div class='tr'>"
-        f"<span class='title'><span class='t'><a href='{href}'>{name}</a>"
+        f"<span class='title'{deck}><span class='t'><a href='{href}'>{name}</a>"
         f"{status_label(r.get('status'), cls='stin')}</span>"
         + (f"<span class='deck'>{line}</span>" if line else "")
         + "<span class='sub'>"

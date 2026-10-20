@@ -102,9 +102,10 @@ def test_no_white_text_on_orange_anywhere() -> None:
     from mtg_gateway.scan import routes
 
     scan_css = (Path(routes.__file__).parent / "static" / "scan.css").read_text(encoding="utf-8")
-    for rule in re.findall(r"\{[^}]*background:var\(--s-accent\)[^}]*\}", scan_css):
+    for rule in re.findall(r"\{[^}]*background:var\(--orange\)[^}]*\}", scan_css):
         assert "color:#fff" not in rule, rule
-    assert "--s-border:var(--control-border,#868686)" in scan_css  # the Set input's edge, 3:1
+    set_box = re.search(r"\.scan \.setbox\{[^}]*\}", scan_css)
+    assert set_box and "border:1px solid var(--control-border)" in set_box.group(0)  # the Set box's edge, 3:1
     from mtg_gateway import browse
 
     browse_src = Path(browse.__file__).read_text(encoding="utf-8")

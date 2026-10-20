@@ -1,11 +1,25 @@
-/* The card menu and the Watch button, shared by Card search (static/cardsearch.js), the deck
-   editor's add box and the top bar's "Search cards and decks" suggestions (static/suggest.js).
+/* The menu and box layer every page shares, plus the card menu and the Watch button.
 
-   The menu: right-click, press and hold, the ContextMenu key or Shift+F10 on a card opens Open
-   card, Watch this card (or "On your watchlist", which opens it), Art variants… (the shared
-   printing picker, static/printpick.js, in its browse mode), Add to deck… where the page can add
-   to any deck, and Open on Scryfall. A floating menu where the pointer was; a bottom sheet over a
-   dimmed page on a phone. Watch goes through /watchlist/api/watch; the toast's Undo stops that one
+   window.MtgMenu: one floating menu (a bottom sheet over a dimmed page on a phone) for cards,
+   decks, folders and list rows: `open({head, label, items, focusBack}, x, y)` with items from
+   `item()`, `link()`, `sep()` and `node()`; `bind(root, {itemOf, keyItem, skip, button, open})`
+   wires the ways in on `root`: right-click, a press and hold on a touch screen, the ⋮ button
+   (`button`, a selector inside the item) and the ContextMenu key or Shift+F10 on a focused item.
+   Escape, a press outside, the page scrolling, a resize and the phone's Back close it. A hold
+   never leaves anything marked: nothing is added to the item while the finger is down, a drag the
+   browser starts under a finger is refused, and only the tap that ends the hold is swallowed.
+   `kebab(label)` makes a ⋮ button; `toast`, `post`, `getJSON`, `copyText` and `collect` (add one
+   copy of a card to the collection) are the small shared actions.
+
+   window.MtgBox: a box (dialog): a centred card on a wide screen, a sheet from the bottom on a
+   phone; Escape, the scrim and Cancel close it; focus goes into the box and back to the opener.
+
+   window.MtgCardMenu: the card menu used by Card search (static/cardsearch.js), the deck editor's
+   add box, the top bar's "Search cards and decks" suggestions (static/suggest.js) and the other
+   pages' card rows (static/menus.js): Open card, Add to deck…, Add to collection, Watch this
+   card (or "On your watchlist", which opens it) and Art variants… (the shared printing picker,
+   static/printpick.js, in its browse mode) with watchlists on, Copy name, Open on Scryfall, and a
+   page's own items. Watch goes through /watchlist/api/watch; the toast's Undo stops that one
    watch again through /watchlist/api/unwatch, by its id. Nothing of the watch shows with
    watchlists off (the page's body has no data-watchlist then).
 
@@ -28,12 +42,33 @@
   }
   var PATHS = {
     plus: "<path d='M12 5v14M5 12h14'/>",
+    minus: "<path d='M5 12h14'/>",
     x: "<path d='M6 6l12 12M18 6L6 18'/>",
     external: "<path d='M14 4h6v6M20 4l-9 9'/><path d='M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5'/>",
     bookmark: "<path d='M6 3h12v18l-6-4-6 4z'/>",
     check: "<path d='M5 12l4 4L19 6'/>",
     eye: "<path d='M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12z'/><circle cx='12' cy='12' r='3'/>",
-    image: "<path d='M4 5h16v14H4z'/><circle cx='9' cy='10' r='1.5'/><path d='M4 17l5-5 4 4 3-3 4 4'/>"
+    image: "<path d='M4 5h16v14H4z'/><circle cx='9' cy='10' r='1.5'/><path d='M4 17l5-5 4 4 3-3 4 4'/>",
+    more: "<circle cx='12' cy='5' r='1.5' fill='currentColor'/><circle cx='12' cy='12' r='1.5' fill='currentColor'/><circle cx='12' cy='19' r='1.5' fill='currentColor'/>",
+    edit: "<path d='M4 20h4l11-11-4-4L4 16z'/><path d='M13 7l4 4'/>",
+    clone: "<path d='M9 9h11v11H9z'/><path d='M4 15V4h11'/>",
+    copy: "<path d='M9 9h11v11H9z'/><path d='M4 15V4h11'/>",
+    play: "<circle cx='12' cy='12' r='9'/><path d='M10 8l6 4-6 4z' fill='currentColor'/>",
+    stats: "<path d='M4 20V10M10 20V4M16 20v-7M22 20H2'/>",
+    report: "<path d='M6 3h9l5 5v13H6z'/><path d='M14 3v6h6M9 14h6M9 17h6'/>",
+    folder: "<path d='M3 6h6l2 2h10v11H3z'/>",
+    download: "<path d='M12 4v11M7 10l5 5 5-5'/><path d='M4 20h16'/>",
+    layers: "<path d='M12 3l9 5-9 5-9-5z'/><path d='M3 13l9 5 9-5'/>",
+    settings: "<circle cx='12' cy='12' r='3'/><path d='M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1'/>",
+    link: "<path d='M10 14a4 4 0 0 1 0-5.7l3-3a4 4 0 0 1 5.7 5.7l-1.5 1.5'/><path d='M14 10a4 4 0 0 1 0 5.7l-3 3a4 4 0 0 1-5.7-5.7L6.8 11.5'/>",
+    trash: "<path d='M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13'/><path d='M10 11v6M14 11v6'/>",
+    collection: "<path d='M4 6h12v14H4z'/><path d='M8 6V3h12v14h-3'/><path d='M7 11h6M7 15h6'/>",
+    swap: "<path d='M4 7h13l-3-3M20 17H7l3 3'/>",
+    bell: "<path d='M6 16V11a6 6 0 0 1 12 0v5l2 2H4z'/><path d='M10 21h4'/>",
+    undo: "<path d='M9 14L4 9l5-5'/><path d='M4 9h10a6 6 0 0 1 0 12h-3'/>",
+    history: "<circle cx='12' cy='12' r='9'/><path d='M12 7v5l3 2'/>",
+    decks: "<path d='M4 7h16v13H4z'/><path d='M7 4h13v13'/>",
+    proposals: "<path d='M9 11l3 3 8-8'/><path d='M20 12v6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h9'/>"
   };
   function icon(name) {
     var span = el("span");
@@ -44,17 +79,32 @@
     var i = document.querySelector("input[name=csrf]");
     return i ? i.value : "";
   }
+  var ODD = "The gateway sent an answer this page could not read. Reload the page to see whether the change was made.";
   function post(path, body) {
     return fetch(path, {
       method: "POST", credentials: "same-origin",
       headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf() },
       body: JSON.stringify(body)
     }).then(function (r) {
-      return r.json().then(function (d) { d.status = r.status; return d; }, function () { return { ok: false, status: r.status, message: "The gateway answered oddly; nothing was changed." }; });
+      return r.json().then(function (d) { d.status = r.status; return d; }, function () { return { ok: false, status: r.status, message: ODD }; });
+    });
+  }
+  function getJSON(path) {
+    return fetch(path, { credentials: "same-origin", headers: { Accept: "application/json" } }).then(function (r) {
+      return r.json().then(function (d) { d.status = r.status; return d; }, function () { return { ok: false, status: r.status, message: ODD }; });
     });
   }
   var norm = function (n) { return String(n || "").toLowerCase().replace(/\s+/g, " ").trim(); };
   function enabled() { return document.body.hasAttribute("data-watchlist"); }
+  function phone() { return window.matchMedia && window.matchMedia("(max-width: 599.98px)").matches; }
+  // Where the phone's Back should close a menu instead of leaving the page: a phone, a touch
+  // screen in the rail range (600 to 1279.98 px, as theme.py draws the rail) and the Android
+  // app at any width (static/deck.js and static/feedback.js ask the same)
+  function backCloses() {
+    return phone() ||
+      (window.matchMedia && window.matchMedia("(max-width: 1279.98px) and ((pointer: coarse) or (hover: none))").matches) ||
+      document.body.classList.contains("app");
+  }
 
   // -- toast: what was done, with its links; errors stay until dismissed -------------------------
   var toastEl = null, toastTimer = null;
@@ -74,6 +124,42 @@
     toastEl.appendChild(x);
     document.body.appendChild(toastEl);
     if (!opts.error) toastTimer = setTimeout(dismissToast, opts.ms || 9000);
+  }
+  // Copies text: execCommand first, inside the press (the app's WebView may refuse the async
+  // clipboard), then the async API. Resolves true when it was copied.
+  function copyText(text) {
+    var temp = el("textarea");
+    temp.value = text;
+    temp.setAttribute("readonly", "");
+    temp.style.position = "fixed";
+    temp.style.top = "-1000px";
+    document.body.appendChild(temp);
+    temp.select();
+    var ok = false;
+    try { ok = document.execCommand("copy"); } catch (err) { ok = false; }
+    temp.remove();
+    if (ok) return Promise.resolve(true);
+    if (navigator.clipboard && navigator.clipboard.writeText) return navigator.clipboard.writeText(text).then(function () { return true; }, function () { return false; });
+    return Promise.resolve(false);
+  }
+  function copyAndSay(text, said) {
+    return copyText(text).then(function (ok) {
+      if (ok) toast(said, { ok: true, ms: 4000 });
+      else toast("Copying was refused by the browser.", { error: true });
+    });
+  }
+  // "Add to collection": one copy, as "I own this card" on the deck page adds it
+  function collect(name) {
+    return post("/collection/api/add", { items: [{ name: name, quantity: 1 }], source: "manual" }).then(function (d) {
+      if (d.ok && d.added && d.added.length) {
+        var a = el("a", null, "Open the collection");
+        a.href = "/collection?q=" + enc(name);
+        toast(name + " added to your collection.", { ok: true, actions: [a] });
+        return true;
+      }
+      toast(d.message || "The card could not be added to your collection.", { error: true });
+      return false;
+    }, function () { toast("No connection; the card was not added.", { error: true }); return false; });
   }
 
   // -- Watch -------------------------------------------------------------------------------------
@@ -153,60 +239,67 @@
   }
 
   // -- the menu ----------------------------------------------------------------------------------
-  var menu = null, menuBack = null, scrim = null;
-  function close(focusBack) {
+  var menu = null, menuBack = null, scrim = null, menuPushed = false, ignorePop = false, menuScroll = [0, 0];
+  function close(focusBack, fromHistory) {
     if (!menu) return;
     menu.remove();
     if (scrim) scrim.remove();
     menu = null; scrim = null;
+    if (menuPushed && !fromHistory) {
+      // going back over the menu's entry fires popstate later; that one is ours, not a Back press
+      menuPushed = false;
+      ignorePop = true;
+      try { history.back(); } catch (e) { ignorePop = false; }
+    }
+    menuPushed = false;
     if (focusBack && menuBack && menuBack.isConnected) menuBack.focus();
     menuBack = null;
   }
-  function menuItem(text, ic, onClick, focusBack) {
-    var b = el("button", null, "");
+  /* An item: a button that closes the menu and runs onClick. o: {danger, disabled, title (why it
+     is disabled), keepOpen (the menu stays, as a quantity step), cls}. */
+  function item(text, ic, onClick, o) {
+    o = o || {};
+    var b = el("button", o.cls || "", "");
     b.type = "button";
     b.setAttribute("role", "menuitem");
-    b.appendChild(icon(ic));
+    if (o.danger) b.classList.add("danger");
+    if (ic) b.appendChild(icon(ic));
     b.appendChild(document.createTextNode(text));
-    b.addEventListener("click", function (e) { e.preventDefault(); close(!!focusBack); onClick(); });
+    if (o.disabled) { b.disabled = true; if (o.title) b.title = o.title; }
+    b.addEventListener("click", function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!o.keepOpen) close(!!o.focusBack);
+      if (onClick) onClick(e);
+    });
     return b;
   }
-  function menuLink(text, ic, href, ext) {
-    var a = el("a", null, "");
+  function link(text, ic, href, o) {
+    o = o || {};
+    var a = el("a", o.cls || "", "");
     a.setAttribute("role", "menuitem");
     a.href = href;
-    if (ext) { a.target = "_blank"; a.rel = "noreferrer noopener"; }
-    a.appendChild(icon(ic));
+    if (o.danger) a.classList.add("danger");
+    if (o.ext) { a.target = "_blank"; a.rel = "noreferrer noopener"; }
+    if (ic) a.appendChild(icon(ic));
     a.appendChild(document.createTextNode(text));
+    a.addEventListener("click", function () { close(false); });
     return a;
   }
-  /* s: {name, onOpen(), watch: {watched, onWatch(), onArt() or null} or null (watchlists off),
-     onAdd() or null, addDisabled (why it can't add, or ""), scry, focusBack (an element)} */
-  function open(s, x, y) {
+  function sep() { return el("div", "sep"); }
+  /* s: {head (the item's name), label (for readers; default "Menu: head"), items (nodes), cls,
+     focusBack (an element)}; x, y: where it opens (the pointer, or the ⋮). */
+  function openMenu(s, x, y) {
     close(false);
-    var name = s.name || "";
-    var m = el("div", "menu ctxmenu cs-menu");
+    var m = el("div", "menu ctxmenu cs-menu" + (s.cls ? " " + s.cls : ""));
     m.setAttribute("role", "menu");
-    m.setAttribute("aria-label", "Card: " + name);
-    m.appendChild(el("div", "head", name));
-    m.appendChild(menuItem("Open card", "eye", s.onOpen));
-    if (s.watch) {
-      if (s.watch.watched) m.appendChild(menuLink("On your watchlist", "check", "/watchlist?q=" + enc(name)));
-      else m.appendChild(menuItem("Watch this card", "bookmark", s.watch.onWatch, true));
-      if (s.watch.onArt && window.MtgPrintPick) m.appendChild(menuItem("Art variants…", "image", s.watch.onArt));
-    }
-    if (s.onAdd) {
-      var add = menuItem("Add to deck…", "plus", s.onAdd);
-      if (s.addDisabled) { add.disabled = true; add.title = s.addDisabled; }
-      m.appendChild(add);
-    }
-    m.appendChild(el("div", "sep"));
-    var scry = s.scry || "https://scryfall.com/search?q=" + enc("!\"" + name + "\"");
-    m.appendChild(menuLink("Open on Scryfall", "external", scry, true));
+    m.setAttribute("aria-label", s.label || ("Menu: " + (s.head || "")));
+    if (s.head) m.appendChild(el("div", "head", s.head));
+    (s.items || []).forEach(function (n) { if (n) m.appendChild(n); });
     m.addEventListener("keydown", function (e) {
       var items = $$("[role=menuitem]:not([disabled])", m);
       var i = items.indexOf(document.activeElement);
-      if (e.key === "Escape") { e.preventDefault(); close(true); }
+      if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); close(true); }
       else if (e.key === "ArrowDown") { e.preventDefault(); (items[i + 1] || items[0]).focus(); }
       else if (e.key === "ArrowUp") { e.preventDefault(); (items[i - 1] || items[items.length - 1]).focus(); }
       else if (e.key === "Home") { e.preventDefault(); items[0].focus(); }
@@ -222,26 +315,60 @@
     var pad = 8, w = m.offsetWidth, h = m.offsetHeight;
     m.style.left = Math.max(pad, Math.min(x, window.innerWidth - w - pad)) + "px";
     m.style.top = Math.max(pad, Math.min(y, window.innerHeight - h - pad)) + "px";
+    m.style.maxHeight = (window.innerHeight - parseFloat(m.style.top) - pad) + "px";
     m.style.visibility = "";
     menu = m;
     menuBack = s.focusBack || null;
+    menuScroll = [window.scrollX, window.scrollY];
     var first = m.querySelector("[role=menuitem]:not([disabled])");
-    if (first) first.focus();
+    if (first) first.focus({ preventScroll: true });
+    if (backCloses()) { try { history.pushState({ mtgmenu: 1 }, ""); menuPushed = true; } catch (e) { menuPushed = false; } }
+    return m;
   }
   document.addEventListener("pointerdown", function (e) { if (menu && !menu.contains(e.target) && e.target !== scrim) close(false); }, true);
+  document.addEventListener("keydown", function (e) { if (menu && e.key === "Escape" && !menu.contains(e.target)) close(true); });
   window.addEventListener("resize", function () { close(false); });
+  // the page scrolling away closes the menu (a list inside it may scroll)
+  window.addEventListener("scroll", function (e) {
+    if (!menu || (e.target instanceof Element && menu.contains(e.target))) return;
+    if (Math.abs(window.scrollX - menuScroll[0]) > 4 || Math.abs(window.scrollY - menuScroll[1]) > 4) close(false);
+  }, { capture: true, passive: true });
+  window.addEventListener("popstate", function () {
+    if (ignorePop) { ignorePop = false; return; }
+    if (menu && menuPushed) { menuPushed = false; close(true, true); }
+  });
+
+  // A ⋮ button for a tile or row; label: "Menu for NAME"
+  function kebab(label) {
+    var b = el("button", "kebab");
+    b.type = "button";
+    b.setAttribute("aria-label", label);
+    b.setAttribute("aria-haspopup", "menu");
+    b.title = "Menu";
+    b.appendChild(icon("more"));
+    return b;
+  }
 
   /* The ways in, on `root`: right-click, a press and hold on a touch screen (Android sends
-     contextmenu itself; iOS does not), the ContextMenu key or Shift+F10. o: {itemOf(target) -> the
-     card's element or null, keyItem(event) -> the same for a key (default itemOf(event.target)),
-     skip (a selector a hold must not start on), open(item, x, y)}. */
+     contextmenu itself; iOS does not), the ⋮ button and the ContextMenu key or Shift+F10.
+     o: {itemOf(target) -> the item's element or null, keyItem(event) -> the same for a key
+     (default itemOf(event.target)), skip (a selector a hold must not start on), button (the
+     selector of the item's ⋮), open(item, x, y, how)}. */
   function bind(root, o) {
     // As static/deck.js: a finger or a pen (an S Pen press and hold too) holds; the hold is off
     // once the pointer has slid 8 px from where it started, or lifts, or the browser cancels it.
     // The tap that ends a hold which opened the menu is swallowed for a moment only, so nothing
-    // sticks when no tap follows (a later Enter on the card, or a tap elsewhere, works as ever).
-    var hold = null, opened = false, swallow = 0, startX = 0, startY = 0;
+    // sticks when no tap follows (a later Enter on the item, or a tap elsewhere, works as ever).
+    var hold = null, opened = false, swallow = 0, startX = 0, startY = 0, touchPress = false;
     root.addEventListener("click", function (e) {
+      var b = o.button && e.target.closest ? e.target.closest(o.button) : null;
+      if (b && o.itemOf(b)) {
+        e.preventDefault();
+        e.stopPropagation();
+        var r = b.getBoundingClientRect();
+        o.open(o.itemOf(b), r.left, r.bottom, "button");
+        return;
+      }
       if (!swallow) return;
       if (menu && menu.contains(e.target)) return;  // a tap in the menu itself
       e.preventDefault();
@@ -249,13 +376,18 @@
     }, true);
     root.addEventListener("pointerdown", function (e) {
       opened = false;
-      if (e.pointerType === "mouse") return;
+      touchPress = e.pointerType !== "mouse";
+      if (!touchPress) return;
       var it = o.itemOf(e.target);
-      if (!it || (o.skip && e.target.closest(o.skip))) return;
+      if (!it || (o.skip && e.target.closest(o.skip)) || (o.button && e.target.closest(o.button))) return;
       var x = e.clientX, y = e.clientY;
       startX = x; startY = y;
       clearTimeout(hold);
-      hold = setTimeout(function () { hold = null; opened = true; o.open(it, x, y); }, 550);
+      hold = setTimeout(function () {
+        hold = null; opened = true;
+        if (navigator.vibrate) { try { navigator.vibrate(20); } catch (err) { /* no vibration */ } }
+        o.open(it, x, y, "hold");
+      }, 450);
     });
     ["pointerup", "pointercancel", "pointermove"].forEach(function (t) {
       root.addEventListener(t, function (e) {
@@ -271,13 +403,18 @@
         }
       });
     });
+    // a link tile is draggable by itself: never under a finger, where the drag the browser starts
+    // from a hold would leave the tile marked and the next tap refused
+    root.addEventListener("dragstart", function (e) {
+      if (touchPress && o.itemOf(e.target)) e.preventDefault();
+    });
     root.addEventListener("contextmenu", function (e) {
       var it = o.itemOf(e.target);
       if (!it) return;
       e.preventDefault();
       if (menu) return;  // the hold already opened it
       clearTimeout(hold); hold = null;
-      o.open(it, e.clientX, e.clientY);
+      o.open(it, e.clientX, e.clientY, "context");
     });
     root.addEventListener("keydown", function (e) {
       if (!(e.key === "ContextMenu" || (e.shiftKey && e.key === "F10"))) return;
@@ -285,8 +422,139 @@
       if (!it) return;
       e.preventDefault();
       var r = it.getBoundingClientRect();
-      o.open(it, r.left + Math.min(r.width / 2, 40), r.top + Math.min(r.height / 2, 40));
+      o.open(it, r.left + Math.min(r.width / 2, 40), r.top + Math.min(r.height / 2, 40), "key");
     });
+  }
+
+  // -- boxes (dialogs) ---------------------------------------------------------------------------
+  var box = null;
+  // a box that must stay (a delete job running inside it) refuses Esc and the scrim; the box's
+  // own code closes it with force once the outcome is shown
+  function closeBox(force) {
+    if (!box || (box.locked && !force)) return;
+    var b = box;
+    box = null;
+    b.scrim.remove();
+    if (b.onClose) b.onClose();
+    if (b.back && b.back.isConnected) b.back.focus();
+  }
+  /* o: {title, body (a node, or a function (box) -> node), actions (buttons; a button with
+     data-cancel closes the box), wide (the export box), label, returnFocus, onClose}. Returns
+     {panel, body, close(), note(text, error), busy(on), setBody(node), setActions(nodes),
+     lock(on): while on, Esc and the scrim do not close the box (close() still does)}. */
+  function openBox(o) {
+    closeBox(true);
+    close(false);
+    var sc = el("div", "mtgbox-scrim");
+    var panel = el("div", "mtgbox" + (o.wide ? " wide" : ""));
+    panel.setAttribute("role", "dialog");
+    panel.setAttribute("aria-modal", "true");
+    var h = el("h2", null, o.title || "");
+    h.id = "mtgbox-title";
+    panel.setAttribute("aria-labelledby", h.id);
+    if (o.label) panel.setAttribute("aria-label", o.label);
+    panel.appendChild(h);
+    var body = el("div", "body");
+    panel.appendChild(body);
+    var note = el("p", "notice error boxnote");
+    note.setAttribute("role", "alert");
+    note.hidden = true;
+    panel.appendChild(note);
+    var acts = el("div", "acts");
+    panel.appendChild(acts);
+    sc.appendChild(panel);
+    var b = {
+      scrim: sc, panel: panel, body: body, acts: acts, back: o.returnFocus || document.activeElement, onClose: o.onClose,
+      close: function () { closeBox(true); },
+      locked: false,
+      lock: function (on) { b.locked = !!on; panel.setAttribute("data-locked", on ? "true" : "false"); },
+      note: function (text, error) {
+        note.hidden = !text;
+        note.textContent = text || "";
+        note.className = "notice boxnote" + (error ? " error" : " ok");
+      },
+      busy: function (on) {
+        $$("button", acts).forEach(function (x) { x.disabled = !!on || x.hasAttribute("data-gate-off"); });
+        panel.setAttribute("aria-busy", on ? "true" : "false");
+      },
+      setTitle: function (t) { h.textContent = t; },
+      setBody: function (node) { body.textContent = ""; body.appendChild(node); },
+      setActions: function (nodes) {
+        acts.textContent = "";
+        nodes.forEach(function (n) { if (n) acts.appendChild(n); });
+      },
+      focusFirst: function () {
+        var f = panel.querySelector("input:not([type=hidden]):not([type=radio]):not([disabled]), textarea, select, input[type=radio]:checked, .acts button:not([disabled])");
+        if (f) f.focus({ preventScroll: true });
+      }
+    };
+    b.setBody(typeof o.body === "function" ? o.body(b) : (o.body || el("div")));
+    b.setActions(o.actions || []);
+    sc.addEventListener("click", function (e) {
+      if (e.target === sc) closeBox();
+      var c = e.target.closest ? e.target.closest("[data-cancel]") : null;
+      if (c && panel.contains(c)) closeBox();
+    });
+    panel.addEventListener("keydown", function (e) {
+      if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); closeBox(); return; }
+      if (e.key !== "Tab") return;
+      var f = $$("a[href], button:not([disabled]), input:not([disabled]):not([type=hidden]), select:not([disabled]), textarea:not([disabled]), [tabindex='0']", panel)
+        .filter(function (x) { return x.offsetParent !== null; });
+      if (!f.length) return;
+      if (e.shiftKey && document.activeElement === f[0]) { e.preventDefault(); f[f.length - 1].focus(); }
+      else if (!e.shiftKey && document.activeElement === f[f.length - 1]) { e.preventDefault(); f[0].focus(); }
+    });
+    document.body.appendChild(sc);
+    box = b;
+    b.focusFirst();
+    return b;
+  }
+  function boxButton(text, cls, onClick, o) {
+    o = o || {};
+    var b = el("button", cls || "", "");
+    b.type = "button";
+    if (o.icon) b.appendChild(icon(o.icon));
+    b.appendChild(document.createTextNode((o.icon ? " " : "") + text));
+    if (o.cancel) b.setAttribute("data-cancel", "");
+    if (onClick) b.addEventListener("click", onClick);
+    return b;
+  }
+  document.addEventListener("keydown", function (e) { if (box && e.key === "Escape" && !box.panel.contains(e.target)) closeBox(); });
+
+  window.MtgMenu = {
+    open: openMenu, close: close, isOpen: function () { return !!menu; }, bind: bind,
+    item: item, link: link, sep: sep, kebab: kebab, icon: icon, el: el,
+    toast: toast, dismissToast: dismissToast, post: post, getJSON: getJSON, csrf: csrf,
+    copyText: copyText, copyAndSay: copyAndSay, collect: collect, enabled: enabled, phone: phone, norm: norm
+  };
+  window.MtgBox = { open: openBox, close: function () { closeBox(true); }, button: boxButton, isOpen: function () { return !!box; } };
+
+  // -- the card menu -----------------------------------------------------------------------------
+  /* s: {name, onOpen(), watch: {watched, onWatch(), onArt() or null} or null (watchlists off),
+     onAdd() or null, addHref (Add to deck… as a link, where the page has no add box), addDisabled
+     (why it can't add, or ""), collect (true: Add to collection), copyName (default true), scry,
+     before (nodes above Copy name), after (nodes under Open on Scryfall), focusBack (an element)} */
+  function open(s, x, y) {
+    var name = s.name || "";
+    var items = [item("Open card", "eye", s.onOpen)];
+    if (s.onAdd) {
+      items.push(item("Add to deck…", "plus", s.onAdd, { disabled: !!s.addDisabled, title: s.addDisabled }));
+    } else if (s.addHref) {
+      items.push(link("Add to deck…", "plus", s.addHref));
+    }
+    if (s.collect) items.push(item("Add to collection", "collection", function () { collect(name); }));
+    if (s.watch) {
+      if (s.watch.watched) items.push(link("On your watchlist", "check", "/watchlist?q=" + enc(name)));
+      else items.push(item("Watch this card", "bookmark", s.watch.onWatch, { focusBack: true }));
+      if (s.watch.onArt && window.MtgPrintPick) items.push(item("Art variants…", "image", s.watch.onArt));
+    }
+    (s.before || []).forEach(function (n) { items.push(n); });
+    if (s.copyName !== false) items.push(item("Copy name", "copy", function () { copyAndSay(name, "Name copied."); }));
+    items.push(sep());
+    var scry = s.scry || "https://scryfall.com/search?q=" + enc("!\"" + name + "\"");
+    items.push(link("Open on Scryfall", "external", scry, { ext: true }));
+    (s.after || []).forEach(function (n) { items.push(n); });
+    return openMenu({ head: name, label: "Card: " + name, items: items, focusBack: s.focusBack }, x, y);
   }
 
   // -- suggestion lists (static/suggest.js) ------------------------------------------------------
@@ -368,6 +636,7 @@
         }
       } : null,
       onAdd: null,
+      copyName: false,  // a suggestion row: the name is the typed text already
       focusBack: input
     }, x, y);
   }
@@ -411,7 +680,7 @@
 
   window.MtgCardMenu = {
     enabled: enabled, icon: icon, toast: toast, dismissToast: dismissToast, norm: norm,
-    drawButton: drawButton, listLink: listLink, watch: watch, artVariants: artVariants,
+    drawButton: drawButton, listLink: listLink, watch: watch, artVariants: artVariants, collect: collect,
     open: open, close: close, isOpen: function () { return !!menu; }, bind: bind
   };
 })();
