@@ -43,11 +43,13 @@ class _FrozenTime:
 
 
 def page_clock(monkeypatch: pytest.MonkeyPatch) -> int:
-    """A "now" at least ten minutes into its UTC day, with the History page's clock stopped at it.
-    Rows seeded seconds or minutes before now then fall on the page's "today" whenever the test
-    runs, including just after midnight UTC or across it."""
+    """Noon UTC of the latest day whose noon has passed, with the History page's clock stopped at
+    it. Rows seeded seconds or hours before now then fall on the same "Today" and "Yesterday" day
+    rows whatever time the test runs (32 hours before noon is yesterday; before 08:00 it was not)."""
     real = int(time.time())
-    now = real if real % DAY >= 600 else real - real % DAY - 1
+    now = real - real % DAY + DAY // 2
+    if now > real:
+        now -= DAY
     monkeypatch.setattr(history_view, "time", _FrozenTime(now))
     return now
 
