@@ -93,7 +93,11 @@ def test_quick_access_in_the_side_bar_order(server: Server) -> None:
         "<h2>Quick access</h2><span class='ui-sub'>The same sections, in the same order, as the app" in page
     )
     assert ">Card search</a>" in page and "href='/precons'>Precons</a>" in page
-    assert "Snapshots, restores, deck reports and backup copies." in page
+    # one History tile, in the one approved wording
+    quick = page.split("aria-label='Quick access'>")[1].split("</section>")[0]
+    tiles = re.findall(r"<a class='lab' href='/history'>.*?</div>", quick, flags=re.S)
+    assert len(tiles) == 1 and "Snapshots, restores, deck reports and backup copies." in tiles[0]
+    assert page.count("Snapshots, restores, deck reports and backup copies.") == 1
     # one orange button above the folded connector panel: Search Archidekt is plain
     assert page.split("<details class='connect")[0].count("btn-primary") == 1
     assert "<button class='btn-plain'>" in page and "Search Archidekt</button>" in page
