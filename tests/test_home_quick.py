@@ -59,6 +59,12 @@ def test_reports_and_watchlist_widgets() -> None:
     assert ">Open watchlist</a>" in w
 
 
+def test_the_reports_widget_names_a_deck_with_no_name_as_an_unnamed_deck() -> None:
+    latest = {"report_id": "r9", "deck_name": "", "taken_at": NOW - 7200, "deck_id": "77"}
+    out = home.reports_widget([latest], latest, 0, now=NOW)
+    assert "Latest: an unnamed deck, 2 h ago" in out and "Deck" not in out.replace("All reports", "")
+
+
 @pytest.fixture
 def server(tmp_path: Path):
     s = Server(tmp_path, watchlists_enabled=True)

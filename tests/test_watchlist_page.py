@@ -112,6 +112,14 @@ def test_widgets_and_the_watch_a_card_panel() -> None:
     assert "Last check today at 06:00 UTC" in page
 
 
+def test_a_watched_deck_with_no_name_is_an_unnamed_deck() -> None:
+    unnamed = {**DATA["decks"][0], "deck_id": "4242", "name": ""}
+    data = {**DATA, "decks": [unnamed]}
+    page = watchlist_page_html(data, {}, "tok", Query(), now=NOW)
+    assert ">Unnamed deck</a>" in page and "Value of Unnamed deck" in page
+    assert "Deck 4242" not in page and ">4242<" not in page
+
+
 def test_rows_show_picture_finish_changes_and_alerts() -> None:
     page = _page()
     assert "https://cards.scryfall.io/small/front/0/0/" in page  # Esper Sentinel's picture

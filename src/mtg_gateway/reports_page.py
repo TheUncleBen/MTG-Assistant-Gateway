@@ -323,7 +323,7 @@ def latest_widget(latest: dict[str, Any] | None, *, now: float) -> str:
     href = f"/history/reports/{esc(latest['report_id'])}"
     det = (
         status_label(latest.get("status"))
-        + f"<span><a href='{href}'>{esc(latest.get('deck_name') or 'Deck')}</a>, "
+        + f"<span><a href='{href}'>{esc(latest.get('deck_name') or 'Unnamed deck')}</a>, "
         f"{ui.when(latest.get('taken_at'), now=now)}</span>"
     )
     trend = "/history?" + urlencode({"deck_id": str(latest.get("deck_id") or ""), "type": "reports"})
@@ -382,7 +382,7 @@ def decks_widget(index: list[dict[str, Any]], trends: list[dict[str, Any]]) -> s
             else:
                 delta = "<span class='dl'>±0</span>"
         rows.append(
-            f"<li><span>{esc(t['deck_name'] or 'Deck')}</span><b>{'T' + turn if turn else '–'}</b>"
+            f"<li><span>{esc(t['deck_name'] or 'Unnamed deck')}</span><b>{'T' + turn if turn else '–'}</b>"
             f"{delta or '<span class=dl></span>'}</li>"
         )
     det = (

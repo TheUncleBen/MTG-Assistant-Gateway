@@ -131,6 +131,23 @@ def test_a_report_with_no_stored_name_is_an_unnamed_deck(server: Server) -> None
     assert "<option value='99'>Unnamed deck</option>" in page and "Deck 99" not in page
 
 
+def test_the_widgets_say_unnamed_deck_for_a_report_with_no_name() -> None:
+    from mtg_gateway import reports_page
+
+    latest = {
+        "report_id": "r9",
+        "deck_id": "77",
+        "deck_name": "",
+        "status": "complete",
+        "taken_at": 1_800_000_000,
+    }
+    out = reports_page.latest_widget(latest, now=1_800_000_100.0)
+    assert ">Unnamed deck</a>" in out and ">Deck<" not in out and "77</a>" not in out
+    trend = {"deck_id": "77", "deck_name": "", "latest": 5, "previous": None}
+    tested = reports_page.decks_widget([{"deck_id": "77"}], [trend])
+    assert "<li><span>Unnamed deck</span>" in tested and "<span>Deck</span>" not in tested
+
+
 def test_reports_dashboard_pages_by_25(server: Server) -> None:
     sid = server.sign_in_and_link()
     now = int(time.time())

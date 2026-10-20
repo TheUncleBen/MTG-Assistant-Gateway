@@ -141,7 +141,7 @@ def reports_widget(
         if win and win.get("rate") is not None:
             how = f", {100 * win['rate']:.0f}% won against precons"
         ago = ui.when_text(latest.get("taken_at"), now=now)
-        det = f"Latest: {latest.get('deck_name') or 'Deck'}, {ago}{how}"
+        det = f"Latest: {latest.get('deck_name') or 'an unnamed deck'}, {ago}{how}"
         actions = (
             ui.button_link("Open latest", f"/history/reports/{latest['report_id']}"),
             ui.button_link("All reports", "/reports"),

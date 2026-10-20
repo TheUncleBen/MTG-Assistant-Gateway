@@ -373,7 +373,7 @@ def card_row(v: dict[str, Any], uid: str | None, csrf_in: str, today: str, *, qu
 
 def deck_row(v: dict[str, Any], csrf_in: str, today: str, *, query: Query) -> str:
     did = str(v["deck_id"])
-    name = v.get("name") or f"Deck {did}"
+    name = v.get("name") or "Unnamed deck"
     full = [[h["day"], h["price"]] for h in _priced(v.get("history") or [])]
     read = ""
     if v.get("refreshed_at"):
