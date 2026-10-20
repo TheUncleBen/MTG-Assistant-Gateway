@@ -38,6 +38,7 @@ CARDS = [
     "Asmoranomardicadaistinaculdacar",
     "Okiri, Belligerent Bannerkeeper of the Greatest Grand Army",
 ]
+SHEETS_LOADED = """() => [...document.querySelectorAll("link[rel=stylesheet]")].every((l) => l.sheet)"""
 WIDTHS = [320, 360, 400, 480, 560, 600, 640, 680, 720, 760, 800, 900, 1000, 1100, 1200, 1300, 1366, 1400]
 
 
@@ -391,6 +392,9 @@ def test_no_page_scrolls_sideways_or_clips_a_control(server: Server, touch: bool
             server.db.delete_prefs("user-1", prefixes=("view.",))  # on the account from 0.7.29
             r = page.goto(f"{server.base}{path}", wait_until="networkidle")
             assert r is not None and r.status == 200, (path, r and r.status)
+            # measure only once every stylesheet has applied: on a busy runner a page was once
+            # measured unstyled (17 px inline links overlapping, a 493 px wide document)
+            page.wait_for_function(SHEETS_LOADED, timeout=10_000)
             for w in WIDTHS:
                 page.set_viewport_size({"width": w, "height": 900})
                 page.wait_for_timeout(20)
