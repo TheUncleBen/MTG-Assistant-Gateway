@@ -321,7 +321,7 @@ def test_writes_on_apply_is_browser_only_and_the_review_page_applies(clients, en
         async with browser_page() as page:
             await gateway_browser_sign_in(page, env, "alice-test", f"/proposals/{pid}")
             text = await page.inner_text("body")
-            assert "Arcane Signet" in text and "Rampant Growth" in text and "pending" in text.lower(), text
+            assert "Arcane Signet" in text and "Rampant Growth" in text and "waiting" in text.lower(), text
             # the form carries a CSRF token; a POST without one is refused (also covered by unit tests)
             await click_guarded(page, "form.guarded button[value=apply]")
             await page.wait_for_url(f"{PUBLIC_URL}/proposals/{pid}?ok=applied", timeout=60_000)
