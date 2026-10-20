@@ -318,7 +318,8 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
             "</select></div>"
             f"<div class='actions'><button class='primary'>{icon('plus')} Create deck</button>"
             "<a class='btn' href='/decks'>Cancel</a></div>"
-            "<p class='muted small'>The deck is created on Archidekt straight away and opens here.</p>"
+            "<p class='muted small'>The deck is created on Archidekt when you press Create deck, and opens "
+            "here.</p>"
             "</form>"
         )
 
@@ -437,7 +438,9 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
             sort=qp.get("sort") or "name",
             q=(qp.get("q") or "").strip()[:80],
             notice=notice,
-            waiting=waiting_changes(state.db, sub, deck.id, own=own),  # waiting_strip.py
+            waiting=waiting_changes(
+                state.db, sub, deck.id, own=own, risk_of=decks.proposal_risk
+            ),  # waiting_strip.py
         ) + prefs.page_prefs(state.db, sub, f"{prefs.STACK}{deck.id}:", prefs.EDHPLAY_STEPS, prefs.DECKSTATS)
         resp = page(
             deck.name or f"Deck {deck.id}",

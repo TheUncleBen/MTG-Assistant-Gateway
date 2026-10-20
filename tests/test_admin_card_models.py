@@ -5,6 +5,7 @@ own models, so Remove names the card and the member."""
 from __future__ import annotations
 
 import html
+import re
 from pathlib import Path
 
 import pytest
@@ -29,7 +30,8 @@ async def test_admins_see_who_added_each_model_and_can_remove_any(gw: Harness) -
     try:
         r = await b.http.get("/admin/models", headers=NAVIGATE)
         assert r.status_code == 200 and "No card models are kept yet." in r.text
-        assert "href='/admin/models'>Card models</a>" in r.text
+        # the admin tab bar marks the current page (UI standard: tinted, not an orange button)
+        assert "href='/admin/models' aria-current='page'>Card models</a>" in r.text
         gw.db.put_card_model("sol ring", "Sol Ring", MODEL, "user-9", 100)
         gw.db.put_card_model("<b>x", "<b>Bad name", MODEL, "user-9", 200)
         gw.db.put_card_model("sol ring", "Sol Ring", MODEL, "admin-1", 50)  # the admin's own
@@ -52,7 +54,9 @@ async def test_admins_see_who_added_each_model_and_can_remove_any(gw: Harness) -
         # both activity logs say it in words, with whose model it was
         for path in ("/admin/activity", "/activity"):
             text = html.unescape((await b.http.get(path, headers=NAVIGATE)).text)
-            assert "Sol Ring (added by bram)" in text and '"card_key"' not in text, path
+            # the stored JSON is only in the admin page's row details, never the Detail column
+            cells = "".join(re.findall(r"<span class='c-det'>(.*?)</span><span class='c-app'>", text))
+            assert "Sol Ring (added by bram)" in cells and '"card_key"' not in cells, path
         assert "Card model removed" in html.unescape((await b.http.get("/activity", headers=NAVIGATE)).text)
         r = await b.http.post("/admin/models", data=one)
         assert r.headers["location"].startswith("/admin/models?err=model_gone")
@@ -124,6 +128,6 @@ async def test_an_account_without_a_name_is_not_called_deleted(gw: Harness) -> N
     b = await admin_browser(gw)
     try:
         text = html.unescape((await b.http.get("/admin/activity", headers=NAVIGATE)).text)
-        assert "Opt (added by an account with no username or email)" in text
+        assert "Opt (added by a member with no name)" in text
     finally:
         await b.aclose()

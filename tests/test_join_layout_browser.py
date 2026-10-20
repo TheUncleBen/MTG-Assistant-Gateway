@@ -159,8 +159,8 @@ def test_the_deck_pages_view_boxes_never_overlap_at_desktop_width(server: Server
 
 
 def test_reports_is_in_the_account_menu_at_desktop_width(server: Server) -> None:  # noqa: F811
-    """The top bar has no Reports link, so with a mouse at desktop width the
-    account menu has it (a phone has it under More, the rail as a tab)."""
+    """With a mouse at desktop width the account menu has Reports (the top bar
+    also shows it from 1200 px, under its More below that)."""
     from playwright.sync_api import sync_playwright
 
     exe, (sid, _pending) = _exe(), _seed(server)
@@ -170,8 +170,8 @@ def test_reports_is_in_the_account_menu_at_desktop_width(server: Server) -> None
             ctx = _context(browser, server, sid, width, 800, touch=False)
             page = ctx.new_page()
             page.goto(f"{server.base}/history", wait_until="load")
-            page.click("details.dd > summary")
-            link = page.locator("details.dd[open] .menu a[href='/reports']")
+            page.click("details.dd:not(.navmore) > summary")
+            link = page.locator("details.dd:not(.navmore)[open] .menu a[href='/reports']")
             assert link.is_visible(), width
             assert link.inner_text().strip() == "Reports"
             link.click()

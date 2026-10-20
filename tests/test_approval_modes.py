@@ -688,7 +688,10 @@ async def test_a_lowered_count_on_a_commander_with_two_rows_waits_and_keeps_the_
         page = (await b.http.get(f"/proposals/{p['proposal_id']}")).text
         text = html.unescape(page)
         assert stays in text
-        row = text[text.rindex("<li", 0, text.index(stays)) : text.index("</li>", text.index(stays))]
+        # the change list of the proposal's own panel (the waiting list sits beside it, and the
+        # panel's heading repeats the summary)
+        at = text.index(stays, text.index("<ul class='changes'", text.index("<aside class='ui-drawer'")))
+        row = text[text.rindex("<li", 0, at) : text.index("</li>", at)]
         assert "→" not in row and "Commander" in row
         r = await b.http.post(
             f"/api/v1/proposals/{p['proposal_id']}/apply",

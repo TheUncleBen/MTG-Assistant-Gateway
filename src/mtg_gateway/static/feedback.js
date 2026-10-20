@@ -211,6 +211,22 @@
           : d.toLocaleString(undefined, { year: "numeric", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
       } catch (e) { return d.toISOString().slice(0, 16).replace("T", " "); }
     },
+    // The UI standard's one list date (ui.when_text is its twin on the server): "just now",
+    // "40 min ago", "2 h ago", "1 day ago" up to "7 days ago", then "Oct 12" in the viewer's own
+    // time zone, with the year only when it isn't this year.
+    rel: function (value, now) {
+      var d = value instanceof Date ? value : new Date(value);
+      if (isNaN(d)) return "";
+      var n = now instanceof Date ? now : new Date(now === undefined ? Date.now() : now);
+      var age = Math.floor((n.getTime() - d.getTime()) / 1000);
+      if (age < 60) return "just now";
+      if (age < 3600) return Math.floor(age / 60) + " min ago";
+      if (age < 86400) return Math.floor(age / 3600) + " h ago";
+      if (age <= 7 * 86400) { var days = Math.floor(age / 86400); return days + (days === 1 ? " day ago" : " days ago"); }
+      var opts = { month: "short", day: "numeric" };
+      if (d.getFullYear() !== n.getFullYear()) opts.year = "numeric";
+      try { return d.toLocaleDateString(undefined, opts); } catch (e) { return d.toISOString().slice(0, 10); }
+    },
     plural: function (n, word, pluralWord) {
       var num = Number(n);
       return (isNaN(num) ? n : num.toLocaleString()) + " " + (num === 1 ? word : (pluralWord || word + "s"));
@@ -218,12 +234,40 @@
   };
   window.MtgText = MtgText;
   // Every <time datetime> the server rendered in UTC is shown in the viewer's time zone.
+  // data-fmt=rel (ui.when): the list date, with the full local date and time as its tooltip,
+  // kept current while the page stays open.
   var times = document.querySelectorAll("time[datetime]");
   for (var t = 0; t < times.length; t++) {
     var iso = times[t].getAttribute("datetime");
+    if (times[t].getAttribute("data-fmt") === "rel") continue;
     var local = MtgText.when(iso, times[t].getAttribute("data-fmt") === "time");
     if (local) { times[t].setAttribute("title", times[t].textContent); times[t].textContent = local; }
   }
+  function relTimes() {
+    var rel = document.querySelectorAll("time[datetime][data-fmt=rel]");
+    for (var r = 0; r < rel.length; r++) {
+      var at = rel[r].getAttribute("datetime"), shown = MtgText.rel(at), full = MtgText.when(at);
+      if (shown && rel[r].textContent !== shown) rel[r].textContent = shown;
+      if (full) rel[r].setAttribute("title", full);
+    }
+  }
+  relTimes();
+  window.MtgText.refreshTimes = relTimes;
+  if (document.querySelector("time[data-fmt=rel]")) setInterval(relTimes, 60000);
+  // A list's filter applies as soon as it changes (ui.toolbar; a Search button without scripts).
+  document.addEventListener("change", function (e) {
+    var sel = e.target;
+    if (!(sel instanceof HTMLSelectElement) || !sel.form || !sel.form.classList.contains("ui-tools")) return;
+    if (sel.form.requestSubmit) sel.form.requestSubmit(); else sel.form.submit();
+  });
+  // Esc closes an item's side panel (ui.side_panel) as its × does, when nothing else is open.
+  document.addEventListener("keydown", function (e) {
+    if (e.key !== "Escape" || e.defaultPrevented) return;
+    var close = document.querySelector(".ui-split.with-panel .ui-drawer .close");
+    if (!close || !close.offsetParent) return;
+    if (document.querySelector("details[open].dd, [aria-expanded=true], dialog[open]")) return;
+    close.click();
+  });
   // "1 card" / "7 cards" next to a number field: the word follows the value (the odds form).
   document.addEventListener("input", function (e) {
     var input = e.target;

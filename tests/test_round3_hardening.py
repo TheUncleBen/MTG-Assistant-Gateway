@@ -395,8 +395,11 @@ async def test_activity_badge_for_an_app_named_browser(stack: Stack) -> None:
     await b.login()
     page = (await b.http.get("/activity")).text
     await b.aclose()
-    badges = re.findall(r"<span class='badge' title='(app: browser \(.*?\))'>(.*?)</span>", page)
-    assert any(x[1].startswith("app: browser") and "(" in x[0] for x in badges), badges  # id in the tooltip
+    # an app that calls itself "browser" shows by its own name, never as the member's website, and
+    # My activity names apps only (the client id is in no member text)
+    apps = re.findall(r"<span class='ui-app'><i aria-hidden='true'>.</i>(.*?)</span>", page)
+    assert any(a.startswith("browser") for a in apps), apps
+    assert client["client_id"] not in page
     rows = h.app.state.gateway.db.audit_for_user("user-1", 10)
     assert any((r.get("detail") or {}).get("origin") == "app" for r in rows)
 

@@ -217,7 +217,7 @@ deck or to the maybeboard. **Paste a list** adds many cards at once, one per
 line with a count in front (Archidekt's own export syntax is understood:
 printing, `*F*` and `*E*` finishes, `[Category]`, `# Sideboard` headers);
 names the gateway cannot match stay in the box.
-Press **Save changes** and they go to Archidekt straight away (a snapshot
+Press **Save changes** and they go to Archidekt (a snapshot is taken
 first, so History can undo); only a large removal or a change to the
 commander zone asks you to confirm.
 

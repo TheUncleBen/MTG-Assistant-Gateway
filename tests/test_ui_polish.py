@@ -52,11 +52,6 @@ def test_event_sentences_and_actor_badges() -> None:
         companion.event_label("backup_trim_queued")
         == "Older backup copies queued for deletion from Archidekt"
     )
-    html = companion.event_detail_html(
-        {"deck_id": "42", "deck_name": "Reap", "proposal_id": "p0123456789", "via": "x"}
-    )
-    assert "<a href='/decks/42'>Reap</a>" in html and "proposal p0123456" in html and "via x" in html
-    assert "archidekt_username" not in companion.event_detail_html({"archidekt_username": "alice"})
     assert (
         actor_html("app: Claude (c-123)")
         == "<span class='badge' title='app: Claude (c-123)'>app: Claude</span>"
@@ -66,10 +61,11 @@ def test_event_sentences_and_actor_badges() -> None:
     )
     # an app that registered no name is "an assistant" (its id only in the tooltip), never "app: app-1"
     assert actor_html("app: app-1") == "<span class='badge' title='app: app-1'>an assistant</span>"
-    from mtg_gateway.history_view import _who
+    # History names who made an entry as the app chip does (the redesign's "By" column)
+    from mtg_gateway.history_view import _app
 
-    assert _who("app: Claude (c-123)") == "the assistant (Claude)" and _who("app: app-1") == "an assistant"
-    assert _who("browser") == "you"
+    assert _app("app: Claude (c-123)") == "Claude" and _app("app: app-1") == "An assistant"
+    assert _app("browser") == "You" and _app("") is None
 
 
 def test_link_preview_image_is_absolute() -> None:
@@ -252,7 +248,7 @@ async def test_nav_highlights_export_and_proposals_and_copy_keeps_its_icon(stack
         )
         assert "aria-label='Archidekt import text'" in export
         proposals = (await b.http.get("/proposals", headers=NAV)).text
-        assert "<a href='/proposals' aria-current='page'>Proposals</a>" in proposals
+        assert "<a href='/proposals' aria-current='page' class=fold>Proposals</a>" in proposals
         compare = (await b.http.get("/decks/42/compare", headers=NAV)).text
         assert "<input type='text' name='with' data-suggest='static'" in compare
         search = (await b.http.get("/search", headers=NAV)).text

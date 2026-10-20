@@ -56,8 +56,9 @@ async def test_the_list_groups_waiting_changes_by_deck_with_checkboxes(stack: St
         assert "id='deck-42'" in page and "data-all='42'" in page
         assert f"name='pick' value='{one}' data-group='42'" in page
         assert f"name='v_{one}' value='1'" in page
-        assert "<span class='st wait'>Waiting</span>" in page
-        assert "<span class='st look'" in page and "Needs a look" in page  # #2 would now be 13 -> 14
+        assert re.search(r"<span class='ui-lbl orange'>(<svg.*?</svg>)?Waiting</span>", page)
+        # #2 would now be 13 -> 14
+        assert re.search(r"<span class='ui-lbl red'[^>]*>(<svg.*?</svg>)?Needs a look</span>", page)
         assert "Not tied to one of your decks" in page and f"value='{new}' data-group='untied'" in page
         assert "Apply checked" in page and "Reject checked" in page
         assert "/static/proposals.js" in page
@@ -246,7 +247,7 @@ async def test_the_deck_page_shows_the_strip_and_home_counts_the_decks(stack: St
         assert page.index("class='banner") < page.index("class='wstrip'") < page.index("id='cards'")
         assert "name='back' value='/decks/42'" in page
         home = (await b.http.get("/")).text
-        assert "2 waiting on 1 deck." in home
+        assert "2<small>waiting</small>" in home and "2 on 1 deck · oldest 1 min · next expires in" in home
     finally:
         await b.aclose()
 
@@ -260,3 +261,10 @@ def test_a_row_with_no_recorded_app_has_no_stray_comma() -> None:
     assert "<span class='by'>1 min ago</span>" in out, out
     line["created_by"] = "browser"
     assert "<span class='by'>you, 1 min ago</span>" in waiting_strip.row_html(line, now=1060)
+
+
+def test_no_unused_home_tile_line_left_in_the_waiting_strip() -> None:
+    # Home's Proposals widget uses home.proposals_line; the old one-line helper went with the old tile.
+    from mtg_gateway import waiting_strip
+
+    assert not hasattr(waiting_strip, "waiting_line")

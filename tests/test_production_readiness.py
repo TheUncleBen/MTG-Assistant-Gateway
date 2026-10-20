@@ -88,7 +88,7 @@ def test_old_metrics_and_deck_covers_are_purged(tmp_path: Path):
 
 def test_purge_indexes_exist_and_are_used(tmp_path: Path):
     db = Database(tmp_path / "g.sqlite")
-    assert db.schema_version == db_module.SCHEMA_VERSION == 14
+    assert db.schema_version == db_module.SCHEMA_VERSION == 15
     with db.tx() as c:
         names = {r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type = 'index'")}
         assert {
@@ -292,6 +292,7 @@ async def test_unexpected_error_is_a_plain_page_logged_and_counted(
             raise RuntimeError("secret internal detail")
 
         monkeypatch.setattr(h.db, "list_proposals", boom)
+        monkeypatch.setattr(h.db, "proposal_index", boom)  # the Proposals page's own list
         page = await b.http.get("/proposals", headers=NAVIGATE)
         assert page.status_code == 500 and "Something went wrong" in page.text
         assert "secret internal detail" not in page.text and "Traceback" not in page.text

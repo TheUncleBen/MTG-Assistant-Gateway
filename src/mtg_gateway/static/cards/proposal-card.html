@@ -10,9 +10,11 @@
 /* The proposal card's own look on top of the shared base. */
 .card{max-width:720px}
 .badge.pending{background:var(--amber-bg);color:var(--amber)}
-.badge.applying{background:var(--amber-bg);color:var(--amber)}
+.badge.applying{background:var(--blue-bg);color:var(--blue)}
 .badge.applied{background:var(--green-bg);color:var(--green)}
-.badge.rejected,.badge.failed,.badge.expired{background:var(--red-bg);color:var(--red)}
+.badge.failed,.badge.needs_look{background:var(--red-bg);color:var(--red)}
+.badge.updated{background:var(--blue-bg);color:var(--blue)}
+.badge.rejected,.badge.expired,.badge.withdrawn,.badge.replaced{background:var(--bg2);color:var(--muted)}
 ul.changes{list-style:none;margin:0;padding:0;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden}
 ul.changes li{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:10px;padding:7px 10px;
   border-top:1px solid var(--border);border-left:4px solid var(--border);background:var(--bg)}
@@ -46,7 +48,9 @@ ul.changes li.group{display:block;padding:5px 10px;font-size:.6875rem;font-weigh
 ul.changes li.more-row{display:block;padding:0;border-left-color:var(--border)}
 /* The state and risk badges stay whole: on a narrow card the risk badge moves under the state one. */
 .badges{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:6px;flex:0 1 auto;min-width:min-content}
-.badge.risk.high,.badge.risk.consent{background:var(--amber-bg);color:var(--amber)}
+.badge.risk.high{background:var(--amber-bg);color:var(--amber)}
+.badge.risk.low{background:var(--green-bg);color:var(--green)}
+.badge.risk.consent{background:var(--blue-bg);color:var(--blue)}
 .badge.risk.destructive{background:var(--red-bg);color:var(--red)}
 /* At large text sizes the badges move under the title rather than over it,
    and the risk badge may wrap */
@@ -297,7 +301,13 @@ button.danger:disabled{color:var(--red)}
     proposal = sc;
     var rows = Array.isArray(sc.rows) ? sc.rows : [];
     $("title").textContent = (sc.state === "pending" && sc.board_no ? "#" + sc.board_no + " " : "") + titleFor(sc);
-    var st = $("state"); st.textContent = sc.state || ""; st.className = "badge " + (sc.state || "");
+    // the Proposals page's words: a waiting one by its status (Updated, Needs a look, Held)
+    var STATE_TEXT = { applying: "Applying", applied: "Applied", rejected: "Rejected", expired: "Expired",
+      replaced: "Replaced", superseded: "Replaced", withdrawn: "Withdrawn", failed: "Failed" };
+    var stKey = sc.state === "pending" ? ({ updated: "updated", needs_look: "needs_look", held: "held" }[sc.status] || "pending") : (sc.state || "");
+    var st = $("state");
+    st.textContent = sc.state === "pending" ? ({ updated: "Updated", needs_look: "Needs a look", held: "Held" }[sc.status] || "Waiting") : (STATE_TEXT[sc.state] || sc.state || "");
+    st.className = "badge " + (stKey === "held" ? "pending" : stKey === "superseded" ? "replaced" : stKey);
     $("summary").textContent = summaryFor(sc, rows);
     var list = $("rows"); list.replaceChildren();
     if (!rows.length && sc.diff) {
@@ -309,11 +319,11 @@ button.danger:disabled{color:var(--red)}
       });
     }
     var risk = $("risk");
-    var RISK_TEXT = { consent: "Needs your approval", destructive: "Destructive: deletes a deck" };
+    var RISK_TEXT = { low: "Low", high: "High", consent: "Your press", destructive: "Delete" };
     if (sc.risk === "high" && sc.state === "pending" && sc.assistant_may_apply && sc.approval_mode === "auto") {
       // every high-risk change Full auto applies
       risk.textContent = "No press needed"; risk.className = "badge risk";
-    } else if (sc.risk) { risk.textContent = RISK_TEXT[sc.risk] || sc.risk + " risk"; risk.className = "badge risk " + sc.risk; }
+    } else if (sc.risk) { risk.textContent = RISK_TEXT[sc.risk] || sc.risk; risk.className = "badge risk " + sc.risk; }
     else risk.className = "badge risk hidden";
     var note = [changeNote(sc), statusNote(sc), sc.state === "pending" ? sc.replace_note : "", modeNote(sc)].filter(Boolean).join(" ");
     $("note").textContent = note; $("note").className = "note" + (note ? "" : " hidden");

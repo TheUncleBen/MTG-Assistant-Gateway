@@ -48,6 +48,9 @@ MODES = ("manual", "semi", "auto")
 # Risk tiers no approval mode lets an assistant apply: acting publicly or on the member's
 # account (consent) and deleting a deck (destructive) always wait for the member's own press.
 MEMBER_ONLY = ("consent", "destructive")
+# Stored on a closed proposal whose risk could not be judged (nothing to judge it by, or an
+# error while judging): never retried, shown as a dash with no risk label.
+UNJUDGED = "unjudged"
 DEFAULT_MODE = "manual"
 DEFAULT_MAX_ROWS = 5
 DEFAULT_BIG_EDIT_ROWS = 20  # an edit with more rows than this waits for a card press in auto

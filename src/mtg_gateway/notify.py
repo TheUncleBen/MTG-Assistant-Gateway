@@ -45,7 +45,8 @@ from starlette.responses import JSONResponse, Response, StreamingResponse
 
 from .db import Database
 from .theme import esc as _esc
-from .theme import in_app
+from .theme import icon, in_app
+from .ui import label
 
 if TYPE_CHECKING:
     from .app import AppState
@@ -62,6 +63,7 @@ ACCOUNT_OK = {
     "gateway's app on that phone and press Get notifications on this phone.",
     "notify_test_sent": "The test message is sent. Each phone you connected should show it.",
     "summary_saved": "Summary choice saved.",
+    "summary_sent": "The summary is sent. Each phone you connected should show it.",
 }
 ACCOUNT_ERR = {
     "notify_test_failed": "The test could not be sent. Check that notifications are on; if they are, the "
@@ -70,6 +72,10 @@ ACCOUNT_ERR = {
     "another.",
     "summary_invalid": "Choose Off, Every day or Every week.",
     "summary_off": "Summaries are sent through notifications, and this gateway has no notification server.",
+    "summary_send_wait": "A summary was just sent. The gateway sends one a minute, so wait before sending "
+    "another.",
+    "summary_send_failed": "The summary could not be sent. Check that notifications are on; if they are, "
+    "the notification server did not accept it (the operator can see why in the gateway's log).",
 }
 # Members' topics all start with mtg-, so an operator's ntfy grant can be limited to 'mtg-*' and
 # a member can never make the gateway publish to the operator's other topics.
@@ -293,6 +299,19 @@ def _message_id(out: bytes | None) -> str | None:
     return mid if isinstance(mid, str) else None
 
 
+def _press_allowed(last: dict[str, float], sub: str) -> bool:
+    """True (and the member's next press held back for TEST_COOLDOWN) unless they pressed less
+    than TEST_COOLDOWN seconds ago; ``last`` keeps each member's last press."""
+    now = time.monotonic()
+    if now - last.get(sub, -TEST_COOLDOWN) < TEST_COOLDOWN:
+        return False
+    if len(last) > 1000:
+        for k in [k for k, t in last.items() if now - t >= TEST_COOLDOWN]:
+            del last[k]
+    last[sub] = now
+    return True
+
+
 class Notifier:
     """Publishes to the stack's ntfy server for members who opted in, and relays each member's
     topic to their Android app (:meth:`relay`)."""
@@ -306,6 +325,7 @@ class Notifier:
         self._tasks: set[asyncio.Task[Any]] = set()  # held so a pending send is not collected
         self.sent = 0
         self._last_test: dict[str, float] = {}
+        self._last_summary: dict[str, float] = {}
         self._waiting: dict[tuple[str, str], int] = {}  # the count each deck's message last said
         self._cleared: set[tuple[str, str]] = set()  # decks whose message this process withdrew
         self._streams: dict[str, int] = {}  # open app connections per key
@@ -322,13 +342,12 @@ class Notifier:
     def test_allowed(self, sub: str) -> bool:
         """True (and the member's next test held back for TEST_COOLDOWN) unless they pressed
         Send test less than TEST_COOLDOWN seconds ago."""
-        now = time.monotonic()
-        if now - self._last_test.get(sub, -TEST_COOLDOWN) < TEST_COOLDOWN:
-            return False
-        if len(self._last_test) > 1000:
-            self._last_test = {k: t for k, t in self._last_test.items() if now - t < TEST_COOLDOWN}
-        self._last_test[sub] = now
-        return True
+        return _press_allowed(self._last_test, sub)
+
+    def summary_allowed(self, sub: str) -> bool:
+        """The same for the Account page's Send it now, with its own wait: a test does not hold
+        back the summary, nor the summary a test."""
+        return _press_allowed(self._last_summary, sub)
 
     def __repr__(self) -> str:  # the token stays out of any printed or logged object
         return f"Notifier(url={self.url!r})"
@@ -776,15 +795,80 @@ class _Stream(StreamingResponse):
 
 # -- Account page: the Notifications card, with the summary ----------------------------------------
 
-SUMMARY_CSS = (
-    "<style>#summary pre{white-space:pre-wrap;font-family:inherit;margin:.5rem 0 0;padding:.6rem .8rem;"
-    "background:var(--surface-2);border-radius:3px;overflow-wrap:anywhere}</style>"
+ACCOUNT_CSS = """<style>
+/* the Account page's Notifications and Summary cards */
+.nf-card .gh{display:flex;flex-wrap:wrap;align-items:center;gap:.4rem .75rem;margin:0 0 .35rem}
+.nf-card .gh h2{margin:0}
+.nf-card .intro{margin:0 0 .75rem;line-height:1.45}
+.nf-card h3{margin:0 0 .35rem;font-size:1.05rem}
+.nf-card form{margin:0}
+/* every tick box on its own 44 px row, with room between the rows */
+.nf-card .ui-checks label{line-height:1.35;padding:.2rem 0}
+.nf-card .master label{font-weight:700}
+/* the When group: a heading and an indent, not a panel inside the card */
+.nf-card .nf-when{margin:.35rem 0 0;padding:0 0 0 1.85rem;border:0;min-width:0}
+.nf-card .nf-when legend{padding:0;margin:0 0 .15rem;font-weight:700;color:var(--text-muted);font-size:.86rem;
+  text-transform:uppercase;letter-spacing:.03em}
+.nf-card .part{margin:1rem 0 0;padding:1rem 0 0;border-top:1px solid var(--border-soft)}
+.nf-card .part .ui-hint{font-size:.86rem;line-height:1.45;margin:.25rem 0 .5rem}
+.nf-card .part p{line-height:1.45}
+.nf-card .ui-actions{margin:.6rem 0 .25rem}
+.nf-card .notice{margin:0 0 .75rem}
+/* Summary: How often and Save summary on one line, at the end of what they act on */
+.nf-card .sum-row{display:flex;flex-wrap:wrap;align-items:flex-end;gap:.5rem}
+.nf-card .sum-row .fld{flex:0 1 16rem;min-width:0}
+.nf-card .sum-row label{display:block;margin:0 0 .3rem;font-weight:700}
+.nf-card .sum-row select:not(.msel-native),.nf-card .sum-row .msel-btn{width:100%}
+.nf-card .sum-text{margin:.25rem 0;padding:.6rem .8rem;background:var(--surface-2);
+  border:1px solid var(--border-soft);border-radius:var(--radius);font-family:inherit;font-size:.92rem;
+  white-space:pre-wrap;overflow-wrap:anywhere}
+@media (max-width:599.98px){
+  .nf-card .ui-actions > *{flex:1 1 100%}
+  .nf-card .ui-actions form{display:flex}
+  .nf-card .ui-actions form button{flex:1 1 100%}
+  .nf-card .sum-row .fld,.nf-card .sum-row button{flex:1 1 100%}
+  .nf-card .nf-when{padding-left:1rem}
+}
+</style>"""
+
+# Which notices belong to which card: each shows inside its own card, where the redirect lands.
+NOTIFY_NOTICES = frozenset(
+    {
+        "notify_saved",
+        "notify_off",
+        "notify_topic",
+        "notify_test_sent",
+        "notify_test_failed",
+        "notify_test_wait",
+    }
 )
+SUMMARY_NOTICES = frozenset(
+    {
+        "summary_saved",
+        "summary_sent",
+        "summary_invalid",
+        "summary_off",
+        "summary_send_wait",
+        "summary_send_failed",
+    }
+)
+CARD_NOTICES = NOTIFY_NOTICES | SUMMARY_NOTICES
 
 
-def _summary_html(state: AppState, sub: str, p: dict[str, Any], csrf_in: str) -> str:
-    """The summary part of the card (only with a notification server: ntfy is how it is sent).
-    The latest summary is built only for a member who chose one, not on every page view."""
+def _card_notice(ok: str | None, err: str | None, codes: frozenset[str]) -> str:
+    if ok in codes and ok in ACCOUNT_OK:
+        return f"<div class='notice ok' role='status'>{_esc(ACCOUNT_OK[ok])}</div>"
+    if err in codes and err in ACCOUNT_ERR:
+        return f"<div class='notice error' role='alert'>{_esc(ACCOUNT_ERR[err])}</div>"
+    return ""
+
+
+def _summary_html(
+    state: AppState, sub: str, p: dict[str, Any], csrf_in: str, *, on: bool, notice: str = ""
+) -> str:
+    """The Summary card (only with a notification server: ntfy is how it is sent). The latest
+    summary is built only for a member who chose one, not on every page view; Send it now sends
+    that same summary at once, so it shows only then."""
     every = p["summary_every"]
     period = "day" if every == "daily" else "week"
     opts = "".join(
@@ -799,18 +883,37 @@ def _summary_html(state: AppState, sub: str, p: dict[str, Any], csrf_in: str) ->
     latest = ""
     if every != "off" and state.summaries is not None:
         built = state.summaries.build(sub, period)
+        kind = "daily" if period == "day" else "weekly"
+        hint = (
+            f"Sends this summary to your phones now, as your {kind} summary would. "
+            "Like Send test, once a minute."
+        )
+        if not on:
+            hint = (
+                "Notifications are off, so there is nowhere to send it. Tick Send me notifications and "
+                "press Save notifications first."
+            )
         latest = (
-            f"<h4>{'Today' if period == 'day' else 'The last 7 days'}</h4><pre>{_esc(built['text'])}</pre>"
+            f"<div class='part'><h3>{'Today' if period == 'day' else 'The last 7 days'}</h3>"
+            f"<pre class='sum-text'>{_esc(built['text'])}</pre>"
+            f"<form method='post' class='ui-actions'>{csrf_in}"
+            "<input type='hidden' name='action' value='summary_send'>"
+            f"<button class='btn-plain' aria-describedby='s-now'{'' if on else ' disabled'}>"
+            f"{icon('send')}Send it now</button></form>"
+            f"<p class='ui-hint' id='s-now'>{hint}</p></div>"
         )
     return (
-        f"<div class='summary' id='summary'>{SUMMARY_CSS}<h3>Summary</h3>"
-        f"<p>A plain summary of {what}, written by the gateway from its own data (no AI) and sent "
-        "through your notifications when they are on. Your assistant can read it too and write you "
+        "<section class='card nf-card' id='summary' aria-labelledby='s-h'>"
+        "<div class='gh'><h2 id='s-h'>Summary</h2></div>"
+        f"<p class='intro'>A plain summary of {what}, written by the gateway from its own data (no AI) and "
+        "sent through your notifications when they are on. Your assistant can read it too and write you "
         "its own version on a schedule.</p>"
-        f"<form method='post'>{csrf_in}<input type='hidden' name='action' value='summary_save'>"
-        "<label for='s-every'>How often</label>"
-        f"<select id='s-every' name='summary_every'>{opts}</select>"
-        f"<button class='primary'>Save summary</button></form>{latest}</div>"
+        f"{notice}"
+        f"<form method='post' class='sum-row'>{csrf_in}"
+        "<input type='hidden' name='action' value='summary_save'>"
+        "<span class='fld'><label for='s-every'>How often</label>"
+        f"<select id='s-every' name='summary_every'>{opts}</select></span>"
+        f"<button class='primary'>Save summary</button></form>{latest}</section>"
     )
 
 
@@ -822,7 +925,8 @@ def strong_topic(db: Database, sub: str, topic: str | None) -> bool:
 def _phone_html(state: AppState, sub: str, p: dict[str, Any]) -> str:
     """The card's part about this phone, inside the Android app: whether it is connected, and the
     button that connects it (which asks Android for the notification permission and for the
-    app to keep running in the background). The app says which part applies (feedback.js)."""
+    app to keep running in the background). The app says which part applies (feedback.js).
+    The button is plain: Save notifications stays the card's one orange button."""
     topic = p["ntfy_topic"]
     if not strong_topic(state.db, sub, topic):  # none yet, or not one new_topic made: give one now
         topic = new_topic(state.db, sub)
@@ -840,18 +944,22 @@ def _phone_html(state: AppState, sub: str, p: dict[str, Any]) -> str:
         "notifications on this phone. Android may ask you to allow notifications and to let the app run "
         "in the background. Allow both so notifications arrive while the app is closed.</p>"
         "<div class='form-actions' data-native-show='off blocked' hidden>"
-        f"<button type='button' class='primary' data-native='startNotifications' data-native-arg='{key}' "
-        "data-native-auto>Get notifications on this phone</button></div>"
-        "<p class='muted small' data-native-show='' hidden>Update the app to get notifications on this "
+        f"<button type='button' class='btn-plain' data-native='startNotifications' data-native-arg='{key}' "
+        f"data-native-auto>{icon('bell')}Get notifications on this phone</button></div>"
+        "<p class='ui-hint' data-native-show='' hidden>Update the app to get notifications on this "
         "phone.</p>"
         "</div>"
     )
 
 
-def account_card_html(state: AppState, sub: str, csrf_in: str) -> str:
-    """The Account page's Notifications card: a note when the gateway has no notification server,
-    otherwise the member's choices (one switch for the whole account), this phone's part inside
-    the app, Send test, Disconnect my phones and the summary schedule."""
+def account_card_html(
+    state: AppState, sub: str, csrf_in: str, *, ok: str | None = None, err: str | None = None
+) -> str:
+    """The Account page's Notifications card and, beside it, the Summary card: a note when the
+    gateway has no notification server, otherwise the member's choices (one switch for the whole
+    account), "Your phones" (this phone's part inside the app), Send test, Disconnect my phones,
+    and the summary's own card. A notice from one of their forms (``ok`` / ``err``) shows inside
+    the card it came from."""
     n = state.notifier
     if n is None or not n.enabled:
         watched = ", a watched card crosses your alert" if state.prices is not None else ""
@@ -865,8 +973,8 @@ def account_card_html(state: AppState, sub: str, csrf_in: str) -> str:
 
     def box(name: str, label: str) -> str:
         return (
-            f"<label class='check'><input type='checkbox' name='{name}' value='1'"
-            f"{' checked' if p[name] else ''}> <span>{_esc(label)}</span></label>"
+            f"<label><input type='checkbox' name='{name}' value='1'"
+            f"{' checked' if p[name] else ''}><span>{_esc(label)}</span></label>"
         )
 
     on = p["ntfy_on"] and bool(p["ntfy_topic"])
@@ -874,17 +982,19 @@ def account_card_html(state: AppState, sub: str, csrf_in: str) -> str:
         phone = _phone_html(state, sub, p) if on else ""
     else:
         phone = (
-            "<p class='muted small'>Notifications arrive in the gateway's Android app, also while it is "
+            "<p class='ui-hint'>Notifications arrive in the gateway's Android app, also while it is "
             "closed. To get them, install the app from the <a href='/install?for=android'>Android app</a> "
             "page and sign in. Then open this page in the app, tick Send me notifications and press Save "
             "notifications.</p>"
         )
     test = (
+        "<div class='ui-actions'>"
         f"<form method='post'>{csrf_in}<input type='hidden' name='action' value='notify_test'>"
-        "<button>Send test</button></form>"
+        "<button class='btn-plain'>Send test</button></form>"
         f"<form method='post'>{csrf_in}<input type='hidden' name='action' value='notify_new_topic'>"
-        "<button class='inline' title='Your phones stop getting notifications until each one is connected "
-        "again.'>Disconnect my phones</button></form>"
+        "<button class='btn-plain' aria-describedby='n-disc'>Disconnect my phones</button></form></div>"
+        "<p class='ui-hint' id='n-disc'>Disconnect my phones: your phones stop getting notifications until "
+        "each one is connected again.</p>"
         if on
         else ""
     )
@@ -894,20 +1004,26 @@ def account_card_html(state: AppState, sub: str, csrf_in: str) -> str:
         if state.prices is not None
         else ("<input type='hidden' name='on_prices' value='1'>" if p["on_prices"] else "")
     )
+    # inside the app the part is about this phone and has its own heading (_phone_html)
+    head = "" if in_app() else "<h3>Your phones</h3>"
+    phones = f"<div class='part'>{head}{phone}{test}</div>" if phone or test else ""
     return (
-        "<div class='card' id='notifications'><h2>Notifications</h2>"
-        "<p>The gateway's Android app can show you a short message when something happens. Each message "
-        "says only what happened and links to the right page on this gateway. It never lists your deck's "
-        "cards. The choices below apply to your whole account and to every phone you connect.</p>"
+        f"{ACCOUNT_CSS}<section class='card nf-card' id='notifications' aria-labelledby='n-h'>"
+        "<div class='gh'><h2 id='n-h'>Notifications</h2>"
+        f"{label('On', 'green', 'check') if on else ''}</div>"
+        "<p class='intro'>The gateway's Android app can show you a short message when something happens. "
+        "Each message says only what happened and links to the right page on this gateway. It never lists "
+        "your deck's cards. The choices below apply to your whole account and to every phone you connect.</p>"
+        f"{_card_notice(ok, err, NOTIFY_NOTICES)}"
         f"<form method='post'>{csrf_in}<input type='hidden' name='action' value='notify_save'>"
-        f"{box('ntfy_on', 'Send me notifications')}"
-        "<fieldset><legend>When</legend>"
+        f"<div class='ui-checks master'>{box('ntfy_on', 'Send me notifications')}</div>"
+        "<fieldset class='nf-when'><legend>When</legend><div class='ui-checks'>"
         f"{box('on_proposals', 'An assistant left changes waiting for my press (one message per deck)')}"
         f"{box('on_reports', 'A deck report finished (Forge runs that waited included)')}"
-        f"{prices_box}</fieldset>"
-        "<button class='primary'>Save notifications</button></form>"
-        f"{phone}<div class='form-actions'>{test}</div>"
-        f"{_summary_html(state, sub, p, csrf_in)}</div>"
+        f"{prices_box}</div></fieldset>"
+        "<div class='ui-actions'><button class='primary'>Save notifications</button></div></form>"
+        f"{phones}</section>"
+        f"{_summary_html(state, sub, p, csrf_in, on=on, notice=_card_notice(ok, err, SUMMARY_NOTICES))}"
     )
 
 
@@ -958,6 +1074,18 @@ async def account_action(state: AppState, sub: str, action: str, data: dict[str,
             "/account",
         )
         return "ok=notify_test_sent" if ok else "err=notify_test_failed"
+    if action == "summary_send":
+        # Send it now: the summary the card shows, sent at once as the schedule would send it.
+        n = state.notifier
+        p = prefs(state.db, sub)
+        if n is None or not n.enabled or state.summaries is None:
+            return "err=summary_off"
+        if not p["ntfy_on"] or not p["ntfy_topic"] or p["summary_every"] == "off":
+            return "err=summary_send_failed"
+        if not n.summary_allowed(sub):
+            return "err=summary_send_wait"
+        ok = await state.summaries.send(sub, "day" if p["summary_every"] == "daily" else "week")
+        return "ok=summary_sent" if ok else "err=summary_send_failed"
     if action == "summary_save":
         # Summaries go out only as notifications: without a server there is no schedule to choose.
         if state.notifier is None or not state.notifier.enabled:

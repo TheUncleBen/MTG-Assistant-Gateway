@@ -302,7 +302,7 @@ async def test_the_pages_show_why_a_change_waits_and_what_replaces_it(stack: Sta
         assert f"This replaces #{theirs['board_no']}, which still waits." in listing
         assert f"Waits for #{first['board_no']}, which is not applied." in listing
         review = html.unescape((await br.http.get(f"/proposals/{new['proposal_id']}")).text)
-        assert "<dt>Waits for you</dt>" in review
+        assert "<p class='ui-why pr-waits'>" in review  # under the labels
         assert (
             f"This replaces #{theirs['board_no']}, which still waits. This one includes or replaces a "
             "change another app made or changed, so it needs your press." in review
@@ -313,7 +313,7 @@ async def test_the_pages_show_why_a_change_waits_and_what_replaces_it(stack: Sta
             in review
         )
         plain = html.unescape((await br.http.get(f"/proposals/{first['proposal_id']}")).text)
-        assert "<dt>Waits for you</dt>" not in plain
+        assert "<p class='ui-why pr-waits'>" not in plain
     finally:
         await br.aclose()
 

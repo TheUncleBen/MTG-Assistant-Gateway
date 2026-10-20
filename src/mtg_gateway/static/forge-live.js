@@ -1,5 +1,5 @@
 "use strict";
-// Report page: while the Forge games are queued or running (the card carries data-forge-live and
+// Report page: while the Forge games are queued or running (the Forge section carries data-forge-live and
 // the report's id), ask the JSON status route (/api/v1/reports/<id>/forge) every 5 seconds and swap
 // in the new Forge card and status, until the run ends; then the page is fetched once more so the
 // Markdown copy matches. No polling while the tab is hidden; it stops for good after a failed fetch
@@ -10,7 +10,7 @@
   var started = Date.now();
   var timer = null;
 
-  function live() { return document.querySelector(".card.forge[data-forge-live]"); }
+  function live() { return document.querySelector(".forge[data-forge-live]"); }
 
   function imported(nodes) {
     return Array.prototype.map.call(nodes, function (n) { return document.importNode(n, true); });
@@ -32,7 +32,7 @@
 
   function swapCard(html) {
     var doc = new DOMParser().parseFromString("<div>" + html + "</div>", "text/html");
-    var fresh = doc.querySelector(".card.forge");
+    var fresh = doc.querySelector(".forge");
     var card = live();
     if (!fresh || !card) return false;
     // The card itself stays (it is the aria-live region); the live mark goes once the run has ended.

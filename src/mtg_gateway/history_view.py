@@ -1,10 +1,13 @@
-"""The history page (``/history``): the member's proposals, snapshots and deck reports as one
-timeline, grouped by day or by deck, with a filter bar (deck, type, state, when, search) and
-"Older" pages.
+"""The History page (``/history``): a row of widgets, then the member's
+snapshots, applied restores and deck reports as one list, newest first, grouped by day (or by
+deck), with chips and their counts, a deck-name search, filter drop-downs, paging, and each row's
+Details beside the list (from 1100 px) or on its own page; then the backup copies on Archidekt.
+Changes the assistants proposed are on Proposals (proposals_view.py).
 
-The rows come from the database already narrowed and paged (db.list_proposals, db.list_snapshots,
-ReportService.list); this module only reads a request's filters and draws the page. Every
-string a row shows is escaped here; nothing in it runs script (the site's CSP forbids it).
+The rows come from the database already narrowed and paged (db.list_snapshots,
+DeckService.list_proposals, ReportService.list); this module only reads a request's filters and
+draws the page. Every string a row shows is escaped here; nothing in it runs script (the site's
+CSP forbids it).
 """
 
 from __future__ import annotations
@@ -15,21 +18,15 @@ import time
 from typing import Any
 from urllib.parse import urlencode
 
+from . import ui
 from .decks import actor_label
 from .theme import esc as _esc
 from .theme import icon, time_html
 
-PAGE = 25
+PAGE = ui.PER_PAGE
 MAX_OFFSET = 2000
-TYPES = (("all", "Everything"), ("changes", "Changes"), ("snapshots", "Snapshots"), ("reports", "Reports"))
-STATES = (
-    ("", "Any state"),
-    ("pending", "Pending"),
-    ("applied", "Applied"),
-    ("failed", "Failed"),
-    ("rejected", "Rejected"),
-    ("expired", "Expired"),
-)
+# The chips. "changes" (a link from before proposals moved to Proposals) reads as Everything.
+TYPES = (("all", "Everything"), ("snapshots", "Snapshots"), ("restores", "Restores"), ("reports", "Reports"))
 # The "When" presets: UTC calendar days (every time on the site is UTC), each a window that
 # starts at the beginning of a day and runs to now. The value is what the query string carries.
 WHENS = (
@@ -41,30 +38,21 @@ WHENS = (
     ("year", "This year"),
 )
 WHEN_DAYS = {"today": 1, "7d": 7, "30d": 30, "90d": 90}
-GROUPS = (("day", "Day"), ("deck", "Deck"))
+GROUPS = (("day", "Group by day"), ("deck", "Group by deck"))
 DEFAULTS = {"type": "all", "group": "day"}
-KIND_LABELS = {
-    "edit": "Edit",
-    "create_deck": "New deck",
-    "restore": "Restore",
-    "snapshot": "Snapshot",
-    "report": "Report",
-}
-KIND_ICONS = {
-    "edit": "edit",
-    "create_deck": "plus",
-    "restore": "undo",
-    "snapshot": "bookmark",
-    "report": "stats",
-}
+PAGE_SUB_TEXT = "Snapshots of your decks, restores and deck reports. Changes your assistants proposed are on"
+NO_WHO = "Snapshots do not record who made them"
+NOTHING_YET = (
+    "Nothing yet. The snapshots taken before a change is applied, the restores and deck reports appear here."
+)
 
 
 def read_query(params: Any) -> dict[str, Any]:
     """The page's filters from the query string, each limited to what the page offers."""
     kind = (params.get("type") or "all").strip().lower()
-    state = (params.get("state") or "").strip().lower()
     when = (params.get("when") or "").strip().lower()
     group = (params.get("group") or "day").strip().lower()
+    opened = (params.get("open") or "").strip()
     try:
         offset = int(params.get("offset") or 0)
     except ValueError:
@@ -72,17 +60,19 @@ def read_query(params: Any) -> dict[str, Any]:
     return {
         "deck_id": (params.get("deck_id") or "").strip()[:40],
         "type": kind if kind in {t for t, _ in TYPES} else "all",
-        "state": state if state in {s for s, _ in STATES} else "",
         "when": when if when in {w for w, _ in WHENS} else "",
         "group": group if group in {g for g, _ in GROUPS} else "day",
         "q": (params.get("q") or "").strip()[:120],
         "offset": max(0, min(offset, MAX_OFFSET)),
+        "open": opened if re.fullmatch(r"[spr]-[A-Za-z0-9_-]{1,64}", opened) else "",
     }
 
 
 def is_filtered(query: dict[str, Any]) -> bool:
-    """Whether any filter (not the grouping or the page) narrows the timeline."""
-    return any(v and v != DEFAULTS.get(k, "") for k, v in query.items() if k not in ("offset", "group"))
+    """Whether any filter (not the grouping, the page or an open row) narrows the list."""
+    return any(
+        v and v != DEFAULTS.get(k, "") for k, v in query.items() if k not in ("offset", "group", "open")
+    )
 
 
 def when_since(when: str, *, now: int | None = None) -> int | None:
@@ -103,104 +93,139 @@ def query_string(query: dict[str, Any], **override: Any) -> str:
     return "?" + urlencode(pairs) if pairs else ""
 
 
-def _who(created_by: str | None) -> str:
-    """Who made an entry, in plain words: the member's own browser is 'you', an app the
-    assistant ('the assistant (app name)'), the administrator client an administrator."""
+def _app(created_by: str | None) -> str | None:
+    """Who made an entry, as the app chip names it: "You", "The administrator", the app's name
+    (never its client id), or None."""
     label = created_by or ""
     if label == "browser":
-        return "you"
+        return "You"
     if label == "administrator":
-        return "an administrator"
+        return "The administrator"
     if label.startswith("app: "):
-        # "app: Name (client id)": the name is enough here; the id stays on the Activity page
         name = re.sub(r" \(.+\)$", "", label[5:])
-        return f"the assistant ({name})" if name != label[5:] else "an assistant"
-    return ""
+        return name if name != label[5:] else "An assistant"
+    return None
+
+
+def _taken(text: str) -> int | None:
+    """A restore row's "taken" ("2026-10-11 16:10 UTC") as epoch seconds."""
+    try:
+        return int(calendar.timegm(time.strptime(str(text), "%Y-%m-%d %H:%M UTC")))
+    except (TypeError, ValueError):
+        return None
 
 
 def build_events(
-    proposals: list[dict[str, Any]],
+    restores: list[dict[str, Any]],
     snapshots: list[dict[str, Any]],
     reports: list[dict[str, Any]],
     *,
     csrf_input: str,
     client_names: dict[str, str | None] | None = None,
 ) -> list[dict[str, Any]]:
-    """One event per row, newest first. Each carries what the page shows: kind, deck, a
-    one-line summary, who made it, the time and the folded details."""
+    """One event per row, newest first. Each carries what the page shows: kind, deck, the line
+    under the deck's name (markup), who made it, the time, its quick action and its Details."""
     events: list[dict[str, Any]] = []
-    for p in proposals:
-        kind = p.get("kind") or "edit"
-        summary = p.get("summary") or ""
+    for p in restores:
+        taken = _taken(p.get("taken") or "")
+        when = f"Put back as it stood on {time_html(taken)}" if taken else "Put back as a snapshot had it"
+        line = f"{when} · <a href='/proposals/{_esc(p['id'])}'>proposal</a>"
         diff = str(p.get("diff_text") or "")
-        details = f"<pre class='diff'>{_esc(diff)}</pre>" if diff.strip() else ""
-        details += f"<p><a class='btn small' href='/proposals/{_esc(p['id'])}'>Open the review page</a></p>"
+        details = (
+            f"<p>{when}.</p>"
+            + (f"<pre class='diff'>{_esc(diff)}</pre>" if diff.strip() else "")
+            + "<div class='ui-actions'>"
+            + ui.button_link("Open the review page", f"/proposals/{p['id']}")
+            + "</div>"
+        )
         events.append(
             {
-                "ts": int(p.get("created_at") or 0),
-                "kind": kind if kind in KIND_LABELS else "edit",
+                "key": f"p-{p['id']}",
+                "ts": int(p.get("applied_at") or p.get("created_at") or 0),
+                "kind": "restore",
                 "deck_id": p.get("deck_id"),
                 "deck_name": p.get("deck_name") or p.get("deck_id"),
-                "href": f"/proposals/{_esc(p['id'])}",
-                "state": p.get("state") or "",
-                "summary": summary or "No change lines recorded.",
-                "who": _who(p.get("created_by")),
+                "line": line,
+                "app": _app(p.get("created_by")),
+                "who": True,
+                "action": "",
                 "details": details,
             }
         )
     for x in snapshots:
         # deck_gone / backup_gone: what the member's Archidekt deck list says (decks.mark_gone)
-        if x.get("backup_gone"):
-            backup = (
-                "The Archidekt backup copy made with it is no longer on Archidekt (deleted there). "
-                "Restore does not need it: it uses this snapshot, kept in the gateway."
-            )
-        elif x.get("backup_url"):
-            backup = (
-                f"<a href='{_esc(x['backup_url'])}' target='_blank' rel='noopener noreferrer'>"
-                "Archidekt backup copy</a>"
-            )
-        else:
-            backup = ""
-        link = (
-            f"<a href='/proposals/{_esc(x['proposal_id'])}'>the change it was taken before</a>"
-            if x.get("proposal_id")
-            else ""
-        )
+        bits: list[str] = []
         count = x.get("card_count")
-        summary = f"{count} cards as the deck stood" if count is not None else "The whole deck as it stood"
-        if x.get("stopped_attempt"):  # taken for an apply that changed nothing
-            summary += " just before an apply that stopped before it changed anything."
+        if x.get("deck_gone"):
+            bits.append("Deleted on Archidekt")
+            if count is not None:
+                bits.append(f"{count} cards")
         else:
-            summary += " just before a change was applied." if x.get("proposal_id") else "."
+            summary = (
+                f"{count} cards as the deck stood" if count is not None else "The whole deck as it stood"
+            )
+            if x.get("stopped_attempt"):  # taken for an apply that changed nothing
+                summary += " just before an apply that stopped before it changed anything"
+            elif x.get("proposal_id"):
+                summary += " just before a change was applied"
+            bits.append(_esc(summary))
+        if x.get("proposal_id"):
+            bits.append(f"<a href='/proposals/{_esc(x['proposal_id'])}'>the change</a>")
+        if x.get("backup_gone"):
+            bits.append("its backup copy is no longer on Archidekt")
+        elif x.get("backup_url"):
+            bits.append(
+                f"<a href='{_esc(x['backup_url'])}' target='_blank' rel='noopener noreferrer'>"
+                "backup copy on Archidekt</a>"
+            )
+        restore_form = (
+            "<form method='post' action='/history/restore' class='hy-restore'>"
+            + csrf_input
+            + f"<input type='hidden' name='snapshot_id' value='{_esc(x['snapshot_id'])}'>"
+            + "<button type='submit' class='btn-plain'>Restore (review first)</button></form>"
+        )
         if x.get("deck_gone"):
             # A restore rewrites the deck itself; with the deck deleted on Archidekt it cannot work.
-            summary += " The deck is no longer on Archidekt."
             restore = (
                 "<p class='muted'>This deck is no longer on your Archidekt account (deleted there?), so "
                 "the snapshot cannot be restored onto it. The snapshot stays here.</p>"
             )
+            action = ""
         else:
             restore = (
                 "<p>Restoring makes a proposal that puts the deck back to this snapshot; you review and "
                 "confirm it before anything changes on Archidekt.</p>"
-                "<form method='post' action='/history/restore' class='form-actions'>"
-                + csrf_input
-                + f"<input type='hidden' name='snapshot_id' value='{_esc(x['snapshot_id'])}'>"
-                + f"<button type='submit'>{icon('undo')} Restore (review first)</button></form>"
+                f"<div class='ui-actions'>{restore_form}</div>"
             )
-        details = (f"<p>See {link}.</p>" if link else "") + (f"<p>{backup}</p>" if backup else "") + restore
+            action = restore_form
+        backup = ""
+        if x.get("backup_gone"):
+            backup = (
+                "<p>The Archidekt backup copy made with it is no longer on Archidekt (deleted there). "
+                "Restore does not need it: it uses this snapshot, kept in the gateway.</p>"
+            )
+        elif x.get("backup_url"):
+            backup = (
+                f"<p><a href='{_esc(x['backup_url'])}' target='_blank' rel='noopener noreferrer'>"
+                "Archidekt backup copy</a></p>"
+            )
+        link = (
+            f"<p>See <a href='/proposals/{_esc(x['proposal_id'])}'>the change it was taken before</a>.</p>"
+            if x.get("proposal_id")
+            else ""
+        )
         events.append(
             {
+                "key": f"s-{x['snapshot_id']}",
                 "ts": int(x.get("taken_at") or 0),
                 "kind": "snapshot",
                 "deck_id": x.get("deck_id"),
                 "deck_name": x.get("deck_name") or x.get("deck_id"),
-                "href": f"/proposals/{_esc(x['proposal_id'])}" if x.get("proposal_id") else "",
-                "state": "",
-                "summary": summary,
-                "who": "",
-                "details": details,
+                "line": " · ".join(bits),
+                "app": None,
+                "who": False,
+                "action": action,
+                "details": link + backup + restore,
             }
         )
     for r in reports:
@@ -221,39 +246,55 @@ def build_events(
             bits.append(f"bracket about {r['bracket_estimate']}")
         sim = "with a goldfish simulation" if r.get("has_goldfish") else "statistics only"
         client = r.get("created_by_client")
-        who = (
-            _who(actor_label(client, (client_names or {}).get(client) if client else None)) if client else ""
+        app = (
+            _app(actor_label(client, (client_names or {}).get(client) if client else None))
+            if client
+            else None
         )
+        href = f"/history/reports/{r['report_id']}"
+        open_report = ui.button_link("Open report", href)
         events.append(
             {
+                "key": f"r-{r['report_id']}",
                 "ts": int(r.get("taken_at") or 0),
                 "kind": "report",
                 "deck_id": r.get("deck_id"),
                 "deck_name": r.get("deck_name") or r.get("deck_id"),
-                "href": f"/history/reports/{_esc(r['report_id'])}",
                 # the report's overall status (reports.report_status), shown unless complete
                 "state": r["status"] if r.get("status") and r.get("status") != "complete" else "",
-                "summary": (", ".join(bits) + f" · {sim}") if bits else sim,
-                "who": who,
-                "details": f"<p><a class='btn small' href='/history/reports/{_esc(r['report_id'])}'>"
-                "Open the report</a></p>",
+                "line": _esc((", ".join(bits) + f" · {sim}") if bits else sim),
+                "app": app,
+                "who": True,
+                "action": open_report,
+                "details": f"<div class='ui-actions'>{open_report}</div>",
             }
         )
     events.sort(key=lambda e: e["ts"], reverse=True)
     return events
 
 
-def _badge(state: str) -> str:
-    cls = {
-        "applied": "ok",
-        "pending": "warn",
-        "failed": "danger",
-        "applying": "warn",
-        "partial": "warn",
-        "queued": "warn",
-        "running": "warn",
-    }.get(state, "")
-    return f"<span class='badge {cls}'>{_esc(state)}</span>" if state else ""
+# Type labels (status label shape): Snapshot grey, Restore green, Report blue; a report's status beside it
+KIND_LABELS = {
+    "snapshot": ("Snapshot", "grey", "bookmark"),
+    "restore": ("Restore", "green", "undo"),
+    "report": ("Report", "blue", "report"),
+}
+REPORT_STATES = {
+    "running": ("Running", "orange", "spinner"),
+    "queued": ("Queued", "orange", "clock"),
+    "partial": ("Partial", "orange", "alert"),
+    "failed": ("Failed", "red", "alert"),
+}
+
+
+def _type_html(e: dict[str, Any]) -> str:
+    word, colour, ic = KIND_LABELS[e["kind"]]
+    out = ui.label(word, colour, ic)
+    st = e.get("state") or ""
+    if st:
+        w, c, i = REPORT_STATES.get(st, (st.capitalize(), "orange", "clock"))
+        out += ui.label(w, c, i)
+    return out
 
 
 def _day_label(day: str, today: str, yesterday: str) -> str:
@@ -265,38 +306,37 @@ def _day_label(day: str, today: str, yesterday: str) -> str:
     return time.strftime("%A %d %B %Y", t).replace(" 0", " ")
 
 
-def _row_html(e: dict[str, Any], *, with_day: bool) -> str:
-    kind = e["kind"]
-    label = KIND_LABELS.get(kind, "Edit")
+COLS = ("8rem minmax(0,1fr) 4rem 6.5rem 17rem", "minmax(0,1fr) auto", "minmax(0,1fr) 44px")
+
+
+def _row_html(e: dict[str, Any], query: dict[str, Any], *, now: float) -> str:
     name = _esc(e["deck_name"])
-    deck_link = f"<a class='name' href='/decks/{_esc(e['deck_id'])}'>{name}</a>" if e.get("deck_id") else name
-    title = (
-        f"<a class='kind' href='{e['href']}'>{label}</a>"
-        if e.get("href")
-        else f"<span class='kind'>{label}</span>"
+    deck = (
+        f"<a class='t' href='/decks/{_esc(e['deck_id'])}'>{name}</a>"
+        if e.get("deck_id")
+        else f"<span class='t'>{name}</span>"
     )
-    who = f"<span class='who'>by {_esc(e['who'])}</span>" if e.get("who") else ""
-    when = time_html(e["ts"], day=with_day)
-    details = (
-        f"<details><summary>Details</summary><div class='more'>{e['details']}</div></details>"
-        if e.get("details")
-        else ""
+    who = (
+        ui.app_chip(e["app"])
+        if e["who"]
+        else f"<span class='ui-when' title='{_esc(NO_WHO)}'>—"
+        f"<span class='sr-only'>{_esc(NO_WHO)}</span></span>"
     )
+    when = ui.when(e["ts"], now=now)
+    details = "/history" + query_string(query, open=e["key"])
+    acts = e.get("action") or ""
+    if e["kind"] != "report":
+        acts += f"<a class='btn btn-plain' href='{_esc(details)}'>Details</a>"
+    chev_href = details
+    chev_text = "Details"
+    cls = "tr" + (" open" if query.get("open") == e["key"] else "")
     return (
-        f"<li class='hrow k-{_esc(kind)}'><span class='k' title='{label}'>"
-        f"{icon(KIND_ICONS.get(kind, 'edit'))}</span><div class='body'><div class='l1'>{title}{deck_link}"
-        f"{_badge(e.get('state') or '')}</div>"
-        f"<p class='sum'>{_esc(e['summary'])}</p>{details}</div>"
-        f"<div class='side'>{when}{who}</div></li>"
-    )
-
-
-def _section_html(heading: str, rows: list[str], *, extra: str = "", cls: str = "") -> str:
-    n = len(rows)
-    return (
-        f"<h2 class='day{(' ' + cls) if cls else ''}'><span>{heading}</span>"
-        f"<small>{n} {'entry' if n == 1 else 'entries'}{extra}</small></h2>"
-        f"<ul class='plain hrows'>{''.join(rows)}</ul>"
+        f"<div class='{cls}'><span class='md-hide'>{_type_html(e)}</span>"
+        f"<span class='title'>{deck}<span class='deck'>{e['line']}</span>"
+        f"<span class='sub'>{_type_html(e)}{ui.app_chip(e['app']) if e['who'] else ''}{when}</span></span>"
+        f"<span class='md-hide'>{who}</span><span class='md-hide'>{when}</span>"
+        f"<span class='act'><span class='sm-hide acts'>{acts}</span>"
+        f"<a class='sm-only chev' href='{_esc(chev_href)}' aria-label='{chev_text}'>›</a></span></div>"
     )
 
 
@@ -307,54 +347,89 @@ def events_html(
     group: str = "day",
     query: dict[str, Any] | None = None,
 ) -> str:
-    """The rows under sticky headings: one per UTC day (as every time on the site), or with
-    ``group='deck'`` one per deck, headed by the deck's name (linked to its page and to its own
-    history), decks in the order of their newest entry and each deck's rows newest first."""
-    if group == "deck":
-        return _by_deck_html(events, query or {})
+    """The table: a header row, then the rows under a row per UTC day ("Today · 2", as every
+    time on the site), or with ``group='deck'`` under a row per deck (its name linked to its page
+    and, unless the page is already one deck's, "only this deck"), decks in the order of their
+    newest entry and each deck's rows newest first."""
+    query = query or {}
     now = int(time.time()) if now is None else now
-    today = time.strftime("%Y-%m-%d", time.gmtime(now))
-    yesterday = time.strftime("%Y-%m-%d", time.gmtime(now - 86400))
-    out: list[str] = []
-    current = None
-    rows: list[str] = []
-    for e in events:
-        day = time.strftime("%Y-%m-%d", time.gmtime(e["ts"]))
-        if day != current:
-            if current is not None and rows:
-                out.append(_section_html(_esc(_day_label(current, today, yesterday)), rows))
-            current, rows = day, []
-        rows.append(_row_html(e, with_day=False))
-    if current is not None and rows:
-        out.append(_section_html(_esc(_day_label(current, today, yesterday)), rows))
+    sort = f"<span class='hy-sort'>When {icon('sort')}</span>"
+    out = [
+        ui.table_open(*COLS, cls="hy-table", label="History"),
+        ui.table_header(
+            [
+                ui.Column("Type", "md-hide"),
+                ui.Column("Deck and what"),
+                ui.Column("By", "md-hide"),
+                ui.Column("When", "md-hide", html=sort),
+                ui.Column(""),
+            ]
+        ),
+    ]
+    if group == "deck":
+        order: list[str] = []
+        by_deck: dict[str, list[dict[str, Any]]] = {}
+        for e in events:
+            key = str(e.get("deck_id") or e.get("deck_name") or "")
+            if key not in by_deck:
+                order.append(key)
+                by_deck[key] = []
+            by_deck[key].append(e)
+        for key in order:
+            rows = by_deck[key]
+            name = _esc(rows[0].get("deck_name") or key)
+            deck_id = rows[0].get("deck_id")
+            heading = f"<a href='/decks/{_esc(deck_id)}'>{name}</a>" if deck_id else name
+            n = len(rows)
+            extra = ""
+            if deck_id and not query.get("deck_id"):
+                own = query_string({**query, "offset": 0, "open": ""}, deck_id=str(deck_id))
+                extra = f" · <a href='/history{_esc(own)}'>only this deck</a>"
+            out.append(
+                f"<div class='tr group hy-group'><span>{heading}</span>"
+                f"<span class='meta'>{n} {'entry' if n == 1 else 'entries'}{extra}</span></div>"
+            )
+            out += [_row_html(e, query, now=now) for e in rows]
+    else:
+        today = time.strftime("%Y-%m-%d", time.gmtime(now))
+        yesterday = time.strftime("%Y-%m-%d", time.gmtime(now - 86400))
+        days: list[tuple[str, list[dict[str, Any]]]] = []
+        for e in events:
+            day = time.strftime("%Y-%m-%d", time.gmtime(e["ts"]))
+            if not days or days[-1][0] != day:
+                days.append((day, []))
+            days[-1][1].append(e)
+        for day, rows in days:
+            out.append(ui.day_row(f"{_day_label(day, today, yesterday)} · {len(rows)}"))
+            out += [_row_html(e, query, now=now) for e in rows]
+    out.append("</div>")
     return "".join(out)
 
 
-def _by_deck_html(events: list[dict[str, Any]], query: dict[str, Any]) -> str:
-    """The deck grouping: ``events`` are newest first, so the decks come out in the order of
-    their newest entry and each deck's rows keep that order. Each heading links the deck's
-    page and, unless the page is already one deck's, its own history with the same filters."""
-    order: list[str] = []
-    by_deck: dict[str, list[dict[str, Any]]] = {}
-    for e in events:
-        key = str(e.get("deck_id") or e.get("deck_name") or "")
-        if key not in by_deck:
-            order.append(key)
-            by_deck[key] = []
-        by_deck[key].append(e)
-    out: list[str] = []
-    for key in order:
-        group = by_deck[key]
-        name = _esc(group[0].get("deck_name") or key)
-        deck_id = group[0].get("deck_id")
-        heading = f"<a href='/decks/{_esc(deck_id)}'>{name}</a>" if deck_id else name
-        extra = ""
-        if deck_id and not query.get("deck_id"):
-            own = query_string({**query, "offset": 0}, deck_id=str(deck_id))
-            extra = f" · <a href='/history{_esc(own)}'>only this deck</a>"
-        rows = [_row_html(e, with_day=True) for e in group]
-        out.append(_section_html(heading, rows, extra=extra, cls="deck"))
-    return "".join(out)
+def details_panel(e: dict[str, Any], query: dict[str, Any]) -> str:
+    """One row's Details: beside the list from 1100 px, its own page below that."""
+    word = KIND_LABELS[e["kind"]][0]
+    body = (
+        f"<div class='pills'>{_type_html(e)}</div>"
+        f"<p class='ui-why'>{e['line']}</p>"
+        + ui.meta(
+            [
+                ("Deck", f"<a href='/decks/{_esc(e['deck_id'])}'>{_esc(e['deck_name'])}</a>")
+                if e.get("deck_id")
+                else ("Deck", _esc(e["deck_name"])),
+                ("By", ui.app_chip(e["app"]) if e["who"] else "—"),
+                ("When", time_html(e["ts"])),
+            ]
+        )
+        + e["details"]
+    )
+    return ui.side_panel(
+        _esc(f"{word}: {e['deck_name']}"),
+        body,
+        label=f"{word} details",
+        close_href="/history" + query_string(query, open=""),
+        back_text="Back to History",
+    )
 
 
 COLLECTION_ID = "collection"  # decks.Decks.COLLECTION_TARGET: collection proposals file under it
@@ -394,19 +469,10 @@ def deck_filter_groups(
     return current, gone
 
 
-def filter_bar_html(
-    query: dict[str, Any],
-    decks: dict[str, str],
-    *,
-    shown: int,
-    total_hint: str = "",
-    gone: dict[str, str] | None = None,
-) -> str:
-    def options(items: list[tuple[str, str]], chosen: str) -> str:
-        return "".join(
-            f"<option value='{_esc(v)}'{' selected' if v == chosen else ''}>{_esc(label)}</option>"
-            for v, label in items
-        )
+def toolbar_html(query: dict[str, Any], decks: dict[str, str], *, gone: dict[str, str] | None = None) -> str:
+    """The search (deck names) and the drop-downs: deck (with its "No longer on Archidekt"
+    group), when (UTC days) and the grouping. They apply as they change; a Search button
+    without scripts."""
 
     def by_name(group: dict[str, str]) -> list[tuple[str, str]]:
         return [
@@ -417,87 +483,96 @@ def filter_bar_html(
     deck_items = [("", "All decks"), *by_name(decks)]
     if query["deck_id"] and query["deck_id"] not in decks and query["deck_id"] not in gone:
         deck_items.append((query["deck_id"], query["deck_id"]))
-    deck_options = options(deck_items, query["deck_id"])
+    deck_select = ui.filter_select("deck_id", "Deck", deck_items, query["deck_id"])
     if gone:
-        deck_options += (
-            "<optgroup label='No longer on Archidekt'>"
-            + options(by_name(gone), query["deck_id"])
-            + "</optgroup>"
+        opts = "".join(
+            f"<option value='{_esc(v)}'{' selected' if v == query['deck_id'] else ''}>{_esc(t)}</option>"
+            for v, t in by_name(gone)
         )
-    status = f"{shown} shown" + (f" · {total_hint}" if total_hint else "")
-    return (
-        "<form method='get' action='/history' class='card filterbar' role='search'>"
-        "<div class='controls'>"
-        f"<div class='field'><label for='h-deck'>Deck</label><span class='sel'>{icon('decks')}"
-        f"<select id='h-deck' name='deck_id'>{deck_options}</select></span></div>"
-        f"<div class='field'><label for='h-type'>Type</label><span class='sel'>{icon('filter')}"
-        f"<select id='h-type' name='type'>{options(list(TYPES), query['type'])}</select></span></div>"
-        f"<div class='field'><label for='h-state'>State</label><span class='sel'>{icon('proposals')}"
-        f"<select id='h-state' name='state'>{options(list(STATES), query['state'])}</select></span></div>"
-        f"<div class='field'><label for='h-when'>When (UTC days)</label><span class='sel'>{icon('history')}"
-        f"<select id='h-when' name='when'>{options(list(WHENS), query['when'])}</select></span></div>"
-        f"<div class='field'><label for='h-group'>Group by</label><span class='sel'>{icon('layers')}"
-        f"<select id='h-group' name='group'>{options(list(GROUPS), query['group'])}</select></span></div>"
-        "<div class='field'><label for='h-q'>Search</label><input type='search' id='h-q' name='q' "
-        f"value='{_esc(query['q'])}' placeholder='Deck or card name' autocomplete='off'></div>"
-        "</div>"
-        f"<div class='form-actions'><button type='submit' class='btn-primary'>{icon('filter')} Filter"
-        "</button>"
-        "<a class='btn' href='/history'>Clear</a>"
-        f"<span class='status'>{_esc(status)}</span></div></form>"
+        deck_select = deck_select.replace(
+            "</select>", f"<optgroup label='No longer on Archidekt'>{opts}</optgroup></select>", 1
+        )
+    return ui.toolbar(
+        "/history",
+        search_label="Search history",
+        placeholder="Deck name",
+        q=query["q"],
+        filters=[
+            deck_select,
+            ui.filter_select("when", "When (UTC days)", list(WHENS), query["when"]),
+            ui.filter_select("group", "Group by", list(GROUPS), query["group"]),
+        ],
+        keep={"type": query["type"] if query["type"] != "all" else ""},
     )
+
+
+def _copy_ts(d: dict[str, Any]) -> int | None:
+    raw = str(d.get("updated_at") or d.get("created_at") or "")[:19]
+    for fmt in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%d"):
+        try:
+            return int(calendar.timegm(time.strptime(raw[: 19 if "T" in fmt else 10], fmt)))
+        except ValueError:
+            continue
+    return None
 
 
 def backup_copies_html(
-    copies: list[dict[str, Any]] | None, *, folder: str, deck_id: str | None = None
+    copies: list[dict[str, Any]] | None,
+    *,
+    folder: str,
+    deck_id: str | None = None,
+    names: dict[str, str] | None = None,
+    now: float | None = None,
 ) -> str:
-    """The "Backup copies on Archidekt" panel: the deck copies the gateway made (kept out of Home
-    and My decks), each linked to Archidekt and to the deck it was a copy of. ``None`` (the deck
-    list still cold) says so; an empty list renders nothing."""
+    """The "Backup copies on Archidekt" table (``id=backups``, where the deck pages' links
+    land): the deck copies the gateway made (kept out of Home and My decks), each opening on
+    Archidekt in a new tab, with the deck it was a copy of. ``None`` (the deck list still cold)
+    says so; an empty list renders nothing."""
+    head = "<h2 id='backups' class='ui-section hy-backups'>Backup copies on Archidekt</h2>"
     if copies is None:
         return (
-            "<section class='card backups' id='backups'><h2>Backup copies on Archidekt</h2>"
-            "<p class='muted'>Your Archidekt decks are still being read; reload the page to see the "
-            "backup copies.</p></section>"
+            head + "<p class='muted'>Your Archidekt decks are still being read; reload the page to see "
+            "the backup copies.</p>"
         )
     if not copies:
         return ""
-    items = []
+    where = "this deck" if deck_id else "your decks"
+    rows = [
+        ui.table_open(
+            "minmax(0,1fr) 7rem 12rem",
+            "minmax(0,1fr) auto",
+            "minmax(0,1fr) 44px",
+            cls="hy-copies",
+            label="Backup copies",
+        ),
+        ui.table_header([ui.Column("Copy"), ui.Column("Made", "md-hide"), ui.Column("")]),
+    ]
     for d in copies:
         did = _esc(str(d.get("id", "")))
         name = _esc(str(d.get("name", "")))
+        url = f"https://archidekt.com/decks/{did}"
         of = ""
         if d.get("backup_of") and not deck_id:
-            of = f" <span class='muted'>of <a href='/decks/{_esc(str(d['backup_of']))}'>this deck</a></span>"
-        when = str(d.get("updated_at") or d.get("created_at") or "")[:10]
-        items.append(
-            f"<li><a href='https://archidekt.com/decks/{did}' target='_blank' "
-            f"rel='noopener noreferrer'>{name}</a>{of}"
-            + (f" <time class='muted'>{_esc(when)}</time>" if when else "")
-            + "</li>"
+            of_name = (names or {}).get(str(d["backup_of"])) or "this deck"
+            of = f" · copy of <a href='/decks/{_esc(str(d['backup_of']))}'>{_esc(of_name)}</a>"
+        ts = _copy_ts(d)
+        when = ui.when(ts, now=now) if ts else ""
+        rows.append(
+            f"<div class='tr'><span class='title'><a class='t' href='{url}' target='_blank' "
+            f"rel='noopener noreferrer'>{name}</a>"
+            f"<span class='deck'>In &ldquo;{_esc(folder)}&rdquo;{of}</span>"
+            f"<span class='sub'>{when}</span></span><span class='md-hide'>{when}</span>"
+            f"<span class='act'><a class='btn btn-plain sm-hide' href='{url}' target='_blank' "
+            f"rel='noopener noreferrer'>{icon('external')}Open on Archidekt</a>"
+            f"<a class='sm-only chev' href='{url}' target='_blank' rel='noopener noreferrer' "
+            f"aria-label='Open on Archidekt'>{icon('external')}</a></span></div>"
         )
-    where = "this deck" if deck_id else "your decks"
+    rows.append("</div>")
     return (
-        f"<section class='card backups' id='backups'><h2>Backup copies on Archidekt ({len(copies)})</h2>"
-        f"<p class='muted'>Full copies of {where} as they were before a change, kept in the "
+        head + f"<p class='ui-note'>Full copies of {where} as they were before a change, kept in the "
         f"&ldquo;{_esc(folder)}&rdquo; folder of your Archidekt account. They stay out of Home and My "
-        "decks; Restore here uses the gateway's own snapshots.</p>"
-        f"<ul class='plain copies'>{''.join(items)}</ul></section>"
+        "decks; Restore here uses the gateway's own snapshots.</p>" + "".join(rows)
     )
-
-
-def pager_html(query: dict[str, Any], *, has_more: bool) -> str:
-    offset = query["offset"]
-    if not has_more and offset == 0:
-        return ""
-    parts = ["<nav class='pager form-actions' aria-label='Older and newer entries'>"]
-    if offset > 0:
-        newer = max(0, offset - PAGE)
-        parts.append(f"<a class='btn' href='/history{query_string(query, offset=newer)}'>← Newer</a>")
-    if has_more:
-        parts.append(f"<a class='btn' href='/history{query_string(query, offset=offset + PAGE)}'>Older →</a>")
-    parts.append("</nav>")
-    return "".join(parts)
 
 
 # Further History page styles: HISTORY_CSS ends with this.
@@ -655,43 +730,29 @@ HISTORY_CSS_C = ""
 
 HISTORY_CSS = (
     """
-.filterbar .controls{display:grid;gap:.6rem 1rem;align-items:end;
-  grid-template-columns:repeat(auto-fit,minmax(min(100%,11rem),1fr))}
-.filterbar .field label{margin:0 0 .3rem}
-.filterbar .form-actions{margin-top:.75rem}
-.history .day{position:sticky;top:50px;z-index:3;display:flex;align-items:baseline;gap:.6rem;margin:0;
-  padding:.6rem 0 .4rem;font-size:1.05rem;background:var(--bg);border-bottom:1px solid var(--border)}
-.history .day small{font-weight:400;color:var(--text-muted);font-size:.86rem}
-.hrows{margin:0 0 1rem}
-.hrow{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:.25rem .75rem;align-items:start;
-  padding:.7rem 0;border-top:1px solid var(--surface-2)}
-.hrow:first-child{border-top:0}
-.hrow .k{display:inline-flex;align-items:center;justify-content:center;width:2rem;height:2rem;
-  border-radius:50%;background:var(--surface-2);color:var(--orange);flex:none;margin-top:.1rem}
-.hrow .k svg{width:1.1rem;height:1.1rem}
-.hrow.k-report .k{color:var(--blue-text)} .hrow.k-snapshot .k{color:var(--green-text)}
-.hrow .body{min-width:0}
-.hrow .l1{display:flex;flex-wrap:wrap;align-items:center;gap:.25rem .5rem;font-weight:700}
-.hrow .kind{color:var(--text-muted);font-weight:700;text-decoration:none}
-.hrow .kind:hover{color:var(--orange)}
-.hrow .name{overflow-wrap:anywhere}
-.hrow .sum{margin:.15rem 0 0;color:var(--text);font-size:.93rem;overflow-wrap:anywhere;line-height:1.4}
-.hrow details{margin-top:.3rem} .hrow details > summary{cursor:pointer;color:var(--link);font-size:.9rem;
-  min-height:2rem;display:flex;align-items:center}
-.hrow details > summary:hover{color:var(--orange)}
-.hrow .more{margin:.25rem 0 0;padding:.6rem .8rem;background:var(--surface-2);border-radius:3px;
-  font-size:.93rem}
-.hrow .more p{margin:.3rem 0} .hrow .more .form-actions{margin-top:.5rem}
-.hrow .more pre.diff{margin:0 0 .5rem;max-height:14rem}
-.hrow .side{display:flex;flex-direction:column;align-items:flex-end;gap:.15rem;color:var(--text-muted);
-  font-size:.86rem;white-space:nowrap;text-align:right}
-.hrow .side time{font-variant-numeric:tabular-nums}
-@media (max-width:480px){ .hrow{grid-template-columns:auto minmax(0,1fr)}
-  .hrow .side{grid-column:2;flex-direction:row;gap:.5rem;align-items:center;white-space:normal} }
-.history .day.deck span a{text-decoration:none} .history .day.deck span a:hover{color:var(--orange)}
-.history .day small a{font-weight:400}
-.pager{justify-content:space-between} .pager .btn{margin:0}
-.pager + .backups,.history + .backups{margin-top:1rem}
+/* History (UI standard): the shared table, widgets and side panel are theme.UI_CSS */
+.hy-table .act .acts form{display:contents}
+.hy-table .act .acts .btn,.hy-table .act .acts button{margin:0}
+.hy-table .title .deck a{font-weight:400}
+.hy-table .group.hy-group{grid-template-columns:minmax(0,1fr) auto}
+.hy-table .ui-lbl + .ui-lbl{margin-left:.25rem}
+.hy-table .th .hy-sort{display:inline-flex;align-items:center;gap:.2rem}
+.hy-table .th .hy-sort svg.i{width:14px;height:14px}
+.hy-copies .act .btn{display:inline-flex;align-items:center;gap:.35rem;margin:0}
+.hy-copies .act .chev svg.i{width:20px;height:20px}
+h2.hy-backups{font-size:1.2rem}
+/* a group row's meta wraps rather than push the page sideways at large text sizes */
+.ui-table .group > *{min-width:0}
+.ui-table .group .meta{white-space:normal}
+@media (min-width:900px){.ui-table .group .meta a{white-space:nowrap}}
+@media (min-width:600px){.ui-table .group .meta{text-align:right}}
+/* a widget's number and its word wrap apart at large text sizes */
+.wdg .big{display:flex;flex-wrap:wrap;align-items:baseline;column-gap:.35rem}
+.wdg .big small{margin-left:0}
+.ui-drawer pre.diff{max-height:16rem;overflow:auto}
+.ui-drawer .page-only a{display:inline-flex;align-items:center;min-height:44px}
+.hy-empty p{margin:0}
+.hy-back{margin:0 0 .5rem}
 .trend h2{font-size:1.2rem} .trend > p.muted{margin:.2rem 0 .75rem}
 .tmetrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,13rem),1fr));gap:.75rem;margin:0}
 .tmetric{border:1px solid var(--border);border-radius:3px;padding:.6rem .75rem;min-width:0}
@@ -709,9 +770,6 @@ HISTORY_CSS = (
   vertical-align:top}
 .tdata thead th{min-width:6rem}
 .tdata th[scope=row],.tdata thead th:first-child{text-align:left;min-width:0;white-space:nowrap}
-.backups h2{font-size:1.2rem} .backups .copies{margin:0;display:grid;gap:.4rem}
-.backups .copies li{display:flex;flex-wrap:wrap;gap:.25rem .5rem;align-items:baseline;overflow-wrap:anywhere}
-.backups time{font-size:.86rem;font-variant-numeric:tabular-nums}
 """
     + HISTORY_CSS_A
     + HISTORY_CSS_C
@@ -722,13 +780,13 @@ __all__ = [
     "PAGE",
     "backup_copies_html",
     "build_events",
-    "events_html",
     "deck_filter_groups",
-    "filter_bar_html",
+    "details_panel",
+    "events_html",
     "is_filtered",
-    "pager_html",
     "query_string",
     "read_query",
+    "toolbar_html",
     "trend_html",
     "when_since",
 ]

@@ -75,22 +75,28 @@ async def test_the_page_lists_every_setting_and_locks_the_deployments(gw: Harnes
         assert "Set in your stack" in forge and "<code>MTG_<wbr>FORGE_<wbr>GAMES</code>" in forge
         assert "disabled" in forge and "value='12'" in forge and "Back to default" not in forge
         # the scan thresholds start folded away; the others are open
-        assert "<details><summary>Card scanning (advanced)</summary>" in r.text
+        assert (
+            "<details><summary><span class='sum'><span class='h2'>Card scanning (advanced)</span>" in r.text
+        )
         assert "Allowed: 0 (off), or 30 to 1,440" in page
     finally:
         await b.aclose()
 
 
-async def test_the_top_line_names_what_the_stack_sets(tmp_path: Path, idp: FakeIdP) -> None:
-    """One line at the top names every setting the stack sets, by variable, each
-    a link to its row; a setting in the folded scan group opens it. No line when the stack sets
-    none."""
+async def test_the_stack_box_is_gone_and_each_locked_row_and_group_says_so(
+    tmp_path: Path, idp: FakeIdP, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No stack box. Each locked row has a grey "Set in your stack"
+    label beside its name (its lock line keeps the variable), each group heading counts its locked
+    rows, and the chip "Set in your stack {n}" (a link to ?locked=1 without scripts) shows only
+    them, opening the folded group that holds one. No chip when the stack sets nothing."""
     settings = make_settings(tmp_path, required_group="mtg-users", admin_group="mtg-admins")
     async with running(_with_admin(Harness(settings, idp))) as h:
         b = await admin_browser(h)
         try:
             r = await b.http.get("/admin/settings", headers=NAVIGATE)
-            assert r.status_code == 200 and "class='set-stack'" not in r.text
+            assert r.status_code == 200 and "set-stack" not in r.text and "lockchip" not in r.text
+            assert "set in your stack</span>" not in r.text
         finally:
             await b.aclose()
     locked = {"forge_games": 12, "scan_ambiguity_margin": MANAGED_SETTINGS["scan_ambiguity_margin"].default}
@@ -101,44 +107,98 @@ async def test_the_top_line_names_what_the_stack_sets(tmp_path: Path, idp: FakeI
         b = await admin_browser(h)
         try:
             r = await b.http.get("/admin/settings", headers=NAVIGATE)
-            top = r.text.split("<div class='set-stack' role='note'>", 1)[1].split("</div>", 1)[0]
-            assert _words(top).startswith(
-                "Your stack sets 2 of the settings on this page, so they can only be changed there. To "
-                "manage one here instead, remove its variable from your stack, then redeploy."
+            assert "Your stack sets" not in r.text and "set-stack" not in r.text
+            chips = r.text.split("<nav class='ui-chips set-nav' aria-label='Setting groups'>", 1)[1].split(
+                "</nav>"
+            )[0]
+            assert _words(chips).endswith("Set in your stack 2")
+            assert "href='?locked=1' role='button' aria-pressed='false'" in chips
+            # the notice slot stays above the chips, under the intro line
+            assert r.text.index("Settings for the whole gateway.") < r.text.index("class='ui-chips set-nav'")
+            forge = r.text.split("id='s-row-forge_games'", 1)[1].split("id='s-row-", 1)[0]
+            assert "<span class='ui-lbl grey set-badge'>" in forge and "Set in your stack</span>" in forge
+            sim = r.text.split("id='g-simulation'", 1)[1].split("</section>", 1)[0]
+            assert "1 set in your stack</span>" in sim.split("</div>", 1)[0]
+            assert (
+                "set in your stack</span>"
+                not in r.text.split("id='g-approvals'", 1)[1].split("</section>")[0]
             )
-            forge = html.escape(settings_page.label("forge_games"))
-            assert f"<a href='#s-row-forge_games'>{forge} (<code>MTG_<wbr>FORGE_<wbr>GAMES</code>)</a>" in top
-            assert "role='list' aria-label='Settings your stack sets'" in top
-            assert "href='?open=scan#s-row-scan_ambiguity_margin'" in top
-            assert r.text.index("class='set-stack'") < r.text.index("class='set-nav'")
-            # the scan group starts folded, and opens for that link
-            assert "<details><summary>Card scanning (advanced)</summary>" in r.text
+            scan = r.text.split("id='g-scan'", 1)[1].split("</summary>", 1)[0]
+            assert "<span class='ui-sub'>15 settings</span>" in scan and "1 set in your stack" in scan
+            # a folded group of one setting reads "1 setting"
+            keys_of = settings_page.group_keys
+            monkeypatch.setattr(
+                settings_page, "group_keys", lambda g: keys_of(g)[:1] if g == "scan" else keys_of(g)
+            )
+            one = (await b.http.get("/admin/settings", headers=NAVIGATE)).text
+            assert "<span class='ui-sub'>1 setting</span>" in one.split("id='g-scan'", 1)[1]
+            monkeypatch.setattr(settings_page, "group_keys", keys_of)
+            assert "class='set-page'" in r.text and "only-locked" not in r.text.split("<main", 1)[1]
+            # without scripts: the link shows the same, the folded group open, the chip pressed
+            r = await b.http.get("/admin/settings?locked=1", headers=NAVIGATE)
+            assert "class='set-page only-locked'" in r.text
+            assert "<details open><summary><span class='sum'><span class='h2'>Card scanning" in r.text
+            assert "href='/admin/settings' role='button' aria-pressed='true'" in r.text
+            assert "class='ui-card set-group has-locked' id='g-simulation'" in r.text
+            assert "class='ui-card set-group' id='g-approvals'" in r.text
+            # the scan group starts folded, and opens for a link to one of its rows
             r = await b.http.get("/admin/settings?open=scan", headers=NAVIGATE)
-            assert "<details open><summary>Card scanning (advanced)</summary>" in r.text
+            assert "<details open><summary><span class='sum'><span class='h2'>Card scanning" in r.text
             r = await b.http.get("/admin/settings?open=general", headers=NAVIGATE)
             assert r.status_code == 200 and "<details open>" not in r.text
         finally:
             await b.aclose()
-    # with one setting: "it", both times
-    settings = make_settings(
-        tmp_path,
-        required_group="mtg-users",
-        admin_group="mtg-admins",
-        env_set=frozenset({"forge_games"}),
-        forge_games=12,
-    )
-    async with running(_with_admin(Harness(settings, idp))) as h:
-        b = await admin_browser(h)
-        try:
-            r = await b.http.get("/admin/settings", headers=NAVIGATE)
-            top = r.text.split("<div class='set-stack' role='note'>", 1)[1].split("</div>", 1)[0]
-            assert _words(top).startswith(
-                "Your stack sets 1 of the settings on this page, so it can only be changed there. To "
-                "manage it here instead, remove its variable from your stack, then redeploy."
+
+
+async def test_confirm_ticks_carry_what_the_script_needs_and_show_after_a_refused_save(gw: Harness) -> None:
+    """Each of the three ticks (CONFIRM) is in an orange box the
+    script shows only once the value goes down or off (data-confirm, data-from); without scripts
+    it shows as before. After a refused save the box says what was lowered, and saving still
+    needs the tick."""
+    b = await admin_browser(gw)
+    try:
+        r = await b.http.get("/admin/settings", headers=NAVIGATE)
+        assert "/static/settings.js" in r.text
+        for key, rule, start in (
+            ("archidekt_backups", "off", "on"),
+            ("archidekt_backup_copies", "lower", "10"),
+            ("snapshots_per_deck", "lower", "25"),
+        ):
+            row = r.text.split(f"id='s-row-{key}'", 1)[1].split("id='s-row-", 1)[0]
+            assert f"data-confirm='{rule}' data-from='{start}'" in row, key
+            assert f"name='confirm_{key}'" in row and "<p class='lead' id='c-" in row and " hidden>" in row, (
+                key
             )
-            assert r.status_code == 200 and "<details open>" not in r.text
-        finally:
-            await b.aclose()
+        assert r.text.count("class='set-confirm'") == 3
+        r = await _post(b, {"group": "backups", "v_archidekt_backup_copies": "5"})
+        assert r.status_code == 400
+        row = r.text.split("id='s-row-archidekt_backup_copies'", 1)[1].split("id='s-row-", 1)[0]
+        assert "data-shown>" in row
+        assert (
+            _words(row).count("You lowered this from 10 to 5. Tick the box below to confirm lowering this.")
+            == 1
+        )
+        assert _live(gw).get("archidekt_backup_copies") == 10
+        r = await _post(b, {"group": "backups", "v_archidekt_backups": "off"})
+        row = r.text.split("id='s-row-archidekt_backups'", 1)[1].split("id='s-row-", 1)[0]
+        assert "You turned this off. Tick the box below to confirm turning this off." in _words(row)
+    finally:
+        await b.aclose()
+
+
+async def test_a_number_keeps_its_unit_inside_the_box(gw: Harness) -> None:
+    """K-04: the unit is inside the box (every control the same width), read with the box."""
+    b = await admin_browser(gw)
+    try:
+        r = await b.http.get("/admin/settings", headers=NAVIGATE)
+        row = r.text.split("id='s-row-proposal_expiry_days'", 1)[1].split("id='s-row-", 1)[0]
+        assert "<span class='set-num has-u'><input type='number' id='f-proposal_expiry_days'" in row
+        assert "u-proposal_expiry_days r-proposal_expiry_days'" in row
+        assert "<span class='unit' id='u-proposal_expiry_days'>days</span></span>" in row
+        assert "class='set-num'><input" in r.text.split("id='s-row-auto_apply_max_rows'", 1)[1][:400]
+        assert "<span class='ui-hint unsaved' aria-live='polite'></span>" in r.text
+    finally:
+        await b.aclose()
 
 
 async def test_saving_a_section_stores_and_reports_each_change(gw: Harness) -> None:
@@ -366,9 +426,14 @@ async def test_the_activity_logs_say_a_setting_change_in_words(gw: Harness) -> N
     try:
         await _post(b, {"group": "approvals", "v_proposal_expiry_days": "14"})
         for path in ("/admin/activity", "/activity"):
-            text = _words((await b.http.get(path, headers=NAVIGATE)).text)
+            page = (await b.http.get(path, headers=NAVIGATE)).text
+            text = _words(page)
             assert "Days a change waits for approval: 7 days → 14 days" in text, path
-            assert '"previous"' not in text, path
+            # the stored JSON only in the admin's row details, never in the Detail column
+            cells = "".join(re.findall(r"<span class='c-det'>(.*?)</span><span class='c-app'>", page))
+            assert "Days a change waits" in _words(cells) and '"previous"' not in _words(cells), path
+            if path == "/activity":
+                assert '"previous"' not in text
         assert "Gateway setting changed" in _words((await b.http.get("/activity", headers=NAVIGATE)).text)
     finally:
         await b.aclose()
