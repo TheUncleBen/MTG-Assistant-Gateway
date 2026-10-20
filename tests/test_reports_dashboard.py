@@ -97,6 +97,9 @@ def test_reports_dashboard_widgets_chips_filters_and_rows(server: Server) -> Non
     # each row: the status label, the win rate with its interval, the lethal turn, who asked
     assert "class='ui-lbl orange'" in page and ">Partial</span>" in page
     assert "95% interval" in page and "turn 10" in page
+    # the column header does not assume 40 damage: a constructed deck's report counts 20
+    head = page.split("class='ui-table rp-t'")[1].split("<div class='tr'>")[0]
+    assert ">Lethal by<" in head and "40 damage" not in head
     assert "<i aria-hidden='true'>C</i>Claude" in page and "<i aria-hidden='true'>Y</i>You" in page
     assert "no solo test" in page and "did not run" in page
     assert "Deck trend and history" not in page

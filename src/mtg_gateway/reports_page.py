@@ -471,7 +471,7 @@ def reports_page_html(
         ui.Column("Deck"),
         ui.Column("Status", "sm-hide"),
         ui.Column("Won vs precons", "md-hide"),
-        ui.Column("40 damage", "md-hide"),
+        ui.Column("Lethal by", "md-hide"),
         ui.Column("Asked by", "md-hide"),
         ui.Column("Ran", "md-hide", html=sort),
         ui.Column(""),
