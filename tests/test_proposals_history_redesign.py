@@ -183,6 +183,12 @@ def test_proposal_index_and_history_counts(tmp_path: Path) -> None:
     assert {"risk", "board_no", "snapshot_id", "result"} <= set(index[0])
     counts = db.history_counts("u", deck_id=None, search="", since=None)
     assert counts["snapshots"] == 15 and counts["restores"] == 1  # p04, an applied restore
+    # the search counts as the rows match: a restore by its deck's name or its change summary
+    for q in ("immortal", "sol ring", "card 4", "reap"):
+        rows = db.list_proposals("u", limit=100, kinds=["restore"], states=["applied"], search=q)
+        assert db.history_counts("u", search=q)["restores"] == len(rows), q
+    assert db.history_counts("u", search="sol ring")["restores"] == 1
+    assert db.history_counts("u", search="sol ring")["snapshots"] == 0  # a snapshot has no summary
     assert db.history_counts("u", deck_id="43", search="", since=None)["snapshots"] == 0
     stats = db.snapshot_stats("u")
     assert stats["count"] == 15 and stats["decks"] == 1
@@ -279,7 +285,9 @@ async def test_all_view_pages_newest_first(stack: Stack) -> None:
         older = (await b.http.get("/proposals?show=all&offset=25", headers=NAV)).text
         assert "26–50 of 60" in older and "/proposals/p25?show=all" in older
         assert re.search(r"<span class='ui-lbl grey'>(<svg.*?</svg>)?Rejected</span>", body)
-        assert "Archidekt refused it" in body  # a failed one says why
+        # a failed one says why; the seeded ones store no error, so Archidekt did not refuse them
+        assert "Could not be applied · <a href='/proposals/p03'>Why</a>" in body
+        assert "Archidekt refused it" not in body
         assert "(deck 4" not in body
     finally:
         await b.aclose()
@@ -308,6 +316,31 @@ async def test_one_proposal_is_a_side_panel_or_a_page(stack: Stack) -> None:
         assert "<summary>Technical details</summary>" in closed
     finally:
         await b.aclose()
+
+
+def test_a_failed_row_says_refused_only_when_archidekt_refused() -> None:
+    """Archidekt's own no (a 4xx, a contract it did not keep) reads "Archidekt refused it"; the
+    gateway restarting, a network error or a timeout and the backup copy read "Could not be
+    applied", each with the Why link to the proposal."""
+    from mtg_gateway.proposals_view import _closing_html
+
+    def line(error: str | None) -> str:
+        it = {
+            "id": "f1",
+            "state": "failed",
+            "result": {"error": error} if error else {},
+            "app": None,
+            "applied_at": 0,
+            "status_at": 0,
+            "created_at": 0,
+            "expires_at": 0,
+        }
+        return _closing_html(it, csrf=None, replaced_by=None, now=0.0)
+
+    for refused in ("forbidden", "not_found", "auth", "rate_limited", "contract", "verify_mismatch"):
+        assert line(refused) == "Archidekt refused it · <a href='/proposals/f1'>Why</a>", refused
+    for other in ("interrupted", "unavailable", "internal", "backup_failed", None):
+        assert line(other) == "Could not be applied · <a href='/proposals/f1'>Why</a>", other
 
 
 # -- H1 ------------------------------------------------------------------------------

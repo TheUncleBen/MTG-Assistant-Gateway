@@ -2175,16 +2175,23 @@ class Database:
         since: int | None = None,
     ) -> dict[str, int]:
         """How many snapshots, applied restores and deck reports the History page holds under its
-        filters (deck, a deck-name search, a start time): its chips and its pager."""
+        filters (deck, a search, a start time): its chips and its pager. Each count narrows as the
+        rows it counts do (list_snapshots, list_proposals, ReportService.list): the search matches
+        a deck's name, and for a restore its change summary too."""
 
-        def narrow(time_col: str) -> tuple[str, list[Any]]:
+        def narrow(time_col: str, *, diff: bool = False) -> tuple[str, list[Any]]:
             where, args = " WHERE owner_sub = ?", [owner_sub]
             if deck_id:
                 where += " AND deck_id = ?"
                 args.append(str(deck_id))
             if search:
-                where += " AND deck_name LIKE ? ESCAPE '\\'"
-                args.append(_like(search))
+                like = _like(search)
+                if diff:
+                    where += " AND (deck_name LIKE ? ESCAPE '\\' OR diff_text LIKE ? ESCAPE '\\')"
+                    args += [like, like]
+                else:
+                    where += " AND deck_name LIKE ? ESCAPE '\\'"
+                    args.append(like)
             if since is not None:
                 where += f" AND {time_col} >= ?"
                 args.append(int(since))
@@ -2202,7 +2209,7 @@ class Database:
                 if has_reports
                 else 0
             )
-            w, a = narrow("created_at")
+            w, a = narrow("created_at", diff=True)
             out["restores"] = int(
                 self._conn.execute(
                     "SELECT COUNT(*) FROM proposals" + w + " AND kind = 'restore' AND state = 'applied'", a

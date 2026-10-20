@@ -56,6 +56,13 @@ WHENS = (("", "Any time"), ("today", "Today"), ("7d", "Last 7 days"), ("30d", "L
 YOU, ADMIN = "you", "admin"
 FROM_YOU, FROM_ADMIN = "You", "The administrator"
 NO_APP_NAME = "An assistant"  # an app with no registered name: never its client id
+# A failed apply's stored error when Archidekt answered and said no (ArchidektError kinds, and the
+# gateway's own refusals of what it was about to send); anything else (the gateway restarted, a
+# network error or a timeout, the backup copy) is "could not be applied", not a refusal.
+ARCHIDEKT_REFUSALS = frozenset(
+    {"auth", "forbidden", "not_found", "rate_limited", "contract", "invalid", "edit", "verify_mismatch"}
+)
+NOT_APPLIED = "Could not be applied"
 
 PAGE_SUB = (
     "Every change your assistants proposed, waiting and past. Past proposals stay here for 30 days "
@@ -534,7 +541,10 @@ def _closing_html(
             esc(f"Withdrawn by {it['app']}") if it["app"] and it["app"] not in (FROM_YOU, FROM_ADMIN) else ""
         )
     if st == "failed":
-        return f"Archidekt refused it · <a href='/proposals/{esc(it['id'])}'>Why</a>"
+        said = (
+            "Archidekt refused it" if (it["result"] or {}).get("error") in ARCHIDEKT_REFUSALS else NOT_APPLIED
+        )
+        return f"{said} · <a href='/proposals/{esc(it['id'])}'>Why</a>"
     return ""
 
 
