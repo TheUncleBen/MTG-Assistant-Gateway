@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 from starlette.requests import Request
 from starlette.responses import FileResponse, JSONResponse, Response
 
+from . import theme
 from .companion import (
     ICON_HEADERS,
     OFFLINE_PAGE,
@@ -78,7 +79,14 @@ def add_shell_routes(server: MCPServer, h: SimpleNamespace) -> None:
                 {"name": "My decks", "url": "/decks", "icons": [SHORTCUT_ICON]},
                 {"name": "Scan page", "url": "/scan", "icons": [SHORTCUT_ICON]},
                 {"name": "Proposals", "url": "/proposals", "icons": [SHORTCUT_ICON]},
-            ],
+                {"name": "Reports", "url": "/reports", "icons": [SHORTCUT_ICON]},
+            ]
+            # Watchlist only while watchlists are on (the Android app adds its own the same way)
+            + (
+                [{"name": "Watchlist", "url": "/watchlist", "icons": [SHORTCUT_ICON]}]
+                if theme.WATCHLISTS
+                else []
+            ),
         }
         return JSONResponse(
             data, media_type="application/manifest+json", headers={"Cache-Control": "public, max-age=3600"}

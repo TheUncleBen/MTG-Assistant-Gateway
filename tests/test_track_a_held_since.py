@@ -156,9 +156,9 @@ async def test_the_review_page_refuses_a_change_held_after_it_was_opened(stack: 
             "This change is held for a reason that came up after you opened this page, so nothing was sent."
             in page
         )
-        assert f"<dt>Held</dt><dd>{HELD}</dd>" in page
+        assert f"<p class='ui-why pr-held'>{HELD}</p>" in page  # under the Held label
         # the Held row says why; the row after it does not say it again
-        assert "<dt>Waits for you</dt><dd>It needs your press.</dd>" in page, page
+        assert "<p class='ui-why pr-waits'>It needs your press.</p>" in page, page
         assert "This one would replace" not in page
         # the page now shows the hold: the member's press applies it
         form = await br.review_form(url)

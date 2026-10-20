@@ -54,7 +54,7 @@ async def test_an_amended_change_says_who_changed_it_and_what(stack: Stack) -> N
         assert "<dt>Version</dt><dd>2, changed by " in page
         assert ". Last change: Opt instead of Ponder</dd>" in page
         other = (await b.http.get(f"/proposals/{q['proposal_id']}")).text
-        assert "<dt>Version</dt>" not in other
+        assert "<dt>Version</dt><dd>1</dd>" in other  # P3 always shows the version
     finally:
         await b.aclose()
 

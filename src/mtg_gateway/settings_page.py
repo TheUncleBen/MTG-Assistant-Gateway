@@ -14,6 +14,8 @@ from typing import Any
 from .config import MANAGED_SETTINGS, STACK_LOCK_HOW, LiveSettings, SettingError, SettingSpec, _number
 from .modes import MODE_LABELS
 from .plugin_page import CHATGPT_NAME_MAX, chatgpt_name_too_long
+from .theme import icon
+from .ui import label as label_html
 
 # (group, title, intro). The order is the page's; "scan" starts folded away.
 GROUPS: tuple[tuple[str, str, str], ...] = (
@@ -216,90 +218,101 @@ def needs_confirm(key: str, before: Any, after: Any) -> bool:
 
 
 SETTINGS_CSS = """
-.set-nav{display:flex;flex-wrap:wrap;gap:.4rem;margin:.75rem 0 1rem}
-.set-nav a{display:inline-flex;align-items:center;min-height:var(--ctl);padding:0 .8rem;
-  border:1px solid var(--border);
-  border-radius:999px;color:var(--text);text-decoration:none;background:var(--surface);font-size:.95rem}
-.set-nav a:hover{background:var(--surface-2)}
-.set-nav a:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
-.set-stack{margin:.75rem 0 0;padding:.75rem 1rem;border:1px solid var(--border);
-  border-radius:var(--radius-lg);background:var(--surface)}
-.set-stack p{margin:0}
-.set-stack-list{display:flex;flex-wrap:wrap;gap:.4rem;list-style:none;margin:.6rem 0 0;padding:0}
-.set-stack-list a{display:inline-block;box-sizing:border-box;min-height:var(--ctl);padding:.45rem .7rem;
-  border:1px solid var(--border);border-radius:var(--radius-lg);color:var(--text);text-decoration:none;
-  background:var(--surface-2);max-width:100%}
-.set-stack-list a:hover{border-color:var(--text)}
-.set-stack-list a:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
-.set-stack-list code{background:none;padding:0}
-@media (pointer:coarse){ .set-stack-list a{min-height:44px} }
-.set-group{scroll-margin-top:4.5rem}
-.set-group h2{margin:0 0 .25rem;font-size:1.2rem}
-.set-group > .intro,.set-group details > .intro{margin:0 0 .75rem}
-.set-group details > summary{cursor:pointer;font-weight:700;font-size:1.2rem;min-height:2.5rem;
-  display:flex;align-items:center}
-.set-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,20rem);gap:.5rem 1.5rem;padding:.9rem 0;
-  border-top:1px solid var(--border-soft);scroll-margin-top:4.5rem}
-.set-row:first-of-type{border-top:0}
-.set-label{font-weight:700;margin:0;display:block}
-.set-help,.set-src{margin:.2rem 0 0}
-.set-err{margin:.35rem 0 0;color:var(--danger-text);font-weight:700}
-.set-warn{margin:.35rem 0 0;padding:.4rem .6rem;border-left:4px solid var(--orange);
+/* the admin Settings page: one flat card per group, one row per setting,
+   every control in the same 16rem column so the boxes, switches and lists line up */
+.set-nav{margin:0 0 1rem}
+.set-nav .ui-chip{background:var(--surface);min-height:var(--ctl)}
+.set-nav .ui-chip[aria-pressed=true]{background:var(--orange-tint)}
+.set-group{padding:1rem 1rem .25rem;scroll-margin-top:4.5rem}
+.set-group .gh{display:flex;flex-wrap:wrap;align-items:center;gap:.4rem .75rem;margin:0 0 .15rem}
+.set-group .gh h2,.set-group .h2{margin:0;font-size:1.25rem;font-weight:700}
+.set-group .intro{margin:0 0 .25rem}
+.set-group details > summary{list-style:none;display:flex;align-items:center;justify-content:space-between;
+  gap:.75rem;min-height:44px;cursor:pointer;margin:-.25rem 0 .5rem}
+.set-group details > summary::-webkit-details-marker{display:none}
+.set-group details > summary .sum{display:flex;flex-wrap:wrap;align-items:center;gap:.2rem .75rem}
+.set-group details > summary .sum .ui-sub{margin:0}
+.set-group details > summary > svg.i{width:20px;height:20px;flex:none}
+.set-group details[open] > summary > svg.i{transform:rotate(180deg)}
+.set-row{display:grid;grid-template-columns:minmax(0,1fr) 16rem;gap:.35rem 1.5rem;align-items:start;
+  padding:.85rem 0;border-top:1px solid var(--border-soft);scroll-margin-top:4.5rem}
+form > .set-row:first-of-type{border-top:0}
+.set-row .sl{display:flex;flex-wrap:wrap;align-items:center;gap:.3rem .5rem}
+.set-label{display:inline;margin:0;font-weight:700}
+.set-row .sl .ui-lbl{height:22px;font-size:.78rem}
+.set-help{margin:.3rem 0 0;color:var(--text-muted);font-size:.88rem;line-height:1.4}
+.set-src{margin:.3rem 0 0;font-size:.86rem}
+.set-src code{font-size:.8rem}
+.set-lock code{overflow-wrap:break-word}
+.set-err{margin:.35rem 0 0;color:var(--danger-text);font-weight:700;font-size:.88rem}
+.set-warn{margin:.35rem 0 0;padding:.4rem .6rem;border-left:4px solid var(--orange);font-size:.88rem;
   background:var(--orange-tint);color:var(--orange-text);border-radius:var(--radius)}
 .set-row.bad input:not([type=checkbox]):not([type=radio]),.set-row.bad select{border-color:var(--danger-text)}
-.set-ctl{display:flex;flex-direction:column;gap:.45rem;align-items:stretch;min-width:0}
-.set-num{display:flex;align-items:center;gap:.5rem}
-.set-num input{flex:1 1 auto;min-width:0}
-.set-num .unit{color:var(--text-muted);white-space:nowrap}
-.set-ctl .range{margin:0}
-.set-seg{display:inline-flex;border:1px solid var(--control-border);border-radius:var(--radius);
-  overflow:hidden;
-  align-self:flex-start;margin:0;padding:0;min-width:0}
-.set-seg legend{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
-.set-seg label{position:relative;display:inline-flex;align-items:center;justify-content:center;
-  min-width:4.5rem;
-  min-height:var(--ctl);padding:0 1rem;margin:0;cursor:pointer;font-weight:400;background:var(--surface)}
+.set-ctl{display:flex;flex-direction:column;gap:.35rem;min-width:0}
+.set-ctl input:not([type=radio]):not([type=checkbox]),.set-ctl select:not(.msel-native),.set-ctl .msel-btn{
+  width:100%;margin:0}
+.set-ctl .range{margin:0;color:var(--text-muted);font-size:.84rem}
+.set-ctl .reset{align-self:stretch;min-height:var(--ctl);margin:0}
+/* a number with its unit inside the box: every box is the same width */
+.set-num{position:relative;display:block}
+.set-num.has-u input{padding-right:4.75rem}
+.set-num .unit{position:absolute;right:.75rem;top:50%;transform:translateY(-50%);color:var(--text-muted);
+  pointer-events:none}
+.set-num.typed input{border-color:var(--orange-text);box-shadow:inset 0 0 0 1px var(--orange-text)}
+/* On / Off: two equal halves of the control column */
+.set-seg{display:grid;grid-template-columns:1fr 1fr;margin:0;padding:0;border:1px solid var(--control-border);
+  border-radius:var(--radius);overflow:hidden;min-width:0}
+.set-seg legend,.set-choices legend{position:absolute;width:1px;height:1px;overflow:hidden;
+  clip:rect(0 0 0 0);white-space:nowrap}
+.set-seg label{position:relative;display:flex;align-items:center;justify-content:center;min-height:var(--ctl);
+  margin:0;cursor:pointer;font-weight:400;background:var(--surface)}
 .set-seg label + label{border-left:1px solid var(--control-border)}
-.set-seg input{position:absolute;opacity:0;inset:0;margin:0;width:100%;height:100%;cursor:pointer}
+.set-seg input{position:absolute;opacity:0;inset:0;width:100%;height:100%;margin:0;cursor:pointer}
 .set-seg label:has(input:checked){background:var(--orange-tint);font-weight:700}
-.set-seg label:has(input:focus-visible){outline:2px solid var(--focus);outline-offset:-2px}
-.set-seg label:has(input:disabled){cursor:default;color:var(--text-muted)}
-.set-ctl .reset{align-self:flex-start;min-height:var(--ctl)}
-.set-choices{display:flex;flex-direction:column;border:1px solid var(--control-border);
-  border-radius:var(--radius);overflow:hidden;margin:0;padding:0;min-width:0}
-.set-choices legend{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);
-  white-space:nowrap}
-.set-choices label{position:relative;display:flex;align-items:center;gap:.6rem;min-height:var(--ctl);
-  padding:.45rem .8rem;margin:0;cursor:pointer;font-weight:400;background:var(--surface);
-  overflow-wrap:anywhere}
+.set-seg label:has(input:focus-visible),.set-choices label:has(input:focus-visible){
+  outline:2px solid var(--focus);outline-offset:-2px}
+.set-choices{display:flex;flex-direction:column;margin:0;padding:0;border:1px solid var(--control-border);
+  border-radius:var(--radius);overflow:hidden;min-width:0}
+.set-choices label{position:relative;display:flex;align-items:center;gap:.6rem;min-height:44px;
+  padding:.45rem .75rem;margin:0;cursor:pointer;font-weight:400;background:var(--surface);
+  overflow-wrap:anywhere;line-height:1.3}
 .set-choices label + label{border-top:1px solid var(--control-border)}
 .set-choices input{flex:none;margin:0;width:1.1rem;height:1.1rem;accent-color:var(--orange)}
 .set-choices label:has(input:checked){background:var(--orange-tint);font-weight:700}
-.set-choices label:has(input:focus-visible){outline:2px solid var(--focus);outline-offset:-2px}
-.set-choices label:has(input:disabled){cursor:default;color:var(--text-muted)}
-.set-lock code{overflow-wrap:break-word}
-.set-confirm{grid-column:1 / -1}
-/* Set in the stack: shown where it would be changed, greyed out, its value still readable (4.5:1) */
-/* the radios of On/Off and the approval modes are left out: they stay hidden or plain, and their
-   labels carry the value */
+.set-seg label:has(input:disabled),.set-choices label:has(input:disabled){cursor:default;
+  color:var(--text-muted)}
+/* set in the stack: greyed, dashed, the value still readable (4.5:1) */
 .set-row.locked input:disabled:not([type=radio]):not([type=checkbox]),.set-row.locked select:disabled,
-.set-row.locked .msel-btn:disabled{
-  background:var(--surface-2);color:var(--text-muted);-webkit-text-fill-color:var(--text-muted);
-  border-style:dashed;opacity:1;cursor:not-allowed}
+.set-row.locked .msel-btn:disabled{background:var(--surface-2);color:var(--text-muted);
+  -webkit-text-fill-color:var(--text-muted);border-style:dashed;opacity:1;cursor:not-allowed}
 .set-row.locked .set-seg,.set-row.locked .set-choices{border-style:dashed}
 .set-row.locked input[type=radio]{accent-color:var(--text-muted)}
 .set-row.locked .set-seg label,.set-row.locked .set-choices label{background:var(--surface-2);
   cursor:not-allowed}
 .set-row.locked .set-seg label:has(input:checked),.set-row.locked .set-choices label:has(input:checked){
   background:var(--surface-2);box-shadow:inset 0 0 0 2px var(--text-muted)}
-.set-save{display:flex;flex-wrap:wrap;gap:.75rem;align-items:center;padding-top:.9rem;
+/* the tick that confirms lowering or turning off; with scripts only once the value goes down */
+.set-confirm{grid-column:1 / -1;margin:.25rem 0 0;padding:.6rem .75rem;border-left:4px solid var(--orange);
+  background:var(--orange-tint);border-radius:var(--radius)}
+.set-confirm[hidden]{display:none}
+.set-confirm .lead{display:flex;gap:.4rem;align-items:flex-start;margin:0 0 .25rem;color:var(--orange-text);
+  font-weight:700;font-size:.92rem}
+.set-confirm .lead[hidden]{display:none}
+.set-confirm .lead svg.i{width:18px;height:18px;flex:none;margin-top:.05rem}
+.set-confirm .tick{display:flex;align-items:flex-start;gap:.6rem;margin:0;min-height:44px;padding:.35rem 0;
+  font-weight:400;font-size:.92rem;line-height:1.4;color:var(--text)}
+.set-confirm .tick input{flex:none;width:20px;height:20px;margin:.1rem 0 0;accent-color:var(--orange-ctl)}
+.set-save{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem 1rem;padding:.85rem 0 .75rem;
   border-top:1px solid var(--border-soft)}
-.set-save button{min-height:var(--ctl)}
-.set-badge{display:inline-block;margin-left:.4rem;vertical-align:.1em}
+.set-save button{min-height:var(--ctl);margin:0}
+.set-save .ui-hint{margin:0}
 p.set-saved{margin:0} ul.set-saved{margin:.35rem 0 0;padding-left:1.2rem}
-@media (max-width:720px){
+/* "Set in your stack": only the rows the stack sets (the chip, or ?locked=1 without scripts) */
+.only-locked .set-row:not(.locked),.only-locked .set-group:not(.has-locked),
+.only-locked .set-save{display:none}
+@media (max-width:719.98px){
   .set-row{grid-template-columns:minmax(0,1fr)}
-  .set-ctl{max-width:none}
+  .set-save .primary{flex:1 1 100%}
 }
 """
 
@@ -323,24 +336,6 @@ def group_keys(group: str) -> list[str]:
 
 def label(key: str) -> str:
     return TEXT.get(key, (key, ""))[0]
-
-
-# The summary box's link text where the row's name only reads right beside its value box ("Check
-# Archidekt for deck changes every [30] minutes"). A link has no value after it, so these five say
-# the whole thing (SUMMARY-LINK-TEXTS-r3.md option a, approved 10-17 about 03:21Z). The rows, the
-# save notices and the Activity log keep the row's name.
-LINK_TEXT = {
-    "deck_sync_minutes": "How often to check Archidekt for deck changes",
-    "archidekt_cache_seconds": "How long public deck reads are reused",
-    "archidekt_card_cache_seconds": "How long Archidekt card lookups are reused",
-    "scan_ambiguity_margin": "Name similarity lead over the next match",
-    "scan_art_gallery_idle_days": "Days without a scan before a card's printings are forgotten",
-}
-
-
-def link_text(key: str) -> str:
-    """A setting's name in the summary box: its row's name, or the whole wording in LINK_TEXT."""
-    return LINK_TEXT.get(key) or label(key)
 
 
 def shown(spec: SettingSpec, value: Any) -> str:
@@ -452,32 +447,45 @@ def settings_body(
     outcome: Outcome | None = None,
     notice: str = "",
     focus: str | None = None,
+    locked_only: bool = False,
 ) -> str:
     """The page body. ``running`` is the Settings the gateway started with (a setting that applies
     after a restart may differ from its saved value); ``who`` names an account, ``when`` writes a
-    time (both return HTML)."""
+    time (both return HTML). ``locked_only`` shows only the rows the stack sets (the "Set in your
+    stack" chip without scripts, ``?locked=1``)."""
     outcome = outcome or Outcome()
     rows = {d["key"]: d for d in live.describe()}
     warns = {"chatgpt_name": chatgpt_name_warning(live)}
-    nav = "".join(
-        f"<a href='#g-{g}'>{html.escape(title)}</a>" for g, title, _intro in GROUPS if group_keys(g)
-    )
+    locked_total = sum(1 for k in MANAGED_SETTINGS if live.locked(k))
+    jump = [
+        f"<a class='ui-chip' href='#g-{g}'>{html.escape(title)}</a>"
+        for g, title, _intro in GROUPS
+        if group_keys(g)
+    ]
+    if locked_total:
+        # The stack's settings in one place: a toggle with scripts (static/settings.js), a link to
+        # ?locked=1 without them.
+        jump.append(
+            f"<a class='ui-chip lockchip' href='{'/admin/settings' if locked_only else '?locked=1'}' "
+            f"role='button' aria-pressed='{'true' if locked_only else 'false'}'>{icon('lock')}Set in your "
+            f"stack <span class='n'>{locked_total}</span></a>"
+        )
     parts = [
-        "<p class='muted'>Settings for the whole gateway. A setting your stack sets is shown greyed out "
+        "<p class='ui-sub'>Settings for the whole gateway. A setting your stack sets is shown greyed out "
         "with its value, and can only be changed in the stack.</p>",
-        _stack_summary(live),
         notice,
-        f"<nav class='set-nav' aria-label='Setting groups'>{nav}</nav>",
+        f"<nav class='ui-chips set-nav' aria-label='Setting groups'>{''.join(jump)}</nav>",
     ]
     for group, title, intro in GROUPS:
         keys = group_keys(group)
         if not keys:
             continue
         fields = "".join(_row(rows[k], running, outcome, who, when, warns.get(k, "")) for k in keys)
-        editable = any(not live.locked(k) for k in keys)
+        n_locked = sum(1 for k in keys if live.locked(k))
+        editable = n_locked < len(keys)
         save = (
             f"<div class='set-save'><button type='submit' class='primary'>Save {html.escape(title)}"
-            "</button></div>"
+            "</button><span class='ui-hint unsaved' aria-live='polite'></span></div>"
             if editable
             else "<p class='muted small set-save'>Every setting here is set in your stack.</p>"
         )
@@ -486,42 +494,25 @@ def settings_body(
             f"<input type='hidden' name='csrf' value='{html.escape(csrf)}'>"
             f"<input type='hidden' name='group' value='{group}'>{fields}{save}</form>"
         )
-        intro_html = f"<p class='muted intro'>{html.escape(intro)}</p>"
+        intro_html = f"<p class='ui-sub intro'>{html.escape(intro)}</p>"
+        stack = label_html(f"{n_locked} set in your stack", "grey", "lock") if n_locked else ""
         if group in FOLDED:
-            is_open = " open" if (focus == group or any(k in outcome.errors for k in keys)) else ""
-            inner = f"<details{is_open}><summary>{html.escape(title)}</summary>{intro_html}{form}</details>"
+            opened = focus == group or any(k in outcome.errors for k in keys) or (locked_only and n_locked)
+            inner = (
+                f"<details{' open' if opened else ''}><summary><span class='sum'>"
+                f"<span class='h2'>{html.escape(title)}</span>"
+                f"<span class='ui-sub'>{len(keys)} setting{'' if len(keys) == 1 else 's'}</span>"
+                f"{stack}</span>{icon('chev')}</summary>"
+                f"{intro_html}{form}</details>"
+            )
         else:
-            inner = f"<h2>{html.escape(title)}</h2>{intro_html}{form}"
+            inner = f"<div class='gh'><h2>{html.escape(title)}</h2>{stack}</div>{intro_html}{form}"
         parts.append(
-            f"<section class='card set-group' id='g-{group}' aria-label='{html.escape(title)}'>"
-            f"{inner}</section>"
+            f"<section class='ui-card set-group{' has-locked' if n_locked else ''}' id='g-{group}' "
+            f"aria-label='{html.escape(title)}'>{inner}</section>"
         )
-    return "".join(parts)
-
-
-def _stack_summary(live: LiveSettings) -> str:
-    """One line at the top naming every setting the stack sets, by its name on
-    the page (for five, the whole wording in LINK_TEXT) and its variable, each a link to its row
-    (a folded group opens), so the operator can see which lines to remove from the stack to manage
-    those settings here. Nothing when the stack sets none."""
-    locked = [spec for spec in MANAGED_SETTINGS.values() if live.locked(spec.key)]
-    if not locked:
-        return ""
-    links = "".join(
-        f"<li><a href='{f'?open={spec.group}' if spec.group in FOLDED else ''}#s-row-{spec.key}'>"
-        f"{html.escape(link_text(spec.key))} (<code>{html.escape(spec.env).replace('_', '_<wbr>')}</code>)"
-        "</a></li>"
-        for spec in locked
-    )
-    n = len(locked)
-    one = n == 1
-    return (
-        "<div class='set-stack' role='note'>"
-        f"<p>Your stack sets {n} of the settings on this page, so {'it' if one else 'they'} can only be "
-        f"changed there. To manage {'it' if one else 'one'} here instead, remove its variable from your "
-        "stack, then redeploy.</p>"
-        f"<ul class='set-stack-list' role='list' aria-label='Settings your stack sets'>{links}</ul></div>"
-    )
+    cls = "set-page only-locked" if locked_only else "set-page"
+    return f"<div class='{cls}'>{''.join(parts)}</div>"
 
 
 def chatgpt_name_warning(live: LiveSettings) -> str:
@@ -558,33 +549,65 @@ def _row(
     reset = ""
     if d["source"] == "dashboard":
         reset = (
-            f"<button type='submit' class='btn reset' name='reset' value='{key}' formnovalidate>"
+            f"<button type='submit' class='btn-plain reset' name='reset' value='{key}' formnovalidate>"
             f"Back to default ({html.escape(shown(spec, spec.default))})</button>"
         )
-    badge = "<span class='badge set-badge'>After a restart</span>" if spec.restart else ""
+    badges = (label_html("After a restart", "grey", "refresh", cls="set-badge") if spec.restart else "") + (
+        label_html("Set in your stack", "grey", "lock", cls="set-badge") if locked else ""
+    )
     title = (
-        f"<span class='set-label' id='l-{key}'>{html.escape(name)}{badge}</span>"
+        f"<span class='set-label' id='l-{key}'>{html.escape(name)}</span>"
         if spec.kind == "bool" or (spec.kind == "choice" and spec.labels)
-        else f"<label class='set-label' for='f-{key}'>{html.escape(name)}{badge}</label>"
+        else f"<label class='set-label' for='f-{key}'>{html.escape(name)}</label>"
     )
     confirm = ""
     if key in CONFIRM and not locked and (CONFIRM[key][0] == "lower" or d["value"]):
-        confirm = (
-            f"<label class='set-confirm small'><input type='checkbox' name='confirm_{key}' value='yes'>"
-            f"{html.escape(CONFIRM[key][1])}</label>"
-        )
+        confirm = _confirm(spec, d["value"], outcome.posted.get(key))
     return (
         f"<div class='set-row{' bad' if err else ''}{' locked' if locked else ''}' id='s-row-{key}'>"
-        f"<div class='set-text'>{title}"
+        f"<div class='set-text'><div class='sl'>{title}{badges}</div>"
         + (
-            f"<p class='set-help muted small' id='{help_id}'>{html.escape(help_text)}</p>"
+            f"<p class='set-help' id='{help_id}'>{html.escape(help_text)}</p>"
             if help_text
             else f"<span id='{help_id}' hidden></span>"
         )
-        + f"<p class='set-src small' id='s-{key}'>{src}</p>"
-        + (f"<p class='set-warn small' id='w-{key}'>{html.escape(warn)}</p>" if warn else "")
-        + (f"<p class='set-err small' id='e-{key}' role='alert'>{html.escape(err)}</p>" if err else "")
+        + f"<p class='set-src' id='s-{key}'>{src}</p>"
+        + (f"<p class='set-warn' id='w-{key}'>{html.escape(warn)}</p>" if warn else "")
+        + (f"<p class='set-err' id='e-{key}' role='alert'>{html.escape(err)}</p>" if err else "")
         + f"</div><div class='set-ctl'>{control}{reset}</div>{confirm}</div>"
+    )
+
+
+def _confirm(spec: SettingSpec, saved: Any, posted: str | None) -> str:
+    """The tick that confirms turning a setting off or lowering it (CONFIRM). It is asked on every
+    save that lowers the value (apply_form refuses one without it). With scripts it shows only once
+    the value is typed lower or switched off (static/settings.js fills in the first sentence);
+    without them it shows all the time, as before. After a refused save it shows with the value
+    that was sent."""
+    key = spec.key
+    rule = CONFIRM[key][0]
+    what = "turning this off" if rule == "off" else "lowering this"
+    said = ""
+    if posted is not None:
+        try:
+            value = spec.parse(posted)
+        except SettingError:
+            value = saved
+        if needs_confirm(key, saved, value):
+            said = (
+                "You turned this off."
+                if rule == "off"
+                else f"You lowered this from {shown(spec, saved)} to {shown(spec, value)}."
+            )
+    start = "on" if (rule == "off" and saved) else ("off" if rule == "off" else _plain(saved))
+    return (
+        f"<div class='set-confirm' role='group' aria-labelledby='c-{key}' data-confirm='{rule}' "
+        f"data-from='{html.escape(start)}' data-unit='{html.escape(spec.unit or '')}'"
+        f"{' data-shown' if said else ''}>"
+        f"<p class='lead' id='c-{key}'{'' if said else ' hidden'}>{icon('alert')}<span>"
+        f"<span class='said'>{html.escape(said)}</span> Tick the box below to confirm {what}.</span></p>"
+        f"<label class='tick'><input type='checkbox' name='confirm_{key}' value='yes'>"
+        f"<span>{html.escape(CONFIRM[key][1])}</span></label></div>"
     )
 
 
@@ -655,13 +678,16 @@ def _control(spec: SettingSpec, value: Any, *, locked: bool, described: str) -> 
         if spec.zero_ok
         else f"{_number(spec.lo)} to {_number(spec.hi)}"
     )
-    unit = f"<span class='unit'>{html.escape(spec.unit)}</span>" if spec.unit else ""
+    # the unit sits inside the box at its right, so every box is the same width (K-04)
+    unit = f"<span class='unit' id='u-{key}'>{html.escape(spec.unit)}</span>" if spec.unit else ""
+    unit_id = f" u-{key}" if spec.unit else ""
     return (
-        f"<div class='set-num'><input type='number' id='f-{key}' name='{name}' "
+        f"<span class='set-num{' has-u' if spec.unit else ''}'>"
+        f"<input type='number' id='f-{key}' name='{name}' "
         f"value='{html.escape(shown_value)}' min='{lo}' max='{_plain(spec.hi)}' step='{step}' "
         f"inputmode='{'numeric' if spec.kind == 'int' else 'decimal'}' "
-        f"aria-describedby='{described} r-{key}'{dis}>{unit}</div>"
-        f"<p class='muted small range' id='r-{key}'>Allowed: {html.escape(span)}</p>"
+        f"aria-describedby='{described}{unit_id} r-{key}'{dis}>{unit}</span>"
+        f"<p class='range' id='r-{key}'>Allowed: {html.escape(span)}</p>"
     )
 
 

@@ -95,6 +95,10 @@ button.danger:disabled{color:var(--red)}
   function statusWord(x) {
     return { updated: "Updated", needs_look: "Needs a look", held: "Held" }[x.status] || "Waiting";
   }
+  // the risk words of the Proposals page: Low, High, Your press (always waits for you), Delete
+  function riskWord(x) {
+    return { low: "Low", high: "High", consent: "Your press", destructive: "Delete" }[x.risk] || "";
+  }
   function stillWaiting() {
     return set ? set.ids.filter(function (id) { return !decided[id]; }) : [];
   }
@@ -112,6 +116,7 @@ button.danger:disabled{color:var(--red)}
       var what = el("span", "what");
       what.appendChild(el("span", "name", label(x)));
       var sub = [statusWord(x), "by " + creator(x.created_by), ago(x.created_at)];
+      if (riskWord(x)) sub.splice(1, 0, riskWord(x));
       if (Number(x.version) > 1 && !x.changed_by) sub.push("Version " + Number(x.version));
       if (!data.deck_id && x.deck_name) sub.unshift(String(x.deck_name));
       what.appendChild(el("span", "sub", sub.join(" · ")));

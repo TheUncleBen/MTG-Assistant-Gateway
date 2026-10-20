@@ -204,6 +204,9 @@ body.picker-open{overflow:hidden}
   background:var(--bg,#181818);border-top:1px solid var(--s-border-soft)}
 .scan .controls > :first-child{justify-self:end} .scan .controls > :last-child{justify-self:start}
 .scan .controls button,.scan .controls .btn{width:auto}
+/* always a circle: the rule above must not size it, and inside the Android app a fourth button
+   ("Phone camera") puts it in a wide column, where it used to stretch into an oval */
+.scan .controls .shutter{width:min(4.75rem,20vw);flex:none;justify-self:center;aspect-ratio:1}
 .scan .shutter{width:min(4.75rem,20vw);height:min(4.75rem,20vw);min-width:min(4.75rem,20vw);border-radius:50%;border:4px solid #fff;
   background:var(--s-accent);box-shadow:0 0 0 3px var(--s-accent),0 2px 8px rgba(0,0,0,.5);padding:0;
   color:var(--s-on-accent);transition:transform .1s;display:inline-flex;align-items:center;justify-content:center}

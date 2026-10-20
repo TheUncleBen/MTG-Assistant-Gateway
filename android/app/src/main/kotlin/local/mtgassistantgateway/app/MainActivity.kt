@@ -7,7 +7,9 @@ import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.pm.ShortcutInfo
 import android.content.pm.ShortcutManager
+import android.graphics.drawable.Icon
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
@@ -436,16 +438,48 @@ class MainActivity : ComponentActivity() {
 
     /**
      * The launcher shortcuts are static now (res/xml/shortcuts.xml), so they show before the app has
-     * ever run. Versions up to 0.7.21 published the same three as dynamic shortcuts; those are
-     * removed so a long press never lists them twice. A shortcut someone pinned to the home screen
-     * keeps working: it carries a gateway link, which [takeLink] opens like any other.
+     * ever run. Versions up to 0.7.21 published the first three as dynamic shortcuts (IDs decks,
+     * scan, proposals); those are removed so a long press never lists them twice. A shortcut someone
+     * pinned to the home screen keeps working: it carries a gateway link, which [takeLink] opens
+     * like any other. The app's own Watchlist shortcut ([syncWatchlistShortcut]) stays.
      */
     private fun dropDynamicShortcuts() {
         val sm = getSystemService(ShortcutManager::class.java) ?: return
         try {
-            if (sm.dynamicShortcuts.isNotEmpty()) sm.removeAllDynamicShortcuts()
+            val old = sm.dynamicShortcuts.map { it.id }.filter { it in setOf("decks", "scan", "proposals") }
+            if (old.isNotEmpty()) sm.removeDynamicShortcuts(old)
         } catch (e: IllegalStateException) {
             Log.w(TAG, "old shortcuts not removed: ${e.message}") // a locked user: tried again next launch
+        }
+    }
+
+    /**
+     * The Watchlist launcher shortcut, only while the gateway's watchlists are on: each signed-in
+     * gateway page says so ([GatewayUrl.WATCHLIST_PROBE]); it is added or removed to match.
+     */
+    private fun syncWatchlistShortcut(on: Boolean) {
+        val sm = getSystemService(ShortcutManager::class.java) ?: return
+        val id = GatewayUrl.dynamicShortcutId("watchlist")
+        try {
+            val has = sm.dynamicShortcuts.any { it.id == id }
+            if (on && !has) {
+                val intent = Intent(GatewayUrl.SHORTCUT_ACTION)
+                    .setClassName(packageName, MainActivity::class.java.name)
+                    .putExtra(GatewayUrl.SHORTCUT_PAGE, "watchlist")
+                val info = ShortcutInfo.Builder(this, id)
+                    .setShortLabel(getString(R.string.shortcut_watchlist))
+                    .setIcon(Icon.createWithResource(this, R.mipmap.ic_launcher))
+                    .setIntent(intent)
+                    .setRank(0)
+                    .build()
+                sm.addDynamicShortcuts(listOf(info))
+            } else if (!on && has) {
+                sm.removeDynamicShortcuts(listOf(id))
+            }
+        } catch (e: IllegalStateException) {
+            Log.w(TAG, "watchlist shortcut not changed: ${e.message}") // a locked user: next page tries again
+        } catch (e: IllegalArgumentException) {
+            Log.w(TAG, "watchlist shortcut not changed: ${e.message}") // over the launcher's limit
         }
     }
 
@@ -992,6 +1026,12 @@ class MainActivity : ComponentActivity() {
             // camera and take the lens from the panel, so the panel closes first; the glue is installed
             // fresh and the person taps Scan again.
             if (camera != null) closeCamera()
+            // The Watchlist launcher shortcut follows the gateway's watchlists (on or off)
+            if (gateway) {
+                view.evaluateJavascript(GatewayUrl.WATCHLIST_PROBE) { v ->
+                    GatewayUrl.watchlistShortcutWanted(v)?.let { syncWatchlistShortcut(it) }
+                }
+            }
             if (gateway && GatewayUrl.pathStartsWith(url, "/scan")) {
                 scanPageReady()
             } else {

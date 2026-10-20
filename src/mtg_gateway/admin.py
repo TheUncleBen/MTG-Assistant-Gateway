@@ -19,10 +19,10 @@ from urllib.parse import parse_qs, quote
 from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
 
-from . import idp_sweep, settings_page, update_check
-from .companion import card_model_line, member_name
+from . import activity_view, idp_sweep, settings_page, update_check
+from .companion import member_name
 from .config import MANAGED_SETTINGS
-from .decks import ADMIN_CLIENT, actor_label, current_client
+from .decks import ADMIN_CLIENT, current_client
 from .pages import (
     BROWSER_CLIENT_ID,
     _csrf,
@@ -100,6 +100,8 @@ def add_admin_routes(server: MCPServer, state: AppState) -> None:
         sid: str | None = None,
         sid_sub: str | None = None,
         head_extra: str = "",
+        heading: bool = True,
+        main_class: str = "",
     ) -> Response:
         return render(
             title,
@@ -111,6 +113,8 @@ def add_admin_routes(server: MCPServer, state: AppState) -> None:
             admin=True,
             user=display_name(state.db.get_user(sid_sub) if sid_sub else None),
             head_extra=head_extra,
+            heading=heading,
+            main_class=main_class,
         )
 
     def not_found(api: bool) -> Response:
@@ -297,13 +301,14 @@ def add_admin_routes(server: MCPServer, state: AppState) -> None:
         if isinstance(who, Response):
             return who
         sub, sid = who
-        only = request.query_params.get("sub") or None
-        rows = state.db.audit_recent(200, sub=only)
         return page(
             "Admin: activity",
-            _nav("/admin/activity") + _activity_body(state, rows, only),
+            activity_view.admin_body(state, request.query_params, nav=_nav("/admin/activity")),
             sid=sid,
             sid_sub=sub,
+            head_extra=activity_view.HEAD_ADMIN,
+            heading=False,
+            main_class="ui-wide",
         )
 
     def settings_page_response(
@@ -314,6 +319,7 @@ def add_admin_routes(server: MCPServer, state: AppState) -> None:
         notice: str = "",
         focus: str | None = None,
         status: int = 200,
+        locked_only: bool = False,
     ) -> Response:
         body = settings_page.settings_body(
             state.live,
@@ -326,6 +332,7 @@ def add_admin_routes(server: MCPServer, state: AppState) -> None:
             outcome=outcome,
             notice=notice,
             focus=focus,
+            locked_only=locked_only,
         )
         return page(
             "Admin: settings",
@@ -333,7 +340,8 @@ def add_admin_routes(server: MCPServer, state: AppState) -> None:
             status=status,
             sid=sid,
             sid_sub=sub,
-            head_extra=f"<style>{settings_page.SETTINGS_CSS}</style>",
+            head_extra=f"<style>{settings_page.SETTINGS_CSS}</style>"
+            "<script src='/static/settings.js' defer></script>",
         )
 
     @server.custom_route("/admin/settings", methods=["GET"], include_in_schema=False)
@@ -354,7 +362,9 @@ def add_admin_routes(server: MCPServer, state: AppState) -> None:
             except ValueError:
                 since = 0
             notice = settings_page.changes_notice(_saved_changes(state, sub, since))
-        return settings_page_response(sub, sid, notice=notice, focus=focus)
+        return settings_page_response(
+            sub, sid, notice=notice, focus=focus, locked_only=q.get("locked") == "1"
+        )
 
     @server.custom_route("/admin/settings", methods=["POST"], include_in_schema=False)
     async def settings_post(request: Request) -> Response:
@@ -740,7 +750,12 @@ def users_data(state: Any) -> list[dict[str, Any]]:
 
 
 # -- HTML -------------------------------------------------------------------------
+CURRENT = " aria-current='page'"
+
+
 def _nav(active: str) -> str:
+    """The admin pages' own tabs (all six pages): even links in full rows, the current one tinted
+    and marked aria-current, not a second orange button (one orange main button per page)."""
     links = (("/admin", "Overview"), ("/admin/users", "Users"), ("/admin/activity", "Activity"))
     links += (
         ("/admin/metrics", "Metrics"),
@@ -748,12 +763,9 @@ def _nav(active: str) -> str:
         ("/admin/models", "Card models"),
     )
     return (
-        "<div class='actions' role='navigation' aria-label='Admin'>"
-        + "".join(
-            f"<a class='btn{' btn-primary' if href == active else ''}' href='{href}'>{label}</a>"
-            for href, label in links
-        )
-        + "</div>"
+        "<nav class='adm-nav' aria-label='Admin'>"
+        + "".join(f"<a href='{href}'{CURRENT if href == active else ''}>{label}</a>" for href, label in links)
+        + "</nav>"
     )
 
 
@@ -1014,41 +1026,6 @@ def _users_body(state: Any, admin_sub: str, csrf: str | None) -> str:
         "gateway only.</p>"
         f"<ul class='plain plist'>{''.join(items)}</ul></div>"
     )
-
-
-def _activity_body(state: Any, rows: list[dict[str, Any]], only: str | None) -> str:
-    head = ""
-    if only:
-        head = (
-            f"<p class='muted small'>Showing <code>{html.escape(only)}</code> only. "
-            "<a href='/admin/activity'>Show everyone</a></p>"
-        )
-    if not rows:
-        return f"<div class='card'>{head}<p>No activity recorded.</p></div>"
-    names = state.db.client_names(r.get("client_id") for r in rows if r.get("client_id") != BROWSER_CLIENT_ID)
-    items = []
-    for r in rows:
-        event = str(r["event"])
-        cls = "danger" if ("rejected" in event or "refused" in event or "reuse" in event) else ""
-        if event.startswith("admin_"):
-            cls = "warn"
-        detail = ""
-        said = settings_page.change_line(r.get("detail")) if event == "setting_changed" else None
-        if event == "card_model_removed" and isinstance(r.get("detail"), dict):
-            said = card_model_line(r["detail"], member_name(state.db, r["detail"].get("added_by")))
-        if said:
-            detail = f"<span class='small'>{html.escape(said)}</span>"
-        elif r.get("detail"):
-            detail = f"<code>{html.escape(json.dumps(r['detail'], sort_keys=True)[:300])}</code>"
-        cid = r.get("client_id")
-        client = actor_label(cid, names.get(cid) if cid and cid != BROWSER_CLIENT_ID else None)
-        items.append(
-            f"<li><span class='badge {cls}'>{html.escape(event)}</span>"
-            f"<span class='name'>{html.escape(r.get('sub') or '')}</span>"
-            f"<span class='muted small'>{html.escape(str(client)[:60])}</span>{detail}"
-            f"<span class='when'>{_when(r['at'])}</span></li>"
-        )
-    return f"<div class='card'>{head}<ul class='plain plist'>{''.join(items)}</ul></div>"
 
 
 def _metrics_body(state: Any) -> str:

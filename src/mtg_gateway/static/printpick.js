@@ -7,7 +7,9 @@
    preview printings too, each labelled. Hovering a tile (or focusing it) shows the whole card in
    the preview pane beside the list on a wide screen; a tap or click on a tile shows it there (a
    sheet over the list on a narrower screen) with "Use this printing". The page decides what a
-   pick does (save at once, queue it, add a card): opts.onPick(printing, info).
+   pick does (save at once, queue it, add a card): opts.onPick(printing, info). Browse mode
+   (Art variants…, from Card search and the deck page's card menu): opts.onWatch(printing, finish)
+   adds "Watch this printing" beside the pick, or alone when there is no onPick.
    A dialog with a focus trap; Escape, the close button and a click on the backdrop close it.
    Loaded before deck.js and companion.js, which call window.MtgPrintPick. */
 (function () {
@@ -238,10 +240,11 @@
 
   /* opts: {name, current: {set, number} | null (the deck's printing, marked Current), pending:
      {set, number} | null (a pick not saved yet, marked Picked), finish: the card's finish
-     ("normal" / "foil" / "etched", or Archidekt's Normal...), pickLabel, onPick(printing, info)}
+     ("normal" / "foil" / "etched", or Archidekt's Normal...), pickLabel, onPick(printing, info),
+     onWatch(printing, finish) returning a promise (browse mode; onPick may then be left out)}
      info: {finish: "normal" | "foil" | "etched", changed: bool, from: the finish it had} */
   function open(opts) {
-    if (!opts || !opts.name || typeof opts.onPick !== "function") return;
+    if (!opts || !opts.name || (typeof opts.onPick !== "function" && typeof opts.onWatch !== "function")) return;
     ensure();
     if (isOpen()) close();
     lastFocus = opts.returnFocus || document.activeElement;
@@ -656,15 +659,29 @@
         FINISH_NAMES[fit.finish].toLowerCase() + " with this printing."));
     }
     var acts = el("div", "ppacts");
-    var use = el("button", "btn-primary ppuse", same ? (samePrint(p, o.pending) ? "Already picked" : "Already in the deck") : (o.pickLabel || "Use this printing"));
-    use.type = "button";
-    use.disabled = same;
-    use.addEventListener("click", function () {
-      var opts = st.opts, from = deckFinish(st.finish);
-      close();
-      opts.onPick(p, { finish: deckFinish(fit.finish), changed: fit.changed, from: from });
-    });
-    acts.appendChild(use);
+    if (typeof o.onPick === "function") {
+      var use = el("button", "btn-primary ppuse", same ? (samePrint(p, o.pending) ? "Already picked" : "Already in the deck") : (o.pickLabel || "Use this printing"));
+      use.type = "button";
+      use.disabled = same;
+      use.addEventListener("click", function () {
+        var opts = st.opts, from = deckFinish(st.finish);
+        close();
+        opts.onPick(p, { finish: deckFinish(fit.finish), changed: fit.changed, from: from });
+      });
+      acts.appendChild(use);
+    }
+    if (typeof o.onWatch === "function") {
+      // browse mode: watch this printing's price (in the finish shown), the dialog stays open
+      var watch = el("button", (typeof o.onPick === "function" ? "btn" : "btn-primary") + " ppwatch", "Watch this printing");
+      watch.type = "button";
+      watch.addEventListener("click", function () {
+        watch.disabled = true;
+        Promise.resolve(o.onWatch(p, fit.finish)).then(function () {
+          watch.textContent = "Watching";
+        }, function () { watch.disabled = false; });
+      });
+      acts.appendChild(watch);
+    }
     var back = el("button", "btn ppback", "Back to printings");
     back.type = "button";
     back.addEventListener("click", hidePreview);

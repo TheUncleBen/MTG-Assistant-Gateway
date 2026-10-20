@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
@@ -12,6 +13,7 @@ from starlette.responses import JSONResponse, RedirectResponse, Response
 from . import deck_stats
 from .archidekt import Deck
 from .busy import _headers, busy_body, busy_json_response, busy_plan, busy_response, busy_text_response
+from .cardsearch_view import watched_names
 from .companion import DECK_CSP, DECK_ERR_MESSAGES, EDITOR_CSP, TEXT_PLAIN, _filename, _json_for_html
 from .decklist import DecklistError, parse_decklist
 from .deckpage import (
@@ -32,8 +34,12 @@ from .pages import (
     read_limited,
 )
 from .reports import NO_FORGE_TO_SHARE, PAIR_NO_FORGE
+from .reports_page import CHIPS as REPORTS_CHIPS
 from .reports_page import PAGE as REPORTS_PAGE
 from .reports_page import REPORTS_PAGE_CSS, reports_page_html
+from .reports_page import Query as ReportsQuery
+from .reports_page import in_chip as reports_in_chip
+from .reports_page import matches as reports_matches
 from .theme import (
     esc as _esc,
 )
@@ -180,6 +186,12 @@ def add_deck_tool_routes(
             "outsideCategories": outside,
         }
         side_name = _esc(deck.side_category())
+        # Each suggestion in the add box has the card menu (static/cardmenu.js); with
+        # watchlists on also a Watch button, "Watching" for the names the member watches already
+        watch_attr = " data-suggest-menu"
+        if state.prices is not None:
+            watched = sorted(watched_names(state.prices.watched_cards(sub)))[:200]
+            watch_attr = f" data-suggest-watch='{_esc(json.dumps(watched))}'"
         body = (
             f"<script id='editor-config' type='application/json'>{_json_for_html(config)}</script>"
             "<div id='editor' class='editor'>"
@@ -236,7 +248,7 @@ def add_deck_tool_routes(
             f"{side_name}</button></div>"
             "<div class='field grow'><label for='addname'>Card name</label>"
             "<input id='addname' type='text' name='card' data-suggest='cards' data-suggest-submit "
-            "data-suggest-rich data-suggest-qty placeholder='Type a card name; Enter adds one, "
+            f"data-suggest-rich data-suggest-qty{watch_attr} placeholder='Type a card name; Enter adds one, "
             "“3 sol ring” adds three' autocomplete='off' required>"
             "<div class='addprints' hidden aria-label='Printings' role='group'></div></div>"
             f"<div class='field go'><button class='btn-primary'>{icon('plus')} Add</button>"
@@ -569,22 +581,63 @@ def add_deck_tool_routes(
         sub, sid = browser_session(state, request)
         if not sub:
             return login_redirect("/reports")
-        qp = request.query_params
-        deck_id = (qp.get("deck_id") or "").strip()[:40]
-        try:
-            offset = max(0, min(int(qp.get("offset") or 0), 2000))
-        except ValueError:
-            offset = 0
-        rows = reports.list(sub, deck_id or None, limit=REPORTS_PAGE + 1, offset=offset)
+        query = ReportsQuery.parse(request.query_params)
+        now = time.time()
+        index = reports.index(sub)
+        apps = state.db.client_names({str(r["created_by_client"] or "") for r in index})
+        passing = [r for r in index if reports_matches(r, query, apps, now)]
+        if query.order:
+            passing.reverse()
+        counts = {key: sum(1 for r in passing if reports_in_chip(r, key)) for key, _t in REPORTS_CHIPS}
+        shown = [r for r in passing if reports_in_chip(r, query.show)]
+        ids = [r["report_id"] for r in shown[query.offset : query.offset + REPORTS_PAGE]]
+        rows = reports.summaries(sub, ids)
+        latest = None
+        if index:
+            got = [r for r in rows if r["report_id"] == index[0]["report_id"]]
+            latest = got[0] if got else (reports.summaries(sub, [index[0]["report_id"]]) or [None])[0]
+        # the newest three decks tested: their newest lethal turn and the one before (two reports each)
+        # the newest three decks tested: the lethal turn of each one's newest report and the one before
+        two: dict[str, list[dict[str, Any]]] = {}
+        for r in index:
+            if r["deck_id"] in two or len(two) < 3:
+                two.setdefault(r["deck_id"], [])
+                if len(two[r["deck_id"]]) < 2:
+                    two[r["deck_id"]].append(r)
+        nums = reports.headlines(sub, [r["report_id"] for pair in two.values() for r in pair])
+        trends = [
+            {
+                "deck_name": pair[0]["deck_name"],
+                "latest": (nums.get(pair[0]["report_id"]) or {}).get("kill_median_turn"),
+                "previous": (nums.get(pair[1]["report_id"]) or {}).get("kill_median_turn")
+                if len(pair) > 1
+                else None,
+            }
+            for pair in two.values()
+        ]
         body = reports_page_html(
-            rows[:REPORTS_PAGE],
+            index,
+            rows,
+            query=query,
+            total=len(shown),
+            counts=counts,
             runs=reports.forge_queue(sub),
             decks=reports.decks_seen(sub),
-            deck_id=deck_id,
-            offset=offset,
-            has_more=len(rows) > REPORTS_PAGE,
+            apps=apps,
+            latest=latest,
+            trends=trends,
+            now=now,
         )
-        return page("Reports", body, sub=sub, sid=sid, current="/reports", extra_css=REPORTS_PAGE_CSS)
+        return page(
+            "Reports",
+            body,
+            sub=sub,
+            sid=sid,
+            current="/reports",
+            heading=False,
+            main_class="ui-wide",
+            extra_css=REPORTS_PAGE_CSS,
+        )
 
     @server.custom_route("/decks/{deck_id}/goldfish", methods=["GET"], include_in_schema=False)
     async def goldfish_page(request: Request) -> Response:

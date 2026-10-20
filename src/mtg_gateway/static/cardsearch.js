@@ -496,24 +496,10 @@
   // chips the page came with show their full names once the lists are known (cheap after a day)
   if ($$("[data-picker] .chips li", form).length) loadOptions().catch(function () { /* codes stay */ });
 
-  // -- toast: what was saved, with a link to the deck; errors stay until dismissed ---------------
-  var toastEl = null, toastTimer = null;
-  function dismissToast() { if (toastEl) toastEl.remove(); toastEl = null; clearTimeout(toastTimer); }
-  function toast(text, opts) {
-    opts = opts || {};
-    dismissToast();
-    toastEl = el("div", "toast cards-toast" + (opts.error ? " error" : ""));
-    toastEl.setAttribute("role", opts.error ? "alert" : "status");
-    toastEl.appendChild(el("span", "msg", text));
-    (opts.actions || []).forEach(function (a) { toastEl.appendChild(a); });
-    var x = el("button", "close icon-only", "×");
-    x.type = "button";
-    x.setAttribute("aria-label", "Dismiss");
-    x.addEventListener("click", dismissToast);
-    toastEl.appendChild(x);
-    document.body.appendChild(toastEl);
-    if (!opts.error) toastTimer = setTimeout(dismissToast, opts.ms || 9000);
-  }
+  // -- toast: what was saved, with a link to the deck; errors stay until dismissed (the shared
+  // one, static/cardmenu.js) ------------------------------------------------------------------
+  var Menu = window.MtgCardMenu;
+  function toast(text, opts) { Menu.toast(text, opts); }
 
   // -- the card viewer: the picture button's data attributes, plus Add to deck and Scryfall ------
   function viewerActions(node) {
@@ -829,4 +815,69 @@
       setMsg(d.message || "The card could not be added.", true);
     }).catch(function () { busy(false); setMsg("No connection; nothing was changed.", true); });
   }
+  // -- Watch: the Watch button on each result, the card menu and Art variants… -------------
+  // Only with watchlists on: the server draws the Watch buttons and the page hint then. A watch
+  // goes through the shared static/cardmenu.js (a printing search sends the shown printing), as
+  // do the menu and its toast with Undo.
+  var norm = Menu.norm;
+  function setWatched(name, on) {
+    $$(".wbtn[data-watch]", results).forEach(function (b) {
+      var n = b.getAttribute("data-watch");
+      if (norm(n) === norm(name)) Menu.drawButton(b, n, on);
+    });
+  }
+  function isWatched(name) {
+    return $$(".wbtn.on[data-watch]", results).some(function (b) { return norm(b.getAttribute("data-watch")) === norm(name); });
+  }
+  // what: {name, set_code, collector_number, finish}; resolves with the watch, rejects on a refusal
+  function watch(what, btn) {
+    return Menu.watch(what, { btn: btn, was: isWatched(what.name), onState: function (on) { setWatched(what.name, on); } });
+  }
+  function watchOf(btn) {
+    var p = pinOf(btn) || {};
+    return { name: btn.getAttribute("data-watch"), set_code: p.set_code, collector_number: p.collector_number };
+  }
+  results.addEventListener("click", function (e) {
+    var b = e.target.closest(".wbtn[data-watch]");
+    if (!b || b.disabled) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (b.classList.contains("on")) {
+      var n = b.getAttribute("data-watch");
+      toast(n + " is on your watchlist.", { ok: true, actions: [Menu.listLink(n)] });
+      return;
+    }
+    watch(watchOf(b), b).catch(function () { /* the toast said why */ });
+  }, true);
+
+  // the card menu: right-click, press and hold, the Menu key or Shift+F10 on a result
+  function openMenu(item, x, y) {
+    var pic = item.querySelector(".pic");
+    if (!pic) return;
+    var name = pic.getAttribute("data-card") || "";
+    var wbtn = item.querySelector(".wbtn[data-watch]");
+    var addBtn = item.querySelector("button[data-add]");
+    Menu.open({
+      name: name,
+      onOpen: function () { openViewer(pic); },
+      watch: wbtn ? {
+        watched: wbtn.classList.contains("on"),
+        onWatch: function () { watch(watchOf(wbtn), wbtn).catch(function () {}); },
+        onArt: function () {
+          Menu.artVariants(pic.getAttribute("data-card") || "", {
+            returnFocus: pic, onState: function (on) { setWatched(name, on); }, was: function () { return isWatched(name); }
+          });
+        }
+      } : null,
+      onAdd: function () { openSheet(name, addBtn ? pinOf(addBtn) : null); },
+      addDisabled: linked ? "" : "Link your Archidekt account on the Account page to add cards to a deck.",
+      scry: pic.getAttribute("data-scry"),
+      focusBack: pic
+    }, x, y);
+  }
+  function itemOf(target) {
+    var li = target && target.closest ? target.closest("li") : null;
+    return li && results.contains(li) && !li.classList.contains("hd") && li.querySelector(".pic") ? li : null;
+  }
+  Menu.bind(results, { itemOf: itemOf, skip: ".wbtn, button[data-add]", open: openMenu });
 })();

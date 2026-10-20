@@ -36,7 +36,7 @@ from .forge import (
     summarise,
 )
 from .mf_proxy import FULL_REPORT, MysticForgeProxy, busy_retry_after, is_busy
-from .report_view import PREFLIGHT_ONLY, goldfish_settings, speed_numbers
+from .report_view import PREFLIGHT_ONLY, goldfish_settings, parse_goldfish, speed_numbers
 
 logger = logging.getLogger(__name__)
 
@@ -1475,6 +1475,81 @@ class ReportService:
             ).fetchall()
         return {str(r["deck_id"]): str(r["deck_name"] or "") for r in rows}
 
+    def index(self, sub: str) -> list[dict[str, Any]]:
+        """Every stored report of the member (at most MAX_REPORTS_PER_USER), newest first, with only
+        what the Reports page filters and counts by: deck, commanders, who asked, when, the overall
+        status and whether Forge games came. One query; the big result texts stay unread."""
+        with self.db._lock:
+            rows = self.db._conn.execute(
+                "SELECT id, deck_id, deck_name, taken_at, created_by_client, forge_json, "
+                "goldfish_json IS NOT NULL AS g_has, json_extract(goldfish_json, '$.ok') AS g_ok, "
+                "validation_json IS NOT NULL AS v_has, json_extract(validation_json, '$.ok') AS v_ok, "
+                "json_extract(stats_json, '$.commanders') AS commanders FROM reports WHERE owner_sub = ? "
+                "ORDER BY taken_at DESC, rowid DESC",
+                (sub,),
+            ).fetchall()
+        out = []
+        for r in rows:
+            forge = json.loads(r["forge_json"]) if r["forge_json"] else None
+            forge = forge if isinstance(forge, dict) else None
+            goldfish = {"ok": bool(r["g_ok"])} if r["g_has"] else None
+            validation = {"ok": bool(r["v_ok"])} if r["v_has"] else None
+            try:
+                commanders = [str(c) for c in json.loads(r["commanders"] or "[]") if c]
+            except (TypeError, ValueError):
+                commanders = []
+            out.append(
+                {
+                    "report_id": r["id"],
+                    "deck_id": str(r["deck_id"]),
+                    "deck_name": r["deck_name"] or "",
+                    "taken_at": r["taken_at"],
+                    "created_by_client": r["created_by_client"],
+                    "commanders": commanders,
+                    "status": report_status(goldfish, validation, forge),
+                    "forge_played": bool(forge and _forge_played(forge)),
+                    "forge_state": (forge or {}).get("state"),
+                }
+            )
+        return out
+
+    def headlines(self, sub: str, report_ids: list[str]) -> dict[str, dict[str, Any]]:
+        """headline_numbers of some of the member's reports, by report id (the Reports page's
+        Decks tested widget)."""
+        ids = [str(i) for i in report_ids][:MAX_REPORTS_PER_USER]
+        if not ids:
+            return {}
+        with self.db._lock:
+            rows = self.db._conn.execute(
+                "SELECT id, taken_at, stats_json, goldfish_json, forge_json FROM reports "
+                f"WHERE owner_sub = ? AND id IN ({','.join('?' * len(ids))})",
+                (sub, *ids),
+            ).fetchall()
+        return {r["id"]: headline_numbers(dict(r)) for r in rows}
+
+    def summaries(self, sub: str, report_ids: list[str]) -> list[dict[str, Any]]:
+        """The Reports page's rows, in the order of ``report_ids``: list's summary plus the headline
+        numbers a row shows (Forge's win rate for the member's deck with its 95% interval, the solo
+        test's median turn for lethal damage) and the deck's commander."""
+        ids = [str(i) for i in report_ids][:MAX_REPORTS_PER_USER]
+        if not ids:
+            return []
+        with self.db._lock:
+            rows = self.db._conn.execute(
+                f"SELECT * FROM reports WHERE owner_sub = ? AND id IN ({','.join('?' * len(ids))})",
+                (sub, *ids),
+            ).fetchall()
+        by_id = {r["id"]: dict(r) for r in rows}
+        out = []
+        for rid in ids:
+            d = by_id.get(rid)
+            if d is None:
+                continue
+            row = self._summary(d)
+            row.update(headline_numbers(d))
+            out.append(row)
+        return out
+
     def series(self, sub: str, deck_id: str, limit: int = TREND_LIMIT) -> list[dict[str, Any]]:
         """A deck's newest ``limit`` reports oldest first: report_id, taken_at, the trend numbers
         (TREND_KEYS) and the simulation's speed numbers (report_view.speed_numbers), for charts."""
@@ -1758,6 +1833,68 @@ def report_status(goldfish: Any, validation: Any, forge: Any) -> str:
     if parts and not any(some):
         return "failed"
     return "complete" if all(parts) else "partial"
+
+
+# The headline numbers of a stored report (headline_numbers), by report id, its time and the size
+# of its stored results: reading them parses the solo test's text, and a stored report's results
+# change only when its Forge games do (then the forge part's size changes too).
+_HEADLINES: dict[tuple[Any, ...], dict[str, Any]] = {}
+_HEADLINES_MAX = 1024
+
+
+def headline_numbers(d: dict[str, Any]) -> dict[str, Any]:
+    """A stored report's headline numbers (``d`` is its database row) for a list row or a widget:
+    ``win`` (the member's deck's Forge win rate, its 95% interval, the games and the opponents,
+    once a game has finished), the Forge run's ``forge_state`` and games played and asked for,
+    the solo test's ``kill_median_turn`` and the damage that counts as lethal (``kill_damage``:
+    40, or 20 in a 60-card game), whether the deck is ``constructed``, and its ``commander``
+    (front face). A missing number is None, never guessed."""
+    key = (d.get("id"), d.get("taken_at"), len(d.get("goldfish_json") or ""), len(d.get("forge_json") or ""))
+    hit = _HEADLINES.get(key)
+    if hit is not None:
+        return dict(hit)
+    stats = json.loads(d["stats_json"]) if d.get("stats_json") else {}
+    goldfish = json.loads(d["goldfish_json"]) if d.get("goldfish_json") else None
+    forge = json.loads(d["forge_json"]) if d.get("forge_json") else None
+    forge = forge if isinstance(forge, dict) else {}
+    res = forge.get("result") if isinstance(forge.get("result"), dict) else {}
+    seats = [s for s in res.get("seats") or [] if isinstance(s, dict)]
+    win = None
+    if seats and isinstance(seats[0].get("win_rate"), (int, float)) and res.get("games"):
+        low, high = (seats[0].get("win_rate_95") or [None, None])[:2]
+        win = {
+            "rate": float(seats[0]["win_rate"]),
+            "lo": low if isinstance(low, (int, float)) else None,
+            "hi": high if isinstance(high, (int, float)) else None,
+            "games": res.get("games"),
+            "opponents": len(seats) - 1,
+        }
+    g = parse_goldfish(goldfish) if isinstance(goldfish, dict) else None
+    kill = None
+    if g and g["ok"]:
+        m = g.get("metrics") or {}
+        k = m.get("kill") if isinstance(m.get("kill"), dict) else {}
+        kill = k.get("median_among_reached")
+        kill = float(kill) if isinstance(kill, (int, float)) and not isinstance(kill, bool) else None
+    constructed = bool(g and g.get("format") == "constructed") or (
+        RUN_KEY in stats and isinstance(stats[RUN_KEY], dict) and stats[RUN_KEY].get("mode") == "constructed"
+    )
+    commanders = stats.get("commanders") if isinstance(stats.get("commanders"), list) else []
+    out = {
+        "win": win,
+        "forge_state": forge.get("state"),
+        "forge_done": res.get("games") or 0,
+        "forge_asked": forge.get("games_requested") or res.get("games_requested"),
+        "kill_median_turn": kill,
+        "kill_damage": 20 if constructed else 40,
+        "constructed": constructed,
+        "commander": _front_face(str(commanders[0])) if commanders and commanders[0] else None,
+    }
+    if forge.get("state") in FINAL_STATES or not forge:  # a run still playing changes its numbers
+        if len(_HEADLINES) >= _HEADLINES_MAX:
+            _HEADLINES.clear()
+        _HEADLINES[key] = out
+    return dict(out)
 
 
 def _forge_not_asked(forge_json: Any) -> bool:

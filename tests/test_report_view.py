@@ -171,16 +171,16 @@ def test_page_speaks_plainly_and_shows_every_panel() -> None:
     html = rv.report_body_html(report(), stats_html="<div class='tiles'>stats</div>", reused=True)
     for text in (
         "Solo test (300 games, no opponents)",
-        "class='tiles wide'",
+        "class='tiles wide rv-stats'",
         "class='ci'",
-        "class='charts'",
+        "class='charts rv-charts'",
         "<svg",
         "What the solo test could not model",
         "Played without their effect",
         "32 of 98 cards (33% of the deck)",
         "Left out on purpose",
         "Removal and other interaction",
-        "badge warn'>issues found",
+        "Issues found</span>",
         "Deck statistics",
         "Raw output from the research service",
         "## Metrics",
@@ -190,13 +190,13 @@ def test_page_speaks_plainly_and_shows_every_panel() -> None:
     assert "goldfish_" not in html and "run_deck_report" not in html
     assert "Run id: wjyxinfngo4dg" in html and "(could be annotated)" in html
     # double-faced names appear as their front face in the panels; the whole name only in the raw text
-    panels = html.split("<details class='card raw")[0]
+    panels = html.split("<details class='ui-card rv-det rv-raw")[0]
     assert "Enduring Angel" in panels and "Enduring Angel //" not in panels
 
 
 def test_page_without_a_simulation() -> None:
     html = rv.report_body_html(report(goldfish=None, validation=None))
-    assert "research service was not configured" in html and "<svg" not in html
+    assert "research service was not configured" in html and "role='img'" not in html  # no chart
     refused = {
         "tool": "goldfish_run",
         "ok": False,
@@ -204,9 +204,10 @@ def test_page_without_a_simulation() -> None:
         "deck's Commander (premier) category.",
     }
     html = rv.report_body_html(report(goldfish=refused["text"]) | {"goldfish": refused})
-    assert "badge danger'>not run" in html and "needs one card" in html and "class='tiles" not in html
+    assert "ui-lbl red'" in html and ">Not run</span>" in html and "needs one card" in html
+    assert "class='tiles" not in html
     html = rv.report_body_html(report(validation=VALIDATION_PASSED))
-    assert "badge ok'>passed" in html
+    assert "ui-lbl green'" in html and ">Passed</span>" in html
 
 
 def test_markdown_and_html_exports() -> None:
@@ -308,19 +309,19 @@ def test_preflight_only_label_and_overall_status() -> None:
     """A report without Forge games (Forge off, or left out of this report) says "Preflight only
     (no rules engine)" where the Forge games would be. QA-010: its overall status is in the head."""
     html = rv.report_body_html(report(status="complete"))  # Forge was not set up
-    assert "<h2>Preflight only (no rules engine)</h2>" in html and "was not set up" in html
-    assert "id='rep-status'><span class='badge ok'>complete</span>" in html
+    assert ">Preflight only (no rules engine)</h2>" in html and "was not set up" in html
+    assert "id='rep-status'><span class='ui-lbl green'>" in html and ">Complete</span>" in html
     skipped = {"state": "skipped", "reason": "not_commander", "note": "Forge plays Commander games only."}
     html = rv.report_body_html(report(forge=skipped, status="complete"))
-    assert "<h2>Preflight only (no rules engine)</h2>" in html and "Commander games only." in html
+    assert ">Preflight only (no rules engine)</h2>" in html and "Commander games only." in html
     assert "Forge games" not in html and "not run" not in html.split("Solo test (")[0]
     full = {"state": "skipped", "error": "You already have a Forge run going and 2 reports waiting."}
     html = rv.report_body_html(report(forge=full, status="partial"))
     assert "Preflight only" in html and "notice warn'>You already have" in html
-    assert "badge warn'>partial</span>" in html
+    assert "id='rep-status'><span class='ui-lbl orange'>" in html and ">Partial</span>" in html
     running = rv.report_body_html(report(forge={"state": "running"}, status="running"))
-    assert "Preflight only" not in running and "<h2>Forge games" in running
-    assert "id='rep-status'><span class='badge '>running</span>" in running
+    assert "Preflight only" not in running and ">Forge games (against precons)</h2>" in running
+    assert "id='rep-status'><span class='ui-lbl orange'>" in running and ">Forge going</span>" in running
     md = rv.report_markdown(report(forge=skipped, status="complete"))
     assert "## Preflight only (no rules engine)" in md and "- Status: complete" in md
     assert "## Preflight only (no rules engine)" in rv.report_markdown(report())

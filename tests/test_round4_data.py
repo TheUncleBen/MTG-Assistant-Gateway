@@ -362,7 +362,7 @@ async def test_set_category_to_maybeboard_is_shown_as_removal(stack_browser_only
     await b.login()
     url = f"/proposals/{p['proposal_id']}"
     page = (await b.http.get(url)).text
-    summary = re.search(r"<div class='summary'>(.*?)</div>", page).group(1)
+    summary = re.search(r"<div class='pills summary-pills'>(.*?)</div>", page).group(1)
     assert f"{len(victims)} removed" in summary and f"Net -{gone} cards" in summary, summary
     await b.http.post(url, data={**await b.review_form(url), "action": "apply"})
     await b.aclose()
@@ -434,7 +434,8 @@ async def test_proposals_name_their_app_and_close_on_disconnect(stack_browser_on
     await b.login()
     url = f"/proposals/{p['proposal_id']}"
     page = (await b.http.get(url)).text
-    assert "Helper Bot" in page and client_id[:12] in page
+    # the app chip names the app; its client id stays out of the page (no internal ids)
+    assert "Helper Bot" in page and client_id[:12] not in page
     listing = (await b.http.get("/proposals")).text
     assert "Helper Bot" in listing
     account = (await b.http.get("/account")).text

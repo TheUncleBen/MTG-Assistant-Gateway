@@ -12,7 +12,6 @@ import pytest
 
 from mtg_gateway.config import MANAGED_SETTINGS
 from mtg_gateway.modes import MODE_LABELS
-from mtg_gateway.settings_page import LINK_TEXT, label, link_text
 
 from .test_card_search_filters_browser import CONTRAST
 from .test_cardsearch_browser import SIZES, _chromium, _page
@@ -26,14 +25,14 @@ SHOTS = os.environ.get("MTG_SETTINGS_SHOTS")
 TEXT = (
     ".set-group h2, .set-group summary, .set-label, .set-help, .set-src, .set-err, .range, .unit, "
     ".set-seg label, .set-choices label, .set-confirm, .set-nav a, .set-save button, .reset, .notice, "
-    ".notice li, .set-warn, .set-stack p, .set-stack-list a, code"
+    ".notice li, .set-warn, .set-badge, .set-confirm .lead, .set-confirm .tick, code"
 )
 
 # Every visible control at least as tall as the site's standard control (--ctl, 39 px).
 TAPS = """
 () => [...document.querySelectorAll(
     '.set-group:not(#g-scan) input[type=number], .set-group:not(#g-scan) .msel-btn,'
-    + ' .set-seg label, .set-choices label, .set-save button, .set-nav a, .set-stack-list a, .reset')]
+    + ' .set-seg label, .set-choices label, .set-save button, .set-nav a, .reset')]
   .filter(e => e.getBoundingClientRect().width)
   .filter(e => e.getBoundingClientRect().height < 38.5)
   .map(e => (e.id || e.textContent.trim()).slice(0, 30) + ' ' + Math.round(e.getBoundingClientRect().height))
@@ -304,28 +303,24 @@ def test_a_setting_the_stack_sets_shows_greyed_out_and_cannot_be_changed(
         assert rows["server_name"]["shown"] == ["Our Table"]
         assert "WARNING" in rows["log_level"]["shown"]
         assert rows["deck_sync_minutes"]["shown"] == ["60"]
-        # The line at the top names every one, in the page's order, each a link
-        summary = page.locator(".set-stack")
-        assert (
-            summary.locator("p")
-            .inner_text()
-            .startswith("Your stack sets 6 of the settings on this page, so they")
+        # no stack box: each locked row says so beside its name, and the chip shows
+        # only those rows, then everything again
+        assert page.locator(".set-stack").count() == 0
+        for key in LOCKED:
+            assert "Set in your stack" in page.locator(f"#s-row-{key} .sl .set-badge").all_inner_texts(), key
+        chip = page.locator(".set-nav .lockchip")
+        assert chip.inner_text().split() == ["Set", "in", "your", "stack", "6"]
+        chip.click()
+        assert chip.get_attribute("aria-pressed") == "true" and page.url.endswith("?locked=1")
+        shown = page.evaluate(
+            "() => [...document.querySelectorAll('.set-row')].filter(r => r.offsetHeight).map(r => r.id)"
         )
-        links = summary.locator("a")
-        names = links.all_inner_texts()
-        order = [k for k in MANAGED_SETTINGS if k in LOCKED]
-        assert names == [f"{link_text(k)} ({MANAGED_SETTINGS[k].env})" for k in order]
-        assert names[order.index("deck_sync_minutes")].startswith(
-            "How often to check Archidekt for deck changes ("
-        )
-        assert summary.evaluate("e => e.getBoundingClientRect().top") < page.locator(".set-nav").evaluate(
-            "e => e.getBoundingClientRect().top"
-        )
-        links.last.click()
-        page.wait_for_function(f"() => location.hash === '#s-row-{order[-1]}'")
-        row_top = page.locator(f"#s-row-{order[-1]}").evaluate("e => e.getBoundingClientRect().top")
-        assert 0 <= row_top < page.viewport_size["height"]
-        page.evaluate("scrollTo(0, 0)")
+        assert shown == [f"s-row-{k}" for k in MANAGED_SETTINGS if k in LOCKED]
+        assert page.evaluate(MEASURE) == []
+        _shot(page, f"settings-locked-only-{width}-{theme}.png")
+        chip.click()
+        assert chip.get_attribute("aria-pressed") == "false"
+        assert page.locator(".set-row:visible").count() > len(LOCKED)
         # the keyboard never lands on a locked control
         landed = set()
         for _ in range(150):
@@ -346,7 +341,7 @@ def test_a_setting_the_stack_sets_shows_greyed_out_and_cannot_be_changed(
 
 # Where a locked row's variable name breaks onto a new line: each break must follow an underscore.
 MIDWORD_BREAKS = """
-() => [...document.querySelectorAll('.set-lock code, .set-stack code')].flatMap(c => {
+() => [...document.querySelectorAll('.set-lock code')].flatMap(c => {
   const text = c.textContent, out = [];
   const walker = document.createTreeWalker(c, NodeFilter.SHOW_TEXT);
   const chars = [];
@@ -428,62 +423,55 @@ def test_a_locked_setting_shows_its_value_in_words_and_its_variable_whole(
     assert errors == []
 
 
-# The five settings whose row name only reads right beside its value box get a whole wording in
-# the summary box (SUMMARY-LINK-TEXTS-r3.md option a). The two longest are drawn here at
-# phone width and 200% text, where a link wraps inside its chip.
-WORDED = {
-    "deck_sync_minutes": 60,
-    "archidekt_cache_seconds": 120,
-    "archidekt_card_cache_seconds": 7200,
-    "scan_ambiguity_margin": 0.1,
-    "scan_art_gallery_idle_days": 90,
-}
+CONFIRMS = """
+() => [...document.querySelectorAll('.set-confirm')].filter(b => b.offsetHeight)
+  .map(b => b.closest('.set-row').id + ': ' + b.querySelector('.lead').innerText.trim())
+"""
 
 
-# The five link texts as approved, written out here so a changed word in LINK_TEXT fails.
-APPROVED_LINKS = {
-    "deck_sync_minutes": "How often to check Archidekt for deck changes",
-    "archidekt_cache_seconds": "How long public deck reads are reused",
-    "archidekt_card_cache_seconds": "How long Archidekt card lookups are reused",
-    "scan_ambiguity_margin": "Name similarity lead over the next match",
-    "scan_art_gallery_idle_days": "Days without a scan before a card's printings are forgotten",
-}
-
-
-@pytest.fixture
-def worded_server(tmp_path: Path):
-    s = Server(tmp_path, admin_group="mtg-admins", env_set=frozenset(WORDED), **WORDED)
-    s.start()
-    try:
-        yield s
-    finally:
-        s.stop()
-
-
-@pytest.mark.parametrize(("width", "zoom"), [(344, "text"), (344, "root"), (1280, "")])
-def test_the_summary_box_says_the_whole_name_where_a_row_name_needs_its_value(
-    worded_server: Server, width: int, zoom: str
+@pytest.mark.parametrize(("width", "theme"), [(344, "light"), (390, "dark"), (673, "light"), (1280, "dark")])
+def test_a_confirmation_tick_shows_only_after_lowering_or_turning_off(
+    server: Server, width: int, theme: str
 ) -> None:
+    """The three ticks are hidden until their setting is lowered or
+    switched off, then shown with what changed; back up, gone again. The group says how many
+    changes are not saved yet, and saving a lowered value still needs the tick."""
     from playwright.sync_api import sync_playwright
 
     exe = _chromium()
-    sid = _admin(worded_server)
+    sid = _admin(server)
     with sync_playwright() as p:
-        browser, page, errors = _page(p, worded_server, sid, width, "light", exe)
-        page.goto(f"{worded_server.base}/admin/settings?open=scan", wait_until="networkidle")
-        if zoom:
-            page.evaluate(ROOT_200 if zoom == "root" else TEXT_200)
-        page.wait_for_timeout(30)
-        links = page.locator(".set-stack a")
-        order = [k for k in MANAGED_SETTINGS if k in WORDED]
-        assert set(LINK_TEXT) == set(APPROVED_LINKS) == set(order)
-        assert links.all_inner_texts() == [f"{APPROVED_LINKS[k]} ({MANAGED_SETTINGS[k].env})" for k in order]
-        # the rows keep their approved names
-        for k in order:
-            assert page.locator(f"#s-row-{k}").inner_text().startswith(label(k)), k
+        browser, page, errors = _page(p, server, sid, width, theme, exe)
+        page.goto(f"{server.base}/admin/settings", wait_until="networkidle")
+        assert page.evaluate(CONFIRMS) == []
+        hint = page.locator("#g-backups .set-save .unsaved")
+        assert hint.inner_text() == ""
+        page.fill("#f-archidekt_backup_copies", "5")
+        assert page.evaluate(CONFIRMS) == [
+            "s-row-archidekt_backup_copies: You lowered this from 10 to 5. Tick the box below to confirm "
+            "lowering this."
+        ]
+        assert hint.inner_text() == "1 change not saved yet"
+        page.locator("#s-row-archidekt_backups .set-seg label", has_text="Off").click()
+        assert len(page.evaluate(CONFIRMS)) == 2 and hint.inner_text() == "2 changes not saved yet"
+        assert "You turned this off." in page.evaluate(CONFIRMS)[0]
         assert page.evaluate(MEASURE) == []
-        assert page.evaluate(MIDWORD_BREAKS) == []
         assert page.evaluate(CONTRAST, TEXT) == []
-        _shot(page, f"settings-worded-{width}-{zoom or 'plain'}.png", page.locator(".set-stack"))
+        _shot(page, f"settings-confirm-{width}-{theme}.png", page.locator("#g-backups"))
+        page.locator("#s-row-archidekt_backups .set-seg label", has_text="On").click()
+        page.fill("#f-archidekt_backup_copies", "20")
+        assert page.evaluate(CONFIRMS) == [] and hint.inner_text() == "1 change not saved yet"
+        # lowered and saved without the tick: refused, the box still there with its sentence
+        page.fill("#f-snapshots_per_deck", "10")
+        page.locator("#g-backups button.primary").click()
+        page.wait_for_load_state("networkidle")
+        assert page.evaluate(CONFIRMS) == [
+            "s-row-snapshots_per_deck: You lowered this from 25 to 10. Tick the box below to confirm "
+            "lowering this."
+        ]
+        page.check("input[name=confirm_snapshots_per_deck]")
+        page.locator("#g-backups button.primary").click()
+        page.wait_for_load_state("networkidle")
+        assert "saved=backups" in page.url
         browser.close()
     assert errors == []

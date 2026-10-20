@@ -48,6 +48,25 @@ CARDS_CSS = """
 .cs .wide{grid-column:1/-1}
 /* colour and rarity toggles: a checkbox under each pip, the whole pill pressable */
 .cs .toggles{display:flex;flex-wrap:wrap;gap:.4rem}
+/* The main filters. The six colour pills sit on one row (White to Colorless), the colour mode
+   beside them where there is room: from 1000 px the grid has five columns, Type takes one and
+   Colors the other four, then Commander colors three with Mana value and Rarity beside it.
+   600-999 px: Type, Colors and Commander colors take a whole row each and the mode sits under
+   the pills. Phones: the pills form a grid of equal columns, two across on a 344 px screen,
+   three from 360 px (one at 200% text), with the mode below at full width. */
+.cs .crow{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem}
+.cs .crow .toggles{flex:0 1 auto;min-width:0}
+.cs .crow .cmp,.cs .crow .msel-btn{width:auto;flex:0 1 auto;min-width:0;max-width:100%}
+@media (min-width:600px) and (max-width:999.98px){
+  .cs-main > [data-picker=t],.cs-main > .colors,.cs-main > .ident{grid-column:1/-1} }
+@media (min-width:1000px){
+  .cs-grid.cs-main{grid-template-columns:repeat(5,minmax(0,1fr));
+    grid-template-areas:"type colors colors colors colors" "ident ident ident mv rar"}
+  .cs-main > [data-picker=t]{grid-area:type}
+  .cs-main > .colors{grid-area:colors}
+  .cs-main > .ident{grid-area:ident}
+  .cs-main > .mv{grid-area:mv}
+  .cs-main > .rar{grid-area:rar} }
 .cs .tog{margin:0;position:relative;display:inline-flex;align-items:center;gap:.4rem;min-height:2.5rem;
   padding:.25rem .65rem .25rem .4rem;border:1px solid var(--control-border);border-radius:1.25rem;
   background:var(--surface);cursor:pointer;font-weight:400;user-select:none}
@@ -117,6 +136,7 @@ details.cs-more > .cs-grid{margin:.5rem 0 0}
 .cs-head .sort{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem}
 .cs-head .sort label{margin:0;font-weight:400;color:var(--text-muted)}
 .cs-head .sort select,.cs-head .sort .msel-btn{width:auto;min-width:8rem;margin:0}
+.cs-head .views{display:inline-flex;flex-wrap:wrap;align-items:center;gap:.5rem;min-width:0}
 .cs-head .seg{display:inline-flex;border:1px solid var(--control-border);border-radius:var(--radius);
   overflow:hidden}
 .cs-head .seg label{position:relative;display:inline-flex;align-items:center;gap:.35rem;margin:0;
@@ -151,7 +171,8 @@ details.cs-more > .cs-grid{margin:.5rem 0 0}
   overflow-wrap:anywhere;min-width:0}
 .cardgrid .ty,.cardgrid .pr{font-size:.86rem;color:var(--text-muted);overflow-wrap:anywhere}
 .cardgrid .add,.cardlist .add{margin:0;min-width:0}
-.cardgrid .add{width:100%}
+/* every card of a row is as tall as the tallest, its Add to deck on the row's bottom edge */
+.cardgrid .add{width:100%;margin-top:auto}
 .cardgrid .add > span,.cardlist .add > span{min-width:0;overflow:hidden;text-overflow:ellipsis;
   white-space:nowrap}
 /* the list view: one row a card, columns that fold under the name on narrow screens */
@@ -208,9 +229,15 @@ details.cs-more > .cs-grid{margin:.5rem 0 0}
   .cs-sheet-foot .btn-primary{flex:2 1 auto}
   .cs-actions{display:none}
   .cs .row3{grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(0,5rem) auto}
+  .cs .toggles{display:grid;grid-template-columns:repeat(auto-fill,minmax(7.6rem,1fr))}
+  .cs .crow > *,.cs .crow .toggles{flex:1 1 100%}
+  .cs .crow .cmp,.cs .crow .msel-btn{width:100%}
+  /* the results head: Sort by with its two drop-downs, then View and Card size on a row of
+     their own (its label goes below 360 px; the group keeps its name) */
   .cs-head .sort{width:100%}
   .cs-head .sort select,.cs-head .sort .msel-btn{flex:1 1 8rem}
 }
+@media (max-width:359.98px){.cs-head .cardsize .lbl{display:none}}
 html.cs-sheet-open,html.cs-sheet-open body{overflow:hidden}
 /* Add to deck: a small dialog over the page (a bottom sheet on phones), themed like the card viewer */
 .addsheet{position:fixed;inset:0;z-index:90;display:none;align-items:center;justify-content:center;
@@ -239,10 +266,23 @@ html.cs-sheet-open,html.cs-sheet-open body{overflow:hidden}
     border-radius:var(--radius-panel) var(--radius-panel) 0 0;
     padding-bottom:calc(1.25rem + env(safe-area-inset-bottom))}
   .addsheet .acts button{flex:1 1 auto} }
-.toast.cards-toast{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem .75rem;z-index:95}
-.toast.cards-toast .msg{flex:1 1 12rem;min-width:0;overflow-wrap:anywhere}
-.toast.cards-toast .btn,.toast.cards-toast button{margin:0}
-.toast.cards-toast .close{width:2rem;min-height:2rem;height:2rem;padding:0;border-radius:50%;font-size:1.2rem}
+/* Watch on each result: a pill on the picture's top right corner, a check and "Watching"
+   when the card is watched; icon only at card size S and in the list view; 44 px on touch */
+.cs-hint{margin:0 0 .9rem}
+.picwrap{position:relative;display:block}
+.picwrap > .pic{width:100%}
+.wbtn{position:absolute;z-index:1;top:.4rem;right:.4rem}
+html[data-card-size=s] .cardgrid .wbtn span{position:absolute;width:1px;height:1px;
+  overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+html[data-card-size=s] .cardgrid .wbtn{padding:0;justify-content:center;width:32px}
+.cardlist .acts{display:flex;align-items:center;gap:.4rem}
+.cardlist .wbtn{position:static;width:var(--ctl);height:var(--ctl);min-height:var(--ctl);
+  border-radius:var(--radius);box-shadow:none}
+.cardlist .wbtn.on{box-shadow:inset 0 0 0 99px var(--green-tint)}
+@media (pointer:coarse){html[data-card-size=s] .cardgrid .wbtn{width:44px}}
+@media (max-width:899.98px){.cardlist .acts{grid-area:add}}
+/* the card menu on results: theme.CARD_MENU_CSS (static/cardmenu.js) */
+.cardgrid .pic img{-webkit-touch-callout:none}
 """
 
 RARITY_NAMES = dict(cq.RARITIES)
@@ -365,7 +405,7 @@ def filters_html(f: cq.Filters, *, view: str) -> str:
     price_rows = [_price_row(*row) for row in f.prices] or [_price_row("usd", "le", "")]
     format_rows = [_format_row(*row) for row in f.formats] or [_format_row("legal", "")]
     main = (
-        "<div class='cs-grid'>"
+        "<div class='cs-grid cs-main'>"
         + _picker(
             "t",
             "Type",
@@ -374,20 +414,21 @@ def filters_html(f: cq.Filters, *, view: str) -> str:
             signed=True,
             placeholder="Creature, Goblin, Equipment…",
         )
-        + f"<fieldset><legend>Colors</legend><div class='toggles'>{colors}</div>"
+        + "<fieldset class='colors'><legend>Colors</legend><div class='crow'>"
+        f"<div class='toggles'>{colors}</div>"
         f"<select name='cmp' aria-label='How the colors match' class='cmp'>"
         + _opts([(k, label) for k, (_op, label) in cq.COLOR_COMPARE.items()], f.color_cmp)
-        + "</select></fieldset>"
-        f"<fieldset><legend>Commander colors</legend><div class='toggles'>{identity}</div>"
+        + "</select></div></fieldset>"
+        f"<fieldset class='ident'><legend>Commander colors</legend><div class='toggles'>{identity}</div>"
         "<span class='hint'>Cards that fit a commander of these colors.</span></fieldset>"
-        "<fieldset><legend>Mana value</legend><div class='range'>"
+        "<fieldset class='mv'><legend>Mana value</legend><div class='range'>"
         f"<input type='text' inputmode='decimal' name='mv' value='{_esc(f.mv_min)}' "
         "aria-label='Mana value from' "
         "placeholder='From' maxlength='5'><span>to</span>"
         f"<input type='text' inputmode='decimal' name='mvx' value='{_esc(f.mv_max)}' "
         "aria-label='Mana value to' "
         "placeholder='To' maxlength='5'></div></fieldset>"
-        f"<fieldset><legend>Rarity</legend><div class='toggles'>{rarity}</div></fieldset>"
+        f"<fieldset class='rar'><legend>Rarity</legend><div class='toggles'>{rarity}</div></fieldset>"
         + _rows("format", "Format", format_rows, "Add a format")
         + _picker("s", "Set", f.sets, source="sets", signed=False, placeholder="Set name or code")
         + "</div>"
@@ -503,7 +544,8 @@ def results_head_html(f: cq.Filters, *, view: str, total: int | None, shown: boo
         "<div class='sort'><label for='f-order'>Sort by</label>"
         f"<select id='f-order' name='order' form='cs-form'>{_opts(cq.ORDERS, f.order)}</select>"
         f"<select name='dir' form='cs-form' aria-label='Direction'>{_opts(cq.DIRECTIONS, f.dir)}</select>"
-        "<span class='seg' role='radiogroup' aria-label='View'>"
+        # View and Card size move as one group, so the size control never leaves the View row
+        "<span class='views'><span class='seg' role='radiogroup' aria-label='View'>"
         + "".join(
             f"<label title='{label}'><input type='radio' name='view' value='{v}' form='cs-form'"
             f"{' checked' if v == view else ''}>{icon(v)}<span>{label}</span></label>"
@@ -512,7 +554,7 @@ def results_head_html(f: cq.Filters, *, view: str, total: int | None, shown: boo
         + "</span>"
         # card size (0.7.29): shown with the Grid view only (cs-head[data-view], cardsearch.js)
         + card_size_control().replace("class='field cardsize'", "class='cardsize'")
-        + "</div></div>"
+        + "</span></div></div>"
     )
 
 
@@ -563,9 +605,52 @@ def _add_button(card: dict[str, Any], *, can_add: bool, reason: str, printing: b
     )
 
 
-def card_tile_html(card: dict[str, Any], *, can_add: bool, reason: str, printing: bool = False) -> str:
-    """One result as a tile: the picture (a button that opens the card viewer), name with mana
-    pips, type line, the printing and its price when the search is about printings, Add to deck."""
+HINT_HTML = (
+    "<p class='ui-hint cs-hint' id='cs-hint'>Watch a card with its <b>Watch</b> button, or right-click it "
+    "(press and hold on a phone) for more.</p>"
+)
+
+
+def watch_button(card: dict[str, Any], *, watched: frozenset[str], printing: bool = False) -> str:
+    """The Watch button on a result: "Watch", or a check and "Watching" when the member
+    already watches the card. A printing search watches the shown printing."""
+    name = str(card.get("name") or "")
+    pin = ""
+    if printing and card.get("set") and card.get("collector_number"):
+        pin = f" data-set-code='{_esc(card['set'])}' data-number='{_esc(card['collector_number'])}'"
+    if _norm(name) in watched:
+        return (
+            f"<button type='button' class='wbtn on' data-watch='{_esc(name)}'{pin} aria-pressed='true' "
+            f"aria-label='{_esc(name)} is on your watchlist' title='On your watchlist'>"
+            f"{icon('check')}<span>Watching</span></button>"
+        )
+    return (
+        f"<button type='button' class='wbtn' data-watch='{_esc(name)}'{pin} aria-pressed='false' "
+        f"aria-label='Watch {_esc(name)}' title='Watch {_esc(name)}'>"
+        f"{icon('bookmark')}<span>Watch</span></button>"
+    )
+
+
+def _norm(name: str) -> str:
+    return " ".join(name.lower().split())
+
+
+def watched_names(rows: list[dict[str, Any]]) -> frozenset[str]:
+    """The names a member watches (any printing), as the Watch buttons compare them."""
+    return frozenset(_norm(str(r.get("name") or "")) for r in rows)
+
+
+def card_tile_html(
+    card: dict[str, Any],
+    *,
+    can_add: bool,
+    reason: str,
+    printing: bool = False,
+    watched: frozenset[str] | None = None,
+) -> str:
+    """One result as a tile: the picture (a button that opens the card viewer) with the Watch
+    button on its corner when watchlists are on, name with mana pips, type line, the printing and
+    its price when the search is about printings, Add to deck."""
     name = str(card.get("name") or "")
     img = card.get("image_normal") or card.get("image_small") or ""
     body = (
@@ -578,10 +663,14 @@ def card_tile_html(card: dict[str, Any], *, can_add: bool, reason: str, printing
         where = f"{str(card.get('set_name') or card.get('set') or '')} #{card.get('collector_number') or ''}"
         price = _price(card)
         extra = f"<span class='pr'>{_esc(where)}{' · ' + _esc(price) if price else ''}</span>"
+    pic = (
+        f"<button type='button' class='pic'{_pic_attrs(card)} aria-label='{_esc(name)}: show the card'>"
+        f"{body}</button>"
+    )
+    if watched is not None:
+        pic = f"<span class='picwrap'>{pic}{watch_button(card, watched=watched, printing=printing)}</span>"
     return (
-        f"<li class='cc'><button type='button' class='pic'{_pic_attrs(card)} "
-        f"aria-label='{_esc(name)}: show the card'>"
-        f"{body}</button><div class='meta'><span class='nm'><span>{_esc(name)}</span>"
+        f"<li class='cc'>{pic}<div class='meta'><span class='nm'><span>{_esc(name)}</span>"
         f"{mana_html(str(card.get('mana_cost') or ''))}</span>"
         f"<span class='ty'>{_esc(card.get('type_line') or '')}</span>{extra}</div>"
         + _add_button(card, can_add=can_add, reason=reason, printing=printing)
@@ -589,9 +678,17 @@ def card_tile_html(card: dict[str, Any], *, can_add: bool, reason: str, printing
     )
 
 
-def card_row_html(card: dict[str, Any], *, can_add: bool, reason: str, printing: bool = False) -> str:
+def card_row_html(
+    card: dict[str, Any],
+    *,
+    can_add: bool,
+    reason: str,
+    printing: bool = False,
+    watched: frozenset[str] | None = None,
+) -> str:
     """One result as a list row: a small picture, name and cost, type, set, rarity, price and
-    power/toughness, and Add to deck. Under 900px the columns fold under the name."""
+    power/toughness, the Watch button as an icon (watchlists on) and Add to deck. Under 900px the
+    columns fold under the name."""
     name = str(card.get("name") or "")
     img = card.get("image_small") or card.get("image_normal") or ""
     body = (
@@ -613,7 +710,18 @@ def card_row_html(card: dict[str, Any], *, can_add: bool, reason: str, printing:
         f"<span class='set num' title='{_esc(card.get('set_name') or '')}'>{_esc(where)}</span>"
         f"<span class='rar'>{_esc(rarity)}</span>"
         f"<span class='price num'>{_esc(price) if price else '<span class=muted>–</span>'}</span>"
-        "</span>" + _add_button(card, can_add=can_add, reason=reason, printing=printing) + "</li>"
+        "</span>"
+        + (
+            ""
+            if watched is None
+            else "<span class='acts'>"
+            + watch_button(card, watched=watched, printing=printing).replace(
+                "class='wbtn", "class='wbtn icon", 1
+            )
+        )
+        + _add_button(card, can_add=can_add, reason=reason, printing=printing)
+        + ("" if watched is None else "</span>")
+        + "</li>"
     )
 
 
@@ -624,17 +732,33 @@ LIST_HEAD = (
 
 
 def results_items_html(
-    cards: list[dict[str, Any]], *, view: str, can_add: bool, reason: str, printing: bool
+    cards: list[dict[str, Any]],
+    *,
+    view: str,
+    can_add: bool,
+    reason: str,
+    printing: bool,
+    watched: frozenset[str] | None = None,
 ) -> str:
-    """The results' rows (tiles or list rows) without their list, so a next page appends."""
+    """The results' rows (tiles or list rows) without their list, so a next page appends.
+    ``watched``: the member's watched names, or None when watchlists are off (no Watch button)."""
     one = card_row_html if view == "list" else card_tile_html
-    return "".join(one(c, can_add=can_add, reason=reason, printing=printing) for c in cards)
+    return "".join(one(c, can_add=can_add, reason=reason, printing=printing, watched=watched) for c in cards)
 
 
 def results_list_html(
-    cards: list[dict[str, Any]], *, view: str, can_add: bool, reason: str, printing: bool, linked: bool
+    cards: list[dict[str, Any]],
+    *,
+    view: str,
+    can_add: bool,
+    reason: str,
+    printing: bool,
+    linked: bool,
+    watched: frozenset[str] | None = None,
 ) -> str:
-    items = results_items_html(cards, view=view, can_add=can_add, reason=reason, printing=printing)
+    items = results_items_html(
+        cards, view=view, can_add=can_add, reason=reason, printing=printing, watched=watched
+    )
     cls = "cardlist" if view == "list" else "cardgrid"
     head = LIST_HEAD if view == "list" else ""
     return (

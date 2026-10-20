@@ -6,7 +6,9 @@
    whose shorter form already came back complete (fewer than the limit) is narrowed locally with
    no request at all. Keyboard: Down/Up move, Enter picks, Escape closes, Tab leaves. Picking
    fills the box and fires a "suggest:pick" event; with data-suggest-submit the form is sent too
-   (the deck editor adds the card at once). data-suggest-site="/cards?q=" is the top bar's site
+   (the deck editor adds the card at once); "suggest:rows" fires once the rows are drawn. Card rows
+   get the card menu with data-suggest-menu or data-suggest-watch (static/cardmenu.js).
+   data-suggest-site="/cards?q=" is the top bar's site
    search: the names become a Cards group whose rows open that page for the card, and a Decks
    group offers the deck search for the typed text and, once the card details are known, "Decks
    with commander …" for a legendary creature among the matches; Enter on plain text submits the
@@ -176,7 +178,9 @@
       // separates the name from its mana cost, never "Oathsw" from "orn Giant"
       var label = document.createElement("span");
       label.className = "label";
-      while (li.firstChild) label.appendChild(li.firstChild);
+      // a Watch button on the row (static/cardmenu.js) stays where it is, after the card
+      var keep = li.querySelector(".wbtn");
+      while (li.firstChild && li.firstChild !== keep) label.appendChild(li.firstChild);
       nm.appendChild(label);
       if (c.mana_cost && window.MtgMana) nm.appendChild(window.MtgMana.mana(c.mana_cost));
       text.appendChild(nm);
@@ -186,7 +190,7 @@
         text.appendChild(ty);
       }
       row.appendChild(text);
-      li.appendChild(row);
+      li.insertBefore(row, keep);
     }
     function peek(names) {
       var missing = names.filter(function (n) { return !(fold(n) in cards); });
@@ -307,6 +311,7 @@
         status.textContent = names.length + " suggestion" + (names.length === 1 ? "" : "s");
       }
       if (site) siteRows(names);
+      if (names.length) emit("suggest:rows", {});  // static/cardmenu.js adds its Watch buttons
       var heading = whole && names.length && input.getAttribute("data-suggest-head");
       if (heading) list.insertBefore(head(heading), list.firstChild);
       list.hidden = false;

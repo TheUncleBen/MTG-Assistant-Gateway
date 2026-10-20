@@ -456,7 +456,12 @@ async def test_browser_reject_closes_a_pending_proposal(stack: Stack) -> None:
     r = await b.http.post(url, data={**await b.review_form(url), "action": "reject"})
     assert r.status_code == 303 and r.headers["location"].endswith("?ok=rejected")
     page = await b.http.get(url + "?ok=rejected")
-    assert "Rejected." in page.text and ">rejected<" in page.text and "Reject this proposal" not in page.text
+    # the status label word on the proposal
+    assert (
+        "Rejected." in page.text
+        and "Rejected</span>" in page.text
+        and "Reject this proposal" not in page.text
+    )
     # Nothing was sent, the assistant sees the state, and a later apply is refused.
     assert ark.patches == []
     got = structured(await call(h, token, "get_proposal", {"proposal_id": p["proposal_id"]}))

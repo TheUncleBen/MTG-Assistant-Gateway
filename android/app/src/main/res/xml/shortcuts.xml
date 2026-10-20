@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The launcher shortcuts (long-press the app icon), the same three as the gateway's web manifest.
+<!-- The launcher shortcuts (long-press the app icon), as the gateway's web manifest has them; its
+     Watchlist is added by the app itself while the gateway's watchlists are on (MainActivity,
+     GatewayUrl.DYNAMIC_SHORTCUTS), since a static shortcut cannot ask.
      Static, so they show even before the app has run. Each opens MainActivity naming a page;
      the app opens that page on the saved gateway, or the address screen before setup
      (GatewayUrl.SHORTCUTS, MainActivity.takeLink). targetPackage is the package ID written out:
@@ -43,6 +45,18 @@
             android:targetPackage="local.mtgassistantgateway.app"
             android:targetClass="local.mtgassistantgateway.app.MainActivity">
             <extra android:name="page" android:value="proposals" />
+        </intent>
+    </shortcut>
+    <shortcut
+        android:shortcutId="page_reports"
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher"
+        android:shortcutShortLabel="@string/shortcut_reports">
+        <intent
+            android:action="local.mtgassistantgateway.app.OPEN_PAGE"
+            android:targetPackage="local.mtgassistantgateway.app"
+            android:targetClass="local.mtgassistantgateway.app.MainActivity">
+            <extra android:name="page" android:value="reports" />
         </intent>
     </shortcut>
 </shortcuts>

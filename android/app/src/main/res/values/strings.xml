@@ -48,11 +48,13 @@
     <string name="notify_channel_connection">Connection to your gateway</string>
     <string name="notify_channel_connection_text">Android shows this quiet notification while the app listens for your notifications.</string>
     <string name="notify_permission_denied">Notifications are off for this app. Turn them on in Android\'s settings.</string>
-    <!-- Launcher shortcuts, the same three as the web manifest (companion.py). -->
+    <!-- Launcher shortcuts, as the web manifest has them (companion_shell.py). -->
     <string name="shortcut_decks">My decks</string>
     <string name="shortcut_scan">Scan page</string>
     <string name="shortcut_scan_long">Open the scan page</string>
     <string name="shortcut_proposals">Proposals</string>
+    <string name="shortcut_reports">Reports</string>
+    <string name="shortcut_watchlist">Watchlist</string>
 
     <string name="page_error">The page could not be loaded. Check your connection, then tap Retry.</string>
     <string name="page_offline">No connection to your gateway. Check that the phone is online, then tap Retry.</string>

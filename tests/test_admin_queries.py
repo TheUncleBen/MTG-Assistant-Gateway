@@ -3,11 +3,12 @@
 
 from __future__ import annotations
 
+import re
 import time
 from pathlib import Path
 from types import SimpleNamespace
 
-from mtg_gateway import admin
+from mtg_gateway import activity_view, admin
 from mtg_gateway.db import Database
 
 
@@ -78,23 +79,21 @@ def test_users_page_queries_do_not_grow_with_members(tmp_path: Path):
 
 
 def test_activity_names_each_app_with_a_fixed_number_of_queries(tmp_path: Path):
-    db = Database(tmp_path / "g.sqlite")
-    _members(db, members=25, apps=3)
-    rows = db.audit_recent(200)
-    state = SimpleNamespace(db=db)
-    out: list[str] = []
-    assert _queries(db, lambda: out.append(admin._activity_body(state, rows, None))) <= 2
-    assert "App 1" in out[0]
-    # An app with no name still shows as before (actor_label's fallback).
-    assert out[0] == _old_activity_body(state, rows)
-    db.close()
+    """The redesigned Activity page reads its apps, members and rows in queries that do not
+    grow with the number of members or apps on the page."""
 
+    def count(name: str, members: int, apps: int) -> tuple[int, str]:
+        db = Database(tmp_path / name)
+        _members(db, members=members, apps=apps)
+        out: list[str] = []
+        n = _queries(db, lambda: out.append(activity_view.admin_body(SimpleNamespace(db=db), {}, nav="")))
+        db.close()
+        return n, out[0]
 
-def _old_activity_body(state, rows) -> str:
-    """The Activity body with the old one-lookup-per-row names, to prove the output is unchanged."""
-    real = state.db.client_names
-    state.db.client_names = lambda ids: {i: n for i in set(ids) if i and (n := state.db.client_name(i))}
-    try:
-        return admin._activity_body(state, rows, None)
-    finally:
-        state.db.client_names = real
+    small, _ = count("s.sqlite", members=2, apps=2)
+    big, page = count("b.sqlite", members=25, apps=3)
+    apps = re.findall(r"<span class='c-app'>(.*?)</span><span class='c-when'>", page)
+    assert any("App " in a for a in apps) and "/admin/activity?sub=m24'" in page
+    # an app with no stored name is named "An assistant"; its id shows only in the row's details
+    assert any("An assistant" in a for a in apps) and not any("unknown-app" in a for a in apps)
+    assert big == small

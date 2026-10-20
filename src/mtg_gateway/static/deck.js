@@ -1061,6 +1061,50 @@
       onPick: function (p, info) { if (card.isConnected) savePrinting(card, p, info); }
     });
   }
+  // -- Watch this card / Art variants…: the watchlist's own JSON calls; Undo stops the watch
+  // again by its id. The deck is not changed.
+  function scryFinishOf(card) {
+    var f = (card.getAttribute("data-finish") || "").toLowerCase();
+    return f === "foil" || f === "etched" ? f : "nonfoil";
+  }
+  function watchCard(card, printing, finish) {
+    var name = card.getAttribute("data-card") || "";
+    var body = { name: name, finish: finish || scryFinishOf(card) };
+    if (printing) { body.set_code = printing.set; body.collector_number = printing.collector_number; }
+    return api("/watchlist/api/watch", body).then(function (d) {
+      if (!d.ok) { toast(d.message || "The card could not be watched.", { error: true }); throw new Error("refused"); }
+      var w = d.watch || {};
+      var open = el("a", "", "Open the watchlist");
+      open.href = "/watchlist?q=" + enc(w.name || name);
+      if (!w.created) { toast((w.name || name) + " is on your watchlist.", { actions: [open] }); return w; }
+      var undo = el("button", "", "Undo");
+      undo.type = "button";
+      undo.addEventListener("click", function () {
+        undo.disabled = true;
+        api("/watchlist/api/unwatch", { watch_id: w.watch_id }).then(function (u) {
+          if (!u.ok && u.status !== 404) { toast(u.message || "The watch could not be undone.", { error: true }); return; }
+          toast((w.name || name) + " is no longer on your watchlist.");
+        }).catch(function () { toast("No connection; the card is still watched.", { error: true }); });
+      });
+      toast((w.name || name) + " added to your watchlist.", { actions: [open, undo] });
+      return w;
+    }, function (err) { toast("No connection; the card was not watched.", { error: true }); throw err; });
+  }
+  function artVariants(card) {
+    var Pick = window.MtgPrintPick;
+    if (!Pick || !card.isConnected) return;
+    var pr = (card.getAttribute("data-set") || "").trim().split(/\s+/);
+    var opts = {
+      name: card.getAttribute("data-card") || "",
+      current: pr.length === 2 && pr[0] ? { set: pr[0].toLowerCase(), number: pr[1] } : null,
+      finish: card.getAttribute("data-finish") || "Normal",
+      returnFocus: card,
+      onWatch: function (p, finish) { return watchCard(card, p, finish); }
+    };
+    // on the member's own deck the same picker can also put the printing in the deck
+    if (own && deckId && zoneOf(card) === "main") opts.onPick = function (p, info) { if (card.isConnected) savePrinting(card, p, info); };
+    Pick.open(opts);
+  }
   var FINISH_WORDS = { normal: "non-foil", foil: "foil", etched: "etched" };
   // "SLD 1075" (the page's data-set) as the picker writes it: "SLD #1075"
   function printLabel(set) { return String(set || "").trim().replace(/\s+/, " #"); }
@@ -1224,6 +1268,11 @@
     var head = el("div", "head", name);
     m.appendChild(head);
     m.appendChild(menuItem("Open card", "eye", function () { closeMenu(); openViewer(card); }));
+    if (document.body.hasAttribute("data-watchlist")) {
+      // watch the card's price, or browse its printings and watch one (the picker's browse mode)
+      m.appendChild(menuItem("Watch this card", "bookmark", function () { closeMenu(); watchCard(card, null); }));
+      if (window.MtgPrintPick) m.appendChild(menuItem("Art variants…", "image", function () { closeMenu(); artVariants(card); }));
+    }
     if (own && deckId) {
       var row = el("div", "item qtyrow");
       row.setAttribute("role", "none");
@@ -1342,6 +1391,7 @@
     var card = e.target.closest(".c, .row");
     if (!card || !cards.contains(card)) return;
     e.preventDefault();  // never the browser's image menu over a card
+    clearStaleDrag();
     if (picking || (menu && menuCard === card)) return;  // a touch hold already opened it
     // a finger still holding the card: Android's own long press must not open the menu under it,
     // or the slide that follows scrolls the page in place of moving the card (letting go opens it)
@@ -1384,6 +1434,16 @@
   var isStacks = cards.classList.contains("stacks");
   var dragged = null;
   var swallowClick = false;
+  // A mouse drag the browser never finished (no dragend): the card no longer looks lifted and taps
+  // on the cards work again. The touch drag below keeps its own state and is never cleared here.
+  function clearStaleDrag() {
+    if (!dragged || dragged !== nativeDrag) return;
+    dragged.classList.remove("dragging");
+    cards.classList.remove("carddrag");
+    $$(".stack.dropping", cards).forEach(function (s) { s.classList.remove("dropping"); });
+    dragged = null; nativeDrag = null;
+  }
+  var nativeDrag = null;
   cards.addEventListener("click", function (e) {
     var card = e.target.closest(".c, .row");
     if (!card || !cards.contains(card) || dragged || swallowClick) return;
@@ -1711,13 +1771,26 @@
   }
 
   // mouse drag (native drag and drop)
+  // A finger never starts the browser's own drag: Chrome on Android starts one from a press and
+  // hold on a draggable card, and when the finger lets go without moving it opens the card's menu
+  // but sends no dragend, so the card stayed faded and every later tap on a card was refused as
+  // the end of a drop. A touch press and hold is the touch code's below (the menu, or slide to
+  // move), so the card is not draggable under a finger or a pen and a drag one starts is refused.
   $$(".c, .row", cards).forEach(function (c) { c.setAttribute("draggable", "true"); });
+  var touchPress = false;
+  cards.addEventListener("pointerdown", function (e) {
+    touchPress = e.pointerType !== "mouse";  // a finger or a pen (an S Pen press and hold too)
+    clearStaleDrag();
+    var card = e.target.closest(".c, .row");
+    if (card) card.setAttribute("draggable", touchPress ? "false" : "true");
+  }, true);
   cards.addEventListener("dragstart", function (e) {
     var card = e.target.closest(".c, .row");
     if (!card) return;
-    if (picking) { e.preventDefault(); return; }
+    if (picking || touchPress) { e.preventDefault(); return; }
     closeMenu();
     dragged = card;
+    nativeDrag = card;
     card.classList.add("dragging");
     // The stack under the pointer fans out below its stack's box, over the top of the stack
     // directly below, and a native drag keeps it open: a drop there would land on the card's own
@@ -1745,6 +1818,7 @@
   });
   cards.addEventListener("dragend", function () {
     if (dragged) dragged.classList.remove("dragging");
+    nativeDrag = null;
     cards.classList.remove("carddrag");
     $$(".stack.dropping", cards).forEach(function (s) { s.classList.remove("dropping"); });
     setTimeout(function () { dragged = null; }, 0);  // swallow the click that follows a drop
@@ -1804,6 +1878,8 @@
     if (!card || e.touches.length !== 1 || picking) return;
     var t = e.touches[0];
     startX = t.clientX; startY = t.clientY;
+    // a hold whose touch never ended (no touchend or touchcancel came) is over now
+    if (armed && armed !== card && !touchCard) { armed.classList.remove("held"); armed = null; }
     clearTimeout(hold);
     hold = setTimeout(function () { armTouch(card); }, 350);
   }, { passive: true });

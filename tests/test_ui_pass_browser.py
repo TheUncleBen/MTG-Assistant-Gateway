@@ -79,7 +79,8 @@ def test_watchlist_inputs_are_styled_like_every_other_input(server: Server) -> N
         page.goto(f"{server.base}/watchlist", wait_until="networkidle")
         heights = page.evaluate(
             "() => [...document.querySelectorAll("
-            "'.watch input:not([type=hidden]), .watch select:not([aria-hidden=true]), .watch .msel-btn')]"
+            "'.watch-page input:not([type=hidden]), .watch-page select:not([aria-hidden=true]),"
+            " .watch-page .msel-btn')].filter(e => e.getClientRects().length && !e.closest('[hidden]'))"
             ".map(e => [e.id || e.className, Math.round(e.getBoundingClientRect().height),"
             " getComputedStyle(e).borderRadius])"
         )
@@ -181,7 +182,7 @@ def test_tab_reaches_the_deck_owner_before_the_deck_buttons(server: Server) -> N
 TOUCH_TARGETS = {
     "/": ".topbar .icon-btn, a.brand, footer.site .links a, main .btn, main button,"
     " main input:not([type=hidden])",
-    "/reports": "a.rp-deck",
+    "/reports": ".rp-t .title .t a, .rp-t a.act",
     "/collection?view=list": ".coll-totals a.ext",
     "/guide": ".guide h2 .anchor",
     "/decks/42": ".curveaxis .mv, .rowbtn, .banner .social .soc",

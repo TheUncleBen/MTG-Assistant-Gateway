@@ -132,7 +132,8 @@ async def test_admin_sees_the_pages_and_the_api(gw: Harness) -> None:
         act = await b.http.get("/admin/activity", headers=NAVIGATE)
         assert act.status_code == 200 and "tokens_issued" in act.text
         only = await b.http.get("/admin/activity?sub=user-2", headers=NAVIGATE)
-        assert only.status_code == 200 and "admin-1" not in only.text.split("<ul", 1)[1]
+        assert only.status_code == 200 and "<code>admin-1</code>" not in only.text
+        assert "<code>user-2</code>" in only.text
         gw.db.metrics_increment("2026-01-01", "user-2", "tool", "whoami", 3)
         gw.app.state.gateway.db.metrics_increment(dbmod.Database._since_day(1), "user-2", "tool", "whoami")
         m = await b.http.get("/admin/metrics", headers=NAVIGATE)
@@ -481,7 +482,7 @@ def test_v010_database_upgrades_in_place(tmp_path: Path) -> None:
 
     db = Database(path)
     try:
-        assert db.schema_version == dbmod.SCHEMA_VERSION == 14
+        assert db.schema_version == dbmod.SCHEMA_VERSION == 15
         user = db.get_user("u1")
         assert user["disabled_at"] is None and user["last_seen_at"] == 200 and user["groups"] == ["g"]
         assert db.list_snapshots("u1")[0]["backup_url"] is None
@@ -613,5 +614,32 @@ async def test_admin_tab_titles_name_the_admin_area(gw: Harness) -> None:
             page = await b.http.get(path, headers={"Accept": "text/html"})
             assert page.status_code == 200 and f"<title>{title} · " in page.text, path
             assert "Signed in as <b>" in page.text
+    finally:
+        await b.aclose()
+
+
+async def test_every_admin_page_has_the_same_even_tab_bar_with_the_current_tab_not_orange(
+    gw: Harness,
+) -> None:
+    """One admin tab bar on all six pages: links in .adm-nav, the current one marked aria-current
+    and tinted, never the orange main button (one orange main button per page)."""
+    b = await admin_browser(gw)
+    try:
+        paths = (
+            "/admin",
+            "/admin/users",
+            "/admin/activity",
+            "/admin/metrics",
+            "/admin/settings",
+            "/admin/models",
+        )
+        for path in paths:
+            page = await b.http.get(path, headers={"Accept": "text/html"})
+            assert page.status_code == 200, path
+            nav = page.text.split("<nav class='adm-nav' aria-label='Admin'>", 1)[1].split("</nav>", 1)[0]
+            assert [h for h in paths if f"href='{h}'" in nav] == list(paths), path
+            assert nav.count("aria-current='page'") == 1, path
+            assert f"<a href='{path}' aria-current='page'>" in nav, path
+            assert "btn-primary" not in nav and "class='btn" not in nav, path
     finally:
         await b.aclose()

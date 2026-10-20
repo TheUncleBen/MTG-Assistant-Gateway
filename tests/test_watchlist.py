@@ -123,7 +123,7 @@ def test_a_0_7_22_database_is_upgraded_and_keeps_its_rows(tmp_path: Path, monkey
     monkeypatch.undo()
     new = Database(path)
     try:
-        assert new.schema_version == db_module.SCHEMA_VERSION == 14
+        assert new.schema_version == db_module.SCHEMA_VERSION == 15
         assert new.get_user("u1") is not None
         tables = {r[0] for r in new._conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
         assert {
@@ -177,7 +177,7 @@ async def test_a_watched_card_is_priced_daily_and_shows_its_history(stack: Stack
         assert "class='tspark'" in page and "role='img'" in page
         assert "Sol Ring: $1.28 on 2026-10-12, $2.00 on 2026-10-15." in page
         assert "<th scope='row'>2026-10-13</th><td>$1.40</td>" in page
-        assert "1 day: up 81.8%" in page
+        assert "1 day <span class='dl up'><span aria-hidden='true'>↑</span>up 81.8%</span>" in page
         # the card viewer's Price history reads the same, with nothing asked of Scryfall
         asked = len(stack.sf.requests)
         api = (await b.http.get("/watchlist/api/card", params={"name": "Sol Ring"})).json()
@@ -718,7 +718,7 @@ async def test_watchlists_off_with_ntfy_keep_the_summary_without_prices(
             r = await _post(b, "/account", {"action": "summary_save", "summary_every": "daily"})
             assert r.headers["location"] == "/account?ok=summary_saved#summary"
             page = (await b.http.get("/account")).text
-            assert "<pre>Summary for" in page and "Watched cards" not in page
+            assert "<pre class='sum-text'>Summary for" in page and "Watched cards" not in page
         finally:
             await b.aclose()
         clock.next_day()
@@ -757,7 +757,7 @@ async def test_each_deck_value_names_its_price_source(stack: Stack, monkeypatch)
     try:
         assert (await _post(b, "/watchlist", {"action": "add_deck", "deck": "42"})).status_code == 303
         page = (await b.http.get("/watchlist")).text
-        assert "Sample Commander Deck" in page and "(Scryfall prices)" in page
+        assert "Sample Commander Deck" in page and "cards · Scryfall prices" in page
         deck = (await b.http.get("/decks/42")).text
         assert "(Archidekt prices)</span>" in deck and "<span>Est cost (Archidekt)</span>" in deck
     finally:

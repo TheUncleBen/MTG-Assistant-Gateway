@@ -472,13 +472,13 @@ def test_report_page_and_markdown_show_forge_results() -> None:
 
     assert report_status(None, None, part) == "partial"
     # the Reports page, History and the assistant count its games as Forge games
-    from mtg_gateway.reports import ReportService, run_settings
-    from mtg_gateway.reports_page import engines_text
+    from mtg_gateway.reports import ReportService, _forge_played, run_settings
+    from mtg_gateway.reports_page import in_chip
 
     row = {"id": "rep_x", "deck_id": "42", "deck_name": "Liesa", "taken_at": 1, "fingerprint": "f"}
     summary = ReportService._summary({**row, "forge_json": json.dumps(part)})
     assert summary["engine"] == "forge" and summary["settings"]["engines"] == ["forge"]
-    assert "Forge games" in engines_text(summary)
+    assert in_chip({"forge_played": _forge_played(part)}, "forge")  # the "With Forge games" chip
     none = ReportService._summary(
         {**row, "forge_json": json.dumps({"state": "failed", "result": {"games": 0}})}
     )
@@ -603,7 +603,7 @@ def test_report_page_shows_a_queued_run_and_its_place() -> None:
         "average_game_seconds_measured": 235.6,
     }
     live = forge_html(queued, live=True)
-    assert "queued" in live and "data-forge-live" in live
+    assert ">Queued</span>" in live and "data-forge-live" in live
     assert "Waiting for your earlier Forge run to finish." in live
     assert "Waiting: number 1 in line, behind your report of Liesa. It starts by itself" in live
     assert "Expected to finish in about 79 minutes (at the measured 235.6 seconds a game)." in live

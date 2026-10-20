@@ -14,7 +14,7 @@ PROMISE = re.compile(
     r"|again in a few minutes|within a minute or two|reload (?:this page |the page )?in a (?:minute|moment)"
     r"|wait a few minutes and try|wait a (?:minute|moment)(?:[,.(]| and| \()|for a few minutes\."
     r"|waits a few minutes|refills over a few minutes|try again in [{0-9]|within a few (?:seconds|minutes)"
-    r"|in about (?:a |[0-9])",
+    r"|in about (?:a |[0-9])|straight away",
     re.IGNORECASE,
 )
 # a message split over several source lines ("...try again in a " "few minutes.") is one string
@@ -28,6 +28,10 @@ NOT_A_MESSAGE = {
     ("ANDROID.md", "if that happens again within a few seconds the app unloads the page"),
     ("TROUBLESHOOTING.md", "A change shows up within a few seconds of the member's next page"),
     ("SKILL.md", "All three tasks `Running` within about a minute"),  # operator deploy check
+    ("decks.py", "the call would only be refused: queue it straight away"),  # comment
+    ("oidc.py", "any answer is tried once more straight away"),  # docstring
+    ("deck.js", "opens EDHPlay straight away, as a plain link"),  # comment
+    ("OPERATIONS.md", "The person can sign in again straight away"),  # what the operator's button does
 }
 
 

@@ -378,7 +378,9 @@ def add_cardsearch_routes(server: MCPServer, state: AppState) -> None:
                 # deck.css carries the card viewer's own styles (the dialog, its bottom sheet on phones)
                 f"{stylesheet_link('deck.css')}<style>{cv.CARDS_CSS}</style>"
                 "<script src='/static/cardview.js' defer></script>"
-                "<script src='/static/cardsearch.js' defer></script>"
+                # Art variants… in the card menu: the shared printing picker, in its browse mode
+                + ("<script src='/static/printpick.js' defer></script>" if state.prices is not None else "")
+                + "<script src='/static/cardsearch.js' defer></script>"
             ),
         )
         resp.headers["Content-Security-Policy"] = CARDS_CSP
@@ -414,6 +416,13 @@ def add_cardsearch_routes(server: MCPServer, state: AppState) -> None:
             "" if linked else "Link your Archidekt account on the Account page to add cards to a deck.",
         )
 
+    def watched_of(sub: str) -> frozenset[str] | None:
+        """The member's watched card names for the Watch buttons (one read a page), or None when
+        watchlists are off: then no result has a Watch button."""
+        if state.prices is None:
+            return None
+        return cv.watched_names(state.prices.watched_cards(sub))
+
     def view_of(request: Request, sub: str) -> tuple[str, bool]:
         return prefs.view_choice(state.db, sub, request, "cards", cv.VIEWS, "grid")
 
@@ -445,14 +454,21 @@ def add_cardsearch_routes(server: MCPServer, state: AppState) -> None:
             )
         linked, reason = add_reason(sub)
         printing = f.shows_printings()
+        watched = watched_of(sub)
         if page_no > 1:
             html_out = cv.results_items_html(
-                out["cards"], view=view, can_add=linked, reason=reason, printing=printing
+                out["cards"], view=view, can_add=linked, reason=reason, printing=printing, watched=watched
             )
         else:
             html_out = (
                 cv.results_list_html(
-                    out["cards"], view=view, can_add=linked, reason=reason, printing=printing, linked=linked
+                    out["cards"],
+                    view=view,
+                    can_add=linked,
+                    reason=reason,
+                    printing=printing,
+                    linked=linked,
+                    watched=watched,
                 )
                 if out["cards"]
                 else NO_MATCH_HTML
@@ -544,6 +560,7 @@ def add_cardsearch_routes(server: MCPServer, state: AppState) -> None:
                         reason=reason,
                         printing=f.shows_printings(),
                         linked=linked,
+                        watched=watched_of(sub),
                     )
                     if out["cards"]
                     else NO_MATCH_HTML
@@ -558,6 +575,7 @@ def add_cardsearch_routes(server: MCPServer, state: AppState) -> None:
         body += (
             "<section class='cs-out'>"
             + cv.results_head_html(f, view=view, total=total, shown=f.chosen())
+            + (cv.HINT_HTML if state.prices is not None else "")
             + f"<div id='cs-status' class='cs-status' role='status'>{status_html}</div>"
             + f"<div id='cs-results' class='cs-results' data-linked='{'1' if linked else ''}'>{results}</div>"
             + more
