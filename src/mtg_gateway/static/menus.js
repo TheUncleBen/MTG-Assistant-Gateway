@@ -793,6 +793,13 @@
     var who = ($("input[name=username]", form) || {}).value;
     who = (who || "").trim();
     if (!who || (action !== "add" && action !== "remove")) return;
+    if (action === "add") {
+      // someone not among the people followed goes straight to the gateway, which says why not
+      var people = [];
+      try { people = JSON.parse(($("#collabname", form) || { getAttribute: function () { return ""; } }).getAttribute("data-options") || "[]"); } catch (err) { people = []; }
+      var low = who.toLowerCase();
+      if (!people.some(function (n) { return String(n && n.name !== undefined ? n.name : n).toLowerCase() === low; })) return;
+    }
     e.preventDefault();
     var deck = collab.getAttribute("data-deck-name") || "";
     var adding = action === "add";

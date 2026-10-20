@@ -122,6 +122,9 @@ ICONS = {
     "report_more_games": "report",
     "folder_created": "folder",
     "folder_renamed": "folder",
+    "folder_moved": "folder",
+    "folder_deleted": "folder",
+    "folder_delete_stopped": "folder",
     "deck_moved": "folder",
     "deck_commented": "comment",
     "deck_comment_edited": "comment",
@@ -687,7 +690,7 @@ def member_detail_html(row: Mapping[str, Any], names: Names) -> str:
     deck_id = _deck_of(row, d, names)
     if deck_id not in (None, ""):
         bits.append(_deck_html(names, sub, deck_id, link=True, own=event not in OTHERS_DECKS))
-    if event == "folder_created" or event == "folder_renamed":
+    if event in ("folder_created", "folder_renamed", "folder_moved"):
         folder = names.folder(sub, d.get("folder_id"))
         if folder:
             bits.append(esc(folder))

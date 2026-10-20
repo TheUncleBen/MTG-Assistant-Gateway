@@ -184,12 +184,15 @@ def test_collaborator_box_picks_from_the_people_followed(server: Server, width: 
         box.fill("")
         listbox.locator("[role=option]", has_text="gwen").click()
         assert box.input_value() == "gwen" and not listbox.is_visible()
-        # Add sends the picked name to the confirmation step
+        # Add asks in a box first; nothing is sent until the box's Add
+        section.locator("form.addtag > button").click()
+        dialog = page.locator("[role=dialog]", has_text="Let gwen edit")
+        dialog.wait_for(timeout=3000)
+        assert posted == []
         with page.expect_navigation():
-            section.locator("form.addtag > button").click()
-        assert "Let gwen edit" in page.locator("main").inner_text()
-        assert any("action=add" in d and "username=gwen" in d for d in posted), posted
-        assert server.ark.editors[42][0]["user"]["username"] == "amy" and len(server.ark.editors[42]) == 1
+            dialog.locator("button", has_text="Add gwen").click()
+        assert any("action=add" in d and "username=gwen" in d and "confirmed=1" in d for d in posted), posted
+        assert [e["user"]["username"] for e in server.ark.editors[42]] == ["amy", "gwen"]
         assert errors == []
         browser.close()
 
