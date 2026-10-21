@@ -7,7 +7,67 @@ Notable changes for people who run or use the gateway. The format follows
 with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 (`release/1.2.3`); `latest` is always the newest.
 
-## [0.7.38] - unreleased
+## [0.7.39] - 2026-10-21
+
+Fixes from a security review of 0.7.31 to 0.7.37, and small fixes to card search and the
+Proposals page.
+
+### Upgrade notes
+- None beyond the [update steps](docs/UPGRADING.md). Coming from 0.7.37 or 0.7.38 there is no
+  database change, so this update saves no before-upgrade copy, and going back needs only the
+  `MTG_TAG` change. Coming from 0.7.36 or older, the database is upgraded as before.
+- At its first start the gateway deletes the copies in `before-upgrade` (set-aside copies too)
+  that are older than `MTG_BACKUP_KEEP_DAYS` (14 days unless you changed it), the newest included,
+  and brings the rest in line with the database (below).
+- Going back by itself works only within `MTG_BACKUP_KEEP_DAYS` of an upgrade; raise it before
+  you update to keep the way back open longer.
+- The Android app doesn't change.
+
+### Security
+- The copies saved before database upgrades, and the set-aside copies made when going back, are
+  kept no longer than the nightly backups (`MTG_BACKUP_KEEP_DAYS`), the newest included. An
+  unlink, a disable, a removal from the gateway's group, **Disconnect my phones** and **Delete my
+  data** are applied to every one of them at once, as the “Before you link” text says, and so is a
+  relink's replaced session; a copy that can't be changed is deleted. At every start the copies
+  are also brought in line with the database, so what ended under an older version is ended in
+  them too: deleted members are forgotten (in a set-aside copy too, where members who joined after
+  the upgrade stay), members who are gone or disabled keep no sign-in tokens, and Archidekt
+  sessions and phone keys the database no longer holds are blanked.
+- When you go back from a later version to 0.7.39 or newer, each member keeps the Archidekt link
+  and the phone connection they have now: an Archidekt account they unlinked or replaced since the
+  upgrade, and phones they disconnected, don't come back.
+- Going forward again with a set-aside copy put back by hand: if the copy was made by 0.7.39 or
+  newer, the newer version ends every sign-in at its first start on it. docs/UPGRADING.md says
+  what to do with a copy made by 0.7.37 or 0.7.38, and what to check on the Users page afterwards.
+- The My decks folder and deck boxes, deck search's Load more, tag suggestions, deck downloads,
+  the JSON API used with a browser sign-in and the other signed-in reads that ask Archidekt (or
+  Scryfall, for card search) now answer only requests from the gateway's own pages: a link on
+  another site can't make them spend a member's allowance.
+- Nightly backups no longer keep members' phone keys (their notification topics). After a
+  restore, members who use notifications press **Save notifications** in the app again.
+- The gateway remembers the folder it puts backup copies in, so the backup folder renamed on
+  Archidekt (or a folder it was moved into) can't be deleted like any other folder, even with no
+  copy left inside. Deleting a folder is also refused when it holds backup copies the gateway
+  made.
+- The before-upgrade folder is made owner-only even when it already existed with looser
+  permissions.
+- The “Before you link” text and the member guide say what the copy saved before a database
+  upgrade keeps, and for how long.
+
+### Changed
+- Card search fills the screen and a few rows more, then loads more cards only from the Load more
+  button, never by scrolling.
+
+### Fixed
+- Card search on a computer: the cards Load more adds no longer move the Add to deck buttons
+  already on screen, and they get their ⋮ menu button too. Every card tile is now the same
+  height: the mana cost keeps one line and the type line two (the card viewer shows all of a long
+  one).
+- Proposals: a proposal whose risk can't be judged shows "—" instead of High, also while it
+  waits (it still waits for your own press).
+- The 0.7.35, 0.7.36, 0.7.37 and 0.7.38 sections of this changelog carry their release dates.
+
+## [0.7.38] - 2026-10-21
 
 The solo test plays far more of a deck's cards with their effect. It now reads the common card
 text it used to skip (drawing, ramp, tokens, damage, anthems, cost reducers and more), so across
@@ -46,7 +106,7 @@ aside and said so, instead of counting against the deck.
 - Forge games run a little faster (about 5% on average over 6 paired test games on one x86
   machine; not timed on a Pi).
 
-## [0.7.37] - unreleased
+## [0.7.37] - 2026-10-21
 
 Updating is now a fresh install on top of your data: take the newest stack file and example
 variables file, put your settings in, deploy. There is no backup to take first: before a new
@@ -90,7 +150,7 @@ version puts that copy back by itself.
 - docs/UPGRADING.md, docs/DEPLOY.md and docs/DEPLOY-COMPOSE.md describe an update as the install
   steps again; the extra steps 0.7.29 to 0.7.33 needed are kept at the end of UPGRADING.md.
 
-## [0.7.36] - unreleased
+## [0.7.36] - 2026-10-20
 
 Decks, folders and cards get a menu on every page (right-click, press and hold, or the ⋮
 button), and the actions that had a page of their own open as a box instead. Folders can be moved
@@ -138,7 +198,7 @@ pages fit phones, an open Fold, tablets and computers the same way.
 ### Fixed
 - A saved scan could write its list into another tab after you switched tabs.
 
-## [0.7.35] - unreleased
+## [0.7.35] - 2026-10-20
 
 The gateway's pages follow one look: the same status and risk words everywhere, tables that turn
 into two-line rows on phones, a row of widgets at the top of Proposals, History, Reports and the

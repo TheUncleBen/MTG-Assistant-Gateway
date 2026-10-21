@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import glob
 import json
-import socket
 import threading
 import time
 from pathlib import Path
@@ -32,14 +31,9 @@ from mtg_gateway.oidc import OIDCClient, pkce_pair
 
 from .conftest import CLIENT_ID, CLIENT_SECRET, IDP, FakeIdP, make_settings
 from .test_cimd import CLIENT_URL, DocHost, document
+from .test_scan_browser import _free_port, _serve
 
 pytest.importorskip("playwright")
-
-
-def _free_port() -> int:
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
 
 
 def _chromium_path() -> str | None:
@@ -102,7 +96,10 @@ class Server:
                 uvicorn.Config(outside_app, host="127.0.0.1", port=self.outside_port, log_level="warning")
             ),
         ]
-        self.threads = [threading.Thread(target=s.run, daemon=True) for s in self.servers]
+        self.threads = [
+            threading.Thread(target=_serve(s, port), daemon=True)
+            for s, port in zip(self.servers, (self.port, self.outside_port), strict=True)
+        ]
 
     def start(self) -> None:
         for t in self.threads:

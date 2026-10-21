@@ -20,7 +20,7 @@ from typing import Any
 
 import pytest
 
-from .test_scan_browser import _chromium_path, _free_port
+from .test_scan_browser import _chromium_path, _free_port, _held_socket
 from .test_suggest_browser import Server
 
 pytest.importorskip("playwright")
@@ -39,9 +39,7 @@ class Relay:
         self.refuse: bytes | None = None
         self.live: set[socket.socket] = set()
         self._stop = False
-        self._sock = socket.socket()
-        self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self._sock.bind(("127.0.0.1", self.port))
+        self._sock = _held_socket(self.port)  # bound already, so no other test can take the port
         self._sock.listen(64)
         self._sock.settimeout(0.1)
         threading.Thread(target=self._loop, daemon=True).start()

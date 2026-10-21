@@ -787,6 +787,9 @@ def _like_prefix(prefix: str) -> str:
 
 # job_runs rows recording how each backup copy was made (record_backup_made), by the copy's id.
 BACKUP_MADE_JOB = "backup_made:"
+# job_runs rows recording each Archidekt folder the gateway put a member's backup copies in
+# (record_backup_folder), by member and folder id: a renamed backup folder stays known as one
+BACKUP_FOLDER_JOB = "backup_folder:"
 # job_runs rows of the queued backup deletes before schema 13 moved them to backup_deletes:
 # this prefix and the snapshot id (read only by _step_13)
 BACKUP_DELETE_JOB = "backup_delete:"
@@ -852,6 +855,12 @@ def delete_member_rows(c: sqlite3.Connection, sub: str) -> dict[str, int]:
         if "snapshots" in present
         else 0
     )
+    # and the records of the folders the gateway put their copies in
+    if "job_runs" in present:
+        out["backup_folders"] = c.execute(
+            "DELETE FROM job_runs WHERE substr(name, 1, ?) = ?",
+            (len(BACKUP_FOLDER_JOB) + len(sub) + 1, f"{BACKUP_FOLDER_JOB}{sub}:"),
+        ).rowcount
     for table, column in MEMBER_TABLES:
         if table in present:
             out[table] = c.execute(f"DELETE FROM {table} WHERE {column} = ?", (sub,)).rowcount
@@ -868,6 +877,9 @@ class Database:
         the database file."""
         self.path = Path(path)
         self.upgrade_dir = upgrade_dir
+        # Days the before-upgrade copies are kept (the app wires in MTG_BACKUP_KEEP_DAYS); None
+        # keeps them until newer ones push them out.
+        self.upgrade_keep_days: int | None = None
         if str(self.path) != ":memory:":
             self.path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
@@ -892,9 +904,41 @@ class Database:
             self._conn.execute("PRAGMA secure_delete=ON")
             try:
                 self._migrate()
+                upgrade_backup.went_forward(self._conn)
             except Exception:
                 self._conn.close()
                 raise
+
+    @property
+    def upgrade_folder(self) -> Path | None:
+        """The before-upgrade folder (upgrade_backup.py), or None for a database in memory."""
+        if str(self.path) == ":memory:":
+            return None
+        return self.upgrade_dir if self.upgrade_dir is not None else self.path.parent / upgrade_backup.FOLDER
+
+    def scrub_upgrade_copies(self, sub: str, what: str) -> int:
+        """End in the before-upgrade and set-aside copies what just ended for ``sub`` here
+        (upgrade_backup.scrub_member): "link", "account", "phone" or "data"."""
+        folder = self.upgrade_folder
+        if folder is None:
+            return 0
+        return upgrade_backup.scrub_member(folder, sub, what, delete_member_rows, len(MIGRATIONS))
+
+    def reconcile_upgrade_copies(self) -> int:
+        """Bring the copies in line with this database (upgrade_backup.reconcile): at start, so
+        what ended under an older version, or in a change cut short, is ended in them too."""
+        folder = self.upgrade_folder
+        if folder is None:
+            return 0
+        with self._lock:
+            return upgrade_backup.reconcile(folder, self._conn, delete_member_rows, len(MIGRATIONS))
+
+    def age_out_upgrade_copies(self) -> int:
+        """Delete the before-upgrade and set-aside copies older than ``upgrade_keep_days``."""
+        folder = self.upgrade_folder
+        if folder is None or self.upgrade_keep_days is None:
+            return 0
+        return upgrade_backup.age_out(folder, self.upgrade_keep_days)
 
     def _migrate(self) -> None:
         """Run the migration steps this database has not seen (``PRAGMA user_version``), after
@@ -920,6 +964,9 @@ class Database:
             self._conn.execute("PRAGMA journal_mode=WAL")
             version = int(self._conn.execute("PRAGMA user_version").fetchone()[0])
         if version < len(MIGRATIONS) and on_disk and upgrade_backup.has_data(self._conn):
+            # a set-aside copy put back on a newer version: its sign-ins end, and its mark stays
+            # out of the copy saved now
+            upgrade_backup.went_forward(self._conn)
             upgrade_backup.save_before_upgrade(self._conn, self.path, folder, version, len(MIGRATIONS))
         if version < 1:
             # executescript commits on its own, so step 1 can't share a transaction. Every
@@ -1063,7 +1110,9 @@ class Database:
                 "UPDATE users SET disabled_at = ? WHERE sub = ?",
                 (int(time.time()) if disabled else None, sub),
             )
-            return cur.rowcount > 0
+        if disabled and cur.rowcount > 0:
+            self.scrub_upgrade_copies(sub, "account")
+        return cur.rowcount > 0
 
     def list_users(self) -> list[dict[str, Any]]:
         """Every user the identity provider has signed in, newest sign-in first, with their active
@@ -1460,7 +1509,8 @@ class Database:
         request) for its whole run (0.7.29). Every step is idempotent: a purge cut
         short by an error or a restart is finished by the next one."""
         now = int(time.time())
-        n = self._delete_batched("tokens", "expires_at < ?", (now - 86400,))
+        n = self.age_out_upgrade_copies()
+        n += self._delete_batched("tokens", "expires_at < ?", (now - 86400,))
         n += self._delete_batched("auth_codes", "expires_at < ?", (now,))
         n += self._delete_batched("login_sessions", "expires_at < ?", (now,))
         n += self._delete_batched("browser_sessions", "expires_at < ?", (now,))
@@ -1832,6 +1882,7 @@ class Database:
         with self.tx() as c:
             out = delete_member_rows(c, sub)
         self.flush_wal()
+        self.scrub_upgrade_copies(sub, "data")
         return out
 
     def drop_member(self, sub: str, groups: list[str]) -> int:
@@ -1844,6 +1895,7 @@ class Database:
             # leave a usable Archidekt login behind on this server.
             c.execute("UPDATE archidekt_links SET status = 'revoked', secret_enc = '' WHERE sub = ?", (sub,))
         self.flush_wal()
+        self.scrub_upgrade_copies(sub, "account")
         return sum(self.revoke_all_for_user(sub).values())
 
     def set_user_issuer(self, sub: str, issuer: str) -> None:
@@ -1899,6 +1951,8 @@ class Database:
             stored = cur.rowcount > 0
         if replaced:
             self.flush_wal()
+            if stored:  # the replaced session is not kept in the copies either
+                self.scrub_upgrade_copies(sub, "link")
         return stored
 
     def audit_seen(self, event: str) -> bool:
@@ -1960,6 +2014,8 @@ class Database:
             changed = c.execute(sql, args).rowcount > 0
         if changed:
             self.flush_wal()
+        if only_secret is None:  # an unlink: the copies saved at upgrades keep no session either
+            self.scrub_upgrade_copies(sub, "link")
         return changed
 
     def flush_wal(self) -> None:
@@ -3122,6 +3178,43 @@ class Database:
                 (BACKUP_MADE_JOB + str(backup_deck_id), self._since_day(0), now, json.dumps(record)),
             )
 
+    def record_backup_folder(self, sub: str, folder_id: str | int) -> None:
+        """Remember that the gateway put ``sub``'s backup copies in the Archidekt folder
+        ``folder_id``, so the folder is known as the backup folder after a rename on Archidekt,
+        even once no copy is left inside. Kept until the member's data is deleted."""
+        with self.tx() as c:
+            c.execute(
+                "INSERT OR REPLACE INTO job_runs (name, day, at, detail_json) VALUES (?, ?, ?, ?)",
+                (f"{BACKUP_FOLDER_JOB}{sub}:{int(folder_id)}", self._since_day(0), int(time.time()), "{}"),
+            )
+
+    def backup_folder_ids(self, sub: str) -> set[int]:
+        """The Archidekt folders the gateway put ``sub``'s backup copies in (record_backup_folder,
+        and the folder each recorded copy was made in)."""
+        prefix = f"{BACKUP_FOLDER_JOB}{sub}:"
+        with self._lock:
+            names = self._conn.execute(
+                "SELECT substr(name, ?) FROM job_runs WHERE substr(name, 1, ?) = ?",
+                (len(prefix) + 1, len(prefix), prefix),
+            ).fetchall()
+            made = self._conn.execute(
+                """SELECT folder_id FROM (
+                       SELECT CASE WHEN json_valid(detail_json)
+                                   THEN json_extract(detail_json, '$.folder_id') END AS folder_id,
+                              CASE WHEN json_valid(detail_json)
+                                   THEN json_extract(detail_json, '$.sub') END AS sub
+                       FROM job_runs WHERE substr(name, 1, ?) = ?)
+                   WHERE sub = ?""",
+                (len(BACKUP_MADE_JOB), BACKUP_MADE_JOB, sub),
+            ).fetchall()
+        out: set[int] = set()
+        for (v,) in [*names, *made]:
+            try:
+                out.add(int(v))
+            except (TypeError, ValueError):
+                continue
+        return out
+
     def backup_made(self, backup_deck_id: str) -> dict[str, Any] | None:
         row = self._one(
             "SELECT detail_json FROM job_runs WHERE name = ?", (BACKUP_MADE_JOB + str(backup_deck_id),)
@@ -3317,6 +3410,9 @@ class Database:
                 "UPDATE archidekt_links SET secret_enc = '', status = 'revoked' WHERE secret_enc != ''"
             )
             mem.execute("UPDATE idp_grants SET refresh_enc = '', access_enc = ''")
+            # A member's notification topic works as their phone's key: a restored backup asks
+            # phones to connect again rather than keep a key anyone holding a backup could read.
+            mem.execute("UPDATE notify_prefs SET ntfy_topic = NULL WHERE ntfy_topic IS NOT NULL")
             mem.commit()
             mem.execute("VACUUM")
             target = sqlite3.connect(str(dest))

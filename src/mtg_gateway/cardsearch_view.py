@@ -122,15 +122,21 @@ details.cs-more > .cs-grid{margin:.5rem 0 0}
 .cardgrid .meta{display:flex;flex-direction:column;gap:.15rem;min-width:0}
 /* the name and its ⋮ share the first row, the mana cost the second (a row every tile keeps, so
    a land's type line sits level with its neighbours'); a long name stops at two lines, and a
-   short one keeps two lines' room, so every tile of a row keeps the same height */
+   short one keeps two lines' room. The mana cost keeps one line and the type line two, so every
+   tile is as tall as every other: the cards Load more adds to a row never move its Add to deck
+   buttons */
 .cardgrid .nm{display:grid;grid-template-columns:minmax(0,1fr) auto;
-  grid-template-rows:auto minmax(1.4em,auto);align-items:start;gap:.2rem .4rem;font-weight:700;
+  grid-template-rows:auto 1.4em;align-items:start;gap:.2rem .4rem;font-weight:700;
   line-height:1.25;overflow-wrap:anywhere;min-width:0}
 .cardgrid .nm > span:first-child{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;
   overflow:hidden;grid-column:1;grid-row:1;min-width:0;min-height:2.5em}
-.cardgrid .nm .mana{grid-column:1 / -1;grid-row:2;min-width:0;flex-wrap:wrap;white-space:normal}
+.cardgrid .nm .mana{grid-column:1 / -1;grid-row:2;min-width:0;flex-wrap:nowrap;overflow:hidden;
+  max-width:100%;height:1.4em}
 .cardgrid .nm .kebab{grid-column:2;grid-row:1}
 .cardgrid .ty,.cardgrid .pr{font-size:.86rem;color:var(--text-muted);overflow-wrap:anywhere}
+.cardgrid .ty{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;
+  line-height:1.3;height:2.6em}
+.cardgrid .pr{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .cardgrid .add,.cardlist .add{margin:0;min-width:0}
 /* every card of a row is as tall as the tallest, its Add to deck on the row's bottom edge */
 .cardgrid .add{width:100%;margin-top:auto}
@@ -629,7 +635,8 @@ def card_tile_html(
     return (
         f"<li class='cc'>{pic}<div class='meta'><span class='nm'><span>{_esc(name)}</span>"
         f"{mana_html(str(card.get('mana_cost') or ''))}</span>"
-        f"<span class='ty'>{_esc(card.get('type_line') or '')}</span>{extra}</div>"
+        f"<span class='ty' title='{_esc(card.get('type_line') or '')}'>{_esc(card.get('type_line') or '')}"
+        f"</span>{extra}</div>"
         + _add_button(card, can_add=can_add, reason=reason, printing=printing)
         + "</li>"
     )

@@ -11,6 +11,7 @@ tiles of one height. Skipped without Chromium."""
 from __future__ import annotations
 
 import copy
+import threading
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
@@ -192,6 +193,8 @@ def test_the_delete_folder_box_stays_until_its_job_ends(server: Server) -> None:
         box = _box(page)
         box.locator("#mb-typed").wait_for(timeout=5000)
         box.locator("#mb-typed").fill("Commander")
+        held = threading.Event()  # the delete waits until the box has been tried
+        server.ark.hold_folder_deletes = held
         box.locator("button", has_text="Delete folder").click()
         box.locator(".progress").wait_for(timeout=5000)
         # Esc and a press on the scrim do nothing while the job runs
@@ -200,6 +203,8 @@ def test_the_delete_folder_box_stays_until_its_job_ends(server: Server) -> None:
         page.wait_for_timeout(200)
         assert page.locator(".mtgbox[role=dialog]").count() == 1
         assert page.locator(".mtgbox[role=dialog] [data-cancel]").count() == 0
+        assert server.ark.folder_deletes == []  # the job really was still running
+        held.set()
         # then the outcome: My decks with the notice
         page.wait_for_url(lambda u: "ok=folder_deleted" in u, timeout=30000)
         assert "Folder deleted" in page.locator("main .notice.ok").inner_text()

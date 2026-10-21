@@ -94,3 +94,14 @@ def test_release_refuses_a_version_tagged_on_another_commit(tmp_path: Path) -> N
     root = _repo(tmp_path, "1.2.0")
     subprocess.run(["git", "tag", "v1.2.0", "HEAD~1"], cwd=root, check=True)
     assert rv.main(["release"], root) == 1
+
+
+def test_every_changelog_section_has_its_date() -> None:
+    """Every section carries its date: the pull request dates its own section (docs/VERSIONS.md),
+    so none reads "unreleased" once it is on main. A version folded into a later release says so
+    instead."""
+    heads = re.findall(r"^## \[(\d+\.\d+\.\d+)\] - (.+)$", (ROOT / "CHANGELOG.md").read_text(), re.M)
+    assert heads
+    dated = r"\d{4}-\d{2}-\d{2}|not released on its own, included in \d+\.\d+\.\d+"
+    undated = [v for v, when in heads if not re.fullmatch(dated, when.strip())]
+    assert undated == []

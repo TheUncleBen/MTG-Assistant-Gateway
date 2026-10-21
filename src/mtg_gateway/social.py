@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, Any
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
-from . import formatting, refusals
+from . import formatting, prefs, refusals
 from .archidekt import VOTE_DOWN, VOTE_NONE, VOTE_UP, ArchidektError, Deck, QuillDoc, plain_text, rich_text
 from .decklist import clean_text
 from .decks import DeckError, _clean_deck_id
@@ -595,6 +595,8 @@ def add_social_routes(server: MCPServer, state: AppState) -> SocialService:
         if write:
             if not csrf_header_ok(s, sid, request):
                 return _fail("csrf", "Reload the page and retry.")
+        elif not prefs.from_this_site(request):  # a read asks Archidekt on the member's own allowance
+            return JSONResponse({"ok": False, "error": "cross_site"}, 403, headers=NO_STORE)
         return sub
 
     async def body(request: Request) -> dict[str, Any] | Response:

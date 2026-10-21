@@ -39,7 +39,7 @@ from .fake_scryfall import FakeScryfall
 from .test_card_search_filters_browser import CONTRAST
 from .test_deck_menu_browser import PNG
 from .test_overflow_sweep_browser import MEASURE
-from .test_scan_browser import _chromium_path, _free_port
+from .test_scan_browser import _chromium_path, _free_port, _serve
 
 pytest.importorskip("playwright")
 
@@ -77,7 +77,7 @@ class Server:
         self.server = uvicorn.Server(
             uvicorn.Config(self.app, host="127.0.0.1", port=self.port, log_level="warning")
         )
-        self.thread = threading.Thread(target=self.server.run, daemon=True)
+        self.thread = threading.Thread(target=_serve(self.server, self.port), daemon=True)
 
     def start(self) -> None:
         self.thread.start()

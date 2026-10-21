@@ -3147,11 +3147,17 @@ class DeckService:
             return "high", "was changed by another app after it was made"
         return risk, why
 
+    @staticmethod
+    def unjudged(row: dict[str, Any]) -> bool:
+        """An edit with no review rows (stored before they existed): nothing to judge its risk by.
+        It still waits for the member's own press, as a high-risk one does, but shows no tier."""
+        return (row.get("kind") or "edit") in ("edit", "collection") and row.get("rows") is None
+
     def stored_risk(self, row: dict[str, Any]) -> str:
         """The risk tier stored on a proposal when it closes (Database.risk_source). A closed edit
         with no review rows (stored before they existed) has nothing to judge it by: it keeps no
         tier (``modes.UNJUDGED``) rather than reading High for want of evidence."""
-        if (row.get("kind") or "edit") in ("edit", "collection") and row.get("rows") is None:
+        if self.unjudged(row):
             return modes.UNJUDGED
         return self.proposal_risk(str(row.get("owner_sub") or ""), row)[0]
 
@@ -3507,6 +3513,11 @@ class DeckService:
                 risk, why = stored, STORED_RISK_REASON
             elif stored == modes.UNJUDGED:
                 risk, why = None, ""  # nothing to judge it by: no risk label, a dash
+        if risk == "high" and why == modes.NO_ROWS_REASON:
+            # the same while it waits, or closed before its tier was stored; `allowed` above still
+            # keeps a waiting one for the member's own press. A High with a reason (another app
+            # changed it) stays High.
+            risk, why = None, ""
         press = self.press_reason(sub, row) if risk not in modes.MEMBER_ONLY else None
         # "May apply now": the member's mode allows it for this risk AND the proposal is still
         # pending (risk, approval_mode and risk_reason keep the policy side either way).
@@ -5379,6 +5390,7 @@ class DeckService:
                 sub,
                 lambda token, *_: self.client.ensure_folder(token, name=folder_name),
             )
+            self.db.record_backup_folder(sub, folder["id"])
             # How long the gateway's own writes to the copy took (the copy POST and its
             # description PATCH, which come back together): Archidekt's createdAt and every
             # updatedAt those writes set fall inside it, whatever Archidekt's clock says.
@@ -6922,7 +6934,17 @@ class DeckService:
         info, folder = await self._folder_in(sub, int(folder_id))
         self._movable_folder(info, folder)
         below = self._inside(info, folder["id"])
-        if any(f.get("backup") for f in below):
+        # the backup folder is known by its name; one renamed on Archidekt by the gateway's
+        # record of the folders it put backup copies in
+        recorded = self.db.backup_folder_ids(sub)
+        if folder["id"] in recorded:
+            raise DeckError(
+                "backup_inside",
+                f"“{folder['name']}” is the folder the gateway keeps backup copies of your decks in, "
+                "renamed on Archidekt. Deleting it would delete the backup copies, so it can't be "
+                "deleted here.",
+            )
+        if any(f.get("backup") or f["id"] in recorded for f in below):
             raise DeckError(
                 "backup_inside",
                 f"The gateway's backup folder is inside “{folder['name']}”, and deleting it would delete "
@@ -6939,6 +6961,15 @@ class DeckService:
             # left out would be deleted unseen, with no snapshot of its decks
             if subs != {g["id"] for g in below if g["parent"] == f["id"]}:
                 raise DeckError("unavailable", self.TOO_MUCH_TO_LIST)
+        # any other folder holding backup copies the gateway recorded making (moved there on
+        # Archidekt) is not deleted like any other folder either
+        made = self.db.backup_copies(sub)
+        if any(d["id"] in made for d in decks):
+            raise DeckError(
+                "backup_inside",
+                f"“{folder['name']}” holds backup copies the gateway made of your decks, and deleting it "
+                "would delete them too. Move those decks out of it on Archidekt first.",
+            )
         return {"folder": folder, "decks": decks, "packages": packages, "folders": below}
 
     LIMIT_WAITS = 30  # waits for the member's own Archidekt limit within one folder delete

@@ -28,6 +28,7 @@
   var enc = encodeURIComponent;
   var LAST_DECK = "mtg.addToDeck";
   var DEBOUNCE_MS = 400;
+  var FILL_ROWS = 3;  // the rows past the screen's foot a first answer fills before "Load more" takes over
   function el(tag, cls, text) {
     var e = document.createElement(tag);
     if (cls) e.className = cls;
@@ -110,6 +111,8 @@
   // lastQs: the search last asked for (an unchanged form asks nothing again). shownQs: the search
   // whose tiles are on screen; "Load more" asks for its next page, never the form's newer text.
   var timer = null, ctrl = null, moreCtrl = null, page = 1, hasMore = false, loadingMore = false;
+  // filling: the first answer is still being topped up to a screenful and a few rows (fill)
+  var filling = false;
   var lastQs = null, shownQs = null;
   var startTpl = $("#cs-start"), startHtml = startTpl ? startTpl.innerHTML : null;
   function setStatus(text, isError) {
@@ -196,7 +199,8 @@
           results.innerHTML = d.html;
           setCount(d.total, true);
           showMore(d.has_more);
-          nearEnd();
+          filling = true;
+          fill();
           if (d.warnings && d.warnings.length) setStatus(d.warnings.join(" "), false);
         }
         updateBadge(p);
@@ -222,36 +226,39 @@
         if (forQs !== shownQs || (mine && moreCtrl !== mine)) return;  // a newer search is on screen
         moreCtrl = null;
         moreDone();
-        if (!d.ok) { setStatus(d.message || "More cards could not be loaded.", true); return; }
+        if (!d.ok) { filling = false; setStatus(d.message || "More cards could not be loaded.", true); return; }
         var list = results.querySelector(".cardgrid,.cardlist");
         if (!list) return;
         list.insertAdjacentHTML("beforeend", d.html);
         page = d.page;
         showMore(d.has_more);
-        nearEnd();
+        fill();
       })
       .catch(function (e) {
         if ((e && e.name === "AbortError") || forQs !== shownQs || (mine && moreCtrl !== mine)) return;
         moreCtrl = null;
+        filling = false;
         moreDone();
         setStatus("No connection; more cards could not be loaded.", true);
       });
   }
-  // the observer only speaks when the end comes into reach, so a page too short to push it
-  // back out (a tall window, a short page) asks for the next one itself
-  function nearEnd() {
-    if (!hasMore || !moreWrap || !window.IntersectionObserver) return;
+  // A search's first answer fills the screen and a few rows more: while the list ends above
+  // that, the next page is asked for by itself. After that only "Load more" asks; scrolling
+  // never does.
+  function fill() {
+    if (!filling || !hasMore || !moreWrap) { filling = false; return; }
     requestAnimationFrame(function () {
-      if (moreWrap.getBoundingClientRect().top < window.innerHeight + 600) loadMore();
+      if (!filling || !hasMore) return;
+      var first = results.querySelector(".cardgrid > li:not(.hd), .cardlist > li:not(.hd)");
+      var row = first ? first.getBoundingClientRect().height : 0;
+      if (moreWrap.getBoundingClientRect().top < window.innerHeight + FILL_ROWS * row) loadMore();
+      else filling = false;
     });
   }
-  if (moreBtn) moreBtn.addEventListener("click", loadMore);
-  if (moreWrap && window.IntersectionObserver) {
-    new IntersectionObserver(function (entries) {
-      if (entries.some(function (e) { return e.isIntersecting; })) loadMore();
-    }, { rootMargin: "600px 0px" }).observe(moreWrap);
-  }
+  if (moreBtn) moreBtn.addEventListener("click", function () { filling = false; loadMore(); });
   hasMore = moreWrap ? !moreWrap.hidden : false;
+  filling = hasMore;
+  fill();
   // the page's own first search: when it failed, the same search can be asked again
   if (!$(".notice.error", statusEl)) lastQs = shownQs = params().toString();
   updateBadge(params());
@@ -877,5 +884,6 @@
     });
   }
   kebabs();
-  new MutationObserver(kebabs).observe(results, { childList: true });
+  // a new search replaces the list, Load more adds to it: both get their ⋮
+  new MutationObserver(kebabs).observe(results, { childList: true, subtree: true });
 })();
