@@ -28,6 +28,7 @@ deploy/compose/backups/
 docker/forge/scryfall-names.json
 docker/forge/precons.json
 docker/forge/scryfall-legal.json
+docker/forge/scryfall-commander.json
 
 # The emulator push test writes a test certificate and network config here (android/scripts/push-test.sh --prepare).
 android/app/src/debug/

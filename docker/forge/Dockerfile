@@ -11,9 +11,9 @@ ARG FORGE_VERSION=2.0.15
 ARG FORGE_ASSET=forge-installer-2.0.15.tar.bz2
 ARG FORGE_SHA256=4468f182b60f6ca62d89697baa208981085af744f116781af751c611826db600
 # Bump when this image changes without a new Forge release. The image is tagged <FORGE_VERSION>-<FORGE_LOCAL>.
-ARG FORGE_LOCAL=mag4
+ARG FORGE_LOCAL=mag5
 
-FROM mirror.gcr.io/library/eclipse-temurin:17-jre@sha256:a9b54b51aaa867507be76277a98c6b11b99515cac6330891b534d070f607214c AS source
+FROM mirror.gcr.io/library/eclipse-temurin:21-jre@sha256:227118764cccd3c3294617061aaa93a08309c63a395eefa83e6b35032992ea99 AS source
 ARG FORGE_URL
 ARG FORGE_ASSET
 ARG FORGE_SHA256
@@ -31,7 +31,8 @@ COPY docker/forge/build_names.py docker/forge/filter_precons.py docker/forge/for
 RUN cd /tmp/fb && python3 build_names.py /opt/forge /opt/forge-index/names.txt scryfall-names.json \
  && python3 filter_precons.py precons.json /opt/forge-index/precons.json
 
-FROM mirror.gcr.io/library/eclipse-temurin:17-jre@sha256:a9b54b51aaa867507be76277a98c6b11b99515cac6330891b534d070f607214c
+# Java 21: its class archive (-XX:+AutoCreateSharedArchive, forge_service.py) needs 19 or later.
+FROM mirror.gcr.io/library/eclipse-temurin:21-jre@sha256:227118764cccd3c3294617061aaa93a08309c63a395eefa83e6b35032992ea99
 ARG FORGE_VERSION
 ARG FORGE_LOCAL
 ARG FORGE_URL

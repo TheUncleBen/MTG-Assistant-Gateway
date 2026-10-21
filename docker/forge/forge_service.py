@@ -20,6 +20,9 @@ Endpoints (JSON):
   POST   /check           {"names": [...]} -> each name's spelling in Forge's card list, or null
   POST   /jobs            {"decks": [{"commander": [...], "main": [[count, name], ...]}], "games": n,
                            "seed"?: s, "parallel"?: p}
+                          or a solo test: {"solo": {"opponents"?: 1-3, "until_turn"?: 1-30, "game_seconds"?:
+                          10-FORGE_GAME_SECONDS}, "decks": [one deck], ...}: the deck plays against
+                          opponents who do nothing (solo_opponent)
   GET    /jobs/<id>       state, games done, per-game winners, cards Forge could not load
   DELETE /jobs/<id>       stop a queued or running job
 """
@@ -189,6 +192,140 @@ LOAD_PROBLEM = re.compile(
     r"(could not|cannot|can't|unable to) (find|load)|unsupported|not supported|unknown card", re.IGNORECASE
 )
 
+# The solo test: the deck (seat D1) plays against opponents who do nothing, so Forge's full rules
+# play every card it has. Each opponent's commander costs {W}{W}{U}{U}{B}{B}{R}{R}{G}{G} and the rest
+# of its deck is Wastes, which make only colourless mana, so it never casts anything.
+SOLO_COMMANDER = "Progenitus"
+SOLO_LAND = "Wastes"
+SOLO_MAX_OPPONENTS = 3
+SOLO_MAX_TURN = 30
+SOLO_MIN_SECONDS = 10  # the shortest time limit a solo game may ask for (FORGE_GAME_SECONDS is the longest)
+# Forge's game log lines a solo test reads (Forge 2.0.15, sim mode without -q), for seat D1 or
+# its opponents D2 to D4:
+#   "Turn: Turn 13 (Ai(1)-D1)"
+#   "Land: Ai(1)-D1 played Forest (45)"
+#   "Add To Stack: Ai(1)-D1 cast Shock targeting [Ai(4)-D4]"
+#   "Life: Life: Ai(4)-D4 22 > 20"
+#   "Damage: Bashful Beastie (70) deals 5 combat damage to Ai(2)-D2."
+#   "Mulligan: Ai(1)-D1 has kept a hand of 7 cards"
+SOLO_TURN = re.compile(r"^Turn: Turn \d+ \((?P<who>.+)\)\s*$")
+SOLO_LAND_LINE = re.compile(r"^Land: Ai\(\d+\)-D1 played (?P<card>.+?)(?: \(\d+\))?\s*$")
+SOLO_CAST = re.compile(r"^Add To Stack: Ai\(\d+\)-D1 cast (?P<card>.+?)(?: targeting .*)?\s*$")
+SOLO_LIFE = re.compile(r"^Life: Life: Ai\(\d+\)-D(?P<seat>[2-4]) (?P<before>-?\d+) > (?P<after>-?\d+)\s*$")
+SOLO_COMBAT = re.compile(
+    r"^Damage: (?P<card>.+?) \(\d+\) deals (?P<n>\d+) combat damage to Ai\(\d+\)-D(?P<seat>[2-4])\b"
+)
+SOLO_KEPT = re.compile(r"^Mulligan: Ai\(\d+\)-D1 has kept a hand of (?P<n>\d+) cards")
+
+
+def solo_opponent(fmt: str) -> dict[str, Any]:
+    """An opponent who does nothing: Wastes and, in Commander, a commander it can never pay for."""
+    if fmt == "Commander":
+        return {"commander": [SOLO_COMMANDER], "main": [[99, SOLO_LAND]]}
+    return {"commander": [], "main": [[60, SOLO_LAND]]}
+
+
+class SoloGame:
+    """What the deck did in one solo-test game, read from Forge's log line by line. Turns are the
+    deck's own turns (its first is 1), whichever seat Forge lets start; what happens on an
+    opponent's turn counts in the deck's turn before it (or its first)."""
+
+    def __init__(self, commanders: list[str], opponents: int, life: int, until_turn: int) -> None:
+        self.commanders = {norm(c) for c in commanders}
+        self.until_turn = until_turn
+        self.turn = 0
+        self.life = {seat: life for seat in range(2, 2 + opponents)}
+        # commander damage per opponent and commander: 21 from one commander puts a player out
+        self.cmdr: dict[tuple[int, str], int] = {}
+        self.out: set[int] = set()
+        self.lands: list[int] = []
+        self.casts: list[int] = []
+        self.damage: list[int] = []
+        self.kept: int | None = None
+        self.commander_cast_turn: int | None = None
+        self.first_out_turn: int | None = None
+        self.all_out_turn: int | None = None
+        self.past_limit = False
+        self.began = False  # the first turn has started: what follows is the game, not loading
+
+    def _at(self, series: list[int], n: int) -> None:
+        i = max(self.turn, 1) - 1
+        while len(series) <= i:
+            series.append(0)
+        series[i] += n
+
+    def _out(self, seat: int) -> None:
+        if seat in self.out:
+            return
+        self.out.add(seat)
+        turn = max(self.turn, 1)
+        if self.first_out_turn is None:
+            self.first_out_turn = turn
+        if len(self.out) == len(self.life) and self.all_out_turn is None:
+            self.all_out_turn = turn
+
+    def feed(self, line: str) -> None:
+        """Read one log line. Sets ``past_limit`` when the deck's turn after ``until_turn`` begins;
+        what happens from then on is past the solo test's last turn and is not counted."""
+        m = SOLO_TURN.match(line)
+        if m:
+            self.began = True
+            if m.group("who").endswith("-D1"):
+                self.turn += 1
+                if self.turn > self.until_turn:
+                    self.past_limit = True
+                    return
+                for series in (self.lands, self.casts, self.damage):
+                    self._at(series, 0)
+            return
+        if self.past_limit:
+            return
+        m = SOLO_KEPT.match(line)
+        if m:
+            self.kept = int(m.group("n"))
+            return
+        m = SOLO_LAND_LINE.match(line)
+        if m:
+            self._at(self.lands, 1)
+            return
+        m = SOLO_CAST.match(line)
+        if m:
+            self._at(self.casts, 1)
+            if self.commander_cast_turn is None and norm(m.group("card")) in self.commanders:
+                self.commander_cast_turn = max(self.turn, 1)
+            return
+        m = SOLO_LIFE.match(line)
+        if m:
+            seat, before, after = int(m.group("seat")), int(m.group("before")), int(m.group("after"))
+            if seat in self.life:
+                self.life[seat] = after
+                if after < before:
+                    self._at(self.damage, before - after)
+                if after <= 0:
+                    self._out(seat)
+            return
+        m = SOLO_COMBAT.match(line)
+        if m and norm(m.group("card")) in self.commanders:
+            seat, key = int(m.group("seat")), (int(m.group("seat")), norm(m.group("card")))
+            if seat in self.life:
+                self.cmdr[key] = self.cmdr.get(key, 0) + int(m.group("n"))
+                if self.cmdr[key] >= 21:
+                    self._out(seat)
+
+    def view(self) -> dict[str, Any]:
+        turns = min(self.turn, self.until_turn)
+        return {
+            "turns": turns,
+            "kept": self.kept,
+            "commander_cast_turn": self.commander_cast_turn,
+            "first_out_turn": self.first_out_turn,
+            "won_turn": self.all_out_turn,
+            "lands_by_turn": self.lands[:turns],
+            "casts_by_turn": self.casts[:turns],
+            "damage_by_turn": self.damage[:turns],
+            "commander_damage": max(self.cmdr.values(), default=0),
+        }
+
 
 def norm(name: str) -> str:
     """Case-, accent- and punctuation-insensitive form used to match card names."""
@@ -258,8 +395,18 @@ def slice_seed(seed: int | None, index: int) -> int | None:
 
 class Job:
     def __init__(
-        self, decks: list[dict[str, Any]], games: int, fmt: str, seed: int | None = None, parallel: int = 1
+        self,
+        decks: list[dict[str, Any]],
+        games: int,
+        fmt: str,
+        seed: int | None = None,
+        parallel: int = 1,
+        solo: dict[str, int] | None = None,
     ) -> None:
+        # A solo test ({"opponents", "until_turn"}): decks[0] plays against solo_opponent decks.
+        self.solo = solo
+        if solo:
+            decks = [decks[0]] + [solo_opponent(fmt) for _ in range(solo["opponents"])]
         self.seed = seed
         self.slices = slices(games)
         self.parallel = max(1, min(parallel, MAX_PARALLEL, len(self.slices)))
@@ -302,6 +449,7 @@ class Job:
             ],
             "header": self.header,
             "game_seconds": GAME_SECONDS,
+            **({"solo": self.solo} if self.solo else {}),
             "queued_s": round((self.started or time.time()) - self.created, 1),
             "run_s": round((self.finished or time.time()) - self.started, 1) if self.started else None,
             "forge_version": VERSION,
@@ -383,6 +531,13 @@ def run_slice(job: Job, index: int, work: Path, names: list[str], slot: int) -> 
         "java",
         f"-Xmx{XMX}",
         f"-XX:MaxMetaspaceSize={MAX_METASPACE}",
+        # Speed, measured on 2 CPUs of an x86 PC with the same seeded games (2026-10-21): together
+        # about 6% faster a game. The serial collector leaves both CPUs to the game; the class
+        # archive (Java 19 and later) is written in the place's home by its first game and lets
+        # each later Java start faster (4.6 s to 4.2 s). A stale archive is rebuilt by itself.
+        "-XX:+UseSerialGC",
+        "-XX:+AutoCreateSharedArchive",
+        f"-XX:SharedArchiveFile={place_home(slot) / f'forge-{VERSION}.jsa'}",
         "-Djava.awt.headless=true",
         # Java takes its home from the user account, never from $HOME, so without this every
         # place shared one preferences and log folder.
@@ -399,9 +554,10 @@ def run_slice(job: Job, index: int, work: Path, names: list[str], slot: int) -> 
         "-n",
         str(job.slices[index]),
         "-c",
-        str(GAME_SECONDS),
+        str((job.solo or {}).get("game_seconds", GAME_SECONDS)),
         *(["-s", str(seed)] if seed is not None else []),
-        "-q",
+        # A solo test reads the game log (SoloGame); other jobs need only the results.
+        *([] if job.solo else ["-q"]),
     ]
     with job.lock:
         if job.cancelled or job.timed_out:
@@ -421,11 +577,16 @@ def run_slice(job: Job, index: int, work: Path, names: list[str], slot: int) -> 
     tag = f"[slice {index + 1}] " if len(job.slices) > 1 else ""
     stopped_slow = False
     outcome: dict[str, Any] = {}  # the turn and each loser's reason, for the next result line
+    solo = new_solo(job) if job.solo else None
     assert proc.stdout is not None
     for raw in proc.stdout:
         line = raw.rstrip("\n")
         if not line.strip():
             continue
+        if solo is not None:
+            # Forge prints a game's log only once the game has ended (or its time limit stopped it),
+            # so a solo game plays on past ``until_turn``; what comes after that turn isn't counted.
+            solo.feed(line)
         turn, lost = OUTCOME_TURN.search(line), OUTCOME_LOST.search(line)
         if turn:
             outcome["turn"] = int(turn.group("turn"))
@@ -436,6 +597,14 @@ def run_slice(job: Job, index: int, work: Path, names: list[str], slot: int) -> 
             result["game"] += offset
             result.update(outcome)
             outcome = {}
+            if solo is not None:
+                view = solo.view()
+                if result.get("winner") == 1 and view["won_turn"] is None and not solo.past_limit:
+                    view["won_turn"] = max(solo.turn, 1)  # won another way (poison, a card)
+                if solo.past_limit and view["won_turn"] is None:
+                    result["turn_limit"] = True  # not won by the solo test's last turn
+                result["solo"] = view
+                solo = new_solo(job)
             if stopped_slow:
                 # Forge ends a game that runs past its time limit as a draw; count it as one
                 # even if a winner is printed, and mark why.
@@ -450,7 +619,11 @@ def run_slice(job: Job, index: int, work: Path, names: list[str], slot: int) -> 
                 stopped_slow = True
             if result:
                 job.results.append(result)
-            elif LOAD_PROBLEM.search(line) and line.strip()[:300] not in job.load_problems:
+            elif (
+                not (solo is not None and solo.began)  # a solo game's own log is not a load problem
+                and LOAD_PROBLEM.search(line)
+                and line.strip()[:300] not in job.load_problems
+            ):
                 job.load_problems.append(line.strip()[:300])
     code = proc.wait()
     proc.stdout.close()
@@ -458,6 +631,12 @@ def run_slice(job: Job, index: int, work: Path, names: list[str], slot: int) -> 
         job.procs.pop(index, None)
         job.slice_state[index] = "done" if code == 0 else "failed"
     return code
+
+
+def new_solo(job: Job) -> SoloGame:
+    life = 40 if job.format == "Commander" else 20
+    assert job.solo is not None
+    return SoloGame(job.decks[0]["commander"], job.solo["opponents"], life, job.solo["until_turn"])
 
 
 def run_job(job: Job, slots: list[int] | None = None) -> None:
@@ -617,6 +796,29 @@ def prune() -> None:
             JOBS.pop(jid, None)
 
 
+def validate_solo(body: dict[str, Any], fmt: str) -> dict[str, int] | None:
+    """A solo test's settings, or None for a game against other decks."""
+    solo = body.get("solo")
+    if solo is None:
+        return None
+    if not isinstance(solo, dict):
+        raise ValueError("solo is an object with opponents and until_turn")
+    opponents = solo.get("opponents", SOLO_MAX_OPPONENTS if fmt == "Commander" else 1)
+    until = solo.get("until_turn", 10)
+    seconds = solo.get("game_seconds", GAME_SECONDS)
+    for value, low, top, name in (
+        (opponents, 1, SOLO_MAX_OPPONENTS, "opponents"),
+        (until, 1, SOLO_MAX_TURN, "until_turn"),
+        (seconds, min(SOLO_MIN_SECONDS, GAME_SECONDS), GAME_SECONDS, "game_seconds"),
+    ):
+        if not isinstance(value, int) or isinstance(value, bool) or not low <= value <= top:
+            raise ValueError(f"solo {name} must be a whole number from {low} to {top}")
+    out = {"opponents": opponents, "until_turn": until}
+    if seconds != GAME_SECONDS:
+        out["game_seconds"] = seconds
+    return out
+
+
 def validate(body: dict[str, Any]) -> tuple[list[dict[str, Any]], int, str, list[str]]:
     fmt = body.get("format", "Commander")
     if fmt not in FORMATS:
@@ -625,7 +827,10 @@ def validate(body: dict[str, Any]) -> tuple[list[dict[str, Any]], int, str, list
     if not isinstance(games, int) or isinstance(games, bool) or not 1 <= games <= MAX_GAMES:
         raise ValueError(f"games must be a whole number from 1 to {MAX_GAMES}")
     decks = body.get("decks")
-    if not isinstance(decks, list) or not 2 <= len(decks) <= MAX_DECKS:
+    if body.get("solo") is not None:
+        if not isinstance(decks, list) or len(decks) != 1:
+            raise ValueError("a solo test lists exactly one deck")
+    elif not isinstance(decks, list) or not 2 <= len(decks) <= MAX_DECKS:
         raise ValueError(f"decks must list 2 to {MAX_DECKS} decks")
     clean: list[dict[str, Any]] = []
     unknown: list[str] = []
@@ -782,7 +987,7 @@ class Handler(BaseHTTPRequestHandler):
                 ):
                     raise ValueError(f"parallel must be a whole number from 1 to {MAX_PLACES}")
                 # More than FORGE_MAX_PARALLEL is not refused: the job plays as many at once as allowed.
-                job = Job(decks, games, fmt, seed, parallel)
+                job = Job(decks, games, fmt, seed, parallel, validate_solo(body, fmt))
                 with JOBS_LOCK:
                     JOBS[job.id] = job
                 QUEUE.put(job)

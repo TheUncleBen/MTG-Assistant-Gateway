@@ -18,13 +18,16 @@ from mtg_gateway.archidekt import parse_deck
 from mtg_gateway.db import Database
 from mtg_gateway.decks import DeckError
 from mtg_gateway.forge import (
+    SOLO_TOO_OLD,
     ForgeClient,
     ForgeError,
     forge_deck,
     pick_opponents,
     refresh,
     start_run,
+    start_solo_run,
     summarise,
+    summarise_solo,
     wilson,
 )
 from mtg_gateway.report_view import FORGE_DRIFT_NOTE, forge_lines
@@ -169,6 +172,79 @@ async def test_refresh_finishes_and_reports_a_lost_job() -> None:
     assert await refresh(client, done) is done  # final: never asked again
     gone = await refresh(client, {**section, "job_id": "ffffffffffffffff"})
     assert gone["state"] == "lost"
+
+
+def _solo_view(won: int | None, *, cmdr: int | None = 3, kept: int = 7, turns: int = 6) -> dict[str, Any]:
+    return {
+        "turns": turns,
+        "kept": kept,
+        "commander_cast_turn": cmdr,
+        "first_out_turn": won,
+        "won_turn": won,
+        "lands_by_turn": [1] * turns,
+        "casts_by_turn": [2] * turns,
+        "damage_by_turn": [0] * (turns - 1) + [10],
+        "commander_damage": 0,
+    }
+
+
+def test_summarise_solo_counts_wins_turns_and_averages_by_turn() -> None:
+    results = [
+        {"game": 1, "winner": 1, "solo": _solo_view(5, turns=5)},
+        {"game": 2, "winner": 1, "solo": _solo_view(7, kept=6, turns=7)},
+        {"game": 3, "draw": True, "solo": _solo_view(None, cmdr=None, turns=10)},
+        {"game": 4, "unparsed": "garbled"},
+    ]
+    out = summarise_solo(results, 4, {"opponents": 3, "until_turn": 10})
+    assert out["games"] == 3 and out["unread"] == 1
+    assert out["won"] == 2 and out["won_rate"] == round(2 / 3, 4)
+    assert out["median_won_turn"] == 6 and out["won_turn_range"] == [5, 7]
+    assert out["median_commander_turn"] == 3 and out["mulligans"] == 1
+    # turn 6 is averaged over the two games still going (7 and 10 turns), not all three
+    assert out["damage_by_turn"][4] == round((10 + 0 + 0) / 3, 2)
+    assert out["damage_by_turn"][5] == 0 and len(out["damage_by_turn"]) == 10
+    assert out["lands_by_turn"] == [1.0] * 10
+
+
+async def test_start_solo_run_sends_one_deck_and_refresh_summarises_it() -> None:
+    fake = FakeForge(missing={"Fake Sticker Card"})
+    client = fake.client()
+    section = await start_solo_run(client, DECK_TEXT, "Liesa", games=4, seed=7)
+    sent = fake.started[0]
+    assert sent["solo"] == {"opponents": 3, "until_turn": 10} and sent["format"] == "Commander"
+    assert len(sent["decks"]) == 1 and sent["seed"] == 7
+    assert section["seats"] == ["Liesa"] and section["not_played"] == ["Fake Sticker Card"]
+    fake.jobs[section["job_id"]].update(
+        state="done", results=[{"game": 1, "winner": 1, "solo": _solo_view(6)}]
+    )
+    done = await refresh(client, section)
+    assert done["state"] == "done" and done["result"]["median_won_turn"] == 6
+    assert "seats" not in done["result"]
+
+
+async def test_start_solo_run_plays_a_deck_without_commander_against_one() -> None:
+    fake = FakeForge()
+    await start_solo_run(fake.client(), "4 Lightning Bolt\n20 Mountain\n", "Burn", games=2, until_turn=5)
+    sent = fake.started[0]
+    assert sent["format"] == "Constructed" and sent["solo"] == {"opponents": 1, "until_turn": 5}
+    await start_solo_run(fake.client(), DECK_TEXT, "Liesa", games=1, game_seconds=60)
+    assert fake.started[1]["solo"] == {"opponents": 3, "until_turn": 10, "game_seconds": 60}
+    with pytest.raises(ForgeError):
+        await start_solo_run(fake.client(), DECK_TEXT, "Liesa", games=1, until_turn=31)
+
+
+async def test_start_solo_run_says_when_forge_is_too_old() -> None:
+    fake = FakeForge()
+    old = fake.handler
+
+    def refuse(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/jobs" and request.method == "POST":
+            return httpx.Response(400, json={"error": "decks must list 2 to 4 decks"})
+        return old(request)
+
+    client = ForgeClient("http://forge.test", transport=httpx.MockTransport(refuse))
+    section = await start_solo_run(client, DECK_TEXT, "Liesa", games=2)
+    assert section == {"state": "failed", "not_played": [], "error": SOLO_TOO_OLD}
 
 
 class _Decks:
