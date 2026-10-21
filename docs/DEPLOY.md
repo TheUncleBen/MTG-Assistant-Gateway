@@ -12,7 +12,8 @@ This gets you one Swarm stack with these services:
 
 Not running a Swarm? [DEPLOY-COMPOSE.md](DEPLOY-COMPOSE.md) does the same on
 one machine with plain Docker Compose. How the pieces fit together is in
-[ARCHITECTURE.md](ARCHITECTURE.md).
+[ARCHITECTURE.md](ARCHITECTURE.md), and what hardware it needs is in
+[HARDWARE.md](HARDWARE.md).
 
 The steps use Portainer, Nginx Proxy Manager (NPM) and Authentik because
 that's the setup the guide was written on, but none of them is required:
@@ -692,7 +693,7 @@ default, and an install that leaves it off behaves exactly as before.
 - **Privacy:** the service is on its own internal network with no internet access; only the gateway
   reaches it.
 - Cards Forge cannot play are listed in each report's `forge.not_played`, and the games run without
-  them.
+  them. Which cards those are: [CAPABILITIES.md](CAPABILITIES.md#cards-forge-cannot-play).
 
 ## Notifications on members' phones
 

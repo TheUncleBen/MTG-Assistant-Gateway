@@ -17,7 +17,8 @@ How the pieces fit is in [ARCHITECTURE.md](ARCHITECTURE.md).
 - A machine with **Docker Engine** and the **Compose plugin** 2.24 or newer
   (`docker compose version`). amd64 or arm64, so a Raspberry Pi 4 or 5 is
   fine. About 900 MB of memory free for the three containers at their limits
-  (another 1.5 GB if you turn Forge on).
+  (another 1.5 GB if you turn Forge on). [HARDWARE.md](HARDWARE.md) has the
+  minimum and recommended machines and how long tests take.
 - A **domain name** for the gateway, say `mtg.example.com`, pointing at a
   reverse proxy that can reach this machine.
 - An **OpenID Connect identity provider** you control: Authentik
