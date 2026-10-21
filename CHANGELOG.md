@@ -29,7 +29,7 @@ example files for new installs.
   there; emptying it alone leaves Forge running unused. If you keep your own variables file, it
   already has Forge off and stays that way.
 - The reports table gains two columns, added in place, so this update saves no before-upgrade
-  copy, and going back to 0.7.38 needs no restore.
+  copy, and going back to 0.7.39 needs no restore.
 - The Android app doesn't change.
 
 ### Added

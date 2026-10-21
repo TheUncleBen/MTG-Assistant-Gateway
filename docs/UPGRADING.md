@@ -194,7 +194,7 @@ reach past the stack, so if your old version is older than the one named, also:
   `mtg_authentik_api_token` secret, so you no longer remove the `# ` from its lines. The secrets
   step above (Portainer step 2) creates it with the word `off` if you don't have it; with Compose,
   `./make-secrets.sh` does.
-- **0.7.38 or older:** Forge is on in the example variables files. If you take the new example
+- **0.7.39 or older:** Forge is on in the example variables files. If you take the new example
   file and want Forge off, set both `FORGE_REPLICAS=0` and an empty `MTG_FORGE_URL=` (Compose: put
   a `#` in front of `COMPOSE_PROFILES=forge` and set an empty `MTG_FORGE_URL=`). Turning Forge off
   without emptying `MTG_FORGE_URL` leaves the gateway asking a Forge that isn't there; emptying it
