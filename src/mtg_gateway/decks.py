@@ -709,7 +709,8 @@ def row_line(r: dict[str, Any]) -> str:
     if kind == "printing":
         return f"{r['name']}: printing {r['before']} -> {r['after']}"
     if kind == "clone":
-        return f"Clone '{r['source']}' ({r['cards']} cards) as '{r['name']}'"
+        where = f" in folder '{r['folder']}'" if r.get("folder") else ""
+        return f"Clone '{r['source']}' ({r['cards']} cards) as '{r['name']}'{where}"
     if kind == "commander":
         if r.get("stays") or r.get("moved"):
             return " ".join(commander_row_texts(r))
@@ -5488,19 +5489,30 @@ class DeckService:
         return await actions.propose(self, sub, action, params)
 
     @_dedupe
-    async def propose_clone(self, sub: str, deck_id: str, name: str | None = None) -> dict[str, Any]:
+    async def propose_clone(
+        self, sub: str, deck_id: str, name: str | None = None, *, folder_id: int | None = None
+    ) -> dict[str, Any]:
         """A proposal (kind ``clone``) that copies any deck the member can read (their own, a
-        public deck, a precon) into a new private deck in their root folder, the way Archidekt's
-        Clone deck button does ("Copy of - " prefix by default). Applied with the same copy route
-        the backups use (verified live 2026-10-05 on the member's own deck; a copy of someone
-        else's public deck is the same request and has not been exercised live); the copy keeps
-        every card, quantity, category and finish."""
+        public deck, a precon) into a new private deck in their root folder, or in ``folder_id``
+        (one of the member's own folders, checked here), the way Archidekt's Clone deck button
+        does ("Copy of - " prefix by default). Applied with the same copy route the backups use
+        (verified live 2026-10-05 on the member's own deck; a copy of someone else's public deck
+        is the same request and has not been exercised live); the copy keeps every card,
+        quantity, category and finish."""
         deck_id = _clean_deck_id(deck_id)
         self._room_for_proposal(sub)
         deck = await self.get_any_deck(sub, deck_id)
         new_name = clean_text(name or "") or f"Copy of - {deck.name}"
         if len(new_name) > 200:
             raise DeckError("invalid", "name must be up to 200 characters")
+        changes: dict[str, Any] = {"name": new_name}
+        folder_name = None
+        if folder_id is not None:
+            if isinstance(folder_id, bool) or not str(folder_id).isdigit():
+                raise DeckError("invalid", "That folder is not in your Archidekt account.")
+            _info, folder = await self._folder_in(sub, int(folder_id))
+            changes["folder_id"] = int(folder["id"])
+            folder_name = str(folder.get("name") or "")
         pid = secrets.token_urlsafe(12)
         cards = sum(c.quantity for c in deck.cards)
         self._save_proposal(
@@ -5511,9 +5523,9 @@ class DeckService:
                 "deck_id": deck.id,
                 "deck_name": deck.name,
                 "baseline_fingerprint": deck.fingerprint(),
-                "changes": {"name": new_name},
+                "changes": changes,
             },
-            [_row("clone", name=new_name, source=deck.name, cards=cards)],
+            [_row("clone", name=new_name, source=deck.name, cards=cards, folder=folder_name)],
         )
         self._audit(
             "proposal_created", sub=sub, detail={"proposal_id": pid, "deck_id": deck.id, "kind": "clone"}
@@ -5527,7 +5539,11 @@ class DeckService:
         if deck.fingerprint() != row["baseline_fingerprint"]:
             raise needs_look_error(None)
         name = clean_text(str((row.get("changes") or {}).get("name") or "")) or f"Copy of - {deck.name}"
-        copy = await self._call(sub, lambda token, *_: self.client.copy_deck(token, deck, name=name))
+        folder_id = (row.get("changes") or {}).get("folder_id")
+        folder = str(int(folder_id)) if folder_id is not None else None
+        copy = await self._call(
+            sub, lambda token, *_: self.client.copy_deck(token, deck, name=name, folder_id=folder)
+        )
         # Recorded at once, as _apply_create records its new deck: a stop from here on
         # has made the copy, so the proposal stays failed and is never copied a second time.
         progress["deck_id"] = str(copy["id"])

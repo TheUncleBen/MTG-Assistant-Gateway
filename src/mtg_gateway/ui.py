@@ -1,11 +1,13 @@
 """The shared pieces of the dashboard and list pages, as HTML strings for the list and
-dashboard pages: status labels, the app a row came from, list dates, widgets, chips with counts, the
-search toolbar, the table's header, paging, the selection bar and the side panel.
+dashboard pages: status labels, the app a row came from, list dates, notices, widgets, chips with
+counts, the search toolbar, the table's header, paging and Load more, the selection bar, the side
+panel, and the box (dialog) every pop-up shares (``box``, ``box_opener``; static/box.js).
 
-The look is theme.UI_CSS (in the shared site.css); the few behaviours (the dates in the viewer's own
-time zone, a filter that applies when it changes, Esc closing the side panel) are in
-static/feedback.js, which every page loads. Every argument named ``*_html`` (and every action or
-cell given as markup) is trusted markup the caller built; every other text is escaped here.
+The look is theme.UI_CSS and theme.BOX_CSS (in the shared site.css); the few behaviours (the dates
+in the viewer's own time zone, a filter that applies when it changes, Esc closing the side panel)
+are in static/feedback.js, which every page loads. Every argument named ``*_html`` (and every
+action or cell given as markup) is trusted markup the caller built; every other text is escaped
+here.
 """
 
 from __future__ import annotations
@@ -14,7 +16,9 @@ import time
 from collections.abc import Iterable, Mapping, Sequence
 from typing import NamedTuple
 
-from .theme import esc, icon
+from .theme import card_size_control, esc, icon
+
+__all__ = ["card_size_control"]  # re-exported: the one card size switch (R-175), theme.card_size_control
 
 # --- status labels: a word, a colour and an icon -------------------------------------------------
 
@@ -134,21 +138,30 @@ def risk_label(risk: str, *, title: str = "", cls: str = "") -> str:
 
 # --- the app a row came from ------------------------------------------------------------------
 
-# The letter on an app's tile where its first letter would read as another app's.
-_APP_LETTERS = {"chatgpt": "G"}
+UNNAMED_APP = "Unnamed app"
+NO_APP = "No app"
 
 
-def app_chip(name: str | None) -> str:
-    """The app a row came from: its name only (never a client id), on a letter tile. A row with no
-    app recorded shows a grey dash with the tooltip "No app"; never a guessed app."""
+def app_name(name: str | None) -> str:
+    """An app's full name as member text ("Claude", "ChatGPT", "Codex"), or "Unnamed app" for an
+    app that gave none. Never a client id, never initials."""
     name = (name or "").strip()
-    if not name:
+    return name or UNNAMED_APP
+
+
+def app_chip(name: str | None, *, unnamed: bool = False) -> str:
+    """The app a row came from: its full name beside the one neutral "connected app" icon (no
+    initials, no third-party logos; Ben, 21 Oct). A row with no app recorded shows a grey dash with
+    the tooltip "No app", never a guessed app; where the row *is* an app that gave no name (the
+    Users page's connected apps), ``unnamed=True`` reads "Unnamed app" instead."""
+    name = (name or "").strip()
+    if not name and not unnamed:
         return (
-            "<span class='ui-app none' title='No app'><span aria-hidden='true'>—</span>"
-            "<span class='sr-only'>No app</span></span>"
+            f"<span class='ui-app none' title='{NO_APP}'><span aria-hidden='true'>—</span>"
+            f"<span class='sr-only'>{NO_APP}</span></span>"
         )
-    letter = _APP_LETTERS.get(name.casefold()) or next((c for c in name if c.isalnum()), "?").upper()
-    return f"<span class='ui-app'><i aria-hidden='true'>{esc(letter)}</i>{esc(name)}</span>"
+    cls = "ui-app" if name else "ui-app unnamed"
+    return f"<span class='{cls}'>{icon('app')}<span class='nm'>{esc(app_name(name))}</span></span>"
 
 
 # --- list dates ---------------------------------------------------------------------------------
@@ -212,13 +225,34 @@ def when(ts: int | float | None, *, now: float | None = None, cls: str = "") -> 
     )
 
 
+# --- notices --------------------------------------------------------------------------------------
+
+NOTICE_KINDS = ("info", "ok", "warn", "error")
+
+
+def notice(text: str, kind: str = "info", *, html: bool = False, role: str = "", cls: str = "") -> str:
+    """One notice strip (F8): a tinted strip with a coloured left edge and no border of its own.
+    ``kind``: info (blue), ok (green), warn (orange) or error (red). ``html=True`` takes ``text`` as
+    markup the caller built. ``role``: "status" for a result the page announces, "alert" for an
+    error that needs attention; empty for a strip that is simply part of the page."""
+    if kind not in NOTICE_KINDS:
+        raise ValueError(f"unknown notice kind {kind!r}")
+    classes = " ".join(c for c in ("notice", kind if kind != "info" else "", cls) if c)
+    r = f" role='{esc(role)}'" if role else ""
+    return f"<div class='{classes}'{r}>{text if html else esc(text)}</div>"
+
+
 # --- page head, widgets, chips, toolbar --------------------------------------------------------
 
 
-def page_head(title: str, sub: str = "") -> str:
-    """The title with one line saying what the page holds. Render with heading=False."""
+def page_head(title: str, sub: str = "", *, actions_html: str = "") -> str:
+    """The title with one line saying what the page holds (the purpose line), and the page's
+    actions at the title's end (``actions_html``: buttons or button_links, the one orange button
+    among them). Render with heading=False."""
     line = f"<p class='ui-sub'>{esc(sub)}</p>" if sub else ""
-    return f"<div class='ui-head'><h1>{esc(title)}</h1></div>{line}"
+    acts = f"<span class='acts'>{actions_html}</span>" if actions_html else ""
+    cls = "ui-head phead" if actions_html else "ui-head"
+    return f"<div class='{cls}'><h1>{esc(title)}</h1>{acts}</div>{line}"
 
 
 def list_head(title: str, total: int | None = None, note: str = "") -> str:
@@ -228,12 +262,20 @@ def list_head(title: str, total: int | None = None, note: str = "") -> str:
     return f"<div class='list-head'><h2>{esc(title)}{count}</h2>{side}</div>"
 
 
-def button_link(text: str, href: str, *, kind: str = "plain", cls: str = "") -> str:
+BUTTON_KINDS = {
+    "plain": "btn-plain",
+    "primary": "btn-primary",
+    "danger": "btn-outline-danger",  # a red outline: the step before a box's final solid-red button
+    "danger-solid": "btn-danger",  # solid red: only the final button inside a delete or remove box
+}
+
+
+def button_link(text: str, href: str, *, kind: str = "plain", cls: str = "", icon_name: str = "") -> str:
     """A link drawn as a button: ``plain`` (bordered, no fill), ``primary`` (the one orange main
     button) or ``danger`` (a red outline)."""
-    kinds = {"plain": "btn-plain", "primary": "btn-primary", "danger": "btn-outline-danger"}
     extra = f" {esc(cls)}" if cls else ""
-    return f"<a class='btn {kinds[kind]}{extra}' href='{esc(href)}'>{esc(text)}</a>"
+    ic = icon(icon_name) if icon_name else ""
+    return f"<a class='btn {BUTTON_KINDS[kind]}{extra}' href='{esc(href)}'>{ic}{esc(text)}</a>"
 
 
 def widget(
@@ -422,6 +464,25 @@ def pager(
     )
 
 
+def load_more(
+    href: str, *, text: str = "Load more", shown: int | None = None, total: int | None = None, done: str = ""
+) -> str:
+    """ "Load more" under a list that grows in place (the standard's Load more button; Ben: a button,
+    never endless scrolling). ``href`` is the next page's address (the link works without scripts;
+    a page's script may fetch it and append the rows). ``shown`` of ``total`` gives the line under
+    it ("25 of 112"); ``done`` is the line shown instead when there is no more ("That is every
+    card.")."""
+    if done:
+        return f"<div class='loadmore'><p class='muted'>{esc(done)}</p></div>"
+    line = ""
+    if shown is not None and total is not None:
+        line = f"<p class='muted'>{shown:,} of {total:,}</p>"
+    return (
+        f"<div class='loadmore'><a class='btn btn-plain' href='{esc(href)}' rel='next' data-load-more>"
+        f"{esc(text)}</a>{line}</div>"
+    )
+
+
 def selection_bar(count_text: str, actions: Sequence[str], *, label: str, hidden: bool = False) -> str:
     """The sticky action bar while a list has a selection: the count ("2 checked on 1 deck"), then
     the actions (plain, then the red-outline one, then the one orange main button)."""
@@ -462,3 +523,102 @@ def split(list_html: str, panel_html: str = "") -> str:
 def meta(rows: Iterable[tuple[str, str]]) -> str:
     """Key and value rows in a panel (``.ui-meta``); the values are markup."""
     return "<dl class='ui-meta'>" + "".join(f"<dt>{esc(k)}</dt><dd>{v}</dd>" for k, v in rows) + "</dl>"
+
+
+# --- the box (dialog) every pop-up shares: static/box.js, theme.BOX_CSS ------------------------
+
+
+def box_open_attr(box_id: str) -> str:
+    """The attribute that makes any button, link or menu item open the page's box ``box_id``
+    (``data-box-open``). On a link, keep ``href`` as the old page address: without scripts the link
+    still goes there."""
+    return f"data-box-open='{esc(box_id)}'"
+
+
+def box_opener(
+    text: str, href: str, box_id: str, *, kind: str = "plain", cls: str = "", icon_name: str = ""
+) -> str:
+    """A button that opens the box ``box_id`` the page holds (see ``box``): a real link to ``href``,
+    the old page address, so it works without scripts and in a new tab; with scripts the box opens
+    on this page instead. ``kind`` as button_link (plain, primary, danger)."""
+    extra = f" {esc(cls)}" if cls else ""
+    ic = icon(icon_name) if icon_name else ""
+    return (
+        f"<a class='btn {BUTTON_KINDS[kind]}{extra}' href='{esc(href)}' {box_open_attr(box_id)}>"
+        f"{ic}{esc(text)}</a>"
+    )
+
+
+def box_button(
+    text: str,
+    *,
+    kind: str = "plain",
+    cancel: bool = False,
+    name: str = "",
+    value: str = "",
+    form: str = "",
+    icon_name: str = "",
+    disabled: bool = False,
+    attrs: str = "",
+) -> str:
+    """A button for a box's action row. ``cancel=True`` is the Cancel (or Keep it) button: it closes
+    the box and is not shown without scripts. Otherwise a submit button for the form in the box's
+    body (``form``: that form's id when the button sits outside it), ``primary`` the one orange
+    button, ``danger-solid`` the final solid-red button of a delete or remove box."""
+    classes = {"plain": "btn-plain", "primary": "primary", "danger": "btn-outline-danger"}
+    cls = classes.get(kind) or {"danger-solid": "danger"}[kind]
+    ic = icon(icon_name) if icon_name else ""
+    if cancel:
+        return f"<button type='button' class='{cls}' data-cancel>{ic}{esc(text)}</button>"
+    a = "".join(
+        (
+            f" name='{esc(name)}'" if name else "",
+            f" value='{esc(value)}'" if value else "",
+            f" form='{esc(form)}'" if form else "",
+            " disabled" if disabled else "",
+            f" {attrs}" if attrs else "",
+        )
+    )
+    return f"<button type='submit' class='{cls}'{a}>{ic}{esc(text)}</button>"
+
+
+def box(
+    box_id: str,
+    title: str,
+    body_html: str,
+    *,
+    actions: Sequence[str] = (),
+    wide: bool = False,
+    open: bool = False,
+    close_href: str = "",
+    label: str = "",
+    cls: str = "",
+) -> str:
+    """A box the page holds, hidden until something with ``box_open_attr(box_id)`` opens it (or the
+    page's script calls ``MtgBox.openElement(box_id)``). ``body_html`` is the box's content, as a
+    rule a form posting to the route the old page posted to, so what the box does needs no new
+    route; ``actions`` are its buttons (box_button: Cancel first, the main one last). ``wide`` is
+    the Export box's width. ``open=True`` draws it open: the old page address renders its page with
+    the box open, and without scripts the box is then a plain panel at the top of the page (its
+    Cancel buttons hidden); ``close_href`` is the page without the box (the × points there, and
+    closing the box puts that address in the bar). Put it anywhere in the page body."""
+    classes = " ".join(c for c in ("ui-box mtgbox", "wide" if wide else "", cls) if c)
+    hid = "" if open else " hidden"
+    opened = " data-open" if open else ""
+    aria = f" aria-label='{esc(label)}'" if label else ""
+    tid = f"{box_id}-title"
+    x = f"<a class='bx' href='{esc(close_href or '#')}' aria-label='Close' title='Close'>{icon('x')}</a>"
+    acts = f"<div class='acts'>{''.join(actions)}</div>" if actions else "<div class='acts'></div>"
+    return (
+        f"<div class='{classes}' id='{esc(box_id)}' role='dialog' aria-modal='true' "
+        f"aria-labelledby='{esc(tid)}'{aria}{hid}{opened}>"
+        f"<div class='bh'><h2 id='{esc(tid)}'>{esc(title)}</h2>{x}</div>"
+        f"<div class='body'>{body_html}</div>{acts}</div>"
+    )
+
+
+def thumb_size_css(selector: str, width: str, height: str = "") -> str:
+    """The rule that makes a page's own list thumbnails follow the card size (R-175): ``width`` and
+    ``height`` are their M sizes ("40px"); S and L multiply them by the theme's --thumb-scale."""
+    h = f";height:calc({height} * var(--thumb-scale))" if height else ""
+    return f"html[data-card-size] {selector}{{width:calc({width} * var(--thumb-scale)){h}}}"

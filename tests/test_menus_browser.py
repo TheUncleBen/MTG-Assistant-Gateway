@@ -124,6 +124,11 @@ def _box(page):
     return box
 
 
+def _gone(page) -> None:
+    """The box closes with a short transition (none under reduced motion): wait until it is gone."""
+    page.locator(".mtgbox-scrim").first.wait_for(state="detached", timeout=3000)
+
+
 def _notice(page) -> str:
     return page.locator("main .notice.ok").first.inner_text()
 
@@ -349,7 +354,7 @@ def test_the_deck_boxes_rename_move_export_compare_and_delete(tmp_path: Path) ->
             assert box.locator("textarea").is_hidden()
             assert box.locator(".acts button", has_text="Copy").is_hidden()
             page.keyboard.press("Escape")
-            assert page.locator(".mtgbox").count() == 0
+            _gone(page)
             # Compare with: the member's decks, then today's comparison page
             page.locator("li.deck[data-deck-id='42'] button.kebab").click()
             _pick(page, "Compare with…")
@@ -546,7 +551,7 @@ def test_a_folder_holding_the_backup_folder_is_refused_in_the_box(tmp_path: Path
             assert box.locator(".body").inner_text().strip()
             assert [t.strip() for t in box.locator(".acts button").all_inner_texts()] == ["OK"]
             box.locator(".acts button").click()
-            assert page.locator(".mtgbox").count() == 0
+            _gone(page)
             assert ark.folder_deletes == []
             assert errors == [], errors
             browser.close()
@@ -573,16 +578,20 @@ def test_the_collaborator_form_asks_in_a_box_before_it_is_sent(tmp_path: Path) -
             calls = len(server.ark.calls)
             section.locator("form.addtag button").click()
             box = _box(page)
-            assert box.locator("h2").inner_text() == "Let bob edit “Sample Commander Deck” on Archidekt?"
+            assert box.locator("h2").inner_text() == "Let “bob” edit “Sample Commander Deck” on Archidekt?"
             assert box.locator(".body").inner_text().strip() == section.get_attribute("data-note")
-            assert [t.strip() for t in box.locator(".acts button").all_inner_texts()] == ["Cancel", "Add bob"]
+            assert [t.strip() for t in box.locator(".acts button").all_inner_texts()] == [
+                "Cancel",
+                "Add “bob”",
+            ]
             box.locator("button", has_text="Cancel").click()
-            assert page.locator(".mtgbox").count() == 0 and len(server.ark.calls) == calls
+            _gone(page)
+            assert len(server.ark.calls) == calls
             assert "/settings" in page.url
             # Add sends the form with its confirmation; no confirmation page in between
             section.locator("form.addtag button").click()
             with page.expect_navigation(wait_until="networkidle"):
-                _box(page).locator("button", has_text="Add bob").click()
+                _box(page).locator("button", has_text="Add “bob”").click()
             assert page.locator("form.confirmform").count() == 0
             assert page.locator("#collaborators").count() == 1
             assert errors == [], errors

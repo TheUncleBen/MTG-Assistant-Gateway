@@ -120,8 +120,10 @@ def test_label_options_and_escaping() -> None:
 
 
 def test_app_chip_names_the_app_and_never_guesses() -> None:
-    assert ui.app_chip("Claude") == "<span class='ui-app'><i aria-hidden='true'>C</i>Claude</span>"
-    assert ui.app_chip("ChatGPT") == "<span class='ui-app'><i aria-hidden='true'>G</i>ChatGPT</span>"
+    # 2026-10-21 (Ben): the app's full name beside one neutral icon; no initials, no logos
+    plug = theme.icon("app")
+    assert ui.app_chip("Claude") == f"<span class='ui-app'>{plug}<span class='nm'>Claude</span></span>"
+    assert ui.app_chip("ChatGPT") == f"<span class='ui-app'>{plug}<span class='nm'>ChatGPT</span></span>"
     assert "&lt;script&gt;" in ui.app_chip("<script>")
     for none in (None, "", "  "):
         out = ui.app_chip(none)

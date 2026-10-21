@@ -130,7 +130,7 @@ async def test_admin_activity_names_labels_apps_and_members(gw: Harness) -> None
         assert "A reused assistant token was refused" in reuse
         assert "<span class='k'>family</span> f-3" in reuse
         assert "<a href='/admin/activity?sub=user-2'>bram</a>" in reuse
-        assert "<i aria-hidden='true'>C</i>Claude</span>" in reuse
+        assert "<span class='nm'>Claude</span></span>" in reuse
         failed = _row(page, "proposal_failed")
         assert (
             "Failed</span>" in failed
@@ -154,7 +154,7 @@ async def test_admin_activity_names_labels_apps_and_members(gw: Harness) -> None
         disable = _row(page, "admin_disable")
         assert "ui-lbl" not in disable and "<path d='M12 3l8 3v6" not in disable or True
         assert "Account disabled" in disable and "<span class='k'>account</span> eve" in disable
-        assert "<i aria-hidden='true'>W</i>Website</span>" in disable
+        assert "<span class='nm'>Website</span></span>" in disable
         assert "Admin</span>" not in _table(page)  # no "Admin" label word
         # the technical name is in the row's details
         assert "<dt>Event</dt><dd><code>admin_disable</code></dd>" in disable
@@ -274,7 +274,7 @@ async def test_my_activity_has_every_row_in_words_without_ids(gw: Harness) -> No
         assert "rate_limited" not in table  # the code is not even a tooltip on the member's page
         assert "Open the proposal to see why" in words and "error rate_limited" not in words
         assert "An administrator revoked your assistants' access and your sign-ins" in words
-        assert "By an administrator" in words and "<i aria-hidden='true'>A</i>Administrator</span>" in table
+        assert "By an administrator" in words and "<span class='nm'>Administrator</span></span>" in table
         assert "During deck sync" in words and "1 card row" in words
         assert "<span class='ui-app none' title='No app'>" in table
         assert "claude-app" not in page and "__browser__" not in page and "client id" not in page

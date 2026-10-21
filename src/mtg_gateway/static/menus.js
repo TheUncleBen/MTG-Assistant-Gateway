@@ -1,5 +1,6 @@
 /* The deck, folder, card and row menus and their boxes, on every signed-in page (after
-   static/cardmenu.js, which has the menu and box layer, window.MtgMenu and window.MtgBox).
+   static/box.js, the box every pop-up shares, window.MtgBox, and static/cardmenu.js, the menu
+   layer, window.MtgMenu).
 
    Deck tiles (My decks, Home, deck search, precons, profiles: li.deck with data-deck-id) and
    folder tiles (li.folder with data-folder-id) get their menu from a right-click, a press and
@@ -805,9 +806,10 @@
     var deck = collab.getAttribute("data-deck-name") || "";
     var adding = action === "add";
     var box = Box.open({
-      title: adding ? "Let " + who + " edit “" + deck + "” on Archidekt?" : "Stop " + who + " editing “" + deck + "” on Archidekt?",
-      body: adding ? el("p", "muted small", collab.getAttribute("data-note") || "") : el("div"),
-      actions: [cancelButton(), Box.button(adding ? "Add " + who : "Remove " + who, "primary", function () {
+      title: adding ? "Let “" + who + "” edit “" + deck + "” on Archidekt?" : "Stop “" + who + "” editing “" + deck + "” on Archidekt?",
+      body: adding ? el("p", "muted small", collab.getAttribute("data-note") || "") : el("p", null, "“" + who + "” can no longer change this deck. You can add them again later."),
+      // adding is the box's one orange button; removing ends on the solid red one (red outline before it)
+      actions: [cancelButton(), Box.button(adding ? "Add “" + who + "”" : "Remove “" + who + "”", adding ? "primary" : "danger", function () {
         var c = el("input");
         c.type = "hidden"; c.name = "confirmed"; c.value = "1";
         form.appendChild(c);
