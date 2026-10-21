@@ -949,6 +949,10 @@ def create_app(
     db = db or Database(settings.db_path, upgrade_dir=folder_for(settings.backup_dir, settings.db_path))
     # Values saved on the admin Settings page, for every key the deployment left blank (0.7.29).
     settings = with_stored(settings, db)
+    # the copies saved at database upgrades are kept no longer than the nightly backups (also hourly)
+    db.upgrade_keep_days = settings.backup_keep_days
+    db.age_out_upgrade_copies()
+    db.reconcile_upgrade_copies()
     theme.PUBLIC_URL = settings.public_url.rstrip("/")  # link previews point at the site's icon
     theme.WATCHLISTS = settings.watchlists_enabled  # the Watchlist links and price buttons
     oidc = oidc or OIDCClient(

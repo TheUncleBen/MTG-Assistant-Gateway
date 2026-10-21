@@ -254,7 +254,8 @@ copy of it in `backups/before-upgrade/` first, and going back to an older versio
   Archidekt.
 - Before a new version upgrades the database, the gateway saves a full copy of it (Archidekt
   sessions included, still encrypted with the Fernet key) in `backups/before-upgrade/`, and keeps
-  the newest 3. It is what going back to an older version uses
+  the newest 3, and deletes any older than `MTG_BACKUP_KEEP_DAYS`. It is what going back to an
+  older version uses
   ([UPGRADING.md](UPGRADING.md#going-back-to-an-older-version)).
 - Keep the Fernet key (`secrets/mtg_fernet_key.txt`) somewhere safe as well.
   It isn't in the backups, on purpose.

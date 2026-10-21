@@ -381,3 +381,29 @@ def test_stale_work_folders_from_a_crashed_backup_are_swept(tmp_path: Path, capl
     assert (elsewhere / "keep.txt").exists() and link.is_symlink()
     assert sorted(p.name for p in b.iterdir() if not p.name.startswith(".backup-")) == [out.name]
     assert sweep_work_dirs(b, older_than=0) == 1 and not young.exists()  # the young one, when old enough
+
+
+def test_a_nightly_backup_keeps_no_phone_key(tmp_path: Path):
+    """A member's notification topic works as their phone's key: the backup leaves it out, so a
+    restored backup asks phones to connect again, and the member's other choices stay."""
+    import sqlite3
+
+    from mtg_gateway import notify
+
+    db = Database(tmp_path / "d" / "g.sqlite")
+    try:
+        db.upsert_user("u1", email=None, name="x", preferred_username=None, groups=[])
+        topic = notify.new_topic(db, "u1")
+        notify.save_prefs(db, "u1", ntfy_topic=topic, ntfy_on=True, on_reports=True)
+        out = export_now(db, tmp_path / "b", keep_days=14)
+        assert notify.prefs(db, "u1")["ntfy_topic"] == topic  # the live database keeps it
+    finally:
+        db.close()
+    conn = sqlite3.connect(out)
+    try:
+        assert conn.execute("SELECT ntfy_topic, ntfy_on, on_reports FROM notify_prefs").fetchall() == [
+            (None, 1, 1)
+        ]
+    finally:
+        conn.close()
+    assert topic.encode() not in out.read_bytes()

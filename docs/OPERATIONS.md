@@ -295,9 +295,11 @@ not in your backups.
 - **Before a database upgrade:** when a new version has to upgrade the database, it first saves a
   full copy in `<MTG_BACKUP_DIR>/before-upgrade/` (inside the data folder when `MTG_BACKUP_DIR`
   isn't set), checks it, and only then upgrades; without a good copy it doesn't upgrade or
-  start. The newest 3 are kept. Unlike the nightly backups, this copy keeps members' Archidekt
-  sessions and the identity provider's tokens (still encrypted with the Fernet key, which isn't
-  in it), so going back needs nobody to relink; it is never copied to `MTG_BACKUP_COPY_DIR`.
+  start. The newest 3 are kept, and any older than `MTG_BACKUP_KEEP_DAYS` are deleted. Unlike the nightly
+  backups, this copy keeps members' Archidekt sessions and the identity provider's tokens (still
+  encrypted with the Fernet key, which isn't in it), so going back needs nobody to relink; it is
+  never copied to `MTG_BACKUP_COPY_DIR`. An unlink, a disable or a **Delete my data** is made in
+  every copy too, at once.
   Going back is in [UPGRADING.md](UPGRADING.md#going-back-to-an-older-version).
 - **Back up right now:**
 
@@ -313,7 +315,10 @@ not in your backups.
   tokens you revoked and browser sessions people logged out of come back,
   and accounts you disabled on the admin page are enabled again (disable
   them again after the restore). Archidekt links don't come back: the
-  backup holds none, so everyone relinks. Before you start the stack again,
+  backup holds none, so everyone relinks. Phones don't stay connected either:
+  backups from 0.7.38 on hold no phone keys, so each member who uses
+  notifications opens their Account page in the Android app and presses
+  **Save notifications** again. Before you start the stack again,
   end every session in the restored file so everyone signs in once more
   (which re-checks their Authentik groups). On the gateway's node, as the
   `PUID` user (`1000` here):
@@ -467,10 +472,10 @@ proposal deletes any older ones beyond that. Snapshots and reports stay with the
 account: after unlinking and linking another Archidekt account, the member
 still sees the snapshots and reports taken before (they are the member's own
 backups); they age out with the limits above or go with **Delete my data**.
-"Delete my data" removes a member's rows from the live database; the nightly
-backups in `MTG_BACKUP_DIR` keep a copy until they age out after
-`MTG_BACKUP_KEEP_DAYS` (never the member's Archidekt session, which backups
-leave out). A flood of sign-up attempts can therefore cost a connector that was
+"Delete my data" removes a member's rows from the live database and from the
+copies saved before database upgrades; the nightly backups in `MTG_BACKUP_DIR`
+keep a copy until they age out after `MTG_BACKUP_KEEP_DAYS` (never the member's
+Archidekt session, which backups leave out, nor from 0.7.38 on the member's phone key). A flood of sign-up attempts can therefore cost a connector that was
 registered but not used yet; that client just registers again. To slow
 floods down at the proxy, see the optional rate limit in
 [DEPLOY.md](DEPLOY.md#7-reverse-proxy).

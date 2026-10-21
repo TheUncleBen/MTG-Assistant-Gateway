@@ -675,3 +675,31 @@ async def test_a_failed_read_back_after_the_delete_says_to_look_on_archidekt(sta
     assert str(exc.value) == (
         "Archidekt can't be reached right now. Check the folder on Archidekt to see what was deleted."
     )
+
+
+async def test_a_renamed_backup_folder_is_known_by_the_copies_inside(stack: Stack) -> None:
+    """The backup folder renamed on Archidekt no longer has its name, but the backup copies the
+    gateway recorded making are still inside: the folder is refused as the backup folder is."""
+    await linked_user(stack)
+    ids = _setup(stack)
+    db = stack.h.app.state.gateway.db
+    backup = next(f for f in stack.ark.folders["alice"] if f["id"] == ids["backup"])
+    backup["name"] = "Old copies"
+    stack.ark.deck_folder[201] = ids["backup"]  # a copy the gateway made, recorded on a snapshot
+    assert db.save_snapshot(
+        "s-copy", owner_sub=SUB, deck_id="42", proposal_id=None, fingerprint="fp", deck={"name": "x"}
+    )
+    db.set_snapshot_backup("s-copy", backup_deck_id="201", backup_url="")
+    b, _csrf = await _browser(stack)
+    try:
+        r = await b.http.get(f"/decks/api/folders/{ids['backup']}/contents")
+        assert r.status_code == 409 and r.json()["error"] == "backup_inside", r.text
+        assert "backup copies the gateway made" in r.json()["message"]
+    finally:
+        await b.aclose()
+    with pytest.raises(DeckError) as exc:
+        await stack.h.app.state.gateway.decks.delete_folder(
+            SUB, ids["backup"], "Old copies", {"decks": 1, "packages": 0, "folders": 0}
+        )
+    assert exc.value.kind == "backup_inside"
+    assert stack.ark.folder_deletes == [] and 201 in stack.ark.decks

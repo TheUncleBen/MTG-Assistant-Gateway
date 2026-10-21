@@ -8,12 +8,16 @@ the gateway stops with a message saying why, and the database is left as it was.
 The copy is the database exactly as it was, members' Archidekt links and identity-provider tokens
 included (still encrypted with the Fernet key, which is never in the file), so going back needs
 nobody to relink. That is why it stays in its own owner-only folder and is never copied to
-``MTG_BACKUP_COPY_DIR``. The newest ``KEEP`` copies are kept.
+``MTG_BACKUP_COPY_DIR``. The newest ``KEEP`` copies are kept, and none longer than the nightly
+backups (``MTG_BACKUP_KEEP_DAYS``, :func:`age_out`). What a member ends on the live database is
+ended in every copy too (:func:`scrub_member`): an unlink, a disable, "Delete my data".
 
 Going back: when an older version (this one or newer) starts on a database a newer version
 upgraded, it looks in the same folder for its own before-upgrade copy. With one, it first saves
 the newer database there as a set-aside copy (nothing is lost), puts its copy back, ends every
 sign-in so everyone signs in once more, and starts. Without one, it stops and says what to do.
+The set-aside copy is marked (``SET_ASIDE_EVENT``): put back by hand to go forward again, the
+newer version ends every sign-in at its first start on it (:func:`went_forward`).
 """
 
 from __future__ import annotations
@@ -26,6 +30,7 @@ import re
 import shutil
 import sqlite3
 import tempfile
+import threading
 import time
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -45,10 +50,16 @@ STALE_WORK_SECONDS = 3600
 KEEP = 3
 # Free space wanted beyond the database's own size, for SQLite's journal while the copy is checked.
 SPACE_MARGIN_BYTES = 16 * 1024 * 1024
+# The audit row a set-aside copy carries (going forward again with it ends every sign-in), and
+# the one that start writes instead.
+SET_ASIDE_EVENT = "database_set_aside"
+WENT_FORWARD_EVENT = "database_went_forward"
 _NAME = re.compile(r"^mtg-gateway-(?:before-upgrade|set-aside)-(\d{8}T\d{6}Z)-schema(\d+)\.sqlite$")
 
 # What this process did at start, for the admin page: {"kind": "upgraded" | "went-back", ...}.
 last_event: dict[str, object] = {}
+# One clean-up of the copies at a time (a member's delete, the hourly age-out).
+_COPIES_LOCK = threading.Lock()
 
 
 class DatabaseUpgradeError(RuntimeError):
@@ -59,6 +70,16 @@ class DatabaseUpgradeError(RuntimeError):
 def folder_for(backup_dir: Path | None, db_path: Path) -> Path:
     """Where before-upgrade copies live: inside the backup folder, else next to the database."""
     return (backup_dir if backup_dir is not None else db_path.parent) / FOLDER
+
+
+def tighten(folder: Path) -> None:
+    """Make the folder owner-only: one made by hand, or by an older version, may be looser. One
+    the gateway can't change (another user's) is logged and left as it is."""
+    try:
+        if folder.is_dir() and not folder.is_symlink() and folder.stat().st_mode & 0o077:
+            folder.chmod(0o700)
+    except OSError as exc:
+        logger.warning("could not make %s owner-only: %s", folder, type(exc).__name__)
 
 
 def _stamp() -> str:
@@ -112,11 +133,18 @@ def _db_bytes(db_path: Path) -> int:
 
 
 def _write_copy(
-    source: sqlite3.Connection, folder: Path, name: str, expect_schema: int, db_path: Path
+    source: sqlite3.Connection,
+    folder: Path,
+    name: str,
+    expect_schema: int,
+    db_path: Path,
+    prepare: Callable[[sqlite3.Connection], object] | None = None,
 ) -> Path:
     """Copy the database behind ``source`` into ``folder`` as ``name`` with SQLite's online backup
-    API, check it, and only then give it its name. Raises OSError or sqlite3.Error on failure."""
+    API, run ``prepare`` on the copy, check it, and only then give it its name. Raises OSError or
+    sqlite3.Error on failure."""
     folder.mkdir(mode=0o700, parents=True, exist_ok=True)
+    tighten(folder)
     need = _db_bytes(db_path) + SPACE_MARGIN_BYTES
     free = shutil.disk_usage(folder).free
     if free < need:
@@ -138,6 +166,9 @@ def _write_copy(
             source.backup(target)
             # a standalone file with no WAL beside it
             target.execute("PRAGMA journal_mode=DELETE")
+            if prepare is not None:
+                prepare(target)
+                target.commit()
         finally:
             target.close()
         got = _schema_of(tmp)
@@ -174,19 +205,18 @@ def _sha256(path: Path) -> str:
 
 
 def _drop_if_same_as_older(new: Path, schema: int, folder: Path) -> Path:
-    """The newest older copy of ``schema`` when it holds exactly the same bytes as ``new`` (which is
-    then deleted), else ``new``. SQLite's backup copies page by page, so an unchanged database
-    gives the same file."""
+    """``new``, after deleting the newest older copy of ``schema`` when it holds exactly the same
+    bytes (SQLite's backup copies page by page, so an unchanged database gives the same file). The
+    new one is kept: its date is the one the age-out goes by."""
     older = next((f for f, s in copies(folder) if s == schema and f != new), None)
     if older is None:
         return new
     try:
-        if _sha256(older) != _sha256(new):
-            return new
-        new.unlink()
+        if _sha256(older) == _sha256(new):
+            older.unlink()
     except OSError:
-        return new
-    return older
+        pass
+    return new
 
 
 def has_data(conn: sqlite3.Connection) -> bool:
@@ -245,15 +275,23 @@ def _carry_forward(newer: sqlite3.Connection, old: sqlite3.Connection, since: in
             old.execute("UPDATE users SET disabled_at = ? WHERE sub = ? AND disabled_at IS NULL", (at, sub))
     except sqlite3.Error as exc:
         logger.warning("going back: could not read who was disabled since the upgrade: %s", exc)
+    _carry_links(newer, old)
     try:
-        linked = {r[0] for r in newer.execute("SELECT sub FROM archidekt_links WHERE secret_enc != ''")}
-        for (sub,) in old.execute("SELECT sub FROM archidekt_links WHERE secret_enc != ''").fetchall():
-            if sub not in linked:
-                old.execute(
-                    "UPDATE archidekt_links SET secret_enc = '', status = 'revoked' WHERE sub = ?", (sub,)
-                )
+        # the phone keys: one replaced since (Disconnect my phones) must not work again
+        topics = {r[0]: r[1] for r in newer.execute("SELECT sub, ntfy_topic FROM notify_prefs")}
+        subs = [r[0] for r in old.execute("SELECT sub FROM notify_prefs").fetchall()]
+        old.execute("UPDATE notify_prefs SET ntfy_topic = NULL")
+        for sub in subs:
+            if topics.get(sub):
+                old.execute("UPDATE notify_prefs SET ntfy_topic = ? WHERE sub = ?", (topics[sub], sub))
     except sqlite3.Error as exc:
-        logger.warning("going back: could not read which Archidekt sessions were deleted: %s", exc)
+        logger.warning(
+            "going back: could not read the members' phone keys, so every phone connects again: %s", exc
+        )
+        try:
+            old.execute("UPDATE notify_prefs SET ntfy_topic = NULL")
+        except sqlite3.Error:
+            pass
     try:
         deleted = [
             r[0]
@@ -267,6 +305,48 @@ def _carry_forward(newer: sqlite3.Connection, old: sqlite3.Connection, since: in
         deleted = []
     for sub in deleted:
         forget(old, sub)
+
+
+_LINK_COLUMNS = (
+    "archidekt_username",
+    "archidekt_user_id",
+    "secret_enc",
+    "status",
+    "created_at",
+    "refreshed_at",
+)
+
+
+def _carry_links(newer: sqlite3.Connection, old: sqlite3.Connection) -> None:
+    """Each member's Archidekt link in ``old`` becomes the one the newer database holds now: a
+    session deleted since (an unlink) stays deleted, and one replaced since (a relink, perhaps to
+    another Archidekt account) is not brought back; the member's current link is kept, so nobody
+    relinks. When the newer rows can't be read or written, every link in ``old`` is blanked."""
+    cols = ", ".join(_LINK_COLUMNS)
+    try:
+        now = {
+            r[0]: r[1:]
+            for r in newer.execute(f"SELECT sub, {cols} FROM archidekt_links WHERE secret_enc != ''")
+        }
+        for (sub,) in old.execute("SELECT sub FROM archidekt_links WHERE secret_enc != ''").fetchall():
+            if sub not in now:
+                old.execute(
+                    "UPDATE archidekt_links SET secret_enc = '', status = 'revoked' WHERE sub = ?", (sub,)
+                )
+        members = {r[0] for r in old.execute("SELECT sub FROM users")}
+        sets = ", ".join(f"{c} = excluded.{c}" for c in _LINK_COLUMNS)
+        for sub, values in now.items():
+            if sub in members:  # someone who joined after the upgrade isn't in the older copy
+                old.execute(
+                    f"INSERT INTO archidekt_links (sub, {cols}) VALUES (?, {', '.join('?' * len(values))})"
+                    f" ON CONFLICT(sub) DO UPDATE SET {sets}",
+                    (sub, *values),
+                )
+    except sqlite3.Error as exc:
+        logger.warning(
+            "going back: could not carry the members' Archidekt links over, so everyone relinks: %s", exc
+        )
+        old.execute("UPDATE archidekt_links SET secret_enc = '', status = 'revoked' WHERE secret_enc != ''")
 
 
 def _stamp_of(path: Path) -> int:
@@ -296,8 +376,19 @@ def go_back(
     if candidate is None:
         return False
     aside_name = f"{SET_ASIDE_PREFIX}{_stamp()}-schema{found}{SUFFIX}"
+
+    def mark(copy: sqlite3.Connection) -> None:
+        # the newer schema's audit_log may differ: unmarked, going forward needs the docs' command
+        try:
+            copy.execute(
+                "INSERT INTO audit_log (at, sub, client_id, event, detail_json) VALUES (?, NULL, NULL, ?, ?)",
+                (int(time.time()), SET_ASIDE_EVENT, json.dumps({"back_to_schema": supported})),
+            )
+        except sqlite3.Error as exc:
+            logger.warning("going back: the set-aside copy could not be marked: %s", exc)
+
     try:
-        aside = _write_copy(conn, folder, aside_name, found, db_path)
+        aside = _write_copy(conn, folder, aside_name, found, db_path, prepare=mark)
     except (OSError, sqlite3.Error) as exc:
         raise DatabaseUpgradeError(
             f"the gateway did not go back to its before-upgrade copy {candidate.name} because it could "
@@ -320,6 +411,8 @@ def go_back(
             _carry_forward(conn, old, _stamp_of(candidate), forget)
             for sql in _END_SIGN_INS:
                 old.execute(sql)
+            # a mark the copy carried (a set-aside copy that was put back and upgraded since)
+            old.execute("DELETE FROM audit_log WHERE event = ?", (SET_ASIDE_EVENT,))
             old.execute(
                 "INSERT INTO audit_log (at, sub, client_id, event, detail_json) VALUES (?, NULL, NULL, ?, ?)",
                 (
@@ -365,6 +458,245 @@ def go_back(
         target=supported,
     )
     return True
+
+
+def went_forward(conn: sqlite3.Connection) -> bool:
+    """At start: when the database is a set-aside copy put back by hand (going forward again after
+    going back), end every sign-in, as going back does: sign-ins revoked while the older version
+    ran would otherwise work again. The mark is replaced by a record of this, so it happens once.
+    True when it did."""
+    try:
+        marked = conn.execute(
+            "SELECT 1 FROM audit_log WHERE event = ? LIMIT 1", (SET_ASIDE_EVENT,)
+        ).fetchone()
+    except sqlite3.Error:
+        return False
+    if marked is None:
+        return False
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        for sql in _END_SIGN_INS:
+            conn.execute(sql)
+        conn.execute("DELETE FROM audit_log WHERE event = ?", (SET_ASIDE_EVENT,))
+        conn.execute(
+            "INSERT INTO audit_log (at, sub, client_id, event, detail_json) VALUES (?, NULL, NULL, ?, '{}')",
+            (int(time.time()), WENT_FORWARD_EVENT),
+        )
+    except BaseException:
+        conn.execute("ROLLBACK")
+        raise
+    conn.execute("COMMIT")
+    logger.warning(
+        "going forward again: this database was set aside when an older version went back, and has "
+        "been put back. Every sign-in has ended, so everyone signs in once more. Members disabled, "
+        "unlinked or deleted while the older version ran are not; check the admin Users page."
+    )
+    last_event.clear()
+    last_event.update(kind="went-forward", at=int(time.time()))
+    return True
+
+
+def age_out(folder: Path, keep_days: int, now: float | None = None) -> int:
+    """Delete the before-upgrade and set-aside copies older than ``keep_days`` (the nightly backups'
+    ``MTG_BACKUP_KEEP_DAYS``), by the time in their names: they hold what members asked to be
+    deleted later, so they are kept no longer than the nightly backups. Returns how many went."""
+    cutoff = (time.time() if now is None else now) - keep_days * 86400
+    removed = 0
+    with _COPIES_LOCK:
+        tighten(folder)
+        for prefix in (BEFORE_PREFIX, SET_ASIDE_PREFIX):
+            for f, _ in copies(folder, prefix):
+                # a journal beside a copy is a change cut short: it holds the rows before it
+                hot = Path(f"{f}-journal")
+                if _stamp_of(f) >= cutoff and not hot.exists():
+                    continue
+                try:
+                    f.unlink()
+                    removed += 1
+                except OSError as exc:
+                    logger.warning("could not delete the old copy %s: %s", f.name, type(exc).__name__)
+        _sweep_leftovers(folder)
+    if removed:
+        logger.info("deleted %d copies saved at database upgrades, older than %d days", removed, keep_days)
+    return removed
+
+
+def _sweep_leftovers(folder: Path) -> None:
+    """Remove what a crash left in the folder: work folders older than STALE_WORK_SECONDS (a
+    half-made copy inside) and journals whose copy is gone."""
+    cutoff = time.time() - STALE_WORK_SECONDS
+    try:
+        entries = list(folder.iterdir())
+    except OSError:
+        return
+    for e in entries:
+        try:
+            if e.name.startswith(WORK_PREFIX) and e.is_dir() and not e.is_symlink():
+                if e.lstat().st_mtime < cutoff:
+                    shutil.rmtree(e, ignore_errors=True)
+            elif e.name.endswith(f"{SUFFIX}-journal") and not e.is_symlink():
+                if not Path(str(e)[: -len("-journal")]).exists():
+                    e.unlink()
+        except OSError:
+            continue
+
+
+# What :func:`scrub_member` does to one member's rows in a copy, by what ended on the live database.
+_SCRUB = {
+    # an unlink (also an admin's): the Archidekt session
+    "link": ("UPDATE archidekt_links SET secret_enc = '', status = 'revoked' WHERE sub = ?",),
+    # a disable or a removal from the group: the Archidekt session and the identity-provider tokens
+    "account": (
+        "UPDATE archidekt_links SET secret_enc = '', status = 'revoked' WHERE sub = ?",
+        "DELETE FROM idp_grants WHERE sub = ?",
+    ),
+}
+
+
+def scrub_member(
+    folder: Path,
+    sub: str,
+    what: str,
+    forget: Callable[[sqlite3.Connection, str], object],
+    supported: int | None = None,
+) -> int:
+    """End in every before-upgrade and set-aside copy what just ended for ``sub`` on the live
+    database: ``what`` is "link", "account" (see ``_SCRUB``) or "data" (``forget(conn, sub)``
+    deletes their rows, as "Delete my data" does). Deleted rows are overwritten (secure_delete).
+    A copy that can't be changed is deleted, so it never keeps what the member was told is gone;
+    so is, for "data", a copy of a schema newer than ``supported`` (a set-aside copy), whose
+    tables this version doesn't all know. Returns how many copies were changed."""
+    if what != "data" and what not in _SCRUB:
+        raise ValueError(what)
+    changed = 0
+    with _COPIES_LOCK:
+        for prefix in (BEFORE_PREFIX, SET_ASIDE_PREFIX):
+            for f, schema in copies(folder, prefix):
+                try:
+                    if what == "data" and supported is not None and schema > supported:
+                        raise sqlite3.DatabaseError(f"schema {schema} is newer than this version reads")
+                    _scrub_one(f, sub, what, forget)
+                    changed += 1
+                except (OSError, sqlite3.Error) as exc:
+                    logger.warning(
+                        "could not remove a member's data from the copy %s (%s), so it is deleted",
+                        f.name,
+                        exc,
+                    )
+                    try:
+                        f.unlink()
+                    except OSError as err:
+                        logger.error("could not delete the copy %s: %s", f.name, type(err).__name__)
+    return changed
+
+
+def reconcile(
+    folder: Path,
+    live: sqlite3.Connection,
+    forget: Callable[[sqlite3.Connection, str], object],
+    supported: int,
+) -> int:
+    """At start: bring every copy in line with what has ended on the live database ``live`` since
+    it was made, also by a version from before this check, or by a change cut short: in a
+    before-upgrade copy, members who are gone (their data deleted) are forgotten; in every copy,
+    disabled members keep no identity-provider tokens, and an Archidekt session the live database
+    doesn't hold (unlinked or replaced; going back carries the live one over) is blanked. A
+    set-aside copy keeps the rows of members who joined after the upgrade, though not their
+    Archidekt session (going forward with it, they relink). A copy that can't be brought in line is
+    deleted. Returns how many copies were changed."""
+    try:
+        members = {r[0] for r in live.execute("SELECT sub FROM users")}
+        disabled = {r[0] for r in live.execute("SELECT sub FROM users WHERE disabled_at IS NOT NULL")}
+        sessions = {
+            (r[0], r[1])
+            for r in live.execute("SELECT sub, secret_enc FROM archidekt_links WHERE secret_enc != ''")
+        }
+    except sqlite3.Error as exc:
+        logger.warning("could not read the live database to check the copies: %s", exc)
+        return 0
+    changed = 0
+    with _COPIES_LOCK:
+        for prefix in (BEFORE_PREFIX, SET_ASIDE_PREFIX):
+            for f, schema in copies(folder, prefix):
+                try:
+                    older = prefix == BEFORE_PREFIX and schema <= supported
+                    if _reconcile_one(f, members, disabled, sessions, forget, older):
+                        changed += 1
+                except (OSError, sqlite3.Error) as exc:
+                    logger.warning("could not bring the copy %s in line (%s), so it is deleted", f.name, exc)
+                    try:
+                        f.unlink()
+                    except OSError as err:
+                        logger.error("could not delete the copy %s: %s", f.name, type(err).__name__)
+    if changed:
+        logger.info("brought %d copies saved at database upgrades in line with the database", changed)
+    return changed
+
+
+def _reconcile_one(
+    path: Path,
+    members: set[str],
+    disabled: set[str],
+    sessions: set[tuple[str, str]],
+    forget: Callable[[sqlite3.Connection, str], object],
+    older: bool,
+) -> bool:
+    conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    try:
+        gone = [r[0] for r in conn.execute("SELECT sub FROM users") if r[0] not in members] if older else []
+        stale = [
+            r[0]
+            for r in conn.execute("SELECT sub, secret_enc FROM archidekt_links WHERE secret_enc != ''")
+            if (r[0], r[1]) not in sessions
+        ]
+        grants = [r[0] for r in conn.execute("SELECT sub FROM idp_grants") if r[0] in disabled]
+    finally:
+        conn.close()
+    if not (gone or stale or grants):
+        return False
+    conn = sqlite3.connect(str(path), isolation_level=None)
+    try:
+        conn.execute("PRAGMA secure_delete=ON")
+        conn.execute("PRAGMA foreign_keys=ON")
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            for sub in gone:
+                forget(conn, sub)
+            for sub in stale:
+                conn.execute(_SCRUB["link"][0], (sub,))
+            for sub in grants:
+                conn.execute("DELETE FROM idp_grants WHERE sub = ?", (sub,))
+        except BaseException:
+            conn.execute("ROLLBACK")
+            raise
+        conn.execute("COMMIT")
+        if conn.execute("PRAGMA quick_check").fetchone()[0] != "ok":
+            raise sqlite3.DatabaseError("the copy failed its check")
+    finally:
+        conn.close()
+    return True
+
+
+def _scrub_one(path: Path, sub: str, what: str, forget: Callable[[sqlite3.Connection, str], object]) -> None:
+    conn = sqlite3.connect(str(path), isolation_level=None)
+    try:
+        conn.execute("PRAGMA secure_delete=ON")
+        conn.execute("PRAGMA foreign_keys=ON")
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            if what == "data":
+                forget(conn, sub)
+            else:
+                for sql in _SCRUB[what]:
+                    conn.execute(sql, (sub,))
+        except BaseException:
+            conn.execute("ROLLBACK")
+            raise
+        # no whole-file check here: it reads the whole copy, and this runs inside a member's
+        # request; the change commits whole or not at all, and the copies are checked at start
+        conn.execute("COMMIT")
+    finally:
+        conn.close()
 
 
 def summary(folder: Path) -> dict[str, object]:

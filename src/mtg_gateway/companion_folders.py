@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Any
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
+from . import prefs
 from .decks import DeckError, current_client
 from .folderview import visible_folders
 from .pages import BROWSER_CLIENT_ID, browser_session, csrf_header_ok, read_limited
@@ -39,6 +40,7 @@ KEEP_JOBS = 50  # finished folder deletes kept for their box (per gateway)
 STATUS = {
     "unauthenticated": 401,
     "csrf": 403,
+    "cross_site": 403,
     "forbidden": 403,
     "not_found": 404,
     "backup_inside": 409,
@@ -161,6 +163,9 @@ def add_folder_routes(server: MCPServer, state: AppState) -> FolderJobs:
             return None, _fail("unauthenticated", "Sign in again to use this.")
         if write and not csrf_header_ok(s, sid, request):
             return None, _fail("csrf", "Reload the page and try again.")
+        # a read asks Archidekt on the member's own allowance: never for a link on another site
+        if not write and not prefs.from_this_site(request):
+            return None, _fail("cross_site", "Open this from the gateway's own pages.")
         current_client.set(BROWSER_CLIENT_ID)
         return sub, None
 

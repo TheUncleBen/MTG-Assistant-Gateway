@@ -123,8 +123,11 @@ def test_the_deck_search_panel_fits_every_width(server: Server, width: int) -> N
         got = page.evaluate(PANEL)
         _check_panel(got, width)
         if width < 600:
-            page.locator(".sp-show").click()
-            page.wait_for_function("() => !document.getElementById('sp-filters').classList.contains('open')")
+            # Show results submits the search: wait for the new page to finish loading, or the
+            # tiles can be measured on a page whose styles are not applied yet
+            with page.expect_navigation(wait_until="networkidle"):
+                page.locator(".sp-show").click()
+            assert not page.locator("#sp-filters.open").count()
         # the tiles: as many as fit, each at least 220 px wide (M)
         cols = page.evaluate(
             "() => { const ul = document.querySelector('ul.decklist.grid');"

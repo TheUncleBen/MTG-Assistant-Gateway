@@ -49,7 +49,9 @@ def test_disclosure_names_what_the_operator_and_admins_can_and_cannot_do() -> No
         "Link only if you trust them.",
         "cannot open your proposals",
         "Logs never contain your password or session.",
-        "The gateway's own backups leave out the session",
+        "The gateway's nightly backups leave out the session",
+        "that copy is deleted after as many days as the nightly backups are kept",
+        "also from the copies saved before database upgrades",
         "about 40 days after you link",
         "Whether the session also stops working at Archidekt, or ends when you change your "
         "Archidekt password, is not known",

@@ -436,6 +436,8 @@ def add_cardsearch_routes(server: MCPServer, state: AppState) -> None:
         sub, _sid = browser_session(state, request)
         if not sub:
             return JSONResponse({"ok": False, "error": "unauthenticated"}, 401, headers=NO_STORE)
+        if not prefs.from_this_site(request):  # it asks Scryfall on the member's own allowance
+            return JSONResponse({"ok": False, "error": "cross_site"}, 403, headers=NO_STORE)
         f = cq.parse(request.query_params)
         view, remember = view_of(request, sub)
         try:
