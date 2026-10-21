@@ -703,3 +703,24 @@ async def test_a_renamed_backup_folder_is_known_by_the_copies_inside(stack: Stac
         )
     assert exc.value.kind == "backup_inside"
     assert stack.ark.folder_deletes == [] and 201 in stack.ark.decks
+
+
+async def test_a_renamed_backup_folder_with_no_copy_left_is_still_the_backup_folder(stack: Stack) -> None:
+    """Renamed on Archidekt and emptied of copies, the folder the gateway put backup copies in is
+    still refused, as is a folder it was moved into."""
+    await linked_user(stack)
+    ids = _setup(stack)
+    db = stack.h.app.state.gateway.db
+    backup = next(f for f in stack.ark.folders["alice"] if f["id"] == ids["backup"])
+    backup["name"] = "Old copies"
+    db.record_backup_folder(SUB, ids["backup"])
+    decks = stack.h.app.state.gateway.decks
+    with pytest.raises(DeckError) as exc:
+        await decks.folder_contents(SUB, ids["backup"])
+    assert exc.value.kind == "backup_inside" and "renamed on Archidekt" in str(exc.value)
+    backup["parent"] = ids["archive"]
+    decks.folder_trees.drop(SUB)  # the tree read again, with the folder moved
+    with pytest.raises(DeckError) as exc:
+        await decks.folder_contents(SUB, ids["archive"])
+    assert exc.value.kind == "backup_inside"
+    assert stack.ark.folder_deletes == []

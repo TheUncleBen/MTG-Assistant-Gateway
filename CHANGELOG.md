@@ -26,10 +26,13 @@ Proposals page.
 ### Security
 - The copies saved before database upgrades, and the set-aside copies made when going back, are
   kept no longer than the nightly backups (`MTG_BACKUP_KEEP_DAYS`), the newest included. An
-  unlink, a disable, a removal from the gateway's group and **Delete my data** are applied to
-  every one of them at once, as the “Before you link” text says, and so is a relink's replaced
-  session; a copy that can't be changed is deleted. At every start the copies are also brought in
-  line with the database, so what ended under an older version is ended in them too.
+  unlink, a disable, a removal from the gateway's group, **Disconnect my phones** and **Delete my
+  data** are applied to every one of them at once, as the “Before you link” text says, and so is a
+  relink's replaced session; a copy that can't be changed is deleted. At every start the copies
+  are also brought in line with the database, so what ended under an older version is ended in
+  them too: deleted members are forgotten (in a set-aside copy too, where members who joined after
+  the upgrade stay), members who are gone or disabled keep no sign-in tokens, and Archidekt
+  sessions and phone keys the database no longer holds are blanked.
 - When you go back from a later version to 0.7.38 or newer, each member keeps the Archidekt link
   and the phone connection they have now: an Archidekt account they unlinked or replaced since the
   upgrade, and phones they disconnected, don't come back.
@@ -42,8 +45,10 @@ Proposals page.
   another site can't make them spend a member's allowance.
 - Nightly backups no longer keep members' phone keys (their notification topics). After a
   restore, members who use notifications press **Save notifications** in the app again.
-- Deleting a folder is also refused when it holds backup copies the gateway made, so a backup
-  folder renamed on Archidekt can't be deleted like any other folder.
+- The gateway remembers the folder it puts backup copies in, so the backup folder renamed on
+  Archidekt (or a folder it was moved into) can't be deleted like any other folder, even with no
+  copy left inside. Deleting a folder is also refused when it holds backup copies the gateway
+  made.
 - The before-upgrade folder is made owner-only even when it already existed with looser
   permissions.
 - The “Before you link” text and the member guide say what the copy saved before a database

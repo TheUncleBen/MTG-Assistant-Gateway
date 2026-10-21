@@ -35,6 +35,7 @@ import time
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import NamedTuple
 
 logger = logging.getLogger(__name__)
 
@@ -550,6 +551,8 @@ _SCRUB = {
         "UPDATE archidekt_links SET secret_enc = '', status = 'revoked' WHERE sub = ?",
         "DELETE FROM idp_grants WHERE sub = ?",
     ),
+    # "Disconnect my phones": the phone notification key
+    "phone": ("UPDATE notify_prefs SET ntfy_topic = NULL WHERE sub = ?",),
 }
 
 
@@ -561,7 +564,7 @@ def scrub_member(
     supported: int | None = None,
 ) -> int:
     """End in every before-upgrade and set-aside copy what just ended for ``sub`` on the live
-    database: ``what`` is "link", "account" (see ``_SCRUB``) or "data" (``forget(conn, sub)``
+    database: ``what`` is "link", "account", "phone" (see ``_SCRUB``) or "data" (``forget(conn, sub)``
     deletes their rows, as "Delete my data" does). Deleted rows are overwritten (secure_delete).
     A copy that can't be changed is deleted, so it never keeps what the member was told is gone;
     so is, for "data", a copy of a schema newer than ``supported`` (a set-aside copy), whose
@@ -597,13 +600,19 @@ def reconcile(
     supported: int,
 ) -> int:
     """At start: bring every copy in line with what has ended on the live database ``live`` since
-    it was made, also by a version from before this check, or by a change cut short: in a
-    before-upgrade copy, members who are gone (their data deleted) are forgotten; in every copy,
-    disabled members keep no identity-provider tokens, and an Archidekt session the live database
-    doesn't hold (unlinked or replaced; going back carries the live one over) is blanked. A
+    it was made, also by a version from before this check, or by a change cut short: members who
+    are gone (their data deleted) are forgotten; members who are gone or disabled keep no
+    identity-provider tokens; an Archidekt session or a phone key the live database doesn't hold
+    (unlinked, replaced or disconnected; going back carries the live ones over) is blanked. A
     set-aside copy keeps the rows of members who joined after the upgrade, though not their
-    Archidekt session (going forward with it, they relink). A copy that can't be brought in line is
-    deleted. Returns how many copies were changed."""
+    Archidekt session, phone key or sign-in tokens (going forward with it, they sign in, relink and
+    reconnect); a member it holds who was already there at the upgrade (signed in before the
+    before-upgrade copy that going back put in its place was saved, as the live database's
+    "database_went_back" record names them) and is gone from the live database is gone. A
+    set-aside copy holding a member who is gone, or who can't be told apart from one (no such
+    record left), is deleted when its schema is newer than ``supported``, as this version doesn't
+    know all its tables. A copy that can't be brought in line is deleted. Returns how many copies
+    were changed."""
     try:
         members = {r[0] for r in live.execute("SELECT sub FROM users")}
         disabled = {r[0] for r in live.execute("SELECT sub FROM users WHERE disabled_at IS NOT NULL")}
@@ -611,6 +620,11 @@ def reconcile(
             (r[0], r[1])
             for r in live.execute("SELECT sub, secret_enc FROM archidekt_links WHERE secret_enc != ''")
         }
+        phones = {
+            (r[0], r[1])
+            for r in live.execute("SELECT sub, ntfy_topic FROM notify_prefs WHERE ntfy_topic IS NOT NULL")
+        }
+        upgraded = _upgrade_times(live)
     except sqlite3.Error as exc:
         logger.warning("could not read the live database to check the copies: %s", exc)
         return 0
@@ -619,8 +633,10 @@ def reconcile(
         for prefix in (BEFORE_PREFIX, SET_ASIDE_PREFIX):
             for f, schema in copies(folder, prefix):
                 try:
-                    older = prefix == BEFORE_PREFIX and schema <= supported
-                    if _reconcile_one(f, members, disabled, sessions, forget, older):
+                    known = LiveState(members, disabled, sessions, phones)
+                    before = prefix == BEFORE_PREFIX
+                    since = None if before else upgraded.get(f.name)
+                    if _reconcile_one(f, known, forget, before, schema <= supported, since):
                         changed += 1
                 except (OSError, sqlite3.Error) as exc:
                     logger.warning("could not bring the copy %s in line (%s), so it is deleted", f.name, exc)
@@ -633,27 +649,72 @@ def reconcile(
     return changed
 
 
+class LiveState(NamedTuple):
+    """What the live database holds, for ``reconcile``."""
+
+    members: set[str]
+    disabled: set[str]
+    sessions: set[tuple[str, str]]
+    phones: set[tuple[str, str]]
+
+
+def _upgrade_times(live: sqlite3.Connection) -> dict[str, int]:
+    """For each set-aside copy going back recorded on ``live``, by its file name: when the
+    before-upgrade copy put back in its place was saved, which is when that upgrade began."""
+    out: dict[str, int] = {}
+    for (detail,) in live.execute("SELECT detail_json FROM audit_log WHERE event = 'database_went_back'"):
+        try:
+            d = json.loads(detail or "")
+            aside, copy = str(d["set_aside"]), Path(str(d["copy"]))
+        except (ValueError, KeyError, TypeError):
+            continue
+        if _stamp_of(copy):
+            out[aside] = _stamp_of(copy)
+    return out
+
+
 def _reconcile_one(
     path: Path,
-    members: set[str],
-    disabled: set[str],
-    sessions: set[tuple[str, str]],
+    live: LiveState,
     forget: Callable[[sqlite3.Connection, str], object],
-    older: bool,
+    before: bool,
+    readable: bool,
+    upgraded_at: int | None,
 ) -> bool:
     conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
     try:
-        gone = [r[0] for r in conn.execute("SELECT sub FROM users") if r[0] not in members] if older else []
+        held = conn.execute("SELECT sub, first_login_at FROM users").fetchall()
+        if before:
+            gone = [sub for sub, _ in held if sub not in live.members]
+        else:
+            # a set-aside copy also holds those who joined after the upgrade: only those who were
+            # already there at it are gone; with no record to date the upgrade by, a member it
+            # holds who isn't here can't be told apart from one who is gone, and the copy goes
+            absent = [(sub, int(first or 0)) for sub, first in held if sub not in live.members]
+            if absent and upgraded_at is None:
+                raise sqlite3.DatabaseError("it holds members who may be gone; the upgrade can't be dated")
+            gone = [sub for sub, first in absent if upgraded_at is not None and first < upgraded_at]
         stale = [
             r[0]
             for r in conn.execute("SELECT sub, secret_enc FROM archidekt_links WHERE secret_enc != ''")
-            if (r[0], r[1]) not in sessions
+            if (r[0], r[1]) not in live.sessions
         ]
-        grants = [r[0] for r in conn.execute("SELECT sub FROM idp_grants") if r[0] in disabled]
+        phones = [
+            r[0]
+            for r in conn.execute("SELECT sub, ntfy_topic FROM notify_prefs WHERE ntfy_topic IS NOT NULL")
+            if (r[0], r[1]) not in live.phones
+        ]
+        grants = [
+            r[0]
+            for r in conn.execute("SELECT sub FROM idp_grants")
+            if r[0] in live.disabled or r[0] not in live.members
+        ]
     finally:
         conn.close()
-    if not (gone or stale or grants):
+    if not (gone or stale or phones or grants):
         return False
+    if gone and not readable:
+        raise sqlite3.DatabaseError("it holds a member who is gone, in a schema newer than this reads")
     conn = sqlite3.connect(str(path), isolation_level=None)
     try:
         conn.execute("PRAGMA secure_delete=ON")
@@ -664,6 +725,8 @@ def _reconcile_one(
                 forget(conn, sub)
             for sub in stale:
                 conn.execute(_SCRUB["link"][0], (sub,))
+            for sub in phones:
+                conn.execute(_SCRUB["phone"][0], (sub,))
             for sub in grants:
                 conn.execute("DELETE FROM idp_grants WHERE sub = ?", (sub,))
         except BaseException:

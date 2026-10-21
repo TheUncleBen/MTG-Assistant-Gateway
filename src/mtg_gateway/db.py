@@ -787,6 +787,9 @@ def _like_prefix(prefix: str) -> str:
 
 # job_runs rows recording how each backup copy was made (record_backup_made), by the copy's id.
 BACKUP_MADE_JOB = "backup_made:"
+# job_runs rows recording each Archidekt folder the gateway put a member's backup copies in
+# (record_backup_folder), by member and folder id: a renamed backup folder stays known as one
+BACKUP_FOLDER_JOB = "backup_folder:"
 # job_runs rows of the queued backup deletes before schema 13 moved them to backup_deletes:
 # this prefix and the snapshot id (read only by _step_13)
 BACKUP_DELETE_JOB = "backup_delete:"
@@ -852,6 +855,12 @@ def delete_member_rows(c: sqlite3.Connection, sub: str) -> dict[str, int]:
         if "snapshots" in present
         else 0
     )
+    # and the records of the folders the gateway put their copies in
+    if "job_runs" in present:
+        out["backup_folders"] = c.execute(
+            "DELETE FROM job_runs WHERE substr(name, 1, ?) = ?",
+            (len(BACKUP_FOLDER_JOB) + len(sub) + 1, f"{BACKUP_FOLDER_JOB}{sub}:"),
+        ).rowcount
     for table, column in MEMBER_TABLES:
         if table in present:
             out[table] = c.execute(f"DELETE FROM {table} WHERE {column} = ?", (sub,)).rowcount
@@ -909,7 +918,7 @@ class Database:
 
     def scrub_upgrade_copies(self, sub: str, what: str) -> int:
         """End in the before-upgrade and set-aside copies what just ended for ``sub`` here
-        (upgrade_backup.scrub_member): "link", "account" or "data"."""
+        (upgrade_backup.scrub_member): "link", "account", "phone" or "data"."""
         folder = self.upgrade_folder
         if folder is None:
             return 0
@@ -3168,6 +3177,43 @@ class Database:
                 "INSERT OR REPLACE INTO job_runs (name, day, at, detail_json) VALUES (?, ?, ?, ?)",
                 (BACKUP_MADE_JOB + str(backup_deck_id), self._since_day(0), now, json.dumps(record)),
             )
+
+    def record_backup_folder(self, sub: str, folder_id: str | int) -> None:
+        """Remember that the gateway put ``sub``'s backup copies in the Archidekt folder
+        ``folder_id``, so the folder is known as the backup folder after a rename on Archidekt,
+        even once no copy is left inside. Kept until the member's data is deleted."""
+        with self.tx() as c:
+            c.execute(
+                "INSERT OR REPLACE INTO job_runs (name, day, at, detail_json) VALUES (?, ?, ?, ?)",
+                (f"{BACKUP_FOLDER_JOB}{sub}:{int(folder_id)}", self._since_day(0), int(time.time()), "{}"),
+            )
+
+    def backup_folder_ids(self, sub: str) -> set[int]:
+        """The Archidekt folders the gateway put ``sub``'s backup copies in (record_backup_folder,
+        and the folder each recorded copy was made in)."""
+        prefix = f"{BACKUP_FOLDER_JOB}{sub}:"
+        with self._lock:
+            names = self._conn.execute(
+                "SELECT substr(name, ?) FROM job_runs WHERE substr(name, 1, ?) = ?",
+                (len(prefix) + 1, len(prefix), prefix),
+            ).fetchall()
+            made = self._conn.execute(
+                """SELECT folder_id FROM (
+                       SELECT CASE WHEN json_valid(detail_json)
+                                   THEN json_extract(detail_json, '$.folder_id') END AS folder_id,
+                              CASE WHEN json_valid(detail_json)
+                                   THEN json_extract(detail_json, '$.sub') END AS sub
+                       FROM job_runs WHERE substr(name, 1, ?) = ?)
+                   WHERE sub = ?""",
+                (len(BACKUP_MADE_JOB), BACKUP_MADE_JOB, sub),
+            ).fetchall()
+        out: set[int] = set()
+        for (v,) in [*names, *made]:
+            try:
+                out.add(int(v))
+            except (TypeError, ValueError):
+                continue
+        return out
 
     def backup_made(self, backup_deck_id: str) -> dict[str, Any] | None:
         row = self._one(

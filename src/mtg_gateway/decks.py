@@ -5390,6 +5390,7 @@ class DeckService:
                 sub,
                 lambda token, *_: self.client.ensure_folder(token, name=folder_name),
             )
+            self.db.record_backup_folder(sub, folder["id"])
             # How long the gateway's own writes to the copy took (the copy POST and its
             # description PATCH, which come back together): Archidekt's createdAt and every
             # updatedAt those writes set fall inside it, whatever Archidekt's clock says.
@@ -6933,7 +6934,17 @@ class DeckService:
         info, folder = await self._folder_in(sub, int(folder_id))
         self._movable_folder(info, folder)
         below = self._inside(info, folder["id"])
-        if any(f.get("backup") for f in below):
+        # the backup folder is known by its name; one renamed on Archidekt by the gateway's
+        # record of the folders it put backup copies in
+        recorded = self.db.backup_folder_ids(sub)
+        if folder["id"] in recorded:
+            raise DeckError(
+                "backup_inside",
+                f"“{folder['name']}” is the folder the gateway keeps backup copies of your decks in, "
+                "renamed on Archidekt. Deleting it would delete the backup copies, so it can't be "
+                "deleted here.",
+            )
+        if any(f.get("backup") or f["id"] in recorded for f in below):
             raise DeckError(
                 "backup_inside",
                 f"The gateway's backup folder is inside “{folder['name']}”, and deleting it would delete "
@@ -6950,8 +6961,8 @@ class DeckService:
             # left out would be deleted unseen, with no snapshot of its decks
             if subs != {g["id"] for g in below if g["parent"] == f["id"]}:
                 raise DeckError("unavailable", self.TOO_MUCH_TO_LIST)
-        # the backup folder is known by its name; one renamed on Archidekt is known by the backup
-        # copies the gateway recorded making, so it is never deleted like any other folder
+        # any other folder holding backup copies the gateway recorded making (moved there on
+        # Archidekt) is not deleted like any other folder either
         made = self.db.backup_copies(sub)
         if any(d["id"] in made for d in decks):
             raise DeckError(

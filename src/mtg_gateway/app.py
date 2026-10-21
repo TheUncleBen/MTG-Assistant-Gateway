@@ -872,7 +872,10 @@ def build_mcp_server(state: AppState) -> MCPServer:
     # (prices.py), which exist only with MTG_WATCHLISTS_ENABLED: off, there is no price service, so
     # no Watchlist page or API, no watch tools and no daily price check. Stored rows stay.
     state.notifier = Notifier(s.ntfy_url, s.ntfy_token, state.db, s.public_url)
-    replace_old_topics(state.db)  # every start: only a topic the gateway made is an app's key
+    # every start: only a topic the gateway made is an app's key; a replaced one goes from the
+    # copies saved at database upgrades too
+    if replace_old_topics(state.db):
+        state.db.reconcile_upgrade_copies()
     if s.watchlists_enabled:
         state.prices = PriceService(
             s,

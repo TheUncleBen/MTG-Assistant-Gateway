@@ -3,6 +3,7 @@ back to an older version (upgrade_backup.py)."""
 
 from __future__ import annotations
 
+import json
 import os
 import sqlite3
 import stat
@@ -791,3 +792,132 @@ def test_a_folder_the_gateway_can_t_tighten_doesn_t_stop_the_upgrade(
     finally:
         db.close()
     assert len(upgrade_backup.copies(folder)) == 1
+
+
+def _phone(path: Path, sub: str, topic: str | None) -> None:
+    conn = sqlite3.connect(path)
+    conn.execute(
+        "INSERT OR REPLACE INTO notify_prefs (sub, ntfy_on, ntfy_topic, updated_at) VALUES (?, 1, ?, 1)",
+        (sub, topic),
+    )
+    conn.commit()
+    conn.close()
+
+
+async def test_disconnect_my_phones_reaches_every_copy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Members are told Disconnect my phones ends the old key: a copy saved at an upgrade can't
+    bring it back."""
+    from mtg_gateway.notify import account_action
+
+    path, folder = tmp_path / "g.sqlite", tmp_path / "before-upgrade"
+    _old_database(path, 15)
+    _members(path, "u2")
+    _phone(path, "u1", "old-key-1")
+    _phone(path, "u2", "key-2")
+    with monkeypatch.context() as m:
+        _newer(m, _add_table)
+        newer = Database(path, upgrade_dir=folder)
+        try:
+            ((before, _),) = upgrade_backup.copies(folder)
+            aside = folder / "mtg-gateway-set-aside-20260101T000000Z-schema15.sqlite"
+            aside.write_bytes(before.read_bytes())
+            aside.chmod(0o600)
+            state = SimpleNamespace(db=newer, notifier=None)
+            assert await account_action(state, "u1", "notify_new_topic", {})
+            live = dict(newer._conn.execute("SELECT sub, ntfy_topic FROM notify_prefs").fetchall())
+            assert live["u1"] not in (None, "old-key-1")
+        finally:
+            newer.close()
+    for copy in (before, aside):
+        assert dict(_read(copy, "SELECT sub, ntfy_topic FROM notify_prefs")) == {"u1": None, "u2": "key-2"}
+
+
+def test_at_start_a_phone_key_the_database_no_longer_holds_is_blanked_in_the_copies(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Disconnected under 0.7.37, or in a change cut short: the next start blanks it."""
+    path, folder = tmp_path / "g.sqlite", tmp_path / "before-upgrade"
+    _old_database(path, 15)
+    _members(path, "u2")
+    _phone(path, "u1", "old-key-1")
+    _phone(path, "u2", "key-2")
+    with monkeypatch.context() as m:
+        _newer(m, _add_table)
+        newer = Database(path, upgrade_dir=folder)
+        try:
+            ((before, _),) = upgrade_backup.copies(folder)
+            newer._conn.execute("UPDATE notify_prefs SET ntfy_topic = 'new-key-1' WHERE sub = 'u1'")
+            assert newer.reconcile_upgrade_copies() == 1
+            assert newer.reconcile_upgrade_copies() == 0
+        finally:
+            newer.close()
+    assert dict(_read(before, "SELECT sub, ntfy_topic FROM notify_prefs")) == {"u1": None, "u2": "key-2"}
+
+
+UPGRADED = "mtg-gateway-before-upgrade-20260301T000000Z-schema15.sqlite"  # 2026-03-01: the upgrade
+AFTER_UPGRADE = 1775000000  # 2026-04-01, a sign-in after it
+
+
+def _set_aside(tmp_path: Path, name: str, *, record: bool = True) -> tuple[Database, Path]:
+    """A live database (schema 15, member u1 only) that went back from a newer one, and the
+    set-aside copy named ``name``: u1, u2 (there at the upgrade, deleted since) and u9 (joined
+    after the upgrade), each with an Archidekt session and identity-provider tokens."""
+    folder = tmp_path / "before-upgrade"
+    folder.mkdir()
+    src = tmp_path / "aside.sqlite"
+    _old_database(src, 15)
+    _members(src, "u2", "u9")
+    conn = sqlite3.connect(src)
+    conn.execute("UPDATE users SET first_login_at = ? WHERE sub = 'u9'", (AFTER_UPGRADE,))
+    conn.execute(
+        "INSERT INTO idp_grants (sub, refresh_enc, access_enc, access_expires_at, updated_at)"
+        " VALUES ('u1', 'r', 'a', 1, 1)"
+    )
+    conn.commit()
+    conn.close()
+    aside = folder / name
+    aside.write_bytes(src.read_bytes())
+    aside.chmod(0o600)
+    live_path = tmp_path / "g.sqlite"
+    _old_database(live_path, 15)
+    db = Database(live_path, upgrade_dir=folder)
+    if record:
+        db._conn.execute(
+            "INSERT INTO audit_log (at, sub, client_id, event, detail_json) VALUES (1, NULL, NULL, ?, ?)",
+            ("database_went_back", json.dumps({"copy": UPGRADED, "set_aside": name, "from_schema": 16})),
+        )
+    return db, aside
+
+
+def test_at_start_a_member_deleted_since_is_forgotten_in_the_set_aside_copy(tmp_path: Path) -> None:
+    """A set-aside copy also holds those who joined after the upgrade: they stay (going forward
+    with it, they sign in and relink), but a member who was there at the upgrade and is gone now
+    is forgotten, and no member who is gone or new keeps identity-provider tokens."""
+    name = "mtg-gateway-set-aside-20260501T000000Z-schema15.sqlite"
+    db, aside = _set_aside(tmp_path, name)
+    try:
+        assert db.reconcile_upgrade_copies() == 1
+        assert db.reconcile_upgrade_copies() == 0
+    finally:
+        db.close()
+    assert sorted(r[0] for r in _read(aside, "SELECT sub FROM users")) == ["u1", "u9"]
+    assert _read(aside, "SELECT count(*) FROM proposals WHERE owner_sub = 'u2'") == [(0,)]
+    assert _read(aside, "SELECT sub FROM idp_grants") == [("u1",)]
+    assert dict(_read(aside, "SELECT sub, secret_enc FROM archidekt_links")) == {"u9": ""}
+
+
+@pytest.mark.parametrize("record", [True, False])
+def test_a_set_aside_copy_that_can_t_be_brought_in_line_is_deleted(tmp_path: Path, record: bool) -> None:
+    """Holding a member who is gone, in a newer schema this version doesn't know every table of;
+    or with no record left of when the upgrade was, so the members it holds who aren't here can't
+    be told apart from those who are gone."""
+    schema = 16 if record else 15
+    name = f"mtg-gateway-set-aside-20260501T000000Z-schema{schema}.sqlite"
+    db, aside = _set_aside(tmp_path, name, record=record)
+    try:
+        db.reconcile_upgrade_copies()
+    finally:
+        db.close()
+    assert not aside.exists()
