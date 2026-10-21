@@ -373,8 +373,11 @@ class ForgeClient:
         fmt: str = "Commander",
         seed: int | None = None,
         parallel: int = 1,
+        solo: dict[str, int] | None = None,
     ) -> dict[str, Any]:
         body: dict[str, Any] = {"decks": decks, "games": games, "format": fmt}
+        if solo is not None:  # a solo test: the one deck against opponents who do nothing
+            body["solo"] = solo
         if seed is not None:
             body["seed"] = seed
         if parallel > 1:  # a Forge image before 0.7.30 ignores it and plays one game at a time
@@ -677,10 +680,13 @@ async def refresh(
         if isinstance(r, dict)
     ]
     asked = section.get("games_requested") if earlier else job.get("games_requested")
+    solo = section.get("solo")
     out = {
         **section,
         "state": job["state"],
-        "result": summarise({**job, "results": played, "games_requested": asked}, section.get("seats") or []),
+        "result": summarise_solo(played, asked, solo)
+        if isinstance(solo, dict)
+        else summarise({**job, "results": played, "games_requested": asked}, section.get("seats") or []),
         "played": played,
     }
     out.pop("unanswered_since", None)
@@ -689,3 +695,123 @@ async def refresh(
     if job["state"] in ("failed", "timeout"):
         out["log_tail"] = (job.get("log_tail") or [])[-15:]
     return out
+
+
+# The solo test on Forge: the deck plays by the full rules against opponents who do nothing (the
+# Forge service's solo_opponent), so every card Forge has does what it says. It stops at the
+# deck's turn ``until_turn``; a deck that has not won by then is counted as not winning in time.
+SOLO_UNTIL_TURN = 10
+SOLO_OPPONENTS = {"Commander": 3, "Constructed": 1}
+SOLO_TOO_OLD = (
+    "This gateway's Forge is older than the solo test needs. Update the Forge image to the one "
+    "named in the stack file, then run it again."
+)
+
+
+def _median(values: list[int]) -> float | int | None:
+    return statistics.median(values) if values else None
+
+
+def _per_turn(rows: list[list[int]], turns: int) -> list[float]:
+    """The average of a per-turn series over the games still going on each turn."""
+    out: list[float] = []
+    for t in range(turns):
+        seen = [r[t] for r in rows if len(r) > t]
+        if not seen:
+            break
+        out.append(round(sum(seen) / len(seen), 2))
+    return out
+
+
+def summarise_solo(results: list[dict[str, Any]], asked: Any, solo: dict[str, Any]) -> dict[str, Any]:
+    """A solo test's numbers from its games' ``solo`` views: how often and on which turn the deck
+    won, when its commander came down, and what it did each turn on average."""
+    views = [r["solo"] for r in results if isinstance(r, dict) and isinstance(r.get("solo"), dict)]
+
+    def ints(key: str) -> list[int]:
+        return [v[key] for v in views if isinstance(v.get(key), int) and not isinstance(v[key], bool)]
+
+    def series(key: str) -> list[list[int]]:
+        return [[n for n in v[key] if isinstance(n, int)] for v in views if isinstance(v.get(key), list)]
+
+    until = solo.get("until_turn") if isinstance(solo.get("until_turn"), int) else SOLO_UNTIL_TURN
+    won = ints("won_turn")
+    games = len(views)
+    out: dict[str, Any] = {
+        "games": games,
+        "games_requested": asked,
+        "until_turn": until,
+        "opponents": solo.get("opponents"),
+        "won": len(won),
+        "won_rate": round(len(won) / games, 4) if games else None,
+        "won_rate_95": list(wilson(len(won), games)),
+        "median_won_turn": _median(won),
+        "won_turn_range": [min(won), max(won)] if won else None,
+        "median_commander_turn": _median(ints("commander_cast_turn")),
+        "median_first_out_turn": _median(ints("first_out_turn")),
+        "mulligans": sum(1 for k in ints("kept") if k < 7),
+        "lands_by_turn": _per_turn(series("lands_by_turn"), until),
+        "casts_by_turn": _per_turn(series("casts_by_turn"), until),
+        "damage_by_turn": _per_turn(series("damage_by_turn"), until),
+        # games Forge itself stopped at its time limit, apart from the turn limit
+        "stopped_slow": sum(1 for r in results if isinstance(r, dict) and r.get("stopped_slow")),
+    }
+    unread = sum(1 for r in results if isinstance(r, dict) and not isinstance(r.get("solo"), dict))
+    if unread:
+        out["unread"] = unread
+    return out
+
+
+async def start_solo_run(
+    client: ForgeClient,
+    deck_text: str,
+    deck_name: str,
+    *,
+    games: int,
+    until_turn: int = SOLO_UNTIL_TURN,
+    seed: int | None = None,
+    parallel: int = 1,
+) -> dict[str, Any]:
+    """Start a solo test of the member's deck on Forge and return its section, shaped as a Forge
+    run's so ``refresh`` keeps it up to date. A deck with a card in a Commander category plays a
+    Commander game against three opponents, any other deck a game against one. Cards Forge lacks
+    are left out and named in ``not_played``, as in a run against precons."""
+    deck = forge_deck(deck_text)
+    fmt = "Commander" if deck["commander"] else "Constructed"
+    names = list(dict.fromkeys(deck["commander"] + [name for _, name in deck["main"]]))
+    resolved = await client.check(names)
+    not_played = sorted(n for n in names if not resolved.get(n))
+    if any(not resolved.get(c) for c in deck["commander"]):
+        return {
+            "state": "failed",
+            "not_played": not_played,
+            "error": "Forge does not have this deck's commander, so it can't run the game.",
+        }
+    deck["main"] = [[n, name] for n, name in deck["main"] if resolved.get(name)]
+    solo = {"opponents": SOLO_OPPONENTS[fmt], "until_turn": until_turn}
+    source = "request" if seed is not None else "gateway"
+    if seed is None:
+        seed = secrets.randbelow(2**63)
+    forge_seed = seed % 2**63
+    try:
+        job = await client.start([deck], games, fmt, seed=forge_seed, parallel=max(1, parallel), solo=solo)
+    except ForgeError as exc:
+        # an image from before the solo test asks for two decks or more
+        if exc.kind == "invalid" and "decks must list" in str(exc):
+            return {"state": "failed", "not_played": not_played, "error": SOLO_TOO_OLD}
+        raise
+    return {
+        "state": job.get("state", "queued"),
+        "solo": solo,
+        "format": fmt,
+        "seed": seed,
+        "seed_source": source,
+        **({"forge_seed": forge_seed} if forge_seed != seed else {}),
+        "job_id": job["id"],
+        "seats": [deck_name],
+        "not_played": not_played,
+        "games_requested": games,
+        "forge_version": job.get("forge_version"),
+        **({"parallel": job["parallel"]} if isinstance(job.get("parallel"), int) else {}),
+        "started_at": int(time.time()),
+    }
