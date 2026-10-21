@@ -7,6 +7,43 @@ Notable changes for people who run or use the gateway. The format follows
 with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 (`release/1.2.3`); `latest` is always the newest.
 
+## [0.7.38] - unreleased
+
+The solo test plays far more of a deck's cards with their effect. It now reads the common card
+text it used to skip (drawing, ramp, tokens, damage, anthems, cost reducers and more), so a
+typical Commander precon goes from about a third of its cards played with their effect to about
+half. Removal, board wipes and counterspells, which have nothing to hit in a solo test, are set
+aside and said so, instead of counting against the deck.
+
+### Upgrade notes
+- Update as usual ([docs/UPGRADING.md](docs/UPGRADING.md)): the newest stack file and example
+  variables file, with your values in it. The research service and Forge images are new
+  (`1.3.2-mag5` and `2.0.15-mag5`), and the newest stack file already names them.
+- No database change, so this update saves no before-upgrade copy.
+- The Android app doesn't change.
+
+### Added
+- **[docs/HARDWARE.md](docs/HARDWARE.md):** the machine you need, with and without Forge, and how
+  long tests took on the machines we timed.
+- **Cards Forge cannot play**, listed again in [docs/CAPABILITIES.md](docs/CAPABILITIES.md): the
+  Unfinity sticker and Attraction cards, and Alchemy cards that are not Commander-legal.
+
+### Changed
+- **The solo test reads more card text.** Cards that draw, gain life, make Treasure or
+  creature tokens, deal damage or drain opponents, add +1/+1 counters, fetch lands or cards, make
+  extra mana or extra combats, pump your creatures, give haste, let you play more lands, lower
+  costs or double tokens now do that in the solo test, from when they enter, when you cast
+  spells, at upkeep, in combat, or from an ability with a plain cost. Prowess, the monarch, double
+  strike and defender count too. Cards with hybrid or Phyrexian mana costs are cast.
+- A permanent whose text the solo test can't fully read is still cast, and does the parts it
+  can read; the report names what it left out. Before, any card with removal or a counterspell
+  in its text was never cast at all, even a creature.
+- Removal, board wipes and counterspells are listed as set aside on purpose, not as cards the
+  solo test can't play.
+- Forge's build check now also measures the cards legal in Commander, and fails below 99.7% of
+  them. Today it plays 99.71% of Commander-legal cards and 99.60% of all cards legal anywhere.
+- Forge games start a little faster (about 6% per game in our timing).
+
 ## [0.7.37] - unreleased
 
 Updating is now a fresh install on top of your data: take the newest stack file and example
