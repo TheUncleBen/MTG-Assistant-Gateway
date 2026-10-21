@@ -43,7 +43,8 @@ aside and said so, instead of counting against the deck.
   solo test can't play.
 - Forge's build check now also measures the cards legal in Commander, and fails below 99.6% of
   them. Today it plays 99.71% of Commander-legal cards and 99.60% of all cards legal anywhere.
-- Forge games run a little faster (about 6% per game on the x86 machine we timed).
+- Forge games run a little faster (about 5% on average over 6 paired test games on one x86
+  machine; not timed on a Pi).
 
 ## [0.7.37] - unreleased
 

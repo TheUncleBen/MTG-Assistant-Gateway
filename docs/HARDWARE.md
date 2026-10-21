@@ -1,7 +1,7 @@
 # What hardware you need
 
-The gateway runs on any 64-bit ARM or x86 machine with Docker. It has been timed on a Raspberry Pi 5;
-a Pi 4 has not been timed.
+The gateway runs on any 64-bit ARM or x86 machine with Docker. Forge games have been timed on a
+Raspberry Pi 5; a Pi 4 has not been timed.
 Forge, the optional game engine, is the only part that needs real power.
 
 ## Minimum and recommended
@@ -19,18 +19,19 @@ about 740 MB on a Pi 5.
 
 ## How long a test takes
 
-Measured, one game at a time unless the row says otherwise:
+Measured, one game at a time:
 
-| What | x86 PC | Raspberry Pi 5 |
+| What | Machine | Time |
 | --- | --- | --- |
-| Solo test without Forge, 300 games | 1.3 to 1.7 seconds (5 recent precons) | not measured yet |
-| One Forge game against three precons, on 2 cores | 29 seconds up to the 4-minute game limit | one game measured: 38 seconds, against 18 to 19 on x86 |
-| One Forge game of the solo test, to a win | 12 to 15 seconds on 4 cores, 15 to 21 seconds on 2 | not measured yet |
+| Solo test without Forge, 300 games | x86 Xeon 2.8 GHz, 4 cores | 1.4 to 1.5 seconds per deck (5 recent precons) |
+| One Forge game against three precons | x86 Xeon 2.8 GHz, 2 cores | 29 seconds to 2 minutes 43 seconds (10 games, four precons) |
+| The same seeded Forge game, alone | x86 Xeon 2.1 GHz, 4 cores | 18 to 19 seconds |
+| The same seeded Forge game, alone | Raspberry Pi 5, 8 GB, running the rest of the stack | 38 seconds |
+| One Forge game of the solo test, to a win, including Java's start | x86 Xeon 2.8 GHz | 15 to 19 seconds on 4 cores, 19 to 26 on 2 |
 
-The x86 figures come from a 4-core Xeon container (2.8 GHz), the Pi figure from a Pi 5 with 8 GB
-running the rest of the stack. A Raspberry Pi 4 has not been timed. The solo-test games were
-Forge's own starter Commander decks, which won on their fifth or sixth turn. Times vary a lot with
-the decks: a deck that wins fast finishes fast.
+A Raspberry Pi 4 has not been timed, and the solo test has not been timed on any Pi. The solo-test
+games were one of Forge's own Commander precons, which won on its fifth or sixth turn. Times vary
+a lot with the decks: a deck that wins fast finishes fast.
 
 ## Making it faster
 

@@ -46,9 +46,9 @@ This patch:
   enter-the-battlefield drain read from text) and the reading of real cards'
   oracle text. test_unmodeled_other_patterns is updated to the new pin.
 
-Measured with the same oracle file: 16.1% of Commander-legal cards fully
+Measured with the same oracle file: 16.0% of Commander-legal cards fully
 modeled (35.0% weighted by EDHREC rank), and on Forge's 85 Commander
-precons from 2023 to 2026, 51.4% of each deck's cards played with their
+precons from 2023 to 2026, 51.6% of each deck's cards played with their
 effect on average, up from 34.5%.
 
 Upstream: Kautiontape/mystic-forge at dd82cd1 (main, 2026-10-03) has no

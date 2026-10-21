@@ -526,7 +526,7 @@ licence, from upstream). It's built from upstream commit
 rules, precon and goldfish tools, and the gateway relays an allowlisted set
 of them to signed-in users.
 
-Upstream code is unchanged apart from seven small patches in
+Upstream code is unchanged apart from eight patches in
 `docker/mystic-forge/patches/`, which is where the `-mag5` in the image tag
 `1.3.2-mag5` comes from:
 
@@ -571,6 +571,14 @@ Upstream code is unchanged apart from seven small patches in
   card were left out ("2 Foo"), and `scryfall_named` without a set shows the
   same printing as the other lookups (the newest out on paper) and says which
   one it is.
+- `0009-goldfish-rules-text-templates.patch`: the goldfish simulator reads
+  common rules text (drawing, ramp, tokens, damage and drain, +1/+1 counters,
+  anthems, cost reducers, extra combats and more), so far more cards play
+  with their effect. Removal, board wipes and counterspells are counted as
+  set aside instead of keeping a card from being cast. A card whose text is
+  only partly read plays the read parts, unless an unread part limits them
+  ("only once each turn", for example); `goldfish_annotate` lists what was
+  read and what was not.
 
 What to know about it:
 
