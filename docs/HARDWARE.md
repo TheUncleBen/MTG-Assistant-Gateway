@@ -3,7 +3,8 @@
 The gateway runs on any 64-bit ARM or x86 machine with Docker. Forge games have been timed on a
 Raspberry Pi 5; a Pi 4 has not been timed.
 Forge, the game engine, is the only part that needs real power. It is on in the example files;
-turn it off on a machine below the Forge minimum ([DEPLOY.md](DEPLOY.md#forge-simulations-on-by-default)).
+turn it off on a machine below the "With Forge on" minimum in the table below
+([how](DEPLOY.md#forge-simulations-on-by-default)).
 
 ## Minimum and recommended
 

@@ -112,8 +112,8 @@ FORGE_NO_COMMANDER = (
 # The Forge solo test (forge.start_solo_run): with every report that simulates while Forge is set up,
 # the deck also plays alone on Forge, by the full rules, beside the solo test's quick estimate. It
 # is kept apart from the games against precons (forge_solo_json), takes no place in the member's
-# queue of those, starts after them, and each member has one unfinished at a time (two for a
-# comparison's two decks). Each round of games gets an equal part of a time budget of play,
+# queue of those, starts after them, and each member has one unfinished at a time (two for
+# reports that share opponents). Each round of games gets an equal part of a time budget of play,
 # never less than SOLO_MIN_GAME_SECONDS nor more than the Forge service's own limit; Java's start
 # and a wait in Forge's queue come on top. A report is finished once both Forge parts are.
 SOLO_BUDGET_SECONDS = 270
@@ -481,12 +481,15 @@ class ReportService:
             self._cancel_forge(section)
         self.db.audit("report_created", sub=sub, detail={"report_id": rid, "deck_id": deck.id})
         # Shielded: a request cancelled now (its client gone) still saves both Forge parts, so no
-        # engine job is left that nobody would cancel.
-        await asyncio.shield(
+        # engine job is left that nobody would cancel. The task is held until it ends.
+        task = asyncio.get_running_loop().create_task(
             self._start_forge_parts(
                 sub, rid, deck, stats, mode, games, options, forge, plays_solo, shared, other, pair_hold
             )
         )
+        self._forge_cancels.add(task)
+        task.add_done_callback(self._forge_cancels.discard)
+        await asyncio.shield(task)
         return self.get(sub, rid)
 
     async def _start_forge_parts(
@@ -505,13 +508,16 @@ class ReportService:
         pair_hold: PairHold | None,
     ) -> None:
         """Start report rid's games against precons (or say why there are none), then its Forge
-        solo test, which plays after them on the engine."""
-        await self._start_precon_part(
-            sub, rid, deck, stats, mode, games, options, forge, shared, other, pair_hold
-        )
-        if plays_solo:
-            partner = shared.get("report_id") if shared else None
-            await self._start_solo(sub, rid, deck_to_text(deck), deck.name, options.get("seed"), partner)
+        solo test, sent after them so it never holds them up; the solo test starts even when the
+        first part fails, so its report is not left waiting for it."""
+        try:
+            await self._start_precon_part(
+                sub, rid, deck, stats, mode, games, options, forge, shared, other, pair_hold
+            )
+        finally:
+            if plays_solo:
+                partner = shared.get("report_id") if shared else None
+                await self._start_solo(sub, rid, deck_to_text(deck), deck.name, options.get("seed"), partner)
 
     async def _start_precon_part(
         self,
@@ -1110,6 +1116,12 @@ class ReportService:
         self, sub: str, rid: str, text: str, name: str, seed: Any, partner: Any
     ) -> None:
         assert self.forge is not None
+        row = self.db._one("SELECT forge_solo_json FROM reports WHERE id = ?", (rid,))
+        if row is None:
+            return  # the report was deleted meanwhile
+        marked = row["forge_solo_json"]
+        if marked is not None and json.loads(marked).get("state") != "queued":
+            return  # given up (SOLO_START_SECONDS) or started already
         section: dict[str, Any]
         if self._solo_running(sub, rid, partner):
             section = {"state": "skipped", "error": SOLO_ONE_AT_A_TIME}
@@ -1118,10 +1130,6 @@ class ReportService:
                 client, engine, how_many = await self.forge.pick()
                 health = await client.health()
                 if not health.get("solo"):  # a Forge image from before the solo test
-                    logger.warning(
-                        "Forge solo test skipped: the Forge image is older than it needs; update "
-                        "FORGE_TAG to the version the stack file names"
-                    )
                     section = {"state": "skipped", "error": SOLO_TOO_OLD}
                 else:
                     places = health.get("max_parallel")
@@ -1150,7 +1158,14 @@ class ReportService:
             except Exception:  # an unexpected reply must not turn a stored report into a tool error
                 logger.exception("starting a Forge solo test failed for %s", rid)
                 section = {"state": "failed", "error": "Forge gave an unexpected answer."}
-        if not self._save_solo(rid, section):  # the report was deleted while it started
+        if section.get("error") == SOLO_TOO_OLD:
+            logger.warning(
+                "Forge solo test skipped: the Forge image is older than it needs; update "
+                "FORGE_TAG to the version the stack file names"
+            )
+        # only over the mark read above: a report deleted, or a mark given up, while it started
+        # keeps that, and the new job is stopped
+        if not self._save_solo(rid, section, unless_changed_from=marked):
             self._cancel_forge(section)
             return
         self._ensure_forge_refresher()

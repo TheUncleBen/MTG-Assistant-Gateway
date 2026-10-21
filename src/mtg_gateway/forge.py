@@ -707,7 +707,7 @@ SOLO_UNTIL_TURN = 10
 SOLO_MAX_TURN = 30
 SOLO_OPPONENTS = {"Commander": 3, "Constructed": 1}
 # Shown to members: the advice for whoever runs the gateway goes to its log (reports._start_solo).
-SOLO_TOO_OLD = "This gateway's Forge is older than the Forge solo test needs, so this report has none."
+SOLO_TOO_OLD = "This gateway's Forge is too old for the Forge solo test, so this report has none."
 
 
 def _median(values: list[int]) -> float | int | None:

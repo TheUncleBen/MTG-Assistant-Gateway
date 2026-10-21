@@ -31,7 +31,7 @@ person has said yes to the exact change.
   - The **operator** deploys it and decides who gets in.
   - **Users** connect their assistant and link their Archidekt account.
 - **What it runs on:** three Docker containers (the gateway, Mystic Forge
-  and ntfy) and a fourth for Forge, on by default, all for amd64 or arm64 (so a
+  and ntfy) and a fourth for Forge (on by default, can be turned off), all for amd64 or arm64 (so a
   Raspberry Pi is fine), behind any HTTPS reverse proxy, with any OpenID Connect
   identity provider handling sign-in. What hardware it needs, and how long a test
   takes: [docs/HARDWARE.md](docs/HARDWARE.md).

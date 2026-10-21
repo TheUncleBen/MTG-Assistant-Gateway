@@ -196,8 +196,9 @@ reach past the stack, so if your old version is older than the one named, also:
   `./make-secrets.sh` does.
 - **0.7.38 or older:** Forge is on in the example variables files. If you take the new example
   file and want Forge off, set both `FORGE_REPLICAS=0` and an empty `MTG_FORGE_URL=` (Compose: put
-  a `#` in front of `COMPOSE_PROFILES=forge` and set an empty `MTG_FORGE_URL=`); one without the
-  other leaves the gateway asking a Forge that isn't there. Everyone on a stack: `FORGE_NODE` now
+  a `#` in front of `COMPOSE_PROFILES=forge` and set an empty `MTG_FORGE_URL=`). Turning Forge off
+  without emptying `MTG_FORGE_URL` leaves the gateway asking a Forge that isn't there; emptying it
+  alone leaves Forge running unused. Everyone on a stack: `FORGE_NODE` now
   needs a node name, even with Forge off.
 
 Every version's full notes are in the [CHANGELOG](../CHANGELOG.md), and the older update steps

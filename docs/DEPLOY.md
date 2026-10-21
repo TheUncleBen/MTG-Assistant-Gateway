@@ -642,13 +642,15 @@ have the solo test's estimate and no Forge games.
 - **The Forge solo test:** with every report that simulates, Forge also plays the deck alone
   against opponents who do nothing (three for a Commander deck, one for a 60-card deck),
   `MTG_FORGE_GAMES` games counted up to turn 10, and the report shows how often and on which turn
-  it won, beside the solo test's estimate. It plays after the report's games against precons.
+  it won, beside the solo test's estimate. It starts after the report's games against precons,
+  so it never holds them up.
   Forge prints a game only once it has ended, so each game plays until the deck wins or its time
   limit stops it; the gateway gives each round of games an equal part of about four and a half
-  minutes of play (at least 30 seconds, at most `FORGE_GAME_SECONDS`). Java's start for each game
-  and any wait in Forge's queue come on top, so with many games and few places it takes longer.
+  minutes of play (at least 30 seconds, at most `FORGE_GAME_SECONDS`). Java starting up for each
+  game and any wait in Forge's queue come on top, and each game gets at least 30 seconds, so with
+  many games and few places it takes longer.
   A game stopped before turn 10 or a win is left out of the numbers, and the report says how
-  many. One per member runs at a time (two for a comparison's two decks).
+  many. One per member runs at a time (two for reports that share opponents).
 - **The image tag:** the stack files name the Forge image by `FORGE_TAG` (default `2.0.15-mag6`).
   GitHub builds and publishes a new tag the first time `main` carries it (the Forge image
   workflow, after its test games pass on arm64 and amd64), so pulling a new tag fails until that
