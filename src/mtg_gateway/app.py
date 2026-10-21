@@ -110,6 +110,7 @@ from .sync import DeckSync
 from .theme import NoSniffMiddleware, ThemeMiddleware, display_name, render
 from .timing import TimingMiddleware
 from .update_check import UpdateChecker
+from .upgrade_backup import folder_for
 from .watchlist import add_watchlist_routes, add_watchlist_tools
 
 DeckView = Literal["text", "summary", "cards", "export", "full"]
@@ -945,7 +946,7 @@ def create_app(
     mf_proxy: MysticForgeProxy | None = None,
     cimd: CimdFetcher | None = None,
 ) -> Starlette:
-    db = db or Database(settings.db_path)
+    db = db or Database(settings.db_path, upgrade_dir=folder_for(settings.backup_dir, settings.db_path))
     # Values saved on the admin Settings page, for every key the deployment left blank (0.7.29).
     settings = with_stored(settings, db)
     theme.PUBLIC_URL = settings.public_url.rstrip("/")  # link previews point at the site's icon

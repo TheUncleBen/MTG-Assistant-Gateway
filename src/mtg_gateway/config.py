@@ -418,6 +418,10 @@ def load_settings() -> Settings:
     except ConfigError as exc:
         sweep_problem = str(exc)
         sweep_missing = isinstance(exc.__cause__, FileNotFoundError)
+    # The stack files always attach this secret, so whoever doesn't use the clean-up puts the word
+    # "off" in it (a Docker secret can't be empty).
+    if sweep_token is not None and sweep_token.lower() == "off":
+        sweep_token = None
     # Optional, like the sweep token: the ntfy access token (notify.py). Never logged.
     ntfy_token = _read_secret("MTG_NTFY_TOKEN_FILE", required=False)
     if len(session_secret) < 32:

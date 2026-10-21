@@ -62,12 +62,17 @@ def main(argv: list[str] | None = None) -> int:
     if command == "backup":
         from .backup import export_now
         from .db import Database
+        from .upgrade_backup import DatabaseUpgradeError, folder_for
 
         if settings.backup_dir is None:
             print("MTG_BACKUP_DIR is not set", file=sys.stderr)
             return 2
         settings.backup_dir.mkdir(parents=True, exist_ok=True)
-        db = Database(settings.db_path)
+        try:
+            db = Database(settings.db_path, upgrade_dir=folder_for(settings.backup_dir, settings.db_path))
+        except DatabaseUpgradeError as exc:
+            print(f"database error: {exc}", file=sys.stderr)
+            return 3
         try:
             dest = export_now(db, settings.backup_dir, settings.backup_keep_days, settings.backup_copy_dir)
         finally:
@@ -78,9 +83,13 @@ def main(argv: list[str] | None = None) -> int:
     import uvicorn
 
     from .app import create_app
+    from .upgrade_backup import DatabaseUpgradeError
 
     try:
         app = create_app(settings)
+    except DatabaseUpgradeError as exc:
+        print(f"database error: {exc}", file=sys.stderr)
+        return 3
     except sqlite3.DatabaseError as exc:
         print(
             f"database error: {settings.db_path} could not be opened ({exc}). If the file is damaged, "

@@ -415,6 +415,14 @@ def test_the_saved_scans_menu_opens_renames_and_deletes(server: Server, width: i
         # the row's own delete button is a red outline, not solid
         db = rows.first.locator(".btn-outline-danger")
         assert db.get_attribute("aria-label") == "Delete Trade binder"
+        # once the list shrinks, the button can land under the pointer: move it off and let the
+        # hover's fade end before reading the colour
+        page.mouse.move(0, 0)
+        page.wait_for_function(
+            "e => { const c = getComputedStyle(e).backgroundColor; return c === 'transparent'"
+            " || /,\\s*0\\)$/.test(c) }",
+            arg=db.element_handle(),
+        )
         assert _clear(_style(db, "backgroundColor"))
         # Open loads the scan onto the list tab
         rows.first.locator(".kebab").click()

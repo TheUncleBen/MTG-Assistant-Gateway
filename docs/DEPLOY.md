@@ -178,21 +178,17 @@ In the Authentik admin UI:
 
 ## 4. Docker secrets (once)
 
-The stack expects four Swarm secrets with exactly these names:
+The stack expects five Swarm secrets with exactly these names. Secrets you already made for an
+earlier version stay as they are: when you update, this step only adds a secret that is missing
+(the commands in Option B skip any secret that already exists).
 
 | Secret name | What goes in it |
 | --- | --- |
-| `mtg_fernet_key` | A random encryption key for linked Archidekt sessions and the identity provider's tokens the gateway keeps. **Keep a copy** (password manager or similar). Lose it and every linked account has to be relinked (and everyone signs in once more). Backups hold no Archidekt sessions or sign-in tokens, so they don't need it |
+| `mtg_fernet_key` | A random encryption key for linked Archidekt sessions and the identity provider's tokens the gateway keeps. **Keep a copy** (password manager or similar). Lose it and every linked account has to be relinked (and everyone signs in once more). The nightly backups hold no Archidekt sessions or sign-in tokens; the copy the gateway saves before an upgrade does, still encrypted with this key |
 | `mtg_session_secret` | A random string of 32+ characters that signs the browser sign-in cookie. No need to keep a copy |
 | `mtg_oidc_client_secret` | The Client Secret from the Authentik provider in step 3 |
 | `mtg_ntfy_token` | The token the gateway uses with the stack's own notification server: `tk_` and 29 random lowercase letters and digits. You don't need to keep a copy. |
-
-A fifth secret is optional: `mtg_authentik_api_token`, an Authentik API
-token that may view only the gateway's one or two groups (and its own tokens, see IDP-AUTHENTIK.md §12), turns on the hourly clean-up of removed
-members' stored Archidekt sessions. Its setup, and the three stack lines to
-uncomment, are in
-[IDP-AUTHENTIK.md](IDP-AUTHENTIK.md#12-optional-removed-member-clean-up).
-Without it the gateway works the same, with the clean-up off.
+| `mtg_authentik_api_token` | The word `off`, unless you set up the optional hourly clean-up of removed members' stored Archidekt sessions: then the Authentik API token from [IDP-AUTHENTIK.md](IDP-AUTHENTIK.md#12-optional-removed-member-clean-up), which says how to swap `off` for the token later |
 
 Make the random values on your own machine, right when you need them. They
 only ever go into the secret, never into the stack's environment variables,
@@ -215,36 +211,44 @@ ways below.
    printf 'tk_%s\n' "$(LC_ALL=C tr -dc a-z0-9 </dev/urandom | head -c 29)"
    ```
 
-2. In Portainer, pick your Swarm environment, then **Secrets → Add secret**.
+2. In Portainer, pick your Swarm environment, then **Secrets**, and look at the list. For each
+   secret below that it doesn't show yet, click **Add secret** (and skip the value for any secret
+   you already have).
 3. Name `mtg_fernet_key`, paste the first value into **Secret**, leave
    **Encode secret** on (the default), and click **Create the secret**.
    Save that value in your password manager now.
 4. Do the same for `mtg_session_secret` (the second value),
-   `mtg_ntfy_token` (the third) and `mtg_oidc_client_secret` (paste the
-   Client Secret straight from Authentik).
+   `mtg_ntfy_token` (the third), `mtg_oidc_client_secret` (paste the
+   Client Secret straight from Authentik) and `mtg_authentik_api_token` (type the word `off`).
 5. Clear your terminal (`clear`) so the values aren't left on screen.
 
 ### Option B: on a Swarm manager
 
-This creates the same four secrets from the command line. Nothing is written to disk or your
-shell history:
+This creates the same five secrets from the command line, each only if it doesn't exist yet, so
+it is safe to run again. Nothing is written to disk or your shell history:
 
 ```bash
+# Runs the rest of the line only when the secret named first doesn't exist yet.
+missing() { if docker secret inspect "$1" >/dev/null 2>&1; then echo "$1 already exists"; false; fi; }
+
 # 1. mtg_fernet_key. Prints the key once so you can save a copy, then creates the secret.
-openssl rand -base64 32 | tr '+/' '-_' | tee /dev/stderr | docker secret create mtg_fernet_key -
+missing mtg_fernet_key && openssl rand -base64 32 | tr '+/' '-_' | tee /dev/stderr | docker secret create mtg_fernet_key -
 
 # 2. mtg_session_secret. No need to keep a copy.
-openssl rand -base64 48 | docker secret create mtg_session_secret -
+missing mtg_session_secret && openssl rand -base64 48 | docker secret create mtg_session_secret -
 
 # 3. mtg_oidc_client_secret. Paste the Authentik Client Secret at the (silent) prompt and press Enter.
-read -rs S && printf %s "$S" | docker secret create mtg_oidc_client_secret - ; unset S
+missing mtg_oidc_client_secret && read -rs S && printf %s "$S" | docker secret create mtg_oidc_client_secret - ; unset S
 
 # 4. mtg_ntfy_token. You don't need to keep a copy.
-printf 'tk_%s' "$(LC_ALL=C tr -dc a-z0-9 </dev/urandom | head -c 29)" | docker secret create mtg_ntfy_token -
+missing mtg_ntfy_token && printf 'tk_%s' "$(LC_ALL=C tr -dc a-z0-9 </dev/urandom | head -c 29)" | docker secret create mtg_ntfy_token -
+
+# 5. mtg_authentik_api_token: off, or see IDP-AUTHENTIK.md to put the token in.
+missing mtg_authentik_api_token && printf off | docker secret create mtg_authentik_api_token -
 ```
 
 Either way, Portainer's **Secrets** page (or `docker secret ls`) should now
-list all four.
+list all five.
 
 Swarm secrets can't be edited. To change one later, remove the stack (or
 take the secret out of it), delete the secret, create it again with the
@@ -332,7 +336,7 @@ while IFS= read -r line; do case "$line" in ''|\#*) ;; *) export "$line" ;; esac
 docker stack deploy -c deploy/portainer-stack.yml mtg
 ```
 
-To update later, change `MTG_TAG` in the file and run the last two lines
+To update later, follow [UPGRADING.md](UPGRADING.md), which ends with the last two lines
 again.
 
 The gateway is one Python process. In the end-to-end test (amd64, idle after
@@ -783,12 +787,12 @@ value. Leave it out to manage it on the page.
 | `MTG_REQUIRED_GROUP` | yes, *stack* | | Group a user must be in. The gateway refuses to start with it empty unless `MTG_ALLOW_ANY_IDP_USER` is `true` |
 | `MTG_ALLOW_ANY_IDP_USER` | no, *stack* | `false` | `true` lets an empty `MTG_REQUIRED_GROUP` through, so anyone your identity provider signs in gets in. Only for an identity provider that already admits nobody else |
 | `MTG_ADMIN_GROUP` | no, *stack* | empty (no admin page) | Identity-provider group whose members get the `/admin` pages and `/api/v1/admin` (users, activity, metrics; disable, enable, revoke, unlink, delete data). Checked live like `MTG_REQUIRED_GROUP`. Members of this group may sign in even when they aren't in `MTG_REQUIRED_GROUP` (since 0.6.6). Unset or empty, the admin routes answer 404 for everyone. Details in [OPERATIONS.md](OPERATIONS.md#the-admin-page) |
-| `MTG_AUTHENTIK_API_TOKEN_FILE` | no, *stack* | empty (off) | Authentik only. File holding an Authentik API token that may view only the gateway's one or two groups (and its own tokens, see IDP-AUTHENTIK.md §12) (`/run/secrets/mtg_authentik_api_token`, an optional secret). With it, once an hour the gateway asks Authentik who is in `MTG_REQUIRED_GROUP` and `MTG_ADMIN_GROUP` and deletes the stored Archidekt session of every linked member who is in neither or is deactivated. An answer that can't be trusted deletes nothing. A missing or unreadable file leaves the clean-up off with one warning at start. Setup: [IDP-AUTHENTIK.md](IDP-AUTHENTIK.md#12-optional-removed-member-clean-up) |
+| `MTG_AUTHENTIK_API_TOKEN_FILE` | no, *stack* | `/run/secrets/mtg_authentik_api_token` in the stack and the Compose file (empty in the image, which means off) | Authentik only. File holding an Authentik API token that may view only the gateway's one or two groups (and its own tokens, see IDP-AUTHENTIK.md §12): the `mtg_authentik_api_token` secret, where the word `off` keeps the clean-up off. With a token, once an hour the gateway asks Authentik who is in `MTG_REQUIRED_GROUP` and `MTG_ADMIN_GROUP` and deletes the stored Archidekt session of every linked member who is in neither or is deactivated. An answer that can't be trusted deletes nothing. A missing or unreadable file leaves the clean-up off with one warning at start. Setup: [IDP-AUTHENTIK.md](IDP-AUTHENTIK.md#12-optional-removed-member-clean-up) |
 | `MTG_AUTHENTIK_API_URL` | no, *stack* | the scheme and host of `MTG_OIDC_ISSUER` | Where the clean-up reaches Authentik's API. https only |
 | `MTG_OIDC_GROUPS_CLAIM` | no, *stack* | `groups` | Dot-path to the group list in the ID token (or userinfo) claims. Authentik: `groups`; Keycloak: `realm_access.roles`; Zitadel: `urn:zitadel:iam:org:project:roles` (a dict whose keys are the role names also works; a key whose value is empty or `false` does not count). The whole value is tried as one claim name first, so Auth0-style `https://example.com/groups` works too. Names are compared exactly, with no trimming. A missing or differently shaped claim means no groups, so `MTG_REQUIRED_GROUP` refuses the sign-in |
 | `MTG_OIDC_TOKEN_AUTH_METHOD` | no, *stack* | `client_secret_post` | How the gateway sends its client secret to the token endpoint: `client_secret_post` (in the form body) or `client_secret_basic` (HTTP Basic header). Match what the client is configured for in the identity provider |
 | `MTG_DATA_DIR` | yes with Swarm, *stack* | `/data` | Where the SQLite database lives. In the stack, the variable is the folder on the host, mounted at `/data` |
-| `MTG_BACKUP_DIR` | yes with Swarm, *stack* | `/backups` in the image | Where nightly backups go. In the stack and the Compose file, the folder on the host, mounted at `/backups`; the gateway itself always uses `/backups` there |
+| `MTG_BACKUP_DIR` | yes with Swarm, *stack* | `/backups` in the image | Where nightly backups go, and the copies saved before database upgrades (in its `before-upgrade` folder). In the stack and the Compose file, the folder on the host, mounted at `/backups`; the gateway itself always uses `/backups` there |
 | `MTG_BACKUP_HOUR_UTC` | no, *stack* | `3` | Hour (UTC) of the nightly backup, 0 to 23 |
 | `MTG_BACKUP_KEEP_DAYS` | no, *stack* | `14` | How many days of backups to keep, 1 to 3650 |
 | `MTG_BACKUP_COPY_DIR` | no, *stack* | empty (no second copy) | A host folder (another disk, or storage every node mounts at the same path) that every backup is also copied to and pruned the same way. It must already exist on `MTG_NODE`. The stack mounts it at `/backup-copy`; left empty it mounts `/dev/null` there and nothing is copied. A failed copy is logged and shown on the admin page. See [OPERATIONS.md](OPERATIONS.md#backups) |

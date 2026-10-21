@@ -7,6 +7,50 @@ Notable changes for people who run or use the gateway. The format follows
 with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 (`release/1.2.3`); `latest` is always the newest.
 
+## [0.7.37] - unreleased
+
+Updating is now a fresh install on top of your data: take the newest stack file and example
+variables file, put your settings in, deploy. There is no backup to take first: before a new
+version upgrades the database, the gateway saves a copy of it, and going back to an older
+version puts that copy back by itself.
+
+### Upgrade notes
+- Update the new way ([docs/UPGRADING.md](docs/UPGRADING.md)): the newest
+  `deploy/portainer-stack.yml` (or `docker-compose.yml`) unchanged, the newest example variables
+  file with your values in it.
+- **One new Docker secret, `mtg_authentik_api_token`, if you don't have it yet.** The stack file
+  and `docker-compose.yml` now always attach it, so you no longer remove the `# ` from its lines.
+  If you don't use the removed-member clean-up, this secret holds the word `off`: on Swarm,
+  command 5 under Option B in [docs/DEPLOY.md](docs/DEPLOY.md#4-docker-secrets-once) step 4 makes
+  it (the commands there now skip secrets you already have), or add it under **Secrets** in
+  Portainer; with Compose, run the new `make-secrets.sh` again. If you
+  already use the clean-up, your secret stays as it is.
+- No database change, so this update saves no before-upgrade copy, and going back to 0.7.36 needs
+  only the `MTG_TAG` change (with 0.7.36's stack file, whose Authentik lines are commented out).
+- The Android app doesn't change.
+
+### Added
+- **A copy before every database upgrade.** When a new version has to upgrade the database, it
+  first saves a full copy in `before-upgrade` inside the backup folder, checks it, and keeps the
+  newest 3. Without a good copy (a full disk, say) it doesn't upgrade or start, and its log says
+  why. The copy keeps members' Archidekt links, still encrypted, so going back needs nobody to
+  relink; it is never copied to the second backup folder.
+- **Going back by itself.** From this version on, an older version started on a database a newer
+  one upgraded puts back its before-upgrade copy, after saving the newer database beside it so
+  nothing is lost, and everyone signs in once more. The admin page says when this happened.
+- The admin page's System card names the newest before-upgrade copy and where it is.
+- Going back keeps what must not come undone: members disabled, Archidekt sessions deleted and
+  members' "Delete my data" since the upgrade stay so.
+
+### Changed
+- A database upgrade happens whole or not at all: one that fails or is cut off leaves the
+  database as it was, and the older version still starts on it. A start that keeps failing saves
+  its before-upgrade copy once, not on every try.
+- The `mtg_authentik_api_token` secret holding the word `off` turns the removed-member clean-up
+  off with no warning.
+- docs/UPGRADING.md, docs/DEPLOY.md and docs/DEPLOY-COMPOSE.md describe an update as the install
+  steps again; the extra steps 0.7.29 to 0.7.33 needed are kept at the end of UPGRADING.md.
+
 ## [0.7.36] - unreleased
 
 Decks, folders and cards get a menu on every page (right-click, press and hold, or the ⋮
