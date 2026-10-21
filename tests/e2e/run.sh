@@ -5,7 +5,7 @@
 #   1. overlay network           docker network create --driver overlay --attachable mtg-gateway
 #   2. storage dirs for the pinned node
 #   3. Authentik: provider + application + group bindings + test users (authentik_setup.py)
-#   4. the four Docker secrets, with the exact commands from DEPLOY.md step 4
+#   4. the five Docker secrets, with the exact commands from DEPLOY.md step 4
 #   6. the stack, deployed from deploy/portainer-stack.yml with stack.env-style variables
 #   7. an nginx edge standing in for Nginx Proxy Manager (tests/e2e/stacks/edge-stack.yml)
 #   8. the DEPLOY.md verification curls, then the pytest suite in this directory
@@ -156,7 +156,9 @@ step_secrets() {
       | docker secret create mtg_oidc_client_secret - >/dev/null
   docker secret inspect mtg_ntfy_token >/dev/null 2>&1 || \
     printf 'tk_%s' "$(LC_ALL=C tr -dc a-z0-9 </dev/urandom | head -c 29)" | docker secret create mtg_ntfy_token - >/dev/null
-  docker secret ls --format '{{.Name}}' | grep -c '^mtg_' | grep -qx 4
+  docker secret inspect mtg_authentik_api_token >/dev/null 2>&1 || \
+    printf off | docker secret create mtg_authentik_api_token - >/dev/null
+  docker secret ls --format '{{.Name}}' | grep -c '^mtg_' | grep -qx 5
 }
 
 step_stack_up() {
@@ -232,7 +234,7 @@ cmd_test() {
 cmd_down() {
   docker stack rm mtg e2eedge 2>/dev/null || true
   sleep 5
-  for s in mtg_fernet_key mtg_session_secret mtg_oidc_client_secret mtg_ntfy_token; do docker secret rm "$s" 2>/dev/null || true; done
+  for s in mtg_fernet_key mtg_session_secret mtg_oidc_client_secret mtg_ntfy_token mtg_authentik_api_token; do docker secret rm "$s" 2>/dev/null || true; done
   for _ in $(seq 1 20); do docker network rm "$MTG_NETWORK_NAME" >/dev/null 2>&1 && break; sleep 3; done
   # The gateway writes data/ and backups/ as uid 1000; on a CI runner that is not us, so
   # fall back to removing them from a root container when a plain rm is refused.
