@@ -37,14 +37,30 @@ async def test_admins_see_who_added_each_model_and_can_remove_any(gw: Harness) -
         gw.db.put_card_model("sol ring", "Sol Ring", MODEL, "admin-1", 50)  # the admin's own
         r = await b.http.get("/admin/models", headers=NAVIGATE)
         text = html.unescape(r.text)
-        assert "3 card models kept." in text and "added by bram" in text
-        assert "Each member keeps their own models" in text
-        assert "aria-label='Remove the model of Sol Ring added by bram'" in text
+        assert "All card models <span class='ui-sub'>3</span>" in text and "added by bram" in text
+        assert "Each model is used only in its owner's simulations. Only admins see who added it." in text
         assert "<b>Bad name" not in r.text and "&lt;b&gt;Bad name" in r.text
+        # Remove sits only in the row's menu: the ⋮ is a link to the page with the "are you sure"
+        # box open, whose last button is the solid red Remove model with the same screen reader name
+        assert "aria-label='Remove the model of Sol Ring added by bram'" not in text
+        href = "/admin/models?remove=sol+ring&by=user-9"
+        assert f"href='{href}' aria-label='Actions for Sol Ring' aria-haspopup='menu'" in text
+        box = html.unescape((await b.http.get(href, headers=NAVIGATE)).text)
+        assert "<div class='ui-box mtgbox' id='remove' role='dialog'" in box and "data-open>" in box
+        assert "Remove the model of “Sol Ring”?" in box
+        assert "“bram” added it. The simulator stops using it in bram's simulations. " in box
+        assert "This can't be undone." in box
+        assert (
+            "<button type='submit' class='danger' form='rmf' "
+            "aria-label='Remove the model of Sol Ring added by bram'>Remove model</button>" in box
+        )
         csrf = await b.csrf("/admin/models")
         one = {"csrf": csrf, "card_key": "sol ring", "added_by": "user-9"}
-        r = await b.http.post("/admin/models", data={**one, "page": "1"})
-        assert r.status_code == 303 and r.headers["location"] == "/admin/models?ok=model_removed&page=1"
+        r = await b.http.post("/admin/models", data={**one, "back": "/admin/models?member=user-9"})
+        assert r.status_code == 303
+        assert r.headers["location"] == "/admin/models?member=user-9&ok=model_removed"
+        # the old form's page number still lands on the right page
+        assert (await b.http.get("/admin/models?page=1", headers=NAVIGATE)).status_code == 200
         # only bram's model of the card goes; the admin's own stays
         left = [(m["card_key"], m["added_by"]) for m in gw.db.list_card_models()]
         assert left == [("<b>x", "user-9"), ("sol ring", "admin-1")]
@@ -107,15 +123,16 @@ async def test_a_page_past_the_end_shows_the_last_page(gw: Harness) -> None:
 
 
 async def test_an_account_without_a_name_is_named_in_words_on_the_list(gw: Harness) -> None:
-    """The list and the Remove button say "an account with no username or
-    email", as the Activity log does, not the account's raw id."""
+    """The list and the Remove box say "a member with no name", as the Activity page does, not
+    the account's raw id."""
     gw.db.upsert_user("user-8", email=None, name=None, preferred_username=None, groups=[])
     gw.db.put_card_model("opt", "Opt", MODEL, "user-8", 100)
     b = await admin_browser(gw)
     try:
         text = html.unescape((await b.http.get("/admin/models", headers=NAVIGATE)).text)
-        assert "added by an account with no username or email" in text
-        assert "aria-label='Remove the model of Opt added by an account with no username or email'" in text
+        assert "added by a member with no name" in text and "user-8</span>" not in text
+        box = html.unescape((await b.http.get("/admin/models?remove=opt&by=user-8", headers=NAVIGATE)).text)
+        assert "aria-label='Remove the model of Opt added by a member with no name'" in box
     finally:
         await b.aclose()
 

@@ -119,7 +119,7 @@ def _menu(page):
 
 
 def _box(page):
-    box = page.locator(".mtgbox[role=dialog]")
+    box = page.locator(".mtgbox[role=dialog]:not([hidden])")
     box.wait_for(timeout=3000)
     return box
 
@@ -734,10 +734,15 @@ def test_cards_have_their_menus_on_search_the_collection_and_the_editor(tmp_path
             assert page.locator(".ctxmenu").count() == 1  # the menu stays for more steps
             assert int(menu.locator(".mqty .n").inner_text()) == n + 1
             _pick(page, "Details…")
-            assert row.locator("details.rowmenu").get_attribute("open") is not None
-            # the row's own ⋮ is still its Details form
-            row.locator("details.rowmenu > summary").click()
-            assert row.locator("details.rowmenu").get_attribute("open") is None
+            page.wait_for_function("() => !document.getElementById('col-details').hidden")
+            assert page.locator("#col-details input[name=id]").input_value() == row.get_attribute("data-id")
+            page.keyboard.press("Escape")
+            page.wait_for_function("() => document.getElementById('col-details').hidden")
+            # the row's own ⋮ opens the same shared menu
+            row.locator(".kebab").click()
+            assert page.locator(".ctxmenu").count() == 1
+            page.keyboard.press("Escape")
+            page.wait_for_timeout(100)
             assert page.locator(".ctxmenu").count() == 0
             # the editor's rows
             page.goto(f"{server.base}/decks/42/edit", wait_until="networkidle")

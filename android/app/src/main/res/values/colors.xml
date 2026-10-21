@@ -24,4 +24,7 @@
     <color name="cam_text_muted">#a8a8a8</color>
     <!-- Pressed state of the orange buttons: a dark ripple over the fill. -->
     <color name="ripple_on_accent">#33000000</color>
+    <!-- Pressed state of the camera sheet's plain buttons and toggles: a light ripple over the dark sheet. -->
+    <color name="ripple_on_dark">#33ffffff</color>
+    <color name="cam_border_disabled">#5f5f5f</color>
 </resources>

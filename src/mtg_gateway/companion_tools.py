@@ -17,10 +17,12 @@ from .cardsearch_view import watched_names
 from .companion import DECK_CSP, DECK_ERR_MESSAGES, EDITOR_CSP, TEXT_PLAIN, _filename, _json_for_html
 from .decklist import DecklistError, parse_decklist
 from .deckpage import (
+    COMPARE_CSS,
     GOLDFISH_CSS,
     GOLDFISH_GUIDE_PREF,
     card_image,
     compare_page_html,
+    deck_title,
     goldfish_page_html,
     precon_by_label,
 )
@@ -41,10 +43,11 @@ from .reports_page import Query as ReportsQuery
 from .reports_page import in_chip as reports_in_chip
 from .reports_page import matches as reports_matches
 from .theme import (
-    esc as _esc,
+    card_size_control,
+    icon,
 )
 from .theme import (
-    icon,
+    esc as _esc,
 )
 from .views import auto_category, cards_by_category
 
@@ -224,6 +227,8 @@ def add_deck_tool_routes(
                 if state.live.get("archidekt_backups")
                 else ""
             )
+            # the card size every view with card pictures shares (R-175): the rows' thumbnails
+            + card_size_control(cls="field cardsize")
             + "<p class='status' role='status'></p></div>"
             "<details class='panel pendingbox'><summary>Pending changes <b class='n'>0</b></summary>"
             "<div class='pending'></div><p class='muted small limit'></p></details>"
@@ -251,7 +256,7 @@ def add_deck_tool_routes(
             f"data-suggest-rich data-suggest-qty{watch_attr} placeholder='Type a card name; Enter adds one, "
             "“3 sol ring” adds three' autocomplete='off' required>"
             "<div class='addprints' hidden aria-label='Printings' role='group'></div></div>"
-            f"<div class='field go'><button class='btn-primary'>{icon('plus')} Add</button>"
+            f"<div class='field go'><button>{icon('plus')} Add</button>"
             "<label class='foil'><input type='checkbox' name='foil'> Foil</label></div>"
             "<input type='hidden' id='addcat' name='addcat' value=''>"
             "<input type='hidden' id='addzone' name='addzone' value='main'>"
@@ -261,7 +266,7 @@ def add_deck_tool_routes(
             "(“2 Lightning Bolt”)</label>"
             "<textarea id='pastetext' name='text' rows='6' maxlength='20000' "
             "placeholder='4 Lightning Bolt&#10;1 Sol Ring'></textarea>"
-            f"<div class='actions'><button class='btn-primary'>{icon('plus')} Add these cards</button>"
+            f"<div class='actions'><button>{icon('plus')} Add these cards</button>"
             "<span class='pastestatus muted small' role='status'></span></div></form></details>"
             "<ul class='erows added'></ul></section>"
             "<div class='cats existing'></div>"
@@ -290,83 +295,12 @@ def add_deck_tool_routes(
 
     @server.custom_route("/decks/{deck_id}/export", methods=["GET"], include_in_schema=False)
     async def export_page(request: Request) -> Response:
-        from .decks import deck_to_archidekt_text, deck_to_text
-
+        """The old Export page's address (F3): the deck page with the Export box open."""
         deck_id = request.path_params["deck_id"]
         sub, sid = browser_session(state, request)
         if not sub:
             return login_redirect(f"/decks/{deck_id}/export")
-        try:
-            deck = await decks.get_any_deck(sub, deck_id)
-        except DeckError as exc:
-            if busy := busy_response(exc, request, page, sub=sub, sid=sid):
-                return busy
-            return page(
-                "Deck not found", f"<div class='card'><p>{_esc(exc)}</p></div>", sub=sub, sid=sid, status=404
-            )
-        main = deck_to_text(deck)
-        side = deck_to_text(deck, zone="side")
-        arch = deck_to_archidekt_text(deck)
-        did = _esc(deck.id)
-
-        def block(key: str, title: str, blurb: str, text: str, rows: int) -> str:
-            return (
-                f"<div class='exportblock'><div class='head'><h2>{title}</h2>"
-                f"<button type='button' class='btn small copybtn' data-copy='{key}' "
-                f"aria-describedby='{key}-status'>{icon('copy')} <span class='label'>Copy</span></button>"
-                f"<span class='sr-only' id='{key}-status' role='status' aria-live='polite'></span></div>"
-                f"<p class='muted small'>{blurb}</p>"
-                f"<textarea id='{key}' rows='{rows}' readonly aria-label='{title}'>{_esc(text)}"
-                "</textarea></div>"
-            )
-
-        body = (
-            f"<div class='card'><p><a href='/decks/{did}'>← {_esc(deck.name)}</a></p>"
-            "<p class='muted small'>Copy a list below or download a file. The file buttons save to your "
-            "Downloads folder in the app and in a browser.</p>"
-            + block(
-                "exp-arch",
-                "Archidekt import text",
-                "Every row with its printing, finish, categories and labels. Paste into Archidekt's "
-                "Import dialog, or into the gateway's New deck page, to get the same deck back "
-                "(sideboard and maybeboard included).",
-                arch,
-                min(40, arch.count(chr(10)) + 2),
-            )
-            + block(
-                "exp-main",
-                "Plain decklist",
-                "Mainboard only, commander first. For Moxfield, MTGO, Arena or your assistant.",
-                main,
-                min(40, main.count(chr(10)) + 2),
-            )
-            + (
-                block(
-                    "exp-side",
-                    "Sideboard and maybeboard",
-                    "Rows Archidekt keeps outside the deck.",
-                    side,
-                    min(12, side.count(chr(10)) + 2),
-                )
-                if side
-                else ""
-            )
-            + "<h2>Download</h2>"
-            "<p class='muted small'>Archidekt text, CSV and the gateway's JSON import back here (New deck "
-            "&rarr; from a file) or into Archidekt; Arena, MTGO and PDF are one-way.</p>"
-            "<div class='actions'>"
-            f"<a class='btn' href='/decks/{did}/export.archidekt.txt' download>Archidekt .txt</a>"
-            f"<a class='btn' href='/decks/{did}/export.txt' download>Plain .txt</a>"
-            f"<a class='btn' href='/decks/{did}/export.csv' download>.csv</a>"
-            f"<a class='btn' href='/decks/{did}/export.json' download>.json</a>"
-            f"<a class='btn' href='/decks/{did}/export.arena.txt' download>Arena .txt</a>"
-            f"<a class='btn' href='/decks/{did}/export.dek' download>MTGO .dek</a>"
-            f"<a class='btn' href='/decks/{did}/export.pdf' download>PDF</a>"
-            "</div></div>"
-        )
-        return page(
-            f"Export: {deck.name}", body, sub=sub, sid=sid, extra_scripts=("export.js",), current="/decks"
-        )
+        return await h.deck_page_response(request, sub, sid, deck_id, box="export")
 
     @server.custom_route("/decks/{deck_id}/export.archidekt.txt", methods=["GET"], include_in_schema=False)
     async def export_archidekt_txt(request: Request) -> Response:
@@ -651,19 +585,24 @@ def add_deck_tool_routes(
         try:
             deck = await decks.get_any_deck(sub, deck_id)
         except DeckError as exc:
-            if busy := busy_response(exc, request, page, sub=sub, sid=sid):
-                return busy
-            return page(
-                "Deck not found",
-                f"<div class='panel'><p>{_esc(exc)}</p>"
-                "<a class='btn' href='/decks'>Back to my decks</a></div>",
-                sub=sub,
-                sid=sid,
-                status=404 if exc.kind == "not_found" else 400,
-            )
+            return h.deck_problem(request, exc, sub=sub, sid=sid)
+        # The deck's newest Forge solo test, for the line under the intro (the Goldfish thread's
+        # ReportService.newest_forge_solo; nothing is shown while that method is not there).
+        newest = getattr(reports, "newest_forge_solo", None)
+        forge_solo = None
+        if callable(newest):
+            try:
+                forge_solo = newest(sub, str(deck.id))
+            except Exception:  # noqa: BLE001 - a report problem never breaks the goldfish
+                forge_solo = None
         return page(
-            f"Goldfish: {deck.name or deck.id}",
-            goldfish_page_html(deck, guide_hidden=state.db.get_pref(sub, GOLDFISH_GUIDE_PREF) == "hidden"),
+            f"Goldfish: {deck_title(deck)}",
+            goldfish_page_html(
+                deck,
+                guide_hidden=state.db.get_pref(sub, GOLDFISH_GUIDE_PREF) == "hidden",
+                forge_solo=forge_solo if isinstance(forge_solo, dict) else None,
+                csrf=_csrf(s, sid),
+            ),
             sub=sub,
             sid=sid,
             two_pane=True,
@@ -805,16 +744,7 @@ def add_deck_tool_routes(
         try:
             deck = await decks.get_any_deck(sub, deck_id)
         except DeckError as exc:
-            if busy := busy_response(exc, request, page, sub=sub, sid=sid):
-                return busy
-            return page(
-                "Deck not found",
-                f"<div class='panel'><p>{_esc(exc)}</p>"
-                "<a class='btn' href='/decks'>Back to my decks</a></div>",
-                sub=sub,
-                sid=sid,
-                status=404 if exc.kind == "not_found" else 400,
-            )
+            return h.deck_problem(request, exc, sub=sub, sid=sid)
         qp = request.query_params
         other_ref = (qp.get("with") or "").strip()[:2000]
         paste = (qp.get("paste") or "").strip()[:20000]
@@ -858,7 +788,7 @@ def add_deck_tool_routes(
             forge_on=reports.forge is not None,
         )
         return page(
-            f"Compare: {deck.name or deck.id}",
+            f"Compare: {deck_title(deck)}",
             body,
             sub=sub,
             sid=sid,
@@ -869,5 +799,6 @@ def add_deck_tool_routes(
             viewer_only=True,  # the card viewer only: none of deck.js's hooks are on this page
             heading=False,
             deck_css=True,
+            extra_css=COMPARE_CSS,
             extra_scripts=("compare.js",),
         )

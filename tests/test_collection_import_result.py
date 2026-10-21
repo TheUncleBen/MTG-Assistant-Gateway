@@ -152,7 +152,8 @@ async def test_import_through_the_page_reports_merges_and_misses_once(stack: Sta
             "(Sol Ring, Japanese added to English)." in page
         )
         assert "Not found, so not imported: line 4 (Foo Bar)." in page
-        assert "<details class='addfold' open>" in page
+        assert "aria-labelledby='col-add-title' data-open>" in page
+        assert "data-coltab='import' aria-selected='true'" in page
         # read once: the same address falls back to the plain notice
         again = (await b.http.get(where, headers=NAV)).text
         assert "Imported into your Archidekt collection." in again and "Foo Bar" not in again

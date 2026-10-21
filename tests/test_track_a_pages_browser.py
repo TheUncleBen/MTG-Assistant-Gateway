@@ -209,9 +209,8 @@ def test_proposals_page_strip_and_formatting_review_in_the_browser(server: Serve
                 page.screenshot(path=f"{shots}/a-confirm-desktop-dark.png")
             page.keyboard.press("Enter")
             page.wait_for_url("**/proposals/applied/**")
-            page.wait_for_function(
-                "() => !document.querySelector(\"meta[http-equiv='refresh']\")", timeout=20000
-            )
+            # the result card updates in place while applying (applied-live.js); done, the mark goes
+            page.wait_for_function("() => !document.querySelector('[data-applied-live]')", timeout=20000)
             body = page.locator("main").inner_text()
             assert "Opt" in body and "Arcane Signet" in body, body
             if shots:

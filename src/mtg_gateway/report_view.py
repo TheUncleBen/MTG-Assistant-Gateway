@@ -16,7 +16,7 @@ import json
 import re
 from typing import Any
 
-from . import card_models
+from . import card_models, ui
 from .theme import ICON_DATA_URL, icon, time_html, time_text
 from .theme import esc as _esc
 
@@ -713,12 +713,20 @@ def _share(count: int, deck_size: int | None) -> str:
     return f"{count} of {deck_size} cards ({100 * count / deck_size:.0f}% of the deck)"
 
 
-def _names(cards: list[dict[str, Any]]) -> str:
+def _names(cards: list[dict[str, Any]], *, menu: bool = False) -> str:
+    """The names as a list; ``menu`` (the signed-in page) makes each a card the shared card menu
+    opens on (static/menus.js: ``button.cardlink[data-card]``), never in the scriptless export."""
     items = []
     for c in cards:
         copies = f"{c['copies']}× " if isinstance(c.get("copies"), int) and c["copies"] > 1 else ""
         drawn = f" <i>drawn {_pct(c['drawn'])}</i>" if c.get("drawn") is not None else ""
-        items.append(f"<li>{copies}{_esc(front_face(c['name']))}{drawn}</li>")
+        name = front_face(c["name"])
+        shown = (
+            f"<button type='button' class='cardlink' data-card='{_esc(name)}'>{_esc(name)}</button>"
+            if menu
+            else _esc(name)
+        )
+        items.append(f"<li>{copies}{shown}{drawn}</li>")
     return f"<ul class='names'>{''.join(items)}</ul>"
 
 
@@ -857,15 +865,26 @@ def more_games_html(f: Any, csrf: str, report_id: str) -> str:
     )
 
 
-def _remove_form(u: dict[str, Any], csrf: str, report_id: str, button: str = "btn small") -> str:
-    """The adder's Remove button for a saved description (``button``: its classes)."""
+def model_box_id(prefix: str, name: str) -> str:
+    """The id of the confirm box for one saved description (letters, digits and dashes only)."""
+    slug = re.sub(r"[^a-z0-9]+", "-", front_face(name).casefold()).strip("-") or "card"
+    return f"{prefix}-{slug}"
+
+
+def _remove_form(
+    u: dict[str, Any], csrf: str, report_id: str, button: str = "btn small", box_prefix: str = ""
+) -> str:
+    """The adder's Remove button for a saved description (``button``: its classes). With
+    ``box_prefix`` the button opens the page's confirm box for this card first (ui.box; the box
+    holds the form that removes); without scripts it submits as before."""
     card = front_face(u["name"])
+    opener = f" {ui.box_open_attr(model_box_id(box_prefix, u['name']))}" if box_prefix else ""
     return (
         f"<form method='post' action='/history/reports/{_esc(report_id)}/models/remove' class='inline'>"
         f"<input type='hidden' name='csrf' value='{_esc(csrf)}'>"
         f"<input type='hidden' name='card' value='{_esc(u['name'])}'>"
-        f"<button type='submit' class='{button}' aria-label='Remove the saved description of {_esc(card)}'>"
-        f"{REMOVE_MODEL_LABEL}</button></form>"
+        f"<button type='submit' class='{button}'{opener} aria-label='Remove the saved description of "
+        f"{_esc(card)}'>{REMOVE_MODEL_LABEL}</button></form>"
     )
 
 
@@ -876,17 +895,19 @@ def kept_models_html(
     csrf: str = "",
     report_id: str = "",
     button: str = "btn small",
+    box_prefix: str = "",
 ) -> str:
     """The saved descriptions this run played. ``removable`` holds the cards (front face, case
     aside) whose saved description is now the member's own: those get a Remove button
-    (``button``: its classes; the signed-in page draws it as a red outline)."""
+    (``button``: its classes; the signed-in page draws it as a red outline that opens a confirm
+    box, ``box_prefix``)."""
     if not used:
         return ""
     items = "".join(
         f"<li>{_esc(front_face(u['name']))}"
         + (f" <i>{_esc(_kept_who(u))}</i>" if _kept_who(u) else "")
         + (
-            " " + _remove_form(u, csrf, report_id, button)
+            " " + _remove_form(u, csrf, report_id, button, box_prefix)
             if csrf and report_id and front_face(u["name"]).casefold() in removable
             else ""
         )
@@ -1003,11 +1024,14 @@ def solo_heading(g: dict[str, Any] | None) -> str:
     return f"{SOLO_NAME} (no opponents)"
 
 
-def honesty_groups(g: dict[str, Any], ask: str = "") -> list[tuple[str, str, str, str]]:
+def honesty_groups(
+    g: dict[str, Any], ask: str = "", *, menu: bool = False
+) -> list[tuple[str, str, str, str]]:
     """The groups of the "what the simulation could not model" panel, in order, as (key, heading,
     count words, body): the cards played without their effect (with ``ask`` under their names),
     those left out on purpose, those played but never mattered, and the model's shortcuts. The
-    export draws them as headed blocks (honesty_html), the signed-in page as folds."""
+    export draws them as headed blocks (honesty_html), the signed-in page as folds, with the card
+    menu on every name (``menu``)."""
     h = g.get("honesty") or {}
     size = g.get("deck_size")
     out: list[tuple[str, str, str, str]] = []
@@ -1023,7 +1047,7 @@ def honesty_groups(g: dict[str, Any], ask: str = "") -> list[tuple[str, str, str
                 f"<p>{UNMODELED_TEXT}"
                 + (f" {UNMODELED_SAVED_TEXT}" if g.get("models_saved") and card_models.SWITCHED_ON else "")
                 + "</p>"
-                + _names(unrec)
+                + _names(unrec, menu=menu)
                 + ask,
             )
         )
@@ -1031,7 +1055,8 @@ def honesty_groups(g: dict[str, Any], ask: str = "") -> list[tuple[str, str, str
     if oos:
         total = _copies([c for grp in oos for c in grp["cards"]])
         groups = "".join(
-            f"<h4>{_esc(grp['label'])} <small>{_copies(grp['cards'])}</small></h4>" + _names(grp["cards"])
+            f"<h4>{_esc(grp['label'])} <small>{_copies(grp['cards'])}</small></h4>"
+            + _names(grp["cards"], menu=menu)
             for grp in oos
         )
         out.append(
@@ -1052,7 +1077,7 @@ def honesty_groups(g: dict[str, Any], ask: str = "") -> list[tuple[str, str, str
                 _share(len(low), size),
                 "<p>These cards were understood, drawn and played, and nothing they do changed a solo test "
                 "game. A solo test game has no opponent and no interaction, so this says nothing about how "
-                "the card does at a real table.</p>" + _names([{"name": n} for n in low]),
+                "the card does at a real table.</p>" + _names([{"name": n} for n in low], menu=menu),
             )
         )
     approx = [a for a in h.get("approximations") or [] if a.get("cards")]
@@ -1093,13 +1118,14 @@ CONSTRUCTED_VALIDATION = (
 
 
 def _validation_badge(v: dict[str, Any] | None) -> str:
+    """The validation's label in the export: the live page's words, colours and icons."""
     if v is None:
         return ""
     return {
-        "passed": "<span class='badge ok'>passed</span>",
-        "issues": "<span class='badge warn'>issues found</span>",
-        "failed": "<span class='badge danger'>not run</span>",
-    }.get(v["verdict"] or "", "<span class='badge'>checked</span>")
+        "passed": ui.label("Passed", "green", "check"),
+        "issues": ui.label("Issues found", "orange", "triangle"),
+        "failed": ui.label("Not run", "red", "alert"),
+    }.get(v["verdict"] or "", ui.label("Checked", "grey", "check"))
 
 
 def validation_html(v: dict[str, Any] | None) -> str:
@@ -1242,7 +1268,7 @@ def forge_results_html(f: dict[str, Any]) -> str:
     for seat in seats:
         rate = seat.get("win_rate")
         width = max(0, min(100, round(100 * rate))) if _float(rate) is not None else 0
-        you = " <span class='badge'>your deck</span>" if seat is mine else ""
+        you = " " + ui.label("your deck", "grey", "user") if seat is mine else ""
         name = _esc(front_face(seat.get("deck")))
         mark = " class='mine'" if seat is mine else ""
         rows.append(
@@ -1426,14 +1452,14 @@ def forge_html(f: Any, *, live: bool = False, report_id: Any = None) -> str:
         return preflight_html(f)
     badge = {
         "done": "",
-        "queued": " <span class='badge'>queued</span>",
-        "running": " <span class='badge'>running</span>",
+        "queued": " " + ui.label("Queued", "orange", "clock"),
+        "running": " " + ui.label("Running", "orange", "spinner"),
     }
-    not_run = " <span class='badge danger'>not run</span>"
+    not_run = " " + ui.label("Not run", "red", "alert")
     stopped = forge_stopped_text(f)
     if stopped:
-        # every game played: the notice says the run did not end cleanly, and no badge
-        not_run = " <span class='badge warn'>stopped early</span>" if forge_stopped_early(f) else ""
+        # every game played: the notice says the run did not end cleanly, and no label
+        not_run = " " + ui.label("Stopped early", "orange", "triangle") if forge_stopped_early(f) else ""
     head = f"<h2>{FORGE_HEADING}{badge.get(state, not_run)}</h2>"
     parts = [
         head,
@@ -1463,9 +1489,9 @@ def forge_html(f: Any, *, live: bool = False, report_id: Any = None) -> str:
         parts.append("<ul class='sumlines'>" + "".join(f"<li>{_esc(ln)}</li>" for ln in lines) + "</ul>")
     if f.get("not_played"):
         parts.append(
-            "<div class='honesty'><h3>Cards Forge could not play</h3><p class='muted small'>These were "
-            "left out of the games, so the numbers above do not include them.</p><p>"
-            + ", ".join(_esc(n) for n in f["not_played"])
+            f"<div class='honesty'><h3>Cards Forge left out <small>{len(f['not_played'])}</small></h3>"
+            "<p class='muted small'>Not counted above.</p><p>"
+            + ", ".join(_esc(front_face(n)) for n in f["not_played"])
             + "</p></div>"
         )
     ahead = f.get("waiting_for") if isinstance(f.get("waiting_for"), dict) else None
@@ -1589,9 +1615,10 @@ def status_inner(status: Any) -> str:
     """The badge and words inside the head's status (``#rep-status``), or '' for no status."""
     if not isinstance(status, str) or status not in STATUS_TEXT:
         return ""
-    cls = {"complete": "ok", "partial": "warn", "failed": "danger"}.get(status, "")
+    from .reports_page import status_label
+
     return (
-        f"<span class='badge {cls}'>{_esc(status)}</span> "
+        f"{status_label(status)} "
         f"<span class='muted small'>{_esc(STATUS_TEXT[status].partition(': ')[2])}</span>"
     )
 
@@ -1617,17 +1644,25 @@ def forge_status(r: dict[str, Any]) -> dict[str, Any]:
     """What the report page's live view needs while the Forge games play: the run's state
     and section, the report's overall status, and the Forge card and the status as the page draws
     them, so forge-live.js swaps them in without fetching the whole page again."""
+    from .report_page import forge_solo_pending, forge_solo_section_html
+
     f = r.get("forge") if isinstance(r.get("forge"), dict) else None
     state = str((f or {}).get("state") or "") or None
-    return {
+    fs = r.get("forge_solo") if isinstance(r.get("forge_solo"), dict) else None
+    out = {
         "report_id": r.get("report_id"),
         "status": r.get("status"),
         "state": state,
-        "live": state in ("queued", "running"),
+        # the page polls while either run is unfinished: the Forge games or the solo test by Forge
+        "live": state in ("queued", "running") or forge_solo_pending(fs),
         "forge": f,
         "forge_html": _live_forge_html(r),
         "status_html": _live_status_html(r.get("status")),
     }
+    if fs:
+        out["forge_solo"] = fs
+        out["forge_solo_html"] = forge_solo_section_html(fs, live=True, report_id=r.get("report_id"))
+    return out
 
 
 def report_sections(r: dict[str, Any]) -> dict[str, Any]:
@@ -1726,7 +1761,7 @@ def report_body_html(
         )
     elif g.get("message") and not g.get("metrics"):
         body += (
-            f"<div class='card'><h2>{_esc(solo_heading(g))} <span class='badge danger'>not run</span></h2>"
+            f"<div class='card'><h2>{_esc(solo_heading(g))} {ui.label('Not run', 'red', 'alert')}</h2>"
             f"<p class='notice warn'>{_esc(g['message'])}</p></div>"
         )
     else:
@@ -1916,11 +1951,20 @@ h3 small,h4 small{font-weight:400;color:var(--text-muted);font-size:.86rem;margi
 .card > :first-child{margin-top:0} .card > :last-child{margin-bottom:0}
 .meta{display:grid;grid-template-columns:max-content 1fr;gap:.3rem 1rem;margin:0 0 1rem;font-size:.93rem}
 .meta dt{color:var(--text-muted);font-weight:700} .meta dd{margin:0;overflow-wrap:anywhere}
-.badge{display:inline-block;vertical-align:middle;padding:.125rem .5rem;border-radius:5px;font-size:.86rem;
-  font-weight:700;background:#6b6b6b;color:#fff}
-.badge.ok{background:var(--green);color:var(--on-green)}
-.badge.warn{background:var(--orange);color:var(--on-orange)}
-.badge.danger{background:var(--danger-fill)}
+/* labels: a word, a colour and an icon, as the live report page draws them (theme.UI_CSS .ui-lbl) */
+.ui-lbl{display:inline-flex;align-items:center;gap:.3rem;height:24px;padding:0 .55rem 0 .45rem;
+  border-radius:999px;font-size:.82rem;font-weight:700;line-height:1;white-space:nowrap;
+  border:1px solid transparent;background:var(--surface-2);color:var(--text);vertical-align:middle}
+.ui-lbl svg.i{width:15px;height:15px;stroke-width:2.2;fill:none;stroke:currentColor;stroke-linecap:round;
+  stroke-linejoin:round}
+.ui-lbl.orange{background:var(--orange-tint);color:var(--orange-text)}
+.ui-lbl.green{background:rgba(30,187,108,.18);color:#146b3f}
+.ui-lbl.red{background:rgba(192,24,43,.14);color:#9a1322}
+.ui-lbl.blue{background:rgba(66,134,244,.16);color:#1f4f9e}
+.ui-lbl.grey{background:transparent;color:var(--text-muted);border-color:var(--border)}
+@media (prefers-color-scheme:dark){.ui-lbl.green{color:#5fd59a}.ui-lbl.red{color:#ff8a90}
+  .ui-lbl.blue{color:#8db6f7}}
+h2 .ui-lbl{margin-left:.35rem}
 .notice{border:1px solid var(--border);border-left:4px solid var(--blue);background:var(--surface);
   border-radius:3px;padding:.7rem .9rem;margin:0 0 1rem;font-weight:700}
 .notice.warn{border-left-color:var(--orange);background:var(--orange-tint);color:var(--orange-text)}

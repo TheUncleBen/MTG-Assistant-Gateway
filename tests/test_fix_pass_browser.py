@@ -198,8 +198,8 @@ def test_the_delete_folder_box_stays_until_its_job_ends(server: Server) -> None:
         page.keyboard.press("Escape")
         page.mouse.click(5, 5)
         page.wait_for_timeout(200)
-        assert page.locator(".mtgbox[role=dialog]").count() == 1
-        assert page.locator(".mtgbox[role=dialog] [data-cancel]").count() == 0
+        assert page.locator(".mtgbox[role=dialog]:not([hidden])").count() == 1
+        assert page.locator(".mtgbox[role=dialog]:not([hidden]) [data-cancel]").count() == 0
         # then the outcome: My decks with the notice
         page.wait_for_url(lambda u: "ok=folder_deleted" in u, timeout=30000)
         assert "Folder deleted" in page.locator("main .notice.ok").inner_text()

@@ -152,16 +152,16 @@
     var status = (g.turn ? "Turn " + g.turn : "Opening hand") + " · Library " + g.library.length +
       " · Hand " + g.hand.length + " · Graveyard " + g.graveyard.length + " · Exile " + g.exile.length;
     $("#gf-status").textContent = status;
+    // One line only when a choice is open (the bottom cards after a mulligan): the buttons say
+    // the rest, and the intro line above the table says the rules (the mockup, 33-goldfish.js).
     var hint = "";
     var picked = Object.keys(g.picked).length, need = toBottom();
-    if (g.phase === "mulligan") {
-      hint = "Keep this hand, or take a mulligan: the hand goes back, the library is shuffled and you draw " +
-        "seven again" + (isCommanderGame && g.mulligans === 0 ? " (the first mulligan is free)." : ".");
-      if (g.mulligans) hint += " Mulligans so far: " + g.mulligans + "; keeping puts " + plural(need, "card") + " on the bottom.";
-    } else if (g.phase === "bottom") {
+    if (g.phase === "bottom") {
       hint = "Choose " + plural(need, "card") + " to put on the bottom of your library (" + picked + " chosen).";
-    } else {
-      hint = g.library.length ? "Select a card to play, tap or move it." : "The library is empty.";
+    } else if (g.phase === "mulligan" && g.mulligans) {
+      hint = "Mulligans so far: " + g.mulligans + "; keeping puts " + plural(need, "card") + " on the bottom.";
+    } else if (g.phase === "play" && !g.library.length) {
+      hint = "The library is empty.";
     }
     $("#gf-hint").textContent = hint;
     guideStep();
@@ -308,37 +308,62 @@
     b.addEventListener("click", function () { afterViewer(fn); });
     return b;
   }
-  function moveAction(id, label, zone, bottom) {
-    return actionButton(label, function () {
+  function moveFn(id, zone, bottom) {
+    return function () {
       moveTo(id, zone, bottom);
       if (zone === "library") say(nameOf(id) + " put on the " + (bottom ? "bottom" : "top") + " of the library.");
       else say(nameOf(id) + " moved to " + ZONE_WORDS[zone] + ".");
       render(zone === "library" ? null : id);
       if (zone === "library") { var h = $("#gf-hand-h"); if (h) { h.tabIndex = -1; h.focus(); } }
-    });
+    };
   }
-  function cardActions(id) {
+  // what a card can do now: the viewer's buttons and the card menu's items share this list
+  function actionList(id) {
     var zone = zoneOf(id), c = cards[id], acts = [];
     if (g.phase !== "play") return acts;
     if (zone === "battlefield") {
-      acts.push(actionButton(g.tapped[id] ? "Untap" : "Tap", function () {
+      acts.push({ label: g.tapped[id] ? "Untap" : "Tap", icon: "swap", fn: function () {
         if (g.tapped[id]) delete g.tapped[id]; else { g.tapped[id] = true; g.acted = true; }
         say(nameOf(id) + (g.tapped[id] ? " tapped." : " untapped."));
         render(id);
-      }));
+      } });
     } else {
-      acts.push(moveAction(id, zone === "command" ? "Cast to the battlefield" : "Play to the battlefield", "battlefield"));
+      acts.push({ label: zone === "command" ? "Cast to the battlefield" : "Play to the battlefield", icon: "play", fn: moveFn(id, "battlefield") });
     }
-    if (zone !== "hand") acts.push(moveAction(id, "Return to hand", "hand"));
-    if (zone !== "graveyard") acts.push(moveAction(id, "Put in the graveyard", "graveyard"));
-    if (zone !== "exile") acts.push(moveAction(id, "Exile", "exile"));
-    if (c.commander && zone !== "command") acts.push(moveAction(id, "Return to the command zone", "command"));
+    if (zone !== "hand") acts.push({ label: "Return to hand", icon: "undo", fn: moveFn(id, "hand") });
+    if (zone !== "graveyard") acts.push({ label: "Put in the graveyard", icon: "trash", fn: moveFn(id, "graveyard") });
+    if (zone !== "exile") acts.push({ label: "Exile", icon: "x", fn: moveFn(id, "exile") });
+    if (c.commander && zone !== "command") acts.push({ label: "Return to the command zone", icon: "undo", fn: moveFn(id, "command") });
     if (zone === "hand") {
-      acts.push(moveAction(id, "Put on top of the library", "library", false));
-      acts.push(moveAction(id, "Put on the bottom of the library", "library", true));
+      acts.push({ label: "Put on top of the library", icon: "layers", fn: moveFn(id, "library", false) });
+      acts.push({ label: "Put on the bottom of the library", icon: "layers", fn: moveFn(id, "library", true) });
     }
     return acts;
   }
+  function cardActions(id) {
+    return actionList(id).map(function (a) { return actionButton(a.label, a.fn); });
+  }
+  function openViewer(id) {
+    if (!CardView) return;
+    var card = cards[id].card;
+    CardView.open({
+      name: card.name, img: card.img || "", set: card.set || "", type: card.type || "",
+      mana: card.mana || "", text: card.text || "", pt: card.pt || "", loyalty: card.loyalty || "",
+      // links: none, so the viewer does not look the card up (only a two-faced card's back is read)
+      faces: card.faces || [], links: []
+    }, cardActions(id));
+  }
+  // The shared card menu on every card (F6, M9): right-click, press and hold, Shift+F10 or the
+  // Menu key; the game's own moves sit above Copy name. Nothing here is saved or sent anywhere.
+  var Menu = window.MtgMenu, CardMenu = window.MtgCardMenu;
+  if (Menu && CardMenu) Menu.bind(document, {
+    itemOf: function (n) { return n && n.closest ? n.closest(".gf-card[data-id]") : null; },
+    open: function (node, x, y) {
+      var id = node.getAttribute("data-id");
+      var before = actionList(id).map(function (a) { return Menu.item(a.label, a.icon, a.fn); });
+      CardMenu.open({ name: nameOf(id), onOpen: function () { openViewer(id); }, collect: true, before: before, focusBack: node }, x, y);
+    }
+  });
   document.addEventListener("click", function (e) {
     var node = e.target.closest ? e.target.closest(".gf-card[data-id]") : null;
     if (!node) return;
@@ -352,14 +377,7 @@
       render(id);
       return;
     }
-    if (!CardView) return;
-    var card = cards[id].card;
-    CardView.open({
-      name: card.name, img: card.img || "", set: card.set || "", type: card.type || "",
-      mana: card.mana || "", text: card.text || "", pt: card.pt || "", loyalty: card.loyalty || "",
-      // links: none, so the viewer does not look the card up (only a two-faced card's back is read)
-      faces: card.faces || [], links: []
-    }, cardActions(id));
+    openViewer(id);
   });
 
   newGame();

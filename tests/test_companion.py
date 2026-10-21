@@ -913,12 +913,15 @@ async def test_compare_page_shows_what_a_build_changed(stack: Stack) -> None:
         # the fake's precon listing carries deck 42; its label is offered, and names resolve
         assert "Sample Commander Deck (" in empty.text and "<datalist" not in empty.text
         by_name = await b.http.get("/decks/42/compare?with=Sample+Commander+Deck", headers=NAV)
-        assert by_name.status_code == 200 and "Taken out of Sample Commander Deck" in by_name.text
+        assert by_name.status_code == 200 and "Taken out of “Sample Commander Deck”" in by_name.text
         assert "Taken out of" not in empty.text
         # against itself: nothing changes
         same = await b.http.get("/decks/42/compare?with=https://archidekt.com/decks/42/sample", headers=NAV)
-        assert same.status_code == 200 and "Taken out of Sample Commander Deck" in same.text
-        assert "<li class='muted'>None</li>" in same.text and "No difference" in same.text
+        assert same.status_code == 200 and "Taken out of “Sample Commander Deck”" in same.text
+        assert (
+            "<div class='tr'><span class='muted'>None</span></div>" in same.text
+            and "No difference" in same.text
+        )
         # against a pasted list: the paste is the "before", this deck the "after"
         paste = "1 Sol Ring\n4 Lightning Bolt\n3 Island\n"
         r = await b.http.get("/decks/42/compare", params={"paste": paste}, headers=NAV)
@@ -929,12 +932,19 @@ async def test_compare_page_shows_what_a_build_changed(stack: Stack) -> None:
         token = await mcp_token(stack.h)
         tool = structured(await call(stack.h, token, "compare_decks", {"a": paste, "b": "42"}))
         sm = tool["summary"]
-        out_tile = f"<b>{sm['cut']}</b><span>cards taken out ({sm['cut_pct']}% of the pasted list)</span>"
-        in_tile = f"<b>{sm['added']}</b><span>cards put in ({sm['added_pct']}% of Sample Commander Deck)"
+        # (the widgets: the number, then the share in the detail line)
+        out_tile = (
+            f"<span class='big'>{sm['cut']}<small>cards</small></span>"
+            f"<span class='det'>{sm['cut_pct']}% of the pasted list</span>"
+        )
+        in_tile = (
+            f"<span class='big'>{sm['added']}<small>cards</small></span>"
+            f"<span class='det'>{sm['added_pct']}% of “Sample Commander Deck”</span>"
+        )
         assert out_tile in r.text and in_tile in r.text
         # the lists under the tiles leave basic lands to their own list, so their counts match the tiles
         added_rows = [a for a in tool["added"] if a["name"] not in ("Island", "Forest")]
-        assert f"Put into Sample Commander Deck <span class='count'>{len(added_rows)}</span>" in r.text
+        assert f"Put into “Sample Commander Deck” <span class='n'>{len(added_rows)}</span>" in r.text
         assert len(added_rows) < len(tool["added"])  # the deck's Forests are only under Basic lands
         bad = await b.http.get("/decks/42/compare?with=https://evil.example/decks/1", headers=NAV)
         assert bad.status_code == 400 and "could not be read" in bad.text
@@ -1022,7 +1032,7 @@ async def test_export_import_round_trip_keeps_every_card_finish_and_commander(st
         assert r.status_code == 303, r.text
         page = await b.http.get("/decks/new", headers=NAV)
         assert (
-            "type='file'" in page.text and "filepick.js" in page.text and "gateway .json export" in page.text
+            "type='file'" in page.text and "filepick.js" in page.text and "Gateway .json export" in page.text
         )
         made_ids = [d for d in ark.decks if ark.decks[d]["name"] == "From the page"]
         assert (
@@ -1295,9 +1305,9 @@ async def test_a_missing_deck_is_still_not_found(stack: Stack) -> None:
     b = await linked_browser(stack)
     try:
         for path, title in (
-            ("/decks/999999", "Deck not found"),
-            ("/decks/999999/export", "Deck not found"),
-            ("/decks/999999/compare", "Deck not found"),
+            ("/decks/999999", "This deck could not be found."),
+            ("/decks/999999/export", "This deck could not be found."),
+            ("/decks/999999/compare", "This deck could not be found."),
             ("/decks/999999/edit", "Cannot edit this deck"),
             ("/decks/999999/settings", "Cannot edit this deck"),
         ):

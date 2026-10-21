@@ -626,9 +626,16 @@ def test_saved_descriptions_and_remove_fit_and_read(
         assert len(state["buttons"]) == 1 and state["buttons"][0] >= 44, state["buttons"]
         coverage = page.locator(".report .coverage").inner_text()
         assert "Played with their effect:" in coverage and "Known:" in coverage
+        # Remove asks first (2026-10-21, POPUP-INVENTORY): the red outline opens a box whose solid
+        # red button removes
         page.get_by_role("button", name="Remove the saved description of Sol Ring").click()
+        box = page.locator("#rm-model-sol-ring")
+        box.wait_for(state="visible")
+        assert "Remove the saved description of “Sol Ring”?" in box.inner_text()
+        assert any(k[1] == "sol ring" for k in store.rows)  # nothing removed yet
+        box.locator("button.danger").click()
         page.wait_for_load_state("networkidle")
-        assert "models=removed" in page.url and "sol ring" not in store.rows
+        assert "models=removed" in page.url and not any(k[1] == "sol ring" for k in store.rows)
         assert "The saved description was removed." in page.locator("main").inner_text()
         assert page.locator(".report .kept button").count() == 0
         assert not errors, errors

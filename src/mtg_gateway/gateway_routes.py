@@ -10,6 +10,7 @@ from urllib.parse import parse_qs, urlencode
 from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
 
+from . import smallpage
 from .app import APP_CONFIG_PATH, AppState, logger
 from .auth_provider import (
     CONSENT_PATH,
@@ -26,26 +27,31 @@ def add_gateway_routes(state: AppState, h: SimpleNamespace) -> None:
     s = h.s
     server = h.server
 
+    def small(title: str, body: str, status: int = 200, **kw: object) -> Response:
+        """One of the small pages (smallpage.py), in the signed-out shell."""
+        return render(
+            title, body, site=s.server_name, status=status, heading=False, head_extra=smallpage.HEAD, **kw
+        )
+
+    def login_error(exc: LoginError, *, assistant: bool = True) -> Response:
+        # An assistant (Claude, ChatGPT, Codex) was connecting: the way forward is back in the app.
+        body = smallpage.login_error(exc.kind, str(exc), assistant=assistant)
+        return small(smallpage.login_error_title(exc.kind), body, exc.status)
+
     @server.custom_route(CONSENT_PATH, methods=["GET"], include_in_schema=False)
     async def consent(request: Request) -> Response:
         login_id = request.query_params.get("state", "")
         browser_key = request.cookies.get(login_cookie)
         info = await state.provider.consent_details(login_id, browser_key) if login_id else None
         if info is None:
-            return render(
-                "Sign-in failed",
-                "<p>This sign-in link has expired, was already used, or was started in a different "
-                "browser. Start again from your AI client.</p>",
-                site=s.server_name,
-                status=400,
-            )
+            return small(smallpage.EXPIRED_TITLE, smallpage.link_expired_app(), 400)
         warning = ""
         if info["loopback"]:
             warning = (
-                "<div class='notice warn strong' role='alert'><p class='lead'>Warning: this application "
-                "runs on this computer</p><p>It uses a localhost address, and anyone can claim a well-known "
+                "<div class='notice warn' role='alert'><strong>Warning: this application runs on this "
+                "computer</strong><br>It uses a localhost address, and anyone can claim a well-known "
                 "application's name that way. Approve only if you started this sign-in yourself a moment "
-                "ago.</p></div>"
+                "ago.</div>"
             )
         # The member signs in at the identity provider after this page, so it cannot name their
         # own approval mode yet; it is honest about what the mode may allow.
@@ -55,21 +61,27 @@ def add_gateway_routes(state: AppState, h: SimpleNamespace) -> None:
             "this site, unless the approval mode on your account page lets it apply changes without "
             "asking (a change to one of your decks keeps a snapshot; a collection change keeps none)."
         )
-        body = (
-            "<div class='card consent'>"
-            "<p class='ask'>An application wants to connect to your account.</p>"
-            f"<div class='who'><span class='app'>{html.escape(info['client_name'])}</span>"
-            + (
-                f"<span class='host'>identified by {html.escape(info['client_host'])}</span></div>"
-                if info["client_host"]
-                else "<span class='host'>a name the application chose for itself</span></div>"
-            )
-            + f"<dl class='meta'><dt>It will be able to</dt><dd>{able}</dd>"
+        # The app's name in a tinted strip (F8); every sentence at normal size, the click-guard
+        # hint the only small print; Deny stays plain (F9), Approve is the page's one orange button.
+        who = (
+            f"<span class='host'>identified by {html.escape(info['client_host'])}</span>"
+            if info["client_host"]
+            else "<span class='host'>a name the application chose for itself</span>"
+        )
+        body = smallpage.panel(
+            "Connect an application",
+            "<p>An application wants to connect to your account.</p>"
+            f"<div class='notice sio-who'><span class='app'>{html.escape(info['client_name'])}</span>"
+            f"{who}</div>"
+            f"<dl class='ui-meta'><dt>It will be able to</dt><dd>{able}</dd>"
             f"<dt>After sign-in you go to</dt><dd><code>{html.escape(info['redirect_host'])}</code></dd></dl>"
-            "<p class='small'>Approve only if you started connecting this application yourself a "
+            "<p>Approve only if you started connecting this application yourself a "
             "moment ago, and the address above is the one you expect (for example claude.ai or "
             "chatgpt.com). If someone sent you this link, choose Deny.</p>"
             f"{warning}"
+            "<p>Approving opens your identity provider's sign-in page. Nothing is "
+            "connected unless you approve here and sign in there. Deny leaves the application "
+            "unconnected.</p>"
             # Approve and Deny stay disabled until the click guard sees the page in use (a
             # double-click on a hostile page that swaps this window in must not approve).
             + guarded_form(
@@ -79,13 +91,10 @@ def add_gateway_routes(state: AppState, h: SimpleNamespace) -> None:
                     "csrf": state.provider.consent_csrf(login_id, browser_key),
                     "shown": form_stamp(s.session_secret, f"consent:{login_id}"),
                 },
-                buttons=[("approve", "Approve and sign in", "primary btn-lg"), ("deny", "Deny", "btn")],
-            )
-            + "<p class='muted small'>Approving opens your identity provider's sign-in page. Nothing is "
-            "connected unless you approve here and sign in there. Deny leaves the application "
-            "unconnected.</p></div>"
+                buttons=[("approve", "Approve and sign in", "primary"), ("deny", "Deny", "btn-plain")],
+            ),
         )
-        return render("Connect an application", body, site=s.server_name, form_action=info["form_action"])
+        return small("Connect an application", body, form_action=info["form_action"])
 
     @server.custom_route(CONSENT_PATH, methods=["POST"], include_in_schema=False)
     async def consent_continue(request: Request) -> Response:
@@ -100,12 +109,7 @@ def add_gateway_routes(state: AppState, h: SimpleNamespace) -> None:
             "approve",
             "deny",
         ):
-            return render(
-                "Sign-in failed",
-                "<p>This form expired. Go back to your AI client and start the sign-in again.</p>",
-                site=s.server_name,
-                status=403,
-            )
+            return small(smallpage.EXPIRED_TITLE, smallpage.link_expired_app(), 403)
         if submitted_too_soon(s.session_secret, f"consent:{login_id}", data.get("shown")):
             # Faster than a person reads the page (or a stamp that is not ours): show it again.
             return RedirectResponse(
@@ -119,15 +123,14 @@ def add_gateway_routes(state: AppState, h: SimpleNamespace) -> None:
             else:
                 target = await state.provider.continue_login(login_id, browser_key)
         except LoginError as exc:
-            return render(
-                "Sign-in failed", f"<p>{html.escape(str(exc))}</p>", site=s.server_name, status=exc.status
-            )
+            return login_error(exc)
         return RedirectResponse(target, status_code=303, headers={"Cache-Control": "no-store"})
 
     @server.custom_route("/auth/callback", methods=["GET"], include_in_schema=False)
     async def auth_callback(request: Request) -> Response:
         q = request.query_params
-        if q.get("state") and state.db.get_login_session_client_id(q["state"]) == BROWSER_CLIENT_ID:
+        client = state.db.get_login_session_client_id(q["state"]) if q.get("state") else None
+        if client == BROWSER_CLIENT_ID:
             return await state.finish_browser_login(request)  # type: ignore[attr-defined]
         try:
             target = await state.provider.complete_login(
@@ -137,9 +140,8 @@ def add_gateway_routes(state: AppState, h: SimpleNamespace) -> None:
                 cookie_value=request.cookies.get(login_cookie),
             )
         except LoginError as exc:
-            return render(
-                "Sign-in failed", f"<p>{html.escape(str(exc))}</p>", site=s.server_name, status=exc.status
-            )
+            # With no login session left to say which flow it was, the website's words
+            return login_error(exc, assistant=client is not None)
         # The login key stays: it is this browser's, and another sign-in may be pending in it.
         return RedirectResponse(target, status_code=302, headers={"Cache-Control": "no-store"})
 

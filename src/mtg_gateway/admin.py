@@ -13,22 +13,22 @@ from __future__ import annotations
 import datetime as _dt
 import html
 import json
+import time
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
-from urllib.parse import parse_qs, quote
+from urllib.parse import parse_qs, quote, urlencode
 
 from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
 
-from . import activity_view, idp_sweep, settings_page, update_check, upgrade_backup
+from . import activity_view, idp_sweep, settings_page, tool_labels, ui, update_check, upgrade_backup
 from .companion import member_name
 from .config import MANAGED_SETTINGS
 from .decks import ADMIN_CLIENT, current_client
 from .pages import (
     BROWSER_CLIENT_ID,
     _csrf,
-    _err,
-    _when,
     browser_session,
     csrf_form_ok,
     csrf_header_ok,
@@ -36,7 +36,7 @@ from .pages import (
     read_limited,
 )
 from .plugin_page import CHATGPT_NAME_MAX, chatgpt_name_too_long, developer_name_warning
-from .theme import display_name, plural, render
+from .theme import display_name, icon, plural, render
 
 if TYPE_CHECKING:
     from mcp.server.mcpserver import MCPServer
@@ -101,9 +101,9 @@ def add_admin_routes(server: MCPServer, state: AppState) -> None:
         sid: str | None = None,
         sid_sub: str | None = None,
         head_extra: str = "",
-        heading: bool = True,
-        main_class: str = "",
     ) -> Response:
+        """An admin page: the 1200 px width of every admin tab (so the tab bar sits in the same
+        place on each), its own heading in the body, the admin styles and script."""
         return render(
             title,
             body,
@@ -113,9 +113,9 @@ def add_admin_routes(server: MCPServer, state: AppState) -> None:
             csrf=_csrf(s, sid),
             admin=True,
             user=display_name(state.db.get_user(sid_sub) if sid_sub else None),
-            head_extra=head_extra,
-            heading=heading,
-            main_class=main_class,
+            head_extra=ADMIN_HEAD + head_extra,
+            heading=False,
+            main_class="ui-wide",
         )
 
     def not_found(api: bool) -> Response:
@@ -218,7 +218,7 @@ def add_admin_routes(server: MCPServer, state: AppState) -> None:
         if isinstance(who, Response):
             return who
         sub, sid = who
-        return page("Admin: overview", _nav("/admin") + _overview_body(state), sid=sid, sid_sub=sub)
+        return page("Admin: overview", _overview_body(state), sid=sid, sid_sub=sub)
 
     @server.custom_route("/admin/users", methods=["GET"], include_in_schema=False)
     async def users(request: Request) -> Response:
@@ -229,7 +229,7 @@ def add_admin_routes(server: MCPServer, state: AppState) -> None:
         notice = _notice(request.query_params.get("ok"), request.query_params.get("err"))
         return page(
             "Admin: users",
-            _nav("/admin/users") + notice + _users_body(state, sub, _csrf(s, sid)),
+            _users_body(state, sub, _csrf(s, sid), request.query_params, notice=notice),
             sid=sid,
             sid_sub=sub,
         )
@@ -243,7 +243,14 @@ def add_admin_routes(server: MCPServer, state: AppState) -> None:
         data = await form(request)
         if not csrf_form_ok(s, sid, data):
             return page(
-                "Users", _err("This form expired. Reload the page and try again."), status=403, sid=sid
+                "Admin: users",
+                "<div class='adm au'>"
+                + _head("Admin: users", USERS_PURPOSE, "/admin/users")
+                + _err("This form expired. Reload the page and try again.")
+                + "</div>",
+                status=403,
+                sid=sid,
+                sid_sub=admin_sub,
             )
         try:
             out = act(
@@ -262,14 +269,10 @@ def add_admin_routes(server: MCPServer, state: AppState) -> None:
         if isinstance(who, Response):
             return who
         sub, sid = who
-        try:
-            page_no = max(1, int(request.query_params.get("page", "1")))
-        except ValueError:
-            page_no = 1
         notice = _notice(request.query_params.get("ok"), request.query_params.get("err"))
         return page(
             "Admin: card models",
-            _nav("/admin/models") + notice + _models_body(state, _csrf(s, sid), page_no),
+            _models_body(state, _csrf(s, sid), request.query_params, notice=notice),
             sid=sid,
             sid_sub=sub,
         )
@@ -284,16 +287,26 @@ def add_admin_routes(server: MCPServer, state: AppState) -> None:
         if not csrf_form_ok(s, sid, data):
             return page(
                 "Admin: card models",
-                _nav("/admin/models") + _err("This form expired. Reload the page and try again."),
+                "<div class='adm amo'>"
+                + _head("Admin: card models", MODELS_PURPOSE, "/admin/models")
+                + _err("This form expired. Reload the page and try again.")
+                + "</div>",
                 status=403,
                 sid=sid,
                 sid_sub=admin_sub,
             )
         key, owner = str(data.get("card_key") or ""), str(data.get("added_by") or "")
         removed = bool(key and owner) and state.db.admin_delete_card_model(key, owner, by=admin_sub)
-        back = f"&page={quote(str(data.get('page') or '1'), safe='')}"
+        # back to the list as it was (its search, filter and page); the old form's page number too
+        back = str(data.get("back") or "")
+        if not back.startswith("/admin/models") or any(c in back for c in "\r\n"):
+            back = "/admin/models"
+        page_no = str(data.get("page") or "")
+        if page_no.isdigit() and "?" not in back:
+            back = _href("/admin/models", offset=max(0, int(page_no) - 1) * PER_PAGE)
+        sep = "&" if "?" in back else "?"
         return RedirectResponse(
-            f"/admin/models?{'ok=model_removed' if removed else 'err=model_gone'}{back}", status_code=303
+            f"{back}{sep}{'ok=model_removed' if removed else 'err=model_gone'}", status_code=303
         )
 
     @server.custom_route("/admin/activity", methods=["GET"], include_in_schema=False)
@@ -308,8 +321,6 @@ def add_admin_routes(server: MCPServer, state: AppState) -> None:
             sid=sid,
             sid_sub=sub,
             head_extra=activity_view.HEAD_ADMIN,
-            heading=False,
-            main_class="ui-wide",
         )
 
     def settings_page_response(
@@ -329,7 +340,7 @@ def add_admin_routes(server: MCPServer, state: AppState) -> None:
             who=lambda who_sub: html.escape(
                 display_name(state.db.get_user(who_sub)) if who_sub else "someone"
             ),
-            when=_when,
+            when=ui.when,
             outcome=outcome,
             notice=notice,
             focus=focus,
@@ -337,7 +348,8 @@ def add_admin_routes(server: MCPServer, state: AppState) -> None:
         )
         return page(
             "Admin: settings",
-            _nav("/admin/settings") + body,
+            f"<div class='adm as'>{_head('Admin: settings', settings_page.PURPOSE, '/admin/settings')}"
+            f"{body}</div>",
             status=status,
             sid=sid,
             sid_sub=sub,
@@ -377,7 +389,10 @@ def add_admin_routes(server: MCPServer, state: AppState) -> None:
         if not csrf_form_ok(s, sid, data):
             return page(
                 "Admin: settings",
-                _nav("/admin/settings") + _err("This form expired. Reload the page and try again."),
+                "<div class='adm as'>"
+                + _head("Admin: settings", settings_page.PURPOSE, "/admin/settings")
+                + _err("This form expired. Reload the page and try again.")
+                + "</div>",
                 status=403,
                 sid=sid,
                 sid_sub=sub,
@@ -417,7 +432,7 @@ def add_admin_routes(server: MCPServer, state: AppState) -> None:
         if isinstance(who, Response):
             return who
         sub, sid = who
-        return page("Admin: metrics", _nav("/admin/metrics") + _metrics_body(state), sid=sid, sid_sub=sub)
+        return page("Admin: metrics", _metrics_body(state, request.query_params), sid=sid, sid_sub=sub)
 
     # -- JSON API -----------------------------------------------------------
     @server.custom_route("/api/v1/admin/overview", methods=["GET"], include_in_schema=False)
@@ -581,13 +596,422 @@ def system_data(state: Any) -> dict[str, Any]:
     return out
 
 
-def _before_upgrade_text(b: dict[str, Any] | None) -> Any:
+# -- HTML -------------------------------------------------------------------------
+USERS_PURPOSE = "Everyone who has signed in. Disabling blocks this gateway only."
+MODELS_PURPOSE = "Each model is used only in its owner's simulations. Only admins see who added it."
+CURRENT = " aria-current='page'"
+NO_NAME = activity_view.NO_NAME  # a member with neither a username nor an email on record
+BAN_ICON = activity_view.BAN_ICON
+PER_PAGE = ui.PER_PAGE
+# the member's first-sign-in and last-seen windows the Users page filters by
+SEEN = (
+    ("", "Seen any time"),
+    ("24h", "Seen in 24 hours"),
+    ("7d", "Seen in 7 days"),
+    ("30d", "Seen in 30 days"),
+    ("not30d", "Not seen in 30 days"),
+)
+SEEN_SECONDS = {"24h": 86400, "7d": 7 * 86400, "30d": 30 * 86400, "not30d": 30 * 86400}
+USER_CHIPS = (
+    ("all", "All"),
+    ("active", "Active"),
+    ("disabled", "Disabled"),
+    ("linked", "Linked"),
+    ("notlinked", "Not linked"),
+    ("admins", "Admins"),
+)
+METRIC_DAYS = (7, 30, 90)
+# the Metrics table's short kind word (the chip and widget word is tool_labels.METRIC_KINDS)
+KIND_WORDS = {
+    "tool": "Tool call",
+    "error": "Error",
+    "api": "API call",
+    "admin": "Admin action",
+    "card": "Chat card load",
+}
+KIND_ICONS = {"tool": "activity", "error": "alert", "api": "link", "admin": "shield", "card": "image"}
+
+ADMIN_CSS = """
+/* the admin pages (admin.py): dashboards in the 1200 px width, the tab bar in the same place on
+   every tab, the System rows lined up as on Settings */
+.adm .adm-nav{margin:0 0 1rem}
+.adm .notice{margin:0 0 1rem}
+.adm .ui-widgets .wdg .det{overflow-wrap:anywhere;min-width:0}
+/* the number and its unit ("0.7.37 running") may part at 200% text: two flex items, not one word */
+.adm .wdg .big{display:flex;flex-wrap:wrap;align-items:baseline;column-gap:.35rem}
+.adm .wdg .big small{margin-left:0}
+.adm .wdg .det .tx{flex:1 1 100%}
+.adm .spark{flex:1 1 100%;display:flex;align-items:flex-end;gap:3px;height:36px;margin:.1rem 0 0}
+.adm .spark i{flex:1;display:block;min-height:2px;background:var(--text-muted);border-radius:2px 2px 0 0}
+.adm .spark i:last-child{background:var(--text)}
+.adm .nobody,.adm .kebab{color:var(--text-muted)}
+.adm .ui-table .tr.th > span:last-child{text-align:right}
+.adm .ui-table .act{justify-self:end;margin:-.5rem 0}
+.adm .ui-table .act .kebab{margin:0;width:44px;height:44px}
+/* a widget's button names a member: a long name wraps inside the button instead of pushing the page */
+.adm .wdg .go .btn,.adm .wdg .go a.btn-plain{white-space:normal;overflow-wrap:anywhere;height:auto;
+  text-align:center}
+.adm .ui-table .title .labs{display:inline-flex;flex-wrap:wrap;gap:.3rem;align-items:center}
+.adm .ui-table .title .sub .ui-lbl,.adm .ui-table .title .sm-only .ui-lbl{height:22px;font-size:.78rem}
+.adm .ui-table .sm-only{display:none}
+.adm .ui-table .sub{font-weight:400;color:var(--text-muted);font-size:.86rem}
+.adm .ui-table .tr > span{min-width:0;overflow-wrap:anywhere}
+@media (max-width:599.98px){
+  /* below 600 px the one-line summary (.sm-only) stands in for the folded line (.sub) */
+  .adm .ui-table .sub{display:none}
+  .adm .ui-table .sm-only{display:flex;flex-wrap:wrap;gap:.3rem .5rem;align-items:center;flex-basis:100%;
+    margin-top:.25rem;color:var(--text-muted);font-size:.86rem;font-weight:400}
+}
+/* Overview: six widgets three a row, then System left, Updates and Activity by day right */
+@media (min-width:900px){.ao .ui-widgets{grid-template-columns:repeat(3,minmax(0,1fr))}}
+.ao .ao-cols{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:1rem;align-items:start}
+.ao .ao-cols > div > .ui-card:last-child{margin-bottom:0}
+.ao .ui-row{grid-template-columns:minmax(0,min(12rem,40%)) minmax(0,1fr);align-items:start}
+.ao .ui-row .ctl .ui-lbl{white-space:normal;height:auto;min-height:22px;padding-top:2px;padding-bottom:2px}
+.ao .ui-row .ctl{overflow-wrap:anywhere;font-size:.95rem}
+.ao .ui-row .lab .muted{font-weight:400;margin-left:.35rem}
+.ao .ui-card .notice{margin:.75rem 0 0}
+.ao .ui-card details{margin:.5rem 0 0}
+.ao .ui-card details > summary{display:flex;align-items:center;gap:.4rem;min-height:44px;cursor:pointer;
+  font-weight:700;list-style:none}
+.ao .ui-card details > summary::-webkit-details-marker{display:none}
+.ao .ui-card details > summary svg.i{width:18px;height:18px;flex:none}
+.ao .ui-card details[open] > summary svg.i{transform:rotate(180deg)}
+.ao .ui-card details p{font-size:.93rem}
+@media (max-width:899.98px){
+  .ao .ao-cols{grid-template-columns:minmax(0,1fr)}
+  .ao .ao-cols > div > .ui-card:last-child{margin-bottom:1rem}
+}
+@media (max-width:599.98px){.ao .ui-row{grid-template-columns:1fr}}
+/* Users: a member's row opens their side panel (static/admin.js makes the whole row the target) */
+.au .ui-table .tr.mem{cursor:pointer}
+.au .ui-table .tr.mem.on{background:var(--orange-tint)}
+.au .ui-table .tr.mem .title .t{font-weight:700}
+.au .ui-table .labs,.au .ui-table .apps{display:flex;flex-wrap:wrap;gap:.3rem;align-items:center}
+@media (max-width:899.98px){.au .ui-table .md-hide{display:none}}
+@media (min-width:1100px){.au .with-panel .ui-table .md-hide{display:none}}
+.au .arch .u{font-size:.86rem;color:var(--text-muted)}
+.au .ui-drawer .ui-actions .btn,.au .ui-drawer .ui-actions button{margin:0}
+.au .au-del{border-top:1px solid var(--border-soft);margin-top:.75rem;padding-top:.75rem}
+.au .ui-drawer .note{color:var(--text-muted);font-size:.9rem}
+.au .ui-drawer .ui-meta code{font-size:.8rem;overflow-wrap:anywhere}
+@media (min-width:1100px){.au .with-panel .ui-table .tr.mem .arch{display:none}}
+/* Metrics: one table, the share bar, a row opens its details in place */
+.am .ui-table .tr.mrow{cursor:pointer}
+.am .ui-table .tr.mrow:hover{background:var(--surface-2)}
+.am .ui-table .tr.mrow .title .t{display:inline-block;text-decoration:none;color:var(--text);font-weight:700}
+.am .am-bar{display:inline-block;width:6rem;max-width:40vw;height:8px;border-radius:4px;
+  background:var(--surface-3,var(--surface-2));vertical-align:middle;overflow:hidden}
+.am .am-bar i{display:block;height:100%;background:var(--orange)}
+.am .am-p{color:var(--text-muted);font-size:.86rem;margin-left:.4rem}
+.am .am-n{font-weight:700;font-variant-numeric:tabular-nums}
+.am .more-body{grid-column:1 / -1;padding:.6rem 0 .25rem;margin-top:.45rem;
+  border-top:1px solid var(--border-soft)}
+.am .more-body[hidden]{display:none}
+.am .more-body .ui-meta{margin:0;font-size:.9rem}
+.am .ui-tools .f{flex:0 0 auto;width:10rem}
+@media (max-width:599.98px){.am .ui-tools .f{width:8.8rem}}
+/* Card models */
+.amo .ui-tools .f{flex:0 0 auto;width:13rem}
+@media (max-width:599.98px){.amo .ui-tools .f{width:9.5rem}}
+.amo .ui-table .tr.model .title .t{font-weight:700}
+"""
+ADMIN_HEAD = f"<style>{ADMIN_CSS}</style><script src='/static/admin.js' defer></script>"
+
+
+def _nav(active: str) -> str:
+    """The admin pages' own tabs (all six pages): even links in full rows, the current one tinted
+    and marked aria-current, not a second orange button (one orange main button per page)."""
+    links = (("/admin", "Overview"), ("/admin/users", "Users"), ("/admin/activity", "Activity"))
+    links += (
+        ("/admin/metrics", "Metrics"),
+        ("/admin/settings", "Settings"),
+        ("/admin/models", "Card models"),
+    )
+    return (
+        "<nav class='adm-nav' aria-label='Admin'>"
+        + "".join(f"<a href='{href}'{CURRENT if href == active else ''}>{label}</a>" for href, label in links)
+        + "</nav>"
+    )
+
+
+def _head(title: str, purpose: str, active: str) -> str:
+    """Every admin tab in the same order: the title, its purpose line, then the tab bar."""
+    return ui.page_head(title, purpose) + _nav(active)
+
+
+def _href(path: str, **params: Any) -> str:
+    """``path`` with the parameters that have a value (0, "" and None are left out)."""
+    out = {k: v for k, v in params.items() if v not in (None, "", 0, "all")}
+    return path + ("?" + urlencode(out) if out else "")
+
+
+def _saved_changes(state: Any, sub: str, after: int) -> list[tuple[str, Any, Any]]:
+    """The settings ``sub`` changed in audit rows after id ``after`` (the save that redirected
+    here), oldest first, for the notice after a save; a key changed twice shows its first value
+    and its last."""
+    rows = [
+        r
+        for r in state.db.audit_recent(200, sub=sub)
+        if r["event"] == "setting_changed" and r["id"] > after and isinstance(r.get("detail"), dict)
+    ]
+    out: dict[str, tuple[Any, Any]] = {}
+    for r in reversed(rows):
+        key = r["detail"].get("key")
+        if key not in MANAGED_SETTINGS:
+            continue
+        before = out[key][0] if key in out else r["detail"].get("previous")
+        out[key] = (before, r["detail"].get("value"))
+    return [(k, b, a) for k, (b, a) in out.items() if b != a]
+
+
+def _notice(ok: str | None, err: str | None) -> str:
+    if ok in OK_MESSAGES:
+        return ui.notice(OK_MESSAGES[ok], "ok", role="status")
+    if err in ERR_MESSAGES:
+        return ui.notice(ERR_MESSAGES[err], "error", role="alert")
+    return ""
+
+
+def _err(msg: str) -> str:
+    return ui.notice(msg, "error", role="alert")
+
+
+def _member_text(u: Mapping[str, Any]) -> str:
+    """A member's name as plain text: username, else email, else "a member with no name" (never
+    the raw subject id; that shows only in the member's details)."""
+    return str(u.get("preferred_username") or u.get("email") or "") or NO_NAME
+
+
+def _member_html(u: Mapping[str, Any]) -> str:
+    name = str(u.get("preferred_username") or u.get("email") or "")
+    return html.escape(name) if name else f"<i class='nobody'>{NO_NAME}</i>"
+
+
+def _who(u: dict[str, Any]) -> str:
+    return _member_html(u)
+
+
+class _Html(str):
+    """A value that is already HTML (escaped text plus markup such as a <time>): _row keeps it."""
+
+
+def _row(label: str, value: Any, *, note: str = "") -> str:
+    """One lined-up row of a panel (``.ui-row``, as on Settings): the label, then the value."""
+    shown = value if isinstance(value, _Html) else html.escape(str(value))
+    extra = f" <span class='muted'>{html.escape(note)}</span>" if note else ""
+    lab = f"<p class='lab'>{html.escape(label)}{extra}</p>"
+    return f"<div class='ui-row'>{lab}<div class='ctl'>{shown}</div></div>"
+
+
+def _spark(values: list[int], *, label: str) -> str:
+    """A bar chart of counts per day that fills its row (no script, no external request)."""
+    if not values:
+        return ""
+    top = max(values) or 1
+    bars = "".join(f"<i style='height:{max(4, round(v * 100 / top))}%'></i>" for v in values)
+    said = ", ".join(str(v) for v in values)
+    text = f"{html.escape(label)} per day, oldest first: {said}"
+    return f"<span class='spark' role='img' aria-label='{text}'>{bars}</span>"
+
+
+def _mode_name(mode: object) -> str:
+    """An approval mode as the Guide names it, with the word its setting takes: "Semi-auto (semi)"."""
+    from .modes import MODE_NAMES
+
+    return f"{MODE_NAMES.get(str(mode), str(mode))} ({mode})"
+
+
+def _service_label(status: str) -> _Html:
+    """A service's state as a label: Answering (green), Not answering (red), the rest grey."""
+    if status == "answering":
+        return _Html(ui.label("Answering", "green", "check"))
+    if status == "NOT answering":
+        return _Html(ui.label("Not answering", "red", "alert"))
+    return _Html(ui.label(status.capitalize(), "grey", "clock" if status == "not checked yet" else "x"))
+
+
+def _proposal_labels(props: Mapping[str, int]) -> str:
+    """Every proposal state with a count, as the status labels used everywhere else (Waiting,
+    Applied, Failed and the rest), in the standard's order; a state the standard doesn't name
+    keeps its stored word."""
+    order = {k: i for i, k in enumerate(ui.STATUS_KEYS)}
+    items = sorted(props.items(), key=lambda kv: (order.get(ui.ALIASES.get(kv[0], kv[0]), 99), kv[0]))
+    out = []
+    for state, n in items:
+        if not n:
+            continue
+        key = ui.ALIASES.get(state, state)
+        if key in ui.LABELS:
+            out.append(ui.label_for(key, word=f"{ui.LABELS[key].word} {n}"))
+        else:
+            out.append(ui.label(f"{state} {n}", "grey", "x"))
+    return "".join(out)
+
+
+def _overview_body(state: Any, now: float | None = None) -> str:
+    """/admin: six widgets (Members, Proposals, Tool calls, Errors, System, Updates), then the
+    System rows on the left and Updates with Activity by day on the right."""
+    now = time.time() if now is None else now
+    d = overview_data(state)
+    props = d["proposals"]
+    sysd = d["system"]
+    series = d["series"]
+    tool_days = list(series.get("tool", {}).values())
+    error_days = list(series.get("error", {}).values())
+    # the System widget: the services that are set up, and whether each answers
+    services = [sysd["mystic_forge"], sysd["forge"]]
+    counted = [s for s in services if s != "not configured"]
+    working = sum(1 for s in counted if s == "answering")
+    cleanup = sysd["member_cleanup"].get("state")
+    if cleanup != "off":
+        counted.append("cleanup")
+        working += cleanup in ("ok", "waiting")
+    backup_failed = bool(sysd["last_backup_error"] or sysd.get("last_backup_copy_error"))
+    system_bad = backup_failed or working < len(counted)
+    if not sysd["backups_enabled"]:
+        backup_line = "Nightly backup off"
+    elif sysd["last_backup_at"]:
+        backup_line = f"Nightly backup {ui.when(sysd['last_backup_at'], now=now)}"
+    else:
+        backup_line = "No nightly backup yet"
+    if not sysd["backup_copies_enabled"]:
+        copies_line = "copies off"
+    elif sysd.get("last_backup_copy_at"):
+        copies_line = f"copy {ui.when(sysd['last_backup_copy_at'], now=now)}"
+    else:
+        copies_line = "no copy yet"
+    u = sysd["updates"]
+    found = update_check.newer()
+    widgets = [
+        ui.widget(
+            "Members",
+            "user",
+            int(d["users"]),
+            unit="signed in",
+            detail=f"{d['disabled']} disabled · {d['linked']} linked to Archidekt",
+            actions=[ui.button_link("Users", "/admin/users")],
+        ),
+        ui.widget(
+            f"Proposals, {d['days']} days",
+            "proposals",
+            sum(props.values()),
+            detail_html=_proposal_labels(props),
+            actions=[ui.button_link("Show in Activity", "/admin/activity?kind=proposals&time=30d")],
+        ),
+        ui.widget(
+            f"Tool calls, {d['days']} days",
+            "activity",
+            int(d["tool_calls"]),
+            detail_html=f"<span class='tx'>{tool_days[-1] if tool_days else 0} today</span>"
+            + _spark(tool_days, label="Tool calls"),
+            actions=[ui.button_link("Metrics", "/admin/metrics")],
+        ),
+        ui.widget(
+            f"Errors, {d['days']} days",
+            "alert",
+            int(d["errors"]),
+            detail=f"{error_days[-1] if error_days else 0} today",
+            actions=[ui.button_link("Show errors", "/admin/activity?kind=failed")],
+            tone="alert" if d["errors"] else "",
+        ),
+        ui.widget(
+            "System",
+            "box",
+            working,
+            unit=f"of {len(counted)} services working" if counted else "services set up",
+            detail_html=f"{backup_line} · {copies_line}",
+            actions=[ui.button_link("System details", "#system")],
+            tone="alert" if system_bad else "",
+        ),
+        ui.widget(
+            "Updates",
+            "download",
+            found["version"] if found else str(u["running"]),
+            unit="available" if found else "running",
+            detail=f"This gateway runs {u['running']}" if found else _update_state_text(u),
+            actions=[ui.button_link("How to update", "#updates")],
+            tone="accent" if found else "",
+        ),
+    ]
+    # the System panel: every row as today, the same wording
+    if not sysd["backups_enabled"]:
+        backup: Any = "off (MTG_BACKUP_DIR not set)"
+    elif sysd["last_backup_at"]:
+        backup = _Html(ui.when(sysd["last_backup_at"], now=now))
+    else:
+        backup = "none yet"
+    if not sysd["backup_copies_enabled"]:
+        copies: Any = "off (MTG_BACKUP_COPY_DIR not set)"
+    elif sysd["last_backup_copy_at"]:
+        copies = _Html(ui.when(sysd["last_backup_copy_at"], now=now))
+    else:
+        copies = "none yet"
+    size = sysd["database_bytes"]
+    system = (
+        "<section class='ui-card' id='system' aria-labelledby='system-h'><h2 id='system-h'>System</h2>"
+        + _row("Version", sysd["version"])
+        + _row("Database schema", sysd["schema_version"])
+        + _row("Database size", f"{size / 1048576:.1f} MB" if size is not None else "in memory")
+        + _row("Newest backup", backup)
+        + _row("Newest backup copy", copies)
+        + _row("Newest before-upgrade copy", _before_upgrade_text(sysd.get("before_upgrade"), now=now))
+        + _row("Research service (Mystic Forge)", _service_label(sysd["mystic_forge"]))
+        + _row("Simulation engine (Forge)", _service_label(sysd["forge"]))
+        + _row("Removed-member clean-up", _cleanup_text(sysd["member_cleanup"], now=now))
+        + _archidekt_stats(sysd.get("archidekt"))
+        # the live settings; each by its name, with the setting's own word
+        + _row("Default approval mode", _mode_name(state.decks.live.get("approval_mode_default")))
+        + _row("Highest approval mode allowed", _mode_name(state.decks.live.get("approval_mode_max")))
+        + (
+            _err(f"The last nightly backup failed ({sysd['last_backup_error']}). Check the gateway's log.")
+            if sysd["last_backup_error"]
+            else ""
+        )
+        + (
+            _err(f"The last backup copy failed ({sysd['last_backup_copy_error']}). Check the copy folder.")
+            if sysd.get("last_backup_copy_error")
+            else ""
+        )
+        + _cleanup_warning(sysd["member_cleanup"])
+        + _went_back_notice(sysd.get("before_upgrade"))
+        + _chatgpt_name_warning(state.settings)
+        + "</section>"
+    )
+    rows = []
+    for kind, by_day in series.items():
+        values = list(by_day.values())
+        name = tool_labels.METRIC_KINDS.get(kind, kind)
+        rows.append(_row(name, _Html(_spark(values, label=name)), note=f"{sum(values):,}"))
+    by_day_card = (
+        "<section class='ui-card' aria-labelledby='byday-h'><h2 id='byday-h'>Activity by day</h2>"
+        f"{''.join(rows)}<p class='muted small' style='margin:.5rem 0 0'>Per UTC day.</p></section>"
+    )
+    return (
+        "<div class='adm ao'>"
+        + _head("Admin: overview", "Members, the last 30 days and the system.", "/admin")
+        + ui.widgets(widgets)
+        + f"<div class='ao-cols'>{system}<div>{_updates_card(u, now=now)}{by_day_card}</div></div></div>"
+    )
+
+
+def _update_state_text(u: dict[str, Any]) -> str:
+    if u["check"] == "off":
+        return "Update check off"
+    if u.get("error"):
+        return "The last update check failed"
+    if u.get("latest"):
+        return "Up to date"
+    return "Not checked yet"
+
+
+def _before_upgrade_text(b: dict[str, Any] | None, *, now: float | None = None) -> Any:
     """The System list's line for the before-upgrade folder."""
     if not b:
         return "none (the database is in memory)"
     if not b.get("newest"):
         return "none yet (one is saved the first time a new version upgrades the database)"
-    when = _when(b["newest_at"]) if b.get("newest_at") else ""
+    when = ui.when(b["newest_at"], now=now) if b.get("newest_at") else ""
     return _Html(f"{html.escape(str(b['newest']))} {when}, in {html.escape(str(b['folder']))}")
 
 
@@ -605,7 +1029,7 @@ def _went_back_notice(b: dict[str, Any] | None) -> str:
         "Anyone you enabled again since then is disabled again: enable them on the Users page "
         "(docs/UPGRADING.md, “Going back to an older version”)."
     )
-    return f"<div class='notice warn'>{html.escape(text)}</div>"
+    return ui.notice(text, "warn")
 
 
 def _cleanup_warning(c: dict[str, Any]) -> str:
@@ -619,7 +1043,7 @@ def _cleanup_warning(c: dict[str, Any]) -> str:
         "stack file or docker-compose.yml is the current one, which attaches the "
         "mtg_authentik_api_token secret to the gateway, then redeploy."
     )
-    return f"<div class='notice warn'>{html.escape(text)}</div>"
+    return ui.notice(text, "warn")
 
 
 def _chatgpt_name_warning(settings: Any) -> str:
@@ -638,40 +1062,48 @@ def _chatgpt_name_warning(settings: Any) -> str:
                 f"Change MTG_CHATGPT_NAME in your stack to a name of {CHATGPT_NAME_MAX} characters or "
                 "fewer, then redeploy."
             )
-            out += f"<div class='notice warn'>{html.escape(text)}</div>"
+            out += ui.notice(text, "warn")
         else:
             text += f"Set a name of {CHATGPT_NAME_MAX} characters or fewer under “Name in ChatGPT” on the "
-            out += (
-                f"<div class='notice warn'>{html.escape(text)}"
-                "<a href='/admin/settings#s-row-chatgpt_name'>Settings page</a>.</div>"
+            out += ui.notice(
+                f"{html.escape(text)}<a href='/admin/settings#s-row-chatgpt_name'>Settings page</a>.",
+                "warn",
+                html=True,
             )
     # the plugin file's developer and author name: a long MTG_SERVER_NAME shortened
     if cut := developer_name_warning(settings.server_name):
-        out += f"<div class='notice warn'>{html.escape(cut)}</div>"
+        out += ui.notice(cut, "warn")
     return out
 
 
-def _updates_card(u: dict[str, Any]) -> str:
+def _updates_card(u: dict[str, Any], *, now: float | None = None) -> str:
     """Whether a newer gateway release is out (update_check.py) and how to move to it."""
     found = update_check.newer()
     if u["check"] == "off":
-        state = "off (MTG_UPDATE_CHECK=false)"
+        state: Any = "off (MTG_UPDATE_CHECK=false)"
     elif u.get("error"):
         state = f"last check failed ({u['error']}), trying again within the hour"
     elif u.get("latest"):
-        state = _Html(f"newest release {html.escape(str(u['latest']))}, checked {_when(u['checked_at'])}")
+        state = _Html(
+            f"newest release {html.escape(str(u['latest']))}, checked {ui.when(u['checked_at'], now=now)}"
+        )
     else:
         state = "not checked yet (the first check runs a minute after start)"
     head = (
-        f"<div class='notice warn'>Version {html.escape(found['version'])} is available; this gateway "
-        f"runs {html.escape(u['running'])}. Read <a href='{html.escape(found['url'])}' rel='noopener'>its "
-        "release notes</a> first: they say when a release needs a settings change.</div>"
+        ui.notice(
+            f"Version {html.escape(found['version'])} is available; this gateway "
+            f"runs {html.escape(u['running'])}. Read <a href='{html.escape(found['url'])}' rel='noopener'>"
+            "its "
+            "release notes</a> first: they say when a release needs a settings change.",
+            "warn",
+            html=True,
+        )
         if found
         else ""
     )
     tag = html.escape(found["version"]) if found else "&lt;new version&gt;"
     steps = (
-        "<details><summary>How to update</summary>"
+        f"<details id='how-to-update'><summary>{icon('chev')}How to update</summary>"
         "<p>The gateway never updates itself. An update is a fresh install on top of your data "
         "(docs/UPGRADING.md has every step): take the newest stack file and the newest example "
         "variables file, copy your own values into the example, and deploy. Your data, backups and "
@@ -703,13 +1135,12 @@ def _updates_card(u: dict[str, Any]) -> str:
         "app update from this gateway on their own.</p></details>"
     )
     return (
-        "<div class='card' id='updates'><h2>Updates</h2><dl class='meta'>"
-        + _stat("This gateway", u["running"])
-        + _stat("Update check", state)
-        + "</dl>"
+        "<section class='ui-card' id='updates' aria-labelledby='updates-h'><h2 id='updates-h'>Updates</h2>"
+        + _row("This gateway", u["running"])
+        + _row("Update check", state)
         + head
         + steps
-        + "</div>"
+        + "</section>"
     )
 
 
@@ -724,10 +1155,10 @@ def _archidekt_stats(a: dict[str, Any] | None) -> str:
         f"{a['requests']} sent, {a['cache_hits']} answered from cache, {a['retries']} retried, "
         f"{a['rate_limited']} slowed down by Archidekt"
     )
-    return _stat("Archidekt request limits", limits) + _stat("Archidekt requests since start", counts)
+    return _row("Archidekt request limits", limits) + _row("Archidekt requests since start", counts)
 
 
-def _cleanup_text(c: dict[str, Any]) -> str:
+def _cleanup_text(c: dict[str, Any], *, now: float | None = None) -> str:
     """The removed-member clean-up's state in one line that ends with what to do next
     (idp_sweep.AuthentikSweep.status). docs/IDP-AUTHENTIK.md section 12 explains each one."""
     st = c.get("state")
@@ -767,13 +1198,13 @@ def _cleanup_text(c: dict[str, Any]) -> str:
             else "no one lost access"
         )
         return _Html(
-            f"Working. Last check at {_when(c['at'])}: {plural(int(c['allowed']), 'member')} with "
+            f"Working. Last check {ui.when(c['at'], now=now)}: {plural(int(c['allowed']), 'member')} with "
             f"access; {what}. Nothing for you to do."
         )
     if st == "failed":
         err = str(c["error"])
         return _Html(
-            f"Not working. The last check at {_when(c['at'])} failed and deleted nothing: "
+            f"Not working. The last check {ui.when(c['at'], now=now)} failed and deleted nothing: "
             f"{html.escape(err)}. To fix: {html.escape(idp_sweep.next_step(err))}"
         )
     return "Not started yet. Reload this page to see its first result."
@@ -787,309 +1218,867 @@ def users_data(state: Any) -> list[dict[str, Any]]:
     ]
 
 
-# -- HTML -------------------------------------------------------------------------
-CURRENT = " aria-current='page'"
+# -- Users ----------------------------------------------------------------------------------------
 
 
-def _nav(active: str) -> str:
-    """The admin pages' own tabs (all six pages): even links in full rows, the current one tinted
-    and marked aria-current, not a second orange button (one orange main button per page)."""
-    links = (("/admin", "Overview"), ("/admin/users", "Users"), ("/admin/activity", "Activity"))
-    links += (
-        ("/admin/metrics", "Metrics"),
-        ("/admin/settings", "Settings"),
-        ("/admin/models", "Card models"),
+def _status_labels(u: Mapping[str, Any], admin_sub: str, *, is_admin: bool) -> str:
+    out = (
+        f"<span class='ui-lbl red'>{BAN_ICON}Disabled</span>"
+        if u["disabled"]
+        else ui.label("Active", "green", "check")
     )
-    return (
-        "<nav class='adm-nav' aria-label='Admin'>"
-        + "".join(f"<a href='{href}'{CURRENT if href == active else ''}>{label}</a>" for href, label in links)
-        + "</nav>"
-    )
+    if is_admin:
+        out += ui.label("Admin", "blue", "shield")
+    if u["sub"] == admin_sub:
+        out += ui.label("You", "grey", "user")
+    return out
 
 
-def _saved_changes(state: Any, sub: str, after: int) -> list[tuple[str, Any, Any]]:
-    """The settings ``sub`` changed in audit rows after id ``after`` (the save that redirected
-    here), oldest first, for the notice after a save; a key changed twice shows its first value
-    and its last."""
-    rows = [
-        r
-        for r in state.db.audit_recent(200, sub=sub)
-        if r["event"] == "setting_changed" and r["id"] > after and isinstance(r.get("detail"), dict)
+def _arch_label(u: Mapping[str, Any], *, name: bool = True) -> str:
+    if u["archidekt_username"]:
+        who = f" <span class='u'>{html.escape(u['archidekt_username'])}</span>" if name else ""
+        return f"<span class='arch'>{ui.label('Linked', 'blue', 'link')}{who}</span>"
+    return f"<span class='arch'>{ui.label('Not linked', 'grey', 'x')}</span>"
+
+
+def _apps_html(u: Mapping[str, Any]) -> str:
+    if not u["clients"]:
+        return "<span class='muted'>none</span>"
+    return "".join(ui.app_chip(c["name"], unnamed=True) for c in u["clients"])
+
+
+def _seen_at(u: Mapping[str, Any]) -> int:
+    return int(u.get("last_seen_at") or u["last_login_at"] or 0)
+
+
+def _users_body(
+    state: Any,
+    admin_sub: str,
+    csrf: str | None,
+    params: Mapping[str, str],
+    *,
+    notice: str = "",
+    now: float | None = None,
+) -> str:
+    """/admin/users: five widgets, then every member as a list with chips, search, the App and
+    Last seen filters and 25 a page; a member opens in a side panel (their own page on a narrow
+    screen) with every detail and action; the ⋮ menu holds the actions too (static/admin.js)."""
+    now = time.time() if now is None else now
+    path = "/admin/users"
+    users = users_data(state)
+    group = state.settings.admin_group
+    admins = {u["sub"] for u in users if group and group in u["groups"]}
+    chip = params.get("chip", "all")
+    if chip not in {c for c, _t in USER_CHIPS}:
+        chip = "all"
+    app = str(params.get("app", ""))[:120]
+    seen = params.get("seen", "") if params.get("seen", "") in SEEN_SECONDS else ""
+    q = " ".join(str(params.get("q", "")).split())[:100]
+    try:
+        offset = max(0, int(params.get("offset", "0") or 0))
+    except ValueError:
+        offset = 0
+    opened = str(params.get("open", ""))
+    box = params.get("box", "")
+    if not users:
+        return (
+            "<div class='adm au'>"
+            + _head("Admin: users", USERS_PURPOSE, path)
+            + notice
+            + "<div class='ui-card'><p>Nobody has signed in yet.</p></div></div>"
+        )
+
+    # the widgets
+    week = [u for u in users if _seen_at(u) >= now - 7 * 86400]
+    newest = max(users, key=lambda u: int(u["first_login_at"] or 0))
+    recent = max(users, key=_seen_at)
+    disabled = [u for u in users if u["disabled"]]
+    linked = [u for u in users if u["archidekt_username"]]
+    app_members: dict[str, int] = {}
+    unnamed_members = 0
+    connections = 0
+    for u in users:
+        connections += len(u["clients"])
+        names = {c["name"] for c in u["clients"]}
+        for n in names:
+            if n:
+                app_members[n] = app_members.get(n, 0) + 1
+            else:
+                unnamed_members += 1
+    app_bits = [
+        f"{n} use {name}" if n != 1 else f"1 uses {name}"
+        for name, n in sorted(app_members.items(), key=lambda kv: (-kv[1], kv[0].casefold()))
     ]
-    out: dict[str, tuple[Any, Any]] = {}
-    for r in reversed(rows):
-        key = r["detail"].get("key")
-        if key not in MANAGED_SETTINGS:
-            continue
-        before = out[key][0] if key in out else r["detail"].get("previous")
-        out[key] = (before, r["detail"].get("value"))
-    return [(k, b, a) for k, (b, a) in out.items() if b != a]
-
-
-def _notice(ok: str | None, err: str | None) -> str:
-    if ok in OK_MESSAGES:
-        return f"<div class='notice ok'>{html.escape(OK_MESSAGES[ok])}</div>"
-    if err in ERR_MESSAGES:
-        return _err(ERR_MESSAGES[err])
-    return ""
-
-
-def _who(u: dict[str, Any]) -> str:
-    return html.escape(str(u.get("preferred_username") or u.get("email") or u.get("sub") or ""))
-
-
-class _Html(str):
-    """A value that is already HTML (escaped text plus markup such as a <time>): _stat keeps it."""
-
-
-def _stat(label: str, value: Any) -> str:
-    shown = value if isinstance(value, _Html) else html.escape(str(value))
-    return f"<dt>{html.escape(label)}</dt><dd><strong>{shown}</strong></dd>"
-
-
-def _sparkline(values: list[int], *, label: str, width: int = 240, height: int = 36) -> str:
-    """A 30-day line as inline SVG (no script, no external request; CSP unchanged)."""
-    if not values:
-        return ""
-    top = max(max(values), 1)
-    step = width / max(len(values) - 1, 1)
-    pts = " ".join(
-        f"{i * step:.1f},{height - 2 - (v / top) * (height - 4):.1f}" for i, v in enumerate(values)
-    )
-    return (
-        f"<svg role='img' viewBox='0 0 {width} {height}' width='{width}' height='{height}' "
-        "preserveAspectRatio='none'>"
-        f"<title>{html.escape(label)}: {', '.join(str(v) for v in values)}</title>"
-        f"<polyline fill='none' stroke='var(--orange)' stroke-width='2' points='{pts}'/></svg>"
-    )
-
-
-def _mode_name(mode: object) -> str:
-    """An approval mode as the Guide names it, with the word its setting takes: "Semi-auto (semi)"."""
-    from .modes import MODE_NAMES
-
-    return f"{MODE_NAMES.get(str(mode), str(mode))} ({mode})"
-
-
-def _overview_body(state: Any) -> str:
-    d = overview_data(state)
-    props = d["proposals"]
-    cards = [
-        "<div class='card'><h2>Users</h2><dl class='meta'>"
-        + _stat("Signed in at least once", d["users"])
-        + _stat("Disabled", d["disabled"])
-        + _stat("Linked to Archidekt", d["linked"])
-        + "</dl></div>",
-        f"<div class='card'><h2>Last {d['days']} days</h2><dl class='meta'>"
-        + _stat("Proposals", sum(props.values()))
-        + "".join(_stat(f"&nbsp;&nbsp;{st}".replace("&nbsp;", " "), n) for st, n in sorted(props.items()))
-        + _stat("Applies", d["applies"])
-        + _stat("Tool calls", d["tool_calls"])
-        + _stat("Errors", d["errors"])
-        + "</dl></div>",
+    if unnamed_members:
+        app_bits.append(f"{unnamed_members} an unnamed app")
+    if app_bits:
+        app_bits[0] = app_bits[0].replace(" use ", " members use ", 1).replace("1 uses ", "1 member uses ", 1)
+    top_app = max(app_members.items(), key=lambda kv: kv[1])[0] if app_members else ""
+    newest_disabled = max(disabled, key=lambda u: int(u["disabled_at"] or 0)) if disabled else None
+    widgets = [
+        ui.widget(
+            "Members",
+            "user",
+            len(users),
+            unit="signed in",
+            detail_html=f"Newest: {_member_html(newest)}, {ui.when(newest['first_login_at'], now=now)}",
+            actions=[ui.button_link("Show all", path)],
+        ),
+        ui.widget(
+            "Active in 7 days",
+            "activity",
+            len(week),
+            unit=f"of {len(users)}",
+            detail_html=f"Most recent: {_member_html(recent)}, {ui.when(_seen_at(recent), now=now)}"
+            if week
+            else "",
+            actions=[ui.button_link("Activity", "/admin/activity?time=7d")],
+        ),
+        ui.widget(
+            "Disabled",
+            "x",
+            len(disabled),
+            detail_html=(
+                f"{_member_html(newest_disabled)}, since {ui.when(newest_disabled['disabled_at'], now=now)}"
+                if newest_disabled
+                else "No account is disabled"
+            ),
+            actions=[ui.button_link("Show them", _href(path, chip="disabled"))],
+            tone="alert" if disabled else "",
+        ),
+        ui.widget(
+            "Linked to Archidekt",
+            "link",
+            len(linked),
+            unit=f"of {len(users)}",
+            detail=f"{len(users) - len(linked)} not linked",
+            actions=[ui.button_link("Not linked", _href(path, chip="notlinked"))],
+        ),
+        ui.widget(
+            "Connected apps",
+            "layers",
+            connections,
+            unit="connections",
+            detail=", ".join(app_bits) if app_bits else "No app is connected",
+            actions=[ui.button_link(f"{top_app} only", _href(path, app=top_app))] if top_app else (),
+            wide_sm=True,
+        ),
     ]
-    sysd = d["system"]
-    if not sysd["backups_enabled"]:
-        backup = "off (MTG_BACKUP_DIR not set)"
-    elif sysd["last_backup_at"]:
-        backup = _Html(_when(sysd["last_backup_at"]))
-    else:
-        backup = "none yet"
-    if not sysd["backup_copies_enabled"]:
-        copies = "off (MTG_BACKUP_COPY_DIR not set)"
-    elif sysd["last_backup_copy_at"]:
-        copies = _Html(_when(sysd["last_backup_copy_at"]))
-    else:
-        copies = "none yet"
-    size = sysd["database_bytes"]
-    cards.append(
-        "<div class='card'><h2>System</h2><dl class='meta'>"
-        + _stat("Version", sysd["version"])
-        + _stat("Database schema", sysd["schema_version"])
-        + _stat("Database size", f"{size / 1048576:.1f} MB" if size is not None else "in memory")
-        + _stat("Newest backup", backup)
-        + _stat("Newest backup copy", copies)
-        + _stat("Newest before-upgrade copy", _before_upgrade_text(sysd.get("before_upgrade")))
-        + _stat("Research service (Mystic Forge)", sysd["mystic_forge"])
-        + _stat("Simulation engine (Forge)", sysd["forge"])
-        + _stat("Removed-member clean-up", _cleanup_text(sysd["member_cleanup"]))
-        + _archidekt_stats(sysd.get("archidekt"))
-        # the live settings; each by its name, with the setting's own word
-        + _stat("Default approval mode", _mode_name(state.decks.live.get("approval_mode_default")))
-        + _stat("Highest approval mode allowed", _mode_name(state.decks.live.get("approval_mode_max")))
-        + "</dl>"
-        + (
-            _err(f"The last nightly backup failed ({sysd['last_backup_error']}). Check the gateway's log.")
-            if sysd["last_backup_error"]
+
+    # the list: the search, app and seen filters, then the chips counted over that
+    def base_ok(u: Mapping[str, Any]) -> bool:
+        if q:
+            low = q.casefold()
+            hay = " ".join(str(u.get(k) or "") for k in ("preferred_username", "email", "name")).casefold()
+            if low not in hay:
+                return False
+        if app == "none":
+            if u["clients"]:
+                return False
+        elif app == "unnamed":
+            if not any(not c["name"] for c in u["clients"]):
+                return False
+        elif app and not any(c["name"] == app for c in u["clients"]):
+            return False
+        if seen == "not30d":
+            return _seen_at(u) < now - SEEN_SECONDS[seen]
+        if seen:
+            return _seen_at(u) >= now - SEEN_SECONDS[seen]
+        return True
+
+    chip_ok = {
+        "all": lambda u: True,
+        "active": lambda u: not u["disabled"],
+        "disabled": lambda u: u["disabled"],
+        "linked": lambda u: bool(u["archidekt_username"]),
+        "notlinked": lambda u: not u["archidekt_username"],
+        "admins": lambda u: u["sub"] in admins,
+    }
+    base = [u for u in users if base_ok(u)]
+    chips = [
+        ui.Chip(
+            text,
+            sum(1 for u in base if chip_ok[c](u)),
+            _href(path, chip=c, app=app, seen=seen, q=q),
+            current=chip == c,
+        )
+        for c, text in USER_CHIPS
+    ]
+    shown = [u for u in base if chip_ok[chip](u)]
+    total = len(shown)
+    offset = min(offset, max(0, (total - 1) // PER_PAGE * PER_PAGE))
+    page_users = shown[offset : offset + PER_PAGE]
+    app_names = sorted({c["name"] for u in users for c in u["clients"] if c["name"]}, key=str.casefold)
+    app_opts = [("", "Any app")] + [(n, n) for n in app_names]
+    if any(not c["name"] for u in users for c in u["clients"]):
+        app_opts.append(("unnamed", ui.UNNAMED_APP))
+    app_opts.append(("none", "No app"))
+    tools = ui.toolbar(
+        path,
+        search_label="Search members",
+        placeholder="Search name, email or username",
+        q=q,
+        filters=[
+            ui.filter_select("app", "App", app_opts, app),
+            ui.filter_select("seen", "Last seen", SEEN, seen),
+        ],
+        keep={"chip": chip if chip != "all" else ""},
+    )
+    list_href = _href(path, chip=chip, app=app, seen=seen, q=q, offset=offset)
+
+    def open_href(sub: str, **more: Any) -> str:
+        return _href(path, chip=chip, app=app, seen=seen, q=q, offset=offset, open=sub, **more)
+
+    rows = []
+    for u in page_users:
+        sub = u["sub"]
+        status = _status_labels(u, admin_sub, is_admin=sub in admins)
+        when = ui.when(_seen_at(u), now=now)
+        email = (
+            f"<span class='deck'>{html.escape(u['email'])}</span>"
+            if u.get("email") and u.get("preferred_username")
             else ""
         )
-        + (
-            _err(f"The last backup copy failed ({sysd['last_backup_copy_error']}). Check the copy folder.")
-            if sysd.get("last_backup_copy_error")
-            else ""
+        rows.append(
+            f"<div class='tr mem{' on' if sub == opened else ''}' data-open='{html.escape(open_href(sub))}' "
+            f"data-name='{html.escape(_member_text(u))}' data-sub='{html.escape(sub)}' "
+            f"data-act='/admin/users/{quote(sub, safe='')}'"
+            f"{' data-disabled' if u['disabled'] else ''}{' data-you' if sub == admin_sub else ''}"
+            f"{' data-linked' if u['archidekt_username'] else ''} "
+            f"data-box-disable='{html.escape(open_href(sub, box='disable'))}' "
+            f"data-box-delete='{html.escape(open_href(sub, box='delete'))}' "
+            f"data-activity='/admin/activity?sub={quote(sub, safe='')}'>"
+            f"<span class='title'><a class='t' href='{html.escape(open_href(sub))}'>{_member_html(u)}</a>"
+            f"{email}"
+            f"<span class='sub'>{status} {_arch_label(u)} {_apps_html(u)}</span>"
+            f"<span class='sm-only'>{status} {_arch_label(u, name=False)} {when}</span></span>"
+            f"<span class='md-hide labs'>{status}</span>"
+            f"<span class='md-hide'>{_arch_label(u)}</span>"
+            f"<span class='md-hide apps'>{_apps_html(u)}</span>"
+            f"<span class='sm-hide'>{when}</span>"
+            f"<span class='act'><a class='kebab' href='{html.escape(open_href(sub))}' "
+            f"aria-label='Actions for {html.escape(_member_text(u))}' aria-haspopup='menu' title='Menu'>"
+            f"{icon('more')}</a></span></div>"
         )
-        + _cleanup_warning(sysd["member_cleanup"])
-        + _went_back_notice(sysd.get("before_upgrade"))
-        + _chatgpt_name_warning(state.settings)
+    if rows:
+        table = (
+            ui.table_open(
+                "minmax(0,1.5fr) 11rem 10rem minmax(0,1fr) 6.5rem 44px",
+                "minmax(0,1fr) 6.5rem 44px",
+                "minmax(0,1fr) 44px",
+                label="All members",
+            )
+            + ui.table_header(
+                [
+                    ui.Column("Member"),
+                    ui.Column("Status", "md-hide"),
+                    ui.Column("Archidekt", "md-hide"),
+                    ui.Column("Apps", "md-hide"),
+                    ui.Column("Last seen", "sm-hide"),
+                    ui.Column("", html="<span class='sr-only'>Actions</span>"),
+                ]
+            )
+            + "".join(rows)
+            + "</div>"
+        )
+    else:
+        table = (
+            "<div class='ui-card'><p>Nobody matches these filters. "
+            f"<a href='{path}'>Show everyone</a></p></div>"
+        )
+    newer = (
+        _href(path, chip=chip, app=app, seen=seen, q=q, offset=max(0, offset - PER_PAGE))
+        if offset > 0
+        else None
+    )
+    older = (
+        _href(path, chip=chip, app=app, seen=seen, q=q, offset=offset + PER_PAGE)
+        if offset + PER_PAGE < total
+        else None
+    )
+    pager = ui.pager(offset, total, newer_href=newer, older_href=older)
+    list_html = (
+        ui.widgets(widgets)
+        + ui.list_head("All members", len(base), note="Newest sign-in first")
+        + ui.chips(chips)
+        + tools
+        + table
+        + pager
+    )
+    person = next((u for u in users if u["sub"] == opened), None) if opened else None
+    panel = (
+        _user_panel(
+            person,
+            admin_sub,
+            csrf,
+            list_href,
+            open_href,
+            box,
+            is_admin=bool(person) and person["sub"] in admins,
+            now=now,
+        )
+        if person
+        else ""
+    )
+    return (
+        f"<div class='adm au{' opened' if person else ''}'>"
+        + _head("Admin: users", USERS_PURPOSE, path)
+        + notice
+        + ui.split(list_html, panel)
         + "</div>"
     )
-    cards.append(_updates_card(sysd["updates"]))
-    rows = []
-    for kind, by_day in d["series"].items():
-        values = list(by_day.values())
-        rows.append(
-            f"<li><span class='name'>{html.escape(kind)}</span>"
-            f"{_sparkline(values, label=kind)}<span class='when'>{sum(values)}</span></li>"
-        )
-    cards.append(
-        f"<div class='card'><h2>Activity by day</h2><ul class='plain plist'>{''.join(rows)}</ul>"
-        "<p class='muted small'>Counts are per UTC day. Tool calls and errors come from the MCP "
-        "middleware, API calls from the JSON API, admin actions from this page.</p></div>"
-    )
-    return "".join(cards)
 
 
-MODELS_PER_PAGE = 100
-
-
-def _models_body(state: Any, csrf: str | None, page_no: int) -> str:
-    """The simulator's kept card models: who added each (admins only), when, and
-    a Remove button per model."""
-    total = state.db.count_all_card_models()
-    intro = (
-        "<p class='muted small'>The card models the simulator keeps, most recently changed first. "
-        "Each member keeps their own models, and a model is used only in that member's "
-        "simulations. Only admins see who added it.</p>"
-    )
-    if not total:
-        return f"<div class='card'>{intro}<p>No card models are kept yet.</p></div>"
-    pages = (total + MODELS_PER_PAGE - 1) // MODELS_PER_PAGE
-    page_no = min(page_no, pages)  # a page past the end shows the last one (and never overflows SQLite)
-    rows = state.db.list_card_models(limit=MODELS_PER_PAGE, offset=(page_no - 1) * MODELS_PER_PAGE)
+def _user_panel(
+    u: Mapping[str, Any],
+    admin_sub: str,
+    csrf: str | None,
+    list_href: str,
+    open_href: Callable[..., str],
+    box: str,
+    *,
+    is_admin: bool,
+    now: float,
+) -> str:
+    """One member's side panel: every detail (the subject id and the apps' client ids only here),
+    the actions, and the Disable and Delete data boxes."""
+    sub = u["sub"]
+    you = sub == admin_sub
+    name = _member_text(u)
     csrf_in = f"<input type='hidden' name='csrf' value='{html.escape(csrf or '')}'>"
-    people: dict[str, str] = {}
-    items = []
-    for r in rows:
-        adder = str(r["added_by"])
-        if adder not in people:
-            # an account with neither name reads as the Activity log says it, not as its raw id
-            people[adder] = html.escape(member_name(state.db, adder) or adder)
-        items.append(
-            f"<li><div class='model'><span class='name'>{html.escape(str(r['name']))}</span>"
-            f"<span class='muted small'>added by {people[adder]}, {_when(r['added_at'])}"
-            + (f"; changed {_when(r['updated_at'])}" if r["updated_at"] != r["added_at"] else "")
-            + "</span></div>"
-            f"<form method='post' action='/admin/models'>{csrf_in}"
-            f"<input type='hidden' name='card_key' value='{html.escape(str(r['card_key']))}'>"
-            f"<input type='hidden' name='added_by' value='{html.escape(adder)}'>"
-            f"<input type='hidden' name='page' value='{page_no}'>"
-            f"<button class='danger' aria-label='Remove the model of {html.escape(str(r['name']))} "
-            f"added by {people[adder]}'>Remove</button></form></li>"
+    action = f"/admin/users/{quote(sub, safe='')}"
+    apps = (
+        "".join(
+            f"<div>{ui.app_chip(c['name'], unnamed=True)} <code>{html.escape(c['client_id'])}</code></div>"
+            for c in u["clients"]
         )
-    pager = ""
-    if pages > 1:
-        links = []
-        if page_no > 1:
-            links.append(f"<a class='btn' href='/admin/models?page={page_no - 1}'>Newer</a>")
-        if page_no < pages:
-            links.append(f"<a class='btn' href='/admin/models?page={page_no + 1}'>Older</a>")
-        pager = (
-            f"<div class='actions'>{''.join(links)}</div>"
-            f"<p class='muted small'>Page {page_no} of {pages}.</p>"
-        )
-    count = f"{total} card model{'s' if total != 1 else ''} kept."
-    return (
-        f"<div class='card'>{intro}<p class='muted small'>{count}</p>"
-        f"<ul class='plain plist models'>{''.join(items)}</ul>{pager}</div>"
+        or "none"
     )
-
-
-def _users_body(state: Any, admin_sub: str, csrf: str | None) -> str:
-    users = users_data(state)
-    if not users:
-        return "<div class='card'><p>Nobody has signed in yet.</p></div>"
-    csrf_in = f"<input type='hidden' name='csrf' value='{html.escape(csrf or '')}'>"
-    items = []
-    for u in users:
-        sub = u["sub"]
-        badges = ""
-        if u["disabled"]:
-            badges += "<span class='badge danger'>disabled</span>"
-        if u["archidekt_username"]:
-            badges += "<span class='badge ok'>archidekt</span>"
-        if sub == admin_sub:
-            badges += "<span class='badge'>you</span>"
-        apps = ", ".join(html.escape(c["name"] or c["client_id"][:40]) for c in u["clients"]) or "none"
-        meta = (
-            "<dl class='meta'>"
-            f"<dt>Name</dt><dd>{html.escape(u.get('name') or '')}</dd>"
-            f"<dt>Email</dt><dd>{html.escape(u.get('email') or '')}</dd>"
-            f"<dt>Subject</dt><dd><code>{html.escape(sub)}</code></dd>"
-            f"<dt>Groups</dt><dd>{html.escape(', '.join(u['groups']) or 'none')}</dd>"
-            f"<dt>First sign-in</dt><dd>{_when(u['first_login_at'])}</dd>"
-            f"<dt>Last seen</dt><dd>{_when(u.get('last_seen_at') or u['last_login_at'])}</dd>"
-            f"<dt>Archidekt</dt><dd>{html.escape(u['archidekt_username'] or 'not linked')}</dd>"
-            f"<dt>Connected apps</dt><dd>{apps}</dd>"
-            f"<dt>Active tokens</dt><dd>{u['active_tokens']}</dd>"
-            f"<dt>Browser sessions</dt><dd>{u['browser_sessions']}</dd>"
-            + (f"<dt>Disabled</dt><dd>{_when(u['disabled_at'])}</dd>" if u["disabled"] else "")
-            + "</dl>"
-        )
-        buttons = ""
-        if u["disabled"]:
-            buttons += "<button name='action' value='enable' class='primary'>Enable</button>"
-        elif sub != admin_sub:
-            buttons += "<button name='action' value='disable' class='danger'>Disable</button>"
-        buttons += "<button name='action' value='revoke'>Revoke tokens and sessions</button>"
-        if u["archidekt_username"]:
-            buttons += "<button name='action' value='unlink'>Unlink Archidekt</button>"
-        buttons += f"<a class='btn' href='/admin/activity?sub={quote(sub, safe='')}'>Activity</a>"
-        delete_form = ""
-        if sub != admin_sub:
-            delete_form = (
-                f"<form method='post' action='/admin/users/{quote(sub, safe='')}'>{csrf_in}"
-                "<label class='small'><input type='checkbox' name='confirm' value='yes' required> "
-                "Delete everything the gateway keeps about this person</label>"
-                "<div class='actions'><button name='action' value='delete_data' class='danger'>"
-                "Delete data</button></div></form>"
-            )
-        items.append(
-            f"<li><span class='name'>{_who(u)}</span>{badges}"
-            f"<span class='when'>seen {_when(u.get('last_seen_at') or u['last_login_at'])}</span>"
-            f"<details><summary>Details and actions</summary>{meta}"
-            f"<form method='post' action='/admin/users/{quote(sub, safe='')}'>{csrf_in}"
-            f"<div class='actions'>{buttons}</div></form>{delete_form}</details></li>"
-        )
-    return (
-        f"<div class='card'><p class='muted small'>{len(users)} user{'s' if len(users) != 1 else ''}. "
-        "Users and groups come from the identity provider; disabling here refuses the account on this "
-        "gateway only.</p>"
-        f"<ul class='plain plist'>{''.join(items)}</ul></div>"
+    rows = [
+        ("Name", html.escape(u.get("name") or "") or "<span class='muted'>none</span>"),
+        ("Email", html.escape(u.get("email") or "") or "<span class='muted'>none</span>"),
+        ("Subject", f"<code>{html.escape(sub)}</code>"),
+        ("Groups", html.escape(", ".join(u["groups"]) or "none")),
+        ("First sign-in", ui.when(u["first_login_at"], now=now)),
+        ("Last seen", ui.when(_seen_at(u), now=now)),
+        ("Archidekt", html.escape(u["archidekt_username"] or "not linked")),
+        ("Connected apps", apps),
+        ("Active tokens", str(u["active_tokens"])),
+        ("Browser sessions", str(u["browser_sessions"])),
+    ]
+    if u["disabled"]:
+        rows.append(("Disabled", ui.when(u["disabled_at"], now=now)))
+    note = (
+        "<p class='note'>This is you. You can't disable your own account here. To delete your data, use "
+        "Delete my data on your Account page.</p>"
+        if you
+        else ""
     )
+    buttons = ""
+    if u["disabled"]:
+        buttons += "<button name='action' value='enable' class='btn-plain'>Enable</button>"
+    elif not you:
+        buttons += ui.box_opener("Disable…", open_href(sub, box="disable"), "disable", kind="danger")
+    buttons += "<button name='action' value='revoke' class='btn-plain'>Revoke tokens and sessions</button>"
+    if u["archidekt_username"]:
+        buttons += "<button name='action' value='unlink' class='btn-plain'>Unlink Archidekt</button>"
+    buttons += ui.button_link("Activity", f"/admin/activity?sub={quote(sub, safe='')}")
+    actions = f"<form method='post' action='{action}' class='ui-actions'>{csrf_in}{buttons}</form>"
+    boxes = ""
+    delete = ""
+    if not you:
+        opener = ui.box_opener("Delete data…", open_href(sub, box="delete"), "delete", kind="danger")
+        delete = f"<div class='au-del'>{opener}</div>"
+        boxes += ui.box(
+            "disable",
+            f"Disable “{name}”?",
+            f"<form id='disf' method='post' action='{action}'>{csrf_in}"
+            "<input type='hidden' name='action' value='disable'>"
+            f"<p>“{html.escape(name)}” can't sign in or use their apps on this gateway until you enable the "
+            "account again. Their tokens and sessions are revoked now. The account at the identity provider "
+            "is not changed.</p></form>",
+            actions=[
+                ui.box_button("Cancel", cancel=True),
+                ui.box_button("Disable account", kind="danger-solid", form="disf"),
+            ],
+            open=box == "disable" and not u["disabled"],
+            close_href=open_href(sub),
+        )
+        boxes += ui.box(
+            "delete",
+            f"Delete “{name}”'s data?",
+            f"<form id='delf' method='post' action='{action}'>{csrf_in}"
+            "<input type='hidden' name='action' value='delete_data'>"
+            f"<p>This deletes everything the gateway keeps about “{html.escape(name)}”: their settings, "
+            "proposals, history, reports, card models and the stored Archidekt sign-in. "
+            "Their decks on Archidekt are not "
+            "touched. This can't be undone.</p>"
+            "<label class='check'><input type='checkbox' name='confirm' value='yes' required> "
+            "Delete everything the gateway keeps about this person</label></form>",
+            actions=[
+                ui.box_button("Cancel", cancel=True),
+                ui.box_button("Delete data", kind="danger-solid", form="delf", attrs="data-needs-tick"),
+            ],
+            open=box == "delete",
+            close_href=open_href(sub),
+        )
+    heading = _member_html(u)
+    body = (
+        f"<div class='pills'>{_status_labels(u, admin_sub, is_admin=is_admin)}</div>"
+        + ui.meta(rows)
+        + note
+        + actions
+        + delete
+        + boxes
+    )
+    return ui.side_panel(heading, body, label=name, close_href=list_href, back_text="All members")
 
 
-def _metrics_body(state: Any) -> str:
-    totals = state.db.metrics_totals(DAYS)
-    by_kind: dict[str, list[dict[str, Any]]] = {}
+# -- Metrics ---------------------------------------------------------------------------------------
+
+
+def _metrics_body(state: Any, params: Mapping[str, str]) -> str:
+    """/admin/metrics: a widget per kind with its chart over the period, then one table of every
+    counted name in plain words (the raw name in the row's details), 25 a page."""
+    path = "/admin/metrics"
+    try:
+        days = int(params.get("days", str(DAYS)))
+    except ValueError:
+        days = DAYS
+    if days not in METRIC_DAYS:
+        days = DAYS
+    kind = str(params.get("kind", "all"))[:40]
+    q = " ".join(str(params.get("q", "")).split())[:100]
+    try:
+        offset = max(0, int(params.get("offset", "0") or 0))
+    except ValueError:
+        offset = 0
+    opened = str(params.get("open", ""))
+    totals = state.db.metrics_totals(days)
+    series = _series(state, days)
+    kind_total: dict[str, int] = {}
     for t in totals:
-        by_kind.setdefault(t["kind"], []).append(t)
+        kind_total[t["kind"]] = kind_total.get(t["kind"], 0) + int(t["n"])
+    known = [k for k in (*METRIC_KINDS, "card")]
+    kinds = known + sorted(k for k in kind_total if k not in known)
+    if kind not in kinds and kind != "all":
+        kind = "all"
+
+    def words(k: str, name: str) -> str:
+        return tool_labels.metric_label(k, name) if k in known else name
+
+    def kind_name(k: str) -> str:
+        return tool_labels.METRIC_KINDS.get(k, k)
+
+    def first(k: str) -> dict[str, Any] | None:
+        return next((t for t in totals if t["kind"] == k), None)
+
+    def busiest(k: str, lead: str) -> str:
+        t = first(k)
+        return f"{lead}: {words(k, t['name'])}, {int(t['n']):,}" if t else ""
+
+    def show(k: str) -> str:
+        return _href(path, kind=k, days=days if days != DAYS else "", q=q)
+
+    unit = f"in {days} days"
+    widgets = [
+        ui.widget(
+            "Tool calls",
+            "activity",
+            kind_total.get("tool", 0),
+            unit=unit,
+            detail_html=f"<span class='tx'>{html.escape(busiest('tool', 'Busiest'))}</span>"
+            + _spark(list(series.get("tool", {}).values()), label="Tool calls"),
+            actions=[ui.button_link("Show them", show("tool"))],
+        ),
+        ui.widget(
+            "Errors",
+            "alert",
+            kind_total.get("error", 0),
+            unit=unit,
+            detail_html=f"<span class='tx'>{html.escape(busiest('error', 'Most'))}</span>"
+            + _spark(list(series.get("error", {}).values()), label="Errors"),
+            actions=[
+                ui.button_link("Show them", show("error")),
+                ui.button_link("Activity", "/admin/activity?kind=failed"),
+            ],
+            tone="alert" if kind_total.get("error") else "",
+        ),
+        ui.widget(
+            "API calls",
+            "link",
+            kind_total.get("api", 0),
+            unit=unit,
+            detail_html="<span class='tx'>From the app and the website</span>"
+            + _spark(list(series.get("api", {}).values()) or [0] * days, label="API calls"),
+            actions=[ui.button_link("Show them", show("api"))],
+        ),
+        ui.widget(
+            "Admin actions",
+            "shield",
+            kind_total.get("admin", 0),
+            unit=unit,
+            detail_html="<span class='tx'>From the Users page and the admin API</span>"
+            + _spark(list(series.get("admin", {}).values()) or [0] * days, label="Admin actions"),
+            actions=[ui.button_link("Show them", show("admin"))],
+        ),
+    ]
+    head = _head("Admin: metrics", "Usage and errors, counted per UTC day.", path) + ui.widgets(widgets)
     if not totals:
-        return f"<div class='card'><p>No activity counted in the last {DAYS} days.</p></div>"
-    cards = []
-    titles = {"tool": "Tool calls", "error": "Errors", "api": "API calls"}
-    for kind in sorted(by_kind, key=lambda k: (k not in METRIC_KINDS, k)):
-        rows = by_kind[kind]
-        items = "".join(
-            f"<li><span class='name'>{html.escape(str(t['name']))}</span>"
-            f"<span class='when'>{t['n']}</span></li>"
-            for t in rows
+        none = f"<div class='ui-card'><p>No activity counted in the last {days} days.</p></div>"
+        return f"<div class='adm am'>{head}{none}</div>"
+    low = q.casefold()
+    base = [
+        t
+        for t in totals
+        if not q or low in words(t["kind"], t["name"]).casefold() or low in str(t["name"]).casefold()
+    ]
+    chips = [
+        ui.Chip("All", len(base), _href(path, days=days if days != DAYS else "", q=q), current=kind == "all")
+    ]
+    for k in kinds:
+        n = sum(1 for t in base if t["kind"] == k)
+        if n or k in known[:4]:
+            chips.append(ui.Chip(kind_name(k), n, show(k), current=kind == k))
+    rows_all = [t for t in base if kind == "all" or t["kind"] == kind]
+    total = len(rows_all)
+    offset = min(offset, max(0, (total - 1) // PER_PAGE * PER_PAGE))
+    page_rows = rows_all[offset : offset + PER_PAGE]
+    tools = ui.toolbar(
+        path,
+        search_label="Search names",
+        placeholder="Search name",
+        q=q,
+        filters=[
+            ui.filter_select("days", "Period", [(str(n), f"Last {n} days") for n in METRIC_DAYS], str(days))
+        ],
+        keep={"kind": kind if kind != "all" else ""},
+    )
+    rows = []
+    for i, t in enumerate(page_rows):
+        k, name, n = str(t["kind"]), str(t["name"]), int(t["n"])
+        key = f"{k}:{name}"
+        is_open = opened == key
+        rid = f"m-{offset + i}"
+        pct = round(n * 100 / max(kind_total.get(k, n), 1))
+        bar = (
+            f"<span class='am-bar' title='{pct}% of {html.escape(kind_name(k).lower())}'>"
+            f"<i style='width:{pct}%'></i></span>"
+            f"<span class='am-p'>{pct}%</span>"
         )
-        total = sum(int(t["n"]) for t in rows)
-        cards.append(
-            f"<div class='card'><h2>{html.escape(titles.get(kind, kind.title()))} "
-            f"<span class='badge'>{total}</span></h2><ul class='plain plist'>{items}</ul></div>"
+        kind_lbl = ui.label(
+            KIND_WORDS.get(k, k), "red" if k == "error" else "grey", KIND_ICONS.get(k, "stats")
         )
-    return f"<p class='muted small'>Totals over the last {DAYS} UTC days.</p>" + "".join(cards)
+        toggle = (
+            _href(
+                path,
+                kind=kind,
+                days=days if days != DAYS else "",
+                q=q,
+                offset=offset,
+                open="" if is_open else key,
+            )
+            + f"#{rid}"
+        )
+        more = ui.meta(
+            [
+                ("Recorded as", f"<code>{html.escape(name)}</code>"),
+                ("Kind", html.escape(KIND_WORDS.get(k, k))),
+                ("Count", f"{n:,} in {days} days"),
+            ]
+        )
+        rows.append(
+            f"<div class='tr mrow{' open' if is_open else ''}' id='{rid}' data-more>"
+            f"<span class='title'><a class='t' href='{html.escape(toggle)}' role='button' "
+            f"aria-expanded='{'true' if is_open else 'false'}' aria-controls='{rid}-more'>"
+            f"{html.escape(words(k, name))}</a>"
+            f"<span class='sub'>{kind_lbl}</span>"
+            f"<span class='sm-only'>{kind_lbl} <span class='am-n'>{n:,}</span> {bar}</span></span>"
+            f"<span class='md-hide'>{kind_lbl}</span><span class='sm-hide am-n'>{n:,}</span>"
+            f"<span class='sm-hide'>{bar}</span>"
+            f"<div class='more-body' id='{rid}-more'{'' if is_open else ' hidden'}>{more}</div></div>"
+        )
+    if rows:
+        table = (
+            ui.table_open(
+                "minmax(0,1fr) 9.5rem 5rem 10rem",
+                "minmax(0,1fr) 4.5rem 10rem",
+                "minmax(0,1fr)",
+                label="Everything counted",
+            )
+            + ui.table_header(
+                [
+                    ui.Column("Name"),
+                    ui.Column("Kind", "md-hide"),
+                    ui.Column("Count", "sm-hide"),
+                    ui.Column("Share", "sm-hide"),
+                ]
+            )
+            + "".join(rows)
+            + "</div>"
+        )
+    else:
+        table = (
+            "<div class='ui-card'><p>Nothing counted matches these filters. "
+            f"<a href='{path}'>Show everything</a></p></div>"
+        )
+    newer = (
+        _href(path, kind=kind, days=days if days != DAYS else "", q=q, offset=max(0, offset - PER_PAGE))
+        if offset > 0
+        else None
+    )
+    older = (
+        _href(path, kind=kind, days=days if days != DAYS else "", q=q, offset=offset + PER_PAGE)
+        if offset + PER_PAGE < total
+        else None
+    )
+    return (
+        f"<div class='adm am'>{head}"
+        + ui.list_head("Everything counted", len(base), note="Busiest first")
+        + ui.chips(chips)
+        + tools
+        + table
+        + ui.pager(offset, total, newer_href=newer, older_href=older)
+        + "</div>"
+    )
+
+
+# -- Card models ------------------------------------------------------------------------------------
+
+
+def _size_text(size: Any) -> str:
+    try:
+        n = int(size)
+    except (TypeError, ValueError):
+        return ""
+    return f"{n / 1024:.1f} KB" if n >= 1024 else f"{n} B"
+
+
+def _models_query(db: Any, q: str, member: str, since: int | None) -> tuple[str, list[Any]]:
+    where, args = ["1"], []
+    if q:
+        where.append("name LIKE ? ESCAPE '\\'")
+        args.append("%" + q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%")
+    if member:
+        where.append("added_by = ?")
+        args.append(member)
+    if since is not None:
+        where.append("updated_at >= ?")
+        args.append(since)
+    return " AND ".join(where), args
+
+
+def _models_body(
+    state: Any, csrf: str | None, params: Mapping[str, str], *, notice: str = "", now: float | None = None
+) -> str:
+    """/admin/models: three widgets, search by card, a member filter, the table (25 a page) and
+    the Remove box (opened from the row's menu; the ?remove= address draws it open)."""
+    now = time.time() if now is None else now
+    path = "/admin/models"
+    db = state.db
+    q = " ".join(str(params.get("q", "")).split())[:100]
+    member = str(params.get("member", ""))[:200]
+    changed = "7d" if params.get("changed") == "7d" else ""
+    try:
+        offset = max(0, int(params.get("offset", "0") or 0))
+        if "page" in params and "offset" not in params:  # the old address: ?page=N
+            offset = max(0, int(params.get("page", "1")) - 1) * PER_PAGE
+    except ValueError:
+        offset = 0
+    remove_key, remove_by = str(params.get("remove", "")), str(params.get("by", ""))
+    head = _head("Admin: card models", MODELS_PURPOSE, path) + notice
+    total_all = db.count_all_card_models()
+    if not total_all:
+        return (
+            f"<div class='adm amo'>{head}<div class='ui-card'><p>No card models are kept yet.</p></div></div>"
+        )
+    week_since = int(now) - 7 * 86400
+    with db._lock:
+        by_member = db._conn.execute(
+            "SELECT added_by, COUNT(*) AS n FROM card_models GROUP BY added_by ORDER BY n DESC, added_by"
+        ).fetchall()
+        week_rows = db._conn.execute(
+            "SELECT DISTINCT added_by FROM card_models WHERE updated_at >= ?", (week_since,)
+        ).fetchall()
+        week_n = int(
+            db._conn.execute(
+                "SELECT COUNT(*) FROM card_models WHERE updated_at >= ?", (week_since,)
+            ).fetchone()[0]
+        )
+        everyone = int(db._conn.execute("SELECT COUNT(*) FROM users").fetchone()[0])
+        where, args = _models_query(db, q, member, week_since if changed else None)
+        total = int(db._conn.execute(f"SELECT COUNT(*) FROM card_models WHERE {where}", args).fetchone()[0])
+        offset = min(offset, max(0, (total - 1) // PER_PAGE * PER_PAGE))
+        rows = [
+            dict(r)
+            for r in db._conn.execute(
+                "SELECT card_key, name, added_by, added_at, updated_at, "
+                "length(CAST(model_json AS BLOB)) AS size "
+                f"FROM card_models WHERE {where} "
+                "ORDER BY updated_at DESC, card_key, added_by LIMIT ? OFFSET ?",
+                [*args, PER_PAGE, offset],
+            ).fetchall()
+        ]
+    newest = db.list_card_models(limit=1)
+    people: dict[str, str] = {}
+
+    def who(sub: str) -> str:
+        if sub not in people:
+            name = member_name(db, sub)
+            people[sub] = (
+                "a deleted account" if name is None else (NO_NAME if "no username" in name else name)
+            )
+        return people[sub]
+
+    top = by_member[0] if by_member else None
+    widgets = [
+        ui.widget(
+            "Models kept",
+            "layers",
+            total_all,
+            detail_html=f"Newest change: “{html.escape(str(newest[0]['name']))}”, "
+            + ui.when(newest[0]["updated_at"], now=now)
+            if newest
+            else "",
+            actions=[ui.button_link("Show all", path)],
+        ),
+        ui.widget(
+            "Members with models",
+            "user",
+            len(by_member),
+            unit=f"of {everyone}",
+            detail=f"Most: {who(top['added_by'])}, {plural(int(top['n']), 'model')}" if top else "",
+            actions=[ui.button_link(f"Show {who(top['added_by'])}'s", _href(path, member=top["added_by"]))]
+            if top
+            else (),
+        ),
+        ui.widget(
+            "Changed in 7 days",
+            "clock",
+            week_n,
+            unit="models",
+            detail=("By " + _and_list([who(r["added_by"]) for r in week_rows])) if week_rows else "",
+            actions=[ui.button_link("Show them", _href(path, changed="7d"))],
+            wide_sm=True,
+        ),
+    ]
+    member_opts = [("", "Every member")] + [(r["added_by"], who(r["added_by"])) for r in by_member]
+    tools = ui.toolbar(
+        path,
+        search_label="Search card models",
+        placeholder="Search card name",
+        q=q,
+        filters=[ui.filter_select("member", "Member", member_opts, member)],
+        keep={"changed": changed},
+    )
+    list_href = _href(path, q=q, member=member, changed=changed, offset=offset)
+    items = []
+    for i, r in enumerate(rows):
+        adder, name = str(r["added_by"]), str(r["name"])
+        added, updated = ui.when(r["added_at"], now=now), ui.when(r["updated_at"], now=now)
+        is_changed = r["updated_at"] != r["added_at"]
+        remove_href = _href(
+            path, q=q, member=member, changed=changed, offset=offset, remove=r["card_key"], by=adder
+        )
+        size = _size_text(r["size"])
+        items.append(
+            f"<div class='tr model' id='cm-{offset + i}' data-card='{html.escape(name)}' "
+            f"data-who='{html.escape(who(adder))}' data-remove='{html.escape(remove_href)}' "
+            f"data-member='{html.escape(_href(path, member=adder))}' "
+            f"data-open='/cards?q={quote(name, safe='')}'>"
+            f"<span class='title'><span class='t'>{html.escape(name)}</span>"
+            f"<span class='sub'>added by {html.escape(who(adder))} · {added} · {size}</span>"
+            f"<span class='sm-only'>{html.escape(who(adder))} · "
+            f"{'changed ' + updated if is_changed else 'added ' + added}</span></span>"
+            f"<span class='md-hide'>{html.escape(who(adder))}</span><span class='md-hide'>{added}</span>"
+            f"<span class='sm-hide'>{updated if is_changed else '<span class=muted>—</span>'}</span>"
+            f"<span class='md-hide muted'>{size}</span>"
+            f"<span class='act'><a class='kebab' href='{html.escape(remove_href)}' "
+            f"aria-label='Actions for {html.escape(name)}' "
+            f"aria-haspopup='menu' title='Menu'>{icon('more')}</a></span></div>"
+        )
+    if items:
+        table = (
+            ui.table_open(
+                "minmax(0,1fr) 11rem 6.5rem 6.5rem 4.5rem 44px",
+                "minmax(0,1fr) 6.5rem 44px",
+                "minmax(0,1fr) 44px",
+                label="All card models",
+            )
+            + ui.table_header(
+                [
+                    ui.Column("Card"),
+                    ui.Column("Added by", "md-hide"),
+                    ui.Column("Added", "md-hide"),
+                    ui.Column("Changed", "sm-hide"),
+                    ui.Column("Size", "md-hide"),
+                    ui.Column("", html="<span class='sr-only'>Actions</span>"),
+                ]
+            )
+            + "".join(items)
+            + "</div>"
+        )
+    else:
+        table = f"<div class='ui-card'><p>No card models match. <a href='{path}'>Show all</a></p></div>"
+    newer = (
+        _href(path, q=q, member=member, changed=changed, offset=max(0, offset - PER_PAGE))
+        if offset > 0
+        else None
+    )
+    older = (
+        _href(path, q=q, member=member, changed=changed, offset=offset + PER_PAGE)
+        if offset + PER_PAGE < total
+        else None
+    )
+    box = ""
+    if remove_key and remove_by:
+        with db._lock:
+            found = db._conn.execute(
+                "SELECT name FROM card_models WHERE card_key = ? AND added_by = ?", (remove_key, remove_by)
+            ).fetchone()
+        if found is not None:
+            card, adder_name = str(found["name"]), who(remove_by)
+            box = ui.box(
+                "remove",
+                f"Remove the model of “{card}”?",
+                f"<form id='rmf' method='post' action='{path}'>"
+                f"<input type='hidden' name='csrf' value='{html.escape(csrf or '')}'>"
+                f"<input type='hidden' name='card_key' value='{html.escape(remove_key)}'>"
+                f"<input type='hidden' name='added_by' value='{html.escape(remove_by)}'>"
+                f"<input type='hidden' name='back' value='{html.escape(list_href)}'>"
+                f"<p>“{html.escape(adder_name)}” added it. "
+                f"The simulator stops using it in {html.escape(adder_name)}'s "
+                "simulations. This can't be undone.</p></form>",
+                actions=[
+                    ui.box_button("Cancel", cancel=True),
+                    ui.box_button(
+                        "Remove model",
+                        kind="danger-solid",
+                        form="rmf",
+                        attrs="aria-label='Remove the model of "
+                        + f"{html.escape(card)} added by {html.escape(adder_name)}'",
+                    ),
+                ],
+                open=True,
+                close_href=list_href,
+            )
+    return (
+        f"<div class='adm amo'>{head}"
+        + ui.widgets(widgets)
+        + ui.list_head("All card models", total, note="Most recently changed first")
+        + tools
+        + table
+        + ui.pager(offset, total, newer_href=newer, older_href=older)
+        + box
+        + "</div>"
+    )
+
+
+def _and_list(names: list[str]) -> str:
+    names = sorted(set(names), key=str.casefold)
+    if len(names) <= 1:
+        return "".join(names)
+    return ", ".join(names[:-1]) + " and " + names[-1]
 
 
 __all__ = ["ACTIONS", "AdminError", "add_admin_routes", "is_admin", "overview_data", "users_data"]

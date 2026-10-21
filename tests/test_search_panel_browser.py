@@ -336,8 +336,9 @@ def test_the_deck_page_toolbar_shows_the_size_beside_the_view_with_the_drag_hint
     with sync_playwright() as p:
         browser, page, errors = _page(p, server, sid, width, exe)
         page.goto(f"{server.base}/decks/42?view=stacks", wait_until="networkidle")
-        hint = page.locator(".toolbar .hint")
-        assert hint.inner_text() == "Drag a card onto another category to move it; on touch, hold it first."
+        hint = page.locator(".toolbar .hint")  # the grip icon; the words are its hover text
+        drag_words = "Drag a card onto another category to move it; on touch, hold it first."
+        assert hint.get_attribute("title") == drag_words
         view = page.locator(".toolbar #f-view-btn").bounding_box()
         size = page.locator(".toolbar .cardsize .sizeseg").bounding_box()
         assert view and size and abs(view["y"] - size["y"]) <= 2, (view, size)

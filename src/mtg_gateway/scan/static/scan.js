@@ -1101,6 +1101,18 @@
   /* A sheet listing every printing as a tile with its picture, set, number, year and finishes. The current
      printing is marked; tapping a tile records it with the foil switch's setting and closes the sheet.
      target is the pending result (state.pending) or the list item (state.items[i]). */
+  // The card size S / M / L (R-175): the same switch as every list of card pictures; static/prefs.js
+  // presses it, applies it on <html data-card-size> and keeps the choice on the account.
+  function sizeSwitch() {
+    const now = document.documentElement.getAttribute('data-card-size') || 'm';
+    const seg = h('span', { class: 'sizeseg', role: 'group', 'aria-label': 'Card size' });
+    for (const [k, label] of [['s', 'Small'], ['m', 'Medium'], ['l', 'Large']]) {
+      seg.append(h('button', { type: 'button', 'data-card-size-set': k, 'aria-pressed': k === now ? 'true' : 'false',
+        'aria-label': label + ' cards', title: label + ' cards' }, k.toUpperCase()));
+    }
+    return h('div', { class: 'cardsize' }, h('span', { class: 'lbl', 'aria-hidden': 'true', text: 'Card size' }), seg);
+  }
+
   async function openPicker(target) {
     closePicker();
     pickerOpener = document.activeElement;
@@ -1115,7 +1127,7 @@
     const close = h('button', { type: 'button', class: 'close', 'aria-label': 'Close', title: 'Close', onclick: closePicker }, icon('x'));
     const sheet = h('div', { class: 'sheet', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Choose a printing' },
       h('div', { class: 'sheet-head' }, h('div', { class: 'ttl' }, h('h3', { text: 'Choose a printing' }), h('div', { class: 'muted', text: card.name || '' })), close),
-      h('div', { class: 'sheet-tools' }, filter, foilSw), status, h('div', { class: 'sheet-body' }, grid));
+      h('div', { class: 'sheet-tools' }, filter, foilSw, sizeSwitch()), status, h('div', { class: 'sheet-body' }, grid));
     const wrap = h('div', { id: 'picker', class: 'picker', onclick: (e) => { if (e.target === wrap) closePicker(); } }, sheet);
     root.append(wrap); document.body.classList.add('picker-open');
     pickerKeys = (e) => { if (e.key === 'Escape') closePicker(); };
@@ -1475,7 +1487,8 @@
       });
     } }, 'New scan');
     const actions = h('div', { class: 'list-actions' }, save, copy, clear);
-    panel.append(h('div', { class: 'card' }, h('label', { for: 'session-name', text: 'Scan name' }), name, summary, ul, actions), msg);
+    const tools = h('div', { class: 'list-tools' }, summary, sizeSwitch());
+    panel.append(h('div', { class: 'card' }, h('label', { for: 'session-name', text: 'Scan name' }), name, tools, ul, actions), msg);
     if (state.items.length) panel.append(whatNext(msg));
   }
 

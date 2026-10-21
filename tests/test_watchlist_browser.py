@@ -202,3 +202,53 @@ def test_watchlist_rows_open_in_place_and_draw_the_full_history(server: Server, 
             assert errors == [], errors
             ctx.close()
         browser.close()
+
+
+def test_the_rows_menu_sits_beside_details_and_the_card_size_switch_is_on_the_page(server: Server) -> None:
+    """FIXES 2026-10-21: the row's ⋮ (static/menus.js) wrapped under Details; the action column
+    now holds both side by side at every width, and the card size switch (R-175) is on the page."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_path()
+    if exe == "missing":
+        pytest.skip("no Chromium available for Playwright")
+    sid = server.sign_in()
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+        # watch a card from the card search's Watch button first
+        ctx = browser.new_context(viewport={"width": 1280, "height": 800})
+        ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
+        ctx.route(
+            re.compile(r"https://cards\.scryfall\.io/.*"),
+            lambda route: route.fulfill(status=200, content_type="image/png", body=PNG),
+        )
+        page = ctx.new_page()
+        page.goto(f"{server.base}/cards?q=Sol Ring", wait_until="networkidle")
+        page.locator(".cardgrid .wbtn[data-watch='Sol Ring']").first.click()
+        page.wait_for_selector(".cardgrid .wbtn.on", timeout=5000)
+        ctx.close()
+        for width in (344, 390, 810, 1280):
+            ctx = browser.new_context(viewport={"width": width, "height": 800}, has_touch=width < 900)
+            ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
+            ctx.route(
+                re.compile(r"https://cards\.scryfall\.io/.*"),
+                lambda route: route.fulfill(status=200, content_type="image/png", body=PNG),
+            )
+            page = ctx.new_page()
+            errors: list[str] = []
+            page.on("pageerror", lambda e, errs=errors: errs.append(str(e)))
+            page.goto(f"{server.base}/watchlist", wait_until="networkidle")
+            row = page.locator(".w-t .tr[id^='wr-']").first
+            more = row.locator(".act .more").bounding_box()
+            kebab = row.locator(".act .kebab").bounding_box()
+            assert more and kebab, width
+            assert abs(more["y"] - kebab["y"]) < 4, (width, more, kebab)  # on one line
+            assert kebab["x"] >= more["x"] + more["width"] - 1, (width, more, kebab)  # beside, not under
+            assert page.locator(".w-size .sizeseg").is_visible()
+            over = page.evaluate(
+                "() => document.documentElement.scrollWidth - document.documentElement.clientWidth"
+            )
+            assert over <= 0, width
+            assert errors == []
+            ctx.close()
+        browser.close()

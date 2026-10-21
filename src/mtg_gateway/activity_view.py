@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import quote, urlencode
 
-from . import ui
+from . import tool_labels, ui
 from .companion import EVENT_LABELS, card_model_line, event_label, member_name
 from .config import MANAGED_SETTINGS
 from .decks import ADMIN_CLIENT, BROWSER_CLIENT, DECK_LIST_LAST
@@ -161,6 +161,21 @@ OTHER_ERROR = "Something went wrong"
 GONE_DECK = "a deck that was removed"
 NO_DETAIL = "No detail"
 NO_NAME = "a member with no name"  # a member with neither a username nor an email on record
+NO_MEMBER = "No member"  # a row with no member recorded (a refused sign-in before any account)
+
+# The ban sign: Refused carries it so it differs from Failed by icon as well as by word (theme.py
+# has no such icon yet; the same markup as theme.icon, so it sizes and colours like one).
+BAN_ICON = (
+    "<svg class='i' viewBox='0 0 24 24' aria-hidden='true'><circle cx='12' cy='12' r='9'/>"
+    "<path d='M5.7 5.7l12.6 12.6'/></svg>"
+)
+
+
+def refused_label(word: str = "Refused", *, title: str = "") -> str:
+    """The red Refused label with the ban sign (ui.label_for("refused") carries the alert sign)."""
+    tip = f" title='{esc(title)}'" if title else ""
+    return f"<span class='ui-lbl red'{tip}>{BAN_ICON}{esc(word)}</span>"
+
 
 # Detail keys as words on the admin page; keys that only name a row elsewhere are left to
 # the row's details. Unmapped keys show as stored.
@@ -523,7 +538,7 @@ def is_refused(event: str, detail: Mapping[str, Any]) -> bool:
 def status_html(event: str, detail: Mapping[str, Any], *, title: str = "") -> str:
     """The short status label before an event's name, or "" for an event without a status."""
     if is_refused(event, detail):
-        return ui.label_for("refused", title=title)
+        return refused_label(title=title)
     if event in FAILED_EVENTS:
         return ui.label_for("failed", title=title)
     if event == "proposal_applied":
@@ -762,6 +777,9 @@ def admin_detail_html(row: Mapping[str, Any], names: Names) -> str:
             shown = esc(folder)
         elif k == "target":
             shown = esc(names.member(v) or str(v))
+        elif k == "tool":
+            # the tool in words; its raw name stays in the row's details (the stored detail)
+            shown = esc(tool_labels.tool_name(str(v)))
         elif k == "error":
             shown = f"<span title='{esc(v)}'>{esc(error_words(v))}</span>"
         elif k == "via":
@@ -791,9 +809,7 @@ def _counts(rows: Iterable[Any], log: Log) -> dict[str, int]:
 def _problem_widget(rows: list[Any], href: str) -> str:
     refused = sum(1 for r in rows if is_refused(r["event"], _detail(r)))
     failed = sum(1 for r in rows if r["event"] in FAILED_EVENTS)
-    labels = ui.label_for("refused", word=f"Refused {refused}") + ui.label_for(
-        "failed", word=f"Failed {failed}"
-    )
+    labels = refused_label(f"Refused {refused}") + ui.label_for("failed", word=f"Failed {failed}")
     return ui.widget(
         "Refused or failed",
         "alert",
@@ -826,13 +842,15 @@ def _list_parts(
         n = log.count(f"{base} AND {sql}" if sql else base, [*base_args, *a])
         if k == "all":
             total_all = n
-        chips.append(ui.Chip(KIND_WORDS[k], n, query.href(path, kind=k), current=query.kind == k))
+        # the "Refused or failed" quick start (kind=problems) marks both chips as current
+        current = query.kind == k or (query.kind == "problems" and k in ("refused", "failed"))
+        chips.append(ui.Chip(KIND_WORDS[k], n, query.href(path, kind=k), current=current))
     where, args = log.where(query, search=search, now=now)
     total = log.count(where, args)
     offset = min(query.offset, max(0, (total - 1) // PER_PAGE * PER_PAGE))
     rows = log.page(where, args, offset)
     query.offset = offset
-    head = ui.list_head("All activity", total_all, note="Newest first") + ui.chips(chips)
+    head = ui.list_head("All activity", total_all, note="Newest first") + _chip_icons(ui.chips(chips))
     tools = ui.toolbar(
         path,
         search_label=search_label,
@@ -842,6 +860,13 @@ def _list_parts(
         keep={"kind": query.kind if query.kind != "all" else ""},
     )
     return head + tools, rows, total
+
+
+def _chip_icons(chips_html: str) -> str:
+    """Refused and Failed differ by icon on the chips too: the ban sign and the alert sign."""
+    return chips_html.replace(">Refused <span", f">{BAN_ICON}Refused <span", 1).replace(
+        ">Failed <span", f">{icon('alert')}Failed <span", 1
+    )
 
 
 def _empty(path: str, query: Query, nothing_at_all: str) -> str:
@@ -940,7 +965,7 @@ def _join(parts: Iterable[str]) -> str:
 
 
 ACT_CSS = """
-.act-page .adm-nav{max-width:52rem}
+.act-page .ui-chip svg.i{width:15px;height:15px;margin-right:.3rem;vertical-align:-2px}
 .act-page .wdg .det .ui-lbl{height:22px;font-size:.78rem}
 .act-page .spark{flex:1 1 100%;display:flex;align-items:flex-end;gap:3px;height:36px;margin:.1rem 0 0}
 .act-page .spark i{flex:1;display:block;min-height:2px;background:var(--text-muted);border-radius:2px 2px 0 0}
@@ -968,8 +993,11 @@ ACT_CSS = """
   overflow-wrap:anywhere}
 .act-table .kv{max-width:100%}
 .act-table .kv .k{color:var(--text-muted)}
+.act-table .c-btns{display:flex;justify-content:flex-end;align-items:center;gap:0;margin:-.45rem 0;
+  justify-self:end}
+.act-table .c-btns .kebab{color:var(--text-muted);width:44px;height:44px}
 .act-table .c-more{display:inline-grid;place-items:center;width:44px;min-height:44px;padding:0;
-  margin:-.45rem 0;  color:var(--text-muted);justify-self:end;text-decoration:none}
+  margin:0;color:var(--text-muted);text-decoration:none}
 .act-table .c-more svg.i{width:20px;height:20px}
 .act-table .tr.open{background:var(--surface-2)}
 .act-table .tr.open .c-more svg{transform:rotate(180deg)}
@@ -984,26 +1012,27 @@ ACT_CSS = """
 ADMIN_CSS = (
     ACT_CSS
     + """
-.act-admin .act-table .tr{grid-template-columns:15rem 6.5rem minmax(0,1fr) 7rem 6.5rem 44px}
+.act-admin .act-table .tr{grid-template-columns:15rem 6.5rem minmax(0,1fr) 7rem 6.5rem 88px}
+.act-admin .act-table .tr.th > span:last-child{text-align:right}
 @media (max-width:899.98px){
-  .act-admin .act-table .tr.ev{grid-template-columns:auto minmax(0,1fr) auto 44px;
+  .act-admin .act-table .tr.ev{grid-template-columns:auto minmax(0,1fr) auto 88px;
     grid-template-areas:"ev who when more" "det det app more";row-gap:.3rem}
   .act-admin .act-table .c-ev{grid-area:ev} .act-admin .act-table .c-who{grid-area:who}
   .act-admin .act-table .c-when{grid-area:when} .act-admin .act-table .c-det{grid-area:det}
-  .act-admin .act-table .c-app{grid-area:app;justify-self:end} .act-admin .act-table .c-more{grid-area:more}
+  .act-admin .act-table .c-app{grid-area:app;justify-self:end} .act-admin .act-table .c-btns{grid-area:more}
   .act-admin .act-table .more-body{grid-area:auto;grid-column:1 / -1}
 }
 @media (max-width:599.98px){
   .act-admin .act-table .tr.ev{display:flex;flex-wrap:wrap;align-items:center;gap:.3rem .5rem;
-    position:relative;padding-right:48px}
+    position:relative;padding-right:92px}
   .act-admin .act-table .c-ev{flex:0 0 calc(100% - 6.5rem);order:1}
   .act-admin .act-table .c-when{flex:0 0 6rem;order:2;text-align:right;font-size:.86rem}
   .act-admin .act-table .c-who{order:3;font-size:.9rem}
   .act-admin .act-table .c-app{order:4;font-size:.86rem}
   .act-admin .act-table .c-det{order:5;flex:1 1 9rem;font-size:.86rem}
-  .act-admin .act-table .c-more{position:absolute;right:2px;top:50%;transform:translateY(-50%);margin:0}
-  .act-admin .act-table .tr.open .c-more{top:.35rem;transform:none}
-  .act-admin .act-table .more-body{order:6;flex:1 1 100%;margin-right:-44px}
+  .act-admin .act-table .c-btns{position:absolute;right:2px;top:50%;transform:translateY(-50%);margin:0}
+  .act-admin .act-table .tr.open .c-btns{top:.35rem;transform:none}
+  .act-admin .act-table .more-body{order:6;flex:1 1 100%;margin-right:-88px}
 }
 """
 )
@@ -1030,7 +1059,10 @@ MEMBER_CSS = (
 """
 )
 
-HEAD_ADMIN = f"<style>{ADMIN_CSS}</style><script src='/static/activity.js' defer></script>"
+HEAD_ADMIN = (
+    f"<style>{ADMIN_CSS}</style><script src='/static/activity.js' defer></script>"
+    "<script src='/static/admin.js' defer></script>"
+)
 
 
 # -- the admin's Activity page ---------------------------------------------------------------
@@ -1133,6 +1165,7 @@ def admin_body(state: Any, params: Mapping[str, str], *, nav: str, now: float | 
             unit="events",
             detail_html=_spark(per_day),
             actions=[ui.button_link("Metrics", "/admin/metrics")],
+            wide_sm=True,
         ),
     ]
 
@@ -1168,7 +1201,7 @@ def admin_body(state: Any, params: Mapping[str, str], *, nav: str, now: float | 
             ui.Column("Detail"),
             ui.Column("App"),
             ui.Column("When"),
-            ui.Column("", html="<span class='sr-only'>Details</span>"),
+            ui.Column("", html="<span class='sr-only'>Actions</span>"),
         ]
         table = (
             ui.table_open(
@@ -1182,11 +1215,12 @@ def admin_body(state: Any, params: Mapping[str, str], *, nav: str, now: float | 
             + "".join(_admin_row(r, log, names, query, path, now) for r in rows)
             + "</div>"
         )
-    sub_line = ui.page_head("Admin: activity") + nav
+    head = ui.page_head(
+        "Admin: activity",
+        "What members, their apps and admins did on this gateway, newest first. Kept for a year.",
+    )
     return (
-        f"<div class='act-page act-admin' style='--nf:4'>{sub_line}"
-        "<p class='ui-sub'>What members, their apps and admins did on this gateway, newest first. "
-        "Kept for a year.</p>"
+        f"<div class='act-page act-admin' style='--nf:4'>{head}{nav}"
         f"{ui.widgets(cards)}{top_html}"
         f"{table}{_pager(path, query, total)}</div>"
     )
@@ -1199,7 +1233,7 @@ def _admin_row(r: dict[str, Any], log: Log, names: Names, query: Query, path: st
     if sub and who_name:
         who = f"<a href='{esc(query.href(path, sub=sub))}'>{esc(who_name)}</a>"
     else:
-        who = "<span class='none'>unknown</span>"
+        who = f"<span class='none'>{NO_MEMBER}</span>"
     cid = r.get("client_id")
     app = log.app_name(cid)
     opened = query.open == rid
@@ -1209,9 +1243,9 @@ def _admin_row(r: dict[str, Any], log: Log, names: Names, query: Query, path: st
     else:
         app_detail = "No app <span class='muted'>(no client id stored)</span>"
     member_detail = (
-        f"{esc(who_name or 'unknown')} <span class='muted'>(<code>{esc(sub)}</code>)</span>"
+        f"{esc(who_name or NO_NAME)} <span class='muted'>(<code>{esc(sub)}</code>)</span>"
         if sub
-        else "unknown"
+        else NO_MEMBER
     )
     raw = json.dumps(r.get("detail"), sort_keys=True) if r.get("detail") is not None else ""
     actions = []
@@ -1239,9 +1273,13 @@ def _admin_row(r: dict[str, Any], log: Log, names: Names, query: Query, path: st
         f"<span class='c-det'>{admin_detail_html(r, names)}</span>"
         f"<span class='c-app'>{ui.app_chip(app)}</span>"
         f"<span class='c-when'>{ui.when(r['at'], now=now)}</span>"
+        # the row's menu (static/admin.js: right-click, press and hold, the ⋮); without scripts the
+        # ⋮ opens the row's details, as the chevron does
+        f"<span class='c-btns'><a class='kebab' href='{esc(toggle)}' aria-label='Actions for this event' "
+        f"aria-haspopup='menu' title='Menu'>{icon('more')}</a>"
         f"<a class='c-more' href='{esc(toggle)}' role='button' "
         f"aria-expanded='{'true' if opened else 'false'}' "
-        f"aria-controls='more-{rid}' aria-label='Details' title='Details'>{icon('chev')}</a>"
+        f"aria-controls='more-{rid}' aria-label='Details' title='Details'>{icon('chev')}</a></span>"
         f"<div class='more-body' id='more-{rid}'{'' if opened else ' hidden'}>{body}</div></div>"
     )
 

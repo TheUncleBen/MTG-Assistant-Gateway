@@ -243,11 +243,15 @@ def test_collection_my_decks_and_card_search_show_the_switch_in_every_view(
     _chromium()
     sid = server.sign_in_and_link()
     _size(server, "l")
+    ark = server.ark  # an empty collection shows no results bar: give it one card
+    ark.collections.setdefault("alice", {})[5001] = ark._collection_row(
+        5001, ark.printing(9003), {"quantity": 1}
+    )
     with sync_playwright() as p:
         browser, page, errors = _page(p, server, sid, width, theme=theme)
         for path, bar in (
             ("/decks?view=grid", ".rbar"),
-            ("/collection?view=grid", ".collbar"),
+            ("/collection?view=grid", ".spanel .rbar"),  # the switch stays in the bar on phones
             ("/cards?q=sol&view=grid", ".rbar.cards"),
         ):
             page.goto(f"{server.base}{path}", wait_until="networkidle")

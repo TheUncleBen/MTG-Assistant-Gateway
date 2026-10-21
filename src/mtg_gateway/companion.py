@@ -24,6 +24,7 @@ from starlette.responses import RedirectResponse, Response
 
 from . import deck_stats
 from .archidekt import FORMAT_NAMES, format_label
+from .busy import busy_response
 from .deckpage import (
     LIST_ORDERS,
     money,
@@ -39,6 +40,7 @@ from .theme import (
     ICON_DATA_URL,
     STYLESHEETS,
     display_name,
+    icon,
     render,
     stylesheet_link,
 )
@@ -175,7 +177,27 @@ DECK_OK_MESSAGES = {
     "report": "Report saved. See it under History.",
     "saved": "Saved to Archidekt. A snapshot from just before is under History if you want to undo.",
     "created": "Created on Archidekt.",
+    "moved": "Deck moved to that folder on Archidekt.",
 }
+# The deck pages' problem page (deck, Goldfish, Compare, Export): one full sentence per case as the
+# title, and one orange Back to my decks. Any other refusal shows its own words.
+DECK_PROBLEM_TITLES = {
+    "not_found": "This deck could not be found.",
+    "forbidden": "This deck is private, so it can't be shown here.",
+    "auth": "This deck is private, so it can't be shown here.",
+    "unavailable": "Archidekt didn't answer. Try again later.",
+    "rate_limited": "Archidekt didn't answer. Try again later.",
+}
+
+
+def deck_problem_title(exc: DeckError) -> str:
+    text = DECK_PROBLEM_TITLES.get(exc.kind)
+    if text:
+        return text
+    text = str(exc).strip() or "This deck could not be shown."
+    return text if text.endswith((".", "!", "?")) else text + "."
+
+
 INDENT = "\u2003"  # an em space per folder level in folder pickers
 # Notices the settings page shows after one of its hand actions (?ok=).
 SETTINGS_OK_MESSAGES = {
@@ -287,6 +309,21 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
 
     EXPIRED = "<p class='notice error'>This form expired. Reload and try again.</p>"
 
+    def deck_problem(request: Request, exc: DeckError, *, sub: str, sid: str | None) -> Response:
+        """A deck that cannot be shown (the deck page, Goldfish, Compare, Export): the shared busy
+        page while Archidekt is busy, else one sentence for the case and Back to my decks."""
+        if busy := busy_response(exc, request, page, sub=sub, sid=sid):
+            return busy
+        title = deck_problem_title(exc)
+        return page(
+            title,
+            f"<div class='panel deckproblem'><p>{_esc(title)}</p>"
+            f"<a class='btn btn-primary' href='/decks'>{icon('decks')} Back to my decks</a></div>",
+            sub=sub,
+            sid=sid,
+            status=404 if exc.kind == "not_found" else 403 if exc.kind in ("forbidden", "auth") else 400,
+        )
+
     async def form(request: Request, limit: int = 16_384) -> dict[str, str]:
         from urllib.parse import parse_qs
 
@@ -377,6 +414,7 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         arrange_decks=arrange_decks,
         check_csrf=check_csrf,
         deck_list_skeleton=deck_list_skeleton,
+        deck_problem=deck_problem,
         decks=decks,
         form=form,
         link_prompt=link_prompt,

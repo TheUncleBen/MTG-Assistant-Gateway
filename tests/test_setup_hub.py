@@ -144,3 +144,109 @@ async def test_the_public_markdown_keeps_the_signed_in_parts_on_the_page(harness
 def test_connect_doc_points_at_the_hub() -> None:
     doc = (REPO / "docs" / "CONNECT.md").read_text(encoding="utf-8")
     assert "/install?for=skill" in doc and "/install?for=android" in doc
+
+
+# -- the approved layout (F11, F12): the app list beside the steps, one orange button a section --
+
+
+async def test_the_app_list_sits_beside_the_steps_and_marks_the_picked_app(harness: Harness) -> None:
+    b = Browser(harness)
+    try:
+        await b.login("/install")
+        hub = (await b.http.get("/install")).text
+        # the purpose line under the title; the page is a wide one
+        assert "<div class='ui-head'><h1>Guided setup</h1></div><p class='ui-sub'>" in hub
+        assert setup_hub.PURPOSE in hub and "class='wrap ui-wide'" in hub
+        # the list (a computer) and the drop-down (narrow screens) are both there; CSS shows one
+        assert "<nav class='pick' aria-label='Which app'><h2>Which app will you use?</h2>" in hub
+        assert "<details class='drop'><summary><span class='v'>Which app will you use?</span>" in hub
+        assert hub.count("Which app will you use?") == 2  # the list's heading and the drop-down's label
+        assert "Pick one to see only the steps that work there." not in hub
+        assert "Other sections:" not in hub and "btn-primary' href='/install?for=" not in hub
+        assert ".inst .cols{grid-template-columns:17rem minmax(0,1fr)}" in hub
+        # the first screen: the intro, the phone note and the Connector URL; its address is a link
+        assert f"<a class='nb' href='{GATEWAY}/install.md'><code>{GATEWAY}/<wbr>install.md</code></a>" in hub
+        assert f"<p>{setup_hub.INTRO}</p>" in hub.replace("&#x27;", "'")
+        assert "data-copy='mcp-url'" in hub and "On a phone?" in hub
+        # a picked app: tinted in the list (aria-current), named in the drop-down, no orange button
+        claude = (await b.http.get("/install?for=claude")).text
+        assert (
+            "<a href='/install?for=claude' aria-current='true'>Claude: web, desktop, iPhone and Android</a>"
+            in claude
+        )
+        assert claude.count("aria-current='true'") == 2  # the list and the drop-down
+        assert (
+            "<span class='sfk'>Steps for:</span><span class='v'>Claude: web, desktop, iPhone and Android"
+            "</span>" in claude
+        )
+        assert f"<a class='nb' href='{GATEWAY}/install.md?for=claude'>" in claude
+    finally:
+        await b.aclose()
+
+
+async def test_each_section_has_one_orange_button(harness: Harness) -> None:
+    b = Browser(harness)
+    try:
+        await b.login("/install")
+        expected = {
+            "claude": ["Connect to Claude"],
+            "claude-code": [],
+            "chatgpt": ["Download the icon (PNG)"],
+            "codex": [],
+            "skill": ["Download the skill (ZIP)"],
+            "android": ["Download the app (APK)"],
+        }
+        for key, orange in expected.items():
+            page = (await b.http.get(f"/install?for={key}")).text
+            found = re.findall(
+                r"<a class='btn btn-primary' href='[^']*'[^>]*>(?:<svg.*?</svg> )?([^<]*)</a>", page
+            )
+            assert found == orange, (key, found)
+        claude = (await b.http.get("/install?for=claude")).text
+        assert re.search(
+            r"<a class='btn' href='/plugin/mtg-gateway.zip'><svg.*?</svg> Download the plugin \(ZIP\)</a>",
+            claude,
+        )
+    finally:
+        await b.aclose()
+
+
+async def test_the_approved_wording_changes(harness: Harness, monkeypatch: pytest.MonkeyPatch) -> None:
+    b = Browser(harness)
+    try:
+        await b.login("/install")
+        claude = (await b.http.get("/install?for=claude")).text
+        # F12: the test step is a plain ask, not a tool name
+        assert "Ask your assistant “Who am I on the MTG gateway?” It should answer with your name." in claude
+        assert "whoami" not in claude.split("<h2>After connecting</h2>", 1)[1]
+        android = (await b.http.get("/install?for=android")).text
+        assert "Play Protect may warn that the developer is unknown. That is expected" in android
+        assert "unverified" not in android
+        # the Markdown keeps its lead and the same intro
+        md = (await harness.http.get("/install.md")).text
+        assert md.splitlines()[2] == f"{setup_hub.MD_LEAD} {setup_hub.INTRO}"
+        assert "Ask your assistant “Who am I on the MTG gateway?” It should answer with your name." in md
+    finally:
+        await b.aclose()
+
+
+async def test_without_an_app_file_the_page_speaks_to_members(
+    tmp_path: Path, idp: FakeIdP, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("MTG_PLUGIN_DIR", str(REPO_PLUGIN))
+    monkeypatch.setenv("MTG_APP_DIR", str(tmp_path / "no-such-dir"))
+    async with running(Harness(make_settings(tmp_path), idp)) as h:
+        b = Browser(h)
+        try:
+            await b.login("/install")
+            page = (await b.http.get("/install?for=android")).text
+            assert "<h2>No app file on this gateway</h2>" in page
+            assert (
+                "<p>The person who runs this gateway hasn't added the app file yet. In the meantime, "
+                f"open <strong>{GATEWAY}</strong> in your phone's browser and add it to your home "
+                "screen.</p>" in page
+            )
+            assert "docs/ANDROID.md" not in page and "If you run the gateway" not in page
+            assert "<a class='btn' href='/decks'>Back to decks</a>" in page and "btn-primary" not in page
+        finally:
+            await b.aclose()

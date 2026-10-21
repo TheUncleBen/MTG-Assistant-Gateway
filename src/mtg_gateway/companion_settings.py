@@ -11,13 +11,12 @@ from typing import TYPE_CHECKING, Any
 from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
 
+from . import ui
 from .actions import COLLABORATOR_NOTE, collaborator_by_hand, collaborator_target, profile_url
 from .archidekt import FORMAT_IDS, ArchidektError, Deck, featured_scryfall_id, format_label, rich_text
 from .busy import busy_response
 from .companion import DECK_CSP, FORMAT_CHOICES, INDENT, SETTINGS_OK_MESSAGES
-from .deckpage import (
-    card_image,
-)
+from .deckpage import card_image, deck_title, delete_box_html
 from .decks import DeckError, current_client
 from .pages import (
     BROWSER_CLIENT_ID,
@@ -25,13 +24,8 @@ from .pages import (
     browser_session,
     login_redirect,
 )
-from .theme import (
-    esc as _esc,
-)
-from .theme import (
-    icon,
-    plural,
-)
+from .theme import esc as _esc
+from .theme import icon
 
 NO_STORE = {"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"}
 
@@ -52,6 +46,76 @@ OK_SECTIONS = {
     "collaborator_removed": "collaborators",
 }
 
+SETTINGS_CSS = """
+.ds-wrap{display:grid;grid-template-columns:minmax(0,52rem);justify-content:center;gap:24px}
+.ds-nav{display:none}
+@media (min-width:1100px){.ds-wrap{grid-template-columns:11rem minmax(0,52rem)}
+  .ds-nav{display:block;position:sticky;top:12px;align-self:start;margin-top:118px}}
+.ds-nav ol{list-style:none;margin:0;padding:0;border-left:2px solid var(--border-soft)}
+.ds-nav a{display:flex;align-items:center;min-height:36px;padding:0 .75rem;color:var(--text-muted);
+  text-decoration:none;font-weight:700;font-size:.92rem;margin-left:-2px;border-left:2px solid transparent}
+.ds-nav a:hover,.ds-nav a:focus-visible{color:var(--text);border-left-color:var(--border)}
+.ds-nav a.dz{color:var(--danger-text)}
+.ds .back{display:inline-flex;align-items:center;min-height:44px;text-decoration:none;font-weight:700}
+.ds .ui-card{margin:0 0 1rem}
+.ds .ui-card h2{display:flex;align-items:center;gap:.5rem}
+.ds .ui-card.danger{border-color:var(--danger-fill)}
+.ds .ui-card.danger h2{color:var(--danger-text)}
+.ds .ds-note{margin:0 0 .75rem}
+.ds .ui-row .help{margin:.15rem 0 0}
+.ds .ui-row label{font-weight:700}
+.ds .ui-row.plain .lab{font-weight:400}
+.ds .ui-row.plain .ctl{justify-self:end}
+.ds .ui-row.wctl{grid-template-columns:minmax(0,1fr) minmax(0,26rem)}
+.ds .ui-row.full{grid-template-columns:1fr}
+.ds .ui-row.full .ctl{grid-column:1;grid-row:auto}
+.ds .ui-row .ctl input,.ds .ui-row .ctl select:not(.msel-native),.ds .ui-row .ctl textarea{width:100%;
+  margin:0}
+.ds .ds-switch{justify-content:flex-end;margin:0}
+.ds .acts{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;border-top:1px solid var(--border-soft);
+  padding-top:.75rem;margin-top:.75rem}
+.ds .acts .btn,.ds .acts button{margin:0;width:auto}
+.ds .foot{margin:.5rem 0 0}
+.ds ul.ds-list{list-style:none;margin:.25rem 0 .25rem;padding:0}
+.ds ul.ds-list li{display:flex;flex-wrap:wrap;align-items:center;gap:.4rem .6rem;min-height:44px;
+  border-top:1px solid var(--border-soft);padding:.25rem 0}
+.ds ul.ds-list li:first-child{border-top:0}
+.ds ul.ds-list li .nm,.ds ul.ds-list li .who{font-weight:700;flex:1 1 auto;min-width:0}
+.ds .collablist .who{display:flex;flex-direction:column;gap:.1rem}
+.ds .collablist .when{color:var(--text-muted);font-size:.86rem;font-weight:400}
+.ds .collablist form{margin:0}
+.ds .collablist form button{margin:0;min-height:44px;width:auto}
+.ds .ds-flags{display:flex;flex-wrap:wrap;gap:.35rem}
+.ds .ds-flag{display:inline-flex;align-items:center;min-height:28px;border-radius:999px;padding:0 .7rem;
+  font-size:.85rem;border:1px solid var(--control-border);background:var(--surface-2);color:var(--text)}
+.ds .ds-flag.premier{background:var(--orange-tint);color:var(--orange-text);border-color:var(--orange-text)}
+.ds .ds-cover{display:grid;grid-template-columns:9rem minmax(0,1fr);gap:1rem;align-items:center}
+.ds .ds-cover .pv{width:100%;max-width:none;aspect-ratio:4/3;border-radius:var(--radius-panel);
+  object-fit:cover;background:var(--surface-2);display:grid;place-items:center;text-align:center;
+  padding:0;margin:0}
+.ds .ds-cover .pv.none{padding:.5rem}
+.ds .ds-cover .field{margin:0}
+.ds form.addtag{display:block}
+.ds .ds-inline{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+/* the box (or the themed select's button, or the suggest wrapper) takes the room, the button its
+   own; at large text the button wraps under the box instead of leaving the window */
+.ds .ds-inline > *{flex:1 1 12rem;min-width:0}
+.ds .ds-inline > .btn,.ds .ds-inline > button{flex:0 0 auto;width:auto;margin:0;white-space:nowrap}
+.ds .ds-inline .msel-btn,.ds .ui-row .ctl .msel-btn{max-width:100%}
+.ds ul.taglist{display:flex;flex-wrap:wrap;gap:.5rem;margin:0 0 .75rem;padding:0}
+.ds .follownote{display:flex;flex-direction:column;align-items:flex-start;gap:.5rem;margin:.75rem 0 0}
+.ds .follownote p{margin:0;font-weight:400}
+.ds .follownote p.lead{font-weight:700}
+.ds .follownote .btn{color:var(--text)}
+@media (pointer:coarse){.ds .taglist button.mini{width:44px;height:44px}}
+@media (max-width:599.98px){.ds .ui-row.wctl{grid-template-columns:1fr}
+  .ds .ui-row.plain .ctl{justify-self:start}
+  .ds .ds-cover{grid-template-columns:1fr}.ds .ds-cover .pv{max-width:12rem}
+  .ds .ds-inline{flex-wrap:wrap}.ds .ds-inline > *{flex:1 1 100%}
+  .ds .ds-inline > .btn,.ds .ds-inline > button{flex:1 1 100%;width:100%}
+  .ds .acts .btn,.ds .acts button{flex:1 1 auto}}
+"""
+
 
 def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> None:
     """Deck settings, hand actions, delete and folders."""
@@ -64,6 +128,13 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
     s = h.s
 
     # -- deck settings (details proposal) ---------------------------------------
+    def row(lab: str, help_html: str, ctl: str, cls: str = "") -> str:
+        """One shared form row: label (and help) on the left, the control on the right."""
+        help_part = f"<p class='help'>{help_html}</p>" if help_html else ""
+        return (
+            f"<div class='ui-row {cls}'><p class='lab'>{lab}</p>{help_part}<div class='ctl'>{ctl}</div></div>"
+        )
+
     def settings_form(
         deck: Deck,
         csrf: str | None,
@@ -78,16 +149,16 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
         typed_tag: str = "",
         ok: str = "",
     ) -> str:
-        """The settings page. ``error`` shows at the top (the main settings form's own refusal) or,
-        with ``error_in``, inside that section next to its form, as the ?ok= notices of the section
-        forms do (OK_SECTIONS): those forms land on their own section, below the top of the page."""
+        """The settings page on the shared form rows (F7). ``error`` shows in the main panel (the main
+        settings form's own refusal) or, with ``error_in``, inside that section next to its form, as
+        the ?ok= notices of the section forms do (OK_SECTIONS): each panel carries its own strip."""
         v = values or {}
 
         def note(section: str) -> str:
             if error and error_in == section:
-                return f"<p class='notice error' id='{section}-msg' role='alert'>{_esc(error)}</p>"
+                return ui.notice(error, "error", role="alert", cls=f"ds-note' id='{section}-msg")
             if not error and ok in SETTINGS_OK_MESSAGES and OK_SECTIONS.get(ok) == section:
-                return f"<p class='notice ok' role='status'>{_esc(SETTINGS_OK_MESSAGES[ok])}</p>"
+                return ui.notice(SETTINGS_OK_MESSAGES[ok], "ok", role="status", cls="ds-note")
             return ""
 
         fmt_current = v.get("deck_format", deck.format or "")
@@ -123,59 +194,88 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
         private = v.get("private", "") if values else ("1" if deck.private else "")
         unlisted = v.get("unlisted", "") if values else ("1" if deck.unlisted else "")
         did = _esc(deck.id)
-        cats = "".join(
-            f"<li><span class='name'>{_esc(c.get('name'))}</span>"
-            + ("<span class='badge warn'>premier</span>" if c.get("isPremier") else "")
-            + ("" if c.get("includedInDeck", True) else "<span class='badge'>not in deck</span>")
-            + ("" if c.get("includedInPrice", True) else "<span class='badge'>not in price</span>")
-            + "</li>"
-            for c in deck.categories
-            if isinstance(c.get("name"), str)
-        )
-        return (
-            (f"<p class='notice error'>{_esc(error)}</p>" if error and not error_in else "")
-            + (
-                f"<p class='notice ok'>{_esc(SETTINGS_OK_MESSAGES[ok])}</p>"
+        title = deck_title(deck)
+
+        def switch(name: str, on: str) -> str:
+            return (
+                f"<label class='switch ds-switch'><input id='{name}' type='checkbox' name='{name}' value='1'"
+                + (" checked" if on else "")
+                + "><span class='track'></span><span class='sr-only'>"
+                + name.capitalize()
+                + "</span></label>"
+            )
+
+        main_note = (
+            ui.notice(error, "error", role="alert", cls="ds-note")
+            if error and not error_in
+            else (
+                ui.notice(SETTINGS_OK_MESSAGES[ok], "ok", role="status", cls="ds-note")
                 if ok in SETTINGS_OK_MESSAGES and ok not in OK_SECTIONS
                 else ""
             )
-            + f"<form method='post' action='/decks/{did}/settings' class='panel settings'>"
+        )
+        sections = [
+            ("main", "Main settings"),
+            ("categories", "Categories"),
+            ("cover", "Cover image"),
+            ("tags", "Deck tags"),
+            ("folder", "Folder"),
+            ("collaborators", "Collaborators"),
+            ("delete", "Delete this deck"),
+        ]
+        nav = (
+            "<nav class='ds-nav' aria-label='Sections'><ol>"
+            + "".join(
+                f"<li><a href='#{'ds-delete' if k == 'delete' else k}'{' class=dz' if k == 'delete' else ''}>"
+                f"{_esc(t)}</a></li>"
+                for k, t in sections
+            )
+            + "</ol></nav>"
+        )
+        return (
+            "<div class='ds-wrap'>"
+            + nav
+            + f"<div class='ds'><a class='back' href='/decks/{did}'>← {_esc(title)}</a>"
+            + ui.page_head("Deck settings", f"“{title}”")
+            + f"<form method='post' action='/decks/{did}/settings' class='ui-card settings' id='main'>"
             f"<input type='hidden' name='csrf' value='{_esc(csrf)}'>"
             "<h2>Main settings</h2>"
-            "<label for='name'>Deck name</label>"
-            f"<input id='name' type='text' name='name' value='{_esc(v.get('name', deck.name))}' "
-            "required maxlength='200'>"
-            f"<div class='field'><label for='deck_format'>Format</label><select id='deck_format' "
-            "name='deck_format'>"
-            f"{fmt_opts}</select></div>"
-            "<div class='field'><label for='edh_bracket'>Commander bracket</label>"
-            f"<select id='edh_bracket' name='edh_bracket'>{bracket_opts}</select>"
-            "<p class='muted small'>Your own bracket, for Commander decks only: changing the format "
-            "clears it. It does not influence the estimated bracket on the deck page."
-            "</p></div>"
-            "<label for='description'>Description</label>"
-            f"<textarea id='description' name='description' rows='10'>{_esc(description)}"
-            "</textarea>"
-            "<label class='switch'><input type='checkbox' name='private' value='1'"
-            + (" checked" if private else "")
-            + "><span class='track'></span>Private <span class='muted small'>(the deck is only "
-            "visible to you)"
-            "</span></label>"
-            "<label class='switch'><input type='checkbox' name='unlisted' value='1'"
-            + (" checked" if unlisted else "")
-            + "><span class='track'></span>Unlisted <span class='muted small'>(viewable with a "
-            "direct link, but "
-            "not shown in lists)</span></label>"
-            f"<div class='actions'><button class='primary'>{icon('check')} Save changes</button>"
+            + main_note
+            + row(
+                "<label for='name'>Deck name</label>",
+                "",
+                f"<input id='name' type='text' name='name' value='{_esc(v.get('name', deck.name))}' "
+                "required maxlength='200'>",
+            )
+            + row(
+                "<label for='deck_format'>Format</label>",
+                "",
+                f"<select id='deck_format' name='deck_format'>{fmt_opts}</select>",
+            )
+            + row(
+                "<label for='edh_bracket'>Commander bracket</label>",
+                "Commander only. Changing the format clears it. It does not influence the estimated "
+                "bracket on the deck page.",
+                f"<select id='edh_bracket' name='edh_bracket'>{bracket_opts}</select>",
+            )
+            + "<div class='ui-row full'><p class='lab'><label for='description'>Description</label></p>"
+            f"<div class='ctl'><textarea id='description' name='description' rows='8'>{_esc(description)}"
+            "</textarea></div></div>"
+            + row(
+                "<label for='private'>Private</label>",
+                "The deck is only visible to you.",
+                switch("private", private),
+            )
+            + row(
+                "<label for='unlisted'>Unlisted</label>",
+                "Viewable with a direct link, but not shown in lists.",
+                switch("unlisted", unlisted),
+            )
+            + f"<div class='acts'><button class='btn btn-primary'>{icon('check')} Save changes</button>"
             f"<a class='btn' href='/decks/{did}'>Cancel</a></div>"
-            "<p class='muted small'>Saved to Archidekt when you press Save changes; a snapshot from just "
-            "before is kept under History.</p></form>"
-            "<section class='panel' id='categories'><h2>Categories</h2>"
-            f"<ul class='plain plist'>{cats or '<li class=muted>No categories yet.</li>'}</ul>"
-            "<p class='muted small'>Cards are moved between categories in the editor; a new category "
-            "is created "
-            "by typing its name there. Renaming, deleting and the premier / in-deck / in-price flags are not "
-            "available through the gateway yet.</p></section>"
+            "<p class='muted small foot'>Saved to Archidekt when you press Save changes; a snapshot from "
+            "just before is kept under History.</p></form>"
+            + categories_section(deck)
             + cover_section(deck, csrf, note("cover"))
             + tags_section(deck, csrf, note("tags"), typed_tag if error_in == "tags" else "")
             + folder_section(deck, csrf, folders, note("folder"))
@@ -187,16 +287,44 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
                 follow_hint if error_in == "collaborators" else "",
                 note("collaborators"),
             )
-            + "<section class='panel danger' id='delete'><h2>Delete this deck</h2>"
-            "<p class='muted small'>Deletes the deck on Archidekt after you type its name. A snapshot is "
-            "kept under History"
-            + (
-                ", and a copy in your backup folder on Archidekt"
-                if state.live.get("archidekt_backups")
-                else ""
+            # (ds-delete: the Delete box the page holds is #delete)
+            + "<section class='ui-card danger' id='ds-delete'><h2>Delete this deck</h2>"
+            + row(
+                f"{icon('history')} A snapshot is kept under History, and a copy in your backup folder on "
+                "Archidekt when backups are on.",
+                "",
+                f"<a class='btn btn-outline-danger' href='/decks/{did}/delete' data-box-open='delete'>"
+                f"{icon('trash')} Delete deck…</a>",
+                "plain",
             )
-            + ".</p>"
-            f"<a class='btn btn-danger' href='/decks/{did}/delete'>{icon('trash')} Delete deck…</a></section>"
+            + "</section></div></div>"
+            + delete_box_html(deck, csrf, backups=bool(state.live.get("archidekt_backups")))
+        )
+
+    def categories_section(deck: Deck) -> str:
+        """The deck's categories with their flags, read-only: editing them here is on hold (F7)."""
+        flags = (
+            ("isPremier", True, "Premier", "premier"),
+            ("includedInDeck", False, "Not in deck", ""),
+            ("includedInPrice", False, "Not in price", ""),
+        )
+        items = ""
+        for c in deck.categories:
+            if not isinstance(c.get("name"), str):
+                continue
+            pills = "".join(
+                f"<span class='ds-flag {cls}'>{_esc(text)}</span>"
+                for key, when, text, cls in flags
+                if bool(c.get(key, not when)) == when
+            )
+            items += (
+                f"<li><span class='nm'>{_esc(c['name'])}</span><span class='ds-flags'>{pills}</span></li>"
+            )
+        return (
+            "<section class='ui-card' id='categories'><h2>Categories</h2>"
+            f"<ul class='plain ds-list ds-cats'>{items or '<li class=muted>No categories yet.</li>'}</ul>"
+            "<p class='muted small foot'>Rename a category or change its flags on Archidekt. Moving cards "
+            "between categories stays in the deck editor and on the deck page.</p></section>"
         )
 
     def cover_section(deck: Deck, csrf: str | None, note: str = "") -> str:
@@ -217,23 +345,22 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
                 f"<option value='{_esc(uid)}'{' selected' if uid == chosen else ''}>{_esc(label)}</option>"
             )
         return (
-            "<section class='panel coverbox' id='cover'><h2>Cover image</h2>"
-            f"<form method='post' action='/decks/{did}/cover#cover' class='coverform'>"
+            "<section class='ui-card coverbox' id='cover'><h2>Cover image</h2>"
+            + note
+            + f"<form method='post' action='/decks/{did}/cover#cover' class='ds-cover'>"
             f"<input type='hidden' name='csrf' value='{_esc(csrf)}'>"
             + (
-                f"<img class='coverart' src='{_esc(preview)}' alt='Current cover: {_esc(current.name)}'>"
+                f"<img class='pv coverart' src='{_esc(preview)}' alt='Current cover: {_esc(current.name)}'>"
                 if preview and current
-                else "<div class='coverart none'><span class='muted small'>Archidekt picks the image"
+                else "<div class='pv coverart none'><span class='muted small'>Archidekt picks the image"
                 "</span></div>"
             )
-            + "<div class='field grow'><label for='cover_card'>Card whose art fronts the deck</label>"
-            "<span class='sel'><select id='cover_card' name='card'>"
+            + "<div class='field'><label for='cover_card'>Card whose art fronts the deck</label>"
+            "<div class='ds-inline'><select id='cover_card' name='card'>"
             f"<option value=''{'' if chosen else ' selected'}>Automatic (Archidekt picks)</option>"
             + "".join(options)
-            + "</select></span></div>"
-            f"<button class='primary'>{icon('image')} Set cover</button></form>"
-            + note
-            + "<p class='muted small'>Shown on the deck page, in your deck lists and on Archidekt.</p>"
+            + f"</select><button class='btn'>{icon('image')} Set cover</button></div></div></form>"
+            "<p class='muted small foot'>Shown on the deck page, in your deck lists and on Archidekt.</p>"
             "</section>"
         )
 
@@ -257,30 +384,39 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
         taken = [str(r["name"]) for r in deck.tag_relations if r.get("name")]
         bad = "id='tags-msg'" in note
         return (
-            f"<section class='panel tagbox' id='tags'><h2>Deck tags</h2>"
-            f"<ul class='plain taglist'>{items or '<li class=muted>No deck tags yet.</li>'}</ul>"
+            "<section class='ui-card tagbox' id='tags'><h2>Deck tags</h2>"
+            + note
+            + f"<ul class='plain taglist'>{items or '<li class=muted>No deck tags yet.</li>'}</ul>"
             f"<form method='post' action='/decks/{did}/tags#tags' class='addtag'>{csrf_in}"
             "<input type='hidden' name='action' value='add'>"
-            "<div class='field grow'><label for='tagname'>Add a tag</label>"
-            "<input id='tagname' type='text' name='name' maxlength='40' autocomplete='off' "
-            "data-suggest='tags' data-suggest-src='/decks/api/tags?q=' data-suggest-delay='250' "
-            f"data-suggest-exclude='{_esc(json.dumps(taken, ensure_ascii=False))}' "
-            "data-suggest-none='No Archidekt tag by that name' placeholder='Type to find a tag' "
-            f"value='{_esc(typed)}' "
-            "aria-describedby='tags-help" + (" tags-msg' aria-invalid='true'" if bad else "'") + " required>"
-            f"</div><button>{icon('tag')} Add tag</button></form>"
-            + note
-            + "<p class='muted small' id='tags-help'>Tags come from Archidekt's own tag list: type a few "
-            "letters and pick one of its tags.</p></section>"
+            + row(
+                "<label for='tagname'>Add a tag</label>",
+                "<span id='tags-help'>Tags come from Archidekt's own tag list: type a few letters and pick "
+                "one of its tags.</span>",
+                "<div class='ds-inline'>"
+                "<input id='tagname' type='text' name='name' maxlength='40' autocomplete='off' "
+                "data-suggest='tags' data-suggest-src='/decks/api/tags?q=' data-suggest-delay='250' "
+                f"data-suggest-exclude='{_esc(json.dumps(taken, ensure_ascii=False))}' "
+                "data-suggest-none='No Archidekt tag by that name' placeholder='Type to find a tag' "
+                f"value='{_esc(typed)}' "
+                "aria-describedby='tags-help"
+                + (" tags-msg' aria-invalid='true'" if bad else "'")
+                + f" required><button class='btn'>{icon('tag')} Add tag</button></div>",
+                "wctl",
+            )
+            + "</form></section>"
         )
 
     def folder_section(deck: Deck, csrf: str | None, folders: dict[str, Any] | None, note: str = "") -> str:
         did = _esc(deck.id)
         if not folders:
             return (
-                "<section class='panel folderbox' id='folder'><h2>Folder</h2>"
+                "<section class='ui-card folderbox' id='folder'><h2>Folder</h2>"
                 + note
-                + "<p class='muted'>Your folders could not be read from Archidekt right now.</p></section>"
+                + ui.notice(
+                    "Your folders could not be read from Archidekt right now.", "error", cls="ds-note"
+                )
+                + "</section>"
             )
         current = deck.parent_folder if deck.parent_folder is not None else folders["root_id"]
         # the backup folder is no place to move a deck to; a deck already in it keeps its row
@@ -291,15 +427,18 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
             if not f.get("backup") or f["id"] == current
         )
         return (
-            f"<section class='panel folderbox' id='folder'><h2>Folder</h2>"
-            f"<form method='post' action='/decks/{did}/move#folder' class='moveform'>"
-            f"<input type='hidden' name='csrf' value='{_esc(csrf)}'>"
-            "<div class='field grow'><label for='folder_id'>This deck sits in</label>"
-            f"<span class='sel'><select id='folder_id' name='folder_id'>{opts}</select></span></div>"
-            f"<button>{icon('folder')} Move</button></form>"
+            "<section class='ui-card folderbox' id='folder'><h2>Folder</h2>"
             + note
-            + "<p class='muted small'>Folders are made, renamed, moved and deleted from "
-            "<a href='/decks'>My decks</a>.</p></section>"
+            + f"<form method='post' action='/decks/{did}/move#folder'>"
+            f"<input type='hidden' name='csrf' value='{_esc(csrf)}'>"
+            + row(
+                "<label for='folder_id'>This deck sits in</label>",
+                "Manage folders on <a href='/decks'>My decks</a>.",
+                f"<div class='ds-inline'><select id='folder_id' name='folder_id'>{opts}</select>"
+                f"<button class='btn'>{icon('folder')} Move</button></div>",
+                "wctl",
+            )
+            + "</form></section>"
         )
 
     def collaborator_section(
@@ -311,18 +450,21 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
         note: str = "",
     ) -> str:
         """Archidekt's deck collaborators. Adding or removing one changes who can edit the deck, so
-        each form asks once more (a confirmation page) before it is sent to Archidekt. These are the
-        member's own presses; an assistant's proposal for the same thing waits on its review page.
-        The add box is the site's own combobox (static/suggest.js, data-suggest="list") over the
-        people the member follows (``following``, the only people Archidekt accepts) less the
-        current collaborators: focusing it shows them all, typing narrows them; without scripts it is
-        a plain box. ``follow_hint`` is a name just refused for not being followed: the refusal under
-        the box offers that person's Archidekt profile, where the Follow button is. ``note`` is this
-        section's other notice (a refusal or the ?ok= notice)."""
+        each form asks once more (a box with scripts, static/menus.js; a confirmation page without)
+        before it is sent to Archidekt. These are the member's own presses; an assistant's proposal
+        for the same thing waits on its review page. The add box is the site's own combobox
+        (static/suggest.js, data-suggest="list") over the people the member follows
+        (``following``, the only people Archidekt accepts) less the current collaborators: focusing
+        it shows them all, typing narrows them; without scripts it is a plain box. ``follow_hint``
+        is a name just refused for not being followed: the refusal under the row offers that
+        person's Archidekt profile, where the Follow button is. ``note`` is this section's other
+        notice (a refusal or the ?ok= notice)."""
         did = _esc(deck.id)
         csrf_in = f"<input type='hidden' name='csrf' value='{_esc(csrf)}'>"
         if rows is None:
-            listing = "<p class='muted'>The collaborators could not be read from Archidekt right now.</p>"
+            listing = ui.notice(
+                "The collaborators could not be read from Archidekt right now.", "error", cls="ds-note"
+            )
         else:
             items = "".join(
                 f"<li><span class='who'><span class='name'>{_esc(r['username'])}</span>"
@@ -331,18 +473,19 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
                 f"<form method='post' action='/decks/{did}/collaborators#collaborators'>{csrf_in}"
                 "<input type='hidden' name='action' value='remove'>"
                 f"<input type='hidden' name='username' value='{_esc(r['username'])}'>"
-                f"<button aria-label='Remove {_esc(r['username'])}'>{icon('x')} Remove</button>"
+                f"<button class='btn btn-outline-danger' aria-label='Remove {_esc(r['username'])}'>"
+                f"{icon('trash')} Remove</button>"
                 "</form></li>"
                 for r in rows
             )
             empty = "<li class='none muted'>No collaborators yet. Only you can edit this deck.</li>"
-            listing = f"<ul class='plain plist collablist'>{items or empty}</ul>"
+            listing = f"<ul class='plain ds-list collablist'>{items or empty}</ul>"
         taken = {str(r["username"]).casefold() for r in rows or []}
         people = sorted((n for n in following or [] if n.casefold() not in taken), key=str.casefold)
         if follow_hint:
             name = _esc(follow_hint)
             note = (
-                "<div class='notice error follownote' id='collaborators-msg' role='alert'>"
+                "<div class='notice error follownote ds-note' id='collaborators-msg' role='alert'>"
                 f"<p class='lead'>{name} isn't someone you follow on Archidekt.</p>"
                 "<p>Follow them on their Archidekt profile, then add them here.</p>"
                 f"<a class='btn' href='{_esc(profile_url(follow_hint))}' target='_blank' "
@@ -350,14 +493,16 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
             )
         if following is not None and not following:
             hint = (
-                "<p class='muted small'>You don't follow anyone on Archidekt yet. To find people, "
-                "<a href='/search'>search decks</a>, open a deck, then its owner's name, and press "
-                "Follow.</p>"
+                "You don't follow anyone on Archidekt yet. To find people, "
+                "<a href='/search'>search decks</a>, open a deck, then its owner's name, and press Follow."
             )
         elif following and not people:
-            hint = "<p class='muted small'>Everyone you follow on Archidekt is a collaborator already.</p>"
+            hint = "Everyone you follow on Archidekt is a collaborator already."
         else:
-            hint = ""
+            hint = (
+                "Only people you follow on Archidekt. They can change anything in this deck except its "
+                "main settings."
+            )
         described = "collab-help" + (" collaborators-msg" if "id='collaborators-msg'" in note else "")
         picker = (
             "data-suggest='list' "
@@ -370,27 +515,28 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
         )
         # the deck's name and the note for the box the forms ask in first (static/menus.js); the
         # confirmation page does the same without scripts
-        deck_label = deck.name or "Unnamed deck"
         return (
-            f"<section class='panel collabbox' id='collaborators' data-deck-name='{_esc(deck_label)}' "
+            "<section class='ui-card collabbox' id='collaborators' "
+            f"data-deck-name='{_esc(deck_title(deck))}' "
             f"data-note='{_esc(COLLABORATOR_NOTE)}'><h2>Collaborators</h2>"
             + listing
             + f"<form method='post' action='/decks/{did}/collaborators#collaborators' class='addtag'>"
             f"{csrf_in}<input type='hidden' name='action' value='add'>"
-            "<div class='field grow'><label for='collabname'>Add someone you follow</label>"
-            "<input id='collabname' type='text' name='username' maxlength='60' autocomplete='off' "
-            "autocapitalize='none' spellcheck='false' "
-            + picker
-            + f"value='{_esc(follow_hint)}' aria-describedby='{described}'"
-            + (" aria-invalid='true'" if "id='collaborators-msg'" in note else "")
-            + " required>"
-            + f"</div><button>{icon('plus')} Add</button></form>"
+            + row(
+                "<label for='collabname'>Add someone you follow</label>",
+                f"<span id='collab-help'>{hint}</span>",
+                "<div class='ds-inline'>"
+                "<input id='collabname' type='text' name='username' maxlength='60' autocomplete='off' "
+                "autocapitalize='none' spellcheck='false' "
+                + picker
+                + f"value='{_esc(follow_hint)}' aria-describedby='{described}'"
+                + (" aria-invalid='true'" if "id='collaborators-msg'" in note else "")
+                + f" required><button class='btn'>{icon('plus')} Add</button></div>",
+                "wctl",
+            )
+            + "</form>"
             + note
-            + hint
-            + "<p class='muted small' id='collab-help'>Only people you follow on Archidekt can be added; "
-            "that is Archidekt's own rule. A collaborator can make any change to this deck that you can, "
-            "except its main settings. You confirm each change once before it is sent to Archidekt.</p>"
-            "</section>"
+            + "</section>"
         )
 
     async def collaborators_or_none(sub: str, deck_id: str) -> list[dict[str, Any]] | None:
@@ -443,8 +589,7 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
         except DeckError as exc:
             return settings_problem(request, deck_id, exc, sub, sid)
         ok = request.query_params.get("ok") or ""
-        return page(
-            f"Deck settings: {deck.name}",
+        return settings_response(
             settings_form(
                 deck,
                 _csrf(s, sid),
@@ -453,11 +598,22 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
                 following=await following_or_none(sub),
                 ok=ok,
             ),
+            sub,
+            sid,
+        )
+
+    def settings_response(body: str, sub: str, sid: str | None, status: int = 200) -> Response:
+        return page(
+            "Deck settings",
+            body,
             sub=sub,
             sid=sid,
+            status=status,
             current="/decks",
             csp=DECK_CSP,
             deck_css=True,
+            heading=False,
+            extra_css=SETTINGS_CSS,
         )
 
     async def hand_action(request: Request, deck_id: str, run: Any, *, ok: str, anchor: str) -> Response:
@@ -481,8 +637,7 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
                 deck = await decks.get_own_deck(sub, deck_id)
             except DeckError as again:
                 return settings_problem(request, deck_id, again, sub, sid)
-            return page(
-                f"Deck settings: {deck.name}",
+            return settings_response(
                 settings_form(
                     deck,
                     _csrf(s, sid),
@@ -494,12 +649,9 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
                     follow_hint=str(exc.extra.get("follow_username") or ""),
                     typed_tag=(data.get("name") or "")[:40] if data.get("action") == "add" else "",
                 ),
-                sub=sub,
-                sid=sid,
-                status=400,
-                current="/decks",
-                csp=DECK_CSP,
-                deck_css=True,
+                sub,
+                sid,
+                400,
             )
         if isinstance(code, Response):
             return code
@@ -513,6 +665,8 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
         note: str,
         yes: str,
         back: str,
+        *,
+        danger: bool = False,
     ) -> str:
         """The second step of a one-press account action on the member's own pages (0.7.24): the
         question, then a form that sends the same fields again with ``confirmed`` and the page's
@@ -526,8 +680,13 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
             "<input type='hidden' name='confirmed' value='1'>"
             f"<h2>{_esc(question)}</h2>"
             + (f"<p class='muted small'>{_esc(note)}</p>" if note else "")
-            + f"<div class='actions'><button class='primary'>{icon('check')} {_esc(yes)}</button>"
-            f"<a class='btn' href='{_esc(back)}'>Cancel</a></div></form>"
+            + "<div class='actions'>"
+            + (
+                f"<button class='btn btn-outline-danger'>{icon('trash')} {_esc(yes)}</button>"
+                if danger
+                else f"<button class='btn btn-primary'>{icon('check')} {_esc(yes)}</button>"
+            )
+            + f"<a class='btn' href='{_esc(back)}'>Cancel</a></div></form>"
         )
 
     @server.custom_route("/decks/{deck_id}/collaborators", methods=["POST"], include_in_schema=False)
@@ -552,12 +711,13 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
                 f"/decks/{deck.id}/collaborators#collaborators",
                 _csrf(s, sid),
                 {"action": data.get("action") or "", "username": name},
-                f"Let {name} edit “{deck.name}” on Archidekt?"
+                f"Let “{name}” edit “{deck_title(deck)}” on Archidekt?"
                 if adding
-                else f"Stop {name} editing “{deck.name}” on Archidekt?",
+                else f"Stop “{name}” editing “{deck_title(deck)}” on Archidekt?",
                 COLLABORATOR_NOTE if adding else "",
-                f"Add {name}" if adding else f"Remove {name}",
+                f"Add “{name}”" if adding else f"Remove “{name}”",
                 f"/decks/{deck.id}/settings#collaborators",
+                danger=not adding,
             )
             return page("Confirm collaborator", body, sub=sub, sid=sid, current="/decks", deck_css=True)
 
@@ -623,50 +783,15 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
 
         return await hand_action(request, deck_id, run, ok="moved", anchor="folder")
 
-    # -- delete a deck (hand action, typed-name confirmation) -----------------------------------
-    def delete_form(deck: Deck, csrf: str | None, error: str = "") -> str:
-        did = _esc(deck.id)
-        n = sum(c.quantity for c in deck.cards if deck.in_deck(c))
-        undo = (
-            "A snapshot of the deck is kept under History"
-            + (
-                ", and a private copy is made in your backup folder on Archidekt first"
-                if state.live.get("archidekt_backups")
-                else ""
-            )
-            + ". Archidekt itself has no undo for a deleted deck."
-        )
-        return (
-            (f"<p class='notice error'>{_esc(error)}</p>" if error else "")
-            + f"<form method='post' action='/decks/{did}/delete' class='panel danger deleteform'>"
-            f"<input type='hidden' name='csrf' value='{_esc(csrf)}'>"
-            f"<h2>Delete “{_esc(deck.name)}”?</h2>"
-            f"<p>This deletes the deck ({plural(n, 'card')}) from your Archidekt account. {undo}</p>"
-            "<label for='typed'>Type the deck's name to confirm</label>"
-            f"<input id='typed' type='text' name='name' autocomplete='off' required maxlength='200' "
-            f"placeholder='{_esc(deck.name)}'>"
-            f"<div class='actions'><button class='danger'>{icon('trash')} Delete this deck</button>"
-            f"<a class='btn' href='/decks/{did}'>Keep it</a></div></form>"
-        )
-
+    # -- delete a deck (hand action, typed-name box on the deck page) --------------------------
     @server.custom_route("/decks/{deck_id}/delete", methods=["GET"], include_in_schema=False)
     async def delete_page(request: Request) -> Response:
+        """The old Delete page's address: the deck page with its Delete box open (M4)."""
         deck_id = request.path_params["deck_id"]
         sub, sid = browser_session(state, request)
         if not sub:
             return login_redirect(f"/decks/{deck_id}/delete")
-        try:
-            deck = await decks.get_own_deck(sub, deck_id)
-        except DeckError as exc:
-            return settings_problem(request, deck_id, exc, sub, sid)
-        return page(
-            f"Delete {deck.name}",
-            delete_form(deck, _csrf(s, sid)),
-            sub=sub,
-            sid=sid,
-            current="/decks",
-            deck_css=True,
-        )
+        return await h.deck_page_response(request, sub, sid, deck_id, box="delete")
 
     @server.custom_route("/decks/{deck_id}/delete", methods=["POST"], include_in_schema=False)
     async def delete_post(request: Request) -> Response:
@@ -681,18 +806,9 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
         try:
             await decks.delete_deck(sub, deck_id, data.get("name") or "")
         except DeckError as exc:
-            try:
-                deck = await decks.get_own_deck(sub, deck_id)
-            except DeckError as again:
-                return settings_problem(request, deck_id, again, sub, sid)
-            return page(
-                f"Delete {deck.name}",
-                delete_form(deck, _csrf(s, sid), str(exc)),
-                sub=sub,
-                sid=sid,
-                status=400,
-                current="/decks",
-                deck_css=True,
+            # the deck page again, the box open with the refusal (a wrong name, Archidekt busy ...)
+            return await h.deck_page_response(
+                request, sub, sid, deck_id, box="delete", box_error=str(exc), status=400
             )
         return RedirectResponse("/decks?ok=deleted", status_code=303)
 
@@ -784,13 +900,5 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
         try:
             p = await decks.propose_deck_details(sub, deck.id, details)
         except DeckError as exc:
-            return page(
-                f"Deck settings: {deck.name}",
-                settings_form(deck, _csrf(s, sid), data, str(exc)),
-                sub=sub,
-                sid=sid,
-                status=400,
-                current="/decks",
-                deck_css=True,
-            )
+            return settings_response(settings_form(deck, _csrf(s, sid), data, str(exc)), sub, sid, 400)
         return await apply_now(sub, p["proposal_id"], ok="saved", deck_id=deck.id)

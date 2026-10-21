@@ -196,7 +196,6 @@
           results.innerHTML = d.html;
           setCount(d.total, true);
           showMore(d.has_more);
-          nearEnd();
           if (d.warnings && d.warnings.length) setStatus(d.warnings.join(" "), false);
         }
         updateBadge(p);
@@ -228,7 +227,6 @@
         list.insertAdjacentHTML("beforeend", d.html);
         page = d.page;
         showMore(d.has_more);
-        nearEnd();
       })
       .catch(function (e) {
         if ((e && e.name === "AbortError") || forQs !== shownQs || (mine && moreCtrl !== mine)) return;
@@ -237,20 +235,9 @@
         setStatus("No connection; more cards could not be loaded.", true);
       });
   }
-  // the observer only speaks when the end comes into reach, so a page too short to push it
-  // back out (a tall window, a short page) asks for the next one itself
-  function nearEnd() {
-    if (!hasMore || !moreWrap || !window.IntersectionObserver) return;
-    requestAnimationFrame(function () {
-      if (moreWrap.getBoundingClientRect().top < window.innerHeight + 600) loadMore();
-    });
-  }
+  // the next page comes on the Load more button only (the standard's Load more; never endless
+  // scrolling), so the foot of the page stays within reach
   if (moreBtn) moreBtn.addEventListener("click", loadMore);
-  if (moreWrap && window.IntersectionObserver) {
-    new IntersectionObserver(function (entries) {
-      if (entries.some(function (e) { return e.isIntersecting; })) loadMore();
-    }, { rootMargin: "600px 0px" }).observe(moreWrap);
-  }
   hasMore = moreWrap ? !moreWrap.hidden : false;
   // the page's own first search: when it failed, the same search can be asked again
   if (!$(".notice.error", statusEl)) lastQs = shownQs = params().toString();

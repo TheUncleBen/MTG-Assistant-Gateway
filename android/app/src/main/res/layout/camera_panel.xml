@@ -31,8 +31,9 @@
                 android:textColor="@color/accent" android:textSize="16sp" android:textStyle="bold"
                 android:visibility="invisible" android:text="" android:accessibilityLiveRegion="polite" />
             <Button android:id="@+id/undo"
+                style="@style/CameraButton.Plain"
                 android:layout_width="wrap_content" android:layout_height="wrap_content"
-                android:minHeight="48dp" android:layout_marginStart="12dp" android:minWidth="80dp" android:text="@string/undo"
+                android:layout_marginStart="12dp" android:minWidth="80dp" android:text="@string/undo"
                 android:visibility="gone" />
         </LinearLayout>
 
@@ -47,6 +48,7 @@
             android:layout_marginStart="16dp" android:layout_marginEnd="16dp"
             android:orientation="horizontal" android:gravity="center_vertical" android:layout_marginTop="8dp">
             <ToggleButton android:id="@+id/torch_toggle"
+                style="@style/CameraButton.Toggle"
                 android:layout_width="wrap_content" android:layout_height="wrap_content"
                 android:textOn="@string/torch" android:textOff="@string/torch" android:minWidth="96dp" />
             <TextView android:id="@+id/torch_label"
@@ -82,23 +84,26 @@
         </LinearLayout>
 
         <!-- The same row as the Scan page's capture bar: Done on the left, the round capture
-             button in the middle, Auto on the right. -->
+             button in the middle, Auto on the right. Shoot is the row's one orange (primary) button;
+             Done, Undo and the toggles take the pages' plain outline (styles.xml, CameraButton). -->
         <LinearLayout
             android:layout_width="match_parent" android:layout_height="wrap_content"
             android:layout_marginStart="16dp" android:layout_marginEnd="16dp"
             android:orientation="horizontal" android:gravity="center_vertical"
             android:layout_marginTop="8dp" android:layout_marginBottom="16dp">
             <Button android:id="@+id/done"
+                style="@style/CameraButton.Plain"
                 android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
-                android:minHeight="48dp" android:text="@string/done" />
+                android:text="@string/done" />
             <ImageButton android:id="@+id/shoot"
                 android:layout_width="72dp" android:layout_height="72dp"
                 android:layout_marginStart="12dp" android:layout_marginEnd="12dp"
                 android:background="@drawable/shutter_bg" android:src="@drawable/ic_camera"
                 android:scaleType="center" android:contentDescription="@string/shoot" android:enabled="false" />
             <ToggleButton android:id="@+id/auto_toggle"
+                style="@style/CameraButton.Toggle"
                 android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
-                android:minHeight="48dp" android:textOn="@string/auto_mode" android:textOff="@string/auto_mode" />
+                android:textOn="@string/auto_mode" android:textOff="@string/auto_mode" />
         </LinearLayout>
     </LinearLayout>
     </ScrollView>

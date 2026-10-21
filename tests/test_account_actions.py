@@ -744,9 +744,11 @@ async def test_settings_page_collaborators_take_one_press_and_a_confirmation(sta
         assert "press Apply there" not in page
         # One line on the rule; the people followed are offered (the site's own combobox, no
         # datalist), less current collaborators: amy, the only one followed, is one already
-        assert "Only people you follow on Archidekt can be added" in page
+        # (the help line is "Everyone you follow … already" here; the rule's sentence otherwise)
         assert "<datalist" not in page and "data-suggest='list'" not in page
         assert "Everyone you follow on Archidekt is a collaborator already." in page
+        # Remove is the red outline with the trash icon; the solid red button is in the box
+        assert "class='btn btn-outline-danger' aria-label='Remove amy'" in page
         # each form names its section, so the answer (a refusal, or the page after the confirmation)
         # opens there
         assert "action='/decks/42/collaborators#collaborators'" in page
@@ -755,7 +757,8 @@ async def test_settings_page_collaborators_take_one_press_and_a_confirmation(sta
         r = await b.http.post(
             "/decks/42/collaborators", data={"csrf": csrf, "action": "remove", "username": "AMY"}
         )
-        assert r.status_code == 200 and "Stop amy editing" in r.text and "name='confirmed'" in r.text
+        assert r.status_code == 200 and "Stop “amy” editing" in r.text and "name='confirmed'" in r.text
+        assert "btn btn-outline-danger'>" in r.text and "Remove “amy”" in r.text
         assert "/decks/42/settings#collaborators" in r.text  # Cancel goes back
         assert len(ark.editors[42]) == 1 and h.db.list_proposals(SUB) == []
         # the confirmation removes them at once
@@ -776,7 +779,7 @@ async def test_settings_page_collaborators_take_one_press_and_a_confirmation(sta
         r = await b.http.post(
             "/decks/42/collaborators", data={"csrf": csrf, "action": "add", "username": "amy"}
         )
-        assert r.status_code == 200 and "Let amy edit" in r.text and ark.editors[42] == []
+        assert r.status_code == 200 and "Let “amy” edit" in r.text and ark.editors[42] == []
         r = await b.http.post(
             "/decks/42/collaborators",
             data={"csrf": csrf, "action": "add", "username": "amy", "confirmed": "1"},
@@ -794,7 +797,8 @@ async def test_settings_page_collaborators_take_one_press_and_a_confirmation(sta
         assert "not among the people you follow" not in bad.text
         assert "<p class='notice error'>" not in bad.text
         msg = bad.text.index("id='collaborators-msg'")
-        assert bad.text.index("id='collabname'") < msg < bad.text.index("id='collab-help'")
+        # (the row's help sits beside the box; the refusal is the strip under the row)
+        assert bad.text.index("id='collab-help'") < bad.text.index("id='collabname'") < msg
         assert (
             "<a class='btn' href='https://archidekt.com/u/nobody' target='_blank' "
             "rel='noreferrer noopener'>" in bad.text

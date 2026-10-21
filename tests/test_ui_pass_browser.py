@@ -183,7 +183,7 @@ TOUCH_TARGETS = {
     "/": ".topbar .icon-btn, a.brand, footer.site .links a, main .btn, main button,"
     " main input:not([type=hidden])",
     "/reports": ".rp-t .title .t a, .rp-t a.act",
-    "/collection?view=list": ".coll-totals a.ext",
+    "/collection?view=list": ".ui-widgets a.ext",
     "/guide": ".guide h2 .anchor",
     "/decks/42": ".curveaxis .mv, .rowbtn, .banner .social .soc",
     "/decks/42?view=table": "ul.rows .row",

@@ -6,6 +6,7 @@ menu keys, the search bar syntax, the 90-second list cache)."""
 
 from __future__ import annotations
 
+import html
 import re
 
 from mtg_gateway import guide
@@ -182,3 +183,60 @@ def test_the_backup_texts_follow_the_backup_settings() -> None:
     assert "by default on this gateway" not in off and copy_step not in off and "backup copy first" not in off
     assert "checks it still fits the deck, saves a snapshot, then reads the deck back to confirm." in off
     assert "keeps the snapshot first." in off
+
+
+# -- 2026-10-21 overhaul (Ben's answers of 18:11Z): plain asks, the one closed tool-names fold ----
+def test_member_text_names_no_tool_the_abilities_are_plain_asks() -> None:
+    from mtg_gateway import tool_labels
+
+    page = _page(watchlists=True)
+    fold_at = page.index("id='adv-tools'")
+    before = page[:fold_at]
+    named = [raw for raw in tool_labels.TOOLS if f"<code>{raw}</code>" in before or f">{raw}<" in before]
+    assert not named, named
+    assert "by tool" not in page
+    assert "<h3 id='ref-assistant-h'>" in page and "What the assistant can do" in page
+    table = page[page.index("id='ref-assistant'") : fold_at]
+    assert "<th role='columnheader'>Ask your assistant</th><th role='columnheader'>What happens</th>" in table
+    for ask in ("Read my deck", "Compare two decks", "Run a test report", "Watch this card's price"):
+        assert f"“{html.escape(ask)}”" in table, ask
+    assert "A change you approve first (a proposal)" in table and "only your own press applies" in table
+    assert "Reads; nothing changes" in table
+    # the asks follow the shared words, so a renamed tool cannot drift from the setup pages
+    assert tool_labels.tool_ask("get_deck") == "Read my deck"
+
+
+def test_the_advanced_fold_is_last_closed_and_lists_each_ask_beside_its_tool_name() -> None:
+    from mtg_gateway import tool_labels
+
+    page = _page(watchlists=True)
+    fold = re.search(r"<details class='gadv' id='adv-tools'>(.*?)</details>", page, re.S)
+    assert fold, "no fold"
+    assert " open" not in fold.group(0)[: fold.group(0).index(">")]  # closed by default
+    assert "<summary class='btn'>" in fold.group(0) and "Advanced: tool names</summary>" in fold.group(0)
+    assert (
+        "<p>Your assistant picks these for you. They are listed here in case you need the exact name.</p>"
+        in fold.group(0)
+    )
+    # after the last part (Explanation), before the no-match line: the end of the guide
+    assert page.index("id='explanation'") < fold.start() < page.index("class='nomatch muted'")
+    for raw, words in tool_labels.TOOLS.items():
+        assert f"<td role='cell' data-label='Ask'>“{html.escape(words.ask)}”</td>" in fold.group(1), raw
+        assert f"<td role='cell' data-label='Tool name'><code>{raw}</code></td>" in fold.group(1), raw
+    # the watch asks go with watchlists off, in the table and in the fold
+    off = _page()
+    assert "watch_card" not in off and "Watch this card's price" not in off
+    # no heading inside the fold: the rail and the search index only the four parts
+    assert not re.search(r"<h[2-4]", fold.group(1))
+
+
+def test_guide_smaller_fixes_touch_targets_placeholder_and_collection_words() -> None:
+    page = _page()
+    assert "placeholder='Search the guide'" in page and "A word or two" not in page
+    assert "@media (pointer:coarse){.gnav a{min-height:44px}}" in guide.GUIDE_CSS
+    assert (
+        "Filter by name, show it as a grid or a list, sort it, and press Load more for the rest. Plus "
+        "and minus change the count. The ⋮ button opens the card's menu: Details… there changes finish, "
+        "condition, language and price paid." in page
+    )
+    assert "page through it" not in page and "the dots open its details" not in page

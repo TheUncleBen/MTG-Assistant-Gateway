@@ -41,8 +41,7 @@
     }
     $("title").textContent = String(sc.name || "Scan session");
     var st = $("state");
-    st.textContent = sc.status === "done" ? "done" : "open";
-    st.className = sc.status === "done" ? "badge ok" : "badge info";
+    if (sc.status === "done") B.label(st, "Done", "ok", "check"); else B.label(st, "Open", "info", "camera");
     var items = Array.isArray(sc.items) ? sc.items.filter(function (it) { return it && typeof it === "object"; }) : [];
     var flagged = items.filter(needsLook), known = items.filter(function (it) { return !needsLook(it); });
     var cards = 0; known.forEach(function (it) { cards += num(it.quantity); });

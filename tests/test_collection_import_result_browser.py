@@ -27,7 +27,7 @@ SHOTS = os.environ.get("MTG_IMPORT_SHOTS")
 FITS = """
 () => {
   const vw = document.documentElement.clientWidth, out = [];
-  const box = document.querySelector('.notice');
+  const box = document.querySelector('#col-notes .notice');
   if (!box) return ['no notice'];
   const b = box.getBoundingClientRect();
   if (b.left < -1 || b.right > vw + 1) out.push('notice outside the window');
@@ -57,21 +57,19 @@ def server(tmp_path: Path):
 
 
 def _import(page, server: Server, text: str) -> None:
-    page.goto(f"{server.base}/collection", wait_until="networkidle")
-    fold = page.locator("details.addfold:not(.csvhelp)")
-    if not fold.evaluate("d => d.open"):
-        fold.locator("summary").click()
+    page.goto(f"{server.base}/collection?add=import", wait_until="networkidle")
+    page.wait_for_function("() => !document.getElementById('col-add').hidden")
     page.fill("#importtext", text)
     with page.expect_navigation(wait_until="networkidle"):
-        page.locator("form.importform button").click()
+        page.locator("#col-add button[form=col-importform]").click()
 
 
 def _check(page, name: str, width: int, theme: str) -> None:
     assert page.evaluate(MEASURE) == []
     assert page.evaluate(FITS) == []
-    assert page.evaluate(CONTRAST, ".notice, .notice p, .notice li") == []
+    assert page.evaluate(CONTRAST, "#col-notes .notice, #col-notes .notice p, #col-notes .notice li") == []
     if SHOTS:
-        page.locator(".notice").screenshot(path=str(Path(SHOTS) / f"{name}-{width}-{theme}.png"))
+        page.locator("#col-notes .notice").screenshot(path=str(Path(SHOTS) / f"{name}-{width}-{theme}.png"))
         page.screenshot(path=str(Path(SHOTS) / f"{name}-page-{width}-{theme}.png"))
 
 
@@ -84,11 +82,17 @@ def test_import_result_reads_at_every_width(server: Server, width: int, theme: s
     with sync_playwright() as p:
         browser, page, errors = _page(p, server, sid, width, theme, exe)
         _import(page, server, FIRST)
-        assert page.locator(".notice").inner_text() == "Imported 1 card into your Archidekt collection."
+        assert (
+            page.locator("#col-notes .notice").inner_text()
+            == "Imported 1 card into your Archidekt collection."
+        )
         _import(page, server, MIXED)
         assert "&r=" in page.url and "Foo" not in page.url
-        lines = page.locator(".notice li").all_inner_texts()
-        assert page.locator(".notice p").inner_text() == "Imported 4 cards into your Archidekt collection."
+        lines = page.locator("#col-notes .notice li").all_inner_texts()
+        assert (
+            page.locator("#col-notes .notice p").inner_text()
+            == "Imported 4 cards into your Archidekt collection."
+        )
         assert lines == [
             "Kept as English, because Phyrexian is not a language Archidekt stores "
             "for collection cards: line 3 (Opt).",
@@ -100,18 +104,18 @@ def test_import_result_reads_at_every_width(server: Server, width: int, theme: s
         ], lines
         _check(page, "import-result", width, theme)
         _import(page, server, BAD)
-        assert page.locator(".notice").inner_text() == (
+        assert page.locator("#col-notes .notice").inner_text() == (
             "Nothing was imported: line 3: quantity 'x' is not a number."
         )
         _check(page, "import-refused", width, theme)
         # the refusals the review fixes added: a quantity out of range, an unclosed quote
         _import(page, server, "Quantity,Name\n1,Opt\n0,Opt\n")
-        assert page.locator(".notice").inner_text() == (
+        assert page.locator("#col-notes .notice").inner_text() == (
             "Nothing was imported: line 3: quantity '0' is not from 1 to 9,999."
         )
         _check(page, "import-refused-quantity", width, theme)
         _import(page, server, 'Quantity,Name\n1,"Opt' + "x" * 140_000 + "\n")
-        assert page.locator(".notice").inner_text() == (
+        assert page.locator("#col-notes .notice").inner_text() == (
             "Nothing was imported: line 2: a cell is longer than 131,072 characters; check for a quotation "
             'mark (") that is not closed.'
         )

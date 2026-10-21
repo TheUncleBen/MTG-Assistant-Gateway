@@ -133,6 +133,20 @@ def test_rows_show_picture_finish_changes_and_alerts() -> None:
     assert "1–4 of 4" in page and "1–1 of 1" in page
 
 
+def test_the_card_size_switch_and_room_for_the_row_menu_beside_details() -> None:
+    """R-175 (2026-10-21): the card size switch sits above the table; the action column is wide
+    enough for Details and the row's ⋮ side by side, so the ⋮ no longer wraps under Details."""
+    from mtg_gateway import watchlist_page as wp
+
+    page = _page()
+    assert "class='cardsize w-size'" in page and "data-card-size-set='m'" in page
+    assert wp.TABLE_COLS.split()[-1] == "8.5rem" and wp.TABLE_MD.split()[-1] == "8.5rem"
+    assert (
+        ".watch-page .w-t .act{display:inline-flex;align-items:center;gap:.4rem;flex-wrap:nowrap"
+        in wp.WATCH_PAGE_CSS
+    )
+
+
 def test_chips_search_finish_and_sort() -> None:
     def rows(page: str) -> list[str]:
         return re.findall(r"class='wcard' data-card='([^']+)'", page)

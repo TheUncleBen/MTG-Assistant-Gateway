@@ -65,10 +65,10 @@ def test_add_to_deck_buttons_share_a_row_bottom_edge_on_a_computer(server: Serve
     with sync_playwright() as p:
         browser, page, errors = _page(p, server, 1280, exe)
         page.goto(f"{server.base}/cards?q=s", wait_until="networkidle")
-        # the page's end is near: the second page comes by itself, the third once Load more is in view
+        # the next pages come on Load more (UI overhaul 2026-10-21: never by scrolling)
+        page.locator("#cs-more [data-more]").click()
         page.wait_for_function("() => document.querySelectorAll('#cardgrid .cc').length >= 8", timeout=5000)
-        if page.locator("#cs-more").is_visible():  # the third page may have come by itself too
-            page.locator("#cs-more").scroll_into_view_if_needed()
+        page.locator("#cs-more [data-more]").click()
         page.wait_for_function("() => document.querySelectorAll('#cardgrid .cc').length >= 9", timeout=5000)
         rows = page.evaluate(ROWS_JS)
         assert len(rows) >= 2 and len(rows[0]) == 7  # the first row holds cards from two pages

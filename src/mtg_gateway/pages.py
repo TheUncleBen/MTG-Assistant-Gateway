@@ -19,7 +19,7 @@ from urllib.parse import parse_qs, quote
 from starlette.requests import Request
 from starlette.responses import RedirectResponse, Response
 
-from . import app_signin, link_disclosure, modes, notify, prefs, proposals_view, ui
+from . import app_signin, link_disclosure, modes, notify, prefs, proposals_view, smallpage, ui
 from .archidekt import PATIENCE_SPENT, page_turn
 from .auth_provider import BROWSER_COOKIE, LoginError, cookie_name
 from .avatars import initials_svg
@@ -109,8 +109,19 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
     async def form(request: Request) -> dict[str, str] | Response:
         raw = await read_limited(request, MAX_FORM)
         if raw is None:
-            return page("Too large", "<p>That form was too large.</p>", status=413)
+            return small("Too large", smallpage.too_large(request.url.path), status=413)
         return {k: v[0] for k, v in parse_qs(raw.decode("utf-8", "replace"), keep_blank_values=True).items()}
+
+    def small(
+        title: str, body: str, *, status: int = 200, sub: str | None = None, sid: str | None = None
+    ) -> Response:
+        """One of the small pages (smallpage.py): the panel carries its own title."""
+        return page(title, body, status=status, sub=sub, sid=sid, heading=False, head_extra=smallpage.HEAD)
+
+    def login_failed(exc: LoginError, login_href: str) -> Response:
+        """The page for a website sign-in that could not be finished, by the error's kind."""
+        body = smallpage.login_error(exc.kind, str(exc), assistant=False, login_href=login_href)
+        return small(smallpage.login_error_title(exc.kind), body, status=exc.status)
 
     def check_csrf(sid: str | None, data: dict[str, str]) -> bool:
         return csrf_form_ok(s, sid, data)
@@ -134,7 +145,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             # The Android app's sign-in, running in the phone's browser (app_signin.py). This
             # browser's own session, if any, is not handed over: the identity provider decides.
             if not app_signin.CHALLENGE.fullmatch(challenge):
-                return page("Sign-in failed", "<p>That sign-in link is not valid.</p>", status=400)
+                return small("Sign-in failed", smallpage.signin_failed(f"/login?next={nxt}"), status=400)
             params["app_challenge"] = challenge
         else:
             sub, _sid = current(request)
@@ -143,13 +154,13 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             if in_app() and q.get("inapp") != "1":
                 # The fresh cookie stays until a sign-in completes (start_session), so backing out
                 # of the browser and coming back here still asks for credentials again.
-                resp = page("Sign in", app_signin.handoff_body(nxt, fresh))
+                resp = small("Sign in", app_signin.handoff_body(nxt, fresh))
                 resp.headers["Cache-Control"] = "no-store"
                 return resp
         try:
             url = await state.provider.start_idp_login(BROWSER_CLIENT_ID, params, force_login=fresh)
         except LoginError as exc:
-            return page("Sign-in unavailable", f"<p>{html.escape(str(exc))}</p>", status=exc.status)
+            return login_failed(exc, f"/login?next={nxt}")
         resp = RedirectResponse(url, status_code=302, headers={"Cache-Control": "no-store"})
         if fresh:
             resp.delete_cookie(fresh_cookie, path="/", secure=secure, httponly=True, samesite="lax")
@@ -262,11 +273,13 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
 
     @server.custom_route("/signed-out", methods=["GET"], include_in_schema=False)
     async def signed_out(_request: Request) -> Response:
-        return page(
+        return small(
             "Signed out",
-            "<div class='card'><p>You are signed out of this gateway.</p>"
-            "<div class='actions'><a class='btn btn-primary' href='/login?next=/'>Sign in again</a>"
-            "</div></div>",
+            smallpage.panel(
+                "Signed out",
+                smallpage.p("You are signed out of this gateway."),
+                smallpage.button("Sign in again", "/login?next=/", primary=True),
+            ),
         )
 
     @server.custom_route("/data-deleted", methods=["GET"], include_in_schema=False)
@@ -277,17 +290,22 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             if s.backup_dir is not None
             else ""
         )
-        return page(
+        return small(
             "Your data was deleted",
-            "<div class='card'><p>What this gateway kept for your account was deleted from its "
-            "database: proposals, snapshots, test reports, scan sessions, deck covers, your Archidekt "
-            "link, connected apps and your sign-in. You are signed out.</p>"
-            "<p class='muted small'>Your decks on Archidekt, including any backup copies the gateway "
-            "made there, are yours on Archidekt and were not touched. "
-            f"{html.escape(backups)}The gateway's security log keeps "
-            "a record that this account existed and was deleted until it ages out after a year.</p>"
-            "<div class='actions'><a class='btn btn-primary' href='/login?next=/'>Sign in again</a>"
-            "</div></div>",
+            smallpage.panel(
+                "Your data was deleted",
+                smallpage.p(
+                    "What this gateway kept for your account was deleted from its database: "
+                    f"{DELETED_LIST}. You are signed out."
+                )
+                + "<div class='notice'><strong>Not touched:</strong> your decks on Archidekt, including any "
+                "backup copies the gateway made there.</div>"
+                + smallpage.small(
+                    f"{backups}The gateway's security log keeps a record that this account existed and was "
+                    "deleted until it ages out after a year."
+                ),
+                smallpage.button("Sign in again", "/login?next=/", primary=True),
+            ),
         )
 
     # -- account ------------------------------------------------------------
@@ -296,14 +314,24 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         sub, sid = current(request)
         if not sub:
             return to_login("/account")
-        ok, err = request.query_params.get("ok"), request.query_params.get("err")
+        q = request.query_params
+        ok, err = q.get("ok"), q.get("err")
         # The Notifications and Summary cards show their own notices inside them (where the
         # redirect lands); every other notice stays at the top of the page.
-        notice = _notice(
-            None if ok in notify.CARD_NOTICES else ok, None if err in notify.CARD_NOTICES else err
+        if ok == "disconnected":
+            # the app's registered name, looked up by the id the redirect carries (never the URL's words)
+            notice = _ok(f"Disconnected “{ui.app_name(state.db.client_name(q.get('app')))}”.")
+        else:
+            notice = _notice(
+                None if ok in notify.CARD_NOTICES else ok, None if err in notify.CARD_NOTICES else err
+            )
+        # The old one-press forms' addresses open the page with the matching box open (no-JS path
+        # of the red-outline buttons): ?unlink=1, ?disconnect=<client id>, ?disconnect_all=1, ?delete=1.
+        open_box = next((k for k in ("unlink", "disconnect", "disconnect_all", "delete") if k in q), None)
+        body = _account_body(
+            state, sub, _csrf(s, sid), ok=ok, err=err, open_box=open_box, open_client=q.get("disconnect")
         )
-        body = _account_body(state, sub, _csrf(s, sid), ok=ok, err=err)
-        return page("Account", notice + body, sub=sub, sid=sid)
+        return page("Account", notice + body, sub=sub, sid=sid, head_extra=ACCOUNT_HEAD)
 
     @server.custom_route("/account/avatar", methods=["GET"], include_in_schema=False)
     async def account_avatar(request: Request) -> Response:
@@ -342,9 +370,11 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         if isinstance(data, Response):
             return data
         if not check_csrf(sid, data):
-            return page(
-                "Account",
-                _err("This form expired. Reload the page and try again."),
+            return small(
+                "Form expired",
+                smallpage.form_expired(
+                    "Reload Account", "/account", "/account", nothing="Nothing was changed."
+                ),
                 status=403,
                 sub=sub,
                 sid=sid,
@@ -369,7 +399,8 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
                     client_id=BROWSER_CLIENT_ID,
                     detail={"proposal_id": pid, "origin": "browser", "reason": "app disconnected"},
                 )
-            return RedirectResponse(f"/account?ok={'disconnected' if client_id else 'disconnected_all'}", 303)
+            done = f"ok=disconnected&app={quote(client_id, safe='')}" if client_id else "ok=disconnected_all"
+            return RedirectResponse(f"/account?{done}#apps", 303)
         if action == "unlink":
             state.decks.unlink(sub)
             return RedirectResponse("/account?ok=unlinked", status_code=303)
@@ -401,7 +432,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             return resp
         if action == "delete_data":
             if data.get("confirm") != "yes":
-                return RedirectResponse("/account?err=confirm_delete", status_code=303)
+                return RedirectResponse("/account?delete=1&err=confirm_delete", status_code=303)
             state.db.delete_member_data(sub)
             state.decks.forget_member(sub)
             if state.membership is not None:
@@ -482,15 +513,16 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         multi = parse_qs(raw.decode("utf-8", "replace"), keep_blank_values=True)
         data = {k: v[0] for k, v in multi.items()}
         action = data.get("action")
+        back = _list_back(data.get("back"))
         if not check_csrf(sid, data) or action not in ("apply", "reject"):
-            return page(
-                "Proposals",
-                _err("This form expired. Reload the page and try again."),
+            nothing = "Nothing was rejected." if action == "reject" else "Nothing was applied."
+            return small(
+                "Form expired",
+                smallpage.form_expired("Reload Proposals", "/proposals", back, nothing=nothing),
                 status=403,
                 sub=sub,
                 sid=sid,
             )
-        back = _list_back(data.get("back"))
         picks = [p for p in multi.get("pick", []) if re.fullmatch(r"[A-Za-z0-9_-]{1,64}", p)][:MAX_PICKS]
         versions = _picked_versions(data, picks)
         if not picks:
@@ -536,13 +568,17 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             raise exc
         return page(
             "Apply these changes?",
-            "<div class='card'>"
-            + _err(str(exc))
-            + f"<p><a class='btn btn-plain' href='{html.escape(back)}'>Back</a></p></div>",
+            smallpage.panel(
+                "Apply these changes?",
+                smallpage.error_strip(str(exc)),
+                smallpage.button("Back to Proposals", back),
+            ),
             status=409,
             sub=sub,
             sid=sid,
             current="/proposals",
+            heading=False,
+            head_extra=smallpage.HEAD,
         )
 
     @server.custom_route("/proposals/apply", methods=["POST"], include_in_schema=False)
@@ -554,10 +590,13 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         data = await form(request)
         if isinstance(data, Response):
             return data
+        back = _list_back(data.get("back"))
         if not check_csrf(sid, data) or data.get("action") != "apply":
-            return page(
-                "Proposals",
-                _err("This form expired. Reload the page and try again."),
+            return small(
+                "Form expired",
+                smallpage.form_expired(
+                    "Reload Proposals", "/proposals", back, nothing="Nothing was applied."
+                ),
                 status=403,
                 sub=sub,
                 sid=sid,
@@ -565,7 +604,6 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         picks = [p for p in (data.get("picks") or "").split(",") if re.fullmatch(r"[A-Za-z0-9_-]{1,64}", p)]
         picks = picks[:MAX_PICKS]
         versions = _picked_versions(data, picks)
-        back = _list_back(data.get("back"))
         if any(p not in versions for p in picks):  # a change not at the version shown, as on the list
             return RedirectResponse(_with_query(back, "err=changed_some"), status_code=303)
         if submitted_too_soon(s.session_secret, f"select:{sub}", data.get("shown")):
@@ -616,18 +654,32 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         run = state.decks.batches.get(sub, bid)
         if run is None:
             return page(
-                "Applied",
-                "<div class='card'><p>This result is no longer kept. Each change shows its own outcome "
-                "on the <a href='/proposals'>Proposals</a> page and in History.</p></div>",
+                "This result is no longer kept",
+                smallpage.panel(
+                    "This result is no longer kept",
+                    "<p>Each change shows its own outcome on the <a href='/proposals'>Proposals</a> page "
+                    "and in History.</p>",
+                    smallpage.button("Back to Proposals", "/proposals", primary=True),
+                ),
                 status=404,
                 sub=sub,
                 sid=sid,
                 current="/proposals",
+                heading=False,
+                head_extra=smallpage.HEAD,
             )
-        head = LIST_STYLE + (
-            f"<meta http-equiv='refresh' content='3;url=/proposals/applied/{quote(bid, safe='')}'>"
-            if run["state"] == "applying"
-            else ""
+        # While applying, static/applied-live.js asks for this page every 3 s and swaps in only the
+        # rows that changed (no reload, the scroll stays); without scripts the page reloads itself.
+        head = (
+            LIST_STYLE
+            + UNDO_SCRIPT
+            + (
+                "<noscript><meta http-equiv='refresh' "
+                f"content='3;url=/proposals/applied/{quote(bid, safe='')}'></noscript>"
+                f"<script src='{APPLIED_LIVE_SCRIPT}' defer></script>"
+                if run["state"] == "applying"
+                else ""
+            )
         )
         return page(
             "Applying" if run["state"] == "applying" else "Applied",
@@ -648,18 +700,22 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         data = await form(request)
         if isinstance(data, Response):
             return data
-        if not check_csrf(sid, data) or data.get("action") not in ("preview", "undo"):
-            return page(
-                "Undo",
-                _err("This form expired. Reload the page and try again."),
-                status=403,
-                sub=sub,
-                sid=sid,
-            )
         snapshot_id = data.get("snapshot") or ""
         applied = [
             p for p in (data.get("applied") or "").split(",") if re.fullmatch(r"[A-Za-z0-9_-]{1,64}", p)
         ]
+        if not check_csrf(sid, data) or data.get("action") not in ("preview", "undo"):
+            # Reload the change: its review page when the form names one change, else Proposals
+            change = f"/proposals/{applied[0]}" if len(applied) == 1 else "/proposals"
+            return small(
+                "Form expired",
+                smallpage.form_expired(
+                    "Reload the change", change, "/proposals", nothing="Nothing was undone."
+                ),
+                status=403,
+                sub=sub,
+                sid=sid,
+            )
         after_at = int(data["after"]) if (data.get("after") or "").isdigit() else 0
         current_client.set(BROWSER_CLIENT_ID)
         if data.get("action") == "undo":
@@ -670,19 +726,36 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             except DeckError as exc:
                 return page(
                     "Undo",
-                    "<div class='card'>"
-                    + _err(str(exc))
-                    + "<p><a class='btn btn-plain' href='/proposals'>Back to Proposals</a></p></div>",
+                    smallpage.panel(
+                        "Undo",
+                        smallpage.error_strip(str(exc)),
+                        smallpage.button("Back to Proposals", "/proposals"),
+                    ),
                     status=409,
                     sub=sub,
                     sid=sid,
                     current="/proposals",
+                    heading=False,
+                    head_extra=smallpage.HEAD,
                 )
             return RedirectResponse(f"/proposals/{done['proposal_id']}?ok=undone", status_code=303)
         try:
             look = await state.decks.undo_preview(sub, snapshot_id, applied=applied, after_at=after_at)
         except DeckError as exc:
-            return page("Undo", _err(str(exc)), status=404, sub=sub, sid=sid, current="/proposals")
+            return page(
+                "Undo",
+                smallpage.panel(
+                    "Undo",
+                    smallpage.error_strip(str(exc)),
+                    smallpage.button("Back to Proposals", "/proposals"),
+                ),
+                status=404,
+                sub=sub,
+                sid=sid,
+                current="/proposals",
+                heading=False,
+                head_extra=smallpage.HEAD,
+            )
         stamp = form_stamp(s.session_secret, f"undo:{sub}:{snapshot_id}")
         return page(
             "Undo this change?",
@@ -772,7 +845,8 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             )
             + DOC_STYLE
             + LIST_STYLE
-            + PROPOSALS_STYLE,
+            + PROPOSALS_STYLE
+            + UNDO_SCRIPT,
         )
 
     @server.custom_route("/proposals/{pid}", methods=["POST"], include_in_schema=False)
@@ -841,15 +915,15 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
                 cookie_value=request.cookies.get(cookie_name(BROWSER_COOKIE, s)),
             )
         except LoginError as exc:
-            return page("Sign-in failed", f"<p>{html.escape(str(exc))}</p>", status=exc.status)
-        if identity is None:
-            return page("Sign-in canceled", "<p>You canceled at the identity provider.</p>", status=200)
+            return login_failed(exc, "/login")
         nxt = _safe_next(str(session["params"].get("next", "/account")))
+        if identity is None:
+            return small("Sign-in canceled", smallpage.signin_canceled(f"/login?next={nxt}"))
         challenge = session["params"].get("app_challenge")
         if isinstance(challenge, str) and app_signin.CHALLENGE.fullmatch(challenge):
             # The Android app's sign-in: no session in this browser, a one-time code for the app.
             code = state.app_signins.issue(identity.sub, challenge, nxt)  # type: ignore[attr-defined]
-            resp = page("Signed in", app_signin.return_body(code, s.android_package))
+            resp = small("Signed in", app_signin.return_body(code, s.android_package))
             resp.headers["Cache-Control"] = "no-store"
             resp.headers["Referrer-Policy"] = "no-referrer"
             return resp
@@ -881,8 +955,10 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         Without that, someone could sign in as themselves in their own browser, then make a
         victim's browser post their code and verifier, signing the victim in as them."""
         if not in_app() or request.headers.get("sec-fetch-site", "none") not in ("none", "same-origin"):
-            resp = page(
-                "Sign-in failed", "<p>This sign-in can only be finished by the Android app.</p>", status=403
+            resp = small(
+                "Sign-in failed",
+                smallpage.panel("Sign-in failed", smallpage.p(smallpage.APP_ONLY), smallpage.home()),
+                status=403,
             )
             resp.headers["Cache-Control"] = "no-store"
             return resp
@@ -891,7 +967,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             return data
         pending = state.app_signins.redeem(data.get("code", ""), data.get("verifier", ""))  # type: ignore[attr-defined]
         if pending is None:
-            resp = page("Sign-in failed", app_signin.expired_body("/"), status=400)
+            resp = small("Sign-in failed", app_signin.expired_body("/"), status=400)
             resp.headers["Cache-Control"] = "no-store"
             return resp
         return start_session(pending.sub, _safe_next(pending.next_path), via="android_app", status=303)
@@ -969,18 +1045,13 @@ MAX_FORM = 16_384
 # else shows nothing, so a link cannot make the page display text of its choosing.
 OK_MESSAGES = {
     "linked": "Archidekt account linked. Your assistant can now read your decks.",
-    "unlinked": "Archidekt account unlinked. The gateway's copy of your Archidekt session was "
-    "deleted. The gateway cannot sign that session out on Archidekt's side; whether Archidekt "
-    "keeps accepting a copy until it expires, and whether changing your Archidekt password ends "
-    "it, is not known.",
+    "unlinked": "Unlinked. The gateway's copy of the session was deleted.",
     "applied": "Applied. Archidekt now matches this proposal.",
     "applying": "Applying. This is a large change, so Archidekt is updated a step at a time to stay "
     "within its limits. You can leave this page; the progress below refreshes by itself.",
     "rejected": "Rejected. Nothing was sent to Archidekt.",
-    "disconnected": "Disconnected. That app has to be connected and approved again to use your account. "
-    "Its pending proposals were rejected.",
-    "disconnected_all": "Every connected app was disconnected. Each has to be connected and approved again. "
-    "Their pending proposals were rejected.",
+    "disconnected": "The app was disconnected.",  # the Account page names the app when it can
+    "disconnected_all": "All apps were disconnected.",
     "choices_forgotten": "Done. Every page starts with its usual view again, on all your devices.",
     "mode_manual": "Saved: your assistant asks you every time.",
     "mode_semi": "Saved: your assistant applies low-risk changes without asking (a small deck or collection "
@@ -1062,6 +1133,36 @@ def _err(msg: str) -> str:
     return f"<div class='notice error'>{html.escape(msg)}</div>"
 
 
+def _ok(msg: str) -> str:
+    return f"<div class='notice ok'>{html.escape(msg)}</div>"
+
+
+# What "Delete my data" deletes, word for word on the Account page's card and on the "Your data
+# was deleted" page (db.py MEMBER_TABLES is the code's list; tests keep the two in step).
+DELETED_LIST = (
+    "proposals, snapshots, test reports, scan sessions, deck covers, your watchlist, your simulator "
+    "card models, your notification and view choices, your Archidekt link, connected apps and your "
+    "sign-in"
+)
+
+# The Account page: connected app rows, the disclosure as a tinted strip, buttons that wrap.
+ACCOUNT_CSS = (
+    ".acc .apps{list-style:none;margin:.5rem 0;padding:0}"
+    ".acc .apps li{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:.1rem 1rem;align-items:center;"
+    "padding:.6rem 0;border-top:1px solid var(--border-soft)}"
+    ".acc .apps li:first-child{border-top:0;padding-top:.2rem}"
+    ".acc .apps .nm .ui-app{font-size:1rem;font-weight:700}"
+    ".acc .apps .sub{color:var(--text-muted);font-size:.9rem}"
+    ".acc .apps .btn-cell{grid-column:2;grid-row:1 / span 2}"
+    ".acc .notice.disclosure{background:var(--blue-tint);border-left-color:var(--blue)}"
+    ".acc .ui-actions .btn,.acc .ui-actions button{white-space:normal;max-width:100%;text-align:center}"
+    ".acc form.inbox{margin:0}.acc form.inbox p{margin:0 0 .5rem}"
+    "@media (max-width:599.98px){.acc .apps li{grid-template-columns:1fr}.acc .apps .btn-cell{grid-column:1;"
+    "grid-row:auto}.acc .ui-actions .btn,.acc .ui-actions button{flex:1 1 auto}}"
+)
+ACCOUNT_HEAD = f"<style>{ACCOUNT_CSS}</style><script src='{smallpage.SCRIPT}' defer></script>"
+
+
 def _notice(ok: str | None, err: str | None) -> str:
     if ok in OK_MESSAGES:
         return f"<div class='notice ok'>{html.escape(OK_MESSAGES[ok])}</div>"
@@ -1130,21 +1231,26 @@ def _account_body(
     disclosure_read: bool = False,
     ok: str | None = None,
     err: str | None = None,
+    open_box: str | None = None,
+    open_client: str | None = None,
 ) -> str:
+    """The Account page's cards in their order. ``open_box`` names the box drawn open (the old
+    one-press forms' addresses: unlink, disconnect, disconnect_all, delete), ``open_client`` the
+    app a ?disconnect= address names."""
     info = state.decks.status(sub)
     user = state.db.get_user(sub) or {}
     who = html.escape(user.get("preferred_username") or user.get("email") or sub)
     csrf_in = f"<input type='hidden' name='csrf' value='{html.escape(csrf or '')}'>"
-    writes = (
-        "<span class='badge ok'>on</span>" if info["writes_enabled"] else "<span class='badge'>off</span>"
-    )
+    writes = ui.label("On", "green", "check") if info["writes_enabled"] else ui.label("Off", "grey", "x")
+    linked = bool(info["linked"])
     out = [
+        "<div class='acc'>"
         "<div class='card'><dl class='meta'>"
         f"<dt>Signed in as</dt><dd><strong>{who}</strong></dd>"
         f"<dt>Archidekt writes</dt><dd>{writes}</dd></dl>"
         # The same words as the deck page's writes-off texts, and no variable names
-        "<p class='muted small'>Archidekt writes are switched on or off for the whole gateway by the "
-        "person who runs it. While they are off, changes can be reviewed but not applied.</p>"
+        "<p class='muted small'>Set for the whole gateway by the person who runs it. While they are "
+        "off, changes can be reviewed but not applied.</p>"
         f"{_identity_details(user)}"
         "<div class='form-actions'>"
         "<a class='btn' href='/install?for=skill'>Get the assistant skill for Claude or ChatGPT</a>"
@@ -1157,30 +1263,48 @@ def _account_body(
     ]
     if in_app():
         out.append(_app_card())
-    out.append(_mode_card(state, sub, csrf_in))
-    out.append(_apps_card(state, sub, csrf_in))
+    # One orange button on the page: Save approval mode while Archidekt is linked, Link account
+    # while it is not (as Compare switches its main button by state).
+    out.append(_mode_card(state, sub, csrf_in, primary=linked))
+    out.append(_apps_card(state, sub, csrf_in, open_box=open_box, open_client=open_client))
     if state.summaries is not None:
         # the Notifications card, and with ntfy on the Summary card after it
         out.append(notify.account_card_html(state, sub, csrf_in, ok=ok, err=err))
-    if info["linked"]:
+    if linked:
         expires = _when(info.get("link_expires_at"))
+        unlink_box = ui.box(
+            "unlink",
+            "Unlink Archidekt?",
+            f"<form id='unlinkf' class='inbox' method='post' action='/account'>{csrf_in}"
+            "<input type='hidden' name='action' value='unlink'>"
+            "<p>The gateway deletes its copy of your Archidekt session at once. Whether the session "
+            "also stops working on Archidekt's side is not known. Your decks on Archidekt are not "
+            "touched.</p></form>",
+            actions=[
+                ui.box_button("Cancel", cancel=True),
+                ui.box_button("Unlink and delete stored session", kind="danger-solid", form="unlinkf"),
+            ],
+            open=open_box == "unlink",
+            close_href="/account",
+        )
         out.append(
-            "<div class='card'><h2>Archidekt</h2>"
+            "<div class='card' id='archidekt'><h2>Archidekt</h2>"
             f"<p>Linked to <strong>{html.escape(info['archidekt_username'] or '')}</strong> "
-            "<span class='badge ok'>active</span></p>"
-            f"<p class='muted small'>Linked {_when(info['linked_at'])}. "
-            f"Last used {_when(info['last_used_at']) or 'never'}."
+            f"{ui.label('Active', 'green', 'check')}</p>"
+            f"<p class='muted small'>Linked {ui.when(info['linked_at'])}. "
+            f"Last used {ui.when(info['last_used_at']) or 'never'}."
             + (f" Archidekt's session stops working on {expires}; then you link again." if expires else "")
             + "</p>"
-            f"<form method='post'>{csrf_in}<input type='hidden' name='action' value='unlink'>"
-            "<button class='danger'>Unlink and delete stored session</button></form>"
+            "<div class='ui-actions'>"
+            + ui.box_opener("Unlink and delete stored session", "/account?unlink=1", "unlink", kind="danger")
+            + "</div>"
             "<p class='muted small'>Unlinking deletes the gateway's copy of the session at once. "
             "Whether the session also stops working on Archidekt's side is not known.</p>"
-            f"{link_disclosure.linked_html(_sweep_on(state))}</div>"
+            f"{link_disclosure.linked_html(_sweep_on(state))}{unlink_box}</div>"
         )
     else:
         out.append(
-            "<div class='card'><h2>Link your Archidekt account</h2>"
+            "<div class='card' id='archidekt'><h2>Link your Archidekt account</h2>"
             f"{link_disclosure.form_html(_sweep_on(state), read=disclosure_read)}"
             f"<form method='post' autocomplete='off'>{csrf_in}"
             "<input type='hidden' name='action' value='link'>"
@@ -1189,17 +1313,20 @@ def _account_body(
             "<label for='p'>Archidekt password</label>"
             "<input id='p' type='password' name='archidekt_password' required "
             "autocomplete='current-password'>"
-            "<label class='check'><input type='checkbox' name='accept_risk' value='1' required "
-            "aria-describedby='accept-risk-hint'> "
+            # the fold above says what opening it does; static/disclosure.js keeps the box locked
+            # until the detail was opened
+            "<label class='check'><input type='checkbox' name='accept_risk' value='1' required> "
             f"<span>{html.escape(link_disclosure.ACKNOWLEDGE)}</span></label>"
-            # Shown by static/disclosure.js while the tick box waits for the detail to be opened.
-            "<p class='muted small' id='accept-risk-hint' hidden>"
-            f"{html.escape(link_disclosure.TICK_HINT)}</p>"
             "<button class='primary'>Link account</button></form></div>"
         )
     s = state.settings
     out.append(_forget_choices_card(csrf_in))
-    out.append(_delete_card(csrf_in, s.backup_keep_days if s.backup_dir is not None else None))
+    out.append(
+        _delete_card(
+            csrf_in, s.backup_keep_days if s.backup_dir is not None else None, open=open_box == "delete"
+        )
+    )
+    out.append("</div>")
     return "".join(out)
 
 
@@ -1228,9 +1355,10 @@ def _sweep_on(state: Any) -> bool:
     return bool(sweep is not None and sweep.enabled)
 
 
-def _mode_card(state: Any, sub: str, csrf_in: str) -> str:
+def _mode_card(state: Any, sub: str, csrf_in: str, *, primary: bool = True) -> str:
     """The member's approval mode (modes.py): three radio choices, the current one checked,
-    choices above the gateway's cap shown disabled, and the plain cost of the auto modes."""
+    choices above the gateway's cap shown disabled, and the plain cost of the auto modes.
+    ``primary`` makes Save the page's orange button (not while Link account is)."""
     live = state.decks.live  # the admin's Settings page values, read now
     current = state.decks.mode_of(sub)
     big = int(live.get("auto_big_edit_rows"))
@@ -1247,50 +1375,80 @@ def _mode_card(state: Any, sub: str, csrf_in: str) -> str:
             f"{'' if allowed else ' (not allowed on this gateway)'}</span></span></label>"
         )
     return (
-        "<div class='card'><h2>Approval mode</h2>"
-        "<p>How much your assistant may change on Archidekt without asking you first. This is "
-        "your own setting: it applies to your account, your decks and the apps you connected, "
-        "and to nobody else.</p>"
+        "<div class='card' id='mode'><h2>Approval mode</h2>"
+        "<p>How much your assistant may change on Archidekt without asking you first. It applies to "
+        "your account only, and to nobody else.</p>"
         f"<form method='post'>{csrf_in}<input type='hidden' name='action' value='approval_mode'>"
         f"{''.join(choices)}"
         f"<p class='muted small'><strong>Low risk:</strong> {html.escape(modes.low_risk_text(rows))} "
         f"<strong>High risk:</strong> {html.escape(modes.HIGH_RISK_TEXT)}</p>"
         f"<p class='muted small'>{html.escape(modes.MEMBER_ONLY_TEXT)}</p>"
         f"<div class='notice warn'>{html.escape(modes.AUTO_WARNING)}</div>"
-        "<button class='primary'>Save approval mode</button></form></div>"
+        f"<button class='{'primary' if primary else 'btn-plain'}'>Save approval mode</button></form></div>"
     )
 
 
-def _apps_card(state: Any, sub: str, csrf_in: str) -> str:
-    """The assistants connected to this account, each with a Disconnect button."""
+def _apps_card(
+    state: Any, sub: str, csrf_in: str, *, open_box: str | None = None, open_client: str | None = None
+) -> str:
+    """The assistants connected to this account: each row the app's full name (ui.app_chip, no
+    client id in member text) and when it last signed in, with a red-outline Disconnect that asks
+    first in a box; Disconnect all apps the same way."""
     apps = state.db.user_clients(sub)
     if not apps:
         return (
             "<div class='card' id='apps'><h2>Connected apps</h2><p class='muted'>No assistant is connected "
             "to your account.</p></div>"
         )
-    items = "".join(
-        f"<li><span class='name'>{html.escape(a['name'] or 'Unnamed app')}</span>"
-        # the name is the app's own choice; its client id tells two apps of one name apart
-        f"<code class='small'>{html.escape(_short_id(a['client_id']))}</code>"
-        f"<span class='when'>last signed in or refreshed {_when(a['last_issued_at'])}</span>"
-        f"<form method='post'>{csrf_in}<input type='hidden' name='action' value='disconnect'>"
-        f"<input type='hidden' name='client_id' value='{html.escape(a['client_id'])}'>"
-        "<button class='danger'>Disconnect</button></form></li>"
-        for a in apps
+    rows, boxes = [], []
+    for n, a in enumerate(apps, 1):
+        name = ui.app_name(a["name"])
+        box_id = f"disc{n}"
+        href = f"/account?disconnect={quote(a['client_id'], safe='')}"
+        rows.append(
+            f"<li><span class='nm'>{ui.app_chip(a['name'], unnamed=True)}</span>"
+            f"<span class='sub'>Last signed in or refreshed {ui.when(a['last_issued_at'])}</span>"
+            f"<span class='btn-cell'>{ui.box_opener('Disconnect', href, box_id, kind='danger')}</span></li>"
+        )
+        boxes.append(
+            ui.box(
+                box_id,
+                f"Disconnect “{name}”?",
+                f"<form id='{box_id}f' class='inbox' method='post' action='/account'>{csrf_in}"
+                "<input type='hidden' name='action' value='disconnect'>"
+                f"<input type='hidden' name='client_id' value='{html.escape(a['client_id'])}'>"
+                f"<p>“{html.escape(name)}” can no longer use your account. To use it again, connect it again "
+                "and approve it.</p></form>",
+                actions=[
+                    ui.box_button("Cancel", cancel=True),
+                    ui.box_button("Disconnect", kind="danger-solid", form=f"{box_id}f"),
+                ],
+                open=open_box == "disconnect" and open_client == a["client_id"],
+                close_href="/account",
+            )
+        )
+    all_box = ui.box(
+        "discall",
+        "Disconnect all apps?",
+        f"<form id='discallf' class='inbox' method='post' action='/account'>{csrf_in}"
+        "<input type='hidden' name='action' value='disconnect_all'>"
+        "<p>Every assistant connected to your account loses access at once. Each one has to be "
+        "connected and approved again.</p></form>",
+        actions=[
+            ui.box_button("Cancel", cancel=True),
+            ui.box_button("Disconnect all apps", kind="danger-solid", form="discallf"),
+        ],
+        open=open_box == "disconnect_all",
+        close_href="/account",
     )
     return (
         "<div class='card' id='apps'><h2>Connected apps</h2>"
-        "<p class='muted small'>Assistants that can use your account now. Disconnect any you don't "
-        "recognize; it then has to be connected and approved again.</p>"
-        f"<ul class='plain plist'>{items}</ul>"
-        f"<form method='post'>{csrf_in}<input type='hidden' name='action' value='disconnect_all'>"
-        "<button class='danger'>Disconnect all apps</button></form></div>"
+        "<p class='muted small'>Disconnect any you don't recognize.</p>"
+        f"<ul class='apps'>{''.join(rows)}</ul>"
+        "<div class='ui-actions'>"
+        + ui.box_opener("Disconnect all apps", "/account?disconnect_all=1", "discall", kind="danger")
+        + f"</div>{''.join(boxes)}{all_box}</div>"
     )
-
-
-def _short_id(client_id: str) -> str:
-    return client_id if len(client_id) <= 40 else client_id[:37] + "..."
 
 
 def _forget_choices_card(csrf_in: str) -> str:
@@ -1307,24 +1465,41 @@ def _forget_choices_card(csrf_in: str) -> str:
     )
 
 
-def _delete_card(csrf_in: str, backup_days: int | None = None) -> str:
+def _delete_card(csrf_in: str, backup_days: int | None = None, *, open: bool = False) -> str:
     """Deleting your data is as easy to find as everything else on the page: no hiding it, no
-    guilt-trip wording; one checkbox so a stray tap can't do it."""
+    guilt-trip wording. A red-outline "Delete my data…" opens the box that holds the tick and the
+    solid red final button (as Admin › Users' Delete data…)."""
     kept = (
         f" Nightly database backups keep a copy until they age out after {backup_days} days."
         if backup_days
         else ""
     )
+    box = ui.box(
+        "delete",
+        "Delete my data?",
+        f"<form id='deletef' class='inbox' method='post' action='/account'>{csrf_in}"
+        "<input type='hidden' name='action' value='delete_data'>"
+        "<p>Everything this gateway keeps for your account is deleted and you are signed out. Your "
+        "decks on Archidekt are not touched. This can't be undone.</p>"
+        "<label class='check'><input type='checkbox' id='delete-tick' name='confirm' value='yes' required>"
+        "<span>Yes, delete my data from this gateway</span></label></form>",
+        actions=[
+            ui.box_button("Cancel", cancel=True),
+            # static/pages.js keeps it disabled until the tick; without scripts `required` holds the form
+            ui.box_button(
+                "Delete my data", kind="danger-solid", form="deletef", attrs="data-enabled-by='delete-tick'"
+            ),
+        ],
+        open=open,
+        close_href="/account",
+    )
     return (
-        "<div class='card'><h2>Delete my data</h2>"
-        "<p>Delete everything this gateway keeps for your account: proposals, snapshots, test "
-        "reports, scan sessions, your watchlist and notification choices, your Archidekt link, "
-        "connected apps and your sign-in. Your decks on "
+        "<div class='card' id='delete-data'><h2>Delete my data</h2>"
+        f"<p>Delete everything this gateway keeps for your account: {DELETED_LIST}. Your decks on "
         f"Archidekt are not touched. This can't be undone.{kept}</p>"
-        f"<form method='post'>{csrf_in}<input type='hidden' name='action' value='delete_data'>"
-        "<div class='ui-checks'><label><input type='checkbox' name='confirm' value='yes' required>"
-        "<span>Yes, delete my data from this gateway</span></label></div>"
-        "<div class='ui-actions'><button class='danger'>Delete my data</button></div></form></div>"
+        "<div class='ui-actions'>"
+        + ui.box_opener("Delete my data…", "/account?delete=1", "delete", kind="danger", icon_name="trash")
+        + f"</div>{box}</div>"
     )
 
 
@@ -1960,7 +2135,7 @@ def _proposal_body(
     ):
         # Flow G: one tap shows what Undo would put back, then asks once
         actions.append(
-            "<form method='post' action='/proposals/undo' class='undo'>"
+            "<form method='post' action='/proposals/undo' class='undo' data-undo-box>"
             f"<input type='hidden' name='csrf' value='{html.escape(csrf)}'>"
             "<input type='hidden' name='action' value='preview'>"
             f"<input type='hidden' name='snapshot' value='{html.escape(str(p['snapshot_id']))}'>"
@@ -2024,6 +2199,10 @@ def _pretty(obj: Any) -> str:
 MAX_PICKS = 100  # one press may apply every change a member can have waiting (decks.MAX_SELECTION)
 BATCH_WAIT_SECONDS = 8.0  # the confirm's Apply waits this long for the result, then shows progress
 LIST_STYLE = f"<style>{LIST_CSS}</style>"
+# The Undo buttons open their confirm in a box (static/undo-box.js); the "Undo this change?" page
+# stays as the answer without scripts. The Applied page's rows update in place while applying.
+UNDO_SCRIPT = "<script src='/static/undo-box.js' defer></script>"
+APPLIED_LIVE_SCRIPT = "/static/applied-live.js"
 PROPOSALS_STYLE = f"<style>{PROPOSALS_CSS}</style>"
 # A document drawn with its formatting; the review page's toggles are 44 px tall
 DOC_STYLE = (
@@ -2244,11 +2423,12 @@ def _result_body(run: dict[str, Any], csrf: str | None) -> str:
     an Undo per deck."""
     from . import batch
 
-    out = ["<div class='card' aria-live='polite'>"]
+    live = " data-applied-live" if run["state"] == "applying" else ""
+    out = [f"<div class='card' id='applied-result' aria-live='polite'{live}>"]
     if run["state"] == "applying":
         out.append(
-            "<p class='notice'>Applying, one change at a time. You can leave this page; this refreshes "
-            "by itself.</p>"
+            f"<div class='notice'>{ui.status_label('applying')} One change at a time. You can leave this "
+            "page; it updates by itself.</div>"
         )
     out.append(f"<p><strong>{html.escape(batch.summary_text(run))}</strong></p>")
 
@@ -2269,12 +2449,13 @@ def _result_body(run: dict[str, Any], csrf: str | None) -> str:
         out.append(f"<h2 class='ui-section'>{ui.status_label('failed')}</h2>" + items(run["failed"], True))
     if run["not_sent"]:
         out.append(
-            "<h2>Not sent</h2><p class='muted'>These are still waiting; open one to fix or reject it.</p>"
+            f"<h2 class='ui-section'>{ui.label('Not sent', 'grey', 'x')}</h2>"
+            "<p class='muted'>These are still waiting; open one to fix or reject it.</p>"
             + items(run["not_sent"], True)
         )
     for u in run["undo"]:
         out.append(
-            "<form method='post' action='/proposals/undo' class='undo'>"
+            "<form method='post' action='/proposals/undo' class='undo' data-undo-box>"
             f"<input type='hidden' name='csrf' value='{html.escape(csrf or '')}'>"
             "<input type='hidden' name='action' value='preview'>"
             f"<input type='hidden' name='snapshot' value='{html.escape(u['snapshot_id'])}'>"
@@ -2286,18 +2467,29 @@ def _result_body(run: dict[str, Any], csrf: str | None) -> str:
     return "".join(out) + "</div>"
 
 
+UNDO_ROWS_SHOWN = 200
+
+
+def undo_rows_left(left: int) -> str:
+    """The line under an Undo list cut at UNDO_ROWS_SHOWN rows: how many are not shown."""
+    return "1 more row is not shown." if left == 1 else f"{left} more rows are not shown."
+
+
 def _undo_body(look: dict[str, Any], csrf: str | None, shown: str, applied: list[str], after_at: int) -> str:
     """Flow G step 3-4: what Undo puts back, and the one warning when that is more than the apply."""
-    out = [f"<div class='card'><h2>{html.escape(look['deck_name'])}</h2>"]
+    out = [f"<div class='card' id='undo-confirm'><h2>{html.escape(look['deck_name'])}</h2>"]
     if look["nothing"]:
         out.append("<p>The deck already matches how it was before that change. There is nothing to undo.</p>")
         return "".join(out) + "<p><a class='btn btn-plain' href='/proposals'>Back</a></p></div>"
     if look["warning"]:
         out.append(f"<p class='notice warn'>{html.escape(look['warning'])}</p>")
     out.append("<p>Undo puts the deck back as it was before that change:</p><ul class='results'>")
-    for r in look["rows"][:200]:
+    for r in look["rows"][:UNDO_ROWS_SHOWN]:
         out.append(f"<li>{html.escape(row_line(r))}</li>")
     out.append("</ul>")
+    left = len(look["rows"]) - UNDO_ROWS_SHOWN
+    if left > 0:
+        out.append(f"<p class='muted'>{undo_rows_left(left)}</p>")
     out.append(
         guarded_form(
             hidden={

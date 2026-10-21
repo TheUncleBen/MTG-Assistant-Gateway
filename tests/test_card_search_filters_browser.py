@@ -1,6 +1,6 @@
 """The card search's filters in headless Chromium: typing a name updates the tiles in place (no
 page load) and the address follows; a type picked from the list becomes a chip that narrows the
-results and flips between IS and NOT; the grid loads its next page on its own when scrolled; the
+results and flips between IS and NOT; the grid's next page comes on the Load more button; the
 list view and the sort are part of the search; Clear filters empties everything. On a phone the
 filters open as a full-screen panel that "Show cards" closes. At 360, 720 (Fold) and 1280 px,
 light and dark: nothing scrolls sideways, every control is uncovered, and the picker's text and
@@ -202,7 +202,8 @@ def test_a_type_chip_narrows_and_flips_to_not_and_clear_empties_everything(serve
         browser.close()
 
 
-def test_scrolling_loads_the_next_page_and_the_list_view_and_sort_stay_in_the_search(server: Server) -> None:
+def test_load_more_brings_the_next_page_and_the_list_view_and_sort_stay_in_the_search(server: Server) -> None:
+    """UI overhaul 2026-10-21: the next page comes on the Load more button, never by scrolling."""
     from playwright.sync_api import sync_playwright
 
     exe = _chromium()
@@ -211,10 +212,15 @@ def test_scrolling_loads_the_next_page_and_the_list_view_and_sort_stay_in_the_se
         browser, page, errors = _page(p, server, sid, 1280, "light", exe)
         page.goto(f"{server.base}/cards?q=test+land", wait_until="networkidle")
         _wait_count(page, "30 cards")
+        first = page.locator("#cardgrid .cc").count()
+        assert 0 < first < 30
+        page.mouse.wheel(0, 8000)
+        page.wait_for_timeout(700)
+        assert page.locator("#cardgrid .cc").count() == first  # scrolling loads nothing
         for _ in range(12):
             if page.locator("#cardgrid .cc").count() >= 30:
                 break
-            page.mouse.wheel(0, 4000)
+            page.locator("#cs-more [data-more]").click()
             page.wait_for_timeout(250)
         names = _names(page)
         assert names == [f"Test Land {i:02d}" for i in range(30)], names

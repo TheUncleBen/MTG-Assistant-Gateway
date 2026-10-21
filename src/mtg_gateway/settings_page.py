@@ -11,6 +11,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
+from . import ui
 from .config import MANAGED_SETTINGS, STACK_LOCK_HOW, LiveSettings, SettingError, SettingSpec, _number
 from .modes import MODE_LABELS
 from .plugin_page import CHATGPT_NAME_MAX, chatgpt_name_too_long
@@ -42,6 +43,11 @@ GROUPS: tuple[tuple[str, str, str], ...] = (
     ),
 )
 FOLDED = frozenset({"scan"})
+# the page's purpose line (admin.py draws it with the title, above the tab bar)
+PURPOSE = (
+    "Settings for the whole gateway. A setting your stack sets is shown greyed out with its value, "
+    "and can only be changed in the stack."
+)
 
 # key -> (label, one-line help)
 TEXT: dict[str, tuple[str, str]] = {
@@ -220,6 +226,9 @@ def needs_confirm(key: str, before: Any, after: Any) -> bool:
 SETTINGS_CSS = """
 /* the admin Settings page: one flat card per group, one row per setting,
    every control in the same 16rem column so the boxes, switches and lists line up */
+/* the form stays in the 52rem column under the tab bar (the page itself is 1200 px) */
+.set-page{max-width:52rem}
+.set-page .notice{margin:0 0 1rem}
 .set-nav{margin:0 0 1rem}
 .set-nav .ui-chip{background:var(--surface);min-height:var(--ctl)}
 .set-nav .ui-chip[aria-pressed=true]{background:var(--orange-tint)}
@@ -434,7 +443,7 @@ def unsaved_notice(keys: list[str], group: str) -> str:
     title = next((t for g, t, _i in GROUPS if g == group), "")
     names = ", ".join(f"“{label(k)}”" for k in keys)
     text = f"Not saved yet: {names}. What you typed is still in the form; press “Save {title}” to keep it."
-    return f"<div class='notice warn' role='status'>{html.escape(text)}</div>"
+    return ui.notice(text, "warn", role="status")
 
 
 def settings_body(
@@ -471,8 +480,6 @@ def settings_body(
             f"stack <span class='n'>{locked_total}</span></a>"
         )
     parts = [
-        "<p class='ui-sub'>Settings for the whole gateway. A setting your stack sets is shown greyed out "
-        "with its value, and can only be changed in the stack.</p>",
         notice,
         f"<nav class='ui-chips set-nav' aria-label='Setting groups'>{''.join(jump)}</nav>",
     ]
@@ -709,7 +716,7 @@ def change_line(detail: Any) -> str | None:
 def changes_notice(changes: list[tuple[str, Any, Any]]) -> str:
     """The notice after a save: what changed, from and to."""
     if not changes:
-        return "<div class='notice ok' role='status'>Nothing to save: no setting was changed.</div>"
+        return ui.notice("Nothing to save: no setting was changed.", "ok", role="status")
     items = []
     for key, before, after in changes:
         spec = MANAGED_SETTINGS[key]

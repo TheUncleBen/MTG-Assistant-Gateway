@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING
 from starlette.requests import Request
 from starlette.responses import Response
 
-from . import modes
+from . import modes, tool_labels
 from .pages import _csrf, browser_session, login_redirect
 from .theme import display_name, icon, render
 
@@ -59,6 +59,7 @@ details.gnav > summary::-webkit-details-marker{display:none}
 .gnav li ul{margin:.1rem 0 .25rem .75rem;border-left:2px solid var(--border-soft);padding-left:.35rem}
 .gnav a{display:flex;align-items:center;gap:.5rem;padding:.4rem .6rem;border-radius:var(--radius);
   color:var(--text);text-decoration:none;min-height:2.2rem}
+@media (pointer:coarse){.gnav a{min-height:44px}}
 .gnav a.part{font-weight:800}
 .gnav a.part svg{color:var(--orange)}
 .gnav li ul a{font-size:.95rem;color:var(--text-muted)}
@@ -113,6 +114,14 @@ details.gnav > summary::-webkit-details-marker{display:none}
   padding:.05rem .3rem}
 .guide kbd{border:1px solid var(--border);font-weight:700;white-space:nowrap}
 .guide .nomatch{margin:1rem 0}
+.guide .gadv{margin:1.5rem 0 0;border-top:1px solid var(--border-soft);padding-top:1rem}
+.guide .gadv > summary{list-style:none;cursor:pointer;display:inline-flex;align-items:center;gap:.4rem;
+  min-height:44px;width:auto}
+.guide .gadv > summary::-webkit-details-marker{display:none}
+.guide .gadv > summary svg{transition:transform .15s}
+.guide .gadv[open] > summary svg{transform:rotate(180deg)}
+.guide .gadv > p{color:var(--text-muted)}
+.guide .gadv code{white-space:nowrap}
 .gtop{position:fixed;right:1rem;bottom:1.5rem;z-index:7;display:inline-flex;align-items:center;gap:.4rem;
   box-shadow:var(--shadow)}
 .gtop.hide{display:none}
@@ -171,7 +180,7 @@ PARTS: list[tuple[str, str, str, str, list[tuple[str, str, str]]]] = [
         "Reference",
         "The facts, laid out to look things up.",
         [
-            ("ref-assistant", "report", "What the assistant can do, by tool"),
+            ("ref-assistant", "report", "What the assistant can do"),
             ("ref-pages", "layers", "Pages and addresses"),
             ("ref-approval", "proposals", "Approval modes and risk levels"),
             ("ref-keys", "menu", "Keyboard shortcuts"),
@@ -193,6 +202,61 @@ PARTS: list[tuple[str, str, str, str, list[tuple[str, str, str]]]] = [
         ],
     ),
 ]
+
+
+# The closed fold at the end of the guide (Ben, 18:11Z 21 Oct): the one place member text shows a tool name.
+ADVANCED_TITLE = "Advanced: tool names"
+ADVANCED_INTRO = "Your assistant picks these for you. They are listed here in case you need the exact name."
+WATCH_TOOLS = frozenset({"watch_card", "watch_deck", "unwatch", "list_watchlist", "card_price_history"})
+# What each ask does, for the abilities table: a proposal you approve, your own press, applying, a
+# test report, a scan draft, the watchlist, or a read that changes nothing.
+_PROPOSES = frozenset(
+    {
+        "propose_deck_changes",
+        "propose_new_deck",
+        "propose_clone_deck",
+        "propose_deck_details",
+        "propose_restore_snapshot",
+        "propose_collection_changes",
+    }
+)
+_YOUR_PRESS = frozenset(
+    {
+        "propose_deck_social",
+        "propose_comment",
+        "propose_create_folder",
+        "propose_collaborator",
+        "propose_delete_deck",
+    }
+)
+_ON_PROPOSALS = frozenset(
+    {
+        "apply_proposal",
+        "confirm_proposal",
+        "confirm_waiting",
+        "reject_proposal",
+        "amend_proposal",
+        "withdraw_proposal",
+        "combine_proposals",
+        "check_deck_changes",
+    }
+)
+
+
+def _does(raw: str) -> str:
+    if raw in _PROPOSES:
+        return "A change you approve first (a proposal), as your approval mode allows"
+    if raw in _YOUR_PRESS:
+        return "A proposal only your own press applies, in every approval mode"
+    if raw in _ON_PROPOSALS:
+        return "Acts on your proposals; applying follows your approval mode"
+    if raw in ("run_deck_report", "play_more_games"):
+        return "Runs a test report (Forge games too, when Forge is set up); nothing on Archidekt changes"
+    if raw == "save_scan_session":
+        return "Saves a scan draft on this gateway"
+    if raw in WATCH_TOOLS:
+        return "Your watchlist on this gateway; nothing on Archidekt changes"
+    return "Reads; nothing changes"
 
 
 def _anchor(target: str, label: str) -> str:
@@ -605,9 +669,9 @@ def guide_body(
         "Archidekt, shown and edited here through the account you linked: nothing about your cards is "
         "stored on this gateway, and what you add here appears on archidekt.com at once. Scan a pile and "
         "save it, or add cards by name; each card keeps its printing, finish, condition and count.</p><ul>"
-        "<li>Filter by name, show it as a grid or a list, sort by newest or by set release, and page "
-        "through it. Plus and minus change the count; the cross removes a card; the dots open its details "
-        "(finish, condition, language, price paid), saved to Archidekt on Save.</li>"
+        "<li>Filter by name, show it as a grid or a list, sort it, and press Load more for the rest. Plus "
+        "and minus change the count. The ⋮ button opens the card's menu: Details… there changes finish, "
+        "condition, language and price paid.</li>"
         "<li>Cards you own show a <strong>green dot</strong> on every deck page, your own decks and public "
         "ones alike, with the number of copies Archidekt knows about.</li>"
         "<li><strong>Export CSV</strong> and <strong>Import a list</strong> are described under "
@@ -677,192 +741,28 @@ def guide_body(
     )
 
     # -- Reference --------------------------------------------------------------------------------
-    cap_rows = [
-        (
-            "Who is signed in; is Archidekt linked, are writes on",
-            "<code>whoami</code>, <code>account_status</code>",
-            "no",
-            "linking itself happens only in the browser (Account page)",
-        ),
-        (
-            "List my decks (private included), filter by name, format, folder",
-            "<code>list_my_decks</code>",
-            "no",
-            "",
-        ),
-        (
-            "Search public decks (name, commander, partial commander names, format, colors, owner), and "
-            "one user's public decks (<code>owner</code>, newest first)",
-            "<code>search_decks</code>",
-            "no",
-            "hides Mystic Forge <code>archidekt_user_decks</code>; the profile page /users/&lt;name&gt; "
-            "is the hand path",
-        ),
-        (
-            "Read any deck, your own private ones included: cards (type line, power/toughness, loyalty), "
-            "zones, stats, plain list, Archidekt import text, picked with <code>view</code>; rules text, "
-            "faces, flavour and artist on request",
-            "<code>get_deck</code>",
-            "no",
-            "hides Mystic Forge <code>archidekt_deck</code>, <code>archidekt_export</code>; "
-            "<code>owner</code> says whose deck it is",
-        ),
-        (
-            "Read a pasted list or an Archidekt CSV export",
-            "<code>parse_decklist</code>, <code>parse_deck_export</code>",
-            "no",
-            "",
-        ),
-        (
-            "Statistics, legality, structural checks, bracket estimate",
-            "<code>deck_stats</code>",
-            "no",
-            "hides <code>validate_archidekt_deck</code>",
-        ),
-        (
-            "Diff two decks, snapshots or lists (precon upgrades included), with an optional paired "
-            "goldfish A/B",
-            "<code>compare_decks</code>",
-            "no",
-            "hides <code>precon_diff</code>, <code>goldfish_ab</code>; the deck page's Compare view is "
-            "the hand path",
-        ),
-        (
-            "Solo test (300 games, no opponents) of one deck or pasted list, stored with its stats and "
-            "validation (a pasted list is returned, not stored)",
-            "<code>run_deck_report</code> (+ <code>list_deck_reports</code>, <code>get_deck_report</code>, "
-            "<code>remove_card_model</code>)",
-            "stores a report",
-            "hides <code>goldfish_run</code>; takes the simulator's options; the deck page's Run "
-            "full test is the hand path",
-        ),
-        (
-            "Play more Forge games for a report whose games have finished, against the same "
-            "opponents (on a comparison, both decks get the same number)",
-            "<code>play_more_games</code>",
-            "starts Forge games",
-            "the report page's Play more games button is the hand path, with the same rules: up to 50 "
-            "games a report, and nothing starts when the member's Forge queue is full",
-        ),
-        (
-            "Draw odds; what the engine models for a deck",
-            "<code>goldfish_odds</code>, <code>goldfish_annotate</code> (Mystic Forge)",
-            "no",
-            "annotations feed <code>run_deck_report</code>; the deck page's Probability of draw is the "
-            "hand path to the same odds",
-        ),
-        (
-            "Validate a pasted list that is not a deck yet",
-            "<code>validate_decklist</code> (Mystic Forge)",
-            "no",
-            "an Archidekt deck's checks are in <code>deck_stats</code>",
-        ),
-        (
-            "Card lookups, rulings, prices, rules, EDHREC, combos, precon lists",
-            "the Mystic Forge research tools",
-            "no",
-            "the full list is in the assistant skill's tool reference",
-        ),
-        (
-            "Turn names or card photos into exact printings",
-            "<code>resolve_cards</code>, <code>card_printings</code>",
-            "no",
-            "the picker card lets you keep, drop or pick among suggestions; the printings card shows "
-            "every printing's picture to tap (a form question in an app without cards)",
-        ),
-        (
-            "Scan sessions (the Scan page's drafts)",
-            "<code>list_scan_sessions</code>, <code>get_scan_session</code>, <code>save_scan_session</code>",
-            "saves a draft",
-            "drafts stay in the gateway until used",
-        ),
-        ("Edit a deck's cards (main or maybeboard)", "<code>propose_deck_changes</code>", "proposal", ""),
-        (
-            "Create a deck from cards, a list, a CSV, the gateway's JSON or a scan",
-            "<code>propose_new_deck</code>",
-            "proposal (high)",
-            "",
-        ),
-        ("Clone a deck", "<code>propose_clone_deck</code>", "proposal (low)", ""),
-        (
-            "Change a deck's name, description, format, bracket, privacy; move it to a folder, add or "
-            "remove tags, set its cover",
-            "<code>propose_deck_details</code>",
-            "proposal (high)",
-            "applied the same way as on the deck settings page",
-        ),
-        (
-            "Undo: snapshots and restore (cards and the deck's name, description, format, bracket, privacy)",
-            "<code>list_snapshots</code>, <code>get_snapshot</code>, <code>propose_restore_snapshot</code>",
-            "proposal (high)",
-            "",
-        ),
-        (
-            "My collection: read; add or remove cards",
-            "<code>list_collection</code>, <code>propose_collection_changes</code>",
-            "proposal",
-            "in-chat card like a deck proposal; read back after applying",
-        ),
-        (
-            "Read a deck's comments, and the collaborators of your own deck",
-            "<code>get_deck_comments</code>, <code>get_deck_collaborators</code>",
-            "no",
-            "",
-        ),
-        (
-            "Act on your Archidekt account: like, vote, bookmark, follow the owner; post, edit, delete or "
-            "vote on comments; a new folder; add or remove a collaborator; delete a deck",
-            "<code>propose_deck_social</code>, <code>propose_comment</code>, "
-            "<code>propose_create_folder</code>, <code>propose_collaborator</code>, "
-            "<code>propose_delete_deck</code>",
-            "proposal (your press)",
-            "only you apply these, on the review page, in every approval mode",
-        ),
-        (
-            "A plain summary of the last day or week",
-            "<code>get_summary</code>",
-            "no",
-            "fixed sentences from the gateway's own data, with or without notifications",
-        ),
-        (
-            "Proposals: list, read, approve with the card's code, reject (with a reason on the card), "
-            "apply; show the waiting ones as a card with Apply all; tidy them (amend, withdraw, combine); "
-            "check a planned deck edit first, with no card",
-            "<code>list_my_proposals</code>, <code>get_proposal</code>, <code>confirm_proposal</code>, "
-            "<code>reject_proposal</code>, <code>apply_proposal</code>, <code>show_waiting_changes</code>, "
-            "<code>confirm_waiting</code> and <code>get_apply_result</code> (the card's buttons), "
-            "<code>amend_proposal</code>, <code>withdraw_proposal</code>, <code>combine_proposals</code>, "
-            "<code>check_deck_changes</code>",
-            "apply writes",
-            "<code>apply_proposal</code> succeeds only when the mode allows; one that would now do "
-            "something other than what was reviewed is not sent and waits as Needs a look",
-        ),
+    # The abilities as plain asks (tool_labels.tool_ask), with what each does: no tool names in member
+    # text (Ben, 21 Oct). The watch asks show only with watchlists on. The real names sit in the
+    # closed "Advanced: tool names" fold at the end of the guide.
+    asks = [
+        (raw, w.ask, _does(raw))
+        for raw, w in tool_labels.TOOLS.items()
+        if watchlists or raw not in WATCH_TOOLS
     ]
-    if watchlists:
-        cap_rows.append(
-            (
-                "Watch card prices and deck values",
-                "<code>watch_card</code>, <code>watch_deck</code>, <code>unwatch</code>, "
-                "<code>list_watchlist</code>, <code>card_price_history</code>",
-                "the gateway's own data",
-                "changes nothing on Archidekt, so no proposal; the Watchlist page is the hand path",
-            )
-        )
     ref_assistant = (
         "<p>The assistant acts as the signed-in member. Reads need nothing more than the connection; "
         "<strong>every write is a proposal</strong>, and who applies it is decided by your approval mode "
-        "on the Account page, never by the assistant. Every job has exactly one tool, so the assistant "
-        "never guesses between two ways of doing the same thing: where the research service (Mystic "
-        "Forge) has a tool that does what a gateway tool does, the research one is hidden and an "
-        "assistant that calls it is told which tool owns the job.</p>"
-        "<div class='tbl'><table><thead><tr><th>Capability</th><th>The one tool</th><th>Writes?</th>"
-        "<th>Notes</th></tr></thead><tbody>"
-        + "".join(f"<tr><td>{c}</td><td>{t}</td><td>{w}</td><td>{n}</td></tr>" for c, t, w, n in cap_rows)
+        "on the Account page, never by the assistant. Every job has exactly one way to do it, so the "
+        "assistant never guesses between two ways of doing the same thing. Ask in your own words; these "
+        "are examples.</p>"
+        "<div class='tbl'><table><thead><tr><th>Ask your assistant</th><th>What happens</th></tr></thead>"
+        "<tbody>"
+        + "".join(f"<tr><td>“{_esc(ask)}”</td><td>{_esc(does)}</td></tr>" for _raw, ask, does in asks)
         + "</tbody></table></div>"
         f"<p><strong>Your own approval, every time:</strong> {_esc(modes.MEMBER_ONLY_TEXT)} An "
         "assistant can propose them, and no setting lets an assistant apply them. "
-        "<strong>No assistant tool exists for:</strong> renaming "
-        "folders, linking or unlinking Archidekt, approval modes, admin.</p>"
+        "<strong>The assistant cannot:</strong> rename "
+        "folders, link or unlink Archidekt, change your approval mode, or do anything an admin does.</p>"
         "<p><strong>Only the assistant does:</strong> research lookups (Scryfall, EDHREC, combos, rules), "
         "the paired goldfish A/B with the simulator's options, reading card photos into names, proposing "
         "changes it worked out itself. <strong>Both reach:</strong> reading decks and collections, "
@@ -870,8 +770,17 @@ def guide_body(
         "cloning, restoring snapshots, collection changes, scan drafts; your path applies at once, the "
         "assistant's is a proposal under your mode. The solo test of one deck and the "
         "comparison of two are both paths: Run full test and Compare on the deck page for people, "
-        "<code>run_deck_report</code> and <code>compare_decks</code> for the assistant, same engine and "
-        "settings.</p>"
+        "“Run a test report” and “Compare two decks” for the assistant, same engine and settings.</p>"
+    )
+    advanced = (
+        "<details class='gadv' id='adv-tools'><summary class='btn'>"
+        f"{icon('chev')} {_esc(ADVANCED_TITLE)}</summary>"
+        f"<p>{_esc(ADVANCED_INTRO)}</p>"
+        "<div class='tbl'><table><thead><tr><th>Ask</th><th>Tool name</th></tr></thead><tbody>"
+        + "".join(
+            f"<tr><td>“{_esc(ask)}”</td><td><code>{_esc(raw)}</code></td></tr>" for raw, ask, _d in asks
+        )
+        + "</tbody></table></div></details>"
     )
     page_rows = [
         (
@@ -1177,7 +1086,7 @@ def guide_body(
         "can propose deleting a deck, creating a folder, a like, a comment or a follow, but each one "
         "waits for your own press every time. Renaming folders, linking Archidekt and choosing your "
         "approval mode have no assistant tool at all. "
-        "<a href='#ref-assistant'>What the assistant can do, by tool</a> is the full map.</p>"
+        "<a href='#ref-assistant'>What the assistant can do</a> is the full map.</p>"
         "<p class='tip'>The <a href='/install?for=skill'>assistant skill</a> teaches your assistant "
         "the house rules: "
         "look things up instead of guessing, show the diff before changing anything, never ask for a "
@@ -1271,14 +1180,14 @@ def guide_body(
     )
     search = (
         "<div class='gsearch' hidden><label for='guide-q'>Search the guide</label>"
-        "<input id='guide-q' type='search' placeholder='A word or two, such as “snapshot” or “F10”' "
+        "<input id='guide-q' type='search' placeholder='Search the guide' "
         "autocomplete='off' spellcheck='false' aria-describedby='guide-status'>"
         "<p id='guide-status' class='status muted small' role='status' aria-live='polite'></p>"
         "<ul id='guide-results' class='gresults' aria-label='Matching sections' hidden></ul></div>"
     )
     return (
         f"<div class='guide' id='top'><div class='gside'>{search}{_nav(parts)}</div>"
-        f"<div class='gmain'>{main}"
+        f"<div class='gmain'>{main}{_stackable(advanced)}"
         "<p class='nomatch muted' hidden>Nothing in the guide matches that. Clear the search to see "
         "everything again.</p></div></div>"
         f"<a class='btn gtop hide' href='#top'>{icon('chev')} Back to top</a>"

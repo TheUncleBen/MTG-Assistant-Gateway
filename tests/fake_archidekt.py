@@ -110,6 +110,7 @@ class FakeArchidekt:
         }
         self.calls: list[tuple[str, str]] = []
         self.collection_posts: list[dict[str, Any]] = []  # the bodies of collection creates, as sent
+        self.collection_queries: list[dict[str, str]] = []  # each collection listing's query, as sent
         # Answers given before the normal handling, one per request, in order: an int status (with
         # an optional Retry-After) or an exception to raise, e.g. httpx.ReadTimeout.
         self.inject: list[tuple[int | Exception, str | None]] = []
@@ -748,12 +749,16 @@ class FakeArchidekt:
             if int(parts[2]) != self._user_id(who):
                 return httpx.Response(400, json=["No public collection found."])
             rows = list(self.collections.get(who, {}).values())
+            self.collection_queries.append(dict(request.url.params))
             name = request.url.params.get("cardName", "").lower()
             if name:
                 rows = [r for r in rows if name in r["card"]["oracleCard"]["name"].lower()]
             order = request.url.params.get("collectionOrderBy")
             if order == "editionDate":
-                rows.sort(key=lambda r: r["card"]["edition"]["editioncode"])
+                rows.sort(
+                    key=lambda r: r["card"]["edition"]["editioncode"],
+                    reverse=request.url.params.get("orderDirection") == "descending",
+                )
             else:
                 rows.sort(key=lambda r: -r["id"])
             size = int(request.url.params.get("pageSize", "50"))
