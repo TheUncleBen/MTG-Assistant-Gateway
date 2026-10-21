@@ -202,7 +202,7 @@ def test_a_type_chip_narrows_and_flips_to_not_and_clear_empties_everything(serve
         browser.close()
 
 
-def test_scrolling_loads_the_next_page_and_the_list_view_and_sort_stay_in_the_search(server: Server) -> None:
+def test_load_more_reads_to_the_end_and_the_list_view_and_sort_stay_in_the_search(server: Server) -> None:
     from playwright.sync_api import sync_playwright
 
     exe = _chromium()
@@ -216,6 +216,10 @@ def test_scrolling_loads_the_next_page_and_the_list_view_and_sort_stay_in_the_se
                 break
             page.mouse.wheel(0, 4000)
             page.wait_for_timeout(250)
+            if page.evaluate(MORE_READY):
+                n = page.locator("#cardgrid .cc").count()
+                page.locator("#cs-more [data-more]").click()  # scrolling alone never loads more
+                page.wait_for_function(f"() => document.querySelectorAll('#cardgrid .cc').length > {n}")
         names = _names(page)
         assert names == [f"Test Land {i:02d}" for i in range(30)], names
         assert page.locator("#cs-more [data-more]").is_hidden()
@@ -357,7 +361,8 @@ def test_a_search_that_failed_can_be_asked_again_and_old_tiles_go(server: Server
         browser.close()
 
 
-# The page asks for page 2 by itself when the first tiles land; "Load more" is busy until it answers.
+# The page asks for page 2 by itself while the first tiles don't fill the screen; "Load more" is busy
+# until it answers.
 MORE_READY = """
 () => { const b = document.querySelector('#cs-more [data-more]');
   return !!b && !b.disabled && b.getAttribute('aria-busy') !== 'true' && b.offsetParent !== null; }

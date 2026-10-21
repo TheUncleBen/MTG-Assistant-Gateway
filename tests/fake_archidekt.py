@@ -6,6 +6,7 @@ Shapes follow the handoff's endpoint map and the project's real CSV export
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import datetime
 import json
@@ -118,6 +119,9 @@ class FakeArchidekt:
         self.fail_card_writes = False  # PATCH modifyCards answers 503
         # set to an unset threading.Event: PATCH modifyCards waits for it (a slow save, held open)
         self.hold_card_writes: Any = None
+        # the same for a folder delete (deleteItems), waited for without holding up the gateway's
+        # other requests (_after)
+        self.hold_folder_deletes: Any = None
         # Faults a verify must catch: added rows stored without their finish, or with another
         # printing of the same card (card id -> card id to store instead).
         self.add_rows_lose_finish = False
@@ -282,6 +286,15 @@ class FakeArchidekt:
 
     def _folder_name(self, username: str, folder_id: int | None) -> str | None:
         return next((f["name"] for f in self.folders.get(username, []) if f["id"] == folder_id), None)
+
+    async def _after(self, held: Any, request: httpx.Request) -> httpx.Response:
+        """Answer ``request`` once ``held`` is set (or after 15 s), letting the event loop run."""
+        for _ in range(150):
+            if held.is_set():
+                break
+            await asyncio.sleep(0.1)
+        held.set()
+        return self.handle(request)
 
     def client(self) -> httpx.AsyncClient:
         return httpx.AsyncClient(transport=self.transport)
@@ -515,6 +528,9 @@ class FakeArchidekt:
                 },
             )
         if path == "/api/decks/folders/deleteItems/" and request.method == "POST":
+            held = self.hold_folder_deletes
+            if held is not None and not held.is_set():
+                return self._after(held, request)
             body = json.loads(request.content)
             self.folder_deletes.append(body)
             mine = self.folders.get(who, [])

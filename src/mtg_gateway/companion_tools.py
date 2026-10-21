@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any
 from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
 
-from . import deck_stats
+from . import deck_stats, prefs
 from .archidekt import Deck
 from .busy import _headers, busy_body, busy_json_response, busy_plan, busy_response, busy_text_response
 from .cardsearch_view import watched_names
@@ -396,6 +396,10 @@ def add_deck_tool_routes(
         sub, _sid = browser_session(state, request)
         if not sub:
             return login_redirect("/decks")
+        if not prefs.from_this_site(request):  # a link on another site: Archidekt is not asked
+            return Response(
+                "Open this from the gateway's own pages.", 403, headers={"Cache-Control": "no-store"}
+            )
         try:
             deck = await decks.get_any_deck(sub, request.path_params["deck_id"])
         except DeckError as exc:
@@ -433,6 +437,8 @@ def add_deck_tool_routes(
         sub, _sid = browser_session(state, request)
         if not sub:
             return JSONResponse({"ok": False, "error": "unauthenticated"}, 401, headers=headers)
+        if not prefs.from_this_site(request):  # a link on another site: Archidekt is not asked
+            return JSONResponse({"ok": False, "error": "cross_site"}, 403, headers=headers)
         try:
             deck = await decks.page_deck(sub, request.path_params["deck_id"])
         except DeckError as exc:
@@ -475,6 +481,10 @@ def add_deck_tool_routes(
         sub, _sid = browser_session(state, request)
         if not sub:
             return login_redirect("/decks")
+        if not prefs.from_this_site(request):  # a link on another site: Archidekt is not asked
+            return Response(
+                "Open this from the gateway's own pages.", 403, headers={"Cache-Control": "no-store"}
+            )
         try:
             deck = await decks.get_any_deck(sub, request.path_params["deck_id"])
         except DeckError as exc:

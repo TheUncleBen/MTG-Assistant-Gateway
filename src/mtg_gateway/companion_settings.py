@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any
 from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
 
+from . import prefs
 from .actions import COLLABORATOR_NOTE, collaborator_by_hand, collaborator_target, profile_url
 from .archidekt import FORMAT_IDS, ArchidektError, Deck, featured_scryfall_id, format_label, rich_text
 from .busy import busy_response
@@ -602,6 +603,8 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
         sub, _sid = browser_session(state, request)
         if not sub:
             return JSONResponse({"ok": False, "error": "unauthenticated"}, 401, headers=NO_STORE)
+        if not prefs.from_this_site(request):  # it asks Archidekt on the member's own allowance
+            return JSONResponse({"ok": False, "error": "cross_site"}, 403, headers=NO_STORE)
         try:
             names = await decks.tag_suggestions(sub, request.query_params.get("q", ""))
         except (DeckError, ArchidektError) as exc:

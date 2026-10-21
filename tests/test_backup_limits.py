@@ -385,3 +385,18 @@ def test_the_copy_and_its_record_are_written_together(tmp_path: Path) -> None:
         assert db.backup_made("900") == {"name": "x"}
     finally:
         db.close()
+
+
+@pytest.mark.usefixtures("no_sharing")
+async def test_the_folder_a_copy_goes_in_is_remembered_even_once_the_copy_is_gone(stack: Stack) -> None:
+    """The backup folder stays known as one after a rename on Archidekt, with no copy left in it,
+    until the member's data is deleted."""
+    token = await linked_user(stack)
+    first = (await _apply(stack, token, ADDS[0]))["result"]["backup_deck_id"]
+    folder = int(stack.h.db.backup_made(first)["folder_id"])
+    with stack.h.db.tx() as c:  # the copy's own record gone, as once the copy is deleted
+        c.execute("DELETE FROM job_runs WHERE name = ?", (f"backup_made:{first}",))
+    assert stack.h.db.backup_folder_ids(SUB) == {folder}
+    assert stack.h.db.backup_folder_ids("someone-else") == set()
+    stack.h.db.delete_member_data(SUB)
+    assert stack.h.db.backup_folder_ids(SUB) == set()

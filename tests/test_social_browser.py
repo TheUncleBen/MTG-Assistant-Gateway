@@ -25,7 +25,7 @@ from mtg_gateway.oidc import OIDCClient
 
 from .conftest import CLIENT_ID, CLIENT_SECRET, IDP, make_settings
 from .fake_archidekt import FakeArchidekt
-from .test_scan_browser import _chromium_path, _free_port
+from .test_scan_browser import _chromium_path, _free_port, _serve
 
 
 class Server:
@@ -49,7 +49,7 @@ class Server:
         self.server = uvicorn.Server(
             uvicorn.Config(self.app, host="127.0.0.1", port=self.port, log_level="warning")
         )
-        self.thread = threading.Thread(target=self.server.run, daemon=True)
+        self.thread = threading.Thread(target=_serve(self.server, self.port), daemon=True)
 
     def start(self) -> None:
         self.thread.start()

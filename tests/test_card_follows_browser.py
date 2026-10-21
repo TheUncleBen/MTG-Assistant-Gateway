@@ -46,16 +46,25 @@ REDRAWN = "Updated: this card now shows the newest version."
 
 # The host: answers ui/initialize, pushes the tool result and answers each get_proposal from
 # window.gets (a queue; the last one stays), with window.getMeta as its _meta; "refuse" refuses
-# the call. confirm_proposal answers window.confirms the same way.
+# the call. confirm_proposal answers window.confirms the same way. With window.gate set to n,
+# the get_proposal calls after the first n wait unanswered until window.release(), so a test
+# looks at the card between two reads however slow the machine is.
 HOST = """<!DOCTYPE html><html><body>
 <iframe id="f" sandbox="allow-scripts" style="width:600px;height:10px;border:0"></iframe>
 <script>
 window.log = []; window.gets = []; window.getMeta = {}; window.confirms = [];
+window.gate = null; window.answered = 0; window.held = [];
 var frame = document.getElementById("f");
 function next(q) { return q.length > 1 ? q.shift() : q[0]; }
+window.release = () => { window.gate = null; const h = window.held; window.held = []; h.forEach(handle); };
 window.addEventListener("message", (ev) => {
   const m = ev.data; if (!m || m.jsonrpc !== "2.0") return;
   window.log.push(m);
+  if (m.method === "tools/call" && m.params.name === "get_proposal" && window.gate !== null
+      && window.answered >= window.gate) { window.held.push(m); return; }
+  handle(m);
+});
+function handle(m) {
   const send = (x) => frame.contentWindow.postMessage(x, "*");
   if (m.method === "ui/initialize") {
     send({jsonrpc: "2.0", id: m.id, result: {protocolVersion: "2026-01-26",
@@ -65,6 +74,7 @@ window.addEventListener("message", (ev) => {
     send({jsonrpc: "2.0", method: "ui/notifications/tool-result", params: window.toolResult});
   } else if (m.method === "tools/call") {
     const get = m.params.name === "get_proposal";
+    if (get) window.answered += 1;
     const sc = next(get ? window.gets : window.confirms);
     if (sc === "refuse" || sc === undefined)
       send({jsonrpc: "2.0", id: m.id, error: {code: -32000, message: "blocked"}});
@@ -73,7 +83,7 @@ window.addEventListener("message", (ev) => {
   } else if (m.id !== undefined && m.method) {
     send({jsonrpc: "2.0", id: m.id, result: {}});
   }
-});
+}
 </script></body></html>"""
 
 
@@ -82,6 +92,7 @@ def _open(
     gets: list,
     confirms: list | None = None,
     *,
+    gate: int | None = None,
     every_ms: int | None = None,
     meta=None,
     applying_ms: int | None = None,
@@ -98,6 +109,7 @@ def _open(
     page.set_content(HOST)
     page.evaluate("(g) => { window.gets = g; }", gets)
     page.evaluate("(c) => { window.confirms = c; }", confirms or [])
+    page.evaluate("(n) => { window.gate = n; }", gate)
     code = meta if meta is not None else {APPROVAL_META_KEY: "code-v2"}
     page.evaluate("(m) => { window.getMeta = m; }", code)
     first = {"structuredContent": drawn or V1, "_meta": {APPROVAL_META_KEY: "code-v1"}}
@@ -217,10 +229,11 @@ def test_a_newer_version_read_without_a_code_offers_the_review_page_only() -> No
 
 def test_a_redraw_closes_an_open_why_box_so_reject_answers_the_change_shown() -> None:
     def test(page) -> None:
-        card = _open(page, [V1, V2], [{**V2, "state": "rejected"}], every_ms=1_500)
+        card = _open(page, [V1, V2], [{**V2, "state": "rejected"}], gate=1, every_ms=300)
         card.locator("#reject:enabled").wait_for(timeout=5_000)
         card.locator("#reject").click()
         assert "hidden" not in (card.locator("#why").get_attribute("class") or "")
+        page.evaluate("() => window.release()")
         card.locator("ul.changes li", has_text="Ponder").wait_for(timeout=5_000)  # the timed read
         assert "hidden" in (card.locator("#why").get_attribute("class") or "")
         assert _calls(page, "confirm_proposal") == []
@@ -231,8 +244,9 @@ def test_a_redraw_closes_an_open_why_box_so_reject_answers_the_change_shown() ->
 def test_a_replaced_change_that_comes_back_shows_again_with_its_buttons() -> None:
     def test(page) -> None:
         gone = {**V1, "state": "replaced", "replace_note": "Replaced by #4."}
-        card = _open(page, [gone, gone, V1], every_ms=300)
+        card = _open(page, [gone, gone, V1], gate=2, every_ms=300)
         card.locator("#state.replaced").wait_for(timeout=5_000)
+        page.evaluate("() => window.release()")
         card.locator("#state.pending").wait_for(timeout=5_000)
         assert card.locator("#status").inner_text() == "This change is waiting again."
         card.locator("#approve:enabled").wait_for(timeout=5_000)

@@ -1056,6 +1056,8 @@ async def account_action(state: AppState, sub: str, action: str, data: dict[str,
     if action == "notify_new_topic":
         old = prefs(state.db, sub)["ntfy_topic"]
         save_prefs(state.db, sub, ntfy_topic=new_topic(state.db, sub))
+        # nor may the old key come back from a copy saved before a database upgrade
+        state.db.scrub_upgrade_copies(sub, "phone")
         if state.notifier is not None:
             state.notifier.kick(old)
         return "ok=notify_topic"

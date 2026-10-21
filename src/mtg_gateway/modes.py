@@ -51,6 +51,8 @@ MEMBER_ONLY = ("consent", "destructive")
 # Stored on a closed proposal whose risk could not be judged (nothing to judge it by, or an
 # error while judging): never retried, shown as a dash with no risk label.
 UNJUDGED = "unjudged"
+# risk_of's reason for an edit with no review rows: High only because nothing can be judged
+NO_ROWS_REASON = "has no list of rows to check"
 DEFAULT_MODE = "manual"
 DEFAULT_MAX_ROWS = 5
 DEFAULT_BIG_EDIT_ROWS = 20  # an edit with more rows than this waits for a card press in auto
@@ -232,7 +234,7 @@ def risk_of(
     if kind not in ("edit", "collection"):
         return "high", "not a plain deck or collection edit"
     if rows is None:  # stored before review rows existed: nothing to judge it by
-        return "high", "has no list of rows to check"
+        return "high", NO_ROWS_REASON
     kinds = [str(r.get("kind")) for r in rows]
     if any(k == "commander" for k in kinds):
         return "high", commander_reason(rows)

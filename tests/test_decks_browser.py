@@ -39,9 +39,10 @@ def server(tmp_path: Path):
 DECKS_API = re.compile(r".*/api/decks/mine\?.*")
 
 
-def _goto_held(page, url: str, skeleton: str) -> None:
+def _goto_held(page, url: str, skeleton: str, while_held=None) -> None:
     """Open a page whose deck list loads after it, holding that read until the placeholder has
-    been seen, so a fast answer can never swap the placeholder out before the test looks."""
+    been seen (and ``while_held`` has looked at the page), so a fast answer can never swap the
+    placeholder out before the test looks."""
     held: list = []
     page.route(DECKS_API, lambda route: held.append(route))
     page.goto(url, wait_until="commit")
@@ -51,6 +52,8 @@ def _goto_held(page, url: str, skeleton: str) -> None:
             break
         page.wait_for_timeout(50)
     assert held, "the page never asked for the deck list"
+    if while_held:
+        while_held()
     for route in held:
         route.continue_()
     page.unroute(DECKS_API)
@@ -75,9 +78,12 @@ def test_cold_deck_pages_fill_their_placeholders(server: Server) -> None:
         page = ctx.new_page()
         errors: list[str] = []
         page.on("pageerror", lambda e: errors.append(str(e)))
+
         # the shell first: the placeholder list and a blank total...
-        _goto_held(page, f"{server.base}/decks", "ul.decklist.skeleton")
-        assert page.locator("#decks-total").inner_text() == "Decks"
+        def blank_total() -> None:
+            assert page.locator("#decks-total").inner_text() == "Decks"
+
+        _goto_held(page, f"{server.base}/decks", "ul.decklist.skeleton", blank_total)
         # ...then the list itself, as the server renders it, and the toolbar filled in
         page.wait_for_selector("ul.decklist li.deck", timeout=10_000)
         assert page.locator("ul.decklist.skeleton").count() == 0

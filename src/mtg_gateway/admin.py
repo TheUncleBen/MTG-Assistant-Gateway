@@ -595,6 +595,15 @@ def _went_back_notice(b: dict[str, Any] | None) -> str:
     """A notice after this start put back the copy saved before an upgrade (an older version was
     started on a database a newer one had upgraded)."""
     event = (b or {}).get("event") or {}
+    if event.get("kind") == "went-forward":
+        text = (
+            "This version started on a set-aside copy that was put back by hand, so it ended every "
+            "sign-in: everyone signs in once more. What happened while the older version ran is not "
+            "in this database: look through the Users page and disable, unlink or delete again "
+            "anyone you disabled, unlinked or deleted in that time (docs/UPGRADING.md, “Going "
+            "forward again with the set-aside database”)."
+        )
+        return f"<div class='notice warn'>{html.escape(text)}</div>"
     if event.get("kind") != "went-back":
         return ""
     text = (

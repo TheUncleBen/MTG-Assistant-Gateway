@@ -99,7 +99,10 @@ TEXT: dict[str, tuple[str, str]] = {
         "copy the gateway may still delete are kept too.",
     ),
     "backup_hour_utc": ("Nightly backup hour (UTC)", "When the gateway backs up its own database, 0 to 23."),
-    "backup_keep_days": ("Days of nightly backups kept", "Older backup files are deleted."),
+    "backup_keep_days": (
+        "Days of nightly backups kept",
+        "Older backup files are deleted, and so are older copies saved before database upgrades.",
+    ),
     "forge_games": (
         "Forge games per report",
         "How many games a new report plays in all. More games give steadier numbers and take longer. "
