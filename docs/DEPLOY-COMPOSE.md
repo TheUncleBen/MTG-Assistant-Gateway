@@ -55,7 +55,7 @@ secret**. The secret only goes into a file in the next step.
 
 ## 2. Secrets
 
-The gateway reads four secrets from files, never from environment
+The gateway reads five secrets from files, never from environment
 variables:
 
 | File in `secrets/` | What's in it |
@@ -64,6 +64,7 @@ variables:
 | `mtg_session_secret.txt` | Random key that signs browser cookies. No need to keep a copy |
 | `mtg_oidc_client_secret.txt` | The client secret from step 1 |
 | `mtg_ntfy_token.txt` | Random token the gateway uses with the stack's own notification server. You don't need to keep a copy. |
+| `mtg_authentik_api_token.txt` | The word `off`, or the Authentik API token for the optional clean-up of removed members' stored Archidekt sessions ([IDP-AUTHENTIK.md](IDP-AUTHENTIK.md#12-optional-removed-member-clean-up)) |
 
 Run the helper as the user in `PUID` (see step 3), or with `sudo`, in which
 case it hands the files to `PUID:PGID` from `.env`:
@@ -73,9 +74,10 @@ case it hands the files to `PUID:PGID` from `.env`:
 ```
 
 It generates the three random values, prints the Fernet key once so you can
-save it in your password manager, and asks for the client secret at a
-hidden prompt. It never overwrites a file that's already there. Clear your
-terminal afterwards.
+save it in your password manager, asks for the client secret at a
+hidden prompt, and writes `off` into `mtg_authentik_api_token.txt`. It never overwrites a file
+that's already there, so after an update, run it again: it adds only a file that is missing.
+Clear your terminal afterwards.
 
 The files are mode `600`. Compose mounts them into the containers as they
 are, so the user in `PUID` must be able to read them. If the gateway's log
@@ -230,20 +232,10 @@ Next:
 
 ## Updating
 
-```bash
-# take a backup first (your PUID:PGID):
-docker compose exec --user 1000:1000 gateway mtg-gateway backup
-# change MTG_TAG in .env to the new release, then:
-docker compose pull
-docker compose up -d
-```
-
-Read the [CHANGELOG](../CHANGELOG.md) first; it says when a release needs
-more than this, and [UPGRADING.md](UPGRADING.md) has those steps (0.7.30
-among them). The gateway upgrades its database on start and records the
-schema version in the file. To go back to an older release, restore the backup
-you took before updating (see [OPERATIONS.md](OPERATIONS.md#backups)) and run
-the old image on that; don't run an old image on an upgraded database.
+An update is this guide again with the newest files: [UPGRADING.md](UPGRADING.md) has the steps.
+There is no backup to take first: when a new version upgrades the database, the gateway saves a
+copy of it in `backups/before-upgrade/` first, and going back to an older version is in
+[UPGRADING.md](UPGRADING.md#going-back-to-an-older-version).
 
 ## Backups
 
@@ -259,6 +251,10 @@ the old image on that; don't run an old image on an upgraded database.
 - Backups leave out everyone's Archidekt session and the identity
   provider's tokens, so after a restore people sign in again and relink
   Archidekt.
+- Before a new version upgrades the database, the gateway saves a full copy of it (Archidekt
+  sessions included, still encrypted with the Fernet key) in `backups/before-upgrade/`, and keeps
+  the newest 3. It is what going back to an older version uses
+  ([UPGRADING.md](UPGRADING.md#going-back-to-an-older-version)).
 - Keep the Fernet key (`secrets/mtg_fernet_key.txt`) somewhere safe as well.
   It isn't in the backups, on purpose.
 - Don't copy `data/` while the gateway runs; use the backup files.
@@ -270,6 +266,6 @@ start.
 ## Moving to Swarm later
 
 The Swarm stack ([DEPLOY.md](DEPLOY.md)) uses the same images and variables.
-Create the four Swarm secrets from your four files
+Create the five Swarm secrets from your five files
 (`docker secret create mtg_fernet_key secrets/mtg_fernet_key.txt`, and so on),
 copy `data/` to the node in `MTG_NODE`, and deploy the stack.

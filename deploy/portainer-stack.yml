@@ -2,7 +2,7 @@
 #
 # Paste this whole file into Portainer's stack web editor as is. Everything you
 # change lives in the stack's environment variables: start from
-# deploy/stack.env.example. Create the four external secrets below before you
+# deploy/stack.env.example. Create the five external secrets below before you
 # deploy (docs/DEPLOY.md, step 4) and the overlay network (step 1).
 
 version: "3.8"
@@ -14,11 +14,10 @@ secrets:
     external: true
   mtg_oidc_client_secret:
     external: true
-  # Optional: the Authentik API token for the hourly removed-member clean-up
-  # (docs/IDP-AUTHENTIK.md, "Optional: removed-member clean-up"). After creating the secret,
-  # remove the "# " from the next two lines and from "# - mtg_authentik_api_token" below.
-  # mtg_authentik_api_token:
-  #   external: true
+  # The Authentik API token for the hourly removed-member clean-up (docs/IDP-AUTHENTIK.md,
+  # "Optional: removed-member clean-up"), or the word off when you don't use it.
+  mtg_authentik_api_token:
+    external: true
   # The token the gateway uses with the stack's own ntfy server (the members' notifications);
   # ntfy lets nothing else in. docs/DEPLOY.md, step 4, has the command that makes it.
   mtg_ntfy_token:
@@ -51,7 +50,7 @@ services:
       - mtg_session_secret
       - mtg_oidc_client_secret
       - mtg_ntfy_token
-      # - mtg_authentik_api_token
+      - mtg_authentik_api_token
     # Most settings passed as ${MTG_X:-} (empty unless your env sets it) are also on the gateway's
     # Settings page (/admin/settings), which starts from the gateway's default; stack.env.example
     # says which. A value set in your env wins and locks it: the page shows it greyed out with its
@@ -75,9 +74,9 @@ services:
       MTG_OIDC_TOKEN_AUTH_METHOD: ${MTG_OIDC_TOKEN_AUTH_METHOD:-}
       MTG_SERVER_NAME: ${MTG_SERVER_NAME:-}
       MTG_CHATGPT_NAME: ${MTG_CHATGPT_NAME:-}
-      # Optional removed-member clean-up: /run/secrets/mtg_authentik_api_token once that secret
-      # is created and listed above. Empty = off. The API URL defaults to the issuer's address.
-      MTG_AUTHENTIK_API_TOKEN_FILE: ${MTG_AUTHENTIK_API_TOKEN_FILE:-}
+      # The removed-member clean-up reads its token from the secret above; the word off there
+      # turns it off. The API URL defaults to the issuer's address.
+      MTG_AUTHENTIK_API_TOKEN_FILE: ${MTG_AUTHENTIK_API_TOKEN_FILE:-/run/secrets/mtg_authentik_api_token}
       MTG_AUTHENTIK_API_URL: ${MTG_AUTHENTIK_API_URL:-}
       # Notifications to the members' Android app go through the stack's own ntfy server
       # (mtg-assistant-ntfy below); the phones reach it through the gateway's own address.

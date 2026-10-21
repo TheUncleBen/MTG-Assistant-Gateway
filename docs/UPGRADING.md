@@ -1,76 +1,187 @@
 # Updating the gateway
 
-This page is for every update: what to do before it, the update itself, and the extra steps a few
-versions need. The deployment guides ([DEPLOY.md](DEPLOY.md) for Swarm and Portainer,
-[DEPLOY-COMPOSE.md](DEPLOY-COMPOSE.md) for Docker Compose) always describe the current version
-from a fresh start.
+An update is a fresh install on top of your data: take the newest stack file and the newest
+example variables file, put your own settings in, and deploy, as on the first day
+([DEPLOY.md](DEPLOY.md) for Swarm and Portainer, [DEPLOY-COMPOSE.md](DEPLOY-COMPOSE.md) for
+Docker Compose). You don't need older release notes, and you don't take a backup first: when the
+new version has to upgrade the database, the gateway saves a copy of it before it changes
+anything ([below](#what-the-gateway-does-by-itself)).
 
 The gateway never updates itself. Twice a day it asks GitHub whether a newer release is out and, if
 so, shows its admins a notice with these steps ([OPERATIONS.md](OPERATIONS.md#restart-or-update)).
 
-## Before every update
-
-1. **Read the release notes** of every version between yours and the new one: the
-   [CHANGELOG](../CHANGELOG.md), or the project's GitHub releases, which carry the same text. From
-   0.7.31 on, a version whose update needs more than the steps below says so under **Upgrade
-   notes**. Every such version, 0.7.29 and 0.7.30 included, has a section in
-   [Upgrade notes by version](#upgrade-notes-by-version) here. Do those steps for every
-   version you skip over, oldest first.
-2. **Take a backup.** The gateway upgrades its database when it starts, and an older image refuses
-   to start on a database a newer one upgraded. Going back means restoring the backup you took
-   before updating and running the old image on it ([OPERATIONS.md](OPERATIONS.md#backups)).
-   - Swarm, on the node that runs the gateway:
-     `docker exec --user 1000:1000 $(docker ps -q -f name=mtg_mtg-assistant-gateway) mtg-gateway backup`
-   - Docker Compose: `docker compose exec --user 1000:1000 gateway mtg-gateway backup`
-
-   (Use your own `PUID:PGID` in place of `1000:1000`.)
+**What stays as it is:** the data folder (`MTG_DATA_DIR`), the backup folder (`MTG_BACKUP_DIR`),
+the Docker secrets you already made, your identity provider, the overlay network and the reverse
+proxy. **What you take new each time:** the stack file (or `docker-compose.yml`), which you use
+unchanged, and the example variables file, into which you copy your own values.
 
 ## Update steps
 
 ### Portainer
 
-**Stacks** → `mtg`. If `MTG_TAG` names a version, change it to the new one first
-([VERSIONS.md](VERSIONS.md)); with `MTG_TAG=latest` the update pulls the newest version. If the
-release notes say the stack file changed, replace the stack's text with the new
-[`deploy/portainer-stack.yml`](../deploy/portainer-stack.yml) (with the **Repository** build
-method, the update brings it). Before you replace it, note your own edits to the old text and
-make them again in the new one: the new file has the optional secret lines commented out again
-(such as the three `mtg_authentik_api_token` lines from
-[IDP-AUTHENTIK.md](IDP-AUTHENTIK.md#12-optional-removed-member-clean-up), step 7). Without
-them, `MTG_AUTHENTIK_API_TOKEN_FILE` names a file that isn't there, and the admin page says the
-removed-member clean-up is off because the token can't be read. Then click **Update the stack** (with the Repository build method
-the button is called **Pull and redeploy**), and in the box that asks “Are you sure?” make sure
-**Re-pull image and redeploy** is on, then click **Update**.
+1. **Your values.** Save your current variables as `mtg.env.old`: your old `mtg.env`, or the
+   stack's **Environment variables** in **Advanced mode** copied out of Portainer. Then download
+   the newest [`deploy/stack.env.example`](../deploy/stack.env.example) and save it as `mtg.env`.
+   Copy into it every value your old file sets: the lines marked `REQUIRED`, and any optional
+   line you changed. To list the lines your old file sets, run
+   `grep -v -e '^#' -e '=$' -e '^$' mtg.env.old`, or read through it. A variable the new file
+   doesn't list any more has no effect: leave it out. The comments in the new file explain every
+   line, so this is also the moment to see what is new.
+2. **Secrets.** Do [DEPLOY.md step 4](DEPLOY.md#4-docker-secrets-once) again. It only adds a
+   secret that is missing, and the commands there skip any secret you already have (in
+   Portainer, skip the ones the **Secrets** list already shows). Your old secrets stay as they
+   are.
+3. **The stack.** **Stacks** → `mtg` → **Editor**. Replace the whole text with the newest
+   [`deploy/portainer-stack.yml`](../deploy/portainer-stack.yml), unchanged. (With the
+   **Repository** build method the update brings the newest file itself.) Under **Environment
+   variables**, switch to **Advanced mode** and replace everything there with your new `mtg.env`.
+   Then click **Update the stack** (with the Repository build method the button is called
+   **Pull and redeploy**), and in the box that asks “Are you sure?” make sure **Re-pull image and
+   redeploy** is on, then click **Update**.
 
 ### Swarm without Portainer
 
-Set `MTG_TAG` in your variables file if it is pinned, update your copy of the repository
-(`git pull`), load the variables into a new shell and run `docker stack deploy` again, as in
-[DEPLOY.md](DEPLOY.md#without-portainer).
+On a Swarm manager, in your copy of the repository:
+
+```bash
+git pull                                  # the newest stack file and example
+cp mtg.env mtg.env.old
+cp deploy/stack.env.example mtg.env       # then copy your values in, as in Portainer step 1
+```
+
+Do [DEPLOY.md step 4](DEPLOY.md#4-docker-secrets-once) again for any secret that is missing.
+Then open a new shell (a variable you removed stays set in the old one) and load the variables
+and deploy: the `while ... done < mtg.env` line and the `docker stack deploy ...` line under
+[Without Portainer](DEPLOY.md#without-portainer).
 
 ### Docker Compose
 
+In the folder with `docker-compose.yml`, get the newest files (if you cloned the repository, run
+`git pull` in it instead of the three `curl` lines):
+
 ```bash
-# change MTG_TAG in .env to the new release if it is pinned, then:
+base=https://raw.githubusercontent.com/TheUncleBen/MTG-Assistant-Gateway/main/deploy/compose
+curl -fsSLO "$base/docker-compose.yml"
+curl -fsSLO "$base/make-secrets.sh" && chmod +x make-secrets.sh
+cp .env .env.old
+curl -fsSL "$base/.env.example" -o .env
+```
+
+**Now edit `.env`** and copy your values in from `.env.old`, as in Portainer step 1 (in
+particular `MTG_DATA_DIR`, `MTG_BACKUP_DIR` and `MTG_SECRETS_DIR` if you changed them, so the
+gateway finds your data and secrets). Then:
+
+```bash
+./make-secrets.sh          # adds only a secret file that is missing
 docker compose pull
 docker compose up -d
 ```
 
-If the release notes say the Compose file changed, get the new `docker-compose.yml` first (see
-[0.7.29](#0729-included-in-0730) below for how, and what to carry over).
+## What the gateway does by itself
+
+When a new version first starts on your database, it checks whether the database needs
+upgrading. When it does, the gateway:
+
+1. saves a full copy of the database in `before-upgrade`, a folder inside your backup folder
+   (`<MTG_BACKUP_DIR>/before-upgrade/`, or inside the data folder when `MTG_BACKUP_DIR` isn't
+   set), named like `mtg-gateway-before-upgrade-20261021T030000Z-schema15.sqlite`;
+2. checks the copy (it runs SQLite's own check on it and makes sure it holds the same database
+   version it copied) before it keeps it;
+3. upgrades the database in one step: the upgrade happens whole or not at all, so one that fails
+   or is cut off leaves the database exactly as it was;
+4. keeps the newest 3 copies and deletes older ones. A start that keeps failing saves its copy
+   once, not on every try.
+
+If it can't save the copy (for example the disk is full or the folder can't be written), it
+doesn't upgrade, changes nothing and doesn't start. Its log says why, with a line starting
+`database error: the database was not upgraded`, such as `... not enough free space in
+/backups/before-upgrade: it needs about 40 MB and has 12 MB`. Fix that and update the stack
+again, or go back to the version you ran before, which still works on the unchanged database.
+
+The copy is the database exactly as it was, so going back needs nobody to relink Archidekt. That
+also means it holds members' Archidekt sessions and the identity provider's tokens, still
+encrypted with the Fernet key, which is never in the file. So it is readable by the gateway's own
+user only, stays in the backup folder, and is never copied to `MTG_BACKUP_COPY_DIR`. (The nightly
+backups leave those out, as before: [OPERATIONS.md](OPERATIONS.md#backups).)
+
+A version that doesn't change the database saves no copy; the release notes say when a version
+changes it.
 
 ## After updating
 
 `curl -s https://mtg.example.com/healthz` answers `{"status":"ok"}`, and the admin page's
-**System** card shows the new version. Updates are `stop-first`, so expect a few seconds of
-downtime; signed-in assistants keep working.
+**System** card shows the new version and, under **Newest before-upgrade copy**, the newest
+copy. Updates are `stop-first`: the old gateway stops before the new one starts, so it is
+unreachable for a short while; signed-in assistants keep working.
 
-## Upgrade notes by version
+## Going back to an older version
 
-This list starts at 0.7.29. Only versions that need more than the update steps are listed, newest
-first, and a version from 0.7.29 on that is not listed needs nothing extra. If you are updating from
-an older version, also read each version's notes in the CHANGELOG. Sections stay here at least until
-version 1.0.0.
+**To 0.7.37 or newer:** change `MTG_TAG` to that version and update the stack with that
+version's stack file and example file (each version's files are on its branch,
+`release/X.Y.Z`, see [VERSIONS.md](VERSIONS.md)). If a newer version had upgraded the database,
+the older one finds its copy in `before-upgrade` and puts it back by itself when it starts:
+
+- First it saves the newer database in the same folder as a set-aside copy,
+  `mtg-gateway-set-aside-...sqlite`, so nothing is lost. The newest 3 set-aside copies are kept.
+- Members disabled, Archidekt sessions deleted and members' **Delete my data** since the upgrade
+  stay so. Every other change made since the upgrade (proposals, snapshots, settings, someone you
+  enabled again) is only in the set-aside copy: enable such a member again on the Users page.
+- It ends every sign-in, so everyone signs in once more, and the admin page says what happened.
+
+If there is no copy for it, it doesn't start, and its log says so.
+
+**To 0.7.36 or older:** these versions don't go back by themselves. A version that didn't change
+the database needs nothing more than the `MTG_TAG` change. If the newer version upgraded the
+database (its release notes say so), put the copy it saved back by hand first: the newest file in
+`before-upgrade` whose name starts `mtg-gateway-before-upgrade-`. On the gateway's node, with
+your folders and your `PUID` (`1000` here):
+
+```bash
+docker service scale mtg_mtg-assistant-gateway=0       # Compose: docker compose stop gateway
+sudo ls -t <MTG_BACKUP_DIR>/before-upgrade              # the newest copy is listed first
+sudo -u '#1000' sh -c 'umask 077 && cd <MTG_DATA_DIR> && mkdir newer-1 &&
+  mv mtg-gateway.sqlite* newer-1/ && cp <MTG_BACKUP_DIR>/before-upgrade/<the copy> mtg-gateway.sqlite'
+```
+
+Put the file name `ls` listed in place of `<the copy>`. The `newer-1` folder keeps the newer
+database; if one is already there from an earlier time, use another name. Then end every sign-in
+in the copy with the command under **Restore** in [OPERATIONS.md](OPERATIONS.md#backups) (that
+page also says what a restore by hand brings back, such as members you disabled since), and
+update the stack with the old version's `MTG_TAG` and files.
+
+**Going forward again with the set-aside database:** to get back the changes made after the
+upgrade, stop the gateway as above, and with the same `sudo -u '#1000' sh -c '...'` line move the
+`mtg-gateway.sqlite*` files into a new folder and copy the `mtg-gateway-set-aside-...` file in as
+`mtg-gateway.sqlite`. Then update the stack to the newer version again.
+
+## Coming from an older version
+
+The update steps above bring every stack, variable and secret change up to now. A few changes
+reach past the stack, so if your old version is older than the one named, also:
+
+- **0.7.29 or older:** settings you keep in your variables lock them on the gateway's Settings
+  page (greyed out with that value). Leave out of `mtg.env` (or `.env`) any setting you'd rather
+  change on the page.
+- **0.7.29 or older:** members' notifications come in the gateway's Android app, not the ntfy
+  app. Each member who wants them ticks **Send me notifications** on their Account page in the
+  app and presses **Save notifications**. Members on an app older than 0.7.12 install the new app
+  from the gateway's Install page (uninstalling the old one first). If you ran an ntfy server of
+  your own for the gateway, you can stop it, and revoke the old token there.
+- **0.7.32 or older:** the gateway sends at most 30 Archidekt requests a minute by default
+  instead of 40. To keep 40, set "Archidekt requests per minute" on the Settings page.
+- **0.7.36 or older:** the stack file and `docker-compose.yml` now always attach the
+  `mtg_authentik_api_token` secret, so you no longer remove the `# ` from its lines. The secrets
+  step above (Portainer step 2) creates it with the word `off` if you don't have it; with Compose,
+  `./make-secrets.sh` does.
+
+Every version's full notes are in the [CHANGELOG](../CHANGELOG.md), and the older update steps
+are kept below for reference.
+
+## Older update notes
+
+These are the extra steps the versions from 0.7.29 to 0.7.33 needed when an update meant keeping
+your old stack file and variables. The update steps above already cover them, and the steps
+below that point “above” mean the update steps of those versions, which kept the old stack file.
 
 ### 0.7.33
 
