@@ -20,7 +20,7 @@ flowchart LR
       gw["mtg-gateway<br/>:8080"]
       mf["Mystic Forge<br/>:8000, not published"]
       ntfy["ntfy<br/>notifications, not published"]
-      forge["Forge<br/>simulations, optional, not published"]
+      forge["Forge<br/>simulations, on by default, not published"]
     end
     data[("data/ (SQLite)<br/>backups/")]
     secrets[["Docker secrets<br/>4 files"]]
@@ -55,7 +55,7 @@ Claude / ChatGPT / Android app / browser
         ▼
   mtg-gateway :8080 ──MCP──▶ Mystic Forge :8000 ──▶ Scryfall, EDHREC, Spellbook, rules
         │   ├─ SQLite in data/, nightly copies in backups/
-        │   ├─ ntfy (members' notifications) and Forge (simulations, optional), both private
+        │   ├─ ntfy (members' notifications) and Forge (simulations, on by default), both private
         │   ├─ 4 Docker secrets (encryption key, cookie key, OIDC client secret, ntfy token)
         │   ├─ sign-in ──▶ your OIDC identity provider
         │   └─ deck reads and edits ──▶ archidekt.com (as the signed-in user)

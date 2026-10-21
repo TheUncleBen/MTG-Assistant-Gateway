@@ -194,10 +194,11 @@ reach past the stack, so if your old version is older than the one named, also:
   `mtg_authentik_api_token` secret, so you no longer remove the `# ` from its lines. The secrets
   step above (Portainer step 2) creates it with the word `off` if you don't have it; with Compose,
   `./make-secrets.sh` does.
-- **0.7.38 or older:** Forge is on in the example variables files. If you ran without it and want
-  to keep it off, set `FORGE_REPLICAS=0` and an empty `MTG_FORGE_URL=` (Compose: put a `#` in front
-  of `COMPOSE_PROFILES=forge` and set an empty `MTG_FORGE_URL=`). On a stack, `FORGE_NODE` now
-  needs a node name even with Forge off.
+- **0.7.38 or older:** Forge is on in the example variables files. If you take the new example
+  file and want Forge off, set both `FORGE_REPLICAS=0` and an empty `MTG_FORGE_URL=` (Compose: put
+  a `#` in front of `COMPOSE_PROFILES=forge` and set an empty `MTG_FORGE_URL=`); one without the
+  other leaves the gateway asking a Forge that isn't there. Everyone on a stack: `FORGE_NODE` now
+  needs a node name, even with Forge off.
 
 Every version's full notes are in the [CHANGELOG](../CHANGELOG.md), and the older update steps
 are kept below for reference.

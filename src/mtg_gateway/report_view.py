@@ -1574,7 +1574,7 @@ def forge_solo_lines(f: dict[str, Any]) -> list[str]:
             lines.append(f"Commander cast (median turn): {_turn_text(r['median_commander_turn'])}")
         if r.get("median_first_out_turn") is not None:
             lines.append(f"First opponent out (median turn): {_turn_text(r['median_first_out_turn'])}")
-        lines.append(f"Mulligans: {r.get('mulligans', 0)} of {games} games")
+        lines.append(f"Mulligans: {r.get('mulligans', 0)} of {games} {'game' if games == 1 else 'games'}")
         for key, label in (
             ("lands_by_turn", "Lands played"),
             ("casts_by_turn", "Spells cast"),
@@ -1582,11 +1582,12 @@ def forge_solo_lines(f: dict[str, Any]) -> list[str]:
         ):
             if _per_turn_text(r.get(key)):
                 lines.append(f"{label} each turn (average, from turn 1): {_per_turn_text(r.get(key))}")
-        slow = r.get("stopped_slow")
-        if isinstance(slow, int) and slow > 0:
-            lines.append(
-                f"{slow} of {games} games reached Forge's time limit first, so they count as not won."
-            )
+    unfinished = r.get("unfinished")
+    if isinstance(unfinished, int) and unfinished > 0:
+        lines.append(
+            f"Left out: {unfinished} {'game' if unfinished == 1 else 'games'} that Forge's time limit "
+            f"stopped before turn {until} or a win."
+        )
     if f.get("not_played"):
         lines.append("Cards Forge could not play: " + ", ".join(str(n) for n in f["not_played"]))
     return [ln for ln in lines if ln]

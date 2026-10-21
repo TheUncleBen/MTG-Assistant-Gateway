@@ -112,11 +112,19 @@ FORGE_NO_COMMANDER = (
 # The Forge solo test (forge.start_solo_run): with every report that simulates while Forge is set up,
 # the deck also plays alone on Forge, by the full rules, beside the solo test's quick estimate. It
 # is kept apart from the games against precons (forge_solo_json), takes no place in the member's
-# queue of those, and each member has one unfinished at a time. Its games share a time budget so
-# the whole test stays within five minutes: each game gets an equal part of it (less room for
-# Java's start), never less than SOLO_MIN_GAME_SECONDS nor more than the Forge service's own limit.
+# queue of those, starts after them, and each member has one unfinished at a time (two for a
+# comparison's two decks). Each round of games gets an equal part of a time budget of play,
+# never less than SOLO_MIN_GAME_SECONDS nor more than the Forge service's own limit; Java's start
+# and a wait in Forge's queue come on top. A report is finished once both Forge parts are.
 SOLO_BUDGET_SECONDS = 270
 SOLO_MIN_GAME_SECONDS = 30
+# A solo test whose engine stops answering is given up this long after it started (not after
+# forge.GIVE_UP_SECONDS), so the member's next one is not kept waiting for hours.
+SOLO_GIVE_UP_SECONDS = 3600
+# A report's solo test is marked as coming (no engine job yet) when the report is stored; one
+# still without a job this long after (a gateway restart while it started) never started.
+SOLO_START_SECONDS = 600
+SOLO_NOT_STARTED = "The Forge solo test did not start. Run the report again."
 SOLO_ONE_AT_A_TIME = (
     "Another report of yours is still playing its Forge solo test, so this report has none. Run the "
     "report again once that one has finished."
@@ -171,6 +179,8 @@ class ReportService:
         self._forge_cancels: set[asyncio.Task[None]] = set()  # held so a pending cancel is not collected
         # Held from the one-run-per-member check until the new run is saved (one gateway process).
         self._forge_start_lock = asyncio.Lock()
+        # Per member, held from the one-solo-test check until its run is saved (one gateway process).
+        self._solo_locks: dict[str, asyncio.Lock] = {}
         self._pair_holds: dict[str, list[PairHold]] = {}  # per member, see reserve_pair
         self.min_interval = min_interval
         # (member, report id) once a report is finished, its Forge games included; set by app.py
@@ -361,6 +371,14 @@ class ReportService:
             and not (simulate and self.mf is not None and latest.get("goldfish_json") is None)
             # nor does one that asks for Forge reuse one whose Forge games were not asked for
             and not (forge and self.forge is not None and _forge_not_asked(latest.get("forge_json")))
+            # nor one whose Forge solo test did not come (skipped, failed): a run again plays it
+            and not (
+                forge
+                and simulate
+                and self.forge is not None
+                and latest.get("run_mode") in SIM_MODES
+                and latest.get("forge_solo_state") not in ("queued", "running", "done")
+            )
         ):
             out = self.get(sub, latest["id"])
             out["reused"] = True
@@ -413,12 +431,17 @@ class ReportService:
                 **({"compare_of": compare_of} if compare_of else {}),
             },
         }
+        # the Forge solo test is marked as coming from the start, so the report is not finished
+        # (nor its member notified) until it has played too
+        plays_solo = self.forge is not None and forge and simulate and mode in SIM_MODES
+        solo_mark = {"state": "queued", "started_at": now} if plays_solo else None
         with self.db.tx() as c:
             # Stored only while the member exists: a report still running when they deleted
             # their data is dropped, not written back for the deleted account.
             stored = c.execute(
                 "INSERT INTO reports (id, owner_sub, deck_id, deck_name, fingerprint, taken_at, stats_json, "
-                "goldfish_json, validation_json, created_by_client) SELECT ?,?,?,?,?,?,?,?,?,? "
+                "goldfish_json, validation_json, created_by_client, forge_solo_json, forge_solo_state) "
+                "SELECT ?,?,?,?,?,?,?,?,?,?,?,? "
                 "WHERE EXISTS (SELECT 1 FROM users WHERE sub = ?)",
                 (
                     rid,
@@ -431,6 +454,8 @@ class ReportService:
                     json.dumps(goldfish) if goldfish is not None else None,
                     json.dumps(validation) if validation is not None else None,
                     current_client.get(),
+                    json.dumps(solo_mark) if solo_mark is not None else None,
+                    "queued" if solo_mark is not None else None,
                     sub,
                 ),
             ).rowcount
@@ -455,9 +480,53 @@ class ReportService:
         for section in pruned_forge:  # an unfinished run goes with its report, as in delete()
             self._cancel_forge(section)
         self.db.audit("report_created", sub=sub, detail={"report_id": rid, "deck_id": deck.id})
-        if self.forge is not None and forge and simulate and mode in SIM_MODES:
-            # the Forge solo test goes first: it is short, and the games against precons may wait
-            await self._start_solo(sub, rid, deck_to_text(deck), deck.name, options.get("seed"))
+        # Shielded: a request cancelled now (its client gone) still saves both Forge parts, so no
+        # engine job is left that nobody would cancel.
+        await asyncio.shield(
+            self._start_forge_parts(
+                sub, rid, deck, stats, mode, games, options, forge, plays_solo, shared, other, pair_hold
+            )
+        )
+        return self.get(sub, rid)
+
+    async def _start_forge_parts(
+        self,
+        sub: str,
+        rid: str,
+        deck: Deck,
+        stats: dict[str, Any],
+        mode: str,
+        games: int,
+        options: dict[str, Any],
+        forge: bool,
+        plays_solo: bool,
+        shared: dict[str, Any] | None,
+        other: Deck | None,
+        pair_hold: PairHold | None,
+    ) -> None:
+        """Start report rid's games against precons (or say why there are none), then its Forge
+        solo test, which plays after them on the engine."""
+        await self._start_precon_part(
+            sub, rid, deck, stats, mode, games, options, forge, shared, other, pair_hold
+        )
+        if plays_solo:
+            partner = shared.get("report_id") if shared else None
+            await self._start_solo(sub, rid, deck_to_text(deck), deck.name, options.get("seed"), partner)
+
+    async def _start_precon_part(
+        self,
+        sub: str,
+        rid: str,
+        deck: Deck,
+        stats: dict[str, Any],
+        mode: str,
+        games: int,
+        options: dict[str, Any],
+        forge: bool,
+        shared: dict[str, Any] | None,
+        other: Deck | None,
+        pair_hold: PairHold | None,
+    ) -> None:
         if self.forge is None:
             self._finished(rid)
         elif not forge:
@@ -477,7 +546,6 @@ class ReportService:
                 await self._start_or_queue_forge(
                     sub, rid, deck, games, seed, bracket, shared, copies, hold=pair_hold
                 )
-        return self.get(sub, rid)
 
     async def pair_deck(self, sub: str, pair_with: str | Deck) -> Deck:
         """The other deck of a Forge comparison, read for its bracket. A deck that can't be read
@@ -1028,17 +1096,32 @@ class ReportService:
             return
         self._ensure_forge_refresher()
 
-    async def _start_solo(self, sub: str, rid: str, text: str, name: str, seed: Any) -> None:
-        """Start report rid's Forge solo test (see SOLO_BUDGET_SECONDS), or say why there is none."""
+    async def _start_solo(
+        self, sub: str, rid: str, text: str, name: str, seed: Any, partner: Any = None
+    ) -> None:
+        """Start report rid's Forge solo test (see SOLO_BUDGET_SECONDS), or say why there is none.
+        ``partner``: the report a comparison's second deck seats the opponents of, whose own solo
+        test may play beside this one."""
+        lock = self._solo_locks.setdefault(sub, asyncio.Lock())
+        async with lock:
+            await self._start_solo_locked(sub, rid, text, name, seed, partner)
+
+    async def _start_solo_locked(
+        self, sub: str, rid: str, text: str, name: str, seed: Any, partner: Any
+    ) -> None:
         assert self.forge is not None
         section: dict[str, Any]
-        if self._solo_running(sub, rid):
+        if self._solo_running(sub, rid, partner):
             section = {"state": "skipped", "error": SOLO_ONE_AT_A_TIME}
         else:
             try:
                 client, engine, how_many = await self.forge.pick()
                 health = await client.health()
                 if not health.get("solo"):  # a Forge image from before the solo test
+                    logger.warning(
+                        "Forge solo test skipped: the Forge image is older than it needs; update "
+                        "FORGE_TAG to the version the stack file names"
+                    )
                     section = {"state": "skipped", "error": SOLO_TOO_OLD}
                 else:
                     places = health.get("max_parallel")
@@ -1072,13 +1155,17 @@ class ReportService:
             return
         self._ensure_forge_refresher()
 
-    def _solo_running(self, sub: str, rid: str) -> bool:
+    def _solo_running(self, sub: str, rid: str, partner: Any = None) -> bool:
+        """Whether another of the member's Forge solo tests (one with an engine job, not merely
+        marked as coming) is unfinished; ``partner``'s does not count."""
         finals = tuple(FINAL_STATES)
         with self.db._lock:
             row = self.db._conn.execute(
-                "SELECT 1 FROM reports WHERE owner_sub = ? AND id != ? AND forge_solo_state IS NOT NULL "
-                f"AND forge_solo_state NOT IN ({','.join('?' * len(finals))}) LIMIT 1",
-                (sub, rid, *finals),
+                "SELECT 1 FROM reports WHERE owner_sub = ? AND id != ? AND id != ? "
+                "AND forge_solo_state IS NOT NULL "
+                f"AND forge_solo_state NOT IN ({','.join('?' * len(finals))}) "
+                "AND json_extract(forge_solo_json, '$.job_id') IS NOT NULL LIMIT 1",
+                (sub, rid, str(partner or ""), *finals),
             ).fetchone()
         return row is not None
 
@@ -1086,17 +1173,23 @@ class ReportService:
         self, rid: str, section: dict[str, Any], *, unless_changed_from: str | None = None
     ) -> bool:
         """Store the report's Forge solo test, as _save_forge does its games against precons; one
-        that reaches a final state gets the time it did (``finished_at``). It never finishes the
-        report: that is the games against precons' to do."""
+        that reaches a final state gets the time it did (``finished_at``), and finishes the report
+        if its games against precons have too."""
         if section.get("state") in FINAL_STATES and "finished_at" not in section:
             section = {**section, "finished_at": int(time.time())}
         same = "" if unless_changed_from is None else " AND forge_solo_json = ?"
         args = () if unless_changed_from is None else (unless_changed_from,)
         with self.db.tx() as c:
+            was = c.execute(
+                "SELECT forge_state, forge_solo_state FROM reports WHERE id = ?", (rid,)
+            ).fetchone()
             cur = c.execute(
                 f"UPDATE reports SET forge_solo_json = ?, forge_solo_state = ? WHERE id = ?{same}",
                 (json.dumps(section), section.get("state"), rid, *args),
             )
+        if cur.rowcount > 0 and was is not None:
+            if not _report_done(was[0], was[1]) and _report_done(was[0], section.get("state")):
+                self._finished(rid)
         return cur.rowcount > 0
 
     def _owner(self, rid: str) -> str | None:
@@ -1244,18 +1337,20 @@ class ReportService:
         ``unless_changed_from`` (the stored text the caller read), when something else saved the
         section since (an undo or more games while the refresher waited on Forge): then the
         newer section stays. A section that reaches a final state (done, failed, skipped...)
-        finishes its report."""
-        final = section.get("state") in FINAL_STATES
+        finishes its report, unless its Forge solo test is still to come or playing."""
         same = "" if unless_changed_from is None else " AND forge_json = ?"
         args = () if unless_changed_from is None else (unless_changed_from,)
         with self.db.tx() as c:
-            was = c.execute("SELECT forge_state FROM reports WHERE id = ?", (rid,)).fetchone()
+            was = c.execute(
+                "SELECT forge_state, forge_solo_state FROM reports WHERE id = ?", (rid,)
+            ).fetchone()
             cur = c.execute(
                 f"UPDATE reports SET forge_json = ?, forge_state = ? WHERE id = ?{same}",
                 (json.dumps(section), section.get("state"), rid, *args),
             )
-        if cur.rowcount > 0 and final and (was is None or was[0] not in FINAL_STATES):
-            self._finished(rid)
+        if cur.rowcount > 0 and was is not None:
+            if not _report_done(was[0], was[1]) and _report_done(section.get("state"), was[1]):
+                self._finished(rid)
         return cur.rowcount > 0
 
     def _finished(self, rid: str) -> None:
@@ -1362,8 +1457,18 @@ class ReportService:
                     section = json.loads(stored)
                     if _waiting(section):
                         continue  # no engine job yet; started below when its turn comes
+                    solo = save == self._save_solo
+                    if solo and not section.get("job_id"):
+                        # marked as coming when its report was stored; started by _run
+                        if time.time() - section.get("started_at", 0) > SOLO_START_SECONDS:
+                            failed = {**section, "state": "failed", "error": SOLO_NOT_STARTED}
+                            save(rid, failed, unless_changed_from=stored)
+                        continue
                     fresh = await refresh(
-                        self._engine(section), section, pinned_gone=self._pinned_gone(section)
+                        self._engine(section),
+                        section,
+                        pinned_gone=self._pinned_gone(section),
+                        give_up=SOLO_GIVE_UP_SECONDS if solo else forge_module.GIVE_UP_SECONDS,
                     )
                     # written only when a game finished or the state moved, and only over the
                     # section read above: a newer one saved meanwhile is read again next round
@@ -1506,7 +1611,8 @@ class ReportService:
     def _latest(self, sub: str, deck_id: str) -> dict[str, Any] | None:
         with self.db._lock:
             row = self.db._conn.execute(
-                "SELECT id, fingerprint, taken_at, goldfish_json, validation_json, forge_json FROM reports "
+                "SELECT id, fingerprint, taken_at, goldfish_json, validation_json, forge_json, "
+                f"forge_solo_state, json_extract(stats_json, '$.{RUN_KEY}.mode') AS run_mode FROM reports "
                 "WHERE owner_sub = ? AND deck_id = ? "
                 "ORDER BY taken_at DESC, rowid DESC LIMIT 1",
                 (sub, deck_id),
@@ -1631,7 +1737,8 @@ class ReportService:
         status and whether Forge games came. One query; the big result texts stay unread."""
         with self.db._lock:
             rows = self.db._conn.execute(
-                "SELECT id, deck_id, deck_name, taken_at, created_by_client, forge_json, "
+                "SELECT id, deck_id, deck_name, taken_at, created_by_client, forge_json, forge_solo_state, "
+                "json_extract(forge_solo_json, '$.result.games') AS solo_games, "
                 "goldfish_json IS NOT NULL AS g_has, json_extract(goldfish_json, '$.ok') AS g_ok, "
                 "validation_json IS NOT NULL AS v_has, json_extract(validation_json, '$.ok') AS v_ok, "
                 "json_extract(stats_json, '$.commanders') AS commanders FROM reports WHERE owner_sub = ? "
@@ -1656,7 +1763,14 @@ class ReportService:
                     "taken_at": r["taken_at"],
                     "created_by_client": r["created_by_client"],
                     "commanders": commanders,
-                    "status": report_status(goldfish, validation, forge),
+                    "status": report_status(
+                        goldfish,
+                        validation,
+                        forge,
+                        {"state": r["forge_solo_state"], "result": {"games": r["solo_games"]}}
+                        if r["forge_solo_state"]
+                        else None,
+                    ),
                     "forge_played": bool(forge and _forge_played(forge)),
                     "forge_state": (forge or {}).get("state"),
                 }
@@ -1802,6 +1916,8 @@ class ReportService:
         validation = json.loads(d["validation_json"]) if d.get("validation_json") else None
         forge = json.loads(d["forge_json"]) if d.get("forge_json") else None
         forge = forge if isinstance(forge, dict) else None
+        solo = json.loads(d["forge_solo_json"]) if d.get("forge_solo_json") else None
+        solo = solo if isinstance(solo, dict) else None
         # No rules-engine games came or will come: not run, skipped, or the Forge run ended without games.
         preflight = forge is None or not _forge_played(forge)
         return {
@@ -1817,7 +1933,7 @@ class ReportService:
             "bracket_estimate": (stats.get("bracket_estimate") or {}).get("bracket"),
             "bracket_set": stats.get("archidekt_bracket"),
             "created_by_client": d.get("created_by_client"),
-            "status": report_status(goldfish, validation, forge),
+            "status": report_status(goldfish, validation, forge, solo),
             "engine": "preflight_only" if preflight else "forge",
             "engine_label": PREFLIGHT_ONLY if preflight else "Forge rules engine",
             "settings": run_settings(stats, goldfish, forge),
@@ -1968,19 +2084,26 @@ def settings_changes(series: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return out
 
 
-def report_status(goldfish: Any, validation: Any, forge: Any) -> str:
-    """One word for where a report stands: "queued" or "running" while its Forge games wait or
-    play, else "complete" when every part asked for came back, "partial" when some did not (a
-    failed simulation or validation, Forge games that failed or found no place), "failed" when
-    none did. Forge left out on purpose (not asked for, or a 60-card deck) is not a failure."""
-    if isinstance(forge, dict) and forge.get("state") not in FINAL_STATES:
-        return "running" if forge.get("state") == "running" else "queued"
+def report_status(goldfish: Any, validation: Any, forge: Any, solo: Any = None) -> str:
+    """One word for where a report stands: "queued" or "running" while its Forge games or its
+    Forge solo test wait or play, else "complete" when every part asked for came back, "partial"
+    when some did not (a failed simulation or validation, Forge games that failed or found no
+    place), "failed" when none did. Forge left out on purpose (not asked for, or a 60-card deck)
+    is not a failure, nor is a Forge solo test skipped (Forge busy or too old)."""
+    going = [
+        x.get("state") for x in (forge, solo) if isinstance(x, dict) and x.get("state") not in FINAL_STATES
+    ]
+    if going:
+        return "running" if "running" in going else "queued"
     parts = [bool(b.get("ok")) for b in (goldfish, validation) if isinstance(b, dict)]
     some = list(parts)
     if isinstance(forge, dict) and forge.get("reason") not in ("not_requested", "not_commander"):
         parts.append(forge.get("state") == "done")
         # a run that stopped early still brought back the games it played
         some.append(forge.get("state") == "done" or _done_games(forge) > 0)
+    if isinstance(solo, dict) and solo.get("state") != "skipped":
+        parts.append(solo.get("state") == "done")
+        some.append(solo.get("state") == "done" or _done_games(solo) > 0)
     if parts and not any(some):
         return "failed"
     return "complete" if all(parts) else "partial"
@@ -2114,6 +2237,12 @@ def solo_game_seconds(games: int, places: int, cap: int) -> int:
     of games (``places`` play at once), between SOLO_MIN_GAME_SECONDS and the service's ``cap``."""
     rounds = max(1, -(-max(1, games) // max(1, places)))
     return max(min(SOLO_MIN_GAME_SECONDS, cap), min(cap, SOLO_BUDGET_SECONDS // rounds))
+
+
+def _report_done(forge_state: Any, solo_state: Any) -> bool:
+    """Whether a report with these Forge states is finished: its games against precons ended,
+    and its Forge solo test, if it has one, too."""
+    return forge_state in FINAL_STATES and (solo_state is None or solo_state in FINAL_STATES)
 
 
 def _waiting(section: dict[str, Any]) -> bool:

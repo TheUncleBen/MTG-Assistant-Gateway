@@ -10,9 +10,9 @@ with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 ## [0.7.40] - 2026-10-21
 
 When Forge is on, every report that simulates now also has Forge play the deck alone by the full
-rules, beside the solo test's quick estimate, so you can see how often and on which turn the deck
-won when every card does exactly what it says. Forge is now on in the example files for new
-installs.
+rules, beside the solo test's quick estimate: Forge's AI plays every card Forge has by its rules
+text, and the report shows how often and on which turn the deck won. Forge is now on in the
+example files for new installs.
 
 ### Upgrade notes
 - Update as usual ([docs/UPGRADING.md](docs/UPGRADING.md)): the newest stack file and example
@@ -23,17 +23,24 @@ installs.
   says how). [docs/HARDWARE.md](docs/HARDWARE.md) says what machine it needs.
 - **Portainer or Swarm: `FORGE_NODE` is now required,** even with Forge off; set it to the node
   that runs Forge (any node name will do with Forge off). The stack won't deploy without it.
-- To keep Forge off on a stack: `FORGE_REPLICAS=0` and an empty `MTG_FORGE_URL=`. With Compose:
-  put a `#` in front of `COMPOSE_PROFILES=forge` and set an empty `MTG_FORGE_URL=`.
-- No database change, so this update saves no before-upgrade copy.
+- To keep Forge off on a stack, set both `FORGE_REPLICAS=0` and an empty `MTG_FORGE_URL=`. With
+  Compose: put a `#` in front of `COMPOSE_PROFILES=forge` and set an empty `MTG_FORGE_URL=`. One
+  without the other leaves the gateway asking a Forge that isn't there. If you keep your own
+  variables file, it already has Forge off and stays that way.
+- The reports table gains two columns, added in place, so this update saves no before-upgrade
+  copy, and going back to 0.7.38 needs no restore.
 - The Android app doesn't change.
 
 ### Added
 - **The Forge solo test.** With Forge on, a report that simulates also has Forge play the deck
-  alone against opponents who do nothing, counted up to turn 10, and shows how often and on which
-  turn it won. Each game has an equal part of about four and a half minutes, so the whole test
-  stays within five, and one runs at a time for each member. Deleting the report stops it. An
-  older Forge image skips it and the report says so.
+  alone against opponents who do nothing (60-card decks too), counted up to turn 10, and shows how
+  often and on which turn it won, in the report your assistant reads and in the report's Markdown
+  download. It plays after the report's games against precons, each round of games gets an equal
+  part of about four and a half minutes of play, and games the time limit stopped before turn 10
+  or a win are left out of the numbers and counted apart. One runs at a time for each member (two
+  for a comparison's two decks), and the report counts as finished, and you are notified, once it
+  has played too. Running the report again plays one that was skipped. Deleting the report stops
+  it. An older Forge image skips it and the report says so.
 
 ### Changed
 - **Forge is on by default** in the example stack, Compose and variables files.
