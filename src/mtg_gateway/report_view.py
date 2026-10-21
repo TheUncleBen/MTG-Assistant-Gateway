@@ -23,21 +23,34 @@ from .theme import esc as _esc
 # The simulator's honesty classes, in plain words.
 HONESTY_CLASSES = {
     "interaction_removal": "Removal and other interaction",
+    "interaction_wipe": "Board wipes",
     "interaction_counter": "Counterspells",
     "protection": "Protection",
+    "political": "Votes and choices for opponents",
     "unmodeled_other": "Other effects the simulator does not model",
 }
 # Its standing approximations (the "v1 model shortcuts"), in plain words.
 APPROXIMATIONS = {
     "any-color": "Treated as producing any color",
-    "creature-producer": "Treated as a plain creature producer",
-    "equipment-extra": "Equipment beyond the first is ignored",
-    "fetch": "Fetch lands find a basic at once",
-    "hybrid-cost": "Hybrid costs paid with either color",
+    "creature-producer": "Mana creatures can tap for mana the turn they arrive",
+    "equipment-extra": "Equipment text beyond its bonus is ignored",
+    "fetch": "Fetch lands find a land that enters tapped, in your main phase",
+    "hybrid-cost": "Hybrid and Phyrexian costs paid with one color",
     "residual-text": "Extra card text ignored",
-    "bounce-land": "Bounce lands enter untapped",
+    "bounce-land": "Bounce lands give two mana; returning a land is ignored",
     "filter-ignored": "Mana filtering ignored",
     "ramp-widened": "Ramp counted as finding a land",
+    "for-each": "Mana that scales is counted as a fixed amount",
+    "conditional-tapland": "Lands that sometimes enter tapped enter untapped",
+    "dfc-back-face": "Two-faced cards play their front face only",
+    "lifelink": "Life from lifelink is not counted",
+    "unused-option": "Optional costs and ways to cast (kicker, cycling, flashback) are not used",
+    "library-order": "Scry and surveil do not change the order of the library",
+    "no-deaths": "Nothing dies in a solo test, so death triggers never happen",
+    "attack-trigger": "Attack triggers happen whenever you attack",
+    "anthem-self": "Bonuses for your other creatures count the card itself too",
+    "own-life": "Your own life total is not tracked",
+    "monarch": "The monarch's card is drawn at the start of your turn",
 }
 # The milestones the simulator tracks as "reached by turn N", in plain words and plot order. A
 # 60-card game (no commander, 20 life) has no commander milestones and its kill is 20 damage.
@@ -1039,8 +1052,10 @@ def honesty_groups(g: dict[str, Any], ask: str = "") -> list[tuple[str, str, str
                 "",
                 "Left out on purpose",
                 _share(total, size),
-                "<p>The simulator plays against an opponent who does nothing, so removal, counterspells and "
-                "protection have nothing to act on. These cards sat in hand.</p>" + groups,
+                "<p>The simulator plays against opponents who do nothing, so removal, board wipes, "
+                "counterspells and protection have nothing to act on. Spells that only do that stayed in "
+                "hand. Creatures and other permanents among them were cast and played the rest of their "
+                "text.</p>" + groups,
             )
         )
     low = h.get("low_impact") or []

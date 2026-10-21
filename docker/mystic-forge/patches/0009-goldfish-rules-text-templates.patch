@@ -1,0 +1,1123 @@
+Subject: Goldfish: read common rules text, cast creatures that carry removal
+
+The solo test modeled a card only when the whole card was one shape (a
+land, a mana rock, a "Draw N" spell, a land-ramp spell, equipment with a
+bonus, a creature with nothing but keywords). Everything else was cast as a
+blank body, and anything with removal, a board wipe, a counterspell, a
+sacrifice or life-payment cost, a coin flip or a hybrid mana cost was never
+cast at all, creatures included. Measured on Scryfall's oracle cards
+(2026-10-21): 10.8% of the 32,116 Commander-legal cards were modeled.
+
+This patch:
+
+- adds mystic_forge/goldfish/rules_text.py, which reads a card sentence by
+  sentence into the existing annotation vocabulary (no new verbs): enter,
+  cast, upkeep, attack, combat, spell-cast, creature/land/equipment-enter
+  triggers with draw, gain life, Treasure, creature tokens, damage or life
+  loss to opponents, +1/+1 counters, self pumps, basic-land ramp, tutors,
+  rituals, extra combats; anthems, extra land drops, cost reductions, token
+  doubling; tapped and mana-cost activated abilities; prowess. Each sentence
+  is read, has no effect in a goldfish game (evasion, "can't block", death
+  triggers: nothing blocks or dies), is interaction with nothing to hit, or
+  is unknown. The output goes through validate_annotations like any client
+  annotation. Approximations carry notes (lifelink life not counted,
+  kicker/cycling/flashback not used, scry does not reorder, monarch drawn at
+  upkeep, and so on);
+- a card with no unknown sentence is auto-annotated; a permanent whose
+  interaction has nothing to hit is cast and counted in that out-of-scope
+  class (Derived.aside_class, used by _goldfish_prepare's card_scopes); a
+  spell whose whole effect is interaction stays uncast, as before; a card
+  with an unknown sentence still needs annotation but plays what was read
+  (Derived.unread lists the rest, and goldfish_annotate shows both);
+- permanents that _d9_class set aside (sacrifice and life-payment costs,
+  coin flips) are now cast and asked for instead of never cast;
+- hybrid and Phyrexian costs are paid with their first colour (noted)
+  instead of the card never being cast;
+- the engine reads double strike (combat damage twice, nothing blocks) and
+  defender (never attacks);
+- tests/goldfish/test_known_answers.py: hand-worked kill turns (a commander
+  with 99 Mountains: plain, double strike, haste, defender, an anthem and an
+  enter-the-battlefield drain read from text) and the reading of real cards'
+  oracle text. test_unmodeled_other_patterns is updated to the new pin.
+
+Measured with the same oracle file: 16.1% of Commander-legal cards fully
+modeled (35.0% weighted by EDHREC rank), and on Forge's 85 Commander
+precons from 2023 to 2026, 51.4% of each deck's cards played with their
+effect on average, up from 34.5%.
+
+Upstream: Kautiontape/mystic-forge at dd82cd1 (main, 2026-10-03) has no
+such reader. Needs patches 0001-0008 applied first.
+
+diff --git a/mystic_forge/goldfish/autoderive.py b/mystic_forge/goldfish/autoderive.py
+index 5d34089..a1be543 100644
+--- a/mystic_forge/goldfish/autoderive.py
++++ b/mystic_forge/goldfish/autoderive.py
+@@ -27,10 +27,12 @@ from __future__ import annotations
+ import re
+ from dataclasses import dataclass, field
+ 
++from . import rules_text
+ from .cards import (
+     COLORS,
+     Activated,
+     Annotation,
++    AnnotationError,
+     CardData,
+     Cost,
+     CostParseError,
+@@ -38,6 +40,7 @@ from .cards import (
+     Trigger,
+     merge_card,
+     parse_cost,
++    validate_annotations,
+ )
+ 
+ 
+@@ -51,6 +54,13 @@ class Derived:
+     needs_annotation: bool
+     oracle: str
+     approx_notes: list[str] = field(default_factory=list)
++    # A castable permanent whose interaction sentences (removal, counters)
++    # have nothing to hit at a goldfish table: the honesty report counts it
++    # in this out-of-scope class, though the card is cast and plays the
++    # rest of its text.
++    aside_class: str | None = None
++    # Sentences no template read (the card still plays the ones it read).
++    unread: list[str] = field(default_factory=list)
+ 
+ 
+ _REMINDER_RE = re.compile(r"\([^)]*\)")
+@@ -94,7 +104,9 @@ _CARD_TYPES = frozenset({"land", "creature", "artifact", "enchantment",
+ _NOTE_KINDS = frozenset({
+     "fetch", "bounce-land", "filter-ignored", "residual-text", "any-color",
+     "conditional-tapland", "dfc-back-face", "creature-producer",
+-    "ramp-widened", "for-each", "hybrid-cost", "equipment-extra"})
++    "ramp-widened", "for-each", "hybrid-cost", "equipment-extra",
++    "lifelink", "unused-option", "library-order", "no-deaths",
++    "attack-trigger", "anthem-self", "own-life", "monarch"})
+ 
+ 
+ def _count_word(w: str) -> int:
+@@ -348,9 +360,17 @@ def _derive_one(raw: dict) -> Derived:
+         try:
+             cost = parse_cost(mana_cost)
+         except CostParseError as exc:
+-            scope_class = "unmodeled_other"
+-            notes.append(f"hybrid-cost: unparseable mana cost "
+-                         f"{mana_cost!r} — {exc}")
++            plain = _plain_cost(mana_cost)
++            try:
++                cost = parse_cost(plain) if plain else None
++            except CostParseError:
++                cost = None
++            if cost is None:
++                scope_class = "unmodeled_other"
++                notes.append(f"hybrid-cost: unparseable mana cost "
++                             f"{mana_cost!r} — {exc}")
++            else:
++                notes.append(f"hybrid-cost: {mana_cost} paid as {plain}")
+ 
+     # Sagas are pinned out of scope BEFORE the branch chain: a land-Saga
+     # (Urza's Saga) must not classify as a plain land, and quoted chapter
+@@ -372,6 +392,8 @@ def _derive_one(raw: dict) -> Derived:
+     ann: Annotation | None = None
+     auto = False
+     needs = False
++    aside_class: str | None = None
++    unread: list[str] = []
+ 
+     if scope_class is not None:
+         pass                                          # classified above, not asked
+@@ -428,13 +450,35 @@ def _derive_one(raw: dict) -> Derived:
+         ann = Annotation(name=name, grants=grants)
+         if _equipment_extra_text(stripped):
+             notes.append("equipment-extra: additional ability text not modeled")
+-    elif (d9 := _d9_class(stripped, types)) is not None:
+-        scope_class = d9
+     elif ("creature" in types and power is not None and toughness is not None
+-            and _is_vanilla(stripped, keywords)):
++            and _is_vanilla(stripped, keywords)
++            and not keywords & rules_text.MODELED_KEYWORDS):
+         auto = True                                   # data alone models it
+     else:
+-        needs = True
++        permanent = not ({"instant", "sorcery"} & types)
++        reading = rules_text.read_card(oracle, name, permanent=permanent)
++        parts = None
++        if reading.parts:
++            try:
++                parts = validate_annotations([reading.annotation(name)])[name]
++            except AnnotationError:
++                reading.unknown.append("(a template produced an invalid model)")
++        if not reading.unknown and (permanent or parts is not None):
++            auto = True
++            ann = parts
++            notes.extend(reading.notes)
++            if reading.aside is not None:
++                aside_class = reading.aside
++        elif not reading.unknown and reading.aside is not None:
++            scope_class = reading.aside          # pure interaction spell: not cast
++        elif not permanent and (d9 := _d9_class(stripped, types)) is not None:
++            scope_class = d9
++        else:
++            needs = True
++            unread = list(reading.unknown)
++            if parts is not None:
++                ann = parts                      # plays what was read
++                notes.extend(reading.notes)
+ 
+     data = CardData(name=name, cost=cost, types=types, power=power,
+                     toughness=toughness, keywords=keywords, produces=produces,
+@@ -443,7 +487,25 @@ def _derive_one(raw: dict) -> Derived:
+     return Derived(card=merge_card(data, ann, scope_class),
+                    auto_annotated=auto, needs_annotation=needs,
+                    oracle=oracle,
+-                   approx_notes=list(dict.fromkeys(notes)))    # dedup, ordered
++                   approx_notes=list(dict.fromkeys(notes)),    # dedup, ordered
++                   aside_class=aside_class, unread=unread)
++
++
++_HYBRID_RE = re.compile(r"\{([^}/]+)/([^}]+)\}")
++
++
++def _plain_cost(mana_cost: str) -> str | None:
++    """A hybrid or Phyrexian cost read as plain mana: {R/G} as its first
++    colour, {2/W} and {W/P} as the colour. None when nothing changed."""
++    def one(m: re.Match) -> str:
++        a, b = m.group(1), m.group(2)
++        if b == "P":
++            return "{" + a + "}"
++        if a.isdigit():
++            return "{" + b + "}"
++        return "{" + a + "}"
++    plain = _HYBRID_RE.sub(one, mana_cost)
++    return plain if plain != mana_cost else None
+ 
+ 
+ def derive(scryfall_cards: list[dict]) -> dict[str, Derived]:
+diff --git a/mystic_forge/goldfish/engine.py b/mystic_forge/goldfish/engine.py
+index 426e428..eda4038 100644
+--- a/mystic_forge/goldfish/engine.py
++++ b/mystic_forge/goldfish/engine.py
+@@ -1333,7 +1333,10 @@ def _attacker_eligible(g: Game, p: Permanent) -> bool:
+     untapped, past summoning sickness or hasty."""
+     if not _is_creature_perm(g, p) or p.tapped:
+         return False
+-    return p.arrived_turn < g.turn or "haste" in effective_keywords(g, p)
++    kws = effective_keywords(g, p)
++    if "defender" in kws:
++        return False
++    return p.arrived_turn < g.turn or "haste" in kws
+ 
+ 
+ def _step_attack(g: Game, action: dict):
+@@ -1371,6 +1374,8 @@ def _step_attack(g: Game, action: dict):
+             raise IllegalAction(f"{p.name!r} ({pid}) is tapped")
+         if p.arrived_turn >= g.turn and "haste" not in effective_keywords(g, p):
+             raise IllegalAction(f"{p.name!r} ({pid}) is summoning sick")
++        if "defender" in effective_keywords(g, p):
++            raise IllegalAction(f"{p.name!r} ({pid}) has defender")
+         attackers.append(p)
+     # --- all checks passed; mutation begins ---
+     g.attacked_this_combat = True
+@@ -1385,7 +1390,10 @@ def _step_attack(g: Game, action: dict):
+             p.tapped = True
+         # committed power, pinned before the dead-table break below: the log
+         # reports what was swung, not what landed
+-        powers = [effective_power(g, p) for p in attackers]
++        # Double strike deals its damage twice: nothing blocks, so both hits land.
++        powers = [effective_power(g, p)
++                  * (2 if "double strike" in effective_keywords(g, p) else 1)
++                  for p in attackers]
+         total = sum(powers)
+         hit: list[int] = []           # opponent indexes in first-hit order
+         eliminated: list[int] = []
+diff --git a/mystic_forge/goldfish/rules_text.py b/mystic_forge/goldfish/rules_text.py
+new file mode 100644
+index 0000000..50da38b
+--- /dev/null
++++ b/mystic_forge/goldfish/rules_text.py
+@@ -0,0 +1,502 @@
++"""Rules-text templates: common card sentences read into the annotation DSL.
++
++autoderive's first-match branches model a card only when the whole card is
++one shape (a land, a rock, a pure draw spell...). Everything else used to be
++asked for an annotation and played as a blank body. This module reads the
++card sentence by sentence instead. Each sentence gets exactly one of four
++outcomes:
++
++- ``model``: read into DSL parts (triggers, statics, activated abilities),
++  validated by cards.validate_annotations like any client annotation.
++- ``free``: has no effect in a goldfish game, where nothing blocks, nothing
++  dies and no opponent acts (flying, "can't block", a dies trigger...).
++  Some carry an approximation note (lifelink's life is not counted).
++- ``aside``: interaction with opponents' cards (removal, counters, bounce).
++  A goldfish table has nothing for it to hit; the card is still cast when it
++  is a permanent, and is counted in the honesty report's out-of-scope class.
++- ``unknown``: no template. One unknown sentence keeps the card in
++  "needs annotation"; its modeled sentences still play.
++
++``read_card`` never guesses: a sentence is ``unknown`` unless a template
++matches the whole sentence.
++"""
++from __future__ import annotations
++
++import re
++from dataclasses import dataclass, field
++
++NUM_WORDS = {"a": 1, "an": 1, "one": 1, "two": 2, "three": 3, "four": 4,
++             "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10}
++NUM = r"(a|an|one|two|three|four|five|six|seven|eight|nine|ten|\d+)"
++PT = r"([+-]\d+)/([+-]\d+)"
++COST = r"((?:\{[^}]+\}(?:,\s*)?)+)"
++
++# Keywords with no effect in a goldfish game: no blockers, no opponent
++# spells or removal, nothing dies.
++FREE_KEYWORDS = frozenset({
++    "flying", "reach", "trample", "menace", "deathtouch", "first strike",
++    "vigilance", "flash", "hexproof", "indestructible", "shroud", "fear",
++    "intimidate", "shadow", "skulk", "horsemanship", "changeling", "devoid",
++    "partner", "choose a background", "friends forever", "banding",
++    "can't be blocked", "persist", "undying", "split second",
++})
++# Keywords the engine reads from the card's own keyword list.
++ENGINE_KEYWORDS = frozenset({"haste", "double strike", "defender"})
++# Keywords read into a model (a keyword-only creature is not vanilla).
++MODELED_KEYWORDS = frozenset({"prowess"})
++# Free, but the report says what is left out.
++NOTED_KEYWORDS = {
++    "lifelink": "lifelink: life gained from combat damage is not counted",
++    "cycling": "unused-option: cycling is never used; the card is cast",
++    "flashback": "unused-option: flashback is never used",
++    "kicker": "unused-option: the kicker cost is never paid",
++    "multikicker": "unused-option: the kicker cost is never paid",
++    "buyback": "unused-option: buyback is never paid",
++    "entwine": "unused-option: entwine is never paid",
++    "evoke": "unused-option: evoke is never used; the card is cast",
++    "ninjutsu": "unused-option: ninjutsu is never used; the card is cast",
++    "madness": "unused-option: madness is never used",
++}
++SCRY_NOTE = "library-order: scry and surveil do not change the library order"
++DIES_NOTE = "no-deaths: nothing dies in a goldfish game, so this never happens"
++ATTACK_NOTE = ("attack-trigger: fires whenever you attack, which the policy "
++               "does with every creature that can")
++OTHER_NOTE = "anthem-self: 'other' is not modeled; the bonus includes this card"
++
++ASIDE_PATTERNS = (
++    (r"\b(destroy|exile) (up to \w+ )?(another )?target\b", "interaction_removal"),
++    (r"\b(destroy|exile) all\b", "interaction_wipe"),
++    (r"\beach (player|opponent) sacrifices\b", "interaction_wipe"),
++    (r"\bdeals? \w+ damage to each creature\b", "interaction_wipe"),
++    (r"\ball creatures get -", "interaction_wipe"),
++    (r"\bcounter target\b", "interaction_counter"),
++    (r"\bdeals? \w+ damage to (up to \w+ )?(another )?target creature\b", "interaction_removal"),
++    (r"\btarget creature( an opponent controls| you don't control)? gets -", "interaction_removal"),
++    (r"\breturn (up to \w+ )?target [^.]*to (its|their) owner'?s'? hands?\b", "interaction_removal"),
++    (r"\btap (up to \w+ )?target\b", "interaction_removal"),
++    (r"\btarget creature( an opponent controls)? can't block\b", "interaction_removal"),
++    (r"\bfights?\b", "interaction_removal"),
++)
++FREE_SENTENCES = tuple(re.compile(p, re.IGNORECASE) for p in (
++    r"CARDNAME can't block",
++    r"CARDNAME can't be (blocked|countered)( except by [^.]*)?",
++    r"this spell can't be countered",
++    r"activate only (as a sorcery|once each turn|during your turn)",
++    r"activate only as a sorcery and only once each turn",
++    r"this ability triggers only once each turn",
++    r"you have no maximum hand size",
++    r"you may choose new targets for the copy",
++    r"CARDNAME attacks each combat if able",
++    r"creatures you control have (flying|trample|vigilance|menace|reach|deathtouch|"
++    r"first strike|hexproof|indestructible|lifelink|ward \{\d+\})",
++))
++# Your own life total is not tracked: opponents never attack in a goldfish game.
++OWN_LIFE = re.compile(r"^you lose \w+ life$|^CARDNAME deals \w+ damage to you$",
++                      re.IGNORECASE)
++OWN_LIFE_NOTE = "own-life: your life total is not tracked in a goldfish game"
++MONARCH = re.compile(r"^(when|whenever) CARDNAME enters( the battlefield)?, you become the monarch$",
++                     re.IGNORECASE)
++MONARCH_NOTE = ("monarch: nobody takes it from you at a goldfish table, so it is "
++                "one more card each turn, drawn at your upkeep instead of your end step")
++KEYWORD_COSTED = re.compile(
++    r"^(?:(ward|equip|cycling|flashback|kicker|multikicker|buyback|entwine|evoke|"
++    r"ninjutsu|madness)(?: ?(?:\{[^}]+\})+| ?\u2014[^,;]+)"
++    r"|(crew) \d+|(protection from) [a-z ]+|([a-z]+walk)|(partner with) [^,;]+)$",
++    re.IGNORECASE)
++
++
++@dataclass
++class Reading:
++    triggers: list = field(default_factory=list)
++    statics: list = field(default_factory=list)
++    activated: list = field(default_factory=list)
++    notes: list = field(default_factory=list)
++    aside: str | None = None          # first interaction class seen
++    unknown: list = field(default_factory=list)
++
++    @property
++    def parts(self) -> bool:
++        return bool(self.triggers or self.statics or self.activated)
++
++    def annotation(self, name: str) -> dict:
++        return {"name": name, "triggers": self.triggers,
++                "statics": self.statics, "activated": self.activated}
++
++
++def _n(word: str) -> int:
++    w = word.lower()
++    return int(w) if w.isdigit() else NUM_WORDS.get(w, 1)
++
++
++def _pt(p: str, t: str) -> tuple[int, int]:
++    return int(p), int(t)
++
++
++def normalise(text: str, name: str) -> str:
++    """Reminder text dropped, the card's own name (and its short name before
++    a comma, and 'this creature/artifact/...') read as CARDNAME."""
++    text = re.sub(r"\([^)]*\)", "", text)
++    for n in sorted({name, name.split(",")[0]}, key=len, reverse=True):
++        if n:
++            text = text.replace(n, "CARDNAME")
++    text = re.sub(r"\bthis (creature|artifact|enchantment|permanent|land|"
++                  r"vehicle|planeswalker|spell|card|equipment|aura)\b",
++                  "CARDNAME", text, flags=re.IGNORECASE)
++    lines = (" ".join(ln.split()) for ln in text.splitlines())
++    return "\n".join(ln for ln in lines if ln)
++
++
++def _sentences(line: str) -> list[str]:
++    # Quoted abilities granted to something else stay one sentence.
++    out, buf, quoted = [], "", False
++    for ch in line:
++        buf += ch
++        if ch in "\"“”":
++            quoted = not quoted
++        if ch == "." and not quoted:
++            out.append(buf.strip())
++            buf = ""
++    if buf.strip():
++        out.append(buf.strip())
++    return [s.rstrip(".").strip() for s in out if s.strip(" .")]
++
++
++# -- effects -----------------------------------------------------------------
++
++_EFFECTS: list[tuple[re.Pattern, object]] = []
++
++
++def _effect(pattern: str):
++    def deco(fn):
++        _EFFECTS.append((re.compile(r"^" + pattern + r"$", re.IGNORECASE), fn))
++        return fn
++    return deco
++
++
++@_effect(rf"(you may )?draw {NUM} cards?")
++def _draw(m):
++    return [{"do": "draw", "count": _n(m.group(2))}]
++
++
++@_effect(rf"you draw {NUM} cards? and (you )?lose {NUM} life")
++def _arena(m):
++    return [{"do": "draw", "count": _n(m.group(1))}]     # the life: OWN_LIFE_NOTE
++
++
++@_effect(rf"(you may )?draw {NUM} cards?, then discard {NUM} cards?")
++def _loot(m):
++    # Discard is not modeled: the hand keeps the extra cards.
++    return None
++
++
++@_effect(rf"you gain {NUM} life")
++def _gain(m):
++    return [{"do": "gain_life", "count": _n(m.group(1))}]
++
++
++@_effect(rf"(you may )?create {NUM} (tapped )?treasure tokens?")
++def _treasure(m):
++    return [{"do": "treasure", "count": _n(m.group(2))}]
++
++
++@_effect(rf"(you may )?create {NUM} (tapped )?(\d+)/(\d+) [a-z ]*?creature tokens?"
++         rf"( with ([a-z ,]+?))?( named [^.]+)?")
++def _token(m):
++    if m.group(3):
++        return None                     # tapped tokens: not modeled
++    kws = ()
++    if m.group(7):
++        kws = tuple(k.strip() for k in re.split(r",| and ", m.group(7).lower()) if k.strip())
++        if any(k not in FREE_KEYWORDS | ENGINE_KEYWORDS | set(NOTED_KEYWORDS) for k in kws):
++            return None
++    return [{"do": "create_token", "count": _n(m.group(2)),
++             "power": int(m.group(4)), "toughness": int(m.group(5)),
++             "keywords": [k for k in kws if k in ENGINE_KEYWORDS]}]
++
++
++@_effect(rf"CARDNAME deals {NUM} damage to (any target|target player|target opponent|"
++         rf"target player or planeswalker|target opponent or planeswalker|each opponent|"
++         rf"each player)")
++def _damage(m):
++    target = "one_opponent" if m.group(2).lower().startswith("target") or \
++        m.group(2).lower() == "any target" else "each_opponent"
++    return [{"do": "damage", "count": _n(m.group(1)), "target": target}]
++
++
++@_effect(rf"(each opponent|target opponent|target player) loses {NUM} life"
++         rf"( and you gain {NUM} life)?")
++def _drain(m):
++    target = "each_opponent" if m.group(1).lower() == "each opponent" else "one_opponent"
++    out = [{"do": "damage", "count": _n(m.group(2)), "target": target}]
++    if m.group(3):
++        out.append({"do": "gain_life", "count": _n(m.group(4))})
++    return out
++
++
++@_effect(rf"put {NUM} \+1/\+1 counters? on CARDNAME")
++def _counters(m):
++    n = _n(m.group(1))
++    return [{"do": "pump", "power": n, "toughness": n, "duration": "permanent"}]
++
++
++@_effect(rf"CARDNAME gets {PT} until end of turn")
++def _self_pump(m):
++    p, t = _pt(m.group(1), m.group(2))
++    return [{"do": "pump", "power": p, "toughness": t}]
++
++
++@_effect(r"(you may )?search your library for (a|up to one|up to two|two) (basic land|basic "
++         r"forest|basic island|basic plains|basic swamp|basic mountain|forest|island|plains|"
++         r"swamp|mountain) cards?"
++         r"( and/or [^,]+)?, (reveal (it|them), )?put (it|them|that card|those cards) onto "
++         r"the battlefield( tapped)?, then shuffle")
++def _ramp(m):
++    return [{"do": "ramp_land", "count": 2 if "two" in m.group(2).lower() else 1}]
++
++
++@_effect(r"(you may )?search your library for an? (forest|island|plains|swamp|mountain|"
++         r"basic land) card, put (it|that card) onto the battlefield( tapped)?, then shuffle")
++def _ramp_one(m):
++    return [{"do": "ramp_land", "count": 1}]
++
++
++@_effect(r"(you may )?search your library for an? (creature|artifact|enchantment|instant|"
++         r"sorcery|land|planeswalker|equipment)? ?card, (reveal it, )?put (it|that card) "
++         r"into your hand, then shuffle")
++def _tutor(m):
++    return [{"do": "tutor", "filter": (m.group(2) or "any").lower()}]
++
++
++@_effect(r"add ((?:\{[WUBRGC]\})+)")
++def _ritual(m):
++    return [{"do": "add_mana", "pips": m.group(1)}]
++
++
++@_effect(rf"(scry|surveil) {NUM}")
++def _scry(m):
++    return []                           # free, noted by the caller
++
++
++@_effect(r"after this (main )?phase, there is an additional combat phase"
++         r"( followed by an additional main phase)?")
++def _extra_combat(m):
++    return [{"do": "extra_combat"}]
++
++
++def read_effect(text: str) -> list | None:
++    """DSL verb dicts (no ``on``) for one effect clause, or None."""
++    text = text.strip().rstrip(".")
++    for pat, fn in _EFFECTS:
++        m = pat.match(text)
++        if m:
++            return fn(m)
++    for sep in (", then ", " and "):
++        if sep in text:
++            left, right = text.split(sep, 1)
++            a, b = read_effect(left), read_effect(right)
++            if a is not None and b is not None:
++                return a + b
++    return None
++
++
++# -- whole sentences -----------------------------------------------------------
++
++_TRIGGER_HEADS = (
++    (r"(when|whenever) CARDNAME enters( the battlefield)?( or attacks)?", ("etb",)),
++    (r"(when|whenever) CARDNAME enters( the battlefield)? or dies", ("etb",)),
++    (r"when you cast (this spell|CARDNAME)", ("cast",)),
++    (r"at the beginning of your upkeep", ("upkeep",)),
++    (r"at the beginning of combat on your turn", ("combat_begin",)),
++    (r"whenever (CARDNAME|you) attacks?", ("attack",)),
++    (r"whenever CARDNAME deals combat damage to (a player|an opponent)", ("attack",)),
++    (r"whenever (another creature|a creature|another nontoken creature|a nontoken creature) "
++     r"(you control )?enters( the battlefield)?( under your control)?", ("creature_etb",)),
++    (r"whenever a land (you control )?enters( the battlefield)?( under your control)?",
++     ("land_etb",)),
++    (r"whenever an equipment (you control )?enters( the battlefield)?( under your control)?",
++     ("equipment_etb",)),
++    (r"whenever you cast an? (noncreature|instant or sorcery|) ?spell", ("spell_cast",)),
++)
++_HEADS = [(re.compile(r"^" + p + r", (.+)$", re.IGNORECASE), ev) for p, ev in _TRIGGER_HEADS]
++_DIES = re.compile(r"^(when|whenever) [^,]*(dies|is put into (a|your) graveyard)\b",
++                   re.IGNORECASE)
++_ABILITY_WORD = re.compile(r"^[A-Z][a-z' ]+ — ")
++_STATIC = (
++    (re.compile(rf"^(other )?creatures you control get {PT}( and have ([a-z ,]+))?$",
++                re.IGNORECASE), "anthem"),
++    (re.compile(r"^creatures you control have haste$", re.IGNORECASE), "haste_anthem"),
++    (re.compile(r"^you may play an additional land on each of your turns$", re.IGNORECASE),
++     "extra_land"),
++    (re.compile(r"^(instant and sorcery|noncreature|creature|artifact|equipment) spells you "
++                r"cast cost \{(\d+)\} less to cast$", re.IGNORECASE), "cost_reduction"),
++    (re.compile(r"^if an effect would create one or more tokens under your control, it "
++                r"creates twice that many of those tokens instead$", re.IGNORECASE),
++     "token_doubling"),
++    (re.compile(r"^equipped creature gets \+(\d+)/\+(\d+)$", re.IGNORECASE), "equip_grant"),
++)
++_COST_FILTERS = {"instant and sorcery": "instant_or_sorcery", "noncreature": "noncreature",
++                 "creature": "creature", "artifact": "artifact", "equipment": "equipment"}
++_ACTIVATED = re.compile(r"^((?:\{[^}]+\}(?:, )?)+): (.+)$")
++
++
++def _keyword_sentence(s: str, out: Reading) -> bool:
++    """A sentence that is only keywords (``Flying, haste``)."""
++    toks = [t.strip() for t in re.split(r",|;", s) if t.strip()]
++    if not toks:
++        return False
++    notes = []
++    for t in toks:
++        low = t.lower()
++        if low in FREE_KEYWORDS or low in ENGINE_KEYWORDS:
++            continue
++        if low == "prowess":
++            out.triggers.append({"on": "spell_cast", "filter": "noncreature",
++                                 "do": "pump", "power": 1, "toughness": 1})
++            continue
++        head = KEYWORD_COSTED.match(low)
++        if head:
++            word = next(g for g in head.groups() if g)
++            if word in NOTED_KEYWORDS:
++                notes.append(NOTED_KEYWORDS[word])
++            elif word in ("crew", "equip", "partner with") or word.endswith("walk") \
++                    or word in ("ward", "protection from"):
++                pass
++            else:
++                return False
++            continue
++        if low in NOTED_KEYWORDS:
++            notes.append(NOTED_KEYWORDS[low])
++            continue
++        return False
++    out.notes.extend(notes)
++    return True
++
++
++def read_sentence(s: str, out: Reading, *, permanent: bool) -> str:
++    """Read one sentence into ``out``; returns its outcome."""
++    s = _ABILITY_WORD.sub("", s).strip()
++    low = s.lower()
++    if _keyword_sentence(s, out):
++        return "model"
++    if any(p.fullmatch(s) for p in FREE_SENTENCES):
++        return "free"
++    if OWN_LIFE.match(s):
++        out.notes.append(OWN_LIFE_NOTE)
++        return "free"
++    if MONARCH.match(s):
++        out.triggers.append({"on": "upkeep", "do": "draw", "count": 1})
++        out.notes.append(MONARCH_NOTE)
++        return "model"
++    if _DIES.match(s):
++        out.notes.append(DIES_NOTE)
++        return "free"
++    for pat, kind in _STATIC:
++        m = pat.match(s)
++        if not m:
++            continue
++        if kind == "anthem":
++            kws = tuple(k.strip() for k in re.split(r",| and ", (m.group(5) or "").lower())
++                        if k.strip())
++            if any(k not in FREE_KEYWORDS | ENGINE_KEYWORDS for k in kws):
++                return "unknown"
++            if m.group(1):
++                out.notes.append(OTHER_NOTE)
++            out.statics.append({"kind": "anthem", "power": int(m.group(2)),
++                                "toughness": int(m.group(3)),
++                                "keywords": [k for k in kws if k in ENGINE_KEYWORDS]})
++        elif kind == "haste_anthem":
++            out.statics.append({"kind": "anthem", "keywords": ["haste"]})
++        elif kind == "extra_land":
++            out.statics.append({"kind": "extra_land_drops", "count": 1})
++        elif kind == "cost_reduction":
++            out.statics.append({"kind": "cost_reduction",
++                                "filter": _COST_FILTERS[m.group(1).lower()],
++                                "amount": int(m.group(2))})
++        elif kind == "token_doubling":
++            out.statics.append({"kind": "token_doubling"})
++        else:
++            return "unknown"              # equipment grants belong to autoderive
++        return "model"
++    for pat, events in _HEADS:
++        m = pat.match(s)
++        if not m:
++            continue
++        verbs = read_effect(m.group(m.lastindex))
++        if verbs is None:
++            break
++        for ev in events:
++            for v in verbs:
++                t = {"on": ev, **v}
++                if ev == "spell_cast":
++                    kind = re.search(r"cast an? (noncreature|instant or sorcery)", low)
++                    if kind:
++                        t["filter"] = ("noncreature" if kind.group(1) == "noncreature"
++                                       else "instant_or_sorcery")
++                    if v["do"] == "tutor":
++                        return "unknown"
++                out.triggers.append(t)
++        if events == ("attack",):
++            out.notes.append(ATTACK_NOTE)
++        if " or attacks" in low and events == ("etb",):
++            for v in verbs:
++                out.triggers.append({"on": "attack", **v})
++            out.notes.append(ATTACK_NOTE)
++        if re.match(r"^(scry|surveil)", m.group(m.lastindex), re.IGNORECASE):
++            out.notes.append(SCRY_NOTE)
++        if re.search(r"\blose \w+ life$", m.group(m.lastindex), re.IGNORECASE):
++            out.notes.append(OWN_LIFE_NOTE)
++        return "model"
++    m = _ACTIVATED.match(s)
++    if m and permanent:
++        cost = m.group(1).replace(", ", "")
++        if not re.fullmatch(r"(\{(\d+|[WUBRGC]|T)\})+", cost):
++            return _aside_or_unknown(s, out)
++        verbs = read_effect(m.group(2))
++        if verbs is None:
++            return _aside_or_unknown(s, out)
++        for v in verbs:
++            if v["do"] in ("add_mana",):
++                return "unknown"           # mana abilities belong to autoderive
++            out.activated.append({"cost": cost, **v})
++        if re.match(r"^(scry|surveil)", m.group(2), re.IGNORECASE):
++            out.notes.append(SCRY_NOTE)
++        return "model"
++    if not permanent:
++        verbs = read_effect(s)
++        if verbs is not None:
++            for v in verbs:
++                out.triggers.append({"on": "cast", **v})
++            if re.match(r"^(scry|surveil)", s, re.IGNORECASE):
++                out.notes.append(SCRY_NOTE)
++            return "model"
++    return _aside_or_unknown(s, out)
++
++
++def _aside_or_unknown(s: str, out: Reading) -> str:
++    low = s.lower()
++    for pat, cls in ASIDE_PATTERNS:
++        if re.search(pat, low):
++            # Only when the whole sentence is the interaction: a rider
++            # ("..., then draw a card") would be lost otherwise.
++            rest = re.split(r", then |\. ", low, maxsplit=1)
++            if len(rest) > 1:
++                return "unknown"
++            out.aside = out.aside or cls
++            return "aside"
++    out.unknown.append(s)
++    return "unknown"
++
++
++def read_card(oracle: str, name: str, *, permanent: bool) -> Reading:
++    """Read a card's whole rules text (one face). ``permanent`` is False for
++    instants and sorceries, whose sentences are cast effects."""
++    out = Reading()
++    for line in normalise(oracle, name).splitlines():
++        if re.match(r"^(•|•)|^choose (one|two|one or more|any number)", line,
++                    re.IGNORECASE):
++            out.unknown.append(line)       # modal spells: not modeled
++            continue
++        for s in _sentences(line):
++            read_sentence(s, out, permanent=permanent)
++    out.notes = list(dict.fromkeys(out.notes))
++    return out
+diff --git a/server.py b/server.py
+index ce121b9..da597de 100644
+--- a/server.py
++++ b/server.py
+@@ -4104,6 +4104,10 @@ def _goldfish_summary(d: autoderive.Derived) -> str:
+                             f"/+{ann.grants.get('toughness', 0)}")
+             bits.extend(str(k) for k in ann.grants.get("keywords", ()))
+             return "equipment — grants " + ", ".join(bits)
++        read = _goldfish_read_parts(ann)
++        if read:
++            body = (f"{data.power}/{data.toughness}; " if card.is_creature else "")
++            return "read from its text — " + body + read
+     if card.is_creature:
+         kw = ", ".join(sorted(data.keywords))
+         base = f"vanilla {data.power}/{data.toughness}"
+@@ -4111,6 +4115,23 @@ def _goldfish_summary(d: autoderive.Derived) -> str:
+     return "modeled from card data"
+ 
+ 
++def _goldfish_read_parts(ann) -> str:
++    """The parts of a model read from rules text (rules_text.py), in one line."""
++    bits: list[str] = []
++    for t in ann.triggers:
++        what = f"{t.do} {t.count}" if t.do not in ("pump", "create_token") else (
++            f"{t.do} {t.count}x {t.power:+d}/{t.toughness:+d}" if t.power is not None
++            else t.do)
++        bits.append(f"on {t.on}: {what}")
++    for st in ann.statics:
++        bits.append(f"static {st.kind}" + (f" {st.power:+d}/{st.toughness:+d}"
++                                            if st.kind == "anthem" and (st.power or st.toughness)
++                                            else ""))
++    for a in ann.activated:
++        bits.append(f"activated: {a.do}")
++    return "; ".join(bits)
++
++
+ # ── Goldfish Input Models ────────────────────────────────────────────────────
+ 
+ 
+@@ -4235,7 +4256,9 @@ async def goldfish_annotate(params: GoldfishAnnotateInput) -> str:
+         kinds = sorted({n.split(":", 1)[0] for n in d.approx_notes})
+         suffix = f"  [{', '.join(kinds)}]" if kinds else ""
+         if d.auto_annotated:
+-            auto_lines.append(f"- {d.card.name} — {_goldfish_summary(d)}{suffix}")
++            aside = (f" (cast; its {d.aside_class} text has nothing to act on, "
++                     f"counted out of scope)" if d.aside_class else "")
++            auto_lines.append(f"- {d.card.name} — {_goldfish_summary(d)}{aside}{suffix}")
+         elif d.needs_annotation:
+             needs.append((raw, d))
+         else:
+@@ -4280,7 +4303,8 @@ async def goldfish_annotate(params: GoldfishAnnotateInput) -> str:
+     parts.append("")
+     parts.append(f"## Out of scope ({_goldfish_n_cards(out_total)})")
+     if out_total:
+-        parts.append("Inert in the sim; counted by class in the honesty report.")
++        parts.append("Not cast in the sim (their whole effect is one of these); counted by "
++                     "class in the honesty report.")
+         for cls in sorted(out_by_class):
+             parts.append(f"**{cls}** — {_GOLDFISH_D9_NOTES.get(cls, cls)}")
+             parts.extend(f"- {n}" for n in out_by_class[cls])
+@@ -4301,6 +4325,11 @@ async def goldfish_annotate(params: GoldfishAnnotateInput) -> str:
+         parts.append("")
+         parts.append(f"### {d.card.name} — {mana} — {raw.get('type_line', '?')}")
+         parts.append(d.oracle or "(no oracle text)")
++        if d.card.ann is not None and _goldfish_read_parts(d.card.ann):
++            parts.append(f"Already played from its text: {_goldfish_read_parts(d.card.ann)}. "
++                         "An annotation replaces this, so include these parts too.")
++        if d.unread:
++            parts.append("Not read: " + " | ".join(d.unread[:6]))
+ 
+     parts.append("")
+     parts.append("### Registry cheat-sheet (unknown names are rejected)")
+@@ -4532,7 +4561,7 @@ async def _goldfish_prepare(
+         else:
+             cards_pool[req_name] = d.card
+             card_scopes[req_name] = ("unrecognized" if d.needs_annotation
+-                                     else d.card.scope_class)
++                                     else d.card.scope_class or d.aside_class)
+         if d.approx_notes:
+             approx_by_card[req_name] = list(d.approx_notes)
+     unmatched_anns = sorted(set(client_anns) - matched_anns)
+@@ -4636,8 +4665,9 @@ def _goldfish_honesty_lines(honesty: dict, approx_by_card: dict[str, list[str]],
+     lines = [heading]
+     oos = honesty["out_of_scope"]
+     n_oos = sum(len(v) for v in oos.values())
+-    lines.append(f"Out of scope — {_goldfish_n_cards(n_oos)}, inert, counted "
+-                 f"by class (the sim cannot value these):")
++    lines.append(f"Out of scope — {_goldfish_n_cards(n_oos)}, counted by class "
++                 f"(nothing for this text to act on in a goldfish game; spells "
++                 f"are not cast, permanents are cast for the rest of their text):")
+     if n_oos:
+         lines.extend(f"- {cls}: {drawn(oos[cls])}" for cls in sorted(oos))
+     else:
+diff --git a/tests/goldfish/test_autoderive.py b/tests/goldfish/test_autoderive.py
+index aadb177..c068ab5 100644
+--- a/tests/goldfish/test_autoderive.py
++++ b/tests/goldfish/test_autoderive.py
+@@ -520,12 +520,17 @@ def test_protection_granting_instant_classified():
+ 
+ 
+ def test_unmodeled_other_patterns():
++    # Permanents with these patterns are cast (a real player casts them) and
++    # asked for, not set aside uncast; spells still are (patch 0009).
+     d = derive([KRARKS_THUMB, ASHNODS_ALTAR, NECROPOTENCE])
+-    assert d["Krark's Thumb"].card.scope_class == "unmodeled_other"     # coin flip
+-    assert d["Ashnod's Altar"].card.scope_class == "unmodeled_other"    # sac cost
+-    assert d["Necropotence"].card.scope_class == "unmodeled_other"      # life payment
+-    assert all(not d[n].needs_annotation for n in d)
+-    assert all(not d[n].auto_annotated for n in d)
++    for n in d:
++        assert d[n].card.scope_class is None and d[n].card.inert_reason is None
++        assert d[n].needs_annotation and not d[n].auto_annotated
++    coin = derive([{"name": "Stitch in Time", "type_line": "Sorcery",
++                    "mana_cost": "{1}{U}", "keywords": [],
++                    "oracle_text": "Flip a coin. If you win the flip, take an extra "
++                                   "turn after this one."}])
++    assert coin["Stitch in Time"].card.scope_class == "unmodeled_other"
+ 
+ 
+ # ── Vanilla creatures ───────────────────────────────────────────────────────
+diff --git a/tests/goldfish/test_known_answers.py b/tests/goldfish/test_known_answers.py
+new file mode 100644
+index 0000000..b545201
+--- /dev/null
++++ b/tests/goldfish/test_known_answers.py
+@@ -0,0 +1,255 @@
++"""Known-answer table: cases whose result was worked out by hand.
++
++Part 1 plays whole games where draws cannot matter (a commander and 99 copies
++of one basic land), so the turn each opponent dies follows from the rules
++alone: 3 opponents at 40 life, attacks always unblocked, focus fire on the
++first living opponent, 21 commander damage eliminates. Each case's comment
++shows the arithmetic.
++
++Part 2 reads real cards' rules text (Scryfall oracle text, copied 2026-10-21)
++and checks the model the templates produce, or that the card is left
++unmodeled. A change that moves any of these answers is a change in what the
++simulator does and must update the table on purpose.
++"""
++import pytest
++
++from mystic_forge.goldfish import autoderive
++from mystic_forge.goldfish.cards import SimCard, parse_cost
++from mystic_forge.goldfish.runner import play_one_game
++from tests.goldfish.helpers import make_data
++
++
++def _game(commander_data, until_turn=40):
++    cards = {
++        "Mountain": SimCard(data=make_data("Mountain", types=frozenset({"land"}),
++                                           produces={"R": 1}), ann=None, scope_class=None),
++        commander_data.name: SimCard(data=commander_data, ann=None, scope_class=None),
++    }
++    rec, log = play_one_game(cards, ["Mountain"] * 99, commander_data.name,
++                             game_seed=7, until_turn=until_turn, opponents=3)
++    return rec, log
++
++
++def _boss(**kw):
++    base = {"cost": parse_cost("{2}{R}"),
++            "types": frozenset({"creature", "legendary"}), "power": 3, "toughness": 3}
++    base.update(kw)
++    return make_data("Boss", **base)
++
++
++def test_plain_three_power_commander():
++    # Cast turn 3 (third Mountain), attacks from turn 4 for 3. Commander damage
++    # reaches 21 on the 7th hit: turn 10 (opponent 1), turns 11-17 (2), 18-24 (3).
++    rec, _ = _game(_boss())
++    assert rec.commander_cast_turn == 3
++    assert rec.cmdr21_turn == 10
++    assert rec.kill_turn == 10
++    assert rec.won_turn == 24
++
++
++def test_double_strike_commander():
++    # 3 power twice a hit = 6: 21 on the 4th hit. Turns 4-7, 8-11, 12-15.
++    rec, _ = _game(_boss(keywords=frozenset({"double strike"})))
++    assert rec.cmdr21_turn == 7
++    assert rec.won_turn == 15
++
++
++def test_haste_commander():
++    # {1}{R} 2/2 haste: cast and attacks turn 2. 21 on the 11th hit (22):
++    # turns 2-12, 13-23, 24-34.
++    rec, _ = _game(_boss(cost=parse_cost("{1}{R}"), power=2, toughness=2,
++                         keywords=frozenset({"haste"})))
++    assert rec.commander_cast_turn == 2
++    assert rec.cmdr21_turn == 12
++    assert rec.won_turn == 34
++
++
++def test_defender_commander_never_attacks():
++    rec, _ = _game(_boss(power=0, toughness=4, keywords=frozenset({"defender"})),
++                   until_turn=12)
++    assert rec.commander_cast_turn == 3
++    assert rec.won_turn is None
++    assert sum(rec.damage_by_turn) == 0
++
++
++def _derived(card):
++    return autoderive._derive_one({"keywords": [], **card})
++
++
++def test_anthem_on_the_commander_read_from_its_text():
++    # "Creatures you control get +1/+1." on a 3/3 commander: hits for 4, 21 on
++    # the 6th hit. Turns 4-9, 10-15, 16-21.
++    d = _derived({"name": "Boss", "type_line": "Legendary Creature — Soldier",
++                  "mana_cost": "{2}{R}", "power": "3", "toughness": "3",
++                  "oracle_text": "Creatures you control get +1/+1."})
++    assert d.auto_annotated and not d.needs_annotation
++    cards = {
++        "Mountain": SimCard(data=make_data("Mountain", types=frozenset({"land"}),
++                                           produces={"R": 1}), ann=None, scope_class=None),
++        "Boss": d.card,
++    }
++    rec, _ = play_one_game(cards, ["Mountain"] * 99, "Boss", game_seed=7,
++                           until_turn=30, opponents=3)
++    assert rec.cmdr21_turn == 9
++    assert rec.won_turn == 21
++
++
++def test_enters_trigger_drain_read_from_its_text():
++    # A 0/1 commander that drains each opponent for 3 on entering: turn 3, 9
++    # damage in all, never any combat damage.
++    d = _derived({"name": "Boss", "type_line": "Legendary Creature — Vampire",
++                  "mana_cost": "{2}{R}", "power": "0", "toughness": "1",
++                  "oracle_text": "When this creature enters, each opponent loses 3 life."})
++    cards = {
++        "Mountain": SimCard(data=make_data("Mountain", types=frozenset({"land"}),
++                                           produces={"R": 1}), ann=None, scope_class=None),
++        "Boss": d.card,
++    }
++    rec, _ = play_one_game(cards, ["Mountain"] * 99, "Boss", game_seed=7,
++                           until_turn=8, opponents=3)
++    assert rec.noncombat_damage_by_turn[2] == 9
++    assert sum(rec.noncombat_damage_by_turn) == 9
++    assert rec.won_turn is None
++
++
++# -- Part 2: real cards' text --------------------------------------------------
++
++def _card(name, type_line, cost, text, power=None, toughness=None, keywords=()):
++    return {"name": name, "type_line": type_line, "mana_cost": cost, "oracle_text": text,
++            "power": power, "toughness": toughness, "keywords": list(keywords)}
++
++
++def _ann(d):
++    a = d.card.ann
++    trig = sorted((t.on, t.do, t.count if isinstance(t.count, int) else str(t.count),
++                   t.target, t.event_filter, t.power, t.toughness, t.duration)
++                  for t in a.triggers) if a else []
++    stat = sorted((s.kind, s.power, s.toughness, s.count, s.filter, s.amount)
++                  for s in a.statics) if a else []
++    return trig, stat
++
++
++MODELED = [
++    (_card("Lightning Bolt", "Instant", "{R}",
++           "Lightning Bolt deals 3 damage to any target."),
++     [("cast", "damage", 3, "one_opponent", None, None, None, "eot")], []),
++    (_card("Elvish Visionary", "Creature — Elf Shaman", "{1}{G}",
++           "When this creature enters, draw a card.", "1", "1"),
++     [("etb", "draw", 1, None, None, None, None, "eot")], []),
++    (_card("Glorious Anthem", "Enchantment", "{1}{W}{W}", "Creatures you control get +1/+1."),
++     [], [("anthem", 1, 1, 1, "any", 0)]),
++    (_card("Exploration", "Enchantment", "{G}",
++           "You may play an additional land on each of your turns."),
++     [], [("extra_land_drops", 0, 0, 1, "any", 0)]),
++    (_card("Anointed Procession", "Enchantment", "{3}{W}",
++           "If an effect would create one or more tokens under your control, it creates "
++           "twice that many of those tokens instead."),
++     [], [("token_doubling", 0, 0, 1, "any", 0)]),
++    (_card("Young Pyromancer", "Creature — Human Shaman", "{1}{R}",
++           "Whenever you cast an instant or sorcery spell, create a 1/1 red Elemental "
++           "creature token.", "2", "1"),
++     [("spell_cast", "create_token", 1, None, "instant_or_sorcery", 1, 1, "eot")], []),
++    (_card("Monastery Swiftspear", "Creature — Human Monk", "{R}",
++           "Haste\nProwess (Whenever you cast a noncreature spell, this creature gets "
++           "+1/+1 until end of turn.)", "1", "2", ["Prowess", "Haste"]),
++     [("spell_cast", "pump", 1, None, "noncreature", 1, 1, "eot")], []),
++    (_card("Guttersnipe", "Creature — Goblin Shaman", "{2}{R}",
++           "Whenever you cast an instant or sorcery spell, this creature deals 2 damage to "
++           "each opponent.", "2", "2"),
++     [("spell_cast", "damage", 2, "each_opponent", "instant_or_sorcery", None, None, "eot")],
++     []),
++    (_card("Impact Tremors", "Enchantment", "{1}{R}",
++           "Whenever a creature you control enters, this enchantment deals 1 damage to each "
++           "opponent."),
++     [("creature_etb", "damage", 1, "each_opponent", None, None, None, "eot")], []),
++    (_card("Phyrexian Arena", "Enchantment", "{1}{B}{B}",
++           "At the beginning of your upkeep, you draw a card and lose 1 life."),
++     [("upkeep", "draw", 1, None, None, None, None, "eot")], []),
++    (_card("Mulldrifter", "Creature — Elemental", "{4}{U}",
++           "Flying\nWhen this creature enters, draw two cards.\nEvoke {2}{U} (You may cast "
++           "this spell for its evoke cost. If you do, it's sacrificed when it enters.)",
++           "2", "2", ["Flying", "Evoke"]),
++     [("etb", "draw", 2, None, None, None, None, "eot")], []),
++    (_card("Kitchen Finks", "Creature — Ouphe", "{1}{G/W}{G/W}",
++           "When this creature enters, you gain 2 life.\nPersist (When this creature dies, "
++           "if it had no -1/-1 counters on it, return it to the battlefield under its "
++           "owner's control with a -1/-1 counter on it.)", "3", "2", ["Persist"]),
++     [("etb", "gain_life", 2, None, None, None, None, "eot")], []),
++    (_card("Archon of Coronation", "Creature — Archon", "{4}{W}{W}",
++           "Flying\nWhen this creature enters, you become the monarch.\nAs long as you're "
++           "the monarch, damage doesn't cause you to lose life.", "5", "5", ["Flying"]),
++     None, None),   # monarch read, but the last sentence has no template
++]
++
++
++@pytest.mark.parametrize("card,triggers,statics", MODELED, ids=[c[0]["name"] for c in MODELED])
++def test_known_card_readings(card, triggers, statics):
++    d = _derived(card)
++    if triggers is None:
++        assert d.needs_annotation and d.unread
++        return
++    assert d.auto_annotated and not d.needs_annotation, d.unread
++    assert d.card.scope_class is None and d.aside_class is None
++    assert _ann(d) == (triggers, statics)
++
++
++def test_kitchen_finks_hybrid_cost_is_paid_as_its_first_colours():
++    d = _derived(MODELED[11][0])
++    assert d.card.data.cost.pips["G"] == 2 and d.card.data.cost.mv == 3
++    assert any(n.startswith("hybrid-cost:") for n in d.approx_notes)
++    assert any(n.startswith("no-deaths:") for n in d.approx_notes) is False
++
++
++ASIDE = [
++    # (card, scope_class: not cast, aside_class: cast and counted aside)
++    (_card("Murder", "Instant", "{1}{B}{B}", "Destroy target creature."),
++     "interaction_removal", None),
++    (_card("Counterspell", "Instant", "{U}{U}", "Counter target spell."),
++     "interaction_counter", None),
++    (_card("Wrath of God", "Sorcery", "{2}{W}{W}",
++           "Destroy all creatures. They can't be regenerated."),
++     "interaction_wipe", None),
++    (_card("Swords to Plowshares", "Instant", "{W}",
++           "Exile target creature. Its controller gains life equal to its power."),
++     "interaction_removal", None),
++    (_card("Ravenous Chupacabra", "Creature — Beast Horror", "{2}{B}{B}",
++           "When this creature enters, destroy target creature an opponent controls.",
++           "2", "2"),
++     None, "interaction_removal"),
++]
++
++
++@pytest.mark.parametrize("card,scope,aside", ASIDE, ids=[c[0]["name"] for c in ASIDE])
++def test_interaction_is_counted_aside(card, scope, aside):
++    d = _derived(card)
++    assert d.card.scope_class == scope
++    assert d.aside_class == aside
++    if aside:                       # a creature: cast, its body attacks
++        assert d.card.inert_reason is None and not d.needs_annotation
++
++
++NOT_READ = [
++    _card("Rhystic Study", "Enchantment", "{2}{U}",
++          "Whenever an opponent casts a spell, you may draw a card unless that player pays {1}."),
++    _card("Brimaz, King of Oreskos", "Legendary Creature — Cat Soldier", "{1}{W}{W}",
++          "Vigilance\nWhenever Brimaz attacks, create a 1/1 white Cat Soldier creature token "
++          "with vigilance that's attacking.\nWhenever Brimaz blocks a creature, create a 1/1 "
++          "white Cat Soldier creature token with vigilance that's blocking that creature.",
++          "3", "4", ["Vigilance"]),
++    _card("Goblin Bombardment", "Enchantment", "{1}{R}",
++          "Sacrifice a creature: This enchantment deals 1 damage to any target."),
++]
++
++
++@pytest.mark.parametrize("card", NOT_READ, ids=[c["name"] for c in NOT_READ])
++def test_cards_without_a_template_still_ask(card):
++    d = _derived(card)
++    assert d.needs_annotation and not d.auto_annotated
++    assert d.unread
++
++
++def test_vanilla_keywords_stay_modeled():
++    d = _derived(_card("Serra Angel", "Creature — Angel", "{3}{W}{W}",
++                       "Flying\nVigilance (Attacking doesn't cause this creature to tap.)",
++                       "4", "4", ["Flying", "Vigilance"]))
++    assert d.auto_annotated and d.card.ann is None

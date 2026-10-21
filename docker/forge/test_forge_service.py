@@ -241,12 +241,88 @@ if os.environ.get("FAKE_FLAGS"):  # what the memory guards gave this Java
     oom = open("/proc/self/oom_score_adj").read().strip()
     open(os.environ["FAKE_FLAGS"], "w").write(" ".join([oom, *(x for x in a if x.startswith("-X"))]))
 time.sleep(float(os.environ.get("FAKE_SLOW", "0")))
+if "-q" not in a:  # a solo test reads the game log: D1 plays second, hits D2 for 10 a turn
+    life = 40
+    for t in range(1, 40):
+        print("Turn: Turn %d (Ai(2)-D2)" % (2 * t - 1), flush=True)
+        print("Turn: Turn %d (Ai(1)-D1)" % (2 * t), flush=True)
+        print("Land: Ai(1)-D1 played Forest (%d)" % t, flush=True)
+        if t == 2:
+            print("Add To Stack: Ai(1)-D1 cast Liesa, Forgotten Archangel", flush=True)
+        if t >= 3:
+            print("Damage: Grizzly Bears (9) deals 10 combat damage to Ai(2)-D2.", flush=True)
+            print("Life: Life: Ai(2)-D2 %d > %d" % (life, life - 10), flush=True)
+            life -= 10
+        if life <= 0:
+            print("Game Outcome: Turn %d" % (2 * t), flush=True)
+            print("Game Outcome: Ai(2)-D2 has lost because life total reached 0", flush=True)
+            print("Game Result: Game 1 ended in 900 ms. Ai(1)-D1 has won!", flush=True)
+            sys.exit(0)
 for g in range(1, n + 1):
     w = 1 + g % 2
     print("Game Outcome: Turn %d" % (5 + g), flush=True)
     print("Game Outcome: Ai(%d)-D%d has lost because life total reached 0" % (3 - w, 3 - w), flush=True)
     print("Game Result: Game %d ended in %d ms. Ai(%d)-D%d has won!" % (g, 1000 + g, w, w), flush=True)
 """
+
+
+class Solo(unittest.TestCase):
+    DECK = {"commander": ["Liesa, Forgotten Archangel"], "main": [[99, "Forest"]]}
+
+    def test_a_solo_request_lists_one_deck(self):
+        body = {"games": 2, "decks": [self.DECK], "solo": {}}
+        decks, games, fmt, unknown = fs.validate(body)
+        self.assertEqual((len(decks), games, fmt, unknown), (1, 2, "Commander", []))
+        self.assertEqual(fs.validate_solo(body, fmt), {"opponents": 3, "until_turn": 10})
+        self.assertEqual(fs.validate_solo({"solo": {}}, "Constructed")["opponents"], 1)
+        self.assertIsNone(fs.validate_solo({}, "Commander"))
+        for bad in (
+            {"games": 1, "decks": [self.DECK, self.DECK], "solo": {}},
+            {"games": 1, "decks": [], "solo": {}},
+        ):
+            with self.assertRaises(ValueError):
+                fs.validate(bad)
+        for solo in ({"opponents": 4}, {"opponents": 0}, {"until_turn": 31}, {"until_turn": True}, "yes"):
+            with self.assertRaises(ValueError, msg=solo):
+                fs.validate_solo({"solo": solo}, "Commander")
+
+    def test_the_opponents_do_nothing(self):
+        job = fs.Job([self.DECK], 1, "Commander", 1, 1, {"opponents": 2, "until_turn": 5})
+        self.assertEqual(len(job.decks), 3)
+        self.assertEqual(job.decks[1], {"commander": ["Progenitus"], "main": [[99, "Wastes"]]})
+        self.assertEqual(fs.solo_opponent("Constructed"), {"commander": [], "main": [[60, "Wastes"]]})
+        self.assertEqual(job.view()["solo"], {"opponents": 2, "until_turn": 5})
+
+    def test_the_log_is_read_by_the_decks_own_turns(self):
+        # Lines as Forge 2.0.15 prints them; D1 is the third seat here, so its first turn is game turn 3.
+        game = fs.SoloGame(["Anax, Hardened in the Forge"], 3, 40, 10)
+        for line in (
+            "Mulligan: Ai(1)-D1 has kept a hand of 7 cards",
+            "Turn: Turn 1 (Ai(2)-D2)",
+            "Turn: Turn 2 (Ai(3)-D3)",
+            "Turn: Turn 3 (Ai(1)-D1)",
+            "Land: Ai(1)-D1 played Mountain (12)",
+            "Turn: Turn 4 (Ai(4)-D4)",
+            "Turn: Turn 5 (Ai(2)-D2)",
+            "Turn: Turn 6 (Ai(3)-D3)",
+            "Turn: Turn 7 (Ai(1)-D1)",
+            "Land: Ai(1)-D1 played Mountain (40)",
+            "Add To Stack: Ai(1)-D1 cast Anax, Hardened in the Forge",
+            "Add To Stack: Ai(1)-D1 cast Shock targeting [Ai(4)-D4]",
+            "Life: Life: Ai(4)-D4 40 > 38",
+            "Damage: Anax, Hardened in the Forge (100) deals 21 combat damage to Ai(2)-D2.",
+            "Life: Life: Ai(2)-D2 40 > 19",
+        ):
+            game.feed(line)
+        view = game.view()
+        self.assertEqual(view["turns"], 2)
+        self.assertEqual(view["kept"], 7)
+        self.assertEqual(view["commander_cast_turn"], 2)
+        self.assertEqual(view["lands_by_turn"], [1, 1])
+        self.assertEqual(view["casts_by_turn"], [0, 2])
+        self.assertEqual(view["damage_by_turn"], [0, 23])
+        self.assertEqual((view["first_out_turn"], view["won_turn"]), (2, None))  # 21 commander damage
+        self.assertEqual(view["commander_damage"], 21)
 
 
 class Run(unittest.TestCase):
@@ -291,6 +367,31 @@ class Run(unittest.TestCase):
         fs.run_job(job)
         return job
 
+    def solo_job(self, until_turn):
+        deck = {"commander": ["Liesa, Forgotten Archangel"], "main": [[99, "Forest"]]}
+        job = fs.Job([deck], 1, "Commander", 42, 1, {"opponents": 1, "until_turn": until_turn})
+        fs.run_job(job)
+        return job.view()
+
+    def test_a_solo_game_that_wins_in_time(self):
+        view = self.solo_job(10)
+        self.assertEqual(view["state"], "done")
+        (game,) = view["results"]
+        self.assertEqual(game["winner"], 1)
+        self.assertEqual(game["solo"]["won_turn"], 6)  # 10 a turn from turn 3: 40 life by turn 6
+        self.assertEqual(game["solo"]["damage_by_turn"], [0, 0, 10, 10, 10, 10])
+        self.assertEqual(game["solo"]["commander_cast_turn"], 2)
+
+    def test_a_solo_game_stops_after_its_last_turn(self):
+        view = self.solo_job(4)
+        self.assertEqual(view["state"], "done")
+        (game,) = view["results"]
+        self.assertTrue(game["turn_limit"])
+        self.assertIsNone(game["winner"])
+        self.assertEqual(game["solo"]["turns"], 4)
+        self.assertEqual(game["solo"]["damage_by_turn"], [0, 0, 10, 10])
+        self.assertIsNone(game["solo"]["won_turn"])
+
     def test_with_one_game_per_group_every_game_can_play_at_once(self):
         fs.SLICE_GAMES = 1
         fs.MAX_PARALLEL = 4
@@ -328,6 +429,8 @@ class Run(unittest.TestCase):
         self.assertEqual(oom, str(fs.OOM_SCORE_ADJ))  # the kernel's first pick when memory runs out
         self.assertIn(f"-Xmx{fs.XMX}", java)
         self.assertIn(f"-XX:MaxMetaspaceSize={fs.MAX_METASPACE}", java)
+        self.assertIn("-XX:+UseSerialGC", java)
+        self.assertIn(f"-XX:SharedArchiveFile={self.tmp / 'home' / f'forge-{fs.VERSION}.jsa'}", java)
 
     def test_java_starts_without_choom_when_the_score_is_off(self):
         flags = self.tmp / "flags"
