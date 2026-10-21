@@ -13,8 +13,8 @@ Fixes from a security review of 0.7.31 to 0.7.37, and small fixes to card search
 Proposals page.
 
 ### Upgrade notes
-- None beyond the [update steps](docs/UPGRADING.md). Coming from 0.7.37 there is no database
-  change, so this update saves no before-upgrade copy, and going back to 0.7.37 needs only the
+- None beyond the [update steps](docs/UPGRADING.md). Coming from 0.7.37 or 0.7.38 there is no
+  database change, so this update saves no before-upgrade copy, and going back needs only the
   `MTG_TAG` change. Coming from 0.7.36 or older, the database is upgraded as before.
 - At its first start the gateway deletes the copies in `before-upgrade` (set-aside copies too)
   that are older than `MTG_BACKUP_KEEP_DAYS` (14 days unless you changed it), the newest included,
@@ -33,12 +33,12 @@ Proposals page.
   them too: deleted members are forgotten (in a set-aside copy too, where members who joined after
   the upgrade stay), members who are gone or disabled keep no sign-in tokens, and Archidekt
   sessions and phone keys the database no longer holds are blanked.
-- When you go back from a later version to 0.7.38 or newer, each member keeps the Archidekt link
+- When you go back from a later version to 0.7.39 or newer, each member keeps the Archidekt link
   and the phone connection they have now: an Archidekt account they unlinked or replaced since the
   upgrade, and phones they disconnected, don't come back.
-- Going forward again with a set-aside copy put back by hand: if the copy was made by 0.7.38 or
+- Going forward again with a set-aside copy put back by hand: if the copy was made by 0.7.39 or
   newer, the newer version ends every sign-in at its first start on it. docs/UPGRADING.md says
-  what to do with a copy made by 0.7.37, and what to check on the Users page afterwards.
+  what to do with a copy made by 0.7.37 or 0.7.38, and what to check on the Users page afterwards.
 - The My decks folder and deck boxes, deck search's Load more, tag suggestions, deck downloads,
   the JSON API used with a browser sign-in and the other signed-in reads that ask Archidekt (or
   Scryfall, for card search) now answer only requests from the gateway's own pages: a link on

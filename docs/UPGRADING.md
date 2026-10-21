@@ -130,7 +130,7 @@ the older one finds its copy in `before-upgrade` and puts it back by itself when
   each for at most `MTG_BACKUP_KEEP_DAYS`, like the before-upgrade copies.
 - Members disabled, Archidekt sessions deleted and members' **Delete my data** since the upgrade
   stay so, and each member keeps the Archidekt link and phone connection they have now (going
-  back to 0.7.38 or newer). Every other change made since the upgrade (proposals, snapshots,
+  back to 0.7.39 or newer). Every other change made since the upgrade (proposals, snapshots,
   settings, someone you enabled again) is only in the set-aside copy: enable such a member again
   on the Users page.
 - It ends every sign-in, so everyone signs in once more, and the admin page says what happened.
@@ -166,9 +166,9 @@ upgrade, stop the gateway as above, and with the same `sudo -u '#1000' sh -c '..
 `mtg-gateway.sqlite`. Then update the stack to the newer version again.
 
 - **Every sign-in ends.** The set-aside copy still holds the sign-ins from before you went back,
-  including ones revoked while the older version ran. A set-aside copy made by 0.7.38 or newer
+  including ones revoked while the older version ran. A set-aside copy made by 0.7.39 or newer
   is marked, and the newer version ends every sign-in by itself at its first start on it. One
-  made by 0.7.37 isn't: before you update the stack, end every sign-in in the file with the
+  made by 0.7.37 or 0.7.38 isn't: before you update the stack, end every sign-in in the file with the
   command under **Restore** in [OPERATIONS.md](OPERATIONS.md#backups).
 - **What happened while the older version ran isn't in it.** Look through the Users page and
   disable, unlink or delete again any member you disabled, unlinked or deleted while the older

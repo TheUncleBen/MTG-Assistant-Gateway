@@ -316,7 +316,7 @@ not in your backups.
   and accounts you disabled on the admin page are enabled again (disable
   them again after the restore). Archidekt links don't come back: the
   backup holds none, so everyone relinks. Phones don't stay connected either:
-  backups from 0.7.38 on hold no phone keys, so each member who uses
+  backups from 0.7.39 on hold no phone keys, so each member who uses
   notifications opens their Account page in the Android app and presses
   **Save notifications** again. Before you start the stack again,
   end every session in the restored file so everyone signs in once more
@@ -475,7 +475,7 @@ backups); they age out with the limits above or go with **Delete my data**.
 "Delete my data" removes a member's rows from the live database and from the
 copies saved before database upgrades; the nightly backups in `MTG_BACKUP_DIR`
 keep a copy until they age out after `MTG_BACKUP_KEEP_DAYS` (never the member's
-Archidekt session, which backups leave out, nor from 0.7.38 on the member's phone key). A flood of sign-up attempts can therefore cost a connector that was
+Archidekt session, which backups leave out, nor from 0.7.39 on the member's phone key). A flood of sign-up attempts can therefore cost a connector that was
 registered but not used yet; that client just registers again. To slow
 floods down at the proxy, see the optional rate limit in
 [DEPLOY.md](DEPLOY.md#7-reverse-proxy).
