@@ -14,6 +14,11 @@ if [ "$(id -u)" = "0" ]; then
   for d in "${MTG_DATA_DIR:-/data}" "${MTG_BACKUP_DIR:-/backups}" "${MTG_BACKUP_COPY_DIR:-}"; do
     [ -d "$d" ] && chown "$PUID:$PGID" "$d" || true
   done
+  # the copies saved before database upgrades, and their folder, so a changed PUID can still read
+  # them to go back (a few files; the gateway makes the folder itself)
+  for d in "${MTG_BACKUP_DIR:-/backups}/before-upgrade" "${MTG_DATA_DIR:-/data}/before-upgrade"; do
+    [ -d "$d" ] && [ ! -L "$d" ] && chown -R "$PUID:$PGID" "$d" || true
+  done
   exec setpriv --reuid="$PUID" --regid="$PGID" --init-groups --no-new-privs "$@"
 fi
 exec "$@"

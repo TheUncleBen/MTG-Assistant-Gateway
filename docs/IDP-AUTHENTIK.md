@@ -517,41 +517,39 @@ goes only into a Docker secret, in step 6.
    Intent **API Token**, **Expiring** off (it is on by default; an expired
    token just stops the clean-up) → **Create Token**. Copy it with the row
    action **Copy token**.
-6. **Store it as a Docker secret.** On a Swarm manager, run this, paste the
-   token and press Enter. Nothing shows on screen, and the token doesn't
-   land in your shell history:
+6. **Store it as the `mtg_authentik_api_token` Docker secret.** The stack file always attaches
+   this secret. Until you replace it, it holds the word `off` (DEPLOY.md step 4), which keeps the
+   clean-up off.
+   Docker secrets can't be changed, so on a Swarm manager take the old one out of the gateway,
+   delete it and create it again with the token. Paste the token at the silent prompt and press
+   Enter; nothing shows on screen, and the token doesn't land in your shell history:
 
    ```bash
+   docker service update --secret-rm mtg_authentik_api_token mtg_mtg-assistant-gateway
+   docker secret rm mtg_authentik_api_token
    read -rs T && printf %s "$T" | docker secret create mtg_authentik_api_token - ; unset T
    ```
 
-   With plain Docker Compose, the token goes in
-   `secrets/mtg_authentik_api_token.txt` next to `docker-compose.yml`
-   instead, written the same way:
+   (Your stack's name in place of `mtg` in `mtg_mtg-assistant-gateway`.) If you are setting up a
+   new gateway and haven't created the secret yet, the last line alone is enough.
+
+   With plain Docker Compose, the token goes in `secrets/mtg_authentik_api_token.txt` next to
+   `docker-compose.yml` in place of the word `off` that `make-secrets.sh` wrote there:
 
    ```bash
    read -rs T && printf %s "$T" > secrets/mtg_authentik_api_token.txt ; unset T
    ```
 
-   Replacing the token later: Docker secrets can't be changed, so create
-   the new one under a new name (say `mtg_authentik_api_token_v2`) and map
-   it to the old name in the stack file, as for the client secret in
-   [section 7](#7-gateway-settings-and-the-docker-secret).
-7. **Turn it on in the stack.** In `deploy/portainer-stack.yml` (or
-   `deploy/compose/docker-compose.yml`), remove the `# ` in front of the
-   three `mtg_authentik_api_token` lines: the two under the top-level
-   `secrets:` and the one in the gateway's `secrets:` list. Then set the
-   stack variable and redeploy. Every update that brings a new stack file
-   or Compose file brings these lines commented out again, so make this
-   edit again then ([UPGRADING.md](UPGRADING.md#update-steps)). With Portainer's
-   **Repository** build method the stack file comes from the repository
-   as it is, with these lines commented out. Use the **Web editor**
-   method instead, or a copy of the repository you keep yourself with the
-   lines turned on.
+   Replacing the token later works the same way: the three Swarm lines above, or the Compose line.
+7. **Redeploy.** The stack file and `docker-compose.yml` already attach the secret and point the
+   gateway at it, so neither needs an edit: in Portainer, **Update the stack**; without Portainer,
+   `docker stack deploy` again; with Compose, `docker compose up -d --force-recreate gateway` (the
+   gateway reads the token when it starts, and a plain `up -d` doesn't restart it when only the
+   file changed). You don't need to set either variable:
 
    | Variable | Value |
    | --- | --- |
-   | `MTG_AUTHENTIK_API_TOKEN_FILE` | `/run/secrets/mtg_authentik_api_token` |
+   | `MTG_AUTHENTIK_API_TOKEN_FILE` | leave unset: the stack and Compose files use `/run/secrets/mtg_authentik_api_token` |
    | `MTG_AUTHENTIK_API_URL` | leave empty: the issuer's address (`https://auth.example.com`) is used. Set it only if the gateway must reach Authentik's API at another https address |
 
 8. **Check it on the admin page.** Open **Admin**. In the **System** card,
@@ -564,8 +562,8 @@ goes only into a Docker secret, in step 6.
 
 | The row says | What it means | What to do |
 | --- | --- | --- |
-| *Off. This optional hourly check deletes the saved Archidekt sign-in of people who no longer have access. To turn it on, follow docs/IDP-AUTHENTIK.md section 12.* | `MTG_AUTHENTIK_API_TOKEN_FILE` is empty. | Nothing, if you don't want the clean-up. Otherwise follow the steps above. |
-| *Off: the Authentik API token can't be read (…)* | The file named in `MTG_AUTHENTIK_API_TOKEN_FILE` is missing or empty. | Check that the secret exists (`docker secret ls`), that the three stack lines in step 7 are uncommented, and the variable's path. Redeploy. |
+| *Off. This optional hourly check deletes the saved Archidekt sign-in of people who no longer have access. To turn it on, follow docs/IDP-AUTHENTIK.md section 12.* | The `mtg_authentik_api_token` secret holds the word `off`, or `MTG_AUTHENTIK_API_TOKEN_FILE` is empty. | Nothing, if you don't want the clean-up. Otherwise follow the steps above. |
+| *Off: the Authentik API token can't be read (…)* | The file named in `MTG_AUTHENTIK_API_TOKEN_FILE` is missing or empty. | Check that the secret exists (`docker secret ls`), that your stack file is the current one (one from before 0.7.37 has the secret's lines commented out), and that `MTG_AUTHENTIK_API_TOKEN_FILE` is unset or `/run/secrets/mtg_authentik_api_token`. Redeploy. |
 | *Off: it needs MTG_REQUIRED_GROUP.* | There is a token but no required group to compare with. | Set `MTG_REQUIRED_GROUP` and redeploy. |
 | *On. The first check runs 2 minutes after the gateway starts; reload this page then.* | It is set up and waiting for its first round. | Reload the page after two minutes. |
 | *Working. Last check at …: N members with access; no one lost access. Nothing for you to do.* or *…; deleted the saved Archidekt sign-in of N people who lost access. Nothing for you to do.* | The last round worked. | Nothing. |

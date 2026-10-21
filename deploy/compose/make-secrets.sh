@@ -1,5 +1,5 @@
 #!/bin/sh
-# Creates the four secret files docker-compose.yml expects, in ./secrets/
+# Creates the five secret files docker-compose.yml expects, in ./secrets/
 # (or MTG_SECRETS_DIR from the environment or .env). Existing files are left
 # alone, so it's safe to re-run.
 #
@@ -59,6 +59,14 @@ if [ ! -s "$dir/mtg_ntfy_token.txt" ]; then
   printf 'tk_%s' "$(LC_ALL=C tr -dc a-z0-9 </dev/urandom | head -c 29)" > "$dir/mtg_ntfy_token.txt.tmp"
   mv "$dir/mtg_ntfy_token.txt.tmp" "$dir/mtg_ntfy_token.txt"
   echo "mtg_ntfy_token created."
+fi
+
+if [ ! -s "$dir/mtg_authentik_api_token.txt" ]; then
+  # The removed-member clean-up's Authentik API token: off until you put a token here
+  # (docs/IDP-AUTHENTIK.md, "Optional: removed-member clean-up").
+  printf off > "$dir/mtg_authentik_api_token.txt.tmp"
+  mv "$dir/mtg_authentik_api_token.txt.tmp" "$dir/mtg_authentik_api_token.txt"
+  echo "mtg_authentik_api_token created (off: the removed-member clean-up stays off)."
 fi
 
 # Compose mounts these files as they are, so the container's user (PUID) must

@@ -13,13 +13,14 @@ from __future__ import annotations
 import datetime as _dt
 import html
 import json
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from urllib.parse import parse_qs, quote
 
 from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
 
-from . import activity_view, idp_sweep, settings_page, update_check
+from . import activity_view, idp_sweep, settings_page, update_check, upgrade_backup
 from .companion import member_name
 from .config import MANAGED_SETTINGS
 from .decks import ADMIN_CLIENT, current_client
@@ -539,6 +540,11 @@ def system_data(state: Any) -> dict[str, Any]:
         if backup_mod.last_run.get("ok") is False:
             out["last_backup_error"] = backup_mod.last_run.get("error")
             out["last_backup_error_at"] = backup_mod.last_run.get("at")
+    # The copies saved before database upgrades (upgrade_backup.py), and what this start did.
+    db_path = getattr(state.db, "path", None)
+    if isinstance(db_path, Path) and str(db_path) != ":memory:":
+        folder = getattr(state.db, "upgrade_dir", None) or upgrade_backup.folder_for(None, db_path)
+        out["before_upgrade"] = upgrade_backup.summary(folder)
     out["updates"] = update_check.status()
     # The research service as the health check last found it (Docker probes /healthz regularly).
     proxy = getattr(state, "mf_proxy", None)
@@ -575,16 +581,43 @@ def system_data(state: Any) -> dict[str, Any]:
     return out
 
 
+def _before_upgrade_text(b: dict[str, Any] | None) -> Any:
+    """The System list's line for the before-upgrade folder."""
+    if not b:
+        return "none (the database is in memory)"
+    if not b.get("newest"):
+        return "none yet (one is saved the first time a new version upgrades the database)"
+    when = _when(b["newest_at"]) if b.get("newest_at") else ""
+    return _Html(f"{html.escape(str(b['newest']))} {when}, in {html.escape(str(b['folder']))}")
+
+
+def _went_back_notice(b: dict[str, Any] | None) -> str:
+    """A notice after this start put back the copy saved before an upgrade (an older version was
+    started on a database a newer one had upgraded)."""
+    event = (b or {}).get("event") or {}
+    if event.get("kind") != "went-back":
+        return ""
+    text = (
+        "This version started on a database that a newer version had upgraded, so it put back the "
+        f"before-upgrade copy {event['file']}. Everyone has to sign in once more. Members disabled, "
+        "Archidekt sessions deleted and members' data deleted since that upgrade stay so; other "
+        f"changes made since then are only in the set-aside copy {event['aside']}, in {b['folder']}. "
+        "Anyone you enabled again since then is disabled again: enable them on the Users page "
+        "(docs/UPGRADING.md, “Going back to an older version”)."
+    )
+    return f"<div class='notice warn'>{html.escape(text)}</div>"
+
+
 def _cleanup_warning(c: dict[str, Any]) -> str:
-    """A notice when the removed-member clean-up was set up but its token can't be read, as after a
-    stack file was replaced without its uncommented secret lines: the one line in
+    """A notice when the removed-member clean-up was set up but its token can't be read, as with a
+    stack file that doesn't attach its secret: the one line in
     the System list and one start-up warning are easy to miss."""
     if c.get("state") != "off" or c.get("cause") != "token-unreadable":
         return ""
     text = (
-        "The removed-member clean-up is off: its Authentik API token can't be read. If you replaced "
-        'the stack file or docker-compose.yml, check that you removed the "# " from its '
-        "mtg_authentik_api_token lines again, then redeploy."
+        "The removed-member clean-up is off: its Authentik API token can't be read. Check that your "
+        "stack file or docker-compose.yml is the current one, which attaches the "
+        "mtg_authentik_api_token secret to the gateway, then redeploy."
     )
     return f"<div class='notice warn'>{html.escape(text)}</div>"
 
@@ -639,28 +672,32 @@ def _updates_card(u: dict[str, Any]) -> str:
     tag = html.escape(found["version"]) if found else "&lt;new version&gt;"
     steps = (
         "<details><summary>How to update</summary>"
-        "<p>The gateway never updates itself. Read the release notes of every version you skip over and "
-        "do any steps they list under Upgrade notes (docs/UPGRADING.md has them). Take a backup first: "
-        "the gateway upgrades its database when it starts, and going back means restoring that "
-        "backup.</p>"
-        "<p><strong>Portainer (Swarm stack)</strong>: Stacks, your stack. If "
-        f"<code>MTG_TAG</code> is a version number, change it to <code>{tag}</code> in the stack's "
-        "environment variables (leave <code>latest</code> as it is). If the release notes say the "
-        "stack file changed, replace the stack's text with the new "
-        "<code>deploy/portainer-stack.yml</code> (with the Repository build method, the update "
-        "brings it). Then <strong>Update the stack</strong> (if your stack uses the Repository "
-        "build method, the button is called "
-        "<strong>Pull and redeploy</strong>); in the box that asks “Are you sure?”, make sure "
-        "<strong>Re-pull image and redeploy</strong> is on, then click <strong>Update</strong>.</p>"
-        "<p><strong>Swarm without Portainer</strong>: set <code>MTG_TAG</code> in your variables "
-        "file if it is pinned, update your copy of the repository (<code>git pull</code>), load the "
-        "variables into a new shell as in docs/DEPLOY.md, then run "
-        "<code>docker stack deploy -c deploy/portainer-stack.yml mtg</code> "
-        "again (your stack's name in place of <code>mtg</code>).</p>"
-        "<p><strong>docker compose</strong>: in the folder with <code>docker-compose.yml</code>, set "
-        f"<code>MTG_TAG={tag}</code> in <code>.env</code> if it is pinned. If the release notes say "
-        "the Compose file changed, get the new <code>docker-compose.yml</code> first "
-        "(docs/UPGRADING.md says how, and what to carry over). Then run "
+        "<p>The gateway never updates itself. An update is a fresh install on top of your data "
+        "(docs/UPGRADING.md has every step): take the newest stack file and the newest example "
+        "variables file, copy your own values into the example, and deploy. Your data, backups and "
+        "Docker secrets stay as they are. There is no backup to take first: before the new version "
+        "upgrades the database, the gateway saves a copy of it in the before-upgrade folder, inside "
+        "your backup folder.</p>"
+        "<p><strong>Portainer (Swarm stack)</strong>: copy your values into the newest "
+        f"<code>deploy/stack.env.example</code> (with <code>MTG_TAG</code> at <code>{tag}</code>, or "
+        "<code>latest</code>), and create any secret docs/DEPLOY.md step 4 lists that you don't have "
+        "yet. Then Stacks, your stack, Editor: replace the text with the newest "
+        "<code>deploy/portainer-stack.yml</code>, unchanged (with the Repository build method, the "
+        "update brings it), and the environment variables (Advanced mode) with your new file. Then "
+        "<strong>Update the stack</strong> (if your stack uses the Repository build method, the "
+        "button is called <strong>Pull and redeploy</strong>); in the box that asks “Are you "
+        "sure?”, make sure <strong>Re-pull image and redeploy</strong> is on, then click "
+        "<strong>Update</strong>.</p>"
+        "<p><strong>Swarm without Portainer</strong>: <code>git pull</code> in your copy of the "
+        "repository, copy your values into a new copy of <code>deploy/stack.env.example</code>, "
+        "create any missing secret (docs/DEPLOY.md step 4), load the variables into a new shell as "
+        "in docs/DEPLOY.md, then run <code>docker stack deploy -c deploy/portainer-stack.yml "
+        "mtg</code> again (your stack's name in place of <code>mtg</code>).</p>"
+        "<p><strong>docker compose</strong>: in the folder with <code>docker-compose.yml</code>, get "
+        "the newest <code>docker-compose.yml</code>, <code>make-secrets.sh</code> and "
+        "<code>.env.example</code> (docs/UPGRADING.md has the commands), copy your values from "
+        f"<code>.env</code> into the example and save it as <code>.env</code> (<code>MTG_TAG={tag}</code> "
+        "or <code>latest</code>), run <code>./make-secrets.sh</code>, then "
         "<code>docker compose pull</code> and <code>docker compose up -d</code>.</p>"
         "<p class='muted small'>Once the gateway is updated, members' Android apps offer the matching "
         "app update from this gateway on their own.</p></details>"
@@ -702,9 +739,10 @@ def _cleanup_text(c: dict[str, Any]) -> str:
             if c.get("missing"):
                 return (
                     f"Off: {why}. The likely cause: the mtg_authentik_api_token secret isn't attached "
-                    "to the gateway in the stack file, so check that its three lines there are "
-                    "uncommented and that MTG_AUTHENTIK_API_TOKEN_FILE is "
-                    f"/run/secrets/mtg_authentik_api_token, then redeploy ({setup}, steps 6 and 7)."
+                    "to the gateway, as with a stack file from before 0.7.37. Use the current stack "
+                    "file, check that MTG_AUTHENTIK_API_TOKEN_FILE is "
+                    f"/run/secrets/mtg_authentik_api_token or not set, then redeploy ({setup}, steps 6 "
+                    "and 7)."
                 )
             return (
                 f"Off: {why}. Check the mtg_authentik_api_token Docker secret and "
@@ -871,6 +909,7 @@ def _overview_body(state: Any) -> str:
         + _stat("Database size", f"{size / 1048576:.1f} MB" if size is not None else "in memory")
         + _stat("Newest backup", backup)
         + _stat("Newest backup copy", copies)
+        + _stat("Newest before-upgrade copy", _before_upgrade_text(sysd.get("before_upgrade")))
         + _stat("Research service (Mystic Forge)", sysd["mystic_forge"])
         + _stat("Simulation engine (Forge)", sysd["forge"])
         + _stat("Removed-member clean-up", _cleanup_text(sysd["member_cleanup"]))
@@ -890,6 +929,7 @@ def _overview_body(state: Any) -> str:
             else ""
         )
         + _cleanup_warning(sysd["member_cleanup"])
+        + _went_back_notice(sysd.get("before_upgrade"))
         + _chatgpt_name_warning(state.settings)
         + "</div>"
     )

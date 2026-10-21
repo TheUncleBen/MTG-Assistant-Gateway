@@ -1,6 +1,6 @@
-"""0.7.29 upgrade: a stack file replaced without its uncommented Authentik secret
-lines leaves the removed-member clean-up off. The admin overview says so in a notice, not only in
-its System list and one start-up warning."""
+"""A stack file that doesn't attach the Authentik secret (one from before 0.7.37, whose secret
+lines were commented out) leaves the removed-member clean-up off. The admin overview says so in a
+notice, not only in its System list and one start-up warning."""
 
 from __future__ import annotations
 
@@ -11,9 +11,9 @@ from .conftest import FakeIdP, Harness, make_settings, running
 from .test_admin import NAVIGATE, _with_admin, admin_browser
 
 NOTICE = (
-    "The removed-member clean-up is off: its Authentik API token can't be read. If you replaced the "
-    'stack file or docker-compose.yml, check that you removed the "# " from its '
-    "mtg_authentik_api_token lines again, then redeploy."
+    "The removed-member clean-up is off: its Authentik API token can't be read. Check that your "
+    "stack file or docker-compose.yml is the current one, which attaches the "
+    "mtg_authentik_api_token secret to the gateway, then redeploy."
 )
 
 

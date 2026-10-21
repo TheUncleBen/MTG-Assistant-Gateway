@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
+from . import upgrade_backup
 from .cimd import site_of
 from .modes import UNJUDGED
 
@@ -791,9 +792,82 @@ BACKUP_MADE_JOB = "backup_made:"
 BACKUP_DELETE_JOB = "backup_delete:"
 
 
+# Tables a member's own rows live in, and the column naming the member. reports and scan_sessions
+# belong to optional features and may not exist in this file.
+MEMBER_TABLES = (
+    ("proposals", "owner_sub"),
+    ("snapshots", "owner_sub"),
+    ("reports", "owner_sub"),
+    ("scan_sessions", "owner_sub"),
+    ("archidekt_links", "sub"),
+    ("tokens", "sub"),
+    ("browser_sessions", "sub"),
+    ("idp_grants", "sub"),
+    ("metrics", "sub"),
+    ("watch_cards", "sub"),
+    ("watch_decks", "sub"),
+    ("deck_values", "sub"),
+    ("notify_prefs", "sub"),
+    ("account_prefs", "sub"),
+    ("card_models", "added_by"),  # their simulator card models go too
+    ("backup_deletes", "sub"),  # their queued backup deletes go with their snapshots
+    ("users", "sub"),
+)
+
+
+def delete_member_rows(c: sqlite3.Connection, sub: str) -> dict[str, int]:
+    """Delete one member's rows (Database.delete_member_data) inside the caller's transaction on
+    ``c``; going back to a before-upgrade copy uses it too (upgrade_backup.go_back)."""
+    out: dict[str, int] = {}
+    present = {r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+    # Deck covers are keyed by deck and shared: only the member's own go. Those their deck
+    # pages stored carry their owner_sub; a cover stored before the owner was recorded
+    # (owner_sub NULL) goes when it is of a deck the member has a snapshot of, since
+    # snapshots are taken only of decks the member edits, which are their own. Proposals
+    # and reports can name other members' decks (a clone's source), so they are not used,
+    # and a cover recorded for another member is never touched. Taken before those rows go.
+    deck_ids = (
+        {r[0] for r in c.execute("SELECT DISTINCT deck_id FROM snapshots WHERE owner_sub = ?", (sub,))}
+        if "snapshots" in present
+        else set()
+    )
+    covers = c.execute("DELETE FROM deck_covers WHERE owner_sub = ?", (sub,)).rowcount
+    for deck_id in deck_ids:
+        covers += c.execute(
+            "DELETE FROM deck_covers WHERE deck_id = ? AND owner_sub IS NULL", (deck_id,)
+        ).rowcount
+    out["deck_covers"] = covers
+    # The records of their backup copies (each holds the deck's
+    # name and URL) go now, not at the next hourly clean-up: those their snapshots name,
+    # and those recorded for them. Taken before the snapshots go.
+    out["backup_records"] = (
+        c.execute(
+            """DELETE FROM job_runs WHERE substr(name, 1, ?) = ?
+            AND (CASE WHEN json_valid(detail_json) THEN json_extract(detail_json, '$.sub') END = ?
+                 OR substr(name, ? + 1) IN (
+                     SELECT backup_deck_id FROM snapshots
+                     WHERE owner_sub = ? AND backup_deck_id IS NOT NULL))""",
+            (len(BACKUP_MADE_JOB), BACKUP_MADE_JOB, sub, len(BACKUP_MADE_JOB), sub),
+        ).rowcount
+        if "snapshots" in present
+        else 0
+    )
+    for table, column in MEMBER_TABLES:
+        if table in present:
+            out[table] = c.execute(f"DELETE FROM {table} WHERE {column} = ?", (sub,)).rowcount
+    c.execute(
+        "INSERT INTO audit_log (at, sub, client_id, event, detail_json) VALUES (?, ?, NULL, ?, ?)",
+        (int(time.time()), sub, "member_data_deleted", json.dumps(out)),
+    )
+    return out
+
+
 class Database:
-    def __init__(self, path: Path | str):
+    def __init__(self, path: Path | str, *, upgrade_dir: Path | None = None):
+        """``upgrade_dir`` is the before-upgrade folder (upgrade_backup.py); None puts it next to
+        the database file."""
         self.path = Path(path)
+        self.upgrade_dir = upgrade_dir
         if str(self.path) != ":memory:":
             self.path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
@@ -823,29 +897,46 @@ class Database:
                 raise
 
     def _migrate(self) -> None:
-        """Run the migration steps this database has not seen (``PRAGMA user_version``)."""
+        """Run the migration steps this database has not seen (``PRAGMA user_version``), after
+        saving a copy of a database that already holds data (upgrade_backup.py)."""
         version = int(self._conn.execute("PRAGMA user_version").fetchone()[0])
+        on_disk = str(self.path) != ":memory:"
+        folder = (
+            self.upgrade_dir if self.upgrade_dir is not None else self.path.parent / upgrade_backup.FOLDER
+        )
         if version > len(MIGRATIONS):
             # A newer gateway wrote this file. An older image would skip columns it doesn't know,
-            # such as users.disabled_at, and let disabled people back in, so refuse instead.
-            raise RuntimeError(
-                f"database schema version {version} is newer than this gateway supports "
-                f"({len(MIGRATIONS)}); run the newer image or restore a backup taken before the upgrade"
-            )
-        for number, step in enumerate(MIGRATIONS, start=1):
-            if version >= number:
-                continue
-            if number == 1:
-                # executescript commits on its own, so step 1 can't share a transaction. Every
-                # statement in it is idempotent, so an interrupted run simply repeats it.
-                step(self._conn)
-                self._conn.execute(f"PRAGMA user_version = {number}")
-                continue
-            # A step and its version bump commit together, or neither does.
+            # such as users.disabled_at, and let disabled people back in, so it puts back the copy
+            # saved before that upgrade, or refuses.
+            if not on_disk or not upgrade_backup.go_back(
+                self._conn, self.path, folder, version, len(MIGRATIONS), delete_member_rows
+            ):
+                raise upgrade_backup.DatabaseUpgradeError(
+                    f"database schema version {version} is newer than this gateway supports "
+                    f"({len(MIGRATIONS)}), and {folder} has no copy of the database from before it was "
+                    "upgraded. Run the newer version again, or put a copy back by hand "
+                    "(docs/UPGRADING.md, “Going back to an older version”)."
+                )
+            self._conn.execute("PRAGMA journal_mode=WAL")
+            version = int(self._conn.execute("PRAGMA user_version").fetchone()[0])
+        if version < len(MIGRATIONS) and on_disk and upgrade_backup.has_data(self._conn):
+            upgrade_backup.save_before_upgrade(self._conn, self.path, folder, version, len(MIGRATIONS))
+        if version < 1:
+            # executescript commits on its own, so step 1 can't share a transaction. Every
+            # statement in it is idempotent, so an interrupted run simply repeats it.
+            MIGRATIONS[0](self._conn)
+            self._conn.execute("PRAGMA user_version = 1")
+            version = 1
+        if version < len(MIGRATIONS):
+            # Every other step runs in one transaction with the version bump: the upgrade happens
+            # whole or not at all, so a failed or killed one leaves the database as it was.
             self._conn.execute("BEGIN IMMEDIATE")
             try:
-                step(self._conn)
-                self._conn.execute(f"PRAGMA user_version = {number}")
+                # read again under the lock: another process may have upgraded it meanwhile
+                version = int(self._conn.execute("PRAGMA user_version").fetchone()[0])
+                for number, step in enumerate(MIGRATIONS[version:], start=version + 1):
+                    step(self._conn)
+                    self._conn.execute(f"PRAGMA user_version = {number}")
             except BaseException:
                 self._conn.execute("ROLLBACK")
                 raise
@@ -1730,27 +1821,7 @@ class Database:
         with self.tx() as c:
             return c.execute("DELETE FROM browser_sessions WHERE sub = ?", (sub,)).rowcount
 
-    # Tables a member's own rows live in, and the column naming the member. reports and
-    # scan_sessions belong to optional features and may not exist in this file.
-    MEMBER_TABLES = (
-        ("proposals", "owner_sub"),
-        ("snapshots", "owner_sub"),
-        ("reports", "owner_sub"),
-        ("scan_sessions", "owner_sub"),
-        ("archidekt_links", "sub"),
-        ("tokens", "sub"),
-        ("browser_sessions", "sub"),
-        ("idp_grants", "sub"),
-        ("metrics", "sub"),
-        ("watch_cards", "sub"),
-        ("watch_decks", "sub"),
-        ("deck_values", "sub"),
-        ("notify_prefs", "sub"),
-        ("account_prefs", "sub"),
-        ("card_models", "added_by"),  # their simulator card models go too
-        ("backup_deletes", "sub"),  # their queued backup deletes go with their snapshots
-        ("users", "sub"),
-    )
+    MEMBER_TABLES = MEMBER_TABLES
 
     def delete_member_data(self, sub: str) -> dict[str, int]:
         """Delete everything the gateway keeps about one member, at their request: proposals,
@@ -1758,51 +1829,8 @@ class Database:
         usage counters, the covers of their decks and the user record. The security audit log is
         kept (it ages out after a year) and records the deletion itself. Signing in again starts a
         fresh, empty account."""
-        out: dict[str, int] = {}
         with self.tx() as c:
-            present = {r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
-            # Deck covers are keyed by deck and shared: only the member's own go. Those their deck
-            # pages stored carry their owner_sub; a cover stored before the owner was recorded
-            # (owner_sub NULL) goes when it is of a deck the member has a snapshot of, since
-            # snapshots are taken only of decks the member edits, which are their own. Proposals
-            # and reports can name other members' decks (a clone's source), so they are not used,
-            # and a cover recorded for another member is never touched. Taken before those rows go.
-            deck_ids = (
-                {
-                    r[0]
-                    for r in c.execute("SELECT DISTINCT deck_id FROM snapshots WHERE owner_sub = ?", (sub,))
-                }
-                if "snapshots" in present
-                else set()
-            )
-            covers = c.execute("DELETE FROM deck_covers WHERE owner_sub = ?", (sub,)).rowcount
-            for deck_id in deck_ids:
-                covers += c.execute(
-                    "DELETE FROM deck_covers WHERE deck_id = ? AND owner_sub IS NULL", (deck_id,)
-                ).rowcount
-            out["deck_covers"] = covers
-            # The records of their backup copies (each holds the deck's
-            # name and URL) go now, not at the next hourly clean-up: those their snapshots name,
-            # and those recorded for them. Taken before the snapshots go.
-            out["backup_records"] = (
-                c.execute(
-                    """DELETE FROM job_runs WHERE substr(name, 1, ?) = ?
-                    AND (CASE WHEN json_valid(detail_json) THEN json_extract(detail_json, '$.sub') END = ?
-                         OR substr(name, ? + 1) IN (
-                             SELECT backup_deck_id FROM snapshots
-                             WHERE owner_sub = ? AND backup_deck_id IS NOT NULL))""",
-                    (len(BACKUP_MADE_JOB), BACKUP_MADE_JOB, sub, len(BACKUP_MADE_JOB), sub),
-                ).rowcount
-                if "snapshots" in present
-                else 0
-            )
-            for table, column in self.MEMBER_TABLES:
-                if table in present:
-                    out[table] = c.execute(f"DELETE FROM {table} WHERE {column} = ?", (sub,)).rowcount
-            c.execute(
-                "INSERT INTO audit_log (at, sub, client_id, event, detail_json) VALUES (?, ?, NULL, ?, ?)",
-                (int(time.time()), sub, "member_data_deleted", json.dumps(out)),
-            )
+            out = delete_member_rows(c, sub)
         self.flush_wal()
         return out
 

@@ -23,16 +23,18 @@ Set `MTG_TAG=latest` (the default in `deploy/stack.env.example` and the Compose
   **Update**.
 - Compose: `docker compose pull && docker compose up -d`.
 
-Read the [CHANGELOG](../CHANGELOG.md) entry of every version you're moving past
-first, and do any steps it lists under **Upgrade notes** ([UPGRADING.md](UPGRADING.md)).
+Each update takes the newest stack file and example variables file, as
+[UPGRADING.md](UPGRADING.md) describes; the [CHANGELOG](../CHANGELOG.md) says what each version
+changes.
 
 ## Staying on one version
 
 Set `MTG_TAG` to a version, for example `MTG_TAG=0.6.6`, and redeploy. You stay
 on it until you change the variable. To go back to an older version, set its
-number, but read [OPERATIONS.md](OPERATIONS.md#restart-or-update) first: a newer
-version may have upgraded the database, and an older image refuses to open it.
-Restore the backup taken before the upgrade instead.
+number and use that version's stack file and example file (on its branch, below). If a newer
+version upgraded the database, 0.7.37 and newer put back the copy saved before that upgrade by
+themselves; 0.7.36 and older need it put back by hand
+([UPGRADING.md](UPGRADING.md#going-back-to-an-older-version)).
 
 The code of any version stays on GitHub as the tag `v1.2.3` and the branch
 `release/1.2.3`, for example to build it yourself:

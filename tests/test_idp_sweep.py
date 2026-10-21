@@ -479,3 +479,18 @@ NEXT_STEP_CASES = {
 @pytest.mark.parametrize("error", sorted(NEXT_STEP_CASES))
 def test_each_failure_names_its_next_step(error: str) -> None:
     assert NEXT_STEP_CASES[error] in idp_sweep.next_step(error)
+
+
+def test_the_word_off_in_the_secret_turns_the_clean_up_off_quietly(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The stack files always attach the secret, so whoever doesn't use the clean-up puts off in
+    it: that is the clean-up switched off, with no warning."""
+    _write_secrets(tmp_path, monkeypatch)
+    for word in ("off", "OFF\n", " Off "):
+        (tmp_path / "tok").write_text(word)
+        monkeypatch.setenv("MTG_AUTHENTIK_API_TOKEN_FILE", str(tmp_path / "tok"))
+        s = load_settings()
+        assert s.authentik_api_token is None and s.authentik_api_token_problem is None
+        sweep = AuthentikSweep(s, None, None)
+        assert not sweep.enabled and sweep.why_off() is None and sweep.status()["cause"] == "no-token"

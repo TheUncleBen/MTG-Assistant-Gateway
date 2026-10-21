@@ -90,9 +90,10 @@ project's newest release, and when that is newer, every page shows admins a noti
 overview (**Admin**, **Updates**) shows these steps with the version filled in. It never pulls an
 image or restarts itself. `MTG_UPDATE_CHECK=false` turns the check off.
 
-Before every update, read the release notes and take a backup. The steps for
-every update, and the extra ones some versions need (0.7.30 among them), are
-in [UPGRADING.md](UPGRADING.md).
+An update is a fresh install on top of your data: the newest stack file, the newest example
+variables file with your values, deploy. [UPGRADING.md](UPGRADING.md) has the steps. There is no
+backup to take first: before a new version upgrades the database, the gateway saves a copy of it
+([Backups](#backups)).
 
 In Portainer: **Stacks** → `mtg`. With a pinned version (for example
 `0.6.6`), change `MTG_TAG` first ([VERSIONS.md](VERSIONS.md)); with
@@ -111,8 +112,8 @@ gateway finishes requests already running for up to 100 seconds, then lets a
 deck apply running in the background go on for up to 90 seconds more; the
 stack gives it 200 (`stop_grace_period`) before Docker kills it. An apply that a crash or a kill still cuts off is marked failed when the
 gateway starts again, with a pointer to the snapshot taken before it. A failed
-update is not rolled back automatically on purpose: a new version may have
-upgraded the database, and the old image refuses to start on it (below).
+update is not rolled back automatically: you go back by deploying the older version, which from
+0.7.37 on puts back the copy saved before the upgrade by itself (below).
 Signed-in
 assistants keep working because tokens live in the database on disk. Linked
 Archidekt accounts and proposals survive restarts too. (One exception: the
@@ -120,12 +121,12 @@ first start of 0.6.1 or newer after an older version signs everyone out once,
 because sessions from before have no identity-provider tokens on file for
 the live membership check. See the CHANGELOG.)
 
-Before moving to a new release, read the [CHANGELOG](../CHANGELOG.md) and
-take a backup ([Backups](#backups)). A release can upgrade the database on
-start; to go back, restore that backup and run the old image on it, never the
-old image on the upgraded file. An older image refuses to start on a database
-a newer one upgraded (`database schema version ... is newer than this gateway
-supports`); only the very first release, 0.1.0, had no such check.
+A release can upgrade the database on start. Before it does, the gateway saves a copy of the
+database, and an older version from 0.7.37 on, started on the upgraded file, puts that copy back
+by itself. 0.7.36 and older refuse to start on a database a newer version upgraded (`database
+schema version ... is newer than this gateway supports`); going back to them is by hand
+([UPGRADING.md](UPGRADING.md#going-back-to-an-older-version)). Only the very first release,
+0.1.0, had no such check.
 
 ## Adding and removing people
 
@@ -252,7 +253,8 @@ the audit log. Mystic Forge keeps nothing worth backing up.
 The copy is cleaned in memory before it is written, so a backup briefly
 needs about as much free memory as the database file is large.
 
-**What isn't:** anyone's sign-in. Every member's stored Archidekt session
+**What isn't, in the nightly and by-hand backups:** anyone's sign-in (the copy saved before a
+database upgrade is different, see below). Every member's stored Archidekt session
 and the identity provider's tokens kept for the live membership check are
 blanked in the copy before it is written (the live database keeps them), so
 a backup file never holds a way into someone's Archidekt account. After a
@@ -290,6 +292,13 @@ not in your backups.
   gateway's data folder stays on that node's local disk: on Swarm it is not
   shared between nodes, so the copy folder is the one that can be on
   storage every node sees.
+- **Before a database upgrade:** when a new version has to upgrade the database, it first saves a
+  full copy in `<MTG_BACKUP_DIR>/before-upgrade/` (inside the data folder when `MTG_BACKUP_DIR`
+  isn't set), checks it, and only then upgrades; without a good copy it doesn't upgrade or
+  start. The newest 3 are kept. Unlike the nightly backups, this copy keeps members' Archidekt
+  sessions and the identity provider's tokens (still encrypted with the Fernet key, which isn't
+  in it), so going back needs nobody to relink; it is never copied to `MTG_BACKUP_COPY_DIR`.
+  Going back is in [UPGRADING.md](UPGRADING.md#going-back-to-an-older-version).
 - **Back up right now:**
 
   ```bash

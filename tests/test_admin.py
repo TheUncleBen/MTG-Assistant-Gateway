@@ -231,10 +231,10 @@ _AT = "<time datetime='2027-01-15T08:00:00Z'>2027-01-15 08:00 UTC</time>"
             "Off: the Authentik API token can't be read (cannot read secret file for "
             "MTG_AUTHENTIK_API_TOKEN_FILE: [Errno 2] No such file or directory: "
             "'/run/secrets/mtg_authentik_api_token'). The likely cause: the mtg_authentik_api_token "
-            "secret isn't attached to the gateway in the stack file, so check that its three lines "
-            "there are uncommented and that MTG_AUTHENTIK_API_TOKEN_FILE is "
-            "/run/secrets/mtg_authentik_api_token, then redeploy (docs/IDP-AUTHENTIK.md section 12, "
-            "steps 6 and 7).",
+            "secret isn't attached to the gateway, as with a stack file from before 0.7.37. Use the "
+            "current stack file, check that MTG_AUTHENTIK_API_TOKEN_FILE is "
+            "/run/secrets/mtg_authentik_api_token or not set, then redeploy (docs/IDP-AUTHENTIK.md "
+            "section 12, steps 6 and 7).",
         ),
         (
             {"state": "off", "cause": "no-group", "reason": "x"},
