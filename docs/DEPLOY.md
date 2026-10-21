@@ -12,7 +12,8 @@ This gets you one Swarm stack with these services:
 
 Not running a Swarm? [DEPLOY-COMPOSE.md](DEPLOY-COMPOSE.md) does the same on
 one machine with plain Docker Compose. How the pieces fit together is in
-[ARCHITECTURE.md](ARCHITECTURE.md).
+[ARCHITECTURE.md](ARCHITECTURE.md), and what hardware it needs is in
+[HARDWARE.md](HARDWARE.md).
 
 The steps use Portainer, Nginx Proxy Manager (NPM) and Authentik because
 that's the setup the guide was written on, but none of them is required:
@@ -372,7 +373,7 @@ address and shared CI runners hit that limit. As a fallback for anything a
 build still fetches from Docker Hub, the image jobs sign in to Docker Hub when
 the repository secrets `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` (a
 read-only access token) exist; without them the step is skipped. The
-Mystic Forge image is built once per tag (`1.3.2-mag4`) and not rebuilt by
+Mystic Forge image is built once per tag (`1.3.2-mag5`) and not rebuilt by
 later releases; a manual run of its workflow from `main` rebuilds it from
 the base image `main` pins. GitHub
 Actions are pinned by commit, Python dependencies by version
@@ -525,9 +526,9 @@ licence, from upstream). It's built from upstream commit
 rules, precon and goldfish tools, and the gateway relays an allowlisted set
 of them to signed-in users.
 
-Upstream code is unchanged apart from seven small patches in
-`docker/mystic-forge/patches/`, which is where the `-mag4` in the image tag
-`1.3.2-mag4` comes from:
+Upstream code is unchanged apart from eight patches in
+`docker/mystic-forge/patches/`, which is where the `-mag5` in the image tag
+`1.3.2-mag5` comes from:
 
 - `0001-archidekt-null-categories.patch`: Archidekt sends
   `"categories": null` for cards that never got a category (it happens in
@@ -570,6 +571,14 @@ Upstream code is unchanged apart from seven small patches in
   card were left out ("2 Foo"), and `scryfall_named` without a set shows the
   same printing as the other lookups (the newest out on paper) and says which
   one it is.
+- `0009-goldfish-rules-text-templates.patch`: the goldfish simulator reads
+  common rules text (drawing, ramp, tokens, damage and drain, +1/+1 counters,
+  anthems, cost reducers, extra combats and more), so far more cards play
+  with their effect. Removal, board wipes and counterspells are counted as
+  set aside instead of keeping a card from being cast. A card whose text is
+  only partly read plays the read parts, unless an unread part limits them
+  ("only once each turn", for example); `goldfish_annotate` lists what was
+  read and what was not.
 
 What to know about it:
 
@@ -599,7 +608,7 @@ What to know about it:
 | Variable | Default | What it does |
 | --- | --- | --- |
 | `MF_IMAGE` | `ghcr.io/theuncleben/mtg-assistant-mysticforge` | Image. A copy of the project that builds its own images sets `ghcr.io/<your account>/mtg-assistant-mysticforge` |
-| `MF_TAG` | `1.3.2-mag4` | Image tag |
+| `MF_TAG` | `1.3.2-mag5` | Image tag |
 | `MF_PUBLIC_BASE` | `http://mtg-assistant-mysticforge:8000` | Base URL Mystic Forge uses in links (its own default points at the upstream author's site, so keep this) |
 | `MF_NODE` | none, required | Hostname of the node it runs on. The stack won't start without it |
 | `MF_MEMORY_LIMIT` | `512M` | Memory cap |
@@ -627,7 +636,7 @@ default, and an install that leaves it off behaves exactly as before.
     `MTG_FORGE_URL=http://mtg-assistant-forge:8000`, then update the stack.
   - Docker Compose: start the `forge` profile (`COMPOSE_PROFILES=forge`) and set
     `MTG_FORGE_URL=http://forge:8000`.
-- **The image tag:** the stack files name the Forge image by `FORGE_TAG` (default `2.0.15-mag4`).
+- **The image tag:** the stack files name the Forge image by `FORGE_TAG` (default `2.0.15-mag5`).
   GitHub builds and publishes a new tag the first time `main` carries it (the Forge image
   workflow, after its test games pass on arm64 and amd64), so pulling a new tag fails until that
   run has finished. After an update that changes the tag, wait for the run, then update the stack.
@@ -692,7 +701,7 @@ default, and an install that leaves it off behaves exactly as before.
 - **Privacy:** the service is on its own internal network with no internet access; only the gateway
   reaches it.
 - Cards Forge cannot play are listed in each report's `forge.not_played`, and the games run without
-  them.
+  them. Which cards those are: [CAPABILITIES.md](CAPABILITIES.md#cards-forge-cannot-play).
 
 ## Notifications on members' phones
 
@@ -812,7 +821,7 @@ value. Leave it out to manage it on the page.
 | `MTG_FORGE_PARALLEL_GAMES` | no, *stack* | `4` | How many of a report's Forge games the gateway asks Forge to play at once (1 to 16). `FORGE_MAX_PARALLEL` caps it for all runs together. Also on the Settings page |
 | `FORGE_MAX_METASPACE`, `FORGE_OOM_SCORE_ADJ` | no, *stack* | `256m`, `1000` | On the Forge service: each Forge game's extra Java memory for loaded code (on top of `FORGE_XMX`), and how readily the kernel stops a Forge game when the machine runs out of memory, 1 to 1000 (1000: Forge goes first; 0 turns this off; any other value is left out and Forge's log says why) |
 | `FORGE_MAX_PARALLEL` | no, *stack* | empty | On the Forge service: the most games Forge plays at once, for all runs together (1 to 16). Empty: one per 2 CPUs and 1.2 GB of the container's limits (see the Forge section above) |
-| `FORGE_IMAGE`, `FORGE_TAG` | no, *stack* | `ghcr.io/theuncleben/mtg-assistant-forge`, `2.0.15-mag4` | The Forge image and its version. The stack file names one exact Forge version, which changes only when you deploy a newer stack file. Leave these out to use it; set `FORGE_TAG` only to pin Forge on purpose, and it then stays on that version even when the stack file moves on |
+| `FORGE_IMAGE`, `FORGE_TAG` | no, *stack* | `ghcr.io/theuncleben/mtg-assistant-forge`, `2.0.15-mag5` | The Forge image and its version. The stack file names one exact Forge version, which changes only when you deploy a newer stack file. Leave these out to use it; set `FORGE_TAG` only to pin Forge on purpose, and it then stays on that version even when the stack file moves on |
 | `FORGE_XMX` | no, *stack* | `1g` | The Java heap limit (`-Xmx`) of each Forge game |
 | `FORGE_MEMORY_LIMIT`, `FORGE_CPUS` | no, *stack* | `1536M`, `2` | The Forge container's memory and CPU caps. `FORGE_MEMORY_LIMIT` is also passed to Forge as `FORGE_MEMORY_BUDGET`, which sizes the games at once where Docker can't cap memory (see the Forge section above) |
 | `FORGE_GAME_SECONDS` | no, *stack* | `240` | Seconds before Forge calls one game a draw |
