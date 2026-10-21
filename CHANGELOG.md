@@ -7,6 +7,37 @@ Notable changes for people who run or use the gateway. The format follows
 with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 (`release/1.2.3`); `latest` is always the newest.
 
+## [0.7.40] - 2026-10-21
+
+When Forge is on, every report that simulates now also has Forge play the deck alone by the full
+rules, beside the solo test's quick estimate, so you can see how often and on which turn the deck
+won when every card does exactly what it says. Forge is now on in the example files for new
+installs.
+
+### Upgrade notes
+- Update as usual ([docs/UPGRADING.md](docs/UPGRADING.md)): the newest stack file and example
+  variables file, with your values in it. The Forge image is new (`2.0.15-mag6`), and the newest
+  stack file already names it.
+- **Forge is on in the example files.** If you copy the new example file, Forge runs unless you
+  turn it off ([Forge simulations](docs/DEPLOY.md#forge-simulations-on-by-default) in DEPLOY.md
+  says how). [docs/HARDWARE.md](docs/HARDWARE.md) says what machine it needs.
+- **Portainer or Swarm: `FORGE_NODE` is now required,** even with Forge off; set it to the node
+  that runs Forge (any node name will do with Forge off). The stack won't deploy without it.
+- To keep Forge off on a stack: `FORGE_REPLICAS=0` and an empty `MTG_FORGE_URL=`. With Compose:
+  put a `#` in front of `COMPOSE_PROFILES=forge` and set an empty `MTG_FORGE_URL=`.
+- No database change, so this update saves no before-upgrade copy.
+- The Android app doesn't change.
+
+### Added
+- **The Forge solo test.** With Forge on, a report that simulates also has Forge play the deck
+  alone against opponents who do nothing, counted up to turn 10, and shows how often and on which
+  turn it won. Each game has an equal part of about four and a half minutes, so the whole test
+  stays within five, and one runs at a time for each member. Deleting the report stops it. An
+  older Forge image skips it and the report says so.
+
+### Changed
+- **Forge is on by default** in the example stack, Compose and variables files.
+
 ## [0.7.39] - 2026-10-21
 
 Fixes from a security review of 0.7.31 to 0.7.37, and small fixes to card search and the

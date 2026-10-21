@@ -30,8 +30,12 @@ from mtg_gateway.forge import (
     summarise_solo,
     wilson,
 )
-from mtg_gateway.report_view import FORGE_DRIFT_NOTE, forge_lines
-from mtg_gateway.reports import ReportService
+from mtg_gateway.report_view import FORGE_DRIFT_NOTE, forge_lines, forge_solo_lines
+from mtg_gateway.reports import (
+    SOLO_ONE_AT_A_TIME,
+    ReportService,
+    solo_game_seconds,
+)
 
 from .fake_archidekt import FakeArchidekt
 
@@ -51,6 +55,7 @@ class FakeForge:
         self.health_probes = 0
         self.max_parallel: int | None = None  # the engine's places, listed in each job when set
         self.parallel_cap: int | None = None  # a Forge image before 2.0.15-mag4 refuses more than 4
+        self.solo = False  # a Forge image that plays solo tests (2.0.15-mag6 on) says so in /health
 
     def handler(self, request: httpx.Request) -> httpx.Response:
         path = request.url.path
@@ -58,7 +63,8 @@ class FakeForge:
             self.health_probes += 1
             if not self.up:
                 raise httpx.ConnectError("down")
-            return httpx.Response(200, json={"status": "ok", "busy": False, "queued": 0})
+            extra = {"solo": True, "game_seconds": 240, "max_parallel": 1} if self.solo else {}
+            return httpx.Response(200, json={"status": "ok", "busy": False, "queued": 0, **extra})
         if path.startswith("/jobs/") and request.method == "DELETE":
             jid = path.rsplit("/", 1)[1]
             if jid not in self.jobs:
@@ -1594,3 +1600,93 @@ async def test_one_forge_address_changes_nothing(tmp_path: Path, monkeypatch: An
         assert await client.copies() == []
         picked, engine, copies = await client.pick()
         assert picked is client and engine is None and copies == 1
+
+
+def test_solo_game_seconds_share_five_minutes() -> None:
+    assert solo_game_seconds(5, 1, 240) == 54  # 270 s over 5 rounds
+    assert solo_game_seconds(4, 4, 240) == 240  # one round: the service's own limit
+    assert solo_game_seconds(50, 1, 240) == 30  # never less than 30 s
+    assert solo_game_seconds(50, 1, 20) == 20  # nor more than the service allows
+
+
+async def test_a_report_plays_the_forge_solo_test_first(tmp_path: Path) -> None:
+    db = Database(tmp_path / "t.sqlite")
+    db.upsert_user("alice", email=None, name=None, preferred_username=None, groups=[])
+    fake = FakeForge()
+    fake.solo = True
+    reports = ReportService(db, _Decks(), None, forge=fake.client(), forge_games=5)  # type: ignore[arg-type]
+    reports.forge_interval = 0.05
+    out = await reports.run("alice", "42", games=300, options={"seed": 7})
+    solo_job, precon_job = fake.started
+    assert solo_job["solo"] == {"opponents": 3, "until_turn": 10, "game_seconds": 54}
+    assert len(solo_job["decks"]) == 1 and solo_job["games"] == 5 and solo_job["seed"] == 7
+    assert "solo" not in precon_job and len(precon_job["decks"]) == 4
+    assert out["forge_solo"]["state"] == "running" and "deck_text" not in out["forge_solo"]
+    assert reports.newest_forge_solo("alice", "42") is None
+    # a second report while this one's solo test plays gets none
+    again = await reports.run("alice", "42", games=300, options={"seed": 8})
+    assert again["forge_solo"] == {"state": "skipped", "error": SOLO_ONE_AT_A_TIME, "finished_at": ANY_TIME}
+    fake.jobs[out["forge_solo"]["job_id"]].update(
+        state="done", results=[{"game": 1, "winner": 1, "solo": _solo_view(6)}]
+    )
+    for _ in range(200):
+        if reports.get("alice", out["report_id"])["forge_solo"]["state"] == "done":
+            break
+        await asyncio.sleep(0.02)
+    solo = reports.get("alice", out["report_id"])["forge_solo"]
+    assert solo["state"] == "done" and solo["result"]["median_won_turn"] == 6
+    newest = reports.newest_forge_solo("alice", "42")
+    assert newest == {
+        "report_id": out["report_id"],
+        "finished_at": solo["finished_at"],
+        "won_rate": 1.0,
+        "games": 1,
+        "median_won_turn": 6,
+    }
+    # deleting a report stops its unfinished runs, the solo test's included
+    third = await reports.run("alice", "42", games=300, options={"seed": 9})
+    reports.delete("alice", third["report_id"])
+    await asyncio.sleep(0.05)
+    assert third["forge_solo"]["job_id"] in fake.cancelled
+    reports._forge_task.cancel()
+
+
+async def test_an_older_forge_gives_no_solo_test(tmp_path: Path) -> None:
+    db = Database(tmp_path / "t.sqlite")
+    db.upsert_user("alice", email=None, name=None, preferred_username=None, groups=[])
+    fake = FakeForge()
+    reports = ReportService(db, _Decks(), None, forge=fake.client(), forge_games=4)  # type: ignore[arg-type]
+    out = await reports.run("alice", "42", games=300, options={"seed": 7})
+    assert out["forge_solo"]["state"] == "skipped" and out["forge_solo"]["error"] == SOLO_TOO_OLD
+    assert all("solo" not in job for job in fake.started)
+    # a run without Forge, or without a simulation, has no solo test at all
+    quick = await reports.run("alice", "42", games=300, options={"seed": 8}, forge=False)
+    assert quick["forge_solo"] is None
+    reports._forge_task.cancel()
+
+
+class _AnyTime:
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, int) and other > 0
+
+
+ANY_TIME = _AnyTime()
+
+
+def test_forge_solo_lines_read_plainly() -> None:
+    result = summarise_solo(
+        [
+            {"game": 1, "winner": 1, "solo": _solo_view(5, turns=5)},
+            {"game": 2, "draw": True, "stopped_slow": True, "solo": _solo_view(None, turns=4)},
+        ],
+        2,
+        {"opponents": 3, "until_turn": 10},
+    )
+    lines = forge_solo_lines({"state": "done", "result": result, "not_played": ["Sticker Card"]})
+    assert lines[0] == "Games: 2, each counted up to your turn 10"
+    assert lines[1].startswith("Won by turn 10: 1 of 2 (50%, 95% interval ")
+    assert "Median winning turn: 5 (turns 5 to 5)" in lines
+    assert "Mulligans: 0 of 2 games" in lines
+    assert "1 of 2 games reached Forge's time limit first, so they count as not won." in lines
+    assert lines[-1] == "Cards Forge could not play: Sticker Card"
+    assert forge_solo_lines({"state": "running"}) == ["Games are going now."]

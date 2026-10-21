@@ -11,7 +11,7 @@ ARG FORGE_VERSION=2.0.15
 ARG FORGE_ASSET=forge-installer-2.0.15.tar.bz2
 ARG FORGE_SHA256=4468f182b60f6ca62d89697baa208981085af744f116781af751c611826db600
 # Bump when this image changes without a new Forge release. The image is tagged <FORGE_VERSION>-<FORGE_LOCAL>.
-ARG FORGE_LOCAL=mag5
+ARG FORGE_LOCAL=mag6
 
 FROM mirror.gcr.io/library/eclipse-temurin:21-jre@sha256:227118764cccd3c3294617061aaa93a08309c63a395eefa83e6b35032992ea99 AS source
 ARG FORGE_URL
