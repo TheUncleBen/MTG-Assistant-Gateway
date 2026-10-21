@@ -227,6 +227,10 @@ async def test_start_solo_run_plays_a_deck_without_commander_against_one() -> No
     await start_solo_run(fake.client(), "4 Lightning Bolt\n20 Mountain\n", "Burn", games=2, until_turn=5)
     sent = fake.started[0]
     assert sent["format"] == "Constructed" and sent["solo"] == {"opponents": 1, "until_turn": 5}
+    await start_solo_run(fake.client(), DECK_TEXT, "Liesa", games=1, game_seconds=60)
+    assert fake.started[1]["solo"] == {"opponents": 3, "until_turn": 10, "game_seconds": 60}
+    with pytest.raises(ForgeError):
+        await start_solo_run(fake.client(), DECK_TEXT, "Liesa", games=1, until_turn=31)
 
 
 async def test_start_solo_run_says_when_forge_is_too_old() -> None:

@@ -42,15 +42,15 @@ APPROXIMATIONS = {
     "ramp-widened": "Ramp counted as finding a land",
     "for-each": "Mana that scales is counted as a fixed amount",
     "conditional-tapland": "Lands that sometimes enter tapped enter untapped",
-    "dfc-back-face": "Two-faced cards play their front face only",
+    "dfc-back-face": "Two-faced cards are played as their front face only",
     "lifelink": "Life from lifelink is not counted",
-    "unused-option": "Optional costs and ways to cast (kicker, cycling, flashback) are not used",
+    "unused-option": "Optional costs and other ways to cast (kicker, cycling, flashback) are not used",
     "library-order": "Scry and surveil do not change the order of the library",
     "no-deaths": "Nothing dies in a solo test, so death triggers never happen",
     "attack-trigger": "Attack triggers happen whenever you attack",
     "anthem-self": "Bonuses for your other creatures count the card itself too",
     "own-life": "Your own life total is not tracked",
-    "monarch": "The monarch's card is drawn at the start of your turn",
+    "monarch": "The monarch's extra card is drawn at your upkeep",
 }
 # The milestones the simulator tracks as "reached by turn N", in plain words and plot order. A
 # 60-card game (no commander, 20 life) has no commander milestones and its kill is 20 damage.
@@ -1054,8 +1054,8 @@ def honesty_groups(g: dict[str, Any], ask: str = "") -> list[tuple[str, str, str
                 _share(total, size),
                 "<p>The simulator plays against opponents who do nothing, so removal, board wipes, "
                 "counterspells and protection have nothing to act on. Spells that only do that stayed in "
-                "hand. Creatures and other permanents among them were cast and played the rest of their "
-                "text.</p>" + groups,
+                "hand. Creatures and other permanents among them were still cast, and played the parts of "
+                "their text the simulator can read.</p>" + groups,
             )
         )
     low = h.get("low_impact") or []

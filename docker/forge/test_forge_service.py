@@ -247,6 +247,7 @@ if "-q" not in a:  # a solo test reads the game log: D1 plays second, hits D2 fo
         print("Turn: Turn %d (Ai(2)-D2)" % (2 * t - 1), flush=True)
         print("Turn: Turn %d (Ai(1)-D1)" % (2 * t), flush=True)
         print("Land: Ai(1)-D1 played Forest (%d)" % t, flush=True)
+        print("Resolve Stack: Tutor (%d) - Ai(1)-D1 can't find a card" % t, flush=True)
         if t == 2:
             print("Add To Stack: Ai(1)-D1 cast Liesa, Forgotten Archangel", flush=True)
         if t >= 3:
@@ -282,7 +283,19 @@ class Solo(unittest.TestCase):
         ):
             with self.assertRaises(ValueError):
                 fs.validate(bad)
-        for solo in ({"opponents": 4}, {"opponents": 0}, {"until_turn": 31}, {"until_turn": True}, "yes"):
+        self.assertEqual(
+            fs.validate_solo({"solo": {"game_seconds": 60}}, "Commander"),
+            {"opponents": 3, "until_turn": 10, "game_seconds": 60},
+        )
+        for solo in (
+            {"opponents": 4},
+            {"opponents": 0},
+            {"until_turn": 31},
+            {"until_turn": True},
+            {"game_seconds": 9},
+            {"game_seconds": fs.GAME_SECONDS + 1},
+            "yes",
+        ):
             with self.assertRaises(ValueError, msg=solo):
                 fs.validate_solo({"solo": solo}, "Commander")
 
@@ -323,6 +336,31 @@ class Solo(unittest.TestCase):
         self.assertEqual(view["damage_by_turn"], [0, 23])
         self.assertEqual((view["first_out_turn"], view["won_turn"]), (2, None))  # 21 commander damage
         self.assertEqual(view["commander_damage"], 21)
+
+    def test_partners_count_their_commander_damage_apart(self):
+        game = fs.SoloGame(["Tymna the Weaver", "Kraum, Ludevic's Opus"], 1, 40, 10)
+        for line in (
+            "Turn: Turn 1 (Ai(1)-D1)",
+            "Damage: Tymna the Weaver (3) deals 11 combat damage to Ai(2)-D2.",
+            "Damage: Kraum, Ludevic's Opus (4) deals 10 combat damage to Ai(2)-D2.",
+        ):
+            game.feed(line)
+        self.assertIsNone(game.view()["first_out_turn"])  # 11 and 10, not 21 from one commander
+        self.assertEqual(game.view()["commander_damage"], 11)
+
+    def test_nothing_after_the_last_turn_counts(self):
+        game = fs.SoloGame([], 1, 20, 1)
+        for line in (
+            "Turn: Turn 1 (Ai(1)-D1)",
+            "Turn: Turn 2 (Ai(2)-D2)",
+            "Turn: Turn 3 (Ai(1)-D1)",
+            "Land: Ai(1)-D1 played Mountain (40)",
+            "Life: Life: Ai(2)-D2 20 > 0",
+        ):
+            game.feed(line)
+        view = game.view()
+        self.assertTrue(game.past_limit)
+        self.assertEqual((view["turns"], view["lands_by_turn"], view["won_turn"]), (1, [0], None))
 
 
 class Run(unittest.TestCase):
@@ -381,13 +419,15 @@ class Run(unittest.TestCase):
         self.assertEqual(game["solo"]["won_turn"], 6)  # 10 a turn from turn 3: 40 life by turn 6
         self.assertEqual(game["solo"]["damage_by_turn"], [0, 0, 10, 10, 10, 10])
         self.assertEqual(game["solo"]["commander_cast_turn"], 2)
+        self.assertEqual(view["load_problems"], [])  # the game's own log is not a load problem
 
-    def test_a_solo_game_stops_after_its_last_turn(self):
+    def test_a_solo_game_won_after_its_last_turn_counts_as_not_won(self):
+        # Forge prints the log once the game is over, so the game plays on to its end (turn 6 here)
         view = self.solo_job(4)
         self.assertEqual(view["state"], "done")
         (game,) = view["results"]
         self.assertTrue(game["turn_limit"])
-        self.assertIsNone(game["winner"])
+        self.assertEqual(game["winner"], 1)
         self.assertEqual(game["solo"]["turns"], 4)
         self.assertEqual(game["solo"]["damage_by_turn"], [0, 0, 10, 10])
         self.assertIsNone(game["solo"]["won_turn"])

@@ -699,12 +699,14 @@ async def refresh(
 
 # The solo test on Forge: the deck plays by the full rules against opponents who do nothing (the
 # Forge service's solo_opponent), so every card Forge has does what it says. It stops at the
-# deck's turn ``until_turn``; a deck that has not won by then is counted as not winning in time.
+# deck's turn ``until_turn`` as far as its numbers go; a deck that has not won by then is counted as
+# not winning in time.
 SOLO_UNTIL_TURN = 10
+SOLO_MAX_TURN = 30
 SOLO_OPPONENTS = {"Commander": 3, "Constructed": 1}
 SOLO_TOO_OLD = (
-    "This gateway's Forge is older than the solo test needs. Update the Forge image to the one "
-    "named in the stack file, then run it again."
+    "The Forge image is older than the solo test needs. Update it to the version named in the "
+    "stack file, then run the test again."
 )
 
 
@@ -769,13 +771,19 @@ async def start_solo_run(
     *,
     games: int,
     until_turn: int = SOLO_UNTIL_TURN,
+    game_seconds: int | None = None,
     seed: int | None = None,
     parallel: int = 1,
 ) -> dict[str, Any]:
     """Start a solo test of the member's deck on Forge and return its section, shaped as a Forge
     run's so ``refresh`` keeps it up to date. A deck with a card in a Commander category plays a
     Commander game against three opponents, any other deck a game against one. Cards Forge lacks
-    are left out and named in ``not_played``, as in a run against precons."""
+    are left out and named in ``not_played``, as in a run against precons. Forge prints a game only
+    once it has ended, so each game plays on past ``until_turn`` until the deck wins or the game's
+    time limit (``game_seconds``, else the service's own) stops it; only turns up to
+    ``until_turn`` count."""
+    if not 1 <= until_turn <= SOLO_MAX_TURN:
+        raise ForgeError("invalid", f"until_turn must be from 1 to {SOLO_MAX_TURN}")
     deck = forge_deck(deck_text)
     fmt = "Commander" if deck["commander"] else "Constructed"
     names = list(dict.fromkeys(deck["commander"] + [name for _, name in deck["main"]]))
@@ -789,6 +797,8 @@ async def start_solo_run(
         }
     deck["main"] = [[n, name] for n, name in deck["main"] if resolved.get(name)]
     solo = {"opponents": SOLO_OPPONENTS[fmt], "until_turn": until_turn}
+    if game_seconds is not None:
+        solo["game_seconds"] = game_seconds
     source = "request" if seed is not None else "gateway"
     if seed is None:
         seed = secrets.randbelow(2**63)

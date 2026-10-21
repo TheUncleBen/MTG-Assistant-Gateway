@@ -136,8 +136,8 @@ jobs:
         run: docker image ls forge:ci-arm64
       - name: Service tests (offline)
         run: python3 -m unittest discover -s docker/forge -p 'test_*.py' -v
-      # Floors: what Forge 2.0.15 reached on 2026-10-21, less a little room for new sets Forge
-      # has not caught up with. Commander 99.71% (the 94 it lacks are Unfinity sticker and
+      # Floors: what Forge 2.0.15 reached on 2026-10-21, less about 0.1% (some 35 cards) of room
+      # for new sets Forge has not caught up with. Commander 99.71% (the 94 it lacks are Unfinity sticker and
       # Attraction cards); any format 99.60% (plus Arena-only Alchemy cards). A failure blocks
       # only this image; the published one stays as it is.
       - name: Coverage gate (cards legal in at least one format, and in Commander)
@@ -146,7 +146,7 @@ jobs:
           docker run --rm -v "$PWD/docker/forge/scryfall-legal.json:/tmp/legal.json:ro" -w /app forge:ci-arm64 \
             python3 coverage.py /tmp/legal.json 99.5 | tee coverage.txt
           docker run --rm -v "$PWD/docker/forge/scryfall-commander.json:/tmp/commander.json:ro" -w /app \
-            forge:ci-arm64 python3 coverage.py /tmp/commander.json 99.7 "Commander-legal cards" \
+            forge:ci-arm64 python3 coverage.py /tmp/commander.json 99.6 "Commander-legal cards" \
             | tee coverage-commander.txt
           head -1 coverage.txt >> "$GITHUB_STEP_SUMMARY"
           head -1 coverage-commander.txt >> "$GITHUB_STEP_SUMMARY"
@@ -218,8 +218,8 @@ jobs:
         run: docker image ls forge:ci-amd64
       - name: Service tests (offline)
         run: python3 -m unittest discover -s docker/forge -p 'test_*.py' -v
-      # Floors: what Forge 2.0.15 reached on 2026-10-21, less a little room for new sets Forge
-      # has not caught up with. Commander 99.71% (the 94 it lacks are Unfinity sticker and
+      # Floors: what Forge 2.0.15 reached on 2026-10-21, less about 0.1% (some 35 cards) of room
+      # for new sets Forge has not caught up with. Commander 99.71% (the 94 it lacks are Unfinity sticker and
       # Attraction cards); any format 99.60% (plus Arena-only Alchemy cards). A failure blocks
       # only this image; the published one stays as it is.
       - name: Coverage gate (cards legal in at least one format, and in Commander)
@@ -228,7 +228,7 @@ jobs:
           docker run --rm -v "$PWD/docker/forge/scryfall-legal.json:/tmp/legal.json:ro" -w /app forge:ci-amd64 \
             python3 coverage.py /tmp/legal.json 99.5 | tee coverage.txt
           docker run --rm -v "$PWD/docker/forge/scryfall-commander.json:/tmp/commander.json:ro" -w /app \
-            forge:ci-amd64 python3 coverage.py /tmp/commander.json 99.7 "Commander-legal cards" \
+            forge:ci-amd64 python3 coverage.py /tmp/commander.json 99.6 "Commander-legal cards" \
             | tee coverage-commander.txt
           head -1 coverage.txt >> "$GITHUB_STEP_SUMMARY"
           head -1 coverage-commander.txt >> "$GITHUB_STEP_SUMMARY"

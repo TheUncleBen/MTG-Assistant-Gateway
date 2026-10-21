@@ -20,8 +20,9 @@ Endpoints (JSON):
   POST   /check           {"names": [...]} -> each name's spelling in Forge's card list, or null
   POST   /jobs            {"decks": [{"commander": [...], "main": [[count, name], ...]}], "games": n,
                            "seed"?: s, "parallel"?: p}
-                          or a solo test: {"solo": {"opponents"?: 1-3, "until_turn"?: 1-30}, "decks": [one
-                          deck], ...}: the deck plays against opponents who do nothing (solo_opponent)
+                          or a solo test: {"solo": {"opponents"?: 1-3, "until_turn"?: 1-30, "game_seconds"?:
+                          10-FORGE_GAME_SECONDS}, "decks": [one deck], ...}: the deck plays against
+                          opponents who do nothing (solo_opponent)
   GET    /jobs/<id>       state, games done, per-game winners, cards Forge could not load
   DELETE /jobs/<id>       stop a queued or running job
 """
@@ -198,6 +199,7 @@ SOLO_COMMANDER = "Progenitus"
 SOLO_LAND = "Wastes"
 SOLO_MAX_OPPONENTS = 3
 SOLO_MAX_TURN = 30
+SOLO_MIN_SECONDS = 10  # the shortest time limit a solo game may ask for (FORGE_GAME_SECONDS is the longest)
 # Forge's game log lines a solo test reads (Forge 2.0.15, sim mode without -q), for seat D1 or
 # its opponents D2 to D4:
 #   "Turn: Turn 13 (Ai(1)-D1)"
@@ -233,7 +235,8 @@ class SoloGame:
         self.until_turn = until_turn
         self.turn = 0
         self.life = {seat: life for seat in range(2, 2 + opponents)}
-        self.cmdr = {seat: 0 for seat in self.life}
+        # commander damage per opponent and commander: 21 from one commander puts a player out
+        self.cmdr: dict[tuple[int, str], int] = {}
         self.out: set[int] = set()
         self.lands: list[int] = []
         self.casts: list[int] = []
@@ -243,6 +246,7 @@ class SoloGame:
         self.first_out_turn: int | None = None
         self.all_out_turn: int | None = None
         self.past_limit = False
+        self.began = False  # the first turn has started: what follows is the game, not loading
 
     def _at(self, series: list[int], n: int) -> None:
         i = max(self.turn, 1) - 1
@@ -261,15 +265,20 @@ class SoloGame:
             self.all_out_turn = turn
 
     def feed(self, line: str) -> None:
-        """Read one log line. Sets ``past_limit`` when the deck's turn after ``until_turn`` begins."""
+        """Read one log line. Sets ``past_limit`` when the deck's turn after ``until_turn`` begins;
+        what happens from then on is past the solo test's last turn and is not counted."""
         m = SOLO_TURN.match(line)
         if m:
+            self.began = True
             if m.group("who").endswith("-D1"):
                 self.turn += 1
                 if self.turn > self.until_turn:
                     self.past_limit = True
+                    return
                 for series in (self.lands, self.casts, self.damage):
                     self._at(series, 0)
+            return
+        if self.past_limit:
             return
         m = SOLO_KEPT.match(line)
         if m:
@@ -297,10 +306,10 @@ class SoloGame:
             return
         m = SOLO_COMBAT.match(line)
         if m and norm(m.group("card")) in self.commanders:
-            seat = int(m.group("seat"))
-            if seat in self.cmdr:
-                self.cmdr[seat] += int(m.group("n"))
-                if self.cmdr[seat] >= 21:
+            seat, key = int(m.group("seat")), (int(m.group("seat")), norm(m.group("card")))
+            if seat in self.life:
+                self.cmdr[key] = self.cmdr.get(key, 0) + int(m.group("n"))
+                if self.cmdr[key] >= 21:
                     self._out(seat)
 
     def view(self) -> dict[str, Any]:
@@ -545,7 +554,7 @@ def run_slice(job: Job, index: int, work: Path, names: list[str], slot: int) -> 
         "-n",
         str(job.slices[index]),
         "-c",
-        str(GAME_SECONDS),
+        str((job.solo or {}).get("game_seconds", GAME_SECONDS)),
         *(["-s", str(seed)] if seed is not None else []),
         # A solo test reads the game log (SoloGame); other jobs need only the results.
         *([] if job.solo else ["-q"]),
@@ -569,48 +578,32 @@ def run_slice(job: Job, index: int, work: Path, names: list[str], slot: int) -> 
     stopped_slow = False
     outcome: dict[str, Any] = {}  # the turn and each loser's reason, for the next result line
     solo = new_solo(job) if job.solo else None
-    began = time.time()
     assert proc.stdout is not None
     for raw in proc.stdout:
         line = raw.rstrip("\n")
         if not line.strip():
             continue
         if solo is not None:
+            # Forge prints a game's log only once the game has ended (or its time limit stopped it),
+            # so a solo game plays on past ``until_turn``; what comes after that turn isn't counted.
             solo.feed(line)
-            if solo.past_limit:
-                # The deck's turn after the last one asked for: the game is over for the solo test.
-                # The slice is one game (SLICE_GAMES), so stopping its Forge ends only this game.
-                _stop(proc)
-                with job.lock:
-                    job.results.append(
-                        {
-                            "game": offset + 1,
-                            "ms": int((time.time() - began) * 1000),
-                            "winner": None,
-                            "draw": False,
-                            "turn_limit": True,
-                            "solo": solo.view(),
-                        }
-                    )
-                    job.tail = (job.tail + [f"{tag}stopped after turn {solo.until_turn}"])[-80:]
-                solo = None
-                continue
         turn, lost = OUTCOME_TURN.search(line), OUTCOME_LOST.search(line)
         if turn:
             outcome["turn"] = int(turn.group("turn"))
         elif lost:
             outcome.setdefault("lost", {})[lost.group("seat")] = lost.group("why").strip()[:120]
         result = parse_result(line)
-        if result and job.solo and solo is None:
-            result = None  # the game was already stopped at its last turn
         if result:
             result["game"] += offset
             result.update(outcome)
             outcome = {}
             if solo is not None:
-                result["solo"] = solo.view()
-                if result.get("winner") == 1 and result["solo"]["won_turn"] is None:
-                    result["solo"]["won_turn"] = max(solo.turn, 1)  # won another way (poison, a card)
+                view = solo.view()
+                if result.get("winner") == 1 and view["won_turn"] is None and not solo.past_limit:
+                    view["won_turn"] = max(solo.turn, 1)  # won another way (poison, a card)
+                if solo.past_limit and view["won_turn"] is None:
+                    result["turn_limit"] = True  # not won by the solo test's last turn
+                result["solo"] = view
                 solo = new_solo(job)
             if stopped_slow:
                 # Forge ends a game that runs past its time limit as a draw; count it as one
@@ -626,12 +619,14 @@ def run_slice(job: Job, index: int, work: Path, names: list[str], slot: int) -> 
                 stopped_slow = True
             if result:
                 job.results.append(result)
-            elif LOAD_PROBLEM.search(line) and line.strip()[:300] not in job.load_problems:
+            elif (
+                not (solo is not None and solo.began)  # a solo game's own log is not a load problem
+                and LOAD_PROBLEM.search(line)
+                and line.strip()[:300] not in job.load_problems
+            ):
                 job.load_problems.append(line.strip()[:300])
     code = proc.wait()
     proc.stdout.close()
-    if job.solo and code != 0 and any(r.get("turn_limit") and r["game"] == offset + 1 for r in job.results):
-        code = 0  # stopped by the solo test's turn limit, not a failure
     with job.lock:
         job.procs.pop(index, None)
         job.slice_state[index] = "done" if code == 0 else "failed"
@@ -642,14 +637,6 @@ def new_solo(job: Job) -> SoloGame:
     life = 40 if job.format == "Commander" else 20
     assert job.solo is not None
     return SoloGame(job.decks[0]["commander"], job.solo["opponents"], life, job.solo["until_turn"])
-
-
-def _stop(proc: subprocess.Popen[str]) -> None:
-    if proc.poll() is None:
-        try:
-            os.killpg(proc.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
 
 
 def run_job(job: Job, slots: list[int] | None = None) -> None:
@@ -818,13 +805,18 @@ def validate_solo(body: dict[str, Any], fmt: str) -> dict[str, int] | None:
         raise ValueError("solo is an object with opponents and until_turn")
     opponents = solo.get("opponents", SOLO_MAX_OPPONENTS if fmt == "Commander" else 1)
     until = solo.get("until_turn", 10)
-    for value, top, name in (
-        (opponents, SOLO_MAX_OPPONENTS, "opponents"),
-        (until, SOLO_MAX_TURN, "until_turn"),
+    seconds = solo.get("game_seconds", GAME_SECONDS)
+    for value, low, top, name in (
+        (opponents, 1, SOLO_MAX_OPPONENTS, "opponents"),
+        (until, 1, SOLO_MAX_TURN, "until_turn"),
+        (seconds, min(SOLO_MIN_SECONDS, GAME_SECONDS), GAME_SECONDS, "game_seconds"),
     ):
-        if not isinstance(value, int) or isinstance(value, bool) or not 1 <= value <= top:
-            raise ValueError(f"solo {name} must be a whole number from 1 to {top}")
-    return {"opponents": opponents, "until_turn": until}
+        if not isinstance(value, int) or isinstance(value, bool) or not low <= value <= top:
+            raise ValueError(f"solo {name} must be a whole number from {low} to {top}")
+    out = {"opponents": opponents, "until_turn": until}
+    if seconds != GAME_SECONDS:
+        out["game_seconds"] = seconds
+    return out
 
 
 def validate(body: dict[str, Any]) -> tuple[list[dict[str, Any]], int, str, list[str]]:

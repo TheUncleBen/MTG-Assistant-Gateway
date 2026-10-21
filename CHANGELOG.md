@@ -10,9 +10,9 @@ with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 ## [0.7.38] - unreleased
 
 The solo test plays far more of a deck's cards with their effect. It now reads the common card
-text it used to skip (drawing, ramp, tokens, damage, anthems, cost reducers and more), so a
-typical Commander precon goes from about a third of its cards played with their effect to about
-half. Removal, board wipes and counterspells, which have nothing to hit in a solo test, are set
+text it used to skip (drawing, ramp, tokens, damage, anthems, cost reducers and more), so across
+Forge's 85 recent Commander precons, about a third of a deck's cards played with their effect
+before and about half do now. Removal, board wipes and counterspells, which have nothing to hit in a solo test, are set
 aside and said so, instead of counting against the deck.
 
 ### Upgrade notes
@@ -25,7 +25,7 @@ aside and said so, instead of counting against the deck.
 ### Added
 - **[docs/HARDWARE.md](docs/HARDWARE.md):** the machine you need, with and without Forge, and how
   long tests took on the machines we timed.
-- **Cards Forge cannot play**, listed again in [docs/CAPABILITIES.md](docs/CAPABILITIES.md): the
+- **Cards Forge cannot play**, now listed in [docs/CAPABILITIES.md](docs/CAPABILITIES.md): the
   Unfinity sticker and Attraction cards, and Alchemy cards that are not Commander-legal.
 
 ### Changed
@@ -33,16 +33,17 @@ aside and said so, instead of counting against the deck.
   creature tokens, deal damage or drain opponents, add +1/+1 counters, fetch lands or cards, make
   extra mana or extra combats, pump your creatures, give haste, let you play more lands, lower
   costs or double tokens now do that in the solo test, from when they enter, when you cast
-  spells, at upkeep, in combat, or from an ability with a plain cost. Prowess, the monarch, double
-  strike and defender count too. Cards with hybrid or Phyrexian mana costs are cast.
+  spells, at upkeep, in combat, or from an ability with a plain cost. Prowess, double strike and
+  defender count too, and the monarch's extra card is drawn at your upkeep. Cards with hybrid or Phyrexian mana costs are cast.
 - A permanent whose text the solo test can't fully read is still cast, and does the parts it
-  can read; the report names what it left out. Before, any card with removal or a counterspell
+  can read, unless the part it can't read limits the rest (such as "only once each turn"): then
+  it is cast without its effect. The report names what it left out. Before, any card with removal or a counterspell
   in its text was never cast at all, even a creature.
 - Removal, board wipes and counterspells are listed as set aside on purpose, not as cards the
   solo test can't play.
-- Forge's build check now also measures the cards legal in Commander, and fails below 99.7% of
+- Forge's build check now also measures the cards legal in Commander, and fails below 99.6% of
   them. Today it plays 99.71% of Commander-legal cards and 99.60% of all cards legal anywhere.
-- Forge games start a little faster (about 6% per game in our timing).
+- Forge games run a little faster (about 6% per game on the x86 machine we timed).
 
 ## [0.7.37] - unreleased
 

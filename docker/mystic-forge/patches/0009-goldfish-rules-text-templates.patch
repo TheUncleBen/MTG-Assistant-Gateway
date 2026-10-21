@@ -29,6 +29,12 @@ This patch:
   spell whose whole effect is interaction stays uncast, as before; a card
   with an unknown sentence still needs annotation but plays what was read
   (Derived.unread lists the rest, and goldfish_annotate shows both);
+- a sentence that limits the others and is not read ("Activate only once
+  each turn", "This ability triggers only once each turn", "If you do",
+  a keyword label such as Boast or Exhaust whose limit is in its reminder
+  text) keeps the read parts from playing: such a card is a body that
+  asks for a model, so no limit is silently dropped; only real ability
+  words (Landfall, Raid, ...) are stripped as labels;
 - permanents that _d9_class set aside (sacrifice and life-payment costs,
   coin flips) are now cast and asked for instead of never cast;
 - hybrid and Phyrexian costs are paid with their first colour (noted)
@@ -49,7 +55,7 @@ Upstream: Kautiontape/mystic-forge at dd82cd1 (main, 2026-10-03) has no
 such reader. Needs patches 0001-0008 applied first.
 
 diff --git a/mystic_forge/goldfish/autoderive.py b/mystic_forge/goldfish/autoderive.py
-index 5d34089..a1be543 100644
+index 5d34089..f5b5b5d 100644
 --- a/mystic_forge/goldfish/autoderive.py
 +++ b/mystic_forge/goldfish/autoderive.py
 @@ -27,10 +27,12 @@ from __future__ import annotations
@@ -128,7 +134,7 @@ index 5d34089..a1be543 100644
  
      if scope_class is not None:
          pass                                          # classified above, not asked
-@@ -428,13 +450,35 @@ def _derive_one(raw: dict) -> Derived:
+@@ -428,13 +450,36 @@ def _derive_one(raw: dict) -> Derived:
          ann = Annotation(name=name, grants=grants)
          if _equipment_extra_text(stripped):
              notes.append("equipment-extra: additional ability text not modeled")
@@ -162,13 +168,14 @@ index 5d34089..a1be543 100644
 +        else:
 +            needs = True
 +            unread = list(reading.unknown)
-+            if parts is not None:
++            limited = any(rules_text.LIMITING.search(u) for u in reading.unknown)
++            if parts is not None and not limited:
 +                ann = parts                      # plays what was read
 +                notes.extend(reading.notes)
  
      data = CardData(name=name, cost=cost, types=types, power=power,
                      toughness=toughness, keywords=keywords, produces=produces,
-@@ -443,7 +487,25 @@ def _derive_one(raw: dict) -> Derived:
+@@ -443,7 +488,25 @@ def _derive_one(raw: dict) -> Derived:
      return Derived(card=merge_card(data, ann, scope_class),
                     auto_annotated=auto, needs_annotation=needs,
                     oracle=oracle,
@@ -234,10 +241,10 @@ index 426e428..eda4038 100644
          eliminated: list[int] = []
 diff --git a/mystic_forge/goldfish/rules_text.py b/mystic_forge/goldfish/rules_text.py
 new file mode 100644
-index 0000000..50da38b
+index 0000000..430d2f8
 --- /dev/null
 +++ b/mystic_forge/goldfish/rules_text.py
-@@ -0,0 +1,502 @@
+@@ -0,0 +1,542 @@
 +"""Rules-text templates: common card sentences read into the annotation DSL.
 +
 +autoderive's first-match branches model a card only when the whole card is
@@ -263,6 +270,7 @@ index 0000000..50da38b
 +from __future__ import annotations
 +
 +import re
++from functools import lru_cache
 +from dataclasses import dataclass, field
 +
 +NUM_WORDS = {"a": 1, "an": 1, "one": 1, "two": 2, "three": 3, "four": 4,
@@ -321,9 +329,7 @@ index 0000000..50da38b
 +    r"CARDNAME can't block",
 +    r"CARDNAME can't be (blocked|countered)( except by [^.]*)?",
 +    r"this spell can't be countered",
-+    r"activate only (as a sorcery|once each turn|during your turn)",
-+    r"activate only as a sorcery and only once each turn",
-+    r"this ability triggers only once each turn",
++    r"activate only (as a sorcery|during your turn)",
 +    r"you have no maximum hand size",
 +    r"you may choose new targets for the copy",
 +    r"CARDNAME attacks each combat if able",
@@ -523,9 +529,26 @@ index 0000000..50da38b
 +    return [{"do": "extra_combat"}]
 +
 +
++# An effect joined from more parts than this is not read (and the search stays short).
++MAX_JOINS = 6
++
++
 +def read_effect(text: str) -> list | None:
 +    """DSL verb dicts (no ``on``) for one effect clause, or None."""
 +    text = text.strip().rstrip(".")
++    if text.count(" and ") + text.count(", then ") > MAX_JOINS:
++        return None
++    found = _read_effect(text)
++    return [dict(v) for v in found] if found is not None else None
++
++
++@lru_cache(maxsize=4096)
++def _read_effect(text: str) -> tuple | None:
++    found = _read_effect_uncached(text)
++    return tuple(found) if found is not None else None
++
++
++def _read_effect_uncached(text: str) -> list | None:
 +    for pat, fn in _EFFECTS:
 +        m = pat.match(text)
 +        if m:
@@ -533,9 +556,9 @@ index 0000000..50da38b
 +    for sep in (", then ", " and "):
 +        if sep in text:
 +            left, right = text.split(sep, 1)
-+            a, b = read_effect(left), read_effect(right)
++            a, b = _read_effect(left.strip().rstrip(".")), _read_effect(right.strip().rstrip("."))
 +            if a is not None and b is not None:
-+                return a + b
++                return list(a) + list(b)
 +    return None
 +
 +
@@ -560,7 +583,27 @@ index 0000000..50da38b
 +_HEADS = [(re.compile(r"^" + p + r", (.+)$", re.IGNORECASE), ev) for p, ev in _TRIGGER_HEADS]
 +_DIES = re.compile(r"^(when|whenever) [^,]*(dies|is put into (a|your) graveyard)\b",
 +                   re.IGNORECASE)
-+_ABILITY_WORD = re.compile(r"^[A-Z][a-z' ]+ — ")
++# Ability words (the label before "—" that has no rules meaning; the sentence after it says it
++# all). Any other label (Boast, Exhaust, Max speed) is a keyword whose limit is in its reminder
++# text, which normalise drops, so its sentence is left unread.
++ABILITY_WORDS = frozenset((
++    "adamant", "addendum", "alliance", "battalion", "bloodrush", "celebration", "channel",
++    "chroma", "cohort", "constellation", "converge", "corrupted", "council's dilemma", "coven",
++    "delirium", "descend 4", "descend 8", "domain", "eerie", "eminence", "enrage",
++    "fateful hour", "fathomless descent", "ferocious", "flurry", "formidable", "grandeur",
++    "hellbent", "heroic", "imprint", "inspired", "join forces", "kinship", "landfall",
++    "lieutenant", "magecraft", "metalcraft", "morbid", "pack tactics", "paradox", "parley",
++    "radiance", "raid", "rally", "revolt", "secret council", "spell mastery", "strive",
++    "survival", "sweep", "tempting offer", "threshold", "undergrowth", "valiant",
++    "will of the council",
++))
++_ABILITY_WORD = re.compile(r"^([A-Za-z0-9' ]+) — ")
++_ENTERS_OR_DIES = re.compile(r"^(when|whenever) CARDNAME enters( the battlefield)? or dies, ",
++                             re.IGNORECASE)
++# An unread sentence that limits or changes the card's other sentences: what was read must not
++# play without it.
++LIMITING = re.compile(r"^(activate |this ability |if you do|otherwise|instead|spend this mana "
++                      r"only|[^—]+ — )|\bonly once\b", re.IGNORECASE)
 +_STATIC = (
 +    (re.compile(rf"^(other )?creatures you control get {PT}( and have ([a-z ,]+))?$",
 +                re.IGNORECASE), "anthem"),
@@ -614,7 +657,9 @@ index 0000000..50da38b
 +
 +def read_sentence(s: str, out: Reading, *, permanent: bool) -> str:
 +    """Read one sentence into ``out``; returns its outcome."""
-+    s = _ABILITY_WORD.sub("", s).strip()
++    label = _ABILITY_WORD.match(s)
++    if label and label.group(1).lower() in ABILITY_WORDS:
++        s = s[label.end():].strip()
 +    low = s.lower()
 +    if _keyword_sentence(s, out):
 +        return "model"
@@ -627,7 +672,7 @@ index 0000000..50da38b
 +        out.triggers.append({"on": "upkeep", "do": "draw", "count": 1})
 +        out.notes.append(MONARCH_NOTE)
 +        return "model"
-+    if _DIES.match(s):
++    if _DIES.match(s) and not _ENTERS_OR_DIES.match(s):
 +        out.notes.append(DIES_NOTE)
 +        return "free"
 +    for pat, kind in _STATIC:
@@ -677,6 +722,8 @@ index 0000000..50da38b
 +                out.triggers.append(t)
 +        if events == ("attack",):
 +            out.notes.append(ATTACK_NOTE)
++        if _ENTERS_OR_DIES.match(s):
++            out.notes.append(DIES_NOTE)
 +        if " or attacks" in low and events == ("etb",):
 +            for v in verbs:
 +                out.triggers.append({"on": "attack", **v})
@@ -741,7 +788,7 @@ index 0000000..50da38b
 +    out.notes = list(dict.fromkeys(out.notes))
 +    return out
 diff --git a/server.py b/server.py
-index ce121b9..da597de 100644
+index ce121b9..aeb6eee 100644
 --- a/server.py
 +++ b/server.py
 @@ -4104,6 +4104,10 @@ def _goldfish_summary(d: autoderive.Derived) -> str:
@@ -755,7 +802,7 @@ index ce121b9..da597de 100644
      if card.is_creature:
          kw = ", ".join(sorted(data.keywords))
          base = f"vanilla {data.power}/{data.toughness}"
-@@ -4111,6 +4115,23 @@ def _goldfish_summary(d: autoderive.Derived) -> str:
+@@ -4111,6 +4115,24 @@ def _goldfish_summary(d: autoderive.Derived) -> str:
      return "modeled from card data"
  
  
@@ -763,9 +810,10 @@ index ce121b9..da597de 100644
 +    """The parts of a model read from rules text (rules_text.py), in one line."""
 +    bits: list[str] = []
 +    for t in ann.triggers:
-+        what = f"{t.do} {t.count}" if t.do not in ("pump", "create_token") else (
-+            f"{t.do} {t.count}x {t.power:+d}/{t.toughness:+d}" if t.power is not None
-+            else t.do)
++        count = f" {t.count}" if t.count is not None else ""
++        what = f"{t.do}{count}" if t.do not in ("pump", "create_token") else (
++            f"{t.do}{count}{'x' if count else ''} {t.power:+d}/{t.toughness:+d}"
++            if t.power is not None else t.do)
 +        bits.append(f"on {t.on}: {what}")
 +    for st in ann.statics:
 +        bits.append(f"static {st.kind}" + (f" {st.power:+d}/{st.toughness:+d}"
@@ -779,7 +827,7 @@ index ce121b9..da597de 100644
  # ── Goldfish Input Models ────────────────────────────────────────────────────
  
  
-@@ -4235,7 +4256,9 @@ async def goldfish_annotate(params: GoldfishAnnotateInput) -> str:
+@@ -4235,7 +4257,9 @@ async def goldfish_annotate(params: GoldfishAnnotateInput) -> str:
          kinds = sorted({n.split(":", 1)[0] for n in d.approx_notes})
          suffix = f"  [{', '.join(kinds)}]" if kinds else ""
          if d.auto_annotated:
@@ -790,7 +838,7 @@ index ce121b9..da597de 100644
          elif d.needs_annotation:
              needs.append((raw, d))
          else:
-@@ -4280,7 +4303,8 @@ async def goldfish_annotate(params: GoldfishAnnotateInput) -> str:
+@@ -4280,7 +4304,8 @@ async def goldfish_annotate(params: GoldfishAnnotateInput) -> str:
      parts.append("")
      parts.append(f"## Out of scope ({_goldfish_n_cards(out_total)})")
      if out_total:
@@ -800,7 +848,7 @@ index ce121b9..da597de 100644
          for cls in sorted(out_by_class):
              parts.append(f"**{cls}** — {_GOLDFISH_D9_NOTES.get(cls, cls)}")
              parts.extend(f"- {n}" for n in out_by_class[cls])
-@@ -4301,6 +4325,11 @@ async def goldfish_annotate(params: GoldfishAnnotateInput) -> str:
+@@ -4301,6 +4326,11 @@ async def goldfish_annotate(params: GoldfishAnnotateInput) -> str:
          parts.append("")
          parts.append(f"### {d.card.name} — {mana} — {raw.get('type_line', '?')}")
          parts.append(d.oracle or "(no oracle text)")
@@ -812,7 +860,7 @@ index ce121b9..da597de 100644
  
      parts.append("")
      parts.append("### Registry cheat-sheet (unknown names are rejected)")
-@@ -4532,7 +4561,7 @@ async def _goldfish_prepare(
+@@ -4532,7 +4562,7 @@ async def _goldfish_prepare(
          else:
              cards_pool[req_name] = d.card
              card_scopes[req_name] = ("unrecognized" if d.needs_annotation
@@ -821,7 +869,7 @@ index ce121b9..da597de 100644
          if d.approx_notes:
              approx_by_card[req_name] = list(d.approx_notes)
      unmatched_anns = sorted(set(client_anns) - matched_anns)
-@@ -4636,8 +4665,9 @@ def _goldfish_honesty_lines(honesty: dict, approx_by_card: dict[str, list[str]],
+@@ -4636,8 +4666,9 @@ def _goldfish_honesty_lines(honesty: dict, approx_by_card: dict[str, list[str]],
      lines = [heading]
      oos = honesty["out_of_scope"]
      n_oos = sum(len(v) for v in oos.values())
@@ -862,10 +910,10 @@ index aadb177..c068ab5 100644
  # ── Vanilla creatures ───────────────────────────────────────────────────────
 diff --git a/tests/goldfish/test_known_answers.py b/tests/goldfish/test_known_answers.py
 new file mode 100644
-index 0000000..b545201
+index 0000000..5c1697b
 --- /dev/null
 +++ b/tests/goldfish/test_known_answers.py
-@@ -0,0 +1,255 @@
+@@ -0,0 +1,307 @@
 +"""Known-answer table: cases whose result was worked out by hand.
 +
 +Part 1 plays whole games where draws cannot matter (a commander and 99 copies
@@ -1121,3 +1169,55 @@ index 0000000..b545201
 +                       "Flying\nVigilance (Attacking doesn't cause this creature to tap.)",
 +                       "4", "4", ["Flying", "Vigilance"]))
 +    assert d.auto_annotated and d.card.ann is None
++
++
++LIMITED = [
++    # A limit the simulator can't keep (a keyword label or "only once"): the card must not
++    # play its read parts without the limit, so it asks for a model and plays as a body.
++    _card("Boast Card", "Creature — Human Warrior", "{1}{R}",
++          "Boast — {1}{R}: This creature deals 1 damage to any target. (Activate only if "
++          "this creature attacked this turn and only once each turn.)", "2", "1"),
++    _card("Exhaust Card", "Creature — Elf", "{1}{G}",
++          "Exhaust — {2}{G}: Put three +1/+1 counters on this creature. (Activate each "
++          "exhaust ability only once.)", "2", "2"),
++    _card("Max Speed Card", "Artifact", "{2}",
++          "Max speed — {T}: Draw a card."),
++    _card("Once Card", "Artifact", "{2}", "{2}: Draw a card. Activate only once each turn."),
++    _card("Once Trigger Card", "Enchantment", "{1}{U}",
++          "Whenever you cast a noncreature spell, draw a card. This ability triggers only "
++          "once each turn."),
++    _card("Graveyard Card", "Artifact", "{2}",
++          "{1}, {T}: Draw a card. Activate only if seven or more cards are in your graveyard."),
++]
++
++
++@pytest.mark.parametrize("card", LIMITED, ids=[c["name"] for c in LIMITED])
++def test_a_limit_that_is_not_read_keeps_the_parts_from_playing(card):
++    d = _derived(card)
++    assert d.needs_annotation and d.unread
++    assert d.card.ann is None or not (d.card.ann.triggers or d.card.ann.activated)
++
++
++def test_landfall_is_an_ability_word_and_still_read():
++    d = _derived(_card("Landfall Card", "Creature — Elemental", "{2}{G}",
++                       "Landfall — Whenever a land you control enters, you gain 1 life.",
++                       "2", "2"))
++    assert d.auto_annotated and not d.needs_annotation, d.unread
++
++
++def test_enters_or_dies_reads_the_enters_part():
++    d = _derived(_card("Twice Card", "Creature — Spirit", "{2}{W}",
++                       "When this creature enters or dies, create a 1/1 white Spirit "
++                       "creature token with flying.", "1", "1"))
++    assert d.auto_annotated and not d.needs_annotation, d.unread
++    assert [t.on for t in d.card.ann.triggers] == ["etb"]
++    assert any(n.startswith("no-deaths:") for n in d.approx_notes)
++
++
++def test_long_and_chains_read_quickly():
++    import time
++    from mystic_forge.goldfish import rules_text
++    t = time.monotonic()
++    assert rules_text.read_effect("x, then y and " * 40 + "z") is None
++    assert rules_text.read_effect(" and ".join(["x"] * 2000)) is None
++    assert time.monotonic() - t < 1.0
