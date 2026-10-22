@@ -94,7 +94,7 @@ async def test_import_and_export_round_trip_archidekt_codes(stack: Stack) -> Non
         assert rows["Sol Ring"][3:5] == ["D", "JP"] and rows["Opt"][3:5] == ["LP", "CS"]
         # the page keeps the gateway's own labels
         page = await b.http.get("/collection?view=list", headers=NAV)
-        assert "<span class='pill cond'>DMG</span>" in page.text
+        assert "role='cell'>Damaged (DMG)</span>" in page.text
         # a language Archidekt's collection has no code for is imported as English, and named
         odd = "Name,Language\nForest,XX\n"
         r = await b.http.post("/collection", data={"csrf": csrf, "action": "import", "text": odd})

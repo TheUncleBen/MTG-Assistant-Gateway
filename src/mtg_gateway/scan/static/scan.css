@@ -114,6 +114,19 @@
 .scan .sheet-tools{display:flex;gap:.6rem;align-items:center;margin:.6rem 0 .25rem}
 .scan .sheet-tools input{flex:1 1 auto;min-width:0}
 .scan .sheet-tools .switch{margin-left:0;flex:0 0 auto}
+.scan .sheet-tools .cardsize,.scan .list-tools .cardsize{display:inline-flex;align-items:center;gap:.5rem;flex:0 0 auto}
+.scan .sheet-tools .cardsize .lbl{display:none}
+.scan .list-tools{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:.5rem .75rem;margin:.5rem 0 .25rem}
+.scan .list-tools .summary{margin:0;flex:1 1 12rem}
+.scan .list-tools .cardsize .lbl{color:var(--text-muted);font-size:.9rem}
+@media (max-width:420px){ .scan .sheet-tools{flex-wrap:wrap} .scan .sheet-tools input{flex-basis:100%} }
+/* the pictures follow the one card size (R-175): the list rows and the picker's tiles */
+.scan ul.items .img-fallback{width:2.6rem;height:3.6rem;flex:0 0 auto;border-radius:var(--radius-panel)}
+html[data-card-size] .scan ul.items img,html[data-card-size] .scan ul.items .thumb,
+html[data-card-size] .scan ul.items .img-fallback{
+  width:calc(2.6rem * var(--thumb-scale));height:calc(3.6rem * var(--thumb-scale))}
+html[data-card-size=s] .scan .tiles{--tile:6rem}
+html[data-card-size=l] .scan .tiles{--tile:10rem}
 .scan .pick-status{margin:.2rem 0 .5rem}
 /* The scrolling box wraps the grid: Chromium sizes the rows of a grid that is itself the scroll container
    to the box, not to the tiles, so the tiles would overlap. Tiles are a fixed width with a fixed-height
@@ -148,6 +161,8 @@ body.picker-open{overflow:hidden}
   .scan .picker{align-items:center;padding:1.5rem}
   .scan .sheet{max-width:56rem;max-height:86vh;border-bottom:1px solid var(--border);border-radius:var(--radius-panel);padding:1rem 1.25rem}
   .scan .tiles{--tile:8.6rem}
+  html[data-card-size=s] .scan .tiles{--tile:6.8rem}
+  html[data-card-size=l] .scan .tiles{--tile:11.5rem}
 }
 
 /* camera panel: one column */

@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The camera sheet's Torch and Auto toggles: the plain 1dp outline while off; while on, a light
+     tint with a 2dp bright outline, and the button's words say On or Off. The orange fill stays the
+     Shoot button's alone (one orange on the sheet), so the state is told by shape, tint and words. -->
+<ripple xmlns:android="http://schemas.android.com/apk/res/android" android:color="@color/ripple_on_dark">
+    <item>
+        <selector>
+            <item android:state_checked="true" android:state_enabled="false">
+                <shape android:shape="rectangle">
+                    <solid android:color="@color/surface_2" />
+                    <corners android:radius="3dp" />
+                </shape>
+            </item>
+            <item android:state_checked="true">
+                <shape android:shape="rectangle">
+                    <solid android:color="@color/cam_tint_on" />
+                    <stroke android:width="2dp" android:color="@color/cam_text" />
+                    <corners android:radius="3dp" />
+                </shape>
+            </item>
+            <item android:state_enabled="false">
+                <shape android:shape="rectangle">
+                    <stroke android:width="1dp" android:color="@color/cam_border_disabled" />
+                    <corners android:radius="3dp" />
+                </shape>
+            </item>
+            <item>
+                <shape android:shape="rectangle">
+                    <stroke android:width="1dp" android:color="@color/cam_text_muted" />
+                    <corners android:radius="3dp" />
+                </shape>
+            </item>
+        </selector>
+    </item>
+</ripple>

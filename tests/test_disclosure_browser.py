@@ -21,15 +21,13 @@ ORIGIN = "https://gw.test"
 
 
 def _page(read: bool = False) -> str:
-    # The same markup pages._account_body renders around the disclosure (the tick box and hint).
+    # The same markup pages._account_body renders around the disclosure (the tick box; no hint).
     return (
         "<!doctype html><html><body>"
         f"{link_disclosure.form_html(True, read=read)}"
         "<form method='post'><input name='archidekt_login'>"
-        "<label class='check'><input type='checkbox' name='accept_risk' value='1' required "
-        "aria-describedby='accept-risk-hint'> "
+        "<label class='check'><input type='checkbox' name='accept_risk' value='1' required> "
         f"<span>{html.escape(link_disclosure.ACKNOWLEDGE)}</span></label>"
-        f"<p id='accept-risk-hint' hidden>{html.escape(link_disclosure.TICK_HINT)}</p>"
         "<button>Link account</button></form></body></html>"
     )
 
@@ -66,10 +64,9 @@ def test_tick_box_unlocks_only_once_the_detail_is_opened() -> None:
             ctx, page = _open(browser, _page())
             detail = page.locator(f"#{link_disclosure.DETAIL_ID}")
             box = page.locator("input[name=accept_risk]")
-            # folded, box locked, hint shown; the summary stays visible
+            # folded, box locked; the summary stays visible
             assert detail.evaluate("d => d.open") is False
             assert box.is_disabled()
-            assert page.locator("#accept-risk-hint").is_visible()
             assert page.get_by_text(link_disclosure.SUMMARY[1]).is_visible()
             assert not page.get_by_text(link_disclosure.SECTIONS[3][1][0]).is_visible()
             # pressing Link before opening it sends nothing and points at the detail
@@ -84,7 +81,6 @@ def test_tick_box_unlocks_only_once_the_detail_is_opened() -> None:
             page.keyboard.press("Enter")
             page.wait_for_function("() => !document.querySelector('input[name=accept_risk]').disabled")
             assert page.get_by_text(link_disclosure.SECTIONS[3][1][0]).is_visible()
-            assert not page.locator("#accept-risk-hint").is_visible()
             # folding it again does not lock the box again
             page.locator(f"#{link_disclosure.DETAIL_ID} > summary").click()
             assert detail.evaluate("d => d.open") is False
@@ -109,7 +105,6 @@ def test_without_scripts_the_detail_is_open_and_the_box_works() -> None:
             assert box.is_enabled()
             box.check()
             assert box.is_checked()
-            assert not page.locator("#accept-risk-hint").is_visible()
             ctx.close()
         finally:
             browser.close()

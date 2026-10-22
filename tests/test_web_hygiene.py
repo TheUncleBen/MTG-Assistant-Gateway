@@ -309,7 +309,9 @@ async def test_member_can_see_and_disconnect_connected_apps(h: Harness) -> None:
         r = await b.http.post(
             "/account", data={"csrf": csrf, "action": "disconnect", "client_id": first["client_id"]}
         )
-        assert r.status_code == 303 and r.headers["location"] == "/account?ok=disconnected"
+        # the redirect names the app by its id, so the notice can say which app ("Disconnected “Claude”.")
+        assert r.status_code == 303
+        assert r.headers["location"] == f"/account?ok=disconnected&app={first['client_id']}#apps"
         assert (await h.mcp(t1, "tools/list")).status_code == 401
         assert (await h.mcp(t2, "tools/list")).status_code == 200
         # Without the form token nothing happens.

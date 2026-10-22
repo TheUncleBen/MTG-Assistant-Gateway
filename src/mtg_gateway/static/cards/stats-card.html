@@ -125,9 +125,9 @@ ul.facts li b{font-weight:600;text-align:right;overflow-wrap:anywhere}
       v.appendChild(ul);
     }
     var st2 = $("state");
-    if (legal === true) { st2.textContent = "legal"; st2.className = "badge ok"; }
-    else if (problems.length) { st2.textContent = problems.length + (problems.length === 1 ? " problem" : " problems"); st2.className = "badge bad"; }
-    else { st2.textContent = "checked"; st2.className = "badge"; }
+    if (legal === true) B.label(st2, "Legal", "ok", "check");
+    else if (problems.length) B.label(st2, problems.length + (problems.length === 1 ? " problem" : " problems"), "bad", "alert");
+    else B.label(st2, "Checked", "", "check");
   }
   function load(result) {
     var sc = result.structuredContent || {};

@@ -114,7 +114,8 @@ async def test_disclosure_is_shown_in_full_and_must_be_ticked_before_linking(sta
     assert detail in page
     assert page.index("In short") < page.index(detail)
     assert re.search(rf"<script src='{link_disclosure.SCRIPT}\?v=[0-9a-f]{{12}}' defer></script>", page)
-    assert "aria-describedby='accept-risk-hint'" in page and "id='accept-risk-hint' hidden" in page
+    # the tick hint is gone (show, not tell: the fold above the tick says it)
+    assert "accept-risk-hint" not in page
     # the form comes after the disclosure, so it is read first
     assert page.index("archidekt-disclosure") < page.index("name='archidekt_password'")
 

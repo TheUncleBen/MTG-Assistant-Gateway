@@ -150,6 +150,10 @@ class FakeModelsDb(Database):
     def delete_card_model(self, key: str, sub: str) -> bool:
         return self.rows.pop((sub, key), None) is not None
 
+    def card_models_of(self, sub: str) -> list[dict[str, Any]]:
+        mine = [r for (s, _k), r in self.rows.items() if s == sub]
+        return sorted(mine, key=lambda r: (-int(r["updated_at"]), r["name"].casefold()))
+
     def count_card_models(self, sub: str) -> int:
         return sum(1 for s, _ in self.rows if s == sub)
 
@@ -598,6 +602,10 @@ class _Store:
     def delete_card_model(self, key: str, sub: str) -> bool:
         return self.rows.pop((sub, key), None) is not None
 
+    def card_models_of(self, sub: str) -> list[dict[str, Any]]:
+        mine = [r for (s, _k), r in self.rows.items() if s == sub]
+        return sorted(mine, key=lambda r: (-int(r["updated_at"]), r["name"].casefold()))
+
     def count_card_models(self, sub: str) -> int:
         return sum(1 for s, _ in self.rows if s == sub)
 
@@ -684,6 +692,94 @@ async def test_the_adder_removes_a_saved_model_from_the_report_and_through_the_a
         assert off.status_code == 404 and (sub, "sol ring") in store.rows
         quiet = await b.http.get("/history/reports/rep_kept?models=removed", headers=NAV)
         assert "The saved description was removed." not in quiet.text
+    finally:
+        gw.reports.models = real
+        await b.aclose()
+
+
+async def test_my_card_models_lists_only_the_members_own_and_removes_with_a_confirm(
+    stack: Stack, monkeypatch: Any
+) -> None:
+    """My card models (card_models_view): the member's own saved descriptions as a box on the report
+    page and the Goldfish page, and as the page /history/models; another member's never show, on
+    any of them. Remove asks first (the confirm box) and comes back to the page it was opened from
+    with the report page's own notice; another member's description cannot be removed."""
+    h = stack.h
+    b = await linked_browser(stack)
+    gw = h.app.state.gateway
+    real = gw.reports.models
+    store = _Store()
+    gw.reports.models = KeptModels(store)
+    try:
+        sub = gw.db._one("SELECT sub FROM users", ())["sub"]
+        model = json.dumps({"name": "x", "inert": True})
+        store.put_card_model("sol ring", "Sol Ring", model, sub, 1_700_000_000)
+        store.put_card_model("opt", "Opt", model, sub, 1_700_000_500)
+        store.rows[(sub, "opt")]["updated_at"] = 1_700_100_000  # changed later
+        store.put_card_model("arcane signet", "Arcane Signet", model, "someone-else", 1_700_000_000)
+        store.put_card_model("sol ring", "Sol Ring", model, "someone-else", 1_700_000_000)
+        assert [m["name"] for m in gw.reports.models.mine(sub)] == ["Opt", "Sol Ring"]
+        assert gw.reports.models.mine("nobody") == []
+        # the page of its own: the box open, a row per own description, a search box, no editing
+        page = await b.http.get("/history/models", headers=NAV)
+        assert page.status_code == 200, page.text[:300]
+        assert (
+            "id='my-models' role='dialog'" in page.text
+            and "<h2 id='my-models-title'>My card models</h2>" in page.text
+        )
+        rows = page.text.split("<ul class='mm-list'", 1)[1].split("</ul>", 1)[0]
+        assert rows.count("<li data-name=") == 2 and "Arcane Signet" not in page.text
+        assert "class='cardlink' data-card='Sol Ring'" in rows  # the shared card menu's hook
+        assert "<time class='ui-when'" in rows and "changed <time" in rows and "added <time" in rows
+        assert "data-models-filter" in page.text and "Search by card name" in page.text
+        assert "<textarea" not in rows and "<input" not in rows  # no hand editing
+        assert "aria-label='Remove the saved description of Sol Ring'" in rows
+        # someone else's name in ?remove= gets no confirm; an own one does
+        other = await b.http.get("/history/models?remove=Arcane%20Signet", headers=NAV)
+        assert "Remove the saved description of “Arcane Signet”?" not in other.text
+        ask = await b.http.get("/history/models?remove=Sol%20Ring", headers=NAV)
+        assert "<h2 id='rm-mine-sol-ring-title'>Remove the saved description of “Sol Ring”?</h2>" in ask.text
+        assert "name='card' value='Sol Ring'" in ask.text and "action='/history/models/remove'" in ask.text
+        # the Goldfish page and a report page open the same box; another member's never show
+        gf = await b.http.get("/decks/42/goldfish", headers=NAV)
+        assert gf.status_code == 200
+        assert "href='/history/models' data-box-open='my-models'" in gf.text and "id='my-models'" in gf.text
+        assert "Arcane Signet" not in gf.text and gf.text.count("<li data-name=") == 2
+        store_report(gw.db, sub, "rep_mine")
+        row = gw.db._one("SELECT goldfish_json FROM reports WHERE id = 'rep_mine'", ())
+        goldfish = {
+            **json.loads(row["goldfish_json"]),
+            "kept_models": [{"name": "Sol Ring", "model": "a", "changed_at": 1}],
+        }
+        with gw.db.tx() as c:
+            c.execute("UPDATE reports SET goldfish_json = ? WHERE id = 'rep_mine'", (json.dumps(goldfish),))
+        rep = await b.http.get("/history/reports/rep_mine", headers=NAV)
+        assert "data-box-open='my-models'" in rep.text and "id='my-models'" in rep.text
+        assert "Arcane Signet" not in rep.text.split("id='my-models'", 1)[1]
+        assert "cardmodels.js" in rep.text and "cardmodels.js" in gf.text
+        # Remove: the box's form, back to the page it was opened from; nobody else's goes
+        csrf = re.search(r"name='csrf' value='([^']+)'", page.text).group(1)
+        r = await b.http.post("/history/models/remove", data={"card": "Sol Ring", "back": "/history/models"})
+        assert r.status_code == 403 and (sub, "sol ring") in store.rows
+        r = await b.http.post(
+            "/history/models/remove",
+            data={"csrf": csrf, "card": "Arcane Signet", "back": "/decks/42/goldfish"},
+        )
+        assert r.status_code == 303 and r.headers["location"] == "/decks/42/goldfish?models=gone"
+        assert ("someone-else", "arcane signet") in store.rows
+        r = await b.http.post(
+            "/history/models/remove", data={"csrf": csrf, "card": "Sol Ring", "back": "https://evil.test/x"}
+        )
+        assert r.headers["location"] == "/history/models?models=removed"  # an outside address is not followed
+        assert (sub, "sol ring") not in store.rows and ("someone-else", "sol ring") in store.rows
+        after = await b.http.get(r.headers["location"], headers=NAV)
+        assert "The saved description was removed." in after.text and after.text.count("<li data-name=") == 1
+        gf2 = await b.http.get("/decks/42/goldfish?models=removed", headers=NAV)
+        assert "The saved description was removed." in gf2.text
+        # the empty state
+        store.rows.pop((sub, "opt"))
+        empty = await b.http.get("/history/models", headers=NAV)
+        assert "No saved descriptions yet." in empty.text and "data-models-filter" not in empty.text
     finally:
         gw.reports.models = real
         await b.aclose()

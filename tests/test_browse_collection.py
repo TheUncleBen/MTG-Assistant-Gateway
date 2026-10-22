@@ -159,7 +159,7 @@ async def test_collection_page_add_step_remove_and_export(stack: Stack) -> None:
         assert r.status_code == 303, r.text
         assert [r["quantity"] for r in stack.ark.collections["alice"].values()] == [2]
         r = await b.http.get("/collection", headers=NAV)
-        assert "Sol Ring" in r.text and "<b>1</b> entry in your Archidekt collection" in r.text
+        assert "Sol Ring" in r.text and "aria-live='polite'>1 entry</h2>" in r.text
         rid = re.search(r"data-id='([0-9]+)'", r.text).group(1)
         r = await b.http.post("/collection", data={"csrf": csrf, "action": "inc", "id": rid})
         assert r.status_code == 303
@@ -431,7 +431,8 @@ async def test_guide_is_end_user_documentation(stack: Stack) -> None:
             "Add or change cards",
             "Use your collection",
             "Scan a photo of your cards",
-            "What the assistant can do, by tool",
+            "What the assistant can do",
+            "Advanced: tool names",
             "Approval modes and risk levels",
             "Keyboard shortcuts",
             "Approvals, snapshots and backups",

@@ -11,11 +11,12 @@
     <string name="setup_continue">Continue</string>
     <string name="setup_checking">Checking %1$s…</string>
     <string name="setup_unreachable">Could not reach that address. Check the spelling and your connection.</string>
-    <string name="setup_not_gateway">That address answered (HTTP %1$d) but does not look like an MTG gateway.</string>
+    <!-- The HTTP status goes to the log (SetupActivity), not into the message. -->
+    <string name="setup_not_gateway">That address answered, but it does not look like an MTG gateway.</string>
     <!-- GatewayUrl.normalize's reasons (SetupActivity maps GatewayUrl.Problem to these). -->
     <string name="setup_bad_empty">Enter the gateway address.</string>
     <string name="setup_bad_invalid">That is not a valid address.</string>
-    <string name="setup_bad_http">The gateway must be reached over https.</string>
+    <string name="setup_bad_http">The address must start with https://.</string>
     <string name="setup_bad_userinfo">Leave the user name and password out of the address.</string>
 
     <string name="menu_scan">Scan with the app\'s camera</string>
@@ -37,7 +38,8 @@
     <string name="update_other_key">Version %1$s has a different signing key, so it can\'t update this app. See the Android app page.</string>
     <string name="update_download_failed">The update did not download completely. Try again later.</string>
     <string name="update_not_an_app">The downloaded file is not the expected version of this app, so it was not installed.</string>
-    <string name="update_install_failed">The update was not installed (%1$s).</string>
+    <!-- The installer's status and message go to the log (Updater), not into the toast. -->
+    <string name="update_install_failed">The update was not installed. Try again later.</string>
     <string name="update_confirm_failed">Android wants you to confirm the update. Open the app and tap Update again.</string>
     <string name="update_checking">Checking for app updates…</string>
     <string name="fab_label">Menu</string>
@@ -66,7 +68,7 @@
     <string name="download_failed">Could not download %1$s.</string>
     <string name="download_signed_out">Your sign-in has ended. Reload the page, sign in again and retry the download.</string>
     <string name="no_app_for_link">No app can open that link.</string>
-    <string name="sign_in_no_browser">No browser is installed to sign in with. Use "Sign in inside the app instead" on the page.</string>
+    <string name="sign_in_no_browser">No browser is installed to sign in with. Use “Sign in inside the app instead” on the page.</string>
     <string name="sign_in_not_started">That sign-in wasn\'t started here or has expired. Sign in again from the app.</string>
     <string name="camera_permission_needed">Camera permission is needed to scan cards.</string>
     <string name="camera_permission_settings">The camera is off for this app. Allow Camera under Permissions, then try again.</string>
@@ -87,12 +89,18 @@
     <string name="shoot">Shoot</string>
     <string name="done">Done</string>
     <string name="torch">Torch</string>
+    <!-- The Torch and Auto toggles say their state in words (NEW-WORDING 28). -->
+    <string name="torch_state_on">Torch: On</string>
+    <string name="torch_state_off">Torch: Off</string>
+    <string name="auto_state_on">Auto: On</string>
+    <string name="auto_state_off">Auto: Off</string>
     <string name="torch_level">Torch %1$d of %2$d</string>
     <string name="torch_strength">Torch brightness</string>
     <string name="zoom">Zoom</string>
     <string name="exposure">Exposure</string>
     <string name="camera_none">No back camera found.</string>
-    <string name="camera_error">Camera error (%1$d). Close and try again.</string>
+    <!-- The CameraX error code goes to the log (CameraPanel), not into the message. -->
+    <string name="camera_error">The camera stopped working. Close it and try again.</string>
     <string name="status_no_flash">Fill the dashed box with the card, then tap Shoot.</string>
     <string name="status_strength">Torch brightness is adjustable on this phone. Fill the dashed box with the card, then tap Shoot.</string>
     <string name="status_no_strength_old">Torch brightness control needs Android 15. Fill the dashed box with the card, then tap Shoot.</string>

@@ -17,6 +17,7 @@ import threading
 import time
 from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -24,6 +25,14 @@ from urllib.parse import urlparse
 from . import upgrade_backup
 from .cimd import site_of
 from .modes import UNJUDGED
+
+# Database.read_ahead: the links and client names a listing is about to ask for row by row, read
+# in one query each. Context variables, so a read-ahead belongs to the request (task) that made it
+# and never serves another.
+_links_ahead: ContextVar[dict[str, dict[str, list[dict[str, Any]]]] | None] = ContextVar(
+    "links_ahead", default=None
+)
+_names_ahead: ContextVar[dict[str, str | None] | None] = ContextVar("names_ahead", default=None)
 
 logger = logging.getLogger(__name__)
 
@@ -1159,6 +1168,16 @@ class Database:
             for r in rows
         ]
 
+    def member_used_client(self, sub: str, client_id: str | None) -> bool:
+        """Whether ``sub`` ever gave ``client_id`` a token (revoked or not): the Account page names
+        a just-disconnected app only when it was the member's own."""
+        if not client_id:
+            return False
+        return (
+            self._one("SELECT 1 FROM tokens WHERE sub = ? AND client_id = ? LIMIT 1", (sub, client_id))
+            is not None
+        )
+
     def all_user_clients(self) -> dict[str, list[dict[str, Any]]]:
         """user_clients for every member at once (the admin Users page): one query
         for the tokens and one name lookup for all their apps, instead of one per member and app."""
@@ -1234,6 +1253,9 @@ class Database:
         """The registered or published name of an OAuth client, for the audit log; None if unknown."""
         if not client_id:
             return None
+        ahead = _names_ahead.get()
+        if ahead is not None and client_id in ahead:
+            return ahead[client_id]
         info = self.get_client(client_id)
         if info is None:
             row = self._one("SELECT info_json FROM cimd_clients WHERE client_id = ?", (client_id,))
@@ -2361,7 +2383,7 @@ class Database:
             ).fetchall()
             props = self._conn.execute(
                 "SELECT deck_id, created_at FROM proposals WHERE owner_sub = ? "
-                "AND kind IN ('edit', 'details', 'restore', 'create_deck') "
+                "AND kind IN ('edit', 'details', 'categories', 'restore', 'create_deck') "
                 "UNION ALL SELECT deck_id, taken_at FROM snapshots WHERE owner_sub = ? "
                 "AND deck_owner_id IS NULL",
                 (owner_sub, owner_sub),
@@ -2712,6 +2734,8 @@ class Database:
             ).fetchone()
             if owned != 2:
                 return False
+            if _links_ahead.get() is not None:
+                _links_ahead.set(None)  # a listing's read-ahead no longer tells the whole story
             c.execute(
                 "INSERT OR IGNORE INTO proposal_links (proposal_id, kind, other_id, created_at) "
                 "VALUES (?, ?, ?, ?)",
@@ -2719,12 +2743,43 @@ class Database:
             )
             return True
 
+    @contextmanager
+    def read_ahead(
+        self, owner_sub: str, proposal_ids: Iterable[str], client_ids: Iterable[str | None] = ()
+    ) -> Iterator[None]:
+        """Within the block, ``proposal_links(owner_sub, [one of proposal_ids])`` and
+        ``client_name(one of client_ids)`` answer from one query each made here, so a listing
+        of N rows asks the database a fixed number of times instead of several per row. A link
+        written inside the block drops the read-ahead (link_proposals), so nothing stale is served."""
+        ids = [str(i) for i in proposal_ids]
+        by_id: dict[str, list[dict[str, Any]]] = {i: [] for i in ids}
+        # proposal_links reads at most 500 ids at once: read in slices of that size
+        links = [
+            lk for i in range(0, len(ids), 500) for lk in self.proposal_links(owner_sub, ids[i : i + 500])
+        ]
+        for link in links:
+            for side in ("proposal_id", "other_id"):
+                if link[side] in by_id and link not in by_id[link[side]]:
+                    by_id[link[side]].append(link)
+        names = self.client_names(client_ids)
+        wanted = {c for c in client_ids if c}
+        links_token = _links_ahead.set({owner_sub: by_id})
+        names_token = _names_ahead.set({c: names.get(c) for c in wanted})
+        try:
+            yield
+        finally:
+            _links_ahead.reset(links_token)
+            _names_ahead.reset(names_token)
+
     def proposal_links(self, owner_sub: str, proposal_ids: list[str]) -> list[dict[str, Any]]:
         """Every link from or to the given proposals of the owner: {proposal_id, kind, other_id,
         created_at}, oldest first."""
         ids = [str(i) for i in proposal_ids][:500]
         if not ids:
             return []
+        ahead = _links_ahead.get()
+        if ahead is not None and len(ids) == 1 and ids[0] in ahead.get(owner_sub, {}):
+            return [dict(r) for r in ahead[owner_sub][ids[0]]]
         marks = _marks(ids)
         with self._lock:
             rows = self._conn.execute(
@@ -3671,6 +3726,17 @@ class Database:
         """How many models are kept, for everyone."""
         row = self._one("SELECT COUNT(*) AS n FROM card_models", ())
         return int(row["n"]) if row else 0
+
+    def card_models_of(self, sub: str) -> list[dict[str, Any]]:
+        """``sub``'s own kept models for their My card models list: card_key, name, added_at,
+        updated_at, the most recently changed first. Never another member's."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT card_key, name, added_at, updated_at FROM card_models WHERE added_by = ? "
+                "ORDER BY updated_at DESC, name COLLATE NOCASE",
+                (sub,),
+            ).fetchall()
+        return [dict(r) for r in rows]
 
     def count_card_models(self, sub: str) -> int:
         """How many of the kept models are ``sub``'s."""

@@ -23,7 +23,7 @@ from typing import Any
 from urllib.parse import quote, urlencode
 
 from . import searchpanel as sp
-from . import waiting_strip
+from . import ui, waiting_strip
 from .archidekt import (
     FORMAT_NAMES,
     VOTE_DOWN,
@@ -125,29 +125,14 @@ def est_cost_html(stats: dict[str, Any]) -> str:
     return money(stats.get("price_total"))
 
 
-def ago(iso: str) -> str:
-    """'15 hrs ago' the way Archidekt words it, from an ISO timestamp; '' when unreadable."""
+def iso_ts(iso: str) -> int | None:
+    """An Archidekt ISO timestamp as seconds since the epoch; None when unreadable."""
     if not iso:
-        return ""
+        return None
     try:
-        then = calendar.timegm(time.strptime(iso[:19], "%Y-%m-%dT%H:%M:%S"))
+        return calendar.timegm(time.strptime(iso[:19], "%Y-%m-%dT%H:%M:%S"))
     except ValueError:
-        return ""
-    secs = max(0, int(time.time() - then))
-    for unit, name in (
-        (86400 * 365, "yr"),
-        (86400 * 30, "mo"),
-        (86400 * 7, "wk"),
-        (86400, "day"),
-        (3600, "hr"),
-    ):
-        if secs >= unit:
-            n = secs // unit
-            return f"{n} {name}{'s' if n != 1 else ''} ago"
-    if secs >= 60:
-        n = secs // 60
-        return f"{n} min{'s' if n != 1 else ''} ago"
-    return "just now"
+        return None
 
 
 def colour_group(card: DeckCard) -> str:
@@ -312,6 +297,23 @@ def legality_chip_html(deck: Deck, stats: dict[str, Any] | None) -> str:
     return f"<span class='legal bad' title='{esc(title)}'>{icon('x')} Legality</span>"
 
 
+def deck_title(deck: Deck) -> str:
+    """The deck's name in headings, menus and boxes; a deck with no name reads "Unnamed deck"."""
+    return deck.name or UNNAMED_DECK
+
+
+def updated_when(iso: str) -> str:
+    """The banner's date in the shared list format (ui.when: relative within 7 days, then the date;
+    the full date and time on hover). '' when the stamp is unreadable."""
+    if not iso:
+        return ""
+    try:
+        ts = calendar.timegm(time.strptime(iso[:19], "%Y-%m-%dT%H:%M:%S"))
+    except ValueError:
+        return ""
+    return ui.when(ts)
+
+
 def banner_html(
     deck: Deck,
     stats: dict[str, Any] | None,
@@ -321,6 +323,12 @@ def banner_html(
     writes_enabled: bool,
     forge_on: bool = False,
 ) -> str:
+    """The deck banner: name, facts, the buttons (Edit deck the page's one orange button) and the
+    deck menu. The menu is the shared deck menu (static/deck.js builds it with cardmenu.js's
+    layer, from the ⋮ More button, a right-click on the banner or a press and hold) plus the old
+    More's page-only items. Without scripts the same items are a details drop-down, and its
+    Export…, Compare with… and Delete deck… links go to the old addresses, which open this page
+    with that box open (deck_boxes_html)."""
     stats = stats or {}
     art = featured(deck)
     art_url = card_image(art, "art_crop") if art else None
@@ -344,16 +352,18 @@ def banner_html(
     )
     csrf_in = f"<input type='hidden' name='csrf' value='{esc(csrf)}'>" if csrf else ""
     did = esc(deck.id)
+    title = deck_title(deck)
     primary = ""
     if own and csrf:
         primary += f"<a class='btn btn-primary' href='/decks/{did}/edit'>{icon('edit')} Edit deck</a>"
     if csrf:
         # Any deck the member can read can be cloned into their own account, as on archidekt.com
-        # (its Clone button is on public decks and precons too).
+        # (its Clone button is on public decks and precons too). The button opens the Clone box
+        # (name of the copy, folder); without scripts it submits the box's form with its defaults.
         primary += (
-            f"<form method='post' action='/decks/{did}/clone' class='inline'>{csrf_in}"
-            f"<button type='submit' title='Copy this deck into your own Archidekt account as a new private "
-            f"deck'>{icon('clone')} Clone deck</button></form>"
+            f"<button type='submit' form='clonef' class='btn' {ui.box_open_attr('clone')} "
+            "title='Copy this deck into your own Archidekt account'>"
+            f"{icon('clone')} Clone deck</button>"
         )
     # Archidekt's own playtester (draw, mulligan, play by hand) in its own tab: a frame
     # inside the gateway never carries the person's Archidekt sign-in, so a private deck stayed empty
@@ -371,7 +381,7 @@ def banner_html(
     # button opens a short box whose Copy and Open EDHPlay.com copies the whole deck in its import
     # format and opens the site (deck.js). The box asks /decks/{id}/edhplay.json for the list when it
     # opens (companion_tools.py), so the page itself doesn't carry the whole list. Without script the
-    # link still opens EDHPlay, and Export deck has the list.
+    # link still opens EDHPlay, and Export has the list.
     primary += (
         f"<a class='btn' href='{EDHPLAY_URL}' target='_blank' rel='noreferrer noopener' data-edhplay "
         f"data-src='/decks/{did}/edhplay.json' "
@@ -395,7 +405,7 @@ def banner_html(
     if csrf and forge_on:
         # The same run without the Forge games, for a quick result (forge=0, companion_tools.py).
         more_items.append(
-            f"<form method='post' action='/decks/{did}/report'>{csrf_in}"
+            f"<form method='post' action='/decks/{did}/report' id='solof'>{csrf_in}"
             "<input type='hidden' name='forge' value='0'>"
             "<button type='submit' data-busy-label='Testing…' title='The same run without Forge games: "
             f"the solo test, the legality check and the statistics'>{icon('stats')} "
@@ -403,19 +413,28 @@ def banner_html(
         )
     if own and csrf:
         more_items.append(f"<a href='/decks/{did}/settings'>{icon('settings')} Deck settings</a>")
-    more_items.append(f"<a href='/decks/{did}/export'>{icon('download')} Export deck</a>")
+    more_items.append(
+        f"<a href='/decks/{did}/export' {ui.box_open_attr('export')}>{icon('download')} Export…</a>"
+    )
     more_items.append(f"<a href='/history?deck_id={did}'>{icon('history')} History and snapshots</a>")
     more_items.append(f"<a href='/proposals?deck_id={did}'>{icon('proposals')} Proposals for this deck</a>")
-    if own and csrf:
-        more_items.append(f"<a class='danger' href='/decks/{did}/delete'>{icon('trash')} Delete deck…</a>")
-    more_items.append(f"<a href='/decks/{did}/compare'>{icon('swap')} Compare with another deck…</a>")
+    more_items.append(
+        f"<a href='/decks/{did}/compare' {ui.box_open_attr('compare')}>{icon('layers')} Compare with…</a>"
+    )
     more_items.append(f"<a href='/decks/{did}#stats'>{icon('report')} Deck stats</a>")
     more_items.append(
         f"<a href='https://archidekt.com/decks/{did}' target='_blank' rel='noreferrer noopener'>"
         f"{icon('external')} Open on Archidekt</a>"
     )
+    if own and csrf:
+        more_items.append(
+            f"<a class='danger' href='/decks/{did}/delete' {ui.box_open_attr('delete')}>{icon('trash')} "
+            "Delete deck…</a>"
+        )
+    # Without scripts: the drop-down. With them deck.js hides it and puts the ⋮ More button that
+    # opens the shared deck menu in its place.
     more = (
-        f"<details class='dd'><summary class='btn'>{icon('more')} More</summary>"
+        f"<details class='dd deckmore'><summary class='btn'>{icon('more')} More</summary>"
         f"<div class='menu left'>{''.join(more_items)}</div></details>"
     )
     writes_note = (
@@ -423,16 +442,22 @@ def banner_html(
         if own and not writes_enabled
         else ""
     )
+    when = updated_when(deck.updated_at)
+    data = (
+        f" data-deck-id='{did}' data-deck-name='{esc(title)}' data-own='{1 if own and csrf else 0}'"
+        f" data-can='{1 if csrf else 0}' data-forge='{1 if forge_on and csrf else 0}'"
+    )
     return (
-        f"<section class='banner{'' if art_url else ' noart'}'{style}>"
+        f"<section class='banner{'' if art_url else ' noart'}'{style}{data} aria-label='Deck: {esc(title)}'>"
         "<div class='shade'><div class='content'>"
         f"<div class='strip'{style}></div>"
         f"<a class='owner' href='/users/{esc(deck.owner)}' title='{esc(deck.owner)}: public decks'>"
         f"{avatar_html(deck.owner)}<span class='uname'>{esc(deck.owner or 'unknown')}</span></a>"
         "<div class='info'>"
-        f"<h1 class='deckname'>{privacy}<span title='{esc(deck.name)}'>{esc(deck.name)}</span></h1>"
+        f"<h1 class='deckname{'' if deck.name else ' unnamed'}'>{privacy}"
+        f"<span title='{esc(title)}'>{esc(title)}</span></h1>"
         "<div class='row'>"
-        + (f"<span>{esc(ago(deck.updated_at))}</span>" if ago(deck.updated_at) else "")
+        + (f"<span>{when}</span>" if when else "")
         + f"<span>{plural(stats.get('distinct', 0), 'distinct card')}</span>"
         "</div><div class='row'>"
         f"<span>{esc(format_label(deck.format))}</span>{legality}{brackets}"
@@ -447,6 +472,230 @@ def banner_html(
         "</div>"
         "</div></div></section>"
     )
+
+
+UNNAMED_DECK = "Unnamed deck"
+INDENT = "\u2003"  # an em space per folder level in folder pickers
+DECK_BOXES = ("export", "delete", "compare", "clone")
+EXPORT_FILES = (
+    ("export.archidekt.txt", "Archidekt .txt"),
+    ("export.txt", "Plain .txt"),
+    ("export.csv", ".csv"),
+    ("export.json", ".json"),
+    ("export.arena.txt", "Arena .txt"),
+    ("export.dek", "MTGO .dek"),
+    ("export.pdf", "PDF"),
+)
+
+
+def _export_pane(key: str, title: str, text: str, *, current: bool) -> str:
+    """One tab's pane of the Export box: the list in a read-only text box with its Copy button
+    (static/export.js). The ids and the status span are what the old Export page had."""
+    return (
+        f"<div class='xpane' data-pane='{key}'{'' if current else ' hidden'}>"
+        f"<div class='xhead'><button type='button' class='btn small copybtn' data-copy='{key}' "
+        f"aria-describedby='{key}-status'>{icon('copy')} <span class='label'>Copy</span></button>"
+        f"<span class='sr-only' id='{key}-status' role='status' aria-live='polite'></span></div>"
+        f"<textarea id='{key}' rows='{min(18, text.count(chr(10)) + 2)}' readonly aria-label='{title}'>"
+        f"{esc(text)}</textarea></div>"
+    )
+
+
+def export_box_html(deck: Deck, *, open: bool = False) -> str:
+    """The Export box (F3): tabs Archidekt text, Plain list, Side and maybe (when the deck has
+    rows outside the deck) and Files, with the seven downloads. Without scripts every pane
+    shows, one under the other."""
+    from .decks import deck_to_archidekt_text, deck_to_text
+
+    did = esc(deck.id)
+    main = deck_to_text(deck)
+    side = deck_to_text(deck, zone="side")
+    arch = deck_to_archidekt_text(deck)
+    tabs = [("exp-arch", "Archidekt text", "Archidekt import text", arch)]
+    tabs.append(("exp-main", "Plain list", "Plain decklist", main))
+    if side:
+        tabs.append(("exp-side", "Side and maybe", "Sideboard and maybeboard", side))
+    tablist = (
+        "".join(
+            f"<button type='button' role='tab' aria-selected='{'true' if i == 0 else 'false'}' "
+            f"aria-controls='{key}-pane' data-tab='{key}'>{esc(short)}</button>"
+            for i, (key, short, _long, _text) in enumerate(tabs)
+        )
+        + "<button type='button' role='tab' aria-selected='false' data-tab='exp-files'>Files</button>"
+    )
+    panes = "".join(
+        _export_pane(key, long, text, current=i == 0) for i, (key, _short, long, text) in enumerate(tabs)
+    )
+    files = "".join(
+        f"<a class='btn' href='/decks/{did}/{path}' download>{icon('download')} {esc(label)}</a>"
+        for path, label in EXPORT_FILES
+    )
+    panes += (
+        "<div class='xpane' data-pane='exp-files' hidden>"
+        "<p class='muted small'>Downloads are made in this browser from the deck as read now.</p>"
+        f"<div class='files'>{files}</div></div>"
+    )
+    body = f"<div class='segc xtabs' role='tablist' aria-label='Export'>{tablist}</div>{panes}"
+    return ui.box(
+        "export",
+        f"Export “{deck_title(deck)}”",
+        body,
+        actions=[ui.box_button("Close", cancel=True)],
+        wide=True,
+        open=open,
+        close_href=f"/decks/{did}",
+    )
+
+
+def delete_box_html(
+    deck: Deck, csrf: str | None, *, backups: bool, open: bool = False, error: str = ""
+) -> str:
+    """The typed-name Delete box (F3, M4): what is deleted and what is kept, the name to type, Keep
+    it and the solid red Delete this deck (static/deck.js keeps it off until the name matches).
+    An unnamed deck is typed as "Unnamed deck"."""
+    did = esc(deck.id)
+    title = deck_title(deck)
+    n = sum(c.quantity for c in deck.cards if deck.in_deck(c))
+    undo = (
+        "A snapshot of the deck is kept under History"
+        + (", and a private copy is made in your backup folder on Archidekt first" if backups else "")
+        + ". Archidekt itself has no undo for a deleted deck."
+    )
+    body = (
+        (ui.notice(error, "error", role="alert") if error else "")
+        + f"<form id='delf' method='post' action='/decks/{did}/delete' class='deleteform'>"
+        f"<input type='hidden' name='csrf' value='{esc(csrf or '')}'>"
+        f"<p>This deletes the deck ({plural(n, 'card')}) from your Archidekt account. {esc(undo)}</p>"
+        "<div class='field'><label for='typed'>Type the deck's name to confirm</label>"
+        f"<input id='typed' type='text' name='name' autocomplete='off' required maxlength='200' "
+        f"placeholder='{esc(title)}' data-typed='{esc(title)}'></div></form>"
+    )
+    return ui.box(
+        "delete",
+        f"Delete “{title}”?",
+        body,
+        actions=[
+            ui.box_button("Keep it", cancel=True),
+            ui.box_button("Delete this deck", kind="danger-solid", form="delf", icon_name="trash"),
+        ],
+        open=open,
+        close_href=f"/decks/{did}",
+        cls="dangerbox",
+    )
+
+
+def compare_box_html(deck: Deck, *, open: bool = False) -> str:
+    """The Compare with box (M8): the other deck (a precon's name, a deck link or id, or a pasted
+    list in the fold), then the Compare page with both decks. static/deck.js adds the member's
+    own decks as a list to pick from."""
+    did = esc(deck.id)
+    body = (
+        f"<form id='cmpf' method='get' action='/decks/{did}/compare' class='stack'>"
+        "<div class='field'><label for='cmp-with'>Other deck</label>"
+        "<input id='cmp-with' type='text' name='with' placeholder='Precon name, deck link or deck ID' "
+        "autocomplete='off'></div>"
+        "<details class='fold'><summary>…or paste a decklist</summary>"
+        "<textarea name='paste' rows='5' aria-label='Paste a decklist' "
+        "placeholder='1 Sol Ring&#10;1 Arcane Signet'></textarea></details></form>"
+    )
+    return ui.box(
+        "compare",
+        f"Compare “{deck_title(deck)}” with",
+        body,
+        actions=[
+            ui.box_button("Cancel", cancel=True),
+            ui.box_button("Compare", kind="primary", form="cmpf", icon_name="swap"),
+        ],
+        open=open,
+        close_href=f"/decks/{did}",
+    )
+
+
+def clone_box_html(
+    deck: Deck,
+    csrf: str | None,
+    folders: dict[str, Any] | None,
+    *,
+    open: bool = False,
+    error: str = "",
+    values: dict[str, str] | None = None,
+) -> str:
+    """The Clone box: the name of the copy (today's default "Copy of - {deck}") and the folder it
+    goes in, then the copy is made (POST /decks/{id}/clone, decks.propose_clone with folder_id).
+    ``folders``: decks.folders' flattened tree, or None when it could not be read (the top level
+    is then the only choice)."""
+    did = esc(deck.id)
+    v = values or {}
+    name = v.get("name") if v.get("name") is not None else f"Copy of - {deck_title(deck)}"
+    chosen = v.get("folder_id", "")
+    opts = "<option value=''" + (" selected" if not chosen else "") + ">Top level (no folder)</option>"
+    for f in (folders or {}).get("folders", []):
+        if f.get("backup") or not f.get("depth"):
+            continue  # the backup folder is no place for a copy; the root is the top level
+        fid = str(f["id"])
+        opts += (
+            f"<option value='{esc(fid)}'{' selected' if chosen == fid else ''}>"
+            f"{esc(INDENT * (int(f['depth']) - 1) + str(f['name']))}</option>"
+        )
+    body = (
+        (ui.notice(error, "error", role="alert") if error else "")
+        + f"<form id='clonef' method='post' action='/decks/{did}/clone' class='stack'>"
+        f"<input type='hidden' name='csrf' value='{esc(csrf or '')}'>"
+        "<div class='field'><label for='clone-name'>Name of the copy</label>"
+        f"<input id='clone-name' type='text' name='name' value='{esc(name)}' maxlength='200' required></div>"
+        "<div class='field'><label for='clone-folder'>Folder</label>"
+        f"<span class='sel'><select id='clone-folder' name='folder_id'>{opts}</select></span></div>"
+        f"<p class='muted small'>{icon('eye-off')} Private copy in your Archidekt account.</p></form>"
+    )
+    return ui.box(
+        "clone",
+        f"Clone “{deck_title(deck)}”",
+        body,
+        actions=[
+            ui.box_button("Cancel", cancel=True),
+            ui.box_button("Clone", kind="primary", form="clonef", icon_name="clone"),
+        ],
+        open=open,
+        close_href=f"/decks/{did}",
+    )
+
+
+def deck_boxes_html(
+    deck: Deck,
+    *,
+    own: bool,
+    csrf: str | None,
+    backups: bool,
+    folders: dict[str, Any] | None = None,
+    open_box: str = "",
+    box_error: str = "",
+    box_values: dict[str, str] | None = None,
+) -> str:
+    """The boxes the deck page holds (hidden until the menu or a button opens them): Export, Compare
+    with, Clone and, on the member's own deck, Delete. ``open_box`` names the one the page comes
+    with open (the old /export and /delete addresses, or a refused clone or delete, whose
+    ``box_error`` shows in it)."""
+    if not csrf:
+        return ""
+    out = export_box_html(deck, open=open_box == "export")
+    out += compare_box_html(deck, open=open_box == "compare")
+    out += clone_box_html(
+        deck,
+        csrf,
+        folders,
+        open=open_box == "clone",
+        error=box_error if open_box == "clone" else "",
+        values=box_values if open_box == "clone" else None,
+    )
+    if own:
+        out += delete_box_html(
+            deck,
+            csrf,
+            backups=backups,
+            open=open_box == "delete",
+            error=box_error if open_box == "delete" else "",
+        )
+    return out
 
 
 WRITES_OFF_TITLE = "Archidekt writes are switched off on this gateway"
@@ -563,6 +812,43 @@ DECK_CSS_A = (
 .comments .cmt .who{flex-wrap:wrap}
 .comments .cmt .who b{overflow-wrap:anywhere}
 @media (max-width:600px){.comments .cmt .replies{margin-left:.35rem;padding-left:.5rem}}
+/* the deck menu (deck.js): the ⋮ More button replaces the no-script drop-down once the script runs */
+.banner .deckmenu{display:inline-flex;align-items:center;gap:.4rem;margin:0}
+.banner[data-menu-ready] details.deckmore{display:none}
+.banner h1.deckname.unnamed > span{color:#cfcfcf;font-style:italic}
+/* the waiting changes strip: Apply plain, Reject a red outline, a divider line instead of a
+   nested bordered bar (the markup is waiting_strip.py's) */
+.wstrip .wbar.inline{border:0;border-top:1px solid var(--border-soft);border-radius:0;background:transparent;
+  padding:.6rem 0 .3rem;margin-top:.25rem}
+.wstrip .wbar button.btn-primary{background:transparent;border:1px solid var(--control-border);
+  color:var(--text);font-weight:700}
+.wstrip .wbar button.btn-primary:hover:not(:disabled){background:var(--surface-2)}
+.wstrip .wbar button.danger{background:transparent;color:var(--danger-text);
+  border:1px solid var(--danger-text)}
+.wstrip .wbar button.danger:hover:not(:disabled){background:var(--red-tint);color:var(--danger-text)}
+/* the drag hint is the grip icon's hover text */
+.toolbar .views .hint{display:inline-flex;align-items:center;justify-content:center;width:44px;
+  min-height:44px;
+  color:var(--text-muted);grid-column:auto}
+.toolbar .views .hint svg{width:20px;height:20px}
+/* the Export box: tabs over one pane at a time (every pane without scripts), Copy at the top right */
+.mtgbox .xtabs [role=tab]{flex:1 1 auto}
+.mtgbox .xpane[hidden]{display:none}
+.mtgbox .xpane .xhead{display:flex;justify-content:flex-end;margin:0 0 .4rem}
+.mtgbox .xpane textarea{min-height:12rem}
+.mtgbox .xpane + .xpane{margin-top:1rem}
+/* a phone's full-screen sheet: the text fills the height instead of leaving a void above Close */
+@media (max-width:599.98px){ #export.mtgbox .body{display:flex;flex-direction:column}
+  #export.mtgbox .body > .xpane:not([hidden]){flex:1 1 auto;display:flex;flex-direction:column;min-height:0}
+  #export.mtgbox .xpane textarea{flex:1 1 auto;min-height:8rem} }
+.mtgbox .body .fold summary{display:inline-flex;align-items:center;min-height:44px;cursor:pointer;
+  color:var(--link);font-weight:700}
+.mtgbox .body .fold textarea{min-height:7rem;margin-top:.5rem}
+.mtgbox .body .field label{display:block;font-weight:700;margin:0 0 .25rem}
+.mtgbox .body .field input:not([type=file]),.mtgbox .body .field select{width:100%}
+.mtgbox.dangerbox .bh h2{color:var(--danger-text)}
+/* a phone at card size L: one stack a row (S and M stay two a row) */
+@media (max-width:420px){ html[data-card-size=l] .deckview.stacks{grid-template-columns:minmax(0,1fr)} }
 """
 )
 
@@ -589,7 +875,7 @@ def toolbar_html(deck: Deck, *, own: bool, view: str, group: str, sort: str, q: 
         "<input id='quick' type='text' name='add' placeholder='Quick add (card name)' data-suggest='cards' "
         "autocomplete='off'>"
         # on a phone the label is hidden and only the icon shows: the name stays the same
-        f"<button type='submit' class='primary' aria-label='Card search'>{icon('search')} "
+        f"<button type='submit' aria-label='Card search'>{icon('search')} "
         "<span>Card search</span></button></div></form>"
         if own
         else ""
@@ -607,7 +893,13 @@ def toolbar_html(deck: Deck, *, own: bool, view: str, group: str, sort: str, q: 
         "autocomplete='off'>"
         f"<button type='submit' aria-label='Apply filter' title='Apply filter'>{icon('search')}</button>"
         "</span></div>"
-        + (f"<p class='hint'>{DRAG_HINT}</p>" if own and view in PICTURE_VIEWS else "")
+        + (
+            # the hint is the grip icon's hover text (show, not tell); the grip itself is deck.js's
+            f"<span class='hint' title='{DRAG_HINT}' aria-label='{DRAG_HINT}' role='img'>"
+            f"{icon('drag')}</span>"
+            if own and view in PICTURE_VIEWS
+            else ""
+        )
         + "<noscript><button type='submit' class='apply'>Apply</button></noscript>"
         "</form></div></section>"
     )
@@ -921,7 +1213,8 @@ def _odds_html(cards: list[DeckCard]) -> str:
     if not size:
         return ""
     groups = _odds_groups(cards)
-    data = json.dumps({"size": size, "groups": groups}, separators=(",", ":")).replace("</", "<\\/")
+    # every "<" escaped (still valid JSON): neither "</script>" nor "<!--" from a name ends the block
+    data = json.dumps({"size": size, "groups": groups}, separators=(",", ":")).replace("<", "\\u003c")
     options = "".join(f"<option value='{esc(k)}'>{esc(k)}</option>" for k in groups)
     return (
         "<div class='odds' id='odds'><h3>Probability of draw</h3>"
@@ -1460,14 +1753,16 @@ def deck_page_html(
     owned: dict[str, int] | None = None,
     forge_on: bool = False,
     waiting: list[dict[str, Any]] | None = None,
+    boxes: str = "",
 ) -> str:
     # ``waiting``: the "Waiting changes" strip's rows (waiting_strip.py), drawn at the top under
-    # the banner
+    # the banner; ``boxes``: the page's boxes (deck_boxes_html), hidden until opened
     view = view if view in VIEWS else "text"
     group = group if group in GROUPS else "category"
     sort = sort if sort in SORTS else "name"
     return (
         banner_html(deck, stats, own=own, csrf=csrf, writes_enabled=writes_enabled, forge_on=forge_on)
+        + boxes
         + waiting_strip.strip_html(waiting or [], csrf=csrf, deck_id=str(deck.id))
         + notice
         + toolbar_html(deck, own=own, view=view, group=group, sort=sort, q=q)
@@ -1493,6 +1788,10 @@ STAT_LABELS = {
     "mass_land_denial": "Mass land denial",
     "salt_total": "Salt",
 }
+COMPARE_FORGE_LINE = (
+    "The same three precons for both decks, picked for the higher bracket. Each deck gets its own "
+    "report under <a href='/reports'>Reports</a>."
+)
 
 
 def _delta_text(key: str, v: float) -> str:
@@ -1505,14 +1804,21 @@ def _delta_text(key: str, v: float) -> str:
 
 
 def _compare_row(name: str, qty_text: str, cards: dict[str, DeckCard]) -> str:
-    """One card of a comparison list; when either deck holds the card the row opens the card
-    viewer (``static/compare.js``), else it is plain text."""
+    """One card of a comparison list, a 44 px table row: the count, the card (a button that opens
+    the card viewer, static/compare.js), its type and the row's ⋮. Every row has the shared card
+    menu (static/menus.js's cardLinkOf: right-click, press and hold, ⋮, Shift+F10), a pasted card
+    too."""
     card = cards.get(name.split(" // ", 1)[0].strip().casefold())
-    if card is None:
-        return f"<li><b>{esc(qty_text)}</b> {esc(name)}</li>"
+    kind = esc(card.type_line.split(" — ")[0]) if card is not None and card.type_line else ""
+    attrs = card_view_attrs(card, img=card_image(card)) if card is not None else ""
     return (
-        f"<li><b>{esc(qty_text)}</b> <button type='button' class='cardlink' data-card='{esc(card.name)}'"
-        f"{card_view_attrs(card, img=card_image(card))}>{esc(name)}</button></li>"
+        f"<div class='tr'><span class='q'>{esc(qty_text)}</span>"
+        f"<button type='button' class='cardlink' data-card='{esc(card.name if card else name)}'{attrs}>"
+        f"<span class='nm'>{esc(name)}</span>"
+        + (f"<span class='s'>{kind}</span>" if kind else "")
+        + "</button>"
+        f"<button type='button' class='kebab' aria-label='Menu for {esc(name)}' aria-haspopup='menu' "
+        f"title='Menu'>{icon('more')}</button></div>"
     )
 
 
@@ -1544,6 +1850,14 @@ def precon_by_label(precons: dict[str, list[dict[str, Any]]], text: str) -> int 
     return by_name[0] if len(by_name) == 1 else None
 
 
+def _compare_table(title: str, n: int, rows: str) -> str:
+    empty = "<div class='tr'><span class='muted'>None</span></div>"
+    return (
+        f"<section class='cmp-col'><h2 class='cmp-h'>{title} <span class='n'>{n}</span></h2>"
+        f"<div class='ui-table cmp-t' role='list'>{rows or empty}</div></section>"
+    )
+
+
 def compare_page_html(
     deck: Deck,
     *,
@@ -1557,33 +1871,35 @@ def compare_page_html(
     csrf: str | None = None,
     forge_on: bool = False,
 ) -> str:
-    """The deck page's compare view: a form to pick the other deck (Archidekt's preconstructed
-    decks are offered as suggestions, any deck id or link and a pasted list work too) and, once
-    chosen, what this build took out of it, put in and changed, with the statistics' differences
-    when both are Archidekt decks."""
+    """Compare decks: a heading with a back link and one purpose line, a compact form (the other
+    deck and Compare on one row, the pasted list in a fold), then widgets, three tables of card
+    rows with the shared card menu, the statistics' differences, and the Forge panel. One orange
+    button: Compare until results show with the Forge panel, then that panel's button (F5: no
+    card size control here, the rows are text)."""
     did = esc(deck.id)
-    name = esc(deck.name or f"Deck {deck.id}")
+    name = esc(deck_title(deck))
     options = esc(json.dumps(precon_labels(precons), ensure_ascii=False))
+    forge_html = (
+        compare_forge_html(deck, other, other_name, csrf=csrf, forge_on=forge_on)
+        if result is not None and other is not None and not error
+        else ""
+    )
+    compare_kind = "" if forge_html else "primary"
     form = (
-        "<section class='panel comparehead'>"
-        f"<div><a href='/decks/{did}'>← {name}</a>"
-        "<span class='muted small'> · compare with another deck</span></div>"
-        f"<form method='get' action='/decks/{did}/compare' class='compareform'>"
-        "<label class='field'><span>Other deck: a preconstructed deck from the list, or any Archidekt deck "
-        "id or link</span>"
-        f"<input type='text' name='with' data-suggest='static' data-options='{options}' "
-        f"value='{esc(other_ref)}' "
-        "placeholder='Start typing a precon name, or paste a deck link' autocomplete='off'></label>"
-        "<label class='field'><span>…or paste a decklist (one card per line, Archidekt's export text works)"
-        f"</span><textarea name='paste' rows='4' placeholder='1 Sol Ring&#10;1 Arcane Signet'>{esc(paste)}"
-        "</textarea></label>"
-        f"<button type='submit' class='btn-primary'>{icon('swap')} Compare</button></form>"
-        "<p class='muted small'>Reads both decks; changes nothing on Archidekt. The assistant's "
-        "compare_decks tool makes the same comparison, and can add a paired goldfish A/B when asked.</p>"
-        "</section>"
+        f"<a class='cmp-back' href='/decks/{did}'>← {name}</a>"
+        + ui.page_head("Compare decks", f"What “{name}” took out of another deck, put in and changed.")
+        + f"<form method='get' action='/decks/{did}/compare' class='panel cmp-form'>"
+        "<div class='row'><div class='field fld'><label for='cmp-with'>Other deck</label>"
+        f"<input id='cmp-with' type='text' name='with' data-suggest='static' data-options='{options}' "
+        f"value='{esc(other_ref)}' placeholder='Precon name, deck link or deck ID' autocomplete='off'></div>"
+        f"<button type='submit' class='{compare_kind}'>{icon('swap')} Compare</button></div>"
+        f"<details class='fold'{' open' if paste else ''}><summary>{icon('chev')} …or paste a decklist"
+        "</summary><textarea name='paste' rows='5' aria-label='Paste a decklist' "
+        "placeholder='1 Sol Ring&#10;1 Arcane Signet'>"
+        f"{esc(paste)}</textarea></details></form>"
     )
     if error:
-        return form + f"<p class='notice error'>{error}</p>"
+        return form + ui.notice(error, "error", html=True, role="alert")
     if result is None or other is None:
         return form
     cards: dict[str, DeckCard] = {}
@@ -1591,17 +1907,29 @@ def compare_page_html(
         cards.update({front_name(c.name).casefold(): c for c in other.cards})
     cards.update({front_name(c.name).casefold(): c for c in deck.cards})
     sm = result["summary"]
-    oname = esc(other_name)
-    tiles = [
-        (f"{sm['before_size']}", f"cards in {other_name}"),
-        (f"{sm['after_size']}", f"cards in {deck.name or 'this deck'}"),
-        (f"{sm['cut']}", f"cards taken out ({sm['cut_pct']}% of {other_name})"),
-        (f"{sm['added']}", f"cards put in ({sm['added_pct']}% of {deck.name or 'this deck'})"),
-        (f"{sm['kept']}", "cards kept (basics aside)"),
-    ]
-    tile_html = "".join(f"<div class='tile'><b>{esc(v)}</b><span>{esc(k)}</span></div>" for v, k in tiles)
+    # a deck's name in curly quotes; "the pasted list" is a phrase, not a name
+    oq = f"“{other_name}”" if isinstance(other, Deck) else other_name
+    oname = esc(oq)
+    widgets = ui.widgets(
+        [
+            ui.widget(f"In {oq}", "decks", str(sm["before_size"]), unit="cards"),
+            ui.widget(f"In “{deck_title(deck)}”", "decks", str(sm["after_size"]), unit="cards"),
+            ui.widget("Taken out", "minus", str(sm["cut"]), unit="cards", detail=f"{sm['cut_pct']}% of {oq}"),
+            ui.widget(
+                "Put in",
+                "plus",
+                str(sm["added"]),
+                unit="cards",
+                detail=f"{sm['added_pct']}% of “{deck_title(deck)}”",
+            ),
+            ui.widget(
+                "Kept", "check", str(sm["kept"]), unit="cards", detail="Basic lands aside", wide_sm=True
+            ),
+        ],
+        label="The comparison",
+    )
     # Basic lands are listed once, under "Basic lands", so the two card lists and their counts
-    # agree with the tiles above them.
+    # agree with the widgets above them.
     removed_rows = [r for r in result["removed"] if not is_basic_land(r["name"])]
     added_rows = [r for r in result["added"] if not is_basic_land(r["name"])]
     removed = "".join(_compare_row(r["name"], f"{r['quantity']}x", cards) for r in removed_rows)
@@ -1610,40 +1938,46 @@ def compare_page_html(
         _compare_row(r["name"], f"{r['before']}→{r['after']}", cards) for r in result["changed"]
     )
     basics = "".join(
-        f"<li><b>{b['before']}→{b['after']}</b> {esc(b['name'])}</li>" for b in sm["basic_land_changes"]
+        _compare_row(b["name"], f"{b['before']}→{b['after']}", cards) for b in sm["basic_land_changes"]
     )
-    empty = "<li class='muted'>None</li>"
+    empty = "<div class='tr'><span class='muted'>None</span></div>"
     lists = (
-        "<div class='comparecols'>"
-        f"<section class='panel'><h3>Taken out of {oname} <span class='count'>{len(removed_rows)}</span>"
-        f"</h3><ul class='comparelist'>{removed or empty}</ul></section>"
-        f"<section class='panel'><h3>Put into {name} <span class='count'>{len(added_rows)}</span></h3>"
-        f"<ul class='comparelist'>{added or empty}</ul></section>"
-        f"<section class='panel'><h3>Changed counts <span class='count'>{len(result['changed'])}</span></h3>"
-        f"<ul class='comparelist'>{changed or empty}</ul>"
-        f"<h3>Basic lands</h3><ul class='comparelist'>{basics or empty}</ul></section></div>"
+        "<div class='cmp-cols'>"
+        + _compare_table(f"Taken out of {oname}", len(removed_rows), removed)
+        + _compare_table(f"Put into “{name}”", len(added_rows), added)
+        + "<section class='cmp-col'><h2 class='cmp-h'>Changed counts "
+        f"<span class='n'>{len(result['changed'])}</span></h2>"
+        f"<div class='ui-table cmp-t' role='list'>{changed or empty}</div>"
+        f"<h3 class='cmp-sub'>Basic lands</h3><div class='ui-table cmp-t' role='list'>{basics or empty}</div>"
+        "</section>"
+        "</div>"
     )
     delta_html = ""
     delta = result.get("stats_delta")
     if delta:
-        rows = "".join(
-            f"<tr><th>{esc(STAT_LABELS.get(k, k))}</th><td>{'+' if v > 0 else ''}{_delta_text(k, v)}</td>"
-            "</tr>"
+        rows = [
+            f"<div class='tr'><span class='t'>{esc(STAT_LABELS.get(k, k))}</span>"
+            f"<span class='v'>{'+' if v > 0 else ''}{_delta_text(k, v)}</span></div>"
             for k, v in delta.items()
             if isinstance(v, (int, float)) and v != 0
-        )
+        ]
+        if rows:
+            half = (len(rows) + 1) // 2
+            cols = "".join(
+                f"<div class='ui-table cmp-st'>{''.join(part)}</div>"
+                for part in (rows[:half], rows[half:])
+                if part
+            )
+        else:
+            cols = (
+                "<div class='ui-table cmp-st'><div class='tr'>"
+                "<span class='muted'>No difference</span></div></div>"
+            )
         delta_html = (
-            "<section class='panel'><h3>Statistics: this deck minus "
-            f"{oname}</h3><table class='deltatable'>{rows or '<tr><td class=muted>No difference</td></tr>'}"
-            "</table></section>"
+            f"<section class='cmp-stats'><h2 class='cmp-h'>Statistics: this deck minus {oname}</h2>"
+            f"<div class='cmp-st2'>{cols}</div></section>"
         )
-    return (
-        form
-        + f"<section class='panel'><div class='tiles'>{tile_html}</div></section>"
-        + lists
-        + delta_html
-        + compare_forge_html(deck, other, other_name, csrf=csrf, forge_on=forge_on)
-    )
+    return form + widgets + lists + delta_html + forge_html
 
 
 def _has_commander(deck: Deck) -> bool:
@@ -1654,18 +1988,13 @@ def compare_forge_html(deck: Deck, other: Any, other_name: str, *, csrf: str | N
     """Forge games of both decks against the same three precons, picked for the higher
     of the two decks' brackets, from the Compare page (POST /decks/<id>/compare/forge).
     Only when Forge is set up and both sides are Archidekt Commander decks: Forge plays nothing
-    else, and a pasted list has no report to keep its games."""
+    else, and a pasted list has no report to keep its games. Its button is the page's orange one
+    once results show."""
     if not (forge_on and csrf and isinstance(other, Deck) and _has_commander(deck) and _has_commander(other)):
         return ""
     return (
-        "<section class='panel compareforge'><h3>Forge games against the same opponents</h3>"
-        "<p class='muted small'>Forge plays each deck against the same three precons, picked for "
-        "the higher of the two decks' brackets: the bracket set on each deck, or Archidekt's estimate "
-        "from cards when none is set. Which deck you compare from doesn't change them. Each deck gets its "
-        "own report on the <a href='/reports'>Reports</a> page (and in History) with the deck "
-        "statistics, the legality check and the Forge games (no solo test). The games play in the "
-        "background: both decks at once when Forge has room for two runs, otherwise one deck after the "
-        "other. Compare the two decks' 95% intervals, not only their win rates.</p>"
+        "<section class='ui-card cmp-forge'><h2>Forge games against the same opponents</h2>"
+        f"<p class='muted small'>{COMPARE_FORGE_LINE}</p>"
         f"<form method='post' action='/decks/{esc(deck.id)}/compare/forge'>"
         f"<input type='hidden' name='csrf' value='{esc(csrf)}'>"
         f"<input type='hidden' name='with' value='{esc(other.id)}'>"
@@ -1675,6 +2004,45 @@ def compare_forge_html(deck: Deck, other: Any, other_name: str, *, csrf: str | N
         f"in Forge against the same opponents</button></form>"
         "</section>"
     )
+
+
+COMPARE_CSS = """
+.cmp-back{display:inline-flex;align-items:center;min-height:44px}
+.cmp-form{padding:.75rem 1rem;margin:0 0 1rem}
+.cmp-form .row{display:flex;gap:.5rem;align-items:flex-end}
+.cmp-form .row .fld{flex:1;min-width:0;margin:0}
+.cmp-form .fld label{display:block;font-weight:700;margin:0 0 .25rem}
+.cmp-form .fld input{width:100%}
+.cmp-form .row button{margin:0;flex:none}
+.cmp-form .fold{margin-top:.5rem}
+.cmp-form .fold summary{display:inline-flex;align-items:center;gap:.3rem;min-height:44px;cursor:pointer;
+  color:var(--link);font-weight:700}
+.cmp-form .fold summary svg.i{width:16px;height:16px}
+.cmp-form textarea{width:100%;min-height:6rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+  font-size:.9rem}
+.cmp-cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,22rem),1fr));gap:1rem;
+  align-items:start;margin:0 0 1rem}
+.cmp-h{display:flex;align-items:baseline;gap:.35rem;font-size:1.1rem;margin:0 0 .5rem;overflow-wrap:anywhere}
+.cmp-h .n{color:var(--text-muted);font-weight:400}
+.cmp-sub{font-size:1rem;margin:1rem 0 .5rem}
+.cmp-t{--cols:4rem minmax(0,1fr) 44px;--cols-md:4rem minmax(0,1fr) 44px;--cols-sm:3.6rem minmax(0,1fr) 44px}
+.cmp-t .tr{min-height:44px;align-items:center}
+.cmp-t .q{font-weight:900;color:var(--text-muted);white-space:nowrap;font-variant-numeric:tabular-nums}
+.cmp-t .cardlink{display:flex;flex-direction:column;align-items:flex-start;min-height:44px;
+  justify-content:center;
+  width:100%;color:var(--text);text-align:left;cursor:pointer;user-select:none;-webkit-touch-callout:none}
+.cmp-t .cardlink .nm{color:var(--link);font-weight:700;overflow-wrap:anywhere}
+.cmp-t .cardlink .s{display:block;font-size:.86rem;color:var(--text-muted)}
+.cmp-t .cardlink:hover .nm{text-decoration:underline}
+.cmp-stats{margin:0 0 1rem}
+.cmp-st2{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,22rem),1fr));gap:1rem;align-items:start}
+.cmp-st{--cols:minmax(0,1fr) 8rem;--cols-md:minmax(0,1fr) 8rem;--cols-sm:minmax(0,1fr) 7rem}
+.cmp-st .v{text-align:right;font-weight:900;font-variant-numeric:tabular-nums}
+.cmp-forge button.btn-primary{white-space:normal;text-align:left;line-height:1.2;margin:0}
+.cmp-forge > p{margin:0 0 .75rem}
+@media (max-width:599.98px){ .cmp-form .row{flex-direction:column;align-items:stretch}
+  .cmp-form .row button{width:100%} }
+"""
 
 
 # -- goldfish page --------------------------------------------------------------------------------
@@ -1724,14 +2092,10 @@ def goldfish_data(deck: Deck) -> dict[str, Any]:
     }
 
 
-# The Goldfish page's own guide: what a goldfish game is and its steps, in order. goldfish.js
-# marks the step the game is at; the member can hide the guide, and the choice follows the account
-# (account_prefs GOLDFISH_GUIDE_PREF).
+# The Goldfish page's own guide: its steps, in order. goldfish.js marks the step the game is at;
+# the member can hide the guide, and the choice follows the account (account_prefs
+# GOLDFISH_GUIDE_PREF).
 GOLDFISH_GUIDE_PREF = "goldfish_guide"
-GOLDFISH_GUIDE_INTRO = (
-    "A goldfish game is your deck played alone, with no opponent, to see how it draws and how fast "
-    "it gets going."
-)
 GOLDFISH_GUIDE_STEPS = (
     ("hand", "Look at your seven cards. Press Keep hand, or Mulligan for seven new ones."),
     (
@@ -1749,11 +2113,14 @@ GOLDFISH_GUIDE_SHOW = "How to play"
 # Phones show the step the game is at; this opens all six
 GOLDFISH_GUIDE_ALL = "Show all steps"
 GOLDFISH_GUIDE_CURRENT = "Show the current step only"
+GOLDFISH_NOTE = "Nothing is saved or sent to Archidekt"
+GOLDFISH_NO_SOLO = "No solo test yet."
 
 
 def goldfish_guide_html(*, hidden: bool = False) -> str:
-    """The guide panel. Hidden (the member hid it) it stays in the page, so "How to play" brings
-    it back without a reload."""
+    """The guide panel: a numbered list, no box around each step; the step the game is at has an
+    orange number and bold text. Hidden (the member hid it) it stays in the page, so "How to play"
+    brings it back without a reload."""
     steps = "".join(
         f"<li data-step='{key}'><span class='gf-step-n' aria-hidden='true'>{i}</span>"
         f"<span>{esc(text)}</span></li>"
@@ -1769,39 +2136,92 @@ def goldfish_guide_html(*, hidden: bool = False) -> str:
         f"{esc(GOLDFISH_GUIDE_ALL)}</button>"
         f"<button type='button' class='btn small' data-guide='hide'>{esc(GOLDFISH_GUIDE_HIDE)}</button>"
         "</span></div>"
-        f"<p class='muted small'>{esc(GOLDFISH_GUIDE_INTRO)}</p>"
         f"<ol class='gf-steps' id='gf-steps'>{steps}</ol>"
         "</section>"
     )
 
 
-def goldfish_page_html(deck: Deck, *, guide_hidden: bool = False) -> str:
+def goldfish_intro(size: int, *, commander: bool) -> str:
+    """The one intro line: the rules as a few words, and that nothing leaves the browser."""
+    rule = (
+        "Commander: first mulligan free"
+        if commander
+        else "No commander: every mulligan puts one more card on the bottom"
+    )
+    return f"{plural(size, 'card')} · {rule} · on the play · {GOLDFISH_NOTE}"
+
+
+def forge_solo_line(deck: Deck, solo: dict[str, Any] | None, *, csrf: str | None) -> str:
+    """The line under the Goldfish intro about the deck's newest Forge solo test
+    (ReportService.newest_forge_solo: report_id, finished_at, won_rate, games, median_won_turn):
+    the win rate and median win turn with Open the report, or, with no report yet, a plain Run
+    full test. The games count is the report's own."""
+    did = esc(deck.id)
+    if not solo:
+        run = (
+            f"<form method='post' action='/decks/{did}/report' class='inline'>"
+            f"<input type='hidden' name='csrf' value='{esc(csrf)}'>"
+            f"<button type='submit' data-busy-label='Testing…'>{icon('stats')} Run full test</button></form>"
+            if csrf
+            else ""
+        )
+        return f"<div class='notice info gf-solo'><span>{GOLDFISH_NO_SOLO}</span>{run}</div>"
+    games = int(solo.get("games") or 0)
+    rate = solo.get("won_rate")
+    pct = (
+        f"{round(float(rate) * 100) if float(rate) <= 1 else round(float(rate))}%"
+        if rate is not None
+        else "–"
+    )
+    turn = solo.get("median_won_turn")
+    turn_text = f", median win turn {esc(turn)}" if turn is not None else ""
+    finished = ui.when(solo.get("finished_at")) if solo.get("finished_at") else ""
+    rid = esc(solo.get("report_id") or "")
+    return (
+        "<div class='notice info gf-solo' role='status'><span>Forge's solo test of this deck: won "
+        f"{pct} of {plural(games, 'game')}{turn_text}.</span>"
+        + (f"<span>{finished}</span>" if finished else "")
+        + (f"<a href='/history/reports/{rid}'>Open the report</a>" if rid else "")
+        + "</div>"
+    )
+
+
+_NO_SOLO_LINE = object()
+
+
+def goldfish_page_html(
+    deck: Deck,
+    *,
+    guide_hidden: bool = False,
+    forge_solo: Any = _NO_SOLO_LINE,
+    csrf: str | None = None,
+    extra_head: str = "",
+) -> str:
     """Goldfish by hand: shuffle, an opening hand with London mulligans, then draw, play, tap and
     pass turns, all in the browser (static/goldfish.js) on the deck already read for the page.
-    Nothing is sent anywhere and nothing is kept, except whether the member hid the guide."""
+    Nothing is sent anywhere and nothing is kept, except whether the member hid the guide.
+    ``forge_solo``: the newest Forge solo test's figures, None for none yet; left out when the
+    gateway has no such results (no line then). ``extra_head``: markup under the solo line (the
+    My card models opener, card_models_view)."""
     did = esc(deck.id)
-    name = esc(deck.name or f"Deck {deck.id}")
+    name = esc(deck_title(deck))
     data = goldfish_data(deck)
     commander = bool(data["commanders"])
     size = sum(c["qty"] for c in data["library"]) + len(data["commanders"])
-    rules = (
-        "Commander game: the commander starts in the command zone and the first mulligan is free."
-        if commander
-        else "No commander: no command zone, and every mulligan puts one more card on the bottom."
-    )
     zone = (
         "<section class='gf-zone' id='gf-{id}' aria-labelledby='gf-{id}-h'>"
         "<h2 id='gf-{id}-h'>{label} <span class='gf-n'></span></h2><div class='gf-row'></div></section>"
     )
     js_data = json.dumps(data, separators=(",", ":")).replace("<", "\\u003c")
+    solo = "" if forge_solo is _NO_SOLO_LINE else forge_solo_line(deck, forge_solo, csrf=csrf)
     return (
         "<section class='panel gf-head'>"
-        f"<div><a href='/decks/{did}'>← {name}</a><span class='muted small'> · goldfish</span></div>"
+        f"<a class='gf-back' href='/decks/{did}'>← {name}</a>"
         "<h1>Goldfish</h1>"
-        f"<p class='muted small'>{plural(size, 'card')}. {rules} The game is on the play: no draw on "
-        "turn 1. Select a card to play it, tap it or move it. Everything happens in this browser; "
-        "nothing is saved or sent to Archidekt.</p>"
-        "<p class='gf-status' id='gf-status'></p>"
+        f"<p class='muted small gf-intro'>{esc(goldfish_intro(size, commander=commander))}</p>"
+        + solo
+        + extra_head
+        + "<p class='gf-status' id='gf-status'></p>"
         "<p class='gf-hint' id='gf-hint'></p>"
         "<div class='gf-controls' role='group' aria-label='Game'>"
         "<button type='button' class='btn-primary' data-act='keep' hidden>Keep hand</button>"
@@ -1813,9 +2233,10 @@ def goldfish_page_html(deck: Deck, *, guide_hidden: bool = False) -> str:
         f"<button type='button' data-act='reset'>{icon('refresh')} New game</button>"
         f"<button type='button' class='gf-guide-show' data-guide='show'{'' if guide_hidden else ' hidden'}>"
         f"{icon('guide')} {esc(GOLDFISH_GUIDE_SHOW)}</button>"
-        "</div>"
-        # the card size every page with card pictures follows (theme.card_size_control, prefs.js)
+        # the card size every page with card pictures follows (theme.card_size_control, prefs.js),
+        # at the end of the game buttons' row
         f"<div class='gf-size'>{card_size_control()}</div>"
+        "</div>"
         "<p class='sr-only' id='gf-live' aria-live='polite'></p>"
         "<noscript><p class='notice error'>The goldfish needs JavaScript.</p></noscript>"
         "</section>"
@@ -1832,13 +2253,19 @@ def goldfish_page_html(deck: Deck, *, guide_hidden: bool = False) -> str:
 
 
 GOLDFISH_CSS = """
-.gf-head h1{margin:.25rem 0 .5rem;font-size:1.6rem}
-.gf-status{font-weight:700;margin:.5rem 0 .25rem}
-.gf-hint{margin:0 0 .75rem;min-height:1.4em}
-.gf-controls{display:flex;flex-wrap:wrap;gap:.5rem}
+.gf-head h1{margin:.1rem 0 .3rem;font-size:1.6rem}
+.gf-back{display:inline-flex;align-items:center;min-height:44px}
+.gf-intro{margin:0}
+.gf-solo{display:flex;flex-wrap:wrap;align-items:center;gap:.25rem .75rem;margin:.6rem 0 0}
+.gf-solo form.inline{display:contents} .gf-solo button{margin:0}
+.gf-status{font-weight:700;margin:.6rem 0 .25rem}
+.gf-hint{margin:0 0 .5rem} .gf-hint:empty{display:none}
+.gf-controls{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center}
 .gf-controls [hidden]{display:none}
-.gf-size{margin-top:.75rem}
-.gf-size .cardsize{display:flex;flex-direction:row;flex-wrap:wrap;align-items:center;gap:.25rem .5rem}
+.gf-controls button{margin:0}
+.gf-size{margin-left:auto}
+.gf-size .cardsize{display:flex;flex-direction:row;flex-wrap:wrap;align-items:center;gap:.25rem .5rem;
+  margin:0}
 .gf-size .cardsize .lbl{color:var(--text-muted)}
 /* at 200% text the three buttons' 2.75rem minimum is wider than a folded Fold leaves the switch:
    let them shrink, down to 44px, instead of the switch cutting off L */
@@ -1849,50 +2276,58 @@ GOLDFISH_CSS = """
   padding:.75rem;margin:0 0 1rem;min-width:0}
 .gf-zone h2{font-size:1.1rem;margin:0 0 .5rem}
 .gf-zone .gf-n{color:var(--text-muted);font-weight:400}
-.gf-row{display:flex;flex-wrap:wrap;gap:.5rem;align-items:flex-start;min-height:2rem}
+/* the cards wrap at every size: a grid of columns the card's width (--gw), never a sideways scroll */
+.gf-row{--gw:130px;display:grid;grid-template-columns:repeat(auto-fill,minmax(var(--gw),1fr));gap:.5rem;
+  align-items:start;min-height:2rem}
+html[data-card-size=s] .gf-row{--gw:92px} html[data-card-size=l] .gf-row{--gw:180px}
 .gf-row + .gf-row{margin-top:.75rem;padding-top:.75rem;border-top:1px dashed var(--border)}
-.gf-empty{color:var(--text-muted);margin:0}
-#gf-hand .gf-row{flex-wrap:nowrap;overflow-x:auto;padding-bottom:.5rem}
+.gf-empty{color:var(--text-muted);margin:0;grid-column:1 / -1}
 .gf-piles{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,18rem),1fr));gap:0 1rem}
-.gf-card{--w:clamp(68px,21vw,130px);position:relative;flex:none;width:var(--w);height:calc(var(--w)*88/63);
-  min-height:0;padding:0;border:1px solid var(--card-border);border-radius:calc(var(--w)*.05);
+/* a card's cell: the card and its ⋮ (hidden at the small size, where the cell is a thumbnail) */
+.gf-c{display:flex;flex-direction:column;align-items:center;gap:2px;min-width:0}
+.gf-c .kebab{flex:none}
+html[data-card-size=s] .gf-c .kebab{display:none}
+.gf-card{position:relative;width:100%;max-width:220px;aspect-ratio:63/88;height:auto;
+  min-height:0;padding:0;border:1px solid var(--card-border);border-radius:4.5%/3.2%;
   background:var(--surface-2);color:var(--text);overflow:hidden;display:block;cursor:pointer;
-  transition:transform .15s}
-html[data-card-size=s] .gf-card{--w:clamp(52px,15vw,96px)}
-html[data-card-size=l] .gf-card{--w:clamp(88px,28vw,180px)}
+  user-select:none;-webkit-touch-callout:none;transition:transform .15s}
 .gf-card img{width:100%;height:100%;object-fit:cover;display:block}
 .gf-card .ph{display:flex;flex-direction:column;justify-content:space-between;height:100%;padding:.35rem;
   font-size:.78rem;text-align:left;line-height:1.2}
-.gf-card .ph .ty{color:var(--text-muted)}
+.gf-card .ph .nm{overflow-wrap:break-word;hyphens:auto}
+.gf-card .ph .ty{color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .gf-card:focus-visible{outline:3px solid var(--focus);outline-offset:2px}
-/* a tapped permanent turns sideways, with room kept for its new width */
-.gf-card.tapped{transform:rotate(90deg);margin:0 calc(var(--w)*.2)}
+/* a tapped permanent turns sideways inside its cell */
+.gf-card.tapped{transform:rotate(90deg) scale(.72)}
 .gf-card .tag{position:absolute;left:0;right:0;bottom:0;padding:.15rem .25rem;font-size:.75rem;
   font-weight:700;background:var(--orange);color:var(--on-orange);text-align:center}
 .gf-card[aria-pressed=true]{outline:3px solid var(--orange-ctl);outline-offset:2px}
 .gf-card[aria-pressed=true]:focus-visible{outline-color:var(--focus)}
 @media (prefers-reduced-motion:reduce){.gf-card{transition:none}}
-/* the guide: the step the game is at stands out; numbers in circles, text beside them */
+/* the guide: a numbered list without boxes; the step the game is at has an orange number and bold text */
 .gf-guide[hidden],.gf-guide-show[hidden]{display:none}
 .gf-guide-head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:.5rem}
 .gf-guide h2{font-size:1.1rem;margin:0}
-.gf-guide > p{margin:.35rem 0 .6rem}
-.gf-steps{list-style:none;margin:0;padding:0;display:grid;gap:.4rem;
-  grid-template-columns:repeat(auto-fit,minmax(min(100%,15rem),1fr))}
-.gf-steps li{display:flex;gap:.6rem;align-items:flex-start;padding:.5rem .6rem;
-  border-radius:var(--radius-panel);border:1px solid var(--border-soft);background:var(--surface-2);
-  line-height:1.35}
+.gf-steps{list-style:none;margin:.5rem 0 0;padding:0;display:grid;gap:.1rem 1.5rem;
+  grid-template-columns:repeat(auto-fill,minmax(min(100%,22rem),1fr))}
+.gf-steps li{display:flex;gap:.6rem;align-items:flex-start;padding:.35rem 0;line-height:1.4}
 .gf-steps .gf-step-n{flex:none;display:inline-flex;align-items:center;justify-content:center;width:1.6rem;
-  height:1.6rem;border-radius:50%;background:var(--surface-3);color:var(--text);font-weight:700;font-size:.85rem}
-.gf-steps li[aria-current=step]{border-color:var(--orange-ctl);box-shadow:inset 3px 0 0 var(--orange-ctl)}
+  height:1.6rem;border-radius:50%;background:var(--surface-2);color:var(--text);font-weight:900;font-size:.85rem}
+.gf-steps li[aria-current=step]{font-weight:700}
 .gf-steps li[aria-current=step] .gf-step-n{background:var(--orange);color:var(--on-orange)}
 .gf-steps li.done{color:var(--text-muted)}
-/* phones: only the step the game is at, so the hand stays near the top */
+/* phones: only the step the game is at, so the hand stays near the top; seven cards a row at S,
+   four at M, three at L */
 .gf-guide-btns{display:flex;flex-wrap:wrap;gap:.4rem}
 .gf-allsteps{display:none}
 @media (max-width:600px){
   .gf-allsteps{display:inline-flex}
   .gf-steps:not(.all):has(li[aria-current=step]) li:not([aria-current=step]){display:none}
+  .gf-row{gap:4px;grid-template-columns:repeat(4,minmax(0,1fr))}
+  html[data-card-size=s] .gf-row{grid-template-columns:repeat(7,minmax(0,1fr))}
+  html[data-card-size=l] .gf-row{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .gf-card .ph{padding:3px;font-size:.6rem}
+  .gf-size{margin-left:0;flex-basis:100%}
 }
 """
 
@@ -1911,6 +2346,9 @@ def colour_bar_html(colors: dict[str, Any] | None) -> str:
     return _bar(parts, label="Color identity") if parts else "<div class='cbar empty'></div>"
 
 
+NO_TAGS = "<span class='notags'>No deck tags</span>"
+
+
 def deck_card_html(
     d: dict[str, Any],
     *,
@@ -1918,10 +2356,12 @@ def deck_card_html(
     selected: bool,
     show_owner: bool = False,
     own: bool = False,
+    plain: bool = False,
 ) -> str:
     """One deck tile: a link to the deck, and after it the tile's ⋮ (static/menus.js opens the
     deck's menu from it, a right-click, a press and hold or Shift+F10). ``own``: the member's own
-    deck, whose menu has Edit deck, Rename, Move to folder, Delete deck and the rest."""
+    deck, whose menu has Edit deck, Rename, Move to folder, Delete deck and the rest. ``plain``:
+    a precon tile, without the owner's picture and the deck tags (as deck search's tiles)."""
     did = esc(d["id"])
     name = d.get("name") or "Unnamed deck"
     folder_id = d.get("folder_id")
@@ -1939,11 +2379,8 @@ def deck_card_html(
         fmt = format_label(d["format"])
     line = (fmt or "Custom") + deck_card_bracket_text(d.get("bracket"))  # bracket_view.py
     tags = d.get("tags") or []
-    tags_html = (
-        "".join(f"<span class='pill'>{esc(t)}</span>" for t in tags[:6])
-        if tags
-        else "<span class='notags'>No deck tags</span>"
-    )
+    pills = "".join(f"<span class='pill'>{esc(t)}</span>" for t in tags[:6]) or NO_TAGS
+    tags_html = "" if plain else f"<span class='tags'>{pills}</span>"
     initial = esc((d.get("name") or "?")[:1].upper())
     size = d.get("size")
     sub_bits = []
@@ -1953,21 +2390,22 @@ def deck_card_html(
         sub_bits.append(str(d["folder"]))
     if d.get("views") and show_owner:
         sub_bits.append(f"{d['views']:,} views")
-    if ago(d.get("updated_at") or ""):
-        sub_bits.append(ago(d.get("updated_at") or ""))
+    sub_text = " · ".join(sub_bits)
+    when = ui.when(iso_ts(d.get("updated_at") or ""))  # the one list date (feedback.js keeps it current)
+    sub_html = esc(sub_text) + (f"{' · ' if sub_text else ''}{when}" if when else "")
     return (
         f"<li class='deck{' selected' if selected else ''}'{data}><a href='/decks/{did}'>"
         f"<span class='thumb{' noart' if not art else ''}'{style}><span class='ini'>{initial}</span>"
         + (f"<span class='views'>{plural(size, 'card')}</span>" if size else "")
         + colour_bar_html(d.get("colors"))
         + "</span>"
-        "<span class='info'>"
-        f"{avatar_html(d.get('owner') or '', 'sm')}"
-        f"<span class='text'><span class='name' title='{esc(name)}'>{esc(name)}</span>"
+        f"<span class='info{' plain' if plain else ''}'>"
+        + ("" if plain else avatar_html(d.get("owner") or "", "sm"))
+        + f"<span class='text'><span class='name' title='{esc(name)}'>{esc(name)}</span>"
         f"<span class='fmt' title='{esc(line)}'>{esc(line)}</span>"
-        f"<span class='sub' title='{esc(' · '.join(sub_bits))}'>{esc(' · '.join(sub_bits))}</span>"
+        f"<span class='sub' title='{esc(sub_text)}'>{sub_html}</span>"
         "</span></span>"
-        f"<span class='tags'>{tags_html}</span></a>{kebab}</li>"
+        f"{tags_html}</a>{kebab}</li>"
     )
 
 
@@ -1994,9 +2432,11 @@ def deck_list_html(
     show_owner: bool = False,
     folder: str = "",
     own: bool = False,
+    plain: bool = False,
 ) -> str:
     """The deck tiles. ``own``: the member's own decks (My decks, Home), whose tiles' menus carry
-    the owner's actions; a listing of other members' decks leaves it off."""
+    the owner's actions; a listing of other members' decks leaves it off. ``plain``: precon tiles
+    (no owner picture, no tags)."""
     if not decks:
         if folder:
             return (
@@ -2016,6 +2456,7 @@ def deck_list_html(
             selected=bool(selected and str(d["id"]) == str(selected)),
             show_owner=show_owner,
             own=own,
+            plain=plain,
         )
         for d in decks
     )
@@ -2194,23 +2635,6 @@ DECK_CSS = (
 .banner .controls .primary{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center}
 .banner .controls .btn,.banner .controls button{margin:0}
 .banner .controls form.inline{display:contents}
-.comparehead{display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap}
-/* compare page */
-.comparehead{flex-direction:column;align-items:stretch}
-.compareform{display:grid;gap:.75rem}
-.compareform .field span{display:block;font-size:.85rem;color:var(--text-muted);margin-bottom:.25rem}
-.compareform .field input,.compareform .field textarea{font-weight:400}
-.compareform input,.compareform textarea{width:100%}
-.compareform button{justify-self:start}
-/* min(18rem,100%): at 200% text 18rem is wider than a phone, so a column never exceeds the page */
-.comparecols{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(18rem,100%),1fr));gap:1rem;margin-top:1rem}
-.comparehead{margin-bottom:1rem}
-.comparecols .panel{margin:0}
-.comparelist{list-style:none;margin:0;padding:0}
-.comparelist li{display:flex;gap:.6rem;align-items:baseline;padding:.3rem 0;min-width:0;
-  overflow-wrap:anywhere;border-bottom:1px solid var(--border)}
-.comparelist li:last-child{border-bottom:0}
-.comparelist b{flex:0 0 3.2rem;color:var(--text-muted);font-variant-numeric:tabular-nums}
 .cardlink{background:none;border:0;padding:0;margin:0;color:var(--link);cursor:pointer;font:inherit;text-align:left}
 .cardlink:hover{text-decoration:underline}
 h3 .count{font-weight:400;color:var(--text-muted);font-size:.9rem}
@@ -3148,6 +3572,11 @@ html.printpick-open{overflow:hidden}
   .editor{padding-bottom:6rem}
   body:has(#editor) footer.site{padding-bottom:calc(11rem + env(safe-area-inset-bottom))}
   .editbar .review{flex:1}
+  /* the card size keeps to the one slim row: no label, narrow S M L */
+  .editbar .cardsize{flex:0 1 auto;min-width:0;margin:0}
+  .editbar .cardsize .lbl{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+  .editbar .cardsize .sizeseg{display:flex;max-width:100%}
+  .editbar .cardsize .sizeseg button{min-width:0;flex:1 1 2rem;padding:0 .4rem}
   .addbox form.addcard{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
   .addbox form.addcard .grow{grid-column:1 / -1;grid-row:1}
   .addbox form.addcard .go{grid-column:1;grid-row:2} .addbox form.addcard .go button{width:100%}

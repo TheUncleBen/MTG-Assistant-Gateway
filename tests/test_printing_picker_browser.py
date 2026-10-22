@@ -353,7 +353,7 @@ def test_change_printing_from_the_card_menu_saves_with_undo(server: Server) -> N
         assert cur.count() == 1 and "CMR #472" in cur.inner_text() and "Current" in cur.inner_text()
         assert (
             "Commander Legends" in cur.inner_text()
-            and "Non-foil" in cur.inner_text()
+            and "Normal" in cur.inner_text()
             and "$1.46" in cur.inner_text()
         )
         sld = page.locator(".printpick .pptile", has_text="SLD #1074")
@@ -438,7 +438,7 @@ def test_change_printing_from_the_card_menu_saves_with_undo(server: Server) -> N
         assert pv.locator(".ppbig img").count() == 1
         assert (
             pv.locator(".ppnote").inner_text()
-            == "Not made in non-foil: the card becomes etched with this printing."
+            == "Not made in a normal finish: the card becomes etched with this printing."
         )
         assert (
             "Etched" in pv.locator(".ppprices").inner_text()

@@ -119,9 +119,14 @@ def _menu(page):
 
 
 def _box(page):
-    box = page.locator(".mtgbox[role=dialog]")
+    box = page.locator(".mtgbox[role=dialog]:not([hidden])")
     box.wait_for(timeout=3000)
     return box
+
+
+def _gone(page) -> None:
+    """The box closes with a short transition (none under reduced motion): wait until it is gone."""
+    page.locator(".mtgbox-scrim").first.wait_for(state="detached", timeout=3000)
 
 
 def _notice(page) -> str:
@@ -289,6 +294,49 @@ def test_a_hold_on_a_deck_tile_opens_its_menu_and_leaves_nothing_stuck(tmp_path:
         server.stop()
 
 
+def test_a_tap_on_the_menu_right_after_a_hold_acts(tmp_path: Path) -> None:
+    """L-3 (review 2026-10-22): a hold that opens the menu with the finger's own timer (no
+    contextmenu from the browser) and lifts with no click after it, then a real tap on a menu item
+    within the moment the lift's tap is swallowed: the tap acts (the swallow ends with the next
+    press, so only the lift of the finger that held is ever swallowed)."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _exe()
+    server = _server(tmp_path)
+    try:
+        sid = _link(server)
+        with sync_playwright() as p:
+            browser, page, errors = _page(p, server, sid, 390, "dark", exe)
+            page.goto(f"{server.base}/decks?folder=503&view=list", wait_until="networkidle")
+            tile = page.locator("li.deck[data-deck-id='42']")
+            tile.scroll_into_view_if_needed()
+            box = tile.locator(".info").bounding_box()
+            x, y = box["x"] + 30, box["y"] + box["height"] / 2
+            cdp = page.context.new_cdp_session(page)
+            # the press and hold, lifted with no click after it (as a long press often ends): the
+            # lift's click is kept from the page here, as a browser that sends none
+            page.evaluate(
+                """() => window.addEventListener("click", function once(e) {
+                    e.stopImmediatePropagation(); e.preventDefault();
+                    window.removeEventListener("click", once, true); }, true)"""
+            )
+            cdp.send("Input.dispatchTouchEvent", {"type": "touchStart", "touchPoints": [{"x": x, "y": y}]})
+            _menu(page)
+            cdp.send("Input.dispatchTouchEvent", {"type": "touchEnd", "touchPoints": []})
+            item = page.locator(".ctxmenu[role=menu] [role=menuitem]", has_text="Copy link").first
+            ib = item.bounding_box()
+            ix, iy = ib["x"] + ib["width"] / 2, ib["y"] + ib["height"] / 2
+            # a real tap on an item while the lift's tap would still be swallowed
+            cdp.send("Input.dispatchTouchEvent", {"type": "touchStart", "touchPoints": [{"x": ix, "y": iy}]})
+            page.wait_for_timeout(40)
+            cdp.send("Input.dispatchTouchEvent", {"type": "touchEnd", "touchPoints": []})
+            page.locator(".ctxmenu[role=menu]").wait_for(state="detached", timeout=2000)
+            assert errors == [], errors
+            browser.close()
+    finally:
+        server.stop()
+
+
 # -- the deck boxes --------------------------------------------------------------------------------
 
 
@@ -349,7 +397,7 @@ def test_the_deck_boxes_rename_move_export_compare_and_delete(tmp_path: Path) ->
             assert box.locator("textarea").is_hidden()
             assert box.locator(".acts button", has_text="Copy").is_hidden()
             page.keyboard.press("Escape")
-            assert page.locator(".mtgbox").count() == 0
+            _gone(page)
             # Compare with: the member's decks, then today's comparison page
             page.locator("li.deck[data-deck-id='42'] button.kebab").click()
             _pick(page, "Compare with…")
@@ -549,7 +597,7 @@ def test_a_folder_holding_the_backup_folder_is_refused_in_the_box(tmp_path: Path
             assert box.locator(".body").inner_text().strip()
             assert [t.strip() for t in box.locator(".acts button").all_inner_texts()] == ["OK"]
             box.locator(".acts button").click()
-            assert page.locator(".mtgbox").count() == 0
+            _gone(page)
             assert ark.folder_deletes == []
             assert errors == [], errors
             browser.close()
@@ -576,16 +624,20 @@ def test_the_collaborator_form_asks_in_a_box_before_it_is_sent(tmp_path: Path) -
             calls = len(server.ark.calls)
             section.locator("form.addtag button").click()
             box = _box(page)
-            assert box.locator("h2").inner_text() == "Let bob edit “Sample Commander Deck” on Archidekt?"
+            assert box.locator("h2").inner_text() == "Let “bob” edit “Sample Commander Deck” on Archidekt?"
             assert box.locator(".body").inner_text().strip() == section.get_attribute("data-note")
-            assert [t.strip() for t in box.locator(".acts button").all_inner_texts()] == ["Cancel", "Add bob"]
+            assert [t.strip() for t in box.locator(".acts button").all_inner_texts()] == [
+                "Cancel",
+                "Add “bob”",
+            ]
             box.locator("button", has_text="Cancel").click()
-            assert page.locator(".mtgbox").count() == 0 and len(server.ark.calls) == calls
+            _gone(page)
+            assert len(server.ark.calls) == calls
             assert "/settings" in page.url
             # Add sends the form with its confirmation; no confirmation page in between
             section.locator("form.addtag button").click()
             with page.expect_navigation(wait_until="networkidle"):
-                _box(page).locator("button", has_text="Add bob").click()
+                _box(page).locator("button", has_text="Add “bob”").click()
             assert page.locator("form.confirmform").count() == 0
             assert page.locator("#collaborators").count() == 1
             assert errors == [], errors
@@ -684,7 +736,18 @@ def test_the_rows_of_the_list_pages_have_their_menus(tmp_path: Path) -> None:
             _menu(page)
             assert _items(page) == ["Open", "Price alert…", "Remove"]
             _pick(page, "Price alert…")
-            assert page.locator("#wx-d42").is_visible()
+            assert page.locator("#wx-d42").is_visible()  # a deck row has no alert fields: its details open
+            # a card row's Price alert… is a box (M16) with the row's three fields, posting as the row's form
+            page.locator("#wr-w_one .act button.kebab").click()
+            _menu(page)
+            _pick(page, "Price alert…")
+            box = page.locator(".mtgbox[role=dialog]:not([hidden])")
+            box.wait_for(timeout=3000)
+            assert box.locator("h2").inner_text().startswith("Price alert: ")
+            assert box.locator("input[name=alert_pct]").count() == 1
+            assert box.locator("form input[name=action][value=alerts]").count() == 1
+            assert box.locator(".acts button", has_text="Save alert").is_visible()
+            page.keyboard.press("Escape")
             assert errors == [], errors
             browser.close()
     finally:
@@ -728,10 +791,15 @@ def test_cards_have_their_menus_on_search_the_collection_and_the_editor(tmp_path
             assert page.locator(".ctxmenu").count() == 1  # the menu stays for more steps
             assert int(menu.locator(".mqty .n").inner_text()) == n + 1
             _pick(page, "Details…")
-            assert row.locator("details.rowmenu").get_attribute("open") is not None
-            # the row's own ⋮ is still its Details form
-            row.locator("details.rowmenu > summary").click()
-            assert row.locator("details.rowmenu").get_attribute("open") is None
+            page.wait_for_function("() => !document.getElementById('col-details').hidden")
+            assert page.locator("#col-details input[name=id]").input_value() == row.get_attribute("data-id")
+            page.keyboard.press("Escape")
+            page.wait_for_function("() => document.getElementById('col-details').hidden")
+            # the row's own ⋮ opens the same shared menu
+            row.locator(".kebab").click()
+            assert page.locator(".ctxmenu").count() == 1
+            page.keyboard.press("Escape")
+            page.wait_for_timeout(100)
             assert page.locator(".ctxmenu").count() == 0
             # the editor's rows
             page.goto(f"{server.base}/decks/42/edit", wait_until="networkidle")

@@ -8,10 +8,12 @@ Chromium build."""
 from __future__ import annotations
 
 import json
+import re
 
 import pytest
 
 from .test_cardsearch_browser import _chromium
+from .test_cardview_browser import PNG
 from .test_suggest_browser import Server, server  # noqa: F401
 
 pytest.importorskip("playwright")
@@ -429,5 +431,70 @@ def test_the_saved_scans_menu_opens_renames_and_deletes(server: Server, width: i
         menu.get_by_role("menuitem", name="Open").click()
         expect(page.locator("#session-name")).to_have_value("Trade binder")
         expect(page.locator("ul.items > li")).to_have_count(1)
+        assert errors == []
+        browser.close()
+
+
+@pytest.mark.parametrize("width", [344, 1280])
+def test_the_card_size_switch_sizes_the_list_pictures_and_the_picker_tiles(
+    server: Server,  # noqa: F811
+    width: int,
+) -> None:
+    """R-175 (2026-10-21): the S / M / L switch sits on the list and in the printing picker; the
+    row pictures and the picker's tiles follow it, and the page keeps its width."""
+    from playwright.sync_api import expect, sync_playwright
+
+    exe = _chromium()
+    with sync_playwright() as p:
+        browser, page, errors, touch = _open(p, exe, server, server.sign_in(), width, False, "light")
+        page.route(
+            re.compile(r"https://cards\.scryfall\.io/.*"),
+            lambda r: r.fulfill(status=200, content_type="image/png", body=PNG),
+        )
+        page.evaluate(
+            """async () => {
+                 const s = window.__scan;
+                 const body = {cards: [{name: 'Sol Ring'}]};
+                 const res = (await s.api('/scan/api/resolve', 'POST', body)).cards[0];
+                 s.state.items = []; s.addItem(res, 2); s.showTab('list'); }"""
+        )
+        rows = page.locator("ul.items > li")
+        expect(rows).to_have_count(1)
+        switch = page.locator(".list-tools .sizeseg")
+        assert switch.is_visible()
+        assert page.get_attribute(".list-tools [data-card-size-set=m]", "aria-pressed") == "true"
+        medium = rows.first.locator("img:not(.img-broken), .thumb, .img-fallback").first.bounding_box()[
+            "width"
+        ]
+        with page.expect_response("**/api/v1/prefs"):
+            page.locator(".list-tools [data-card-size-set=l]").click()
+        assert page.get_attribute("html", "data-card-size") == "l"
+        large = rows.first.locator("img:not(.img-broken), .thumb, .img-fallback").first.bounding_box()[
+            "width"
+        ]
+        assert large > medium * 1.2, (medium, large)
+        with page.expect_response("**/api/v1/prefs"):
+            page.locator(".list-tools [data-card-size-set=s]").click()
+        small = rows.first.locator("img:not(.img-broken), .thumb, .img-fallback").first.bounding_box()[
+            "width"
+        ]
+        assert small < medium, (medium, small)
+        over = page.evaluate(
+            "() => document.documentElement.scrollWidth - document.documentElement.clientWidth"
+        )
+        assert over <= 0
+        # the picker carries the same switch, and its tiles follow the size
+        page.locator("ul.items .setbtn").first.click()
+        page.wait_for_selector("#picker .tile")
+        assert page.get_attribute("#picker .sheet-tools [data-card-size-set=s]", "aria-pressed") == "true"
+        tile_s = page.locator("#picker .tile").first.bounding_box()["width"]
+        with page.expect_response("**/api/v1/prefs"):
+            page.locator("#picker .sheet-tools [data-card-size-set=l]").click()
+        tile_l = page.locator("#picker .tile").first.bounding_box()["width"]
+        assert tile_l > tile_s * 1.3, (tile_s, tile_l)
+        over = page.evaluate(
+            "() => document.documentElement.scrollWidth - document.documentElement.clientWidth"
+        )
+        assert over <= 0
         assert errors == []
         browser.close()

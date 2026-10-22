@@ -58,6 +58,9 @@ ul.changes li.more-row{display:block;padding:0;border-left-color:var(--border)}
 .head h1{flex:1 1 10rem}
 .head .badges{margin-left:auto}
 .badge.risk{white-space:normal;text-align:center;flex:0 1 auto}
+/* beside the High label when Full auto applies the change anyway: a plain note, not a label */
+.nopress{display:inline-flex;align-items:center;gap:4px;font-size:.75rem;color:var(--muted);white-space:nowrap}
+.nopress svg.i{width:12px;height:12px;fill:none;stroke:var(--green);stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round}
 /* Locked (the 700 ms after drawing, and while a press is out), a button keeps a label that reads:
    full-strength text with a dashed outline in its own colour, not faded (as the review page's
    Apply and Reject) */
@@ -82,7 +85,7 @@ button.danger:disabled{color:var(--red)}
 </head>
 <body>
 <div class="card" id="card">
-  <div class="head"><h1 id="title">Deck change proposal</h1><span class="badges"><span class="badge" id="state"></span><span class="badge risk hidden" id="risk"></span></span></div>
+  <div class="head"><h1 id="title">Deck change proposal</h1><span class="badges"><span class="badge" id="state"></span><span class="badge risk hidden" id="risk"></span><span class="nopress hidden" id="nopress"></span></span></div>
   <p class="sum" id="summary">Waiting for the proposal…</p>
   <ul class="changes" id="rows" aria-label="Changes"></ul>
   <p class="note hidden" id="note"></p>
@@ -306,8 +309,11 @@ button.danger:disabled{color:var(--red)}
       replaced: "Replaced", superseded: "Replaced", withdrawn: "Withdrawn", failed: "Failed" };
     var stKey = sc.state === "pending" ? ({ updated: "updated", needs_look: "needs_look", held: "held" }[sc.status] || "pending") : (sc.state || "");
     var st = $("state");
-    st.textContent = sc.state === "pending" ? ({ updated: "Updated", needs_look: "Needs a look", held: "Held" }[sc.status] || "Waiting") : (STATE_TEXT[sc.state] || sc.state || "");
-    st.className = "badge " + (stKey === "held" ? "pending" : stKey === "superseded" ? "replaced" : stKey);
+    // the site's labels: a word, a colour and an icon (ui.LABELS)
+    var STATE_ICON = { pending: "clock", updated: "refresh", needs_look: "alert", held: "pause", applying: "spinner",
+      applied: "check", rejected: "x", expired: "hourglass", replaced: "arrows", superseded: "arrows", withdrawn: "back", failed: "alert" };
+    B.label(st, sc.state === "pending" ? ({ updated: "Updated", needs_look: "Needs a look", held: "Held" }[sc.status] || "Waiting") : (STATE_TEXT[sc.state] || sc.state || ""),
+      stKey === "held" ? "pending" : stKey === "superseded" ? "replaced" : stKey, STATE_ICON[stKey] || "");
     $("summary").textContent = summaryFor(sc, rows);
     var list = $("rows"); list.replaceChildren();
     if (!rows.length && sc.diff) {
@@ -318,13 +324,15 @@ button.danger:disabled{color:var(--red)}
         li.appendChild(n); li.appendChild(el("span", "qty", "")); list.appendChild(li);
       });
     }
-    var risk = $("risk");
+    var risk = $("risk"), nopress = $("nopress");
     var RISK_TEXT = { low: "Low", high: "High", consent: "Your press", destructive: "Delete" };
-    if (sc.risk === "high" && sc.state === "pending" && sc.assistant_may_apply && sc.approval_mode === "auto") {
-      // every high-risk change Full auto applies
-      risk.textContent = "No press needed"; risk.className = "badge risk";
-    } else if (sc.risk) { risk.textContent = RISK_TEXT[sc.risk] || sc.risk; risk.className = "badge risk " + sc.risk; }
+    var RISK_ICON = { low: "shield", high: "triangle", consent: "hand", destructive: "trash" };
+    if (sc.risk) B.label(risk, RISK_TEXT[sc.risk] || sc.risk, "risk " + sc.risk, RISK_ICON[sc.risk] || "");
     else risk.className = "badge risk hidden";
+    // a high-risk change Full auto applies anyway: the High label stays, with a plain note beside it (F14)
+    if (sc.risk === "high" && sc.state === "pending" && sc.assistant_may_apply && sc.approval_mode === "auto") {
+      nopress.replaceChildren(B.icon("check"), document.createTextNode("No press needed")); nopress.className = "nopress";
+    } else nopress.className = "nopress hidden";
     var note = [changeNote(sc), statusNote(sc), sc.state === "pending" ? sc.replace_note : "", modeNote(sc)].filter(Boolean).join(" ");
     $("note").textContent = note; $("note").className = "note" + (note ? "" : " hidden");
     renderRows(list, rows, rows.length > COLLAPSE_AT ? COLLAPSE_AT : rows.length);

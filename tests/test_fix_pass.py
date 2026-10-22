@@ -36,7 +36,7 @@ def _query(**kw: object) -> dict:
 
 def test_including_these_is_the_first_colour_mode_and_the_default() -> None:
     assert [m for m, _t in browse.COLOUR_MODES] == ["incl", "exact", "atmost"]
-    assert browse.COLOUR_MODES[0][1] == "Including these"
+    assert browse.COLOUR_MODES[0][1] == "Including these colors"
     assert _query(c=["U", "G"])["colour_mode"] == "incl"
     assert _query(c=["U"], cm="exact")["colour_mode"] == "exact"  # an old link keeps working
     assert _query(c=["U"], cm="atmost")["colour_mode"] == "atmost"
@@ -116,12 +116,12 @@ async def test_the_deck_search_keeps_including_decks_itself_and_sends_the_direct
         assert "data-deck-id='42'" in r.text and "data-deck-id='102'" in r.text
         assert "data-deck-id='101'" not in r.text
         assert ">2 decks<" in r.text
-        assert "<option value='incl' selected>Including these</option>" in r.text
+        assert "<option value='incl' selected>Including these colors</option>" in r.text
 
         r = await b.http.get("/search?c=U&c=G&cm=atmost", headers=NAV)
         sent = ark.search_params[-1]
         assert sent["colors"] == "U,G" and sent["colorIdentity"] == "true", sent
-        assert "<option value='atmost' selected>At most these</option>" in r.text
+        assert "<option value='atmost' selected>At most these colors</option>" in r.text
 
         r = await b.http.get("/search?c=U&c=G&cm=exact", headers=NAV)
         assert "data-deck-id='42'" in r.text and "data-deck-id='102'" not in r.text

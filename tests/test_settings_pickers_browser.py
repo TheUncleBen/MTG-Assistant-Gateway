@@ -134,14 +134,18 @@ def test_collaborator_box_picks_from_the_people_followed(server: Server, width: 
         assert section.locator("datalist").count() == 0
         # the collaborator is a row with its remove button; the box is the site's combobox
         assert section.locator(".collablist li .name").all_inner_texts() == ["amy"]
-        assert section.locator("button[aria-label='Remove amy']").is_visible()
+        assert section.locator("button[aria-label='Remove “amy”']").is_visible()
         box = page.locator("#collabname")
         assert box.get_attribute("role") == "combobox" and box.get_attribute("aria-expanded") == "false"
         assert box.get_attribute("list") is None
-        # the box and its button share one row at every width, the button at the box's height
-        b, a = box.bounding_box(), section.locator("form.addtag > button").bounding_box()
-        assert abs(b["y"] - a["y"]) < 2 and abs(b["height"] - a["height"]) < 2, (b, a)
-        assert a["x"] > b["x"] + b["width"]
+        # the box and its button share one row, the button at the box's height; on a phone the
+        # shared form row puts the button under the box, full width (the approved mockup)
+        b, a = box.bounding_box(), section.locator("form.addtag button").bounding_box()
+        if width >= 600:
+            assert abs(b["y"] - a["y"]) < 2 and abs(b["height"] - a["height"]) < 2, (b, a)
+            assert a["x"] > b["x"] + b["width"]
+        else:
+            assert a["y"] > b["y"] + b["height"] - 2 and abs(a["width"] - b["width"]) < 2, (b, a)
         # focusing shows everyone followed, less the collaborators, under a heading
         box.click()
         listbox = page.locator("#collabname-list[role=listbox]")
@@ -185,12 +189,12 @@ def test_collaborator_box_picks_from_the_people_followed(server: Server, width: 
         listbox.locator("[role=option]", has_text="gwen").click()
         assert box.input_value() == "gwen" and not listbox.is_visible()
         # Add asks in a box first; nothing is sent until the box's Add
-        section.locator("form.addtag > button").click()
-        dialog = page.locator("[role=dialog]", has_text="Let gwen edit")
+        section.locator("form.addtag button").click()
+        dialog = page.locator("[role=dialog]", has_text="Let “gwen” edit")
         dialog.wait_for(timeout=3000)
         assert posted == []
         with page.expect_navigation():
-            dialog.locator("button", has_text="Add gwen").click()
+            dialog.locator("button", has_text="Add “gwen”").click()
         assert any("action=add" in d and "username=gwen" in d and "confirmed=1" in d for d in posted), posted
         assert [e["user"]["username"] for e in server.ark.editors[42]] == ["amy", "gwen"]
         assert errors == []
@@ -210,7 +214,7 @@ def test_a_person_not_followed_is_refused_under_the_box(server: Server, width: i
         box.fill("nobody")
         page.keyboard.press("Escape")
         with page.expect_navigation():
-            page.locator("#collaborators form.addtag > button").click()
+            page.locator("#collaborators form.addtag button").click()
         page.wait_for_load_state("networkidle")
         # the answer opens on the section, the message right under the box, nothing at the top
         msg = page.locator("#collaborators-msg")
@@ -291,7 +295,7 @@ def test_tag_box_suggests_archidekts_tags(server: Server, width: int, scheme: st
         page.keyboard.press("Enter")
         assert box.input_value() == "budget" and not listbox.is_visible()
         with page.expect_navigation():
-            page.locator("#tags form.addtag > button").click()
+            page.locator("#tags form.addtag button").click()
         page.wait_for_load_state("networkidle")
         assert page.url.endswith("#tags")
         assert "budget" in page.locator("#tags .taglist").inner_text()
@@ -351,9 +355,12 @@ def test_collaborator_picker_fits_names_its_list_and_has_finger_sized_rows(
         box = page.locator("#collabname")
         text, room = page.evaluate(PLACEHOLDER_ROOM)
         assert text <= room, (text, room)
-        b, a = box.bounding_box(), section.locator("form.addtag > button").bounding_box()
-        assert abs(b["y"] - a["y"]) < 2 and a["x"] > b["x"] + b["width"], (b, a)
-        assert section.locator("form.addtag > button").inner_text().strip() == "Add"
+        b, a = box.bounding_box(), section.locator("form.addtag button").bounding_box()
+        if width >= 600:
+            assert abs(b["y"] - a["y"]) < 2 and a["x"] > b["x"] + b["width"], (b, a)
+        else:  # the shared form row on a phone: the button under the box (the approved mockup)
+            assert a["y"] > b["y"] + b["height"] - 2, (b, a)
+        assert section.locator("form.addtag button").inner_text().strip() == "Add"
         box.click()
         listbox = page.locator("#collabname-list[role=listbox]")
         listbox.wait_for(state="visible", timeout=3000)

@@ -1,8 +1,8 @@
 """Card size S / M / L (0.7.29) in headless Chromium: M is today's size; on
 a phone the deck page shows 3, 2 or 1 cards across; on a wide screen My decks shows 6, 5 or 4
 decks across; the switch next to "View as" applies at once and follows the account; the printing
-picker has the same switch; card search shows it with the Grid view only. At 360, 720 and 1280 px
-in both themes the switch fits, reads at 4.5:1 and is as tall as the other controls. Screenshots
+picker has the same switch; the list views keep it and size their row pictures (R-175). At 360, 720 and
+1280 px in both themes the switch fits, reads at 4.5:1 and is as tall as the other controls. Screenshots
 go to MTG_SIZE_SHOTS (a folder) when set. Skipped without a Chromium build."""
 
 from __future__ import annotations
@@ -235,7 +235,7 @@ def test_the_printing_picker_has_the_same_switch(server: Server) -> None:
 
 
 @pytest.mark.parametrize("width,theme", SIZES)
-def test_collection_my_decks_and_card_search_show_the_switch_with_the_grid_only(
+def test_collection_my_decks_and_card_search_show_the_switch_in_every_view(
     server: Server, width: int, theme: str
 ) -> None:
     from playwright.sync_api import sync_playwright
@@ -243,11 +243,15 @@ def test_collection_my_decks_and_card_search_show_the_switch_with_the_grid_only(
     _chromium()
     sid = server.sign_in_and_link()
     _size(server, "l")
+    ark = server.ark  # an empty collection shows no results bar: give it one card
+    ark.collections.setdefault("alice", {})[5001] = ark._collection_row(
+        5001, ark.printing(9003), {"quantity": 1}
+    )
     with sync_playwright() as p:
         browser, page, errors = _page(p, server, sid, width, theme=theme)
         for path, bar in (
             ("/decks?view=grid", ".rbar"),
-            ("/collection?view=grid", ".collbar"),
+            ("/collection?view=grid", ".spanel .rbar"),  # the switch stays in the bar on phones
             ("/cards?q=sol&view=grid", ".rbar.cards"),
         ):
             page.goto(f"{server.base}{path}", wait_until="networkidle")
@@ -263,13 +267,24 @@ def test_collection_my_decks_and_card_search_show_the_switch_with_the_grid_only(
             _shot(page, f"{path[1:].split('?')[0]}-{width}-{theme}.png")
             if sheet:
                 page.locator(".sp-show").click()
-        page.goto(f"{server.base}/decks?view=list", wait_until="networkidle")
-        assert page.locator(".rbar .sizeseg").is_hidden()
-        page.goto(f"{server.base}/collection?view=list", wait_until="networkidle")
-        assert page.locator(".collbar .sizeseg").count() == 0
-        page.goto(f"{server.base}/cards?q=sol&view=grid", wait_until="networkidle")
-        page.locator(".rbar.cards .segc label", has_text="List").click()
-        page.wait_for_function("() => !document.querySelector('.rbar.cards .cardsize').offsetParent")
+        # R-175 (2026-10-21): the switch stays in the list views too, and sizes the row pictures
+        if width >= 600:  # on phones the switch waits in the Filters sheet, as above
+            page.goto(f"{server.base}/decks?view=list", wait_until="networkidle")
+            assert page.locator(".rbar .sizeseg").is_visible()
+            page.goto(f"{server.base}/cards?q=sol&view=grid", wait_until="networkidle")
+            page.locator(".rbar.cards .segc label", has_text="List").click()
+            page.wait_for_function("() => document.querySelector('.cardlist')")
+            assert page.locator(".rbar.cards .cardsize").is_visible()
+            large = page.evaluate(
+                "() => document.querySelector('.cardlist .pic').getBoundingClientRect().width"
+            )
+            with page.expect_response(SAVED) as saved:
+                page.locator(".rbar.cards [data-card-size-set=s]").click()
+            assert saved.value.ok
+            small = page.evaluate(
+                "() => document.querySelector('.cardlist .pic').getBoundingClientRect().width"
+            )
+            assert small < large, (small, large)
         browser.close()
     assert errors == []
 

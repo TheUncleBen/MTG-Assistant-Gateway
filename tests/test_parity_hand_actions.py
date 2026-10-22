@@ -127,7 +127,9 @@ async def test_section_forms_answer_next_to_their_own_form(stack: Stack) -> None
         assert tags < shown.index("Tag added on Archidekt.") < shown.index("id='folder'")
         r = await _form(b, "/decks/42/tags", {"action": "add", "name": "sea monsters"})
         assert r.status_code == 400
-        at = r.text.index("<p class='notice error' id='tags-msg' role='alert'>Archidekt has no deck tag")
+        at = r.text.index(
+            "<div class='notice error ds-note' id='tags-msg' role='alert'>Archidekt has no deck tag"
+        )
         assert r.text.index("id='tags'") < at < r.text.index("id='folder'")
         assert "aria-describedby='tags-help tags-msg' aria-invalid='true'" in r.text
         assert "value='sea monsters'" in r.text  # the box keeps what was typed
@@ -341,7 +343,7 @@ async def test_collection_row_details_save_condition_language_and_price(stack: S
         assert r.status_code == 303
         rid = next(iter(stack.ark.collections["alice"]))
         page = await b.http.get("/collection", headers=NAV)
-        assert "class='menu detailsform'" in page.text and "name='purchase_price'" in page.text
+        assert "id='col-details'" in page.text and "name='purchase_price'" in page.text
         r = await b.http.post(
             "/collection",
             data={
@@ -363,7 +365,7 @@ async def test_collection_row_details_save_condition_language_and_price(stack: S
             1.5,
         )
         page = await b.http.get(r.headers["location"], headers=NAV)
-        assert "Card details saved" in page.text and "class='pill cond'>LP<" in page.text
+        assert "Card details saved" in page.text and "data-cond='LP'" in page.text
         # the JSON API takes the same fields; an empty price clears it, a bad language is refused
         r = await api(b, "POST", f"/collection/api/rows/{rid}", {"purchase_price": "", "condition": "NM"})
         assert r.status_code == 200, r.text
@@ -448,7 +450,8 @@ async def test_precons_page_lists_sets_and_filters(stack: Stack) -> None:
         r = await b.http.get("/precons?q=nothing-here", headers=NAV)
         assert "No preconstructed deck matches" in r.text
         r = await b.http.get("/precons?q=smp", headers=NAV)
-        assert "Sample Set (SMP)" in r.text and "Older Set" not in r.text
+        # the Set drop-down still lists every set; only the matching group is on the page
+        assert "aria-label='Sample Set'" in r.text and "aria-label='Older Set'" not in r.text
         home = await b.http.get("/", headers=NAV)
         assert "href='/precons'" in home.text
         search = await b.http.get("/search", headers=NAV)

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mtg-gateway"
-version = "0.7.40"
+version = "0.7.41"
 description = "Authenticated MCP gateway for Magic: The Gathering deck research and editing"
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -34,7 +34,7 @@ mtg-gateway = "mtg_gateway.__main__:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-"mtg_gateway" = ["static/*", "static/cards/*"]  # companion.js, clickguard.js, the cards
+"mtg_gateway" = ["static/*", "static/cards/*", "static/logos/*"]  # scripts, the cards, app logos
 "mtg_gateway.scan" = ["static/*", "static/vendor/**/*"]
 
 [tool.pytest.ini_options]

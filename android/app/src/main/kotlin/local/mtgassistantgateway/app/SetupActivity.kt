@@ -4,6 +4,7 @@ import android.content.Intent
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.widget.Button
@@ -116,7 +117,10 @@ class SetupActivity : ComponentActivity() {
             conn.instanceFollowRedirects = false
             conn.setRequestProperty("Accept", "application/json")
             val code = conn.responseCode
-            if (code != 200) return getString(R.string.setup_not_gateway, code)
+            if (code != 200) {
+                Log.w(TAG, "healthz answered HTTP $code") // the code stays out of the message
+                return getString(R.string.setup_not_gateway)
+            }
             val body = conn.inputStream.bufferedReader().use { it.readText() }
             val ok = try {
                 // "degraded" is still a gateway: only its research service is down
@@ -124,11 +128,20 @@ class SetupActivity : ComponentActivity() {
             } catch (e: Exception) {
                 false
             }
-            if (ok) null else getString(R.string.setup_not_gateway, code)
+            if (ok) {
+                null
+            } else {
+                Log.w(TAG, "healthz answered HTTP $code without a gateway status")
+                getString(R.string.setup_not_gateway)
+            }
         } catch (e: IOException) {
             getString(R.string.setup_unreachable)
         } finally {
             conn.disconnect()
         }
+    }
+
+    companion object {
+        private const val TAG = "MtgAssistant"
     }
 }

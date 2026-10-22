@@ -29,7 +29,7 @@ from .reports_page import PHONE_WIDGETS_CSS
 from .theme import esc
 
 PAGE = ui.PER_PAGE
-FINISH_WORDS = {"nonfoil": "Non-foil", "foil": "Foil", "etched": "Etched"}
+FINISH_WORDS = {"nonfoil": "Normal", "foil": "Foil", "etched": "Etched"}
 CHIPS = (("", "All"), ("alert", "With an alert"), ("up", "Up in 7 days"), ("down", "Down in 7 days"))
 SORTS = (
     ("", "Sort: Name"),
@@ -244,8 +244,9 @@ def _range_buttons(full_days: int) -> str:
 
 
 # -- rows ----------------------------------------------------------------------------------------
-TABLE_COLS = "56px minmax(0,1fr) 7rem 10.5rem 120px minmax(0,10rem) 5.5rem"
-TABLE_MD = "56px minmax(0,1fr) 5.5rem"
+# the last column holds Details and the row's ⋮ (static/menus.js adds it) side by side
+TABLE_COLS = "56px minmax(0,1fr) 7rem 10.5rem 120px minmax(0,10rem) 8.5rem"
+TABLE_MD = "56px minmax(0,1fr) 8.5rem"
 TABLE_SM = "48px minmax(0,1fr) auto"
 
 
@@ -635,6 +636,7 @@ def watchlist_page_html(
         + "</div>"
         + chips
         + tools
+        + ui.card_size_control(cls="cardsize w-size")  # R-175: the pictures follow the one card size
         + ui.table_open(TABLE_COLS, TABLE_MD, TABLE_SM, cls="w-t", label="Watched cards")
         + head
         + body
@@ -729,7 +731,12 @@ WATCH_PAGE_CSS = (
 .watch-page .tspark polyline,.watch-page .pcl polyline{fill:none;stroke:currentColor;stroke-width:2;
   stroke-linejoin:round;stroke-linecap:round}
 .watch-page .w-t .tr.open{background:var(--orange-tint)}
+.watch-page .w-t .act{display:inline-flex;align-items:center;gap:.4rem;flex-wrap:nowrap;white-space:nowrap}
 .watch-page .w-t .act .more{min-height:var(--ctl);display:inline-flex;align-items:center;margin:0}
+.watch-page .w-size{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:.5rem;
+  margin:0 0 .6rem;max-width:100%}
+.watch-page .w-size .sizeseg{max-width:100%}
+.watch-page .w-size .lbl{color:var(--text-muted);font-size:.9rem}
 .watch-page .wx{display:grid;grid-template-columns:minmax(0,3fr) minmax(0,2fr);gap:.75rem 1.5rem;
   padding:.75rem 1rem 1rem;border-bottom:1px solid var(--border-soft)}
 .watch-page .wx[hidden]{display:none}

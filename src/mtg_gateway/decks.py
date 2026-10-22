@@ -693,6 +693,8 @@ def row_line(r: dict[str, Any]) -> str:
         if r.get("fold"):  # a commander's rows fold into its commander-zone row
             return f"{r['before']} -> {r['after']} {label}{side}. {commander_stays_text(r['fold'])}"
         return f"{r['before']} -> {r['after']} {label}{side}"
+    if kind == "deck_category":  # the deck's own category: renamed or its flags changed
+        return category_line(r)
     if kind == "category":
         line = f"{r['name']}: category {r['before']} -> {r['after']}"
         if r.get("leaves"):  # moved into a category the deck does not count (Maybeboard...)
@@ -709,7 +711,9 @@ def row_line(r: dict[str, Any]) -> str:
     if kind == "printing":
         return f"{r['name']}: printing {r['before']} -> {r['after']}"
     if kind == "clone":
-        return f"Clone '{r['source']}' ({r['cards']} cards) as '{r['name']}'"
+        where = f" in folder “{r['folder']}”" if r.get("folder") else ""
+        n = int(r.get("cards") or 0)
+        return f"Clone “{r['source']}” ({n} {'card' if n == 1 else 'cards'}) as “{r['name']}”{where}"
     if kind == "commander":
         if r.get("stays") or r.get("moved"):
             return " ".join(commander_row_texts(r))
@@ -1846,6 +1850,13 @@ def restore_rows(snapshot: Deck, current: Deck) -> tuple[list[dict[str, Any]], l
     then given the snapshot's quantity, colour tag and custom mana value; rows that already match
     in all of them are untouched. The verification after a restore runs this again on the deck
     read back, so anything left over is a mismatch."""
+    # The deck's categories go back first, by record id (names and flags, category_restore_plan),
+    # so a category renamed since is renamed back in place and its cards are not moved one by one
+    # into a new category with default flags; the cards are then compared with the deck as it
+    # reads once those writes have landed.
+    _bodies, category_lines = category_restore_plan(snapshot, current)
+    if _bodies:
+        current = deck_with_categories(current, _bodies)
     want: dict[tuple[Any, ...], tuple[Any, int]] = {}
     for c in snapshot.cards:
         if c.card_id is None:
@@ -1920,7 +1931,7 @@ def restore_rows(snapshot: Deck, current: Deck) -> tuple[list[dict[str, Any]], l
             continue
         payload.extend(_entry("remove", r, 0) for r in rows)
         lines.append(_rel_row("remove", rows[0], qty=sum(r.quantity for r in rows)))
-    return payload, sorted(lines, key=lambda r: row_line(r).split(" ", 1)[-1].lower())
+    return payload, category_lines + sorted(lines, key=lambda r: row_line(r).split(" ", 1)[-1].lower())
 
 
 def build_payload(
@@ -3596,6 +3607,7 @@ class DeckService:
             "review_url": f"{self.settings.public_url}/proposals/{row['id']}",
             # Which app made it ("browser", or "app: <its name> (<client id>)"), for the review page.
             "created_by": self._creator_label(row.get("created_by_client")),
+            "created_by_client": row.get("created_by_client"),
             "writes_enabled": self.settings.writes_enabled,
             # The member's approval mode (modes.py) and this proposal's risk tier decide whether
             # the assistant may apply it itself or the member's own press is needed.
@@ -3650,7 +3662,9 @@ class DeckService:
                 risk=risk,
                 risk_reason=why,
                 in_chat=self.settings.apply_in_chat,
-                partial=bool((row["result"] or {}).get("sent_entries")),
+                partial=bool(
+                    (row["result"] or {}).get("sent_entries") or (row["result"] or {}).get("categories_saved")
+                ),
                 kind=kind,
                 card_may_approve=self.card_may_approve(row),
                 press_reason=press or "",
@@ -3823,33 +3837,31 @@ class DeckService:
         limit, offset, oldest_first). With ``full`` each row keeps its whole change text as ``diff_text``."""
         now = int(time.time())
         out = []
-        for r in self.db.list_proposals(sub, **narrow):
-            state = "expired" if r["state"] == "pending" and r["expires_at"] < now else r["state"]
-            diff_text = str(r.pop("diff_text", None) or "")
-            lines = diff_text.splitlines()
-            summary = "; ".join(lines[:3]) + (f" (+{len(lines) - 3} more)" if len(lines) > 3 else "")
-            if full:
-                r["diff_text"] = diff_text
-            out.append(
-                {
-                    **r,
-                    "summary": summary[:400],
-                    "state": state,
-                    "created_by": self._creator_label(r.get("created_by_client")),
-                    "review_url": f"{self.settings.public_url}/proposals/{r['id']}",
-                    **(
-                        {"out_of_date": True}
-                        if state == "pending" and r.get("status") == "needs_look"
-                        else {}
-                    ),
-                    **(
-                        self._status_fields(sub, r)
-                        if state == "pending" and r.get("status")
-                        else {"status": None}
-                    ),
-                }
-            )
+        rows = self.db.list_proposals(sub, **narrow)
+        # the links and app names every row asks for, read once for the whole list
+        with self.db.read_ahead(sub, [r["id"] for r in rows], [r.get("created_by_client") for r in rows]):
+            for r in rows:
+                out.append(self._proposal_listed(sub, r, now, full))
         return out
+
+    def _proposal_listed(self, sub: str, r: dict[str, Any], now: int, full: bool) -> dict[str, Any]:
+        """One row of list_proposals."""
+        state = "expired" if r["state"] == "pending" and r["expires_at"] < now else r["state"]
+        diff_text = str(r.pop("diff_text", None) or "")
+        lines = diff_text.splitlines()
+        summary = "; ".join(lines[:3]) + (f" (+{len(lines) - 3} more)" if len(lines) > 3 else "")
+        if full:
+            r["diff_text"] = diff_text
+        return {
+            **r,
+            "summary": summary[:400],
+            "state": state,
+            "created_by": self._creator_label(r.get("created_by_client")),
+            "created_by_client": r.get("created_by_client"),
+            "review_url": f"{self.settings.public_url}/proposals/{r['id']}",
+            **({"out_of_date": True} if state == "pending" and r.get("status") == "needs_look" else {}),
+            **(self._status_fields(sub, r) if state == "pending" and r.get("status") else {"status": None}),
+        }
 
     def _review_page_only(self, sub: str, row: dict[str, Any]) -> DeckError:
         """The refusal for any caller but the review page's own form that tries to apply an
@@ -4375,7 +4387,7 @@ class DeckService:
             "deck_name": deck.name,
             "snapshot_id": snap["id"],
             "rows": lines + detail_lines,
-            "nothing": not payload and not details,
+            "nothing": not payload and not details and not category_restore_plan(wanted, deck)[0],
             "later": len(later),
             "outside": outside,
             "warning": undo_warning(len(later), outside),
@@ -4582,6 +4594,8 @@ class DeckService:
             return await self._apply_restore(sub, row, progress)
         if row.get("kind") == "details":
             return await self._apply_details(sub, row, progress)
+        if row.get("kind") == "categories":
+            return await self._apply_categories(sub, row, progress)
         if row.get("kind") == "clone":
             return await self._apply_clone(sub, row, progress)
         if row.get("kind") == "collection":
@@ -4862,12 +4876,16 @@ class DeckService:
         if now.rows_fingerprint() != deck.rows_fingerprint():
             raise needs_look_error(recheck.REASON_DURING_APPLY)
 
-    def recheck_waiting(self, sub: str, deck: Deck) -> dict[str, str]:
+    def recheck_waiting(
+        self, sub: str, deck: Deck, *, renamed: dict[str, str] | None = None
+    ) -> dict[str, str]:
         """Check every waiting proposal of the member on this deck against it (after an
         apply, on a deck page view, on a new proposal and in the deck sync) and record the
         outcome: "updated" (its baseline moves to this deck) or "needs_look" with the reason.
-        Held proposals keep their hold. Local only: no Archidekt request. Returns id -> status
-        for the proposals whose status was recorded."""
+        ``renamed`` (old name -> new name, after a categories apply or a restore that renamed
+        categories): a card edit naming an old name needs a look whatever its rows say
+        (recheck.renamed_reason). Held proposals keep their hold. Local only: no Archidekt
+        request. Returns id -> status for the proposals whose status was recorded."""
         from . import recheck
 
         out: dict[str, str] = {}
@@ -4896,6 +4914,9 @@ class DeckService:
             except Exception:
                 logger.exception("re-check of a waiting proposal failed")
                 continue
+            was_renamed = recheck.renamed_reason(row, renamed or {})
+            if was_renamed:
+                status, reason = "needs_look", was_renamed
             if status is None:
                 continue
             if self.db.rebase_proposal(
@@ -5500,19 +5521,30 @@ class DeckService:
         return await actions.propose(self, sub, action, params)
 
     @_dedupe
-    async def propose_clone(self, sub: str, deck_id: str, name: str | None = None) -> dict[str, Any]:
+    async def propose_clone(
+        self, sub: str, deck_id: str, name: str | None = None, *, folder_id: int | None = None
+    ) -> dict[str, Any]:
         """A proposal (kind ``clone``) that copies any deck the member can read (their own, a
-        public deck, a precon) into a new private deck in their root folder, the way Archidekt's
-        Clone deck button does ("Copy of - " prefix by default). Applied with the same copy route
-        the backups use (verified live 2026-10-05 on the member's own deck; a copy of someone
-        else's public deck is the same request and has not been exercised live); the copy keeps
-        every card, quantity, category and finish."""
+        public deck, a precon) into a new private deck in their root folder, or in ``folder_id``
+        (one of the member's own folders, checked here), the way Archidekt's Clone deck button
+        does ("Copy of - " prefix by default). Applied with the same copy route the backups use
+        (verified live 2026-10-05 on the member's own deck; a copy of someone else's public deck
+        is the same request and has not been exercised live); the copy keeps every card,
+        quantity, category and finish."""
         deck_id = _clean_deck_id(deck_id)
         self._room_for_proposal(sub)
         deck = await self.get_any_deck(sub, deck_id)
         new_name = clean_text(name or "") or f"Copy of - {deck.name}"
         if len(new_name) > 200:
             raise DeckError("invalid", "name must be up to 200 characters")
+        changes: dict[str, Any] = {"name": new_name}
+        folder_name = None
+        if folder_id is not None:
+            if isinstance(folder_id, bool) or not str(folder_id).isdigit():
+                raise DeckError("invalid", "That folder is not in your Archidekt account.")
+            _info, folder = await self._folder_in(sub, int(folder_id))
+            changes["folder_id"] = int(folder["id"])
+            folder_name = str(folder.get("name") or "")
         pid = secrets.token_urlsafe(12)
         cards = sum(c.quantity for c in deck.cards)
         self._save_proposal(
@@ -5523,9 +5555,9 @@ class DeckService:
                 "deck_id": deck.id,
                 "deck_name": deck.name,
                 "baseline_fingerprint": deck.fingerprint(),
-                "changes": {"name": new_name},
+                "changes": changes,
             },
-            [_row("clone", name=new_name, source=deck.name, cards=cards)],
+            [_row("clone", name=new_name, source=deck.name, cards=cards, folder=folder_name)],
         )
         self._audit(
             "proposal_created", sub=sub, detail={"proposal_id": pid, "deck_id": deck.id, "kind": "clone"}
@@ -5539,7 +5571,11 @@ class DeckService:
         if deck.fingerprint() != row["baseline_fingerprint"]:
             raise needs_look_error(None)
         name = clean_text(str((row.get("changes") or {}).get("name") or "")) or f"Copy of - {deck.name}"
-        copy = await self._call(sub, lambda token, *_: self.client.copy_deck(token, deck, name=name))
+        folder_id = (row.get("changes") or {}).get("folder_id")
+        folder = str(int(folder_id)) if folder_id is not None else None
+        copy = await self._call(
+            sub, lambda token, *_: self.client.copy_deck(token, deck, name=name, folder_id=folder)
+        )
         # Recorded at once, as _apply_create records its new deck: a stop from here on
         # has made the copy, so the proposal stays failed and is never copied a second time.
         progress["deck_id"] = str(copy["id"])
@@ -5570,11 +5606,26 @@ class DeckService:
         wanted = parse_deck(snap["deck"])
         deck = await self._current_deck_for(sub, row)
         payload, _lines = restore_steps(wanted, deck)
+        bodies, _cat_rows = category_restore_plan(wanted, deck)
+        stuck: list[str] = []
         snapshot_id = self._take_snapshot(sub, row, deck)
         progress["snapshot_id"] = snapshot_id
         backup = await self._backup_shared(sub, row, deck, snapshot_id)
         progress.update(backup)
         await self._rows_unchanged(sub, deck)  # the backup takes a while: check again before writing
+        if bodies:
+            # The categories first, one write at a time by record id (names and flags), then the
+            # cards worked out again on the deck as Archidekt reads back: had a rename not taken
+            # its cards along (only a live test can say), they are moved back by card writes.
+            await self._categories_unchanged(sub, deck)
+            await self._send_categories(sub, deck.id, bodies, progress)
+            after = await self.get_own_deck(sub, deck.id)
+            try:
+                payload, _lines = restore_steps(wanted, after)
+            except DeckError as exc:
+                # written already: what can't be worked out now is reported with the mismatches
+                # (N-2), and no card is moved on a deck that no longer matches the plan
+                payload, stuck = [], [_sentence(exc).rstrip(".")]
         if payload:
             await self._send(sub, deck.id, payload, progress)
         # The deck's own details as the snapshot recorded them (name, description, format, bracket,
@@ -5586,8 +5637,12 @@ class DeckService:
                 progress, self._call(sub, self.client.update_deck, deck.id, details_payload(details))
             )
         verified = await self.get_deck(sub, deck.id)
-        self.recheck_waiting(sub, verified)
-        _left, mismatches = restore_steps(wanted, verified)
+        self.recheck_waiting(sub, verified, renamed=_renames(bodies, category_states(deck)))
+        try:
+            _left, mismatches = restore_steps(wanted, verified)
+        except DeckError as exc:  # the writes were sent: a check that can't be made is a mismatch
+            mismatches = [_sentence(exc).rstrip(".")]
+        mismatches = stuck + [m for m in mismatches if m not in stuck]
         still, _lines = details_rows(verified, snapshot_details(wanted)) if details else ({}, [])
         mismatches += [f"{k} (deck detail)" for k in sorted(still)]
         result = {
@@ -5596,6 +5651,7 @@ class DeckService:
             "restored_snapshot_id": snap["id"],
             "sent_entries": len(payload),
             "restored_details": sorted(details),
+            **({"categories_saved": progress.get("categories_saved", [])} if bodies else {}),
             "verified": not mismatches,
             "mismatched_cards": mismatches,
         }
@@ -5734,7 +5790,18 @@ class DeckService:
         app asking made it (``own``: it may apply or withdraw only those)."""
         caller = current_client.get()
         out = []
-        for line in self.db.pending_board(sub, None if deck_id is None else clean_target(deck_id)):
+        lines_ = self.db.pending_board(sub, None if deck_id is None else clean_target(deck_id))
+        clients = [
+            c for line in lines_ for c in (line.get("created_by_client"), line.get("amended_by_client"))
+        ]
+        with self.db.read_ahead(sub, [line["id"] for line in lines_], clients):
+            self._board_rows(sub, lines_, caller, out)
+        return out
+
+    def _board_rows(
+        self, sub: str, lines_: list[dict[str, Any]], caller: Any, out: list[dict[str, Any]]
+    ) -> None:
+        for line in lines_:
             row = self.db.get_proposal(line["id"], sub) or {}
             lines = str(line.get("diff_text") or "").splitlines()
             summary = "; ".join(lines[:3]) + (f" (+{len(lines) - 3} more)" if len(lines) > 3 else "")
@@ -5749,6 +5816,7 @@ class DeckService:
                     "created_at": line["created_at"],
                     "expires_at": line["expires_at"],
                     "created_by": self._creator_label(line.get("created_by_client")),
+                    "created_by_client": line.get("created_by_client"),
                     "own": bool(caller) and line.get("created_by_client") == caller,
                     "version": int(line.get("version") or 1),
                     # the risk word on the cards (Low, High, Your press, Delete)
@@ -6199,8 +6267,9 @@ class DeckService:
         maybeboard too) and quantities. It is an ordinary proposal: reviewed, confirmed and
         applied like any other (which takes a fresh snapshot first), so a restore can itself be
         undone. The deck's own details (name, description, format, bracket, private, unlisted)
-        go back too when the snapshot recorded them differently. Not restored: the deck's own
-        category definitions (a custom category's 'counts toward the deck' setting)."""
+        go back too when the snapshot recorded them differently, and so do the deck's categories:
+        each one still on the deck gets the name and the flags (Premier, Not in deck, Not in price)
+        the snapshot recorded, by its record id (``category_restore_plan``)."""
         snap = self.snapshot(sub, str(snapshot_id or "").strip())
         wanted = parse_deck(snap["deck"])
         self._room_for_proposal(sub)
@@ -6221,7 +6290,7 @@ class DeckService:
         payload, lines = restore_rows(wanted, deck)
         details, detail_lines = details_rows(deck, snapshot_details(wanted))
         lines += detail_lines
-        if not payload and not details:
+        if not payload and not details and not category_restore_plan(wanted, deck)[0]:
             raise DeckError("invalid", "The deck already matches this snapshot; nothing to restore.")
         if len(payload) > MAX_RESTORE_ENTRIES:
             raise DeckError(
@@ -6487,6 +6556,133 @@ class DeckService:
                 "Archidekt accepted the request but the deck's details do not match the proposal for: "
                 + ", ".join(mismatches)
                 + f". A snapshot ({snapshot_id}) of the deck before the change was kept.",
+            )
+        self.db.finish_proposal(row["id"], state="applied", result=result)
+        return self.describe(sub, row["id"])
+
+    # -- the deck's own categories: rename and flags (kind "categories") -------------------------
+    @_dedupe
+    async def propose_categories(self, sub: str, deck_id: str, changes: Any) -> dict[str, Any]:
+        """A proposal (kind ``categories``) that renames categories of the member's own deck and
+        sets their flags (Premier, Not in deck, Not in price), one review row per category. The
+        one way in for the deck settings page (the member's own Save categories, applied at once
+        with ``apply(via="browser")`` as the page's other saves are), the assistant
+        (``propose_deck_categories``, then the usual review and apply) and History's Restore,
+        which puts names and flags back through ``propose_restore``.
+
+        ``changes``: ``[{"category": its name now (or "id": its record id), "rename_to"?: str,
+        "premier"?: bool, "not_in_deck"?: bool, "not_in_price"?: bool}]``. Refused before anything
+        is proposed: a category the deck doesn't have or without a record id, a rename onto a name
+        the deck already has, and a change that changes nothing. Moving cards between categories
+        stays a card edit (``propose_deck_changes``); deleting a category stays on Archidekt.
+
+        Applied (``_apply_categories``) with a backup copy first when backups are on, a snapshot,
+        the deck checked again just before writing, one category write at a time through the
+        pacer, and the deck read back to check every name, flag and card. A change touching the
+        commander, or which cards count in the deck, is high risk and waits for the member's press
+        in every approval mode (modes.auto_waits)."""
+        deck_id = _clean_deck_id(deck_id)
+        wanted = parse_category_changes(changes)
+        self._room_for_proposal(sub)
+        deck = await self.get_own_deck(sub, deck_id)
+        self.recheck_waiting(sub, deck)
+        plan, rows = category_change_rows(deck, wanted)
+        pid = secrets.token_urlsafe(12)
+        self._save_proposal(
+            {
+                "id": pid,
+                "owner_sub": sub,
+                "kind": "categories",
+                "deck_id": deck.id,
+                "deck_name": deck.name,
+                "baseline_fingerprint": deck.fingerprint(),
+                # every category as it is now: the fingerprint is the card rows, so a flag changed
+                # on Archidekt since is caught by this, just before the apply writes
+                "changes": {"categories": plan, "was": category_states(deck)},
+            },
+            rows,
+        )
+        self._audit(
+            "proposal_created",
+            sub=sub,
+            detail={"proposal_id": pid, "deck_id": deck.id, "kind": "categories", "count": len(plan)},
+        )
+        return self.describe(sub, pid)
+
+    async def _categories_unchanged(self, sub: str, deck: Deck) -> Deck:
+        """Re-read the deck just before category writes and refuse (needs a look, nothing sent)
+        when a card row or any category's name, flags or record id changed since ``deck`` was
+        read: the writes go by record id, so a stale id must never reach Archidekt."""
+        from . import recheck
+
+        now = await self.get_own_deck(sub, deck.id)
+        if now.rows_fingerprint() != deck.rows_fingerprint() or category_states(now) != category_states(deck):
+            raise needs_look_error(recheck.REASON_DURING_APPLY)
+        return now
+
+    async def _send_categories(
+        self, sub: str, deck_id: str, bodies: list[dict[str, Any]], progress: dict[str, Any]
+    ) -> None:
+        """One category write per category, in order, through the pacer, stopping at the first
+        failure with the names already saved in the message (and in ``categories_saved``)."""
+        saved = progress.setdefault("categories_saved", [])
+        for body in bodies:
+            try:
+                await _writing(progress, self._call(sub, self.client.update_category, deck_id, body))
+            except DeckError as exc:
+                done = ", ".join(f"“{n}”" for n in saved)
+                note = (
+                    f" Saved before it stopped: {done}; the other categories were not changed."
+                    if saved
+                    else " No category was changed."
+                )
+                raise DeckError(exc.kind, _sentence(exc) + note, **exc.extra) from exc
+            saved.append(body["name"])
+
+    async def _apply_categories(
+        self, sub: str, row: dict[str, Any], progress: dict[str, Any]
+    ) -> dict[str, Any]:
+        from . import recheck
+
+        stored = row["changes"]
+        plan = list(stored.get("categories") or [])
+        # the deck it was made from (its card rows, recheck.py: kept strict for this kind) ...
+        deck = await self._current_deck_for(sub, row)
+        # ... and every category as it was then, record ids included
+        if category_states(deck) != stored.get("was"):
+            raise needs_look_error(recheck.REASON_CHANGED)
+        snapshot_id = self._take_snapshot(sub, row, deck)
+        progress["snapshot_id"] = snapshot_id
+        backup = await self._backup_shared(sub, row, deck, snapshot_id)
+        progress.update(backup)
+        # The backup takes a while: read again and resolve each category's name to its record id
+        # on the deck of now, just before writing
+        now = await self._categories_unchanged(sub, deck)
+        ids = {s["name"]: s["id"] for s in category_states(now)}
+        if any(ids.get(p["was"]["name"]) != p["id"] for p in plan):
+            raise needs_look_error(recheck.REASON_DURING_APPLY)
+        bodies = [dict(p["to"]) for p in plan]
+        progress["of_categories"] = len(bodies)
+        await self._send_categories(sub, deck.id, bodies, progress)
+        verified = await self.get_deck(sub, deck.id)
+        self.recheck_waiting(sub, verified, renamed=_renames(bodies, category_states(deck)))
+        mismatches = category_mismatches(deck, plan, verified)
+        result = {
+            "snapshot_id": snapshot_id,
+            **backup,
+            "categories_saved": list(progress.get("categories_saved") or []),
+            "verified": not mismatches,
+            "mismatched_categories": mismatches,
+            "after_fingerprint": verified.fingerprint(),  # Undo: did the deck change since?
+        }
+        if mismatches:
+            progress.update(result)  # apply() records it with the error
+            raise DeckError(
+                "verify_mismatch",
+                "Archidekt accepted the change but the deck does not show it for: "
+                + "; ".join(mismatches)
+                + f". A snapshot ({snapshot_id}) of the deck from just before was kept: Restore under "
+                "History puts the names and flags back.",
             )
         self.db.finish_proposal(row["id"], state="applied", result=result)
         return self.describe(sub, row["id"])
@@ -7523,6 +7719,309 @@ def snapshot_details(snapshot: Deck) -> dict[str, Any]:
     return out
 
 
+# -- the deck's own categories: rename and flags (kind "categories", 2026-10-21) ---------------
+# Archidekt's category record: its name and three flags. The gateway, its pages and the
+# assistant name the flags as the deck settings page labels them: "Premier", "Not in deck" and
+# "Not in price" (pressed means on), so not_in_deck is includedInDeck turned around.
+CATEGORY_FLAGS = (
+    ("premier", "Premier", "isPremier", False),
+    ("not_in_deck", "Not in deck", "includedInDeck", True),
+    ("not_in_price", "Not in price", "includedInPrice", True),
+)
+MAX_CATEGORY_CHANGES = 30
+# Names Archidekt treats by name, not only by flag: a row filed first under "Sideboard" is out of
+# the deck's count (Deck.categories_count), and "Maybeboard" is the maybeboard by name.
+SIZE_CATEGORY_NAMES = frozenset({"sideboard", "maybeboard"})
+# A category change (a rename or a switch) does not reach an Archidekt editor already open on the
+# deck (the site tells its open tabs over its own live connection, which the gateway does not use).
+OPEN_TABS_NOTE = "Archidekt tabs already open on this deck show the old categories until they are reloaded."
+# The deck settings page's notice after its own Save categories (NEW-WORDING.md).
+CATEGORIES_SAVED = "Categories saved to Archidekt. A snapshot from just before is under History."
+CATEGORY_GONE = "The deck has no category “{name}”."
+CATEGORY_TAKEN = "The deck already has a category named “{name}”. Pick another name."
+
+
+def category_state(c: dict[str, Any]) -> dict[str, Any]:
+    """One category record as the gateway compares it: id (None when Archidekt sent none), name
+    and the three flags in Archidekt's own terms. A flag Archidekt left out reads as its
+    default (not premier, counted in the deck and in the price)."""
+    cid = c.get("id")
+    return {
+        "id": cid if isinstance(cid, int) and not isinstance(cid, bool) else None,
+        "name": str(c.get("name") or ""),
+        "isPremier": c.get("isPremier") is True,
+        "includedInDeck": c.get("includedInDeck") is not False,
+        "includedInPrice": c.get("includedInPrice") is not False,
+    }
+
+
+def category_states(deck: Deck) -> list[dict[str, Any]]:
+    """Every category of the deck as ``category_state`` reads it, in id then name order: what a
+    categories change records when it is made and checks again just before it writes."""
+    out = [
+        category_state(c) for c in deck.categories if isinstance(c, dict) and isinstance(c.get("name"), str)
+    ]
+    return sorted(out, key=lambda s: (s["id"] or 0, s["name"]))
+
+
+def _holds_commander(deck: Deck, name: str) -> bool:
+    """Whether a card in the deck's commander zone is filed under the category ``name``."""
+    return any(name in c.categories and deck.is_commander(c) for c in deck.cards)
+
+
+def deck_categories(deck: Deck) -> list[dict[str, Any]]:
+    """The deck's categories as the deck settings page and the assistant see them: ``id``,
+    ``name``, the flags ``premier``, ``not_in_deck`` and ``not_in_price``, ``cards`` (copies filed
+    under it), ``commander`` (it is or holds the commander zone: changing it asks first and is
+    never applied by an assistant on its own) and ``editable`` (Archidekt sent its record id;
+    one without can't be changed from the gateway)."""
+    out = []
+    for s in category_states(deck):
+        copies = sum(c.quantity for c in deck.cards if s["name"] in c.categories)
+        out.append(
+            {
+                "id": s["id"],
+                "name": s["name"],
+                "premier": s["isPremier"],
+                "not_in_deck": not s["includedInDeck"],
+                "not_in_price": not s["includedInPrice"],
+                "cards": copies,
+                "commander": _touches_commander(deck, s),
+                "editable": s["id"] is not None,
+            }
+        )
+    return sorted(out, key=lambda c: (not c["premier"], c["name"].casefold()))
+
+
+def _touches_commander(deck: Deck, s: dict[str, Any], new_name: str | None = None) -> bool:
+    """Whether changing category ``s`` (a ``category_state``) touches the commander: it is
+    premier, it is named Commander (which the gateway treats as the commander zone by name), it
+    holds a commander, or it is renamed to Commander."""
+    names = {s["name"].casefold(), (new_name or "").casefold()}
+    return bool(s["isPremier"]) or COMMANDER.casefold() in names or _holds_commander(deck, s["name"])
+
+
+def _flag_value(s: dict[str, Any], key: str) -> bool:
+    """A gateway flag (premier, not_in_deck, not_in_price) of a ``category_state``."""
+    _key, _label, field, inverted = next(f for f in CATEGORY_FLAGS if f[0] == key)
+    return (not s[field]) if inverted else bool(s[field])
+
+
+def parse_category_changes(raw: Any) -> list[dict[str, Any]]:
+    """Validate a categories change: a list of ``{"category": its name now, or "id": its record
+    id, "rename_to"?: new name, "premier"?, "not_in_deck"?, "not_in_price"?: true or false}``."""
+    if not isinstance(raw, list) or not raw:
+        raise DeckError("invalid", "changes must be a non-empty list of category changes")
+    if len(raw) > MAX_CATEGORY_CHANGES:
+        raise DeckError("invalid", f"at most {MAX_CATEGORY_CHANGES} categories can change at once")
+    out = []
+    for i, item in enumerate(raw, 1):
+        if not isinstance(item, dict):
+            raise DeckError("invalid", f"change {i}: each change is an object")
+        unknown = set(item) - {"category", "id", "rename_to", *(f[0] for f in CATEGORY_FLAGS)}
+        if unknown:
+            raise DeckError("invalid", f"change {i}: unknown field {sorted(unknown)[0]}")
+        cid = item.get("id")
+        if cid is not None and (isinstance(cid, bool) or not isinstance(cid, int)):
+            raise DeckError("invalid", f"change {i}: id must be a whole number")
+        name = clean_text(str(item.get("category") or ""))
+        if cid is None and not name:
+            raise DeckError("invalid", f"change {i}: name the category to change")
+        entry: dict[str, Any] = {"id": cid, "category": name}
+        if "rename_to" in item and item["rename_to"] is not None:
+            new = clean_text(str(item["rename_to"]))
+            if not new or len(new) > MAX_CATEGORY:
+                raise DeckError("invalid", f"change {i}: a category name is 1 to {MAX_CATEGORY} characters")
+            if "," in new:  # a card's categories travel as one comma-separated list in exports
+                raise DeckError("invalid", f"change {i}: a category name can't have a comma")
+            entry["rename_to"] = new
+        for key, _label, _field, _inv in CATEGORY_FLAGS:
+            if key in item and item[key] is not None:
+                if not isinstance(item[key], bool):
+                    raise DeckError("invalid", f"change {i}: {key} must be true or false")
+                entry[key] = item[key]
+        out.append(entry)
+    return out
+
+
+def category_change_rows(
+    deck: Deck, wanted: list[dict[str, Any]]
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """(plan, review rows) of a categories change on ``deck``. The plan has one entry per category
+    that changes: its record ``id`` and the whole category before (``was``) and after (``to``) in
+    Archidekt's terms, which is the body the write sends. Refused here, before anything is
+    proposed or sent: a category the deck doesn't have, one without a record id, the same
+    category twice, and a rename onto a name the deck already has or another rename gives
+    (archidekt.com's own editor doesn't stop that, and the server may merge the two)."""
+    states = category_states(deck)
+    plan: list[dict[str, Any]] = []
+    rows: list[dict[str, Any]] = []
+    seen: set[int] = set()
+    new_names: set[str] = set()
+    for w in wanted:
+        if w.get("id") is not None:
+            s = next((x for x in states if x["id"] == w["id"]), None)
+        else:
+            s = next((x for x in states if x["name"] == w["category"]), None) or next(
+                (x for x in states if x["name"].casefold() == w["category"].casefold()), None
+            )
+        if s is None:
+            raise DeckError("invalid", CATEGORY_GONE.format(name=w.get("category") or w.get("id")))
+        if s["id"] is None:
+            # Archidekt's defaults (Sideboard, Maybeboard) may have no record until someone
+            # creates them; whether one can be changed before then is not known (research item 5)
+            raise DeckError(
+                "invalid", f"“{s['name']}” can't be changed from here yet. Change it on Archidekt."
+            )
+        if s["id"] in seen:
+            raise DeckError("invalid", f"“{s['name']}” is listed twice. Name each category once.")
+        seen.add(s["id"])
+        to = dict(s)
+        new = w.get("rename_to")
+        if new and new != s["name"]:
+            others = {x["name"].casefold() for x in states if x["id"] != s["id"]}
+            if new.casefold() in others or new.casefold() in new_names:
+                raise DeckError("invalid", CATEGORY_TAKEN.format(name=new))
+            new_names.add(new.casefold())
+            to["name"] = new
+        for key, _label, field, inverted in CATEGORY_FLAGS:
+            if key in w:
+                to[field] = (not w[key]) if inverted else w[key]
+        if to == s:
+            continue
+        plan.append({"id": s["id"], "was": s, "to": to})
+        copies = sum(c.quantity for c in deck.cards if s["name"] in c.categories)
+        names = {s["name"].casefold(), to["name"].casefold()}
+        row = _row(
+            "deck_category",
+            id=s["id"],
+            name=s["name"],
+            rename_to=to["name"] if to["name"] != s["name"] else None,
+            cards=copies,
+            commander=_touches_commander(deck, s, to["name"]) or None,
+            # renamed to or from a name Archidekt counts by name (Sideboard, Maybeboard)
+            counts=(bool(names & SIZE_CATEGORY_NAMES) and to["name"] != s["name"]) or None,
+        )
+        for key, _label, _field, _inv in CATEGORY_FLAGS:
+            before, after = _flag_value(s, key), _flag_value(to, key)
+            if before != after:
+                row[f"{key}_before"], row[f"{key}_after"] = before, after
+        rows.append(row)
+    if not plan:
+        raise DeckError("invalid", "The deck's categories are already this way; nothing would change.")
+    return plan, rows
+
+
+def category_line(r: dict[str, Any]) -> str:
+    """A ``deck_category`` review row in words: the same line on the review page, the chat card,
+    the Changes list, History and Activity."""
+    bits = []
+    if r.get("rename_to"):
+        n = int(r.get("cards") or 0)
+        cards = f" (its {n} card{'s go' if n != 1 else ' goes'} with it)" if n else ""
+        bits.append(f"rename to “{r['rename_to']}”{cards}")
+    for key, label, _field, _inv in CATEGORY_FLAGS:
+        if f"{key}_after" in r:
+            bits.append(f"{label} {'on' if r[f'{key}_after'] else 'off'}")
+    return f"Category “{r.get('name', '')}”: " + ", ".join(bits) + f". {OPEN_TABS_NOTE}"
+
+
+def category_restore_plan(snapshot: Deck, current: Deck) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """The category writes (whole bodies, by record id) and review rows that put ``current``'s
+    categories back to the names and flags ``snapshot`` recorded. Only a category still on the
+    deck (the same record id) is put back; a snapshot taken before category ids were kept puts
+    none back. Refused when a name to put back is now another category's name."""
+    now = {s["id"]: s for s in category_states(current) if s["id"] is not None}
+    bodies: list[dict[str, Any]] = []
+    rows: list[dict[str, Any]] = []
+    for c in snapshot.categories:
+        if not isinstance(c, dict) or not isinstance(c.get("name"), str):
+            continue
+        was = category_state(c)
+        if was["id"] is None or was["id"] not in now:
+            continue
+        cur = now[was["id"]]
+        if "includedInPrice" not in c:  # recorded before Archidekt sent it: left as it is now
+            was["includedInPrice"] = cur["includedInPrice"]
+        if was == cur:
+            continue
+        if was["name"] != cur["name"] and any(
+            x["id"] != cur["id"] and x["name"].casefold() == was["name"].casefold() for x in now.values()
+        ):
+            raise DeckError(
+                "invalid",
+                f"The category “{cur['name']}” can't get its name “{was['name']}” back: another "
+                "category on the deck has that name now. Rename one of them on Archidekt first.",
+            )
+        bodies.append(dict(was))
+        row = _row(
+            "deck_category",
+            id=cur["id"],
+            name=cur["name"],
+            rename_to=was["name"] if was["name"] != cur["name"] else None,
+            cards=sum(k.quantity for k in current.cards if cur["name"] in k.categories),
+            commander=_touches_commander(current, cur, was["name"]) or None,
+        )
+        for key, _label, _field, _inv in CATEGORY_FLAGS:
+            if _flag_value(cur, key) != _flag_value(was, key):
+                row[f"{key}_before"], row[f"{key}_after"] = _flag_value(cur, key), _flag_value(was, key)
+        rows.append(row)
+    return bodies, rows
+
+
+def deck_with_categories(deck: Deck, bodies: list[dict[str, Any]]) -> Deck:
+    """``deck`` as it reads once these category writes have landed, as the research expects them
+    to: each category renamed in place, its cards following the new name, its flags as sent. Used
+    to work out what a restore still has to do to the cards; the apply then works that out again
+    on the deck read back after the writes, so a live Archidekt that behaves otherwise is met there."""
+    raw = json.loads(json.dumps(deck.raw))
+    by_id = {b["id"]: b for b in bodies}
+    renames: dict[str, str] = {}
+    for c in raw.get("categories") or []:
+        b = by_id.get(c.get("id")) if isinstance(c, dict) else None
+        if b is None:
+            continue
+        if c.get("name") != b["name"]:
+            renames[str(c.get("name"))] = b["name"]
+        c.update({k: b[k] for k in ("name", "isPremier", "includedInDeck", "includedInPrice")})
+    for row in raw.get("cards") or []:
+        if isinstance(row, dict) and isinstance(row.get("categories"), list):
+            row["categories"] = [renames.get(x, x) if isinstance(x, str) else x for x in row["categories"]]
+    return parse_deck(raw)
+
+
+def category_mismatches(before: Deck, plan: list[dict[str, Any]], after: Deck) -> list[str]:
+    """What the deck read back after a categories apply doesn't show: a name or flag that is not
+    as sent, and cards that did not follow a rename (by deck row)."""
+    now = {s["id"]: s for s in category_states(after) if s["id"] is not None}
+    rows_after = {c.relation_id: c for c in after.cards if c.relation_id is not None}
+    out: list[str] = []
+    for p in plan:
+        want, got = p["to"], now.get(p["id"])
+        if got is None:
+            out.append(f"“{want['name']}” (category not found)")
+            continue
+        wrong = [
+            label for key, label, _f, _i in CATEGORY_FLAGS if _flag_value(got, key) != _flag_value(want, key)
+        ]
+        if got["name"] != want["name"]:
+            wrong.insert(0, "name")
+        old = p["was"]["name"]
+        if old != want["name"]:
+            stuck = [
+                c.name
+                for c in before.cards
+                if old in c.categories
+                and c.relation_id in rows_after
+                and want["name"] not in rows_after[c.relation_id].categories
+            ]
+            if stuck:
+                wrong.append(f"cards that did not follow: {', '.join(sorted(set(stuck)))}")
+        if wrong:
+            out.append(f"“{want['name']}” ({'; '.join(wrong)})")
+    return out
+
+
 def details_payload(changes: dict[str, Any]) -> dict[str, Any]:
     """The PATCH /decks/{id}/update/ body for validated detail changes (Archidekt's field names)."""
     out: dict[str, Any] = {}
@@ -7785,6 +8284,18 @@ def undo_warning(later: int, outside: bool) -> str:
     if outside:
         return "This also reverts the edits made to this deck on Archidekt since."
     return ""
+
+
+def _renames(bodies: list[dict[str, Any]], was: list[dict[str, Any]]) -> dict[str, str]:
+    """Old name -> new name of the categories that ``bodies`` (category writes by record id)
+    rename, against the category states ``was`` from before they were sent."""
+    names = {s["id"]: s["name"] for s in was if s.get("id") is not None}
+    out = {}
+    for b in bodies:
+        old = names.get(b.get("id"))
+        if old is not None and old != b.get("name"):
+            out[old] = str(b.get("name"))
+    return out
 
 
 def needs_look_error(reason: str | None) -> DeckError:
@@ -8175,7 +8686,15 @@ def _next_step(
     apply that stopped on Archidekt's waits, the same note its stored message ends with
     (``_rate_limited_note``), so the two never disagree. ``applied``: ``applied_text`` for an
     account action or collection change."""
-    what = "these details" if kind == "details" else "this copy" if kind == "clone" else "this diff"
+    what = (
+        "these details"
+        if kind == "details"
+        else "these category changes"
+        if kind == "categories"
+        else "this copy"
+        if kind == "clone"
+        else "this diff"
+    )
     # With the in-chat card (approve.py) the person decides on the card where the app shows one.
     card = (
         "If your app shows this proposal as a card with Approve and Reject buttons, the user decides "
@@ -8246,6 +8765,8 @@ def _next_step(
         return f"Done. {applied}"
     if state == "applied" and kind == "details":
         return "Done. The deck's details on Archidekt match this proposal."
+    if state == "applied" and kind == "categories":
+        return "Done. The deck's categories on Archidekt match this proposal."
     if state == "applied" and kind == "clone":
         return "Done. The copy exists on Archidekt (see result.deck_url) and matches the source deck."
     if state == "applied":

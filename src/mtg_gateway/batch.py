@@ -44,12 +44,19 @@ shared_snapshots: contextvars.ContextVar[dict[str, dict[str, Any]] | None] = con
 )
 
 KEEP_RESULTS = 100  # finished selections kept in memory for their result panel (per gateway)
-ALONE_KINDS = ("restore",)
+ALONE_KINDS = ("restore", "categories")
 
 RESTORE_ALONE = (
     "Not sent: a restore is applied on its own, never together with other changes to the same deck. "
     "It is still waiting: apply it by itself."
 )
+# A change to the deck's categories checks the deck again just before it writes, so another change
+# applied with it to the same deck would make it refuse; it goes alone like a restore.
+CATEGORIES_ALONE = (
+    "Not sent: a change to the deck's categories is applied on its own, never together with other "
+    "changes to the same deck. It is still waiting: apply it by itself."
+)
+ALONE_REASONS = {"restore": RESTORE_ALONE, "categories": CATEGORIES_ALONE}
 DELETE_ALONE = "Not sent: deleting a deck is approved only on its own review page. It is still waiting."
 FORMATTING_ALONE = (
     "Not sent: it keeps the formatting already there, such as bold text, links or pictures, so it is "
@@ -151,7 +158,7 @@ def plan(
                 lost = formatting.loses_formatting(row)
                 skipped.append(_line(svc, sub, row, FORMATTING_LOST_ALONE if lost else FORMATTING_ALONE))
             elif row.get("kind") in ALONE_KINDS and len(group) > 1:
-                skipped.append(_line(svc, sub, row, RESTORE_ALONE))
+                skipped.append(_line(svc, sub, row, ALONE_REASONS[row["kind"]]))
             else:
                 line = _line(svc, sub, row)
                 line["version"] = int(versions.get(row["id"]) or row.get("version") or 1)

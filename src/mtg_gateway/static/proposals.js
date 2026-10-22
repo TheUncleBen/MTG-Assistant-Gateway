@@ -123,6 +123,48 @@
         update();
       });
     }
+    // Apply asks in a box over this page (the server renders the confirm as a ui.box when the
+    // form says box=1); anything but a box answer falls back to the confirm page.
+    var apply = bar.querySelector("button[name=action][value=apply]");
+    if (apply && window.MtgBox && window.fetch && window.FormData) {
+      apply.addEventListener("click", function (e) {
+        if (e.defaultPrevented || apply.disabled) return;
+        e.preventDefault();
+        var body = new FormData(form);
+        body.set("action", "apply");
+        body.set("box", "1");
+        apply.disabled = true;
+        fetch(form.getAttribute("action") || "/proposals/select", {
+          method: "POST", body: body, credentials: "same-origin", headers: { Accept: "application/json" }
+        }).then(function (r) { return r.json(); }).then(function (out) {
+          apply.disabled = false;
+          if (!out || !out.ok || !out.box) {
+            if (out && out.message) { alertNote(out.message); return; }
+            return fallback();
+          }
+          var old = document.getElementById("apply-box");
+          if (old) old.remove();
+          var holder = document.createElement("div");
+          holder.innerHTML = out.box;
+          var box = holder.firstElementChild;
+          document.body.appendChild(box);
+          window.MtgBox.openElement(box, { returnFocus: apply });
+        }).catch(function () { apply.disabled = false; fallback(); });
+      });
+    }
+    function fallback() {
+      var act = document.createElement("input");
+      act.type = "hidden"; act.name = "action"; act.value = "apply";
+      form.appendChild(act);
+      form.submit();
+    }
+    function alertNote(text) {
+      var note = bar.querySelector(".boxnote") || document.createElement("p");
+      note.className = "notice error boxnote";
+      note.setAttribute("role", "alert");
+      note.textContent = text;
+      if (!note.parentNode) bar.appendChild(note);
+    }
     // Reject asks first, in the bar ("Reject 3 changes?"); a rejected change can't
     // be brought back from the page. Without this script the server asks on a page of its own.
     var reject = bar.querySelector("button[name=action][value=reject]");

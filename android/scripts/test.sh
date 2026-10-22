@@ -12,7 +12,15 @@ if [ -z "$SDK" ] || [ ! -d "$SDK" ]; then
 fi
 export ANDROID_HOME="$SDK"
 unset ANDROID_SDK_ROOT
-cd "$ROOT" && ./gradlew -q :app:testPlainDebugUnitTest
+cd "$ROOT"
+if ! ./gradlew -q :app:testPlainDebugUnitTest; then
+  # the build log names no test: print each failing one and its message from the JUnit results
+  for f in app/build/test-results/testPlainDebugUnitTest/*.xml; do
+    [ -f "$f" ] || continue
+    grep -A3 '<failure' "$f" | sed "s|^|$(basename "$f" .xml): |" || true
+  done
+  exit 1
+fi
 for f in app/build/test-results/testPlainDebugUnitTest/*.xml; do
   sed -n 's/.*<testsuite name="\([^"]*\)" tests="\([0-9]*\)" skipped="[0-9]*" failures="\([0-9]*\)" errors="\([0-9]*\)".*/\1: \2 tests, \3 failures, \4 errors/p' "$f"
 done

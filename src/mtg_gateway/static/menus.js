@@ -1,5 +1,6 @@
 /* The deck, folder, card and row menus and their boxes, on every signed-in page (after
-   static/cardmenu.js, which has the menu and box layer, window.MtgMenu and window.MtgBox).
+   static/box.js, the box every pop-up shares, window.MtgBox, and static/cardmenu.js, the menu
+   layer, window.MtgMenu).
 
    Deck tiles (My decks, Home, deck search, precons, profiles: li.deck with data-deck-id) and
    folder tiles (li.folder with data-folder-id) get their menu from a right-click, a press and
@@ -323,8 +324,9 @@
   }
   function watchDeck(d) {
     // the Watchlist page's own "Watch deck" form, as a press there
-    submitForm("/watchlist", { action: "add_deck", deck: d.id });
+    submitForm("/watchlist", { action: "add_deck", deck: typeof d === "object" ? d.id : d });
   }
+  window.MtgDeckWatch = watchDeck; // the deck page's menu (deck.js) reuses it
 
   // -- the deck menu -----------------------------------------------------------------------------
   function deckOf(node) {
@@ -615,6 +617,34 @@
       onOpen: thumb ? function () { thumb.click(); } : null, noCollect: true, before: before, after: after, focus: thumb || li
     }), x, y);
   }
+  function alertBox(tr, inRow, focusBack) {
+    var card = $(".wcard[data-card]", tr), name = card ? card.getAttribute("data-card") : "this card";
+    var form = el("form");
+    form.method = "post";
+    form.action = inRow.getAttribute("action") || location.pathname;
+    form.id = "wx-alert-box-f";
+    ["csrf", "action", "watch_id"].forEach(function (n) {
+      var src = inRow.elements[n];
+      if (!src) return;
+      var h = el("input"); h.type = "hidden"; h.name = n; h.value = src.value; form.appendChild(h);
+    });
+    var stack = el("div", "stack");
+    [["alert_pct", "Moves more than (%)"], ["alert_above", "Rises above"], ["alert_below", "Falls below"]].forEach(function (f) {
+      var src = inRow.elements[f[0]];
+      var wrap = el("div", "field"), lab = el("label", null, f[1]), input = el("input");
+      input.type = "text"; input.inputMode = "decimal"; input.name = f[0]; input.id = "wxb-" + f[0];
+      input.value = src ? src.value : "";
+      lab.htmlFor = input.id;
+      wrap.appendChild(lab); wrap.appendChild(input); stack.appendChild(wrap);
+    });
+    var hint = $(".ui-hint", inRow);
+    if (hint) stack.appendChild(el("p", "ui-hint", hint.textContent));
+    form.appendChild(stack);
+    var save = Box.button("Save alert", "primary", function () {
+      if (form.requestSubmit) form.requestSubmit(); else form.submit();
+    }, { icon: "bell" });
+    Box.open({ title: "Price alert: " + name, body: form, actions: [Box.button("Cancel", "btn", null, { cancel: true }), save], returnFocus: focusBack });
+  }
   function watchRowOf(node) {
     var tr = node && node.closest ? node.closest(".tr[id^='wr-']") : null;
     return tr;
@@ -624,6 +654,10 @@
     var wx = document.getElementById("wx-" + key);
     var more = $(".act .more", tr);
     var alert = item("Price alert…", "bell", function () {
+      // a card row: its alert form as a box (M16), posting as the in-row form does; a row that is
+      // already open, or a deck row (no alert fields), opens the row's details instead
+      var inRow = wx ? $("form.wx-alert", wx) : null;
+      if (inRow && Box && !(more && more.getAttribute("aria-expanded") === "true")) { alertBox(tr, inRow, more || tr); return; }
       if (more && more.getAttribute("aria-expanded") !== "true") more.click();
       var f = wx ? $("input[name=alert_pct], .wx-alert input, .wx-alert a", wx) : null;
       if (f) f.focus();
@@ -647,8 +681,12 @@
     Menu.open({ head: name2, label: "Deck: " + name2, items: items, focusBack: more || tr }, x, y);
   }
   function cardLinkOf(node) {
-    var b = node && node.closest ? node.closest("button.cardlink[data-card]") : null;
-    return b;
+    if (!node || !node.closest) return null;
+    var b = node.closest("button.cardlink[data-card]");
+    if (b) return b;
+    // the row's ⋮ beside the card button (the Compare page's rows)
+    var row = node.closest(".kebab") ? node.closest(".tr, li") : null;
+    return row ? $("button.cardlink[data-card]", row) : null;
   }
   function openCardLinkMenu(b, x, y) {
     var name = b.getAttribute("data-card");
@@ -784,6 +822,45 @@
     newFolder(currentFolder() || null, b);
   });
 
+  // -- the deck Settings page: Save categories asks first when an assistant's version would wait --
+  // (modes.hand_edit_confirm: the commander, from a Premier switch changed anywhere or the name or
+  // a switch of the Commander category or one holding the commander; or which cards count, from a
+  // Not in deck switch or a rename to or from Sideboard or Maybeboard. The words are the backend's,
+  // on the section; without scripts the gateway asks on a page of its own)
+  var cats = $("#categories[data-confirm]");
+  var countsByName = ["sideboard", "maybeboard"];
+  if (cats) cats.addEventListener("submit", function (e) {
+    var form = e.target;
+    if (!form.matches || !form.matches("form") || $("input[name=confirmed]", form)) return;
+    var commander = false, counts = false;
+    $$("li[data-cat]", form).forEach(function (li) {
+      var name = $("input[type=text]", li), premier = $("input[name^=premier_]", li);
+      var notInDeck = $("input[name^=not_in_deck_]", li);
+      var renamed = name && name.value.trim() !== name.defaultValue;
+      var changed = renamed ||
+        $$("input[type=checkbox]", li).some(function (c) { return c.checked !== c.defaultChecked; });
+      if ((premier && premier.checked !== premier.defaultChecked) || (changed && li.hasAttribute("data-commander"))) commander = true;
+      if ((notInDeck && notInDeck.checked !== notInDeck.defaultChecked) ||
+          (renamed && (countsByName.indexOf(name.defaultValue.toLowerCase()) >= 0 ||
+                       countsByName.indexOf(name.value.trim().toLowerCase()) >= 0))) counts = true;
+    });
+    if (!commander && !counts) return;
+    e.preventDefault();
+    var pre = commander ? "data-confirm" : "data-counts-confirm";
+    var box = Box.open({
+      title: cats.getAttribute(pre + "-title") || "",
+      body: el("p", null, cats.getAttribute(pre) || ""),
+      actions: [cancelButton(), Box.button("Save categories", "primary", function () {
+        var c = el("input");
+        c.type = "hidden"; c.name = "confirmed"; c.value = "1";
+        form.appendChild(c);
+        box.busy(true);
+        form.submit();
+      }, { icon: "check" })],
+      returnFocus: $("button[name=action]", form)
+    });
+  });
+
   // -- the deck Settings page: the collaborator forms ask in a box first ------------------------
   var collab = $("#collaborators[data-deck-name]");
   if (collab) collab.addEventListener("submit", function (e) {
@@ -805,9 +882,10 @@
     var deck = collab.getAttribute("data-deck-name") || "";
     var adding = action === "add";
     var box = Box.open({
-      title: adding ? "Let " + who + " edit “" + deck + "” on Archidekt?" : "Stop " + who + " editing “" + deck + "” on Archidekt?",
-      body: adding ? el("p", "muted small", collab.getAttribute("data-note") || "") : el("div"),
-      actions: [cancelButton(), Box.button(adding ? "Add " + who : "Remove " + who, "primary", function () {
+      title: adding ? "Let “" + who + "” edit “" + deck + "” on Archidekt?" : "Stop “" + who + "” editing “" + deck + "” on Archidekt?",
+      body: adding ? el("p", "muted small", collab.getAttribute("data-note") || "") : el("p", null, "“" + who + "” can no longer change this deck. You can add them again later."),
+      // adding is the box's one orange button; removing ends on the solid red one (red outline before it)
+      actions: [cancelButton(), Box.button(adding ? "Add “" + who + "”" : "Remove “" + who + "”", adding ? "primary" : "danger", function () {
         var c = el("input");
         c.type = "hidden"; c.name = "confirmed"; c.value = "1";
         form.appendChild(c);

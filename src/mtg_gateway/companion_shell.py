@@ -13,11 +13,11 @@ from starlette.responses import FileResponse, JSONResponse, Response
 from . import theme
 from .companion import (
     ICON_HEADERS,
-    OFFLINE_PAGE,
     OFFLINE_SCRIPT,
     SHORTCUT_ICON,
     STATIC_DIR,
     _static_payload,
+    offline_page,
     short_name,
 )
 from .theme import (
@@ -126,7 +126,7 @@ def add_shell_routes(server: MCPServer, h: SimpleNamespace) -> None:
             "const tryFetch=(req,i)=>fetch(req).catch(err=>"
             "i<RETRY.length&&self.navigator.onLine!==false?wait(RETRY[i]).then(()=>tryFetch(req,i+1))"
             ":Promise.reject(err));"
-            "const PAGE=" + json.dumps(OFFLINE_PAGE) + ";"
+            "const PAGE=" + json.dumps(offline_page(s.server_name)) + ";"
             "const theme=()=>(self.cookieStore?self.cookieStore.get('mtg_theme'):Promise.resolve(null))"
             ".then(c=>c&&(c.value==='light'||c.value==='dark')?c.value:'').catch(()=>'');"
             "const offline=t=>new Response(PAGE.replace(\"<html lang='en'>\","
@@ -170,7 +170,7 @@ def add_shell_routes(server: MCPServer, h: SimpleNamespace) -> None:
     @server.custom_route("/static/{path:path}", methods=["GET"], include_in_schema=False)
     async def static(request: Request) -> Response:
         rel = request.path_params["path"]
-        if not re.fullmatch(r"[A-Za-z0-9_.-]{1,80}", rel):
+        if not re.fullmatch(r"(?:logos/)?[A-Za-z0-9_.-]{1,80}", rel):  # logos/: the app logos
             return Response("not found", 404)
         if rel not in STYLESHEETS:
             target = (STATIC_DIR / rel).resolve()

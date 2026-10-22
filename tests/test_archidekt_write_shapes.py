@@ -339,7 +339,8 @@ async def test_collection_page_shows_codes_for_archidekts_numbers(stack: Stack) 
         assert (sent.get("condition"), sent.get("language")) == (1, 1), sent
         stack.ark.collections["alice"][rid].update(condition=3, language=4)
         page = await b.http.get("/collection", headers=NAV)
-        assert "class='pill cond'>MP<" in page.text
+        assert "class='cond' title='Moderately Played (MP)'>MP<" in page.text
+        page = await b.http.get(f"/collection?details={rid}", headers=NAV)  # the Details box
         assert "<option value='FR' selected>" in page.text and "value='PH'" not in page.text
         r = await api(b, "POST", f"/collection/api/rows/{rid}", {"language": "PH"})
         assert r.status_code == 400

@@ -90,7 +90,7 @@ categories are ones the deck excludes); each card also carries `in_deck`.
 never a choice to make: `get_deck` reads any Archidekt deck, the member's
 own included (and gives the export text), `list_my_decks` lists the member's
 decks and `search_decks` public ones (another user's with `owner`),
-`propose_deck_details` changes a deck's settings, folder, tags and cover, `deck_stats` checks an Archidekt deck's legality and
+`propose_deck_details` changes a deck's settings, folder, tags and cover, `propose_deck_categories` renames its categories and switches their flags, `deck_stats` checks an Archidekt deck's legality and
 structure, `validate_decklist` checks a pasted list that is not a deck yet,
 `compare_decks` diffs decks and precons, `run_deck_report` runs goldfish
 games, `resolve_cards` turns names into exact printings. Mystic Forge's

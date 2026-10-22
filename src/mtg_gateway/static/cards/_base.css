@@ -52,6 +52,12 @@ h1{font-size:max(var(--font-heading-md-size,1rem),1rem);font-weight:600;margin:0
 .badge.warn{background:var(--amber-bg);color:var(--amber)}
 .badge.bad{background:var(--red-bg);color:var(--red)}
 .badge.info{background:var(--blue-bg);color:var(--blue)}
+/* a label's icon (Bridge.label): the site's icon set, drawn before the word */
+.badge{display:inline-flex;align-items:center;gap:4px}
+.badge svg.i{width:12px;height:12px;flex:none;fill:none;stroke:currentColor;stroke-width:2.4;stroke-linecap:round;
+  stroke-linejoin:round}
+.pill svg.i{width:10px;height:10px;fill:none;stroke:currentColor;stroke-width:2.4;stroke-linecap:round;
+  stroke-linejoin:round;vertical-align:-1px;margin-right:3px}
 .sum{color:var(--muted);font-size:.8125rem;margin:0 0 10px;overflow-wrap:anywhere}
 .note{margin:8px 0 0;font-size:.8125rem;color:var(--muted);overflow-wrap:anywhere}
 .foot{margin:10px 0 0;font-size:.75rem;color:var(--muted);overflow-wrap:anywhere}

@@ -366,7 +366,8 @@ async def test_member_can_delete_their_data_from_the_account_page(gw: Harness) -
         csrf = await b.csrf("/account")
         # Without the confirmation box nothing happens.
         r = await b.http.post("/account", data={"csrf": csrf, "action": "delete_data"})
-        assert r.status_code == 303 and r.headers["location"] == "/account?err=confirm_delete"
+        # the box comes back open, with the notice (the red outline opens it; the tick is inside it)
+        assert r.status_code == 303 and r.headers["location"] == "/account?delete=1&err=confirm_delete"
         assert gw.db.get_user("user-1") is not None
         r = await b.http.post("/account", data={"csrf": csrf, "action": "delete_data", "confirm": "yes"})
         assert r.status_code == 303 and r.headers["location"] == "/data-deleted"

@@ -231,3 +231,41 @@ def test_every_change_label_fits_its_box(server: Server, tmp_path: Path) -> None
                     ctx.close()
         finally:
             browser.close()
+
+
+def test_the_first_tap_on_a_locked_button_moves_neither_focus_nor_the_page(server: Server) -> None:
+    """On a touch screen the first tap unlocks the click guard; it must not look like a jump. A
+    disabled button takes no events, so the browser used to move focus to the nearest focusable
+    ancestor, <main tabindex=-1>, and scroll the page to it (about the top bar's height). Now the
+    tap lands on the button row (theme.py: pointer-events:none on a locked button) and
+    static/clickguard.js keeps focus where it was; the second tap still acts."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_path()
+    if exe == "missing":
+        pytest.skip("no Chromium available for Playwright")
+    sid, edit, _details = _proposals(server)
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=exe) if exe else p.chromium.launch()
+        try:
+            ctx = browser.new_context(viewport={"width": 390, "height": 700}, is_mobile=True, has_touch=True)
+            ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
+            page = ctx.new_page()
+            page.goto(f"{server.base}/proposals/{edit}", wait_until="networkidle")
+            apply = page.locator("form.guarded button[value=apply]")
+            apply.scroll_into_view_if_needed()
+            page.wait_for_timeout(150)
+            state = "() => ({y: Math.round(scrollY), active: document.activeElement.tagName})"
+            before = page.evaluate(state)
+            assert apply.evaluate("b => b.disabled")  # still locked: the page has not been touched
+            box = apply.bounding_box()
+            page.touchscreen.tap(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+            page.wait_for_timeout(200)
+            after = page.evaluate(state)
+            assert after["active"] != "MAIN" and after["y"] == before["y"], (before, after)
+            assert "/proposals/" in page.url  # nothing was sent by the first tap
+            # the tap unlocked the page: the buttons are live once the guard's clocks have run
+            unlocked = "() => !document.querySelector('form.guarded button[value=apply]').disabled"
+            page.wait_for_function(unlocked)
+        finally:
+            browser.close()

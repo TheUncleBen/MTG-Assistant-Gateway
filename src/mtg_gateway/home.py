@@ -22,6 +22,7 @@ from starlette.responses import RedirectResponse, Response
 
 from . import prefs, ui
 from .companion import DECK_CSP
+from .companion_decks import NEW_DECK_CSS, NEW_DECK_SCRIPTS, new_deck_box_html
 from .deckpage import covers_for, deck_list_held_html, decks_unreadable_html, image_url, reread_href
 from .decks import DeckError, is_busy
 from .pages import _csrf, browser_session, login_redirect
@@ -229,7 +230,8 @@ def recent_panel_inner(
         )
     return (
         "<h2>My decks</h2><p class='muted'>No decks yet. "
-        "<a href='/decks/new'>Create one</a>, or <a href='/scan'>scan a pile of cards</a>.</p>"
+        "<a href='/decks/new' data-box-open='newdeck'>Create one</a>, or <a href='/scan'>scan a pile of "
+        "cards</a>.</p>"
     )
 
 
@@ -299,7 +301,8 @@ def add_home_routes(server: MCPServer, state: AppState) -> None:
             + (
                 f"<a class='btn btn-primary' href='/account'>{icon('account')} Link Archidekt</a>"
                 if not link["linked"]
-                else f"<a class='btn btn-primary' href='/decks/new'>{icon('plus')} New deck</a>"
+                else f"<a class='btn btn-primary' href='/decks/new' data-box-open='newdeck'>{icon('plus')} "
+                "New deck</a>"
             )
             + "</div>"
         )
@@ -432,12 +435,15 @@ def add_home_routes(server: MCPServer, state: AppState) -> None:
             f"</a><a class='btn' href='/install?for=skill'>{icon('report')} Assistant skill</a>"
             f"<a class='btn' href='/install?for=android'>{icon('download')} Android app</a></div></details>"
         )
+        # the New deck box (F4): the hero's New deck and the empty panel's "Create one" open it here
+        csrf = _csrf(s, sid)
+        newdeck = new_deck_box_html(csrf, None, back="/") if link["linked"] and csrf else ""
         resp = render(
             "Home",
-            hero + recent + search + tiles + connect,
+            hero + recent + search + tiles + connect + newdeck,
             site=s.server_name,
             signed_in=True,
-            csrf=_csrf(s, sid),
+            csrf=csrf,
             admin=admin,
             user=display_name(user),
             wide=True,
@@ -445,7 +451,11 @@ def add_home_routes(server: MCPServer, state: AppState) -> None:
             heading=False,
             body_class="home",
             # decks.js fills the recent-decks panel; Home has none of deck.js's hooks
-            head_extra=f"<style>{HOME_CSS}</style><script src='/static/decks.js' defer></script>",
+            head_extra=f"<style>{HOME_CSS}{NEW_DECK_CSS if newdeck else ''}</style>"
+            "<script src='/static/decks.js' defer></script>"
+            + "".join(
+                f"<script src='/static/{n}' defer></script>" for n in (NEW_DECK_SCRIPTS if newdeck else ())
+            ),
         )
         resp.headers["Content-Security-Policy"] = DECK_CSP  # deck covers come from Scryfall
         return resp

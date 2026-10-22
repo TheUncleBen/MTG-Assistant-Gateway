@@ -11,6 +11,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import android.webkit.CookieManager
 import android.widget.Toast
 import org.json.JSONException
@@ -128,9 +129,11 @@ class Updater(private val activity: Activity, private val ui: Ui) {
                 commit(apk)
                 null
             } catch (e: IOException) {
-                activity.getString(R.string.update_install_failed, e.message ?: "")
+                Log.w(TAG, "install not committed: ${e.message}") // the reason stays out of the toast
+                activity.getString(R.string.update_install_failed)
             } catch (e: RuntimeException) { // SecurityException included
-                activity.getString(R.string.update_install_failed, e.message ?: "")
+                Log.w(TAG, "install not committed: ${e.javaClass.simpleName} ${e.message}")
+                activity.getString(R.string.update_install_failed)
             } finally {
                 apk.delete() // the session holds its own copy
             }
@@ -338,13 +341,15 @@ class Updater(private val activity: Activity, private val ui: Ui) {
                 PackageInstaller.STATUS_FAILURE_ABORTED -> Unit // the person said no
                 else -> {
                     val why = intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE).orEmpty()
-                    Toast.makeText(context, context.getString(R.string.update_install_failed, "$status $why".trim()), Toast.LENGTH_LONG).show()
+                    Log.w(TAG, "install failed: status $status $why".trim()) // the code stays out of the toast
+                    Toast.makeText(context, R.string.update_install_failed, Toast.LENGTH_LONG).show()
                 }
             }
         }
     }
 
     companion object {
+        private const val TAG = "MtgAssistant"
         /** Whether MainActivity is resumed (set from its onResume/onPause). */
         @Volatile var inFront = false
         @Volatile private var pendingConfirmation: Intent? = null

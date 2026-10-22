@@ -3,6 +3,7 @@ package local.mtgassistantgateway.app
 import android.os.Build
 import android.os.Handler
 import android.view.ContextThemeWrapper
+import android.util.Log
 import android.util.Size
 import android.view.LayoutInflater
 import android.view.Gravity
@@ -224,7 +225,7 @@ class CameraPanel(
             val p = try {
                 future.get()
             } catch (e: ExecutionException) {
-                status.text = activity.getString(R.string.camera_error, -1)
+                cameraFailed(-1, e)
                 return@addListener
             } catch (e: InterruptedException) {
                 return@addListener
@@ -267,10 +268,10 @@ class CameraPanel(
             p.unbindAll()
             p.bindToLifecycle(activity, CameraSelector.DEFAULT_BACK_CAMERA, pv, ic)
         } catch (e: IllegalArgumentException) {
-            status.text = activity.getString(R.string.camera_error, -2)
+            cameraFailed(-2, e)
             return
         } catch (e: IllegalStateException) {
-            status.text = activity.getString(R.string.camera_error, -3)
+            cameraFailed(-3, e)
             return
         }
         pv.setSurfaceProvider(previewView.surfaceProvider)
@@ -411,8 +412,17 @@ class CameraPanel(
         ui.removeCallbacks(captureWatchdog)
         capturing = false
         shoot.isEnabled = camera != null && !awaitingPage
-        status.text = activity.getString(R.string.camera_error, code)
+        cameraFailed(code, null)
         if (autoToggle.isChecked) autoToggle.isChecked = false
+    }
+
+    /**
+     * Shows the one plain camera message. The code (CameraX's ImageCapture error, or -1/-2/-3 for
+     * the provider, binding and state failures while opening) goes to the log, not to the person.
+     */
+    private fun cameraFailed(code: Int, cause: Throwable?) {
+        Log.w(TAG, "camera failed ($code): ${cause?.message ?: ""}".trimEnd())
+        status.text = activity.getString(R.string.camera_error)
     }
 
     /** The JPEG CameraX wrote: upright through its EXIF orientation, which the page's image decoder honours. */
@@ -594,6 +604,7 @@ class CameraPanel(
     }
 
     companion object {
+        private const val TAG = "MtgAssistant"
         private const val STRENGTH_STEPS = 20
         private const val ZOOM_STEPS = 40
         private const val MAX_JPEG_SIDE = 2048

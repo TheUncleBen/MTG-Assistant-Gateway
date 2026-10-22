@@ -148,6 +148,10 @@ def test_keyboard_only(server: Server) -> None:
         page.keyboard.press("Escape")
         assert page.locator("#msel-list").count() == 0
         assert page.locator("#format option:checked").inner_text().strip() == texts[-1]
+        # that Escape closed the list only: the New deck box around it stays open, focus on the button
+        page.wait_for_timeout(500)  # past the box's closing transition, were it closing
+        assert page.locator(".mtgbox-scrim .mtgbox").is_visible()
+        assert page.evaluate("() => document.activeElement.id") == "format-btn"
         # type-ahead: the first letters of a choice jump to it; Tab closes and moves on
         first = texts[0]
         page.keyboard.press("ArrowDown")
@@ -297,6 +301,7 @@ def test_natives_stay_and_triggers_take_the_focus(server: Server) -> None:
         assert page.evaluate("() => document.activeElement.id") == "s-order-btn"
         # the file picker on New deck: the input is off-screen but reachable, the button is themed
         page.goto(f"{server.base}/decks/new", wait_until="networkidle")
+        page.locator("#ndf [role=tab][data-src=file]").click()  # the box's From a file tab
         pick = page.evaluate(
             "() => { const i = document.getElementById('file'); const b = i.nextElementSibling;"
             " i.focus(); const r = i.getBoundingClientRect(); const s = getComputedStyle(b);"
@@ -361,10 +366,9 @@ def test_a_tap_outside_the_touch_sheet_only_closes_it(server: Server, width: int
 
 
 @pytest.mark.parametrize("width", [360, 720, 1366])
-def test_a_collection_cards_details_menu_stays_on_screen(server: Server, width: int) -> None:
-    """In the grid view the first card's Details menu hung off the left edge of the
-    window, cutting its Finish, Condition and Language fields; feedback.js shifts a panel back
-    inside the window when it opens."""
+def test_a_collection_cards_details_box_stays_on_screen(server: Server, width: int) -> None:
+    """The Details box (UI overhaul 2026-10-21: the row's Details form became a box) keeps its
+    themed Finish, Condition and Language drop-downs inside the window in both views."""
     from playwright.sync_api import sync_playwright
 
     sid = _link(server)
@@ -383,18 +387,14 @@ def test_a_collection_cards_details_menu_stays_on_screen(server: Server, width: 
         assert added[0] == 200, added
         for view in ("grid", "list"):
             page.goto(f"{server.base}/collection?view={view}", wait_until="networkidle")
-            menu = page.locator("ul#cards details.rowmenu").first
-            menu.locator("summary").click()
-            page.wait_for_timeout(150)
-            box = page.evaluate(
-                "() => { const m = document.querySelector('ul#cards details.rowmenu[open] > .menu');"
-                " const r = m.getBoundingClientRect(); return { left: r.left, right: r.right,"
-                " width: r.width, vw: document.documentElement.clientWidth }; }"
-            )
-            assert box["left"] >= 0 and box["right"] <= box["vw"], (view, box)
-            assert box["width"] >= 180, (view, box)  # the panel kept its size (14rem); it moved, not shrank
-            # its fields are reachable: the Finish trigger sits inside the window too
-            fin = page.locator("ul#cards details.rowmenu[open] .menu button.msel-btn").first.bounding_box()
+            rid = page.locator("ul#cards > li[data-id]").first.get_attribute("data-id")
+            page.goto(f"{server.base}/collection?view={view}&details={rid}", wait_until="networkidle")
+            box = page.locator("#col-details")
+            page.wait_for_function("() => !document.getElementById('col-details').hidden")
+            r = box.bounding_box()
+            assert r is not None and r["x"] >= 0 and r["x"] + r["width"] <= width, (view, r)
+            assert r["width"] >= 180, (view, r)
+            fin = box.locator("button.msel-btn").first.bounding_box()
             assert fin is not None and fin["x"] >= 0 and fin["x"] + fin["width"] <= width, (view, fin)
         assert errors == []
         browser.close()

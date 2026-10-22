@@ -31,7 +31,7 @@ ul.facts li b{font-weight:600;text-align:right;overflow-wrap:anywhere}
 
   function fact(list, k, v, cls) {
     var li = el("li"); li.appendChild(el("span", "", k));
-    var b = el("b", "", v); if (cls) { var p = el("span", "pill " + cls, cls === "ok" ? "ready" : "to do"); b.appendChild(p); }
+    var b = el("b", "", v); if (cls) { var p = el("span", "pill " + cls); p.appendChild(B.icon(cls === "ok" ? "check" : "alert")); p.appendChild(document.createTextNode(cls === "ok" ? "Ready" : "To do")); b.appendChild(p); }
     li.appendChild(b); list.appendChild(li);
   }
   function load(result) {
@@ -57,8 +57,8 @@ ul.facts li b{font-weight:600;text-align:right;overflow-wrap:anywhere}
     if (sc.approval_mode) fact(list, "Approval mode", String(sc.approval_mode_label || sc.approval_mode));
     if (sc.gateway_version) fact(list, "Gateway", "version " + sc.gateway_version);
     var st = $("state");
-    if (todo.length) { st.textContent = "setup needed"; st.className = "badge warn"; $("summary").textContent = "To use your assistant with Archidekt: " + todo.join("; ") + "."; }
-    else { st.textContent = "ready"; st.className = "badge ok"; $("summary").textContent = "Everything your assistant needs is in place."; }
+    if (todo.length) { B.label(st, "Setup needed", "warn", "alert"); $("summary").textContent = "To use your assistant with Archidekt: " + todo.join("; ") + "."; }
+    else { B.label(st, "Ready", "ok", "check"); $("summary").textContent = "Everything your assistant needs is in place."; }
     var a = $("actions"); a.replaceChildren();
     if (sc.account_page) {
       var btn = el("button", "primary", todo.length && !sc.linked ? "Link Archidekt on the Account page" : "Open the Account page"); btn.type = "button"; btn.id = "open";

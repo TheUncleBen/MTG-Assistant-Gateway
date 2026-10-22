@@ -1,24 +1,29 @@
 "use strict";
-// Report page: while the Forge games are queued or running (the Forge section carries data-forge-live and
-// the report's id), ask the JSON status route (/api/v1/reports/<id>/forge) every 5 seconds and swap
-// in the new Forge card and status, until the run ends; then the page is fetched once more so the
-// Markdown copy matches. No polling while the tab is hidden; it stops for good after a failed fetch
-// or after five hours (the gateway gives a run up after four).
+// Report page: while a Forge run is queued or running (the Forge section, or the solo test played by
+// Forge, carries data-forge-live and the report's id), ask the JSON status route (/api/v1/reports/<id>/forge)
+// every 5 seconds and swap in the new section(s) and status, until every run has ended; then the page is
+// fetched once more so the Markdown copy matches. No polling while the tab is hidden; it stops for good
+// after a failed fetch or after five hours (the gateway gives a run up after four).
 (function () {
   var INTERVAL = 5000;  // each finished game shows within about 8 s (the gateway asks Forge every 3 s)
   var LIMIT = 5 * 3600 * 1000;
   var started = Date.now();
   var timer = null;
+  // the live sections and the JSON field each is redrawn from
+  var PARTS = [
+    { sel: ".forge", field: "forge_html" },
+    { sel: "#rv-solo-forge", field: "forge_solo_html" }
+  ];
 
-  function live() { return document.querySelector(".forge[data-forge-live]"); }
+  function live() { return document.querySelector("[data-forge-live]"); }
 
   function imported(nodes) {
     return Array.prototype.map.call(nodes, function (n) { return document.importNode(n, true); });
   }
 
   // Only what changed is replaced: an unchanged poll leaves every node as it is, and a changed one
-  // swaps just the parts that differ, so the aria-live card announces only the news (a finished
-  // game), never the whole card every 5 seconds.
+  // swaps just the parts that differ, so the aria-live section announces only the news (a finished
+  // game), never the whole section every 5 seconds.
   function patch(target, nodes) {
     var old = target.childNodes;
     if (old.length !== nodes.length) {
@@ -30,12 +35,14 @@
     }
   }
 
-  function swapCard(html) {
+  // One section redrawn from its fresh markup; true while that section is still live.
+  function swapSection(sel, html) {
+    var card = document.querySelector(sel + "[data-forge-live]");
+    if (!card || typeof html !== "string" || !html) return false;
     var doc = new DOMParser().parseFromString("<div>" + html + "</div>", "text/html");
-    var fresh = doc.querySelector(".forge");
-    var card = live();
-    if (!fresh || !card) return false;
-    // The card itself stays (it is the aria-live region); the live mark goes once the run has ended.
+    var fresh = doc.querySelector(sel);
+    if (!fresh) return false;
+    // The section itself stays (it is the aria-live region); the live mark goes once the run has ended.
     patch(card, Array.prototype.slice.call(fresh.childNodes));
     if (!fresh.hasAttribute("data-forge-live")) card.removeAttribute("data-forge-live");
     return fresh.hasAttribute("data-forge-live");
@@ -48,8 +55,8 @@
     patch(shown, Array.prototype.slice.call(doc.body.firstChild.childNodes));
   }
 
-  // Once the run has ended, the Markdown copy (built from the whole report) and the Play more games
-  // button under the card are read from the page.
+  // Once every run has ended, the Markdown copy (built from the whole report) and the Play more games
+  // button under the Forge section are read from the page.
   function refreshMarkdown() {
     var area = document.getElementById("rep-md");
     var more = document.getElementById("forge-more");
@@ -79,9 +86,10 @@
       .then(function (r) { if (!r.ok) throw new Error(String(r.status)); return r.json(); })
       .then(function (data) {
         if (!data || data.ok !== true) return;
-        var still = swapCard(String(data.forge_html || ""));
+        var still = false;
+        PARTS.forEach(function (p) { if (swapSection(p.sel, data[p.field])) still = true; });
         swapStatus(data.status_html);
-        if (still) schedule(); else refreshMarkdown();
+        if (still || live()) schedule(); else refreshMarkdown();
       })
       .catch(function () { /* signed out or offline: leave the page as it is */ });
   }

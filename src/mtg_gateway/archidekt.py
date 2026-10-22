@@ -1282,7 +1282,7 @@ class ArchidektClient:
                 )
             if resp.status_code == 404:
                 self.pacer.record(True)
-                raise ArchidektError("not_found", "Archidekt could not find that deck")
+                raise ArchidektError("not_found", "Archidekt could not find that deck.")
             if resp.status_code >= 500:
                 self.pacer.record(False)
                 raise ArchidektError(
@@ -2015,6 +2015,42 @@ class ArchidektClient:
         if not isinstance(resp, dict):
             raise ArchidektError("contract", "unexpected deck update response shape")
         return resp
+
+    async def update_category(self, token: str, deck_id: str, category: dict[str, Any]) -> Any:
+        """PATCH /decks/category/{categoryId}/ with the whole category, as archidekt.com's deck
+        editor sends it: ``{name, includedInDeck, includedInPrice, isPremier, id}`` (its category
+        service, read from the site's public bundle on 2026-10-21, never called by that reading;
+        CATEGORIES-RESEARCH.md). One request renames the category and sets its three flags. It works
+        by category id, so callers resolve the id from a deck read just before.
+
+        Assumptions only a live call can confirm, each made safe here or by the caller:
+        - The rename is in place and the deck's cards follow the new name (the editor sends no card
+          write after it). The caller re-reads the deck and reports a mismatch if they did not.
+        - Only the full body is proven, so the full body is always sent, never a partial one.
+        - A duplicate name may be refused or merged: the caller refuses a rename onto a name the
+          deck already has before anything is sent.
+        - The answer's shape is unknown: it is not trusted; the caller re-reads the deck.
+        ``deck_id`` is not part of the route; it is checked so a call always names its deck.
+        Account category templates (``/users/category/``) are a different route, never used."""
+        if not DECK_ID_RE.fullmatch(str(deck_id)):
+            raise ArchidektError("contract", "deck id is not a number")
+        cid = category.get("id")
+        if isinstance(cid, bool) or not isinstance(cid, int) or cid <= 0:
+            raise ArchidektError("contract", "category id is not a number")
+        name = category.get("name")
+        if not isinstance(name, str) or not name.strip():
+            raise ArchidektError("contract", "category name is empty")
+        flags = ("includedInDeck", "includedInPrice", "isPremier")
+        if any(not isinstance(category.get(k), bool) for k in flags):
+            raise ArchidektError("contract", "category flags must be true or false")
+        body = {
+            "name": name,
+            "includedInDeck": category["includedInDeck"],
+            "includedInPrice": category["includedInPrice"],
+            "isPremier": category["isPremier"],
+            "id": cid,
+        }
+        return await self._request("PATCH", f"/decks/category/{cid}/", token=token, json_body=body)
 
     # -- a member's own hand actions on their decks: delete, folders, tags, comments ---------------
     # Routes read from archidekt.com's bundle on 2026-10-07 (the deck service, folder service, tag

@@ -494,7 +494,7 @@ def test_report_page_and_markdown_show_forge_results() -> None:
     page = forge_html(done)
     # Laid out as a table, a row per deck at the table (a run stored before 0.7.30 as well)
     assert "Forge games" in page and "<table class='qty seats stack'>" in page
-    assert "<th scope='row'>Liesa &lt;b&gt; <span class='badge'>your deck</span></th>" in page
+    assert "<th scope='row'>Liesa &lt;b&gt; <span class='ui-lbl grey'>" in page  # the "your deck" label
     assert (
         "<td class='num' data-label='95% interval'>15% to 85%</td>" in page
         and "41\u00a0s" in page
@@ -505,11 +505,11 @@ def test_report_page_and_markdown_show_forge_results() -> None:
     assert "Fake Sticker Card" in page and "Seed: 7 (kept for the record)." in page
     assert "Average game time" in page and "Median game time" not in page  # stored before 0.7.30
     running = forge_html({"state": "running", "not_played": []})
-    assert "running" in running and "data-forge-live" not in running  # an export: no refresh
+    assert "Running" in running and "data-forge-live" not in running  # an export: no refresh
     live = forge_html({"state": "running", "not_played": []}, live=True)
     assert "data-forge-live" in live and "updates by itself" in live
     assert "data-forge-live" not in forge_html(done, live=True)  # a finished run is not refreshed
-    assert "not run" in forge_html({"state": "failed", "error": "Forge does not have this deck's commander"})
+    assert "Not run" in forge_html({"state": "failed", "error": "Forge does not have this deck's commander"})
     # A run that stopped early reports the games it did play, never "not run"
     part = {
         **done,
@@ -518,7 +518,7 @@ def test_report_page_and_markdown_show_forge_results() -> None:
         "result": {**done["result"], "games": 5, "games_requested": 10},
     }
     page = forge_html(part)
-    assert "stopped early" in page and "badge danger" not in page and "could not run" not in page
+    assert "Stopped early" in page and "Not run" not in page and "could not run" not in page
     assert (
         "Forge stopped after 5 of 10 games, because the rest of the games failed. The results below count "
         "only the 5 games played." in page
@@ -530,7 +530,7 @@ def test_report_page_and_markdown_show_forge_results() -> None:
     full = {**part, "games_requested": 5, "result": {**part["result"], "games_requested": 5}}
     page = forge_html(full)
     assert "Forge played all 5 games, but the run did not end cleanly. The results below count all 5." in page
-    assert "stopped early" not in page and "not run" not in page
+    assert "Stopped early" not in page and "Not run" not in page
     # one game asked for and played reads as one, not "all 1"
     one = {**part, "games_requested": 1, "result": {**part["result"], "games": 1, "games_requested": 1}}
     page = forge_html(one)
@@ -538,7 +538,7 @@ def test_report_page_and_markdown_show_forge_results() -> None:
         "Forge played the one game asked for, but the run did not end cleanly. The results below count it."
         in page
     )
-    assert "all 1" not in page and "stopped early" not in page
+    assert "all 1" not in page and "Stopped early" not in page
     lost = forge_html({**part, "state": "lost", "error": "Forge stopped answering about this run."})
     assert (
         "The gateway lost track of this run after 5 of 10 games. The results below count only those 5 "

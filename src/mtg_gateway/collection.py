@@ -19,13 +19,15 @@ import json
 import re
 import secrets
 import time
+from collections.abc import Iterable
 from typing import TYPE_CHECKING, Annotated, Any
 
 from pydantic import Field
 from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
 
-from . import prefs, refusals
+from . import prefs, refusals, ui
+from . import searchpanel as sp
 from .approve import CARD_TOOL_META, proposal_tool_result
 from .archidekt import (
     COLLECTION_PAGE_SIZE,
@@ -38,7 +40,8 @@ from .archidekt import (
     page_turn,
 )
 from .busy import busy_response
-from .deckpage import image_url, mana_html
+from .cardsearch_view import CARDS_CSS
+from .deckpage import image_url
 from .decks import DeckError, _writing, archidekt_wait, current_client
 from .pages import (
     NO_STORE,
@@ -51,7 +54,7 @@ from .pages import (
     read_limited,
 )
 from .schemas import CollectionAdd, CollectionRemove, card_aliases, dumped
-from .theme import card_size_control, display_name, icon, render, stylesheet_link
+from .theme import display_name, icon, render, stylesheet_link
 from .theme import esc as _esc
 
 if TYPE_CHECKING:
@@ -424,21 +427,30 @@ class CollectionService:
 
     # -- reads -----------------------------------------------------------------------------------
     async def page(
-        self, sub: str, *, page: int = 1, q: str = "", sort: str = "added", page_size: int = PAGE_SIZE
+        self,
+        sub: str,
+        *,
+        page: int = 1,
+        q: str = "",
+        sort: str = "added",
+        page_size: int = PAGE_SIZE,
+        descending: bool = True,
     ) -> dict[str, Any]:
         """One page of the collection as Archidekt orders and filters it (``cardName`` is a name
-        substring). Returns rows, count, page, total_pages and has_next."""
+        substring; ``descending`` is the Set release direction, Archidekt's default order has
+        none). Returns rows, count, page, total_pages and has_next."""
         uid = self._user_id(sub)
         cacheable = page == 1 and not q and page_size == PAGE_SIZE and self.first_page_ttl > 0
+        key = sort if descending else f"{sort}:asc"
         if cacheable:
-            hit = self._first_pages.get(sub, {}).get(sort)
+            hit = self._first_pages.get(sub, {}).get(key)
             if hit is not None and time.monotonic() - hit[0] < self.first_page_ttl:
                 return {**hit[1], "rows": list(hit[1]["rows"])}
         order = "editionDate" if sort == "edition" else ""
         body = await self._run(
             sub,
             lambda token: self.client.collection_page(
-                token, uid, page=page, page_size=page_size, card_name=q, order_by=order
+                token, uid, page=page, page_size=page_size, card_name=q, order_by=order, descending=descending
             ),
         )
         rows = [row_out(r) for r in body["results"] if isinstance(r, dict)]
@@ -454,7 +466,7 @@ class CollectionService:
         if cacheable:
             if len(self._first_pages) > 10_000:
                 self._first_pages.clear()
-            self._first_pages.setdefault(sub, {})[sort] = (time.monotonic(), out)
+            self._first_pages.setdefault(sub, {})[key] = (time.monotonic(), out)
             return {**out, "rows": list(rows)}
         return out
 
@@ -904,7 +916,7 @@ def import_result_html(result: dict[str, Any]) -> str:
         notes.append(f"Not found, so not imported: {rows(result['missing'])}.")
     if result.get("added"):
         n = int(result.get("cards") or 0)
-        lead, cls = f"Imported {n} {'card' if n == 1 else 'cards'} into your Archidekt collection.", "ok"
+        lead, cls = f"Imported {n} {'card' if n == 1 else 'cards'} into your Collection on Archidekt.", "ok"
     else:
         lead, cls = "Nothing was imported: no card in the list was found.", "error"
     items = "".join(f"<li>{_esc(n)}</li>" for n in notes)
@@ -921,7 +933,7 @@ def export_help_html() -> str:
         f"<tr><th scope='row'>{_esc(col)}</th><td>{_esc(kind)}</td></tr>" for col, kind in EXPORT_COLUMN_TYPES
     )
     return (
-        f"<details class='addfold csvhelp'><summary>{icon('download')} "
+        f"<details class='csvhelp'><summary>{icon('download')} "
         "<span class='t'>Importing the CSV on archidekt.com</span>"
         "<span class='chev'>column types</span></summary><section class='panel'>"
         "<p>Archidekt does not read the column names. When you import the file on archidekt.com, pick "
@@ -992,6 +1004,24 @@ def _rid(value: Any) -> int:
     return int(s)
 
 
+# -- the page's pieces (UI overhaul 2026-10-21, mockup 20-collection) ----------------------------
+SHOWN = 24  # a screenful: the rows a page shows before its Load more button
+CONDITION_LABELS = {
+    "": "Not set",
+    "NM": "Near Mint (NM)",
+    "LP": "Lightly Played (LP)",
+    "MP": "Moderately Played (MP)",
+    "HP": "Heavily Played (HP)",
+    "DMG": "Damaged (DMG)",
+}
+DIRECTION_WORDS = {"desc": "newest set first", "asc": "oldest set first"}
+PURPOSE = "The cards you own, kept on Archidekt."
+TABLE_COLS = "minmax(0,1fr) 9rem 5.5rem 10.5rem 6.5rem 8.5rem var(--ctl)"
+TABLE_MD = "minmax(0,1fr) 8.5rem var(--ctl)"
+TABLE_SM = "minmax(0,1fr) var(--ctl)"
+ARCHIDEKT_COLLECTION = "https://archidekt.com/collection/v2/"
+
+
 def _view_attrs(r: dict[str, Any]) -> str:
     """The data attributes ``static/cardview.js`` reads, from a collection row."""
     pt = f"{r.get('power') or ''}/{r.get('toughness') or ''}" if r.get("power") or r.get("toughness") else ""
@@ -1017,217 +1047,553 @@ def _view_attrs(r: dict[str, Any]) -> str:
         + (f" data-loyalty='{_esc(r['loyalty'])}'" if r.get("loyalty") else "")
         + (f" data-faces='{_esc(json.dumps(faces, separators=(',', ':')))}'" if faces else "")
         + (f" data-rarity='{_esc(r['rarity'])}'" if r.get("rarity") else "")
-        + (f" data-price='{float(r['price']):.2f}'" if isinstance(r.get("price"), (int, float)) else "")
+    )
+
+
+def _set_line(r: dict[str, Any]) -> str:
+    return f"{(r.get('set') or '').upper()} {r.get('collector_number') or ''}".strip()
+
+
+def _price_value(r: dict[str, Any]) -> str:
+    price = r.get("purchase_price")
+    if price is None or price == "":
+        return ""
+    return f"{float(price):.2f}" if isinstance(price, (int, float)) else str(price)
+
+
+def _row_data(r: dict[str, Any]) -> str:
+    """What the Details box and the Remove box read from a row: its finish, condition, language,
+    price paid, tags and set line."""
+    tags = [str(t) for t in (r.get("tags") or [])[:8]]
+    return (
+        f" data-fin='{_esc(r.get('finish') or 'nonfoil')}'"
+        f" data-cond='{_esc((r.get('condition') or '').upper())}'"
+        f" data-lang='{_esc((r.get('lang') or 'EN').upper())}' data-paid='{_esc(_price_value(r))}'"
+        f" data-setline='{_esc(_set_line(r))}'"
+        + (f" data-setname='{_esc(r['set_name'])}'" if r.get("set_name") else "")
+        + (f" data-tags='{_esc(json.dumps(tags, separators=(',', ':')))}'" if tags else "")
+    )
+
+
+def _kebab(name: str, rid: str) -> str:
+    """The row's ⋮: static/cardmenu.js opens the shared card menu on it; without scripts it is the
+    link to the row's Details box."""
+    return (
+        f"<a class='kebab' href='/collection?details={rid}' aria-label='Menu for {_esc(name)}' "
+        f"aria-haspopup='menu' title='Menu'>{icon('more')}</a>"
+    )
+
+
+def _stepper(r: dict[str, Any], csrf_in: str, rid: str) -> str:
+    name = _esc(r["name"])
+    return (
+        f"<form method='post' action='/collection' class='qty stepper' data-id='{rid}'>{csrf_in}"
+        f"<button name='action' value='dec' aria-label='One fewer {name}' title='One fewer'>{icon('minus')}"
+        f"</button><output aria-label='Copies'>{int(r['quantity'])}</output>"
+        f"<button name='action' value='inc' aria-label='One more {name}' title='One more'>{icon('plus')}"
+        "</button></form>"
+    )
+
+
+def _shims(r: dict[str, Any], csrf_in: str) -> str:
+    """Hidden pieces the shared card menu (static/menus.js) reaches for: the Remove from collection
+    form (the page's script asks first, then removes) and the Details… hook (opening it opens the
+    Details box)."""
+    name = _esc(r["name"])
+    return (
+        f"<form method='post' action='/collection' class='rm' hidden>{csrf_in}<button name='action' "
+        f"value='remove' aria-label='Remove {name} from your collection'>Remove</button></form>"
+        "<details class='rowmenu' hidden><summary>Details</summary></details>"
     )
 
 
 def row_html(r: dict[str, Any], csrf: str, *, view: str) -> str:
+    """One entry: card search's tile with the stepper and ⋮ (grid), or one table row (list)."""
     img = r.get("image_small") or ""
     rid = _esc(r["id"])
-    attrs = _view_attrs(r)
+    name = _esc(r["name"])
+    attrs = _view_attrs(r) + _row_data(r)
     finish = _finish_label(r["finish"])
-    badges = (f"<span class='finish' title='{_esc(finish)}'>{finish[:1]}</span>" if finish else "") + (
-        f"<span class='pill cond'>{_esc(r['condition'])}</span>" if r.get("condition") else ""
-    )
+    cond = (r.get("condition") or "").upper()
+    lang = (r.get("lang") or "EN").upper()
     csrf_in = (
         f"<input type='hidden' name='csrf' value='{_esc(csrf)}'><input type='hidden' name='id' value='{rid}'>"
     )
-    stepper = (
-        f"<form method='post' action='/collection' class='qty' data-id='{rid}'>{csrf_in}"
-        "<button name='action' value='dec' class='mini' aria-label='One "
-        f"fewer {_esc(r['name'])}' title='One fewer'>{icon('minus')}</button>"
-        f"<output aria-label='Copies'>{int(r['quantity'])}</output>"
-        "<button name='action' value='inc' class='mini' aria-label='One "
-        f"more {_esc(r['name'])}' title='One more'>{icon('plus')}</button>"
-        "</form>"
-    )
-    remove = (
-        f"<form method='post' action='/collection' class='rm'>{csrf_in}"
-        "<button name='action' value='remove' class='mini "
-        f"icon-only' aria-label='Remove {_esc(r['name'])} from your "
-        f"collection' title='Remove'>{icon('x')}</button></form>"
-    )
-    set_line = f"{_esc((r.get('set') or '').upper())} {_esc(r.get('collector_number'))}"
-    details = details_html(r, csrf_in)
+    stepper = _stepper(r, csrf_in, rid)
+    shims = _shims(r, csrf_in)
+    set_line = _esc(_set_line(r))
     if view == "grid":
-        body = (
-            f"<img src='{_esc(img)}' alt='{_esc(r['name'])}' loading='lazy'>"
-            if img
-            else f"<span class='ph'><span class='t'><span class='nm'>{_esc(r['name'])}</span></span></span>"
-        )
-        return (
-            f"<li class='c col' data-name='{_esc(r['name'].lower())}' data-id='{rid}'{attrs}>"
-            f"<button type='button' class='pic thumbbtn' aria-label='Show {_esc(r['name'])}' "
-            f"title='Show the card'>{body}"
-            f"<span class='qty'>{int(r['quantity'])}</span>{badges}</button>"
-            f"<div class='cap'><span class='name' title='{_esc(r['name'])}'>{_esc(r['name'])}</span><span "
-            f"class='set'>{set_line}</span></div>"
-            f"<div class='act'>{stepper}{details}{remove}</div></li>"
-        )
-    return (
-        f"<li class='row col' data-name='{_esc(r['name'].lower())}' data-id='{rid}'{attrs}>"
-        f"<button type='button' class='thumbbtn' aria-label='Show {_esc(r['name'])}' title='Show the card'>"
-        + (
-            f"<img class='thumb' src='{_esc(img)}' alt='' loading='lazy'>"
-            if img
-            else "<span class='thumb'></span>"
-        )
-        + "</button>"
-        + f"<span class='n'><span class='name' title='{_esc(r['name'])}'>{_esc(r['name'])}{badges}</span>"
-        f"<span class='meta'>{set_line}"
-        + (f" · {_esc(r.get('set_name'))}" if r.get("set_name") else "")
-        + (f" · {_esc(r.get('type_line'))}" if r.get("type_line") else "")
-        + "</span></span>"
-        f"<span class='mc'>{mana_html(r.get('mana_cost') or '')}</span>{stepper}{details}{remove}</li>"
-    )
-
-
-def details_html(r: dict[str, Any], csrf_in: str) -> str:
-    """A row's details menu: the finish, condition, language and price paid, saved to Archidekt
-    on the member's click (tags are shown as Archidekt holds them)."""
-    rid = _esc(r["id"])
-    finish = r.get("finish") or "nonfoil"
-    cond = (r.get("condition") or "").upper()
-    lang = (r.get("lang") or "").upper()
-    price = r.get("purchase_price")
-    price_val = (
-        "" if price is None else f"{float(price):.2f}" if isinstance(price, (int, float)) else _esc(price)
-    )
-
-    def opts(values: tuple[str, ...], current: str, labels: dict[str, str] | None = None) -> str:
-        return "".join(
-            f"<option value='{_esc(v)}'{' selected' if v == current else ''}>{_esc((labels or {}).get(v, v))}"
-            "</option>"
-            for v in values
-        )
-
-    langs = LANGUAGES if not lang or lang in LANGUAGES else (lang, *LANGUAGES)
-    tags = "".join(f"<span class='pill'>{_esc(t)}</span>" for t in (r.get("tags") or [])[:8])
-    return (
-        f"<details class='dd rowmenu details'><summary class='btn mini' aria-label='Details of "
-        f"{_esc(r['name'])}' title='Details'>{icon('more')}</summary>"
-        f"<form method='post' action='/collection' class='menu detailsform' data-id='{rid}'>"
-        f"{csrf_in}<input type='hidden' name='action' value='details'>"
-        f"<div class='head'>{_esc(r['name'])}</div>"
-        f"<label class='field'><span>Finish</span><select name='finish'>"
-        f"{opts(FINISHES, finish, {'nonfoil': 'Normal', 'foil': 'Foil', 'etched': 'Etched'})}</select>"
-        "</label>"
-        f"<label class='field'><span>Condition</span><select name='condition'>"
-        f"{opts(CONDITIONS, cond, {'': 'Not set'})}</select></label>"
-        f"<label class='field'><span>Language</span><select name='language'>{opts(langs, lang or 'EN')}"
-        "</select></label>"
-        f"<label class='field'><span>Price paid</span><input type='number' name='purchase_price' min='0' "
-        f"max='{int(MAX_PRICE)}' step='0.01' inputmode='decimal' value='{price_val}' placeholder='none'>"
-        "</label>"
-        + (
-            f"<div class='field tags'><span>Tags</span><span class='tagline'>{tags}</span></div>"
-            if tags
+        badges = (f"<span class='fin'>{finish}</span>" if finish else "") + (
+            f"<span class='cond' title='{_esc(CONDITION_LABELS.get(cond, cond))}'>{_esc(cond)}</span>"
+            if cond
             else ""
         )
-        + f"<div class='actions'><button class='primary'>{icon('check')} Save</button></div></form></details>"
+        body = (
+            f"<img src='{_esc(img)}' alt='' loading='lazy' decoding='async'>"
+            if img
+            else f"<span class='ph'>{name}</span>"
+        )
+        sub = set_line + (f" · {_esc(_language_name(lang))}" if lang != "EN" else "")
+        return (
+            f"<li class='cc c col' data-name='{_esc(r['name'].lower())}' data-id='{rid}'{attrs}>"
+            f"<button type='button' class='pic thumbbtn' aria-label='Show {name}' title='Show the card'>"
+            f"{body}{badges}</button>"
+            f"<div class='meta'><span class='nm'><span class='name' title='{name}'>{name}</span>"
+            f"{_kebab(r['name'], rid)}</span><span class='ty'>{sub}</span></div>"
+            f"<div class='act'>{stepper}</div>{shims}</li>"
+        )
+    fin_word = finish or "Normal"
+    cond_word = _esc(CONDITION_LABELS.get(cond, cond or "Not set"))
+    lang_word = _esc(_language_name(lang))
+    set_name = _esc(r.get("set_name") or "")
+    thumb = (
+        f"<img class='thumb' src='{_esc(img)}' alt='' loading='lazy'>"
+        if img
+        else "<span class='thumb'></span>"
+    )
+    sub_md = " · ".join(x for x in (set_line, set_name, fin_word, cond_word, lang_word) if x)
+    sub_sm = " · ".join(x for x in (set_line, fin_word, _esc(cond or "Not set"), lang_word) if x)
+    return (
+        f"<li class='tr row' role='row' data-name='{_esc(r['name'].lower())}' data-id='{rid}'{attrs}>"
+        f"<span class='cardc' role='cell'><button type='button' class='thumbbtn' aria-label='Show {name}' "
+        f"title='Show the card'>{thumb}</button><span class='tx'><span class='name' title='{name}'>{name}"
+        "</span>"
+        + (f"<span class='s lg'>{_esc(r['type_line'])}</span>" if r.get("type_line") else "")
+        + f"<span class='sub'>{sub_md}</span><span class='s smline'>{sub_sm}</span></span></span>"
+        f"<span class='md-hide setc' role='cell'>{set_line}"
+        + (f"<span class='s'>{set_name}</span>" if set_name else "")
+        + f"</span><span class='md-hide' role='cell'>{fin_word}</span>"
+        f"<span class='md-hide' role='cell'>{cond_word}</span>"
+        f"<span class='md-hide' role='cell'>{lang_word}</span>"
+        f"<span class='qc' role='cell'>{stepper}</span><span class='act' role='cell'>{_kebab(r['name'], rid)}"
+        f"</span>{shims}</li>"
+    )
+
+
+def table_head_html() -> str:
+    cells = (
+        ("Card", ""),
+        ("Set", "md-hide"),
+        ("Finish", "md-hide"),
+        ("Condition", "md-hide"),
+        ("Language", "md-hide"),
+        ("Copies", "qc"),
+        ("", "act"),
+    )
+    spans = "".join(
+        f"<span role='columnheader'{' class=' + chr(39) + c + chr(39) if c else ''}>{t}</span>"
+        for t, c in cells
+    )
+    return f"<li class='tr th' role='row'>{spans}</li>"
+
+
+def list_html(rows: list[dict[str, Any]], csrf: str, *, view: str) -> str:
+    items = "".join(row_html(r, csrf, view=view) for r in rows)
+    if view == "list":
+        style = _esc(f"--cols:{TABLE_COLS};--cols-md:{TABLE_MD};--cols-sm:{TABLE_SM}")
+        return (
+            f"<ul class='ui-table colllist' id='cards' role='table' aria-label='Your collection' "
+            f"style='{style}'>{table_head_html()}{items}</ul>"
+        )
+    return f"<ul class='cardgrid collgrid' id='cards'>{items}</ul>"
+
+
+def _opts(values: Iterable[str], current: str, labels: dict[str, str] | None = None) -> str:
+    return "".join(
+        f"<option value='{_esc(v)}'{' selected' if v == current else ''}>"
+        f"{_esc((labels or {}).get(v, v))}</option>"
+        for v in values
+    )
+
+
+def _lang_opts(current: str) -> str:
+    langs = LANGUAGES if not current or current in LANGUAGES else (current, *LANGUAGES)
+    return _opts(langs, current or "EN", {k: _language_name(k) for k in langs})
+
+
+def details_box_html(r: dict[str, Any] | None, csrf: str, *, open: bool = False) -> str:
+    """The Details box: finish, condition, language and price paid, saved to Archidekt (tags are
+    shown as Archidekt holds them). With ``r`` it is drawn for that row (the old ``?details=ID``
+    address renders it open); without, it is the template the page's script fills from a row."""
+    r = r or {}
+    rid = _esc(r.get("id", ""))
+    finish = r.get("finish") or "nonfoil"
+    cond = (r.get("condition") or "").upper()
+    lang = (r.get("lang") or "EN").upper()
+    tags = [str(t) for t in (r.get("tags") or [])[:8]]
+    tagline = "".join(f"<span class='pill'>{_esc(t)}</span>" for t in tags)
+    sub = " · ".join(x for x in (_esc(_set_line(r)), _esc(r.get("set_name") or "")) if x)
+    body = (
+        f"<form method='post' action='/collection' id='col-detailsform' class='detailsform' data-id='{rid}'>"
+        f"<input type='hidden' name='csrf' value='{_esc(csrf)}'><input type='hidden' name='id' value='{rid}'>"
+        f"<p class='muted small dsub'>{sub}</p><div class='fl'>"
+        f"<label class='field'><span>Finish</span><select name='finish'>{_opts(FINISHES, finish, MODIFIERS)}"
+        "</select></label>"
+        f"<label class='field'><span>Condition</span><select name='condition'>"
+        f"{_opts(CONDITIONS, cond, CONDITION_LABELS)}</select></label>"
+        f"<label class='field'><span>Language</span>"
+        f"<select name='language'>{_lang_opts(lang)}</select></label>"
+        f"<label class='field'><span>Price paid</span><input type='number' name='purchase_price' min='0' "
+        f"max='{int(MAX_PRICE)}' step='0.01' inputmode='decimal' value='{_esc(_price_value(r))}' "
+        "placeholder='None'></label>"
+        f"<div class='field tags'{'' if tags else ' hidden'}>"
+        "<span>Tags <span class='muted small'>· change them "
+        f"on Archidekt</span></span><span class='tagline'>{tagline}</span></div></div></form>"
+    )
+    title = f"Details: {r['name']}" if r.get("name") else "Details"
+    return ui.box(
+        "col-details",
+        title,
+        body,
+        actions=[
+            ui.box_button("Cancel", cancel=True),
+            ui.box_button(
+                "Remove from collection",
+                kind="danger",
+                form="col-detailsform",
+                name="action",
+                value="remove",
+                icon_name="trash",
+            ),
+            ui.box_button(
+                "Save",
+                kind="primary",
+                form="col-detailsform",
+                name="action",
+                value="details",
+                icon_name="check",
+            ),
+        ],
+        open=open,
+        close_href="/collection",
+    )
+
+
+def add_box_html(csrf: str, *, tab: str = "add", open: bool = False) -> str:
+    """The Add cards box: two tabs, Add a card (name, copies, finish, condition) and Import a list
+    (a file or pasted text). Its forms post to the page as before."""
+    imp = tab == "import"
+    tabs = (
+        "<div class='segc coltabs' role='tablist' aria-label='Add cards'>"
+        "<button type='button' role='tab' id='col-tab-add' data-coltab='add' "
+        f"aria-selected='{str(not imp).lower()}' "
+        f"aria-controls='col-addform'>{icon('plus')}Add a card</button>"
+        "<button type='button' role='tab' id='col-tab-import' data-coltab='import' "
+        f"aria-selected='{str(imp).lower()}' "
+        f"aria-controls='col-importform'>{icon('list')}Import a list</button></div>"
+    )
+    add_form = (
+        f"<form method='post' action='/collection' id='col-addform' class='addcard' role='tabpanel' "
+        f"aria-labelledby='col-tab-add' data-pane='add'{' hidden' if imp else ''}>"
+        f"<input type='hidden' name='csrf' value='{_esc(csrf)}'>"
+        "<input type='hidden' name='action' value='add'>"
+        "<div class='fl'><label class='field span'><span>Card name</span>"
+        "<input id='addname' type='text' name='name' data-suggest='cards' "
+        "placeholder='Card name, or “name (SET) 123” for one printing' autocomplete='off' required></label>"
+        "<label class='field'><span>Copies</span><input id='addqty' type='number' name='quantity' value='1' "
+        "min='1' max='999'></label>"
+        f"<label class='field'><span>Finish</span><select id='addfinish' name='finish'>"
+        f"{_opts(FINISHES, '', MODIFIERS)}</select></label>"
+        f"<label class='field'><span>Condition</span><select id='addcond' name='condition'>"
+        f"{_opts(CONDITIONS[1:], 'NM', CONDITION_LABELS)}</select></label></div>"
+        "<p class='muted small'>Scanning a pile is quicker: open <a href='/scan'>Scan</a>, then choose "
+        "<strong>Save to collection</strong>. Everything you add is added to your Collection on "
+        "Archidekt.</p>"
+        "</form>"
+    )
+    import_form = (
+        f"<form method='post' action='/collection' id='col-importform' class='importform' role='tabpanel' "
+        f"aria-labelledby='col-tab-import' data-pane='import'{'' if imp else ' hidden'}>"
+        f"<input type='hidden' name='csrf' value='{_esc(csrf)}'>"
+        "<input type='hidden' name='action' value='import'>"
+        "<p class='muted small'>A collection CSV or a card list, one card per line, "
+        f"up to {MAX_IMPORT_ROWS} rows "
+        "at a time. Copies of a printing you already own in that finish are added to it.</p>"
+        "<div class='field filepick'><span class='lbl'>From a file</span><label class='filebtn'>"
+        "<input id='importfile' type='file' accept='.csv,.txt,text/csv,text/plain' data-fill='importtext'>"
+        "<span class='btn'>Choose a file</span></label>"
+        "<span class='fname' aria-live='polite'>No file chosen</span>"
+        "</div><textarea id='importtext' name='text' rows='6' placeholder='Quantity,Name,Finish,Edition Code,"
+        "Collector Number&#10;2,Card name,Normal,SET,123'></textarea></form>"
+    )
+    return ui.box(
+        "col-add",
+        "Add cards",
+        tabs + add_form + import_form,
+        actions=[
+            ui.box_button("Cancel", cancel=True),
+            ui.box_button(
+                "Add",
+                kind="primary",
+                form="col-addform",
+                icon_name="plus",
+                attrs="data-pane-btn='add'" + (" hidden" if imp else ""),
+            ),
+            ui.box_button(
+                "Import",
+                kind="primary",
+                form="col-importform",
+                icon_name="plus",
+                attrs="data-pane-btn='import'" + ("" if imp else " hidden"),
+            ),
+        ],
+        open=open,
+        close_href="/collection",
+    )
+
+
+def _archidekt_link(arch_user: str) -> str:
+    if not arch_user:
+        return ""
+    return (
+        f"<a class='btn btn-plain ext' href='{ARCHIDEKT_COLLECTION}{_esc(arch_user)}' target='_blank' "
+        f"rel='noreferrer noopener'>{icon('external')}Open on Archidekt</a>"
+    )
+
+
+def _added_within(row: dict[str, Any], since: float) -> bool:
+    raw = str(row.get("added_at") or "")
+    if not raw:
+        return False
+    try:
+        import datetime as dt
+
+        when = dt.datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        if when.tzinfo is None:
+            when = when.replace(tzinfo=dt.UTC)
+        return when.timestamp() >= since
+    except ValueError:
+        return False
+
+
+def widgets_html(whole: dict[str, Any], arch_user: str, *, now: float | None = None) -> str:
+    """The four widgets, from what Archidekt already sends with the first page: Entries, Copies
+    and Foils (both counted only when the whole collection fits one page of 100), Added this week
+    (from the newest 100 entries)."""
+    now = time.time() if now is None else now
+    rows = whole["rows"]
+    total = int(whole["count"])
+    large = int(whole.get("total_pages") or 1) > 1 or bool(whole.get("has_next"))
+    open_link = [_archidekt_link(arch_user)] if arch_user else []
+    since = now - 7 * 86400
+    week = sum(1 for r in rows if _added_within(r, since))
+    import datetime as dt
+
+    since_day = dt.datetime.fromtimestamp(since, dt.UTC).strftime("%b %d").replace(" 0", " ")
+    items = [ui.widget("Entries", "collection", total, actions=open_link)]
+    if large:
+        items.append(
+            ui.widget(
+                "Copies",
+                "layers",
+                "—",
+                detail=(
+                    "Counted only for a collection of 100 entries or fewer. "
+                    "Open it on Archidekt to see the total."
+                ),
+                actions=open_link,
+            )
+        )
+    else:
+        copies = sum(int(r.get("quantity") or 0) for r in rows)
+        items.append(
+            ui.widget(
+                "Copies",
+                "layers",
+                copies,
+                detail=f"All {total} {'entry' if total == 1 else 'entries'} counted",
+            )
+        )
+    items.append(
+        ui.widget(
+            "Added this week",
+            "clock",
+            week,
+            detail="Counted from your newest 100 entries" if large else f"Since {since_day}",
+            actions=[
+                ui.button_link("Scan cards", "/scan", icon_name="camera"),
+                ui.box_opener(
+                    "Import a list", "/collection?add=import", "col-add", icon_name="list", cls="imp"
+                ),
+            ],
+            wide_sm=large,
+        )
+    )
+    if not large:
+        foils = sum(1 for r in rows if (r.get("finish") or "nonfoil") != "nonfoil")
+        items.append(ui.widget("Foils", "sun", foils, detail="Foil or etched entries"))
+    return ui.widgets(items)
+
+
+def panel_html(*, q: str, sort: str, direction: str, view: str, count: int) -> str:
+    """The shared search panel: the name box, then the results bar (count, Sort with a direction
+    only for Set release, Grid or List, the card size, Clear filters)."""
+    sort_opts = "".join(
+        f"<option value='{k}'{' selected' if k == sort else ''}>{v}</option>" for k, v in SORTS.items()
+    )
+    dir_html = ""
+    if sort == "edition":
+        flip = "asc" if direction == "desc" else "desc"
+        words = DIRECTION_WORDS[direction]
+        dir_html = (
+            f"<input type='hidden' name='dir' value='{direction}'>"
+            f"<button type='submit' class='icob dirbtn' name='dir' value='{flip}' "
+            f"aria-label='Direction: {words}' title='Direction: {words}'>{icon('sort')}</button>"
+        )
+    combined = (
+        ("added", "Recently added", sort == "added"),
+        ("edition:desc", "Set release, newest first", sort == "edition" and direction == "desc"),
+        ("edition:asc", "Set release, oldest first", sort == "edition" and direction == "asc"),
+    )
+    sortc = "".join(f"<option value='{v}'{' selected' if on else ''}>{t}</option>" for v, t, on in combined)
+    sort_html = (
+        "<span class='g sort'><label class='lbl' for='col-sort'>Sort by</label><span class='sortw'>"
+        f"<select class='sortf' id='col-sort' name='sort'>{sort_opts}</select></span>{dir_html}"
+        f"<span class='sortcw'><select class='sortc' aria-label='Sort by'>{sortc}</select></span></span>"
+    )
+    count_text = f"{count:,} {'entry' if count == 1 else 'entries'}"
+    bar = sp.results_bar(
+        count_html=sp.count_html(count_text, count_id="col-count"),
+        sort_html=sort_html,
+        view_html=sp.view_group(view),
+        clear_html="<a class='btn clr' href='/collection'>Clear filters</a>",
+    )
+    return (
+        "<section class='panel spanel'><form id='listform' method='get' action='/collection'>"
+        + sp.name_row(
+            label="Filter by card name",
+            name="q",
+            value=q,
+            placeholder="Card name",
+            input_id="col-q",
+            search_label="Filter",
+            filters_button=False,
+        )
+        + bar
+        + "<noscript><button type='submit' class='btn apply'>Apply</button></noscript></form></section>"
     )
 
 
 COLLECTION_CSS = """
-.notice.importres{overflow-wrap:anywhere}
-.notice.importres p{margin:0}
-.notice.importres ul{margin:.45rem 0 0;padding-left:1.2rem;font-weight:400;line-height:1.45}
-.notice.importres li+li{margin-top:.3rem}
-.collbar .controls{display:grid;grid-template-columns:minmax(0,2fr) repeat(2,minmax(9rem,1fr)) auto;gap:1rem;
-  align-items:end}
-.collbar .field .btn{margin:0}
-@media (max-width:1000px){ .collbar .controls{grid-template-columns:1fr 1fr}
-  .collbar .filter{grid-column:1 / -1} }
-@media (max-width:600px){ .collbar .controls{grid-template-columns:1fr} }
-.coll-totals{display:flex;flex-wrap:wrap;gap:1rem 1.5rem;align-items:baseline;margin:0 0 .75rem;
-  color:var(--text-muted)}
-.coll-totals b{color:var(--text);font-size:1.3rem;font-variant-numeric:tabular-nums}
-.coll-totals .ext{margin-left:auto}
-.addbox form.addcard{display:grid;grid-template-columns:minmax(0,2fr) 5.5rem minmax(0,1fr) minmax(0,1fr) auto;
-  gap:.5rem;align-items:end}
-.addbox form.addcard .field{margin:0} .addbox form.addcard button{margin:0;height:var(--ctl)}
-.importbox textarea{width:100%;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.9rem}
-.importbox .actions{margin-top:.5rem}
-@media (max-width:600px){ .addbox form.addcard{grid-template-columns:1fr 1fr}
-  .addbox form.addcard .grow,.addbox form.addcard button{grid-column:1 / -1} }
-/* A card is at least 170px wide so its controls row (minus, count, plus, Details, remove:
-   about 158px) always fits inside it instead of touching the next card; with large text it
-   grows with the text (12rem), never wider than the list, and the row wraps if it must. */
-ul.collgrid{list-style:none;margin:0;padding:0;display:grid;
-  grid-template-columns:repeat(auto-fill,minmax(min(100%,max(170px,12rem)),1fr));gap:1rem}
-ul.collgrid .col .pic{position:relative;display:block;width:100%;box-sizing:border-box;aspect-ratio:5/7;
-  border-radius:4.5%;
-  overflow:hidden;
-  background:var(--surface-2);
-  border:2px solid var(--card-border)}
-ul.collgrid .col .pic img{width:100%;height:100%;display:block;object-fit:cover}
-ul.collgrid .col .pic .qty{position:absolute;top:0;left:0;width:38px;height:38px;clip-path:polygon(0 0,
-  0 100%,100% 0);
-  border-radius:11px 0 0 0;background:#3a3a3a;color:#fff;font-size:12px;font-weight:700;padding:5px 0 0 7px}
-ul.collgrid .col .pic .ph{position:absolute;inset:0;display:flex;padding:.5rem .5rem .5rem 2.6rem;
-  color:var(--text);font-size:.85rem;line-height:1.2}
-ul.collgrid .col .pic .ph .nm{font-weight:700;overflow-wrap:anywhere}
-ul.collgrid .col .pic .finish{position:absolute;right:6px;bottom:6px}
-ul.collgrid .col .pic .cond{position:absolute;left:6px;bottom:6px;font-size:.7rem}
-ul.collgrid .col .cap{display:flex;flex-direction:column;margin:.35rem 0 .25rem;min-width:0}
-ul.collgrid .col .cap .name{font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-ul.collgrid .col .cap .set{font-size:.8rem;color:var(--text-muted)}
-ul.collgrid .col .act,ul.colllist .act{display:flex;flex-wrap:wrap;align-items:center;gap:.25rem;min-width:0}
-form.qty{display:inline-flex;align-items:center;gap:.15rem;margin:0}
-form.qty button.mini,form.rm button.mini{margin:0;width:2.25rem;height:2.25rem;padding:0;display:inline-flex;
-  align-items:center;justify-content:center}
-form.qty output{min-width:1.5rem;text-align:center;font-weight:700;font-variant-numeric:tabular-nums}
-form.rm{display:inline;margin:0 0 0 auto}
-ul.colllist{list-style:none;margin:0;padding:0}
-ul.colllist .row{display:grid;grid-template-columns:34px minmax(0,1fr) auto auto auto auto;gap:.6rem;
-  align-items:center;
-  padding:.4rem 0;border-top:1px solid var(--border)}
+.collection .ui-head .acts{margin-left:auto;display:inline-flex;flex-wrap:wrap;gap:.5rem;align-items:center}
+.collection .ui-head .acts .btn{margin:0}
+.collection .ui-head.phead{align-items:center}
+@media (max-width:599.98px){ .collection .ui-head .acts{margin-left:0;width:100%}
+  .collection .ui-head .acts .btn{flex:1 1 auto;justify-content:center} }
+/* notices are strips at the top of the page with a × to close */
+#col-notes .notice{display:flex;align-items:flex-start;gap:.5rem;margin:0 0 .75rem;overflow-wrap:anywhere}
+#col-notes .notice .nx{all:unset;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;
+  width:var(--ctl);height:var(--ctl);margin:-.5rem 0 -.5rem -.4rem;border-radius:50%;color:inherit;flex:none}
+#col-notes .notice .nx:hover{background:rgba(0,0,0,.08)}
+#col-notes .notice .nx:focus-visible{outline:2px solid var(--focus)}
+#col-notes .notice .nx svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:2;
+  stroke-linecap:round}
+#col-notes .notice p{margin:0}
+#col-notes .notice ul{margin:.45rem 0 0;padding-left:1.2rem;font-weight:400;line-height:1.45}
+#col-notes .notice li+li{margin-top:.3rem}
+.collection .ui-widgets{margin:0 0 1rem}
+.collection .ui-widgets a.ext{display:inline-flex;align-items:center}
+/* the results bar: the card size and Clear filters stay on phones (no Filters sheet holds them) */
+.collection .spanel .rbar .dirbtn{margin:0;width:var(--ctl);height:var(--ctl);padding:0;display:inline-flex;
+  align-items:center;justify-content:center;border:1px solid var(--control-border);
+  border-radius:var(--radius);
+  background:var(--surface);color:var(--text)}
+.collection .spanel .rbar .dirbtn:hover{background:var(--surface-2)}
+.collection .spanel .rbar .dirbtn svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:2}
+.collection .spanel .rbar .sortcw select{min-width:0}
+.collection .spanel .apply{margin:.5rem 0 0}
+@media (max-width:599.98px){
+  .collection .spanel .rbar .size,.collection .spanel .rbar .clr{display:inline-flex}
+  .collection .spanel .rbar .brka{display:block}
+  .collection .spanel .rbar .sort:has(.sortcw) .dirbtn{display:none}
+  .collection .spanel .rbar .clr{margin-left:auto} }
+/* the tiles: card search's, with the stepper under the name; the finish and condition on the
+   picture; no mana row, so the name block is one row */
+ul.collgrid{margin:0 0 1rem}
+ul.collgrid > li[hidden],ul.colllist > li[hidden]{display:none}
+ul.collgrid .nm{grid-template-rows:auto}
+ul.collgrid .nm .name{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;
+  min-height:2.5em;min-width:0}
+ul.collgrid .pic .fin,ul.collgrid .pic .cond{position:absolute;bottom:6px;font-size:.72rem;font-weight:700;
+  line-height:1.5;padding:0 .4rem;border-radius:4px;background:rgba(0,0,0,.72);color:#fff}
+ul.collgrid .pic .fin{right:6px} ul.collgrid .pic .cond{left:6px}
+ul.collgrid .act{display:flex;align-items:center;min-width:0}
+/* two tiles a row on a narrow phone at S and M (one at L) */
+@media (max-width:420px){
+  html:not([data-card-size=l]) ul.collgrid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  ul.collgrid .cc .kebab{width:38px} }
+/* the 44 px stepper */
+.collection form.qty{display:inline-flex;align-items:center;gap:0;margin:0}
+.collection main form.qty > button{all:unset;cursor:pointer;box-sizing:border-box;margin:0;
+  width:44px;height:44px;
+  min-height:44px;padding:0;display:inline-flex;align-items:center;justify-content:center;
+  border:1px solid var(--control-border);border-radius:var(--radius);background:var(--surface);
+  color:var(--text)}
+.collection main form.qty > button:hover{background:var(--surface-2)}
+.collection main form.qty > button:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+.collection main form.qty > button[disabled]{opacity:.5;cursor:default}
+.collection main form.qty > button svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:2;
+  stroke-linecap:round}
+.collection form.qty output{min-width:2rem;text-align:center;font-weight:700;
+  font-variant-numeric:tabular-nums}
+/* the table (List view) */
+ul.colllist{list-style:none;margin:0 0 1rem;padding:0}
+ul.colllist .tr{padding:.45rem .75rem}
+ul.colllist .cardc{display:flex;align-items:center;gap:.6rem;min-width:0}
+ul.colllist .cardc .tx{display:flex;flex-direction:column;min-width:0}
+ul.colllist .cardc .name{font-weight:700;overflow-wrap:anywhere}
+ul.colllist .s{display:block;color:var(--text-muted);font-size:.84rem;overflow-wrap:anywhere}
+ul.colllist .smline{display:none}
+ul.colllist .thumbbtn{all:unset;cursor:pointer;display:block;flex:none}
+ul.colllist .thumbbtn:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
 ul.colllist .thumb{width:34px;height:48px;border-radius:3px;object-fit:cover;background:var(--surface-3);
   display:block}
-ul.colllist .n{display:flex;flex-direction:column;min-width:0}
-ul.colllist .n .name{font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-ul.colllist .n .meta{font-size:.8rem;color:var(--text-muted);white-space:nowrap;overflow:hidden;
-  text-overflow:ellipsis}
-/* the name line carries the finish and condition badges inline after the name */
-ul.colllist .n .name{display:flex;align-items:center;gap:.35rem;min-width:0}
-ul.colllist .n .name .finish,ul.colllist .n .name .cond{flex:none}
-ul.colllist .n .name .cond{font-size:.72rem;padding:0 .3rem;line-height:1.4}
-/* the ⋮ matches the bordered −, + and × beside it */
-ul.colllist details.rowmenu summary.mini,ul.collgrid details.rowmenu summary.mini{display:inline-flex;
-  align-items:center;justify-content:center;width:2.25rem;height:2.25rem;min-height:2.25rem;margin:0;padding:0;
-  border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);color:var(--text)}
-ul.colllist details.rowmenu summary.mini:hover,ul.collgrid details.rowmenu summary.mini:hover{
-  background:var(--surface-2)}
-/* Add and Import fold above the list; the heading opens them */
-.collection details.addfold{margin:0 0 1rem}
-.collection details.addfold > summary{cursor:pointer;font-weight:700;min-height:2.5rem;display:flex;
-  align-items:center;gap:.5rem;list-style:none}
-.collection details.addfold > summary::-webkit-details-marker{display:none}
-.collection details.addfold > summary::before{content:'\\25B8';color:var(--orange)}
-.collection details.addfold[open] > summary::before{content:'\\25BE'}
-.collection details.addfold > summary .chev{margin-left:auto;color:var(--text-muted);font-weight:400;
-  font-size:.86rem}
-details.rowmenu.details .menu{min-width:min(14rem,calc(100vw - 16px));padding:.4rem 0 .6rem}
-details.rowmenu.details .menu .field{display:flex;flex-direction:column;gap:.25rem;padding:.35rem .9rem}
-details.rowmenu.details .menu .field select,details.rowmenu.details .menu .field input{margin:0}
-details.rowmenu.details .menu .tags .tagline{display:flex;flex-wrap:wrap;gap:.3rem}
-details.rowmenu.details .menu .actions{margin:.4rem .9rem 0}
-details.rowmenu.details .menu .actions button{width:100%;margin:0}
-@media (max-width:600px){ ul.colllist .row{grid-template-columns:34px minmax(0,
-  1fr) auto auto} ul.colllist .mc{display:none}
-  ul.colllist form.rm{grid-column:4;grid-row:2;justify-self:end}
-  ul.colllist details.rowmenu{grid-column:3;grid-row:2;justify-self:end}
-  ul.colllist form.qty{grid-column:2;grid-row:2;flex-wrap:wrap;min-width:0}
-  ul.colllist .n{grid-column:2 / span 3} }
-.pager{display:flex;justify-content:center;gap:.5rem;margin:1rem 0}
-.pager .btn{margin:0}
+ul.colllist .setc{min-width:0;overflow-wrap:anywhere}
+ul.colllist .qc{justify-self:start}
+ul.colllist .th .qc{justify-self:start}
+@media (max-width:899.98px){ ul.colllist .cardc .lg{display:none} }
+@media (max-width:599.98px){
+  ul.colllist .tr.row{grid-template-rows:auto auto;align-items:start}
+  ul.colllist .cardc{grid-column:1;grid-row:1}
+  ul.colllist .act{grid-column:2;grid-row:1}
+  ul.colllist .qc{grid-column:1 / span 2;grid-row:2;margin-top:.35rem;
+    padding-left:calc(34px * var(--thumb-scale,1) + .6rem)}
+  ul.colllist .sub{display:none} ul.colllist .smline{display:block} }
+.loadmore{display:flex;flex-direction:column;align-items:center;gap:.4rem;margin:.5rem 0 1.25rem}
+.loadmore .btn{margin:0;min-width:12rem}
+.loadmore p{margin:0}
+.col-nomatch[hidden]{display:none}
 .coll-empty{text-align:center;padding:2rem 1rem}
 .coll-empty .actions{justify-content:center}
-/* how to import the Export CSV on archidekt.com: a two-column table in the fold */
-/* with large text the title wraps, even inside "archidekt.com", rather than push the page wider */
-.collection details.csvhelp > summary{flex-wrap:wrap;padding-right:.35rem}
+.coll-empty .actions .btn{margin:0}
+/* the Add cards and Details boxes */
+.mtgbox .body .coltabs [role=tab] svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2;
+  margin-right:.3rem}
+.mtgbox .body .fl{display:grid;grid-template-columns:1fr 1fr;gap:.6rem .75rem}
+.mtgbox .body .fl .field{display:flex;flex-direction:column;gap:.25rem;margin:0;min-width:0}
+.mtgbox .body .fl .field > span:first-child{font-weight:700;font-size:.9rem}
+.mtgbox .body .fl .field select,.mtgbox .body .fl .field input{margin:0;width:100%;box-sizing:border-box}
+.mtgbox .body .fl .span,.mtgbox .body .fl .tags{grid-column:1 / -1}
+.mtgbox .body .tagline{display:flex;flex-wrap:wrap;gap:.3rem}
+.mtgbox .body .dsub{margin:0 0 .6rem}
+.mtgbox .body .importform{display:grid;gap:.6rem}
+.mtgbox .body .importform p{margin:0}
+.mtgbox .body textarea{width:100%;box-sizing:border-box;font-family:ui-monospace,Menlo,Consolas,monospace;
+  font-size:.9rem;margin:0}
+.mtgbox .body .filepick{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem}
+.mtgbox .body .filepick .lbl{font-weight:700;font-size:.9rem}
+.mtgbox .body .filepick .btn{margin:0}
+@media (max-width:420px){ .mtgbox .body .fl{grid-template-columns:1fr} }
+/* how to import the Export CSV on archidekt.com: a fold under the list with a two-column table */
+.collection details.csvhelp{margin:0 0 1rem}
+.collection details.csvhelp > summary{cursor:pointer;font-weight:700;min-height:2.75rem;display:flex;
+  align-items:center;gap:.5rem;list-style:none;flex-wrap:wrap;padding-right:.35rem}
+.collection details.csvhelp > summary::-webkit-details-marker{display:none}
+.collection details.csvhelp > summary::before{content:'\\25B8';color:var(--orange)}
+.collection details.csvhelp[open] > summary::before{content:'\\25BE'}
 .collection details.csvhelp > summary .t{min-width:0;overflow-wrap:anywhere}
-/* on a phone the side text would wrap alone against the edge: the title says enough */
+.collection details.csvhelp > summary .chev{margin-left:auto;color:var(--text-muted);font-weight:400;
+  font-size:.86rem}
 @media (max-width:600px){ .collection details.csvhelp > summary .chev{display:none} }
 .csvhelp .tbl{overflow-x:auto;max-width:min(100%,40rem)}
 .csvhelp table{border-collapse:collapse;width:100%;font-size:.95rem}
@@ -1250,7 +1616,14 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
     s = state.settings
 
     def page(
-        title: str, body: str, *, sub: str, sid: str | None, status: int = 200, scripts: bool = False
+        title: str,
+        body: str,
+        *,
+        sub: str,
+        sid: str | None,
+        status: int = 200,
+        scripts: bool = False,
+        heading: bool = True,
     ) -> Response:
         user = state.db.get_user(sub) or {}
         admin = bool(s.admin_group and s.admin_group in (user.get("groups") or []))
@@ -1264,9 +1637,10 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
             admin=admin,
             user=display_name(user),
             wide=True,
+            heading=heading,
             body_class="collection",
             current="/collection",
-            head_extra=f"{stylesheet_link('deck.css')}<style>{COLLECTION_CSS}</style>"
+            head_extra=f"{stylesheet_link('deck.css')}<style>{CARDS_CSS}{COLLECTION_CSS}</style>"
             + (
                 "<script src='/static/cardview.js' defer></script>"
                 "<script src='/static/deck.js' defer></script><script "
@@ -1346,18 +1720,32 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
         results.pop(token or "", None)
         return hit[2] if time.monotonic() - hit[1] <= IMPORT_RESULT_TTL else None
 
+    def strip(text: str, kind: str, *, html: bool = False) -> str:
+        """A notice strip at the top of the page, with a × to close (the page's script hides it)."""
+        x = (
+            "<button type='button' class='nx' aria-label='Close' title='Close' data-dismiss>"
+            f"{icon('x')}</button>"
+        )
+        return ui.notice(
+            x + (text if html else _esc(text)), kind, html=True, role="alert" if kind == "error" else "status"
+        )
+
     def notice(code: str | None, *, sub: str = "", token: str | None = None) -> str:
         if code in ("imported", "nothingimported", "toomany", "unreadable") and token:
             result = take_result(sub, token)
             if result is not None:
-                return import_result_html(result)
+                html = import_result_html(result)
+                kind = "error" if "notice error" in html[:40] else "ok"
+                inner = re.sub(r"^<(p|div)[^>]*>", "", html.rstrip())
+                inner = re.sub(r"</(p|div)>$", "", inner)
+                return strip(inner, kind, html=True)
         msgs = {
-            "added": "Added to your Archidekt collection.",
-            "removed": "Removed from your Archidekt collection.",
-            "updated": "Card details saved to your Archidekt collection.",
+            "added": "Added to your Collection on Archidekt.",
+            "removed": "Removed from your Collection on Archidekt.",
+            "updated": "Card details saved to your Collection on Archidekt.",
             "nothing": "Nothing was added: no card matched. Check the name or pick a suggestion.",
             "nothingimported": "Nothing was imported: no card in the list was found.",
-            "imported": "Imported into your Archidekt collection.",
+            "imported": "Imported into your Collection on Archidekt.",
             "toomany": f"An import adds at most {MAX_IMPORT_ROWS} rows at a time. Split the file and "
             "import the rest after.",
             "unreadable": "That text is not a collection CSV or a card list the gateway can read.",
@@ -1369,23 +1757,81 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
         }
         if not code or code not in msgs:
             return ""
-        cls = "ok" if code in ("added", "removed", "updated", "imported") else "error"
-        return f"<p class='notice {cls}'>{_esc(msgs[code])}</p>"
+        return strip(msgs[code], "ok" if code in ("added", "removed", "updated", "imported") else "error")
+
+    def head(actions_html: str = "") -> str:
+        return ui.page_head("My collection", PURPOSE, actions_html=actions_html)
 
     def problem(exc: CollectionError) -> str:
         if exc.kind in ("not_linked", "auth"):
             return (
                 "<section class='panel coll-empty'><h2>Your collection lives on Archidekt</h2>"
-                "<p>The gateway shows and edits the Collection of the Archidekt account you link; nothing "
-                "about your cards is stored here. Link your account to see it.</p>"
-                f"<div class='actions'><a class='btn btn-primary' href='/account'>{icon('account')} "
-                "Link Archidekt</a></div></section>"
+                "<p>Link your Archidekt account to see it here. Nothing about your cards is stored on this "
+                "gateway.</p><div class='actions'>"
+                + ui.button_link("Link Archidekt", "/account", kind="primary", icon_name="account")
+                + "</div></section>"
             )
         return (
-            f"<section class='panel'><p class='notice error'>{_esc(exc)}</p>"
-            "<p class='muted'>Your collection is read live from Archidekt; when Archidekt is slow or "
-            "down the page cannot show it.</p></section>"
+            f"<div id='col-notes'>{strip(str(exc), 'error')}</div>"
+            "<section class='panel'><p class='muted'>Your collection is read live from Archidekt; when "
+            "Archidekt is slow or down the page cannot show it.</p></section>"
         )
+
+    def listing_query(qp: Any) -> dict[str, Any]:
+        """The list's address: name filter, sort and direction, offset (the old ``page`` too)."""
+        q = _clean(qp.get("q"), 80)
+        sort = qp.get("sort") if qp.get("sort") in SORTS else "added"
+        direction = qp.get("dir") if qp.get("dir") in DIRECTION_WORDS else "desc"
+        try:
+            offset = max(0, min(int(qp.get("offset") or 0), 1_000_000))
+        except ValueError:
+            offset = 0
+        if not offset and qp.get("page"):
+            try:
+                offset = (max(1, min(int(qp.get("page")), 10_000)) - 1) * PAGE_SIZE
+            except ValueError:
+                offset = 0
+        return {"q": q, "sort": sort, "dir": direction, "offset": offset}
+
+    def link_to(lq: dict[str, Any], view: str | None, offset: int, *, api: bool = False) -> str:
+        from urllib.parse import urlencode
+
+        qs: dict[str, Any] = {}
+        if lq["q"]:
+            qs["q"] = lq["q"]
+        if lq["sort"] != "added":
+            qs["sort"] = lq["sort"]
+            if lq["dir"] != "desc":
+                qs["dir"] = lq["dir"]
+        if view:
+            qs["view"] = view
+        if offset:
+            qs["offset"] = offset
+        base = "/collection/api/rows" if api else "/collection"
+        return f"{base}?{urlencode(qs)}" if qs else base
+
+    async def listing(sub: str, lq: dict[str, Any]) -> dict[str, Any]:
+        """The rows the address asks for: a screenful (SHOWN) from the Archidekt page that holds
+        the offset, with what Load more needs (shown, total, has_more)."""
+        offset = lq["offset"]
+        page_no = offset // PAGE_SIZE + 1
+        start = offset % PAGE_SIZE
+        out = await service.page(
+            sub, page=page_no, q=lq["q"], sort=lq["sort"], descending=lq["dir"] == "desc"
+        )
+        rows = out["rows"][start : start + SHOWN]
+        total = int(out["count"])
+        shown = offset + len(rows)
+        has_more = start + SHOWN < len(out["rows"]) or bool(out["has_next"])
+        return {"out": out, "rows": rows, "total": total, "shown": shown, "has_more": has_more}
+
+    def more_html(lq: dict[str, Any], view: str | None, got: dict[str, Any]) -> str:
+        total = got["total"]
+        if got["has_more"]:
+            return ui.load_more(
+                link_to(lq, view, got["shown"]), text="Load more cards", shown=got["shown"], total=total
+            )
+        return ui.load_more("", done=f"All {total:,} {'entry' if total == 1 else 'entries'} shown.")
 
     @server.custom_route("/collection", methods=["GET"], include_in_schema=False)
     async def collection_page(request: Request) -> Response:
@@ -1393,16 +1839,25 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
         if not sub:
             return login_redirect("/collection")
         qp = request.query_params
-        q = _clean(qp.get("q"), 80)
-        sort = qp.get("sort") if qp.get("sort") in SORTS else "added"
+        lq = listing_query(qp)
         view, remember = prefs.view_choice(state.db, sub, request, "collection", ("grid", "list"), "grid")
-        try:
-            page_no = max(1, min(int(qp.get("page") or 1), 10_000))
-        except ValueError:
-            page_no = 1
+        view_in_link = view if qp.get("view") in ("grid", "list") else None
         csrf = _csrf(s, sid) or ""
-        # the Add/Import fold opens after an add or import, or on ?add
-        open_add = bool(qp.get("add")) or (qp.get("ok") or qp.get("err")) in (
+        # the Add cards box comes open on the old address and after an add or import
+        result = qp.get("ok") or qp.get("err")
+        add_tab = (
+            "import"
+            if qp.get("add") == "import"
+            or result
+            in (
+                "nothingimported",
+                "imported",
+                "toomany",
+                "unreadable",
+            )
+            else "add"
+        )
+        open_add = bool(qp.get("add")) or result in (
             "added",
             "nothing",
             "nothingimported",
@@ -1410,150 +1865,117 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
             "toomany",
             "unreadable",
         )
+        notes = notice(result, sub=sub, token=qp.get("r"))
         try:
-            out = await service.page(sub, page=page_no, q=q, sort=sort)
+            got = await listing(sub, lq)
+            whole = got["out"] if not lq["q"] and lq["sort"] == "added" else await service.page(sub)
         except CollectionError as exc:
             if busy := busy_response(exc, request, page, sub=sub, sid=sid):
                 return busy
             status = 200 if exc.kind in ("not_linked", "auth") else _STATUS.get(exc.kind, 400)
+            notes_html = f"<div id='col-notes'>{notes}</div>" if notes else ""
             return page(
                 "My collection",
-                notice(qp.get("err"), sub=sub, token=qp.get("r")) + problem(exc),
+                head() + notes_html + problem(exc),
                 sub=sub,
                 sid=sid,
                 status=status,
+                heading=False,
             )
-        rows = out["rows"]
+        rows = got["rows"]
         link = state.db.get_link(sub) or {}
         arch_user = str(link.get("archidekt_user_id") or "")
-
-        def sel(name: str, options: dict[str, str], cur: str, label: str, ic: str) -> str:
-            opts = "".join(
-                f"<option value='{_esc(k)}'{' selected' if k == cur else ''}>{_esc(v)}</option>"
-                for k, v in options.items()
-            )
-            return (
-                f"<div class='field'><label for='f-{name}'>{_esc(label)}</label><span class='sel'>{icon(ic)}"
-                f"<select id='f-{name}' name='{name}'>{opts}</select></span></div>"
-            )
-
-        controls = (
-            "<section class='panel collbar'><form method='get' "
-            "action='/collection' class='controls' id='listform'>"
-            "<div class='field filter grow'><label for='q'>Filter</label><span class='search'>"
-            f"<input id='q' type='search' name='q' value='{_esc(q)}' placeholder='Card name'>"
-            f"<button type='submit' aria-label='Filter' title='Filter'>{icon('search')}</button></span></div>"
-            + sel("view", {"grid": "Grid", "list": "List"}, view, "View as", "grid")
-            + (card_size_control() if view == "grid" else "")
-            + sel("sort", SORTS, sort, "Sort by", "sort")
-            + "<div class='field'><span class='lbl'>&nbsp;</span>"
-            f"<a class='btn' href='/collection/export.csv'>{icon('download')} Export CSV</a></div>"
-            "<noscript><button type='submit' class='apply'>Apply</button></noscript></form></section>"
-        )
-        add_box = (
-            "<section class='panel addbox'><h2>Add a card</h2>"
-            "<form method='post' action='/collection' class='addcard'><input "
-            f"type='hidden' name='csrf' value='{_esc(csrf)}'>"
-            "<input type='hidden' name='action' value='add'>"
-            "<div class='field grow'><label for='addname'>Card name</label>"
-            "<input id='addname' type='text' name='name' data-suggest='cards' "
-            "placeholder='Card name, or “name (SET) 123” for one printing' "
-            "autocomplete='off' required></div>"
-            "<div class='field'><label for='addqty'>Copies</label><input id='addqty' "
-            "type='number' name='quantity' value='1' min='1' max='999'></div>"
-            "<div class='field'><label for='addfinish'>Finish</label><span "
-            "class='sel'><select id='addfinish' name='finish'>"
-            "<option value='nonfoil'>Non-foil</option><option value='foil'>Foil</option><option "
-            "value='etched'>Etched</option></select></span></div>"
-            "<div class='field'><label for='addcond'>Condition</label><span "
-            "class='sel'><select id='addcond' name='condition'>"
-            "<option selected>NM</option><option>LP</option><option>MP</option>"
-            "<option>HP</option><option>DMG</option>"
-            "</select></span></div>"
-            f"<button class='btn-primary'>{icon('plus')} Add</button></form>"
-            "<p class='muted small'>Scanning a pile is quicker: open <a href='/scan'>Scan</a>, then choose "
-            "<strong>Save to collection</strong>. Everything you add lands in your Collection on "
-            "Archidekt.</p></section>"
-            "<section class='panel addbox importbox'><h2>Import a list</h2>"
-            "<form method='post' action='/collection' class='importform'><input "
-            f"type='hidden' name='csrf' value='{_esc(csrf)}'>"
-            "<input type='hidden' name='action' value='import'>"
-            "<p class='muted small'>A collection CSV (this page's Export CSV, or one with Archidekt's "
-            f"column names) or a card list, one card per line, up to {MAX_IMPORT_ROWS} rows at a time. "
-            "Copies of a printing you already own in that finish are added to it.</p>"
-            "<div class='field filepick'><span class='lbl'>From a file</span><label class='filebtn'>"
-            "<input id='importfile' type='file' accept='.csv,.txt,text/csv,text/plain' "
-            "data-fill='importtext'><span class='btn'>Choose a file</span></label>"
-            "<span class='fname' aria-live='polite'>No file chosen</span></div>"
-            "<textarea id='importtext' name='text' rows='6' placeholder='Quantity,Name,Finish,Edition Code,"
-            "Collector Number&#10;2,Card name,Normal,SET,123'></textarea>"
-            f"<div class='actions'><button class='btn-primary'>{icon('plus')} Import</button></div></form>"
-            "</section>"
-        )
-        arch_link = (
-            f"<a class='ext' href='https://archidekt.com/collection/v2/{_esc(arch_user)}' target='_blank' "
-            f"rel='noreferrer noopener'>{icon('external')} Open on Archidekt</a>"
-            if arch_user
-            else ""
-        )
-        totals_html = (
-            f"<div class='coll-totals' id='totals'><span><b>{int(out['count'])}</b> "
-            f"{'entry' if out['count'] == 1 else 'entries'} in your Archidekt collection</span>"
-            f"{arch_link}</div>"
-            "<p class='sr-only' id='live' role='status' aria-live='polite'></p>"
-        )
-        if not rows and not q:
+        live = "<p class='sr-only' id='live' role='status' aria-live='polite'></p>"
+        details_row: dict[str, Any] | None = None
+        if qp.get("details"):
+            try:
+                rid = _rid(qp.get("details"))
+                details_row = next((r for r in rows if int(r["id"]) == rid), None)
+                if details_row is None:
+                    details_row = row_out(await service._record(sub, rid))
+            except CollectionError:
+                details_row = None
+        details_box = details_box_html(details_row, csrf, open=details_row is not None)
+        add_box = add_box_html(csrf, tab=add_tab, open=open_add)
+        if not rows and not lq["q"] and not lq["offset"]:
             body = (
-                "<section class='panel coll-empty'><h2>No cards yet</h2>"
-                "<p>Your collection is the list of cards you own, kept on Archidekt. "
-                "Scan a pile with your phone, or add cards by name. "
-                "Cards you own show a green dot on every deck page.</p>"
-                "<div class='actions'><a class='btn btn-primary' "
-                f"href='/scan'>{icon('camera')} Scan cards</a>"
-                f"<a class='btn' href='#addname'>{icon('plus')} Add by name</a></div></section>"
+                head()
+                + f"<div id='col-notes'>{notes}</div>"
+                + "<section class='panel coll-empty'><h2>No cards yet</h2>"
+                "<p>Scan a pile, or add cards by name.</p><div class='actions'>"
+                + ui.button_link("Scan cards", "/scan", kind="primary", icon_name="camera")
+                + ui.box_opener("Add by name", "/collection?add=1", "col-add", icon_name="plus")
+                + ui.box_opener(
+                    "Import a list", "/collection?add=import", "col-add", icon_name="list", cls="imp"
+                )
+                + "</div></section>"
+                + live
+                + export_help_html()
+                + add_box
             )
-        elif not rows:
-            body = "<section class='panel'><p class='muted'>No cards match that filter.</p></section>"
         else:
-            items = "".join(row_html(r, csrf, view=view) for r in rows)
-            body = f"<ul class='{'collgrid' if view == 'grid' else 'colllist'}' id='cards'>{items}</ul>"
-        from urllib.parse import urlencode
-
-        qs = {k: v for k, v in (("q", q), ("sort", sort), ("view", view)) if v}
-
-        def link_to(n: int) -> str:
-            return "/collection?" + urlencode({**qs, "page": n})
-
-        pager = ""
-        if page_no > 1 or out["has_next"]:
-            pager = "<nav class='pager' aria-label='Pages'>"
-            if page_no > 1:
-                pager += f"<a class='btn' href='{_esc(link_to(page_no - 1))}'>Previous</a>"
-            pager += f"<span class='muted small'>Page {page_no} of {int(out['total_pages'])}</span>"
-            if out["has_next"]:
-                pager += f"<a class='btn' href='{_esc(link_to(page_no + 1))}'>Next</a>"
-            pager += "</nav>"
-        resp = page(
-            "My collection",
-            notice(qp.get("ok") or qp.get("err"), sub=sub, token=qp.get("r"))
-            + totals_html
-            + controls
-            + export_help_html()
-            + f"<details class='addfold'{' open' if open_add else ''}><summary>{icon('plus')} Add cards or "
-            "import a list<span class='chev'>name, file or scan</span></summary>"
-            + add_box
-            + "</details>"
-            + body
-            + pager,
-            sub=sub,
-            sid=sid,
-            scripts=True,
-        )
+            acts = ui.button_link(
+                "Export CSV", "/collection/export.csv", icon_name="download"
+            ) + ui.box_opener("Add cards", "/collection?add=1", "col-add", kind="primary", icon_name="plus")
+            cards = (
+                list_html(rows, csrf, view=view)
+                if rows
+                else (
+                    f"<ul class='{'cardgrid collgrid' if view == 'grid' else 'ui-table colllist'}' "
+                    "id='cards' hidden></ul>"
+                )
+            )
+            body = (
+                head(acts)
+                + f"<div id='col-notes'>{notes}</div>"
+                + widgets_html(whole, arch_user)
+                + panel_html(q=lq["q"], sort=lq["sort"], direction=lq["dir"], view=view, count=got["total"])
+                + live
+                + cards
+                + f"<p class='muted col-nomatch'{' hidden' if rows else ''}>No cards match that filter.</p>"
+                + more_html(lq, view_in_link, got)
+                + export_help_html()
+                + add_box
+                + details_box
+            )
+        resp = page("My collection", body, sub=sub, sid=sid, scripts=True, heading=False)
         if remember:
             prefs.remember_view(
                 state.db, sub, resp, "collection", view, secure=s.public_url.startswith("https://")
             )
         return resp
+
+    @server.custom_route("/collection/api/rows", methods=["GET"], include_in_schema=False)
+    async def api_rows(request: Request) -> Response:
+        """The next screenful for the Load more button: the rows as the page draws them."""
+        who = api_user(request, write=False)
+        if isinstance(who, Response):
+            return who
+        sub, sid = who
+        qp = request.query_params
+        lq = listing_query(qp)
+        view = qp.get("view") if qp.get("view") in ("grid", "list") else "grid"
+        try:
+            got = await listing(sub, lq)
+        except CollectionError as exc:
+            return _fail(exc)
+        csrf = _csrf(s, sid) or ""
+        html = "".join(row_html(r, csrf, view=view) for r in got["rows"])
+        total = got["total"]
+        return JSONResponse(
+            {
+                "ok": True,
+                "html": html,
+                "shown": got["shown"],
+                "total": total,
+                "has_more": got["has_more"],
+                "next": link_to(lq, view, got["shown"]) if got["has_more"] else "",
+                "done": ""
+                if got["has_more"]
+                else f"All {total:,} {'entry' if total == 1 else 'entries'} shown.",
+            },
+            headers=NO_STORE,
+        )
 
     @server.custom_route("/collection", methods=["POST"], include_in_schema=False)
     async def collection_post(request: Request) -> Response:

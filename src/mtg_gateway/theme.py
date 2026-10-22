@@ -100,6 +100,7 @@ _LIGHT = """
        the dark bars (top bar, footer, deck banner) switch the ring back to orange below */
     --focus:#944b00; --control-border:#7a7a7a;
     --shadow:0 3px 6px rgba(0,0,0,.25); --scrim:rgba(0,0,0,.4);
+    --shadow-box:0 18px 48px rgba(0,0,0,.22),0 2px 8px rgba(0,0,0,.1);
 """
 
 # Tiles, sparklines, charts and the filter-bar select: shared by the deck, report and history
@@ -179,6 +180,8 @@ CSS = (
   --orange-select:rgba(250,137,13,.3);
   --focus:#fa890d; --radius:5px; --radius-panel:3px; --radius-lg:8px; --radius-sheet:12px;
   --shadow:0 3px 6px rgba(0,0,0,.5); --scrim:rgba(0,0,0,.4);
+  /* boxes (dialogs): rounder than the panels, with a soft lifted shadow, so a pop-up feels native */
+  --radius-box:14px; --shadow-box:0 18px 48px rgba(0,0,0,.5),0 2px 8px rgba(0,0,0,.35);
   --ctl:39px; /* phatButton / phatInput / phatDropdown height */
 }
 /* Touch screens: every standard control (buttons, inputs, selects, the custom select) is 44 px
@@ -303,9 +306,11 @@ details.dd .menu button.danger:focus-visible{background:var(--border);color:var(
   padding:.5rem 1rem .4rem;border-bottom:1px solid var(--border);margin-bottom:.25rem;white-space:nowrap;
   overflow:hidden;text-overflow:ellipsis;max-width:18rem}
 .menu .head.who b{color:var(--text)}
-.topbar .signin{height:34px;min-height:34px;padding:0 .9rem;background:var(--orange);
-  border-color:var(--orange);color:var(--on-orange);white-space:nowrap}
-.topbar .signin:hover{background:var(--orange);color:var(--on-orange);filter:brightness(1.1)}
+/* F10: the signed-out Sign in is plain (the page's own button is the one orange), 44 px on touch */
+.topbar .signin{height:34px;min-height:34px;padding:0 .9rem;background:var(--surface);
+  border-color:var(--border);color:var(--text);white-space:nowrap}
+.topbar .signin:hover{background:var(--surface-2);color:var(--text)}
+@media (pointer:coarse){.topbar .signin{height:44px;min-height:44px}}
 .menu form{margin:0;display:contents}
 /* the chosen theme: --orange-text would be 4.0:1 on the light menu */
 .menu .on,details.dd .menu .on{color:var(--toolbar-active);font-weight:700}
@@ -463,6 +468,9 @@ button:disabled,.btn[aria-disabled=true]{opacity:.5;cursor:default}
    (static/feedback.js sets aria-busy on the button that sent it). */
 button:active:not(:disabled),.btn:active{transform:translateY(1px);filter:brightness(.9)}
 button[aria-busy=true],.btn[aria-busy=true]{cursor:progress;opacity:.75}
+/* a list being filtered as you type dims at once (static/decks.js, static/precons.js) and the
+   answer undims it; the dim never hides the list that is there */
+#decks-list[aria-busy=true]:not(:empty),main[aria-busy=true] .pre-grp{opacity:.6;transition:opacity .15s}
 button[aria-busy=true]::after,.btn[aria-busy=true]::after{content:'';width:.9em;height:.9em;flex:none;
   border-radius:50%;border:2px solid currentColor;border-right-color:transparent;
   animation:busy .8s linear infinite}
@@ -568,20 +576,25 @@ button.thumbbtn:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
   background:var(--toolbar-bg);color:var(--toolbar-text);font-weight:700;font-size:.86rem;line-height:1.3}
 .chip{display:inline-block;padding:.25rem .5rem;border-radius:3px;background:var(--surface-2);
   font-size:.86rem}
-.notice{border:1px solid var(--border);border-left:4px solid var(--blue);background:var(--surface);
-  border-radius:var(--radius-panel);padding:.7rem .9rem;margin:0 0 1rem;font-weight:700}
+ /* a notice (F8): a tinted strip with a coloured left edge and no border of its own; info (blue),
+   ok (green), warn (orange) and error (red), the words in the strip's colour where that reads */
+.notice{border:0;border-left:4px solid var(--blue);background:var(--blue-tint);color:var(--text);
+  border-radius:0 var(--radius) var(--radius) 0;padding:.7rem .9rem;margin:0 0 1rem;font-weight:700;
+  overflow-wrap:anywhere}
 .notice.error{border-left-color:var(--red);background:var(--red-tint);color:var(--red-text)}
 .notice.ok{border-left-color:var(--green);background:var(--green-tint);color:var(--green-text)}
 .notice.warn{border-left-color:var(--orange);background:var(--orange-tint);color:var(--orange-text)}
+.notice.info{border-left-color:var(--blue);background:var(--blue-tint);color:var(--text)}
+.notice a{color:inherit;text-decoration:underline}
 .notice.strong{display:grid;grid-template-columns:auto 1fr;gap:.25rem .75rem;align-items:start;
-  border-width:1px 1px 1px 6px;border-color:var(--orange);padding:.9rem 1rem;font-size:1.02rem;
+  border-left:6px solid var(--orange);background:var(--orange-tint);padding:.9rem 1rem;font-size:1.02rem;
   font-weight:400;color:var(--text)}
 .notice.strong::before{content:'!';grid-row:span 2;width:2rem;height:2rem;border-radius:50%;
   display:inline-flex;align-items:center;justify-content:center;font-weight:900;font-size:1.3rem;
   background:var(--orange);color:var(--on-orange)}
 .notice.strong .lead{font-weight:900;color:var(--orange-text);font-size:1.1rem;margin:0}
 .notice.strong p{margin:0}
-.notice.disclosure{font-weight:400;color:var(--text);border-left-color:var(--orange)}
+.notice.disclosure{font-weight:400;color:var(--text);border-left-color:var(--orange);background:var(--surface)}
 .disclosure h3{font-size:1rem;margin:.9rem 0 .3rem}
 .disclosure ul{margin:0 0 .4rem;padding-left:1.25rem}
 /* a long path such as /decks/{deck_id} breaks rather than widen the page (200% text on a phone) */
@@ -689,6 +702,10 @@ details.raw{margin:.5rem 0 0} details.raw summary{cursor:pointer;color:var(--tex
   border:1px dashed currentColor}
 .apply form.guarded button.primary:disabled{color:var(--orange-text)}
 .apply form.guarded button.danger:disabled{color:var(--danger-text)}
+/* A tap on a locked button lands on its row instead (a disabled button takes no events, so the
+   browser would move focus to the nearest focusable ancestor, <main tabindex=-1>, and scroll the
+   page to it); static/clickguard.js then keeps focus where it was. */
+form.guarded button[data-guard]:disabled{pointer-events:none}
 
 /* consent page: who is asking, and where you end up */
 .consent .ask{font-size:1.1rem;margin:0 0 .75rem}
@@ -1078,6 +1095,21 @@ html[data-card-size=l] ul.collgrid{
   grid-template-columns:repeat(auto-fill,minmax(min(100%,max(230px,16.2rem)),1fr))}
 html[data-card-size=s] .printpick .ppgrid{grid-template-columns:repeat(auto-fill,minmax(112px,1fr))}
 html[data-card-size=l] .printpick .ppgrid{grid-template-columns:repeat(auto-fill,minmax(203px,1fr))}
+/* list views (R-175): the row pictures follow the same choice through --thumb-scale (S 0.75, L 1.35);
+   a page's own list thumbnail multiplies its width and height by it (ui.thumb_size_css) */
+html{--thumb-scale:1}
+html[data-card-size=s]{--thumb-scale:.75}
+html[data-card-size=l]{--thumb-scale:1.35}
+html[data-card-size=s] ul.decklist.list .thumb,html[data-card-size=l] ul.decklist.list .thumb{
+  width:calc(90px * var(--thumb-scale));height:calc(60px * var(--thumb-scale))}
+html[data-card-size=s] .cardlist .pic,html[data-card-size=l] .cardlist .pic{
+  width:calc(3rem * var(--thumb-scale))}
+html[data-card-size=s] ul.colllist .thumb,html[data-card-size=l] ul.colllist .thumb{
+  width:calc(34px * var(--thumb-scale));height:calc(48px * var(--thumb-scale))}
+html[data-card-size=s] .watch-page .w-t .thumb,html[data-card-size=l] .watch-page .w-t .thumb{
+  width:calc(48px * var(--thumb-scale));height:calc(67px * var(--thumb-scale))}
+html[data-card-size=s] .erow .thumb,html[data-card-size=l] .erow .thumb{
+  width:calc(40px * var(--thumb-scale));height:calc(56px * var(--thumb-scale))}
 @media (max-width:1500px){
   html[data-card-size=s] ul.decklist.grid{grid-template-columns:repeat(5,minmax(0,1fr))}
   html[data-card-size=l] ul.decklist.grid{grid-template-columns:repeat(3,minmax(0,1fr))} }
@@ -1124,12 +1156,24 @@ main.wrap.ui-wide{max-width:1200px}
 .ui-lbl.blue{background:var(--blue-tint);color:var(--blue-text)}
 .ui-lbl.grey{background:transparent;color:var(--text-muted);border-color:var(--card-border)}
 .ui-lbl.plain{background:var(--surface-2);color:var(--text)}
-/* the app a row came from: its name with a letter tile; a dash when none is recorded */
+/* the app a row came from: its full name beside its own mark (Claude, ChatGPT, Codex: the official
+   files, unmodified, static/logos/) or one neutral "connected app" icon; a dash when none is recorded.
+   OpenAI's mark is black on the light theme and white on the dark one: two images, the theme shows one */
 .ui-app{display:inline-flex;align-items:center;gap:.35rem;color:var(--text);font-size:.9rem;
   white-space:nowrap}
-.ui-app i{display:inline-grid;place-items:center;width:20px;height:20px;border-radius:4px;font-style:normal;
-  font-size:.7rem;font-weight:900;background:var(--surface-2);color:var(--text)}
+.ui-app svg.i{width:16px;height:16px;color:var(--text-muted);stroke-width:2}
+.ui-app img.logo{width:16px;height:16px;flex:none;display:inline-block;object-fit:contain}
+.ui-app img.on-light{display:none}
+@media (prefers-color-scheme: dark){ :root:not([data-theme=light]) .ui-app img.on-light{display:none}
+  :root:not([data-theme=light]) .ui-app img.on-dark{display:inline-block} }
+@media (prefers-color-scheme: light){ :root:not([data-theme=dark]) .ui-app img.on-light{display:inline-block}
+  :root:not([data-theme=dark]) .ui-app img.on-dark{display:none} }
+:root[data-theme=dark] .ui-app img.on-light{display:none}
+:root[data-theme=dark] .ui-app img.on-dark{display:inline-block}
+:root[data-theme=light] .ui-app img.on-light{display:inline-block}
+:root[data-theme=light] .ui-app img.on-dark{display:none}
 .ui-app.none{color:var(--text-muted)}
+.ui-app.unnamed .nm{color:var(--text-muted)}
 /* a dash where a row has no risk label */
 .ui-none{color:var(--text-muted)}
 /* dates: relative within 7 days, then the date; the full date and time in the tooltip */
@@ -1147,13 +1191,12 @@ main.wrap.ui-wide{max-width:1200px}
 
 /* quick-filter chips with counts */
 .ui-chips{display:flex;flex-wrap:wrap;gap:.4rem;margin:0 0 .6rem}
-.ui-chip{display:inline-flex;align-items:center;gap:.35rem;min-height:36px;padding:0 .8rem;
+.ui-chip{display:inline-flex;align-items:center;gap:.35rem;min-height:44px;padding:0 .8rem;
   border-radius:999px;
   border:1px solid var(--control-border);color:var(--text);font-weight:700;font-size:.9rem;
   text-decoration:none;
   background:transparent}
 .ui-chip:hover{color:var(--text);background:var(--surface-2)}
-@media (pointer:coarse){.ui-chip{min-height:44px}}
 .ui-chip[aria-pressed=true],.ui-chip[aria-current]{background:var(--orange-tint);
   border-color:var(--orange-text);
   color:var(--orange-text)}
@@ -1359,7 +1402,8 @@ ul.ui-chg{padding:0;border:1px solid var(--card-border);border-radius:var(--radi
 .wdg .lab{display:flex;align-items:center;gap:.4rem;color:var(--text-muted);font-size:.85rem;font-weight:700;
   text-transform:uppercase;letter-spacing:.03em}
 .wdg .lab svg.i{width:16px;height:16px}
-.wdg .big{font-size:2rem;font-weight:900;line-height:1.1;font-variant-numeric:tabular-nums}
+.wdg .big{font-size:2rem;font-weight:900;line-height:1.1;font-variant-numeric:tabular-nums;min-width:0;
+  overflow-wrap:anywhere}
 .wdg .big small{font-size:.95rem;font-weight:700;color:var(--text-muted);margin-left:.35rem}
 .wdg .det{color:var(--text-muted);font-size:.88rem;display:flex;flex-wrap:wrap;gap:.3rem .5rem;
   align-items:center}
@@ -1473,6 +1517,98 @@ CARD_MENU_CSS = """
 CSS += CARD_MENU_CSS
 # the deck, folder and row menus and the boxes (static/menus.js)
 CSS += MENUS_CSS
+
+# The box (dialog) every pop-up shares (static/box.js, ui.box): a rounded card with a soft lifted
+# shadow, centred over a dimmed page; a sheet from the bottom on a phone, with the safe area kept
+# clear; a header with the title and a 44 px ×; a calm open and close (the page's reduced-motion
+# rule turns the transitions off); long content scrolls inside; light and dark; 200% text.
+BOX_CSS = """
+/* what a box hides (a note, a field) stays hidden whatever display rule the page gives it */
+.mtgbox [hidden]{display:none!important}
+html.mtgbox-open,html.mtgbox-open body{overflow:hidden}
+.mtgbox-scrim{position:fixed;inset:0;z-index:70;background:var(--scrim);display:flex;align-items:center;
+  justify-content:center;padding:1rem;opacity:0;transition:opacity .18s ease-out}
+.mtgbox-scrim.in{opacity:1}
+.mtgbox-scrim.out{pointer-events:none}
+.mtgbox{display:flex;flex-direction:column;width:min(100%,30rem);max-height:calc(100vh - 2rem);
+  max-height:calc(100dvh - 2rem);padding:.75rem 1.25rem 1.25rem;background:var(--surface);color:var(--text);
+  border:1px solid var(--border-soft);border-radius:var(--radius-box);box-shadow:var(--shadow-box)}
+.mtgbox-scrim > .mtgbox{transform:translateY(10px) scale(.98);
+  transition:transform .22s cubic-bezier(.2,.8,.3,1)}
+.mtgbox-scrim.in > .mtgbox{transform:none}
+.mtgbox.wide{width:min(100%,56rem)}
+/* the header: the title, and the × at its right on every box (44 px, round) */
+.mtgbox .bh{display:flex;align-items:center;gap:.5rem;margin:0 -.5rem .5rem 0}
+.mtgbox .bh h2{flex:1;min-width:0;margin:0;font-size:1.25rem;line-height:1.3;overflow-wrap:anywhere;
+  padding:.45rem 0}
+.mtgbox .bx,.mtgbox a.bx{display:inline-flex;align-items:center;justify-content:center;flex:none;width:44px;
+  height:44px;min-height:44px;min-width:44px;padding:0;margin:0;border:0;border-radius:50%;
+  background:transparent;color:var(--text-muted);box-shadow:none;cursor:pointer;text-decoration:none}
+.mtgbox .bx:hover,.mtgbox .bx:focus-visible{background:var(--surface-2);color:var(--text)}
+.mtgbox .bx svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round}
+.mtgbox[data-locked=true] .bx{display:none}
+.mtgbox > h2{margin:0 0 .75rem;font-size:1.25rem}
+.mtgbox .body{flex:1 1 auto;min-height:0;overflow:auto;overscroll-behavior:contain}
+.mtgbox .body > .stack{display:flex;flex-direction:column;gap:.75rem}
+.mtgbox .body p{margin:0}
+.mtgbox .body p + p{margin-top:.5rem}
+.mtgbox .body ul{margin:0;padding-left:1.25rem}
+.mtgbox .body ul li{margin:.2rem 0}
+.mtgbox .body .field{margin:0}
+.mtgbox .body .field + .field{margin-top:.75rem}
+.mtgbox .body textarea{width:100%;min-height:16rem;resize:vertical;font-family:ui-monospace,SFMono-Regular,
+  Menlo,Consolas,monospace;font-size:.9rem;line-height:1.4}
+.mtgbox .body .files{display:flex;flex-wrap:wrap;gap:.5rem;margin:0}
+.mtgbox .body .files .btn{margin:0}
+.mtgbox .body .segc{display:flex;flex-wrap:wrap;gap:.25rem;margin:0 0 .5rem}
+.mtgbox .body .segc [role=tab]{min-height:var(--ctl);padding:0 .9rem;font-weight:400;
+  border-color:var(--border);background:var(--surface-2);color:var(--text)}
+.mtgbox .body .segc [role=tab][aria-selected=true]{background:var(--orange);border-color:var(--orange);
+  color:var(--on-orange);font-weight:700}
+.mtgbox .body .check{display:flex;gap:.6rem;align-items:center;min-height:44px}
+.mtgbox .body .check input{width:20px;height:20px;min-height:0;margin:0;accent-color:var(--orange-ctl);
+  flex:none}
+.mtgbox .tree{display:flex;flex-direction:column;gap:.1rem;max-height:50vh;overflow:auto}
+.mtgbox .tree label{display:flex;align-items:center;gap:.5rem;min-height:var(--ctl);padding:0 .5rem;
+  border-radius:var(--radius);cursor:pointer;overflow-wrap:anywhere}
+.mtgbox .tree label:hover{background:var(--surface-2)}
+.mtgbox .tree input{margin:0;flex:none}
+.mtgbox .tree svg{width:18px;height:18px;flex:none;color:var(--orange);fill:none;stroke:currentColor;
+  stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.mtgbox .boxnote{margin:.75rem 0 0}
+.mtgbox .acts{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:.5rem;margin-top:1rem}
+.mtgbox .acts:empty{display:none}
+.mtgbox .acts button,.mtgbox .acts .btn{margin:0}
+.mtgbox .acts svg.i{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:2}
+.mtgbox .loading,.mtgbox .progress{display:flex;align-items:center;gap:.6rem}
+.mtgbox .loading::before,.mtgbox .progress::before{content:'';width:1rem;height:1rem;flex:none;
+  border:2px solid currentColor;border-right-color:transparent;border-radius:50%;
+  animation:mtgbox-spin .8s linear infinite}
+@keyframes mtgbox-spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){
+  .mtgbox-scrim,.mtgbox-scrim > .mtgbox{transition:none}
+  .mtgbox .loading::before,.mtgbox .progress::before{animation:none}}
+/* a box the page holds (ui.box) before a script opens it: hidden; drawn open without scripts (the
+   old address), it is a plain panel at the top of the page and its Cancel buttons are not shown */
+.ui-box[hidden]{display:none}
+.ui-box:not(.in-scrim){margin:0 0 1rem;border:1px solid var(--card-border);border-radius:var(--radius-panel);
+  box-shadow:none;width:auto;max-height:none}
+.ui-box:not(.in-scrim) [data-cancel]{display:none}
+@media (max-width:599.98px){
+  .mtgbox-scrim{align-items:flex-end;padding:0}
+  .mtgbox,.mtgbox.wide{width:100%;max-height:calc(100vh - var(--tab-room,0px));
+    max-height:calc(100dvh - var(--tab-room,0px));border:0;
+    border-radius:var(--radius-box) var(--radius-box) 0 0;
+    padding-bottom:calc(1.25rem + env(safe-area-inset-bottom))}
+  .mtgbox-scrim > .mtgbox{transform:translateY(100%)}
+  .mtgbox-scrim.in > .mtgbox{transform:none}
+  .mtgbox.wide{height:calc(100vh - var(--tab-room,0px));height:calc(100dvh - var(--tab-room,0px));
+    border-radius:0}
+  .mtgbox .acts{justify-content:stretch}
+  .mtgbox .acts button,.mtgbox .acts .btn{flex:1 1 auto}
+}
+"""
+CSS += BOX_CSS
 
 
 # The top bar's search box (cards and decks, static/suggest.js in its site mode): in the bar from
@@ -1643,8 +1779,7 @@ SEARCH_PANEL_CSS = """
 .spanel .segc label:has(input:focus-visible){outline:2px solid var(--focus);outline-offset:-2px}
 .spanel .rbar .cardsize{display:inline-flex;align-items:center;gap:.5rem}
 .spanel .rbar .cardsize .lbl{display:none}
-/* Grid or List switches without a reload: the size switch goes with the Grid view */
-.spanel .rbar:has(input[name=view][value=list]:checked) .cardsize{display:none}
+/* R-175: the size switch stays whatever the view; in a list it sizes the row pictures (--thumb-scale) */
 @media (max-width:1279.98px){ .spanel .rbar .view .tx{display:none}
   .spanel .rbar .view label{width:calc(var(--ctl) - 2px);padding:0} }
 /* phones: the filter groups wait in a full-screen sheet behind the Filters button; the name row
@@ -1751,6 +1886,7 @@ ICONS = {
     "minus": "<path d='M5 12h14'/>",
     "check": "<path d='M5 12l4 4L19 6'/>",
     "x": "<path d='M6 6l12 12M18 6L6 18'/>",
+    "ban": "<circle cx='12' cy='12' r='9'/><path d='M5.7 5.7l12.6 12.6'/>",
     "undo": "<path d='M9 14L4 9l5-5'/><path d='M4 9h10a6 6 0 0 1 0 12h-3'/>",
     "redo": "<path d='M15 14l5-5-5-5'/><path d='M20 9H10a6 6 0 0 0 0 12h3'/>",
     "settings": "<circle cx='12' cy='12' r='3'/><path d='M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1"
@@ -1805,6 +1941,8 @@ ICONS = {
     "back": "<path d='M9 14L4 9l5-5'/><path d='M4 9h10a6 6 0 0 1 0 12h-3'/>",
     "bell": "<path d='M6 16V11a6 6 0 0 1 12 0v5l2 2H4z'/><path d='M10 21h4'/>",
     "send": "<path d='M4 12l16-8-6 16-2-7z'/>",
+    # the one neutral "connected app" mark (ui.app_chip): a plug, never a company's logo
+    "app": "<path d='M9 2v5M15 2v5'/><path d='M6 7h12v3a6 6 0 0 1-12 0z'/><path d='M12 16v6'/>",
 }
 
 
@@ -1907,8 +2045,11 @@ def current_card_size() -> str:
     return _card_size.get()
 
 
-def card_size_control() -> str:
-    """The S / M / L switch next to "View as" (static/prefs.js presses it and saves the choice)."""
+def card_size_control(*, cls: str = "field cardsize") -> str:
+    """The one S / M / L card size switch (R-175): put it in the toolbar of every view that shows card
+    pictures, list rows included. static/prefs.js presses it, applies it at once on
+    ``<html data-card-size>`` and keeps the choice on the account (prefs.CARD_SIZE), so one choice
+    follows the member to every view. ``cls`` is the wrapper's class (keep ``cardsize`` in it)."""
     size = current_card_size()
     buttons = "".join(
         f"<button type='button' data-card-size-set='{k}' aria-pressed='{'true' if k == size else 'false'}' "
@@ -1916,7 +2057,7 @@ def card_size_control() -> str:
         for k, label in (("s", "Small"), ("m", "Medium"), ("l", "Large"))
     )
     return (
-        "<div class='field cardsize'><span class='lbl' aria-hidden='true'>Card size</span>"
+        f"<div class='{esc(cls)}'><span class='lbl' aria-hidden='true'>Card size</span>"
         f"<span class='sizeseg' role='group' aria-label='Card size'>{buttons}</span></div>"
     )
 
@@ -1998,7 +2139,7 @@ def static_version(name: str) -> str | None:
     return hashlib.sha256(data).hexdigest()[:12]
 
 
-_STATIC_REF = re.compile(r"((?:src|href)=')/static/([A-Za-z0-9_.-]{1,80})'")
+_STATIC_REF = re.compile(r"((?:src|href)=')/static/((?:logos/)?[A-Za-z0-9_.-]{1,80})'")
 
 
 def versioned_static(doc: str) -> str:
@@ -2235,6 +2376,9 @@ def render(
         + ("<script src='/static/prefs.js' defer></script>" if signed_in else "")
         # static/topbar.js: the scroll room above a focused element follows the bar's height
         + "<script src='/static/topbar.js' defer></script>"
+        # static/box.js: the box (dialog) every pop-up shares, on every page, before the menus
+        # and the page scripts that open one
+        + "<script src='/static/box.js' defer></script>"
         # static/cardmenu.js: the card menu and Watch button the pages and the top bar share,
         # before the page scripts that use it
         + ("<script src='/static/cardmenu.js' defer></script>" if signed_in else "")

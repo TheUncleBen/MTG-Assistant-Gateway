@@ -37,6 +37,10 @@ def server(tmp_path: Path):
     cards = parse_export(fixture.read_text(encoding="utf-8"))
     s.ark.decks[DECK] = to_deck_json(cards[:14], deck_id=DECK, name=HOSTILE, owner="alice")
     s.ark.users["alice"]["decks"].append(DECK)
+    # one card in the collection: an empty one shows no results bar (no Grid or List to pick)
+    s.ark.collections.setdefault("alice", {})[5001] = s.ark._collection_row(
+        5001, s.ark.printing(9003), {"quantity": 1}
+    )
     s.start()
     try:
         yield s
@@ -117,11 +121,13 @@ def test_view_as_is_remembered_after_leaving_and_coming_back(server: Server, wid
 
         # the collection: List picked, away and back
         _nav(page, "/collection")
-        _pick(page, "f-view", "List")
+        with page.expect_navigation(wait_until="networkidle"):
+            page.locator(".rbar .segc.view label", has_text="List").click()
         _nav(page, "/decks")
         _nav(page, "/collection")
-        assert page.url == f"{server.base}/collection" and page.locator("#f-view").input_value() == "list"
-        assert "<option value='list' selected>" in page.request.get(f"{server.base}/collection").text()
+        assert page.url == f"{server.base}/collection"
+        assert page.locator(".rbar .segc.view input[value=list]").is_checked()
+        assert "value='list' checked>" in page.request.get(f"{server.base}/collection").text()
         # a view named in the address still wins, and becomes the remembered one
         page.goto(f"{server.base}/decks/{DECK}?view=grid", wait_until="networkidle")
         page.goto(f"{server.base}/decks/{DECK}", wait_until="networkidle")
