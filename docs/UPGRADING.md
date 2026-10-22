@@ -198,8 +198,9 @@ reach past the stack, so if your old version is older than the one named, also:
   file and want Forge off, set both `FORGE_REPLICAS=0` and an empty `MTG_FORGE_URL=` (Compose: put
   a `#` in front of `COMPOSE_PROFILES=forge` and set an empty `MTG_FORGE_URL=`). Turning Forge off
   without emptying `MTG_FORGE_URL` leaves the gateway asking a Forge that isn't there; emptying it
-  alone leaves Forge running unused. Everyone on a stack: `FORGE_NODE` now
-  needs a node name, even with Forge off.
+  alone leaves Forge running unused. A variables file made from an earlier example already has
+  both lines and keeps Forge as it was; one with no `MTG_FORGE_URL` line at all now asks for Forge.
+  Everyone on a stack: `FORGE_NODE` now needs a node name, even with Forge off.
 
 Every version's full notes are in the [CHANGELOG](../CHANGELOG.md), and the older update steps
 are kept below for reference.

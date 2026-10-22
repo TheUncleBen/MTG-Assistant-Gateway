@@ -130,6 +130,12 @@ SOLO_ONE_AT_A_TIME = (
     "report again once that one has finished."
 )
 SOLO_BUSY = "Forge's queue was full, so this report has no Forge solo test. Run the report again later."
+# Other members' games against precons that wait in the gateway's queue go first (first come,
+# first served): a solo test never takes Forge's place ahead of them.
+SOLO_OTHERS_WAITING = (
+    "Other members' Forge games are waiting their turn, so this report has no Forge solo test. Run the "
+    "report again later."
+)
 FORGE_BUSY_GAVE_UP = (
     "Forge stayed busy with other runs for four hours, so this run was given up. Run the report again later."
 )
@@ -1125,6 +1131,8 @@ class ReportService:
         section: dict[str, Any]
         if self._solo_running(sub, rid, partner):
             section = {"state": "skipped", "error": SOLO_ONE_AT_A_TIME}
+        elif self._others_waiting(sub):
+            section = {"state": "skipped", "error": SOLO_OTHERS_WAITING}
         else:
             try:
                 client, engine, how_many = await self.forge.pick()
@@ -1169,6 +1177,41 @@ class ReportService:
             self._cancel_forge(section)
             return
         self._ensure_forge_refresher()
+
+    def _others_waiting(self, sub: str) -> bool:
+        """Whether another member's run waits in the gateway's queue for its turn on Forge."""
+        with self.db._lock:
+            rows = self.db._conn.execute(
+                "SELECT forge_json FROM reports WHERE forge_state = 'queued' AND owner_sub != ?", (sub,)
+            ).fetchall()
+        for r in rows:
+            try:
+                section = json.loads(r["forge_json"])
+            except (TypeError, ValueError):
+                continue
+            if isinstance(section, dict) and _waiting(section):
+                return True
+        return False
+
+    def forget_member(self, sub: str) -> None:
+        """Before a member's data is deleted: stop the Forge jobs behind their unfinished reports
+        (games against precons and solo tests), as deleting one report does."""
+        finals = tuple(FINAL_STATES)
+        marks = ",".join("?" * len(finals))
+        with self.db._lock:
+            rows = self.db._conn.execute(
+                "SELECT forge_json, forge_state, forge_solo_json, forge_solo_state FROM reports "
+                f"WHERE owner_sub = ? AND ((forge_state IS NOT NULL AND forge_state NOT IN ({marks})) "
+                f"OR (forge_solo_state IS NOT NULL AND forge_solo_state NOT IN ({marks})))",
+                (sub, *finals, *finals),
+            ).fetchall()
+        for r in rows:
+            for column in ("forge_json", "forge_solo_json"):
+                try:
+                    section = json.loads(r[column]) if r[column] else None
+                except (TypeError, ValueError):
+                    continue
+                self._cancel_forge(section)
 
     def _solo_running(self, sub: str, rid: str, partner: Any = None) -> bool:
         """Whether another of the member's Forge solo tests (one with an engine job, not merely

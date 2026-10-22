@@ -650,7 +650,8 @@ have the solo test's estimate and no Forge games.
   game and any wait in Forge's queue come on top, and each game gets at least 30 seconds, so with
   many games and few places it takes longer.
   A game stopped before turn 10 or a win is left out of the numbers, and the report says how
-  many. One per member runs at a time (two for reports that share opponents).
+  many. One per member runs at a time (two for reports that share opponents), and none starts
+  while other members' games against precons wait their turn in the gateway's queue.
 - **The image tag:** the stack files name the Forge image by `FORGE_TAG` (default `2.0.15-mag6`).
   GitHub builds and publishes a new tag the first time `main` carries it (the Forge image
   workflow, after its test games pass on arm64 and amd64), so pulling a new tag fails until that

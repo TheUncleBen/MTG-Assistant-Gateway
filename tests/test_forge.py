@@ -35,6 +35,7 @@ from mtg_gateway.reports import (
     SOLO_BUSY,
     SOLO_NOT_STARTED,
     SOLO_ONE_AT_A_TIME,
+    SOLO_OTHERS_WAITING,
     ReportService,
     report_status,
     solo_game_seconds,
@@ -1960,4 +1961,33 @@ async def test_the_solo_test_starts_even_when_the_precon_start_fails(tmp_path: P
         await reports.run("alice", "42", games=300, options={"seed": 1})
     row = db._one("SELECT forge_solo_json FROM reports ORDER BY rowid DESC LIMIT 1")
     assert json.loads(row["forge_solo_json"])["state"] == "running"
+    reports._forge_task.cancel()
+
+
+async def test_deleting_a_members_data_stops_their_forge_jobs(tmp_path: Path) -> None:
+    db = Database(tmp_path / "t.sqlite")
+    db.upsert_user("alice", email=None, name=None, preferred_username=None, groups=[])
+    fake = FakeForge()
+    fake.solo = True
+    reports = ReportService(db, _Decks(), None, forge=fake.client(), forge_games=4)  # type: ignore[arg-type]
+    out = await reports.run("alice", "42", games=300, options={"seed": 1})
+    reports.forget_member("alice")
+    db.delete_member_data("alice")
+    await asyncio.sleep(0.05)
+    assert out["forge"]["job_id"] in fake.cancelled and out["forge_solo"]["job_id"] in fake.cancelled
+    reports._forge_task.cancel()
+
+
+async def test_a_solo_test_never_goes_ahead_of_another_members_waiting_games(tmp_path: Path) -> None:
+    db = Database(tmp_path / "t.sqlite")
+    for sub in ("alice", "bob"):
+        db.upsert_user(sub, email=None, name=None, preferred_username=None, groups=[])
+    fake = FakeForge()
+    reports = ReportService(db, _Decks(), None, forge=fake.client(), forge_games=4)  # type: ignore[arg-type]
+    await reports.run("bob", "42", games=300, options={"seed": 1}, simulate=False, forge=True)
+    waiting = await reports.run("bob", "42", games=300, options={"seed": 2}, simulate=False, forge=True)
+    assert waiting["forge"]["state"] == "queued" and not waiting["forge"].get("job_id")
+    fake.solo = True
+    out = await reports.run("alice", "42", games=300, options={"seed": 3})
+    assert out["forge_solo"]["state"] == "skipped" and out["forge_solo"]["error"] == SOLO_OTHERS_WAITING
     reports._forge_task.cancel()

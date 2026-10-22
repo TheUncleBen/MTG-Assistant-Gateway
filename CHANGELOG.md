@@ -20,14 +20,18 @@ example files for new installs.
   stack file already names it.
 - **Forge is on in the example files.** If you copy the new example file, Forge runs unless you
   turn it off ([Forge simulations](docs/DEPLOY.md#forge-simulations-on-by-default) in DEPLOY.md
-  says how). [docs/HARDWARE.md](docs/HARDWARE.md) says what machine it needs.
+  says how). Forge is limited to about 1.5 GB of memory and 2 CPU cores, and uses them only while
+  it plays; [docs/HARDWARE.md](docs/HARDWARE.md) says what machine it needs.
 - **Portainer or Swarm: `FORGE_NODE` is now required,** even with Forge off; set it to the node
   that runs Forge (any node name will do with Forge off). The stack won't deploy without it.
 - To keep Forge off on a stack, set both `FORGE_REPLICAS=0` and an empty `MTG_FORGE_URL=`. With
   Compose: put a `#` in front of `COMPOSE_PROFILES=forge` and set an empty `MTG_FORGE_URL=`.
   Turning Forge off without emptying `MTG_FORGE_URL` leaves the gateway asking a Forge that isn't
-  there; emptying it alone leaves Forge running unused. If you keep your own variables file, it
-  already has Forge off and stays that way.
+  there; emptying it alone leaves Forge running unused.
+- **If you keep your own variables file** instead of taking the new example: a file made from an
+  earlier example file already has `FORGE_REPLICAS` and `MTG_FORGE_URL` lines, so Forge stays as
+  you set it (on or off). On a stack you still need to add `FORGE_NODE` (above). A variables list
+  with no `MTG_FORGE_URL` line at all now asks for Forge: add `MTG_FORGE_URL=` to keep it off.
 - The reports table gains two columns, added in place, so this update saves no before-upgrade
   copy, and going back to 0.7.39 needs no restore.
 - The Android app doesn't change.
@@ -41,12 +45,17 @@ example files for new installs.
   for Forge come on top, so it often takes longer), and games the time limit stopped before turn
   10 or a win are left out of the numbers, and the report says how many. Each member has one at a
   time (two for reports that share opponents); a report made while another is still playing gets
-  none, and says so. A report now counts as finished, and you are notified, only once its Forge
+  none, and says so, as does one made while other members' Forge games wait their turn, which
+  go first. A report now counts as finished, and you are notified, only once its Forge
   solo test has ended too. Running the report again later plays one that was skipped or failed.
   Deleting the report stops it. An older Forge image skips it and the report says so.
 
 ### Changed
 - **Forge is on by default** in the example stack, Compose and variables files.
+
+### Fixed
+- **Delete my data** (and an administrator's delete of a member's data) now also stops that
+  member's unfinished Forge games, as deleting one report does.
 
 ## [0.7.39] - 2026-10-21
 
