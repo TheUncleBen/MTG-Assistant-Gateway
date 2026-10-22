@@ -1,7 +1,7 @@
 # Deploying with Docker Compose (one machine)
 
-This is the simplest way to run the gateway: one machine with Docker, three
-containers (four with Forge), a reverse proxy for HTTPS, and an OpenID Connect identity
+This is the simplest way to run the gateway: one machine with Docker, four
+containers (three with Forge turned off), a reverse proxy for HTTPS, and an OpenID Connect identity
 provider for sign-in. No Swarm, no Portainer needed. (Portainer's **Stacks**
 page on a standalone Docker environment can run this Compose file too, but
 then set `MTG_DATA_DIR`, `MTG_BACKUP_DIR` and `MTG_SECRETS_DIR` to absolute
@@ -16,8 +16,9 @@ How the pieces fit is in [ARCHITECTURE.md](ARCHITECTURE.md).
 
 - A machine with **Docker Engine** and the **Compose plugin** 2.24 or newer
   (`docker compose version`). amd64 or arm64, so a Raspberry Pi 4 or 5 is
-  fine. About 900 MB of memory free for the three containers at their limits
-  (another 1.5 GB if you turn Forge on). [HARDWARE.md](HARDWARE.md) has the
+  fine. About 900 MB of memory free for three of the containers at their limits,
+  and another 1.5 GB for Forge, which the example file turns on (to run without it, see
+  "Forge simulations" in [DEPLOY.md](DEPLOY.md#forge-simulations-on-by-default)). [HARDWARE.md](HARDWARE.md) has the
   minimum and recommended machines and how long tests take.
 - A **domain name** for the gateway, say `mtg.example.com`, pointing at a
   reverse proxy that can reach this machine.
@@ -137,7 +138,7 @@ The images are on GitHub Container Registry (GHCR):
 
 - `ghcr.io/theuncleben/mtg-assistant-gateway`
 - `ghcr.io/theuncleben/mtg-assistant-mysticforge`
-- `ghcr.io/theuncleben/mtg-assistant-forge` (only pulled if you turn Forge on)
+- `ghcr.io/theuncleben/mtg-assistant-forge` (not pulled if you turn Forge off)
 
 They're public: `docker compose pull` needs no `docker login` and no GitHub
 token. The ntfy server is the official `binwiederhier/ntfy` image from Docker

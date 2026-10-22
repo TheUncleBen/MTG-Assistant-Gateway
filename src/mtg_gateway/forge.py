@@ -644,10 +644,12 @@ async def refresh(
     section: dict[str, Any],
     *,
     pinned_gone: Callable[[], Awaitable[bool]] | None = None,
+    give_up: float = GIVE_UP_SECONDS,
 ) -> dict[str, Any]:
     """The ``forge`` section updated from its job; unchanged once the run has ended.
     ``pinned_gone``, for a run kept on one of several copies: whether that copy's address is no
-    longer the service's (asked only when the copy does not answer)."""
+    longer the service's (asked only when the copy does not answer). ``give_up``: how long after
+    it started a run whose engine does not answer is given up."""
     if section.get("state") in FINAL_STATES or not section.get("job_id"):
         return section
     try:
@@ -656,7 +658,7 @@ async def refresh(
             raise ForgeError("invalid", "Forge gave an unexpected answer.")
     except ForgeError as exc:
         now = time.time()
-        if now - section.get("started_at", now) > GIVE_UP_SECONDS:
+        if now - section.get("started_at", now) > give_up:
             return {**section, "state": "lost", "error": FORGE_SILENT}
         if exc.kind == "not_found":
             # The Forge service restarted and the job is gone.
@@ -704,10 +706,8 @@ async def refresh(
 SOLO_UNTIL_TURN = 10
 SOLO_MAX_TURN = 30
 SOLO_OPPONENTS = {"Commander": 3, "Constructed": 1}
-SOLO_TOO_OLD = (
-    "The Forge image is older than the solo test needs. Update it to the version named in the "
-    "stack file, then run the test again."
-)
+# Shown to members: the advice for whoever runs the gateway goes to its log (reports._start_solo).
+SOLO_TOO_OLD = "This gateway's Forge is too old for the Forge solo test, so this report has none."
 
 
 def _median(values: list[int]) -> float | int | None:
@@ -727,8 +727,15 @@ def _per_turn(rows: list[list[int]], turns: int) -> list[float]:
 
 def summarise_solo(results: list[dict[str, Any]], asked: Any, solo: dict[str, Any]) -> dict[str, Any]:
     """A solo test's numbers from its games' ``solo`` views: how often and on which turn the deck
-    won, when its commander came down, and what it did each turn on average."""
-    views = [r["solo"] for r in results if isinstance(r, dict) and isinstance(r.get("solo"), dict)]
+    won, when its commander came down, and what it did each turn on average. A game Forge's time
+    limit stopped before the deck won or reached ``until_turn`` says nothing about either, so it
+    is counted apart (``unfinished``) and left out of the rest."""
+
+    def unfinished(r: dict[str, Any]) -> bool:
+        return bool(r.get("stopped_slow")) and not r.get("turn_limit") and r["solo"].get("won_turn") is None
+
+    read = [r for r in results if isinstance(r, dict) and isinstance(r.get("solo"), dict)]
+    views = [r["solo"] for r in read if not unfinished(r)]
 
     def ints(key: str) -> list[int]:
         return [v[key] for v in views if isinstance(v.get(key), int) and not isinstance(v[key], bool)]
@@ -755,8 +762,8 @@ def summarise_solo(results: list[dict[str, Any]], asked: Any, solo: dict[str, An
         "lands_by_turn": _per_turn(series("lands_by_turn"), until),
         "casts_by_turn": _per_turn(series("casts_by_turn"), until),
         "damage_by_turn": _per_turn(series("damage_by_turn"), until),
-        # games Forge itself stopped at its time limit, apart from the turn limit
-        "stopped_slow": sum(1 for r in results if isinstance(r, dict) and r.get("stopped_slow")),
+        # games Forge's time limit stopped before the deck won or reached until_turn
+        "unfinished": len(read) - len(views),
     }
     unread = sum(1 for r in results if isinstance(r, dict) and not isinstance(r.get("solo"), dict))
     if unread:
@@ -808,7 +815,7 @@ async def start_solo_run(
     except ForgeError as exc:
         # an image from before the solo test asks for two decks or more
         if exc.kind == "invalid" and "decks must list" in str(exc):
-            return {"state": "failed", "not_played": not_played, "error": SOLO_TOO_OLD}
+            return {"state": "skipped", "not_played": not_played, "error": SOLO_TOO_OLD}
         raise
     return {
         "state": job.get("state", "queued"),
