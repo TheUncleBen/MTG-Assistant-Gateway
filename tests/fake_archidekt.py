@@ -18,6 +18,8 @@ import httpx
 
 from mtg_gateway.archidekt_csv import parse_export, to_deck_json
 
+from .fake_archidekt_account import AccountFake
+
 
 def _now_iso() -> str:
     """The time now as Archidekt writes it: UTC, with microseconds and a "Z"."""
@@ -97,6 +99,8 @@ class FakeArchidekt:
         self.access_ttl = 3600  # live access JWTs expire 3600 s after issue (verified 2026-10-05)
         self.issue_refresh = True  # login answers with a refresh token
         self.refresh_calls = 0
+        # the account-wide lists and community routes of parity release 2
+        self.account = AccountFake(self)
         self.decks: dict[int, dict[str, Any]] = {
             42: to_deck_json(
                 cards,
@@ -578,6 +582,10 @@ class FakeArchidekt:
             if auth:
                 return httpx.Response(401, json={"detail": "Given token not valid for any token type"})
             return httpx.Response(401, json={"detail": "Authentication credentials were not provided."})
+        if who is not None:
+            answered = self.account.handle(request, who, path)
+            if answered is not None:
+                return answered
         if path == "/api/decks/folderTree/" and request.method == "GET":
             root = 1000 + self.users[who]["id"]
             mine = self.folders.get(who, [])

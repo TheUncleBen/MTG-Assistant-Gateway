@@ -1376,38 +1376,30 @@ NOT_ALLOWED = "<span class='small muted'> (not allowed on this gateway)</span>"
 
 def _mode_card(state: Any, sub: str, csrf_in: str, *, primary: bool = True) -> str:
     """The member's approval mode (modes.py): three radio choices, the current one checked,
-    choices above the gateway's cap shown disabled. Each choice is one line, its name; what it
-    means is in a closed "How it works" fold, opened by the chevron at the row's end (Ben,
-    2026-10-22: no wall of text, a tight list), with
-    the low and high risk meanings and the cost of the auto modes in the Semi and Full auto
-    folds. A short line on that cost shows while Semi or Full auto is picked (CSS :has).
+    choices above the gateway's cap shown disabled. A tight list (Ben, 2026-10-22): each choice
+    is one row, its name, with what it means in a fold opened by the chevron at the row's end.
+    The cost of letting an assistant apply changes (AUTO_WARNING) shows once, under the list,
+    while Semi or Full auto is picked (CSS :has).
     ``primary`` makes Save the page's orange button (not while Link account is)."""
     live = state.decks.live  # the admin's Settings page values, read now
     current = state.decks.mode_of(sub)
     big = int(live.get("auto_big_edit_rows"))
     rows = int(live.get("auto_apply_max_rows"))
-    warning = f"<div class='notice warn'>{html.escape(modes.AUTO_WARNING)}</div>"
-    risks = (
-        f"<p class='small'><strong>Low risk:</strong> {html.escape(modes.low_risk_text(rows))}</p>"
-        f"<p class='small'><strong>High risk:</strong> {html.escape(modes.HIGH_RISK_TEXT)}</p>"
-    )
+    # Semi's own words already say what a low-risk change is; what is high risk is added to them
+    high = f"<p><strong>High risk:</strong> {html.escape(modes.HIGH_RISK_TEXT)}</p>"
     choices = []
     for mode in modes.MODES:
         allowed = modes.rank(mode) <= modes.rank(str(live.get("approval_mode_max")))
         label = html.escape(modes.MODE_LABELS[mode])
-        more = f"<p class='small'>{html.escape(modes.mode_help(mode, max_rows=rows, big_rows=big))}</p>"
-        if mode == "semi":
-            more += risks
-        if mode != "manual":
-            more += warning
         choices.append(
             f"<div class='mode-opt{'' if allowed else ' off'}'><label class='mode-pick'>"
             f"<input type='radio' name='mode' value='{mode}'{' checked' if mode == current else ''}"
             f"{'' if allowed else ' disabled'}><span>{label}"
             f"{'' if allowed else NOT_ALLOWED}</span></label>"
-            f"<details class='mode-info'><summary title='How it works'>{icon('chev')}"
-            f"<span class='sr-only'>How it works: {label}</span></summary>"
-            f"<div class='mode-body'>{more}</div></details></div>"
+            f"<details class='mode-info'><summary title='What this mode does'>{icon('chev')}"
+            f"<span class='sr-only'>What this mode does: {label}</span></summary>"
+            f"<div class='mode-body'><p>{html.escape(modes.mode_help(mode, max_rows=rows, big_rows=big))}</p>"
+            f"{high if mode == 'semi' else ''}</div></details></div>"
         )
     return (
         "<div class='card' id='mode'><h2>Approval mode</h2>"
@@ -1415,8 +1407,7 @@ def _mode_card(state: Any, sub: str, csrf_in: str, *, primary: bool = True) -> s
         "your account only, and to nobody else.</p>"
         f"<form method='post'>{csrf_in}<input type='hidden' name='action' value='approval_mode'>"
         f"<div class='mode-list'>{''.join(choices)}</div>"
-        "<p class='mode-warn' role='note'>An assistant can be tricked into changes you did not ask "
-        "for. Open How it works before you save.</p>"
+        f"<p class='mode-warn' role='note'>{html.escape(modes.AUTO_WARNING)}</p>"
         f"<button class='{'primary' if primary else 'btn-plain'}'>Save approval mode</button></form></div>"
     )
 

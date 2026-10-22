@@ -129,9 +129,10 @@ async def test_default_is_manual_and_the_account_page_sets_the_mode(stack: Stack
 
 
 async def test_each_mode_is_one_line_with_its_explanation_folded(stack: Stack) -> None:
-    """Ben (2026-10-22): the Approval mode panel shows each mode as one line; its explanation is in
-    a closed dropdown under it, so the page is not a wall of text. The approved words are kept, and
-    the cost of the auto modes is still said in a line that shows when one of them is picked."""
+    """Ben (2026-10-22): the Approval mode panel is a tight list, each mode one row with its
+    name; what it means is in a closed fold opened by the chevron at the row's end, so the page is
+    not a wall of text. The approved words are kept, and the cost of the auto modes is said once,
+    under the list, shown while one of them is picked."""
     h = stack.h
     await linked_user(stack)
     b = Browser(h)
@@ -146,19 +147,13 @@ async def test_each_mode_is_one_line_with_its_explanation_folded(stack: Stack) -
     rows, big = int(live.get("auto_apply_max_rows")), int(live.get("auto_big_edit_rows"))
     for fold, mode in zip(folds, modes.MODES, strict=True):
         # the chevron is the fold's whole summary, named for the mode it explains
-        assert f"How it works: {html.escape(modes.MODE_LABELS[mode])}" in fold
-        help_text = html.escape(modes.mode_help(mode, max_rows=rows, big_rows=big))
-        assert help_text in fold
-    # outside the folds: the intro, the three names and the short warning line, nothing more
+        assert f"What this mode does: {html.escape(modes.MODE_LABELS[mode])}" in fold
+        assert html.escape(modes.mode_help(mode, max_rows=rows, big_rows=big)) in fold
+        assert html.escape(modes.AUTO_WARNING) not in fold  # said once, under the list
     outside = re.sub(r"<details class='mode-info'>.*?</details>", "", card, flags=re.S)
     for mode in modes.MODES:
         assert html.escape(modes.mode_help(mode, max_rows=rows, big_rows=big)) not in outside
-    assert html.escape(modes.HIGH_RISK_TEXT) not in outside
-    assert html.escape(modes.AUTO_WARNING) not in outside
-    assert "class='mode-warn'" in outside and "tricked" in outside
-    # the full warning and the low and high risk meanings are still on the page, in the folds
-    assert html.escape(modes.AUTO_WARNING) in folds[1] and html.escape(modes.AUTO_WARNING) in folds[2]
-    assert html.escape(modes.HIGH_RISK_TEXT) in folds[1]
+    assert outside.count(html.escape(modes.AUTO_WARNING)) == 1 and "class='mode-warn'" in outside
 
 
 async def test_account_page_needs_a_valid_form(stack: Stack) -> None:
@@ -543,7 +538,8 @@ async def test_the_account_page_and_guide_use_the_one_wording(stack: Stack) -> N
     guide = _flat(guide_body(site="Gateway", writes_enabled=True, has_collection=True, max_rows=3))
     for text in (page, guide):
         assert modes.HIGH_RISK_TEXT in text and modes.MEMBER_ONLY_TEXT in text
-    assert modes.low_risk_text(5) in page and modes.low_risk_text(3) in guide
+    # the Account page says what a low-risk change is in Semi's own fold (mode_help), not twice
+    assert modes.mode_help("semi", max_rows=5) in page and modes.low_risk_text(3) in guide
     assert "Account action or deck deletion" in guide  # the mode table has the column (bug 6)
 
 
