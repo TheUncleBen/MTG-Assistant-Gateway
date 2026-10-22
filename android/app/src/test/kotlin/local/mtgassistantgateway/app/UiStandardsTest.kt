@@ -97,7 +97,7 @@ class UiStandardsTest {
         // No member-facing string shows a bare "(HTTP n)" or "(%d)" code.
         for ((name, text) in s) {
             assertFalse(name, text.contains("(HTTP "))
-            assertFalse(name, Regex("""\(%\d\$d\)""").containsMatchIn(text))
+            assertFalse(name, Regex("""\(%\d${'$'}d\)""").containsMatchIn(text))
         }
     }
 
