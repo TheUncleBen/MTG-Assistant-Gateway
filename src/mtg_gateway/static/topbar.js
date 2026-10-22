@@ -43,7 +43,11 @@
     if (room) root.style.setProperty("--foot-room", Math.ceil(room) + 10 + "px");
     else root.style.removeProperty("--foot-room");
   }
-  fit();
+  // The first measure waits for the first frame: read right away, while the other deferred
+  // scripts are still changing the page, it would force a layout of the whole page that the
+  // frame then does again (a 100-card deck page paid twice). The room is only scroll padding,
+  // so a frame's wait shows nothing.
+  if (window.requestAnimationFrame) requestAnimationFrame(fit); else fit();
   if (window.ResizeObserver) {
     var watch = new ResizeObserver(fit);
     watch.observe(bar);

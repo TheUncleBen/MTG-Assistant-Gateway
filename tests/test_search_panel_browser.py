@@ -125,7 +125,15 @@ def test_the_deck_search_panel_fits_every_width(server: Server, width: int) -> N
         if width < 600:
             page.locator(".sp-show").click()
             page.wait_for_function("() => !document.getElementById('sp-filters').classList.contains('open')")
-        # the tiles: as many as fit, each at least 220 px wide (M)
+        # the tiles: as many as fit, each at least 220 px wide (M). Show refreshes the list in
+        # place (static/decks.js), so the grid is measured once the list is back and laid out, not
+        # while it is being replaced (on a busy runner the columns once read "none")
+        page.wait_for_load_state("networkidle")
+        page.wait_for_function(
+            "() => { const ul = document.querySelector('ul.decklist.grid');"
+            " return !!ul && !ul.closest('[aria-busy=true]')"
+            " && /px/.test(getComputedStyle(ul).gridTemplateColumns); }"
+        )
         cols = page.evaluate(
             "() => { const ul = document.querySelector('ul.decklist.grid');"
             " return {w: ul.getBoundingClientRect().width,"

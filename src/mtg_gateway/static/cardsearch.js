@@ -110,7 +110,7 @@
   // lastQs: the search last asked for (an unchanged form asks nothing again). shownQs: the search
   // whose tiles are on screen; "Load more" asks for its next page, never the form's newer text.
   var timer = null, ctrl = null, moreCtrl = null, page = 1, hasMore = false, loadingMore = false;
-  var lastQs = null, shownQs = null;
+  var lastQs = null, shownQs = null, inflight = false;
   var startTpl = $("#cs-start"), startHtml = startTpl ? startTpl.innerHTML : null;
   function setStatus(text, isError) {
     statusEl.textContent = "";
@@ -159,13 +159,19 @@
   }
   function run(immediate) {
     clearTimeout(timer);
+    // a changed query shows the pending look at once (the results dim); the ask itself waits for
+    // the pause in typing, so a fast typist sends one request, not one per letter
+    if (!immediate && params().toString() !== lastQs) results.setAttribute("aria-busy", "true");
     timer = setTimeout(search, immediate ? 0 : DEBOUNCE_MS);
   }
   function search() {
     var p = params();
     var qs = p.toString();
     updateBadge(p);
-    if (qs === lastQs) return;
+    if (qs === lastQs) {
+      if (!inflight) results.removeAttribute("aria-busy");  // typed and undone while the ask waited
+      return;
+    }
     lastQs = qs;
     // the view is remembered per person (a cookie), so a shared address shows the reader's own
     var addr = new URLSearchParams(qs);
@@ -176,9 +182,11 @@
     ctrl = window.AbortController ? new AbortController() : null;
     stopMore();
     results.setAttribute("aria-busy", "true");
+    inflight = true;
     fetch("/cards/api/search?" + qs, { credentials: "same-origin", signal: ctrl ? ctrl.signal : undefined })
       .then(function (r) { return r.json().then(function (d) { d.status = r.status; return d; }); })
       .then(function (d) {
+        inflight = false;
         results.removeAttribute("aria-busy");
         page = 1;
         if (!d.ok) {
@@ -202,6 +210,7 @@
       })
       .catch(function (e) {
         if (e && e.name === "AbortError") return;
+        inflight = false;
         results.removeAttribute("aria-busy");
         failed(qs, "No connection; the cards could not be looked up.");
       });

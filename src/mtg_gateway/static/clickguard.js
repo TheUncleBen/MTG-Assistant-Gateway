@@ -84,6 +84,20 @@
   ["mousemove", "pointermove", "pointerdown", "touchstart", "touchmove", "wheel", "keydown"].forEach(function (type) {
     document.addEventListener(type, interacted, { capture: true, passive: true });
   });
+  // A tap or click on a locked button lands on the button row (theme.py gives a disabled guarded
+  // button pointer-events:none): without this the browser would move focus to the nearest
+  // focusable ancestor, <main tabindex=-1>, and scroll the page to it, so the first tap on a phone
+  // looked like a jump. The tap still unlocks the page (interacted() above saw its touchstart).
+  document.addEventListener(
+    "mousedown",
+    function (e) {
+      var row = e.target instanceof Element ? e.target.closest("form.guarded .choice") : null;
+      if (!row) return;
+      var control = e.target.closest("button, a[href], input, select, textarea");
+      if (!control || (control.matches("button[data-guard]") && locked(control))) e.preventDefault();
+    },
+    true
+  );
   document.addEventListener(
     "click",
     function (e) {

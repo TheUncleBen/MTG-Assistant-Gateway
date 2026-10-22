@@ -468,6 +468,9 @@ button:disabled,.btn[aria-disabled=true]{opacity:.5;cursor:default}
    (static/feedback.js sets aria-busy on the button that sent it). */
 button:active:not(:disabled),.btn:active{transform:translateY(1px);filter:brightness(.9)}
 button[aria-busy=true],.btn[aria-busy=true]{cursor:progress;opacity:.75}
+/* a list being filtered as you type dims at once (static/decks.js, static/precons.js) and the
+   answer undims it; the dim never hides the list that is there */
+#decks-list[aria-busy=true]:not(:empty),main[aria-busy=true] .pre-grp{opacity:.6;transition:opacity .15s}
 button[aria-busy=true]::after,.btn[aria-busy=true]::after{content:'';width:.9em;height:.9em;flex:none;
   border-radius:50%;border:2px solid currentColor;border-right-color:transparent;
   animation:busy .8s linear infinite}
@@ -699,6 +702,10 @@ details.raw{margin:.5rem 0 0} details.raw summary{cursor:pointer;color:var(--tex
   border:1px dashed currentColor}
 .apply form.guarded button.primary:disabled{color:var(--orange-text)}
 .apply form.guarded button.danger:disabled{color:var(--danger-text)}
+/* A tap on a locked button lands on its row instead (a disabled button takes no events, so the
+   browser would move focus to the nearest focusable ancestor, <main tabindex=-1>, and scroll the
+   page to it); static/clickguard.js then keeps focus where it was. */
+form.guarded button[data-guard]:disabled{pointer-events:none}
 
 /* consent page: who is asking, and where you end up */
 .consent .ask{font-size:1.1rem;margin:0 0 .75rem}

@@ -359,7 +359,7 @@
     // once the pointer has slid 8 px from where it started, or lifts, or the browser cancels it.
     // The tap that ends a hold which opened the menu is swallowed for a moment only, so nothing
     // sticks when no tap follows (a later Enter on the item, or a tap elsewhere, works as ever).
-    var hold = null, opened = false, swallow = 0, startX = 0, startY = 0, touchPress = false;
+    var hold = null, opened = false, swallow = 0, lift = false, startX = 0, startY = 0, touchPress = false;
     root.addEventListener("click", function (e) {
       var b = o.button && e.target.closest ? e.target.closest(o.button) : null;
       if (b && o.itemOf(b)) {
@@ -370,7 +370,11 @@
         return;
       }
       if (!swallow) return;
-      if (menu && menu.contains(e.target)) return;  // a tap in the menu itself
+      // a tap in the menu itself acts, except the lift of the finger that held: the menu opened
+      // under it (a sheet rising over the tile on a phone), so that lift would pick whatever item
+      // sits there
+      if (menu && menu.contains(e.target) && !lift) return;
+      lift = false;
       e.preventDefault();
       e.stopPropagation();
     }, true);
@@ -393,8 +397,9 @@
       root.addEventListener(t, function (e) {
         if (t === "pointerup" && opened) {
           opened = false;
+          lift = true;
           clearTimeout(swallow);
-          swallow = setTimeout(function () { swallow = 0; }, 400);
+          swallow = setTimeout(function () { swallow = 0; lift = false; }, 400);
         }
         if (t === "pointercancel") opened = false;
         if (hold === null) return;

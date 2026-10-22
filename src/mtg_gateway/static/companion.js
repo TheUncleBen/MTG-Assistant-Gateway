@@ -409,14 +409,24 @@
   }
   function pickerOpen() { return !!(window.MtgPrintPick && window.MtgPrintPick.isOpen()); }
 
-  // existing cards, by category
+  // existing cards, by category. The category panels come at once with their headings and
+  // counts; the rows are built in slices of ROW_SLICE, the first one now and the rest a frame at
+  // a time, so a 100-card deck never holds the page in one long task (a tap during the load
+  // would otherwise wait on it). render() skips a row not built yet and the slice builds it from
+  // the state as it is then; MtgReveal (a #card-… deep link) runs once every row is there.
   var existing = root.querySelector(".existing");
+  var ROW_SLICE = 12, rowWork = [];
   cfg.groups.forEach(function (g) {
     var det = el("details", { class: "panel cat", open: "", id: "cat-" + g.name }, [
       el("summary", {}, [el("span", { class: "cname", text: g.name, title: g.name }), el("b", { text: String(g.total) })])
     ]);
     var ul = el("ul", { class: "erows" });
-    g.cards.forEach(function (c) {
+    det.appendChild(ul);
+    existing.appendChild(det);
+    g.cards.forEach(function (c) { rowWork.push([g, ul, c]); });
+  });
+  function buildRow(g, ul, c) {
+    {
       var zone = zoneOf(c);
       var key = keyFor(c.name, zone);
       var r = rows[key];
@@ -444,14 +454,20 @@
         ]));
         return;
       }
+      // the row's More menu: its contents (a finish select and two buttons) are built the first
+      // time it opens, by mouse or by keyboard (toggle fires for both), so 100 rows do not build
+      // 100 menus nobody has asked for
+      var menuBox = el("div", { class: "menu" });
       var more = el("details", { class: "dd rowmenu" }, [
         el("summary", { class: "mini", "aria-label": "More for " + c.name, title: "More" }, [svg("more")]),
-        el("div", { class: "menu" }, [
-          el("label", { class: "field" }, [el("span", { text: "Finish" }), finishSelect(r.setFinish || r.finish, function (v) { mutate(function () { r.setFinish = v === r.finish ? null : v; }); }, c.name)]),
-          el("button", { type: "button", onclick: function () { more.removeAttribute("open"); openPicker(r); } }, [svg("swap"), el("span", { text: " Change printing" })]),
-          el("button", { type: "button", onclick: function () { more.removeAttribute("open"); mutate(function () { r.after = 0; }); } }, [svg("x"), el("span", { text: " Remove from deck" })])
-        ])
+        menuBox
       ]);
+      more.addEventListener("toggle", function () {
+        if (menuBox.firstChild) return;
+        menuBox.appendChild(el("label", { class: "field" }, [el("span", { text: "Finish" }), finishSelect(r.setFinish || r.finish, function (v) { mutate(function () { r.setFinish = v === r.finish ? null : v; }); }, c.name)]));
+        menuBox.appendChild(el("button", { type: "button", onclick: function () { more.removeAttribute("open"); openPicker(r); } }, [svg("swap"), el("span", { text: " Change printing" })]));
+        menuBox.appendChild(el("button", { type: "button", onclick: function () { more.removeAttribute("open"); mutate(function () { r.after = 0; }); } }, [svg("x"), el("span", { text: " Remove from deck" })]));
+      });
       var nameEl = el("span", { class: "name", text: c.name, title: c.name });
       if (r.mana && window.MtgMana) nameEl.appendChild(window.MtgMana.mana(r.mana));
       var thumbEl = thumb(r, c.name);
@@ -475,11 +491,24 @@
       };
       rowEls[key] = li;
       ul.appendChild(li);
-    });
-    det.appendChild(ul);
-    existing.appendChild(det);
-  });
-  if (window.MtgReveal) window.MtgReveal();  // a deep link from the deck page (#cat-…, #card-…)
+    }
+  }
+  function buildSlice() {
+    var n = 0;
+    while (rowWork.length && n < ROW_SLICE) {
+      var w = rowWork.shift();
+      buildRow(w[0], w[1], w[2]);
+      n += 1;
+    }
+    if (rowWork.length) {
+      if (window.requestAnimationFrame) requestAnimationFrame(buildSlice); else buildSlice();
+      return;
+    }
+    render();  // a change made while the rows were still coming marks every row
+    root.setAttribute("data-rows-ready", "");
+    if (window.MtgReveal) window.MtgReveal();  // a deep link from the deck page (#cat-…, #card-…)
+  }
+  buildSlice();
 
   // add a card: one search bar (static/suggest.js lists the names; Enter picks and submits here).
   // Chips above it say where the card goes; "3 sol ring" adds three; the printings of the

@@ -3824,33 +3824,30 @@ class DeckService:
         limit, offset, oldest_first). With ``full`` each row keeps its whole change text as ``diff_text``."""
         now = int(time.time())
         out = []
-        for r in self.db.list_proposals(sub, **narrow):
-            state = "expired" if r["state"] == "pending" and r["expires_at"] < now else r["state"]
-            diff_text = str(r.pop("diff_text", None) or "")
-            lines = diff_text.splitlines()
-            summary = "; ".join(lines[:3]) + (f" (+{len(lines) - 3} more)" if len(lines) > 3 else "")
-            if full:
-                r["diff_text"] = diff_text
-            out.append(
-                {
-                    **r,
-                    "summary": summary[:400],
-                    "state": state,
-                    "created_by": self._creator_label(r.get("created_by_client")),
-                    "review_url": f"{self.settings.public_url}/proposals/{r['id']}",
-                    **(
-                        {"out_of_date": True}
-                        if state == "pending" and r.get("status") == "needs_look"
-                        else {}
-                    ),
-                    **(
-                        self._status_fields(sub, r)
-                        if state == "pending" and r.get("status")
-                        else {"status": None}
-                    ),
-                }
-            )
+        rows = self.db.list_proposals(sub, **narrow)
+        # the links and app names every row asks for, read once for the whole list
+        with self.db.read_ahead(sub, [r["id"] for r in rows], [r.get("created_by_client") for r in rows]):
+            for r in rows:
+                out.append(self._proposal_listed(sub, r, now, full))
         return out
+
+    def _proposal_listed(self, sub: str, r: dict[str, Any], now: int, full: bool) -> dict[str, Any]:
+        """One row of list_proposals."""
+        state = "expired" if r["state"] == "pending" and r["expires_at"] < now else r["state"]
+        diff_text = str(r.pop("diff_text", None) or "")
+        lines = diff_text.splitlines()
+        summary = "; ".join(lines[:3]) + (f" (+{len(lines) - 3} more)" if len(lines) > 3 else "")
+        if full:
+            r["diff_text"] = diff_text
+        return {
+            **r,
+            "summary": summary[:400],
+            "state": state,
+            "created_by": self._creator_label(r.get("created_by_client")),
+            "review_url": f"{self.settings.public_url}/proposals/{r['id']}",
+            **({"out_of_date": True} if state == "pending" and r.get("status") == "needs_look" else {}),
+            **(self._status_fields(sub, r) if state == "pending" and r.get("status") else {"status": None}),
+        }
 
     def _review_page_only(self, sub: str, row: dict[str, Any]) -> DeckError:
         """The refusal for any caller but the review page's own form that tries to apply an
@@ -5760,7 +5757,18 @@ class DeckService:
         app asking made it (``own``: it may apply or withdraw only those)."""
         caller = current_client.get()
         out = []
-        for line in self.db.pending_board(sub, None if deck_id is None else clean_target(deck_id)):
+        lines_ = self.db.pending_board(sub, None if deck_id is None else clean_target(deck_id))
+        clients = [
+            c for line in lines_ for c in (line.get("created_by_client"), line.get("amended_by_client"))
+        ]
+        with self.db.read_ahead(sub, [line["id"] for line in lines_], clients):
+            self._board_rows(sub, lines_, caller, out)
+        return out
+
+    def _board_rows(
+        self, sub: str, lines_: list[dict[str, Any]], caller: Any, out: list[dict[str, Any]]
+    ) -> None:
+        for line in lines_:
             row = self.db.get_proposal(line["id"], sub) or {}
             lines = str(line.get("diff_text") or "").splitlines()
             summary = "; ".join(lines[:3]) + (f" (+{len(lines) - 3} more)" if len(lines) > 3 else "")

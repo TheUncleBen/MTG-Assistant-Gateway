@@ -197,9 +197,20 @@ def gather(state: Any, sub: str, *, now: float | None = None) -> dict[str, Any]:
     db, decks = state.db, state.decks
     names = Names(db)
     waiting_rows = db.pending_board(sub)  # holds what must be held first; oldest first
+    index = db.proposal_index(sub)
+    # the links and app names the rows ask for one by one: read once for the whole page
+    ids = [r["id"] for r in waiting_rows] + [r["id"] for r in index]
+    clients = [r.get("created_by_client") for r in index] + [r.get("amended_by_client") for r in index]
+    with db.read_ahead(sub, ids, clients):
+        return _gathered(db, decks, names, sub, now, waiting_rows, index)
+
+
+def _gathered(
+    db: Any, decks: Any, names: Names, sub: str, now: float, waiting_rows: list, index: list
+) -> dict:
     lines = {r["id"]: line_for(db, sub, r) for r in waiting_rows}
     items: list[dict[str, Any]] = []
-    for r in db.proposal_index(sub):
+    for r in index:
         seen = "expired" if r["state"] == "pending" and int(r["expires_at"] or 0) < now else r["state"]
         risk, why = r.get("risk"), ""
         if r["state"] in ("pending", "applying"):

@@ -64,15 +64,21 @@
     fetch("/precons/api/sets?" + p.toString(), { credentials: "same-origin", headers: { Accept: "application/json" }, signal: ctrl ? ctrl.signal : undefined })
       .then(function (r) { return r.json(); })
       .then(function (d) {
+        main.removeAttribute("aria-busy");
         if (!d || !d.ok) return;
         replace(d);
         var url = "/precons" + (p.toString() ? "?" + p.toString() : "");
         if (window.history && history.replaceState) history.replaceState(null, "", url);
       })
-      .catch(function () { /* the next keystroke, or Enter, asks again */ });
+      .catch(function (e) {
+        if (!e || e.name !== "AbortError") main.removeAttribute("aria-busy");
+        /* the next keystroke, or Enter, asks again */
+      });
   }
   if (q) q.addEventListener("input", function () {
     clearTimeout(timer);
+    // the pending look at once (the sets dim, theme.py); the ask waits for the pause in typing
+    main.setAttribute("aria-busy", "true");
     timer = setTimeout(refetch, 250);
   });
 

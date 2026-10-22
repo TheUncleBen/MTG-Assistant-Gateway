@@ -91,6 +91,8 @@
   }
   function soon() {
     clearTimeout(timer);
+    // the pending look at once (the list dims, theme.py); the ask itself waits for the pause in typing
+    list.setAttribute("aria-busy", "true");
     timer = setTimeout(refresh, 250);
   }
   form.addEventListener("submit", function (e) {
