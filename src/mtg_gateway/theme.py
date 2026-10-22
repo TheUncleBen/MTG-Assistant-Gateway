@@ -445,18 +445,31 @@ input[type=radio]:focus-visible{outline:2px solid var(--focus);outline-offset:2p
 /* a choice with a description under its label: the dot sits level with the label's first line */
 .check.mode{align-items:flex-start}
 .check.mode input{margin-top:.15rem}
-/* Account › Approval mode: one line per mode, its meaning in a closed fold under it */
-.mode-choice{border-top:1px solid var(--border);padding:.35rem 0}
-.mode-choice:first-of-type{border-top:0}
-.mode-choice .check.mode{min-height:44px;align-items:center}
-details.mode-more{margin:0 0 .25rem 2rem}
-details.mode-more > summary{cursor:pointer;color:var(--link);min-height:44px;display:flex;align-items:center;
-  gap:.4rem;font-size:.95rem;width:max-content;max-width:100%}
-details.mode-more > summary::before{content:'\\25B8'}
-details.mode-more[open] > summary::before{content:'\\25BE'}
-details.mode-more > p:first-of-type{margin-top:0}
-.mode-warn{display:none;margin:.5rem 0 .75rem;padding:.5rem .75rem;border-left:3px solid var(--orange);
-  background:var(--orange-tint);border-radius:var(--radius);font-size:.95rem}
+/* Account › Approval mode: a tight list, one 48 px row per mode (radio and name), its meaning in a
+   fold opened by the chevron at the row's end; every row has the same height and padding, so the
+   space between modes is the same whether a fold is open or not */
+.mode-list{border:1px solid var(--card-border);border-radius:var(--radius-panel);margin:.75rem 0;
+  overflow:hidden}
+.mode-opt{position:relative;border-top:1px solid var(--border)}
+.mode-opt:first-child{border-top:0}
+.mode-opt:has(input:checked){background:var(--orange-tint)}
+.mode-pick{display:flex;align-items:center;gap:10px;min-height:48px;margin:0;
+  padding:6px 52px 6px 14px;font-weight:700;line-height:1.3;cursor:pointer}
+.mode-opt.off .mode-pick{color:var(--text-muted);cursor:default}
+details.mode-info > summary{position:absolute;top:2px;right:2px;width:44px;height:44px;display:grid;
+  place-items:center;list-style:none;cursor:pointer;color:var(--text-muted);border-radius:var(--radius)}
+details.mode-info > summary::-webkit-details-marker{display:none}
+details.mode-info > summary:hover{background:var(--surface-2);color:var(--text)}
+details.mode-info > summary:focus-visible{outline:2px solid var(--focus);outline-offset:-2px}
+details.mode-info > summary svg{transition:transform .15s}
+details.mode-info[open] > summary svg{transform:rotate(180deg)}
+.mode-body{padding:0 14px 12px 42px;font-size:.92rem;color:var(--text-muted)}
+.mode-body p{margin:0 0 .5rem}
+.mode-body > :last-child{margin-bottom:0}
+.mode-body strong{color:var(--text)}
+.mode-body .notice{margin:.5rem 0 0}
+.mode-warn{display:none;margin:0 0 .75rem;padding:.45rem .75rem;border-left:3px solid var(--orange);
+  background:var(--orange-tint);border-radius:var(--radius);font-size:.9rem}
 form:has(input[name=mode][value=semi]:checked) .mode-warn,
 form:has(input[name=mode][value=auto]:checked) .mode-warn{display:block}
 /* toggle switch 40x20, orange when on */

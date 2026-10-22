@@ -44,6 +44,7 @@ from .theme import (
     VIEW_KINDS,
     app_version,
     display_name,
+    icon,
     in_app,
     layout_from_cookie,
     plural,
@@ -1370,13 +1371,14 @@ def _sweep_on(state: Any) -> bool:
 
 
 # Under an approval mode above the gateway's cap
-NOT_ALLOWED = "<br><span class='small'>(not allowed on this gateway)</span>"
+NOT_ALLOWED = "<span class='small muted'> (not allowed on this gateway)</span>"
 
 
 def _mode_card(state: Any, sub: str, csrf_in: str, *, primary: bool = True) -> str:
     """The member's approval mode (modes.py): three radio choices, the current one checked,
     choices above the gateway's cap shown disabled. Each choice is one line, its name; what it
-    means is in a closed "How it works" fold under it (Ben, 2026-10-22: no wall of text), with
+    means is in a closed "How it works" fold, opened by the chevron at the row's end (Ben,
+    2026-10-22: no wall of text, a tight list), with
     the low and high risk meanings and the cost of the auto modes in the Semi and Full auto
     folds. A short line on that cost shows while Semi or Full auto is picked (CSS :has).
     ``primary`` makes Save the page's orange button (not while Link account is)."""
@@ -1399,19 +1401,20 @@ def _mode_card(state: Any, sub: str, csrf_in: str, *, primary: bool = True) -> s
         if mode != "manual":
             more += warning
         choices.append(
-            f"<div class='mode-choice'><label class='check mode{'' if allowed else ' muted'}'>"
+            f"<div class='mode-opt{'' if allowed else ' off'}'><label class='mode-pick'>"
             f"<input type='radio' name='mode' value='{mode}'{' checked' if mode == current else ''}"
-            f"{'' if allowed else ' disabled'}><span><strong>{label}</strong>"
+            f"{'' if allowed else ' disabled'}><span>{label}"
             f"{'' if allowed else NOT_ALLOWED}</span></label>"
-            f"<details class='mode-more'><summary>How it works"
-            f"<span class='sr-only'>: {label}</span></summary>{more}</details></div>"
+            f"<details class='mode-info'><summary title='How it works'>{icon('chev')}"
+            f"<span class='sr-only'>How it works: {label}</span></summary>"
+            f"<div class='mode-body'>{more}</div></details></div>"
         )
     return (
         "<div class='card' id='mode'><h2>Approval mode</h2>"
         "<p>How much your assistant may change on Archidekt without asking you first. It applies to "
         "your account only, and to nobody else.</p>"
         f"<form method='post'>{csrf_in}<input type='hidden' name='action' value='approval_mode'>"
-        f"{''.join(choices)}"
+        f"<div class='mode-list'>{''.join(choices)}</div>"
         "<p class='mode-warn' role='note'>An assistant can be tricked into changes you did not ask "
         "for. Open How it works before you save.</p>"
         f"<button class='{'primary' if primary else 'btn-plain'}'>Save approval mode</button></form></div>"

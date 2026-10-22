@@ -140,16 +140,17 @@ async def test_each_mode_is_one_line_with_its_explanation_folded(stack: Stack) -
     await b.aclose()
     card = page[page.index("<div class='card' id='mode'>") :]
     card = card[: card.index("</form></div>")]
-    folds = re.findall(r"<details class='mode-more'>(.*?)</details>", card, re.S)
-    assert len(folds) == 3 and "<details class='mode-more' open" not in card
+    folds = re.findall(r"<details class='mode-info'>(.*?)</details>", card, re.S)
+    assert len(folds) == 3 and "<details class='mode-info' open" not in card
     live = h.app.state.gateway.live
     rows, big = int(live.get("auto_apply_max_rows")), int(live.get("auto_big_edit_rows"))
     for fold, mode in zip(folds, modes.MODES, strict=True):
-        assert "How it works" in fold
+        # the chevron is the fold's whole summary, named for the mode it explains
+        assert f"How it works: {html.escape(modes.MODE_LABELS[mode])}" in fold
         help_text = html.escape(modes.mode_help(mode, max_rows=rows, big_rows=big))
         assert help_text in fold
     # outside the folds: the intro, the three names and the short warning line, nothing more
-    outside = re.sub(r"<details class='mode-more'>.*?</details>", "", card, flags=re.S)
+    outside = re.sub(r"<details class='mode-info'>.*?</details>", "", card, flags=re.S)
     for mode in modes.MODES:
         assert html.escape(modes.mode_help(mode, max_rows=rows, big_rows=big)) not in outside
     assert html.escape(modes.HIGH_RISK_TEXT) not in outside

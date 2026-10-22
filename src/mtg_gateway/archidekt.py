@@ -1032,7 +1032,12 @@ def _refusal_detail(resp: httpx.Response) -> str:
     return " ".join(body.split())[:200]
 
 
-class ArchidektClient:
+# The account-wide requests (parity release 2) live in their own module; it reads the names above
+# from this partly loaded one, so it is imported here, never before this module.
+from .archidekt_account import AccountRequests  # noqa: E402
+
+
+class ArchidektClient(AccountRequests):
     """Every Archidekt request goes through ``_request``: paced by the shared Pacer, sent with the
     gateway's own honest User-Agent (no disguise), read caches as described above, and bounded
     retries with jittered exponential backoff for GETs that failed on a timeout, a network error
@@ -1146,8 +1151,11 @@ class ArchidektClient:
         json_body: Any | None = None,
         params: dict[str, Any] | None = None,
         fresh: bool = False,
+        upload: tuple[bytes, str] | None = None,
     ) -> Any:
-        """``fresh`` skips a cached answer (the read still refreshes the cache)."""
+        """``fresh`` skips a cached answer (the read still refreshes the cache). ``upload`` is a
+        file sent as the raw body, ``(bytes, file name)``, as the site's own upload sends a picture:
+        a PUT with the file as it is and a Content-Disposition naming it."""
         key = self._cache_key(method, path, token, params)
         if key is not None and not fresh:
             found, value = self._cache_get(key, path)
@@ -1166,7 +1174,13 @@ class ArchidektClient:
         while True:
             try:
                 value = await self._send(
-                    method, path, token=token, scheme=scheme, json_body=json_body, params=params
+                    method,
+                    path,
+                    token=token,
+                    scheme=scheme,
+                    json_body=json_body,
+                    params=params,
+                    upload=upload,
                 )
             except ArchidektError as exc:
                 if exc.kind == "rate_limited":
@@ -1235,14 +1249,17 @@ class ArchidektClient:
         scheme: str,
         json_body: Any | None,
         params: dict[str, Any] | None,
+        upload: tuple[bytes, str] | None = None,
     ) -> Any:
         """One request through the pacer: no retry and no cache here."""
         headers = {"Accept": "application/json", "User-Agent": self.user_agent}
         if token:
             headers["Authorization"] = f"{scheme} {token}"
+        if upload is not None:
+            headers["Content-Disposition"] = f'attachment; filename="{upload[1]}"'
         started = time.perf_counter()
         try:
-            return await self._paced_send(method, path, headers, json_body, params)
+            return await self._paced_send(method, path, headers, json_body, params, upload)
         finally:
             add_time(archidekt_time, time.perf_counter() - started)  # pacer wait and transfer alike
 
@@ -1253,13 +1270,19 @@ class ArchidektClient:
         headers: dict[str, str],
         json_body: Any | None,
         params: dict[str, Any] | None,
+        upload: tuple[bytes, str] | None = None,
     ) -> Any:
         async with self.pacer:
             self.stats["requests"] += 1
             try:
-                resp = await self._http.request(
-                    method, f"{self.base_url}{path}", headers=headers, json=json_body, params=params
-                )
+                if upload is not None:
+                    resp = await self._http.request(
+                        method, f"{self.base_url}{path}", headers=headers, content=upload[0], params=params
+                    )
+                else:
+                    resp = await self._http.request(
+                        method, f"{self.base_url}{path}", headers=headers, json=json_body, params=params
+                    )
             except httpx.HTTPError as exc:
                 self.pacer.record(False)
                 raise ArchidektError(
