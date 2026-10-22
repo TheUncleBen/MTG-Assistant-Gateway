@@ -148,12 +148,32 @@ async def test_each_mode_is_one_line_with_its_explanation_folded(stack: Stack) -
     for fold, mode in zip(folds, modes.MODES, strict=True):
         # the chevron is the fold's whole summary, named for the mode it explains
         assert f"What this mode does: {html.escape(modes.MODE_LABELS[mode])}" in fold
-        assert html.escape(modes.mode_help(mode, max_rows=rows, big_rows=big)) in fold
-        assert html.escape(modes.AUTO_WARNING) not in fold  # said once, under the list
+        for lead, points in modes.mode_points(mode, max_rows=rows, big_rows=big):
+            assert html.escape(lead) in fold and all(f"<li>{html.escape(p)}</li>" in fold for p in points)
+        # the whole warning is in the two modes that let an assistant apply changes
+        assert (html.escape(modes.AUTO_WARNING) in fold) == (mode != "manual")
     outside = re.sub(r"<details class='mode-info'>.*?</details>", "", card, flags=re.S)
-    for mode in modes.MODES:
-        assert html.escape(modes.mode_help(mode, max_rows=rows, big_rows=big)) not in outside
-    assert outside.count(html.escape(modes.AUTO_WARNING)) == 1 and "class='mode-warn'" in outside
+    assert html.escape(modes.AUTO_WARNING) not in outside
+    assert outside.count(html.escape(modes.AUTO_WARNING_LINE)) == 1 and "class='mode-warn'" in outside
+
+
+def test_the_account_page_points_say_what_mode_help_says() -> None:
+    """mode_points breaks mode_help into short lines for the Account page; the numbers, the
+    lists and the sentences quoted elsewhere stay the same in both."""
+    for rows, big in ((5, 20), (3, 7)):
+        for mode in modes.MODES:
+            help_text = modes.mode_help(mode, max_rows=rows, big_rows=big)
+            flat = " ".join(
+                lead + " " + " ".join(p) for lead, p in modes.mode_points(mode, max_rows=rows, big_rows=big)
+            )
+            if mode == "semi":
+                for part in (f"at most {rows} card row", modes.LOW_RISK_CHANGES, modes.ACCOUNT_ACTIONS_TEXT):
+                    assert part in help_text and part in flat
+            if mode == "auto":
+                for part in (f"more than {big} card row", modes.MEMBER_ONLY_TEXT):
+                    assert part in help_text and part in flat
+            for word in ("held change", "another app") if mode != "manual" else ("review page", "default"):
+                assert word in help_text and word in flat
 
 
 async def test_account_page_needs_a_valid_form(stack: Stack) -> None:
@@ -536,10 +556,11 @@ async def test_the_account_page_and_guide_use_the_one_wording(stack: Stack) -> N
     finally:
         await b.aclose()
     guide = _flat(guide_body(site="Gateway", writes_enabled=True, has_collection=True, max_rows=3))
+    assert modes.HIGH_RISK_TEXT in guide  # the Account page lists what waits in each mode instead
     for text in (page, guide):
-        assert modes.HIGH_RISK_TEXT in text and modes.MEMBER_ONLY_TEXT in text
-    # the Account page says what a low-risk change is in Semi's own fold (mode_help), not twice
-    assert modes.mode_help("semi", max_rows=5) in page and modes.low_risk_text(3) in guide
+        assert modes.MEMBER_ONLY_TEXT in text
+    # the Account page says what a low-risk change is in Semi's own details (mode_points)
+    assert modes.LOW_RISK_CHANGES in page and modes.low_risk_text(3) in guide
     assert "Account action or deck deletion" in guide  # the mode table has the column (bug 6)
 
 

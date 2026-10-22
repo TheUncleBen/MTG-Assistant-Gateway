@@ -464,12 +464,15 @@ details.mode-info > summary:hover{color:var(--text)}
 details.mode-info > summary:focus-visible{outline:2px solid var(--focus);outline-offset:-4px}
 details.mode-info > summary svg{transition:transform .15s}
 details.mode-info[open] > summary svg{transform:rotate(180deg)}
-.mode-body{margin:-4px 0 0;padding:0 16px 12px 46px;line-height:1.45}
-.mode-body p{margin:0 0 .5rem}
-.mode-body p:last-child{margin-bottom:0}
-.mode-warn{display:none;margin:0 0 .75rem;padding:12px 16px;border:1px solid var(--card-border);
-  border-left:4px solid var(--orange);border-radius:var(--radius-panel);background:var(--surface-2);
-  line-height:1.45}
+.mode-body{margin:-4px 0 0;padding:0 16px 14px 46px;line-height:1.45;font-size:.95rem;color:var(--text)}
+.mode-body p{margin:0 0 .45rem}
+.mode-body ul{margin:-.2rem 0 .55rem;padding-left:1.1rem}
+.mode-body li{margin:.15rem 0}
+.mode-body > :last-child{margin-bottom:0}
+.mode-body p.warn{margin-top:.6rem;padding:8px 12px;border-left:3px solid var(--orange);
+  background:var(--surface);border-radius:var(--radius)}
+.mode-warn{display:none;margin:0 0 .75rem;padding:10px 16px;border-left:3px solid var(--orange);
+  background:var(--orange-tint);border-radius:var(--radius-panel);line-height:1.4;font-size:.95rem}
 form:has(input[name=mode][value=semi]:checked) .mode-warn,
 form:has(input[name=mode][value=auto]:checked) .mode-warn{display:block}
 /* toggle switch 40x20, orange when on */

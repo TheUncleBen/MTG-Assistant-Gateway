@@ -167,6 +167,83 @@ def mode_help(mode: str, *, max_rows: int = DEFAULT_MAX_ROWS, big_rows: int = DE
     )
 
 
+# Under the Approval mode list while Semi or Full auto is picked: one line; the whole warning is
+# in that mode's details on the Account page (AUTO_WARNING, in mode_points)
+AUTO_WARNING_LINE = (
+    "An assistant can be tricked into making changes you did not ask for. Read this mode's details first."
+)
+_STILL_WAITS = (
+    "a held change, a change waiting for another change first, one another app had a hand in, one "
+    "that replaces another app's change, or one that another app's waiting change would replace"
+)
+
+
+def mode_points(
+    mode: str, *, max_rows: int = DEFAULT_MAX_ROWS, big_rows: int = DEFAULT_BIG_EDIT_ROWS
+) -> list[tuple[str, list[str]]]:
+    """What ``mode`` means, as the Account page's details show it (Ben, 2026-10-22: short, not a
+    block): ``(lead sentence, its points)`` pairs, the same meaning as ``mode_help`` broken up.
+    A test checks each point against mode_help, so the two never say different things."""
+    if mode == "manual":
+        return [
+            ("Every change waits for your own press, on the card in the chat or on the review page.", []),
+            ("Actions on your Archidekt account wait too.", []),
+            (
+                "Deleting a deck, and any edit of a description or comment that has formatting, are "
+                "approved on the review page only.",
+                [],
+            ),
+            ("The safest choice, and the default.", []),
+        ]
+    if mode == "semi":
+        return [
+            (
+                "Your assistant applies low-risk changes itself:",
+                [
+                    f"a small edit to a deck or your collection: at most {_rows(max_rows)}, each "
+                    f"{LOW_RISK_CHANGES}, no more than {MAX_COPIES_PER_ROW} copies each",
+                    "a private copy of a deck (a clone), which changes nothing that exists",
+                ],
+            ),
+            (
+                "A small edit never changes which cards are the commanders or the categories of a row in "
+                "the commander zone, and never takes copies from a card that has a row in the commander "
+                "zone and another row, both in the deck or both in the maybeboard or sideboard.",
+                [],
+            ),
+            (
+                "These still wait for your press:",
+                [
+                    "a new deck built from a list",
+                    "restores",
+                    "deck details and categories",
+                    "commander changes and bigger edits",
+                    f"anything on your Archidekt account ({ACCOUNT_ACTIONS_TEXT}) or deleting a deck",
+                    _STILL_WAITS,
+                ],
+            ),
+            (AUTO_WARNING, []),
+        ]
+    return [
+        ("Your assistant applies the deck and collection changes it proposes, without asking you.", []),
+        (
+            "These still wait for your press:",
+            [
+                "restoring a snapshot",
+                "a commander or companion change",
+                "a new deck",
+                f"an edit of more than {_rows(big_rows)}",
+                "making a deck public or unlisted",
+                "a category change that touches the commander or which cards count in the deck",
+                "any edit of a description that has formatting, such as bold text, links or pictures",
+                _STILL_WAITS,
+            ],
+        ),
+        (MEMBER_ONLY_TEXT, []),
+        (AUTO_WARNING, []),
+    ]
+
+
 # Shown next to the semi and auto choices, because turning them on has a real cost.
 AUTO_WARNING = (
     "An assistant can be tricked by text it reads (a web page, a deck description, a pasted "
