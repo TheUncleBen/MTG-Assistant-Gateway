@@ -189,7 +189,7 @@ comparison so that this holds; 0.7.3 folded the separate own-deck reader into
 
 ## Cards Forge cannot play
 
-Forge, the optional game engine, plays 99.71% of the cards legal in Commander and 99.60% of the
+Forge, the game engine (on by default), plays 99.71% of the cards legal in Commander and 99.60% of the
 cards legal in at least one format (Forge 2.0.15, measured against Scryfall on 2026-10-21; every
 Forge image build measures it again and stops below 99.6% and 99.5%). What it lacks:
 

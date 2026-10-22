@@ -319,7 +319,15 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
             "commander: a 60-card deck's report, or one with no commander marked, "
             "never starts it (forge state skipped, with the reason). forge=false leaves Forge out "
             "for a quick solo-test-only report (default: as simulate). A report without Forge games is "
-            "labelled engine_label 'Preflight only (no rules engine)'. same_opponents_as (another of the "
+            "labelled engine_label 'Preflight only (no rules engine)'. With Forge, a simulated report also "
+            "gets forge_solo: the deck alone on Forge by the full rules against opponents who do nothing "
+            "(the solo test's full-rules check), started after the games against precons, one unfinished per "
+            "member (two for reports that share opponents); status stays queued or running until it "
+            "ends too. Its result "
+            "has games, won (by until_turn) with won_rate and won_rate_95, median_won_turn, "
+            "median_commander_turn, median_first_out_turn, mulligans and per-turn averages of lands, "
+            "spells cast and damage, and unfinished (games Forge's time limit stopped before until_turn or a "
+            "win, left out of the rest). same_opponents_as (another of the "
             "user's report ids, one with Forge games) seats that report's opponents instead of the precons "
             "picked for this deck's bracket (or Archidekt's estimate when none is set), so two decks' "
             "Forge numbers come from the same table; the forge section's "
@@ -487,7 +495,7 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
             "complete, partial or failed; engine_label; settings; statistics, the simulation "
             "result, the validation and the forge section); view 'forge' is only forge_status (state, "
             "games_done of games_requested, job_id, and while queued its position, the report it waits "
-            "for and expected_seconds), small enough to poll while the Forge games play."
+            "for and expected_seconds) and forge_solo, small enough to poll while the Forge games play."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": False},
     )

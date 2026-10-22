@@ -7,8 +7,8 @@ This gets you one Swarm stack with these services:
   on it [near the end](#mystic-forge-internal-research-service));
 - `mtg-assistant-ntfy`, an internal notification server for the members' Android app
   ([Notifications on members' phones](#notifications-on-members-phones)); and
-- `mtg-assistant-forge`, the simulation engine, which runs only if you turn it on
-  ([Forge simulations](#forge-simulations-optional)).
+- `mtg-assistant-forge`, the simulation engine, on by default in the example files
+  ([Forge simulations](#forge-simulations-on-by-default)).
 
 Not running a Swarm? [DEPLOY-COMPOSE.md](DEPLOY-COMPOSE.md) does the same on
 one machine with plain Docker Compose. How the pieces fit together is in
@@ -263,7 +263,7 @@ Portainer and Docker pull them without a registry login or a GitHub token:
 
 - `ghcr.io/theuncleben/mtg-assistant-gateway`
 - `ghcr.io/theuncleben/mtg-assistant-mysticforge`
-- `ghcr.io/theuncleben/mtg-assistant-forge` (only pulled if you turn Forge on)
+- `ghcr.io/theuncleben/mtg-assistant-forge` (on by default; not pulled if you turn Forge off)
 
 The stack's ntfy server is the official `binwiederhier/ntfy` image from
 Docker Hub, pinned in the stack file.
@@ -623,20 +623,36 @@ docker service logs mtg_mtg-assistant-mysticforge
 Healthy looks like `Running`, with the logs ending on Uvicorn listening on
 `0.0.0.0:8000`.
 
-## Forge simulations (optional)
+## Forge simulations (on by default)
 
 Forge ([Card-Forge/forge](https://github.com/Card-Forge/forge), GPL-3.0) is an open-source Magic rules
 engine. The `mtg-assistant-forge` image runs it unmodified behind a small job service, so
-`run_deck_report` can play real games of a deck against current Commander precons. It is off by
-default, and an install that leaves it off behaves exactly as before.
+`run_deck_report` can play real games of a deck against current Commander precons, and play the
+deck alone by the full rules beside the solo test's quick estimate (the Forge solo test). It is on
+in the example files; [HARDWARE.md](HARDWARE.md) says what machine it needs. Without it, reports
+have the solo test's estimate and no Forge games.
 
-- **Turn it on**, in one of two ways depending on how you deploy (the two addresses are
-  alternatives, not two steps; use only the one for your setup):
-  - Portainer or Swarm stack: set `FORGE_REPLICAS=1`, `FORGE_NODE` to a node with spare memory, and
-    `MTG_FORGE_URL=http://mtg-assistant-forge:8000`, then update the stack.
-  - Docker Compose: start the `forge` profile (`COMPOSE_PROFILES=forge`) and set
-    `MTG_FORGE_URL=http://forge:8000`.
-- **The image tag:** the stack files name the Forge image by `FORGE_TAG` (default `2.0.15-mag5`).
+- **On (the example files):** Portainer or Swarm stack: `FORGE_REPLICAS=1`, `FORGE_NODE` set to a
+  node with spare memory, and `MTG_FORGE_URL=http://mtg-assistant-forge:8000`. Docker Compose:
+  `COMPOSE_PROFILES=forge` and `MTG_FORGE_URL=http://forge:8000`.
+- **Turn it off**, in one of two ways depending on how you deploy: on a stack set
+  `FORGE_REPLICAS=0` and an empty `MTG_FORGE_URL=` (`FORGE_NODE` still needs a node name), then
+  update the stack; with Compose put a `#` in front of `COMPOSE_PROFILES=forge` and set an empty
+  `MTG_FORGE_URL=`.
+- **The Forge solo test:** with every report that simulates, Forge also plays the deck alone
+  against opponents who do nothing (three for a Commander deck, one for a 60-card deck),
+  `MTG_FORGE_GAMES` games counted up to turn 10, and the report shows how often and on which turn
+  it won, beside the solo test's estimate. It starts after the report's games against precons,
+  so it never holds them up.
+  Forge prints a game only once it has ended, so each game plays until the deck wins or its time
+  limit stops it; the gateway gives each round of games an equal part of about four and a half
+  minutes of play (at least 30 seconds, at most `FORGE_GAME_SECONDS`). Java starting up for each
+  game and any wait in Forge's queue come on top, and each game gets at least 30 seconds, so with
+  many games and few places it takes longer.
+  A game stopped before turn 10 or a win is left out of the numbers, and the report says how
+  many. One per member runs at a time (two for reports that share opponents), and none starts
+  while other members' games against precons wait their turn in the gateway's queue.
+- **The image tag:** the stack files name the Forge image by `FORGE_TAG` (default `2.0.15-mag6`).
   GitHub builds and publishes a new tag the first time `main` carries it (the Forge image
   workflow, after its test games pass on arm64 and amd64), so pulling a new tag fails until that
   run has finished. After an update that changes the tag, wait for the run, then update the stack.
@@ -814,14 +830,14 @@ value. Leave it out to manage it on the page.
 | `MTG_CHATGPT_NAME` | no, *stack* | empty (`MTG_SERVER_NAME`) | The ChatGPT connector name, when it should differ from `MTG_SERVER_NAME`: the name in the ChatGPT plugin file and the name the ChatGPT install steps tell people to type. Everything else keeps `MTG_SERVER_NAME`. Letters, digits, spaces and `. _ ' -` only: any run of other characters becomes a space, and repeated spaces become one; the 80-character count below is taken after that. OpenAI's plugin docs say a plugin file whose name is over 80 characters is refused on upload ([plugin docs](https://developers.openai.com/plugins/llms-full.txt), `plugin_display_name_too_long`, read 2026-10-15 and again 2026-10-16; not tested in ChatGPT). Their 30-character limit applies only to OpenAI's public plugin directory, which the gateway doesn't use, and a name typed when adding the connector by hand has no documented limit. When the ChatGPT connector name is over 80 characters, whether from this setting or from `MTG_SERVER_NAME` with this one empty, the gateway still starts and warns in three places: its log at start, the admin page and the install page's ChatGPT plugin-file step |
 | `MTG_LISTEN_HOST`, `MTG_LISTEN_PORT` | no, *fixed* | `0.0.0.0`, `8080` | Address and port inside the container. Not a setting: the stack, Compose file and health checks expect 8080 |
 | `MTG_MYSTIC_FORGE_URL` | no, *stack* | empty (no research tools) | Internal Mystic Forge MCP URL; the stack sets `http://mtg-assistant-mysticforge:8000/mcp` |
-| `MTG_FORGE_URL` | no, *stack* | empty (Forge off) | Internal Forge runner URL; deck reports add real Forge games when set (see the Forge section above) |
+| `MTG_FORGE_URL` | no, *stack* | `http://mtg-assistant-forge:8000` (`http://forge:8000` with Compose) | Internal Forge runner URL; deck reports add real Forge games when set, and an empty value turns them off (see the Forge section above) |
 | `MTG_FORGE_GAMES` | no, *stack* | `4` | Forge games per deck report (1 to 50); **Play more games** adds this many again |
-| `FORGE_REPLICAS`, `FORGE_NODE` | no, *stack* | `0`, empty | Copies of the Forge service, and the node they run on. `0` leaves Forge off; `1` with `FORGE_NODE` is the usual setup. For copies on several machines, place them by a node label instead of `FORGE_NODE` (see "More than one machine" in the Forge section above) |
+| `FORGE_REPLICAS`, `FORGE_NODE` | `FORGE_NODE` yes, *stack* | `1`, none | Copies of the Forge service, and the node they run on. `1` with `FORGE_NODE` is the usual setup; `0` turns Forge off (with an empty `MTG_FORGE_URL`), and `FORGE_NODE` still needs a node name. For copies on several machines, place them by a node label instead of `FORGE_NODE` (see "More than one machine" in the Forge section above) |
 | *(node label)* `mtg-forge=true` | no | none | Only for Forge copies on several machines: label each machine (`docker node update --label-add mtg-forge=true <node>`) and place the Forge service by `node.labels.mtg-forge == true` instead of `FORGE_NODE` (see "More than one machine" in the Forge section above) |
 | `MTG_FORGE_PARALLEL_GAMES` | no, *stack* | `4` | How many of a report's Forge games the gateway asks Forge to play at once (1 to 16). `FORGE_MAX_PARALLEL` caps it for all runs together. Also on the Settings page |
 | `FORGE_MAX_METASPACE`, `FORGE_OOM_SCORE_ADJ` | no, *stack* | `256m`, `1000` | On the Forge service: each Forge game's extra Java memory for loaded code (on top of `FORGE_XMX`), and how readily the kernel stops a Forge game when the machine runs out of memory, 1 to 1000 (1000: Forge goes first; 0 turns this off; any other value is left out and Forge's log says why) |
 | `FORGE_MAX_PARALLEL` | no, *stack* | empty | On the Forge service: the most games Forge plays at once, for all runs together (1 to 16). Empty: one per 2 CPUs and 1.2 GB of the container's limits (see the Forge section above) |
-| `FORGE_IMAGE`, `FORGE_TAG` | no, *stack* | `ghcr.io/theuncleben/mtg-assistant-forge`, `2.0.15-mag5` | The Forge image and its version. The stack file names one exact Forge version, which changes only when you deploy a newer stack file. Leave these out to use it; set `FORGE_TAG` only to pin Forge on purpose, and it then stays on that version even when the stack file moves on |
+| `FORGE_IMAGE`, `FORGE_TAG` | no, *stack* | `ghcr.io/theuncleben/mtg-assistant-forge`, `2.0.15-mag6` | The Forge image and its version. The stack file names one exact Forge version, which changes only when you deploy a newer stack file. Leave these out to use it; set `FORGE_TAG` only to pin Forge on purpose, and it then stays on that version even when the stack file moves on |
 | `FORGE_XMX` | no, *stack* | `1g` | The Java heap limit (`-Xmx`) of each Forge game |
 | `FORGE_MEMORY_LIMIT`, `FORGE_CPUS` | no, *stack* | `1536M`, `2` | The Forge container's memory and CPU caps. `FORGE_MEMORY_LIMIT` is also passed to Forge as `FORGE_MEMORY_BUDGET`, which sizes the games at once where Docker can't cap memory (see the Forge section above) |
 | `FORGE_GAME_SECONDS` | no, *stack* | `240` | Seconds before Forge calls one game a draw |

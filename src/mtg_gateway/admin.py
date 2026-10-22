@@ -188,6 +188,8 @@ def add_admin_routes(server: MCPServer, state: AppState) -> None:
                 raise AdminError("invalid", "Use Delete my data on your Account page.", code="self_delete")
             if not confirmed:
                 raise AdminError("invalid", "Tick the confirmation box to delete.", code="confirm_delete")
+            if getattr(state, "reports", None) is not None:  # their unfinished Forge games stop too
+                state.reports.forget_member(target)
             out.update(state.db.delete_member_data(target))
             state.decks.forget_member(target)
             if state.membership is not None:

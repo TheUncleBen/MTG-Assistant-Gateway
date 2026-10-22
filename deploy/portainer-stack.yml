@@ -103,9 +103,9 @@ services:
       MTG_LOG_LEVEL: ${MTG_LOG_LEVEL:-}
       # Research tools are proxied from the Mystic Forge service in this stack.
       MTG_MYSTIC_FORGE_URL: ${MTG_MYSTIC_FORGE_URL-http://mtg-assistant-mysticforge:8000/mcp}
-      # Forge simulations: empty (the default) leaves them off. To turn them on set FORGE_REPLICAS=1
-      # and MTG_FORGE_URL=http://mtg-assistant-forge:8000 (docs/DEPLOY.md).
-      MTG_FORGE_URL: ${MTG_FORGE_URL:-}
+      # Forge simulations: on by default. To turn them off set MTG_FORGE_URL to an empty value and
+      # FORGE_REPLICAS=0 (docs/DEPLOY.md).
+      MTG_FORGE_URL: ${MTG_FORGE_URL-http://mtg-assistant-forge:8000}
       MTG_FORGE_GAMES: ${MTG_FORGE_GAMES:-}
       # Forge games the gateway asks Forge to play at once for one report (1 to 16); FORGE_MAX_PARALLEL
       # on the Forge service caps all runs together.
@@ -379,14 +379,14 @@ services:
           - node.hostname == ${MTG_NODE:?set MTG_NODE to the Swarm node that keeps the gateway data}
 
   # Forge on the node named by FORGE_NODE: the rules engine for deck simulations (GPL-3.0,
-  # unmodified). Off by default (FORGE_REPLICAS=0). It starts Java only while a simulation runs,
-  # under a CPU and memory limit, and is on a private network with no way out. On Raspberry Pi OS,
+  # unmodified). On by default (FORGE_REPLICAS=1; 0 turns it off). It starts Java only while a
+  # simulation runs, under a CPU and memory limit, and is on a private network with no way out. On Raspberry Pi OS,
   # where Docker can't cap memory, Forge guards its own memory instead; that is not a hard cap.
   # dnsrr: the gateway
   # sees each copy's address, so with more than one copy every run stays on the copy that started
   # it (one copy works the same either way). For several machines see DEPLOY.md.
   mtg-assistant-forge:
-    image: ${FORGE_IMAGE:-ghcr.io/theuncleben/mtg-assistant-forge}:${FORGE_TAG:-2.0.15-mag5}
+    image: ${FORGE_IMAGE:-ghcr.io/theuncleben/mtg-assistant-forge}:${FORGE_TAG:-2.0.15-mag6}
     logging:
       driver: json-file
       options:
@@ -421,7 +421,7 @@ services:
     networks:
       - forge
     deploy:
-      replicas: ${FORGE_REPLICAS:-0}
+      replicas: ${FORGE_REPLICAS:-1}
       endpoint_mode: dnsrr
       resources:
         limits:
@@ -437,7 +437,7 @@ services:
         order: stop-first
       placement:
         constraints:
-          - node.hostname == ${FORGE_NODE:-set-FORGE_NODE-when-FORGE_REPLICAS-is-1}
+          - node.hostname == ${FORGE_NODE:?set FORGE_NODE to the Swarm node that runs Forge}
 
 networks:
   mtgnet:

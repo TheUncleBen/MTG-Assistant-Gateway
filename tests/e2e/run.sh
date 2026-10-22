@@ -176,6 +176,9 @@ step_stack_up() {
   # as in stack.env.example; test_05 switches them on and off again with docker service update).
   export MTG_ARCHIDEKT_BASE="${MTG_ARCHIDEKT_BASE:-http://archidektmock:8000/api}"
   export MTG_TAG="$MTG_TAG-trusted"
+  # Forge is on in the example files, but this run builds no Forge image: it deploys with Forge
+  # turned off the documented way (both settings), and FORGE_NODE set as the stack requires.
+  export FORGE_NODE="$NODE" FORGE_REPLICAS=0 MTG_FORGE_URL=
   docker stack config -c "$REPO/deploy/portainer-stack.yml" > "$GEN/rendered-stack.yml"
   docker stack deploy --resolve-image never -c "$REPO/deploy/portainer-stack.yml" mtg
   if [ "${E2E_SWARM_DNSRR:-}" = "1" ]; then
