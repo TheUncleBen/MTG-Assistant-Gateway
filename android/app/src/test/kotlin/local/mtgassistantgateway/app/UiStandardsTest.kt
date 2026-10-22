@@ -116,9 +116,11 @@ class UiStandardsTest {
         val updater = File(src, "Updater.kt").readText()
         assertFalse(setup.contains("R.string.setup_not_gateway, code"))
         assertTrue(setup.contains("Log.w(TAG, \"healthz answered HTTP \$code"))
-        assertFalse(camera.contains("R.string.camera_error, "))
+        assertFalse(camera.contains("getString(R.string.camera_error, "))
         assertTrue(camera.contains("Log.w(TAG, \"camera failed (\$code)"))
-        assertFalse(updater.contains("R.string.update_install_failed, "))
+        // the toast may name the string by id (Toast.makeText(context, R.string..., length)); what
+        // must be gone is a getString that fills the message with the status
+        assertFalse(updater.contains("getString(R.string.update_install_failed, "))
         assertTrue(updater.contains("Log.w(TAG, \"install failed: status \$status"))
     }
 }
