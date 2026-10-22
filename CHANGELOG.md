@@ -48,6 +48,9 @@ with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 
 ### Fixed
 - A cloned one-card deck's change line said "1 cards".
+- A deck with a category named like the start of an HTML comment (such as `<!--<script>`) showed
+  a broken deck page: the Probability of draw calculator and the rest of the page below it did not
+  load.
 
 ## [0.7.40] - 2026-10-21
 

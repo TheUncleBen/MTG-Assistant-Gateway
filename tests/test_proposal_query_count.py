@@ -92,3 +92,16 @@ async def test_a_link_written_inside_a_read_ahead_is_seen_by_the_next_lookup(sta
         kinds = [lk["kind"] for lk in db.proposal_links(sub, [a])]
     assert kinds == ["depends_on"]
     assert db.client_name("app-1") == "Claude"
+
+
+async def test_a_read_ahead_of_more_than_500_proposals_still_answers_the_last_ones(stack) -> None:
+    """proposal_links reads at most 500 ids at once: the read-ahead reads in slices of that size,
+    so a long listing's 501st row still shows its links instead of "no links"."""
+    sub = await _signed_in(stack)
+    db = stack.h.db
+    a, b = [r["id"] for r in db.proposal_index(sub)][:2]
+    assert db.link_proposals(a, sub, "depends_on", b)
+    many = [f"old-{i}" for i in range(500)] + [a, b]
+    with db.read_ahead(sub, many):
+        assert [lk["kind"] for lk in db.proposal_links(sub, [a])] == ["depends_on"]
+        assert [lk["kind"] for lk in db.proposal_links(sub, [b])] == ["depends_on"]

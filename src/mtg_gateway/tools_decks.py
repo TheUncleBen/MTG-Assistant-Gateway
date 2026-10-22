@@ -728,8 +728,9 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
             "Archidekt. A change that touches the commander or Not in deck, or renames a category to or "
             "from Sideboard or Maybeboard, always waits for the user's own press, in every approval "
             "mode. Returns the same fields as propose_deck_changes (kind "
-            "'categories', one line per category and the review URL); the user confirms it and then "
-            "it is applied with apply_proposal like any other proposal, which keeps a snapshot first. "
+            "'categories', one line per category and the review URL); it is applied with "
+            "apply_proposal like any other proposal, which keeps a snapshot first: after the user's "
+            "press, or in Full auto, for any other category change, without one. "
             "Changes nothing on Archidekt."
         ),
         annotations={"readOnlyHint": True, "destructiveHint": False, "openWorldHint": True},

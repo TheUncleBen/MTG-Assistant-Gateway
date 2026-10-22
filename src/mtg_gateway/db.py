@@ -2753,7 +2753,11 @@ class Database:
         written inside the block drops the read-ahead (link_proposals), so nothing stale is served."""
         ids = [str(i) for i in proposal_ids]
         by_id: dict[str, list[dict[str, Any]]] = {i: [] for i in ids}
-        for link in self.proposal_links(owner_sub, ids) if ids else []:
+        # proposal_links reads at most 500 ids at once: read in slices of that size
+        links = [
+            lk for i in range(0, len(ids), 500) for lk in self.proposal_links(owner_sub, ids[i : i + 500])
+        ]
+        for link in links:
             for side in ("proposal_id", "other_id"):
                 if link[side] in by_id and link not in by_id[link[side]]:
                     by_id[link[side]].append(link)

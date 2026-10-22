@@ -1213,7 +1213,8 @@ def _odds_html(cards: list[DeckCard]) -> str:
     if not size:
         return ""
     groups = _odds_groups(cards)
-    data = json.dumps({"size": size, "groups": groups}, separators=(",", ":")).replace("</", "<\\/")
+    # every "<" escaped (still valid JSON): neither "</script>" nor "<!--" from a name ends the block
+    data = json.dumps({"size": size, "groups": groups}, separators=(",", ":")).replace("<", "\\u003c")
     options = "".join(f"<option value='{esc(k)}'>{esc(k)}</option>" for k in groups)
     return (
         "<div class='odds' id='odds'><h3>Probability of draw</h3>"

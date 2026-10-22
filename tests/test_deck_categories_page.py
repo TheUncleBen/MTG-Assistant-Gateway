@@ -318,3 +318,25 @@ async def test_the_review_and_lists_know_a_category_change(stack: Stack) -> None
 
     assert "categories" in proposals_view.UNDO_KINDS and "categories" in batch.ALONE_KINDS
     assert "categories" in batch.ALONE_REASONS
+
+
+async def test_a_category_name_cannot_break_the_odds_data_block(stack: Stack) -> None:
+    # "<!--<script>" is a valid category name (the rename takes it, and any public deck can carry
+    # it): inside the odds JSON block every "<" is escaped, so the block ends where it should
+    import json
+
+    _give_categories(stack.ark)
+    name = "<!--<script>"
+    for c in stack.ark.decks[42]["categories"]:
+        if c["name"] == "Ramp":
+            c["name"] = name
+    for row in stack.ark.decks[42]["cards"]:
+        row["categories"] = [name if x == "Ramp" else x for x in row.get("categories") or []]
+    b = await linked_browser(stack)
+    try:
+        page = (await b.http.get("/decks/42", headers=NAV)).text
+        block = page.split("<script type='application/json' id='odds-data'>")[1].split("</script>")[0]
+        assert "<" not in block
+        assert name in json.dumps(json.loads(block), ensure_ascii=False)
+    finally:
+        await b.aclose()
