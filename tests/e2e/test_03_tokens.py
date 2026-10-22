@@ -188,7 +188,7 @@ def test_authorize_rejects_foreign_resource_and_unregistered_redirect(http: http
 
 def test_callback_refuses_a_replayed_or_foreign_browser(http: httpx.Client):
     r = http.get("/auth/callback", params={"state": "never-issued", "code": "x"})
-    assert r.status_code == 400 and "expired or was already used" in r.text
+    assert r.status_code == 400 and "expired, was already used" in r.text
     # Cookie check happens only for a live state, which is covered by the unit tests and the
     # browser flow; here we just confirm no cookie is ever set on the callback itself.
     assert "set-cookie" not in r.headers
