@@ -3,6 +3,7 @@ form behind My decks' folder boxes without scripts (POST /folders)."""
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from types import SimpleNamespace
@@ -29,6 +30,7 @@ from .deckpage import card_image, deck_title, delete_box_html
 from .decks import (
     CATEGORY_FLAGS,
     CATEGORY_HAS_CARDS,
+    MAX_CATEGORY_CHANGES,
     DeckError,
     category_change_rows,
     category_line,
@@ -163,6 +165,53 @@ SETTINGS_CSS = """
 NOTHING_TO_SAVE = "Nothing to save: no name or switch was changed."
 COUNTS_TITLE = modes.CATEGORY_CONFIRM_TITLES[modes.CATEGORY_COUNTS_CONFIRM]
 DELETE_TITLE = modes.CATEGORY_CONFIRM_TITLES[modes.CATEGORY_DELETE_CONFIRM]
+
+
+MAIN_FIELDS = (
+    "name",
+    "description",
+    "deck_format",
+    "edh_bracket",
+    "private",
+    "unlisted",
+    "theorycrafted",
+    "game",
+)
+
+
+def main_values(deck: Deck) -> dict[str, str]:
+    """The Main settings form's fields as the page draws them for ``deck``: the baseline its hidden
+    was_ fields carry, so a save sends only what the member changed and a page opened before a
+    change made elsewhere never puts the old values back (security review 0.7.42). The description
+    is carried as its digest, so the page does not hold it twice."""
+    return {
+        "name": deck.name,
+        "description": _digest(rich_text(deck.description)),
+        "deck_format": deck.format or "",
+        "edh_bracket": str(deck.edh_bracket or ""),
+        "private": "1" if deck.private else "",
+        "unlisted": "1" if deck.unlisted else "",
+        "theorycrafted": "1" if deck.theorycrafted else "",
+        "game": next((k for k, i in GAME_IDS.items() if i == deck.game), "any"),
+    }
+
+
+def _digest(text: str) -> str:
+    return hashlib.sha256(text.replace("\r\n", "\n").encode()).hexdigest()[:32]
+
+
+def posted_main_values(data: dict[str, str]) -> dict[str, str]:
+    """``main_values`` for a posted Main settings form (an unchecked box sends no key)."""
+    return {
+        "name": data.get("name", "").strip(),
+        "description": _digest(data.get("description", "")),
+        "deck_format": data.get("deck_format", ""),
+        "edh_bracket": data.get("edh_bracket", ""),
+        "private": "1" if data.get("private") else "",
+        "unlisted": "1" if data.get("unlisted") else "",
+        "theorycrafted": "1" if data.get("theorycrafted") else "",
+        "game": data.get("game") or "any",
+    }
 
 
 def category_keys(deck: Deck) -> list[tuple[str, dict[str, Any]]]:
@@ -317,6 +366,8 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
         )
         did = _esc(deck.id)
         title = deck_title(deck)
+        # a form drawn again after a refusal keeps the baseline it was opened with
+        baseline = {k: v.get(f"was_{k}", now) for k, now in main_values(deck).items()}
 
         def switch(name: str, on: str) -> str:
             return (
@@ -361,7 +412,10 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
             + ui.page_head("Deck settings", f"“{title}”")
             + f"<form method='post' action='/decks/{did}/settings' class='ui-card settings' id='ds-main'>"
             f"<input type='hidden' name='csrf' value='{_esc(csrf)}'>"
-            "<h2>Main settings</h2>"
+            + "".join(
+                f"<input type='hidden' name='was_{k}' value='{_esc(was)}'>" for k, was in baseline.items()
+            )
+            + "<h2>Main settings</h2>"
             + main_note
             + row(
                 "<label for='name'>Deck name</label>",
@@ -496,13 +550,18 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
                 f"{count}{delete}</li>"
             )
         unused = unused_category_changes(deck)
+        more = len(unused) > MAX_CATEGORY_CHANGES  # one press deletes the first 30, the rest next time
+        unused = unused[:MAX_CATEGORY_CHANGES]
         new_switches = "".join(
             f"<label class='switch ds-flag'><input type='checkbox' name='{key}' value='1'>"
             f"<span class='track'></span><span class='t'>{_esc(label)}</span></label>"
             for key, label, _f, _i in CATEGORY_FLAGS
         )
         unused_names = ", ".join(f"“{u['category']}”" for u in unused)
-        unused_wait = modes.category_wait(category_change_rows(deck, unused)[1]) if unused else None
+        try:
+            unused_wait = modes.category_wait(category_change_rows(deck, unused)[1]) if unused else None
+        except DeckError:  # a damaged deck answer: the press is checked again, and refused there
+            unused_wait = None
         unused_also = {
             modes.CATEGORY_COMMANDER_REASON: modes.CATEGORY_COMMANDER_CONFIRM,
             modes.CATEGORY_COUNTS_REASON: modes.CATEGORY_COUNTS_CONFIRM,
@@ -527,7 +586,8 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
                     "<button class='btn btn-outline-danger' form='catunused' name='action' value='unused' "
                     f"data-names='{_esc(unused_names)}' data-also='{_esc(unused_also)}'>{icon('trash')} "
                     "Delete unused categories "
-                    f"({len(unused)})</button>"
+                    + (f"({len(unused)} at a time)" if more else f"({len(unused)})")
+                    + "</button>"
                     if unused
                     else ""
                 )
@@ -877,7 +937,11 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
                     following=await following_or_none(sub),
                     follow_hint=str(exc.extra.get("follow_username") or ""),
                     typed_tag=(data.get("name") or "")[:40] if data.get("action") == "add" else "",
-                    cat_values=data if anchor == "categories" and not exc.extra.get("fresh") else None,
+                    cat_values=data
+                    if anchor == "categories"
+                    and (data.get("action") or "save") == "save"
+                    and not exc.extra.get("fresh")
+                    else None,
                 ),
                 sub,
                 sid,
@@ -898,18 +962,20 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
         *,
         danger: bool = False,
         extra: str = "",
+        answer: str = "confirmed",
     ) -> str:
         """The second step of a one-press account action on the member's own pages (0.7.24): the
         question, then a form that sends the same fields again with ``confirmed`` and the page's
         CSRF token, or Cancel back where they came from. Deleting a deck has its own typed-name form.
-        ``extra``: more of the form, already escaped (a category delete's "move its cards to")."""
+        ``extra``: more of the form, already escaped (a category delete's "move its cards to");
+        ``answer``: the field the yes sends (``move_ok`` for a pick that may need asking again)."""
         hidden = "".join(
             f"<input type='hidden' name='{_esc(k)}' value='{_esc(v)}'>" for k, v in fields.items()
         )
         return (
             f"<form method='post' action='{_esc(action_url)}' class='panel confirmform'>"
             f"<input type='hidden' name='csrf' value='{_esc(csrf)}'>{hidden}"
-            "<input type='hidden' name='confirmed' value='1'>"
+            f"<input type='hidden' name='{_esc(answer)}' value='1'>"
             f"<h2>{_esc(question)}</h2>"
             + (f"<p class='muted small'>{_esc(note)}</p>" if note else "")
             + extra
@@ -1019,13 +1085,20 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
             else:
                 wanted = parse_category_changes(changes) if changes else []
                 if unused:
-                    wanted += unused_category_changes(deck)
+                    wanted += unused_category_changes(deck, MAX_CATEGORY_CHANGES)  # the rest next time
                     if not wanted:
                         raise DeckError("invalid", "The deck has no unused categories; nothing would change.")
                 _plan, rows = category_change_rows(deck, wanted)
                 why = modes.hand_edit_confirm("categories", rows)
-            if why and data.get("confirmed") != "1":
-                fields = {k: v for k, v in data.items() if k not in ("csrf", "confirmed", "move_cards_to")}
+            # picking where a deleted category's cards go (on its page or in the box, ``move_ok``) is
+            # a yes to the delete only: a pick that makes them commanders or changes which cards
+            # count is asked once more, with that sentence (S-01, review 0.7.42)
+            said_yes = data.get("confirmed") == "1" or (
+                data.get("move_ok") == "1" and why == modes.CATEGORY_DELETE_CONFIRM
+            )
+            if why and not said_yes:
+                drop = ("csrf", "confirmed", "move_ok") + (("move_cards_to",) if move_field else ())
+                fields = {k: v for k, v in data.items() if k not in drop}
                 if action != "save":
                     fields["action"] = action
                 note, title = why, modes.CATEGORY_CONFIRM_TITLES[why]
@@ -1047,6 +1120,7 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
                     f"/decks/{deck.id}/settings#categories",
                     danger=action in ("delete", "unused"),
                     extra=move_field,
+                    answer="move_ok" if move_field else "confirmed",
                 )
                 return page("Confirm categories", body, sub=sub, sid=sid, current="/decks", deck_css=True)
             p = await decks.propose_categories(sub, deck.id, changes, delete_unused=unused)
@@ -1237,11 +1311,27 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
             details["deck_format"] = data["deck_format"]
         bracket = data.get("edh_bracket", "")
         details["edh_bracket"] = int(bracket) if re.fullmatch(r"[1-5]", bracket) else None
+        if "was_name" in data:
+            # only what the member changed on the page is sent: a field left as the page drew it
+            # keeps the deck's current value, even when that changed elsewhere since
+            posted = posted_main_values(data)
+            for k in MAIN_FIELDS:
+                if k in details and f"was_{k}" in data and posted[k] == data[f"was_{k}"]:
+                    del details[k]
         # only a Commander deck has a bracket: archidekt.com's own settings form sends none for
         # another format, so a bracket left picked when the format moves off Commander goes
         fmt = details.get("deck_format") or deck.format
-        if FORMAT_IDS.get(str(fmt or "")) != FORMAT_IDS["commander"]:
+        if FORMAT_IDS.get(str(fmt or "")) != FORMAT_IDS["commander"] and (
+            "edh_bracket" in details or deck.edh_bracket is not None
+        ):
             details["edh_bracket"] = None
+        if not details:
+            return settings_response(
+                settings_form(deck, _csrf(s, sid), data, "Nothing to save: nothing on the form was changed."),
+                sub,
+                sid,
+                400,
+            )
         current_client.set(BROWSER_CLIENT_ID)
         try:
             p = await decks.propose_deck_details(sub, deck.id, details)

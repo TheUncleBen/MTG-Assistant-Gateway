@@ -286,6 +286,8 @@ def risk_of(
     kinds = [str(r.get("kind")) for r in rows]
     if any(k == "commander" for k in kinds):
         return "high", commander_reason(rows)
+    if any(r.get("companion_card") for r in rows):
+        return "high", COMPANION_REASON
     if any(k not in LOW_RISK_ROW_KINDS for k in kinds):
         return (
             "high",
@@ -388,7 +390,7 @@ def auto_waits(
             return "has no list of rows to check"
         if any(str(r.get("kind")) == "commander" for r in rows):
             return commander_reason(rows)
-        if any(str(r.get("kind")) == "companion" for r in rows):
+        if any(str(r.get("kind")) == "companion" or r.get("companion_card") for r in rows):
             return COMPANION_REASON  # it changes what the deck is legal with (parity release 1)
         if len(rows) > big_rows:
             return f"changes {len(rows)} rows, more than the {big_rows} Full auto applies by itself"

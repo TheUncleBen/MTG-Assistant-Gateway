@@ -23,15 +23,18 @@ show back face switches.
   switches, a Delete button on each category, and Delete unused categories; your assistant can
   propose the same. Archidekt only deletes an empty category, so deleting one that still has cards
   asks which category its cards move to, moves them first, and deletes it only after a fresh read
-  of the deck shows it empty. On Deck settings every delete asks you to confirm. Deleting Sideboard or Maybeboard,
+  of the deck just before that delete shows it empty. On Deck settings every delete asks you to
+  confirm. Delete unused categories deletes up to 30 at a time. Deleting Sideboard or Maybeboard,
   a Premier category or the Commander category is high risk and never applied by an assistant on
   its own. Restore under History makes deleted categories again and puts their cards back, and
-  deletes a category added since the snapshot once its cards are gone.
+  deletes a category added since the snapshot once its cards are gone (only the ones its review
+  listed).
 - **Theorycrafted and Game type** (Any, Paper, MTGO, Arena) in Deck settings and for your
   assistant, with snapshot, read-back and Restore like the other settings.
 - **Companion and Show back face** in the card menu on your deck page (Show back face on two-faced
   cards), and for your assistant. A Companion change from an assistant always waits for your
-  press, because it changes what the deck is legal with. Restore puts both back.
+  press, because it changes what the deck is legal with; so does removing the companion card or
+  cutting its copies. Restore puts both back.
 
 ### Changed
 - **Sideboard and Maybeboard without a record.** Archidekt's default Sideboard or Maybeboard can
@@ -39,13 +42,16 @@ show back face switches.
   edited like any other category: the save gives it its record first.
 - **A new deck keeps a category's switches.** A pasted list's category marked not in deck or not
   in price is made with those switches before any card goes in, instead of as a plain category
-  with a warning.
+  with a warning. A list can mark up to 30 such categories, each 1 to 60 characters.
 - **The Guide's ask for categories** reads "Add, delete or rename a deck category".
 - **New deck** has Theorycrafted and Game type too, for you and your assistant.
 
 ### Fixed
 - New deck's Empty tab refused to create the deck ("give exactly one of cards, decklist_text,
   csv_text or json_text"); it now creates an empty deck, as archidekt.com does.
+- Deck settings' Main settings saves only what you changed on the page. Before, saving from a page
+  opened before a change made elsewhere (by your assistant, or on Archidekt) put back the old
+  Private, Unlisted, name, description, format or bracket.
 - On Deck settings, Skip to content and the Main settings link in the section menu could land on
   the wrong place: the page and its Main settings form had the same name.
 

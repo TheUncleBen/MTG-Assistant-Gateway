@@ -464,3 +464,81 @@ async def test_a_category_name_cannot_break_the_odds_data_block(stack: Stack) ->
         assert name in json.dumps(json.loads(block), ensure_ascii=False)
     finally:
         await b.aclose()
+
+
+async def test_moving_cards_into_the_commander_category_asks_with_the_commander_sentence(
+    stack: Stack,
+) -> None:
+    """S-01 (review 0.7.42): the target is picked on the delete page (or in the box), so that pick
+    is not yet a yes to making the cards commanders: the gateway asks once more with that sentence."""
+    _give_categories(stack.ark)
+    b = await linked_browser(stack)
+    try:
+        page, csrf = await _csrf(b)
+        ids = _ids(page)
+        r = await b.http.post(
+            POST,
+            data={
+                "csrf": csrf,
+                "action": "delete",
+                "delete": str(ids["Ramp"]),
+                "move_cards_to": "Commander",
+                "move_ok": "1",
+            },
+            headers=NAV,
+        )
+        assert r.status_code == 200 and stack.ark.category_deletes == [], r.text
+        assert esc(modes.CATEGORY_COMMANDER_CONFIRM) in r.text
+        assert "name='move_cards_to' value='Commander'" in r.text and "name='confirmed' value='1'" in r.text
+        # an ordinary target goes ahead on the pick alone
+        r = await b.http.post(
+            POST,
+            data={
+                "csrf": csrf,
+                "action": "delete",
+                "delete": str(ids["Ramp"]),
+                "move_cards_to": "Maybeboard",
+                "move_ok": "1",
+            },
+            headers=NAV,
+        )
+        assert r.status_code in (200, 303)
+    finally:
+        await b.aclose()
+
+
+async def test_a_refused_create_or_delete_keeps_the_switches_as_they_are(stack: Stack) -> None:
+    """S-02 (review 0.7.42): a refused New category, Delete or Delete unused carries no row fields,
+    so the panel drawn with the refusal must show the deck's own switches, not all of them off."""
+    _give_categories(stack.ark)
+    b = await linked_browser(stack)
+    try:
+        page, csrf = await _csrf(b)
+        ids = _ids(page)
+        r = await b.http.post(POST, data={"csrf": csrf, "action": "create", "category": "ramp"}, headers=NAV)
+        assert r.status_code == 400
+        assert f"name='premier_{ids['Commander']}' value='1' checked" in r.text
+        assert f"name='not_in_deck_{ids['Maybeboard']}' value='1' checked" in r.text
+    finally:
+        await b.aclose()
+
+
+async def test_delete_unused_over_30_deletes_the_first_30(stack: Stack) -> None:
+    """Security review 0.7.42 S-08: with more than 30 empty categories the page offered a press
+    the 30-change cap always refused."""
+    _give_categories(stack.ark)
+    for i in range(31):
+        stack.ark.decks[42]["categories"].append(
+            {"name": f"E{i}", "isPremier": False, "includedInDeck": True}
+        )
+    b = await linked_browser(stack)
+    try:
+        page, csrf = await _csrf(b)
+        assert "Delete unused categories (30 at a time)" in page
+        r = await b.http.post(POST, data={"csrf": csrf, "action": "unused", "confirmed": "1"}, headers=NAV)
+        assert r.status_code == 303, r.text[-500:]
+        assert len(stack.ark.category_deletes) == 30
+        page, _csrf2 = await _csrf(b)
+        assert "Delete unused categories (2)" in page
+    finally:
+        await b.aclose()

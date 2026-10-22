@@ -425,3 +425,66 @@ async def test_the_assistant_creates_deletes_and_deletes_unused_with_the_same_to
         )
     )
     assert p["ok"] is False and "only deletes an empty category" in p["message"], p
+
+
+# -- the security review's findings (release/2026-10-22-0.7.42/security-review) ---------------------
+@pytest.mark.parametrize("target", ["Commander", "Legends"])
+async def test_cards_moved_into_a_commander_category_wait_for_the_press(stack: Stack, target: str) -> None:
+    """S-01: a delete whose cards move into Commander or a Premier category makes them commanders, so
+    it is a commander change: it waits in every mode and the page asks with the commander sentence."""
+    await _ready(stack)
+    stack.ark.decks[42]["categories"].append(
+        {"name": "Legends", "isPremier": True, "includedInDeck": True, "includedInPrice": True}
+    )
+    p = await _svc(stack).propose_categories(
+        SUB, "42", [{"action": "delete", "category": "Ramp", "move_cards_to": target}]
+    )
+    assert modes.category_wait(p["rows"]) == modes.CATEGORY_COMMANDER_REASON
+    assert modes.auto_waits("categories", p["rows"]) == modes.CATEGORY_COMMANDER_REASON
+    assert modes.hand_edit_confirm("categories", p["rows"]) == modes.CATEGORY_COMMANDER_CONFIRM
+
+
+async def test_each_delete_reads_the_deck_again_just_before(stack: Stack) -> None:
+    """Security review 0.7.42 S-05: the deletes read the deck once and then sent every DELETE in
+    turn, so a card filed under a later category in between (on archidekt.com, a collaborator,
+    another tab) was not seen and that category was deleted with its cards."""
+    await _ready(stack)
+    ark, svc = stack.ark, _svc(stack)
+    for name in ("Old", "Spare"):
+        ark.decks[42]["categories"].append({"name": name, "isPremier": False, "includedInDeck": True})
+    p = await svc.propose_categories(SUB, "42", [], delete_unused=True)
+    real = svc.client.delete_category
+    sent: list[int] = []
+
+    async def delete_then_someone_files(token, deck_id, cid):  # noqa: ANN001, ANN202
+        await real(token, deck_id, cid)
+        sent.append(cid)
+        if len(sent) == 1:  # after the first DELETE, before the next: a card is filed under "Spare"
+            ark.decks[42]["cards"][0]["categories"] = ["Spare"]
+
+    svc.client.delete_category = delete_then_someone_files
+    try:
+        await svc.apply(SUB, p["proposal_id"], via="browser")
+    except Exception:  # noqa: BLE001, S110 - the apply may report the category it left; the fake's record is what counts
+        pass
+    assert ark.category_deletes_with_cards == [], ark.category_deletes_with_cards
+    assert "Spare" in _cats(ark) and "Old" not in _cats(ark), list(_cats(ark))
+    assert len(sent) == len(p["rows"]) - 1, sent  # every other unused category went
+
+
+async def test_a_restore_deletes_only_the_categories_its_review_listed(stack: Stack) -> None:
+    """Security review 0.7.42 S-06: a restore worked its category plan out again when applied,
+    so an empty category made after the review (on archidekt.com) was deleted though no reviewed
+    row said so."""
+    await _ready(stack)
+    ark, svc = stack.ark, _svc(stack)
+    p = await svc.propose_categories(SUB, "42", [{"category": "Ramp", "rename_to": "Mana"}])
+    done = await svc.apply(SUB, p["proposal_id"], via="browser")
+    r = await svc.propose_restore(SUB, done["result"]["snapshot_id"])
+    assert "Removal" not in r["diff"]
+    ark.decks[42]["categories"].append(
+        {"id": 79999, "name": "Removal", "isPremier": False, "includedInDeck": True, "includedInPrice": False}
+    )
+    await svc.apply(SUB, r["proposal_id"], via="browser")
+    assert 79999 not in ark.category_deletes and "Removal" in _cats(ark)
+    assert "Ramp" in _cats(ark) and "Mana" not in _cats(ark)

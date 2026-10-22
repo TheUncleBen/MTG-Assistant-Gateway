@@ -119,3 +119,36 @@ async def test_a_switch_archidekt_ignores_is_not_reported_verified(stack: Stack)
     p = await _propose(h, token, {"action": "set_companion", "name": "Sol Ring", "companion": True})
     a = await apply_any(h, token, p["proposal_id"])
     assert not (a.get("ok") and (a.get("result") or {}).get("verified") is True), a
+
+
+@pytest.mark.parametrize("mode", ["auto", "semi"])
+@pytest.mark.parametrize("cut", ["all", "one"])
+async def test_removing_or_cutting_the_companion_waits_in_every_mode(
+    stack: Stack, mode: str, cut: str
+) -> None:
+    """Security review 0.7.42 S-03: the companion rule covered set_companion only, so a plain
+    remove of the companion card applied in Full auto and the deck lost its companion."""
+    from .test_approval_modes import _set_mode
+
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    await _set_mode(h, mode)
+    row = _row(ark, "Sol Ring")
+    row["companion"] = True
+    row["quantity"] = 2
+    ch = {"action": "remove", "card_name": "Sol Ring", "quantity": 2 if cut == "all" else 1}
+    p = structured(await call(h, token, "propose_deck_changes", {"deck_id": "42", "changes": [ch]}))
+    assert p["ok"], p
+    assert p["assistant_may_apply"] is False and p["risk_reason"] == modes.COMPANION_REASON, p
+    assert "(the deck's companion)" in p["diff"], p["diff"]
+    out = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
+    assert out["ok"] is False and row["companion"] is True, out
+
+
+def test_the_review_page_names_the_companion_on_a_cut_row() -> None:
+    from mtg_gateway.pages import _change_rows
+
+    html_rows, _counts, _net = _change_rows(
+        [{"kind": "remove", "name": "Sol Ring", "qty": 1, "companion_card": True}], ""
+    )
+    assert "Sol Ring (the deck&#x27;s companion)" in html_rows, html_rows

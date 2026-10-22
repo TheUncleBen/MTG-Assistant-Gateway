@@ -842,10 +842,12 @@
           c.type = "hidden"; c.name = name; c.value = value;
           form.appendChild(c);
         }
-        hidden("confirmed", "1");
+        // a picked target is a yes to the delete only: the gateway asks once more on its own page
+        // when the pick makes the cards commanders or changes which cards count
+        var pick = $("select", body);
+        hidden(pick ? "move_ok" : "confirmed", "1");
         // form.submit() sends no button: the pressed one's value goes along by hand
         if (submitter && submitter.name) hidden(submitter.name, submitter.value);
-        var pick = $("select", body);
         if (pick) hidden("move_cards_to", pick.value);
         box.busy(true);
         form.submit();
@@ -855,7 +857,7 @@
   }
   if (cats) cats.addEventListener("submit", function (e) {
     var form = e.target;
-    if (!form.matches || !form.matches("form") || $("input[name=confirmed]", form)) return;
+    if (!form.matches || !form.matches("form") || $("input[name=confirmed], input[name=move_ok]", form)) return;
     var by = e.submitter || null;
     // a row's Delete, and Delete unused: always asked, with where a category's cards go (Archidekt
     // only deletes an empty category, so they move first)

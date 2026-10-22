@@ -1554,7 +1554,7 @@ def _change_rows(rows: list[dict[str, Any]] | None, diff: str) -> tuple[str, dic
         return "".join(out), counts, net
     for r in rows:
         kind = r.get("kind")
-        name = html.escape(row_label(r))
+        name = html.escape(row_label(r) + (" (the deck's companion)" if r.get("companion_card") else ""))
         if kind == "add":
             qty = int(r.get("qty") or 0)
             counts["add"] += 1

@@ -704,6 +704,8 @@ def row_line(r: dict[str, Any]) -> str:
     side = " (maybeboard/sideboard)" if r.get("zone") == "side" else ""
     if kind == "add":
         return f"+{r['qty']} {label}{side}"
+    if kind in ("remove", "change") and r.get("companion_card"):
+        return row_line({**r, "companion_card": None}) + " (the deck's companion)"
     if kind == "remove":
         return f"-{r['qty']} {label}{side}"
     if kind == "change":
@@ -1750,6 +1752,15 @@ def plan_zones(
     lines.extend(cat_lines)
     if not lines:
         raise DeckError("invalid", "these changes would leave the deck exactly as it is")
+    # Cutting the companion card's copies changes the deck's companion as surely as
+    # set_companion does, so the row says so and waits in every mode (security review 0.7.42).
+    companions = {(c.name.lower(), "main" if deck.in_deck(c) else "side") for c in deck.cards if c.companion}
+    for r in lines:
+        cut = r.get("kind") == "remove" or (
+            r.get("kind") == "change" and int(r.get("after") or 0) < int(r.get("before") or 0)
+        )
+        if cut and (str(r.get("name", "")).lower(), r.get("zone") or "main") in companions:
+            r["companion_card"] = True
     # A commander change waits for the member's press in every mode (modes.risk_of, auto_waits).
     # set_commander writes its own row; a card moved into or out of Commander, the commander
     # removed or a card added under Commander changes the commanders as well, so the whole list's
@@ -3502,6 +3513,25 @@ class DeckService:
             if c.get("no_price"):
                 f["includedInPrice"] = False
         category_flags = [f for f in flags.values() if not (f["includedInDeck"] and f["includedInPrice"])]
+        # each is one Create Category call: held to what propose_deck_categories allows
+        if len(category_flags) > MAX_CATEGORY_CHANGES:
+            raise DeckError(
+                "invalid",
+                f"The list flags {len(category_flags)} categories {{noDeck}} or {{noPrice}}; a new deck "
+                f"can make at most {MAX_CATEGORY_CHANGES} with their switches.",
+            )
+        seen: dict[str, str] = {}
+        for f in category_flags:
+            if len(f["name"]) > MAX_CATEGORY:
+                raise DeckError(
+                    "invalid", f"A category name is 1 to {MAX_CATEGORY} characters: “{f['name'][:40]}…”."
+                )
+            other = seen.setdefault(f["name"].casefold(), f["name"])
+            if other != f["name"]:
+                raise DeckError(
+                    "invalid",
+                    f"The categories “{other}” and “{f['name']}” differ only in capitals; use one spelling.",
+                )
         # Maybeboard and sideboard rows (in_deck false) are created too, but not counted as deck cards.
         total = sum(c["quantity"] for c in entries if c.get("in_deck", True))
         side = sum(c["quantity"] for c in entries) - total
@@ -5746,7 +5776,13 @@ class DeckService:
         if payload:
             await self._send(sub, deck.id, payload, progress)
         # categories added since the snapshot go once the cards are back, each only if empty then
-        late = [b for b in bodies if b.get("after_cards")]
+        # only those the member reviewed: one made since the review is no row they saw
+        reviewed = {
+            r.get("id")
+            for r in row.get("rows") or []
+            if r.get("kind") == "deck_category" and r.get("delete") and r.get("id") is not None
+        }
+        late = [b for b in bodies if b.get("after_cards") and b["id"] in reviewed]
         kept = await self._delete_empty_categories(sub, deck.id, late, progress) if late else []
         # The deck's own details as the snapshot recorded them (name, description, format, bracket,
         # private, unlisted), re-derived from the current deck so a detail changed back by hand
@@ -5764,7 +5800,13 @@ class DeckService:
             _left, mismatches = restore_steps(wanted, verified)
         except DeckError as exc:  # the writes were sent: a check that can't be made is a mismatch
             mismatches = [_sentence(exc).rstrip(".")]
-        mismatches = stuck + [m for m in mismatches if m not in stuck]
+        # a category made since the review stays, as no reviewed row deletes it
+        try:
+            left_rows = category_restore_plan(wanted, verified)[1]
+        except DeckError:  # restore_steps above reports what can't be worked out
+            left_rows = []
+        unreviewed = {row_line(r) for r in left_rows if r.get("delete") and r.get("id") not in reviewed}
+        mismatches = stuck + [m for m in mismatches if m not in stuck and m not in unreviewed]
         mismatches += [f"“{b['name']}” (category still has cards, so it was kept)" for b in kept]
         still, _lines = details_rows(verified, snapshot_details(wanted)) if details else ({}, [])
         mismatches += [f"{k} (deck detail)" for k in sorted(still)]
@@ -6736,7 +6778,9 @@ class DeckService:
             ]
             if not unused and not wanted:
                 raise DeckError("invalid", "The deck has no unused categories; nothing would change.")
-            wanted += unused
+            # one proposal deletes the first ones up to the cap; the rest are left for the next
+            room = MAX_CATEGORY_CHANGES - len(wanted)
+            wanted += unused[:room] if room > 0 else unused
             if len(wanted) > MAX_CATEGORY_CHANGES:
                 raise DeckError("invalid", f"at most {MAX_CATEGORY_CHANGES} categories can change at once")
         plan, rows = category_change_rows(deck, wanted)
@@ -6805,21 +6849,22 @@ class DeckService:
     async def _delete_empty_categories(
         self, sub: str, deck_id: str, bodies: list[dict[str, Any]], progress: dict[str, Any]
     ) -> list[dict[str, Any]]:
-        """Send the category deletes in ``bodies`` after a fresh read shows each one empty, as
-        archidekt.com's own pages only ever delete an empty category (what its server does with
-        one that still has cards is unknown, so the gateway never asks). Returns the bodies that
-        were not empty, which are not sent."""
-        if not bodies:
-            return []
-        fresh = await self.get_own_deck(sub, deck_id)
-        names = {s["id"]: s["name"] for s in category_states(fresh) if s["id"] is not None}
-        empty, full = [], []
+        """Send the category deletes in ``bodies``, each just after a fresh read shows it empty,
+        as archidekt.com's own pages only ever delete an empty category (what its server does with
+        one that still has cards is unknown, so the gateway never asks). The deck is read again
+        before every delete: a card filed meanwhile (on archidekt.com, by a collaborator) keeps
+        its category. Returns the bodies that were not empty, which are not sent."""
+        full = []
         for b in bodies:
+            fresh = await self.get_own_deck(sub, deck_id)
+            names = {s["id"]: s["name"] for s in category_states(fresh) if s["id"] is not None}
             name = names.get(b["id"])
             if name is None:
                 continue  # already gone
-            (full if any(name in c.categories for c in fresh.cards) else empty).append({**b, "name": name})
-        await self._send_categories(sub, deck_id, empty, progress)
+            if any(name in c.categories for c in fresh.cards):
+                full.append({**b, "name": name})
+                continue
+            await self._send_categories(sub, deck_id, [{**b, "name": name}], progress)
         return full
 
     async def _apply_categories(
@@ -8137,14 +8182,15 @@ def parse_category_changes(raw: Any) -> list[dict[str, Any]]:
     return out
 
 
-def unused_category_changes(deck: Deck) -> list[dict[str, Any]]:
+def unused_category_changes(deck: Deck, limit: int | None = None) -> list[dict[str, Any]]:
     """archidekt.com's "Delete unused categories": a delete for every category with a record and
-    no card filed under it (``deck_categories``' cards 0)."""
+    no card filed under it (``deck_categories``' cards 0); the first ``limit`` of them when given
+    (one proposal changes at most MAX_CATEGORY_CHANGES categories)."""
     return [
         {"action": "delete", "id": c["id"], "category": c["name"]}
         for c in deck_categories(deck)
         if c["id"] is not None and not c["cards"]
-    ]
+    ][:limit]
 
 
 def _find_category(states: list[dict[str, Any]], w: dict[str, Any]) -> dict[str, Any] | None:
@@ -8377,7 +8423,14 @@ def category_change_rows(
                 delete=True,
                 cards=copies,
                 move_to=move_to,
-                commander=_touches_commander(deck, s) or None,
+                # cards moved into Commander or a Premier category become commanders (S-01)
+                commander=_touches_commander(deck, s)
+                or bool(
+                    moves
+                    and target_state
+                    and (target_state.get("isPremier") or str(move_to).casefold() == COMMANDER.casefold())
+                )
+                or None,
                 counts=counts or None,
             )
         )
