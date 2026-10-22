@@ -24,7 +24,9 @@ show back face switches.
   propose the same. Archidekt only deletes an empty category, so deleting one that still has cards
   asks which category its cards move to, moves them first, and deletes it only after a fresh read
   of the deck just before that delete shows it empty. On Deck settings every delete asks you to
-  confirm. Delete unused categories deletes up to 30 at a time. Deleting Sideboard or Maybeboard,
+  confirm. Delete unused categories deletes up to 30 at a time; as it reads the deck again
+  before each delete, 30 categories take 60 Archidekt calls, roughly one to two minutes at the
+  default pace of 30 calls a minute. Deleting Sideboard or Maybeboard,
   a Premier category or the Commander category is high risk and never applied by an assistant on
   its own. Restore under History makes deleted categories again and puts their cards back, and
   deletes a category added since the snapshot once its cards are gone (only the ones its review

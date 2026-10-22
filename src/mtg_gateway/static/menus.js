@@ -886,6 +886,29 @@
           });
           extra.appendChild(lab);
           extra.appendChild(sel);
+          // the pick itself can make the cards commanders, or take them in or out of the deck:
+          // said here as soon as it is picked (the gateway asks once more on its own page)
+          var warn = el("p", "notice warn");
+          warn.setAttribute("data-move-warn", "");
+          warn.setAttribute("role", "status");
+          var row = function (x) {
+            return $$("li[data-name]", cats).filter(function (li) { return li.getAttribute("data-name") === x; })[0];
+          };
+          var flag = function (li, key) {
+            var c = li && $("input[name^=" + key + "_]", li);
+            return !!(c && c.defaultChecked);
+          };
+          var note = function () {
+            var to = sel.value, li = row(to), from = row(name);
+            var text = "";
+            if (flag(li, "premier") || to.toLowerCase() === "commander") text = cats.getAttribute("data-confirm") || "";
+            else if (flag(li, "not_in_deck") !== flag(from, "not_in_deck")) text = cats.getAttribute("data-counts-confirm") || "";
+            warn.textContent = text;
+            warn.hidden = !text;
+          };
+          sel.addEventListener("change", note);
+          note();
+          extra.appendChild(warn);
         }
       } else {
         extra = el("p", null, "Deletes " + (by.getAttribute("data-names") || "") + ".");

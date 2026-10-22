@@ -8613,6 +8613,16 @@ def category_mismatches(before: Deck, plan: list[dict[str, Any]], after: Deck) -
     named = {s["name"]: s for s in category_states(after)}
     rows_after = {c.relation_id: c for c in after.cards if c.relation_id is not None}
     out: list[str] = []
+    # a create that added a second category of a name (e.g. a record-less Maybeboard given its
+    # record as a new one) is reported as such: only a live run can say what Archidekt does
+    counts: dict[str, int] = {}
+    first: dict[str, str] = {}
+    for s in category_states(after):
+        key = s["name"].casefold()
+        counts[key] = counts.get(key, 0) + 1
+        first.setdefault(key, s["name"])
+    touched = {str((p.get("to") or p.get("was") or {}).get("name", "")).casefold() for p in plan}
+    out += [f"“{first[k]}” (on the deck twice)" for k in sorted(touched) if counts.get(k, 0) > 1]
     # a record created only so it can be renamed is checked by its rename (by the final name)
     renamed_new = {
         p["was"]["name"]

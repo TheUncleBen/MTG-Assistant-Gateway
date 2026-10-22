@@ -488,3 +488,26 @@ async def test_a_restore_deletes_only_the_categories_its_review_listed(stack: St
     await svc.apply(SUB, r["proposal_id"], via="browser")
     assert 79999 not in ark.category_deletes and "Removal" in _cats(ark)
     assert "Ramp" in _cats(ark) and "Mana" not in _cats(ark)
+
+
+async def test_a_record_that_arrives_as_a_second_category_is_not_reported_verified(stack: Stack) -> None:
+    """Fact-check 0.7.42: giving a record-less Maybeboard its record must leave one Maybeboard.
+    The fake gives the first its record, as the research expects; should the live site add a
+    second category of that name instead, the read-back says so rather than "verified"."""
+    await _ready(stack)
+    ark, svc = stack.ark, _svc(stack)
+    ark.category_no_record.add("Maybeboard")
+    ark.category_create_duplicates = True
+    p = await svc.propose_categories(SUB, "42", [{"category": "Maybeboard", "not_in_price": False}])
+    with pytest.raises(DeckError) as err:
+        await svc.apply(SUB, p["proposal_id"], via="browser")
+    assert "“Maybeboard” (on the deck twice)" in str(err.value), err.value
+
+
+async def test_the_shared_category_fixture_gives_one_maybeboard(stack: Stack) -> None:
+    """The 0.7.42 screenshots showed two Maybeboards: the browser fixture's maybeboard row had made
+    one, and _give_categories added another."""
+    stack.ark.add_side_row(42, "Sol Ring")
+    _give_categories(stack.ark)
+    names = [c["name"] for c in stack.ark.decks[42]["categories"]]
+    assert names.count("Maybeboard") == 1, names

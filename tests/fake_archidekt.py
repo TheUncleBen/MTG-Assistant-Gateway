@@ -202,6 +202,9 @@ class FakeArchidekt:
         self.category_deletes_with_cards: list[int] = []
         self.category_no_record: set[str] = set()
         self.category_create_ignored = False
+        # a create for a record-less default that adds a second category of that name instead of
+        # giving the first its record (what the live site does is not known)
+        self.category_create_duplicates = False
         self.category_delete_ignored = False
         self.transport = httpx.MockTransport(self.handle)
 
@@ -272,7 +275,7 @@ class FakeArchidekt:
         hit = next((c for c in deck["categories"] if c["name"] == body["name"]), None)
         if hit is not None and body["name"] not in self.category_no_record:
             return httpx.Response(400, json={"name": [f"Deck already has category named {body['name']}"]})
-        if hit is None:
+        if hit is None or self.category_create_duplicates:
             hit = {"name": body["name"]}
             deck["categories"].append(hit)
         self.category_no_record.discard(body["name"])

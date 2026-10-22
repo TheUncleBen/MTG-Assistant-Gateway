@@ -47,9 +47,14 @@ def _filed(ark: FakeArchidekt, name: str, deck_id: int = 42) -> list[str]:
 def _give_categories(ark: FakeArchidekt) -> None:
     """Deck 42 with a Ramp category holding two cards and a Maybeboard (not in deck or price)."""
     deck = ark.decks[42]
+    have = {c["name"] for c in deck["categories"]}  # a deck with a maybeboard row has one already
     deck["categories"] += [
-        {"name": "Ramp", "isPremier": False, "includedInDeck": True, "includedInPrice": True},
-        {"name": "Maybeboard", "isPremier": False, "includedInDeck": False, "includedInPrice": False},
+        c
+        for c in (
+            {"name": "Ramp", "isPremier": False, "includedInDeck": True, "includedInPrice": True},
+            {"name": "Maybeboard", "isPremier": False, "includedInDeck": False, "includedInPrice": False},
+        )
+        if c["name"] not in have
     ]
     for row in deck["cards"]:
         if row["card"]["oracleCard"]["name"] in RAMP:

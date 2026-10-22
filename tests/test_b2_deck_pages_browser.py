@@ -380,3 +380,37 @@ def test_create_and_delete_categories_ask_in_the_box(server: Server, width: int,
         assert page.locator("#categories li[data-name='Ramp']").count() == 0
         assert not errors, errors
         browser.close()
+
+
+def test_the_delete_box_says_when_the_picked_category_makes_the_cards_commanders(server: Server) -> None:
+    """Fact-check 0.7.42 (S-01's box): moving a deleted category's cards into Commander (or another
+    Premier category) makes them commanders, and into Maybeboard takes them out of the deck; the box
+    says so as soon as that category is picked, not only on the page that asks again after."""
+    from playwright.sync_api import sync_playwright
+
+    from mtg_gateway import modes
+
+    from .test_deck_categories import _give_categories
+
+    _give_categories(server.ark)
+    server.ark.decks[42]["categories"].append({"name": "Removal", "isPremier": False, "includedInDeck": True})
+    _chromium()
+    sid = server.sign_in_and_link()
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, 1280)
+        page.goto(f"{server.base}/decks/42/settings", wait_until="networkidle")
+        page.locator("#categories li[data-name='Ramp'] button.del").click()
+        box = page.locator(".mtgbox[role=dialog]:not([hidden])")
+        box.wait_for(timeout=3000)
+        warn = box.locator("[data-move-warn]")
+        for target, says in (
+            ("Commander", modes.CATEGORY_COMMANDER_CONFIRM),
+            ("Maybeboard", modes.CATEGORY_COUNTS_CONFIRM),
+            ("Removal", ""),
+        ):
+            box.locator("select").select_option(target)
+            assert warn.inner_text().strip() == says, (target, warn.inner_text())
+            assert (warn.get_attribute("role") == "status") and warn.is_visible() == bool(says)
+        assert server.ark.category_deletes == []
+        assert not errors, errors
+        browser.close()
