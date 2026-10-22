@@ -111,6 +111,7 @@ class FakeArchidekt:
         }
         self.calls: list[tuple[str, str]] = []
         self.collection_posts: list[dict[str, Any]] = []  # the bodies of collection creates, as sent
+        self.collection_queries: list[dict[str, str]] = []  # each collection listing's query, as sent
         # Answers given before the normal handling, one per request, in order: an int status (with
         # an optional Retry-After) or an exception to raise, e.g. httpx.ReadTimeout.
         self.inject: list[tuple[int | Exception, str | None]] = []
@@ -182,7 +183,57 @@ class FakeArchidekt:
         self.next_tag_rel_id = 90000
         self.deleted: list[int] = []
         self.mass_updates: list[dict[str, Any]] = []
+        # Deck categories (2026-10-21, CATEGORIES-RESEARCH.md): each gets a record id on first read,
+        # as live decks carry one; PATCH /decks/category/{id}/ bodies, as sent, land here.
+        self.next_category_id = 70000
+        self.category_patches: list[dict[str, Any]] = []
+        # Faults a verify must catch: a rename whose cards keep the old name (the research expects
+        # them to follow; only a live test can say), and flags the server does not keep.
+        self.category_rename_leaves_cards = False
+        self.category_flags_ignored = False
         self.transport = httpx.MockTransport(self.handle)
+
+    def _category_write(self, request: httpx.Request, who: str, cid: int) -> httpx.Response:
+        """PATCH /decks/category/{id}/ as archidekt.com's deck editor sends it (its bundle, read
+        2026-10-21): the whole category {name, includedInDeck, includedInPrice, isPremier, id}.
+        Behaves as the research expects, which only a live test can confirm: the rename is in
+        place, every card in the category follows the new name, and the flags are kept. A partial
+        body is refused here (only the full body is proven), and so is a name the deck already has
+        (whether the live site refuses or merges is not known; the gateway never sends one)."""
+        if request.method != "PATCH":
+            return httpx.Response(405, json={"detail": f'Method "{request.method}" not allowed.'})
+        for d in self.decks.values():
+            self._category_ids(d)
+        deck = next((d for d in self.decks.values() if any(c["id"] == cid for c in d["categories"])), None)
+        if deck is None:
+            return httpx.Response(404, json={"detail": "Not found."})
+        if deck["owner"]["username"] != who:
+            return httpx.Response(403, json={"detail": "You do not have permission to perform this action."})
+        body = json.loads(request.content)
+        self.category_patches.append({"deck_id": deck["id"], **body})
+        flags = ("includedInDeck", "includedInPrice", "isPremier")
+        if (
+            set(body) != {"name", "id", *flags}
+            or body["id"] != cid
+            or not isinstance(body["name"], str)
+            or not body["name"].strip()
+            or any(not isinstance(body[k], bool) for k in flags)
+        ):
+            return httpx.Response(400, json={"detail": "Invalid category."})
+        cat = next(c for c in deck["categories"] if c["id"] == cid)
+        if any(c is not cat and c["name"] == body["name"] for c in deck["categories"]):
+            return httpx.Response(400, json={"name": [f"Deck already has category named {body['name']}"]})
+        old = cat["name"]
+        if old != body["name"] and not self.category_rename_leaves_cards:
+            for row in deck["cards"]:
+                if row.get("categories"):
+                    row["categories"] = [body["name"] if x == old else x for x in row["categories"]]
+        cat["name"] = body["name"]
+        if not self.category_flags_ignored:
+            for k in flags:
+                cat[k] = body[k]
+        deck["updatedAt"] = "2026-10-04T00:00:00Z"
+        return httpx.Response(200, json=dict(cat))
 
     def add_side_row(self, deck_id: int, name: str, quantity: int = 1, category: str = "Maybeboard") -> None:
         """Give a deck a maybeboard / sideboard row (a category not counted in the deck) holding
@@ -227,9 +278,20 @@ class FakeArchidekt:
             if r["card"]["oracleCard"]["name"].lower() == oracle_name.lower()
         )
 
+    def _category_ids(self, deck: dict[str, Any]) -> None:
+        """Give each of a deck's categories the record id and price flag a live deck carries (the
+        live fixtures' shape: id, name, isPremier, includedInDeck, includedInPrice). Kept on the
+        stored deck, so the id stays the same from read to read."""
+        for c in deck["categories"]:
+            if not isinstance(c.get("id"), int):
+                self.next_category_id += 1
+                c["id"] = self.next_category_id
+            c.setdefault("includedInPrice", c.get("includedInDeck") is not False)
+
     def _deck_for(self, deck: dict[str, Any], who: str | None) -> dict[str, Any]:
         """A deck as the live JSON carries it for one session: owner id, social fields and the
         per-card ``owned`` count."""
+        self._category_ids(deck)
         out = json.loads(json.dumps(deck))
         owner = out["owner"]["username"]
         out["owner"] = {"id": self._user_id(owner), **out["owner"]}
@@ -614,6 +676,11 @@ class FakeArchidekt:
                     hit["editedAt"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
                 return httpx.Response(200, json=hit)
             return httpx.Response(404, json={"detail": "Not found."})
+        if len(parts) == 4 and parts[1:3] == ["decks", "category"] and parts[3].isdigit():
+            return self._category_write(request, who, int(parts[3]))
+        if path == "/api/users/category/" or path.startswith("/api/users/category/"):
+            # the account's category templates: the gateway must never touch them
+            raise AssertionError(f"the gateway called the category templates route {path}")
         if path == "/api/decks/copy/" and request.method == "POST":
             if self.fail_backup:
                 return httpx.Response(503, json={"detail": "Service unavailable."})
@@ -635,6 +702,9 @@ class FakeArchidekt:
                 createdAt=_now_iso(),
             )
             copy["updatedAt"] = copy["createdAt"]
+            for cat in copy["categories"]:  # the copy's categories are records of their own
+                cat.pop("id", None)
+            self._category_ids(copy)
             self.timed.add(self.next_deck_id)
             self.decks[self.next_deck_id] = copy
             self.private.add(self.next_deck_id)
@@ -764,12 +834,16 @@ class FakeArchidekt:
             if int(parts[2]) != self._user_id(who):
                 return httpx.Response(400, json=["No public collection found."])
             rows = list(self.collections.get(who, {}).values())
+            self.collection_queries.append(dict(request.url.params))
             name = request.url.params.get("cardName", "").lower()
             if name:
                 rows = [r for r in rows if name in r["card"]["oracleCard"]["name"].lower()]
             order = request.url.params.get("collectionOrderBy")
             if order == "editionDate":
-                rows.sort(key=lambda r: r["card"]["edition"]["editioncode"])
+                rows.sort(
+                    key=lambda r: r["card"]["edition"]["editioncode"],
+                    reverse=request.url.params.get("orderDirection") == "descending",
+                )
             else:
                 rows.sort(key=lambda r: -r["id"])
             size = int(request.url.params.get("pageSize", "50"))

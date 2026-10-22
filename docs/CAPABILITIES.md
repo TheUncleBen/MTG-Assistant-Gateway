@@ -27,7 +27,7 @@ assistant:
 | --- | --- | --- |
 | Manual, shown as "Ask me every time" (default) | the member presses Approve or Apply | the member presses |
 | Semi-auto, shown as "Apply low-risk changes without asking" | the assistant applies it (`apply_proposal`) | the member presses |
-| Full auto, shown as "Apply deck and collection changes without asking" | the assistant applies it | the assistant applies it, except a restore, a commander change, a new deck, an edit of more than 20 rows (by default), making a deck public or unlisted, and any edit of a description that has formatting, such as bold text, links or pictures: the member presses |
+| Full auto, shown as "Apply deck and collection changes without asking" | the assistant applies it | the assistant applies it, except a restore, a commander change, a new deck, an edit of more than 20 rows (by default), making a deck public or unlisted, a category change that touches the commander or which cards count in the deck, and any edit of a description that has formatting, such as bold text, links or pictures: the member presses |
 
 Low risk (`MTG_AUTO_APPLY_MAX_ROWS` sets the row limit, 5 here): A small edit
 to an existing deck or to your collection: at most 5 card rows, each a card
@@ -36,8 +36,7 @@ custom mana value, no more than 4 copies a row, never a change to which cards
 are the commanders or to the categories of a row in the commander zone, and never fewer copies of a card that has a row in the commander zone and another row, both in the deck or both in the maybeboard or sideboard;
 and a private copy of a deck (a clone), which changes nothing that exists.
 High risk: Everything else: more rows than that, a commander change, a new
-deck, restoring a snapshot, and the deck's details (name, format, bracket,
-description, visibility, folder, tags and cover).
+deck, restoring a snapshot, the deck's details (name, format, bracket, description, visibility, folder, tags and cover), and its categories (a new name, Premier, Not in deck or Not in price).
 Always the member's own press: Actions on your Archidekt account (likes,
 votes, bookmarks, follows, comments, new folders and collaborator changes) and
 deleting a deck are never applied by an assistant: each one waits for your own press, in every mode, on the card in the chat or on its review page (deleting a deck, and an edit of a comment that has formatting: on the review page only). An edit of a description that has formatting is also approved on its review page only.
@@ -64,7 +63,8 @@ A change to one of your decks keeps a snapshot first. Deck and collection change
 | Create a deck from cards, a list, a CSV, the gateway's JSON or a scan | `propose_new_deck` | proposal (high) | |
 | Clone a deck | `propose_clone_deck` | proposal (low) | |
 | Change a deck's name, description, format, bracket, privacy; move it to a folder, add or remove tags, set its cover | `propose_deck_details` | proposal (high) | applied with the same checked calls as the deck settings page |
-| Undo: snapshots and restore (cards and the deck's name, description, format, bracket, privacy) | `list_snapshots`, `get_snapshot`, `propose_restore_snapshot` | proposal (high) | |
+| Rename a deck's categories; switch Premier, Not in deck and Not in price | `propose_deck_categories` | proposal (high) | the same change as the deck settings page's Save categories; one that touches the commander, Not in deck, or a rename to or from Sideboard or Maybeboard waits for the member's press in every mode (and asks to confirm on the settings page too); a backup copy and a snapshot first, read back after; tabs already open on Archidekt keep the old categories until reloaded; creating and deleting categories stays on Archidekt |
+| Undo: snapshots and restore (cards, the deck's categories with their names and flags, and the deck's name, description, format, bracket, privacy) | `list_snapshots`, `get_snapshot`, `propose_restore_snapshot` | proposal (high) | |
 | My collection: read; add or remove cards | `list_collection`, `propose_collection_changes` | proposal | in-chat card like a deck proposal; read back after applying |
 | Like, vote down, bookmark a deck; follow its owner | `propose_deck_social` | proposal (consent) | the same calls as the deck page's buttons; never applied by the assistant in any mode |
 | Read a deck's comments; post, reply, edit or delete your own, vote on others' | `get_deck_comments`, `propose_comment` | proposal (consent) | the full comment text is on the review card; never applied by the assistant in any mode |

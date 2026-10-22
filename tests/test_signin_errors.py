@@ -1,8 +1,10 @@
-"""When the code exchange with the identity provider fails, the sign-in page says which setting
-to check and the log names the provider's error code, without showing either one's secrets."""
+"""When the code exchange with the identity provider fails, the member reads one plain sentence
+(no setting names, no "verify", a Try again button) and the log names the provider's error code
+and the setting to check, without showing either one's secrets."""
 
 from __future__ import annotations
 
+import html
 import logging
 import time
 from pathlib import Path
@@ -11,8 +13,20 @@ from urllib.parse import parse_qs, urlencode, urlparse
 import httpx
 import pytest
 
+from mtg_gateway import smallpage
 from mtg_gateway.oidc import OIDCClient, OIDCError
 from tests.conftest import CLIENT_ID, CLIENT_SECRET, IDP, FakeIdP, Harness, make_settings, running
+
+PLAIN = html.escape(smallpage.SIGNIN_FAILED, quote=False).replace("'", "&#x27;")
+
+
+def _plain_failed_page(r: httpx.Response) -> None:
+    """The one Sign-in failed page: the plain sentence, Try again and Home, nothing for the admin."""
+    assert "<h1>Sign-in failed</h1>" in r.text and PLAIN in r.text
+    assert "<a class='btn btn-primary' href='/login'>Try again</a>" in r.text
+    assert "<a class='btn btn-plain' href='/'>Home</a>" in r.text
+    for word in ("MTG_OIDC", "verify", "Signing Key", "Confidential", "redirect URI", "clocks"):
+        assert word not in r.text, word
 
 
 async def _browser_signin(h: Harness, *, code: str | None = None) -> httpx.Response:
@@ -36,53 +50,65 @@ async def h(tmp_path: Path, idp: FakeIdP):
         yield harness
 
 
-async def test_wrong_client_secret_names_the_client_settings(h: Harness, caplog: pytest.LogCaptureFixture):
+async def test_wrong_client_secret_names_the_client_settings_in_the_log(
+    h: Harness, caplog: pytest.LogCaptureFixture
+):
     h.oidc._client_secret = "not-the-secret"
     with caplog.at_level(logging.WARNING):
         r = await _browser_signin(h)
     assert r.status_code == 500
-    assert "refused the gateway&#x27;s client ID or client secret" in r.text
-    assert "MTG_OIDC_CLIENT_SECRET_FILE" in r.text
+    _plain_failed_page(r)
     assert "not-the-secret" not in r.text and CLIENT_SECRET not in r.text
     assert "rejected the code exchange (HTTP 401, invalid_client)" in caplog.text
+    assert "refused the gateway's client ID or client secret" in caplog.text
+    assert "MTG_OIDC_CLIENT_SECRET_FILE" in caplog.text and "Confidential" in caplog.text
     assert "not-the-secret" not in caplog.text
 
 
-async def test_refused_code_says_try_again_and_check_redirect(h: Harness, caplog: pytest.LogCaptureFixture):
+async def test_refused_code_tells_the_log_to_check_the_redirect(h: Harness, caplog: pytest.LogCaptureFixture):
     with caplog.at_level(logging.WARNING):
         r = await _browser_signin(h, code="made-up")
     assert r.status_code == 500
-    assert "refused the sign-in code" in r.text and "redirect URI" in r.text
+    _plain_failed_page(r)
     assert "(HTTP 400, invalid_grant)" in caplog.text
+    assert "refused the sign-in code" in caplog.text and "redirect URI" in caplog.text
 
 
-async def test_hs256_id_token_points_at_the_signing_key(
+async def test_hs256_id_token_points_the_log_at_the_signing_key(
     h: Harness, idp: FakeIdP, caplog: pytest.LogCaptureFixture
 ):
     idp.id_token_alg = "HS256"
     with caplog.at_level(logging.WARNING):
         r = await _browser_signin(h)
     assert r.status_code == 500
-    assert "has a Signing Key" in r.text
+    _plain_failed_page(r)
+    assert "has a Signing Key" in caplog.text
     assert "signed with HS256, which the gateway refuses" in caplog.text
     assert h.db.get_user("user-1") is None
 
 
-async def test_expired_id_token_names_the_clocks(h: Harness, idp: FakeIdP, caplog: pytest.LogCaptureFixture):
+async def test_expired_id_token_names_the_clocks_in_the_log(
+    h: Harness, idp: FakeIdP, caplog: pytest.LogCaptureFixture
+):
     now = int(time.time())
     idp.id_token_claims = {"iat": now - 7200, "exp": now - 3600}
     with caplog.at_level(logging.WARNING):
         r = await _browser_signin(h)
     assert r.status_code == 500
-    assert "clocks are right" in r.text
+    _plain_failed_page(r)
+    assert "clocks are right" in caplog.text
     assert "ID token validation failed: ExpiredTokenError" in caplog.text
 
 
-async def test_provider_down_says_try_again_later(h: Harness, idp: FakeIdP):
+async def test_provider_down_is_the_same_plain_page(
+    h: Harness, idp: FakeIdP, caplog: pytest.LogCaptureFixture
+):
     idp.down = True
-    r = await _browser_signin(h)
+    with caplog.at_level(logging.WARNING):
+        r = await _browser_signin(h)
     assert r.status_code == 500
-    assert "no usable answer from the identity provider" in r.text
+    _plain_failed_page(r)
+    assert "no usable answer from the identity provider" in caplog.text
 
 
 async def test_unreachable_token_endpoint_is_unreachable():

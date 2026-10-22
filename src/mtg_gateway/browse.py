@@ -17,6 +17,7 @@ names in its ``featured`` URL; no Archidekt image is loaded.
 from __future__ import annotations
 
 import logging
+import re
 from typing import TYPE_CHECKING, Annotated, Any, Literal
 from urllib.parse import urlencode
 
@@ -24,7 +25,7 @@ from pydantic import Field
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
-from . import prefs
+from . import prefs, ui
 from . import searchpanel as sp
 from .archidekt import FORMAT_IDS, FORMAT_NAMES, SEARCH_ORDERS, format_label, list_row
 from .busy import busy_response
@@ -37,7 +38,7 @@ from .deckpage import (
     deck_list_html,
 )
 from .decks import DeckError, _clean_deck_id
-from .pages import _csrf, browser_session, login_redirect
+from .pages import NO_STORE, _csrf, browser_session, login_redirect
 from .theme import display_name, icon, render, stylesheet_link
 from .theme import esc as _esc
 
@@ -77,7 +78,11 @@ COLOURS = (("W", "White"), ("U", "Blue"), ("B", "Black"), ("R", "Red"), ("G", "G
 # colours; "Including these" (the default) searches without Archidekt's colour filter and keeps
 # the decks whose colours include every picked colour, from each page's colour pips (Archidekt has
 # no search for either).
-COLOUR_MODES = sp.DECK_COLOUR_MODES
+COLOUR_MODES = (
+    ("incl", "Including these colors"),
+    ("exact", "Exactly these colors"),
+    ("atmost", "At most these colors"),
+)
 # the sort direction: Automatic is Archidekt's own way for the order (newest first, the biggest
 # first, the lowest bracket first); the other way sends the order without its leading "-" (the
 # ordering parameter's standard form, so far not tried live with this gateway)
@@ -92,12 +97,6 @@ BROWSE_CSS = """
 /* the deck search: the shared panel (theme.SEARCH_PANEL_CSS); its Commander and Owner boxes */
 .spanel .fgrid > .fg.cmd{--gw:220px}
 .spanel .fgrid > .fg.who{--gw:160px}
-.results-head{display:flex;justify-content:space-between;align-items:baseline;gap:1rem;flex-wrap:wrap;
-  margin:0 0 .75rem}
-.results-head .muted{margin:0}
-.results-head h2,.results-head .muted{min-width:0;overflow-wrap:anywhere}
-.pager{display:flex;justify-content:center;align-items:center;gap:.5rem;margin:1rem 0}
-.pager .btn{margin:0}
 /* Avatar, name and the social row: the name block takes the room and wraps a long unbroken name;
    the social row keeps its own size (Follow ellipsises inside it) and drops under the name when the
    two no longer fit side by side, so neither squeezes the other (a 64-character name). */
@@ -129,13 +128,36 @@ BROWSE_CSS = """
     border:1px solid var(--border)}
 .popular a:hover{border-color:var(--orange);color:var(--orange)}
 .popular a.precons{gap:.4rem;font-weight:700}
-.preconset summary{display:flex;align-items:center;justify-content:space-between;gap:1rem;cursor:pointer;
-  font-weight:700;font-size:1.1rem;padding:.25rem 0}
-.preconset[open] summary{margin-bottom:.75rem}
-.preconset .decklist{margin-bottom:0}
-.listbar .controls{display:flex;flex-wrap:wrap;gap:1rem;align-items:end}
-.listbar .controls .field{margin:0}
-.listbar .controls .grow{flex:1 1 min(100%,16rem);min-width:0}
+/* the preconstructed decks: a heading per set, the first row of tiles until Show all */
+.precons .pre-grp{margin:0 0 1.25rem}
+.precons .pre-gh{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:.5rem 1rem;
+  margin:0 0 .6rem}
+.precons .pre-gh h2{margin:0;font-size:1.15rem;min-width:0;overflow-wrap:anywhere}
+.precons .pre-gh .code{color:var(--text-muted);font-weight:400}
+.precons .pre-gh .n{color:var(--text-muted);font-weight:400;font-size:.92rem;white-space:nowrap}
+.precons .pre-gh .pre-all{margin:0}
+.precons .pre-all[hidden]{display:none}
+.precons .pre-grp:not(.open) ul.decklist.grid{grid-template-rows:auto;grid-auto-rows:0;row-gap:0;
+  overflow:hidden}
+.precons .pre-grp:not(.open) ul.decklist.list > :nth-child(n+4){display:none}
+.precons .pre-grp ul.decklist{margin-bottom:0}
+.precons .pre-grp ul.decklist > li[hidden]{display:none}
+.precons ul.decklist .info .avatar{display:none}
+.precons .pre-none{margin:0 0 1rem}
+.precons .sp-xlink-sm{display:none;margin:.75rem 0 0}
+@media (max-width:599.98px){ .precons .sp-xlink-sm{display:block} .precons .sp-xlink-sm .btn{margin:0} }
+.precons .loadmore,.profile-page .loadmore{display:flex;flex-direction:column;align-items:center;gap:.4rem;
+  margin:.5rem 0 1.25rem}
+.precons .loadmore .btn,.profile-page .loadmore .btn{margin:0;min-width:12rem}
+.precons .loadmore p,.profile-page .loadmore p{margin:0}
+/* a profile: the results bar alone in the panel; the follow question's buttons are 44 px */
+.profile .who h1{font-size:1.5rem;margin:0}
+.profile .who .sub{margin:0}
+.profile .social .confirm button{height:auto;min-height:var(--ctl);padding:0 .9rem;
+  border-radius:var(--radius)}
+.profile .social .confirm{border-radius:var(--radius);padding:.3rem .4rem .3rem .85rem}
+@media (max-width:599.98px){ .profile .social .confirm > span:first-child{flex-basis:100%} }
+.profile-page .spanel .rbar.prof{margin-top:0}
 """
 
 
@@ -236,8 +258,8 @@ def count_text(found: dict[str, Any] | None, query: dict[str, Any], *, shown: in
     if query.get("colors") and query.get("colour_mode") != "atmost":
         return f"{shown} deck{'' if shown == 1 else 's'}"
     count = found.get("count")
-    if not isinstance(count, int):
-        return "Decks"
+    if not isinstance(count, int) or count < 0:
+        return f"{shown} deck{'' if shown == 1 else 's'}"
     return f"About {count:,} decks" if count >= 1000 else f"{count} deck{'' if count == 1 else 's'}"
 
 
@@ -336,14 +358,16 @@ def deck_items_html(rows: list[dict[str, Any]]) -> str:
     )
 
 
-def search_results_html(found: dict[str, Any], query: dict[str, Any], *, view: str) -> str:
+def search_results_html(
+    found: dict[str, Any], query: dict[str, Any], *, view: str, empty_text: str = ""
+) -> str:
     """The first page of a search, then "Load more decks" (static/search.js appends the next
-    page), which says so when Archidekt's cap is reached."""
+    page), which says so when Archidekt's cap is reached. ``empty_text``: the words when nothing
+    was found (a profile has no filters to try fewer of)."""
     rows = found["decks"]
     if not rows:
-        return (
-            "<section class='panel'><p class='muted'>No public decks match. Try fewer filters.</p></section>"
-        )
+        words = empty_text or "No public decks match. Try fewer filters."
+        return f"<section class='panel'><p class='muted'>{_esc(words)}</p></section>"
     more = bool(found.get("has_more"))
     at_cap = more and query["page"] >= MAX_PAGES
     # the search these results are of, for Load more (the form may change without being sent)
@@ -353,40 +377,235 @@ def search_results_html(found: dict[str, Any], query: dict[str, Any], *, view: s
         + f"<div class='loadmore' id='s-more' data-page='{query['page']}' data-max='{MAX_PAGES}' "
         f"data-qs='{_esc(shown_qs)}'"
         + ("" if more else " hidden")
-        + f"><button type='button' class='btn' data-more{' hidden' if at_cap else ''}>Load more decks"
-        "</button>"
+        + f"><button type='button' class='btn btn-plain' data-more{' hidden' if at_cap else ''}>Load more "
+        "decks</button>"
         f"<p class='muted'{'' if at_cap else ' hidden'}>{_esc(LIMIT_NOTE)}</p></div>"
     )
 
 
-def results_html(found: dict[str, Any], query: dict[str, Any], *, heading: str) -> str:
-    """A profile's decks: the heading with the count, the tiles and the page links."""
-    rows = found["decks"]
-    covers = {
-        r["id"]: {"scryfall_uid": r.get("featured_scryfall_id")}
-        for r in rows
-        if r.get("featured_scryfall_id")
+# -- preconstructed decks (UI overhaul 2026-10-21, mockup 21-precons) ----------------------------
+PRECON_PURPOSE = "Archidekt's preconstructed decks, newest set first."
+PRECON_SETS = 4  # set groups a page shows before Load more sets (a screenful plus a few rows)
+PRECON_DECKS = 24  # decks a page shows when sorted by name
+PRECON_SORTS = (("set", "Set release"), ("name", "Deck name"))
+PRECON_DIRS = (("desc", "Descending"), ("asc", "Ascending"))
+_SET_KEY = re.compile(r"^(?P<name>.*?)\s*\((?P<code>[A-Za-z0-9]{2,8})\)\s*$")
+
+
+def precon_query(qp: Any) -> dict[str, Any]:
+    """The precons page's address: name filter, set, sort and direction, how many sets (or
+    decks, sorted by name) are shown."""
+    sort = qp.get("sort") if qp.get("sort") in dict(PRECON_SORTS) else "set"
+    direction = qp.get("dir") if qp.get("dir") in dict(PRECON_DIRS) else "desc"
+
+    def num(key: str, default: int, cap: int) -> int:
+        try:
+            return max(0, min(int(qp.get(key) or default), cap))
+        except ValueError:
+            return default
+
+    return {
+        "q": (qp.get("q") or "").strip()[:80],
+        "set": (qp.get("set") or "").strip()[:120],
+        "sort": sort,
+        "dir": direction,
+        "sets": num("sets", PRECON_SETS, 10_000),
+        "offset": num("offset", 0, 1_000_000),
     }
-    count = found.get("count")
-    if isinstance(count, int):
-        about = f"About {count:,} decks" if count >= 1000 else f"{count} deck{'' if count == 1 else 's'}"
-    else:
-        about = ""
-    head = f"<div class='results-head'><h2>{_esc(heading)}</h2><p class='muted'>{_esc(about)}</p></div>"
-    if not rows:
-        return (
-            head + "<section class='panel'><p class='muted'>No public decks match. Try fewer filters.</p>"
-            "</section>"
+
+
+def precon_link(pq: dict[str, Any], view: str | None = None, *, api: bool = False, **over: Any) -> str:
+    q = {**pq, **over}
+    params: dict[str, Any] = {}
+    if q["q"]:
+        params["q"] = q["q"]
+    if q["set"]:
+        params["set"] = q["set"]
+    if q["sort"] != "set":
+        params["sort"] = q["sort"]
+    if q["dir"] != "desc":
+        params["dir"] = q["dir"]
+    if view:
+        params["view"] = view
+    if q["sort"] == "name":
+        if q["offset"]:
+            params["offset"] = q["offset"]
+    elif q["sets"] != PRECON_SETS:
+        params["sets"] = q["sets"]
+    base = "/precons/api/sets" if api else "/precons"
+    return base + ("?" + urlencode(params) if params else "")
+
+
+def _set_parts(key: str) -> tuple[str, str]:
+    m = _SET_KEY.match(key)
+    return (m.group("name"), m.group("code").upper()) if m else (key, "")
+
+
+def precon_groups(listing: dict[str, list[dict[str, Any]]], pq: dict[str, Any]) -> list[dict[str, Any]]:
+    """The sets that match the filter, each with its matching decks, in the asked direction."""
+    ql = pq["q"].lower()
+    out = []
+    for key, raw_rows in listing.items():
+        if pq["set"] and key != pq["set"]:
+            continue
+        name, code = _set_parts(key)
+        rows = [list_row(d) for d in raw_rows]
+        if ql and ql not in key.lower():
+            rows = [r for r in rows if ql in r["name"].lower()]
+        if rows:
+            out.append({"key": key, "name": name, "code": code, "rows": rows})
+    return out if pq["dir"] == "desc" else list(reversed(out))
+
+
+def precon_group_html(group: dict[str, Any], *, view: str, open: bool) -> str:
+    """One set: its heading (name, code, count), the Show all button (hidden until the page's
+    script finds a row hidden) and the deck tiles."""
+    rows = group["rows"]
+    n = len(rows)
+    code = f" <span class='code'>({_esc(group['code'])})</span>" if group["code"] else ""
+    return (
+        f"<section class='pre-grp{' open' if open else ''}' aria-label='{_esc(group['name'])}'>"
+        f"<div class='pre-gh'><h2 class='sec'>{_esc(group['name'])}{code} <span class='n'>{n} "
+        f"{'deck' if n == 1 else 'decks'}</span></h2>"
+        + (
+            ""
+            if open
+            else f"<button type='button' class='btn btn-plain pre-all' data-n='{n}' hidden "
+            f"aria-expanded='false'>Show all {n}</button>"
         )
-    body = deck_list_html(rows, covers=covers, view="grid", show_owner=True)
-    pager = "<nav class='pager' aria-label='Pages'>"
-    if query["page"] > 1:
-        pager += f"<a class='btn' href='{_esc(search_link(query, page=query['page'] - 1))}'>Previous</a>"
-    pager += f"<span class='muted small'>Page {query['page']}</span>"
-    if found.get("has_more") and query["page"] < MAX_PAGES:
-        pager += f"<a class='btn' href='{_esc(search_link(query, page=query['page'] + 1))}'>Next</a>"
-    pager += "</nav>"
-    return head + body + pager
+        + "</div>"
+        + deck_list_html(rows, covers=covers_for(rows), view=view, plain=True)
+        + "</section>"
+    )
+
+
+def precon_count_text(groups: list[dict[str, Any]], listing: dict[str, Any], pq: dict[str, Any]) -> str:
+    total = sum(len(v) for v in listing.values())
+    sets = sum(1 for v in listing.values() if v)
+    shown = sum(len(g["rows"]) for g in groups)
+    if pq["q"] or pq["set"]:
+        return f"{shown} of {total} decks"
+    return f"{total} {'deck' if total == 1 else 'decks'} in {sets} {'set' if sets == 1 else 'sets'}"
+
+
+def precon_body(
+    groups: list[dict[str, Any]],
+    listing: dict[str, Any],
+    pq: dict[str, Any],
+    *,
+    view: str,
+    view_in_link: str | None,
+) -> tuple[str, str]:
+    """The groups (or one grid sorted by name) the address shows and the Load more under them.
+    Returns (html, next_href)."""
+    filtering = bool(pq["q"] or pq["set"])
+    if not groups:
+        return "<p class='muted pre-none'>No preconstructed deck matches that filter.</p>", ""
+    if pq["sort"] == "name":
+        decks = sorted((r for g in groups for r in g["rows"]), key=lambda r: r["name"].casefold())
+        if pq["dir"] == "desc":
+            decks.reverse()
+        rows = decks[pq["offset"] : pq["offset"] + PRECON_DECKS]
+        shown = pq["offset"] + len(rows)
+        html = (
+            "<section class='pre-grp open'>"
+            + deck_list_html(rows, covers=covers_for(rows), view=view)
+            + "</section>"
+        )
+        if shown < len(decks):
+            nxt = precon_link(pq, view_in_link, offset=shown)
+            return html + ui.load_more(nxt, text="Load more decks", shown=shown, total=len(decks)), nxt
+        return html + ui.load_more("", done=f"All {len(decks)} decks shown."), ""
+    shown_groups = groups[: pq["sets"]]
+    html = "".join(precon_group_html(g, view=view, open=filtering) for g in shown_groups)
+    if len(shown_groups) < len(groups):
+        nxt = precon_link(pq, view_in_link, sets=pq["sets"] + PRECON_SETS)
+        return html + ui.load_more(
+            nxt, text="Load more sets", shown=len(shown_groups), total=len(groups)
+        ), nxt
+    return html + ui.load_more(
+        "", done=f"All {len(groups)} {'set' if len(groups) == 1 else 'sets'} shown."
+    ), ""
+
+
+def precon_panel_html(listing: dict[str, Any], pq: dict[str, Any], *, view: str, count: str) -> str:
+    """Deck search's panel for the precons: the name box with Search all decks, a Set drop-down
+    (in the Filters sheet on phones), and the results bar."""
+    all_link = "/search" + (f"?{urlencode({'name': pq['q']})}" if pq["q"] else "")
+    sets = [("", "All sets")] + [(key, key) for key in listing]
+    groups = sp.filter_grid(
+        [
+            sp.select_group(
+                label="Set", name="set", options=sets, value=pq["set"], input_id="pre-set", cls="setf"
+            )
+        ]
+    ) + (
+        f"<p class='sp-xlink-sm'><a class='btn btn-plain' href='{_esc(all_link)}'>{icon('search')} "
+        "Search all "
+        "decks</a></p>"
+    )
+    bar = sp.results_bar(
+        count_html=sp.count_html(count, count_id="pre-count"),
+        sort_html=sp.sort_group(
+            order_name="sort",
+            orders=PRECON_SORTS,
+            order=pq["sort"],
+            order_id="pre-sort",
+            dir_name="dir",
+            dirs=PRECON_DIRS,
+            direction=pq["dir"],
+        ),
+        view_html=sp.view_group(view),
+        clear_html="<a class='btn sp-clear clr' href='/precons'>Clear filters</a>",
+        cls="pub",
+    )
+    return (
+        "<section class='panel spanel'>"
+        "<form method='get' action='/precons' id='searchform' data-apply='submit'>"
+        + sp.name_row(
+            label="Set or deck name",
+            name="q",
+            value=pq["q"],
+            placeholder="Ixalan",
+            input_id="pre-q",
+            search_label="Filter",
+            cross_html=sp.cross_link("Search all decks", all_link, "search"),
+        )
+        + sp.filters_sheet(
+            groups,
+            show_html="<button type='submit' class='btn-primary sp-show'>Show decks</button>",
+            clear_html="<a class='btn sp-clear' href='/precons'>Clear filters</a>",
+        )
+        + bar
+        + "<noscript><button type='submit' class='btn apply'>Apply</button></noscript></form></section>"
+    )
+
+
+# -- a member's profile (UI overhaul 2026-10-21, mockup 22-user-profile) -------------------------
+def profile_bar_html(query: dict[str, Any], found: dict[str, Any] | None, *, view: str) -> str:
+    """Deck search's results bar alone: the count, Sort by with its direction, Grid or List and
+    the card size. The form sends itself when a drop-down changes (static/searchpanel.js)."""
+    bar = sp.results_bar(
+        count_html=sp.count_html(
+            count_text(found, query, shown=len(found["decks"]) if found else 0), count_id="s-count"
+        ),
+        sort_html=sp.sort_group(
+            order_name="order",
+            orders=SEARCH_ORDERS.items(),
+            order=query["order_by"],
+            order_id="f-order",
+            dir_name="dir",
+            direction=query["direction"],
+        ),
+        view_html=sp.view_group(view),
+        clear_html="",
+        cls="pub prof",
+    )
+    return (
+        "<section class='panel spanel'><form method='get' id='searchform' data-apply='submit'>"
+        + bar
+        + "<noscript><button type='submit' class='btn apply'>Apply</button></noscript></form></section>"
+    )
 
 
 def add_browse_routes(server: MCPServer, state: AppState) -> None:
@@ -402,6 +621,8 @@ def add_browse_routes(server: MCPServer, state: AppState) -> None:
         current: str = "/search",
         status: int = 200,
         social: bool = False,
+        body_class: str = "",
+        scripts: tuple[str, ...] = (),
     ) -> Response:
         user = state.db.get_user(sub) or {}
         admin = bool(s.admin_group and s.admin_group in (user.get("groups") or []))
@@ -415,6 +636,8 @@ def add_browse_routes(server: MCPServer, state: AppState) -> None:
             admin=admin,
             user=display_name(user),
             wide=True,
+            heading=not body_class,  # the precons and a profile draw their own title
+            body_class=body_class,
             current=current,
             head_extra=f"{stylesheet_link('deck.css')}<style>{BROWSE_CSS}</style>"
             "<script src='/static/deck.js' defer></script>"
@@ -422,7 +645,8 @@ def add_browse_routes(server: MCPServer, state: AppState) -> None:
             "<script src='/static/searchpanel.js' defer></script>"
             "<script src='/static/search.js' defer></script>"
             # the user page's Follow button (static/social.js, the social actions' own file)
-            + ("<script src='/static/social.js' defer></script>" if social else ""),
+            + ("<script src='/static/social.js' defer></script>" if social else "")
+            + "".join(f"<script src='/static/{name}' defer></script>" for name in scripts),
         )
         resp.headers["Content-Security-Policy"] = SEARCH_CSP
         return resp
@@ -536,17 +760,17 @@ def add_browse_routes(server: MCPServer, state: AppState) -> None:
         page, has_more, at_cap}``; ``html`` is the tiles only, which the page appends."""
         sub, _sid = browser_session(state, request)
         if not sub:
-            return JSONResponse({"ok": False, "error": "sign in first"}, status_code=401)
+            return JSONResponse({"ok": False, "error": "sign in first"}, status_code=401, headers=NO_STORE)
         if not prefs.from_this_site(request):  # it asks Archidekt on the member's own allowance
-            return JSONResponse(
-                {"ok": False, "error": "cross_site"}, status_code=403, headers={"Cache-Control": "no-store"}
-            )
+            return JSONResponse({"ok": False, "error": "cross_site"}, status_code=403, headers=NO_STORE)
         query = read_query(request.query_params)
         try:
             found = await run_search(sub, query)
         except DeckError as exc:
             return JSONResponse(
-                {"ok": False, "error": problem(exc)}, status_code=503 if exc.kind != "invalid" else 400
+                {"ok": False, "error": problem(exc)},
+                status_code=503 if exc.kind != "invalid" else 400,
+                headers=NO_STORE,
             )
         more = bool(found.get("has_more"))
         return JSONResponse(
@@ -565,65 +789,63 @@ def add_browse_routes(server: MCPServer, state: AppState) -> None:
     @server.custom_route("/precons", methods=["GET"], include_in_schema=False)
     async def precons_page(request: Request) -> Response:
         """Archidekt's preconstructed decks, grouped by set as the site lists them (newest set
-        first). A filter narrows by set or deck name; every deck opens on the gateway like any
+        first). The name box and the Set drop-down narrow the list; a set shows its first row until
+        Show all; Load more sets brings the next sets. Every deck opens on the gateway like any
         public deck and can be cloned from there."""
         sub, sid = browser_session(state, request)
         if not sub:
             return login_redirect("/precons")
-        q = (request.query_params.get("q") or "").strip()[:80]
+        pq = precon_query(request.query_params)
+        view, remember = view_of(request, sub)
+        view_in_link = view if request.query_params.get("view") in VIEWS else None
+        head = ui.page_head("Preconstructed decks", PRECON_PURPOSE)
         try:
             listing = await decks.precons(sub)
         except DeckError as exc:
             if busy := busy_response(exc, request, page, sub=sub, sid=sid):
                 return busy
             return page(
-                "Preconstructed decks", precons_form(q) + problem(exc), sub=sub, sid=sid, current="/search"
+                "Preconstructed decks",
+                head + precon_panel_html({}, pq, view=view, count="Decks") + problem(exc),
+                sub=sub,
+                sid=sid,
+                current="/search",
+                body_class="precons",
             )
-        sections = []
-        shown = 0
-        for i, (set_name, raw_rows) in enumerate(listing.items()):
-            rows = [list_row(d) for d in raw_rows]
-            if q:
-                ql = q.lower()
-                if ql not in set_name.lower():
-                    rows = [r for r in rows if ql in r["name"].lower()]
-            if not rows:
-                continue
-            shown += len(rows)
-            opened = " open" if q or i < 3 else ""
-            sections.append(
-                f"<details class='panel preconset'{opened}><summary><span class='setname'>{_esc(set_name)}"
-                f"</span><span class='muted small'>{len(rows)} deck{'' if len(rows) == 1 else 's'}</span>"
-                f"</summary>{deck_list_html(rows, covers=covers_for(rows), view='grid')}</details>"
-            )
-        if not sections:
-            sections.append(
-                "<section class='panel'><p class='muted'>No preconstructed deck matches that filter.</p>"
-                "</section>"
-            )
-        total = sum(len(v) for v in listing.values())
-        head = (
-            "<div class='results-head'><h2>By set</h2>"
-            f"<p class='muted'>{shown if q else total} of {total} decks in {len(listing)} sets, as Archidekt "
-            "lists them. Open one to see it here, clone it to your account from its page, or compare it with "
-            "your build.</p></div>"
-        )
-        return page(
+        groups = precon_groups(listing, pq)
+        body, _nxt = precon_body(groups, listing, pq, view=view, view_in_link=view_in_link)
+        count = precon_count_text(groups, listing, pq)
+        resp = page(
             "Preconstructed decks",
-            precons_form(q) + head + "".join(sections),
+            head + precon_panel_html(listing, pq, view=view, count=count) + body,
             sub=sub,
             sid=sid,
             current="/search",
+            body_class="precons",
+            scripts=("precons.js",),
         )
+        return remembered(resp, sub, view, remember)
 
-    def precons_form(q: str) -> str:
-        return (
-            "<section class='panel listbar'><form method='get' action='/precons' class='controls'>"
-            "<div class='field grow'><label for='q'>Filter by set or deck name</label><span class='search'>"
-            f"<input id='q' type='search' name='q' value='{_esc(q)}' placeholder='Example: Bloomburrow'>"
-            f"<button type='submit' aria-label='Filter' title='Filter'>{icon('search')}</button></span></div>"
-            f"<div class='field'><a class='btn' href='/search'>{icon('search')} Search all decks</a></div>"
-            "</form></section>"
+    @server.custom_route("/precons/api/sets", methods=["GET"], include_in_schema=False)
+    async def precons_api(request: Request) -> Response:
+        """The precons as the address lists them, for the page's script (the filter as you type,
+        Load more): ``{ok, html, count, next}``; ``html`` is the groups (or the grid) in full."""
+        sub, _sid = browser_session(state, request)
+        if not sub:
+            return JSONResponse({"ok": False, "error": "sign in first"}, status_code=401, headers=NO_STORE)
+        if not prefs.from_this_site(request):  # it asks Archidekt on the member's own allowance
+            return JSONResponse({"ok": False, "error": "cross_site"}, status_code=403, headers=NO_STORE)
+        pq = precon_query(request.query_params)
+        view = request.query_params.get("view") if request.query_params.get("view") in VIEWS else "grid"
+        try:
+            listing = await decks.precons(sub)
+        except DeckError as exc:
+            return JSONResponse({"ok": False, "error": problem(exc)}, status_code=503, headers=NO_STORE)
+        groups = precon_groups(listing, pq)
+        body, nxt = precon_body(groups, listing, pq, view=view, view_in_link=view)
+        return JSONResponse(
+            {"ok": True, "html": body, "count": precon_count_text(groups, listing, pq), "next": nxt},
+            headers={"Cache-Control": "no-store"},
         )
 
     @server.custom_route("/users/{username}", methods=["GET"], include_in_schema=False)
@@ -638,6 +860,7 @@ def add_browse_routes(server: MCPServer, state: AppState) -> None:
             if request.query_params.get("order") in SEARCH_ORDERS
             else "-updatedAt"
         )
+        view, remember = view_of(request, sub)
         try:
             found = await decks.search_decks(sub, **archidekt_query(query))
         except DeckError as exc:
@@ -645,15 +868,31 @@ def add_browse_routes(server: MCPServer, state: AppState) -> None:
                 return busy
             return page(
                 username,
-                problem(exc),
+                profile_head_html(username, None, sub) + problem(exc),
                 sub=sub,
                 sid=sid,
                 current="/search",
                 status=400 if exc.kind == "invalid" else 502,
+                social=True,
+                body_class="profile-page",
             )
         rows = found["decks"]
         shown = rows[0]["owner"] if rows else username
-        owner_id = rows[0].get("owner_id") if rows else None
+        resp = page(
+            shown,
+            profile_head_html(shown, rows[0].get("owner_id") if rows else None, sub)
+            + profile_bar_html(query, found, view=view)
+            + search_results_html(found, query, view=view, empty_text="No public decks yet."),
+            sub=sub,
+            sid=sid,
+            social=True,
+            body_class="profile-page",
+        )
+        return remembered(resp, sub, view, remember)
+
+    def profile_head_html(shown: str, owner_id: Any, sub: str) -> str:
+        """One header: the avatar, the name as the page title with the line under it, then Follow
+        (44 px; disabled with the reason when writes are off) and the Archidekt profile link."""
         link = state.db.get_link(sub) or {}
         writes = bool(state.settings.writes_enabled)
         follow = (
@@ -673,25 +912,15 @@ def add_browse_routes(server: MCPServer, state: AppState) -> None:
             if follow and not writes
             else ""
         )
-        order_opts = "".join(
-            f"<option value='{_esc(k)}'{' selected' if k == query['order_by'] else ''}>{_esc(v)}</option>"
-            for k, v in SEARCH_ORDERS.items()
-        )
-        head = (
-            f"<section class='panel profile'>{avatar_html(shown, 'xl')}<div class='who'>"
-            f"<span class='uname'>{_esc(shown)}</span>"
-            f"<span class='sub'>{'Public decks on Archidekt' if rows else 'No public decks, or no such user'}"
-            "</span></div>"
+        line = "Public decks on Archidekt" if owner_id else "No public decks, or no such user"
+        return (
+            f"<section class='profile'>{avatar_html(shown, 'xl')}<div class='who'>"
+            f"<h1 class='uname'>{_esc(shown)}</h1><p class='sub'>{line}</p></div>"
             f"<div class='social'>{follow}"
-            f"<a class='btn ext' href='https://archidekt.com/u/{_esc(shown)}' "
+            f"<a class='btn btn-plain ext' href='https://archidekt.com/u/{_esc(shown)}' "
             "target='_blank' rel='noreferrer noopener'>"
             f"{icon('external')} Archidekt profile</a></div>{follow_off}</section>"
-            f"<form method='get' class='panel listbar' id='listform'><div class='controls'>"
-            f"<div class='field'><label for='f-order'>Sort by</label><span class='sel'>{icon('sort')}"
-            f"<select id='f-order' name='order'>{order_opts}</select></span></div>"
-            "<noscript><button type='submit' class='apply'>Apply</button></noscript></div></form>"
         )
-        return page(shown, head + results_html(found, query, heading="Decks"), sub=sub, sid=sid, social=True)
 
 
 def add_browse_tools(server: MCPServer, state: AppState) -> None:

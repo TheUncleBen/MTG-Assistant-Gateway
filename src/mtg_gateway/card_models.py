@@ -404,6 +404,33 @@ class KeptModels:
                 out[str(row["card_key"])] = {**dict(row), "model": model}
         return out
 
+    def mine(self, sub: str) -> list[dict[str, Any]]:
+        """``sub``'s own kept models (name, card_key, added_at, updated_at), the most recently
+        changed first: the My card models list. Nobody else's, whatever the store answers; an
+        older store without the listing, or one that fails, lists nothing."""
+        lister = getattr(self.db, "card_models_of", None)
+        if not self.available or not callable(lister) or not sub:
+            return []
+        try:
+            rows = lister(sub)
+        except Exception:  # a store that cannot be read never breaks a page
+            logger.exception("listing kept card models failed")
+            return []
+        out = []
+        for row in rows or []:
+            r = dict(row)
+            if str(r.get("added_by", sub)) != sub or not r.get("name"):
+                continue
+            out.append(
+                {
+                    "name": str(r["name"]),
+                    "card_key": str(r.get("card_key") or card_key(str(r["name"]))),
+                    "added_at": r.get("added_at"),
+                    "updated_at": r.get("updated_at"),
+                }
+            )
+        return out
+
     def _has(self, sub: str, key: str) -> bool:
         """Whether ``sub`` already keeps a model for ``key``. Raises when the store cannot be read
         (the caller refuses rather than guess)."""

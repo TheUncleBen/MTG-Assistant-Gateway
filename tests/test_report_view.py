@@ -405,3 +405,29 @@ def test_left_out_groups_count_copies_as_their_heading_does() -> None:
     }
     html = rv.honesty_html(g)
     assert "<h4>Removal <small>4</small></h4>" in html
+
+
+def test_the_export_draws_labels_with_icons_like_the_live_report() -> None:
+    """2026-10-21: the HTML export's old lowercase pills ("passed", "your deck", "not run") become the
+    live page's labels: a word, a colour and an icon, with their styles inlined."""
+    import json
+
+    from .test_reports_browser import FORGE_DONE
+
+    forge = json.loads(json.dumps(FORGE_DONE))
+    forge["not_played"] = ["Opt // Back"]
+    r = report(validation=VALIDATION_PASSED, forge=forge, status="complete")
+    doc = rv.report_export_html(r, stats_html="", theme_css="")
+    assert "class='badge" not in doc
+    assert "<span class='ui-lbl green'>" in doc and ">Passed</span>" in doc
+    assert "<span class='ui-lbl grey'>" in doc and ">your deck</span>" in doc
+    assert "<span class='ui-lbl green'>" in doc and ">Complete</span>" in doc  # the status
+    assert ".ui-lbl{display:inline-flex" in doc and ".ui-lbl svg.i{" in doc
+    assert "<h3>Cards Forge left out <small>1</small></h3>" in doc and "Not counted above." in doc
+    assert "Cards Forge could not play" not in doc and ">Opt</p>" in doc  # the front face
+    running = rv.report_export_html(report(forge={**forge, "state": "running"}, status="running"))
+    assert "<span class='ui-lbl orange'>" in running and ">Running</span>" in running
+    failed = rv.report_export_html(report(forge={"state": "failed", "error": "x"}, status="partial"))
+    assert "<span class='ui-lbl red'>" in failed and ">Not run</span>" in failed
+    # the export stays scriptless: no card menus on its names
+    assert "cardlink" not in doc and "<script" not in doc

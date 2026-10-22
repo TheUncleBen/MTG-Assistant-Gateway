@@ -231,6 +231,7 @@ def test_consent_click_guard_defeats_a_double_click_swap(server: Server) -> None
             page.goto(server.authorize_url())
             page.wait_for_selector(APPROVE)
             assert page.is_disabled(APPROVE)
+            page.locator(APPROVE).scroll_into_view_if_needed()  # the panel is taller than 720 px
             box = page.locator(APPROVE).bounding_box()
             assert box is not None
             # The window is swapped in now: a blur stands for it having been away, and the clocks
@@ -326,6 +327,7 @@ def test_consent_on_a_phone_unlocks_with_a_first_tap(server: Server) -> None:
             # (seen in CI; the next test does the same). The clocks restart from here.
             page.evaluate("() => window.dispatchEvent(new Event('blur'))")
             page.wait_for_timeout(1000)
+            page.locator(APPROVE).scroll_into_view_if_needed()  # the panel is taller than 720 px
             box = page.locator(APPROVE).bounding_box()
             assert box is not None
             x, y = box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
@@ -333,7 +335,10 @@ def test_consent_on_a_phone_unlocks_with_a_first_tap(server: Server) -> None:
             page.wait_for_timeout(100)
             assert page.url.startswith(f"{server.base}/authorize/confirm"), page.url
             expect(page.locator(APPROVE)).to_be_enabled(timeout=5000)
-            page.touchscreen.tap(x, y)
+            # The tap on the locked button focused <main>, which scrolled the page a little: aim again.
+            box = page.locator(APPROVE).bounding_box()
+            assert box is not None
+            page.touchscreen.tap(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
             page.wait_for_url(f"{server.outside}/application/o/authorize/**", timeout=10_000)
         finally:
             browser.close()
@@ -368,6 +373,7 @@ def test_consent_unlocking_tap_is_swallowed_even_when_its_click_comes_late(serve
             page.evaluate("(sel) => document.querySelector(sel).click()", APPROVE)
             page.wait_for_timeout(300)
             assert page.url.startswith(f"{server.base}/authorize/confirm"), page.url
+            page.locator(APPROVE).scroll_into_view_if_needed()  # the panel is taller than 720 px
             box = page.locator(APPROVE).bounding_box()
             assert box is not None
             page.touchscreen.tap(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)

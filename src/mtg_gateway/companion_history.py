@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any
 from starlette.requests import Request
 from starlette.responses import RedirectResponse, Response
 
-from . import activity_view, ui
+from . import activity_view, card_models_view, ui
 from .companion import (
     DECKS_JSON_TIMEOUT,
     _filename,
@@ -63,6 +63,11 @@ if TYPE_CHECKING:
 
     from .app import AppState
     from .reports import ReportService
+
+
+# A missing report, or someone else's (NEW-WORDING 34): the shared small-page look.
+REPORT_NOT_FOUND_TITLE = "Report not found"
+REPORT_NOT_FOUND_TEXT = "This report isn't in your history. It may have been deleted."
 
 
 def add_history_routes(
@@ -345,6 +350,38 @@ def add_history_routes(
         except DeckError:
             return None
 
+    def _not_found(sub: str, sid: str | None) -> Response:
+        """A missing report, or someone else's: the shared small-page look, with the way back."""
+        return page(
+            REPORT_NOT_FOUND_TITLE,
+            "<div class='card'>"
+            f"<p>{REPORT_NOT_FOUND_TEXT}</p>"
+            "<div class='actions'><a class='btn btn-primary' href='/history'>Back to History</a></div></div>",
+            sub=sub,
+            sid=sid,
+            status=404,
+        )
+
+    def _card_types(names: list[Any]) -> dict[str, str]:
+        """The type lines the gateway already holds for these cards (the scanner's Scryfall cache,
+        read in memory): nothing is fetched for a report page. Unknown cards show their name alone."""
+        scan = getattr(state, "scan", None)
+        client = getattr(scan, "scryfall", None)
+        cache = getattr(client, "cards", None)
+        if cache is None or not hasattr(cache, "get"):
+            return {}
+        out: dict[str, str] = {}
+        for raw in names:
+            name = str(raw or "").strip()
+            if not name:
+                continue
+            for key in (f"named:e::{name.lower()}", f"named:f::{name.lower()}"):
+                hit = cache.get(key)
+                if isinstance(hit, dict) and hit.get("type_line"):
+                    out[name] = str(hit["type_line"])
+                    break
+        return out
+
     @server.custom_route("/history/reports/{rid}", methods=["GET"], include_in_schema=False)
     async def report_page(request: Request) -> Response:
         """One stored report as a page a person reads: the deck, the headline numbers of the goldfish
@@ -356,13 +393,7 @@ def add_history_routes(
         rid = request.path_params["rid"]
         r = _report_or_404(sub, rid)
         if r is None:
-            return page(
-                "Report",
-                "<div class='card'><p>No such report for your account.</p></div>",
-                sub=sub,
-                sid=sid,
-                status=404,
-            )
+            return _not_found(sub, sid)
         safe = _esc(rid)
         md = report_markdown(r)
         # the export buttons as plain buttons at the header's end
@@ -396,6 +427,18 @@ def add_history_routes(
             notice, kind = _esc(refused), "notice warn"
         from .report_page import REPORT_PAGE_CSS, report_page_html
 
+        # the member's own saved descriptions, as a box the mentions open (card_models_view)
+        my_models = (
+            card_models_view.box_html(
+                reports.models.mine(sub), csrf=_csrf(s, sid) or "", back=f"/history/reports/{safe}"
+            )
+            if reports.models.available
+            else ""
+        )
+        left_out: list[Any] = []
+        for block in (r.get("forge"), r.get("forge_solo")):
+            if isinstance(block, dict) and isinstance(block.get("not_played"), list):
+                left_out += block["not_played"]
         body = report_page_html(
             r,
             stats_html=stats_strip(r.get("stats")),
@@ -404,6 +447,8 @@ def add_history_routes(
             reused=request.query_params.get("reused") == "1",
             removable=mine,
             csrf=_csrf(s, sid) or "",
+            card_types=_card_types(left_out) if left_out else {},
+            my_models=my_models,
         )
         return page(
             f"Report: {r['deck_name']}",
@@ -412,10 +457,77 @@ def add_history_routes(
             sid=sid,
             heading=False,
             current="/reports",
-            extra_scripts=("export.js", "forge-live.js"),
-            extra_css=REPORT_CSS + REPORT_PAGE_CSS,
+            viewer_only=True,  # the card viewer for "Open card" on the left-out cards (report.js)
+            extra_scripts=("export.js", "forge-live.js", "report.js", "cardmodels.js"),
+            extra_css=REPORT_CSS + REPORT_PAGE_CSS + card_models_view.CSS,
             main_class="ui-wide",
         )
+
+    # -- My card models: the member's own saved descriptions (card_models_view) -------------------
+    @server.custom_route(card_models_view.PAGE, methods=["GET"], include_in_schema=False)
+    async def my_models_page(request: Request) -> Response:
+        """The box as a page of its own (the opener's address without scripts): the list open,
+        ``?remove=`` a card's confirm open, ``?models=`` the notice after a Remove."""
+        sub, sid = browser_session(state, request)
+        if not sub:
+            return login_redirect(card_models_view.PAGE)
+        if not reports.models.available:
+            return Response(status_code=404)
+        qp = request.query_params
+        mine = reports.models.mine(sub)
+        remove = str(qp.get("remove") or "")[:286]
+        if remove and remove.casefold() not in {m["name"].casefold() for m in mine}:
+            remove = ""  # only a card of the member's own list gets a confirm
+        from .report_view import MODEL_NOTICES
+
+        notice = MODEL_NOTICES.get(qp.get("models") or "", "")
+        kind = "error" if qp.get("models") == "error" else "ok"
+        body = (ui.notice(notice, kind, role="status") if notice else "") + card_models_view.box_html(
+            mine, csrf=_csrf(s, sid) or "", back=card_models_view.PAGE, open=True, remove=remove
+        )
+        return page(
+            card_models_view.TITLE,
+            body,
+            sub=sub,
+            sid=sid,
+            heading=False,
+            current="/reports",
+            viewer_only=True,
+            extra_scripts=("cardmodels.js",),
+            extra_css=card_models_view.CSS,
+        )
+
+    @server.custom_route(card_models_view.REMOVE_ACTION, methods=["POST"], include_in_schema=False)
+    async def my_model_remove(request: Request) -> Response:
+        """Remove from My card models: the same removal and words as the report page's, then back to
+        the page the box was opened from (one of the member's own pages) with the notice."""
+        sub, sid = browser_session(state, request)
+        if not sub:
+            return login_redirect(card_models_view.PAGE)
+        if not reports.models.available:
+            return Response(status_code=404)
+        data = await form(request)
+        if not check_csrf(sid, data):
+            return page(
+                card_models_view.TITLE,
+                "<p class='notice error'>This form expired. Reload and try again.</p>",
+                sub=sub,
+                sid=sid,
+                status=403,
+            )
+        back = card_models_view.safe_back(data.get("back"))
+        outcome = _remove_model(sub, str(data.get("card") or ""))
+        sep = "&" if "?" in back else "?"
+        return RedirectResponse(f"{back}{sep}models={outcome}", status_code=303)
+
+    def _remove_model(sub: str, card: str) -> str:
+        """Remove the member's own saved description of ``card``: removed, gone or error."""
+        from .card_models import StoreError
+
+        try:
+            return "removed" if reports.models.remove(sub, card) else "gone"
+        except StoreError:
+            return "error"
 
     @server.custom_route("/history/reports/{rid}/models/remove", methods=["POST"], include_in_schema=False)
     async def report_model_remove(request: Request) -> Response:
@@ -438,19 +550,8 @@ def add_history_routes(
                 status=403,
             )
         if _report_or_404(sub, rid) is None:
-            return page(
-                "Report",
-                "<div class='card'><p>No such report for your account.</p></div>",
-                sub=sub,
-                sid=sid,
-                status=404,
-            )
-        from .card_models import StoreError
-
-        try:
-            outcome = "removed" if reports.models.remove(sub, str(data.get("card") or "")) else "gone"
-        except StoreError:
-            outcome = "error"
+            return _not_found(sub, sid)
+        outcome = _remove_model(sub, str(data.get("card") or ""))
         return RedirectResponse(f"/history/reports/{_esc(rid)}?models={outcome}", status_code=303)
 
     def _more_notices() -> dict[str, str]:
@@ -479,13 +580,7 @@ def add_history_routes(
             await reports.play_more(sub, rid)
         except DeckError as exc:
             if exc.kind == "not_found":
-                return page(
-                    "Report",
-                    "<div class='card'><p>No such report for your account.</p></div>",
-                    sub=sub,
-                    sid=sid,
-                    status=404,
-                )
+                return _not_found(sub, sid)
             code = next((k for k, v in _more_notices().items() if v == str(exc)), "")
             if not code:
                 raise
@@ -512,7 +607,7 @@ def add_history_routes(
             return login_redirect("/history")
         r = _report_or_404(sub, request.path_params["rid"])
         if r is None:
-            return Response("No such report for your account.", 404)
+            return _not_found(sub, _sid)
         return _report_file(r, ".md", report_markdown(r), "text/markdown; charset=utf-8")
 
     @server.custom_route("/history/reports/{rid}/export.html", methods=["GET"], include_in_schema=False)
@@ -523,7 +618,7 @@ def add_history_routes(
             return login_redirect("/history")
         r = _report_or_404(sub, request.path_params["rid"])
         if r is None:
-            return Response("No such report for your account.", 404)
+            return _not_found(sub, _sid)
         html_doc = report_export_html(r, stats_html=stats_strip(r.get("stats")), theme_css=VIZ_CSS)
         resp = _report_file(r, ".html", html_doc, "text/html; charset=utf-8")
         resp.headers["Content-Security-Policy"] = (

@@ -24,6 +24,25 @@ from .archidekt import Deck
 #: Stored reasons of a "needs a look" status; shown in words by ``reason_text``.
 REASON_CHANGED = "changed"  # a strict kind: the deck changed at all
 REASON_DURING_APPLY = "during_apply"  # the deck changed while an apply was getting ready
+RENAMED = "renamed:"  # "renamed:<old>|<new>": a category the change names was renamed since
+
+
+def renamed_reason(row: dict[str, Any], renamed: dict[str, str]) -> str | None:
+    """The stored "needs a look" reason of a waiting card edit that files a card under a category
+    renamed since (``renamed``: old name -> new name), or None. Applied as it stands, such an edit
+    would make the old name again with default switches, so it is reviewed again first (N-1)."""
+    if row.get("kind", "edit") != "edit" or not renamed:
+        return None
+    olds = {o.casefold(): (o, n) for o, n in renamed.items()}
+    for ch in row.get("changes") or []:
+        if not isinstance(ch, dict):
+            continue
+        for cat in [ch.get("category"), *(ch.get("categories") or [])]:
+            hit = olds.get(str(cat or "").casefold())
+            if hit:
+                return f"{RENAMED}{hit[0]}|{hit[1]}"
+    return None
+
 
 ORGANISE_ROW_FIELDS = ("folder", "tags", "cover")
 
@@ -83,7 +102,10 @@ def rows_now(svc: Any, sub: str, row: dict[str, Any], deck: Deck) -> list[dict[s
 def check(svc: Any, sub: str, row: dict[str, Any], deck: Deck) -> tuple[str | None, str | None]:
     """(status, reason) of a waiting change against ``deck``: (None, None) when the deck is the
     one it was made from, ("updated", None) when it still does exactly what was reviewed, else
-    ("needs_look", reason)."""
+    ("needs_look", reason). A card edit marked after a category it names was renamed
+    (``renamed_reason``) keeps that mark: as it stands it would make the old name again."""
+    if row.get("status") == "needs_look" and str(row.get("status_reason") or "").startswith(RENAMED):
+        return "needs_look", str(row["status_reason"])
     if deck.fingerprint() == row.get("baseline_fingerprint"):
         return None, None
     try:
@@ -126,6 +148,12 @@ def reason_text(reason: str | None) -> str:
     """A stored "needs a look" or hold reason in words, for the pages, the card and the
     assistant."""
     r = str(reason or "")
+    if r.startswith(RENAMED):
+        old, _sep, new = r[len(RENAMED) :].partition("|")
+        return (
+            f"The category “{old}” was renamed to “{new}” since this was made. Applied as it stands, "
+            f"it would make a new category “{old}”."
+        )
     if r == REASON_CHANGED:
         return "The deck changed on Archidekt since this was made."
     if r == REASON_DURING_APPLY:

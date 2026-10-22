@@ -104,8 +104,10 @@ def test_stored_codes_read_as_the_standard_words() -> None:
         ui.label_for("nonsense")
 
 
-def test_refused_is_red_with_the_alert_icon_for_activity_pages() -> None:
-    assert ui.label_for("refused") == f"<span class='ui-lbl red'>{theme.icon('alert')}Refused</span>"
+def test_refused_is_red_with_the_ban_icon_for_activity_pages() -> None:
+    # the ban sign, so Refused differs from Failed (the alert sign) by icon as well as by word
+    assert ui.label_for("refused") == f"<span class='ui-lbl red'>{theme.icon('ban')}Refused</span>"
+    assert theme.icon("ban") != theme.icon("alert")
     assert "refused" not in ui.STATUS_KEYS and "refused" not in ui.RISK_KEYS
 
 
@@ -120,8 +122,16 @@ def test_label_options_and_escaping() -> None:
 
 
 def test_app_chip_names_the_app_and_never_guesses() -> None:
-    assert ui.app_chip("Claude") == "<span class='ui-app'><i aria-hidden='true'>C</i>Claude</span>"
-    assert ui.app_chip("ChatGPT") == "<span class='ui-app'><i aria-hidden='true'>G</i>ChatGPT</span>"
+    # 2026-10-21 (Ben): the app's full name beside its mark (Claude, ChatGPT: the official files,
+    # tests/test_app_logos.py) or the one neutral icon for any other app; never initials
+    plug = theme.icon("app")
+    assert ui.app_chip("Claude", client_id="https://claude.ai/oauth/c.json").endswith(
+        "alt='' width='16' height='16'><span class='nm'>Claude</span></span>"
+    )
+    assert ui.app_chip("ChatGPT", client_id="https://chatgpt.com/oauth/c.json").endswith(
+        "alt='' width='16' height='16'><span class='nm'>ChatGPT</span></span>"
+    )
+    assert ui.app_chip("Forge") == f"<span class='ui-app'>{plug}<span class='nm'>Forge</span></span>"
     assert "&lt;script&gt;" in ui.app_chip("<script>")
     for none in (None, "", "  "):
         out = ui.app_chip(none)

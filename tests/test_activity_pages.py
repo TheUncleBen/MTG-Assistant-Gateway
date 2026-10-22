@@ -130,7 +130,7 @@ async def test_admin_activity_names_labels_apps_and_members(gw: Harness) -> None
         assert "A reused assistant token was refused" in reuse
         assert "<span class='k'>family</span> f-3" in reuse
         assert "<a href='/admin/activity?sub=user-2'>bram</a>" in reuse
-        assert "<i aria-hidden='true'>C</i>Claude</span>" in reuse
+        assert "<span class='nm'>Claude</span></span>" in reuse
         failed = _row(page, "proposal_failed")
         assert (
             "Failed</span>" in failed
@@ -154,12 +154,12 @@ async def test_admin_activity_names_labels_apps_and_members(gw: Harness) -> None
         disable = _row(page, "admin_disable")
         assert "ui-lbl" not in disable and "<path d='M12 3l8 3v6" not in disable or True
         assert "Account disabled" in disable and "<span class='k'>account</span> eve" in disable
-        assert "<i aria-hidden='true'>W</i>Website</span>" in disable
+        assert "<span class='nm'>Website</span></span>" in disable
         assert "Admin</span>" not in _table(page)  # no "Admin" label word
         # the technical name is in the row's details
         assert "<dt>Event</dt><dd><code>admin_disable</code></dd>" in disable
-        unknown = _row(page, "login_rejected_group")
-        assert "<span class='none'>unknown</span>" in unknown
+        nobody = _row(page, "login_rejected_group")
+        assert "<span class='none'>No member</span>" in nobody and "unknown" not in nobody
         # the member filter: the member's rows and the admin's actions on their account
         only = (await b.http.get("/admin/activity?sub=user-5", headers=NAVIGATE)).text
         assert "title='admin_disable'" in only and "title='refresh_reuse_detected'" not in only
@@ -192,8 +192,13 @@ async def test_admin_activity_chips_filters_search_and_widgets(gw: Harness) -> N
     try:
         page = (await b.http.get("/admin/activity", headers=NAVIGATE)).text
         chips = page.split("<nav class='ui-chips' aria-label='Show'>", 1)[1].split("</nav>", 1)[0]
-        assert "href='/admin/activity?kind=refused'>Refused <span class='n'>1</span>" in chips
-        assert "href='/admin/activity?kind=failed'>Failed <span class='n'>1</span>" in chips
+        # Refused and Failed carry their icons (the ban sign and the alert sign) on the chips too
+        assert "href='/admin/activity?kind=refused'><svg class='i'" in chips
+        refused = chips.split("kind=refused'>", 1)[1].split("</a>", 1)[0]
+        assert refused.endswith("Refused <span class='n'>1</span>")
+        assert "href='/admin/activity?kind=failed'><svg class='i'" in chips
+        failed = chips.split("kind=failed'>", 1)[1].split("</a>", 1)[0]
+        assert failed.endswith("Failed <span class='n'>1</span>")
         assert "Admin actions <span class='n'>1</span>" in chips
         assert "aria-current='true'>All" in chips
         widgets = page.split("<section class='ui-widgets'", 1)[1].split("</section>", 1)[0]
@@ -206,6 +211,10 @@ async def test_admin_activity_chips_filters_search_and_widgets(gw: Harness) -> N
         assert _table(refused).count("<div class='tr ev") == 1 and "title='approval_refused'" in refused
         problems = (await b.http.get("/admin/activity?kind=problems&time=7d", headers=NAVIGATE)).text
         assert _table(problems).count("<div class='tr ev") == 2
+        # the "Refused or failed" quick start marks both chips as current (the fix Ben picked)
+        pchips = problems.split("<nav class='ui-chips' aria-label='Show'>", 1)[1].split("</nav>", 1)[0]
+        assert pchips.count("aria-current='true'") == 2
+        assert "aria-current='true'>" in pchips.split("Refused")[0] and "Failed <span" in pchips
         week = (await b.http.get("/admin/activity?time=7d&sub=user-2", headers=NAVIGATE)).text
         assert _table(week).count("<div class='tr ev") == 4
         none = (await b.http.get("/admin/activity?app=none&sub=user-2", headers=NAVIGATE)).text
@@ -274,7 +283,7 @@ async def test_my_activity_has_every_row_in_words_without_ids(gw: Harness) -> No
         assert "rate_limited" not in table  # the code is not even a tooltip on the member's page
         assert "Open the proposal to see why" in words and "error rate_limited" not in words
         assert "An administrator revoked your assistants' access and your sign-ins" in words
-        assert "By an administrator" in words and "<i aria-hidden='true'>A</i>Administrator</span>" in table
+        assert "By an administrator" in words and "<span class='nm'>Administrator</span></span>" in table
         assert "During deck sync" in words and "1 card row" in words
         assert "<span class='ui-app none' title='No app'>" in table
         assert "claude-app" not in page and "__browser__" not in page and "client id" not in page

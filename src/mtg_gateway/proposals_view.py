@@ -86,7 +86,7 @@ EXPIRE_SOON = 2 * 86400  # an "expires in" flag under two days left, as before
 # Changes that are not edits to one of the member's decks ("Not tied to one of your decks").
 _UNTIED_KINDS = ("create_deck", "clone", "collection")
 _DECK_ACTIONS = ("collaborator_add", "collaborator_remove", "delete_deck")
-UNDO_KINDS = ("edit", "details", "restore")
+UNDO_KINDS = ("edit", "details", "restore", "categories")
 
 # Waiting table: tick box, change, risk, status, from, made, the open link.
 WAIT_COLS = (
@@ -197,9 +197,20 @@ def gather(state: Any, sub: str, *, now: float | None = None) -> dict[str, Any]:
     db, decks = state.db, state.decks
     names = Names(db)
     waiting_rows = db.pending_board(sub)  # holds what must be held first; oldest first
+    index = db.proposal_index(sub)
+    # the links and app names the rows ask for one by one: read once for the whole page
+    ids = [r["id"] for r in waiting_rows] + [r["id"] for r in index]
+    clients = [r.get("created_by_client") for r in index] + [r.get("amended_by_client") for r in index]
+    with db.read_ahead(sub, ids, clients):
+        return _gathered(db, decks, names, sub, now, waiting_rows, index)
+
+
+def _gathered(
+    db: Any, decks: Any, names: Names, sub: str, now: float, waiting_rows: list, index: list
+) -> dict:
     lines = {r["id"]: line_for(db, sub, r) for r in waiting_rows}
     items: list[dict[str, Any]] = []
-    for r in db.proposal_index(sub):
+    for r in index:
         seen = "expired" if r["state"] == "pending" and int(r["expires_at"] or 0) < now else r["state"]
         risk, why = r.get("risk"), ""
         if r["state"] in ("pending", "applying"):
@@ -222,6 +233,7 @@ def gather(state: Any, sub: str, *, now: float | None = None) -> dict[str, Any]:
             "risk": risk,
             "risk_why": why,
             "app": app,
+            "client": r.get("created_by_client"),
             "from": Names.key(app),
             "created_at": int(r.get("created_at") or 0),
             "expires_at": int(r.get("expires_at") or 0),
@@ -424,6 +436,11 @@ def _status_label(it: dict[str, Any]) -> str:
     return ui.status_label(key, title=tip)
 
 
+def _chip(it: dict[str, Any]) -> str:
+    """The row's app chip, its mark by the client that made it (ui.client_brand)."""
+    return ui.app_chip(it["app"], client_id=it.get("client"))
+
+
 def _risk_label(it: dict[str, Any]) -> str:
     if it["risk"] == UNJUDGED:
         return ui.no_risk_label()
@@ -496,7 +513,7 @@ def waiting_row(it: dict[str, Any], *, group: str, now: float, checked: bool, op
     title = (
         f"<label class='title' for='{esc(box)}'><span class='t'>{num}{esc(it['summary'])}"
         f"<span class='stin'>{_status_label(it)}</span></span>{_waiting_flags(it, now)}"
-        f"<span class='sub'>{_risk_label(it)}{ui.app_chip(it['app'])}{ui.when(it['created_at'], now=now)}"
+        f"<span class='sub'>{_risk_label(it)}{_chip(it)}{ui.when(it['created_at'], now=now)}"
         "</span></label>"
     )
     cls = "tr" + (" sel" if checked else "") + (" open" if it["id"] == open_id else "")
@@ -504,7 +521,7 @@ def waiting_row(it: dict[str, Any], *, group: str, now: float, checked: bool, op
         f"<div class='{cls}'{_deck_attr(it)}>{chk}{title}"
         f"<label class='md-hide' for='{esc(box)}'>{_risk_label(it)}</label>"
         f"<label class='sm-hide' for='{esc(box)}'>{_status_label(it)}</label>"
-        f"<label class='md-hide' for='{esc(box)}'>{ui.app_chip(it['app'])}</label>"
+        f"<label class='md-hide' for='{esc(box)}'>{_chip(it)}</label>"
         f"<label class='md-hide' for='{esc(box)}'>{ui.when(it['created_at'], now=now)}</label>"
         f"<input type='hidden' name='v_{pid}' value='{int(it['version'])}'>"
         + ui.open_link(f"/proposals/{it['id']}{qs}", "Review")
@@ -580,11 +597,11 @@ def list_row(
         f"<a class='t' href='/proposals/{esc(it['id'])}{esc(qs)}'>"
         f"{num}{esc(it['summary'])}</a><span class='deck'>{esc(_deck_line(it))}"
         f"<span class='stin'>{_status_label(it)}</span></span>"
-        f"<span class='sub'>{_risk_label(it)}{ui.app_chip(it['app'])}{ui.when(it['created_at'], now=now)}{sm}"
+        f"<span class='sub'>{_risk_label(it)}{_chip(it)}{ui.when(it['created_at'], now=now)}{sm}"
         "</span></span>"
         f"<span class='md-hide'>{_risk_label(it)}</span>"
         f"<span class='sm-hide'>{_status_label(it)}{flag}</span>"
-        f"<span class='md-hide'>{ui.app_chip(it['app'])}</span>"
+        f"<span class='md-hide'>{_chip(it)}</span>"
         f"<span class='md-hide'>{ui.when(it['created_at'], now=now)}</span></div>"
     )
 

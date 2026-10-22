@@ -42,7 +42,7 @@ from starlette.responses import JSONResponse, Response
 from starlette.routing import Route, request_response
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from . import __version__, theme
+from . import __version__, smallpage, theme, ui
 from .admin import add_admin_routes
 from .api import add_api_routes
 from .app_page import PROJECT_URL, add_app_routes
@@ -227,6 +227,7 @@ WRITE_TOOLS = frozenset(
         "propose_deck_changes",
         "propose_restore_snapshot",
         "propose_deck_details",
+        "propose_deck_categories",
         "propose_clone_deck",
         # the Archidekt account actions (actions.py): proposals too, even though none of them is
         # ever applied by an assistant
@@ -441,18 +442,28 @@ class LoginCookieMiddleware:
         q = parse_qs(urlsplit(location).query)
         error = (q.get("error") or ["invalid_request"])[0][:60]
         host = urlsplit(location).hostname or ""
-        body = (
-            f"<p>The application's sign-in request was refused ({html.escape(error)}). "
-            "Start again from the application.</p>"
+        # The OAuth error code is for whoever runs the gateway: the log, not the page.
+        logger.warning("app sign-in request refused (%s); the app returns to %s", error, host or "no host")
+        body = smallpage.panel(
+            "Sign-in failed",
+            smallpage.p(smallpage.REFUSED)
             + (
-                f"<p class='small'>The request came from an application that returns to "
+                "<div class='notice warn'>The request came from an app that returns to "
                 f"<code>{html.escape(host)}</code>. <a href='{html.escape(location)}' rel='noreferrer'>"
-                "Go back to it</a> only if you expected that address.</p>"
+                "Go back to it</a> only if you expected that address.</div>"
                 if host
                 else ""
-            )
+            ),
+            smallpage.home(),
         )
-        return render("Sign-in failed", body, site=self.provider.settings.server_name, status=400)
+        return render(
+            "Sign-in failed",
+            body,
+            site=self.provider.settings.server_name,
+            status=400,
+            heading=False,
+            head_extra=smallpage.HEAD,
+        )
 
 
 _LOGIN_KEY = re.compile(r"[A-Za-z0-9_-]{43}")
@@ -598,13 +609,19 @@ class MembershipMiddleware:
         outcomes = [await checker.check(sub) for sub in sorted(self._subjects(scope))]
         if Membership.UNAVAILABLE in outcomes:
             request = Request(scope)
-            message = "The sign-in service can't be reached to confirm your access. Try again later."
+            message = smallpage.IDP_UNREACHABLE
             if _wants_page(request):
                 resp: Response = render(
                     "Try again later",
-                    f"<div class='card'><p>{message}</p></div>",
+                    smallpage.panel(
+                        "Try again later",
+                        smallpage.p(message),
+                        smallpage.button("Try again", _same_url(request), primary=True),
+                    ),
                     site=self.state.settings.server_name,
                     status=503,
+                    heading=False,
+                    head_extra=smallpage.HEAD,
                     **_shell_for(self.state, request),
                 )
             else:
@@ -956,6 +973,8 @@ def create_app(
     db.upgrade_keep_days = settings.backup_keep_days
     db.age_out_upgrade_copies()
     db.reconcile_upgrade_copies()
+    # the app chips show an official mark only for an app verified by where it comes from (ui.py)
+    ui.use_client_info(db.get_client)
     theme.PUBLIC_URL = settings.public_url.rstrip("/")  # link previews point at the site's icon
     theme.WATCHLISTS = settings.watchlists_enabled  # the Watchlist links and price buttons
     oidc = oidc or OIDCClient(
@@ -1069,6 +1088,14 @@ def _shell_for(state: AppState, request: Request) -> dict[str, Any]:
         return {}
 
 
+def _same_url(request: Request) -> str:
+    """This request's path and query, for a Try again link. Leading slashes and backslashes fold
+    into one "/", so a request for ``//other.example/x`` never makes a protocol-relative link to
+    another site (L-1)."""
+    path = "/" + request.url.path.lstrip("/\\")
+    return path + (f"?{request.url.query}" if request.url.query else "")
+
+
 def _wants_page(request: Request) -> bool:
     path = request.url.path
     if path.startswith(_MACHINE_PREFIXES):
@@ -1087,11 +1114,15 @@ def _friendly_errors(app: Starlette, state: AppState) -> None:
         if _wants_page(request):
             return render(
                 "Page not found",
-                "<div class='card'><p>There's nothing at this address. The link may be old or mistyped.</p>"
-                "<div class='actions'><a class='btn btn-primary' href='/decks'>Go to my decks</a>"
-                "<a class='btn' href='/'>Home</a></div></div>",
+                smallpage.panel(
+                    "Page not found",
+                    smallpage.p("There's nothing at this address. The link may be old or mistyped."),
+                    smallpage.button("Go to my decks", "/decks", primary=True) + smallpage.home(),
+                ),
                 site=site,
                 status=404,
+                heading=False,
+                head_extra=smallpage.HEAD,
                 **_shell_for(state, request),
             )
         return JSONResponse(
@@ -1104,14 +1135,21 @@ def _friendly_errors(app: Starlette, state: AppState) -> None:
         if _wants_page(request):
             return render(
                 "Something went wrong",
-                "<div class='card'><p>The gateway hit an unexpected problem and didn't finish this request. "
-                "If you were changing a deck, check its page or your proposals before trying again: "
-                "nothing is applied twice.</p><p class='muted small'>The details were written to the "
-                "gateway's log for whoever runs it.</p><div class='actions'>"
-                "<a class='btn btn-primary' href=''>Try again</a><a class='btn' href='/decks'>Go to my decks"
-                "</a></div></div>",
+                smallpage.panel(
+                    "Something went wrong",
+                    smallpage.p(
+                        "The gateway hit an unexpected problem and didn't finish this request. If you were "
+                        "changing a deck, check its page or your proposals before trying again: nothing is "
+                        "applied twice."
+                    )
+                    + smallpage.small("The details were written to the gateway's log for whoever runs it."),
+                    smallpage.button("Try again", _same_url(request), primary=True)
+                    + smallpage.button("Go to my decks", "/decks"),
+                ),
                 site=site,
                 status=500,
+                heading=False,
+                head_extra=smallpage.HEAD,
                 **_shell_for(state, request),
             )
         return JSONResponse(

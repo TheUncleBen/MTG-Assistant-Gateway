@@ -42,6 +42,9 @@ BUSY_TEXTS = {
         "for now. Nothing is wrong with your decks or your account; try again later."
     ),
 }
+# When the member's own allowance or turns ran out (not Archidekt's own pause), the title says so.
+TOO_MANY_TITLE = "Too many requests right now"
+MEMBER_CAUSES = frozenset({"member_slots", "budget"})
 UNREACHABLE_TITLE = "Archidekt can't be reached right now"
 UNREACHABLE_TEXT = (
     "The gateway could not get an answer from Archidekt (or the research service). This usually "
@@ -90,10 +93,13 @@ def busy_plan(exc: BaseException) -> BusyPlan | None:
     retry = getattr(exc, "retry_after", None)
     if not isinstance(retry, int) or isinstance(retry, bool) or retry < 1:
         retry = DEFAULT_RETRY_AFTER
-    text = _TEXT[kind]
+    text, title = _TEXT[kind], _TITLE[kind]
     if kind == "rate_limited":
-        text = BUSY_TEXTS.get(busy_cause(exc) or "", text)
-    return BusyPlan(kind, _TITLE[kind], text, _STATUS[kind], min(retry, 3600), str(exc))
+        cause = busy_cause(exc) or ""
+        text = BUSY_TEXTS.get(cause, text)
+        if cause in MEMBER_CAUSES:
+            title = TOO_MANY_TITLE
+    return BusyPlan(kind, title, text, _STATUS[kind], min(retry, 3600), str(exc))
 
 
 def _headers(plan: BusyPlan) -> dict[str, str]:

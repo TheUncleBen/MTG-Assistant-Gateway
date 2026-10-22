@@ -107,7 +107,16 @@ def test_one_orange_button_and_a_red_outline_remove(monkeypatch: pytest.MonkeyPa
     html = rp.report_page_html(r, csrf="tok", removable=frozenset({"sol ring"}))
     assert html.count("btn-primary") == 1
     assert "<div id='forge-more' class='rv-more'>" in html and "class='btn-primary'>" in html
-    assert "class='btn-outline-danger' aria-label='Remove the saved description of Sol Ring'" in html
+    # the red-outline Remove opens the page's confirm box first (POPUP-INVENTORY: a remove asks first);
+    # without scripts the button still submits its form, as before
+    assert (
+        "class='btn-outline-danger' data-box-open='rm-model-sol-ring' "
+        "aria-label='Remove the saved description of Sol Ring'" in html
+    )
+    assert "id='rm-model-sol-ring' role='dialog'" in html
+    assert "<h2 id='rm-model-sol-ring-title'>Remove the saved description of “Sol Ring”?</h2>" in html
+    assert "<button type='submit' class='danger' form='rm-model-sol-ring-f'>" in html
+    assert html.count("class='danger'") == 1  # the box's final button is the one solid red
 
 
 @pytest.fixture

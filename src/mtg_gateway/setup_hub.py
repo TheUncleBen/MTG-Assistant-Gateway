@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, Any
 from starlette.requests import Request
 from starlette.responses import PlainTextResponse, Response
 
+from . import ui
 from .app_page import APK_NAME, RELEASES_URL, android_facts
 from .pages import _csrf, browser_session, login_redirect
 from .plugin_page import (
@@ -322,7 +323,7 @@ def section(key: str, ctx: Context) -> Section:
                         Step(
                             f"Press **Connect to Claude**. It opens claude.ai with the name (`{site}`) and "
                             "the connector URL filled in.",
-                            link=Link("Connect to Claude", claude_connect_link(pub, site)),
+                            link=Link("Connect to Claude", claude_connect_link(pub, site), icon="external"),
                         ),
                         Step("Check the name and URL, then continue."),
                         Step("Under **OAuth client**, if asked, choose **Use Claude's published identity**."),
@@ -338,7 +339,12 @@ def section(key: str, ctx: Context) -> Section:
                     steps=(
                         Step(
                             "Download the plugin. Do not unzip it.",
-                            link=Link("Download the plugin (ZIP)", f"{pub}/plugin/{name}.zip"),
+                            link=Link(
+                                "Download the plugin (ZIP)",
+                                f"{pub}/plugin/{name}.zip",
+                                primary=False,
+                                icon="download",
+                            ),
                         ),
                         Step("On claude.ai or in the desktop app, open **Customize**, then **Plugins**."),
                         Step("Press **Add**, then **Upload plugin**, and choose the ZIP file."),
@@ -526,7 +532,9 @@ def section(key: str, ctx: Context) -> Section:
                     steps=(
                         Step(
                             "Download the skill (sign in first). Do not unzip it.",
-                            link=Link("Download the skill (ZIP)", f"{pub}/skill/mtg-gateway.zip"),
+                            link=Link(
+                                "Download the skill (ZIP)", f"{pub}/skill/mtg-gateway.zip", icon="download"
+                            ),
                         ),
                         Step(
                             "In Claude's settings, open **Capabilities** and turn on **Code execution and "
@@ -598,12 +606,8 @@ def _android(ctx: Context) -> Section:
                 Block(
                     "No app file on this gateway",
                     paras=(
-                        "Whoever runs this gateway has not added the Android app file yet, so there is "
-                        "nothing to download here. Everything works in your phone's browser in the "
-                        "meantime: open this address and add it to your home screen.",
-                        "If you run the gateway: build the app from the project repository "
-                        "(docs/ANDROID.md) and put the file where docs/DEPLOY.md describes; this section "
-                        "then offers it.",
+                        "The person who runs this gateway hasn't added the app file yet. In the meantime, "
+                        f"open **{ctx.public_url}** in your phone's browser and add it to your home screen.",
                     ),
                     link=Link("Back to decks", "/decks", primary=False),
                 ),
@@ -632,7 +636,7 @@ def _android(ctx: Context) -> Section:
                 steps=(
                     Step(
                         "Press **Download the app (APK)**, on your Android phone.",
-                        link=Link("Download the app (APK)", f"/app/{APK_NAME}"),
+                        link=Link("Download the app (APK)", f"/app/{APK_NAME}", icon="download"),
                     ),
                     Step(f"Check that it is the real app. {verify}"),
                     Step(
@@ -640,7 +644,7 @@ def _android(ctx: Context) -> Section:
                         "allow it."
                     ),
                     Step(
-                        "Play Protect may warn that the developer is unknown or unverified. That is "
+                        "Play Protect may warn that the developer is unknown. That is "
                         "expected: the app is signed by whoever runs this gateway, not by an app store. "
                         "Only continue if the signing certificate matched in step 2. If Play Protect says "
                         "the app is harmful, or you are unsure, do not install it and ask the owner of "
@@ -668,18 +672,24 @@ def _android(ctx: Context) -> Section:
 # -- the page and the Markdown --------------------------------------------------------------------
 
 INTRO = (
-    "These steps connect your AI assistant to this site. It can then read your decks and your "
-    "collection, research cards and propose changes, which wait for your approval unless your "
-    "approval mode lets it apply them. You need the account the owner gave you. You never need a "
-    "client ID, key or token, and you must never paste a password into a chat."
+    "Your assistant can then read your decks and collection and propose changes for you to approve, "
+    "or apply them itself if your approval mode allows. You never need a key or token; never paste a "
+    "password into a chat."
 )
+# The Markdown (for an agent handed the link) says what the steps are for before INTRO's "then".
+MD_LEAD = "These steps connect your AI assistant to this site. You need the account the owner gave you."
+PURPOSE = (
+    "Connect Claude, ChatGPT or Codex to this gateway, add the assistant skill, or install the Android app."
+)
+PICK = "Which app will you use?"
 
 
 def _after(ctx: Context) -> Block:
     """What to do once connected, for every assistant."""
     return Block(
         steps=(
-            Step("Ask your assistant to call `whoami`. It should answer with your name."),
+            # F12: a plain ask, not a tool name
+            Step("Ask your assistant “Who am I on the MTG gateway?” It should answer with your name."),
             Step(
                 "To let it read and edit your own Archidekt decks, open your "
                 f"[account]({ctx.public_url}/account) "
@@ -742,7 +752,7 @@ def install_markdown(
     after = section_md(Section("after", "After connecting", (_after(ctx),)), ctx)
     return f"""# Install the {site} assistant plugin
 
-{INTRO}
+{MD_LEAD} {INTRO}
 
 Connector URL: `{mcp}`
 
@@ -752,17 +762,79 @@ Connector URL: `{mcp}`
 {BLOCKED_TOOLS.format(public_url=public_url)}"""
 
 
-# The install page's copy boxes and numbered steps (export.js runs the Copy buttons).
+# The install page (F11): the app list beside the steps on a computer (from 760 px of the page's
+# width), a "Steps for:" drop-down above them on a phone or a narrow window; the copy boxes and
+# numbered steps (export.js runs the Copy buttons). The picked app is tinted with an orange edge,
+# never an orange button, so each section's own main button is the page's one orange.
 INSTALL_CSS = (
+    ".inst{container:inst/inline-size}"
+    ".inst .cols{display:grid;grid-template-columns:minmax(0,1fr);gap:1rem;align-items:start}"
+    ".inst .pick{display:none}"
+    "@container inst (min-width:760px){.inst .cols{grid-template-columns:17rem minmax(0,1fr)}"
+    ".inst .drop{display:none}.inst .pick{display:block}}"
+    "@supports not (container-type:inline-size){@media (min-width:900px){"
+    ".inst .cols{grid-template-columns:17rem minmax(0,1fr)}.inst .drop{display:none}"
+    ".inst .pick{display:block}}}"
+    ".inst .pick{position:sticky;top:.5rem;border:1px solid var(--border);border-radius:var(--radius-panel);"
+    "background:var(--surface);padding:.5rem}"
+    ".inst .pick h2{font-size:.8rem;text-transform:uppercase;letter-spacing:.03em;color:var(--text-muted);"
+    "margin:.25rem .5rem .4rem}"
+    ".inst .pick a,.inst .drop .list a{display:flex;align-items:center;min-height:44px;white-space:normal;"
+    "line-height:1.25;width:100%;text-align:left;border:0;border-left:3px solid transparent;border-radius:0;"
+    "background:transparent;color:var(--text);font-weight:700;padding:.4rem .6rem;text-decoration:none}"
+    ".inst .pick a:hover,.inst .drop .list a:hover{background:var(--surface-2)}"
+    ".inst .pick a[aria-current=true],.inst .drop .list a[aria-current=true]{background:var(--orange-tint);"
+    "color:var(--orange-text);border-left-color:var(--orange)}"
+    ".inst .pick .grp{border-top:1px solid var(--border-soft);margin:.4rem 0 0;padding-top:.4rem}"
+    ".inst .drop{border:1px solid var(--border);border-radius:var(--radius-panel);background:var(--surface);"
+    "margin:0 0 1rem}"
+    ".inst .drop>summary{display:flex;align-items:center;gap:.5rem;min-height:44px;padding:0 .75rem;"
+    "cursor:pointer;list-style:none}"
+    ".inst .drop>summary::-webkit-details-marker{display:none}"
+    ".inst .drop>summary .v{flex:1;min-width:0;font-weight:700;overflow-wrap:anywhere}"
+    ".inst .drop>summary .sfk{color:var(--text-muted);font-size:.86rem}"
+    ".inst .drop>summary svg{flex:none;transition:transform .15s}"
+    ".inst .drop[open]>summary svg{transform:rotate(180deg)}"
+    ".inst .drop .list{border-top:1px solid var(--border-soft);padding:.25rem 0}"
+    ".inst .card>h2{margin-bottom:.4rem}"
+    ".inst p,.inst li{overflow-wrap:anywhere}"
+    # the address breaks at its <wbr> first; mid-word only when the address alone is too wide
+    ".inst a.nb code{overflow-wrap:anywhere}"
     ".setup>li{margin:.7rem 0}"
     ".copyfield{margin:.5rem 0}.copyfield label{margin:.2rem 0 .3rem}"
-    ".copyline{display:flex;gap:.5rem;align-items:center}"
+    ".copyline{display:flex;gap:.5rem;align-items:flex-start}"
     ".copyline input,.copyline textarea{flex:1;min-width:0;margin:0;"
     "font-family:ui-monospace,SFMono-Regular,Menlo,monospace;"
     "font-size:.85rem}"
     ".copyline .btn{flex:none;margin:0}"
     ".notice.stepnote{margin:.5rem 0 0;overflow-wrap:anywhere}"
 )
+
+
+def _picker(client: str | None, e) -> tuple[str, str]:
+    """The app list (the left column on a computer) and the drop-down (narrow screens), both with
+    the picked app marked; each app keeps its own ?for= address."""
+
+    def item(key: str, label: str) -> str:
+        cur = " aria-current='true'" if key == client else ""
+        return f"<a href='/install?for={key}'{cur}>{e(label)}</a>"
+
+    items = [item(k, label) for k, label in SECTIONS.items()]
+    n = len(CLIENTS)  # the assistants, a divider, then the skill and the app
+    nav = (
+        f"<nav class='pick' aria-label='Which app'><h2>{PICK}</h2>{''.join(items[:n])}"
+        f"<div class='grp'></div>{''.join(items[n:])}</nav>"
+    )
+    summary = (
+        f"<span class='sfk'>Steps for:</span><span class='v'>{e(SECTIONS[client])}</span>"
+        if client
+        else f"<span class='v'>{PICK}</span>"
+    )
+    drop = (
+        f"<details class='drop'><summary>{summary}{icon('chev')}</summary>"
+        f"<div class='list'>{''.join(items)}</div></details>"
+    )
+    return nav, drop
 
 
 def _context(state: AppState, *, page: bool) -> Context:
@@ -812,22 +884,18 @@ def add_setup_routes(server: MCPServer, state: AppState) -> None:
         e = html.escape
         ctx = _context(state, page=True)
         md_url = f"{s.public_url}/install.md" + (f"?for={client}" if client else "")
+        # the address is a link that breaks only after the gateway's address, never mid-word
+        md_shown = f"{e(s.public_url)}/<wbr>install.md" + (f"?for={client}" if client else "")
         intro = (
             f"<div class='card'><p>{e(INTRO, quote=False)}</p>"
             "<p class='muted small'>Giving an AI agent this page's address and saying \"install this "
-            f'plugin" is enough: the plain-text version is at <code>{e(md_url)}</code>.'
-            "</p></div>"
+            f"plugin\" is enough: the plain-text version is at <a class='nb' href='{e(md_url)}'>"
+            f"<code>{md_shown}</code></a>.</p></div>"
         )
-        picker = "".join(
-            f"<a class='btn{' btn-primary' if key == client else ''}' "
-            f"href='/install?for={key}'>{e(label)}</a>"
-            for key, label in SECTIONS.items()
-        )
+        nav, drop = _picker(client, e)
         if client is None:
-            body = (
-                intro + "<div class='card'><h2>Which app will you use?</h2>"
-                "<p>Pick one to see only the steps that work there.</p>"
-                f"<div class='actions'>{picker}</div>"
+            right = (
+                intro + "<div class='card'>"
                 "<p class='muted small'>On a phone? Claude's iPhone and Android apps work once the "
                 "connector is added on claude.ai or in the desktop app. ChatGPT's phone apps do not "
                 "support custom connectors: set ChatGPT up on chatgpt.com on a computer.</p>"
@@ -835,13 +903,15 @@ def add_setup_routes(server: MCPServer, state: AppState) -> None:
                 + "</div>"
             )
         else:
-            body = (
+            right = (
                 (intro if client in CLIENTS else "")
                 + section_html(section(client, ctx), ctx)
                 + (block_html(_after(ctx), "After connecting", ctx) if client in CLIENTS else "")
-                + f"<div class='card'><p class='muted small'>Other sections:</p><div class='actions'>{picker}"
-                "</div></div>"
             )
+        body = (
+            f"<div class='inst'>{ui.page_head('Guided setup', PURPOSE)}"
+            f"<div class='cols'><div>{drop}{nav}</div><div>{right}</div></div></div>"
+        )
         # Signed in, so the page gets the member's navigation (tab bar, rail, account menu).
         user = state.db.get_user(sub) or {}
         admin = bool(s.admin_group and s.admin_group in (user.get("groups") or []))
@@ -854,6 +924,8 @@ def add_setup_routes(server: MCPServer, state: AppState) -> None:
             admin=admin,
             user=display_name(user),
             current="/install",
+            heading=False,
+            main_class="ui-wide",
             head_extra=f"<style>{INSTALL_CSS}</style><script src='/static/export.js' defer></script>",
         )
         resp.headers["Cache-Control"] = "no-store"

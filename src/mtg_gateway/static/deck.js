@@ -1338,7 +1338,18 @@
       m.appendChild(menuItem("Mana value…", "edit", function () { manaValueForm(card, m); }));
       m.appendChild(menuItem("Remove from deck", "x", function () { removeCard(card); }, "danger"));
       m.appendChild(el("div", "sep"));
+      // the shared card menu's items on your own deck too (F6, M9): Add to deck… and Open on Scryfall
+      var addLink = el("a", "", "");
+      addLink.setAttribute("role", "menuitem");
+      addLink.href = "/cards?q=" + enc(name);
+      addLink.appendChild(icon("plus"));
+      addLink.appendChild(document.createTextNode("Add to deck…"));
+      m.appendChild(addLink);
       if (Shared) m.appendChild(menuItem("Copy name", "copy", function () { closeMenu(); Shared.copyAndSay(name, "Name copied."); }));
+      var ownScry = scryfallLink(name, "");
+      ownScry.setAttribute("role", "menuitem");
+      ownScry.insertBefore(icon("external"), ownScry.firstChild);
+      m.appendChild(ownScry);
       var editLink = el("a", "", "");
       editLink.setAttribute("role", "menuitem");
       editLink.href = "/decks/" + enc(deckId) + "/edit#card-" + enc(name);
@@ -2347,4 +2358,181 @@
     e.preventDefault();
     open(link);
   });
+})();
+
+// -- the deck menu and the deck page's boxes (M9, F3) ------------------------------------------
+// The banner's ⋮ More button, a right-click anywhere on the banner or a press and hold opens the
+// shared deck menu (cardmenu.js's engine): the same items as a tile on My decks plus the old
+// More's page-only items. Rename… and Move to folder… are boxes here (the JSON routes of
+// companion_folders.py); Clone…, Export…, Compare with… and Delete deck… adopt the boxes the
+// page holds (ui.box). Without scripts the <details> drop-down and the real links stay.
+(function () {
+  "use strict";
+  var Menu = window.MtgMenu, Box = window.MtgBox;
+  var banner = document.querySelector(".banner[data-deck-id]");
+  if (!Menu || !Box || !banner) return;
+  var $ = function (sel, root) { return (root || document).querySelector(sel); };
+  var $$ = function (sel, root) { return Array.prototype.slice.call((root || document).querySelectorAll(sel)); };
+  var el = Menu.el, item = Menu.item, link = Menu.link, sep = Menu.sep, enc = encodeURIComponent;
+  var d = {
+    id: banner.getAttribute("data-deck-id"),
+    name: banner.getAttribute("data-deck-name") || "Unnamed deck",
+    own: banner.getAttribute("data-own") === "1",
+    can: banner.getAttribute("data-can") === "1",
+    forge: banner.getAttribute("data-forge") === "1"
+  };
+  var more = $("details.deckmore", banner);
+  var btn = el("button", "btn deckmenu", "");
+  btn.type = "button";
+  btn.setAttribute("aria-haspopup", "menu");
+  btn.setAttribute("aria-label", "More: the deck menu");
+  btn.appendChild(Menu.icon("more"));
+  btn.appendChild(document.createTextNode(" More"));
+  if (more) more.parentNode.insertBefore(btn, more); else $(".actions", banner) && $(".actions", banner).appendChild(btn);
+  banner.setAttribute("data-menu-ready", "");
+
+  function openBox(id) { return function () { Box.openElement(id, { returnFocus: btn }); }; }
+  function submit(sel) {
+    return function () {
+      var f = $(sel, banner);
+      if (!f) return;
+      if (f.requestSubmit) f.requestSubmit(); else f.submit();
+    };
+  }
+  function go(href) { location.assign(href); }
+  function cancelButton(text) { return Box.button(text || "Cancel", "btn", null, { cancel: true }); }
+  function failed(box, r) { box.busy(false); box.note((r && r.message) || "The gateway could not be reached. Check your connection and try again.", true); }
+
+  function renameDeck() {
+    var input = el("input");
+    input.type = "text"; input.value = d.name; input.autocomplete = "off"; input.maxLength = 200; input.id = "dk-name";
+    var wrap = el("div", "field");
+    var lab = el("label", null, "New name"); lab.htmlFor = "dk-name";
+    wrap.appendChild(lab); wrap.appendChild(input);
+    var ok = Box.button("Rename", "primary", function () {
+      var name = input.value.trim();
+      if (!name) { box.note("Type a name.", true); input.focus(); return; }
+      box.busy(true);
+      Menu.post("/decks/api/decks/" + enc(d.id) + "/rename", { name: name }).then(function (r) {
+        if (!r.ok) return failed(box, r);
+        go("/decks/" + enc(d.id) + "?ok=saved");
+      }, function () { failed(box); });
+    }, { icon: "check" });
+    var box = Box.open({ title: "Rename deck", body: wrap, actions: [cancelButton(), ok], returnFocus: btn });
+    input.select();
+  }
+  function moveDeck() {
+    var p = el("p", "muted loading", "Reading from Archidekt…");
+    p.setAttribute("role", "status");
+    var box = Box.open({ title: "Move “" + d.name + "”", body: p, actions: [cancelButton()], returnFocus: btn });
+    Menu.getJSON("/decks/api/folders").then(function (info) {
+      if (!info.ok) return failed(box, info);
+      var sel = el("select"); sel.id = "dk-folder";
+      (info.folders || []).forEach(function (f) {
+        var o = el("option", null, (f.depth ? " ".repeat(f.depth) : "") + (f.name || ""));
+        o.value = String(f.id);
+        sel.appendChild(o);
+      });
+      var wrap = el("div", "field");
+      var lab = el("label", null, "Folder"); lab.htmlFor = "dk-folder";
+      wrap.appendChild(lab); wrap.appendChild(sel);
+      var ok = Box.button("Move", "primary", function () {
+        box.busy(true);
+        Menu.post("/decks/api/decks/" + enc(d.id) + "/move", { folder_id: sel.value }).then(function (r) {
+          if (!r.ok) return failed(box, r);
+          go("/decks/" + enc(d.id) + "?ok=moved");
+        }, function () { failed(box); });
+      }, { icon: "folder" });
+      box.setBody(wrap);
+      box.setActions([cancelButton(), ok]);
+      box.focusFirst();
+    }, function () { failed(box); });
+  }
+
+  function items() {
+    var id = enc(d.id), out = [];
+    out.push(link("Open in a new tab", "external", "/decks/" + id, { ext: true }));
+    if (d.own) out.push(link("Edit deck", "edit", "/decks/" + id + "/edit"));
+    out.push(sep());
+    out.push(link("Goldfish", "play", "/decks/" + id + "/goldfish"));
+    if (d.can) out.push(item("Run full test", "stats", function () {
+      // the report form without the Forge switch (found by hand: a has-selector throws on older browsers)
+      var forms = banner.querySelectorAll("form[action$='/report']");
+      for (var i = 0; i < forms.length; i++) {
+        if (!forms[i].querySelector("input[name=forge]")) {
+          if (forms[i].requestSubmit) forms[i].requestSubmit(); else forms[i].submit();
+          return;
+        }
+      }
+    }));
+    if (d.forge) out.push(item("Solo test only", "stats", submit("#solof")));
+    if (d.can) out.push(item(d.own ? "Clone…" : "Clone into my decks…", "clone", openBox("clone")));
+    if (d.own) {
+      out.push(item("Rename…", "edit", renameDeck));
+      out.push(item("Move to folder…", "folder", moveDeck));
+    }
+    if (d.can) {
+      out.push(item("Export…", "download", openBox("export")));
+      out.push(item("Compare with…", "layers", openBox("compare")));
+    }
+    if (Menu.enabled && Menu.enabled() && window.MtgDeckWatch) out.push(item("Watch deck price", "eye", function () { window.MtgDeckWatch(d.id); }));
+    if (d.own) out.push(link("Deck settings", "settings", "/decks/" + id + "/settings"));
+    out.push(sep());
+    out.push(link("Deck stats", "report", "/decks/" + id + "#stats"));
+    out.push(link("History and snapshots", "history", "/history?deck_id=" + id));
+    out.push(link("Proposals for this deck", "proposals", "/proposals?deck_id=" + id));
+    out.push(sep());
+    out.push(item("Copy link", "link", function () { Menu.copyAndSay(location.origin + "/decks/" + id, "Link copied."); }));
+    out.push(link("Open on Archidekt", "external", "https://archidekt.com/decks/" + id, { ext: true }));
+    if (d.own) {
+      out.push(sep());
+      out.push(item("Delete deck…", "trash", openBox("delete"), { danger: true }));
+    }
+    return out;
+  }
+  function open(_it, x, y) {
+    Menu.open({ head: d.name, label: "Deck: " + d.name, items: items(), focusBack: btn }, x, y);
+  }
+  Menu.bind(banner, {
+    itemOf: function (n) { return n && n.closest ? n.closest(".banner[data-deck-id]") : null; },
+    skip: "a,button,form,input,select,textarea",
+    button: ".deckmenu",
+    open: open
+  });
+
+  // Export box: the tabs show one pane at a time (every pane shows without scripts)
+  var xb = $("#export");
+  if (xb) xb.addEventListener("click", function (e) {
+    var t = e.target.closest("[role=tab][data-tab]");
+    if (!t) return;
+    $$("[role=tab]", xb).forEach(function (o) { o.setAttribute("aria-selected", o === t ? "true" : "false"); });
+    $$(".xpane", xb).forEach(function (p) { p.hidden = p.getAttribute("data-pane") !== t.getAttribute("data-tab"); });
+  });
+  // Delete box: the solid red button waits for the deck's name
+  var typed = $("#delete #typed"), del = $("#delete .acts button.danger");
+  if (typed && del) {
+    var gate = function () { del.disabled = typed.value.trim().toLowerCase() !== (typed.getAttribute("data-typed") || "").trim().toLowerCase(); };
+    typed.addEventListener("input", gate);
+    gate();
+  }
+  // Compare box: your other decks are offered as you type (the gateway reads a deck ID or name)
+  var cw = $("#compare #cmp-with");
+  if (cw && d.can) {
+    var listed = false;
+    cw.addEventListener("focus", function () {
+      if (listed) return;
+      listed = true;
+      Menu.getJSON("/api/decks/mine").then(function (mine) {
+        var dl = el("datalist"); dl.id = "cmp-mine";
+        ((mine && mine.decks) || []).forEach(function (x) {
+          if (String(x.id) === String(d.id)) return;
+          var o = el("option", null, x.name || "Unnamed deck");
+          o.value = String(x.id);
+          dl.appendChild(o);
+        });
+        cw.parentNode.appendChild(dl);
+        cw.setAttribute("list", "cmp-mine");
+      }, function () { /* the box still takes a name, link or ID */ });
+    });
+  }
 })();

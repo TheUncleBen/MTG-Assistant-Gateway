@@ -13,9 +13,10 @@ report row: the widgets repeat numbers the sections show."""
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from typing import Any
 
-from . import ui
+from . import card_models_view, ui
 from .report_view import (
     CONSTRUCTED_VALIDATION,
     ENDED_TEXT,
@@ -44,6 +45,7 @@ from .report_view import (
     honesty_groups,
     kept_models,
     kept_models_html,
+    model_box_id,
     more_games_html,
     plain_words,
     report_sections,
@@ -77,12 +79,107 @@ MODEL_SUB = (
 ABOUT_FORGE = "About these Forge games"
 
 
-def _sec(sid: str, heading: str, body: str, *, label: str = "", cls: str = "", attrs: str = "") -> str:
-    """One flat section: its heading (with a label beside it) and its body."""
+def _sec(
+    sid: str,
+    heading: str,
+    body: str,
+    *,
+    label: str = "",
+    cls: str = "",
+    attrs: str = "",
+    flat: bool = False,
+) -> str:
+    """One section: its heading (with a label beside it) and its body. ``flat``: a heading over a
+    divider line, not a bordered panel (the solo test sections, whose widgets and tables would
+    otherwise sit as panels inside a panel)."""
     extra = f" {cls}" if cls else ""
+    shell = "rv-sec rv-flat" if flat else "ui-card rv-sec"
     return (
-        f"<section class='ui-card rv-sec{extra}' id='{sid}' aria-labelledby='{sid}-h'{attrs}>"
+        f"<section class='{shell}{extra}' id='{sid}' aria-labelledby='{sid}-h'{attrs}>"
         f"<div class='rv-sh'><h2 id='{sid}-h'>{_esc(heading)}</h2>{label}</div>{body}</section>"
+    )
+
+
+LEFT_OUT_HEADING = "Cards Forge left out"
+LEFT_OUT_LINE = "Not counted above."
+
+
+def cards_table(
+    names: list[Any], *, sid: str, types: Mapping[str, str] | None = None, label: str = ""
+) -> str:
+    """A table of card names, each row with the shared card menu (right-click, press and hold, ⋮;
+    static/report.js). ``types`` gives a card's type line, shown under its name when known."""
+    rows = []
+    for raw in names:
+        name = str(raw or "").strip()
+        if not name:
+            continue
+        shown = front_face(name)
+        ty = (types or {}).get(name) or (types or {}).get(shown) or ""
+        sub = f"<span class='s'>{_esc(ty)}</span>" if ty else ""
+        rows.append(
+            f"<div class='tr' tabindex='0' role='button' data-card='{_esc(shown)}' "
+            f"aria-label='{_esc(shown)}'>"
+            f"<span class='title'><span class='t'>{_esc(shown)}</span>{sub}</span>"
+            f"<span class='act'><button type='button' class='kebab' aria-label='Menu for {_esc(shown)}'>"
+            f"{icon('more')}</button></span></div>"
+        )
+    if not rows:
+        return ""
+    return (
+        ui.table_open(
+            "minmax(0,1fr) 44px", "minmax(0,1fr) 44px", "minmax(0,1fr) 44px", cls="rv-cards", label=label
+        )
+        + "".join(rows)
+        + "</div>"
+    )
+
+
+def remove_model_boxes(
+    used: list[dict[str, Any]], *, removable: frozenset[str], csrf: str, report_id: str
+) -> str:
+    """One confirm box per saved description the member may remove (POPUP-INVENTORY: a remove asks
+    first). The box holds the form that removes; its final button is the solid red one."""
+    if not (csrf and report_id):
+        return ""
+    out = []
+    for u in sorted(used, key=lambda u: str(u.get("name") or "").casefold()):
+        name = str(u.get("name") or "")
+        card = front_face(name)
+        if not card or card.casefold() not in removable:
+            continue
+        bid = model_box_id("rm-model", name)
+        fid = f"{bid}-f"
+        body = (
+            f"<form id='{fid}' method='post' action='/history/reports/{_esc(report_id)}/models/remove'>"
+            f"<input type='hidden' name='csrf' value='{_esc(csrf)}'>"
+            f"<input type='hidden' name='card' value='{_esc(name)}'></form>"
+            f"<p>Later solo tests play “{_esc(card)}” without its effect again, until a new description "
+            "is saved. The reports that already played it keep their numbers.</p>"
+        )
+        out.append(
+            ui.box(
+                bid,
+                f"Remove the saved description of “{card}”?",
+                body,
+                actions=[
+                    ui.box_button("Keep it", cancel=True),
+                    ui.box_button("Remove", kind="danger-solid", form=fid, icon_name="trash"),
+                ],
+            )
+        )
+    return "".join(out)
+
+
+def left_out_html(names: list[Any], *, sid: str, types: Mapping[str, str] | None = None) -> str:
+    """ "Cards Forge left out": the cards Forge could not play, as a table with card menus."""
+    table = cards_table(names, sid=sid, types=types, label=LEFT_OUT_HEADING)
+    if not table:
+        return ""
+    n = sum(1 for x in names if str(x or "").strip())
+    return (
+        f"<div class='rv-np'><h3>{LEFT_OUT_HEADING} <span class='n'>{n}</span></h3>"
+        f"<p class='ui-hint'>{LEFT_OUT_LINE}</p>{table}</div>"
     )
 
 
@@ -220,10 +317,18 @@ def _ended_html(f: dict[str, Any], res: dict[str, Any], games: int) -> str:
     return f"<div><h3>How the games ended</h3><ul class='rv-ended'>{rows}</ul>{note}</div>"
 
 
-def forge_section_html(f: Any, *, live: bool = False, report_id: Any = None, more: str = "") -> str:
+def forge_section_html(
+    f: Any,
+    *,
+    live: bool = False,
+    report_id: Any = None,
+    more: str = "",
+    types: Mapping[str, str] | None = None,
+) -> str:
     """The Forge section of the signed-in page, or the preflight-only section when the report has
     no Forge games. ``live`` marks an unfinished run for forge-live.js (which swaps this section's
-    inside); ``more`` is the Play more games block, an empty holder when it has none."""
+    inside); ``more`` is the Play more games block, an empty holder when it has none; ``types``
+    the type lines of the cards Forge left out, when the gateway knows them."""
     holder = more or "<div id='forge-more'></div>"
     if not isinstance(f, dict) or str(f.get("state") or "") == "skipped":
         if isinstance(f, dict):
@@ -286,12 +391,7 @@ def forge_section_html(f: Any, *, live: bool = False, report_id: Any = None, mor
     elif about:
         parts.append(f"<div class='rv-two'>{about}</div>")
     if f.get("not_played"):
-        parts.append(
-            "<div class='rv-np'><h3>Cards Forge could not play</h3><p class='ui-hint'>These were left out "
-            "of the games, so the numbers above do not include them.</p><p>"
-            + ", ".join(_esc(n) for n in f["not_played"])
-            + "</p></div>"
-        )
+        parts.append(left_out_html(list(f["not_played"]), sid="rv-forge", types=types))
     links = []
     ahead = f.get("waiting_for") if isinstance(f.get("waiting_for"), dict) else None
     if live and pending and ahead and ahead.get("report_id"):
@@ -326,6 +426,238 @@ def more_html(f: Any, csrf: str, report_id: str) -> str:
         block.replace("id='forge-more' class='card more-games'", "id='forge-more' class='rv-more'")
         .replace("<button type='submit' class='btn'>", "<button type='submit' class='btn-primary'>")
         .replace("<p class='muted small'>", "<p class='ui-hint'>")
+    )
+
+
+# -- the solo test played by Forge (the report's ``forge_solo`` block; None when Forge is off) ----
+SOLO_FORGE_NAME = "Solo test, played by Forge"
+SOLO_FORGE_SUB = (
+    "Against opponents that do nothing, up to turn {turns}: how fast the deck works on its own, not how "
+    "it fares against interaction."
+)
+SOLO_FORGE_PENDING = " This section updates by itself when the games finish."
+SOLO_FORGE_STATE_TEXT = {
+    "queued": "Waiting for Forge.",
+    "running": "Games are going now.",
+    "failed": "The games could not run.",
+    "timeout": "The games ran out of time before finishing.",
+    "cancelled": "The games were stopped.",
+    "lost": "Forge lost this run.",
+    "skipped": "No solo test by Forge for this report.",
+}
+SOLO_FORGE_FINAL = frozenset({"done", "failed", "skipped", "lost", "timeout", "cancelled"})
+
+
+def forge_solo_pending(fs: Any) -> bool:
+    """Whether the solo test by Forge is still queued or running (the page then polls for it)."""
+    return isinstance(fs, dict) and str(fs.get("state") or "") in ("queued", "running")
+
+
+def _by_turn(values: Any, turns: int) -> list[float | None]:
+    """A per-turn series (a list from turn 1, or a dict keyed by the turn) as ``turns`` values."""
+    out: list[float | None] = [None] * turns
+    if isinstance(values, dict):
+        for k, v in values.items():
+            t = _int(k)
+            if t is not None and 1 <= t <= turns:
+                out[t - 1] = _float(v)
+    elif isinstance(values, list):
+        for i, v in enumerate(values[:turns]):
+            out[i] = _float(v)
+    return out
+
+
+def _n1(v: float | None) -> str:
+    return "–" if v is None else f"{v:.1f}"
+
+
+def forge_solo_heading(fs: dict[str, Any]) -> str:
+    res = fs.get("result") if isinstance(fs.get("result"), dict) else {}
+    games = _int(res.get("games")) or _int(fs.get("games_requested")) or _int(res.get("games_requested"))
+    return f"{SOLO_FORGE_NAME} ({games} games)" if games else SOLO_FORGE_NAME
+
+
+def forge_solo_label(fs: dict[str, Any]) -> str:
+    """The label beside the heading: "300 of 300 played" once done, Queued, Running, else Not run."""
+    state = str(fs.get("state") or "")
+    res = fs.get("result") if isinstance(fs.get("result"), dict) else {}
+    games = _int(res.get("games")) or 0
+    asked = _int(res.get("games_requested")) or _int(fs.get("games_requested")) or games
+    if state == "done":
+        if games:
+            return ui.label(f"{games} of {asked} played", "green", "check")
+        return ui.label("Done", "green", "check")
+    if state == "queued":
+        return ui.label("Queued", "orange", "clock")
+    if state == "running":
+        return ui.label("Running", "orange", "spinner")
+    if games:
+        return ui.label("Stopped early", "orange", "triangle")
+    return ui.label("Not run", "red", "alert")
+
+
+def _solo_widgets(res: dict[str, Any], games: int, turns: int) -> str:
+    asked = _int(res.get("games_requested")) or games
+    out = [
+        ui.widget(
+            "Games played",
+            "layers",
+            games,
+            unit=f"of {asked}" if asked != games else "",
+            detail=f"up to turn {turns} each" if turns else "",
+        )
+    ]
+    won = _int(res.get("won"))
+    rate = _float(res.get("won_rate"))
+    if rate is None and won is not None and games:
+        rate = won / games
+    ci = _interval(res.get("won_rate_95"))
+    out.append(
+        ui.widget(
+            "Wins",
+            "check",
+            _pct(rate) if rate is not None else "–",
+            unit=f"{won} of {games}" if won is not None else "",
+            detail=f"95% interval {ci}" if ci else "",
+        )
+    )
+    mwt = _float(res.get("median_won_turn"))
+    span = res.get("won_turn_range") if isinstance(res.get("won_turn_range"), list) else []
+    out.append(
+        ui.widget(
+            "Median win turn",
+            "clock",
+            f"Turn {_turn(mwt)}" if mwt is not None else "–",
+            detail=f"wins from turn {_turn(span[0])} to {_turn(span[1])}"
+            if len(span) == 2
+            else ("no game was won" if won == 0 else ""),
+        )
+    )
+    cmd = _float(res.get("median_commander_turn"))
+    out.append(
+        ui.widget(
+            "Commander cast",
+            "user",
+            f"Turn {_turn(cmd)}" if cmd is not None else "–",
+            unit="median" if cmd is not None else "",
+        )
+    )
+    first = _float(res.get("median_first_out_turn"))
+    out.append(
+        ui.widget(
+            "First opponent out",
+            "follow",
+            f"Turn {_turn(first)}" if first is not None else "–",
+            unit="median" if first is not None else "",
+        )
+    )
+    mull = _float(res.get("mulligans"))
+    out.append(
+        ui.widget(
+            "Mulligans",
+            "refresh",
+            f"{mull:g}" if mull is not None else "–",
+            unit=f"in {games} games" if mull is not None and games else "",
+            detail=f"{mull / games:.1f} a game on average" if mull is not None and games else "",
+        )
+    )
+    return ui.widgets(out, label="Solo test by Forge")
+
+
+def _turns_table(res: dict[str, Any], turns: int) -> str:
+    lands = _by_turn(res.get("lands_by_turn"), turns)
+    casts = _by_turn(res.get("casts_by_turn"), turns)
+    dmg = _by_turn(res.get("damage_by_turn"), turns)
+    if not any(v is not None for v in lands + casts + dmg):
+        return ""
+    peak = max((v for v in dmg if v is not None), default=0.0)
+    rows = []
+    for i in range(turns):
+        d = dmg[i]
+        width = max(2.0, 100.0 * d / peak) if d is not None and peak > 0 else 0.0
+        bar = (
+            f"<span class='sf-bc'><span class='bar' style='width:{width:.0f}%' aria-hidden='true'></span>"
+            "</span>"
+            if d is not None
+            else "<span class='sf-bc'></span>"
+        )
+        rows.append(
+            f"<div class='tr'><span class='t'>{i + 1}</span><span class='n'>{_n1(lands[i])}</span>"
+            f"<span class='n'>{_n1(casts[i])}</span><span class='n'>{_n1(d)}</span>{bar}</div>"
+        )
+    head = ui.table_header(
+        [
+            ui.Column("Turn"),
+            ui.Column("Lands", "n"),
+            ui.Column("Spells cast", "n"),
+            ui.Column("Damage", "n"),
+            ui.Column("", "sf-bc"),
+        ]
+    )
+    return (
+        f"<h3>Turn by turn (averages, up to turn {turns})</h3>"
+        + ui.table_open(
+            "4rem repeat(3,minmax(0,1fr)) minmax(0,2fr)",
+            "4rem repeat(3,minmax(0,1fr)) minmax(0,1.4fr)",
+            "3rem repeat(3,minmax(0,1fr))",
+            cls="sf-turns",
+            label="Turn by turn",
+        )
+        + head
+        + "".join(rows)
+        + "</div>"
+    )
+
+
+def forge_solo_section_html(
+    fs: Any, *, live: bool = False, report_id: Any = None, types: Mapping[str, str] | None = None
+) -> str:
+    """The "Solo test, played by Forge" section: nothing at all when the report has no
+    ``forge_solo`` block (Forge off, or a report from before), so such a report renders as before.
+    Six widgets, the per-turn table with a damage bar, the cards Forge left out with card menus,
+    one muted line for unfinished games; queued, running and failed runs read like the Forge
+    section's, and ``live`` marks a pending run for forge-live.js."""
+    if not isinstance(fs, dict) or not fs:
+        return ""
+    state = str(fs.get("state") or "")
+    pending = state in ("queued", "running")
+    res = fs.get("result") if isinstance(fs.get("result"), dict) else {}
+    games = _int(res.get("games")) or 0
+    turns = _int(res.get("until_turn")) or 10
+    parts = [f"<p class='ui-sub'>{_esc(SOLO_FORGE_SUB.format(turns=turns))}</p>"]
+    if state != "done":
+        msg = str(fs.get("error") or "") or SOLO_FORGE_STATE_TEXT.get(state, "")
+        if games and state not in ("queued", "running"):
+            msg = (
+                f"Forge stopped after {games} of {_int(res.get('games_requested')) or games} games. "
+                f"The numbers below count only the {games} played. {msg}"
+            ).strip()
+        if msg and pending and live:
+            msg += SOLO_FORGE_PENDING
+        if msg:
+            parts.append(f"<p class='notice{'' if pending else ' warn'}'>{_esc(msg)}</p>")
+    if games:
+        parts.append(_solo_widgets(res, games, turns))
+        parts.append(_turns_table(res, turns))
+        unfinished = _int(res.get("unfinished")) or 0
+        if unfinished > 0:
+            parts.append(
+                f"<p class='ui-hint sf-unfinished'>{unfinished} {'game' if unfinished == 1 else 'games'} "
+                f"the time limit stopped before turn {turns} or before a win "
+                f"{'is' if unfinished == 1 else 'are'} left out of these numbers.</p>"
+            )
+    if fs.get("not_played"):
+        parts.append(left_out_html(list(fs["not_played"]), sid="rv-solo-forge", types=types))
+    rid = f" data-report-id='{_esc(report_id)}'" if isinstance(report_id, str) and report_id else ""
+    attrs = f" data-forge-live aria-live='polite'{rid}" if live and pending else ""
+    return _sec(
+        "rv-solo-forge",
+        forge_solo_heading(fs),
+        "".join(parts),
+        label=forge_solo_label(fs),
+        cls="solo-forge",
+        attrs=attrs,
+        flat=True,
     )
 
 
@@ -504,23 +836,35 @@ def _coverage_bar(modeled: int, aside: int, blanks: int, size: int, *, cls: str 
 
 # -- the sections ------------------------------------------------------------------------
 def solo_section_html(
-    r: dict[str, Any], s: dict[str, Any], *, removable: frozenset[str], csrf: str
+    r: dict[str, Any],
+    s: dict[str, Any],
+    *,
+    removable: frozenset[str],
+    csrf: str,
+    models_opener: str = "",
 ) -> tuple[str, str]:
-    """The solo test section and the "what it could not model" section ('' when none)."""
+    """The solo test section and the "what it could not model" section ('' when none).
+    ``models_opener``: the My card models button, placed where saved descriptions are mentioned
+    (under the ones this run played, and beside the request for cards played without effect)."""
     g, v = s["goldfish"], s["validation"]
     if g is None and v is None and not s["constructed"]:
         body = (
             "<p class='ui-sub'>The research service was not configured when this report ran, so there is no "
             "solo test and no validation: only the deck statistics below.</p>"
         )
-        return _sec("rv-solo", solo_heading(g), body), ""
+        return _sec("rv-solo", solo_heading(g), body, flat=True), ""
     if g is None:
         return _sec(
-            "rv-solo", solo_heading(g), "<p class='ui-sub'>The solo test did not run for this report.</p>"
+            "rv-solo",
+            solo_heading(g),
+            "<p class='ui-sub'>The solo test did not run for this report.</p>",
+            flat=True,
         ), ""
     if g.get("message") and not g.get("metrics"):
         body = f"<p class='notice warn'>{_esc(g['message'])}</p>"
-        return _sec("rv-solo", solo_heading(g), body, label=ui.label("Not run", "red", "alert")), ""
+        return _sec(
+            "rv-solo", solo_heading(g), body, label=ui.label("Not run", "red", "alert"), flat=True
+        ), ""
     warn = "".join(f"<p class='notice warn'>{_esc(w)}</p>" for w in g.get("warnings") or [])
     tiles = "".join(_tile(t) for t in s["tiles"])
     charts = "".join(
@@ -542,11 +886,18 @@ def solo_section_html(
         + (f"<div class='charts rv-charts'>{charts}</div>" if charts else "")
         + s["triggers"]
         + kept_models_html(
-            kept_models(r), removable=removable, csrf=csrf, report_id=rid, button="btn-outline-danger"
+            kept_models(r),
+            removable=removable,
+            csrf=csrf,
+            report_id=rid,
+            button="btn-outline-danger",
+            box_prefix="rm-model",
         )
+        + (f"<div class='rv-models'>{models_opener}</div>" if models_opener and kept_models(r) else "")
         + summary
+        + remove_model_boxes(kept_models(r), removable=removable, csrf=csrf, report_id=rid)
     )
-    solo = _sec("rv-solo", solo_heading(g), body)
+    solo = _sec("rv-solo", solo_heading(g), body, flat=True)
     ask = ask_html(
         r,
         s["unmodeled"],
@@ -554,7 +905,9 @@ def solo_section_html(
         cls="btn-plain",
         button=f"{icon('copy')}<span class='label'>{_esc('Copy a request for your assistant')}</span>",
     )
-    groups = honesty_groups(g, ask)
+    if ask and models_opener:
+        ask += f"<div class='rv-models'>{models_opener}</div>"
+    groups = honesty_groups(g, ask, menu=True)
     if not groups:
         return solo, ""
     h = g.get("honesty") or {}
@@ -618,8 +971,12 @@ def _jump_html(
     )
     f = r.get("forge")
     forge = isinstance(f, dict) and f.get("state") != "skipped"
+    items = []
+    if isinstance(r.get("forge_solo"), dict) and r.get("forge_solo"):
+        items.append(ui.Chip("Solo test by Forge", None, "#rv-solo-forge"))
     # a report without Forge games starts with its preflight-only section: no link to it
-    items = [ui.Chip("Forge games", None, "#rv-forge")] if forge else []
+    if forge:
+        items.append(ui.Chip("Forge games", None, "#rv-forge"))
     items.append(ui.Chip("Solo test", None, "#rv-solo"))
     if model:
         items.append(ui.Chip("What it could not model", n or None, "#rv-model"))
@@ -646,10 +1003,14 @@ def report_page_html(
     reused: bool = False,
     removable: frozenset[str] = frozenset(),
     csrf: str = "",
+    card_types: Mapping[str, str] | None = None,
+    my_models: str = "",
 ) -> str:
     """The signed-in report page's body. ``stats_html`` is the deck statistics strip
     (companion.stats_strip), ``actions_html`` the export buttons, ``notice_html`` a notice from the
-    address (a Remove or a Play more games that started nothing)."""
+    address (a Remove or a Play more games that started nothing), ``card_types`` the type lines the
+    gateway knows for the cards Forge left out, ``my_models`` the My card models box
+    (card_models_view.box_html), whose opener sits where saved descriptions are mentioned."""
     s = report_sections(r)
     g = s["goldfish"]
     deck_id = _esc(r.get("deck_id"))
@@ -683,9 +1044,18 @@ def report_page_html(
         )
     rid = str(r.get("report_id") or "")
     forge = forge_section_html(
-        r.get("forge"), live=True, report_id=r.get("report_id"), more=more_html(r.get("forge"), csrf, rid)
+        r.get("forge"),
+        live=True,
+        report_id=r.get("report_id"),
+        more=more_html(r.get("forge"), csrf, rid),
+        types=card_types,
     )
-    solo, model = solo_section_html(r, s, removable=removable, csrf=csrf)
+    solo_forge = forge_solo_section_html(
+        r.get("forge_solo"), live=True, report_id=r.get("report_id"), types=card_types
+    )
+    solo, model = solo_section_html(
+        r, s, removable=removable, csrf=csrf, models_opener=card_models_view.opener() if my_models else ""
+    )
     valid = validation_section_html(s)
     stats = (
         _sec("rv-stats", "Deck statistics", f"<div class='rv-dstats'>{stats_html}</div>")
@@ -711,12 +1081,14 @@ def report_page_html(
         + notice_html
         + widgets_html(r, s, stats_section=bool(stats))
         + jump
+        + solo_forge
         + forge
         + solo
         + model
         + valid
         + stats
         + raw
+        + my_models
         + "</div>"
     )
 
@@ -848,5 +1220,31 @@ REPORT_PAGE_CSS = (
 .rv-page .rv-raw{padding:.25rem 1rem .5rem}
 .rv-page .rv-raw pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:.85rem}
 .rv-page .rv-np p{overflow-wrap:anywhere}
+.rv-page .rv-np h3 .n,.rv-page .rv-sec h3 .n{color:var(--text-muted);font-weight:400;font-size:.9rem;
+  margin-left:.3rem}
+/* the solo test sections: a heading over a divider line, not a panel (their widgets and tables are
+   panels of their own) */
+.rv-page .rv-flat{border-top:2px solid var(--card-border);padding-top:.75rem;margin:0 0 1.25rem}
+.rv-page .rv-flat .ui-widgets{margin:.75rem 0 .5rem}
+.rv-page .rv-flat .rv-sh h2{font-size:1.25rem}
+.rv-page .rv-flat .ui-table{border:1px solid var(--card-border);border-radius:var(--radius-panel);
+  background:var(--surface)}
+.rv-page .rv-flat .ui-table .th{background:var(--surface-2);border-bottom:0}
+@media (min-width:900px){.rv-page .solo-forge .ui-widgets{grid-template-columns:repeat(3,minmax(0,1fr))}}
+/* turn by turn: four short numbers and a damage bar */
+.rv-page .sf-turns .tr{min-height:40px}
+.rv-page .sf-turns .n{text-align:right;font-variant-numeric:tabular-nums}
+.rv-page .sf-turns .th .n{text-align:right}
+.rv-page .sf-turns .bar{display:block;height:10px;border-radius:2px;background:var(--orange);opacity:.8}
+@media (max-width:599.98px){.rv-page .sf-turns .sf-bc{display:none}.rv-page .sf-turns .th{display:grid}}
+.rv-page .sf-unfinished{margin:.25rem 0 .75rem}
+/* the cards Forge left out: a row per card with the shared card menu */
+.rv-page .rv-cards .tr{cursor:pointer;padding-top:0;padding-bottom:0}
+.rv-page .rv-cards .tr:hover,.rv-page .rv-cards .tr:focus-visible{background:var(--surface-2)}
+.rv-page .rv-cards .title .s{display:block;color:var(--text-muted);font-size:.86rem}
+.rv-page .rv-cards .kebab{margin:0}
+.rv-page .cardlink{background:none;border:0;padding:0;margin:0;color:inherit;cursor:pointer;font:inherit;
+  text-align:left;min-height:0}
+.rv-page .cardlink:hover{text-decoration:underline;color:var(--orange-text)}
 """
 )

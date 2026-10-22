@@ -1033,9 +1033,10 @@ def test_the_waiting_cards_apply_all_confirm_warns_of_a_held_change() -> None:
 @pytest.mark.parametrize("width", [344, 360, 390])
 @pytest.mark.parametrize("text", ["100%", "200%"])
 def test_the_no_press_badge_fits_a_phone_at_any_text_size(width: int, text: str) -> None:
-    """A high-risk change Full auto applies shows "No press needed",
-    not "high risk"; on the Fold cover (344 px) and a phone (390 px), at 100% and 200% text, the
-    badge stays inside the card and the title keeps room. The sizes are printed for the record."""
+    """A high-risk change Full auto applies keeps its High label and shows a plain "No press
+    needed" note beside it (F14, Ben 21 Oct); on the Fold cover (344 px) and a phone (390 px), at
+    100% and 200% text, both stay inside the card and the title keeps room. The sizes are printed
+    for the record."""
     from playwright.sync_api import sync_playwright
 
     exe = _chromium_or_skip()
@@ -1058,14 +1059,20 @@ def test_the_no_press_badge_fits_a_phone_at_any_text_size(width: int, text: str)
             frame = page.frames[1]
             frame.evaluate("(t) => { document.documentElement.style.fontSize = t; }", text)
             page.wait_for_timeout(100)
-            assert badge.inner_text().lower() == "no press needed"
-            assert "high" not in (badge.get_attribute("class") or "")
+            assert badge.inner_text().lower() == "high"
+            assert "high" in (badge.get_attribute("class") or "")
+            note = card.locator("#nopress")
+            assert note.inner_text().lower() == "no press needed"
+            assert "hidden" not in (note.get_attribute("class") or "")
+            assert badge.locator("svg").count() == 1 and note.locator("svg").count() == 1  # their icons
             box = frame.evaluate(
                 "() => { const b = document.getElementById('risk').getBoundingClientRect();"
+                " const n = document.getElementById('nopress').getBoundingClientRect();"
                 " const t = document.getElementById('title').getBoundingClientRect();"
-                " const meet = b.left < t.right && t.left < b.right && b.top < t.bottom && t.top < b.bottom;"
-                " return {right: b.right, left: b.left, width: b.width, title: t.width, overlap: meet,"
-                " page: document.documentElement.clientWidth,"
+                " const meets = (a) => a.left < t.right && t.left < a.right"
+                " && a.top < t.bottom && t.top < a.bottom;"
+                " return {right: Math.max(b.right, n.right), left: b.left, width: b.width, title: t.width,"
+                " overlap: meets(b) || meets(n), page: document.documentElement.clientWidth,"
                 " scroll: document.documentElement.scrollWidth}; }"
             )
             print(f"D-4 badge at {width}px, {text} text: {box}")

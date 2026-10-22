@@ -40,6 +40,8 @@ import time
 from dataclasses import dataclass
 from urllib.parse import quote
 
+from . import smallpage
+
 CHALLENGE = re.compile(r"[A-Za-z0-9_-]{43}")  # base64url SHA-256, no padding
 VERIFIER = re.compile(r"[A-Za-z0-9_-]{43,128}")
 CODE = re.compile(r"[A-Za-z0-9_-]{43}")
@@ -107,43 +109,44 @@ def intent_url(code: str, package: str) -> str:
 
 
 def handoff_body(next_path: str, fresh: bool) -> str:
-    """The page ``/login`` shows inside the app: app-signin.js asks the app to sign in with the
-    browser; the link signs in inside the app instead."""
+    """The page ``/login`` shows inside the app (one of the small pages, smallpage.py):
+    app-signin.js asks the app to sign in with the browser; the link signs in inside the app
+    instead. Render it with ``heading=False`` and ``smallpage.HEAD``."""
     fresh_q = "&fresh=1" if fresh else ""
     inapp = f"/login?next={quote(next_path, safe='/')}&inapp=1{fresh_q}"
     return (
-        f"<div class='card' id='app-signin' data-next='{html.escape(next_path)}' "
-        f"data-fresh='{'1' if fresh else '0'}'>"
-        "<p>Sign-in opens in your phone's browser, where your passkey and password manager work. "
-        "When you're done there, tap <b>Open the MTG Assistant Gateway app</b> and you're back "
-        "here, signed in.</p>"
-        "<div class='actions'><button class='primary' type='button' id='app-signin-go'>"
-        "Sign in with the browser</button></div>"
-        f"<p class='muted small'><a href='{html.escape(inapp)}'>Sign in inside the app instead</a> "
-        "(passkeys and autofill may not work there).</p></div>"
-        f"<script src='{SCRIPT}'></script>"
+        f"<div id='app-signin' data-next='{html.escape(next_path)}' data-fresh='{'1' if fresh else '0'}'>"
+        + smallpage.panel(
+            "Sign in",
+            "<p>Sign-in opens in your phone's browser, where your passkey and password manager work. "
+            "When you're done there, tap <b>Open the MTG Assistant Gateway app</b> and you're back "
+            "here, signed in.</p>",
+            "<button class='primary' type='button' id='app-signin-go'>Sign in with the browser</button>",
+            f"<p class='muted small' style='margin-bottom:0'><a href='{html.escape(inapp)}'>Sign in inside "
+            "the app instead</a> (passkeys and autofill may not work there).</p>",
+        )
+        + f"</div><script src='{SCRIPT}'></script>"
     )
 
 
 def return_body(code: str, package: str) -> str:
     """The browser's last page: a button that opens the app with the one-time code."""
     url = html.escape(intent_url(code, package))
-    return (
-        "<div class='card'><p>You're signed in. Go back to the MTG Assistant Gateway app to finish.</p>"
-        f"<div class='actions'><a class='btn btn-primary' id='app-return' href='{url}'>"
-        "Open the MTG Assistant Gateway app</a></div>"
-        "<p class='muted small'>The link works once, for two minutes. If the app doesn't open, "
-        "go back to it and sign in again. You stay signed out in this browser. If you didn't "
-        "start this sign-in from the MTG Assistant Gateway app, don't tap the button.</p></div>"
+    return smallpage.panel(
+        "Signed in",
+        "<p>You're signed in. Go back to the MTG Assistant Gateway app to finish.</p>",
+        f"<a class='btn btn-primary' id='app-return' href='{url}'>Open the MTG Assistant Gateway app</a>",
+        "<p class='muted small' style='margin-bottom:0'>The link works once, for two minutes. If the app "
+        "doesn't open, go back to it and sign in again. You stay signed out in this browser. If you didn't "
+        "start this sign-in from the MTG Assistant Gateway app, don't tap the button.</p>",
     )
 
 
 def expired_body(next_path: str) -> str:
-    return (
-        "<div class='card'><p>That sign-in didn't finish: it expired, was already used, or was "
-        "started somewhere else. Nothing was signed in.</p>"
-        f"<div class='actions'><a class='btn btn-primary' href='/login?next={quote(next_path, safe='/')}'>"
-        "Sign in again</a></div></div>"
+    return smallpage.panel(
+        "Sign-in failed",
+        smallpage.p(smallpage.APP_EXPIRED),
+        smallpage.button("Sign in again", f"/login?next={quote(next_path, safe='/')}", primary=True),
     )
 
 

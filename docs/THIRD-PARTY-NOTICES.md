@@ -118,3 +118,21 @@ Card data and images come from Scryfall (<https://scryfall.com>) under its API
 terms. Magic: The Gathering is © Wizards of the Coast. This project is
 unofficial Fan Content permitted under the Fan Content Policy and is not
 approved or endorsed by Wizards.
+
+## Connected app marks (`src/mtg_gateway/static/logos/`)
+
+The rows that name a connected app show that app's own mark beside its name,
+only to identify the app, and only when the gateway can tell where the app comes
+from: its client metadata address is on claude.ai or anthropic.com (or
+chatgpt.com or openai.com), or, for a registered app, every address it sends
+members back to after sign-in is. Any other app, whatever name it gives itself,
+shows the gateway's plain app icon. `claude.svg` is the Claude spark from Anthropic's
+media resources (anthropic.com/press-kit, "Claude Spark - Clay.svg");
+`openai-black.svg` and `openai-white.svg` are the OpenAI blossom from OpenAI's
+logo pack (openai.com/brand, "OAI_OpenAI-Blossom_Black.svg" and
+"OAI_OpenAI-Blossom_White.svg"). Claude and the Claude spark are trademarks of
+Anthropic PBC; ChatGPT, Codex, OpenAI and the OpenAI blossom are trademarks of
+OpenAI. The files are the owner's official downloads, used byte for byte and
+unmodified (no recolouring, cropping or effects), and their use here implies no
+endorsement of, or partnership with, this gateway. They are not covered by the
+gateway's licence.

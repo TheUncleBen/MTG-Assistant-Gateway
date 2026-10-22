@@ -69,7 +69,12 @@ async def test_backup_copy_keeps_every_card_and_lands_in_the_folder() -> None:
     def rows(d):  # noqa: ANN001, ANN202
         return sorted((c.name, c.quantity, tuple(sorted(c.categories)), c.modifier) for c in d.cards)
 
-    assert rows(copy) == rows(deck) and copy.categories == deck.categories
+    def cats(d):  # noqa: ANN001, ANN202
+        # names and flags; the copy's categories are records of their own, with their own ids
+        return [{k: v for k, v in c.items() if k != "id"} for c in d.categories]
+
+    assert rows(copy) == rows(deck) and cats(copy) == cats(deck)
+    assert {c["id"] for c in copy.categories}.isdisjoint(c["id"] for c in deck.categories)
     assert ark.decks[42]["name"] == "Sample Commander Deck"  # the original is untouched
 
 

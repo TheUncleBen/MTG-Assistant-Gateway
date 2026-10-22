@@ -265,7 +265,8 @@
       case "PageDown": e.preventDefault(); setActive(Math.max(0, Math.min(open.items.length - 1, open.active + 10)), true); return;
       case "PageUp": e.preventDefault(); setActive(Math.max(0, open.active - 10), true); return;
       case "Enter": case " ": case "Spacebar": e.preventDefault(); if (open.active >= 0) pick(open.active); return;
-      case "Escape": e.preventDefault(); close(); return;
+      // the list's own Escape: the box or menu around the button stays open
+      case "Escape": e.preventDefault(); e.stopPropagation(); close(); return;
       case "Tab": close(); return;
     }
     if (key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) { e.preventDefault(); typeAhead(key); }
@@ -292,9 +293,11 @@
     }
   }, true);
   window.addEventListener("resize", function () { if (open) close(); });
+  // Escape with a list open closes the list only: taken first (capture), so a box around the
+  // button, or the box's own Escape on the page, never sees it
   document.addEventListener("keydown", function (e) {
-    if (e.key === "Escape" && open) { e.preventDefault(); close(); }
-  });
+    if (e.key === "Escape" && open) { e.preventDefault(); e.stopPropagation(); close(); }
+  }, true);
   // a script set the value (a "change" is dispatched), the form was reset, or a label's click or
   // the browser's validation focused the hidden select: the button follows
   document.addEventListener("change", function (e) {

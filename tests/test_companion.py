@@ -815,8 +815,12 @@ async def test_app_shell_routes(stack: Stack) -> None:
     m = await h.http.get("/app.webmanifest")
     assert m.status_code == 200 and m.json()["start_url"] == "/decks"
     assert m.headers["content-type"].startswith("application/manifest+json")
+    object.__setattr__(h.app.state.gateway.settings, "server_name", "Ben's MTG gateway")
     sw = await h.http.get("/sw.js")
     assert sw.status_code == 200 and "fetch" in sw.text and sw.headers["cache-control"] == "no-store"
+    # the offline page carries the gateway's own name and a 44 px Try again
+    assert "Ben&#x27;s MTG gateway" in sw.text
+    assert "MTG Assistant Gateway" not in sw.text and "min-height:44px" in sw.text
     # a dropped connection or a gateway restart doesn't show the offline page: about 5 s of
     # retries first, GET navigations only
     assert "RETRY=[500,1000,1500,2000]" in sw.text and "e.request.method!=='GET'" in sw.text
@@ -913,12 +917,15 @@ async def test_compare_page_shows_what_a_build_changed(stack: Stack) -> None:
         # the fake's precon listing carries deck 42; its label is offered, and names resolve
         assert "Sample Commander Deck (" in empty.text and "<datalist" not in empty.text
         by_name = await b.http.get("/decks/42/compare?with=Sample+Commander+Deck", headers=NAV)
-        assert by_name.status_code == 200 and "Taken out of Sample Commander Deck" in by_name.text
+        assert by_name.status_code == 200 and "Taken out of “Sample Commander Deck”" in by_name.text
         assert "Taken out of" not in empty.text
         # against itself: nothing changes
         same = await b.http.get("/decks/42/compare?with=https://archidekt.com/decks/42/sample", headers=NAV)
-        assert same.status_code == 200 and "Taken out of Sample Commander Deck" in same.text
-        assert "<li class='muted'>None</li>" in same.text and "No difference" in same.text
+        assert same.status_code == 200 and "Taken out of “Sample Commander Deck”" in same.text
+        assert (
+            "<div class='tr'><span class='muted'>None</span></div>" in same.text
+            and "No difference" in same.text
+        )
         # against a pasted list: the paste is the "before", this deck the "after"
         paste = "1 Sol Ring\n4 Lightning Bolt\n3 Island\n"
         r = await b.http.get("/decks/42/compare", params={"paste": paste}, headers=NAV)
@@ -929,12 +936,19 @@ async def test_compare_page_shows_what_a_build_changed(stack: Stack) -> None:
         token = await mcp_token(stack.h)
         tool = structured(await call(stack.h, token, "compare_decks", {"a": paste, "b": "42"}))
         sm = tool["summary"]
-        out_tile = f"<b>{sm['cut']}</b><span>cards taken out ({sm['cut_pct']}% of the pasted list)</span>"
-        in_tile = f"<b>{sm['added']}</b><span>cards put in ({sm['added_pct']}% of Sample Commander Deck)"
+        # (the widgets: the number, then the share in the detail line)
+        out_tile = (
+            f"<span class='big'>{sm['cut']}<small>cards</small></span>"
+            f"<span class='det'>{sm['cut_pct']}% of the pasted list</span>"
+        )
+        in_tile = (
+            f"<span class='big'>{sm['added']}<small>cards</small></span>"
+            f"<span class='det'>{sm['added_pct']}% of “Sample Commander Deck”</span>"
+        )
         assert out_tile in r.text and in_tile in r.text
         # the lists under the tiles leave basic lands to their own list, so their counts match the tiles
         added_rows = [a for a in tool["added"] if a["name"] not in ("Island", "Forest")]
-        assert f"Put into Sample Commander Deck <span class='count'>{len(added_rows)}</span>" in r.text
+        assert f"Put into “Sample Commander Deck” <span class='n'>{len(added_rows)}</span>" in r.text
         assert len(added_rows) < len(tool["added"])  # the deck's Forests are only under Basic lands
         bad = await b.http.get("/decks/42/compare?with=https://evil.example/decks/1", headers=NAV)
         assert bad.status_code == 400 and "could not be read" in bad.text
@@ -1022,7 +1036,7 @@ async def test_export_import_round_trip_keeps_every_card_finish_and_commander(st
         assert r.status_code == 303, r.text
         page = await b.http.get("/decks/new", headers=NAV)
         assert (
-            "type='file'" in page.text and "filepick.js" in page.text and "gateway .json export" in page.text
+            "type='file'" in page.text and "filepick.js" in page.text and "Gateway .json export" in page.text
         )
         made_ids = [d for d in ark.decks if ark.decks[d]["name"] == "From the page"]
         assert (
@@ -1177,8 +1191,9 @@ def _assert_busy_page(r, path: str, *, status: int, title: str, max_wait: int) -
 
 async def test_a_used_up_archidekt_budget_is_one_shared_429_page_everywhere(stack: Stack) -> None:
     """Once the member's Archidekt budget (MTG_ARCHIDEKT_CALLS_PER_10_MIN) is spent, every page
-    that reads from Archidekt says so the same way: "Archidekt is busy", HTTP 429 with the
-    budget's Retry-After, no-store, a Try again link to the same URL. Never "Deck not found" or
+    that reads from Archidekt says so the same way: "Too many requests right now" (the member's
+    own allowance, not Archidekt's pause), HTTP 429 with the budget's Retry-After, no-store, a Try
+    again link to the same URL. Never "Deck not found" or
     "Cannot edit this deck" (the deck and the account are fine), never 200, 502 or 503."""
     from mtg_gateway.decks import RateBudget
 
@@ -1191,19 +1206,20 @@ async def test_a_used_up_archidekt_budget_is_one_shared_429_page_everywhere(stac
         for path in BUSY_PAGES:
             # as Reload asks (a deck page just read would be shown again from memory, no call)
             r = await b.http.get(path, headers={**NAV, "Cache-Control": "max-age=0"})
-            _assert_busy_page(r, path, status=429, title="Archidekt is busy", max_wait=600)
+            _assert_busy_page(r, path, status=429, title="Too many requests right now", max_wait=600)
             assert "used up its Archidekt allowance for the last 10 minutes" in r.text, path
             assert "once there is room" in r.text, path
             assert "Your account has used its 1 Archidekt actions" in r.text, path
             assert "href='/decks'>My decks</a>" in r.text, path
         for path in BUSY_DOWNLOADS:
             r = await b.http.get(path)
-            assert r.status_code == 429 and r.text.startswith("Archidekt is busy."), (path, r.text)
+            assert r.status_code == 429 and r.text.startswith("Too many requests right now."), (path, r.text)
             assert 1 <= int(r.headers["retry-after"]) <= 600 and r.headers["cache-control"] == "no-store"
             assert r.headers["content-type"].startswith("text/plain"), path
         js = await b.http.get("/decks/42/export.json")  # the JSON download answers in its own shape
         assert js.status_code == 429 and js.json()["error"] == "rate_limited", js.text
-        assert js.json()["message"].startswith("Archidekt is busy.") and js.json()["retry_after"] >= 1
+        assert js.json()["message"].startswith("Too many requests right now."), js.text
+        assert js.json()["retry_after"] >= 1
         assert 1 <= int(js.headers["retry-after"]) <= 600 and js.headers["cache-control"] == "no-store"
         # the JSON API already said 429 (docs/API.md); the budget's wait is the same header there
         api = await b.http.get("/api/v1/decks/42")
@@ -1295,9 +1311,9 @@ async def test_a_missing_deck_is_still_not_found(stack: Stack) -> None:
     b = await linked_browser(stack)
     try:
         for path, title in (
-            ("/decks/999999", "Deck not found"),
-            ("/decks/999999/export", "Deck not found"),
-            ("/decks/999999/compare", "Deck not found"),
+            ("/decks/999999", "This deck could not be found."),
+            ("/decks/999999/export", "This deck could not be found."),
+            ("/decks/999999/compare", "This deck could not be found."),
             ("/decks/999999/edit", "Cannot edit this deck"),
             ("/decks/999999/settings", "Cannot edit this deck"),
         ):

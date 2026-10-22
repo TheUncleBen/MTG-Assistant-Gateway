@@ -27,6 +27,9 @@ TABLES = """() => [...document.querySelectorAll('.guide .tbl table')].map(t => {
   }
   return {
     head: t.querySelector('th').textContent,
+    rows: t.querySelectorAll('tbody tr').length,
+    chars: cells.reduce((n, c) => n + c.textContent.trim().length, 0),
+    em: cells.length ? parseFloat(getComputedStyle(cells[0]).fontSize) : 16,
     height: Math.round(t.getBoundingClientRect().height),
     narrow: Math.round(narrow * 10) / 10,
     stacked: getComputedStyle(t.querySelector('tbody tr')).display === 'block',
@@ -82,7 +85,7 @@ def test_the_guide_tables_stay_readable_at_every_width_and_text_size(server: Ser
                     where = (vw, text, scheme)
                     tables = page.evaluate(TABLES)
                     print(where, tables)
-                    assert len(tables) == 5, where
+                    assert len(tables) == 6, where  # the five reference tables and the tool-names fold
                     width = page.evaluate("() => document.documentElement.scrollWidth")
                     assert width <= vw, (where, width)
                     for t in tables:
@@ -90,9 +93,12 @@ def test_the_guide_tables_stay_readable_at_every_width_and_text_size(server: Ser
                         # two at 200% text and three or four at 100%)
                         assert t["narrow"] >= 5, (where, t)
                         assert t["roles"], (where, t)
-                        # the tallest (Capability) at 344 px and 200% text is about 24,000 px
-                        # stacked; squeezed to a letter or two a line it was 56,216 px
-                        assert t["height"] <= 26000, (where, t)
+                        # the height a stacked table needs grows with its text: about 8 em a
+                        # row for the column names and padding, and about 0.2 em a letter
+                        # (five letters a line of 1.5 em is 0.3 em). The Mode table's three
+                        # paragraphs are 4,634 px at 344 px and 200% text; squeezed to a letter
+                        # or two a line the old Capability table was 56,216 px for 44 rows
+                        assert t["height"] <= (8 * t["rows"] + 0.2 * t["chars"]) * t["em"], (where, t)
                     # at 100% on a desktop the table stays a table (on the Fold its cells were
                     # squeezed to about three letters, so it stacks there too)
                     if text == "100%" and vw >= 1280:

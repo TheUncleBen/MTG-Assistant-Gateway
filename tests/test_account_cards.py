@@ -180,11 +180,11 @@ async def test_view_choices_and_delete_my_data_put_the_tick_above_the_button(sta
             "<span>Yes, forget my view choices on every device</span></label></div>"
             "<div class='ui-actions'><button>Forget my view choices</button></div>" in choices
         )
+        # Delete my data: a red outline opens the box that holds the tick and the solid red button
         delete = page.split("<h2>Delete my data</h2>", 1)[1].split("</form>", 1)[0]
-        assert (
-            "<span>Yes, delete my data from this gateway</span></label></div>"
-            "<div class='ui-actions'><button class='danger'>Delete my data</button></div>" in delete
-        )
+        assert "<a class='btn btn-outline-danger' href='/account?delete=1' data-box-open='delete'>" in delete
+        assert "<input type='checkbox' id='delete-tick' name='confirm' value='yes' required>" in delete
+        assert "<span>Yes, delete my data from this gateway</span></label>" in delete
         # the Connected apps card is the target of My activity's "Connected apps" button
         assert "<div class='card' id='apps'><h2>Connected apps</h2>" in page
     finally:

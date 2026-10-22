@@ -123,12 +123,17 @@ def test_the_deck_search_panel_fits_every_width(server: Server, width: int) -> N
         got = page.evaluate(PANEL)
         _check_panel(got, width)
         if width < 600:
-            # Show results submits the search: wait for the new page to finish loading, or the
-            # tiles can be measured on a page whose styles are not applied yet
-            with page.expect_navigation(wait_until="networkidle"):
-                page.locator(".sp-show").click()
-            assert not page.locator("#sp-filters.open").count()
-        # the tiles: as many as fit, each at least 220 px wide (M)
+            page.locator(".sp-show").click()
+            page.wait_for_function("() => !document.getElementById('sp-filters').classList.contains('open')")
+        # the tiles: as many as fit, each at least 220 px wide (M). Show refreshes the list in
+        # place (static/decks.js), so the grid is measured once the list is back and laid out, not
+        # while it is being replaced (on a busy runner the columns once read "none")
+        page.wait_for_load_state("networkidle")
+        page.wait_for_function(
+            "() => { const ul = document.querySelector('ul.decklist.grid');"
+            " return !!ul && !ul.closest('[aria-busy=true]')"
+            " && /px/.test(getComputedStyle(ul).gridTemplateColumns); }"
+        )
         cols = page.evaluate(
             "() => { const ul = document.querySelector('ul.decklist.grid');"
             " return {w: ul.getBoundingClientRect().width,"
@@ -339,8 +344,9 @@ def test_the_deck_page_toolbar_shows_the_size_beside_the_view_with_the_drag_hint
     with sync_playwright() as p:
         browser, page, errors = _page(p, server, sid, width, exe)
         page.goto(f"{server.base}/decks/42?view=stacks", wait_until="networkidle")
-        hint = page.locator(".toolbar .hint")
-        assert hint.inner_text() == "Drag a card onto another category to move it; on touch, hold it first."
+        hint = page.locator(".toolbar .hint")  # the grip icon; the words are its hover text
+        drag_words = "Drag a card onto another category to move it; on touch, hold it first."
+        assert hint.get_attribute("title") == drag_words
         view = page.locator(".toolbar #f-view-btn").bounding_box()
         size = page.locator(".toolbar .cardsize .sizeseg").bounding_box()
         assert view and size and abs(view["y"] - size["y"]) <= 2, (view, size)

@@ -131,7 +131,8 @@ async def test_new_deck_settings_and_clone_forms(stack: Stack) -> None:
     try:
         csrf = await b.csrf()
         form = await b.http.get("/decks/new", headers=NAV)
-        assert form.status_code == 200 and "Super awesome deck name 2000" in form.text
+        # the New deck box over My decks, open (the old address keeps working)
+        assert form.status_code == 200 and "id='ndf'" in form.text and "id='newdeck'" in form.text
         r = await b.http.post(
             "/decks/new",
             data={
@@ -764,7 +765,7 @@ async def test_only_a_commander_deck_has_a_bracket(stack: Stack) -> None:
     try:
         csrf = await b.csrf()
         page = await b.http.get("/decks/42/settings", headers=NAV)
-        assert "for Commander decks only: changing the format clears it" in page.text
+        assert "Commander only. Changing the format clears it." in page.text
         form = {
             "csrf": csrf,
             "name": "Sample Commander Deck",

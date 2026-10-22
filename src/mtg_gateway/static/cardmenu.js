@@ -11,8 +11,8 @@
    `kebab(label)` makes a ⋮ button; `toast`, `post`, `getJSON`, `copyText` and `collect` (add one
    copy of a card to the collection) are the small shared actions.
 
-   window.MtgBox: a box (dialog): a centred card on a wide screen, a sheet from the bottom on a
-   phone; Escape, the scrim and Cancel close it; focus goes into the box and back to the opener.
+   window.MtgBox (static/box.js, loaded before this file): the box (dialog) every pop-up shares;
+   opening a box closes an open menu.
 
    window.MtgCardMenu: the card menu used by Card search (static/cardsearch.js), the deck editor's
    add box, the top bar's "Search cards and decks" suggestions (static/suggest.js) and the other
@@ -359,7 +359,7 @@
     // once the pointer has slid 8 px from where it started, or lifts, or the browser cancels it.
     // The tap that ends a hold which opened the menu is swallowed for a moment only, so nothing
     // sticks when no tap follows (a later Enter on the item, or a tap elsewhere, works as ever).
-    var hold = null, opened = false, swallow = 0, startX = 0, startY = 0, touchPress = false;
+    var hold = null, opened = false, swallow = 0, lift = false, startX = 0, startY = 0, touchPress = false;
     root.addEventListener("click", function (e) {
       var b = o.button && e.target.closest ? e.target.closest(o.button) : null;
       if (b && o.itemOf(b)) {
@@ -370,12 +370,18 @@
         return;
       }
       if (!swallow) return;
-      if (menu && menu.contains(e.target)) return;  // a tap in the menu itself
+      // a tap in the menu itself acts, except the lift of the finger that held: the menu opened
+      // under it (a sheet rising over the tile on a phone), so that lift would pick whatever item
+      // sits there
+      if (menu && menu.contains(e.target) && !lift) return;
+      lift = false;
       e.preventDefault();
       e.stopPropagation();
     }, true);
     root.addEventListener("pointerdown", function (e) {
       opened = false;
+      // a new press is a real tap: the lift of the hold is over even when no click followed it
+      lift = false;
       touchPress = e.pointerType !== "mouse";
       if (!touchPress) return;
       var it = o.itemOf(e.target);
@@ -393,8 +399,9 @@
       root.addEventListener(t, function (e) {
         if (t === "pointerup" && opened) {
           opened = false;
+          lift = true;
           clearTimeout(swallow);
-          swallow = setTimeout(function () { swallow = 0; }, 400);
+          swallow = setTimeout(function () { swallow = 0; lift = false; }, 400);
         }
         if (t === "pointercancel") opened = false;
         if (hold === null) return;
@@ -426,108 +433,14 @@
     });
   }
 
-  // -- boxes (dialogs) ---------------------------------------------------------------------------
-  var box = null;
-  // a box that must stay (a delete job running inside it) refuses Esc and the scrim; the box's
-  // own code closes it with force once the outcome is shown
-  function closeBox(force) {
-    if (!box || (box.locked && !force)) return;
-    var b = box;
-    box = null;
-    b.scrim.remove();
-    if (b.onClose) b.onClose();
-    if (b.back && b.back.isConnected) b.back.focus();
-  }
-  /* o: {title, body (a node, or a function (box) -> node), actions (buttons; a button with
-     data-cancel closes the box), wide (the export box), label, returnFocus, onClose}. Returns
-     {panel, body, close(), note(text, error), busy(on), setBody(node), setActions(nodes),
-     lock(on): while on, Esc and the scrim do not close the box (close() still does)}. */
-  function openBox(o) {
-    closeBox(true);
-    close(false);
-    var sc = el("div", "mtgbox-scrim");
-    var panel = el("div", "mtgbox" + (o.wide ? " wide" : ""));
-    panel.setAttribute("role", "dialog");
-    panel.setAttribute("aria-modal", "true");
-    var h = el("h2", null, o.title || "");
-    h.id = "mtgbox-title";
-    panel.setAttribute("aria-labelledby", h.id);
-    if (o.label) panel.setAttribute("aria-label", o.label);
-    panel.appendChild(h);
-    var body = el("div", "body");
-    panel.appendChild(body);
-    var note = el("p", "notice error boxnote");
-    note.setAttribute("role", "alert");
-    note.hidden = true;
-    panel.appendChild(note);
-    var acts = el("div", "acts");
-    panel.appendChild(acts);
-    sc.appendChild(panel);
-    var b = {
-      scrim: sc, panel: panel, body: body, acts: acts, back: o.returnFocus || document.activeElement, onClose: o.onClose,
-      close: function () { closeBox(true); },
-      locked: false,
-      lock: function (on) { b.locked = !!on; panel.setAttribute("data-locked", on ? "true" : "false"); },
-      note: function (text, error) {
-        note.hidden = !text;
-        note.textContent = text || "";
-        note.className = "notice boxnote" + (error ? " error" : " ok");
-      },
-      busy: function (on) {
-        $$("button", acts).forEach(function (x) { x.disabled = !!on || x.hasAttribute("data-gate-off"); });
-        panel.setAttribute("aria-busy", on ? "true" : "false");
-      },
-      setTitle: function (t) { h.textContent = t; },
-      setBody: function (node) { body.textContent = ""; body.appendChild(node); },
-      setActions: function (nodes) {
-        acts.textContent = "";
-        nodes.forEach(function (n) { if (n) acts.appendChild(n); });
-      },
-      focusFirst: function () {
-        var f = panel.querySelector("input:not([type=hidden]):not([type=radio]):not([disabled]), textarea, select, input[type=radio]:checked, .acts button:not([disabled])");
-        if (f) f.focus({ preventScroll: true });
-      }
-    };
-    b.setBody(typeof o.body === "function" ? o.body(b) : (o.body || el("div")));
-    b.setActions(o.actions || []);
-    sc.addEventListener("click", function (e) {
-      if (e.target === sc) closeBox();
-      var c = e.target.closest ? e.target.closest("[data-cancel]") : null;
-      if (c && panel.contains(c)) closeBox();
-    });
-    panel.addEventListener("keydown", function (e) {
-      if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); closeBox(); return; }
-      if (e.key !== "Tab") return;
-      var f = $$("a[href], button:not([disabled]), input:not([disabled]):not([type=hidden]), select:not([disabled]), textarea:not([disabled]), [tabindex='0']", panel)
-        .filter(function (x) { return x.offsetParent !== null; });
-      if (!f.length) return;
-      if (e.shiftKey && document.activeElement === f[0]) { e.preventDefault(); f[f.length - 1].focus(); }
-      else if (!e.shiftKey && document.activeElement === f[f.length - 1]) { e.preventDefault(); f[0].focus(); }
-    });
-    document.body.appendChild(sc);
-    box = b;
-    b.focusFirst();
-    return b;
-  }
-  function boxButton(text, cls, onClick, o) {
-    o = o || {};
-    var b = el("button", cls || "", "");
-    b.type = "button";
-    if (o.icon) b.appendChild(icon(o.icon));
-    b.appendChild(document.createTextNode((o.icon ? " " : "") + text));
-    if (o.cancel) b.setAttribute("data-cancel", "");
-    if (onClick) b.addEventListener("click", onClick);
-    return b;
-  }
-  document.addEventListener("keydown", function (e) { if (box && e.key === "Escape" && !box.panel.contains(e.target)) closeBox(); });
-
   window.MtgMenu = {
     open: openMenu, close: close, isOpen: function () { return !!menu; }, bind: bind,
     item: item, link: link, sep: sep, kebab: kebab, icon: icon, el: el,
     toast: toast, dismissToast: dismissToast, post: post, getJSON: getJSON, csrf: csrf,
-    copyText: copyText, copyAndSay: copyAndSay, collect: collect, enabled: enabled, phone: phone, norm: norm
+    copyText: copyText, copyAndSay: copyAndSay, collect: collect, enabled: enabled, phone: phone, norm: norm,
+    // true while the menu's own history.back() has not landed yet (static/box.js asks)
+    backPending: function () { return ignorePop; }
   };
-  window.MtgBox = { open: openBox, close: function () { closeBox(true); }, button: boxButton, isOpen: function () { return !!box; } };
 
   // -- the card menu -----------------------------------------------------------------------------
   /* s: {name, onOpen(), watch: {watched, onWatch(), onArt() or null} or null (watchlists off),

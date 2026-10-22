@@ -12,6 +12,7 @@ import pytest
 from starlette.routing import Route
 
 from mtg_gateway import db as dbmod
+from mtg_gateway import ui
 from mtg_gateway.admin import add_admin_routes
 from mtg_gateway.config import ConfigError, load_settings
 from mtg_gateway.db import Database
@@ -123,12 +124,14 @@ async def test_admin_sees_the_pages_and_the_api(gw: Harness) -> None:
     b = await admin_browser(gw)
     try:
         r = await b.http.get("/admin", headers=NAVIGATE)
-        assert r.status_code == 200 and "Signed in at least once" in r.text and "<svg" in r.text
+        assert r.status_code == 200 and "Members</span>" in r.text and "<small>signed in</small>" in r.text
+        assert "<svg" in r.text
         assert "default-src 'none'" in r.headers["content-security-policy"]
         assert "Archidekt request limits" in r.text and "answered from cache" in r.text
         users = await b.http.get("/admin/users", headers=NAVIGATE)
         assert users.status_code == 200 and "user-2" in users.text and "root" in users.text
-        assert "value='disable'" in users.text and "name='csrf'" in users.text
+        opened = await b.http.get("/admin/users?open=user-2", headers=NAVIGATE)  # the member's panel
+        assert "value='disable'" in opened.text and "name='csrf'" in opened.text
         act = await b.http.get("/admin/activity", headers=NAVIGATE)
         assert act.status_code == 200 and "tokens_issued" in act.text
         only = await b.http.get("/admin/activity?sub=user-2", headers=NAVIGATE)
@@ -174,10 +177,7 @@ async def test_the_overview_shows_whether_the_removed_member_clean_up_works(gw: 
         assert "On. The first check runs 2 minutes after the gateway starts; reload this page then." in r.text
         sweep.last.update(ok=True, at=1_800_000_000, removed=1, allowed=4, error=None)
         r = await b.http.get("/admin", headers=NAVIGATE)
-        assert (
-            "Working. Last check at <time datetime='2027-01-15T08:00:00Z'>2027-01-15 08:00 UTC</time>: "
-            in r.text
-        )
+        assert f"Working. Last check {ui.when(1_800_000_000)}: " in r.text
         assert (
             "4 members with access; deleted the saved Archidekt sign-in of 1 person who lost access. "
             "Nothing for you to do." in r.text
@@ -186,8 +186,8 @@ async def test_the_overview_shows_whether_the_removed_member_clean_up_works(gw: 
         err = "group 'mtg-users' found 0 times (is the name right, and may the token view that group?)"
         sweep.last.update(ok=False, at=1_800_003_600, error=err)
         r = await b.http.get("/admin", headers=NAVIGATE)
-        assert "Not working. The last check at <time datetime='2027-01-15T09:00:00Z'>" in r.text
-        assert "2027-01-15 09:00 UTC</time> failed and deleted nothing: " + html.escape(err) in r.text
+        assert f"Not working. The last check {ui.when(1_800_003_600)} failed and deleted nothing: " in r.text
+        assert html.escape(err) in r.text
         assert "To fix: Check that MTG_REQUIRED_GROUP and MTG_ADMIN_GROUP match the Authentik group" in r.text
         assert "&lt;time" not in r.text
         o = (await b.http.get("/api/v1/admin/overview")).json()
@@ -197,7 +197,7 @@ async def test_the_overview_shows_whether_the_removed_member_clean_up_works(gw: 
         await b.aclose()
 
 
-_AT = "<time datetime='2027-01-15T08:00:00Z'>2027-01-15 08:00 UTC</time>"
+_AT = ui.when(1_800_000_000)  # the shared list date ("3 h ago", then "Jan 15, 2027"), full date on hover
 
 
 @pytest.mark.parametrize(
@@ -246,11 +246,11 @@ _AT = "<time datetime='2027-01-15T08:00:00Z'>2027-01-15 08:00 UTC</time>"
         ),
         (
             {"state": "ok", "at": 1_800_000_000, "removed": 0, "allowed": 1},
-            f"Working. Last check at {_AT}: 1 member with access; no one lost access. Nothing for you to do.",
+            f"Working. Last check {_AT}: 1 member with access; no one lost access. Nothing for you to do.",
         ),
         (
             {"state": "ok", "at": 1_800_000_000, "removed": 2, "allowed": 5},
-            f"Working. Last check at {_AT}: 5 members with access; deleted the saved Archidekt sign-in "
+            f"Working. Last check {_AT}: 5 members with access; deleted the saved Archidekt sign-in "
             "of 2 people who lost access. Nothing for you to do.",
         ),
         (
@@ -259,7 +259,7 @@ _AT = "<time datetime='2027-01-15T08:00:00Z'>2027-01-15 08:00 UTC</time>"
                 "at": 1_800_000_000,
                 "error": "Authentik could not be reached (ConnectError)",
             },
-            f"Not working. The last check at {_AT} failed and deleted nothing: Authentik could not be "
+            f"Not working. The last check {_AT} failed and deleted nothing: Authentik could not be "
             "reached (ConnectError). To fix: Check that the gateway can reach Authentik's address "
             "(MTG_AUTHENTIK_API_URL, or the issuer's when that is empty). It tries again by itself.",
         ),
@@ -270,7 +270,7 @@ def test_each_clean_up_state_reads_as_one_plain_line(status: dict, text: str) ->
     """Every state of the admin page's clean-up row, word for word."""
     from mtg_gateway.admin import _cleanup_text
 
-    assert html.unescape(_cleanup_text(status)) == text  # the HTML lines escape quotes
+    assert html.unescape(_cleanup_text(status)) == html.unescape(text)  # the HTML lines escape quotes
 
 
 # -- actions --------------------------------------------------------------------------
@@ -415,7 +415,7 @@ async def test_unlink_and_the_api_guards(gw: Harness) -> None:
     assert gw.db.get_link("user-2")
     b = await admin_browser(gw)
     try:
-        users = await b.http.get("/admin/users", headers=NAVIGATE)
+        users = await b.http.get("/admin/users?open=user-2", headers=NAVIGATE)
         assert "arch" in users.text and "value='unlink'" in users.text
         # The API needs the CSRF header on writes and a JSON body.
         r = await b.http.post("/api/v1/admin/users/user-2", json={"action": "unlink"})

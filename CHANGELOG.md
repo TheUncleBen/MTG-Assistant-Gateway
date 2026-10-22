@@ -7,6 +7,51 @@ Notable changes for people who run or use the gateway. The format follows
 with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 (`release/1.2.3`); `latest` is always the newest.
 
+## [0.7.41] - 2026-10-22
+
+### Upgrade notes
+- None beyond the [update steps](docs/UPGRADING.md). There is no database change, so this update
+  saves no before-upgrade copy, and going back to 0.7.40 needs only the `MTG_TAG` change.
+- No new settings or secrets: your variables file works as it is.
+- **The Android app changes:** install the new APK (the app offers the update by itself). Its
+  buttons follow the site's look, Torch and Auto say "On" or "Off", and its error messages are
+  plain sentences without codes.
+
+### Added
+- **Category rename and switches.** Deck settings lets you rename a deck's categories and turn
+  Premier, Not in deck and Not in price on or off, and your assistant can propose the same. Every
+  such change keeps a snapshot (and a backup copy when backups are on), checks that the deck has
+  not changed since, writes one category at a time and reads the deck back; Restore puts the names
+  and switches back. A change that touches the commander's category, Premier, Not in deck, or a
+  rename to or from Sideboard or Maybeboard is always high risk, is never applied by an assistant
+  on its own, and asks you to confirm on your own Deck settings page too. A Deck settings page
+  left open while the deck changed elsewhere refuses to save instead of undoing that change, and a
+  waiting card edit that names a renamed category waits as Needs a look. Creating and deleting
+  categories stays on Archidekt.
+- **My card models:** the card descriptions the simulator keeps for you, listed from the report
+  and Goldfish pages, each with Remove.
+- **Clone into a folder:** pick the folder when you clone a deck.
+- **The Forge solo test on the page:** the report page shows the Forge solo test's result, and the
+  Goldfish page shows the deck's newest one.
+- **Official Claude and ChatGPT logos** beside the names of connected apps, shown only for an app
+  the gateway can tell really comes from Anthropic or OpenAI; any other app keeps the plain icon.
+- **Card size control** (S / M / L) everywhere card pictures show, remembered on your account.
+
+### Changed
+- **Every page follows one standard.** One-action pages became pop-up boxes on the page you were
+  on: New deck, the admin dashboards, Collection, Precons, your profile, setup, and the sign-in
+  and account pages. Lists, notices, buttons and app names look and read the same everywhere.
+- **Faster.** Menus, boxes and tabs answer at once, long lists and the editor fill in steps, and
+  the Proposals list reads what it needs in one go.
+- **The Guide speaks in plain asks** ("Rename a category in my deck"); the tool names moved to a
+  closed "Advanced: tool names" section at the end.
+
+### Fixed
+- A cloned one-card deck's change line said "1 cards".
+- A deck with a category named like the start of an HTML comment (such as `<!--<script>`) showed
+  a broken deck page: the Probability of draw calculator and the rest of the page below it did not
+  load.
+
 ## [0.7.40] - 2026-10-21
 
 When Forge is on, every report that simulates now also has Forge play the deck alone by the full

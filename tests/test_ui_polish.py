@@ -214,15 +214,15 @@ async def test_the_account_page_names_archidekt_writes_in_plain_words(stack: Sta
     b = await linked_browser(stack)
     decks = stack.h.app.state.gateway.decks
     note = (
-        "<p class='muted small'>Archidekt writes are switched on or off for the whole gateway by the "
-        "person who runs it. While they are off, changes can be reviewed but not applied.</p>"
+        "<p class='muted small'>Set for the whole gateway by the person who runs it. While they are off, "
+        "changes can be reviewed but not applied.</p>"
     )
     try:
         page = (await b.http.get("/account", headers=NAV)).text
-        assert "<dt>Archidekt writes</dt><dd><span class='badge ok'>on</span></dd>" in page and note in page
+        assert "<dt>Archidekt writes</dt><dd><span class='ui-lbl green'>" in page and note in page
         decks.settings = dataclasses.replace(decks.settings, writes_enabled=False)
         page = (await b.http.get("/account", headers=NAV)).text
-        assert "<dt>Archidekt writes</dt><dd><span class='badge'>off</span></dd>" in page and note in page
+        assert "<dt>Archidekt writes</dt><dd><span class='ui-lbl grey'>" in page and note in page
         for old in ("Deck writes", "MTG_WRITES_ENABLED", "by its operator"):
             assert old not in page, old
     finally:
@@ -250,7 +250,7 @@ async def test_nav_highlights_export_and_proposals_and_copy_keeps_its_icon(stack
         proposals = (await b.http.get("/proposals", headers=NAV)).text
         assert "<a href='/proposals' aria-current='page' class=fold>Proposals</a>" in proposals
         compare = (await b.http.get("/decks/42/compare", headers=NAV)).text
-        assert "<input type='text' name='with' data-suggest='static'" in compare
+        assert "<input id='cmp-with' type='text' name='with' data-suggest='static'" in compare
         search = (await b.http.get("/search", headers=NAV)).text
         assert "name='c' value='C'" in search and "Colorless" in search and "At most these" in search
         deck = (await b.http.get("/decks/42", headers=NAV)).text

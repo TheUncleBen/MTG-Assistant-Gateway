@@ -63,7 +63,7 @@ CONTRAST = """() => {
   }
   var worst = 99, what = "";
   var sel = ".gf-head p, .gf-head a, .gf-zone h2, .gf-zone h2 span, .gf-empty, .gf-card .tag, "
-    + ".gf-controls button";
+    + ".gf-controls button[data-act], .gf-controls button[data-guide]";
   document.querySelectorAll(sel)
     .forEach(function (e) {
       if (!e.offsetParent || !e.textContent.trim()) return;
@@ -116,7 +116,9 @@ def test_commander_goldfish_by_mouse(server: Server, width: int, scheme: str) ->
             page.locator("#gf-command .gf-card").get_attribute("data-card") == "Aesi, Tyrant of Gyre Strait"
         )
         assert _count(page, "hand") == 7 and _library(page) == total - 8
-        assert "first mulligan is free" in page.locator("#gf-hint").inner_text()
+        # the rules are the intro line above the table (the mockup): the hint is empty until a choice is open
+        assert "first mulligan free" in page.locator(".gf-intro").inner_text()
+        assert page.locator("#gf-hint").inner_text().strip() == ""
         _contrast_ok(page)
         assert _overflow(page) == 0
         # a free mulligan, then a second: keeping bottoms one card (London)
@@ -138,7 +140,7 @@ def test_commander_goldfish_by_mouse(server: Server, width: int, scheme: str) ->
         assert "Turn 1" in page.locator("#gf-status").inner_text()
         # only the turn buttons show once the hand is kept
         shown = page.eval_on_selector_all(
-            ".gf-controls button", "l => l.filter(b => b.offsetParent).map(b => b.dataset.act)"
+            ".gf-controls button[data-act]", "l => l.filter(b => b.offsetParent).map(b => b.dataset.act)"
         )
         assert shown == ["draw", "next", "untap", "reset"], shown
         assert _count(page, "hand") == 6 and _library(page) == total - 7
@@ -204,7 +206,8 @@ def test_sixty_card_goldfish_by_keyboard_and_touch(server: Server) -> None:
         page.goto(f"{server.base}/decks/42/goldfish", wait_until="networkidle")
         assert page.locator("#gf-command").count() == 0
         assert _count(page, "hand") == 7 and _library(page) == total - 7
-        assert "free" not in page.locator("#gf-hint").inner_text()
+        assert "free" not in page.locator(".gf-intro").inner_text()
+        assert page.locator("#gf-hint").inner_text().strip() == ""
         # keyboard: one mulligan, keep, choose the bottom card with Space, confirm with Enter
         page.locator("[data-act=mulligan]").focus()
         page.keyboard.press("Enter")
@@ -242,8 +245,9 @@ def test_sixty_card_goldfish_by_keyboard_and_touch(server: Server) -> None:
 
 GUIDE_CONTRAST = CONTRAST.replace(
     'var sel = ".gf-head p, .gf-head a, .gf-zone h2, .gf-zone h2 span, .gf-empty, .gf-card .tag, "\n'
-    '    + ".gf-controls button";',
-    'var sel = ".gf-guide h2, .gf-guide p, .gf-guide li span, .gf-guide button, .gf-controls button";',
+    '    + ".gf-controls button[data-act], .gf-controls button[data-guide]";',
+    'var sel = ".gf-guide h2, .gf-guide p, .gf-guide li span, .gf-guide button, "\n'
+    '    + ".gf-controls button[data-act], .gf-controls button[data-guide]";',
 )
 
 
@@ -411,9 +415,63 @@ def test_goldfish_cards_follow_the_card_size(server: Server, width: int, scheme:
                 got = page.evaluate(SIZE_STATE)
                 assert got["segInside"] and got["whole"], (size, zoom is not None, got)
                 assert got["contrast"] >= 4.5, (size, zoom is not None, got)
-                assert got["lined"] and (got["row"] or zoom is not None), (size, zoom is not None, got)
+                # (the switch sits at the end of the game's button row now, so it is no longer
+                # left-aligned with the first button)
+                assert got["row"] or zoom is not None, (size, zoom is not None, got)
                 assert _overflow(page) == 0, (size, zoom is not None)
             _contrast_ok(page)
         _shot(page, f"goldfish-size-{width}-{scheme}")
+        browser.close()
+    assert errors == []
+
+
+# Each cell's ⋮ against its card: label, size, and whether the two overlap or leave the window.
+KEBABS = """() => [...document.querySelectorAll('#gf-hand .gf-c')].map(c => {
+  const card = c.querySelector('.gf-card'), k = c.querySelector('button.kebab');
+  if (!k) return null;
+  const a = card.getBoundingClientRect(), b = k.getBoundingClientRect();
+  const overlap = a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+  return { name: card.getAttribute('data-card'), label: k.getAttribute('aria-label'), w: b.width, h: b.height,
+    overlap, shown: getComputedStyle(k).display !== 'none' && b.width > 0,
+    inside: b.right <= document.documentElement.clientWidth + 0.5 };
+})"""
+
+
+@pytest.mark.parametrize("width", [344, 1280])
+def test_each_goldfish_card_has_a_menu_button_beside_it(server: Server, width: int) -> None:
+    """The approved ways into a card's menu are right-click, press and hold and a ⋮ (Ben, 21 Oct):
+    the ⋮ sits under each card, a 44 px button that covers none of the card, opens the same menu
+    as the card itself (the game's moves above Copy name) and goes away with the small card size,
+    where the cards are too narrow for it."""
+    from playwright.sync_api import sync_playwright
+
+    _chromium()
+    sid = server.sign_in_and_link()
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, width)
+        page.goto(f"{server.base}/decks/42/goldfish", wait_until="networkidle")
+        page.locator("[data-act=keep]").click()
+        got = page.evaluate(KEBABS)
+        assert got and all(got), got
+        for k in got:
+            assert k["label"] == f"Menu for {k['name']}", k
+            assert k["shown"] and k["inside"] and not k["overlap"], k
+            assert k["w"] >= 44 and k["h"] >= 44, k
+        assert _overflow(page) == 0
+        first = page.locator("#gf-hand .gf-c").first
+        name = first.locator(".gf-card").get_attribute("data-card")
+        first.locator("button.kebab").click()
+        menu = page.locator(".ctxmenu[role=menu]")
+        menu.wait_for(timeout=3000)
+        assert name in menu.inner_text()
+        items = [t.strip() for t in menu.locator("[role=menuitem]").all_inner_texts()]
+        assert "Copy name" in items and any(i.startswith("Tap") or i.startswith("Play") for i in items), items
+        page.keyboard.press("Escape")
+        page.wait_for_timeout(100)
+        assert page.locator(".ctxmenu").count() == 0
+        # the card stays its own button: the ⋮ is beside it, not inside it
+        assert page.locator("#gf-hand .gf-card .kebab").count() == 0
+        page.locator(".gf-size [data-card-size-set=s]").click()
+        assert not any(k["shown"] for k in page.evaluate(KEBABS))
         browser.close()
     assert errors == []

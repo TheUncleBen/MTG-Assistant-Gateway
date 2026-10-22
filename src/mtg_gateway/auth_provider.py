@@ -36,6 +36,7 @@ from mcp.server.auth.provider import (
 from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
 from starlette.requests import Request
 
+from . import smallpage
 from .cimd import (
     CimdBusy,
     CimdError,
@@ -91,42 +92,46 @@ def _eq(a: str, b: str) -> bool:
     return hmac.compare_digest(a.encode("utf-8"), b.encode("utf-8"))
 
 
-# What the sign-in page says when the code exchange with the provider fails, by OIDCError.reason.
-# Each names the setting to check, so the admin can fix it without reading the log first; none
-# carries anything from the provider's answer or the gateway's secrets.
-_ADMIN_LOG = " The gateway's log has the details."
-EXCHANGE_FAILED = {
+# When the code exchange with the provider fails, the member reads one plain sentence
+# (smallpage.SIGNIN_FAILED) and the log line names the setting to check, by OIDCError.reason, so
+# the admin can fix it without guessing; none carries anything from the provider's answer or the
+# gateway's secrets.
+EXCHANGE_HINTS = {
     "client": (
-        "Sign-in could not be completed: the identity provider refused the gateway's client ID "
-        "or client secret. The gateway's admin should check that MTG_OIDC_CLIENT_ID and the client "
-        "secret (MTG_OIDC_CLIENT_SECRET_FILE) match the provider, and that the provider's "
-        "client type is Confidential." + _ADMIN_LOG
+        "the identity provider refused the gateway's client ID or client secret. Check that "
+        "MTG_OIDC_CLIENT_ID and the client secret (MTG_OIDC_CLIENT_SECRET_FILE) match the provider, "
+        "and that the provider's client type is Confidential."
     ),
     "grant": (
-        "Sign-in could not be completed: the identity provider refused the sign-in code. It may "
-        "have expired or been used already, so try again. If it keeps happening, the gateway's "
-        "admin should check the provider's redirect URI." + _ADMIN_LOG
+        "the identity provider refused the sign-in code. It may have expired or been used already; "
+        "if it keeps happening, check the provider's redirect URI."
     ),
     "id_token": (
-        "Sign-in could not be completed: the gateway could not verify the identity provider's "
-        "ID token. The gateway's admin should check that the provider has a Signing Key and no "
-        "Encryption Key, that the client ID matches, and that both servers' clocks are right." + _ADMIN_LOG
+        "the gateway could not validate the identity provider's ID token. Check that the provider "
+        "has a Signing Key and no Encryption Key, that the client ID matches, and that both servers' "
+        "clocks are right."
     ),
     "unreachable": (
-        "Sign-in could not be completed: the gateway got no usable answer from the identity "
-        "provider. Try again later. If it keeps happening, the gateway's admin should check "
-        "that the gateway can reach the provider." + _ADMIN_LOG
+        "the gateway got no usable answer from the identity provider. If it keeps happening, check "
+        "that the gateway can reach the provider."
     ),
-    "other": "Sign-in could not be completed with the identity provider. Try again." + _ADMIN_LOG,
+    "other": "the code exchange with the identity provider failed.",
 }
 
 
 class LoginError(Exception):
-    """A login failure to show the user in the browser (no sensitive detail)."""
+    """A login failure to show the user in the browser (no sensitive detail).
 
-    def __init__(self, message: str, status: int = 400):
+    ``kind`` picks the page: ``failed`` (the plain "couldn't be finished" page with Try again),
+    ``expired`` (the sign-in link is no longer good: the website and the assistant flows word it
+    differently), ``unavailable`` (the identity provider cannot be reached: Try again later) or
+    ``refused`` (the gateway itself said no for a reason the member can act on: the message as it
+    is, with Home)."""
+
+    def __init__(self, message: str, status: int = 400, kind: str = "failed"):
         super().__init__(message)
         self.status = status
+        self.kind = kind
 
 
 # Longest OAuth ``state`` accepted on /authorize (it is stored with the pending login).
@@ -495,9 +500,7 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
         browser back to the client with access_denied, as for a cancellation at the IdP."""
         session = await self._consent_session(login_id, browser_key, pop=True)
         if session is None:
-            raise LoginError(
-                "This sign-in link has expired or was already used. Start again from your AI client."
-            )
+            raise LoginError(smallpage.EXPIRED_APP, kind="expired")
         params = AuthorizationParams.model_validate(session["params"])
         self.db.audit(
             "login_denied", client_id=session["client_id"][:200], detail={"by": "user", "where": "consent"}
@@ -549,9 +552,7 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
         """After the user confirms, send the browser to the identity provider."""
         session = await self._consent_session(login_id, browser_key)
         if session is None:
-            raise LoginError(
-                "This sign-in link has expired or was already used. Start again from your AI client."
-            )
+            raise LoginError(smallpage.EXPIRED_APP, kind="expired")
         verifier = session["oidc_code_verifier"]
         challenge = (
             base64.urlsafe_b64encode(hashlib.sha256(verifier.encode("ascii")).digest()).decode().rstrip("=")
@@ -559,7 +560,7 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
         try:
             return await self._idp_url(login_id, session["oidc_nonce"], challenge)
         except AuthorizeError as exc:
-            raise LoginError("The identity provider is unavailable. Try again later.", 503) from exc
+            raise LoginError(smallpage.UNAVAILABLE, 503, kind="unavailable") from exc
 
     async def finish_idp_leg(
         self, *, state: str | None, code: str | None, error: str | None, cookie_value: str | None
@@ -567,33 +568,38 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
         """Validate the identity provider's redirect and return the login session
         plus the verified identity (None when the user cancelled at the provider)."""
         if not state:
-            raise LoginError("Missing state parameter.")
-        expired = "This sign-in link has expired or was already used. Start again from your AI client."
+            logger.warning("sign-in callback without a state parameter")
+            raise LoginError(smallpage.SIGNIN_FAILED)
         pending = self.db.get_login_session(state)
         if pending is None:
-            raise LoginError(expired)
+            raise LoginError(smallpage.EXPIRED_APP, kind="expired")
         # Checked before the session is used up, so another browser cannot burn someone's login.
         if not self.same_browser(pending, cookie_value):
-            raise LoginError(
-                "This sign-in was started in a different browser. Start again from your AI client.", 403
-            )
+            logger.warning("sign-in callback from a different browser than the one that started it")
+            raise LoginError(smallpage.EXPIRED_APP, 403, kind="expired")
         session = self.db.pop_login_session(state)
         if session is None:
-            raise LoginError(expired)
+            raise LoginError(smallpage.EXPIRED_APP, kind="expired")
         if error:
             self.db.audit("login_denied", client_id=session["client_id"], detail={"error": error})
             return session, None
         if not code:
-            raise LoginError("Missing code parameter.")
+            logger.warning("sign-in callback without a code parameter")
+            raise LoginError(smallpage.SIGNIN_FAILED)
         try:
             identity = await self.oidc.exchange_code(
                 code, session["oidc_code_verifier"], session["oidc_nonce"]
             )
         except OIDCError as exc:
-            logger.warning("identity provider exchange failed: %s", exc)
+            # The setting to check goes to the log, not the member's page.
+            logger.warning(
+                "identity provider exchange failed: %s. Sign-in refused: %s",
+                exc,
+                EXCHANGE_HINTS.get(exc.reason, EXCHANGE_HINTS["other"]),
+            )
             # 500, not 502: the Android app covers a 502-504 page with "your gateway is not
             # answering" (meant for the reverse proxy's own page), which would hide this message.
-            raise LoginError(EXCHANGE_FAILED.get(exc.reason, EXCHANGE_FAILED["other"]), 500) from exc
+            raise LoginError(smallpage.SIGNIN_FAILED, 500) from exc
 
         known = self.db.get_user(identity.sub)
         pinned = (known or {}).get("idp_issuer")
@@ -611,17 +617,20 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
                     "uses now. Ask the gateway's admin to delete the old account's data, then sign in "
                     "again.",
                     403,
+                    kind="refused",
                 )
 
         if not self.settings.grants_access(identity.groups):
             self.db.audit("login_rejected_group", sub=identity.sub, client_id=session["client_id"])
             self.db.drop_member(identity.sub, identity.groups)  # their apps and browser sessions too
-            raise LoginError("Your account is not in the group that may use this service.", 403)
+            raise LoginError(
+                "Your account is not in the group that may use this service.", 403, kind="refused"
+            )
 
         if known and known.get("disabled_at"):
             self.db.audit("login_rejected_disabled", sub=identity.sub, client_id=session["client_id"])
             self.db.delete_browser_sessions_for(identity.sub)
-            raise LoginError(DISABLED_MESSAGE, 403)
+            raise LoginError(DISABLED_MESSAGE, 403, kind="refused")
 
         self._record_user(identity)
         # The provider's own tokens, so later requests can ask it again (membership.py).
@@ -689,7 +698,7 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
         try:
             source_hash = self._admit_login()
         except LoginThrottled as exc:
-            raise LoginError(TOO_MANY_LOGINS, 429) from exc
+            raise LoginError(TOO_MANY_LOGINS, 429, kind="refused") from exc
         login_id = secrets.token_urlsafe(32)
         nonce = secrets.token_urlsafe(24)
         verifier, challenge = pkce_pair()
@@ -708,7 +717,7 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
                 state=login_id, nonce=nonce, code_challenge=challenge, prompt="login" if force_login else None
             )
         except OIDCError as exc:
-            raise LoginError("The identity provider is unavailable right now. Try again later.", 502) from exc
+            raise LoginError(smallpage.UNAVAILABLE, 502, kind="unavailable") from exc
 
     async def _require_member(self, sub: str) -> None:
         """Refuse the token request unless the identity provider says ``sub`` is still in."""

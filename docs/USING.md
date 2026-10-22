@@ -199,7 +199,12 @@ One deck:
   privacy, and also the **cover image** (any card of the deck, or Archidekt's
   automatic pick), the deck's **tags** (Archidekt's public deck tags) and the
   **folder** it sits in. Each saves to Archidekt at once; cover and tag
-  changes take a snapshot first.
+  changes take a snapshot first. **Categories** renames the deck's categories
+  and turns Premier, Not in deck and Not in price on or off; Save categories
+  keeps a snapshot first, asks once more when the change touches Premier or the
+  commander, and refuses (sending nothing) if the deck changed since you
+  opened the page; the panel then shows the deck as it is now, to make the
+  change again.
 - Below the cards: statistics (mana curve, colours, types, rarities,
   prices, legality), **Probability of draw** (the chance of at least or
   exactly N cards of a category, name, type, subtype or mana value in your
@@ -214,7 +219,7 @@ One deck:
   estimate; alone when none is set) and the description.
 - **Export** (More menu) shows the deck as Archidekt import text (every row
   with printing, finish, categories and labels; paste it into Archidekt's
-  Import dialog or the gateway's New deck page), as a plain decklist and as
+  Import dialog or the gateway's New deck box), as a plain decklist and as
   the sideboard list, each with a **Copy** button, plus downloads as
   Archidekt .txt, plain .txt, .csv and .json (each imports back here or into
   Archidekt), and Arena .txt, MTGO .dek and PDF (one-way). See
@@ -565,7 +570,7 @@ mentioned at the end.
 
 *Logs and backups*
 
-- Logs never contain your password or session. At the usual log level they hold no Archidekt addresses or usernames: the request log names the kind of page, not the deck or the person (/decks/{deck_id}, /users/{username}), and a few other messages may include a deck number. With debug logging on, they list the Archidekt addresses called, which include deck numbers and usernames.
+- Logs never contain your password or session. At the usual log level they hold no Archidekt addresses or usernames: the request log names the kind of page (deck pages and profile pages), not the deck or the person, and a few other messages may include a deck number. With debug logging on, they list the Archidekt addresses called, which include deck numbers and usernames.
 - The gateway's nightly backups leave out the session and keep everything else above. The copy it saves just before it upgrades its database keeps the session, still encrypted, so the server can go back to the older version without anyone linking again; that copy is deleted after as many days as the nightly backups are kept. A copy of the server's disk made another way includes the session, still encrypted.
 
 *How long it lasts and how to end it*

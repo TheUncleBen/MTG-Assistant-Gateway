@@ -268,3 +268,59 @@ def test_no_unused_home_tile_line_left_in_the_waiting_strip() -> None:
     from mtg_gateway import waiting_strip
 
     assert not hasattr(waiting_strip, "waiting_line")
+
+
+async def test_apply_checked_opens_the_confirm_as_a_box_for_the_lists_script(stack: Stack) -> None:
+    """With box=1 (static/proposals.js), /proposals/select answers the confirm as a ui.box: the
+    approved wording, the order the changes run in, the same stamped form posting to
+    /proposals/apply. Without it the confirm page stays (the no-script fallback)."""
+    h = stack.h
+    token, b = await _signed_in(stack)
+    try:
+        a = await _propose(h, token, _add("Opt"))
+        c = await _propose(h, token, _add("Delver of Secrets"))
+        csrf = await b.csrf("/decks/42")
+        r = await b.http.post(
+            "/proposals/select",
+            content=f"csrf={csrf}&action=apply&box=1&pick={a}&v_{a}=1&back=/decks/42",
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+        assert r.status_code == 200 and r.headers["content-type"].startswith("application/json"), r.text
+        out = r.json()
+        assert out["ok"] is True
+        box = out["box"]
+        assert "class='ui-box mtgbox' id='apply-box' role='dialog'" in box
+        assert "<h2 id='apply-box-title'>Apply this change?</h2>" in box
+        assert "A snapshot is kept first, so Undo can put the cards back." in box
+        assert "<ol class='order'><li><b>#" in box and "+1 Opt" in box
+        assert "<form id='apply-f' method='post' action='/proposals/apply'>" in box
+        assert "name='shown' value='" in box and f"name='v_{a}' value='1'" in box
+        assert f"name='picks' value='{a}'" in box and "name='back' value='/decks/42'" in box
+        assert "name='action' value='apply' form='apply-f'" in box and ">Apply</button>" in box
+        assert "data-cancel" in box  # Cancel
+        two = await b.http.post(
+            "/proposals/select",
+            content=f"csrf={csrf}&action=apply&box=1&pick={a}&pick={c}&v_{a}=1&v_{c}=1&back=/proposals",
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+        box2 = two.json()["box"]
+        assert "Apply 2 changes?</h2>" in box2 and ">Apply 2</button>" in box2
+        assert box2.index("+1 Opt") < box2.index("+1 Delver of Secrets")  # oldest first
+        # an expired form: a short answer, nothing applied
+        bad = await b.http.post(
+            "/proposals/select", data={"csrf": "x", "action": "apply", "box": "1", "pick": a}
+        )
+        assert bad.status_code == 403 and bad.json() == {
+            "ok": False,
+            "message": "This form expired. Reload the page.",
+        }
+        assert h.db.get_proposal(a, SUB)["state"] == "pending"
+        # the same post without box=1 is the confirm page, as before
+        page = await b.http.post(
+            "/proposals/select",
+            content=f"csrf={csrf}&action=apply&pick={a}&v_{a}=1&back=/decks/42",
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+        assert page.status_code == 200 and "<title>Apply these changes?" in page.text
+    finally:
+        await b.aclose()
