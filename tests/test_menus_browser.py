@@ -360,6 +360,9 @@ def test_the_deck_boxes_rename_move_export_compare_and_delete(tmp_path: Path) ->
             _pick(page, "Compare with…")
             box = _box(page)
             assert box.locator("h2").inner_text() == "Compare “Renamed deck” with"
+            # the deck list fills in after the box opens: wait for it, not a fixed moment
+            loose = box.locator("select#mb-cmp option", has_text="Loose deck")
+            loose.wait_for(state="attached", timeout=5000)
             options = [t.strip() for t in box.locator("select#mb-cmp option").all_inner_texts()]
             assert "Renamed deck" not in options and "Loose deck" in options
             assert options[-1] == "Any Archidekt deck (paste a link)…"

@@ -342,3 +342,56 @@ def test_a_missing_report_gets_the_small_page_look_on_every_report_route(server:
     # a real report's export still downloads
     store_report(server.db, "user-1", "rep_real", taken_at=int(time.time()) - 60)
     assert h.get("/history/reports/rep_real/export.md").status_code == 200
+
+
+async def test_the_section_renders_main_s_real_solo_block() -> None:
+    """The block as forge.start_solo_run and refresh really build it (not the agreed fixture):
+    a won game, a lost one, one the time limit stopped (``unfinished``), a card Forge lacks. The
+    page, the poll JSON, the Markdown and the Goldfish line all read it."""
+    from types import SimpleNamespace
+
+    from mtg_gateway import deckpage
+    from mtg_gateway.forge import refresh, start_solo_run
+    from mtg_gateway.reports import report_status
+
+    from .test_forge import DECK_TEXT, FakeForge, _solo_view
+
+    fake = FakeForge(missing={"Fake Sticker Card"})
+    client = fake.client()
+    section = await start_solo_run(client, DECK_TEXT, "Liesa", games=4, seed=7)
+    slow = {**_solo_view(None, turns=6), "won_turn": None}
+    fake.jobs[section["job_id"]].update(
+        state="done",
+        results=[
+            {"game": 1, "winner": 1, "solo": _solo_view(6, turns=6)},
+            {"game": 2, "winner": 1, "solo": _solo_view(8, kept=6, turns=8)},
+            {"game": 3, "turn_limit": True, "solo": _solo_view(None, turns=10)},
+            {"game": 4, "stopped_slow": True, "solo": slow},
+        ],
+    )
+    done = await refresh(client, section)
+    assert done["state"] == "done" and done["result"]["unfinished"] == 1 and done["result"]["games"] == 3
+
+    r = report(forge=json.loads(json.dumps(FORGE_DONE)), status=report_status(None, None, None, done))
+    r["forge_solo"] = done
+    sec = _section(rp.report_page_html(r))
+    assert f"{rp.SOLO_FORGE_NAME} (3 games)" in sec and "3 of 4 played" in sec
+    assert "67%<small>2 of 3</small>" in sec and "Turn 7</span><span class='det'>wins from turn 6 to 8" in sec
+    assert "1 game the time limit stopped before turn 10 or before a win is left out" in sec
+    assert "Fake Sticker Card" in sec and "<div class='tr'><span class='t'>10</span>" in sec
+    status = rv.forge_status(r)
+    assert status["forge_solo"] is done and "rv-solo-forge" in status["forge_solo_html"]
+    md = rv.report_markdown(r)
+    assert f"## {rv.FORGE_SOLO_HEADING}" in md and "Left out: 1 game" in md
+
+    # the Goldfish line reads ReportService.newest_forge_solo's shape of the same result
+    res = done["result"]
+    newest = {
+        "report_id": "r1",
+        "finished_at": int(time.time()),
+        "won_rate": res["won_rate"],
+        "games": res["games"],
+        "median_won_turn": res["median_won_turn"],
+    }
+    line = deckpage.forge_solo_line(SimpleNamespace(id="42"), newest, csrf=None)
+    assert "won 67% of 3 games, median win turn 7" in line and "/history/reports/r1" in line

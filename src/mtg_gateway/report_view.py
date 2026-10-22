@@ -23,21 +23,34 @@ from .theme import esc as _esc
 # The simulator's honesty classes, in plain words.
 HONESTY_CLASSES = {
     "interaction_removal": "Removal and other interaction",
+    "interaction_wipe": "Board wipes",
     "interaction_counter": "Counterspells",
     "protection": "Protection",
+    "political": "Votes and choices for opponents",
     "unmodeled_other": "Other effects the simulator does not model",
 }
 # Its standing approximations (the "v1 model shortcuts"), in plain words.
 APPROXIMATIONS = {
     "any-color": "Treated as producing any color",
-    "creature-producer": "Treated as a plain creature producer",
-    "equipment-extra": "Equipment beyond the first is ignored",
-    "fetch": "Fetch lands find a basic at once",
-    "hybrid-cost": "Hybrid costs paid with either color",
+    "creature-producer": "Mana creatures can tap for mana the turn they arrive",
+    "equipment-extra": "Equipment text beyond its bonus is ignored",
+    "fetch": "Fetch lands find a land that enters tapped, in your main phase",
+    "hybrid-cost": "Hybrid and Phyrexian costs paid with one color",
     "residual-text": "Extra card text ignored",
-    "bounce-land": "Bounce lands enter untapped",
+    "bounce-land": "Bounce lands give two mana; returning a land is ignored",
     "filter-ignored": "Mana filtering ignored",
     "ramp-widened": "Ramp counted as finding a land",
+    "for-each": "Mana that scales is counted as a fixed amount",
+    "conditional-tapland": "Lands that sometimes enter tapped enter untapped",
+    "dfc-back-face": "Two-faced cards are played as their front face only",
+    "lifelink": "Life from lifelink is not counted",
+    "unused-option": "Optional costs and other ways to cast (kicker, cycling, flashback) are not used",
+    "library-order": "Scry and surveil do not change the order of the library",
+    "no-deaths": "Nothing dies in a solo test, so death triggers never happen",
+    "attack-trigger": "Attack triggers happen whenever you attack",
+    "anthem-self": "Bonuses for your other creatures count the card itself too",
+    "own-life": "Your own life total is not tracked",
+    "monarch": "The monarch's extra card is drawn at your upkeep",
 }
 # The milestones the simulator tracks as "reached by turn N", in plain words and plot order. A
 # 60-card game (no commander, 20 life) has no commander milestones and its kill is 20 damage.
@@ -1064,8 +1077,10 @@ def honesty_groups(
                 "",
                 "Left out on purpose",
                 _share(total, size),
-                "<p>The simulator plays against an opponent who does nothing, so removal, counterspells and "
-                "protection have nothing to act on. These cards sat in hand.</p>" + groups,
+                "<p>The simulator plays against opponents who do nothing, so removal, board wipes, "
+                "counterspells and protection have nothing to act on. Spells that only do that stayed in "
+                "hand. Creatures and other permanents among them were still cast, and played the parts of "
+                "their text the simulator can read.</p>" + groups,
             )
         )
     low = h.get("low_impact") or []
@@ -1538,6 +1553,72 @@ def _forge_stop(f: dict[str, Any]) -> tuple[int, int | None] | None:
     return played, total if isinstance(total, int) and total >= played else None
 
 
+# The Forge solo test (reports._start_solo): the deck alone on Forge, by the full rules.
+FORGE_SOLO_HEADING = "Forge solo test (full rules, opponents who do nothing)"
+SOLO_STATE_TEXT = {
+    "queued": "Waiting for Forge.",
+    "running": "Games are going now.",
+    "failed": "The Forge solo test could not run.",
+    "timeout": "The Forge solo test ran out of time before finishing.",
+    "cancelled": "The Forge solo test was stopped.",
+    "lost": "Forge lost this solo test.",
+    "skipped": "No Forge solo test for this report.",
+}
+
+
+def _per_turn_text(values: Any) -> str:
+    nums = [v for v in values if isinstance(v, (int, float))] if isinstance(values, list) else []
+    return ", ".join(f"{v:g}" for v in nums)
+
+
+def _turn_text(v: Any) -> str:
+    return f"{v:g}" if isinstance(v, (int, float)) else "–"
+
+
+def forge_solo_lines(f: dict[str, Any]) -> list[str]:
+    """A report's Forge solo test in short lines: its state while it isn't done, then its numbers
+    and the cards Forge could not play."""
+    lines: list[str] = []
+    state = str(f.get("state") or "")
+    if state != "done":
+        lines.append(str(f.get("error") or SOLO_STATE_TEXT.get(state, "")))
+    r = f.get("result") if isinstance(f.get("result"), dict) else {}
+    games, until = r.get("games"), r.get("until_turn")
+    if isinstance(games, int) and games > 0:
+        lines.append(f"Games: {games}, each counted up to your turn {until}")
+        rate = r.get("won_rate_95") or [None, None]
+        ci = _ci_text({"lo": rate[0], "hi": rate[1]}) if len(rate) == 2 else ""
+        lines.append(
+            f"Won by turn {until}: {r.get('won', 0)} of {games} ({_pct(r.get('won_rate'))}"
+            + (f", 95% interval {ci}" if ci else "")
+            + ")"
+        )
+        if r.get("median_won_turn") is not None:
+            low, high = (r.get("won_turn_range") or [None, None])[:2]
+            lines.append(f"Median winning turn: {_turn_text(r['median_won_turn'])} (turns {low} to {high})")
+        if r.get("median_commander_turn") is not None:
+            lines.append(f"Commander cast (median turn): {_turn_text(r['median_commander_turn'])}")
+        if r.get("median_first_out_turn") is not None:
+            lines.append(f"First opponent out (median turn): {_turn_text(r['median_first_out_turn'])}")
+        lines.append(f"Mulligans: {r.get('mulligans', 0)} of {games} {'game' if games == 1 else 'games'}")
+        for key, label in (
+            ("lands_by_turn", "Lands played"),
+            ("casts_by_turn", "Spells cast"),
+            ("damage_by_turn", "Damage dealt"),
+        ):
+            if _per_turn_text(r.get(key)):
+                lines.append(f"{label} each turn (average, from turn 1): {_per_turn_text(r.get(key))}")
+    unfinished = r.get("unfinished")
+    if isinstance(unfinished, int) and unfinished > 0:
+        lines.append(
+            f"Left out: {unfinished} {'game' if unfinished == 1 else 'games'} that Forge's time limit "
+            f"stopped before turn {until} or a win."
+        )
+    if f.get("not_played"):
+        lines.append("Cards Forge could not play: " + ", ".join(str(n) for n in f["not_played"]))
+    return [ln for ln in lines if ln]
+
+
 def forge_stopped_text(f: dict[str, Any]) -> str:
     """The sentence for a run that ended without "done" after playing some games, else ""."""
     stop = _forge_stop(f)
@@ -1875,6 +1956,11 @@ def report_markdown(r: dict[str, Any]) -> str:
         lines += [f"- {ln}" for ln in forge_lines(forge)]
         if forge.get("not_played"):
             lines.append("- Cards Forge could not play: " + ", ".join(forge["not_played"]))
+        lines.append("")
+    solo = r.get("forge_solo") if isinstance(r.get("forge_solo"), dict) else None
+    if solo:
+        lines += [f"## {FORGE_SOLO_HEADING}", ""]
+        lines += [f"- {ln}" for ln in forge_solo_lines(solo)]
         lines.append("")
     if g:
         h = g["honesty"]

@@ -160,7 +160,10 @@ SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "and profile pages), not the deck or the person, and a few other messages may include "
             "a deck number. With debug logging on, they list the Archidekt addresses "
             "called, which include deck numbers and usernames.",
-            "The gateway's own backups leave out the session and keep everything else above. A "
+            "The gateway's nightly backups leave out the session and keep everything else above. "
+            "The copy it saves just before it upgrades its database keeps the session, still "
+            "encrypted, so the server can go back to the older version without anyone linking "
+            "again; that copy is deleted after as many days as the nightly backups are kept. A "
             "copy of the server's disk made another way includes the session, still encrypted.",
         ),
     ),
@@ -170,7 +173,8 @@ SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "The access token lasts about an hour and is renewed with the refresh token. The "
             "refresh token stops working about 40 days after you link (measured October 2026; "
             "Archidekt can change this). Then you link again. Your Account page shows your date.",
-            "Unlink, Delete my data, or an admin's Unlink or Disable deletes the gateway's copy at once.",
+            "Unlink, Delete my data, or an admin's Unlink or Disable deletes the gateway's copy at "
+            "once, also from the copies saved before database upgrades.",
             "If you're removed from this gateway's group, or your sign-in account is deactivated "
             "or deleted, you lose access at once. If the hourly clean-up is on (it needs an extra "
             "setting at the sign-in service), your stored session is usually deleted within about "

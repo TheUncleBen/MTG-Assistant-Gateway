@@ -202,8 +202,9 @@ def test_a_type_chip_narrows_and_flips_to_not_and_clear_empties_everything(serve
         browser.close()
 
 
-def test_load_more_brings_the_next_page_and_the_list_view_and_sort_stay_in_the_search(server: Server) -> None:
-    """UI overhaul 2026-10-21: the next page comes on the Load more button, never by scrolling."""
+def test_load_more_reads_to_the_end_and_the_list_view_and_sort_stay_in_the_search(server: Server) -> None:
+    """The first answer fills the screen and a few rows by itself (0.7.39); after that the next
+    page comes on the Load more button only, never by scrolling (UI overhaul 2026-10-21)."""
     from playwright.sync_api import sync_playwright
 
     exe = _chromium()
@@ -212,16 +213,20 @@ def test_load_more_brings_the_next_page_and_the_list_view_and_sort_stay_in_the_s
         browser, page, errors = _page(p, server, sid, 1280, "light", exe)
         page.goto(f"{server.base}/cards?q=test+land", wait_until="networkidle")
         _wait_count(page, "30 cards")
+        page.wait_for_function(MORE_SETTLED, timeout=5000)  # the screen's fill has ended
+        page.wait_for_load_state("networkidle")
         first = page.locator("#cardgrid .cc").count()
         assert 0 < first < 30
         page.mouse.wheel(0, 8000)
         page.wait_for_timeout(700)
         assert page.locator("#cardgrid .cc").count() == first  # scrolling loads nothing
         for _ in range(12):
-            if page.locator("#cardgrid .cc").count() >= 30:
+            n = page.locator("#cardgrid .cc").count()
+            if n >= 30:
                 break
+            page.wait_for_function(MORE_READY, timeout=5000)
             page.locator("#cs-more [data-more]").click()
-            page.wait_for_timeout(250)
+            page.wait_for_function(f"() => document.querySelectorAll('#cardgrid .cc').length > {n}")
         names = _names(page)
         assert names == [f"Test Land {i:02d}" for i in range(30)], names
         assert page.locator("#cs-more [data-more]").is_hidden()
@@ -363,7 +368,13 @@ def test_a_search_that_failed_can_be_asked_again_and_old_tiles_go(server: Server
         browser.close()
 
 
-# The page asks for page 2 by itself when the first tiles land; "Load more" is busy until it answers.
+# The page asks for page 2 by itself while the first tiles don't fill the screen; "Load more" is busy
+# until it answers.
+# the button is ready, or gone because every card is on screen
+MORE_SETTLED = """
+() => { const b = document.querySelector('#cs-more [data-more]');
+  return !b || b.offsetParent === null || (!b.disabled && b.getAttribute('aria-busy') !== 'true'); }
+"""
 MORE_READY = """
 () => { const b = document.querySelector('#cs-more [data-more]');
   return !!b && !b.disabled && b.getAttribute('aria-busy') !== 'true' && b.offsetParent !== null; }

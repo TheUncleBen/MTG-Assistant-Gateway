@@ -7,7 +7,156 @@ Notable changes for people who run or use the gateway. The format follows
 with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 (`release/1.2.3`); `latest` is always the newest.
 
-## [0.7.37] - unreleased
+## [0.7.40] - 2026-10-21
+
+When Forge is on, every report that simulates now also has Forge play the deck alone by the full
+rules, beside the solo test's quick estimate: Forge plays each card it supports exactly as its
+rules text says, and the report shows how often and on which turn the deck won. Forge is now on in the
+example files for new installs.
+
+### Upgrade notes
+- Update as usual ([docs/UPGRADING.md](docs/UPGRADING.md)): the newest stack file and example
+  variables file, with your values in it. The Forge image is new (`2.0.15-mag6`), and the newest
+  stack file already names it.
+- **Forge is on in the example files.** If you copy the new example file, Forge runs unless you
+  turn it off ([Forge simulations](docs/DEPLOY.md#forge-simulations-on-by-default) in DEPLOY.md
+  says how). Forge is limited to about 1.5 GB of memory and 2 CPU cores, and uses them only while
+  it plays; [docs/HARDWARE.md](docs/HARDWARE.md) says what machine it needs.
+- **Portainer or Swarm: `FORGE_NODE` is now required,** even with Forge off; set it to the node
+  that runs Forge (any node name will do with Forge off). The stack won't deploy without it.
+- To keep Forge off on a stack, set both `FORGE_REPLICAS=0` and an empty `MTG_FORGE_URL=`. With
+  Compose: put a `#` in front of `COMPOSE_PROFILES=forge` and set an empty `MTG_FORGE_URL=`.
+  Turning Forge off without emptying `MTG_FORGE_URL` leaves the gateway asking a Forge that isn't
+  there; emptying it alone leaves Forge running unused.
+- **If you keep your own variables file** instead of taking the new example: a file made from an
+  earlier example file already has `FORGE_REPLICAS` and `MTG_FORGE_URL` lines, so Forge stays as
+  you set it (on or off). On a stack you still need to add `FORGE_NODE` (above). A variables list
+  with no `MTG_FORGE_URL` line at all now asks for Forge: add `MTG_FORGE_URL=` to keep it off.
+- The reports table gains two columns, added in place, so this update saves no before-upgrade
+  copy, and going back to 0.7.39 needs no restore.
+- The Android app doesn't change.
+
+### Added
+- **The Forge solo test.** With Forge on, a report that simulates also has Forge play the deck
+  alone against opponents who do nothing (60-card decks too), counted up to turn 10, and shows how
+  often and on which turn it won, in the report your assistant reads and in the report's Markdown
+  download. It starts after the report's games against precons, so it never holds them up. Forge
+  shares about four and a half minutes of play between the games (Java starting up and any wait
+  for Forge come on top, so it often takes longer), and games the time limit stopped before turn
+  10 or a win are left out of the numbers, and the report says how many. Each member has one at a
+  time (two for reports that share opponents); a report made while another is still playing gets
+  none, and says so, as does one made while other members' Forge games wait their turn, which
+  go first. A report now counts as finished, and you are notified, only once its Forge
+  solo test has ended too. Running the report again later plays one that was skipped or failed.
+  Deleting the report stops it. An older Forge image skips it and the report says so.
+
+### Changed
+- **Forge is on by default** in the example stack, Compose and variables files.
+
+### Fixed
+- **Delete my data** (and an administrator's delete of a member's data) now also stops that
+  member's unfinished Forge games, as deleting one report does.
+
+## [0.7.39] - 2026-10-21
+
+Fixes from a security review of 0.7.31 to 0.7.37, and small fixes to card search and the
+Proposals page.
+
+### Upgrade notes
+- None beyond the [update steps](docs/UPGRADING.md). Coming from 0.7.37 or 0.7.38 there is no
+  database change, so this update saves no before-upgrade copy, and going back needs only the
+  `MTG_TAG` change. Coming from 0.7.36 or older, the database is upgraded as before.
+- At its first start the gateway deletes the copies in `before-upgrade` (set-aside copies too)
+  that are older than `MTG_BACKUP_KEEP_DAYS` (14 days unless you changed it), the newest included,
+  and brings the rest in line with the database (below).
+- Going back by itself works only within `MTG_BACKUP_KEEP_DAYS` of an upgrade; raise it before
+  you update to keep the way back open longer.
+- The Android app doesn't change.
+
+### Security
+- The copies saved before database upgrades, and the set-aside copies made when going back, are
+  kept no longer than the nightly backups (`MTG_BACKUP_KEEP_DAYS`), the newest included. An
+  unlink, a disable, a removal from the gateway's group, **Disconnect my phones** and **Delete my
+  data** are applied to every one of them at once, as the “Before you link” text says, and so is a
+  relink's replaced session; a copy that can't be changed is deleted. At every start the copies
+  are also brought in line with the database, so what ended under an older version is ended in
+  them too: deleted members are forgotten (in a set-aside copy too, where members who joined after
+  the upgrade stay), members who are gone or disabled keep no sign-in tokens, and Archidekt
+  sessions and phone keys the database no longer holds are blanked.
+- When you go back from a later version to 0.7.39 or newer, each member keeps the Archidekt link
+  and the phone connection they have now: an Archidekt account they unlinked or replaced since the
+  upgrade, and phones they disconnected, don't come back.
+- Going forward again with a set-aside copy put back by hand: if the copy was made by 0.7.39 or
+  newer, the newer version ends every sign-in at its first start on it. docs/UPGRADING.md says
+  what to do with a copy made by 0.7.37 or 0.7.38, and what to check on the Users page afterwards.
+- The My decks folder and deck boxes, deck search's Load more, tag suggestions, deck downloads,
+  the JSON API used with a browser sign-in and the other signed-in reads that ask Archidekt (or
+  Scryfall, for card search) now answer only requests from the gateway's own pages: a link on
+  another site can't make them spend a member's allowance.
+- Nightly backups no longer keep members' phone keys (their notification topics). After a
+  restore, members who use notifications press **Save notifications** in the app again.
+- The gateway remembers the folder it puts backup copies in, so the backup folder renamed on
+  Archidekt (or a folder it was moved into) can't be deleted like any other folder, even with no
+  copy left inside. Deleting a folder is also refused when it holds backup copies the gateway
+  made.
+- The before-upgrade folder is made owner-only even when it already existed with looser
+  permissions.
+- The “Before you link” text and the member guide say what the copy saved before a database
+  upgrade keeps, and for how long.
+
+### Changed
+- Card search fills the screen and a few rows more, then loads more cards only from the Load more
+  button, never by scrolling.
+
+### Fixed
+- Card search on a computer: the cards Load more adds no longer move the Add to deck buttons
+  already on screen, and they get their ⋮ menu button too. Every card tile is now the same
+  height: the mana cost keeps one line and the type line two (the card viewer shows all of a long
+  one).
+- Proposals: a proposal whose risk can't be judged shows "—" instead of High, also while it
+  waits (it still waits for your own press).
+- The 0.7.35, 0.7.36, 0.7.37 and 0.7.38 sections of this changelog carry their release dates.
+
+## [0.7.38] - 2026-10-21
+
+The solo test plays far more of a deck's cards with their effect. It now reads the common card
+text it used to skip (drawing, ramp, tokens, damage, anthems, cost reducers and more), so across
+Forge's 85 recent Commander precons, about a third of a deck's cards played with their effect
+before and about half do now. Removal, board wipes and counterspells, which have nothing to hit in a solo test, are set
+aside and said so, instead of counting against the deck.
+
+### Upgrade notes
+- Update as usual ([docs/UPGRADING.md](docs/UPGRADING.md)): the newest stack file and example
+  variables file, with your values in it. The research service and Forge images are new
+  (`1.3.2-mag5` and `2.0.15-mag5`), and the newest stack file already names them.
+- No database change, so this update saves no before-upgrade copy.
+- The Android app doesn't change.
+
+### Added
+- **[docs/HARDWARE.md](docs/HARDWARE.md):** the machine you need, with and without Forge, and how
+  long tests took on the machines we timed.
+- **Cards Forge cannot play**, now listed in [docs/CAPABILITIES.md](docs/CAPABILITIES.md): the
+  Unfinity sticker and Attraction cards, and Alchemy cards that are not Commander-legal.
+
+### Changed
+- **The solo test reads more card text.** Cards that draw, gain life, make Treasure or
+  creature tokens, deal damage or drain opponents, add +1/+1 counters, fetch lands or cards, make
+  extra mana or extra combats, pump your creatures, give haste, let you play more lands, lower
+  costs or double tokens now do that in the solo test, from when they enter, when you cast
+  spells, at upkeep, in combat, or from an ability with a plain cost. Prowess, double strike and
+  defender count too, and the monarch's extra card is drawn at your upkeep. Cards with hybrid or Phyrexian mana costs are cast.
+- A permanent whose text the solo test can't fully read is still cast, and does the parts it
+  can read, unless the part it can't read limits the rest (such as "only once each turn"): then
+  it is cast without its effect. The report names what it left out. Before, any card with removal or a counterspell
+  in its text was never cast at all, even a creature.
+- Removal, board wipes and counterspells are listed as set aside on purpose, not as cards the
+  solo test can't play.
+- Forge's build check now also measures the cards legal in Commander, and fails below 99.6% of
+  them. Today it plays 99.71% of Commander-legal cards and 99.60% of all cards legal anywhere.
+- Forge games run a little faster (about 5% on average over 6 paired test games on one x86
+  machine; not timed on a Pi).
+
+## [0.7.37] - 2026-10-21
 
 Updating is now a fresh install on top of your data: take the newest stack file and example
 variables file, put your settings in, deploy. There is no backup to take first: before a new
@@ -51,7 +200,7 @@ version puts that copy back by itself.
 - docs/UPGRADING.md, docs/DEPLOY.md and docs/DEPLOY-COMPOSE.md describe an update as the install
   steps again; the extra steps 0.7.29 to 0.7.33 needed are kept at the end of UPGRADING.md.
 
-## [0.7.36] - unreleased
+## [0.7.36] - 2026-10-20
 
 Decks, folders and cards get a menu on every page (right-click, press and hold, or the ⋮
 button), and the actions that had a page of their own open as a box instead. Folders can be moved
@@ -99,7 +248,7 @@ pages fit phones, an open Fold, tablets and computers the same way.
 ### Fixed
 - A saved scan could write its list into another tab after you switched tabs.
 
-## [0.7.35] - unreleased
+## [0.7.35] - 2026-10-20
 
 The gateway's pages follow one look: the same status and risk words everywhere, tables that turn
 into two-line rows on phones, a row of widgets at the top of Proposals, History, Reports and the

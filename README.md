@@ -31,9 +31,10 @@ person has said yes to the exact change.
   - The **operator** deploys it and decides who gets in.
   - **Users** connect their assistant and link their Archidekt account.
 - **What it runs on:** three Docker containers (the gateway, Mystic Forge
-  and ntfy) and an optional fourth for Forge, all for amd64 or arm64 (so a
+  and ntfy) and a fourth for Forge (on by default, can be turned off), all for amd64 or arm64 (so a
   Raspberry Pi is fine), behind any HTTPS reverse proxy, with any OpenID Connect
-  identity provider handling sign-in.
+  identity provider handling sign-in. What hardware it needs, and how long a test
+  takes: [docs/HARDWARE.md](docs/HARDWARE.md).
   - **Deploy with** Docker Compose on one machine, or a Docker Swarm stack
     (Portainer optional).
   - **Tested end to end with** Swarm, Authentik and an nginx proxy in CI.
@@ -109,6 +110,7 @@ identity provider you control (Authentik, Keycloak, Authelia, ...).
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Everyone | How the pieces fit, what you can swap, how sign-in and deck edits work, the security model |
 | [DEPLOY-COMPOSE.md](docs/DEPLOY-COMPOSE.md) | Operators | A full deploy on one machine with Docker Compose |
 | [DEPLOY.md](docs/DEPLOY.md) | Operators | A full deploy on Docker Swarm (Portainer optional), plus every environment variable |
+| [HARDWARE.md](docs/HARDWARE.md) | Operators | Minimum and recommended hardware, and how long tests take |
 | [REVERSE-PROXY.md](docs/REVERSE-PROXY.md) | Operators | What the proxy must do, with Caddy, Traefik, nginx and Nginx Proxy Manager examples |
 | [IDP-AUTHENTIK.md](docs/IDP-AUTHENTIK.md) | Operators | Authentik, field by field: group, provider, application, binding, adding people, checks and troubleshooting |
 | [IDP-OTHERS.md](docs/IDP-OTHERS.md) | Operators | The identity provider checklist, and notes for Keycloak, Authelia, Zitadel, Pocket ID, Kanidm, Entra ID and Google |
@@ -306,7 +308,7 @@ between releases ([docs/VERSIONS.md](docs/VERSIONS.md)).
 | Client and device coverage | See [docs/CONNECT.md](docs/CONNECT.md#which-apps-and-devices-work), which labels each claim as tested, reported or not tested |
 | Deck statistics, stored deck reports and history, compare, companion pages, admin page, JSON API | Built and covered by the test suite against fakes. The companion pages and admin page were also checked on a live deployment on 2026-10-10 and 2026-10-11 (speed, backup copies, the redesigned pages, edit and restore) |
 | Deck deletion, cover image, folders, tags, comment editing, collection details (0.7.2); comment votes, colour tags and the assistant's account-action proposals (likes, bookmarks, follows, comments, folders, deck deletion; 0.7.16 to 0.7.19); custom mana value and deck collaborators (0.7.20) | Built against Archidekt routes read from its own site code and covered by tests against a fake; not yet exercised live (taking a colour tag off a card is also not confirmed). Each one reads the result back and reports a mismatch rather than trusting Archidekt's answer |
-| Forge games in deck reports (0.7.14, optional, off by default) | Built. The Forge image is built and smoke-tested on arm64 in CI, with a card-coverage check of 99.5% of the cards legal in at least one format (measured 99.69%; the cards Forge lacks are named in every report). Not yet measured on a Raspberry Pi. Opponents are Commander precons of the deck's bracket (0.7.23; the bracket set on Archidekt, else the gateway's estimate; a precon's bracket counts only its game changers; the nearest bracket fills in, and the report says which and why). Commander decks only: there are no 60-card opponent decks |
+| Forge games in deck reports (0.7.14; on by default in the example files from 0.7.40) | Built. The Forge image is built and smoke-tested on arm64 in CI, with card-coverage checks of 99.5% of the cards legal in at least one format and 99.6% of the Commander-legal cards (measured 99.60% of all and 99.71% of Commander-legal cards on 2026-10-21; what Forge lacks is listed in [docs/CAPABILITIES.md](docs/CAPABILITIES.md#cards-forge-cannot-play) and named in every report). Timed once on a Raspberry Pi 5: 38 seconds and about 740 MiB for a game an x86 machine played in 18 to 19 seconds. Opponents are Commander precons of the deck's bracket (0.7.23; the bracket set on Archidekt, else the gateway's estimate; a precon's bracket counts only its game changers; the nearest bracket fills in, and the report says which and why). Commander decks only: there are no 60-card opponent decks (the Forge solo test, from 0.7.40, also plays 60-card decks) |
 | Watchlists and price history (0.7.23) | Built and covered by tests against fakes; off unless the operator sets `MTG_WATCHLISTS_ENABLED=true` |
 | Features not built yet | The full list is in [docs/CAPABILITIES.md](docs/CAPABILITIES.md#d-parked) (Mystic Forge's own saved goldfish reports stay hidden too; the gateway's stored deck reports replace them) |
 

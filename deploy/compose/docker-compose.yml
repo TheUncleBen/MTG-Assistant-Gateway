@@ -111,8 +111,8 @@ services:
       MTG_LOG_LEVEL: ${MTG_LOG_LEVEL:-}
       # Set to an empty value (and drop the mysticforge service) to run without research tools.
       MTG_MYSTIC_FORGE_URL: ${MTG_MYSTIC_FORGE_URL-http://mysticforge:8000/mcp}
-      # Forge simulations: empty (the default) leaves them off; http://forge:8000 with the forge profile.
-      MTG_FORGE_URL: ${MTG_FORGE_URL:-}
+      # Forge simulations: on by default with the forge profile; an empty value turns them off.
+      MTG_FORGE_URL: ${MTG_FORGE_URL-http://forge:8000}
       MTG_FORGE_GAMES: ${MTG_FORGE_GAMES:-}
       # Forge games the gateway asks Forge to play at once for one report (1 to 16); FORGE_MAX_PARALLEL
       # on the Forge service caps all runs together.
@@ -229,7 +229,7 @@ services:
   # Mystic Forge: internal research and simulation service. No published ports;
   # only the gateway talks to it.
   mysticforge:
-    image: ${MF_IMAGE:-ghcr.io/theuncleben/mtg-assistant-mysticforge}:${MF_TAG:-1.3.2-mag4}
+    image: ${MF_IMAGE:-ghcr.io/theuncleben/mtg-assistant-mysticforge}:${MF_TAG:-1.3.2-mag5}
     restart: unless-stopped
     # Docker keeps container logs forever by default (json-file max-size -1); cap them so a
     # small disk (a Raspberry Pi SD card) can't fill up.
@@ -345,13 +345,14 @@ services:
           memory: ${NTFY_MEMORY_LIMIT:-128M}
           pids: 128
 
-  # Forge, the rules engine for deck simulations (docker/forge/, GPL-3.0, unmodified). Optional and
-  # off by default: start it with COMPOSE_PROFILES=forge and set MTG_FORGE_URL=http://forge:8000 for
-  # the gateway. It starts Java only while a simulation runs, as many games at once as its CPUs and
-  # memory fit (or FORGE_MAX_PARALLEL when set), and needs no internet.
+  # Forge, the rules engine for deck simulations (docker/forge/, GPL-3.0, unmodified). On by default:
+  # the example .env sets COMPOSE_PROFILES=forge, and MTG_FORGE_URL=http://forge:8000 for the
+  # gateway; remove the first and empty the second to run without it. It starts Java only while a
+  # simulation runs, as many games at once as its CPUs and memory fit (or FORGE_MAX_PARALLEL when
+  # set), and needs no internet.
   forge:
     profiles: ["forge"]
-    image: ${FORGE_IMAGE:-ghcr.io/theuncleben/mtg-assistant-forge}:${FORGE_TAG:-2.0.15-mag4}
+    image: ${FORGE_IMAGE:-ghcr.io/theuncleben/mtg-assistant-forge}:${FORGE_TAG:-2.0.15-mag6}
     restart: unless-stopped
     logging:
       driver: json-file

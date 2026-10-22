@@ -21,7 +21,7 @@ from urllib.parse import urlencode
 from . import ui
 from .decks import ADMIN_CLIENT, BROWSER_CLIENT
 from .history_view import when_since
-from .modes import UNJUDGED
+from .modes import NO_ROWS_REASON, UNJUDGED
 from .theme import esc, icon
 from .waiting_strip import line_for
 
@@ -215,7 +215,10 @@ def _gathered(
         risk, why = r.get("risk"), ""
         if r["state"] in ("pending", "applying"):
             full = db.get_proposal(r["id"], sub)
-            risk, why = decks.proposal_risk(sub, full) if full else ("high", "")
+            # nothing to judge it by (gone meanwhile, or no list of rows): a dash, never High
+            risk, why = decks.proposal_risk(sub, full) if full else (UNJUDGED, "")
+            if risk == "high" and why == NO_ROWS_REASON:
+                risk, why = UNJUDGED, ""
         elif not risk:  # closed before its tier was stored: as the close would judge it
             full = db.get_proposal(r["id"], sub)
             risk = decks.stored_risk(full) if full else UNJUDGED

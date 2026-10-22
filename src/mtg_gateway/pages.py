@@ -433,6 +433,8 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         if action == "delete_data":
             if data.get("confirm") != "yes":
                 return RedirectResponse("/account?delete=1&err=confirm_delete", status_code=303)
+            if getattr(state, "reports", None) is not None:  # their unfinished Forge games stop too
+                state.reports.forget_member(sub)
             state.db.delete_member_data(sub)
             state.decks.forget_member(sub)
             if state.membership is not None:

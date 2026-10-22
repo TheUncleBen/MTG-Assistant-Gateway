@@ -18,17 +18,28 @@ from mtg_gateway.archidekt import parse_deck
 from mtg_gateway.db import Database
 from mtg_gateway.decks import DeckError
 from mtg_gateway.forge import (
+    SOLO_TOO_OLD,
     ForgeClient,
     ForgeError,
     forge_deck,
     pick_opponents,
     refresh,
     start_run,
+    start_solo_run,
     summarise,
+    summarise_solo,
     wilson,
 )
-from mtg_gateway.report_view import FORGE_DRIFT_NOTE, forge_lines
-from mtg_gateway.reports import ReportService
+from mtg_gateway.report_view import FORGE_DRIFT_NOTE, forge_lines, forge_solo_lines, report_markdown
+from mtg_gateway.reports import (
+    SOLO_BUSY,
+    SOLO_NOT_STARTED,
+    SOLO_ONE_AT_A_TIME,
+    SOLO_OTHERS_WAITING,
+    ReportService,
+    report_status,
+    solo_game_seconds,
+)
 
 from .fake_archidekt import FakeArchidekt
 
@@ -48,6 +59,7 @@ class FakeForge:
         self.health_probes = 0
         self.max_parallel: int | None = None  # the engine's places, listed in each job when set
         self.parallel_cap: int | None = None  # a Forge image before 2.0.15-mag4 refuses more than 4
+        self.solo = False  # a Forge image that plays solo tests (2.0.15-mag6 on) says so in /health
 
     def handler(self, request: httpx.Request) -> httpx.Response:
         path = request.url.path
@@ -55,7 +67,8 @@ class FakeForge:
             self.health_probes += 1
             if not self.up:
                 raise httpx.ConnectError("down")
-            return httpx.Response(200, json={"status": "ok", "busy": False, "queued": 0})
+            extra = {"solo": True, "game_seconds": 240, "max_parallel": 1} if self.solo else {}
+            return httpx.Response(200, json={"status": "ok", "busy": False, "queued": 0, **extra})
         if path.startswith("/jobs/") and request.method == "DELETE":
             jid = path.rsplit("/", 1)[1]
             if jid not in self.jobs:
@@ -169,6 +182,79 @@ async def test_refresh_finishes_and_reports_a_lost_job() -> None:
     assert await refresh(client, done) is done  # final: never asked again
     gone = await refresh(client, {**section, "job_id": "ffffffffffffffff"})
     assert gone["state"] == "lost"
+
+
+def _solo_view(won: int | None, *, cmdr: int | None = 3, kept: int = 7, turns: int = 6) -> dict[str, Any]:
+    return {
+        "turns": turns,
+        "kept": kept,
+        "commander_cast_turn": cmdr,
+        "first_out_turn": won,
+        "won_turn": won,
+        "lands_by_turn": [1] * turns,
+        "casts_by_turn": [2] * turns,
+        "damage_by_turn": [0] * (turns - 1) + [10],
+        "commander_damage": 0,
+    }
+
+
+def test_summarise_solo_counts_wins_turns_and_averages_by_turn() -> None:
+    results = [
+        {"game": 1, "winner": 1, "solo": _solo_view(5, turns=5)},
+        {"game": 2, "winner": 1, "solo": _solo_view(7, kept=6, turns=7)},
+        {"game": 3, "draw": True, "solo": _solo_view(None, cmdr=None, turns=10)},
+        {"game": 4, "unparsed": "garbled"},
+    ]
+    out = summarise_solo(results, 4, {"opponents": 3, "until_turn": 10})
+    assert out["games"] == 3 and out["unread"] == 1
+    assert out["won"] == 2 and out["won_rate"] == round(2 / 3, 4)
+    assert out["median_won_turn"] == 6 and out["won_turn_range"] == [5, 7]
+    assert out["median_commander_turn"] == 3 and out["mulligans"] == 1
+    # turn 6 is averaged over the two games still going (7 and 10 turns), not all three
+    assert out["damage_by_turn"][4] == round((10 + 0 + 0) / 3, 2)
+    assert out["damage_by_turn"][5] == 0 and len(out["damage_by_turn"]) == 10
+    assert out["lands_by_turn"] == [1.0] * 10
+
+
+async def test_start_solo_run_sends_one_deck_and_refresh_summarises_it() -> None:
+    fake = FakeForge(missing={"Fake Sticker Card"})
+    client = fake.client()
+    section = await start_solo_run(client, DECK_TEXT, "Liesa", games=4, seed=7)
+    sent = fake.started[0]
+    assert sent["solo"] == {"opponents": 3, "until_turn": 10} and sent["format"] == "Commander"
+    assert len(sent["decks"]) == 1 and sent["seed"] == 7
+    assert section["seats"] == ["Liesa"] and section["not_played"] == ["Fake Sticker Card"]
+    fake.jobs[section["job_id"]].update(
+        state="done", results=[{"game": 1, "winner": 1, "solo": _solo_view(6)}]
+    )
+    done = await refresh(client, section)
+    assert done["state"] == "done" and done["result"]["median_won_turn"] == 6
+    assert "seats" not in done["result"]
+
+
+async def test_start_solo_run_plays_a_deck_without_commander_against_one() -> None:
+    fake = FakeForge()
+    await start_solo_run(fake.client(), "4 Lightning Bolt\n20 Mountain\n", "Burn", games=2, until_turn=5)
+    sent = fake.started[0]
+    assert sent["format"] == "Constructed" and sent["solo"] == {"opponents": 1, "until_turn": 5}
+    await start_solo_run(fake.client(), DECK_TEXT, "Liesa", games=1, game_seconds=60)
+    assert fake.started[1]["solo"] == {"opponents": 3, "until_turn": 10, "game_seconds": 60}
+    with pytest.raises(ForgeError):
+        await start_solo_run(fake.client(), DECK_TEXT, "Liesa", games=1, until_turn=31)
+
+
+async def test_start_solo_run_says_when_forge_is_too_old() -> None:
+    fake = FakeForge()
+    old = fake.handler
+
+    def refuse(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/jobs" and request.method == "POST":
+            return httpx.Response(400, json={"error": "decks must list 2 to 4 decks"})
+        return old(request)
+
+    client = ForgeClient("http://forge.test", transport=httpx.MockTransport(refuse))
+    section = await start_solo_run(client, DECK_TEXT, "Liesa", games=2)
+    assert section == {"state": "skipped", "not_played": [], "error": SOLO_TOO_OLD}
 
 
 class _Decks:
@@ -1518,3 +1604,390 @@ async def test_one_forge_address_changes_nothing(tmp_path: Path, monkeypatch: An
         assert await client.copies() == []
         picked, engine, copies = await client.pick()
         assert picked is client and engine is None and copies == 1
+
+
+def test_solo_game_seconds_share_the_budget() -> None:
+    assert solo_game_seconds(5, 1, 240) == 54  # 270 s over 5 rounds
+    assert solo_game_seconds(4, 4, 240) == 240  # one round: the service's own limit
+    assert solo_game_seconds(50, 1, 240) == 30  # never less than 30 s
+    assert solo_game_seconds(50, 1, 20) == 20  # nor more than the service allows
+
+
+async def test_a_report_plays_the_forge_solo_test_after_its_precon_games(tmp_path: Path) -> None:
+    db = Database(tmp_path / "t.sqlite")
+    db.upsert_user("alice", email=None, name=None, preferred_username=None, groups=[])
+    fake = FakeForge()
+    fake.solo = True
+    reports = ReportService(db, _Decks(), None, forge=fake.client(), forge_games=5)  # type: ignore[arg-type]
+    reports.forge_interval = 0.05
+    finished: list[str] = []
+    reports.on_finished = lambda sub, rid: finished.append(rid)
+    out = await reports.run("alice", "42", games=300, options={"seed": 7})
+    # the games against precons start first, so they don't wait behind the solo test
+    precon_job, solo_job = fake.started
+    assert solo_job["solo"] == {"opponents": 3, "until_turn": 10, "game_seconds": 54}
+    assert len(solo_job["decks"]) == 1 and solo_job["games"] == 5 and solo_job["seed"] == 7
+    assert "solo" not in precon_job and len(precon_job["decks"]) == 4
+    assert out["forge_solo"]["state"] == "running" and "deck_text" not in out["forge_solo"]
+    assert reports.newest_forge_solo("alice", "42") is None
+    # the precon games ending doesn't finish the report while its solo test plays
+    fake.finish(out["forge"]["job_id"], [1, 2, 1, 1, 3])
+    for _ in range(200):
+        if reports.get("alice", out["report_id"])["forge"]["state"] == "done":
+            break
+        await asyncio.sleep(0.02)
+    assert reports.get("alice", out["report_id"])["status"] == "running"
+    assert reports.forge_only("alice", out["report_id"])["forge_solo"]["state"] == "running"
+    assert finished == []
+    # a second report while this one's solo test plays gets none
+    again = await reports.run("alice", "42", games=300, options={"seed": 8})
+    assert again["forge_solo"] == {"state": "skipped", "error": SOLO_ONE_AT_A_TIME, "finished_at": ANY_TIME}
+    fake.jobs[out["forge_solo"]["job_id"]].update(
+        state="done", results=[{"game": 1, "winner": 1, "solo": _solo_view(6)}]
+    )
+    for _ in range(200):
+        if reports.get("alice", out["report_id"])["forge_solo"]["state"] == "done":
+            break
+        await asyncio.sleep(0.02)
+    full = reports.get("alice", out["report_id"])
+    solo = full["forge_solo"]
+    assert solo["state"] == "done" and solo["result"]["median_won_turn"] == 6
+    assert full["status"] == "complete" and finished == [out["report_id"]]  # notified once, now
+    assert "## Forge solo test (full rules, opponents who do nothing)" in report_markdown(full)
+    newest = reports.newest_forge_solo("alice", "42")
+    assert newest == {
+        "report_id": out["report_id"],
+        "finished_at": solo["finished_at"],
+        "won_rate": 1.0,
+        "games": 1,
+        "median_won_turn": 6,
+    }
+    # deleting a report stops its unfinished runs, the solo test's included
+    third = await reports.run("alice", "42", games=300, options={"seed": 9})
+    reports.delete("alice", third["report_id"])
+    await asyncio.sleep(0.05)
+    assert third["forge_solo"]["job_id"] in fake.cancelled
+    reports._forge_task.cancel()
+
+
+async def test_an_older_forge_gives_no_solo_test(tmp_path: Path) -> None:
+    db = Database(tmp_path / "t.sqlite")
+    db.upsert_user("alice", email=None, name=None, preferred_username=None, groups=[])
+    fake = FakeForge()
+    reports = ReportService(db, _Decks(), None, forge=fake.client(), forge_games=4)  # type: ignore[arg-type]
+    out = await reports.run("alice", "42", games=300, options={"seed": 7})
+    assert out["forge_solo"]["state"] == "skipped" and out["forge_solo"]["error"] == SOLO_TOO_OLD
+    assert all("solo" not in job for job in fake.started)
+    # a run without Forge, or without a simulation, has no solo test at all
+    quick = await reports.run("alice", "42", games=300, options={"seed": 8}, forge=False)
+    assert quick["forge_solo"] is None
+    reports._forge_task.cancel()
+
+
+class _AnyTime:
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, int) and other > 0
+
+
+ANY_TIME = _AnyTime()
+
+
+def test_forge_solo_lines_read_plainly() -> None:
+    result = summarise_solo(
+        [
+            {"game": 1, "winner": 1, "solo": _solo_view(5, turns=5)},
+            {"game": 2, "draw": True, "stopped_slow": True, "solo": _solo_view(None, turns=4)},
+        ],
+        2,
+        {"opponents": 3, "until_turn": 10},
+    )
+    lines = forge_solo_lines({"state": "done", "result": result, "not_played": ["Sticker Card"]})
+    # the game the time limit stopped on turn 4 says nothing about turn 10: left out
+    assert lines[0] == "Games: 1, each counted up to your turn 10"
+    assert lines[1].startswith("Won by turn 10: 1 of 1 (100%, 95% interval ")
+    assert "Median winning turn: 5 (turns 5 to 5)" in lines
+    assert "Mulligans: 0 of 1 game" in lines
+    assert "Left out: 1 game that Forge's time limit stopped before turn 10 or a win." in lines
+    assert lines[-1] == "Cards Forge could not play: Sticker Card"
+    assert forge_solo_lines({"state": "running"}) == ["Games are going now."]
+
+
+def test_a_game_stopped_after_the_last_turn_counts_as_not_won() -> None:
+    result = summarise_solo(
+        [
+            {"game": 1, "winner": 1, "solo": _solo_view(7)},
+            {"game": 2, "draw": True, "stopped_slow": True, "turn_limit": True, "solo": _solo_view(None)},
+            {"game": 3, "draw": True, "stopped_slow": True, "solo": _solo_view(None, turns=3)},
+        ],
+        3,
+        {"opponents": 3, "until_turn": 10},
+    )
+    assert result["games"] == 2 and result["won"] == 1 and result["won_rate"] == 0.5
+    assert result["unfinished"] == 1
+
+
+def test_report_status_waits_for_the_forge_solo_test() -> None:
+    ok = {"ok": True}
+    skipped = {"state": "skipped", "reason": "not_commander"}  # a 60-card deck plays no precons
+    assert report_status(ok, None, skipped, {"state": "running"}) == "running"
+    assert report_status(ok, None, skipped, {"state": "queued"}) == "queued"
+    assert report_status(ok, None, skipped, {"state": "done", "result": {"games": 4}}) == "complete"
+    # Forge busy or too old: no solo test, and no failure
+    assert report_status(ok, None, skipped, {"state": "skipped", "error": SOLO_BUSY}) == "complete"
+    assert report_status(ok, None, skipped, {"state": "failed"}) == "partial"
+
+
+async def test_an_older_database_gains_the_solo_columns(tmp_path: Path) -> None:
+    db = Database(tmp_path / "t.sqlite")
+    ReportService(db, _Decks(), None)  # type: ignore[arg-type]
+    with db.tx() as c:
+        c.execute("DROP INDEX reports_forge_solo")
+        c.execute("ALTER TABLE reports DROP COLUMN forge_solo_json")
+        c.execute("ALTER TABLE reports DROP COLUMN forge_solo_state")
+    ReportService(db, _Decks(), None)  # type: ignore[arg-type]
+    with db._lock:
+        columns = {r["name"] for r in db._conn.execute("PRAGMA table_info(reports)")}
+    assert {"forge_solo_json", "forge_solo_state"} <= columns
+
+
+def _solo_refusing(fake: FakeForge, response: httpx.Response | None) -> httpx.MockTransport:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/jobs" and request.method == "POST" and "solo" in json.loads(request.content):
+            if response is None:
+                raise httpx.ConnectError("down")
+            return response
+        return fake.handler(request)
+
+    return httpx.MockTransport(handler)
+
+
+async def test_a_busy_or_silent_forge_gives_no_solo_test(tmp_path: Path) -> None:
+    db = Database(tmp_path / "t.sqlite")
+    db.upsert_user("alice", email=None, name=None, preferred_username=None, groups=[])
+    fake = FakeForge()
+    fake.solo = True
+    busy = ForgeClient(
+        "http://forge.test", transport=_solo_refusing(fake, httpx.Response(429, json={"error": "full"}))
+    )
+    reports = ReportService(db, _Decks(), None, forge=busy, forge_games=4)  # type: ignore[arg-type]
+    out = await reports.run("alice", "42", games=300, options={"seed": 1})
+    assert out["forge_solo"]["state"] == "skipped" and out["forge_solo"]["error"] == SOLO_BUSY
+    reports._forge_task.cancel()
+    silent = ForgeClient("http://forge.test", transport=_solo_refusing(fake, None))
+    reports = ReportService(db, _Decks(), None, forge=silent, forge_games=4)  # type: ignore[arg-type]
+    out = await reports.run("alice", "42", games=300, options={"seed": 2})
+    assert out["forge_solo"]["state"] == "failed"
+    reports._forge_task.cancel()
+
+
+async def test_a_run_again_plays_a_skipped_solo_test(tmp_path: Path) -> None:
+    """A stored report is reused within min_interval, but not one whose solo test did not come."""
+    db = Database(tmp_path / "t.sqlite")
+    db.upsert_user("alice", email=None, name=None, preferred_username=None, groups=[])
+    fake = FakeForge()  # too old for the solo test at first
+    reports = ReportService(db, _Decks(), None, forge=fake.client(), forge_games=4)  # type: ignore[arg-type]
+    first = await reports.run("alice", "42", games=300)
+    assert first["forge_solo"]["state"] == "skipped"
+    fake.solo = True
+    again = await reports.run("alice", "42", games=300)
+    assert not again.get("reused") and again["forge_solo"]["state"] == "running"
+    # one whose solo test plays is reused as before
+    third = await reports.run("alice", "42", games=300)
+    assert third.get("reused") and third["report_id"] == again["report_id"]
+    reports._forge_task.cancel()
+
+
+async def test_two_reports_at_once_play_one_solo_test(tmp_path: Path) -> None:
+    db = Database(tmp_path / "t.sqlite")
+    db.upsert_user("alice", email=None, name=None, preferred_username=None, groups=[])
+    fake = FakeForge()
+    fake.solo = True
+    reports = ReportService(db, _Decks(), None, forge=fake.client(), forge_games=4)  # type: ignore[arg-type]
+    assert reports.forge is not None
+    pick = reports.forge.pick
+
+    async def slow_pick(*args: Any) -> Any:  # both reports reach Forge before either is saved
+        await asyncio.sleep(0.02)
+        return await pick(*args)
+
+    reports.forge.pick = slow_pick  # type: ignore[method-assign]
+    a, b = await asyncio.gather(
+        reports.run("alice", "42", games=300, options={"seed": 1}),
+        reports.run("alice", "43", games=300, options={"seed": 2}),
+    )
+    states = sorted(x["forge_solo"]["state"] for x in (a, b))
+    assert states == ["running", "skipped"]
+    assert sum(1 for job in fake.started if "solo" in job) == 1
+    reports._forge_task.cancel()
+
+
+async def test_a_comparisons_second_deck_plays_its_own_solo_test(tmp_path: Path) -> None:
+    db = Database(tmp_path / "t.sqlite")
+    db.upsert_user("alice", email=None, name=None, preferred_username=None, groups=[])
+    fake = FakeForge()
+    fake.solo = True
+    reports = ReportService(db, _Decks(), None, forge=fake.client(), forge_games=4)  # type: ignore[arg-type]
+    first = await reports.run("alice", "42", games=300, options={"seed": 1})
+    assert first["forge_solo"]["state"] == "running"
+    alone = (await reports.run("alice", "42", games=300, options={"seed": 2}, forge=False))["report_id"]
+    await reports._start_solo("alice", alone, DECK_TEXT, "Liesa", None)
+    assert reports.get("alice", alone)["forge_solo"]["error"] == SOLO_ONE_AT_A_TIME
+    paired = (await reports.run("alice", "42", games=300, options={"seed": 3}, forge=False))["report_id"]
+    await reports._start_solo("alice", paired, DECK_TEXT, "Liesa", None, first["report_id"])
+    assert reports.get("alice", paired)["forge_solo"]["state"] == "running"
+    reports._forge_task.cancel()
+
+
+async def test_pruning_or_deleting_mid_start_stops_the_solo_job(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    db = Database(tmp_path / "t.sqlite")
+    db.upsert_user("alice", email=None, name=None, preferred_username=None, groups=[])
+    fake = FakeForge()
+    fake.solo = True
+    reports = ReportService(db, _Decks(), None, forge=fake.client(), forge_games=4)  # type: ignore[arg-type]
+    monkeypatch.setattr(reports_module, "MAX_REPORTS_PER_USER", 1)
+    first = await reports.run("alice", "42", games=300, options={"seed": 1})
+    await reports.run("alice", "42", games=300, options={"seed": 2})  # prunes the first
+    await asyncio.sleep(0.05)
+    assert first["forge_solo"]["job_id"] in fake.cancelled
+
+    def delete_while_starting(request: httpx.Request) -> httpx.Response:
+        response = fake.handler(request)
+        if request.url.path == "/jobs" and request.method == "POST" and "solo" in json.loads(request.content):
+            newest = db._one("SELECT id FROM reports ORDER BY rowid DESC LIMIT 1")
+            reports.delete("alice", newest["id"])
+        return response
+
+    reports.forge = ForgeClient("http://forge.test", transport=httpx.MockTransport(delete_while_starting))
+    with pytest.raises(DeckError):
+        await reports.run("alice", "42", games=300, options={"seed": 3})
+    await asyncio.sleep(0.05)
+    solo_ids = [jid for jid, job in fake.jobs.items() if "solo" in fake.started[int(jid, 16)]]
+    assert solo_ids[-1] in fake.cancelled
+    reports._forge_task.cancel()
+
+
+async def test_a_lost_or_never_started_solo_test_ends(tmp_path: Path) -> None:
+    db = Database(tmp_path / "t.sqlite")
+    db.upsert_user("alice", email=None, name=None, preferred_username=None, groups=[])
+    fake = FakeForge()
+    fake.solo = True
+    reports = ReportService(db, _Decks(), None, forge=fake.client(), forge_games=4)  # type: ignore[arg-type]
+    reports.forge_interval = 0.05
+    out = await reports.run("alice", "42", games=300, options={"seed": 1})
+    del fake.jobs[out["forge_solo"]["job_id"]]  # Forge restarted: the job is gone
+    # and a solo test marked as coming whose start a restart cut off
+    quick = await reports.run("alice", "42", games=300, options={"seed": 2}, forge=False)
+    reports._save_solo(quick["report_id"], {"state": "queued", "started_at": 1})
+    reports._ensure_forge_refresher()
+    for _ in range(200):
+        if reports.get("alice", out["report_id"])["forge_solo"]["state"] == "lost":
+            break
+        await asyncio.sleep(0.02)
+    assert reports.get("alice", out["report_id"])["forge_solo"]["state"] == "lost"
+    late = reports.get("alice", quick["report_id"])["forge_solo"]
+    assert late["state"] == "failed" and late["error"] == SOLO_NOT_STARTED
+    reports._forge_task.cancel()
+
+
+async def test_a_cancelled_request_still_saves_its_solo_test(tmp_path: Path) -> None:
+    db = Database(tmp_path / "t.sqlite")
+    db.upsert_user("alice", email=None, name=None, preferred_username=None, groups=[])
+    fake = FakeForge()
+    fake.solo = True
+    reports = ReportService(db, _Decks(), None, forge=fake.client(), forge_games=4)  # type: ignore[arg-type]
+    gate = asyncio.Event()
+    start = reports._start_solo
+
+    async def slow_start(*args: Any) -> None:
+        await gate.wait()
+        await start(*args)
+
+    reports._start_solo = slow_start  # type: ignore[method-assign]
+    task = asyncio.create_task(reports.run("alice", "42", games=300, options={"seed": 1}))
+    for _ in range(100):
+        await asyncio.sleep(0.01)
+        if any("solo" not in job for job in fake.started):
+            break
+    task.cancel()  # the client went away while the solo test was starting
+    gate.set()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    for _ in range(100):
+        await asyncio.sleep(0.01)
+        if any("solo" in job for job in fake.started):
+            break
+    await asyncio.sleep(0.05)
+    row = db._one("SELECT forge_solo_json FROM reports ORDER BY rowid DESC LIMIT 1")
+    assert json.loads(row["forge_solo_json"])["state"] == "running"
+    reports._forge_task.cancel()
+
+
+async def test_a_solo_test_given_up_while_starting_stays_given_up(tmp_path: Path) -> None:
+    db = Database(tmp_path / "t.sqlite")
+    db.upsert_user("alice", email=None, name=None, preferred_username=None, groups=[])
+    fake = FakeForge()
+    fake.solo = True
+    reports = ReportService(db, _Decks(), None, forge=fake.client(), forge_games=4)  # type: ignore[arg-type]
+    assert reports.forge is not None
+    pick = reports.forge.pick
+
+    async def slow_pick(*args: Any) -> Any:  # the refresher gives the mark up meanwhile
+        newest = db._one("SELECT id, forge_solo_json FROM reports ORDER BY rowid DESC LIMIT 1")
+        given_up = {**json.loads(newest["forge_solo_json"]), "state": "failed", "error": SOLO_NOT_STARTED}
+        reports._save_solo(newest["id"], given_up)
+        return await pick(*args)
+
+    reports.forge.pick = slow_pick  # type: ignore[method-assign]
+    out = await reports.run("alice", "42", games=300, options={"seed": 1})
+    assert out["forge_solo"]["state"] == "failed" and out["forge_solo"]["error"] == SOLO_NOT_STARTED
+    assert not any("solo" in job for job in fake.started)
+    reports._forge_task.cancel()
+
+
+async def test_the_solo_test_starts_even_when_the_precon_start_fails(tmp_path: Path) -> None:
+    db = Database(tmp_path / "t.sqlite")
+    db.upsert_user("alice", email=None, name=None, preferred_username=None, groups=[])
+    fake = FakeForge()
+    fake.solo = True
+    reports = ReportService(db, _Decks(), None, forge=fake.client(), forge_games=4)  # type: ignore[arg-type]
+
+    async def broken(*args: Any) -> None:
+        raise RuntimeError("bracket lookup broke")
+
+    reports._start_precon_part = broken  # type: ignore[method-assign]
+    with pytest.raises(RuntimeError):
+        await reports.run("alice", "42", games=300, options={"seed": 1})
+    row = db._one("SELECT forge_solo_json FROM reports ORDER BY rowid DESC LIMIT 1")
+    assert json.loads(row["forge_solo_json"])["state"] == "running"
+    reports._forge_task.cancel()
+
+
+async def test_deleting_a_members_data_stops_their_forge_jobs(tmp_path: Path) -> None:
+    db = Database(tmp_path / "t.sqlite")
+    db.upsert_user("alice", email=None, name=None, preferred_username=None, groups=[])
+    fake = FakeForge()
+    fake.solo = True
+    reports = ReportService(db, _Decks(), None, forge=fake.client(), forge_games=4)  # type: ignore[arg-type]
+    out = await reports.run("alice", "42", games=300, options={"seed": 1})
+    reports.forget_member("alice")
+    db.delete_member_data("alice")
+    await asyncio.sleep(0.05)
+    assert out["forge"]["job_id"] in fake.cancelled and out["forge_solo"]["job_id"] in fake.cancelled
+    reports._forge_task.cancel()
+
+
+async def test_a_solo_test_never_goes_ahead_of_another_members_waiting_games(tmp_path: Path) -> None:
+    db = Database(tmp_path / "t.sqlite")
+    for sub in ("alice", "bob"):
+        db.upsert_user(sub, email=None, name=None, preferred_username=None, groups=[])
+    fake = FakeForge()
+    reports = ReportService(db, _Decks(), None, forge=fake.client(), forge_games=4)  # type: ignore[arg-type]
+    await reports.run("bob", "42", games=300, options={"seed": 1}, simulate=False, forge=True)
+    waiting = await reports.run("bob", "42", games=300, options={"seed": 2}, simulate=False, forge=True)
+    assert waiting["forge"]["state"] == "queued" and not waiting["forge"].get("job_id")
+    fake.solo = True
+    out = await reports.run("alice", "42", games=300, options={"seed": 3})
+    assert out["forge_solo"]["state"] == "skipped" and out["forge_solo"]["error"] == SOLO_OTHERS_WAITING
+    reports._forge_task.cancel()

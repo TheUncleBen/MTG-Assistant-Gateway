@@ -7,6 +7,7 @@ watchlists are off. A Watch button on a card already watched keeps its alerts.""
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import httpx
@@ -98,9 +99,16 @@ def test_the_page_has_the_hint_and_the_picker_and_marks_watched_cards(server: Se
         in page
     )
     assert "/static/printpick.js" in page and "class='wbtn'" in page
-    import asyncio
-
-    asyncio.run(server.app.state.gateway.prices.watch_card("user-1", "Sol Ring"))
+    # watched as the Watch button does it, on the server's own event loop (the price service's
+    # clients belong to it: driving it from another loop here could hang)
+    csrf = re.search(r"name='csrf' value='([0-9a-f]+)'", h.get("/watchlist").text)
+    assert csrf
+    r = h.post(
+        "/watchlist/api/watch",
+        content=json.dumps({"name": "Sol Ring"}),
+        headers={"Content-Type": "application/json", "X-CSRF-Token": csrf.group(1)},
+    )
+    assert r.status_code == 200, r.text
     page = h.get("/cards?q=sol").text
     assert "aria-label='Sol Ring is on your watchlist'" in page
     api = h.get("/cards/api/search?q=sol").json()["html"]

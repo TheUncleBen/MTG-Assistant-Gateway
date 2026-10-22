@@ -174,6 +174,53 @@ async def test_a_stored_tier_keeps_no_live_reason_and_an_unjudged_one_is_a_dash(
         await b.aclose()
 
 
+async def test_a_risk_nobody_can_judge_is_a_dash_while_waiting_too(stack: Stack) -> None:
+    """A waiting edit with no review rows, and a closed one whose tier was never stored, show a
+    dash rather than High (nothing judged them); the waiting one still waits for the member's own
+    press, as a high-risk one does."""
+    b = await linked_browser(stack)
+    try:
+        gw = stack.h.app.state.gateway
+        sub = gw.db._one("SELECT sub FROM users", ())["sub"]
+        for pid in ("wait", "shut"):
+            gw.db.save_proposal(
+                {
+                    "id": pid,
+                    "owner_sub": sub,
+                    "kind": "edit",
+                    "deck_id": "42",
+                    "deck_name": "Immortal Reckoning",
+                    "baseline_fingerprint": "f",
+                    "changes": [],
+                    "diff_text": "+1 Sol Ring",
+                    "expires_at": int(time.time()) + 3600,
+                    "created_by_client": "__browser__",
+                }
+            )
+        gw.db._conn.execute("UPDATE proposals SET state = 'rejected' WHERE id = 'shut'")  # risk left NULL
+        waiting = gw.decks.describe(sub, "wait")
+        assert waiting["risk"] is None and waiting["risk_reason"] == ""
+        assert waiting["assistant_may_apply"] is False
+        assert gw.decks.describe(sub, "shut")["risk"] is None
+        body = (await b.http.get("/proposals?show=all", headers=NAV)).text.split("<main")[1]
+        rows = {m[0]: m[1] for m in re.findall(r"href='/proposals/(wait|shut)\?show=all'(.*?)</div>", body)}
+        for pid in ("wait", "shut"):
+            assert "Risk not judged" in rows[pid] and "High" not in rows[pid], pid
+        page = (await b.http.get("/proposals/wait", headers=NAV)).text.split("<aside")[1]
+        assert "Risk not judged" in page and "High" not in page
+        # another app changed it after it was made: that is a reason, and it stays High
+        gw.db._conn.execute(
+            "UPDATE proposals SET version = 2, amended_by_client = 'other-app' WHERE id = 'wait'"
+        )
+        changed = gw.decks.describe(sub, "wait")
+        assert changed["risk"] == "high" and "another app" in changed["risk_reason"]
+        body = (await b.http.get("/proposals?show=all", headers=NAV)).text.split("<main")[1]
+        rows = {m[0]: m[1] for m in re.findall(r"href='/proposals/(wait)\?show=all'(.*?)</div>", body)}
+        assert "High" in rows["wait"] and "Risk not judged" not in rows["wait"]
+    finally:
+        await b.aclose()
+
+
 def test_proposal_index_and_history_counts(tmp_path: Path) -> None:
     db = _db(tmp_path)
     now = int(time.time())

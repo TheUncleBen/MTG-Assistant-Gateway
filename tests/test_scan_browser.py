@@ -15,6 +15,7 @@ import secrets
 import socket
 import threading
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 import httpx
@@ -41,10 +42,29 @@ pytestmark = pytest.mark.skipif(
 )
 
 
+# Ports handed out by _free_port, each still bound until its server takes the socket: a port
+# chosen and let go could be taken by another test worker's server before this one listens.
+_HELD: dict[int, socket.socket] = {}
+
+
 def _free_port() -> int:
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
+    """A free local port, kept bound (``_held_socket`` hands the socket over), so no other
+    process can take it in the meantime."""
+    s = socket.socket()
+    s.bind(("127.0.0.1", 0))
+    port = s.getsockname()[1]
+    _HELD[port] = s
+    return port
+
+
+def _held_socket(port: int) -> socket.socket:
+    return _HELD.pop(port)
+
+
+def _serve(server: uvicorn.Server, port: int) -> Callable[[], None]:
+    """What a server thread runs: ``server`` on the socket ``_free_port`` kept for ``port``."""
+    sock = _held_socket(port)
+    return lambda: server.run(sockets=[sock])
 
 
 def _chromium_path() -> str | None:
@@ -168,7 +188,7 @@ class Server:
         self.server = uvicorn.Server(
             uvicorn.Config(self.app, host="127.0.0.1", port=self.port, log_level="warning")
         )
-        self.thread = threading.Thread(target=self.server.run, daemon=True)
+        self.thread = threading.Thread(target=_serve(self.server, self.port), daemon=True)
 
     def start(self) -> None:
         self.thread.start()

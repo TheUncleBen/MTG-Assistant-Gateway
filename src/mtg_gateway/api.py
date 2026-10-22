@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Any
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
-from . import deck_stats, modes
+from . import deck_stats, modes, prefs
 from .archidekt import page_turn
 from .decks import (
     DeckError,
@@ -107,6 +107,8 @@ async def caller_for(state: AppState, request: Request, *, write: bool) -> Calle
     if write:
         if not csrf_header_ok(state.settings, sid, request):
             return JSONResponse({"ok": False, "error": "csrf", "message": "Reload the page and retry."}, 403)
+    elif not prefs.from_this_site(request):  # a read asks Archidekt on the member's own allowance
+        return JSONResponse({"ok": False, "error": "cross_site"}, 403, headers={"Cache-Control": "no-store"})
     return Caller(sub, BROWSER_CLIENT_ID, "browser")
 
 

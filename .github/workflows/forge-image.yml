@@ -121,7 +121,8 @@ jobs:
           driver-opts: image=mirror.gcr.io/moby/buildkit:buildx-stable-1@sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea
       - name: Scryfall's printed names and the newest Commander precons
         run: |
-          python3 docker/forge/scryfall_names.py docker/forge/scryfall-names.json docker/forge/scryfall-legal.json
+          python3 docker/forge/scryfall_names.py docker/forge/scryfall-names.json docker/forge/scryfall-legal.json \
+            docker/forge/scryfall-commander.json
           python3 docker/forge/precons.py docker/forge/precons.json
       - name: Build arm64 image
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
@@ -135,12 +136,20 @@ jobs:
         run: docker image ls forge:ci-arm64
       - name: Service tests (offline)
         run: python3 -m unittest discover -s docker/forge -p 'test_*.py' -v
-      - name: Coverage gate (cards legal in at least one format)
+      # Floors: what Forge 2.0.15 reached on 2026-10-21, less about 0.1% (some 35 cards) of room
+      # for new sets Forge has not caught up with. Commander 99.71% (the 94 it lacks are Unfinity sticker and
+      # Attraction cards); any format 99.60% (plus Arena-only Alchemy cards). A failure blocks
+      # only this image; the published one stays as it is.
+      - name: Coverage gate (cards legal in at least one format, and in Commander)
         run: |
           set -o pipefail
           docker run --rm -v "$PWD/docker/forge/scryfall-legal.json:/tmp/legal.json:ro" -w /app forge:ci-arm64 \
             python3 coverage.py /tmp/legal.json 99.5 | tee coverage.txt
+          docker run --rm -v "$PWD/docker/forge/scryfall-commander.json:/tmp/commander.json:ro" -w /app \
+            forge:ci-arm64 python3 coverage.py /tmp/commander.json 99.6 "Commander-legal cards" \
+            | tee coverage-commander.txt
           head -1 coverage.txt >> "$GITHUB_STEP_SUMMARY"
+          head -1 coverage-commander.txt >> "$GITHUB_STEP_SUMMARY"
       - name: Smoke test
         run: scripts/ci_smoke_forge.sh forge:ci-arm64
       # One-off measurement for the default of Forge games at once (0.7.30): time, peak memory and
@@ -194,7 +203,8 @@ jobs:
           driver-opts: image=mirror.gcr.io/moby/buildkit:buildx-stable-1@sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea
       - name: Scryfall's printed names and the newest Commander precons
         run: |
-          python3 docker/forge/scryfall_names.py docker/forge/scryfall-names.json docker/forge/scryfall-legal.json
+          python3 docker/forge/scryfall_names.py docker/forge/scryfall-names.json docker/forge/scryfall-legal.json \
+            docker/forge/scryfall-commander.json
           python3 docker/forge/precons.py docker/forge/precons.json
       - name: Build amd64 image
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
@@ -208,12 +218,20 @@ jobs:
         run: docker image ls forge:ci-amd64
       - name: Service tests (offline)
         run: python3 -m unittest discover -s docker/forge -p 'test_*.py' -v
-      - name: Coverage gate (cards legal in at least one format)
+      # Floors: what Forge 2.0.15 reached on 2026-10-21, less about 0.1% (some 35 cards) of room
+      # for new sets Forge has not caught up with. Commander 99.71% (the 94 it lacks are Unfinity sticker and
+      # Attraction cards); any format 99.60% (plus Arena-only Alchemy cards). A failure blocks
+      # only this image; the published one stays as it is.
+      - name: Coverage gate (cards legal in at least one format, and in Commander)
         run: |
           set -o pipefail
           docker run --rm -v "$PWD/docker/forge/scryfall-legal.json:/tmp/legal.json:ro" -w /app forge:ci-amd64 \
             python3 coverage.py /tmp/legal.json 99.5 | tee coverage.txt
+          docker run --rm -v "$PWD/docker/forge/scryfall-commander.json:/tmp/commander.json:ro" -w /app \
+            forge:ci-amd64 python3 coverage.py /tmp/commander.json 99.6 "Commander-legal cards" \
+            | tee coverage-commander.txt
           head -1 coverage.txt >> "$GITHUB_STEP_SUMMARY"
+          head -1 coverage-commander.txt >> "$GITHUB_STEP_SUMMARY"
       - name: Smoke test
         run: scripts/ci_smoke_forge.sh forge:ci-amd64
       # The arm64 job's games-at-once measurement (numbers only, never a gate), on x86.
@@ -258,7 +276,8 @@ jobs:
             type=raw,value=latest,enable={{is_default_branch}}
       - name: Scryfall's printed names and the newest Commander precons
         run: |
-          python3 docker/forge/scryfall_names.py docker/forge/scryfall-names.json docker/forge/scryfall-legal.json
+          python3 docker/forge/scryfall_names.py docker/forge/scryfall-names.json docker/forge/scryfall-legal.json \
+            docker/forge/scryfall-commander.json
           python3 docker/forge/precons.py docker/forge/precons.json
       - name: Build and push linux/arm64 and linux/amd64
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6

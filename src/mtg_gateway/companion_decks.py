@@ -441,6 +441,10 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
             return JSONResponse(
                 {"ok": False, "error": "unauthenticated"}, 401, headers={"Cache-Control": "no-store"}
             )
+        if not prefs.from_this_site(request):  # it asks Archidekt on the member's own allowance
+            return JSONResponse(
+                {"ok": False, "error": "cross_site"}, 403, headers={"Cache-Control": "no-store"}
+            )
         qp = request.query_params
         shape = "recent" if qp.get("shape") == "recent" else "list"
         q, order, view, folder = list_query(qp)

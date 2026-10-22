@@ -1,8 +1,10 @@
-"""Card search layout, in headless Chromium: on a computer every card of a grid row is as tall as
-the tallest and their "Add to deck" buttons share one bottom edge, also for the cards "Load more"
-appends; the filter controls do not wrap by accident at 344, 390, 673 and 1280 px (the six colour
-pills on one row with the colour mode beside them where there is room, a fixed grid of pills on
-phones, the S M L size control on the View row). Skipped without Chromium."""
+"""Card search layout, in headless Chromium: on a computer every card of the grid is as tall as
+every other and their "Add to deck" buttons share one bottom edge, also for the cards "Load more"
+appends (which never move the buttons already on screen, and get their ⋮ menu too); the first
+answer fills the screen and a few rows, then only Load more asks for more; the filter controls do
+not wrap by accident at 344, 390, 673 and 1280 px (the six colour pills on one row with the
+colour mode beside them where there is room, a fixed grid of pills on phones, the S M L size
+control on the View row). Skipped without Chromium."""
 
 from __future__ import annotations
 
@@ -55,29 +57,90 @@ ROWS_JS = """
 """
 
 
+ADDS_JS = """
+() => [...document.querySelectorAll('#cardgrid .cc')].map(li => {
+  const b = li.querySelector('.add').getBoundingClientRect();
+  return [Math.round(b.top + scrollY), Math.round(b.left)];
+})
+"""
+
+
+def _lands(server: Server, n: int) -> None:
+    """``n`` lands of one search, some with a long name, two with a long type line and mana cost:
+    tiles that would be taller than the rest if their text set their height."""
+    import copy
+
+    tower = next(c for c in server.sf.cards if c["name"] == "Command Tower")
+    for i in range(n):
+        c = copy.deepcopy(tower)
+        c["id"] = f"00000000-0000-4000-8000-{i:012d}"
+        c["name"] = f"Test Land {i:02d}" + (" with a much longer name than the others" if i % 9 == 8 else "")
+        c["collector_number"] = str(100 + i)
+        if i in (10, 25):
+            c["type_line"] = "Legendary Land Creature — Elemental Spirit Wizard Horror Beast Dragon"
+            c["mana_cost"] = "{W}{U}{B}{R}{G}{C}{X}{2}{W}{U}"
+        server.sf.extra_cards.append(c)
+
+
 def test_add_to_deck_buttons_share_a_row_bottom_edge_on_a_computer(server: Server) -> None:
-    """At 1280 px the grid rows are equal-height and every Add to deck sits on the row's bottom
-    edge, including the cards Load more appends (the fake Scryfall pages four at a time here)."""
+    """At 1280 px every tile is as tall as every other and each Add to deck sits on its row's
+    bottom edge, including the cards Load more appends: an appended card, however long its name
+    or type line, never moves the Add to deck buttons already on screen."""
     from playwright.sync_api import sync_playwright
 
-    server.sf.page_size = 4
+    _lands(server, 80)
+    server.sf.page_size = 12
     exe = _chromium()
     with sync_playwright() as p:
         browser, page, errors = _page(p, server, 1280, exe)
-        page.goto(f"{server.base}/cards?q=s", wait_until="networkidle")
-        # the next pages come on Load more (UI overhaul 2026-10-21: never by scrolling)
+        page.goto(f"{server.base}/cards?q=test+land", wait_until="networkidle")
+        page.wait_for_timeout(600)
+        before = page.evaluate(ADDS_JS)
+        assert len(before) % 7  # the last row is part-filled, so Load more adds cards to it
         page.locator("#cs-more [data-more]").click()
-        page.wait_for_function("() => document.querySelectorAll('#cardgrid .cc').length >= 8", timeout=5000)
-        page.locator("#cs-more [data-more]").click()
-        page.wait_for_function("() => document.querySelectorAll('#cardgrid .cc').length >= 9", timeout=5000)
+        page.wait_for_function(f"() => document.querySelectorAll('#cardgrid .cc').length > {len(before)}")
+        after = page.evaluate(ADDS_JS)
+        assert after[: len(before)] == before
+        page.wait_for_function(
+            f"() => document.querySelectorAll('#cardgrid .cc .kebab').length === {len(after)}"
+        )
         rows = page.evaluate(ROWS_JS)
-        assert len(rows) >= 2 and len(rows[0]) == 7  # the first row holds cards from two pages
-        names = page.locator("#cardgrid .cc .nm").all_inner_texts()
-        assert any(len(n) > 30 for n in names[:7])  # a long name among them, taller than the rest
+        assert len({c["h"] for row in rows for c in row}) == 1, rows
         for row in rows:
-            assert len({c["h"] for c in row}) == 1, row
             assert len({c["add"] for c in row}) == 1, row
             assert all(abs(c["add"] - c["bottom"]) <= 1 for c in row), row
+        assert errors == []
+        browser.close()
+
+
+@pytest.mark.parametrize("width", [390, 1280])
+def test_card_search_fills_the_screen_then_waits_for_load_more(server: Server, width: int) -> None:
+    """The first answer fills the screen and a few rows more, then stops: scrolling to the end
+    loads nothing, and only the Load more button asks for the next page."""
+    from playwright.sync_api import sync_playwright
+
+    _lands(server, 120)
+    server.sf.page_size = 6
+    exe = _chromium()
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, width, exe)
+        page.goto(f"{server.base}/cards?q=test+land", wait_until="networkidle")
+        page.wait_for_timeout(800)
+        shown = page.locator("#cardgrid .cc").count()
+        assert shown > 6  # more than the first page: the screen was filled
+        more = page.locator("#cs-more [data-more]")
+        assert more.is_visible()
+        # its top is below the screen's foot: a few rows past it are already there
+        assert page.evaluate("document.querySelector('#cs-more').getBoundingClientRect().top") > 860
+        for _ in range(6):
+            page.mouse.wheel(0, 5000)
+            page.wait_for_timeout(250)
+        page.wait_for_load_state("networkidle")
+        assert page.locator("#cardgrid .cc").count() == shown  # scrolling never loads
+        more.click()
+        page.wait_for_function(f"() => document.querySelectorAll('#cardgrid .cc').length === {shown + 6}")
+        page.wait_for_timeout(600)
+        assert page.locator("#cardgrid .cc").count() == shown + 6  # one page, nothing more by itself
         assert errors == []
         browser.close()
 

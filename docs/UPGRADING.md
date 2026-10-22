@@ -90,7 +90,8 @@ upgrading. When it does, the gateway:
 3. upgrades the database in one step: the upgrade happens whole or not at all, so one that fails
    or is cut off leaves the database exactly as it was;
 4. keeps the newest 3 copies and deletes older ones. A start that keeps failing saves its copy
-   once, not on every try.
+   once, not on every try. Every copy is also deleted once it is older than
+   `MTG_BACKUP_KEEP_DAYS` (14 days unless you changed it), as the nightly backups are.
 
 If it can't save the copy (for example the disk is full or the folder can't be written), it
 doesn't upgrade, changes nothing and doesn't start. Its log says why, with a line starting
@@ -102,7 +103,10 @@ The copy is the database exactly as it was, so going back needs nobody to relink
 also means it holds members' Archidekt sessions and the identity provider's tokens, still
 encrypted with the Fernet key, which is never in the file. So it is readable by the gateway's own
 user only, stays in the backup folder, and is never copied to `MTG_BACKUP_COPY_DIR`. (The nightly
-backups leave those out, as before: [OPERATIONS.md](OPERATIONS.md#backups).)
+backups leave those out, as before: [OPERATIONS.md](OPERATIONS.md#backups).) When a member
+unlinks Archidekt or presses **Delete my data**, or an admin disables, unlinks or deletes a
+member, the gateway makes the same change in every copy in the folder at once; a copy it can't
+change is deleted.
 
 A version that doesn't change the database saves no copy; the release notes say when a version
 changes it.
@@ -122,13 +126,20 @@ version's stack file and example file (each version's files are on its branch,
 the older one finds its copy in `before-upgrade` and puts it back by itself when it starts:
 
 - First it saves the newer database in the same folder as a set-aside copy,
-  `mtg-gateway-set-aside-...sqlite`, so nothing is lost. The newest 3 set-aside copies are kept.
+  `mtg-gateway-set-aside-...sqlite`, so nothing is lost. The newest 3 set-aside copies are kept,
+  each for at most `MTG_BACKUP_KEEP_DAYS`, like the before-upgrade copies.
 - Members disabled, Archidekt sessions deleted and members' **Delete my data** since the upgrade
-  stay so. Every other change made since the upgrade (proposals, snapshots, settings, someone you
-  enabled again) is only in the set-aside copy: enable such a member again on the Users page.
+  stay so, and each member keeps the Archidekt link and phone connection they have now (going
+  back to 0.7.39 or newer). Every other change made since the upgrade (proposals, snapshots,
+  settings, someone you enabled again) is only in the set-aside copy: enable such a member again
+  on the Users page.
 - It ends every sign-in, so everyone signs in once more, and the admin page says what happened.
 
-If there is no copy for it, it doesn't start, and its log says so.
+If there is no copy for it, it doesn't start, and its log says so: run the newer version again.
+That is also the case once the copy was older than `MTG_BACKUP_KEEP_DAYS` and has been deleted,
+so going back this way works only within that many days of the upgrade (the nightly backups from
+before the upgrade are gone by then too). To keep the way back open longer, raise
+`MTG_BACKUP_KEEP_DAYS` before you update.
 
 **To 0.7.36 or older:** these versions don't go back by themselves. A version that didn't change
 the database needs nothing more than the `MTG_TAG` change. If the newer version upgraded the
@@ -154,6 +165,16 @@ upgrade, stop the gateway as above, and with the same `sudo -u '#1000' sh -c '..
 `mtg-gateway.sqlite*` files into a new folder and copy the `mtg-gateway-set-aside-...` file in as
 `mtg-gateway.sqlite`. Then update the stack to the newer version again.
 
+- **Every sign-in ends.** The set-aside copy still holds the sign-ins from before you went back,
+  including ones revoked while the older version ran. A set-aside copy made by 0.7.39 or newer
+  is marked, and the newer version ends every sign-in by itself at its first start on it. One
+  made by 0.7.37 or 0.7.38 isn't: before you update the stack, end every sign-in in the file with the
+  command under **Restore** in [OPERATIONS.md](OPERATIONS.md#backups).
+- **What happened while the older version ran isn't in it.** Look through the Users page and
+  disable, unlink or delete again any member you disabled, unlinked or deleted while the older
+  version ran. A member who
+  unlinked Archidekt or pressed **Delete my data** in that time does it again.
+
 ## Coming from an older version
 
 The update steps above bring every stack, variable and secret change up to now. A few changes
@@ -173,6 +194,13 @@ reach past the stack, so if your old version is older than the one named, also:
   `mtg_authentik_api_token` secret, so you no longer remove the `# ` from its lines. The secrets
   step above (Portainer step 2) creates it with the word `off` if you don't have it; with Compose,
   `./make-secrets.sh` does.
+- **0.7.39 or older:** Forge is on in the example variables files. If you take the new example
+  file and want Forge off, set both `FORGE_REPLICAS=0` and an empty `MTG_FORGE_URL=` (Compose: put
+  a `#` in front of `COMPOSE_PROFILES=forge` and set an empty `MTG_FORGE_URL=`). Turning Forge off
+  without emptying `MTG_FORGE_URL` leaves the gateway asking a Forge that isn't there; emptying it
+  alone leaves Forge running unused. A variables file made from an earlier example already has
+  both lines and keeps Forge as it was; one with no `MTG_FORGE_URL` line at all now asks for Forge.
+  Everyone on a stack: `FORGE_NODE` now needs a node name, even with Forge off.
 
 Every version's full notes are in the [CHANGELOG](../CHANGELOG.md), and the older update steps
 are kept below for reference.

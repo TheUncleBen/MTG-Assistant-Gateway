@@ -761,6 +761,10 @@ def add_browse_routes(server: MCPServer, state: AppState) -> None:
         sub, _sid = browser_session(state, request)
         if not sub:
             return JSONResponse({"ok": False, "error": "sign in first"}, status_code=401)
+        if not prefs.from_this_site(request):  # it asks Archidekt on the member's own allowance
+            return JSONResponse(
+                {"ok": False, "error": "cross_site"}, status_code=403, headers={"Cache-Control": "no-store"}
+            )
         query = read_query(request.query_params)
         try:
             found = await run_search(sub, query)

@@ -1678,6 +1678,8 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
                     403,
                     headers=NO_STORE,
                 )
+        elif not prefs.from_this_site(request):  # a read asks Archidekt on the member's own allowance
+            return JSONResponse({"ok": False, "error": "cross_site"}, 403, headers=NO_STORE)
         return sub, sid
 
     async def json_body(request: Request) -> dict[str, Any] | Response:
