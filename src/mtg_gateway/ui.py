@@ -13,8 +13,9 @@ here.
 from __future__ import annotations
 
 import time
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from typing import NamedTuple
+from urllib.parse import urlsplit
 
 from .theme import card_size_control, esc, icon
 
@@ -152,20 +153,74 @@ def app_name(name: str | None) -> str:
 # The apps whose own mark is shown beside the name (Ben, 22 Oct): the official files in
 # static/logos/, byte for byte (docs/THIRD-PARTY-NOTICES.md). The Claude spark has one colour; the
 # OpenAI blossom comes as a black and a white file, the page's theme picking one (UI_CSS).
-CLAUDE_APPS = frozenset({"claude", "claude code", "claude-code"})
-OPENAI_APPS = frozenset({"chatgpt", "codex"})
+# The mark follows where the app verifiably comes from, never the name it gives itself (N-3,
+# review 2026-10-22): its metadata document's own https address (a URL client id, which the
+# gateway fetched from that host and whose document names that same address), or, for a
+# registered app, sign-in addresses that all send the member back to that company's hosts.
+BRAND_HOSTS = {"claude": ("claude.ai", "anthropic.com"), "openai": ("chatgpt.com", "openai.com")}
 CLAUDE_LOGO = "/static/logos/claude.svg"
 OPENAI_LOGO_LIGHT = "/static/logos/openai-black.svg"  # black on the light theme
 OPENAI_LOGO_DARK = "/static/logos/openai-white.svg"  # white on the dark theme
 
 
-def app_logo(name: str) -> str:
-    """The logo markup for ``name``: the app's own mark (``<img>`` with an empty alt, so the name
-    beside it is read once), or the neutral "connected app" icon for any other or unnamed app."""
-    key = " ".join((name or "").split()).casefold()
-    if key in CLAUDE_APPS:
+def _no_client_info(_client_id: str) -> Mapping[str, object] | None:
+    return None
+
+
+# A registered app's stored record by client id (the app sets it to its database's lookup at
+# start, use_client_info); none until then, so a chip shows the neutral icon.
+_client_info = _no_client_info
+
+
+def use_client_info(lookup: Callable[[str], Mapping[str, object] | None]) -> None:
+    """Where ``client_brand`` reads a registered app's record (its redirect addresses)."""
+    global _client_info
+    _client_info = lookup
+
+
+def _brand_of_url(url: object) -> str | None:
+    """The company whose host an https address is on (the host itself or a subdomain), or None."""
+    if not isinstance(url, str):
+        return None
+    try:
+        parts = urlsplit(url)
+        host = (parts.hostname or "").casefold()
+    except ValueError:
+        return None
+    if parts.scheme != "https" or not host:
+        return None
+    for brand, hosts in BRAND_HOSTS.items():
+        if any(host == h or host.endswith("." + h) for h in hosts):
+            return brand
+    return None
+
+
+def client_brand(client_id: str | None, info: Mapping[str, object] | None = None) -> str | None:
+    """ "claude", "openai" or None for an app, by where it verifiably comes from: a URL client id
+    (a metadata document) by its own host; a registered app (``info``, else its stored record)
+    when every address it signs members back to is on one company's hosts."""
+    if not client_id:
+        return None
+    if client_id.startswith("https://"):
+        return _brand_of_url(client_id)
+    if info is None:
+        try:
+            info = _client_info(client_id)
+        except Exception:  # a chip never breaks a page
+            info = None
+    uris = info.get("redirect_uris") if isinstance(info, Mapping) else None
+    if not isinstance(uris, list) or not uris:
+        return None
+    brands = {_brand_of_url(u) for u in uris}
+    return brands.pop() if len(brands) == 1 and None not in brands else None
+
+
+def app_logo(brand: str | None) -> str:
+    """The logo markup for a verified app (``client_brand``): its own mark (``<img>`` with an empty
+    alt, so the name beside it is read once), or the neutral "connected app" icon otherwise."""
+    if brand == "claude":
         return f"<img class='logo' src='{CLAUDE_LOGO}' alt='' width='16' height='16'>"
-    if key in OPENAI_APPS:
+    if brand == "openai":
         return (
             f"<img class='logo on-light' src='{OPENAI_LOGO_LIGHT}' alt='' width='16' height='16'>"
             f"<img class='logo on-dark' src='{OPENAI_LOGO_DARK}' alt='' width='16' height='16'>"
@@ -173,10 +228,11 @@ def app_logo(name: str) -> str:
     return icon("app")
 
 
-def app_chip(name: str | None, *, unnamed: bool = False) -> str:
-    """The app a row came from: its full name beside its logo (Claude, Claude Code, ChatGPT and
-    Codex: the official marks, unmodified, only to tell the connected app apart) or the one neutral
-    "connected app" icon for any other app; never initials. A row with no app recorded shows a
+def app_chip(name: str | None, *, unnamed: bool = False, client_id: str | None = None) -> str:
+    """The app a row came from: its full name beside its logo (an app verified by ``client_id`` as
+    Anthropic's or OpenAI's, ``client_brand``: the official marks, unmodified, only to tell the
+    connected app apart) or the one neutral "connected app" icon for any other app or a row
+    without its client id; never initials. A row with no app recorded shows a
     grey dash with the tooltip "No app", never a guessed app; where the row *is* an app that gave
     no name (the Users page's connected apps), ``unnamed=True`` reads "Unnamed app" instead."""
     name = (name or "").strip()
@@ -186,7 +242,8 @@ def app_chip(name: str | None, *, unnamed: bool = False) -> str:
             f"<span class='sr-only'>{NO_APP}</span></span>"
         )
     cls = "ui-app" if name else "ui-app unnamed"
-    return f"<span class='{cls}'>{app_logo(name)}<span class='nm'>{esc(app_name(name))}</span></span>"
+    logo = app_logo(client_brand(client_id))
+    return f"<span class='{cls}'>{logo}<span class='nm'>{esc(app_name(name))}</span></span>"
 
 
 # --- list dates ---------------------------------------------------------------------------------

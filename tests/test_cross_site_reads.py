@@ -21,6 +21,7 @@ READS = [
     "/decks/api/decks/42/delete-info",
     "/decks/api/decks/42/export",
     "/search/api/decks?q=sol",
+    "/precons/api/sets",
     "/api/decks/mine",
     "/decks/api/tags?q=ra",
     "/social/api/users/1/follow",
@@ -76,5 +77,33 @@ async def test_the_gateway_s_own_pages_and_a_typed_address_still_read(stack: Sta
             assert r.status_code == 200, r.text
             r = await b.http.get("/api/decks/mine", headers=headers)
             assert r.status_code == 200, r.text
+    finally:
+        await b.aclose()
+
+
+async def test_the_json_reads_refusals_are_never_kept_by_a_cache(stack: Stack) -> None:
+    """L-2 (review 2026-10-22): the precons and deck-search JSON answer their refusals (signed
+    out, Archidekt not answering) with no-store too, like their answers."""
+    from mtg_gateway.decks import DeckError
+
+    signed_out = Browser(stack.h)
+    try:
+        for path in ("/precons/api/sets", "/search/api/decks?q=sol"):
+            r = await signed_out.http.get(path)
+            assert r.status_code == 401 and r.headers.get("cache-control") == "no-store", path
+    finally:
+        await signed_out.aclose()
+    await linked_user(stack)
+    b = Browser(stack.h)
+    await b.login()
+    try:
+        decks = stack.h.app.state.gateway.decks
+
+        async def down(*_a, **_k):  # noqa: ANN002, ANN003, ANN202
+            raise DeckError("unavailable", "Archidekt is not answering right now.")
+
+        decks.precons = down
+        r = await b.http.get("/precons/api/sets")
+        assert r.status_code == 503 and r.headers.get("cache-control") == "no-store", r.text
     finally:
         await b.aclose()

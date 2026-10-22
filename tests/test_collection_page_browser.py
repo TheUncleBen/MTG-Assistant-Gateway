@@ -122,7 +122,7 @@ def test_the_stepper_asks_on_the_last_copy_and_the_menu_reaches_the_details_box(
         page.wait_for_function(f"() => !document.querySelector(\"[data-id='{one_id}']\")")
         assert int(one_id) not in server.ark.collections["alice"]
         strip = page.locator("#col-notes .notice.ok[role=status]")
-        assert strip.inner_text().strip() == "Removed from your Archidekt collection."
+        assert strip.inner_text().strip() == "Removed from your Collection on Archidekt."
         assert page.locator("#col-count").inner_text() == "2 entries"
         strip.locator("[data-dismiss]").click()
         assert page.locator("#col-notes .notice").count() == 0
@@ -154,7 +154,7 @@ def test_the_stepper_asks_on_the_last_copy_and_the_menu_reaches_the_details_box(
         assert "Japanese" in first.locator(".ty").inner_text()
         assert (
             page.locator("#col-notes .notice.ok").inner_text().strip()
-            == "Card details saved to your Archidekt collection."
+            == "Card details saved to your Collection on Archidekt."
         )
         page.wait_for_function("() => document.getElementById('col-details').hidden")
         assert errors == []

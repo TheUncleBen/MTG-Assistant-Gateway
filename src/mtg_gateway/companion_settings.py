@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any
 from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
 
-from . import modes, prefs, ui
+from . import modes, prefs, recheck, ui
 from .actions import COLLABORATOR_NOTE, collaborator_by_hand, collaborator_target, profile_url
 from .archidekt import FORMAT_IDS, ArchidektError, Deck, featured_scryfall_id, format_label, rich_text
 from .busy import busy_response
@@ -135,28 +135,59 @@ SETTINGS_CSS = """
 """
 
 
-NOTHING_TO_SAVE = "Nothing to save: no name or flag was changed."
+NOTHING_TO_SAVE = "Nothing to save: no name or switch was changed."
+
+
+def category_baseline_fields(c: dict[str, Any]) -> str:
+    """The hidden fields that carry what an editable category (``deck_categories``) was when the
+    page was shown: the Save compares the deck with them before anything is proposed (M-1)."""
+    cid = int(c["id"])
+    out = f"<input type='hidden' name='was_name_{cid}' value='{_esc(c['name'])}'>"
+    for key, _label, _field, _inv in CATEGORY_FLAGS:
+        out += f"<input type='hidden' name='was_{key}_{cid}' value='{'1' if c[key] else '0'}'>"
+    return out
+
+
+def stale_categories_error() -> DeckError:
+    """The refusal of a Save whose page no longer matches the deck: the needs-a-look words, and
+    ``fresh`` so the panel shows the deck as it is now instead of the stale fields."""
+    return DeckError(
+        "stale",
+        f"Not saved: {recheck.reason_text(recheck.REASON_CHANGED)} Nothing was sent to Archidekt. "
+        "The panel now shows the deck as it is: make your changes again, then save.",
+        fresh=True,
+    )
 
 
 def category_changes_from_form(deck: Deck, data: dict[str, str]) -> list[dict[str, Any]]:
-    """What the Categories panel's fields change against the deck as it is now, as
-    ``decks.propose_categories`` takes them: one entry per editable category whose name or any
-    switch differs (a blank name is left as it is). A checkbox left off sends no field."""
+    """What the Categories panel's fields change, as ``decks.propose_categories`` takes them: one
+    entry per editable category whose name or any switch differs from what the page showed (its
+    hidden ``was_`` fields; a blank name is left as it is). A checkbox left off sends no field.
+    The deck must still be what the page showed: a category changed since (elsewhere, by an
+    assistant or on Archidekt), or a post without the page's baseline, is refused before
+    anything is proposed, so a stale page never puts back a change made since (M-1)."""
     changes: list[dict[str, Any]] = []
     for c in deck_categories(deck):
         if not c["editable"] or f"name_{c['id']}" not in data:
             continue
         cid = int(c["id"])
+        was_name = data.get(f"was_name_{cid}")
+        was = {key: data.get(f"was_{key}_{cid}") for key, _l, _f, _i in CATEGORY_FLAGS}
+        if was_name != c["name"] or any(was[k] != ("1" if c[k] else "0") for k in was):
+            raise stale_categories_error()
         entry: dict[str, Any] = {"id": cid}
         new = " ".join((data.get(f"name_{cid}") or "").split())
-        if new and new != c["name"]:
+        if new and new != was_name:
             entry["rename_to"] = new
-        for key, _label, _field, _inv in CATEGORY_FLAGS:
+        for key in was:
             on = data.get(f"{key}_{cid}") == "1"
-            if on != bool(c[key]):
+            if on != (was[key] == "1"):
                 entry[key] = on
         if len(entry) > 1:
             changes.append(entry)
+    posted = {m.group(1) for k in data if (m := re.fullmatch(r"was_name_(\d+)", k))}
+    if posted - {str(c["id"]) for c in deck_categories(deck) if c["editable"]}:
+        raise stale_categories_error()  # a category the page showed is gone
     return changes
 
 
@@ -388,10 +419,10 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
             commander = " data-commander='1'" if c["commander"] else ""
             items += (
                 f"<li data-cat='{cid}' data-name='{name}'{commander}>"
-                f"<span class='nm'><label class='sr-only' for='cat-{cid}-name'>Name of {name}</label>"
+                f"<span class='nm'><label class='sr-only' for='cat-{cid}-name'>Name of “{name}”</label>"
                 f"<input id='cat-{cid}-name' type='text' name='name_{cid}' value='{shown}' maxlength='60' "
-                "required></span>"
-                f"<span class='ds-sw' role='group' aria-label='Flags of {name}'>{switches}</span></li>"
+                "required>" + category_baseline_fields(c) + "</span>"
+                f"<span class='ds-sw' role='group' aria-label='Switches of “{name}”'>{switches}</span></li>"
             )
         return (
             "<section class='ui-card' id='categories' data-confirm-title='Change the commander category?' "
@@ -557,7 +588,7 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
                 f"<form method='post' action='/decks/{did}/collaborators#collaborators'>{csrf_in}"
                 "<input type='hidden' name='action' value='remove'>"
                 f"<input type='hidden' name='username' value='{_esc(r['username'])}'>"
-                f"<button class='btn btn-outline-danger' aria-label='Remove {_esc(r['username'])}'>"
+                f"<button class='btn btn-outline-danger' aria-label='Remove “{_esc(r['username'])}”'>"
                 f"{icon('trash')} Remove</button>"
                 "</form></li>"
                 for r in rows
@@ -732,7 +763,7 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
                     following=await following_or_none(sub),
                     follow_hint=str(exc.extra.get("follow_username") or ""),
                     typed_tag=(data.get("name") or "")[:40] if data.get("action") == "add" else "",
-                    cat_values=data if anchor == "categories" else None,
+                    cat_values=data if anchor == "categories" and not exc.extra.get("fresh") else None,
                 ),
                 sub,
                 sid,

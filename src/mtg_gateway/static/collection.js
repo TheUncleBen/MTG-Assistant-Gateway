@@ -65,7 +65,7 @@
     var name = nameOf(item);
     item.remove();
     bumpCount(-1);
-    strip("Removed from your Archidekt collection.", "ok");
+    strip("Removed from your Collection on Archidekt.", "ok");
     if (list && !$("li[data-id]", list)) location.reload();
     return name;
   }
@@ -249,7 +249,7 @@
         if (!d.ok) { strip(failText(d, name), "error"); return; }
         applyRow(item, d.row || {});
         if (window.MtgBox) window.MtgBox.close();
-        strip("Card details saved to your Archidekt collection.", "ok");
+        strip("Card details saved to your Collection on Archidekt.", "ok");
       }).catch(function () { btns.forEach(function (b) { b.disabled = false; }); strip(failText(null, name), "error"); });
     });
   }

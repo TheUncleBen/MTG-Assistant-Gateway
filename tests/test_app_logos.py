@@ -31,6 +31,8 @@ SOURCES = {
 }
 IMG = "alt='' width='16' height='16'>"
 NAV = {"Sec-Fetch-Mode": "navigate", "Accept": "text/html"}
+CLAUDE_CIMD = "https://claude.ai/oauth/mcp-oauth-client-metadata"
+OPENAI_CIMD = "https://chatgpt.com/oauth/client-metadata.json"
 
 
 def test_the_logo_files_are_the_official_ones_byte_for_byte() -> None:
@@ -47,26 +49,29 @@ def test_the_logo_files_are_the_official_ones_byte_for_byte() -> None:
 
 
 def test_each_known_app_gets_its_own_mark_and_every_other_app_the_neutral_icon() -> None:
+    """The mark comes from the app's verified address (N-3: test_the_mark_follows_...): Claude and
+    Claude Code from claude.ai, ChatGPT and Codex from chatgpt.com."""
     claude = f"<img class='logo' src='/static/logos/claude.svg' {IMG}"
     openai = (
         f"<img class='logo on-light' src='/static/logos/openai-black.svg' {IMG}"
         f"<img class='logo on-dark' src='/static/logos/openai-white.svg' {IMG}"
     )
+    assert ui.app_logo("claude") == claude and ui.app_logo("openai") == openai
     for name in ("Claude", "claude", " Claude  Code ", "claude-code"):
-        assert ui.app_logo(name) == claude, name
-        assert (
-            ui.app_chip(name) == f"<span class='ui-app'>{claude}<span class='nm'>{name.strip()}</span></span>"
+        assert ui.app_chip(name, client_id=CLAUDE_CIMD) == (
+            f"<span class='ui-app'>{claude}<span class='nm'>{name.strip()}</span></span>"
         )
     for name in ("ChatGPT", "chatgpt", "Codex", "CODEX"):
-        assert ui.app_logo(name) == openai, name
+        assert ui.app_chip(name, client_id=OPENAI_CIMD).startswith(f"<span class='ui-app'>{openai}"), name
     # the name stays beside the mark in full, and the mark itself says nothing (alt='')
-    assert ui.app_chip("ChatGPT").endswith("<span class='nm'>ChatGPT</span></span>")
-    assert "alt=''" in ui.app_chip("Claude") and "title=" not in ui.app_chip("Claude")
+    assert ui.app_chip("ChatGPT", client_id=OPENAI_CIMD).endswith("<span class='nm'>ChatGPT</span></span>")
+    chip = ui.app_chip("Claude", client_id=CLAUDE_CIMD)
+    assert "alt=''" in chip and "title=" not in chip
     # anything else, and an app that gave no name: the gateway's own icon, never a guessed mark
     plug = theme.icon("app")
-    for name in ("browser", "Claudette", "Open AI", "Forge", "Claude Desktop"):
-        assert ui.app_logo(name) == plug, name
-        assert "/static/logos/" not in ui.app_chip(name)
+    assert ui.app_logo(None) == plug
+    for name in ("browser", "Claudette", "Open AI", "Forge", "Claude Desktop", "Claude", "ChatGPT"):
+        assert "/static/logos/" not in ui.app_chip(name), name
     assert (
         ui.app_chip("", unnamed=True)
         == f"<span class='ui-app unnamed'>{plug}<span class='nm'>Unnamed app</span></span>"
@@ -74,7 +79,80 @@ def test_each_known_app_gets_its_own_mark_and_every_other_app_the_neutral_icon()
     assert "/static/logos/" not in ui.app_chip(None)
     # no wording of endorsement anywhere near the chip
     for word in ("official", "partner", "endorsed", "powered by"):
-        assert word not in ui.app_chip("Claude").casefold()
+        assert word not in chip.casefold()
+
+
+@pytest.mark.parametrize(
+    ("client_id", "info", "brand"),
+    [
+        (CLAUDE_CIMD, None, "claude"),
+        ("https://www.anthropic.com/mcp/client.json", None, "claude"),
+        (OPENAI_CIMD, None, "openai"),
+        ("https://platform.openai.com/c.json", None, "openai"),
+        ("reg-1", {"redirect_uris": ["https://chatgpt.com/connector_platform_oauth_redirect"]}, "openai"),
+        ("reg-2", {"redirect_uris": ["https://claude.ai/api/mcp/auth_callback"]}, "claude"),
+        # named like the app but sent back somewhere else, or partly: never the mark
+        ("reg-3", {"client_name": "Claude", "redirect_uris": ["https://evil.example/cb"]}, None),
+        (
+            "reg-4",
+            {"redirect_uris": ["https://claude.ai/api/mcp/auth_callback", "https://evil.example/cb"]},
+            None,
+        ),
+        ("reg-5", {"redirect_uris": ["http://claude.ai/cb"]}, None),
+        ("reg-6", {"redirect_uris": ["https://claude.ai.evil.example/cb"]}, None),
+        ("reg-7", {"redirect_uris": ["http://127.0.0.1:5000/callback"]}, None),
+        ("https://notclaude.ai/c.json", None, None),
+        ("https://claude.ai.evil.example/c.json", None, None),
+        ("http://claude.ai/c.json", None, None),
+        ("unknown", None, None),
+        (None, None, None),
+    ],
+)
+def test_the_mark_follows_the_apps_verified_address_not_its_name(client_id, info, brand) -> None:  # noqa: ANN001
+    """N-3 (review 2026-10-22): an app gets the official mark only when the gateway knows where it
+    comes from: its metadata document's own https address (the client id itself) on claude.ai or
+    anthropic.com, chatgpt.com or openai.com, or a registered app that sends members back only to
+    those. The name the app gives itself never decides."""
+    assert ui.client_brand(client_id, info) == brand
+
+
+def test_a_chip_shows_a_mark_only_for_a_verified_app(monkeypatch: pytest.MonkeyPatch) -> None:
+    plug = theme.icon("app")
+    claude = f"<img class='logo' src='/static/logos/claude.svg' {IMG}"
+    registered = {
+        "evil": {"client_name": "Claude", "redirect_uris": ["https://evil.example/cb"]},
+        "gpt": {
+            "client_name": "ChatGPT",
+            "redirect_uris": ["https://chatgpt.com/connector_platform_oauth_redirect"],
+        },
+    }
+    monkeypatch.setattr(ui, "_client_info", registered.get)
+    # the name alone never brings the mark: the text stays the same either way
+    assert ui.app_chip("Claude") == f"<span class='ui-app'>{plug}<span class='nm'>Claude</span></span>"
+    assert ui.app_chip("Claude", client_id="evil") == ui.app_chip("Claude")
+    assert ui.app_chip("Claude", client_id=CLAUDE_CIMD) == (
+        f"<span class='ui-app'>{claude}<span class='nm'>Claude</span></span>"
+    )
+    assert "/static/logos/openai-black.svg" in ui.app_chip("ChatGPT", client_id="gpt")
+    assert "/static/logos/" not in ui.app_chip("Website", client_id="browser")
+
+
+async def test_the_gateway_reads_a_registered_apps_addresses_for_its_mark(stack: Stack) -> None:
+    """The running gateway hands the chips its own record of each registered app: one named
+    "Claude" that signs members back elsewhere keeps the neutral icon on every list."""
+    db = stack.h.app.state.gateway.db
+    db.save_client("named-claude", {"client_name": "Claude", "redirect_uris": ["https://evil.example/cb"]})
+    db.save_client(
+        "real-chatgpt",
+        {
+            "client_name": "ChatGPT",
+            "redirect_uris": ["https://chatgpt.com/connector_platform_oauth_redirect"],
+        },
+    )
+    assert ui.client_brand("named-claude") is None
+    assert "/static/logos/" not in ui.app_chip("Claude", client_id="named-claude")
+    assert ui.client_brand("real-chatgpt") == "openai"
+    assert "/static/logos/openai-black.svg" in ui.app_chip("ChatGPT", client_id="real-chatgpt")
 
 
 def test_the_theme_switch_shows_one_openai_file_at_a_time() -> None:
@@ -91,7 +169,9 @@ def test_the_theme_switch_shows_one_openai_file_at_a_time() -> None:
     dark_sys = "@media (prefers-color-scheme: dark){ :root:not([data-theme=light]) .ui-app img.on-light{"
     assert light_sys + "display:inline-block}" in css and dark_sys + "display:none}" in css
     # pages ask for the files by digest, so the browser keeps them for a year
-    doc = theme.versioned_static(ui.app_chip("Codex") + ui.app_chip("Claude"))
+    doc = theme.versioned_static(
+        ui.app_chip("Codex", client_id=OPENAI_CIMD) + ui.app_chip("Claude", client_id=CLAUDE_CIMD)
+    )
     assert re.search(r"src='/static/logos/openai-black\.svg\?v=[0-9a-f]{12}'", doc)
     assert re.search(r"src='/static/logos/openai-white\.svg\?v=[0-9a-f]{12}'", doc)
     assert re.search(r"src='/static/logos/claude\.svg\?v=[0-9a-f]{12}'", doc)
@@ -148,8 +228,15 @@ class ChipServer(Server):
 
         async def chips(_request: Request):
             rows = "".join(
-                f"<p class='row'>{ui.app_chip(a)} proposed a change</p>"
-                for a in ("Claude", "Claude Code", "ChatGPT", "Codex", "browser", None)
+                f"<p class='row'>{ui.app_chip(a, client_id=c)} proposed a change</p>"
+                for a, c in (
+                    ("Claude", CLAUDE_CIMD),
+                    ("Claude Code", CLAUDE_CIMD),
+                    ("ChatGPT", OPENAI_CIMD),
+                    ("Codex", OPENAI_CIMD),
+                    ("browser", "browser"),
+                    (None, None),
+                )
             )
             return theme.render(
                 "App chips", f"<div class='chips'>{rows}</div>", site="MTG Gateway", signed_in=True, csrf="x"

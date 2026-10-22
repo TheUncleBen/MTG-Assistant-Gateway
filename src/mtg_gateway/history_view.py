@@ -93,6 +93,17 @@ def query_string(query: dict[str, Any], **override: Any) -> str:
     return "?" + urlencode(pairs) if pairs else ""
 
 
+def _chip(e: dict[str, Any]) -> str:
+    """An entry's app chip, its mark by the client that made it (ui.client_brand)."""
+    return ui.app_chip(e["app"], client_id=e.get("client"))
+
+
+def _client(created_by: str | None) -> str | None:
+    """The client id inside an actor label ("app: Claude (id)"), for the app chip's mark."""
+    m = re.fullmatch(r"app: .+ \((.+)\)", created_by or "")
+    return m.group(1) if m else None
+
+
 def _app(created_by: str | None) -> str | None:
     """Who made an entry, as the app chip names it: "You", "The administrator", the app's name
     (never its client id), or None."""
@@ -147,6 +158,7 @@ def build_events(
                 "deck_name": p.get("deck_name") or p.get("deck_id"),
                 "line": line,
                 "app": _app(p.get("created_by")),
+                "client": _client(p.get("created_by")),
                 "who": True,
                 "action": "",
                 "details": details,
@@ -264,6 +276,7 @@ def build_events(
                 "state": r["status"] if r.get("status") and r.get("status") != "complete" else "",
                 "line": _esc((", ".join(bits) + f" · {sim}") if bits else sim),
                 "app": app,
+                "client": client,
                 "who": True,
                 "action": open_report,
                 "details": f"<div class='ui-actions'>{open_report}</div>",
@@ -317,7 +330,7 @@ def _row_html(e: dict[str, Any], query: dict[str, Any], *, now: float) -> str:
         else f"<span class='t'>{name}</span>"
     )
     who = (
-        ui.app_chip(e["app"])
+        _chip(e)
         if e["who"]
         else f"<span class='ui-when' title='{_esc(NO_WHO)}'>—"
         f"<span class='sr-only'>{_esc(NO_WHO)}</span></span>"
@@ -333,7 +346,7 @@ def _row_html(e: dict[str, Any], query: dict[str, Any], *, now: float) -> str:
     return (
         f"<div class='{cls}'><span class='md-hide'>{_type_html(e)}</span>"
         f"<span class='title'>{deck}<span class='deck'>{e['line']}</span>"
-        f"<span class='sub'>{_type_html(e)}{ui.app_chip(e['app']) if e['who'] else ''}{when}</span></span>"
+        f"<span class='sub'>{_type_html(e)}{_chip(e) if e['who'] else ''}{when}</span></span>"
         f"<span class='md-hide'>{who}</span><span class='md-hide'>{when}</span>"
         f"<span class='act'><span class='sm-hide acts'>{acts}</span>"
         f"<a class='sm-only chev' href='{_esc(chev_href)}' aria-label='{chev_text}'>›</a></span></div>"
@@ -417,7 +430,7 @@ def details_panel(e: dict[str, Any], query: dict[str, Any]) -> str:
                 ("Deck", f"<a href='/decks/{_esc(e['deck_id'])}'>{_esc(e['deck_name'])}</a>")
                 if e.get("deck_id")
                 else ("Deck", _esc(e["deck_name"])),
-                ("By", ui.app_chip(e["app"]) if e["who"] else "—"),
+                ("By", _chip(e) if e["who"] else "—"),
                 ("When", time_html(e["ts"])),
             ]
         )

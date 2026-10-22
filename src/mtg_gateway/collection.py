@@ -916,7 +916,7 @@ def import_result_html(result: dict[str, Any]) -> str:
         notes.append(f"Not found, so not imported: {rows(result['missing'])}.")
     if result.get("added"):
         n = int(result.get("cards") or 0)
-        lead, cls = f"Imported {n} {'card' if n == 1 else 'cards'} into your Archidekt collection.", "ok"
+        lead, cls = f"Imported {n} {'card' if n == 1 else 'cards'} into your Collection on Archidekt.", "ok"
     else:
         lead, cls = "Nothing was imported: no card in the list was found.", "error"
     items = "".join(f"<li>{_esc(n)}</li>" for n in notes)
@@ -1297,7 +1297,8 @@ def add_box_html(csrf: str, *, tab: str = "add", open: bool = False) -> str:
         f"<label class='field'><span>Condition</span><select id='addcond' name='condition'>"
         f"{_opts(CONDITIONS[1:], 'NM', CONDITION_LABELS)}</select></label></div>"
         "<p class='muted small'>Scanning a pile is quicker: open <a href='/scan'>Scan</a>, then choose "
-        "<strong>Save to collection</strong>. Everything you add lands in your Collection on Archidekt.</p>"
+        "<strong>Save to collection</strong>. Everything you add is added to your Collection on "
+        "Archidekt.</p>"
         "</form>"
     )
     import_form = (
@@ -1739,12 +1740,12 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
                 inner = re.sub(r"</(p|div)>$", "", inner)
                 return strip(inner, kind, html=True)
         msgs = {
-            "added": "Added to your Archidekt collection.",
-            "removed": "Removed from your Archidekt collection.",
-            "updated": "Card details saved to your Archidekt collection.",
+            "added": "Added to your Collection on Archidekt.",
+            "removed": "Removed from your Collection on Archidekt.",
+            "updated": "Card details saved to your Collection on Archidekt.",
             "nothing": "Nothing was added: no card matched. Check the name or pick a suggestion.",
             "nothingimported": "Nothing was imported: no card in the list was found.",
-            "imported": "Imported into your Archidekt collection.",
+            "imported": "Imported into your Collection on Archidekt.",
             "toomany": f"An import adds at most {MAX_IMPORT_ROWS} rows at a time. Split the file and "
             "import the rest after.",
             "unreadable": "That text is not a collection CSV or a card list the gateway can read.",

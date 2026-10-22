@@ -616,3 +616,35 @@ def test_card_search_keeps_its_name_and_no_mana_data_is_readable(tmp_path: Path)
                 browser.close()
     finally:
         s.stop()
+
+
+def test_the_deck_menus_run_full_test_submits_the_full_test(tmp_path: Path) -> None:
+    """N-5 (review 2026-10-22): More's "Run full test" finds the banner's full-test form without a
+    has-selector and submits it: the report page opens, with no script error."""
+    import re
+
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_path()
+    if exe == "missing":
+        pytest.skip("no Chromium available for Playwright")
+    s = Server(tmp_path, writes_enabled=True)
+    s.start()
+    try:
+        sid = _link(s)
+        with sync_playwright() as p:
+            browser = p.chromium.launch(executable_path=exe) if exe else p.chromium.launch()
+            try:
+                ctx = _context(browser, s, sid, 1280, 800, False, "light")
+                page = ctx.new_page()
+                errors: list[str] = []
+                page.on("pageerror", lambda e: errors.append(str(e)))
+                page.goto(f"{s.base}/decks/42", wait_until="networkidle")
+                page.locator(".banner button.deckmenu", has_text="More").click()
+                page.locator(".ctxmenu[role=menu] [role=menuitem]", has_text="Run full test").click()
+                page.wait_for_url(re.compile(r"/(history/reports|decks/42/report)"), timeout=60000)
+                assert errors == [], errors
+            finally:
+                browser.close()
+    finally:
+        s.stop()

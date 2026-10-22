@@ -196,8 +196,12 @@ def test_a_notice_is_a_tinted_strip_with_a_coloured_left_edge_and_no_border() ->
 def test_the_app_chip_shows_the_full_name_beside_the_connected_app_icon() -> None:
     plug = theme.icon("app")
     claude = "<img class='logo' src='/static/logos/claude.svg' alt='' width='16' height='16'>"
-    assert ui.app_chip("Claude") == f"<span class='ui-app'>{claude}<span class='nm'>Claude</span></span>"
-    assert ui.app_chip("ChatGPT").startswith(
+    by_claude = "https://claude.ai/oauth/mcp-oauth-client-metadata"  # verified by its address (N-3)
+    assert (
+        ui.app_chip("Claude", client_id=by_claude)
+        == f"<span class='ui-app'>{claude}<span class='nm'>Claude</span></span>"
+    )
+    assert ui.app_chip("ChatGPT", client_id="https://chatgpt.com/oauth/c.json").startswith(
         "<span class='ui-app'><img class='logo on-light' src='/static/logos/"
     )
     assert ui.app_chip("Codex").endswith("<span class='nm'>Codex</span></span>")
@@ -283,3 +287,11 @@ def test_page_head_takes_the_pages_actions_and_load_more_is_a_real_link() -> Non
     assert ui.button_link("Open", "/d", kind="primary", icon_name="eye").startswith(
         "<a class='btn btn-primary' href='/d'><svg"
     )
+
+
+def test_no_script_relies_on_has_in_a_selector() -> None:
+    """N-5 (review 2026-10-22): a ``:has()`` selector in querySelector throws on browsers without
+    it, so a menu item built on one would do nothing there. The scripts find such elements by hand."""
+    static = Path(__file__).resolve().parents[1] / "src" / "mtg_gateway" / "static"
+    for js in sorted(static.glob("*.js")):
+        assert ":has(" not in js.read_text(encoding="utf-8"), js.name

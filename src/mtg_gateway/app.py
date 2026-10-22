@@ -42,7 +42,7 @@ from starlette.responses import JSONResponse, Response
 from starlette.routing import Route, request_response
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from . import __version__, smallpage, theme
+from . import __version__, smallpage, theme, ui
 from .admin import add_admin_routes
 from .api import add_api_routes
 from .app_page import PROJECT_URL, add_app_routes
@@ -973,6 +973,8 @@ def create_app(
     db.upgrade_keep_days = settings.backup_keep_days
     db.age_out_upgrade_copies()
     db.reconcile_upgrade_copies()
+    # the app chips show an official mark only for an app verified by where it comes from (ui.py)
+    ui.use_client_info(db.get_client)
     theme.PUBLIC_URL = settings.public_url.rstrip("/")  # link previews point at the site's icon
     theme.WATCHLISTS = settings.watchlists_enabled  # the Watchlist links and price buttons
     oidc = oidc or OIDCClient(
@@ -1087,8 +1089,11 @@ def _shell_for(state: AppState, request: Request) -> dict[str, Any]:
 
 
 def _same_url(request: Request) -> str:
-    """This request's path and query, for a Try again link."""
-    return request.url.path + (f"?{request.url.query}" if request.url.query else "")
+    """This request's path and query, for a Try again link. Leading slashes and backslashes fold
+    into one "/", so a request for ``//other.example/x`` never makes a protocol-relative link to
+    another site (L-1)."""
+    path = "/" + request.url.path.lstrip("/\\")
+    return path + (f"?{request.url.query}" if request.url.query else "")
 
 
 def _wants_page(request: Request) -> bool:

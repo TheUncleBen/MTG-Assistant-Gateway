@@ -687,7 +687,7 @@ API alike, so there is no path around it. An assistant apply the mode does
 not allow is logged as `apply_needs_user`. Every apply that changes the
 cards or details of one of the member's decks, in every mode, snapshots the
 deck first, so an auto-applied deck change can be restored from the History
-page; a restore does not put back the deck's folder, tags or cover.
+page. Restoring a snapshot does not put back a deck's folder, tags or cover.
 Deleting a deck keeps a snapshot too. With backup copies on
 (`MTG_ARCHIDEKT_BACKUPS`), an assistant's change, or one applied from its
 card or review page, also gets a backup copy on Archidekt. The member's own

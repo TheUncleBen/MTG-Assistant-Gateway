@@ -740,7 +740,7 @@ async def test_settings_page_collaborators_take_one_press_and_a_confirmation(sta
         await b.login()
         page = (await b.http.get("/decks/42/settings")).text
         assert "id='collaborators'" in page and "<span class='name'>amy</span>" in page
-        assert "added by alice" in page and "aria-label='Remove amy'" in page
+        assert "added by alice" in page and "aria-label='Remove “amy”'" in page
         assert "press Apply there" not in page
         # One line on the rule; the people followed are offered (the site's own combobox, no
         # datalist), less current collaborators: amy, the only one followed, is one already
@@ -748,7 +748,7 @@ async def test_settings_page_collaborators_take_one_press_and_a_confirmation(sta
         assert "<datalist" not in page and "data-suggest='list'" not in page
         assert "Everyone you follow on Archidekt is a collaborator already." in page
         # Remove is the red outline with the trash icon; the solid red button is in the box
-        assert "class='btn btn-outline-danger' aria-label='Remove amy'" in page
+        assert "class='btn btn-outline-danger' aria-label='Remove “amy”'" in page
         # each form names its section, so the answer (a refusal, or the page after the confirmation)
         # opens there
         assert "action='/decks/42/collaborators#collaborators'" in page

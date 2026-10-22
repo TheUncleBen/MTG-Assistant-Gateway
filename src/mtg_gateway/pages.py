@@ -319,8 +319,11 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         # The Notifications and Summary cards show their own notices inside them (where the
         # redirect lands); every other notice stays at the top of the page.
         if ok == "disconnected":
-            # the app's registered name, looked up by the id the redirect carries (never the URL's words)
-            notice = _ok(f"Disconnected “{ui.app_name(state.db.client_name(q.get('app')))}”.")
+            # the app's registered name, looked up by the id the redirect carries (never the URL's
+            # words), and only among the member's own apps (any other id reads as an unnamed app)
+            cid = q.get("app")
+            name = state.db.client_name(cid) if state.db.member_used_client(sub, cid) else None
+            notice = _ok(f"Disconnected “{ui.app_name(name)}”.")
         else:
             notice = _notice(
                 None if ok in notify.CARD_NOTICES else ok, None if err in notify.CARD_NOTICES else err
@@ -1417,7 +1420,7 @@ def _apps_card(
         box_id = f"disc{n}"
         href = f"/account?disconnect={quote(a['client_id'], safe='')}"
         rows.append(
-            f"<li><span class='nm'>{ui.app_chip(a['name'], unnamed=True)}</span>"
+            f"<li><span class='nm'>{ui.app_chip(a['name'], unnamed=True, client_id=a['client_id'])}</span>"
             f"<span class='sub'>Last signed in or refreshed {ui.when(a['last_issued_at'])}</span>"
             f"<span class='btn-cell'>{ui.box_opener('Disconnect', href, box_id, kind='danger')}</span></li>"
         )
@@ -2061,7 +2064,12 @@ def _proposal_body(
     ):
         meta_rows.append(("Archidekt account", html.escape(str(p["changes"]["archidekt_username"]))))
     if p.get("created_by"):
-        meta_rows.append(("Proposed by", ui.app_chip(_chip_name(str(p["created_by"])))))
+        meta_rows.append(
+            (
+                "Proposed by",
+                ui.app_chip(_chip_name(str(p["created_by"])), client_id=_chip_client(str(p["created_by"]))),
+            )
+        )
     meta_rows.append(("Made", _future(p.get("created_at"), now)))
     if p.get("state") == "pending":  # a closed one no longer expires
         meta_rows.append(("Expires", _future(p.get("expires_at"), now)))
@@ -2217,6 +2225,12 @@ def _chip_name(label: str) -> str | None:
     return {"browser": "You", "administrator": "The administrator", "admin": "The administrator"}.get(
         label, label or None
     )
+
+
+def _chip_client(label: str) -> str | None:
+    """The client id inside an actor label ("app: Claude (id)"), for the app chip's mark."""
+    m = re.fullmatch(r"app: (.+) \((.+)\)", label)
+    return m.group(2) if m else None
 
 
 def _pretty(obj: Any) -> str:

@@ -32,9 +32,12 @@ async def _csrf(b) -> tuple[str, str]:  # noqa: ANN001
 
 
 def _form(page: str, ids: dict[str, int], **changes: str | None) -> dict[str, str]:
-    """The panel's fields as the browser sends them: every name, each flag that is on, then
+    """The panel's fields as the browser sends them: what each category was when the page was
+    shown (its hidden ``was_`` fields), every name, each flag that is on, then
     ``changes`` on top (``None`` takes a flag off)."""
-    data: dict[str, str] = {}
+    data: dict[str, str] = dict(
+        re.findall(r"<input type='hidden' name='(was_[a-z_]+_\d+)' value='([^']*)'>", page)
+    )
     for name, cid in ids.items():
         data[f"name_{cid}"] = name
         for flag in ("premier", "not_in_deck", "not_in_price"):
@@ -70,7 +73,7 @@ async def test_the_panel_is_editable_with_the_approved_controls(stack: Stack) ->
                 assert re.search(
                     rf"<input type='checkbox' name='{flag}_{cid}' value='1'( checked)?>", page
                 ), flag
-                assert f"aria-label='Flags of {name}'" in page and label in page
+                assert f"aria-label='Switches of “{name}”'" in page and label in page
         assert f"name='premier_{ids['Commander']}' value='1' checked" in page
         assert f"name='not_in_deck_{ids['Maybeboard']}' value='1' checked" in page
         assert f"name='not_in_price_{ids['Maybeboard']}' value='1' checked" in page
@@ -188,8 +191,82 @@ async def test_a_refusal_shows_in_the_panel_with_the_typed_values(stack: Stack) 
         assert f"name='name_{ids['Ramp']}' value='commander'" in panel  # kept to fix
         # nothing changed: said plainly, nothing proposed
         r = await b.http.post(POST, data={"csrf": csrf, "action": "save", **_form(page, ids)}, headers=NAV)
-        assert r.status_code == 400 and "Nothing to save: no name or flag was changed." in r.text
+        assert r.status_code == 400 and "Nothing to save: no name or switch was changed." in r.text
         assert stack.h.app.state.gateway.db.list_proposals("user-1") == []
+    finally:
+        await b.aclose()
+
+
+def _rename_on_archidekt(ark, old: str, new: str) -> None:  # noqa: ANN001
+    """A rename made elsewhere (an assistant in Full auto, the deck editor), as Archidekt keeps it:
+    the category's record and every card filed under it follow the new name."""
+    deck = ark.decks[42]
+    next(c for c in deck["categories"] if c["name"] == old)["name"] = new
+    for row in deck["cards"]:
+        if row.get("categories"):
+            row["categories"] = [new if x == old else x for x in row["categories"]]
+
+
+async def test_a_stale_form_never_undoes_a_change_made_since_the_page_loaded(stack: Stack) -> None:
+    """M-1 (review 2026-10-22): the panel carries what each category was when the page was shown.
+    A deck changed since is refused in the needs-a-look words and nothing is sent; the panel then
+    shows the deck as it is now, so the rename made elsewhere is never put back."""
+    from mtg_gateway import recheck
+
+    _give_categories(stack.ark)
+    b = await linked_browser(stack)
+    try:
+        page, csrf = await _csrf(b)
+        ids = _ids(page)
+        data = _form(page, ids, **{f"not_in_price_{ids['Maybeboard']}": None})
+        _rename_on_archidekt(stack.ark, "Ramp", "Mana rocks")  # between page load and Save
+        r = await b.http.post(POST, data={"csrf": csrf, "action": "save", **data}, headers=NAV)
+        assert r.status_code == 400, r.text
+        assert stack.ark.category_patches == []
+        assert stack.h.app.state.gateway.db.list_proposals("user-1") == []
+        panel = r.text.split("id='categories'")[1].split("</section>")[0]
+        assert "id='categories-msg' role='alert'" in panel
+        assert esc(recheck.reason_text(recheck.REASON_CHANGED)) in panel
+        assert "Nothing was sent to Archidekt." in panel
+        # the panel now shows the deck as it is, not the stale names
+        assert "value='Mana rocks'" in panel and f"name='name_{ids['Ramp']}' value='Ramp'" not in panel
+        # saved again from that panel, only the switch the member changed is sent
+        page = r.text
+        data = _form(page, _ids(page), **{f"not_in_price_{ids['Maybeboard']}": None})
+        r = await b.http.post(POST, data={"csrf": csrf, "action": "save", **data}, headers=NAV)
+        assert r.status_code == 303, r.text
+        assert [p["name"] for p in stack.ark.category_patches] == ["Maybeboard"]
+        assert any(c["name"] == "Mana rocks" for c in stack.ark.decks[42]["categories"])
+    finally:
+        await b.aclose()
+
+
+async def test_only_the_fields_changed_on_the_page_become_changes(stack: Stack) -> None:
+    """A switch changed elsewhere on a category the member did not touch is not part of the save
+    when the page still matches it; with a baseline that no longer matches, the save is refused."""
+    _give_categories(stack.ark)
+    b = await linked_browser(stack)
+    try:
+        page, csrf = await _csrf(b)
+        ids = _ids(page)
+        # a post without the page's baseline (a tab from before this release) is refused, too
+        bare = {k: v for k, v in _form(page, ids, **{f"name_{ids['Ramp']}": "Mana"}).items()}
+        bare = {k: v for k, v in bare.items() if not k.startswith("was_")}
+        r = await b.http.post(POST, data={"csrf": csrf, "action": "save", **bare}, headers=NAV)
+        assert r.status_code == 400 and stack.ark.category_patches == []
+        data = _form(page, ids, **{f"name_{ids['Ramp']}": "Mana"})
+        r = await b.http.post(POST, data={"csrf": csrf, "action": "save", **data}, headers=NAV)
+        assert r.status_code == 303, r.text
+        assert stack.ark.category_patches == [
+            {
+                "deck_id": 42,
+                "name": "Mana",
+                "includedInDeck": True,
+                "includedInPrice": True,
+                "isPremier": False,
+                "id": ids["Ramp"],
+            }
+        ]
     finally:
         await b.aclose()
 

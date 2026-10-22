@@ -262,7 +262,8 @@ def row_html(r: dict[str, Any], apps: dict[str, str], *, now: float) -> str:
     won, won_short = won_cell(r)
     dmg, dmg_short = damage_cell(r)
     who = asked_by(r, apps)
-    app = ui.app_chip(who)
+    client = r.get("created_by_client")
+    app = ui.app_chip(who, client_id=str(client) if client else None)
     ran = ui.when(r.get("taken_at"), now=now)
     kill = f"{r.get('kill_damage') or 40} damage"
     line = deck_line(r)

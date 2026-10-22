@@ -1912,14 +1912,14 @@ def compare_page_html(
     widgets = ui.widgets(
         [
             ui.widget(f"In {oq}", "decks", str(sm["before_size"]), unit="cards"),
-            ui.widget(f"In “{deck.name or 'this deck'}”", "decks", str(sm["after_size"]), unit="cards"),
+            ui.widget(f"In “{deck_title(deck)}”", "decks", str(sm["after_size"]), unit="cards"),
             ui.widget("Taken out", "minus", str(sm["cut"]), unit="cards", detail=f"{sm['cut_pct']}% of {oq}"),
             ui.widget(
                 "Put in",
                 "plus",
                 str(sm["added"]),
                 unit="cards",
-                detail=f"{sm['added_pct']}% of “{deck.name or 'this deck'}”",
+                detail=f"{sm['added_pct']}% of “{deck_title(deck)}”",
             ),
             ui.widget(
                 "Kept", "check", str(sm["kept"]), unit="cards", detail="Basic lands aside", wide_sm=True

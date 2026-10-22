@@ -686,6 +686,11 @@ def _deck_html(names: Names, sub: str | None, deck_id: Any, *, link: bool, own: 
     return f"<a href='{href}'>Open the deck</a>" if link else f"<span class='gone'>{GONE_DECK}</span>"
 
 
+def _member_chip(log: Any, client_id: str | None) -> str:
+    """The By column's app chip, its mark by the client (ui.client_brand)."""
+    return ui.app_chip(log.app_name(client_id), client_id=client_id)
+
+
 def member_detail_html(row: Mapping[str, Any], names: Names) -> str:
     """A row's detail on My activity: the deck and what to open, never an id."""
     event, d, sub = row["event"], _detail(row), row.get("sub")
@@ -1264,7 +1269,7 @@ def _admin_row(r: dict[str, Any], log: Log, names: Names, query: Query, path: st
         f"<span class='c-ev'>{event_html(event, cid, d, admin_page=True)}</span>"
         f"<span class='c-who'>{who}</span>"
         f"<span class='c-det'>{admin_detail_html(r, names)}</span>"
-        f"<span class='c-app'>{ui.app_chip(app)}</span>"
+        f"<span class='c-app'>{ui.app_chip(app, client_id=cid)}</span>"
         f"<span class='c-when'>{ui.when(r['at'], now=now)}</span>"
         # the row's menu (static/admin.js: right-click, press and hold, the ⋮); without scripts the
         # ⋮ opens the row's details, as the chevron does
@@ -1364,7 +1369,7 @@ def member_body(state: Any, sub: str, params: Mapping[str, str], *, now: float |
                 f"<div class='tr ev'><span class='c-ev'>"
                 f"{event_html(str(r['event']), r.get('client_id'), _detail(r), admin_page=False)}</span>"
                 f"<span class='c-det'>{member_detail_html(r, names)}</span>"
-                f"<span class='c-app'>{ui.app_chip(log.app_name(r.get('client_id')))}</span>"
+                f"<span class='c-app'>{_member_chip(log, r.get('client_id'))}</span>"
                 f"<span class='c-when'>{ui.when(r['at'], now=now)}</span></div>"
                 for r in rows
             )

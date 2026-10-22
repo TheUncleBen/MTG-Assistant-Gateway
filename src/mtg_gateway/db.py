@@ -1168,6 +1168,16 @@ class Database:
             for r in rows
         ]
 
+    def member_used_client(self, sub: str, client_id: str | None) -> bool:
+        """Whether ``sub`` ever gave ``client_id`` a token (revoked or not): the Account page names
+        a just-disconnected app only when it was the member's own."""
+        if not client_id:
+            return False
+        return (
+            self._one("SELECT 1 FROM tokens WHERE sub = ? AND client_id = ? LIMIT 1", (sub, client_id))
+            is not None
+        )
+
     def all_user_clients(self) -> dict[str, list[dict[str, Any]]]:
         """user_clients for every member at once (the admin Users page): one query
         for the tokens and one name lookup for all their apps, instead of one per member and app."""

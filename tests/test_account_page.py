@@ -223,3 +223,17 @@ def test_no_setting_names_or_verify_in_the_member_wording() -> None:
     text = html.unescape(pages.DELETED_LIST + pages.ACCOUNT_CSS)
     for word in ("verify", "MTG_", "client ID"):
         assert word not in text, word
+
+
+async def test_the_disconnected_notice_names_only_the_members_own_app(stack: Stack) -> None:
+    """N-4 (review 2026-10-22): ?ok=disconnected&app=<id> names the app only when it is one the
+    member connected; any other client id reads as an unnamed app, its name never looked up."""
+    b = await linked_browser(stack)
+    try:
+        db = stack.h.app.state.gateway.db
+        db.save_client("someone-elses", {"client_name": "Secret Helper"})
+        page = (await b.http.get("/account?ok=disconnected&app=someone-elses")).text
+        assert "Secret Helper" not in page
+        assert "<div class='notice ok'>Disconnected “Unnamed app”.</div>" in page
+    finally:
+        await b.aclose()

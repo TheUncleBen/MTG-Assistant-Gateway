@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import pytest
 
-from mtg_gateway import modes
+from mtg_gateway import modes, recheck
 from mtg_gateway.archidekt import ArchidektClient, ArchidektError, Pacer
 from mtg_gateway.decks import (
     BROWSER_CLIENT,
@@ -429,6 +429,62 @@ async def test_restore_refuses_a_name_another_category_has_now(stack: Stack) -> 
     _cats(ark)["Maybeboard"]["name"] = "Ramp"  # renamed on Archidekt since
     with pytest.raises(DeckError, match="can't get its name “Ramp” back"):
         await svc.propose_restore(SUB, done["result"]["snapshot_id"])
+
+
+async def test_a_waiting_card_edit_naming_a_renamed_category_needs_a_look(stack: Stack) -> None:
+    """N-1 (review 2026-10-22): a waiting card edit that files a card under a category renamed
+    since would, applied as it stands, make the old name again with default switches. After the
+    categories apply it waits as Needs a look, never "updated", so it is reviewed again first."""
+    await _ready(stack)
+    svc = _svc(stack)
+    edit = await svc.propose(
+        SUB, "42", [{"action": "set_category", "card_name": "Sol Ring", "category": "Ramp"}]
+    )
+    p = await svc.propose_categories(SUB, "42", [{"category": "Ramp", "rename_to": "Mana"}])
+    done = await svc.apply(SUB, p["proposal_id"], via="browser")
+    assert done["state"] == "applied", done
+    row = svc.db.get_proposal(edit["proposal_id"], SUB)
+    assert row["state"] == "pending" and row["status"] == "needs_look", row
+    assert recheck.reason_text(row["status_reason"]) == (
+        "The category “Ramp” was renamed to “Mana” since this was made. Applied as it stands, "
+        "it would make a new category “Ramp”."
+    )
+    # a later check (a deck page view) keeps the mark, and applying it is refused, nothing sent
+    deck = await svc.get_own_deck(SUB, "42")
+    svc.recheck_waiting(SUB, deck)
+    assert svc.db.get_proposal(edit["proposal_id"], SUB)["status"] == "needs_look"
+    with pytest.raises(DeckError) as exc:
+        await svc.apply(SUB, edit["proposal_id"], via="browser")
+    assert exc.value.kind == "stale" and "renamed to “Mana”" in str(exc.value)
+    assert stack.ark.patches == []
+
+
+async def test_a_restore_that_cannot_be_checked_after_writing_reports_a_mismatch(stack: Stack) -> None:
+    """N-2 (review 2026-10-22): once the restore's category writes are sent, a deck that can no
+    longer be worked out against the snapshot (another category took the name meanwhile) is a
+    mismatch with the snapshot kept, never the before-anything-is-sent refusal."""
+    await _ready(stack)
+    ark, svc = stack.ark, _svc(stack)
+    p = await svc.propose_categories(SUB, "42", [{"category": "Ramp", "rename_to": "Mana"}])
+    done = await svc.apply(SUB, p["proposal_id"], via="browser")
+    r = await svc.propose_restore(SUB, done["result"]["snapshot_id"])
+    send = svc._send_categories
+
+    async def then_renamed_elsewhere(*a, **k):  # noqa: ANN002, ANN003, ANN202
+        await send(*a, **k)
+        ramp = _cats(ark)["Ramp"]
+        _cats(ark)["Maybeboard"]["name"] = "Taken"
+        ramp["name"] = "Mana"  # undone on Archidekt at once, and its old name taken
+        _cats(ark)["Taken"]["name"] = "Ramp"
+        for row in ark.decks[42]["cards"]:
+            if "Ramp" in (row.get("categories") or []):
+                row["categories"] = ["Mana" if x == "Ramp" else x for x in row["categories"]]
+
+    svc._send_categories = then_renamed_elsewhere
+    with pytest.raises(DeckError) as exc:
+        await svc.apply(SUB, r["proposal_id"], via="browser")
+    assert exc.value.kind == "verify_mismatch", exc.value
+    assert "can't get its name “Ramp” back" in str(exc.value) and "snapshot" in str(exc.value)
 
 
 async def test_undo_preview_lists_the_category_lines(stack: Stack) -> None:

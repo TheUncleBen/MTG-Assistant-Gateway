@@ -122,7 +122,11 @@ approved or endorsed by Wizards.
 ## Connected app marks (`src/mtg_gateway/static/logos/`)
 
 The rows that name a connected app show that app's own mark beside its name,
-only to identify the app. `claude.svg` is the Claude spark from Anthropic's
+only to identify the app, and only when the gateway can tell where the app comes
+from: its client metadata address is on claude.ai or anthropic.com (or
+chatgpt.com or openai.com), or, for a registered app, every address it sends
+members back to after sign-in is. Any other app, whatever name it gives itself,
+shows the gateway's plain app icon. `claude.svg` is the Claude spark from Anthropic's
 media resources (anthropic.com/press-kit, "Claude Spark - Clay.svg");
 `openai-black.svg` and `openai-white.svg` are the OpenAI blossom from OpenAI's
 logo pack (openai.com/brand, "OAI_OpenAI-Blossom_Black.svg" and

@@ -38,7 +38,7 @@ from .deckpage import (
     deck_list_html,
 )
 from .decks import DeckError, _clean_deck_id
-from .pages import _csrf, browser_session, login_redirect
+from .pages import NO_STORE, _csrf, browser_session, login_redirect
 from .theme import display_name, icon, render, stylesheet_link
 from .theme import esc as _esc
 
@@ -760,17 +760,17 @@ def add_browse_routes(server: MCPServer, state: AppState) -> None:
         page, has_more, at_cap}``; ``html`` is the tiles only, which the page appends."""
         sub, _sid = browser_session(state, request)
         if not sub:
-            return JSONResponse({"ok": False, "error": "sign in first"}, status_code=401)
+            return JSONResponse({"ok": False, "error": "sign in first"}, status_code=401, headers=NO_STORE)
         if not prefs.from_this_site(request):  # it asks Archidekt on the member's own allowance
-            return JSONResponse(
-                {"ok": False, "error": "cross_site"}, status_code=403, headers={"Cache-Control": "no-store"}
-            )
+            return JSONResponse({"ok": False, "error": "cross_site"}, status_code=403, headers=NO_STORE)
         query = read_query(request.query_params)
         try:
             found = await run_search(sub, query)
         except DeckError as exc:
             return JSONResponse(
-                {"ok": False, "error": problem(exc)}, status_code=503 if exc.kind != "invalid" else 400
+                {"ok": False, "error": problem(exc)},
+                status_code=503 if exc.kind != "invalid" else 400,
+                headers=NO_STORE,
             )
         more = bool(found.get("has_more"))
         return JSONResponse(
@@ -832,13 +832,15 @@ def add_browse_routes(server: MCPServer, state: AppState) -> None:
         Load more): ``{ok, html, count, next}``; ``html`` is the groups (or the grid) in full."""
         sub, _sid = browser_session(state, request)
         if not sub:
-            return JSONResponse({"ok": False, "error": "sign in first"}, status_code=401)
+            return JSONResponse({"ok": False, "error": "sign in first"}, status_code=401, headers=NO_STORE)
+        if not prefs.from_this_site(request):  # it asks Archidekt on the member's own allowance
+            return JSONResponse({"ok": False, "error": "cross_site"}, status_code=403, headers=NO_STORE)
         pq = precon_query(request.query_params)
         view = request.query_params.get("view") if request.query_params.get("view") in VIEWS else "grid"
         try:
             listing = await decks.precons(sub)
         except DeckError as exc:
-            return JSONResponse({"ok": False, "error": problem(exc)}, status_code=503)
+            return JSONResponse({"ok": False, "error": problem(exc)}, status_code=503, headers=NO_STORE)
         groups = precon_groups(listing, pq)
         body, nxt = precon_body(groups, listing, pq, view=view, view_in_link=view)
         return JSONResponse(

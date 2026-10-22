@@ -711,8 +711,9 @@ def row_line(r: dict[str, Any]) -> str:
     if kind == "printing":
         return f"{r['name']}: printing {r['before']} -> {r['after']}"
     if kind == "clone":
-        where = f" in folder '{r['folder']}'" if r.get("folder") else ""
-        return f"Clone '{r['source']}' ({r['cards']} cards) as '{r['name']}'{where}"
+        where = f" in folder “{r['folder']}”" if r.get("folder") else ""
+        n = int(r.get("cards") or 0)
+        return f"Clone “{r['source']}” ({n} {'card' if n == 1 else 'cards'}) as “{r['name']}”{where}"
     if kind == "commander":
         if r.get("stays") or r.get("moved"):
             return " ".join(commander_row_texts(r))
@@ -4873,12 +4874,16 @@ class DeckService:
         if now.rows_fingerprint() != deck.rows_fingerprint():
             raise needs_look_error(recheck.REASON_DURING_APPLY)
 
-    def recheck_waiting(self, sub: str, deck: Deck) -> dict[str, str]:
+    def recheck_waiting(
+        self, sub: str, deck: Deck, *, renamed: dict[str, str] | None = None
+    ) -> dict[str, str]:
         """Check every waiting proposal of the member on this deck against it (after an
         apply, on a deck page view, on a new proposal and in the deck sync) and record the
         outcome: "updated" (its baseline moves to this deck) or "needs_look" with the reason.
-        Held proposals keep their hold. Local only: no Archidekt request. Returns id -> status
-        for the proposals whose status was recorded."""
+        ``renamed`` (old name -> new name, after a categories apply or a restore that renamed
+        categories): a card edit naming an old name needs a look whatever its rows say
+        (recheck.renamed_reason). Held proposals keep their hold. Local only: no Archidekt
+        request. Returns id -> status for the proposals whose status was recorded."""
         from . import recheck
 
         out: dict[str, str] = {}
@@ -4907,6 +4912,9 @@ class DeckService:
             except Exception:
                 logger.exception("re-check of a waiting proposal failed")
                 continue
+            was_renamed = recheck.renamed_reason(row, renamed or {})
+            if was_renamed:
+                status, reason = "needs_look", was_renamed
             if status is None:
                 continue
             if self.db.rebase_proposal(
@@ -5597,6 +5605,7 @@ class DeckService:
         deck = await self._current_deck_for(sub, row)
         payload, _lines = restore_steps(wanted, deck)
         bodies, _cat_rows = category_restore_plan(wanted, deck)
+        stuck: list[str] = []
         snapshot_id = self._take_snapshot(sub, row, deck)
         progress["snapshot_id"] = snapshot_id
         backup = await self._backup_shared(sub, row, deck, snapshot_id)
@@ -5608,7 +5617,13 @@ class DeckService:
             # its cards along (only a live test can say), they are moved back by card writes.
             await self._categories_unchanged(sub, deck)
             await self._send_categories(sub, deck.id, bodies, progress)
-            payload, _lines = restore_steps(wanted, await self.get_own_deck(sub, deck.id))
+            after = await self.get_own_deck(sub, deck.id)
+            try:
+                payload, _lines = restore_steps(wanted, after)
+            except DeckError as exc:
+                # written already: what can't be worked out now is reported with the mismatches
+                # (N-2), and no card is moved on a deck that no longer matches the plan
+                payload, stuck = [], [_sentence(exc).rstrip(".")]
         if payload:
             await self._send(sub, deck.id, payload, progress)
         # The deck's own details as the snapshot recorded them (name, description, format, bracket,
@@ -5620,8 +5635,12 @@ class DeckService:
                 progress, self._call(sub, self.client.update_deck, deck.id, details_payload(details))
             )
         verified = await self.get_deck(sub, deck.id)
-        self.recheck_waiting(sub, verified)
-        _left, mismatches = restore_steps(wanted, verified)
+        self.recheck_waiting(sub, verified, renamed=_renames(bodies, category_states(deck)))
+        try:
+            _left, mismatches = restore_steps(wanted, verified)
+        except DeckError as exc:  # the writes were sent: a check that can't be made is a mismatch
+            mismatches = [_sentence(exc).rstrip(".")]
+        mismatches = stuck + [m for m in mismatches if m not in stuck]
         still, _lines = details_rows(verified, snapshot_details(wanted)) if details else ({}, [])
         mismatches += [f"{k} (deck detail)" for k in sorted(still)]
         result = {
@@ -6643,7 +6662,7 @@ class DeckService:
         progress["of_categories"] = len(bodies)
         await self._send_categories(sub, deck.id, bodies, progress)
         verified = await self.get_deck(sub, deck.id)
-        self.recheck_waiting(sub, verified)
+        self.recheck_waiting(sub, verified, renamed=_renames(bodies, category_states(deck)))
         mismatches = category_mismatches(deck, plan, verified)
         result = {
             "snapshot_id": snapshot_id,
@@ -8265,6 +8284,18 @@ def undo_warning(later: int, outside: bool) -> str:
     if outside:
         return "This also reverts the edits made to this deck on Archidekt since."
     return ""
+
+
+def _renames(bodies: list[dict[str, Any]], was: list[dict[str, Any]]) -> dict[str, str]:
+    """Old name -> new name of the categories that ``bodies`` (category writes by record id)
+    rename, against the category states ``was`` from before they were sent."""
+    names = {s["id"]: s["name"] for s in was if s.get("id") is not None}
+    out = {}
+    for b in bodies:
+        old = names.get(b.get("id"))
+        if old is not None and old != b.get("name"):
+            out[old] = str(b.get("name"))
+    return out
 
 
 def needs_look_error(reason: str | None) -> DeckError:

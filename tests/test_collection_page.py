@@ -203,10 +203,10 @@ async def test_notices_are_strips_with_a_close_button_and_the_words_are_kept(sta
     try:
         r = await b.http.get("/collection?ok=added", headers=NAV)
         assert "<div class='notice ok' role='status'>" in r.text
-        assert "Added to your Archidekt collection." in r.text
+        assert "Added to your Collection on Archidekt." in r.text
         assert (
             "aria-label='Close' title='Close'"
-            in r.text.split("Added to your Archidekt collection.")[0][-300:]
+            in r.text.split("Added to your Collection on Archidekt.")[0][-300:]
         )
         r = await b.http.get("/collection?err=lookup", headers=NAV)
         assert "<div class='notice error' role='alert'>" in r.text

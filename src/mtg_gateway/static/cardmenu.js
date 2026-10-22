@@ -380,6 +380,8 @@
     }, true);
     root.addEventListener("pointerdown", function (e) {
       opened = false;
+      // a new press is a real tap: the lift of the hold is over even when no click followed it
+      lift = false;
       touchPress = e.pointerType !== "mouse";
       if (!touchPress) return;
       var it = o.itemOf(e.target);

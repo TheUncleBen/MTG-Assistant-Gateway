@@ -233,6 +233,7 @@ def _gathered(
             "risk": risk,
             "risk_why": why,
             "app": app,
+            "client": r.get("created_by_client"),
             "from": Names.key(app),
             "created_at": int(r.get("created_at") or 0),
             "expires_at": int(r.get("expires_at") or 0),
@@ -435,6 +436,11 @@ def _status_label(it: dict[str, Any]) -> str:
     return ui.status_label(key, title=tip)
 
 
+def _chip(it: dict[str, Any]) -> str:
+    """The row's app chip, its mark by the client that made it (ui.client_brand)."""
+    return ui.app_chip(it["app"], client_id=it.get("client"))
+
+
 def _risk_label(it: dict[str, Any]) -> str:
     if it["risk"] == UNJUDGED:
         return ui.no_risk_label()
@@ -507,7 +513,7 @@ def waiting_row(it: dict[str, Any], *, group: str, now: float, checked: bool, op
     title = (
         f"<label class='title' for='{esc(box)}'><span class='t'>{num}{esc(it['summary'])}"
         f"<span class='stin'>{_status_label(it)}</span></span>{_waiting_flags(it, now)}"
-        f"<span class='sub'>{_risk_label(it)}{ui.app_chip(it['app'])}{ui.when(it['created_at'], now=now)}"
+        f"<span class='sub'>{_risk_label(it)}{_chip(it)}{ui.when(it['created_at'], now=now)}"
         "</span></label>"
     )
     cls = "tr" + (" sel" if checked else "") + (" open" if it["id"] == open_id else "")
@@ -515,7 +521,7 @@ def waiting_row(it: dict[str, Any], *, group: str, now: float, checked: bool, op
         f"<div class='{cls}'{_deck_attr(it)}>{chk}{title}"
         f"<label class='md-hide' for='{esc(box)}'>{_risk_label(it)}</label>"
         f"<label class='sm-hide' for='{esc(box)}'>{_status_label(it)}</label>"
-        f"<label class='md-hide' for='{esc(box)}'>{ui.app_chip(it['app'])}</label>"
+        f"<label class='md-hide' for='{esc(box)}'>{_chip(it)}</label>"
         f"<label class='md-hide' for='{esc(box)}'>{ui.when(it['created_at'], now=now)}</label>"
         f"<input type='hidden' name='v_{pid}' value='{int(it['version'])}'>"
         + ui.open_link(f"/proposals/{it['id']}{qs}", "Review")
@@ -591,11 +597,11 @@ def list_row(
         f"<a class='t' href='/proposals/{esc(it['id'])}{esc(qs)}'>"
         f"{num}{esc(it['summary'])}</a><span class='deck'>{esc(_deck_line(it))}"
         f"<span class='stin'>{_status_label(it)}</span></span>"
-        f"<span class='sub'>{_risk_label(it)}{ui.app_chip(it['app'])}{ui.when(it['created_at'], now=now)}{sm}"
+        f"<span class='sub'>{_risk_label(it)}{_chip(it)}{ui.when(it['created_at'], now=now)}{sm}"
         "</span></span>"
         f"<span class='md-hide'>{_risk_label(it)}</span>"
         f"<span class='sm-hide'>{_status_label(it)}{flag}</span>"
-        f"<span class='md-hide'>{ui.app_chip(it['app'])}</span>"
+        f"<span class='md-hide'>{_chip(it)}</span>"
         f"<span class='md-hide'>{ui.when(it['created_at'], now=now)}</span></div>"
     )
 

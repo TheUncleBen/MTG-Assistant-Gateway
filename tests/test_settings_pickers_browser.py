@@ -134,7 +134,7 @@ def test_collaborator_box_picks_from_the_people_followed(server: Server, width: 
         assert section.locator("datalist").count() == 0
         # the collaborator is a row with its remove button; the box is the site's combobox
         assert section.locator(".collablist li .name").all_inner_texts() == ["amy"]
-        assert section.locator("button[aria-label='Remove amy']").is_visible()
+        assert section.locator("button[aria-label='Remove “amy”']").is_visible()
         box = page.locator("#collabname")
         assert box.get_attribute("role") == "combobox" and box.get_attribute("aria-expanded") == "false"
         assert box.get_attribute("list") is None

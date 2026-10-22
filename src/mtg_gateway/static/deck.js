@@ -2455,7 +2455,16 @@
     if (d.own) out.push(link("Edit deck", "edit", "/decks/" + id + "/edit"));
     out.push(sep());
     out.push(link("Goldfish", "play", "/decks/" + id + "/goldfish"));
-    if (d.can) out.push(item("Run full test", "stats", submit("form[action$='/report']:not(:has(input[name=forge]))")));
+    if (d.can) out.push(item("Run full test", "stats", function () {
+      // the report form without the Forge switch (found by hand: a has-selector throws on older browsers)
+      var forms = banner.querySelectorAll("form[action$='/report']");
+      for (var i = 0; i < forms.length; i++) {
+        if (!forms[i].querySelector("input[name=forge]")) {
+          if (forms[i].requestSubmit) forms[i].requestSubmit(); else forms[i].submit();
+          return;
+        }
+      }
+    }));
     if (d.forge) out.push(item("Solo test only", "stats", submit("#solof")));
     if (d.can) out.push(item(d.own ? "Clone…" : "Clone into my decks…", "clone", openBox("clone")));
     if (d.own) {

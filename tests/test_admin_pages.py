@@ -135,7 +135,7 @@ async def test_users_list_reads_in_words_with_widgets_chips_and_filters(gw: Harn
         ]
         assert "<span class='big'>4<small>signed in</small></span>" in text
         assert "<div class='wdg alert'>" in text  # one account is disabled
-        assert "1 member uses Claude, 1 an unnamed app" in text
+        assert "1 member uses Claude, 1 uses an unnamed app" in text
         assert "All members <span class='ui-sub'>4</span>" in text
         chips = text.split("<nav class='ui-chips' aria-label='Show'>", 1)[1].split("</nav>", 1)[0]
         assert "href='/admin/users' aria-current='true'>All <span class='n'>4</span>" in chips

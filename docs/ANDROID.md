@@ -313,7 +313,7 @@ than a browser can, then hands it to that page, which keeps running underneath:
 2. Fill the dashed card outline with the card. Controls, each shown only when
    the camera reports it (the app uses CameraX, Google's camera library, and
    asks it what the camera can do):
-   - **Torch** on/off.
+   - **Torch** on/off (the button reads *Torch: On* or *Torch: Off*).
    - **Torch brightness** slider. Shown when CameraX reports adjustable
      torch strength, which it does on Android 15 or later for cameras with more
      than one level. Earlier Android versions can only set torch strength while
@@ -326,7 +326,7 @@ than a browser can, then hands it to that page, which keeps running underneath:
    button would. The camera stays open: the result appears as a line over the
    viewfinder. A match waits on the page with **Add** and the printing picker;
    tap **Done** to see it.
-4. Or turn **Auto** on and hold up one card after another. This is the page's
+4. Or turn **Auto** on (the button reads *Auto: On*) and hold up one card after another. This is the page's
    continuous mode with the phone camera: a clean read of a name no other card's
    name begins with is added to the list without a tap and shown over the
    viewfinder with **Undo**; the same card is not added again while it stays in

@@ -84,14 +84,14 @@ def test_import_result_reads_at_every_width(server: Server, width: int, theme: s
         _import(page, server, FIRST)
         assert (
             page.locator("#col-notes .notice").inner_text()
-            == "Imported 1 card into your Archidekt collection."
+            == "Imported 1 card into your Collection on Archidekt."
         )
         _import(page, server, MIXED)
         assert "&r=" in page.url and "Foo" not in page.url
         lines = page.locator("#col-notes .notice li").all_inner_texts()
         assert (
             page.locator("#col-notes .notice p").inner_text()
-            == "Imported 4 cards into your Archidekt collection."
+            == "Imported 4 cards into your Collection on Archidekt."
         )
         assert lines == [
             "Kept as English, because Phyrexian is not a language Archidekt stores "

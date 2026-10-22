@@ -294,6 +294,49 @@ def test_a_hold_on_a_deck_tile_opens_its_menu_and_leaves_nothing_stuck(tmp_path:
         server.stop()
 
 
+def test_a_tap_on_the_menu_right_after_a_hold_acts(tmp_path: Path) -> None:
+    """L-3 (review 2026-10-22): a hold that opens the menu with the finger's own timer (no
+    contextmenu from the browser) and lifts with no click after it, then a real tap on a menu item
+    within the moment the lift's tap is swallowed: the tap acts (the swallow ends with the next
+    press, so only the lift of the finger that held is ever swallowed)."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _exe()
+    server = _server(tmp_path)
+    try:
+        sid = _link(server)
+        with sync_playwright() as p:
+            browser, page, errors = _page(p, server, sid, 390, "dark", exe)
+            page.goto(f"{server.base}/decks?folder=503&view=list", wait_until="networkidle")
+            tile = page.locator("li.deck[data-deck-id='42']")
+            tile.scroll_into_view_if_needed()
+            box = tile.locator(".info").bounding_box()
+            x, y = box["x"] + 30, box["y"] + box["height"] / 2
+            cdp = page.context.new_cdp_session(page)
+            # the press and hold, lifted with no click after it (as a long press often ends): the
+            # lift's click is kept from the page here, as a browser that sends none
+            page.evaluate(
+                """() => window.addEventListener("click", function once(e) {
+                    e.stopImmediatePropagation(); e.preventDefault();
+                    window.removeEventListener("click", once, true); }, true)"""
+            )
+            cdp.send("Input.dispatchTouchEvent", {"type": "touchStart", "touchPoints": [{"x": x, "y": y}]})
+            _menu(page)
+            cdp.send("Input.dispatchTouchEvent", {"type": "touchEnd", "touchPoints": []})
+            item = page.locator(".ctxmenu[role=menu] [role=menuitem]", has_text="Copy link").first
+            ib = item.bounding_box()
+            ix, iy = ib["x"] + ib["width"] / 2, ib["y"] + ib["height"] / 2
+            # a real tap on an item while the lift's tap would still be swallowed
+            cdp.send("Input.dispatchTouchEvent", {"type": "touchStart", "touchPoints": [{"x": ix, "y": iy}]})
+            page.wait_for_timeout(40)
+            cdp.send("Input.dispatchTouchEvent", {"type": "touchEnd", "touchPoints": []})
+            page.locator(".ctxmenu[role=menu]").wait_for(state="detached", timeout=2000)
+            assert errors == [], errors
+            browser.close()
+    finally:
+        server.stop()
+
+
 # -- the deck boxes --------------------------------------------------------------------------------
 
 

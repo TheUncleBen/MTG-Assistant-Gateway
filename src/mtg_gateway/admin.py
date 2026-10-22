@@ -1254,7 +1254,7 @@ def _arch_label(u: Mapping[str, Any], *, name: bool = True) -> str:
 def _apps_html(u: Mapping[str, Any]) -> str:
     if not u["clients"]:
         return "<span class='muted'>none</span>"
-    return "".join(ui.app_chip(c["name"], unnamed=True) for c in u["clients"])
+    return "".join(ui.app_chip(c["name"], unnamed=True, client_id=c["client_id"]) for c in u["clients"])
 
 
 def _seen_at(u: Mapping[str, Any]) -> int:
@@ -1320,7 +1320,9 @@ def _users_body(
         for name, n in sorted(app_members.items(), key=lambda kv: (-kv[1], kv[0].casefold()))
     ]
     if unnamed_members:
-        app_bits.append(f"{unnamed_members} an unnamed app")
+        app_bits.append(
+            f"{unnamed_members} use an unnamed app" if unnamed_members != 1 else "1 uses an unnamed app"
+        )
     if app_bits:
         app_bits[0] = app_bits[0].replace(" use ", " members use ", 1).replace("1 uses ", "1 member uses ", 1)
     top_app = max(app_members.items(), key=lambda kv: kv[1])[0] if app_members else ""
@@ -1559,7 +1561,8 @@ def _user_panel(
     action = f"/admin/users/{quote(sub, safe='')}"
     apps = (
         "".join(
-            f"<div>{ui.app_chip(c['name'], unnamed=True)} <code>{html.escape(c['client_id'])}</code></div>"
+            f"<div>{ui.app_chip(c['name'], unnamed=True, client_id=c['client_id'])} "
+            f"<code>{html.escape(c['client_id'])}</code></div>"
             for c in u["clients"]
         )
         or "none"

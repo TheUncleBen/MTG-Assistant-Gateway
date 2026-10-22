@@ -12,7 +12,7 @@
     <string name="setup_checking">Checking %1$s…</string>
     <string name="setup_unreachable">Could not reach that address. Check the spelling and your connection.</string>
     <!-- The HTTP status goes to the log (SetupActivity), not into the message. -->
-    <string name="setup_not_gateway">That address answered, but it does not look like an MTG gateway. Check the address.</string>
+    <string name="setup_not_gateway">That address answered, but it does not look like an MTG gateway.</string>
     <!-- GatewayUrl.normalize's reasons (SetupActivity maps GatewayUrl.Problem to these). -->
     <string name="setup_bad_empty">Enter the gateway address.</string>
     <string name="setup_bad_invalid">That is not a valid address.</string>
@@ -39,7 +39,7 @@
     <string name="update_download_failed">The update did not download completely. Try again later.</string>
     <string name="update_not_an_app">The downloaded file is not the expected version of this app, so it was not installed.</string>
     <!-- The installer's status and message go to the log (Updater), not into the toast. -->
-    <string name="update_install_failed">The update was not installed. Try again later; if it keeps failing, see the Android app page.</string>
+    <string name="update_install_failed">The update was not installed. Try again later.</string>
     <string name="update_confirm_failed">Android wants you to confirm the update. Open the app and tap Update again.</string>
     <string name="update_checking">Checking for app updates…</string>
     <string name="fab_label">Menu</string>
@@ -100,7 +100,7 @@
     <string name="exposure">Exposure</string>
     <string name="camera_none">No back camera found.</string>
     <!-- The CameraX error code goes to the log (CameraPanel), not into the message. -->
-    <string name="camera_error">The camera stopped working. Close the scanner and try again.</string>
+    <string name="camera_error">The camera stopped working. Close it and try again.</string>
     <string name="status_no_flash">Fill the dashed box with the card, then tap Shoot.</string>
     <string name="status_strength">Torch brightness is adjustable on this phone. Fill the dashed box with the card, then tap Shoot.</string>
     <string name="status_no_strength_old">Torch brightness control needs Android 15. Fill the dashed box with the card, then tap Shoot.</string>
