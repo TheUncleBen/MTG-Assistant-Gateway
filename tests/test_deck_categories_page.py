@@ -197,6 +197,46 @@ async def test_a_refusal_shows_in_the_panel_with_the_typed_values(stack: Stack) 
         await b.aclose()
 
 
+async def test_a_change_to_which_cards_count_asks_first_then_saves(stack: Stack) -> None:
+    # Not in deck, or a rename to or from Sideboard or Maybeboard: an assistant's version waits for
+    # the member's press, so the member's own Save asks once more too
+    _give_categories(stack.ark)
+    b = await linked_browser(stack)
+    try:
+        page, csrf = await _csrf(b)
+        ids = _ids(page)
+        for change in (
+            {f"not_in_deck_{ids['Maybeboard']}": None},
+            {f"name_{ids['Ramp']}": "Sideboard"},
+        ):
+            data = _form(page, ids, **change)
+            r = await b.http.post(POST, data={"csrf": csrf, "action": "save", **data}, headers=NAV)
+            assert r.status_code == 200 and stack.ark.category_patches == []
+            assert "<h2>Change which cards count in the deck?</h2>" in r.text
+            assert esc(modes.CATEGORY_COUNTS_CONFIRM) in r.text
+            assert "name='confirmed' value='1'" in r.text
+            assert stack.h.app.state.gateway.db.list_proposals("user-1") == []
+        data = _form(page, ids, **{f"not_in_deck_{ids['Maybeboard']}": None})
+        r = await b.http.post(
+            POST, data={"csrf": csrf, "action": "save", "confirmed": "1", **data}, headers=NAV
+        )
+        assert r.status_code == 303 and r.headers["location"].endswith("?ok=categories#categories")
+        assert [p["includedInDeck"] for p in stack.ark.category_patches] == [True]
+    finally:
+        await b.aclose()
+
+
+async def test_the_panel_carries_both_confirm_sentences_for_the_box(stack: Stack) -> None:
+    _give_categories(stack.ark)
+    b = await linked_browser(stack)
+    try:
+        page, _ = await _csrf(b)
+        assert "data-counts-confirm-title='Change which cards count in the deck?'" in page
+        assert f"data-counts-confirm='{esc(modes.CATEGORY_COUNTS_CONFIRM)}'" in page
+    finally:
+        await b.aclose()
+
+
 def _rename_on_archidekt(ark, old: str, new: str) -> None:  # noqa: ANN001
     """A rename made elsewhere (an assistant in Full auto, the deck editor), as Archidekt keeps it:
     the category's record and every card filed under it follow the new name."""

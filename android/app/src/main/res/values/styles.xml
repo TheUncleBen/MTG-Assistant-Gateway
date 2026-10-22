@@ -4,8 +4,8 @@
     <style name="SetupColumn" />
 
     <!-- The camera sheet's buttons, drawn like the pages' buttons (theme.py): sentence case, 48dp
-         tall, 3dp corners. Plain is the outline button; Toggle is the outline that fills orange
-         while checked. Shoot (shutter_bg) stays the row's one primary button. -->
+         tall, 3dp corners. Plain is the outline button; Toggle is the outline that takes a light
+         tint while checked. Shoot (shutter_bg) stays the row's one primary button. -->
     <style name="CameraButton">
         <item name="android:minHeight">48dp</item>
         <item name="android:textAllCaps">false</item>

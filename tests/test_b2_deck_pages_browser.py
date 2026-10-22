@@ -315,5 +315,17 @@ def test_the_categories_panel_fits_reads_and_saves_everywhere(
         page.wait_for_url(lambda u: "ok=categories" in u and "settings" in u, timeout=5000)
         page.wait_for_load_state("networkidle")
         assert [b["isPremier"] for b in server.ark.category_patches][-1] is False
+        # a Not in deck switch asks too, in the box, with its own title and sentence
+        sent = len(server.ark.category_patches)
+        panel = page.locator("#categories")
+        panel.locator("li[data-name='Mana'] label.ds-flag:has(input[name^=not_in_deck_])").click()
+        panel.locator("button[name=action]").click()
+        box = page.locator(".mtgbox[role=dialog]:not([hidden])")
+        box.wait_for(timeout=3000)
+        assert box.locator("h2").inner_text() == "Change which cards count in the deck?"
+        assert "don't count in the deck" in box.inner_text()
+        box.locator("button", has_text="Cancel").click()
+        box.wait_for(state="hidden", timeout=3000)
+        assert len(server.ark.category_patches) == sent
         assert not errors, errors
         browser.close()

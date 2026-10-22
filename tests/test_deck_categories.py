@@ -131,10 +131,12 @@ async def test_the_review_line_names_the_change_in_the_settings_pages_words(stac
     assert stack.ark.category_patches == []  # proposing sends nothing
 
 
-async def test_flag_only_lines_have_no_open_tabs_note(stack: Stack) -> None:
+async def test_flag_only_lines_carry_the_open_tabs_note_too(stack: Stack) -> None:
+    # any category change, not only a rename, is unseen by an Archidekt tab already open on the deck
     await _ready(stack)
     p = await _svc(stack).propose_categories(SUB, "42", [{"category": "Maybeboard", "not_in_price": False}])
-    assert p["diff"] == "Category “Maybeboard”: Not in price off"
+    assert p["diff"] == "Category “Maybeboard”: Not in price off. " + OPEN_TABS_NOTE
+    assert "old name" not in OPEN_TABS_NOTE and "old categories" in OPEN_TABS_NOTE
 
 
 @pytest.mark.parametrize(
@@ -395,7 +397,7 @@ async def test_restore_puts_category_names_and_flags_back_by_id(stack: Stack) ->
         "Category “Mana”: rename to “Ramp” (its 2 cards go with it), Not in price off. " + OPEN_TABS_NOTE
         in lines
     )
-    assert "Category “Maybeboard”: Not in deck on" in lines
+    assert "Category “Maybeboard”: Not in deck on. " + OPEN_TABS_NOTE in lines
     assert not [ln for ln in lines if ln.startswith(("+", "-"))]  # no card is removed and added again
     back = await svc.apply(SUB, r["proposal_id"], via="browser")
     assert back["state"] == "applied" and back["result"]["verified"] is True, back
@@ -565,6 +567,23 @@ def test_the_settings_page_asks_first_for_a_commander_category() -> None:
     assert modes.hand_edit_confirm("categories", premier) == modes.CATEGORY_COMMANDER_CONFIRM
     plain = [{"kind": "deck_category", "name": "Ramp", "rename_to": "Mana"}]
     assert modes.hand_edit_confirm("categories", plain) is None
+
+
+@pytest.mark.parametrize(
+    "rows",
+    [
+        [{"kind": "deck_category", "name": "Maybe", "not_in_deck_before": True, "not_in_deck_after": False}],
+        [{"kind": "deck_category", "name": "Side", "rename_to": "Sideboard", "counts": True}],
+        [{"kind": "deck_category", "name": "Sideboard", "rename_to": "Extras", "counts": True}],
+    ],
+)
+def test_the_settings_page_asks_first_for_whatever_an_assistant_would_wait_on(rows) -> None:  # noqa: ANN001
+    # the same rule by hand and from an assistant: every reason a category change waits asks first
+    assert modes.category_wait(rows) == modes.CATEGORY_COUNTS_REASON
+    why = modes.hand_edit_confirm("categories", rows)
+    assert why == modes.CATEGORY_COUNTS_CONFIRM
+    assert modes.CATEGORY_CONFIRM_TITLES[why] == "Change which cards count in the deck?"
+    assert modes.CATEGORY_CONFIRM_TITLES[modes.CATEGORY_COMMANDER_CONFIRM] == "Change the commander category?"
 
 
 async def test_rows_mark_the_category_holding_the_commander(stack: Stack) -> None:

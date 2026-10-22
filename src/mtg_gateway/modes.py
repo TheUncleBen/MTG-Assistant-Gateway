@@ -206,6 +206,16 @@ CATEGORY_COMMANDER_CONFIRM = (
     "Cards in a Premier category are the deck's commanders. Changing it can change which cards "
     "Archidekt treats as the commander, the deck's legality and its colours."
 )
+# ... and for a change to which cards count in the deck (Not in deck, or a rename to or from
+# Sideboard or Maybeboard): an assistant's version of either waits, so the member's own asks too
+CATEGORY_COUNTS_CONFIRM = (
+    "Cards in a Not in deck category, or in one named Sideboard or Maybeboard, don't count in the "
+    "deck. Changing it can change the deck's card count and its legality."
+)
+CATEGORY_CONFIRM_TITLES = {
+    CATEGORY_COMMANDER_CONFIRM: "Change the commander category?",
+    CATEGORY_COUNTS_CONFIRM: "Change which cards count in the deck?",
+}
 
 
 def category_wait(rows: list[dict[str, Any]] | None) -> str | None:
@@ -296,7 +306,11 @@ def hand_edit_confirm(kind: str, rows: list[dict[str, Any]] | None) -> str | Non
     when it can go straight to Archidekt (with its snapshot, as every apply to a deck takes one).
     Restores never come here: they have their own review page."""
     if kind == "categories":  # the deck settings page's Save categories
-        return CATEGORY_COMMANDER_CONFIRM if category_wait(rows or []) == CATEGORY_COMMANDER_REASON else None
+        # every reason an assistant's version would wait on (category_wait) asks here too
+        wait = category_wait(rows or [])
+        if wait == CATEGORY_COMMANDER_REASON:
+            return CATEGORY_COMMANDER_CONFIRM
+        return CATEGORY_COUNTS_CONFIRM if wait else None
     if kind != "edit" or not rows:
         return None
     if any(r.get("kind") == "commander" for r in rows):

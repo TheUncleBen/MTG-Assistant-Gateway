@@ -136,6 +136,7 @@ SETTINGS_CSS = """
 
 
 NOTHING_TO_SAVE = "Nothing to save: no name or switch was changed."
+COUNTS_TITLE = modes.CATEGORY_CONFIRM_TITLES[modes.CATEGORY_COUNTS_CONFIRM]
 
 
 def category_baseline_fields(c: dict[str, Any]) -> str:
@@ -426,7 +427,9 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
             )
         return (
             "<section class='ui-card' id='categories' data-confirm-title='Change the commander category?' "
-            f"data-confirm='{_esc(modes.CATEGORY_COMMANDER_CONFIRM)}'>"
+            f"data-confirm='{_esc(modes.CATEGORY_COMMANDER_CONFIRM)}' "
+            f"data-counts-confirm-title='{_esc(COUNTS_TITLE)}' "
+            f"data-counts-confirm='{_esc(modes.CATEGORY_COUNTS_CONFIRM)}'>"
             "<h2>Categories</h2>"
             + note
             + f"<form method='post' action='/decks/{did}/categories#categories' id='catform'>"
@@ -844,8 +847,8 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
         """Save categories: the member's own press on their deck's settings page. The posted names
         and switches are compared with the deck as it is now; what differs is checked first
         (decks.category_change_rows, which refuses before anything is proposed), asks once more
-        when it touches the commander (modes.hand_edit_confirm; the box with scripts sends
-        ``confirmed`` itself), then is proposed and applied at once with its snapshot."""
+        when it touches the commander or which cards count (modes.hand_edit_confirm; the box with
+        scripts sends ``confirmed`` itself), then is proposed and applied at once with its snapshot."""
         deck_id = request.path_params["deck_id"]
 
         async def run(sub: str, data: dict[str, str], sid: str | None) -> str | Response:
@@ -861,7 +864,7 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
                     f"/decks/{deck.id}/categories#categories",
                     _csrf(s, sid),
                     fields,
-                    "Change the commander category?",
+                    modes.CATEGORY_CONFIRM_TITLES[why],
                     why,
                     "Save categories",
                     f"/decks/{deck.id}/settings#categories",

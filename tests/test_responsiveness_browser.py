@@ -479,3 +479,98 @@ def test_the_server_answers_main_pages_fast_and_static_files_are_kept(server: Se
     # and none of them is loaded in the way of the first paint but the stylesheets
     tags = re.findall(r"<script src='/static/[^>]*>", page)
     assert len(tags) >= 8 and all(" defer" in tag for tag in tags), tags
+
+
+# Every loading look the pages draw: a busy mark (aria-busy, which theme.py dims or spins) or a
+# loading line (menus.js's "Reading from Archidekt…"). Recorded from the moment __watch() is called.
+WATCH = r"""
+() => {
+  const W = window.__looks = [];
+  const look = n => n.nodeType === 1 && (
+    n.getAttribute('aria-busy') === 'true' || n.classList.contains('loading') ||
+    (n.querySelector && n.querySelector("[aria-busy='true'], .loading")));
+  new MutationObserver(list => list.forEach(m => {
+    if (m.type === 'attributes' && look(m.target)) W.push(m.target.outerHTML.slice(0, 120));
+    m.addedNodes.forEach(n => { if (look(n)) W.push(n.outerHTML.slice(0, 120)); });
+  })).observe(document.documentElement,
+    { subtree: true, childList: true, attributes: true, attributeFilter: ['aria-busy', 'class'] });
+}
+"""
+
+
+def test_loading_looks_only_where_the_page_waits_on_the_gateway(server: Server) -> None:
+    """Ben, 21 Oct: loading states only where we wait on Archidekt, Forge or similar. A control
+    that needs nothing from the gateway (a menu, a box the page holds, the card size, a sort list,
+    Undo changes) sends no request and draws no loading look; one that asks the gateway (a deck's
+    Delete…, which reads the deck first) shows its loading line while it waits."""
+    from playwright.sync_api import sync_playwright
+
+    sid, _pending = _seed(server)
+    exe = _exe()  # its own Playwright: before ours opens
+    with sync_playwright() as p:
+        for d in _drivers(p, server, sid, exe):
+            _loading_looks(d)
+            assert d.errors == [], d.errors
+
+
+def _loading_looks(d: Driver) -> None:
+    page = d.page
+    asked: list[str] = []
+
+    def record(req) -> None:  # noqa: ANN001
+        if req.url.startswith(d.server.base) and "/static/" not in req.url:
+            asked.append(req.method + " " + req.url[len(d.server.base) :])
+
+    page.on("request", record)
+
+    def local(name: str, do, undo=None, remembers: bool = False) -> None:  # noqa: ANN001
+        """``remembers``: the control also saves the choice in the background (the card size is
+        kept per member), which is never waited on and so never draws a look."""
+        asked.clear()
+        page.evaluate(WATCH)
+        do()
+        page.wait_for_timeout(400)
+        looks = page.evaluate("() => window.__looks")
+        waits = [a for a in asked if not (remembers and a == "POST /api/v1/prefs")]
+        assert waits == [] and looks == [], (name, d.width, asked, looks)
+        if undo:
+            undo()
+            page.wait_for_timeout(400)
+
+    d.goto("/decks")
+    tile = page.locator("li.deck[data-deck-id]").first
+    local("deck ⋮ menu", tile.locator("button.kebab").first.click, d.escape)
+    local("New deck box", page.locator("[data-box-open=newdeck]").first.click, d.escape)
+    d.goto("/decks/42?view=text")  # the view is remembered: the grid visit below sets it
+    card = page.locator(".deckview li[data-card]").first
+    local("deck card menu", partial(card.click, button="right", position={"x": 10, "y": 10}), d.escape)
+    d.goto("/decks/42?view=grid")
+    current = page.evaluate("() => document.documentElement.getAttribute('data-card-size')")
+    other = page.locator(f"[data-card-size-set]:visible:not([data-card-size-set='{current}'])").first
+    if other.count():
+        back = page.locator(f"[data-card-size-set='{current}']").first
+        local("card size", other.click, back.click, remembers=True)  # put back for the next width
+    d.goto("/collection?view=list")
+    sort_btn = page.locator("#col-sort + button.msel-btn").first
+    if sort_btn.is_visible():
+        local("collection sort list", sort_btn.click, d.escape)
+    d.goto("/decks/42/settings")
+    reset = page.locator("#categories button[type=reset]")
+    if reset.count():
+        local("categories Undo changes", reset.first.click)
+    # a control that does ask the gateway shows its loading line while it waits
+    d.goto("/decks")
+    with d.held(re.compile(r"/delete-info")) as held:
+        page.evaluate(WATCH)
+        tile = page.locator("li.deck[data-deck-id]").first
+        tile.locator("button.kebab").first.click()
+        d.menu().wait_for()
+        d.menu().locator("[role=menuitem]", has_text="Delete").first.click()
+        d.box().wait_for()
+        page.wait_for_timeout(200)
+        assert held.routes, "Delete… read nothing from the gateway"
+        assert d.box().locator(".loading").count() == 1
+        assert page.evaluate("() => window.__looks"), "no loading look while it waited"
+        held.routes[0].continue_()
+        page.unroute(held.pattern)
+    d.escape()

@@ -110,7 +110,7 @@ class UiStandardsTest {
     }
 
     @Test fun codesAreLoggedWhereTheyLeftTheMessage() {
-        val src = File(res.parentFile.parentFile, "kotlin/local/mtgassistantgateway/app")
+        val src = File(res.parentFile, "kotlin/local/mtgassistantgateway/app") // src/main/res -> src/main
         val setup = File(src, "SetupActivity.kt").readText()
         val camera = File(src, "CameraPanel.kt").readText()
         val updater = File(src, "Updater.kt").readText()

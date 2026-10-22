@@ -7732,9 +7732,9 @@ MAX_CATEGORY_CHANGES = 30
 # Names Archidekt treats by name, not only by flag: a row filed first under "Sideboard" is out of
 # the deck's count (Deck.categories_count), and "Maybeboard" is the maybeboard by name.
 SIZE_CATEGORY_NAMES = frozenset({"sideboard", "maybeboard"})
-# A rename does not reach an Archidekt editor already open on the deck (the site tells its open
-# tabs over its own live connection, which the gateway does not use).
-OPEN_TABS_NOTE = "Archidekt tabs already open on this deck show the old name until they are reloaded."
+# A category change (a rename or a switch) does not reach an Archidekt editor already open on the
+# deck (the site tells its open tabs over its own live connection, which the gateway does not use).
+OPEN_TABS_NOTE = "Archidekt tabs already open on this deck show the old categories until they are reloaded."
 # The deck settings page's notice after its own Save categories (NEW-WORDING.md).
 CATEGORIES_SAVED = "Categories saved to Archidekt. A snapshot from just before is under History."
 CATEGORY_GONE = "The deck has no category “{name}”."
@@ -7923,10 +7923,7 @@ def category_line(r: dict[str, Any]) -> str:
     for key, label, _field, _inv in CATEGORY_FLAGS:
         if f"{key}_after" in r:
             bits.append(f"{label} {'on' if r[f'{key}_after'] else 'off'}")
-    line = f"Category “{r.get('name', '')}”: " + ", ".join(bits)
-    if r.get("rename_to"):
-        line += f". {OPEN_TABS_NOTE}"
-    return line
+    return f"Category “{r.get('name', '')}”: " + ", ".join(bits) + f". {OPEN_TABS_NOTE}"
 
 
 def category_restore_plan(snapshot: Deck, current: Deck) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:

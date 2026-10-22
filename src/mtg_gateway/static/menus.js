@@ -822,26 +822,34 @@
     newFolder(currentFolder() || null, b);
   });
 
-  // -- the deck Settings page: Save categories asks first when it touches the commander ---------
-  // (a Premier switch changed anywhere, or the name or a switch of the Commander category or one
-  // holding the commander; the words are the backend's, on the section; without scripts the
-  // gateway asks on a page of its own)
+  // -- the deck Settings page: Save categories asks first when an assistant's version would wait --
+  // (modes.hand_edit_confirm: the commander, from a Premier switch changed anywhere or the name or
+  // a switch of the Commander category or one holding the commander; or which cards count, from a
+  // Not in deck switch or a rename to or from Sideboard or Maybeboard. The words are the backend's,
+  // on the section; without scripts the gateway asks on a page of its own)
   var cats = $("#categories[data-confirm]");
+  var countsByName = ["sideboard", "maybeboard"];
   if (cats) cats.addEventListener("submit", function (e) {
     var form = e.target;
     if (!form.matches || !form.matches("form") || $("input[name=confirmed]", form)) return;
-    var touches = false;
+    var commander = false, counts = false;
     $$("li[data-cat]", form).forEach(function (li) {
       var name = $("input[type=text]", li), premier = $("input[name^=premier_]", li);
-      var changed = (name && name.value.trim() !== name.defaultValue) ||
+      var notInDeck = $("input[name^=not_in_deck_]", li);
+      var renamed = name && name.value.trim() !== name.defaultValue;
+      var changed = renamed ||
         $$("input[type=checkbox]", li).some(function (c) { return c.checked !== c.defaultChecked; });
-      if ((premier && premier.checked !== premier.defaultChecked) || (changed && li.hasAttribute("data-commander"))) touches = true;
+      if ((premier && premier.checked !== premier.defaultChecked) || (changed && li.hasAttribute("data-commander"))) commander = true;
+      if ((notInDeck && notInDeck.checked !== notInDeck.defaultChecked) ||
+          (renamed && (countsByName.indexOf(name.defaultValue.toLowerCase()) >= 0 ||
+                       countsByName.indexOf(name.value.trim().toLowerCase()) >= 0))) counts = true;
     });
-    if (!touches) return;
+    if (!commander && !counts) return;
     e.preventDefault();
+    var pre = commander ? "data-confirm" : "data-counts-confirm";
     var box = Box.open({
-      title: cats.getAttribute("data-confirm-title") || "Change the commander category?",
-      body: el("p", null, cats.getAttribute("data-confirm") || ""),
+      title: cats.getAttribute(pre + "-title") || "",
+      body: el("p", null, cats.getAttribute(pre) || ""),
       actions: [cancelButton(), Box.button("Save categories", "primary", function () {
         var c = el("input");
         c.type = "hidden"; c.name = "confirmed"; c.value = "1";
