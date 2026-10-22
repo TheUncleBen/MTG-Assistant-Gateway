@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 from types import SimpleNamespace
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from mcp.server.mcpserver import Context
 from mcp_types import CallToolResult
@@ -47,9 +47,22 @@ class CategoryChange(BaseModel):
     """One category of a propose_deck_categories change, by its name now (or its id)."""
 
     model_config = ConfigDict(extra="forbid")
-    category: str | None = Field(None, description="The category's name as the deck has it now.")
+    action: Literal["change", "create", "delete"] | None = Field(
+        None,
+        description=(
+            "change (the default): rename or switch flags; create: a new category named by "
+            "'category'; delete: Archidekt only deletes an empty category, so one with cards needs "
+            "move_cards_to."
+        ),
+    )
+    category: str | None = Field(
+        None, description="The category's name as the deck has it now (for create: the new name)."
+    )
     id: int | None = Field(None, description="Or the category's id, as get_deck lists it.")
     rename_to: str | None = Field(None, description="A new name, 1 to 60 characters, not one the deck has.")
+    move_cards_to: str | None = Field(
+        None, description="delete only: the category its cards move to before it is deleted."
+    )
     premier: bool | None = Field(None, description="Premier on or off: its cards are the commanders.")
     not_in_deck: bool | None = Field(None, description="Not in deck on or off: its cards don't count.")
     not_in_price: bool | None = Field(None, description="Not in price on or off: left out of the price.")
@@ -291,6 +304,12 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
             Field(description="Or a deck as JSON (get_deck's or the Export page's .json), text or object."),
         ] = None,
         private: Annotated[bool, Field(description="Make the deck private (default true).")] = True,
+        theorycrafted: Annotated[
+            bool, Field(description="Theorycrafted: left out of Archidekt's In decks view by default.")
+        ] = False,
+        game: Annotated[
+            Literal["any", "paper", "mtgo", "arena"], Field(description="Game type (default any).")
+        ] = "any",
         scan_session: Annotated[str | None, Field(description="Or a scan session's id or name.")] = None,
     ) -> CallToolResult:
         warnings: list[str] = []
@@ -310,6 +329,8 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
                 csv_text=csv_text,
                 json_text=json_text,
                 private=private,
+                theorycrafted=theorycrafted,
+                game=game,
             )
             warnings += made.pop("warnings", [])
             size = sum(
@@ -331,7 +352,8 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
             "Step 1 of editing a deck. Records a proposal with a diff against the deck's current state and "
             "returns a review URL. Nothing is sent to Archidekt until the user confirms (or you apply it "
             "when assistant_may_apply is true). changes: a list of {action, name, quantity?, category?, "
-            "set_code?, collector_number?, finish?, zone?, label?, color?, mana_value?}. add may pin "
+            "set_code?, collector_number?, finish?, zone?, label?, color?, mana_value?, companion?, "
+            "back_face?}. add may pin "
             "the exact printing with set_code plus collector_number (as resolve_cards returns them) and "
             "a finish, in zone main or side; "
             "a pinned printing must exist on Archidekt and be that card, or applying refuses with "
@@ -343,7 +365,10 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
             "and set_printing change copies already in the deck. set_label puts Archidekt's color tag "
             "(label up to 40 characters, color #rrggbb) on every row of a card, in zone main or side; "
             "an empty label takes it off. set_mana_value sets Archidekt's custom mana value (mana_value "
-            "0 to 15, null takes it off) on every row of a card in that zone. set_category and "
+            "0 to 15, null takes it off) on every row of a card in that zone. set_companion (companion "
+            "true or false) switches Archidekt's Companion on a card's rows, and always waits for the "
+            "user's press, in every approval mode; set_back_face (back_face true or false) makes a "
+            "two-faced card show its back face by default. set_category and "
             "set_commander move every copy of a card (set_category creates the category if the deck "
             "has none of that name). "
             "One card takes one kind of change per proposal. Put one request of the user in one proposal. "
@@ -718,16 +743,18 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
 
     @server.tool(
         name="propose_deck_categories",
-        title="Propose renaming categories or changing their flags (write, two-step)",
+        title="Propose creating, deleting, renaming or switching categories (write, two-step)",
         description=(
-            "Step 1 of renaming a deck's categories or switching their flags, for decks the linked "
-            "account owns: Premier (its cards are the commanders), Not in deck (its cards don't count "
-            "in the deck, like a maybeboard) and Not in price. Name each category as the deck has it "
-            "now and give only what changes. A rename onto a name the deck already has is refused. "
-            "Moving cards between categories is propose_deck_changes; deleting a category stays on "
-            "Archidekt. A change that touches the commander or Not in deck, or renames a category to or "
-            "from Sideboard or Maybeboard, always waits for the user's own press, in every approval "
-            "mode. Returns the same fields as propose_deck_changes (kind "
+            "Step 1 of changing a deck's categories, for decks the linked account owns: create one, "
+            "delete one, rename one, or switch its flags: Premier (its cards are the commanders), Not "
+            "in deck (its cards don't count in the deck, like a maybeboard) and Not in price. Name "
+            "each category as the deck has it now and give only what changes. A name the deck already "
+            "has is refused. Archidekt only deletes an empty category: a category with cards needs "
+            "move_cards_to, and its cards move there first. delete_unused deletes every empty "
+            "category (Archidekt's Delete unused categories). Moving single cards between categories "
+            "is propose_deck_changes. A change that touches the commander or Not in deck, or a "
+            "Sideboard or Maybeboard rename or delete, always waits for the user's own press, in "
+            "every approval mode. Returns the same fields as propose_deck_changes (kind "
             "'categories', one line per category and the review URL); it is applied with "
             "apply_proposal like any other proposal, which keeps a snapshot first: after the user's "
             "press, or in Full auto, for any other category change, without one. "
@@ -741,12 +768,25 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
             str, Field(description="The Archidekt deck id (the number in the deck URL) or URL.")
         ],
         changes: Annotated[
-            list[CategoryChange], Field(description="One entry per category to change.", max_length=30)
-        ],
+            list[CategoryChange] | None,
+            Field(description="One entry per category to change.", max_length=30),
+        ] = None,
+        delete_unused: Annotated[
+            bool, Field(description="Also delete every category with no cards filed under it.")
+        ] = False,
     ) -> CallToolResult:
         try:
-            raw = [c.model_dump(exclude_none=True) for c in changes]
-            return _proposal({"ok": True, **(await state.decks.propose_categories(_sub(), deck_id, raw))})
+            raw = [c.model_dump(exclude_none=True) for c in changes or []]
+            return _proposal(
+                {
+                    "ok": True,
+                    **(
+                        await state.decks.propose_categories(
+                            _sub(), deck_id, raw, delete_unused=delete_unused
+                        )
+                    ),
+                }
+            )
         except DeckError as exc:
             return _proposal(_tool_error(exc))
 

@@ -178,23 +178,19 @@ async def test_another_members_deck_is_refused(stack: Stack) -> None:
     assert exc.value.kind in ("forbidden", "not_found")
 
 
-async def test_a_category_without_a_record_id_is_refused(stack: Stack) -> None:
-    """Archidekt's default Sideboard and Maybeboard may have no record until someone creates one;
-    whether one can be changed before then is not known, so the gateway does not try."""
+async def test_a_category_without_a_record_is_given_one_and_renamed(stack: Stack) -> None:
+    """Archidekt's default Sideboard and Maybeboard may have no record until someone creates one
+    (0.7.41 refused them). Since 0.7.42 the change creates the record under the name its cards
+    are filed under, then renames it by the id Archidekt gave it."""
     await _ready(stack)
-    svc = _svc(stack)
-    real = svc.get_own_deck
-
-    async def no_ids(sub: str, deck_id: str):  # noqa: ANN202
-        deck = await real(sub, deck_id)
-        for c in deck.categories:
-            if c["name"] == "Ramp":
-                c["id"] = None
-        return deck
-
-    svc.get_own_deck = no_ids
-    with pytest.raises(DeckError, match="can't be changed from here yet"):
-        await svc.propose_categories(SUB, "42", [{"category": "Ramp", "rename_to": "Mana"}])
+    ark, svc = stack.ark, _svc(stack)
+    ark.category_no_record.add("Ramp")
+    p = await svc.propose_categories(SUB, "42", [{"category": "Ramp", "rename_to": "Mana"}])
+    out = await svc.apply(SUB, p["proposal_id"], via="browser")
+    assert out["state"] == "applied" and out["result"]["verified"] is True, out
+    assert [c["name"] for c in ark.category_creates] == ["Ramp"]
+    assert [b["name"] for b in ark.category_patches] == ["Mana"]
+    assert _filed(ark, "Mana") == sorted(RAMP) and "Ramp" not in _cats(ark)
 
 
 # -- applying: backup, snapshot, one call at a time, read back ---------------------------------------
@@ -698,7 +694,7 @@ async def test_a_read_only_token_may_not_propose_category_changes() -> None:
 def test_the_tool_has_plain_words() -> None:
     from mtg_gateway.tool_labels import TOOLS
 
-    assert TOOLS["propose_deck_categories"].ask == "Rename a category in my deck"
+    assert TOOLS["propose_deck_categories"].ask == "Add, delete or rename a deck category"
 
 
 async def test_category_templates_on_the_account_are_never_touched(stack: Stack) -> None:

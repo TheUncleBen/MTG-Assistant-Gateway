@@ -413,9 +413,10 @@ own linked account. Follow every step, in order.
   OK, then `apply_proposal`. A restore puts every deck row back as the
   snapshot recorded it: the same printing, foil or etched finish, quantity,
   categories in their order (so the commander, sideboard and maybeboard
-  too), color tag and custom mana value. It also
-  puts back the deck's name, description, format, bracket and privacy if they
-  changed; folder, tags, cover and the settings of its custom categories stay
+  too), color tag, custom mana value, companion and show back face. It also
+  puts back the deck's name, description, format, bracket, privacy,
+  Theorycrafted and Game type if they changed, and the deck's categories with
+  their names and switches (making deleted ones again); folder, tags, cover and the settings of its custom categories stay
   as they are. Deleting a deck is `propose_delete_deck`, which only
   the user's own press applies.
 

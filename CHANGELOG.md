@@ -7,6 +7,47 @@ Notable changes for people who run or use the gateway. The format follows
 with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 (`release/1.2.3`); `latest` is always the newest.
 
+## [0.7.42] - 2026-10-22
+
+Everything you can do with a deck's categories and settings on Archidekt, you can now do in the
+gateway too: create and delete categories, Theorycrafted, Game type, and a card's Companion and
+show back face switches.
+
+### Upgrade notes
+- None beyond the [update steps](docs/UPGRADING.md). There is no database change, so this update
+  saves no before-upgrade copy, and going back to 0.7.41 needs only the `MTG_TAG` change.
+- No new settings or secrets: your variables file works as it is.
+
+### Added
+- **Create and delete categories.** Deck settings has a New category form with the three
+  switches, a Delete button on each category, and Delete unused categories; your assistant can
+  propose the same. Archidekt only deletes an empty category, so deleting one that still has cards
+  asks which category its cards move to, moves them first, and deletes it only after a fresh read
+  of the deck shows it empty. On Deck settings every delete asks you to confirm. Deleting Sideboard or Maybeboard,
+  a Premier category or the Commander category is high risk and never applied by an assistant on
+  its own. Restore under History makes deleted categories again and puts their cards back.
+- **Theorycrafted and Game type** (Any, Paper, MTGO, Arena) in Deck settings and for your
+  assistant, with snapshot, read-back and Restore like the other settings.
+- **Companion and Show back face** in the card menu on your deck page (Show back face on two-faced
+  cards), and for your assistant. A Companion change from an assistant always waits for your
+  press, because it changes what the deck is legal with. Restore puts both back.
+
+### Changed
+- **Sideboard and Maybeboard without a record.** Archidekt's default Sideboard or Maybeboard can
+  have no record of its own until someone changes it; Deck settings showed it read-only. It is now
+  edited like any other category: the save gives it its record first.
+- **A new deck keeps a category's switches.** A pasted list's category marked not in deck or not
+  in price is made with those switches before any card goes in, instead of as a plain category
+  with a warning.
+- **The Guide's ask for categories** reads "Add, delete or rename a deck category".
+- **New deck** has Theorycrafted and Game type too, for you and your assistant.
+
+### Fixed
+- New deck's Empty tab refused to create the deck ("give exactly one of cards, decklist_text,
+  csv_text or json_text"); it now creates an empty deck, as archidekt.com does.
+- On Deck settings, Skip to content and the Main settings link in the section menu could land on
+  the wrong place: the page and its Main settings form had the same name.
+
 ## [0.7.41] - 2026-10-22
 
 ### Upgrade notes

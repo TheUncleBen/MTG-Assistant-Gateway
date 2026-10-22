@@ -829,9 +829,85 @@
   // on the section; without scripts the gateway asks on a page of its own)
   var cats = $("#categories[data-confirm]");
   var countsByName = ["sideboard", "maybeboard"];
+  function catConfirm(form, pre, okText, extra, danger, icon, submitter) {
+    var body = el("div");
+    body.appendChild(el("p", null, cats.getAttribute(pre) || ""));
+    if (extra) body.appendChild(extra);
+    var box = Box.open({
+      title: cats.getAttribute(pre + "-title") || "",
+      body: body,
+      actions: [cancelButton(), Box.button(okText, danger ? "danger" : "primary", function () {
+        function hidden(name, value) {
+          var c = el("input");
+          c.type = "hidden"; c.name = name; c.value = value;
+          form.appendChild(c);
+        }
+        hidden("confirmed", "1");
+        // form.submit() sends no button: the pressed one's value goes along by hand
+        if (submitter && submitter.name) hidden(submitter.name, submitter.value);
+        var pick = $("select", body);
+        if (pick) hidden("move_cards_to", pick.value);
+        box.busy(true);
+        form.submit();
+      }, { icon: icon })],
+      returnFocus: submitter || $("button", form)
+    });
+  }
   if (cats) cats.addEventListener("submit", function (e) {
     var form = e.target;
     if (!form.matches || !form.matches("form") || $("input[name=confirmed]", form)) return;
+    var by = e.submitter || null;
+    // a row's Delete, and Delete unused: always asked, with where a category's cards go (Archidekt
+    // only deletes an empty category, so they move first)
+    if (form.id === "catdel" || form.id === "catunused") {
+      if (!by) return;  // no idea which was pressed: the gateway's own confirmation page asks
+      e.preventDefault();
+      var extra = null, okText = "Delete unused categories";
+      if (form.id === "catdel") {
+        var name = by.getAttribute("data-name") || "", n = +by.getAttribute("data-cards") || 0;
+        okText = "Delete “" + name + "”";
+        if (n > 0) {
+          var names = [];
+          try { names = JSON.parse(cats.getAttribute("data-names") || "[]"); } catch (err) { names = []; }
+          extra = el("div");
+          extra.appendChild(el("p", null, "“" + name + "” still has " + n + " card" + (n === 1 ? "" : "s") +
+            ". Archidekt only deletes an empty category: pick a category to move " + (n === 1 ? "it" : "them") + " to first."));
+          var lab = el("label", null, "Move its cards to");
+          lab.setAttribute("for", "move_cards_box");
+          var sel = el("select");
+          sel.id = "move_cards_box";
+          names.forEach(function (x) {
+            if (x === name) return;
+            var o = el("option", null, x);
+            o.value = x;
+            sel.appendChild(o);
+          });
+          extra.appendChild(lab);
+          extra.appendChild(sel);
+        }
+      } else {
+        extra = el("p", null, "Deletes " + (by.getAttribute("data-names") || "") + ".");
+      }
+      var also = by.getAttribute("data-also");
+      if (also) {
+        var both = el("div");
+        both.appendChild(el("p", null, also));
+        if (extra) both.appendChild(extra);
+        extra = both;
+      }
+      catConfirm(form, "data-delete-confirm", okText, extra, true, "trash", by);
+      return;
+    }
+    if (form.id === "catnew") {
+      var nm = ($("input[name=category]", form) || {}).value || "";
+      var p = $("input[name=premier]", form), nd = $("input[name=not_in_deck]", form);
+      var pre = p && p.checked ? "data-confirm" :
+        ((nd && nd.checked) || countsByName.indexOf(nm.trim().toLowerCase()) >= 0) ? "data-counts-confirm" : null;
+      if (!pre) return;
+      e.preventDefault();
+      catConfirm(form, pre, "Create category", null, false, "plus", by);
+      return;
+    }
     var commander = false, counts = false;
     $$("li[data-cat]", form).forEach(function (li) {
       var name = $("input[type=text]", li), premier = $("input[name^=premier_]", li);
@@ -846,19 +922,8 @@
     });
     if (!commander && !counts) return;
     e.preventDefault();
-    var pre = commander ? "data-confirm" : "data-counts-confirm";
-    var box = Box.open({
-      title: cats.getAttribute(pre + "-title") || "",
-      body: el("p", null, cats.getAttribute(pre) || ""),
-      actions: [cancelButton(), Box.button("Save categories", "primary", function () {
-        var c = el("input");
-        c.type = "hidden"; c.name = "confirmed"; c.value = "1";
-        form.appendChild(c);
-        box.busy(true);
-        form.submit();
-      }, { icon: "check" })],
-      returnFocus: $("button[name=action]", form)
-    });
+    catConfirm(form, commander ? "data-confirm" : "data-counts-confirm", "Save categories", null, false, "check",
+      $("button[name=action][value=save]", form));
   });
 
   // -- the deck Settings page: the collaborator forms ask in a box first ------------------------

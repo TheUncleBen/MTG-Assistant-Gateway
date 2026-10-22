@@ -33,6 +33,8 @@ _VERBS = {
     "printing": lambda r: "changes its printing",
     "label": lambda r: "changes its color tag",
     "mana_value": lambda r: "changes its custom mana value",
+    "companion": lambda r: "switches its companion",
+    "back_face": lambda r: "switches its back face",
     "commander": lambda r: "changes the commander",
 }
 

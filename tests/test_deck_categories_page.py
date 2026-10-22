@@ -13,7 +13,7 @@ from mtg_gateway.theme import esc
 
 from .conftest import Stack
 from .test_companion import NAV, linked_browser
-from .test_deck_categories import _give_categories
+from .test_deck_categories import RAMP, _give_categories
 
 SETTINGS = "/decks/42/settings"
 POST = "/decks/42/categories"
@@ -87,7 +87,25 @@ async def test_the_panel_is_editable_with_the_approved_controls(stack: Stack) ->
             "<button class='btn' name='action' value='save'>" in page and "Save categories</button>" in page
         )
         assert "<button type='reset' class='btn'>Undo changes</button>" in page
-        assert "Moving cards between categories stays in the deck editor and on the deck page." in page
+        assert "Moving single cards between categories is in the deck editor and on the deck page." in page
+        # each category with a record has a Delete button and its card count (create and delete,
+        # Ben 22 Oct: one pane of glass)
+        assert f"form='catdel' name='delete' value='{ids['Ramp']}' data-name='Ramp' data-cards='2'" in page
+        assert "<span class='cnt'>2 cards</span>" in page
+        # the box's extra sentence: Maybeboard decides what counts, Commander is the commander's
+        assert (
+            f"value='{ids['Maybeboard']}' data-name='Maybeboard' data-cards='0' "
+            f"data-also='{esc(modes.CATEGORY_COUNTS_CONFIRM)}'" in page
+        )
+        assert (
+            f"data-name='Commander' data-cards='1' data-also='{esc(modes.CATEGORY_COMMANDER_CONFIRM)}'"
+            in page
+        )
+        assert f"value='{ids['Ramp']}' data-name='Ramp' data-cards='2' data-also=''" in page
+        assert (
+            "<form method='post' action='/decks/42/categories#categories' class='catnew' id='catnew'>" in page
+        )
+        assert "Create category</button>" in page
         assert "Rename a category or change its flags on Archidekt." not in page
         # the confirm step's words come from the backend, the same with and without scripts
         assert f"data-confirm='{esc(modes.CATEGORY_COMMANDER_CONFIRM)}'" in page
@@ -96,29 +114,135 @@ async def test_the_panel_is_editable_with_the_approved_controls(stack: Stack) ->
         await b.aclose()
 
 
-async def test_a_category_without_a_record_reads_only_with_a_reason(stack: Stack) -> None:
+async def test_a_category_without_a_record_is_edited_like_any_other(stack: Stack) -> None:
+    """Archidekt's default Sideboard may have no record yet (0.7.41 showed it read-only): its row
+    is keyed d1, has no Delete button (nothing to delete), and a save gives it its record."""
     _give_categories(stack.ark)
     stack.ark.decks[42]["categories"].append(
         {"name": "Sideboard", "isPremier": False, "includedInDeck": False, "includedInPrice": False}
     )
+    stack.ark.category_no_record.add("Sideboard")
     b = await linked_browser(stack)
     try:
-        real = stack.h.app.state.gateway.decks.get_own_deck
-
-        async def no_id(sub: str, deck_id: str):  # noqa: ANN202
-            deck = await real(sub, deck_id)
-            for c in deck.categories:
-                if c["name"] == "Sideboard":
-                    c["id"] = None
-            return deck
-
-        stack.h.app.state.gateway.decks.get_own_deck = no_id
-        page, _ = await _csrf(b)
+        page, csrf = await _csrf(b)
         assert "Sideboard" not in _ids(page)
-        assert "<li class='ro' data-name='Sideboard'>" in page
-        assert "name_" not in page.split("data-name='Sideboard'>")[1].split("</li>")[0]
-        assert "Can't be changed from here yet." in page
-        assert "<span class='ds-flag'>Not in deck</span>" in page
+        row = page.split("<li data-cat='d1' data-name='Sideboard'>")[1].split("</li>")[0]
+        assert "name='name_d1' value='Sideboard'" in row and "name='delete'" not in row
+        assert "Can't be changed from here yet." not in page
+        data = _form(page, _ids(page), name_d1="Side", not_in_deck_d1="1")
+        data.update(re.findall(r"<input type='hidden' name='(was_[a-z_]+_d1)' value='([^']*)'>", page))
+        r = await b.http.post(
+            POST, data={"csrf": csrf, "action": "save", "confirmed": "1", **data}, headers=NAV
+        )
+        assert r.status_code == 303, r.text
+        assert [c["name"] for c in stack.ark.category_creates] == ["Sideboard"]
+        assert [p["name"] for p in stack.ark.category_patches] == ["Side"]
+    finally:
+        await b.aclose()
+
+
+async def test_create_a_category_from_the_panel(stack: Stack) -> None:
+    _give_categories(stack.ark)
+    b = await linked_browser(stack)
+    try:
+        _page, csrf = await _csrf(b)
+        r = await b.http.post(
+            POST, data={"csrf": csrf, "action": "create", "category": "  Removal "}, headers=NAV
+        )
+        assert r.status_code == 303 and r.headers["location"] == f"{SETTINGS}?ok=category_created#categories"
+        assert stack.ark.category_creates == [
+            {
+                "deck": 42,
+                "name": "Removal",
+                "includedInDeck": True,
+                "includedInPrice": True,
+                "isPremier": False,
+                "id": None,
+            }
+        ]
+        # Premier or Not in deck on a new category asks first, like a change
+        r = await b.http.post(
+            POST,
+            data={"csrf": csrf, "action": "create", "category": "Big", "premier": "1"},
+            headers=NAV,
+        )
+        assert r.status_code == 200 and len(stack.ark.category_creates) == 1, r.text
+        assert "name='confirmed' value='1'" in r.text and "Create category</button>" in r.text
+        # a name already used is refused in the panel, nothing sent
+        r = await b.http.post(POST, data={"csrf": csrf, "action": "create", "category": "ramp"}, headers=NAV)
+        assert r.status_code == 400 and len(stack.ark.category_creates) == 1
+        assert "already has a category named" in r.text
+    finally:
+        await b.aclose()
+
+
+async def test_delete_asks_first_and_a_category_with_cards_moves_them(stack: Stack) -> None:
+    _give_categories(stack.ark)
+    b = await linked_browser(stack)
+    try:
+        page, csrf = await _csrf(b)
+        ids = _ids(page)
+        # an empty category: one confirm, then deleted
+        r = await b.http.post(
+            POST, data={"csrf": csrf, "action": "delete", "delete": str(ids["Maybeboard"])}, headers=NAV
+        )
+        assert r.status_code == 200 and stack.ark.category_deletes == []
+        assert "<h2>Delete the category?</h2>" in r.text and "move_cards_to" not in r.text
+        r = await b.http.post(
+            POST,
+            data={"csrf": csrf, "action": "delete", "delete": str(ids["Maybeboard"]), "confirmed": "1"},
+            headers=NAV,
+        )
+        assert r.status_code == 303 and r.headers["location"].endswith("?ok=category_deleted#categories")
+        assert stack.ark.category_deletes == [ids["Maybeboard"]]
+        # a category with cards: the confirm asks where its cards go (Archidekt only deletes an
+        # empty category), and the cards move before the delete
+        r = await b.http.post(
+            POST, data={"csrf": csrf, "action": "delete", "delete": str(ids["Ramp"])}, headers=NAV
+        )
+        assert r.status_code == 200, r.text
+        assert "“Ramp” still has 2 cards." in r.text
+        assert "<select id='move_cards_to' name='move_cards_to' required>" in r.text
+        assert "<option value='Ramp'>" not in r.text
+        r = await b.http.post(
+            POST,
+            data={
+                "csrf": csrf,
+                "action": "delete",
+                "delete": str(ids["Ramp"]),
+                "move_cards_to": "Commander",
+                "confirmed": "1",
+            },
+            headers=NAV,
+        )
+        assert r.status_code == 303 and r.headers["location"].endswith("?ok=category_deleted#categories")
+        assert ids["Ramp"] in stack.ark.category_deletes
+        assert "Ramp" not in [c["name"] for c in stack.ark.decks[42]["categories"]]
+        assert all(
+            "Commander" in (row.get("categories") or [])
+            for row in stack.ark.decks[42]["cards"]
+            if row["card"]["oracleCard"]["name"] in RAMP
+        )
+    finally:
+        await b.aclose()
+
+
+async def test_delete_unused_lists_them_and_asks_first(stack: Stack) -> None:
+    _give_categories(stack.ark)
+    stack.ark.decks[42]["categories"].append(
+        {"name": "Empty", "isPremier": False, "includedInDeck": True, "includedInPrice": True}
+    )
+    b = await linked_browser(stack)
+    try:
+        page, csrf = await _csrf(b)
+        assert "form='catunused' name='action' value='unused'" in page
+        r = await b.http.post(POST, data={"csrf": csrf, "action": "unused"}, headers=NAV)
+        assert r.status_code == 200 and stack.ark.category_deletes == []
+        assert "<h2>Delete the category?</h2>" in r.text and "Delete category “Empty”." in r.text
+        r = await b.http.post(POST, data={"csrf": csrf, "action": "unused", "confirmed": "1"}, headers=NAV)
+        assert r.status_code == 303 and r.headers["location"].endswith("?ok=categories_unused#categories")
+        assert _ids(page)["Empty"] in stack.ark.category_deletes
+        assert stack.ark.category_deletes_with_cards == []
     finally:
         await b.aclose()
 

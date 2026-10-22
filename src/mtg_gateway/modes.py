@@ -9,7 +9,7 @@ decks and connected apps:
 * ``semi``: the assistant may apply a *low-risk* proposal itself; anything high-risk waits for
   the member's press as in manual.
 * ``auto``: the assistant may apply every proposal itself, except the ones that always wait for
-  a card press (``auto_waits``): restoring a snapshot, a commander change, a new deck, a
+  a card press (``auto_waits``): restoring a snapshot, a commander or companion change, a new deck, a
   big edit (more rows than the ``auto_big_edit_rows`` setting, 20 by default), and
   making a deck public or unlisted and a description edit that keeps formatting.
 
@@ -111,7 +111,8 @@ def low_risk_text(max_rows: int = DEFAULT_MAX_ROWS) -> str:
 HIGH_RISK_TEXT = (
     "Everything else: more rows than that, a commander change, a new deck, restoring a snapshot, "
     "the deck's details (name, format, bracket, description, visibility, folder, tags and cover), "
-    "and its categories (a new name, Premier, Not in deck or Not in price)."
+    "and its categories (a new category, a new name, Premier, Not in deck or Not in price, or "
+    "deleting one)."
 )
 # What no mode lets an assistant apply (MEMBER_ONLY), as one sentence.
 MEMBER_ONLY_TEXT = (
@@ -126,7 +127,7 @@ MEMBER_ONLY_TEXT = (
 def auto_waits_text(big_rows: int = DEFAULT_BIG_EDIT_ROWS) -> str:
     """What still waits for a press in auto mode, as one sentence."""
     return (
-        "Restoring a snapshot, a commander change, a new deck, an edit of more than "
+        "Restoring a snapshot, a commander or companion change, a new deck, an edit of more than "
         f"{_rows(big_rows)}, making a deck public or unlisted, a category change that touches the "
         "commander or which cards count in the deck, and any edit of a description that has "
         "formatting, such as bold text, links or pictures, still wait for your press. So does a held "
@@ -212,9 +213,15 @@ CATEGORY_COUNTS_CONFIRM = (
     "Cards in a Not in deck category, or in one named Sideboard or Maybeboard, don't count in the "
     "deck. Changing it can change the deck's card count and its legality."
 )
+# ... and for deleting a category (archidekt.com asks "Are you sure" too): the words name each one
+CATEGORY_DELETE_CONFIRM = (
+    "Deleting a category takes it off the deck on Archidekt. A snapshot from just before is kept "
+    "under History, and Restore there makes it again."
+)
 CATEGORY_CONFIRM_TITLES = {
     CATEGORY_COMMANDER_CONFIRM: "Change the commander category?",
     CATEGORY_COUNTS_CONFIRM: "Change which cards count in the deck?",
+    CATEGORY_DELETE_CONFIRM: "Delete the category?",
 }
 
 
@@ -231,6 +238,7 @@ def category_wait(rows: list[dict[str, Any]] | None) -> str | None:
 
 
 COMMANDER_COPIES_REASON = "changes the commander's copies"
+COMPANION_REASON = "changes the deck's companion"
 COMMANDER_ZONE_REASON = "adds or changes a row with a commander-zone category"
 # Fewer copies of a card whose commander-zone row is in the maybeboard or sideboard, with another
 # row there: no commander (its row is not in the deck), but the write folds its rows like a
@@ -310,7 +318,10 @@ def hand_edit_confirm(kind: str, rows: list[dict[str, Any]] | None) -> str | Non
         wait = category_wait(rows or [])
         if wait == CATEGORY_COMMANDER_REASON:
             return CATEGORY_COMMANDER_CONFIRM
-        return CATEGORY_COUNTS_CONFIRM if wait else None
+        if wait:
+            return CATEGORY_COUNTS_CONFIRM
+        deletes = any(isinstance(r, dict) and r.get("delete") for r in rows or [])
+        return CATEGORY_DELETE_CONFIRM if deletes else None
     if kind != "edit" or not rows:
         return None
     if any(r.get("kind") == "commander" for r in rows):
@@ -377,6 +388,8 @@ def auto_waits(
             return "has no list of rows to check"
         if any(str(r.get("kind")) == "commander" for r in rows):
             return commander_reason(rows)
+        if any(str(r.get("kind")) == "companion" for r in rows):
+            return COMPANION_REASON  # it changes what the deck is legal with (parity release 1)
         if len(rows) > big_rows:
             return f"changes {len(rows)} rows, more than the {big_rows} Full auto applies by itself"
         return None

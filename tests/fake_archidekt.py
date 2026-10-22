@@ -191,6 +191,18 @@ class FakeArchidekt:
         # them to follow; only a live test can say), and flags the server does not keep.
         self.category_rename_leaves_cards = False
         self.category_flags_ignored = False
+        # Create and delete (2026-10-22, the parity research): POST /decks/createCategory/ bodies
+        # and the ids sent to DELETE /decks/category/{id}/ land here. ``category_no_record`` names
+        # categories kept without a record id (Archidekt's default Sideboard or Maybeboard until
+        # someone creates one); a create of that name gives it its record. A DELETE of a category
+        # that still holds cards is recorded in ``category_deletes_with_cards`` (the site never
+        # sends one, and what the live server does with it is unknown) and refused here.
+        self.category_creates: list[dict[str, Any]] = []
+        self.category_deletes: list[int] = []
+        self.category_deletes_with_cards: list[int] = []
+        self.category_no_record: set[str] = set()
+        self.category_create_ignored = False
+        self.category_delete_ignored = False
         self.transport = httpx.MockTransport(self.handle)
 
     def _category_write(self, request: httpx.Request, who: str, cid: int) -> httpx.Response:
@@ -234,6 +246,60 @@ class FakeArchidekt:
                 cat[k] = body[k]
         deck["updatedAt"] = "2026-10-04T00:00:00Z"
         return httpx.Response(200, json=dict(cat))
+
+    def _category_create(self, request: httpx.Request, who: str) -> httpx.Response:
+        """POST /decks/createCategory/ as archidekt.com's category form sends it (its category
+        service, read 2026-10-21/22): ``{name, includedInDeck, includedInPrice, isPremier, id: null,
+        deck}``. A name the deck has is refused as the site's form refuses it."""
+        body = json.loads(request.content)
+        self.category_creates.append(dict(body))
+        flags = ("includedInDeck", "includedInPrice", "isPremier")
+        if (
+            set(body) != {"name", "id", "deck", *flags}
+            or body["id"] is not None
+            or not isinstance(body["name"], str)
+            or not body["name"].strip()
+            or any(not isinstance(body[k], bool) for k in flags)
+        ):
+            return httpx.Response(400, json={"detail": "Invalid category."})
+        deck = self.decks.get(body["deck"])
+        if deck is None:
+            return httpx.Response(404, json={"detail": "Not found."})
+        if deck["owner"]["username"] != who:
+            return httpx.Response(403, json={"detail": "You do not have permission to perform this action."})
+        if self.category_create_ignored:
+            return httpx.Response(201, json={})
+        hit = next((c for c in deck["categories"] if c["name"] == body["name"]), None)
+        if hit is not None and body["name"] not in self.category_no_record:
+            return httpx.Response(400, json={"name": [f"Deck already has category named {body['name']}"]})
+        if hit is None:
+            hit = {"name": body["name"]}
+            deck["categories"].append(hit)
+        self.category_no_record.discard(body["name"])
+        self.next_category_id += 1
+        hit["id"] = self.next_category_id
+        for k in flags:
+            hit[k] = body[k]
+        deck["updatedAt"] = "2026-10-05T00:00:00Z"
+        return httpx.Response(201, json=dict(hit))
+
+    def _category_delete(self, who: str, cid: int) -> httpx.Response:
+        deck = next(
+            (d for d in self.decks.values() if any(c.get("id") == cid for c in d["categories"])), None
+        )
+        if deck is None:
+            return httpx.Response(404, json={"detail": "Not found."})
+        if deck["owner"]["username"] != who:
+            return httpx.Response(403, json={"detail": "You do not have permission to perform this action."})
+        cat = next(c for c in deck["categories"] if c.get("id") == cid)
+        if any(cat["name"] in (r.get("categories") or []) for r in deck["cards"]):
+            self.category_deletes_with_cards.append(cid)
+            return httpx.Response(400, json={"detail": "Category is not empty."})
+        self.category_deletes.append(cid)
+        if not self.category_delete_ignored:
+            deck["categories"] = [c for c in deck["categories"] if c.get("id") != cid]
+            deck["updatedAt"] = "2026-10-06T00:00:00Z"
+        return httpx.Response(204)
 
     def add_side_row(self, deck_id: int, name: str, quantity: int = 1, category: str = "Maybeboard") -> None:
         """Give a deck a maybeboard / sideboard row (a category not counted in the deck) holding
@@ -283,6 +349,9 @@ class FakeArchidekt:
         live fixtures' shape: id, name, isPremier, includedInDeck, includedInPrice). Kept on the
         stored deck, so the id stays the same from read to read."""
         for c in deck["categories"]:
+            if c.get("name") in self.category_no_record:
+                c["id"] = None
+                continue
             if not isinstance(c.get("id"), int):
                 self.next_category_id += 1
                 c["id"] = self.next_category_id
@@ -677,7 +746,15 @@ class FakeArchidekt:
                 return httpx.Response(200, json=hit)
             return httpx.Response(404, json={"detail": "Not found."})
         if len(parts) == 4 and parts[1:3] == ["decks", "category"] and parts[3].isdigit():
+            if request.method == "DELETE":
+                for d in self.decks.values():
+                    self._category_ids(d)
+                return self._category_delete(who, int(parts[3]))
             return self._category_write(request, who, int(parts[3]))
+        if path == "/api/decks/createCategory/" and request.method == "POST":
+            for d in self.decks.values():
+                self._category_ids(d)
+            return self._category_create(request, who)
         if path == "/api/users/category/" or path.startswith("/api/users/category/"):
             # the account's category templates: the gateway must never touch them
             raise AssertionError(f"the gateway called the category templates route {path}")
@@ -722,6 +799,8 @@ class FakeArchidekt:
                 "updatedAt": "2026-10-03T00:00:00Z",
                 "deckFormat": body.get("deckFormat"),
                 "private": body.get("private", True),
+                "theorycrafted": body.get("theorycrafted") is True,
+                "game": body.get("game"),
                 "categories": [],
                 "cards": [],
             }
@@ -1093,7 +1172,16 @@ class FakeArchidekt:
                     return httpx.Response(503, json={"detail": "Service unavailable."})
                 body = json.loads(request.content)
                 self.updates.append({"deck_id": deck["id"], **body})
-                for key in ("name", "description", "deckFormat", "edhBracket", "private", "unlisted"):
+                for key in (
+                    "name",
+                    "description",
+                    "deckFormat",
+                    "edhBracket",
+                    "private",
+                    "unlisted",
+                    "theorycrafted",
+                    "game",
+                ):
                     if key in body:
                         deck[key] = body[key]
                 if "featured" in body:
