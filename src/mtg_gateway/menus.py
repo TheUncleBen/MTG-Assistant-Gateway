@@ -4,9 +4,9 @@ quantity row in the Collection's card menu. Appended to theme.CSS; the menu pane
 theme.CARD_MENU_CSS and the boxes are theme.BOX_CSS (static/box.js)."""
 
 MENUS_CSS = """
-/* ⋮: a round button the size of a control (39 px with a mouse, 44 px on a touch screen) */
-.kebab,button.kebab{display:inline-flex;align-items:center;justify-content:center;width:var(--ctl);
-  height:var(--ctl);min-height:0;min-width:0;padding:0;margin:0;border:0;border-radius:50%;
+/* ⋮: a round 44 px button (the touch target, with a mouse too) */
+.kebab,button.kebab{display:inline-flex;align-items:center;justify-content:center;width:44px;
+  height:44px;min-height:0;min-width:0;padding:0;margin:0;border:0;border-radius:50%;
   background:transparent;color:var(--text-muted);box-shadow:none;cursor:pointer}
 .kebab:hover,.kebab:focus-visible,button.kebab:hover{background:var(--surface-2);color:var(--text)}
 .kebab svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round}

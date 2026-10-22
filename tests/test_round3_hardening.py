@@ -397,7 +397,10 @@ async def test_activity_badge_for_an_app_named_browser(stack: Stack) -> None:
     await b.aclose()
     # an app that calls itself "browser" shows by its own name, never as the member's website, and
     # My activity names apps only (the client id is in no member text)
-    apps = re.findall(r"<span class='ui-app'><svg [^>]*>.*?</svg><span class='nm'>(.*?)</span></span>", page)
+    apps = re.findall(
+        r"<span class='ui-app'>(?:<svg [^>]*>.*?</svg>|(?:<img [^>]*>)+)<span class='nm'>(.*?)</span></span>",
+        page,
+    )
     assert any(a.startswith("browser") for a in apps), apps
     assert client["client_id"] not in page
     rows = h.app.state.gateway.db.audit_for_user("user-1", 10)

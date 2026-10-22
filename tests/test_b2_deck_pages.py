@@ -139,9 +139,11 @@ async def test_deck_settings_use_the_shared_form_rows(stack: Stack) -> None:
         assert "<label for='private'>Private</label>" in page and "The deck is only visible to you." in page
         assert "<label for='unlisted'>Unlisted</label>" in page
         assert "Manage folders on <a href='/decks'>My decks</a>." in page
-        # categories read-only, in the new look, with the honest line
-        assert "id='categories'" in page and "class='ds-flag premier'>Premier</span>" in page
-        assert "Rename a category or change its flags on Archidekt." in page
+        # categories editable (F7 a, tests/test_deck_categories_page.py): the name in its box, the
+        # three switches, a plain Save categories
+        assert "id='categories'" in page and "<label class='switch ds-flag'>" in page
+        assert "Save categories</button>" in page and "Undo changes</button>" in page
+        assert "Rename a category or change its flags on Archidekt." not in page
         assert "not available through the gateway yet" not in page
         # delete: red outline opening the typed-name box the page holds
         assert "class='btn btn-outline-danger' href='/decks/42/delete' data-box-open='delete'" in page

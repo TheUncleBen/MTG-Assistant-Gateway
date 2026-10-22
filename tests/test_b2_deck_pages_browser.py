@@ -227,3 +227,93 @@ def test_deck_settings_rows_fit_every_width(server: Server, width: int, scheme: 
         assert _box(page, "delete").locator("h2").inner_text() == "Delete “Sample Commander Deck”?"
         assert not errors, errors
         browser.close()
+
+
+# -- the editable Categories panel (F7 a, Ben 21 Oct) ----------------------------------------------
+
+OPEN_BOXES = "() => document.querySelectorAll('.mtgbox[role=dialog]:not([hidden])').length"
+CAT_ROWS = """() => [...document.querySelectorAll('#categories li[data-cat]')].map(li => {
+  const vw = document.documentElement.clientWidth;
+  const inside = [...li.querySelectorAll('input[type=text], label.ds-flag')]
+    .every(e => e.getBoundingClientRect().right <= vw + 0.5 && e.getBoundingClientRect().left >= -0.5);
+  return { name: li.dataset.name, inside,
+    nameH: li.querySelector('input[type=text]').getBoundingClientRect().height,
+    flags: [...li.querySelectorAll('label.ds-flag')].map(l =>
+      [l.innerText.trim(), l.getBoundingClientRect().height, l.querySelector('input').checked]) };
+})"""
+
+
+@pytest.mark.parametrize(
+    ("width", "scheme"),
+    [(344, "light"), (344, "dark"), (810, "light"), (810, "dark"), (1280, "light"), (1280, "dark")],
+)
+def test_the_categories_panel_fits_reads_and_saves_everywhere(
+    server: Server, width: int, scheme: str
+) -> None:
+    """Each category: its name in a box and the three switches with their words, all inside the
+    window, 44 px on a phone, text at 4.5:1; Undo changes puts the boxes back; Save categories is
+    plain and saves at once; touching the commander opens the confirm box first (the backend's
+    words), whose Save sends the form with ``confirmed``."""
+    from playwright.sync_api import sync_playwright
+
+    from .test_card_search_filters_browser import CONTRAST
+    from .test_deck_categories import _give_categories
+
+    _give_categories(server.ark)
+    _chromium()
+    sid = server.sign_in_and_link()
+    with sync_playwright() as p:
+        touch = width < 600
+        browser, page, errors = _page(p, server, sid, width, color_scheme=scheme, has_touch=touch)
+        page.goto(f"{server.base}{'/decks/42/settings'}", wait_until="networkidle")
+        assert _overflow(page) == 0
+        rows = page.evaluate(CAT_ROWS)
+        assert {r["name"] for r in rows} >= {"Commander", "Ramp", "Maybeboard"}, rows
+        for r in rows:
+            assert r["inside"], r
+            assert r["nameH"] >= 44, r
+            assert [f[0] for f in r["flags"]] == ["Premier", "Not in deck", "Not in price"], r
+            assert all(f[1] >= (44 if touch else 36) for f in r["flags"]), r
+        assert page.evaluate(CONTRAST, "#categories .nm input, #categories .ds-flag, #categories .foot") == []
+        assert page.locator("#categories button.btn-primary").count() == 0
+        panel = page.locator("#categories")
+        # Undo changes puts a typed name and a switched flag back
+        ramp = panel.locator("li[data-name='Ramp']")
+        ramp.locator("input[type=text]").fill("Mana")
+        ramp.locator("label.ds-flag", has_text="Not in price").click()
+        assert ramp.locator("input[name^=not_in_price_]").is_checked()
+        panel.locator("button[type=reset]").click()
+        assert ramp.locator("input[type=text]").input_value() == "Ramp"
+        assert not ramp.locator("input[name^=not_in_price_]").is_checked()
+        # a plain change saves at once, no box
+        ramp.locator("input[type=text]").fill("Mana")
+        panel.locator("button[name=action]").click()
+        page.wait_for_url(lambda u: "ok=categories" in u, timeout=5000)
+        page.wait_for_load_state("networkidle")
+        assert page.evaluate(OPEN_BOXES) == 0
+        assert "Categories saved to Archidekt." in page.locator("#categories .notice").inner_text()
+        assert page.locator("#categories li[data-name='Mana']").count() == 1
+        assert [b["name"] for b in server.ark.category_patches] == ["Mana"]
+        # touching the commander asks first, in the box, with the backend's sentence
+        cmd = page.locator("#categories li[data-name='Commander']")
+        cmd.locator("label.ds-flag", has_text="Premier").click()
+        panel.locator("button[name=action]").click()
+        box = page.locator(".mtgbox[role=dialog]:not([hidden])")
+        box.wait_for(timeout=3000)
+        assert box.locator("h2").inner_text() == "Change the commander category?"
+        assert "Cards in a Premier category are the deck's commanders." in box.inner_text()
+        assert box.locator(".acts button.primary").inner_text().strip() == "Save categories"
+        assert len(server.ark.category_patches) == 1  # nothing sent yet
+        box.locator("button", has_text="Cancel").click()
+        box.wait_for(state="hidden", timeout=3000)
+        assert page.evaluate(OPEN_BOXES) == 0
+        assert len(server.ark.category_patches) == 1
+        panel.locator("button[name=action]").click()
+        box = page.locator(".mtgbox[role=dialog]:not([hidden])")
+        box.wait_for(timeout=3000)
+        box.locator(".acts button.primary").click()
+        page.wait_for_url(lambda u: "ok=categories" in u and "settings" in u, timeout=5000)
+        page.wait_for_load_state("networkidle")
+        assert [b["isPremier"] for b in server.ark.category_patches][-1] is False
+        assert not errors, errors
+        browser.close()

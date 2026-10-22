@@ -9,7 +9,7 @@ from typing import Annotated, Any
 
 from mcp.server.mcpserver import Context
 from mcp_types import CallToolResult
-from pydantic import Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from . import deck_stats
 from .app import ACCOUNT_STATUS_FIELDS, AppState, DeckView, _card_result, _tool_error, token_may_write
@@ -41,6 +41,19 @@ from .schemas import (
     new_deck_card_for_service,
 )
 from .views import deck_out
+
+
+class CategoryChange(BaseModel):
+    """One category of a propose_deck_categories change, by its name now (or its id)."""
+
+    model_config = ConfigDict(extra="forbid")
+    category: str | None = Field(None, description="The category's name as the deck has it now.")
+    id: int | None = Field(None, description="Or the category's id, as get_deck lists it.")
+    rename_to: str | None = Field(None, description="A new name, 1 to 60 characters, not one the deck has.")
+    premier: bool | None = Field(None, description="Premier on or off: its cards are the commanders.")
+    not_in_deck: bool | None = Field(None, description="Not in deck on or off: its cards don't count.")
+    not_in_price: bool | None = Field(None, description="Not in price on or off: left out of the price.")
+
 
 MAX_PROPOSALS_PAGE = 100
 # list_my_decks' note when the folder tree couldn't be read, so decks Archidekt listed by folder id
@@ -700,6 +713,38 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
     async def propose_restore_snapshot(snapshot_id: str) -> CallToolResult:
         try:
             return _proposal({"ok": True, **(await state.decks.propose_restore(_sub(), snapshot_id))})
+        except DeckError as exc:
+            return _proposal(_tool_error(exc))
+
+    @server.tool(
+        name="propose_deck_categories",
+        title="Propose renaming categories or changing their flags (write, two-step)",
+        description=(
+            "Step 1 of renaming a deck's categories or switching their flags, for decks the linked "
+            "account owns: Premier (its cards are the commanders), Not in deck (its cards don't count "
+            "in the deck, like a maybeboard) and Not in price. Name each category as the deck has it "
+            "now and give only what changes. A rename onto a name the deck already has is refused. "
+            "Moving cards between categories is propose_deck_changes; deleting a category stays on "
+            "Archidekt. A change that touches the commander or Not in deck always waits for the user's "
+            "own press, in every approval mode. Returns the same fields as propose_deck_changes (kind "
+            "'categories', one line per category and the review URL); the user confirms it and then "
+            "it is applied with apply_proposal like any other proposal, which keeps a snapshot first. "
+            "Changes nothing on Archidekt."
+        ),
+        annotations={"readOnlyHint": True, "destructiveHint": False, "openWorldHint": True},
+        meta=card_meta,
+    )
+    async def propose_deck_categories(
+        deck_id: Annotated[
+            str, Field(description="The Archidekt deck id (the number in the deck URL) or URL.")
+        ],
+        changes: Annotated[
+            list[CategoryChange], Field(description="One entry per category to change.", max_length=30)
+        ],
+    ) -> CallToolResult:
+        try:
+            raw = [c.model_dump(exclude_none=True) for c in changes]
+            return _proposal({"ok": True, **(await state.decks.propose_categories(_sub(), deck_id, raw))})
         except DeckError as exc:
             return _proposal(_tool_error(exc))
 

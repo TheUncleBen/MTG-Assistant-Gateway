@@ -16,7 +16,7 @@ import re
 from collections.abc import Mapping
 from typing import Any
 
-from . import ui
+from . import card_models_view, ui
 from .report_view import (
     CONSTRUCTED_VALIDATION,
     ENDED_TEXT,
@@ -836,9 +836,16 @@ def _coverage_bar(modeled: int, aside: int, blanks: int, size: int, *, cls: str 
 
 # -- the sections ------------------------------------------------------------------------
 def solo_section_html(
-    r: dict[str, Any], s: dict[str, Any], *, removable: frozenset[str], csrf: str
+    r: dict[str, Any],
+    s: dict[str, Any],
+    *,
+    removable: frozenset[str],
+    csrf: str,
+    models_opener: str = "",
 ) -> tuple[str, str]:
-    """The solo test section and the "what it could not model" section ('' when none)."""
+    """The solo test section and the "what it could not model" section ('' when none).
+    ``models_opener``: the My card models button, placed where saved descriptions are mentioned
+    (under the ones this run played, and beside the request for cards played without effect)."""
     g, v = s["goldfish"], s["validation"]
     if g is None and v is None and not s["constructed"]:
         body = (
@@ -886,6 +893,7 @@ def solo_section_html(
             button="btn-outline-danger",
             box_prefix="rm-model",
         )
+        + (f"<div class='rv-models'>{models_opener}</div>" if models_opener and kept_models(r) else "")
         + summary
         + remove_model_boxes(kept_models(r), removable=removable, csrf=csrf, report_id=rid)
     )
@@ -897,6 +905,8 @@ def solo_section_html(
         cls="btn-plain",
         button=f"{icon('copy')}<span class='label'>{_esc('Copy a request for your assistant')}</span>",
     )
+    if ask and models_opener:
+        ask += f"<div class='rv-models'>{models_opener}</div>"
     groups = honesty_groups(g, ask, menu=True)
     if not groups:
         return solo, ""
@@ -994,11 +1004,13 @@ def report_page_html(
     removable: frozenset[str] = frozenset(),
     csrf: str = "",
     card_types: Mapping[str, str] | None = None,
+    my_models: str = "",
 ) -> str:
     """The signed-in report page's body. ``stats_html`` is the deck statistics strip
     (companion.stats_strip), ``actions_html`` the export buttons, ``notice_html`` a notice from the
     address (a Remove or a Play more games that started nothing), ``card_types`` the type lines the
-    gateway knows for the cards Forge left out."""
+    gateway knows for the cards Forge left out, ``my_models`` the My card models box
+    (card_models_view.box_html), whose opener sits where saved descriptions are mentioned."""
     s = report_sections(r)
     g = s["goldfish"]
     deck_id = _esc(r.get("deck_id"))
@@ -1041,7 +1053,9 @@ def report_page_html(
     solo_forge = forge_solo_section_html(
         r.get("forge_solo"), live=True, report_id=r.get("report_id"), types=card_types
     )
-    solo, model = solo_section_html(r, s, removable=removable, csrf=csrf)
+    solo, model = solo_section_html(
+        r, s, removable=removable, csrf=csrf, models_opener=card_models_view.opener() if my_models else ""
+    )
     valid = validation_section_html(s)
     stats = (
         _sec("rv-stats", "Deck statistics", f"<div class='rv-dstats'>{stats_html}</div>")
@@ -1074,6 +1088,7 @@ def report_page_html(
         + valid
         + stats
         + raw
+        + my_models
         + "</div>"
     )
 

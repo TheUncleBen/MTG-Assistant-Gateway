@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The camera sheet's Torch and Auto toggles: the plain outline while off, the orange fill while
-     on (the same change of shape the pages' pressed toggles make, so the state is not colour alone). -->
+<!-- The camera sheet's Torch and Auto toggles: the plain 1dp outline while off; while on, a light
+     tint with a 2dp bright outline, and the button's words say On or Off. The orange fill stays the
+     Shoot button's alone (one orange on the sheet), so the state is told by shape, tint and words. -->
 <ripple xmlns:android="http://schemas.android.com/apk/res/android" android:color="@color/ripple_on_dark">
     <item>
         <selector>
@@ -12,7 +13,8 @@
             </item>
             <item android:state_checked="true">
                 <shape android:shape="rectangle">
-                    <solid android:color="@color/accent" />
+                    <solid android:color="@color/cam_tint_on" />
+                    <stroke android:width="2dp" android:color="@color/cam_text" />
                     <corners android:radius="3dp" />
                 </shape>
             </item>

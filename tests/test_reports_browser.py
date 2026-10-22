@@ -667,13 +667,13 @@ def test_compare_page_never_scrolls_sideways_at_200_percent_text(
         page = ctx.new_page()
         for zoom in ("none", ROOT_200, TEXT_200):
             page.goto(f"{server.base}/decks/42/compare?with=43", wait_until="networkidle")
-            assert page.locator(".comparecols .panel").count() >= 2  # both decks' columns
+            assert page.locator(".cmp-cols .cmp-col").count() >= 2  # both decks' columns
             if zoom != "none":
                 page.evaluate(zoom)
             state = page.evaluate(
                 """() => {
                   const vw = document.documentElement.clientWidth;
-                  const out = Array.from(document.querySelectorAll('.comparecols, .comparecols *'))
+                  const out = Array.from(document.querySelectorAll('.cmp-cols, .cmp-cols *'))
                     .filter(e => e.getClientRects().length && e.getBoundingClientRect().right > vw + 1);
                   return {sw: document.documentElement.scrollWidth, vw,
                           out: out.slice(0, 3).map(e => e.tagName + ' ' + e.textContent.trim().slice(0, 30))};
@@ -784,3 +784,53 @@ def test_play_more_games_fits_reads_and_starts(server: Server, width: int, schem
         ended = h.post("/history/reports/rep_more/forge/more", data={"csrf": csrf})
         assert ended.status_code == 303 and ended.headers["location"].endswith("?more=ended")
         assert h.post("/history/reports/nope/forge/more", data={"csrf": csrf}).status_code == 404
+
+
+COMPARE_KEBABS = """() => [...document.querySelectorAll('.cmp-t .tr')]
+  .filter(tr => tr.querySelector('button.cardlink[data-card]')).map(tr => {
+  const card = tr.querySelector('button.cardlink[data-card]'), k = tr.querySelector('button.kebab');
+  if (!k) return null;
+  const a = card.getBoundingClientRect(), b = k.getBoundingClientRect();
+  const overlap = a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+  return { name: card.getAttribute('data-card'), label: k.getAttribute('aria-label'), w: b.width, h: b.height,
+    overlap, inside: b.right <= document.documentElement.clientWidth + 0.5 };
+})"""
+
+
+@pytest.mark.parametrize("width", [344, 1280])
+def test_each_compare_row_has_a_menu_button_beside_the_card(server: Server, width: int) -> None:
+    """The Compare page's card rows get the shared card menu by right-click, press and hold and a
+    44 px ⋮ beside the card's name (Ben, 21 Oct), which opens the same menu and covers nothing."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_path()
+    if exe == "missing":
+        pytest.skip("no Chromium available for Playwright")
+    sid = server.sign_in_and_link()
+    server.ark.private.discard(43)
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+        ctx = browser.new_context(viewport={"width": width, "height": 900})
+        ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
+        page = ctx.new_page()
+        page.goto(f"{server.base}/decks/42/compare?with=43", wait_until="networkidle")
+        got = page.evaluate(COMPARE_KEBABS)
+        assert got and all(got), got
+        for k in got:
+            assert k["label"] == f"Menu for {k['name']}", k
+            assert k["inside"] and not k["overlap"], k
+            assert k["w"] >= 44 and k["h"] >= 44, k
+        assert page.evaluate(
+            "() => document.documentElement.scrollWidth <= document.documentElement.clientWidth"
+        )
+        row = page.locator(".cmp-t .tr", has=page.locator("button.cardlink")).first
+        name = row.locator("button.cardlink").get_attribute("data-card")
+        row.locator("button.kebab").click()
+        menu = page.locator(".ctxmenu[role=menu]")
+        menu.wait_for(timeout=3000)
+        assert name in menu.inner_text()
+        assert "Copy name" in [t.strip() for t in menu.locator("[role=menuitem]").all_inner_texts()]
+        page.keyboard.press("Escape")
+        page.wait_for_timeout(100)
+        assert page.locator(".ctxmenu").count() == 0
+        browser.close()

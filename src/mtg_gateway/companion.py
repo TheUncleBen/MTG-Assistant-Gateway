@@ -29,7 +29,7 @@ from .deckpage import (
     LIST_ORDERS,
     money,
 )
-from .decks import DeckError, is_busy
+from .decks import CATEGORIES_SAVED, DeckError, is_busy
 from .pages import (
     _csrf,
     _err_code,
@@ -201,6 +201,7 @@ def deck_problem_title(exc: DeckError) -> str:
 INDENT = "\u2003"  # an em space per folder level in folder pickers
 # Notices the settings page shows after one of its hand actions (?ok=).
 SETTINGS_OK_MESSAGES = {
+    "categories": CATEGORIES_SAVED,
     "cover": "Cover image saved to Archidekt. A snapshot from just before is under History.",
     "cover_auto": "Archidekt picks the cover image again. A snapshot from just before is under History.",
     "tag_added": "Tag added on Archidekt.",
@@ -494,8 +495,9 @@ def offline_page(site: str) -> str:
         "main{max-width:28rem;text-align:center}h1{font-size:1.4rem;margin:.75rem 0 .5rem}"
         ".site{color:var(--muted);font-weight:700;font-size:.9rem;margin:0}"
         "img{width:64px;height:64px;border-radius:14px}"
-        "a{display:inline-block;margin-top:1rem;padding:.6rem 1.2rem;border-radius:5px;background:#fa890d;"
-        "color:#111;font-weight:700;text-decoration:none}</style></head><body><main>"
+        "a{display:inline-flex;align-items:center;min-height:44px;margin-top:1rem;padding:0 1.2rem;"
+        "border-radius:5px;background:#fa890d;color:#111;font-weight:700;text-decoration:none}"
+        "</style></head><body><main>"
         f"<img src='{ICON_DATA_URL}' alt=''><p class='site'>{html.escape(site)}</p>"
         "<h1>You're offline</h1><p>The gateway can't be reached right now. If you just pressed a button, "
         "nothing was sent. Check your connection, then try again.</p>"
@@ -503,7 +505,6 @@ def offline_page(site: str) -> str:
     )
 
 
-OFFLINE_PAGE = offline_page("MTG Assistant Gateway")
 # The offline page's script, which the service worker answers itself (companion_shell, /sw.js).
 OFFLINE_SCRIPT = (STATIC_DIR / "offline.js").read_text(encoding="utf-8")
 

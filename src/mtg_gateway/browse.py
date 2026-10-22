@@ -474,7 +474,7 @@ def precon_group_html(group: dict[str, Any], *, view: str, open: bool) -> str:
             f"aria-expanded='false'>Show all {n}</button>"
         )
         + "</div>"
-        + deck_list_html(rows, covers=covers_for(rows), view=view)
+        + deck_list_html(rows, covers=covers_for(rows), view=view, plain=True)
         + "</section>"
     )
 

@@ -690,7 +690,18 @@ def test_the_rows_of_the_list_pages_have_their_menus(tmp_path: Path) -> None:
             _menu(page)
             assert _items(page) == ["Open", "Price alert…", "Remove"]
             _pick(page, "Price alert…")
-            assert page.locator("#wx-d42").is_visible()
+            assert page.locator("#wx-d42").is_visible()  # a deck row has no alert fields: its details open
+            # a card row's Price alert… is a box (M16) with the row's three fields, posting as the row's form
+            page.locator("#wr-w_one .act button.kebab").click()
+            _menu(page)
+            _pick(page, "Price alert…")
+            box = page.locator(".mtgbox[role=dialog]:not([hidden])")
+            box.wait_for(timeout=3000)
+            assert box.locator("h2").inner_text().startswith("Price alert: ")
+            assert box.locator("input[name=alert_pct]").count() == 1
+            assert box.locator("form input[name=action][value=alerts]").count() == 1
+            assert box.locator(".acts button", has_text="Save alert").is_visible()
+            page.keyboard.press("Escape")
             assert errors == [], errors
             browser.close()
     finally:

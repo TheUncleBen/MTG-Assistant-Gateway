@@ -27,4 +27,6 @@
     <!-- Pressed state of the camera sheet's plain buttons and toggles: a light ripple over the dark sheet. -->
     <color name="ripple_on_dark">#33ffffff</color>
     <color name="cam_border_disabled">#5f5f5f</color>
+    <!-- The checked Torch and Auto toggles: a light tint over the dark sheet (not the orange). -->
+    <color name="cam_tint_on">#2effffff</color>
 </resources>

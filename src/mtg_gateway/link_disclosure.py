@@ -156,9 +156,9 @@ SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
         "Logs and backups",
         (
             "Logs never contain your password or session. At the usual log level they hold no "
-            "Archidekt addresses or usernames: the request log names the kind of page, not the "
-            "deck or the person (/decks/{deck_id}, /users/{username}), and a few other messages "
-            "may include a deck number. With debug logging on, they list the Archidekt addresses "
+            "Archidekt addresses or usernames: the request log names the kind of page (deck pages "
+            "and profile pages), not the deck or the person, and a few other messages may include "
+            "a deck number. With debug logging on, they list the Archidekt addresses "
             "called, which include deck numbers and usernames.",
             "The gateway's own backups leave out the session and keep everything else above. A "
             "copy of the server's disk made another way includes the session, still encrypted.",
@@ -201,7 +201,6 @@ DETAIL_SUMMARY = "Full detail (open it to tick the box below)"
 DETAIL_ID = "archidekt-disclosure-detail"
 # Folds the detail and unlocks the tick box once it is opened (script-src 'self', no inline).
 SCRIPT = "/static/disclosure.js"
-TICK_HINT = "Open the full detail above to tick this box."
 
 SWEEP_ON = "On this gateway the hourly clean-up is on."
 SWEEP_OFF = "On this gateway the hourly clean-up is off."

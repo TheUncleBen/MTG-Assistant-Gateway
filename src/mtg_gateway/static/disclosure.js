@@ -8,11 +8,9 @@
   var detail = document.querySelector("details[data-must-open]");
   var box = document.querySelector("input[name=accept_risk]");
   if (!detail || !box) return;
-  var hint = document.getElementById("accept-risk-hint");
 
   function unlock() {
     box.disabled = false;
-    if (hint) hint.hidden = true;
     detail.removeEventListener("toggle", onToggle);
   }
 
@@ -26,7 +24,6 @@
     box.form.addEventListener("submit", function (ev) {
       if (!box.disabled) return;
       ev.preventDefault();
-      if (hint) hint.hidden = false;
       detail.querySelector("summary").focus();
     });
   }
@@ -34,7 +31,6 @@
   detail.open = false;
   box.checked = false;
   box.disabled = true;
-  if (hint) hint.hidden = false;
   // Added after folding: the toggle event that folding queues sees open === false and is ignored.
   detail.addEventListener("toggle", onToggle);
 })();

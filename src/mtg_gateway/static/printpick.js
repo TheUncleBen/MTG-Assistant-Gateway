@@ -14,8 +14,8 @@
    Loaded before deck.js and companion.js, which call window.MtgPrintPick. */
 (function () {
   "use strict";
-  var FINISH_NAMES = { nonfoil: "Non-foil", foil: "Foil", etched: "Etched" };
-  var FINISHES = [["", "Any finish"], ["nonfoil", "Non-foil"], ["foil", "Foil"], ["etched", "Etched"]];
+  var FINISH_NAMES = { nonfoil: "Normal", foil: "Foil", etched: "Etched" };
+  var FINISHES = [["", "Any finish"], ["nonfoil", "Normal"], ["foil", "Foil"], ["etched", "Etched"]];
   var FRAMES = [["", "Any frame"], ["1993", "1993 frame"], ["1997", "1997 frame"], ["2003", "2003 frame"], ["2015", "2015 frame"], ["future", "Future frame"]];
   var BORDERS = [["", "Any border"], ["black", "Black border"], ["white", "White border"], ["borderless", "Borderless"], ["silver", "Silver border"], ["gold", "Gold border"]];
   var SORTS = [["newest", "Newest first"], ["oldest", "Oldest first"], ["cheapest", "Cheapest (USD)"]];
@@ -655,7 +655,7 @@
     info.appendChild(prices);
     var same = samePrint(p, o.pending || o.current);
     if (fit.changed && !same) {
-      info.appendChild(el("p", "ppnote", "Not made in " + FINISH_NAMES[st.finish].toLowerCase() + ": the card becomes " +
+      info.appendChild(el("p", "ppnote", "Not made in a " + FINISH_NAMES[st.finish].toLowerCase() + " finish: the card becomes " +
         FINISH_NAMES[fit.finish].toLowerCase() + " with this printing."));
     }
     var acts = el("div", "ppacts");

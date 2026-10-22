@@ -29,7 +29,7 @@ from .reports_page import PHONE_WIDGETS_CSS
 from .theme import esc
 
 PAGE = ui.PER_PAGE
-FINISH_WORDS = {"nonfoil": "Non-foil", "foil": "Foil", "etched": "Etched"}
+FINISH_WORDS = {"nonfoil": "Normal", "foil": "Foil", "etched": "Etched"}
 CHIPS = (("", "All"), ("alert", "With an alert"), ("up", "Up in 7 days"), ("down", "Down in 7 days"))
 SORTS = (
     ("", "Sort: Name"),

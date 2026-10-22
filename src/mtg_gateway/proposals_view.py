@@ -86,7 +86,7 @@ EXPIRE_SOON = 2 * 86400  # an "expires in" flag under two days left, as before
 # Changes that are not edits to one of the member's decks ("Not tied to one of your decks").
 _UNTIED_KINDS = ("create_deck", "clone", "collection")
 _DECK_ACTIONS = ("collaborator_add", "collaborator_remove", "delete_deck")
-UNDO_KINDS = ("edit", "details", "restore")
+UNDO_KINDS = ("edit", "details", "restore", "categories")
 
 # Waiting table: tick box, change, risk, status, from, made, the open link.
 WAIT_COLS = (

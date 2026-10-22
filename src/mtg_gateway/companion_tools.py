@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any
 from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
 
-from . import deck_stats
+from . import card_models_view, deck_stats, ui
 from .archidekt import Deck
 from .busy import _headers, busy_body, busy_json_response, busy_plan, busy_response, busy_text_response
 from .cardsearch_view import watched_names
@@ -595,6 +595,21 @@ def add_deck_tool_routes(
                 forge_solo = newest(sub, str(deck.id))
             except Exception:  # noqa: BLE001 - a report problem never breaks the goldfish
                 forge_solo = None
+        # My card models: the member's own saved descriptions, a box opened from the solo line
+        # (card_models_view); the notice after a Remove that came back here
+        models_html, extra = "", ""
+        if getattr(getattr(reports, "models", None), "available", False):
+            from .report_view import MODEL_NOTICES
+
+            back = f"/decks/{deck.id}/goldfish"
+            note = MODEL_NOTICES.get(request.query_params.get("models") or "", "")
+            kind = "error" if request.query_params.get("models") == "error" else "ok"
+            extra = (ui.notice(note, kind, role="status") if note else "") + (
+                f"<div class='gf-models'>{card_models_view.opener()}</div>"
+            )
+            models_html = card_models_view.box_html(
+                reports.models.mine(sub), csrf=_csrf(s, sid) or "", back=back
+            )
         return page(
             f"Goldfish: {deck_title(deck)}",
             goldfish_page_html(
@@ -602,7 +617,9 @@ def add_deck_tool_routes(
                 guide_hidden=state.db.get_pref(sub, GOLDFISH_GUIDE_PREF) == "hidden",
                 forge_solo=forge_solo if isinstance(forge_solo, dict) else None,
                 csrf=_csrf(s, sid),
-            ),
+                extra_head=extra,
+            )
+            + models_html,
             sub=sub,
             sid=sid,
             two_pane=True,
@@ -611,8 +628,8 @@ def add_deck_tool_routes(
             viewer_only=True,  # the card viewer only: none of deck.js's hooks are on this page
             heading=False,
             deck_css=True,  # the card viewer's styles
-            extra_css=GOLDFISH_CSS,
-            extra_scripts=("goldfish.js",),
+            extra_css=GOLDFISH_CSS + card_models_view.CSS,
+            extra_scripts=("goldfish.js", "cardmodels.js"),
         )
 
     @server.custom_route("/goldfish/guide", methods=["POST"], include_in_schema=False)

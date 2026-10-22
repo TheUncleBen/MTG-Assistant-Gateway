@@ -815,8 +815,12 @@ async def test_app_shell_routes(stack: Stack) -> None:
     m = await h.http.get("/app.webmanifest")
     assert m.status_code == 200 and m.json()["start_url"] == "/decks"
     assert m.headers["content-type"].startswith("application/manifest+json")
+    object.__setattr__(h.app.state.gateway.settings, "server_name", "Ben's MTG gateway")
     sw = await h.http.get("/sw.js")
     assert sw.status_code == 200 and "fetch" in sw.text and sw.headers["cache-control"] == "no-store"
+    # the offline page carries the gateway's own name and a 44 px Try again
+    assert "Ben&#x27;s MTG gateway" in sw.text
+    assert "MTG Assistant Gateway" not in sw.text and "min-height:44px" in sw.text
     # a dropped connection or a gateway restart doesn't show the offline page: about 5 s of
     # retries first, GET navigations only
     assert "RETRY=[500,1000,1500,2000]" in sw.text and "e.request.method!=='GET'" in sw.text
@@ -1187,8 +1191,9 @@ def _assert_busy_page(r, path: str, *, status: int, title: str, max_wait: int) -
 
 async def test_a_used_up_archidekt_budget_is_one_shared_429_page_everywhere(stack: Stack) -> None:
     """Once the member's Archidekt budget (MTG_ARCHIDEKT_CALLS_PER_10_MIN) is spent, every page
-    that reads from Archidekt says so the same way: "Archidekt is busy", HTTP 429 with the
-    budget's Retry-After, no-store, a Try again link to the same URL. Never "Deck not found" or
+    that reads from Archidekt says so the same way: "Too many requests right now" (the member's
+    own allowance, not Archidekt's pause), HTTP 429 with the budget's Retry-After, no-store, a Try
+    again link to the same URL. Never "Deck not found" or
     "Cannot edit this deck" (the deck and the account are fine), never 200, 502 or 503."""
     from mtg_gateway.decks import RateBudget
 
@@ -1201,19 +1206,20 @@ async def test_a_used_up_archidekt_budget_is_one_shared_429_page_everywhere(stac
         for path in BUSY_PAGES:
             # as Reload asks (a deck page just read would be shown again from memory, no call)
             r = await b.http.get(path, headers={**NAV, "Cache-Control": "max-age=0"})
-            _assert_busy_page(r, path, status=429, title="Archidekt is busy", max_wait=600)
+            _assert_busy_page(r, path, status=429, title="Too many requests right now", max_wait=600)
             assert "used up its Archidekt allowance for the last 10 minutes" in r.text, path
             assert "once there is room" in r.text, path
             assert "Your account has used its 1 Archidekt actions" in r.text, path
             assert "href='/decks'>My decks</a>" in r.text, path
         for path in BUSY_DOWNLOADS:
             r = await b.http.get(path)
-            assert r.status_code == 429 and r.text.startswith("Archidekt is busy."), (path, r.text)
+            assert r.status_code == 429 and r.text.startswith("Too many requests right now."), (path, r.text)
             assert 1 <= int(r.headers["retry-after"]) <= 600 and r.headers["cache-control"] == "no-store"
             assert r.headers["content-type"].startswith("text/plain"), path
         js = await b.http.get("/decks/42/export.json")  # the JSON download answers in its own shape
         assert js.status_code == 429 and js.json()["error"] == "rate_limited", js.text
-        assert js.json()["message"].startswith("Archidekt is busy.") and js.json()["retry_after"] >= 1
+        assert js.json()["message"].startswith("Too many requests right now."), js.text
+        assert js.json()["retry_after"] >= 1
         assert 1 <= int(js.headers["retry-after"]) <= 600 and js.headers["cache-control"] == "no-store"
         # the JSON API already said 429 (docs/API.md); the budget's wait is the same header there
         api = await b.http.get("/api/v1/decks/42")

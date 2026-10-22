@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, Any
 from urllib.parse import parse_qs, quote
 
 from starlette.requests import Request
-from starlette.responses import RedirectResponse, Response
+from starlette.responses import JSONResponse, RedirectResponse, Response
 
 from . import app_signin, link_disclosure, modes, notify, prefs, proposals_view, smallpage, ui
 from .archidekt import PATIENCE_SPENT, page_turn
@@ -516,6 +516,8 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         back = _list_back(data.get("back"))
         if not check_csrf(sid, data) or action not in ("apply", "reject"):
             nothing = "Nothing was rejected." if action == "reject" else "Nothing was applied."
+            if data.get("box") == "1":
+                return JSONResponse({"ok": False, "message": "This form expired. Reload the page."}, 403)
             return small(
                 "Form expired",
                 smallpage.form_expired("Reload Proposals", "/proposals", back, nothing=nothing),
@@ -551,8 +553,15 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         try:
             the_plan = state.decks.plan_selection(sub, picks, versions)
         except DeckError as exc:
+            if data.get("box") == "1" and exc.kind == "pick_one":
+                return JSONResponse({"ok": False, "message": str(exc)}, status_code=409)
             return _pick_one_page(exc, back, sub, sid)
         stamp = form_stamp(s.session_secret, f"select:{sub}")
+        if data.get("box") == "1":
+            # the list's script (static/proposals.js) opens the confirm as a box over the page
+            # (POPUP-INVENTORY: Apply checked); the page below stays the no-script fallback
+            box = _apply_box_html(the_plan, _csrf(s, sid), stamp, versions, back, s.writes_enabled)
+            return JSONResponse({"ok": True, "box": box}, headers={"Cache-Control": "no-store"})
         return page(
             "Apply these changes?",
             _confirm_body(the_plan, _csrf(s, sid), stamp, versions, back, s.writes_enabled),
@@ -1677,6 +1686,18 @@ def _change_rows(rows: list[dict[str, Any]] | None, diff: str) -> tuple[str, dic
     return "".join(out), counts, net
 
 
+def _category_rows(rows: list[dict[str, Any]] | None, diff: str) -> tuple[str, int]:
+    """A categories proposal's rows, each the one line the settings page, the chat card, History
+    and Activity show (decks.category_line)."""
+    if rows is None:
+        items = [
+            _li("chg", "Category", html.escape(ln)) for ln in filter(None, map(str.strip, diff.splitlines()))
+        ]
+        return "".join(items), len(items)
+    items = [_li("chg", "Category", html.escape(row_line(r))) for r in rows]
+    return "".join(items), len(items)
+
+
 def _detail_rows(rows: list[dict[str, Any]] | None, diff: str) -> tuple[str, int]:
     """A details proposal's fields, before and after. The description is shown in full (both the
     current and the proposed text), so the user sees exactly what an apply will write."""
@@ -1956,6 +1977,14 @@ def _proposal_body(
             "no cards change</span>"
         ]
         heading, aria = "Deck details that will change", "Deck details"
+    elif p.get("kind") == "categories":
+        # the deck's own categories (decks.category_line): said in words, no card count
+        rows, total = _category_rows(p.get("rows"), p["diff"])
+        summary = [
+            f"<span class='ui-lbl grey'>{total} category change{'s' if total != 1 else ''}; "
+            "no cards change</span>"
+        ]
+        heading, aria = "Categories that will change", "Category changes"
     else:
         rows, counts, net = _change_rows(p.get("rows"), p["diff"])
         total = sum(counts.values())
@@ -2129,7 +2158,7 @@ def _proposal_body(
     actions = []
     if (
         state == "applied"
-        and p.get("kind") in ("edit", "details", "restore")
+        and p.get("kind") in ("edit", "details", "restore", "categories")
         and p.get("snapshot_id")
         and csrf
     ):
@@ -2416,6 +2445,75 @@ def _confirm_body(
         )
     )
     return "".join(out) + "</div>"
+
+
+APPLY_BOX_NOTE = "A snapshot is kept first, so Undo can put the cards back."
+
+
+def _apply_box_html(
+    plan: dict[str, Any],
+    csrf: str | None,
+    shown: str,
+    versions: dict[str, int],
+    back: str,
+    writes_enabled: bool,
+) -> str:
+    """The confirm of _confirm_body as the Apply box (NEW-WORDING: "Apply this change?" / "Apply
+    {n} changes?", the snapshot line, the order they run in, what is not sent; button "Apply" /
+    "Apply {n}"). The form inside carries the same stamp and fields as the confirm page's, posting
+    to /proposals/apply, so the too-soon guard and the version checks hold as they do there."""
+    n = plan["count"]
+    title = "Apply this change?" if n == 1 else f"Apply {n} changes?"
+    out = []
+    if n:
+        out.append(f"<p>{APPLY_BOX_NOTE}</p>")
+    for deck in plan["decks"]:
+        out.append(f"<h3>{html.escape(deck['deck_name'])}</h3><ol class='order'>")
+        for c in deck["changes"]:
+            no = f"#{c['board_no']} " if c.get("board_no") else ""
+            held = _held_line(str(c["held"])) if c.get("held") else ""
+            out.append(f"<li><b>{html.escape(no)}</b>{html.escape(c['summary'])}{held}</li>")
+        out.append("</ol>")
+        if deck.get("older_text"):
+            out.append(f"<p class='muted'>{html.escape(deck['older_text'])}</p>")
+    if plan["skipped"]:
+        out.append("<h3>Not sent</h3><ul class='skips'>")
+        for c in plan["skipped"]:
+            no = f"#{c['board_no']} " if c.get("board_no") else ""
+            out.append(
+                f"<li><a href='/proposals/{html.escape(c['proposal_id'])}'>{html.escape(no)}"
+                f"{html.escape(c['summary'])}</a>: {html.escape(c['why'])}</li>"
+            )
+        out.append("</ul>")
+    actions = [ui.box_button("Cancel", cancel=True)]
+    if not n:
+        out.append("<p>None of these can be applied together.</p>")
+    elif not writes_enabled:
+        off = WRITES_OFF_KEPT_MANY if n > 1 else ERR_MESSAGES["writes_disabled"]
+        out.append(f"<p>{html.escape(off)}</p>")
+    else:
+        picks = [c["proposal_id"] for d in plan["decks"] for c in d["changes"]]
+        hidden = {"csrf": csrf or "", "shown": shown, "picks": ",".join(picks), "back": back}
+        hidden.update({f"v_{p}": str(versions[p]) for p in picks if p in versions})
+        for c in (c for d in plan["decks"] for c in d["changes"]):
+            hidden[f"s_{c['proposal_id']}"] = str(c.get("status") or "")
+            hidden[f"t_{c['proposal_id']}"] = str(c.get("status_at") or "")
+        fields = "".join(
+            f"<input type='hidden' name='{html.escape(k)}' value='{html.escape(v)}'>"
+            for k, v in hidden.items()
+        )
+        out.append(f"<form id='apply-f' method='post' action='/proposals/apply'>{fields}</form>")
+        actions.append(
+            ui.box_button(
+                "Apply" if n == 1 else f"Apply {n}",
+                kind="primary",
+                form="apply-f",
+                name="action",
+                value="apply",
+                icon_name="check",
+            )
+        )
+    return ui.box("apply-box", title, "".join(out), actions=actions, close_href=back)
 
 
 def _result_body(run: dict[str, Any], csrf: str | None) -> str:

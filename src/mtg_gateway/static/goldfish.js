@@ -136,7 +136,12 @@
       if (!row.length && i > 0) return;
       var r = el("div", "gf-row");
       if (!row.length) r.appendChild(el("p", "gf-empty", empty));
-      row.forEach(function (id) { r.appendChild(cardButton(id, zone)); });
+      row.forEach(function (id) {
+        var cell = el("span", "gf-c");
+        cell.appendChild(cardButton(id, zone));
+        if (window.MtgMenu && window.MtgMenu.kebab) cell.appendChild(window.MtgMenu.kebab("Menu for " + cards[id].card.name));
+        r.appendChild(cell);
+      });
       box.appendChild(r);
     });
   }
@@ -357,7 +362,14 @@
   // Menu key; the game's own moves sit above Copy name. Nothing here is saved or sent anywhere.
   var Menu = window.MtgMenu, CardMenu = window.MtgCardMenu;
   if (Menu && CardMenu) Menu.bind(document, {
-    itemOf: function (n) { return n && n.closest ? n.closest(".gf-card[data-id]") : null; },
+    itemOf: function (n) {
+      if (!n || !n.closest) return null;
+      var card = n.closest(".gf-card[data-id]");
+      if (card) return card;
+      var cell = n.closest(".kebab") ? n.closest(".gf-c") : null;  // the cell's ⋮
+      return cell ? $(".gf-card[data-id]", cell) : null;
+    },
+    button: ".gf-c .kebab",
     open: function (node, x, y) {
       var id = node.getAttribute("data-id");
       var before = actionList(id).map(function (a) { return Menu.item(a.label, a.icon, a.fn); });

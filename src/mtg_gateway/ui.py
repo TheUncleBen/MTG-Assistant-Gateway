@@ -61,7 +61,7 @@ LABELS: dict[str, Label] = {
     "delete": Label("Delete", "red", "trash", "Deletes a deck. It always waits for you."),
     # Activity pages only
     "refused": Label(
-        "Refused", "red", "alert", "The gateway turned down a sign-in, an app's access or an approval."
+        "Refused", "red", "ban", "The gateway turned down a sign-in, an app's access or an approval."
     ),
 }
 # The codes the database and the board use for the same things.
@@ -149,11 +149,36 @@ def app_name(name: str | None) -> str:
     return name or UNNAMED_APP
 
 
+# The apps whose own mark is shown beside the name (Ben, 22 Oct): the official files in
+# static/logos/, byte for byte (docs/THIRD-PARTY-NOTICES.md). The Claude spark has one colour; the
+# OpenAI blossom comes as a black and a white file, the page's theme picking one (UI_CSS).
+CLAUDE_APPS = frozenset({"claude", "claude code", "claude-code"})
+OPENAI_APPS = frozenset({"chatgpt", "codex"})
+CLAUDE_LOGO = "/static/logos/claude.svg"
+OPENAI_LOGO_LIGHT = "/static/logos/openai-black.svg"  # black on the light theme
+OPENAI_LOGO_DARK = "/static/logos/openai-white.svg"  # white on the dark theme
+
+
+def app_logo(name: str) -> str:
+    """The logo markup for ``name``: the app's own mark (``<img>`` with an empty alt, so the name
+    beside it is read once), or the neutral "connected app" icon for any other or unnamed app."""
+    key = " ".join((name or "").split()).casefold()
+    if key in CLAUDE_APPS:
+        return f"<img class='logo' src='{CLAUDE_LOGO}' alt='' width='16' height='16'>"
+    if key in OPENAI_APPS:
+        return (
+            f"<img class='logo on-light' src='{OPENAI_LOGO_LIGHT}' alt='' width='16' height='16'>"
+            f"<img class='logo on-dark' src='{OPENAI_LOGO_DARK}' alt='' width='16' height='16'>"
+        )
+    return icon("app")
+
+
 def app_chip(name: str | None, *, unnamed: bool = False) -> str:
-    """The app a row came from: its full name beside the one neutral "connected app" icon (no
-    initials, no third-party logos; Ben, 21 Oct). A row with no app recorded shows a grey dash with
-    the tooltip "No app", never a guessed app; where the row *is* an app that gave no name (the
-    Users page's connected apps), ``unnamed=True`` reads "Unnamed app" instead."""
+    """The app a row came from: its full name beside its logo (Claude, Claude Code, ChatGPT and
+    Codex: the official marks, unmodified, only to tell the connected app apart) or the one neutral
+    "connected app" icon for any other app; never initials. A row with no app recorded shows a
+    grey dash with the tooltip "No app", never a guessed app; where the row *is* an app that gave
+    no name (the Users page's connected apps), ``unnamed=True`` reads "Unnamed app" instead."""
     name = (name or "").strip()
     if not name and not unnamed:
         return (
@@ -161,7 +186,7 @@ def app_chip(name: str | None, *, unnamed: bool = False) -> str:
             f"<span class='sr-only'>{NO_APP}</span></span>"
         )
     cls = "ui-app" if name else "ui-app unnamed"
-    return f"<span class='{cls}'>{icon('app')}<span class='nm'>{esc(app_name(name))}</span></span>"
+    return f"<span class='{cls}'>{app_logo(name)}<span class='nm'>{esc(app_name(name))}</span></span>"
 
 
 # --- list dates ---------------------------------------------------------------------------------
@@ -230,16 +255,20 @@ def when(ts: int | float | None, *, now: float | None = None, cls: str = "") -> 
 NOTICE_KINDS = ("info", "ok", "warn", "error")
 
 
-def notice(text: str, kind: str = "info", *, html: bool = False, role: str = "", cls: str = "") -> str:
+def notice(
+    text: str, kind: str = "info", *, html: bool = False, role: str = "", cls: str = "", id: str = ""
+) -> str:
     """One notice strip (F8): a tinted strip with a coloured left edge and no border of its own.
     ``kind``: info (blue), ok (green), warn (orange) or error (red). ``html=True`` takes ``text`` as
     markup the caller built. ``role``: "status" for a result the page announces, "alert" for an
-    error that needs attention; empty for a strip that is simply part of the page."""
+    error that needs attention; empty for a strip that is simply part of the page. ``id`` names the
+    strip for an ``aria-describedby``."""
     if kind not in NOTICE_KINDS:
         raise ValueError(f"unknown notice kind {kind!r}")
     classes = " ".join(c for c in ("notice", kind if kind != "info" else "", cls) if c)
+    i = f" id='{esc(id)}'" if id else ""
     r = f" role='{esc(role)}'" if role else ""
-    return f"<div class='{classes}'{r}>{text if html else esc(text)}</div>"
+    return f"<div class='{classes}'{i}{r}>{text if html else esc(text)}</div>"
 
 
 # --- page head, widgets, chips, toolbar --------------------------------------------------------

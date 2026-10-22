@@ -45,6 +45,10 @@ async def test_precons_have_the_shared_panel_set_headings_and_load_more(stack: S
             "<h2 class='sec'>Sample Set <span class='code'>(SMP)</span> <span class='n'>1 deck</span></h2>"
             in page
         )
+        # precon tiles: no owner picture and no deck tags (as deck search's tiles); the list date
+        tiles = page.split("<ul class='plain decklist", 1)[1]
+        assert "class='avatar" not in tiles and "class='tags'" not in tiles and "No deck tags" not in tiles
+        assert "<span class='info plain'>" in tiles and "<time class='ui-when'" in tiles
         assert (
             "class='btn btn-plain pre-all' data-n='1' hidden aria-expanded='false'>Show all 1</button>"
             in page
@@ -108,6 +112,7 @@ async def test_a_profile_has_one_header_the_results_bar_and_load_more(stack: Sta
         assert page.count("<h1") == 1 and "<h1 class='uname'>alice</h1>" in page
         assert "<p class='sub'>Public decks on Archidekt</p>" in page
         assert "class='avatar xl'" in page
+        assert "<time class='ui-when'" in page.split("<ul class='plain decklist", 1)[1]  # the list date
         assert "Archidekt profile</a>" in page and "href='https://archidekt.com/u/alice'" in page
         assert "class='btn btn-plain ext'" in page  # the one orange button is the follow question's
         # the results bar: the count, Sort by with its direction, Grid or List, card size; no Clear

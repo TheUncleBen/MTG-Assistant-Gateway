@@ -124,7 +124,7 @@ def test_rows_show_picture_finish_changes_and_alerts() -> None:
     page = _page()
     assert "https://cards.scryfall.io/small/front/0/0/" in page  # Esper Sentinel's picture
     assert "<span class='thumb' aria-hidden='true'><span>Mana Crypt</span></span>" in page  # none: a name box
-    assert "MH2 12 · Non-foil" in page and "any printing · Foil" in page
+    assert "MH2 12 · Normal" in page and "any printing · Foil" in page and "Non-foil" not in page
     assert "<span class='none'>No alert</span>" in page
     assert "class='ui-lbl blue'" in page and "Above $45.00 · below $30.00</span>" in page
     assert "7 days <span class='dl down'>" in page and "<span class='kv'>in 7 days</span>" in page
@@ -240,7 +240,7 @@ async def test_the_page_reads_a_year_and_shows_the_new_layout(stack: Stack, monk
         assert (await _watch(b, name="sol ring", set_code="FRC", collector_number="21")).status_code == 303
         page = (await b.http.get("/watchlist")).text
         assert "class='wrap ui-wide'" in page and "/static/watchlist.js" in page
-        assert "class='ui-table w-t'" in page and "FRC 21 · Non-foil" in page
+        assert "class='ui-table w-t'" in page and "FRC 21 · Normal" in page
         assert "<h2>Cards <span class='ui-sub'>1</span></h2>" in page
         assert "$1.28<small>today</small>" in page and clock.day
         assert prices.money(1.28) == "$1.28"

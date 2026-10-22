@@ -108,7 +108,8 @@ def low_risk_text(max_rows: int = DEFAULT_MAX_ROWS) -> str:
 # Which proposals are high risk (risk_of), as one sentence.
 HIGH_RISK_TEXT = (
     "Everything else: more rows than that, a commander change, a new deck, restoring a snapshot, "
-    "and the deck's details (name, format, bracket, description, visibility, folder, tags and cover)."
+    "the deck's details (name, format, bracket, description, visibility, folder, tags and cover), "
+    "and its categories (a new name, Premier, Not in deck or Not in price)."
 )
 # What no mode lets an assistant apply (MEMBER_ONLY), as one sentence.
 MEMBER_ONLY_TEXT = (
@@ -124,7 +125,8 @@ def auto_waits_text(big_rows: int = DEFAULT_BIG_EDIT_ROWS) -> str:
     """What still waits for a press in auto mode, as one sentence."""
     return (
         "Restoring a snapshot, a commander change, a new deck, an edit of more than "
-        f"{_rows(big_rows)}, making a deck public or unlisted, and any edit of a description that has "
+        f"{_rows(big_rows)}, making a deck public or unlisted, a category change that touches the "
+        "commander or which cards count in the deck, and any edit of a description that has "
         "formatting, such as bold text, links or pictures, still wait for your press. So does a held "
         "change, a change waiting for another change first, one another app had a hand in, one that "
         "replaces another app's change, or one that another app's waiting change would replace."
@@ -147,7 +149,8 @@ def mode_help(mode: str, *, max_rows: int = DEFAULT_MAX_ROWS, big_rows: int = DE
             "row in the commander zone, or fewer copies of a card that has a row in the commander zone "
             "and another row, both in the deck or both in the maybeboard or sideboard) and a private "
             "copy of a deck (a clone, which "
-            "changes nothing that exists). A new deck built from a list, restores, deck details, commander "
+            "changes nothing that exists). A new deck built from a list, restores, deck details and "
+            "categories, commander "
             f"changes, bigger edits, and anything on your Archidekt account ({ACCOUNT_ACTIONS_TEXT}) "
             "or deleting a deck still wait for your press. So does a held change, a change waiting for "
             "another change first, one another app had a hand in, one that replaces another app's change, "
@@ -190,6 +193,31 @@ def effective_mode(chosen: str | None, *, default: str, cap: str) -> str:
     return mode if rank(mode) <= rank(cap) else cap
 
 
+# A change to the deck's own categories (kind "categories", decks.category_change_rows): touching
+# the commander zone (Premier, the Commander category or one holding the commander) or which cards
+# count in the deck always waits for the member's press, in Full auto too (auto_waits).
+CATEGORY_COMMANDER_REASON = "changes the commander"
+CATEGORY_COUNTS_REASON = "changes which cards count in the deck"
+CATEGORY_REASON = "changes the deck's categories"
+# The deck settings page's confirm box for a commander category change (NEW-WORDING.md)
+CATEGORY_COMMANDER_CONFIRM = (
+    "Cards in a Premier category are the deck's commanders. Changing it can change which cards "
+    "Archidekt treats as the commander, the deck's legality and its colours."
+)
+
+
+def category_wait(rows: list[dict[str, Any]] | None) -> str | None:
+    """Why a categories change waits for the member's press in every mode, or None."""
+    if rows is None:
+        return "has no list of rows to check"
+    rows = [r for r in rows if isinstance(r, dict)]
+    if any(r.get("commander") or "premier_after" in r for r in rows):
+        return CATEGORY_COMMANDER_REASON
+    if any(r.get("counts") or "not_in_deck_after" in r for r in rows):
+        return CATEGORY_COUNTS_REASON
+    return None
+
+
 COMMANDER_COPIES_REASON = "changes the commander's copies"
 COMMANDER_ZONE_REASON = "adds or changes a row with a commander-zone category"
 # Fewer copies of a card whose commander-zone row is in the maybeboard or sideboard, with another
@@ -229,6 +257,8 @@ def risk_of(
         return "high", "restores a snapshot"
     if kind == "details":
         return "high", "changes the deck's details"
+    if kind == "categories":
+        return "high", category_wait(rows) or CATEGORY_REASON
     if kind not in ("edit", "collection"):
         return "high", "not a plain deck or collection edit"
     if rows is None:  # stored before review rows existed: nothing to judge it by
@@ -263,6 +293,8 @@ def hand_edit_confirm(kind: str, rows: list[dict[str, Any]] | None) -> str | Non
     """Why a member's own edit in the app should ask "are you sure" before it is applied, or None
     when it can go straight to Archidekt (with its snapshot, as every apply to a deck takes one).
     Restores never come here: they have their own review page."""
+    if kind == "categories":  # the deck settings page's Save categories
+        return CATEGORY_COMMANDER_CONFIRM if category_wait(rows or []) == CATEGORY_COMMANDER_REASON else None
     if kind != "edit" or not rows:
         return None
     if any(r.get("kind") == "commander" for r in rows):
@@ -359,6 +391,10 @@ def auto_waits(
         if any(isinstance(r, dict) and r.get("formatting_lost") for r in rows or []):
             return "removes all of the description's formatting, such as bold text, links and pictures"
         return None
+    if kind == "categories":
+        # a rename or Not in price applies in Full auto, as other deck details do; the commander
+        # zone and which cards count in the deck never do
+        return category_wait(rows)
     if kind == "clone":
         return None
     return "is not a deck or collection change"

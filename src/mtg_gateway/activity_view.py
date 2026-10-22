@@ -163,18 +163,11 @@ NO_DETAIL = "No detail"
 NO_NAME = "a member with no name"  # a member with neither a username nor an email on record
 NO_MEMBER = "No member"  # a row with no member recorded (a refused sign-in before any account)
 
-# The ban sign: Refused carries it so it differs from Failed by icon as well as by word (theme.py
-# has no such icon yet; the same markup as theme.icon, so it sizes and colours like one).
-BAN_ICON = (
-    "<svg class='i' viewBox='0 0 24 24' aria-hidden='true'><circle cx='12' cy='12' r='9'/>"
-    "<path d='M5.7 5.7l12.6 12.6'/></svg>"
-)
-
 
 def refused_label(word: str = "Refused", *, title: str = "") -> str:
-    """The red Refused label with the ban sign (ui.label_for("refused") carries the alert sign)."""
-    tip = f" title='{esc(title)}'" if title else ""
-    return f"<span class='ui-lbl red'{tip}>{BAN_ICON}{esc(word)}</span>"
+    """The red Refused label with the ban sign (theme icon "ban"), so it differs from Failed by icon
+    as well as by word."""
+    return ui.label_for("refused", word=word, title=title)
 
 
 # Detail keys as words on the admin page; keys that only name a row elsewhere are left to
@@ -864,7 +857,7 @@ def _list_parts(
 
 def _chip_icons(chips_html: str) -> str:
     """Refused and Failed differ by icon on the chips too: the ban sign and the alert sign."""
-    return chips_html.replace(">Refused <span", f">{BAN_ICON}Refused <span", 1).replace(
+    return chips_html.replace(">Refused <span", f">{icon('ban')}Refused <span", 1).replace(
         ">Failed <span", f">{icon('alert')}Failed <span", 1
     )
 

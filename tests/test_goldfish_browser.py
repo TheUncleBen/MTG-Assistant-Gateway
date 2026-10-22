@@ -423,3 +423,55 @@ def test_goldfish_cards_follow_the_card_size(server: Server, width: int, scheme:
         _shot(page, f"goldfish-size-{width}-{scheme}")
         browser.close()
     assert errors == []
+
+
+# Each cell's ⋮ against its card: label, size, and whether the two overlap or leave the window.
+KEBABS = """() => [...document.querySelectorAll('#gf-hand .gf-c')].map(c => {
+  const card = c.querySelector('.gf-card'), k = c.querySelector('button.kebab');
+  if (!k) return null;
+  const a = card.getBoundingClientRect(), b = k.getBoundingClientRect();
+  const overlap = a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+  return { name: card.getAttribute('data-card'), label: k.getAttribute('aria-label'), w: b.width, h: b.height,
+    overlap, shown: getComputedStyle(k).display !== 'none' && b.width > 0,
+    inside: b.right <= document.documentElement.clientWidth + 0.5 };
+})"""
+
+
+@pytest.mark.parametrize("width", [344, 1280])
+def test_each_goldfish_card_has_a_menu_button_beside_it(server: Server, width: int) -> None:
+    """The approved ways into a card's menu are right-click, press and hold and a ⋮ (Ben, 21 Oct):
+    the ⋮ sits under each card, a 44 px button that covers none of the card, opens the same menu
+    as the card itself (the game's moves above Copy name) and goes away with the small card size,
+    where the cards are too narrow for it."""
+    from playwright.sync_api import sync_playwright
+
+    _chromium()
+    sid = server.sign_in_and_link()
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, width)
+        page.goto(f"{server.base}/decks/42/goldfish", wait_until="networkidle")
+        page.locator("[data-act=keep]").click()
+        got = page.evaluate(KEBABS)
+        assert got and all(got), got
+        for k in got:
+            assert k["label"] == f"Menu for {k['name']}", k
+            assert k["shown"] and k["inside"] and not k["overlap"], k
+            assert k["w"] >= 44 and k["h"] >= 44, k
+        assert _overflow(page) == 0
+        first = page.locator("#gf-hand .gf-c").first
+        name = first.locator(".gf-card").get_attribute("data-card")
+        first.locator("button.kebab").click()
+        menu = page.locator(".ctxmenu[role=menu]")
+        menu.wait_for(timeout=3000)
+        assert name in menu.inner_text()
+        items = [t.strip() for t in menu.locator("[role=menuitem]").all_inner_texts()]
+        assert "Copy name" in items and any(i.startswith("Tap") or i.startswith("Play") for i in items), items
+        page.keyboard.press("Escape")
+        page.wait_for_timeout(100)
+        assert page.locator(".ctxmenu").count() == 0
+        # the card stays its own button: the ⋮ is beside it, not inside it
+        assert page.locator("#gf-hand .gf-card .kebab").count() == 0
+        page.locator(".gf-size [data-card-size-set=s]").click()
+        assert not any(k["shown"] for k in page.evaluate(KEBABS))
+        browser.close()
+    assert errors == []

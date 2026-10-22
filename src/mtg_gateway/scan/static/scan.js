@@ -1088,7 +1088,7 @@
      loadPrints(oracleId) lists every printing newest first; choosePrinting(target, print) re-points the
      pending result or a list item; setFoil(target, on) and foilChoices(card) handle the finish. */
   const hooks = () => window.__scan || {};
-  const FINISH_LABEL = { nonfoil: 'Non-foil', foil: 'Foil', etched: 'Etched' };
+  const FINISH_LABEL = { nonfoil: 'Normal', foil: 'Foil', etched: 'Etched' };
   let pickerKeys = null;   // the open sheet's Escape handler, removed however the sheet closes
   let pickerOpener = null; // the element that opened the sheet, given focus back when it closes
   function closePicker() {

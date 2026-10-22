@@ -306,9 +306,11 @@ details.dd .menu button.danger:focus-visible{background:var(--border);color:var(
   padding:.5rem 1rem .4rem;border-bottom:1px solid var(--border);margin-bottom:.25rem;white-space:nowrap;
   overflow:hidden;text-overflow:ellipsis;max-width:18rem}
 .menu .head.who b{color:var(--text)}
-.topbar .signin{height:34px;min-height:34px;padding:0 .9rem;background:var(--orange);
-  border-color:var(--orange);color:var(--on-orange);white-space:nowrap}
-.topbar .signin:hover{background:var(--orange);color:var(--on-orange);filter:brightness(1.1)}
+/* F10: the signed-out Sign in is plain (the page's own button is the one orange), 44 px on touch */
+.topbar .signin{height:34px;min-height:34px;padding:0 .9rem;background:var(--surface);
+  border-color:var(--border);color:var(--text);white-space:nowrap}
+.topbar .signin:hover{background:var(--surface-2);color:var(--text)}
+@media (pointer:coarse){.topbar .signin{height:44px;min-height:44px}}
 .menu form{margin:0;display:contents}
 /* the chosen theme: --orange-text would be 4.0:1 on the light menu */
 .menu .on,details.dd .menu .on{color:var(--toolbar-active);font-weight:700}
@@ -1147,11 +1149,22 @@ main.wrap.ui-wide{max-width:1200px}
 .ui-lbl.blue{background:var(--blue-tint);color:var(--blue-text)}
 .ui-lbl.grey{background:transparent;color:var(--text-muted);border-color:var(--card-border)}
 .ui-lbl.plain{background:var(--surface-2);color:var(--text)}
-/* the app a row came from: its full name beside one neutral "connected app" icon (no initials, no
-   third-party logos); a dash when none is recorded */
+/* the app a row came from: its full name beside its own mark (Claude, ChatGPT, Codex: the official
+   files, unmodified, static/logos/) or one neutral "connected app" icon; a dash when none is recorded.
+   OpenAI's mark is black on the light theme and white on the dark one: two images, the theme shows one */
 .ui-app{display:inline-flex;align-items:center;gap:.35rem;color:var(--text);font-size:.9rem;
   white-space:nowrap}
 .ui-app svg.i{width:16px;height:16px;color:var(--text-muted);stroke-width:2}
+.ui-app img.logo{width:16px;height:16px;flex:none;display:inline-block;object-fit:contain}
+.ui-app img.on-light{display:none}
+@media (prefers-color-scheme: dark){ :root:not([data-theme=light]) .ui-app img.on-light{display:none}
+  :root:not([data-theme=light]) .ui-app img.on-dark{display:inline-block} }
+@media (prefers-color-scheme: light){ :root:not([data-theme=dark]) .ui-app img.on-light{display:inline-block}
+  :root:not([data-theme=dark]) .ui-app img.on-dark{display:none} }
+:root[data-theme=dark] .ui-app img.on-light{display:none}
+:root[data-theme=dark] .ui-app img.on-dark{display:inline-block}
+:root[data-theme=light] .ui-app img.on-light{display:inline-block}
+:root[data-theme=light] .ui-app img.on-dark{display:none}
 .ui-app.none{color:var(--text-muted)}
 .ui-app.unnamed .nm{color:var(--text-muted)}
 /* a dash where a row has no risk label */
@@ -1171,13 +1184,12 @@ main.wrap.ui-wide{max-width:1200px}
 
 /* quick-filter chips with counts */
 .ui-chips{display:flex;flex-wrap:wrap;gap:.4rem;margin:0 0 .6rem}
-.ui-chip{display:inline-flex;align-items:center;gap:.35rem;min-height:36px;padding:0 .8rem;
+.ui-chip{display:inline-flex;align-items:center;gap:.35rem;min-height:44px;padding:0 .8rem;
   border-radius:999px;
   border:1px solid var(--control-border);color:var(--text);font-weight:700;font-size:.9rem;
   text-decoration:none;
   background:transparent}
 .ui-chip:hover{color:var(--text);background:var(--surface-2)}
-@media (pointer:coarse){.ui-chip{min-height:44px}}
 .ui-chip[aria-pressed=true],.ui-chip[aria-current]{background:var(--orange-tint);
   border-color:var(--orange-text);
   color:var(--orange-text)}
@@ -1383,7 +1395,8 @@ ul.ui-chg{padding:0;border:1px solid var(--card-border);border-radius:var(--radi
 .wdg .lab{display:flex;align-items:center;gap:.4rem;color:var(--text-muted);font-size:.85rem;font-weight:700;
   text-transform:uppercase;letter-spacing:.03em}
 .wdg .lab svg.i{width:16px;height:16px}
-.wdg .big{font-size:2rem;font-weight:900;line-height:1.1;font-variant-numeric:tabular-nums}
+.wdg .big{font-size:2rem;font-weight:900;line-height:1.1;font-variant-numeric:tabular-nums;min-width:0;
+  overflow-wrap:anywhere}
 .wdg .big small{font-size:.95rem;font-weight:700;color:var(--text-muted);margin-left:.35rem}
 .wdg .det{color:var(--text-muted);font-size:.88rem;display:flex;flex-wrap:wrap;gap:.3rem .5rem;
   align-items:center}
@@ -1866,6 +1879,7 @@ ICONS = {
     "minus": "<path d='M5 12h14'/>",
     "check": "<path d='M5 12l4 4L19 6'/>",
     "x": "<path d='M6 6l12 12M18 6L6 18'/>",
+    "ban": "<circle cx='12' cy='12' r='9'/><path d='M5.7 5.7l12.6 12.6'/>",
     "undo": "<path d='M9 14L4 9l5-5'/><path d='M4 9h10a6 6 0 0 1 0 12h-3'/>",
     "redo": "<path d='M15 14l5-5-5-5'/><path d='M20 9H10a6 6 0 0 0 0 12h3'/>",
     "settings": "<circle cx='12' cy='12' r='3'/><path d='M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1"
@@ -2118,7 +2132,7 @@ def static_version(name: str) -> str | None:
     return hashlib.sha256(data).hexdigest()[:12]
 
 
-_STATIC_REF = re.compile(r"((?:src|href)=')/static/([A-Za-z0-9_.-]{1,80})'")
+_STATIC_REF = re.compile(r"((?:src|href)=')/static/((?:logos/)?[A-Za-z0-9_.-]{1,80})'")
 
 
 def versioned_static(doc: str) -> str:

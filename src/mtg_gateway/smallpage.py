@@ -61,11 +61,6 @@ CSS = (
     ".sio-who .app{font-size:1.25rem;font-weight:900;overflow-wrap:anywhere}"
     ".sio-who .host{color:var(--text-muted);overflow-wrap:anywhere}"
     ".sio .ui-meta{font-size:1rem}.sio .ui-meta code{font-size:1em}"
-    # F10: the signed-out top bar's Sign in is plain and 44 px on touch (the page's own button
-    # is the one orange). theme.py still draws it orange; this wins on the pages that load it.
-    ".topbar .signin{background:var(--surface);border-color:var(--border);color:var(--text)}"
-    ".topbar .signin:hover{background:var(--surface-2);color:var(--text);filter:none}"
-    "@media (pointer:coarse){.topbar .signin{height:44px;min-height:44px}}"
     "@media (max-width:599.98px){.sio{margin-top:.5rem}.sio .ui-meta{grid-template-columns:1fr;gap:.15rem}"
     ".sio .ui-meta dd{margin-bottom:.4rem}.sio-p .ui-actions .btn,.sio-p .ui-actions button{flex:1 1 auto}}"
 )

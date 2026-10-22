@@ -127,7 +127,9 @@ async def test_section_forms_answer_next_to_their_own_form(stack: Stack) -> None
         assert tags < shown.index("Tag added on Archidekt.") < shown.index("id='folder'")
         r = await _form(b, "/decks/42/tags", {"action": "add", "name": "sea monsters"})
         assert r.status_code == 400
-        at = r.text.index("<p class='notice error' id='tags-msg' role='alert'>Archidekt has no deck tag")
+        at = r.text.index(
+            "<div class='notice error ds-note' id='tags-msg' role='alert'>Archidekt has no deck tag"
+        )
         assert r.text.index("id='tags'") < at < r.text.index("id='folder'")
         assert "aria-describedby='tags-help tags-msg' aria-invalid='true'" in r.text
         assert "value='sea monsters'" in r.text  # the box keeps what was typed

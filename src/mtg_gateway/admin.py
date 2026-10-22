@@ -601,7 +601,6 @@ USERS_PURPOSE = "Everyone who has signed in. Disabling blocks this gateway only.
 MODELS_PURPOSE = "Each model is used only in its owner's simulations. Only admins see who added it."
 CURRENT = " aria-current='page'"
 NO_NAME = activity_view.NO_NAME  # a member with neither a username nor an email on record
-BAN_ICON = activity_view.BAN_ICON
 PER_PAGE = ui.PER_PAGE
 # the member's first-sign-in and last-seen windows the Users page filters by
 SEEN = (
@@ -1223,7 +1222,7 @@ def users_data(state: Any) -> list[dict[str, Any]]:
 
 def _status_labels(u: Mapping[str, Any], admin_sub: str, *, is_admin: bool) -> str:
     out = (
-        f"<span class='ui-lbl red'>{BAN_ICON}Disabled</span>"
+        f"<span class='ui-lbl red'>{icon('ban')}Disabled</span>"
         if u["disabled"]
         else ui.label("Active", "green", "check")
     )

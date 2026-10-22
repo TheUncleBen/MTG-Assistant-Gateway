@@ -62,6 +62,29 @@ class UiStandardsTest {
         assertTrue(File(res, "drawable/button_toggle_bg.xml").readText().contains("android:state_checked=\"true\""))
     }
 
+    @Test fun togglesSayTheirStateInWordsAndNeverTakeTheOrange() {
+        // Torch and Auto read "Torch: On" / "Torch: Off" and "Auto: On" / "Auto: Off" (NEW-WORDING 28)
+        val s = strings()
+        val byId = elements("layout/camera_panel.xml", "ToggleButton").associateBy { it.getAttribute("android:id") }
+        val torch = byId.getValue("@+id/torch_toggle")
+        val auto = byId.getValue("@+id/auto_toggle")
+        assertEquals("@string/torch_state_on", torch.getAttribute("android:textOn"))
+        assertEquals("@string/torch_state_off", torch.getAttribute("android:textOff"))
+        assertEquals("@string/auto_state_on", auto.getAttribute("android:textOn"))
+        assertEquals("@string/auto_state_off", auto.getAttribute("android:textOff"))
+        assertEquals("Torch: On", s.getValue("torch_state_on"))
+        assertEquals("Torch: Off", s.getValue("torch_state_off"))
+        assertEquals("Auto: On", s.getValue("auto_state_on"))
+        assertEquals("Auto: Off", s.getValue("auto_state_off"))
+        // the checked state is a tint with a bright outline, not the orange fill next to the orange Shoot
+        val bg = File(res, "drawable/button_toggle_bg.xml").readText()
+        val checked = bg.substringAfter("android:state_checked=\"true\">").substringBefore("</item>")
+        assertFalse(checked.contains("@color/accent"))
+        assertTrue(checked.contains("<stroke "))
+        assertTrue(checked.contains("@color/cam_tint_on"))
+        assertFalse(File(res, "color/button_toggle_text.xml").readText().contains("state_checked"))
+    }
+
     @Test fun errorMessagesCarryNoRawCodes() {
         val s = strings()
         // These once showed an HTTP status, a CameraX code or an installer status; the code goes to the log now.

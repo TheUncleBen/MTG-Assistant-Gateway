@@ -190,15 +190,20 @@ def test_a_notice_is_a_tinted_strip_with_a_coloured_left_edge_and_no_border() ->
         ui.notice("x", "purple")
 
 
-# -- the app chip (Ben, 21 Oct: full name, one neutral icon, no initials, no logos) -------------------
+# -- the app chip (Ben, 21 Oct: full name, no initials; 22 Oct: the known apps' own marks) ------------
 
 
 def test_the_app_chip_shows_the_full_name_beside_the_connected_app_icon() -> None:
     plug = theme.icon("app")
-    assert ui.app_chip("Claude") == f"<span class='ui-app'>{plug}<span class='nm'>Claude</span></span>"
-    assert ui.app_chip("ChatGPT") == f"<span class='ui-app'>{plug}<span class='nm'>ChatGPT</span></span>"
+    claude = "<img class='logo' src='/static/logos/claude.svg' alt='' width='16' height='16'>"
+    assert ui.app_chip("Claude") == f"<span class='ui-app'>{claude}<span class='nm'>Claude</span></span>"
+    assert ui.app_chip("ChatGPT").startswith(
+        "<span class='ui-app'><img class='logo on-light' src='/static/logos/"
+    )
     assert ui.app_chip("Codex").endswith("<span class='nm'>Codex</span></span>")
-    assert "<i" not in ui.app_chip("Claude")  # no initials tile
+    # any other app keeps the gateway's own neutral icon; never initials
+    assert ui.app_chip("browser") == f"<span class='ui-app'>{plug}<span class='nm'>browser</span></span>"
+    assert "<i>" not in ui.app_chip("Claude") and "<i " not in ui.app_chip("Claude")  # no initials tile
     assert "&lt;script&gt;" in ui.app_chip("<script>")
     # an app that gave no name is "Unnamed app"; a row with no app recorded stays the dash
     assert (
@@ -209,9 +214,10 @@ def test_the_app_chip_shows_the_full_name_beside_the_connected_app_icon() -> Non
     for none in (None, "", "  "):
         out = ui.app_chip(none)
         assert "class='ui-app none' title='No app'" in out and "—" in out
-    # the icon is the gateway's own stroke, not a company's mark; one mark for every app
+    # the neutral icon is the gateway's own stroke, not a company's mark
     assert "app" in theme.ICONS and "<path" in theme.ICONS["app"] and "fill='#" not in theme.ICONS["app"]
     assert ".ui-app svg.i{width:16px;height:16px" in theme.UI_CSS and ".ui-app i{" not in theme.UI_CSS
+    assert ".ui-app img.logo{width:16px;height:16px" in theme.UI_CSS
 
 
 # -- the card size control (R-175) ----------------------------------------------------------------------

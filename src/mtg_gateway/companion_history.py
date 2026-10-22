@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any
 from starlette.requests import Request
 from starlette.responses import RedirectResponse, Response
 
-from . import activity_view, ui
+from . import activity_view, card_models_view, ui
 from .companion import (
     DECKS_JSON_TIMEOUT,
     _filename,
@@ -427,6 +427,14 @@ def add_history_routes(
             notice, kind = _esc(refused), "notice warn"
         from .report_page import REPORT_PAGE_CSS, report_page_html
 
+        # the member's own saved descriptions, as a box the mentions open (card_models_view)
+        my_models = (
+            card_models_view.box_html(
+                reports.models.mine(sub), csrf=_csrf(s, sid) or "", back=f"/history/reports/{safe}"
+            )
+            if reports.models.available
+            else ""
+        )
         left_out: list[Any] = []
         for block in (r.get("forge"), r.get("forge_solo")):
             if isinstance(block, dict) and isinstance(block.get("not_played"), list):
@@ -440,6 +448,7 @@ def add_history_routes(
             removable=mine,
             csrf=_csrf(s, sid) or "",
             card_types=_card_types(left_out) if left_out else {},
+            my_models=my_models,
         )
         return page(
             f"Report: {r['deck_name']}",
@@ -449,10 +458,76 @@ def add_history_routes(
             heading=False,
             current="/reports",
             viewer_only=True,  # the card viewer for "Open card" on the left-out cards (report.js)
-            extra_scripts=("export.js", "forge-live.js", "report.js"),
-            extra_css=REPORT_CSS + REPORT_PAGE_CSS,
+            extra_scripts=("export.js", "forge-live.js", "report.js", "cardmodels.js"),
+            extra_css=REPORT_CSS + REPORT_PAGE_CSS + card_models_view.CSS,
             main_class="ui-wide",
         )
+
+    # -- My card models: the member's own saved descriptions (card_models_view) -------------------
+    @server.custom_route(card_models_view.PAGE, methods=["GET"], include_in_schema=False)
+    async def my_models_page(request: Request) -> Response:
+        """The box as a page of its own (the opener's address without scripts): the list open,
+        ``?remove=`` a card's confirm open, ``?models=`` the notice after a Remove."""
+        sub, sid = browser_session(state, request)
+        if not sub:
+            return login_redirect(card_models_view.PAGE)
+        if not reports.models.available:
+            return Response(status_code=404)
+        qp = request.query_params
+        mine = reports.models.mine(sub)
+        remove = str(qp.get("remove") or "")[:286]
+        if remove and remove.casefold() not in {m["name"].casefold() for m in mine}:
+            remove = ""  # only a card of the member's own list gets a confirm
+        from .report_view import MODEL_NOTICES
+
+        notice = MODEL_NOTICES.get(qp.get("models") or "", "")
+        kind = "error" if qp.get("models") == "error" else "ok"
+        body = (ui.notice(notice, kind, role="status") if notice else "") + card_models_view.box_html(
+            mine, csrf=_csrf(s, sid) or "", back=card_models_view.PAGE, open=True, remove=remove
+        )
+        return page(
+            card_models_view.TITLE,
+            body,
+            sub=sub,
+            sid=sid,
+            heading=False,
+            current="/reports",
+            viewer_only=True,
+            extra_scripts=("cardmodels.js",),
+            extra_css=card_models_view.CSS,
+        )
+
+    @server.custom_route(card_models_view.REMOVE_ACTION, methods=["POST"], include_in_schema=False)
+    async def my_model_remove(request: Request) -> Response:
+        """Remove from My card models: the same removal and words as the report page's, then back to
+        the page the box was opened from (one of the member's own pages) with the notice."""
+        sub, sid = browser_session(state, request)
+        if not sub:
+            return login_redirect(card_models_view.PAGE)
+        if not reports.models.available:
+            return Response(status_code=404)
+        data = await form(request)
+        if not check_csrf(sid, data):
+            return page(
+                card_models_view.TITLE,
+                "<p class='notice error'>This form expired. Reload and try again.</p>",
+                sub=sub,
+                sid=sid,
+                status=403,
+            )
+        back = card_models_view.safe_back(data.get("back"))
+        outcome = _remove_model(sub, str(data.get("card") or ""))
+        sep = "&" if "?" in back else "?"
+        return RedirectResponse(f"{back}{sep}models={outcome}", status_code=303)
+
+    def _remove_model(sub: str, card: str) -> str:
+        """Remove the member's own saved description of ``card``: removed, gone or error."""
+        from .card_models import StoreError
+
+        try:
+            return "removed" if reports.models.remove(sub, card) else "gone"
+        except StoreError:
+            return "error"
 
     @server.custom_route("/history/reports/{rid}/models/remove", methods=["POST"], include_in_schema=False)
     async def report_model_remove(request: Request) -> Response:
@@ -476,12 +551,7 @@ def add_history_routes(
             )
         if _report_or_404(sub, rid) is None:
             return _not_found(sub, sid)
-        from .card_models import StoreError
-
-        try:
-            outcome = "removed" if reports.models.remove(sub, str(data.get("card") or "")) else "gone"
-        except StoreError:
-            outcome = "error"
+        outcome = _remove_model(sub, str(data.get("card") or ""))
         return RedirectResponse(f"/history/reports/{_esc(rid)}?models={outcome}", status_code=303)
 
     def _more_notices() -> dict[str, str]:

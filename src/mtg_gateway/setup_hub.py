@@ -798,7 +798,8 @@ INSTALL_CSS = (
     ".inst .drop .list{border-top:1px solid var(--border-soft);padding:.25rem 0}"
     ".inst .card>h2{margin-bottom:.4rem}"
     ".inst p,.inst li{overflow-wrap:anywhere}"
-    ".inst a.nb code{overflow-wrap:normal;white-space:nowrap}"
+    # the address breaks at its <wbr> first; mid-word only when the address alone is too wide
+    ".inst a.nb code{overflow-wrap:anywhere}"
     ".setup>li{margin:.7rem 0}"
     ".copyfield{margin:.5rem 0}.copyfield label{margin:.2rem 0 .3rem}"
     ".copyline{display:flex;gap:.5rem;align-items:flex-start}"

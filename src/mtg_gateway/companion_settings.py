@@ -11,13 +11,20 @@ from typing import TYPE_CHECKING, Any
 from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
 
-from . import ui
+from . import modes, ui
 from .actions import COLLABORATOR_NOTE, collaborator_by_hand, collaborator_target, profile_url
 from .archidekt import FORMAT_IDS, ArchidektError, Deck, featured_scryfall_id, format_label, rich_text
 from .busy import busy_response
 from .companion import DECK_CSP, FORMAT_CHOICES, INDENT, SETTINGS_OK_MESSAGES
 from .deckpage import card_image, deck_title, delete_box_html
-from .decks import DeckError, current_client
+from .decks import (
+    CATEGORY_FLAGS,
+    DeckError,
+    category_change_rows,
+    current_client,
+    deck_categories,
+    parse_category_changes,
+)
 from .pages import (
     BROWSER_CLIENT_ID,
     _csrf,
@@ -37,6 +44,7 @@ if TYPE_CHECKING:
 # The section of the settings page each ?ok= notice belongs to: the forms there send the member back
 # to their own section (#cover, #tags ...), so the notice shows next to the form that was used.
 OK_SECTIONS = {
+    "categories": "categories",
     "cover": "cover",
     "cover_auto": "cover",
     "tag_added": "tags",
@@ -85,10 +93,20 @@ SETTINGS_CSS = """
 .ds .collablist .when{color:var(--text-muted);font-size:.86rem;font-weight:400}
 .ds .collablist form{margin:0}
 .ds .collablist form button{margin:0;min-height:44px;width:auto}
-.ds .ds-flags{display:flex;flex-wrap:wrap;gap:.35rem}
+.ds .ds-flags{display:flex;flex-wrap:wrap;gap:.35rem .75rem}
 .ds .ds-flag{display:inline-flex;align-items:center;min-height:28px;border-radius:999px;padding:0 .7rem;
   font-size:.85rem;border:1px solid var(--control-border);background:var(--surface-2);color:var(--text)}
-.ds .ds-flag.premier{background:var(--orange-tint);color:var(--orange-text);border-color:var(--orange-text)}
+/* editable rows (F7): the name in its box, three switches that say their word, one under the
+   other on a phone; a row without a record stays read-only pills with its reason */
+.ds .ds-cats li{align-items:flex-start;padding:.35rem 0}
+.ds .ds-cats .nm{flex:1 1 14rem;min-width:0}
+.ds .ds-cats .nm input{width:100%;min-height:44px;font-weight:700}
+.ds .ds-cats .ds-sw{display:flex;flex-wrap:wrap;gap:0 1rem;flex:0 1 auto}
+.ds .ds-cats .switch.ds-flag{min-height:44px;margin:0;padding:0;border:0;border-radius:0;background:none;
+  font-size:.95rem}
+.ds .ds-cats .ro .why{flex:1 1 100%;color:var(--text-muted);font-size:.9rem}
+.ds .ds-cats + .acts{border-top:0;padding-top:.5rem}
+@media (max-width:599.98px){.ds .ds-cats .nm{flex-basis:100%}.ds .ds-cats .ds-sw{width:100%;gap:0 .75rem}}
 .ds .ds-cover{display:grid;grid-template-columns:9rem minmax(0,1fr);gap:1rem;align-items:center}
 .ds .ds-cover .pv{width:100%;max-width:none;aspect-ratio:4/3;border-radius:var(--radius-panel);
   object-fit:cover;background:var(--surface-2);display:grid;place-items:center;text-align:center;
@@ -115,6 +133,31 @@ SETTINGS_CSS = """
   .ds .ds-inline > .btn,.ds .ds-inline > button{flex:1 1 100%;width:100%}
   .ds .acts .btn,.ds .acts button{flex:1 1 auto}}
 """
+
+
+NOTHING_TO_SAVE = "Nothing to save: no name or flag was changed."
+
+
+def category_changes_from_form(deck: Deck, data: dict[str, str]) -> list[dict[str, Any]]:
+    """What the Categories panel's fields change against the deck as it is now, as
+    ``decks.propose_categories`` takes them: one entry per editable category whose name or any
+    switch differs (a blank name is left as it is). A checkbox left off sends no field."""
+    changes: list[dict[str, Any]] = []
+    for c in deck_categories(deck):
+        if not c["editable"] or f"name_{c['id']}" not in data:
+            continue
+        cid = int(c["id"])
+        entry: dict[str, Any] = {"id": cid}
+        new = " ".join((data.get(f"name_{cid}") or "").split())
+        if new and new != c["name"]:
+            entry["rename_to"] = new
+        for key, _label, _field, _inv in CATEGORY_FLAGS:
+            on = data.get(f"{key}_{cid}") == "1"
+            if on != bool(c[key]):
+                entry[key] = on
+        if len(entry) > 1:
+            changes.append(entry)
+    return changes
 
 
 def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> None:
@@ -148,6 +191,7 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
         follow_hint: str = "",
         typed_tag: str = "",
         ok: str = "",
+        cat_values: dict[str, str] | None = None,
     ) -> str:
         """The settings page on the shared form rows (F7). ``error`` shows in the main panel (the main
         settings form's own refusal) or, with ``error_in``, inside that section next to its form, as
@@ -156,7 +200,7 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
 
         def note(section: str) -> str:
             if error and error_in == section:
-                return ui.notice(error, "error", role="alert", cls=f"ds-note' id='{section}-msg")
+                return ui.notice(error, "error", role="alert", cls="ds-note", id=f"{section}-msg")
             if not error and ok in SETTINGS_OK_MESSAGES and OK_SECTIONS.get(ok) == section:
                 return ui.notice(SETTINGS_OK_MESSAGES[ok], "ok", role="status", cls="ds-note")
             return ""
@@ -275,7 +319,7 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
             f"<a class='btn' href='/decks/{did}'>Cancel</a></div>"
             "<p class='muted small foot'>Saved to Archidekt when you press Save changes; a snapshot from "
             "just before is kept under History.</p></form>"
-            + categories_section(deck)
+            + categories_section(deck, csrf, note("categories"), cat_values)
             + cover_section(deck, csrf, note("cover"))
             + tags_section(deck, csrf, note("tags"), typed_tag if error_in == "tags" else "")
             + folder_section(deck, csrf, folders, note("folder"))
@@ -301,30 +345,70 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
             + delete_box_html(deck, csrf, backups=bool(state.live.get("archidekt_backups")))
         )
 
-    def categories_section(deck: Deck) -> str:
-        """The deck's categories with their flags, read-only: editing them here is on hold (F7)."""
-        flags = (
-            ("isPremier", True, "Premier", "premier"),
-            ("includedInDeck", False, "Not in deck", ""),
-            ("includedInPrice", False, "Not in price", ""),
-        )
+    def categories_section(
+        deck: Deck, csrf: str | None, note: str = "", values: dict[str, str] | None = None
+    ) -> str:
+        """The deck's categories, editable (F7, Ben 21 Oct: option a): each name in its box and
+        three switches, Premier, Not in deck and Not in price; a plain Save categories (the main
+        settings' Save changes stays the page's one orange button) and Undo changes, which puts
+        the boxes back before saving. Anything that touches Premier, the Commander or a
+        commander's category asks first (a box with scripts, static/menus.js; a confirmation page
+        without), with the backend's own sentence. A category Archidekt sent without a record
+        (its default Sideboard or Maybeboard until someone creates one) is read-only here.
+        ``values``: the fields of a refused save, kept in the boxes to fix."""
+        did = _esc(deck.id)
         items = ""
-        for c in deck.categories:
-            if not isinstance(c.get("name"), str):
+        for c in deck_categories(deck):
+            name = _esc(c["name"])
+            if not c["editable"]:
+                pills = "".join(
+                    f"<span class='ds-flag'>{_esc(label)}</span>"
+                    for key, label, _f, _i in CATEGORY_FLAGS
+                    if c[key]
+                )
+                items += (
+                    f"<li class='ro' data-name='{name}'><span class='nm'>{name}</span>"
+                    f"<span class='ds-flags'>{pills}</span>"
+                    "<span class='why'>Can't be changed from here yet.</span></li>"
+                )
                 continue
-            pills = "".join(
-                f"<span class='ds-flag {cls}'>{_esc(text)}</span>"
-                for key, when, text, cls in flags
-                if bool(c.get(key, not when)) == when
+            cid = int(c["id"])
+            typed = values.get(f"name_{cid}") if values else None
+            shown = _esc(typed) if typed is not None else name
+
+            def on(key: str, c: dict[str, Any] = c, cid: int = cid) -> bool:
+                return values.get(f"{key}_{cid}") == "1" if values else bool(c[key])
+
+            switches = "".join(
+                f"<label class='switch ds-flag'><input type='checkbox' name='{key}_{cid}' value='1'"
+                + (" checked" if on(key) else "")
+                + f"><span class='track'></span><span class='t'>{_esc(label)}</span></label>"
+                for key, label, _f, _i in CATEGORY_FLAGS
             )
+            commander = " data-commander='1'" if c["commander"] else ""
             items += (
-                f"<li><span class='nm'>{_esc(c['name'])}</span><span class='ds-flags'>{pills}</span></li>"
+                f"<li data-cat='{cid}' data-name='{name}'{commander}>"
+                f"<span class='nm'><label class='sr-only' for='cat-{cid}-name'>Name of {name}</label>"
+                f"<input id='cat-{cid}-name' type='text' name='name_{cid}' value='{shown}' maxlength='60' "
+                "required></span>"
+                f"<span class='ds-sw' role='group' aria-label='Flags of {name}'>{switches}</span></li>"
             )
         return (
-            "<section class='ui-card' id='categories'><h2>Categories</h2>"
+            "<section class='ui-card' id='categories' data-confirm-title='Change the commander category?' "
+            f"data-confirm='{_esc(modes.CATEGORY_COMMANDER_CONFIRM)}'>"
+            "<h2>Categories</h2>"
+            + note
+            + f"<form method='post' action='/decks/{did}/categories#categories' id='catform'>"
+            f"<input type='hidden' name='csrf' value='{_esc(csrf)}'>"
             f"<ul class='plain ds-list ds-cats'>{items or '<li class=muted>No categories yet.</li>'}</ul>"
-            "<p class='muted small foot'>Rename a category or change its flags on Archidekt. Moving cards "
-            "between categories stays in the deck editor and on the deck page.</p></section>"
+            + (
+                f"<div class='acts'><button class='btn' name='action' value='save'>{icon('check')} "
+                "Save categories</button><button type='reset' class='btn'>Undo changes</button></div>"
+                if items
+                else ""
+            )
+            + "</form><p class='muted small foot'>Moving cards between categories stays in the deck editor "
+            "and on the deck page.</p></section>"
         )
 
     def cover_section(deck: Deck, csrf: str | None, note: str = "") -> str:
@@ -648,6 +732,7 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
                     following=await following_or_none(sub),
                     follow_hint=str(exc.extra.get("follow_username") or ""),
                     typed_tag=(data.get("name") or "")[:40] if data.get("action") == "add" else "",
+                    cat_values=data if anchor == "categories" else None,
                 ),
                 sub,
                 sid,
@@ -722,6 +807,44 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
             return page("Confirm collaborator", body, sub=sub, sid=sid, current="/decks", deck_css=True)
 
         return await hand_action(request, deck_id, run, ok="collaborators", anchor="collaborators")
+
+    @server.custom_route("/decks/{deck_id}/categories", methods=["POST"], include_in_schema=False)
+    async def categories_post(request: Request) -> Response:
+        """Save categories: the member's own press on their deck's settings page. The posted names
+        and switches are compared with the deck as it is now; what differs is checked first
+        (decks.category_change_rows, which refuses before anything is proposed), asks once more
+        when it touches the commander (modes.hand_edit_confirm; the box with scripts sends
+        ``confirmed`` itself), then is proposed and applied at once with its snapshot."""
+        deck_id = request.path_params["deck_id"]
+
+        async def run(sub: str, data: dict[str, str], sid: str | None) -> str | Response:
+            deck = await decks.get_own_deck(sub, deck_id)
+            changes = category_changes_from_form(deck, data)
+            if not changes:
+                raise DeckError("invalid", NOTHING_TO_SAVE)
+            _plan, rows = category_change_rows(deck, parse_category_changes(changes))
+            why = modes.hand_edit_confirm("categories", rows)
+            if why and data.get("confirmed") != "1":
+                fields = {k: v for k, v in data.items() if k not in ("csrf", "confirmed")}
+                body = confirm_form(
+                    f"/decks/{deck.id}/categories#categories",
+                    _csrf(s, sid),
+                    fields,
+                    "Change the commander category?",
+                    why,
+                    "Save categories",
+                    f"/decks/{deck.id}/settings#categories",
+                )
+                return page("Confirm categories", body, sub=sub, sid=sid, current="/decks", deck_css=True)
+            p = await decks.propose_categories(sub, deck.id, changes)
+            done = await apply_now(sub, p["proposal_id"], ok="categories", deck_id=deck.id)
+            if done.headers.get("location") == f"/decks/{deck.id}?ok=categories":
+                return RedirectResponse(
+                    f"/decks/{deck.id}/settings?ok=categories#categories", status_code=303
+                )
+            return done  # Archidekt refused or writes are off: the review page says why
+
+        return await hand_action(request, deck_id, run, ok="categories", anchor="categories")
 
     @server.custom_route("/decks/{deck_id}/cover", methods=["POST"], include_in_schema=False)
     async def cover_post(request: Request) -> Response:
@@ -808,7 +931,13 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
         except DeckError as exc:
             # the deck page again, the box open with the refusal (a wrong name, Archidekt busy ...)
             return await h.deck_page_response(
-                request, sub, sid, deck_id, box="delete", box_error=str(exc), status=400
+                request,
+                sub,
+                sid,
+                deck_id,
+                box="delete",
+                box_error=str(exc),
+                status={"not_found": 404, "forbidden": 403}.get(exc.kind, 400),
             )
         return RedirectResponse("/decks?ok=deleted", status_code=303)
 

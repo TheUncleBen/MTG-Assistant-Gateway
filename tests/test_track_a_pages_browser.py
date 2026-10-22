@@ -431,11 +431,16 @@ def test_the_full_test_buttons_fit_every_screen_and_text_size(tmp_path: Path) ->
                                 "has a commander; saved under History. The solo test takes up to a minute; "
                                 "the result page opens when the solo test is done."
                             ), where
-                            page.locator("details.dd:not(.navmore) > summary", has_text="More").first.click()
-                            solo = page.locator("button", has_text="Solo test only")
+                            # More is the shared deck menu; its Solo test only item submits the
+                            # banner's hidden solo form, whose button keeps the busy label and title
+                            page.locator(".banner button.deckmenu", has_text="More").click()
+                            solo = page.locator(
+                                ".ctxmenu[role=menu] [role=menuitem]", has_text="Solo test only"
+                            )
                             assert solo.is_visible(), where
-                            assert solo.get_attribute("data-busy-label") == "Testing…", where
-                            assert solo.get_attribute("title") == (
+                            form_btn = page.locator("#solof button")
+                            assert form_btn.get_attribute("data-busy-label") == "Testing…", where
+                            assert form_btn.get_attribute("title") == (
                                 "The same run without Forge games: the solo test, the legality check and "
                                 "the statistics"
                             ), where
@@ -443,6 +448,7 @@ def test_the_full_test_buttons_fit_every_screen_and_text_size(tmp_path: Path) ->
                                 box = b.bounding_box()
                                 assert box and box["x"] >= 0 and box["x"] + box["width"] <= vw, (where, box)
                                 assert b.evaluate("e => e.scrollWidth <= e.clientWidth + 1"), where
+                            page.keyboard.press("Escape")
                             sel = "form[action='/decks/42/report'] button"
                             assert page.evaluate(WORDS_BROKEN, sel) == [], (
                                 where,

@@ -161,7 +161,7 @@ def _backup_name_refused(server: Server, width: int, theme: str) -> None:
         page.goto(f"{server.base}/decks", wait_until="networkidle")
         page.locator("li.folder[data-folder-id='504'] button.kebab").click()
         page.locator(".ctxmenu[role=menu] [role=menuitem]", has_text="Rename…").click()
-        box = page.locator(".mtgbox[role=dialog]")
+        box = page.locator(".mtgbox[role=dialog]:not([hidden])")  # the page holds other boxes closed
         box.wait_for(timeout=3000)
         box.locator("input#mb-fname").fill("mtg gateway backups")
         box.locator(".acts button", has_text="Rename").click()

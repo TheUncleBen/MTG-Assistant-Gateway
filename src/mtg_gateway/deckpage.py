@@ -125,29 +125,14 @@ def est_cost_html(stats: dict[str, Any]) -> str:
     return money(stats.get("price_total"))
 
 
-def ago(iso: str) -> str:
-    """'15 hrs ago' the way Archidekt words it, from an ISO timestamp; '' when unreadable."""
+def iso_ts(iso: str) -> int | None:
+    """An Archidekt ISO timestamp as seconds since the epoch; None when unreadable."""
     if not iso:
-        return ""
+        return None
     try:
-        then = calendar.timegm(time.strptime(iso[:19], "%Y-%m-%dT%H:%M:%S"))
+        return calendar.timegm(time.strptime(iso[:19], "%Y-%m-%dT%H:%M:%S"))
     except ValueError:
-        return ""
-    secs = max(0, int(time.time() - then))
-    for unit, name in (
-        (86400 * 365, "yr"),
-        (86400 * 30, "mo"),
-        (86400 * 7, "wk"),
-        (86400, "day"),
-        (3600, "hr"),
-    ):
-        if secs >= unit:
-            n = secs // unit
-            return f"{n} {name}{'s' if n != 1 else ''} ago"
-    if secs >= 60:
-        n = secs // 60
-        return f"{n} min{'s' if n != 1 else ''} ago"
-    return "just now"
+        return None
 
 
 def colour_group(card: DeckCard) -> str:
@@ -1819,8 +1804,9 @@ def _delta_text(key: str, v: float) -> str:
 
 def _compare_row(name: str, qty_text: str, cards: dict[str, DeckCard]) -> str:
     """One card of a comparison list, a 44 px table row: the count, the card (a button that opens
-    the card viewer, static/compare.js) and its type. Every row has the shared card menu
-    (static/menus.js's cardLinkOf: right-click, press and hold, Shift+F10), a pasted card too."""
+    the card viewer, static/compare.js), its type and the row's ⋮. Every row has the shared card
+    menu (static/menus.js's cardLinkOf: right-click, press and hold, ⋮, Shift+F10), a pasted card
+    too."""
     card = cards.get(name.split(" // ", 1)[0].strip().casefold())
     kind = esc(card.type_line.split(" — ")[0]) if card is not None and card.type_line else ""
     attrs = card_view_attrs(card, img=card_image(card)) if card is not None else ""
@@ -1829,7 +1815,9 @@ def _compare_row(name: str, qty_text: str, cards: dict[str, DeckCard]) -> str:
         f"<button type='button' class='cardlink' data-card='{esc(card.name if card else name)}'{attrs}>"
         f"<span class='nm'>{esc(name)}</span>"
         + (f"<span class='s'>{kind}</span>" if kind else "")
-        + "</button></div>"
+        + "</button>"
+        f"<button type='button' class='kebab' aria-label='Menu for {esc(name)}' aria-haspopup='menu' "
+        f"title='Menu'>{icon('more')}</button></div>"
     )
 
 
@@ -2036,7 +2024,7 @@ COMPARE_CSS = """
 .cmp-h{display:flex;align-items:baseline;gap:.35rem;font-size:1.1rem;margin:0 0 .5rem;overflow-wrap:anywhere}
 .cmp-h .n{color:var(--text-muted);font-weight:400}
 .cmp-sub{font-size:1rem;margin:1rem 0 .5rem}
-.cmp-t{--cols:4rem minmax(0,1fr);--cols-md:4rem minmax(0,1fr);--cols-sm:3.6rem minmax(0,1fr)}
+.cmp-t{--cols:4rem minmax(0,1fr) 44px;--cols-md:4rem minmax(0,1fr) 44px;--cols-sm:3.6rem minmax(0,1fr) 44px}
 .cmp-t .tr{min-height:44px;align-items:center}
 .cmp-t .q{font-weight:900;color:var(--text-muted);white-space:nowrap;font-variant-numeric:tabular-nums}
 .cmp-t .cardlink{display:flex;flex-direction:column;align-items:flex-start;min-height:44px;
@@ -2206,12 +2194,14 @@ def goldfish_page_html(
     guide_hidden: bool = False,
     forge_solo: Any = _NO_SOLO_LINE,
     csrf: str | None = None,
+    extra_head: str = "",
 ) -> str:
     """Goldfish by hand: shuffle, an opening hand with London mulligans, then draw, play, tap and
     pass turns, all in the browser (static/goldfish.js) on the deck already read for the page.
     Nothing is sent anywhere and nothing is kept, except whether the member hid the guide.
     ``forge_solo``: the newest Forge solo test's figures, None for none yet; left out when the
-    gateway has no such results (no line then)."""
+    gateway has no such results (no line then). ``extra_head``: markup under the solo line (the
+    My card models opener, card_models_view)."""
     did = esc(deck.id)
     name = esc(deck_title(deck))
     data = goldfish_data(deck)
@@ -2229,6 +2219,7 @@ def goldfish_page_html(
         "<h1>Goldfish</h1>"
         f"<p class='muted small gf-intro'>{esc(goldfish_intro(size, commander=commander))}</p>"
         + solo
+        + extra_head
         + "<p class='gf-status' id='gf-status'></p>"
         "<p class='gf-hint' id='gf-hint'></p>"
         "<div class='gf-controls' role='group' aria-label='Game'>"
@@ -2291,6 +2282,10 @@ html[data-card-size=s] .gf-row{--gw:92px} html[data-card-size=l] .gf-row{--gw:18
 .gf-row + .gf-row{margin-top:.75rem;padding-top:.75rem;border-top:1px dashed var(--border)}
 .gf-empty{color:var(--text-muted);margin:0;grid-column:1 / -1}
 .gf-piles{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,18rem),1fr));gap:0 1rem}
+/* a card's cell: the card and its ⋮ (hidden at the small size, where the cell is a thumbnail) */
+.gf-c{display:flex;flex-direction:column;align-items:center;gap:2px;min-width:0}
+.gf-c .kebab{flex:none}
+html[data-card-size=s] .gf-c .kebab{display:none}
 .gf-card{position:relative;width:100%;max-width:220px;aspect-ratio:63/88;height:auto;
   min-height:0;padding:0;border:1px solid var(--card-border);border-radius:4.5%/3.2%;
   background:var(--surface-2);color:var(--text);overflow:hidden;display:block;cursor:pointer;
@@ -2350,6 +2345,9 @@ def colour_bar_html(colors: dict[str, Any] | None) -> str:
     return _bar(parts, label="Color identity") if parts else "<div class='cbar empty'></div>"
 
 
+NO_TAGS = "<span class='notags'>No deck tags</span>"
+
+
 def deck_card_html(
     d: dict[str, Any],
     *,
@@ -2357,10 +2355,12 @@ def deck_card_html(
     selected: bool,
     show_owner: bool = False,
     own: bool = False,
+    plain: bool = False,
 ) -> str:
     """One deck tile: a link to the deck, and after it the tile's ⋮ (static/menus.js opens the
     deck's menu from it, a right-click, a press and hold or Shift+F10). ``own``: the member's own
-    deck, whose menu has Edit deck, Rename, Move to folder, Delete deck and the rest."""
+    deck, whose menu has Edit deck, Rename, Move to folder, Delete deck and the rest. ``plain``:
+    a precon tile, without the owner's picture and the deck tags (as deck search's tiles)."""
     did = esc(d["id"])
     name = d.get("name") or "Unnamed deck"
     folder_id = d.get("folder_id")
@@ -2378,11 +2378,8 @@ def deck_card_html(
         fmt = format_label(d["format"])
     line = (fmt or "Custom") + deck_card_bracket_text(d.get("bracket"))  # bracket_view.py
     tags = d.get("tags") or []
-    tags_html = (
-        "".join(f"<span class='pill'>{esc(t)}</span>" for t in tags[:6])
-        if tags
-        else "<span class='notags'>No deck tags</span>"
-    )
+    pills = "".join(f"<span class='pill'>{esc(t)}</span>" for t in tags[:6]) or NO_TAGS
+    tags_html = "" if plain else f"<span class='tags'>{pills}</span>"
     initial = esc((d.get("name") or "?")[:1].upper())
     size = d.get("size")
     sub_bits = []
@@ -2392,21 +2389,22 @@ def deck_card_html(
         sub_bits.append(str(d["folder"]))
     if d.get("views") and show_owner:
         sub_bits.append(f"{d['views']:,} views")
-    if ago(d.get("updated_at") or ""):
-        sub_bits.append(ago(d.get("updated_at") or ""))
+    sub_text = " · ".join(sub_bits)
+    when = ui.when(iso_ts(d.get("updated_at") or ""))  # the one list date (feedback.js keeps it current)
+    sub_html = esc(sub_text) + (f"{' · ' if sub_text else ''}{when}" if when else "")
     return (
         f"<li class='deck{' selected' if selected else ''}'{data}><a href='/decks/{did}'>"
         f"<span class='thumb{' noart' if not art else ''}'{style}><span class='ini'>{initial}</span>"
         + (f"<span class='views'>{plural(size, 'card')}</span>" if size else "")
         + colour_bar_html(d.get("colors"))
         + "</span>"
-        "<span class='info'>"
-        f"{avatar_html(d.get('owner') or '', 'sm')}"
-        f"<span class='text'><span class='name' title='{esc(name)}'>{esc(name)}</span>"
+        f"<span class='info{' plain' if plain else ''}'>"
+        + ("" if plain else avatar_html(d.get("owner") or "", "sm"))
+        + f"<span class='text'><span class='name' title='{esc(name)}'>{esc(name)}</span>"
         f"<span class='fmt' title='{esc(line)}'>{esc(line)}</span>"
-        f"<span class='sub' title='{esc(' · '.join(sub_bits))}'>{esc(' · '.join(sub_bits))}</span>"
+        f"<span class='sub' title='{esc(sub_text)}'>{sub_html}</span>"
         "</span></span>"
-        f"<span class='tags'>{tags_html}</span></a>{kebab}</li>"
+        f"{tags_html}</a>{kebab}</li>"
     )
 
 
@@ -2433,9 +2431,11 @@ def deck_list_html(
     show_owner: bool = False,
     folder: str = "",
     own: bool = False,
+    plain: bool = False,
 ) -> str:
     """The deck tiles. ``own``: the member's own decks (My decks, Home), whose tiles' menus carry
-    the owner's actions; a listing of other members' decks leaves it off."""
+    the owner's actions; a listing of other members' decks leaves it off. ``plain``: precon tiles
+    (no owner picture, no tags)."""
     if not decks:
         if folder:
             return (
@@ -2455,6 +2455,7 @@ def deck_list_html(
             selected=bool(selected and str(d["id"]) == str(selected)),
             show_owner=show_owner,
             own=own,
+            plain=plain,
         )
         for d in decks
     )
@@ -2633,23 +2634,6 @@ DECK_CSS = (
 .banner .controls .primary{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center}
 .banner .controls .btn,.banner .controls button{margin:0}
 .banner .controls form.inline{display:contents}
-.comparehead{display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap}
-/* compare page */
-.comparehead{flex-direction:column;align-items:stretch}
-.compareform{display:grid;gap:.75rem}
-.compareform .field span{display:block;font-size:.85rem;color:var(--text-muted);margin-bottom:.25rem}
-.compareform .field input,.compareform .field textarea{font-weight:400}
-.compareform input,.compareform textarea{width:100%}
-.compareform button{justify-self:start}
-/* min(18rem,100%): at 200% text 18rem is wider than a phone, so a column never exceeds the page */
-.comparecols{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(18rem,100%),1fr));gap:1rem;margin-top:1rem}
-.comparehead{margin-bottom:1rem}
-.comparecols .panel{margin:0}
-.comparelist{list-style:none;margin:0;padding:0}
-.comparelist li{display:flex;gap:.6rem;align-items:baseline;padding:.3rem 0;min-width:0;
-  overflow-wrap:anywhere;border-bottom:1px solid var(--border)}
-.comparelist li:last-child{border-bottom:0}
-.comparelist b{flex:0 0 3.2rem;color:var(--text-muted);font-variant-numeric:tabular-nums}
 .cardlink{background:none;border:0;padding:0;margin:0;color:var(--link);cursor:pointer;font:inherit;text-align:left}
 .cardlink:hover{text-decoration:underline}
 h3 .count{font-weight:400;color:var(--text-muted);font-size:.9rem}

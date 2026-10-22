@@ -389,9 +389,9 @@ async def test_admin_activity_has_the_page_head_first_and_a_menu_on_every_row(gw
         assert len(kebabs) >= 2 and all("open=" in k for k in kebabs)
         assert "<span class='sr-only'>Actions</span>" in text
         # the refused row's label carries the ban sign
-        from mtg_gateway.activity_view import BAN_ICON
+        from mtg_gateway.theme import icon
 
-        refused = f"<span class='ui-lbl red'( title='[^']*')?>{re.escape(BAN_ICON)}Refused</span>"
+        refused = f"<span class='ui-lbl red'( title='[^']*')?>{re.escape(icon('ban'))}Refused</span>"
         assert re.search(refused, rows)
         summaries = "".join(r.split("<div class='more-body'", 1)[0] for r in rows.split("<div class='tr ev"))
         assert "search_decks" not in summaries and "Search public decks" in summaries  # the tool in words

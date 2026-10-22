@@ -92,9 +92,11 @@ def test_watchlist_inputs_are_styled_like_every_other_input(server: Server) -> N
 
 
 def test_a_plain_fold_out_keeps_its_marker_on_a_touch_screen(server: Server) -> None:  # noqa: F811
-    """The admin's "Details and actions" (a details element with no class of its own) lost its
-    triangle on touch screens: the rule that makes every summary 40 px tall laid it out as a flex
-    box, which drops the native marker. It is a 40 px list item now, on every such fold-out."""
+    """A plain fold-out (a details element with no class of its own, such as the Account page's
+    "What your sign-in shares") lost its triangle on touch screens: the rule that makes every summary
+    40 px tall laid it out as a flex box, which drops the native marker. It is a 40 px list item now,
+    on every such fold-out. (The admin's "Details and actions" fold, the first case, is a row menu
+    now.)"""
     from playwright.sync_api import sync_playwright
 
     exe, (sid, _pending) = _exe(), _seed(server)
@@ -112,7 +114,7 @@ def test_a_plain_fold_out_keeps_its_marker_on_a_touch_screen(server: Server) -> 
                 " Math.round(s.getBoundingClientRect().height)])"
             )
         browser.close()
-    assert any(t.startswith("Details and actions") for t, _, _ in rows), rows
+    assert any(t.startswith("What your sign-in shares") for t, _, _ in rows), rows
     for text, display, height in rows:
         assert display == "list-item", (text, display)
         assert height >= 40, (text, height)

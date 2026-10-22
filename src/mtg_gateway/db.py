@@ -2305,7 +2305,7 @@ class Database:
             ).fetchall()
             props = self._conn.execute(
                 "SELECT deck_id, created_at FROM proposals WHERE owner_sub = ? "
-                "AND kind IN ('edit', 'details', 'restore', 'create_deck') "
+                "AND kind IN ('edit', 'details', 'categories', 'restore', 'create_deck') "
                 "UNION ALL SELECT deck_id, taken_at FROM snapshots WHERE owner_sub = ? "
                 "AND deck_owner_id IS NULL",
                 (owner_sub, owner_sub),
@@ -3575,6 +3575,17 @@ class Database:
         """How many models are kept, for everyone."""
         row = self._one("SELECT COUNT(*) AS n FROM card_models", ())
         return int(row["n"]) if row else 0
+
+    def card_models_of(self, sub: str) -> list[dict[str, Any]]:
+        """``sub``'s own kept models for their My card models list: card_key, name, added_at,
+        updated_at, the most recently changed first. Never another member's."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT card_key, name, added_at, updated_at FROM card_models WHERE added_by = ? "
+                "ORDER BY updated_at DESC, name COLLATE NOCASE",
+                (sub,),
+            ).fetchall()
+        return [dict(r) for r in rows]
 
     def count_card_models(self, sub: str) -> int:
         """How many of the kept models are ``sub``'s."""

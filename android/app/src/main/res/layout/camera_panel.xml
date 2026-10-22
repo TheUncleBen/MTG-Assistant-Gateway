@@ -50,7 +50,7 @@
             <ToggleButton android:id="@+id/torch_toggle"
                 style="@style/CameraButton.Toggle"
                 android:layout_width="wrap_content" android:layout_height="wrap_content"
-                android:textOn="@string/torch" android:textOff="@string/torch" android:minWidth="96dp" />
+                android:textOn="@string/torch_state_on" android:textOff="@string/torch_state_off" android:minWidth="96dp" />
             <TextView android:id="@+id/torch_label"
                 android:layout_width="wrap_content" android:layout_height="wrap_content"
                 android:layout_marginStart="12dp" android:textColor="@color/cam_text_muted" android:textSize="13sp"
@@ -103,7 +103,7 @@
             <ToggleButton android:id="@+id/auto_toggle"
                 style="@style/CameraButton.Toggle"
                 android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
-                android:textOn="@string/auto_mode" android:textOff="@string/auto_mode" />
+                android:textOn="@string/auto_state_on" android:textOff="@string/auto_state_off" />
         </LinearLayout>
     </LinearLayout>
     </ScrollView>
