@@ -36,7 +36,7 @@ custom mana value, no more than 4 copies a row, never a change to which cards
 are the commanders or to the categories of a row in the commander zone, and never fewer copies of a card that has a row in the commander zone and another row, both in the deck or both in the maybeboard or sideboard;
 and a private copy of a deck (a clone), which changes nothing that exists.
 High risk: Everything else: more rows than that, a commander change, a new
-deck, restoring a snapshot, the deck's details (name, format, bracket, description, visibility, folder, tags and cover), and its categories (a new name, Premier, Not in deck or Not in price).
+deck, restoring a snapshot, the deck's details (name, format, bracket, description, visibility, folder, tags and cover), and its categories (a new category, a new name, Premier, Not in deck or Not in price, or deleting one).
 Always the member's own press: Actions on your Archidekt account (likes,
 votes, bookmarks, follows, comments, new folders and collaborator changes) and
 deleting a deck are never applied by an assistant: each one waits for your own press, in every mode, on the card in the chat or on its review page (deleting a deck, and an edit of a comment that has formatting: on the review page only). An edit of a description that has formatting is also approved on its review page only.

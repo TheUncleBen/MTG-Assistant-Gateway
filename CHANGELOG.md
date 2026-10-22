@@ -25,7 +25,8 @@ show back face switches.
   asks which category its cards move to, moves them first, and deletes it only after a fresh read
   of the deck shows it empty. On Deck settings every delete asks you to confirm. Deleting Sideboard or Maybeboard,
   a Premier category or the Commander category is high risk and never applied by an assistant on
-  its own. Restore under History makes deleted categories again and puts their cards back.
+  its own. Restore under History makes deleted categories again and puts their cards back, and
+  deletes a category added since the snapshot once its cards are gone.
 - **Theorycrafted and Game type** (Any, Paper, MTGO, Arena) in Deck settings and for your
   assistant, with snapshot, read-back and Restore like the other settings.
 - **Companion and Show back face** in the card menu on your deck page (Show back face on two-faced

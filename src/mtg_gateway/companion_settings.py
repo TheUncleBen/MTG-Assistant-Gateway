@@ -129,7 +129,9 @@ SETTINGS_CSS = """
 .ds form.catnew .row .btn{flex:0 0 auto;width:auto;margin:0}
 .ds .confirmform label.mv{display:block;font-weight:700;margin:.75rem 0 .25rem}
 .ds .ds-cats + .acts{border-top:0;padding-top:.5rem}
-@media (max-width:599.98px){.ds .ds-cats .nm{flex-basis:100%}.ds .ds-cats .ds-sw{width:100%;gap:0 .75rem}}
+@media (max-width:599.98px){.ds .ds-cats .nm{flex-basis:100%}.ds .ds-cats .ds-sw{width:100%;gap:0 .75rem}
+  .ds form.catnew .ds-sw{width:100%;gap:0 .75rem}}
+.ds form.catnew .row .btn{max-width:100%;white-space:normal}
 .ds .ds-cover{display:grid;grid-template-columns:9rem minmax(0,1fr);gap:1rem;align-items:center}
 .ds .ds-cover .pv{width:100%;max-width:none;aspect-ratio:4/3;border-radius:var(--radius-panel);
   object-fit:cover;background:var(--surface-2);display:grid;place-items:center;text-align:center;
@@ -346,8 +348,8 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
         nav = (
             "<nav class='ds-nav' aria-label='Sections'><ol>"
             + "".join(
-                f"<li><a href='#{'ds-' + k if k in ('main', 'delete') else k}'{' class=dz' if k == 'delete' else ''}>"
-                f"{_esc(t)}</a></li>"
+                f"<li><a href='#{'ds-' + k if k in ('main', 'delete') else k}'"
+                f"{' class=dz' if k == 'delete' else ''}>{_esc(t)}</a></li>"
                 for k, t in sections
             )
             + "</ol></nav>"

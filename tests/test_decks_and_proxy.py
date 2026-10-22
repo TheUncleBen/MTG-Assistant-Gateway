@@ -1225,6 +1225,10 @@ async def test_snapshots_list_and_restore_through_a_proposal(stack: Stack) -> No
         "-1 Aesi, Tyrant of Gyre Strait (cmr 365)",
         "-1 Arcane Signet (xxx 1) [Ramp]",
         "14 -> 15 Forest (cmr 510)",
+        # Ramp came with the Arcane Signet the edit added: the deck had no such category then
+        # (0.7.42: a restore deletes a category added since, once its cards are gone)
+        "Delete category “Ramp” (added since the snapshot). Archidekt tabs already open on this deck "
+        "show the old categories until they are reloaded.",
     }, lines
     assert len(ark.patches) == 3  # proposing wrote nothing
 
@@ -1234,6 +1238,7 @@ async def test_snapshots_list_and_restore_through_a_proposal(stack: Stack) -> No
     rows = {c["card"]["oracleCard"]["name"]: c for c in ark.decks[42]["cards"]}
     assert rows["Acidic Slime"]["quantity"] == 1 and rows["Acidic Slime"]["card"]["id"] == 5000
     assert rows["Forest"]["quantity"] == 15 and "Arcane Signet" not in rows
+    assert "Ramp" not in {c["name"] for c in ark.decks[42]["categories"]}
     assert rows["Aesi, Tyrant of Gyre Strait"]["modifier"] == "Foil"
     assert rows["Aesi, Tyrant of Gyre Strait"]["categories"] == ["Commander"]
     assert a2["snapshot_id"] != a["snapshot_id"]  # the restore itself is undoable

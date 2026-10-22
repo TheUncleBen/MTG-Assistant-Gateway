@@ -8495,12 +8495,15 @@ def category_restore_plan(snapshot: Deck, current: Deck) -> tuple[list[dict[str,
         rows.append(row)
     if recorded:  # ids were kept, so a category the snapshot doesn't have was added since
         back = {b["name"].casefold() for b in bodies}
+        # ... unless the snapshot's own cards are filed under it: the restore puts them back there
+        filed = {x.casefold() for c in snapshot.cards for x in c.categories}
         for cur in category_states(current):
             if (
                 cur["id"] is None
                 or cur["id"] in recorded
                 or cur["name"].casefold() in snap_names
                 or cur["name"].casefold() in back
+                or cur["name"].casefold() in filed
             ):
                 continue
             bodies.append({"op": "delete", "id": cur["id"], "name": cur["name"], "after_cards": True})
