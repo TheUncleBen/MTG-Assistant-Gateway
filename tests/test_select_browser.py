@@ -148,6 +148,10 @@ def test_keyboard_only(server: Server) -> None:
         page.keyboard.press("Escape")
         assert page.locator("#msel-list").count() == 0
         assert page.locator("#format option:checked").inner_text().strip() == texts[-1]
+        # that Escape closed the list only: the New deck box around it stays open, focus on the button
+        page.wait_for_timeout(500)  # past the box's closing transition, were it closing
+        assert page.locator(".mtgbox-scrim .mtgbox").is_visible()
+        assert page.evaluate("() => document.activeElement.id") == "format-btn"
         # type-ahead: the first letters of a choice jump to it; Tab closes and moves on
         first = texts[0]
         page.keyboard.press("ArrowDown")
