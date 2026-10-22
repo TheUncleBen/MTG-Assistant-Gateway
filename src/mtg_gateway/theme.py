@@ -445,6 +445,20 @@ input[type=radio]:focus-visible{outline:2px solid var(--focus);outline-offset:2p
 /* a choice with a description under its label: the dot sits level with the label's first line */
 .check.mode{align-items:flex-start}
 .check.mode input{margin-top:.15rem}
+/* Account › Approval mode: one line per mode, its meaning in a closed fold under it */
+.mode-choice{border-top:1px solid var(--border);padding:.35rem 0}
+.mode-choice:first-of-type{border-top:0}
+.mode-choice .check.mode{min-height:44px;align-items:center}
+details.mode-more{margin:0 0 .25rem 2rem}
+details.mode-more > summary{cursor:pointer;color:var(--link);min-height:44px;display:flex;align-items:center;
+  gap:.4rem;font-size:.95rem;width:max-content;max-width:100%}
+details.mode-more > summary::before{content:'\\25B8'}
+details.mode-more[open] > summary::before{content:'\\25BE'}
+details.mode-more > p:first-of-type{margin-top:0}
+.mode-warn{display:none;margin:.5rem 0 .75rem;padding:.5rem .75rem;border-left:3px solid var(--orange);
+  background:var(--orange-tint);border-radius:var(--radius);font-size:.95rem}
+form:has(input[name=mode][value=semi]:checked) .mode-warn,
+form:has(input[name=mode][value=auto]:checked) .mode-warn{display:block}
 /* toggle switch 40x20, orange when on */
 .switch{position:relative;display:flex;align-items:center;gap:.6rem;cursor:pointer;font-weight:400;
   margin:.5rem 0;min-height:2rem}

@@ -128,6 +128,38 @@ async def test_default_is_manual_and_the_account_page_sets_the_mode(stack: Stack
     assert structured(await call(h, token, "account_status"))["approval_mode"] == "manual"
 
 
+async def test_each_mode_is_one_line_with_its_explanation_folded(stack: Stack) -> None:
+    """Ben (2026-10-22): the Approval mode panel shows each mode as one line; its explanation is in
+    a closed dropdown under it, so the page is not a wall of text. The approved words are kept, and
+    the cost of the auto modes is still said in a line that shows when one of them is picked."""
+    h = stack.h
+    await linked_user(stack)
+    b = Browser(h)
+    await b.login()
+    page = (await b.http.get("/account")).text
+    await b.aclose()
+    card = page[page.index("<div class='card' id='mode'>") :]
+    card = card[: card.index("</form></div>")]
+    folds = re.findall(r"<details class='mode-more'>(.*?)</details>", card, re.S)
+    assert len(folds) == 3 and "<details class='mode-more' open" not in card
+    live = h.app.state.gateway.live
+    rows, big = int(live.get("auto_apply_max_rows")), int(live.get("auto_big_edit_rows"))
+    for fold, mode in zip(folds, modes.MODES, strict=True):
+        assert "How it works" in fold
+        help_text = html.escape(modes.mode_help(mode, max_rows=rows, big_rows=big))
+        assert help_text in fold
+    # outside the folds: the intro, the three names and the short warning line, nothing more
+    outside = re.sub(r"<details class='mode-more'>.*?</details>", "", card, flags=re.S)
+    for mode in modes.MODES:
+        assert html.escape(modes.mode_help(mode, max_rows=rows, big_rows=big)) not in outside
+    assert html.escape(modes.HIGH_RISK_TEXT) not in outside
+    assert html.escape(modes.AUTO_WARNING) not in outside
+    assert "class='mode-warn'" in outside and "tricked" in outside
+    # the full warning and the low and high risk meanings are still on the page, in the folds
+    assert html.escape(modes.AUTO_WARNING) in folds[1] and html.escape(modes.AUTO_WARNING) in folds[2]
+    assert html.escape(modes.HIGH_RISK_TEXT) in folds[1]
+
+
 async def test_account_page_needs_a_valid_form(stack: Stack) -> None:
     """No CSRF token, no change; a bearer token (an assistant) cannot post the form at all."""
     h = stack.h
