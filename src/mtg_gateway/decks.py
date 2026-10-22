@@ -3607,6 +3607,7 @@ class DeckService:
             "review_url": f"{self.settings.public_url}/proposals/{row['id']}",
             # Which app made it ("browser", or "app: <its name> (<client id>)"), for the review page.
             "created_by": self._creator_label(row.get("created_by_client")),
+            "created_by_client": row.get("created_by_client"),
             "writes_enabled": self.settings.writes_enabled,
             # The member's approval mode (modes.py) and this proposal's risk tier decide whether
             # the assistant may apply it itself or the member's own press is needed.
@@ -3856,6 +3857,7 @@ class DeckService:
             "summary": summary[:400],
             "state": state,
             "created_by": self._creator_label(r.get("created_by_client")),
+            "created_by_client": r.get("created_by_client"),
             "review_url": f"{self.settings.public_url}/proposals/{r['id']}",
             **({"out_of_date": True} if state == "pending" and r.get("status") == "needs_look" else {}),
             **(self._status_fields(sub, r) if state == "pending" and r.get("status") else {"status": None}),
@@ -5814,6 +5816,7 @@ class DeckService:
                     "created_at": line["created_at"],
                     "expires_at": line["expires_at"],
                     "created_by": self._creator_label(line.get("created_by_client")),
+                    "created_by_client": line.get("created_by_client"),
                     "own": bool(caller) and line.get("created_by_client") == caller,
                     "version": int(line.get("version") or 1),
                     # the risk word on the cards (Low, High, Your press, Delete)

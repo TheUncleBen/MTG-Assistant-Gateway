@@ -2067,7 +2067,7 @@ def _proposal_body(
         meta_rows.append(
             (
                 "Proposed by",
-                ui.app_chip(_chip_name(str(p["created_by"])), client_id=_chip_client(str(p["created_by"]))),
+                ui.app_chip(_chip_name(str(p["created_by"])), client_id=p.get("created_by_client")),
             )
         )
     meta_rows.append(("Made", _future(p.get("created_at"), now)))
@@ -2225,12 +2225,6 @@ def _chip_name(label: str) -> str | None:
     return {"browser": "You", "administrator": "The administrator", "admin": "The administrator"}.get(
         label, label or None
     )
-
-
-def _chip_client(label: str) -> str | None:
-    """The client id inside an actor label ("app: Claude (id)"), for the app chip's mark."""
-    m = re.fullmatch(r"app: (.+) \((.+)\)", label)
-    return m.group(2) if m else None
 
 
 def _pretty(obj: Any) -> str:

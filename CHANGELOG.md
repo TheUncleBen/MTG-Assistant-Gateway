@@ -23,7 +23,7 @@ with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
   such change keeps a snapshot (and a backup copy when backups are on), checks that the deck has
   not changed since, writes one category at a time and reads the deck back; Restore puts the names
   and switches back. A change that touches the commander's category, Premier or Not in deck is
-  always high risk: it asks you first and is never applied by an assistant on its own. A Deck
+  always high risk and is never applied by an assistant on its own; a commander change asks you to confirm even on your own Deck settings page. A Deck
   settings page left open while the deck changed elsewhere refuses to save instead of undoing that
   change, and a waiting card edit that names a renamed category waits as Needs a look.
 - **My card models:** the card descriptions the simulator keeps for you, listed from the report

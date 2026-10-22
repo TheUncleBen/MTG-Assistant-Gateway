@@ -319,3 +319,30 @@ def test_the_openai_mark_follows_the_sites_theme_and_every_mark_reads_at_344_px(
     # the names beside the marks keep the label contrast
     names = [c for t, c in texts if t.startswith("ui-app")]
     assert names and min(names) >= 4.5, texts
+
+
+def test_proposed_by_takes_the_mark_from_the_stored_client_id_not_the_label(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Review finding (22 Oct): the "Proposed by" chip read the client id back out of the display
+    label, so a URL client id holding " (https://claude.ai/" brought the Claude mark. It now takes the
+    id the proposal stored."""
+    from mtg_gateway import pages
+
+    monkeypatch.setattr(ui, "_client_info", lambda _cid: None)
+    spoof = "https://e.co/ (https://claude.ai/"
+    base = {
+        "kind": "details",
+        "state": "pending",
+        "rows": [],
+        "diff": "",
+        "deck_id": 1,
+        "deck_name": "Test",
+        "created_at": 0,
+        "expires_at": 0,
+        "writes_enabled": True,
+    }
+    for cid, logo in ((spoof, False), (CLAUDE_CIMD, True)):
+        p = {**base, "created_by": f"app: N ({cid})", "created_by_client": cid}
+        html = pages._proposal_body(p, "t", "x")
+        assert ("/static/logos/claude.svg" in html) is logo, cid
