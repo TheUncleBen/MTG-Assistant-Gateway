@@ -854,6 +854,12 @@
       }, { icon: icon })],
       returnFocus: submitter || $("button", form)
     });
+    var pick = $("select", body), ok = body.closest(".mtgbox") && $(".acts button.danger, .acts button.primary", body.closest(".mtgbox"));
+    if (pick && ok) {
+      var ready = function () { ok.disabled = !pick.value; };
+      pick.addEventListener("change", ready);
+      ready();
+    }
   }
   if (cats) cats.addEventListener("submit", function (e) {
     var form = e.target;
@@ -878,6 +884,10 @@
           lab.setAttribute("for", "move_cards_box");
           var sel = el("select");
           sel.id = "move_cards_box";
+          // nothing picked to start with (the first category is often Commander): Delete waits for a pick
+          var none = el("option", null, "Pick a category…");
+          none.value = ""; none.disabled = true; none.hidden = true; none.selected = true;
+          sel.appendChild(none);
           names.forEach(function (x) {
             if (x === name) return;
             var o = el("option", null, x);

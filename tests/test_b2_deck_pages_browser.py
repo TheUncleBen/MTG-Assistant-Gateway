@@ -403,6 +403,10 @@ def test_the_delete_box_says_when_the_picked_category_makes_the_cards_commanders
         box = page.locator(".mtgbox[role=dialog]:not([hidden])")
         box.wait_for(timeout=3000)
         warn = box.locator("[data-move-warn]")
+        # nothing is picked when the box opens (the first category is often Commander), and
+        # Delete waits for a pick
+        assert box.locator("select").input_value() == ""
+        assert box.locator(".acts button.danger").is_disabled() and not warn.is_visible()
         for target, says in (
             ("Commander", modes.CATEGORY_COMMANDER_CONFIRM),
             ("Maybeboard", modes.CATEGORY_COUNTS_CONFIRM),
@@ -411,6 +415,7 @@ def test_the_delete_box_says_when_the_picked_category_makes_the_cards_commanders
             box.locator("select").select_option(target)
             assert warn.inner_text().strip() == says, (target, warn.inner_text())
             assert (warn.get_attribute("role") == "status") and warn.is_visible() == bool(says)
+            assert box.locator(".acts button.danger").is_enabled()
         assert server.ark.category_deletes == []
         assert not errors, errors
         browser.close()
