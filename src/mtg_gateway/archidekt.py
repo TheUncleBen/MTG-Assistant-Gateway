@@ -497,6 +497,7 @@ class CustomDeckCard:
     modifier: str = ""
     type_line: str = ""
     image_url: str = ""
+    back_image_url: str = ""
     # the row's own settings, sent back unchanged with a count or category change
     custom_cmc: float | None = None
     companion: bool = False
@@ -538,6 +539,7 @@ def parse_custom_rows(raw: Any) -> list[CustomDeckCard]:
                 modifier=str(entry.get("modifier") or ""),
                 type_line=_custom_type_line(card),
                 image_url=str(card.get("frontImageUrl") or ""),
+                back_image_url=str(card.get("backImageUrl") or "") if card.get("hasBack") else "",
                 custom_cmc=_number(entry.get("customCmc")),
                 companion=entry.get("companion") is True,
                 flipped_default=entry.get("flippedDefault") is True,

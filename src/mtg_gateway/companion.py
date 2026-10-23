@@ -413,6 +413,7 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
     from .companion_settings import add_settings_routes
     from .companion_shell import add_shell_routes
     from .companion_tools import add_deck_tool_routes
+    from .custom_pictures import add_custom_picture_routes
     from .deck_extras import add_deck_extras_routes
     from .forum_page import add_forum_routes
     from .lists_page import add_lists_routes
@@ -437,6 +438,7 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         secure=secure,
     )
     state.folder_jobs = add_folder_routes(server, state)
+    add_custom_picture_routes(server, state)
     add_deck_routes(server, state, h)
     add_deck_extras_routes(server, state, h)
     add_settings_routes(server, state, h)
