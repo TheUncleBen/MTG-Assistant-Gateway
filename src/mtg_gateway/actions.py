@@ -348,7 +348,7 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
     # Follow or unfollow someone by username, not through one of their decks
     by_name = action == "follow" and params.get("username") is not None and not params.get("deck_id")
     forum_thread = None
-    if action in COMMENT_ACTIONS and params.get("thread_id") not in (None, ""):
+    if (action in COMMENT_ACTIONS or action == "report") and params.get("thread_id") not in (None, ""):
         # a forum thread: its comments are a thread like a deck's, with the thread as the root
         from . import forum
 
@@ -550,25 +550,44 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
             raise DeckError("invalid", f"A report's message must be at most {REPORT_MESSAGE_MAX} characters.")
         about = ""
         comment_id = None
+        if forum_thread is not None and kind != "comment":
+            raise DeckError("invalid", "In a forum thread only a comment can be reported.")
         if kind in ("card", "custom_card"):
             card = clean_text(str(params.get("card") or ""))
             hit = next((c for c in deck.cards if c.name.casefold() == card.casefold()), None)
             if hit is None:
+                # one of the member's own custom cards in the deck (Deck.custom_cards, kept apart
+                # from the cards): reported as a custom card whatever kind was asked for
+                hit = next((c for c in deck.custom_cards if c.name.casefold() == card.casefold()), None)
+                if hit is not None:
+                    kind = "custom_card"
+            if hit is None:
                 raise DeckError("not_found", f"“{card}” is not in this deck.")
-            about = f"the card “{hit.name}” in the deck {where}"
+            about = f"the {'custom ' if kind == 'custom_card' else ''}card “{hit.name}” in the deck {where}"
             # Archidekt's own box sends the page's address only: the card is named in the message
             message = f"{hit.name}: {message}"
         elif kind == "comment":
-            found = await _thread_comment(
-                decks, sub, deck.id, params.get("comment_id"), page=_page(params.get("page"))
-            )
+            target_id = changes["deck_id"]
+            cid = params.get("comment_id")
+            if forum_thread is not None and cid == forum_thread["id"]:
+                # the thread's own first post: the thread is its root comment, which the comment
+                # list does not carry, so it is taken from the thread read
+                found = {
+                    "id": forum_thread["id"],
+                    "owner": {"username": forum_thread["owner"]},
+                    "text": forum_thread["text"],
+                    "_page": 1,
+                }
+            else:
+                found = await _thread_comment(decks, sub, target_id, cid, page=_page(params.get("page")))
             comment_id = found["id"]
             changes["page"] = found["_page"]
-            about = f"{found['owner']['username'] or 'a'}'s comment on the deck {where}"
+            on = where if forum_thread is not None else f"on the deck {where}"
+            about = f"{found['owner']['username'] or 'a'}'s comment {on}"
             row["before_text"] = found["text"]
         else:
             about = f"the deck {where}"
-        url = report_url(kind, deck.id, comment_id)
+        url = report_url(kind, deck.id if deck is not None else None, comment_id)
         changes.update(report_kind=kind, message=message, url=url, comment_id=comment_id)
         row["text"] = f"Report {about} to Archidekt's moderators"
         row["after_text"] = message

@@ -32,7 +32,18 @@ from .decks import DeckError, current_client, split_label
 from .pages import BROWSER_CLIENT_ID, browser_session, login_redirect, read_limited
 from .theme import esc, icon
 
-EXTRA_BOXES = ("help", "delist", "report", "reportcard", "pdf", "package", "lock", "contest", "withdraw")
+EXTRA_BOXES = (
+    "help",
+    "delist",
+    "report",
+    "reportcard",
+    "reportcomment",
+    "pdf",
+    "package",
+    "lock",
+    "contest",
+    "withdraw",
+)
 # the member's press is on the review page: what the box's main button leads to
 PUBLIC_LINE = (
     "{what} is public on Archidekt under your name. Your assistant can draft it, but it always waits for "
@@ -324,6 +335,54 @@ def report_box_html(
         cls="dx-box",
     ).replace(
         "<div class='ui-box", "<div data-t='Report “{name}” to Archidekt&#39;s moderators' class='ui-box", 1
+    )
+
+
+def report_comment_box_html(
+    csrf: str,
+    *,
+    action: str,
+    close_href: str,
+    open: bool = False,
+    error: str = "",
+    values: dict[str, str] | None = None,
+) -> str:
+    """Report comment… (the mockup's BOXES.r2ReportComment): on a deck's comment or a forum post.
+    Drawn with no comment; the script fills whose comment it is, its id and the thread page it was
+    shown on (static/social.js, the post's ⋮). ``action``: the deck page's report route or the
+    forum thread's, both of which propose the report and send the member to its review page."""
+    v = values or {}
+    who = v.get("who", "")
+    body = (
+        f"<form id='reportcomment-f' method='post' action='{esc(action)}' class='stack' novalidate>"
+        f"<input type='hidden' name='csrf' value='{esc(csrf)}'>"
+        "<input type='hidden' name='report_kind' value='comment'>"
+        f"<input type='hidden' name='comment_id' value='{esc(v.get('comment_id', ''))}'>"
+        f"<input type='hidden' name='page' value='{esc(v.get('page', '1'))}'>"
+        f"<input type='hidden' name='who' value='{esc(who)}'>"
+        "<div class='field'><label for='dx-rcm'>What is wrong with it</label>"
+        f"<textarea id='dx-rcm' name='message' rows='4' maxlength='{actions.REPORT_MESSAGE_MAX}' "
+        f"placeholder='{esc(REPORT_PLACEHOLDER)}' required>{esc(v.get('message', ''))}</textarea></div>"
+        f"<p class='muted small'>{icon('hand')} {esc(REPORT_LINE)}</p>"
+        "</form>" + _err(error)
+    )
+    return ui.box(
+        "reportcomment",
+        f"Report {who}'s comment to Archidekt's moderators"
+        if who
+        else "Report this comment to Archidekt's moderators",
+        body,
+        actions=[
+            ui.box_button("Cancel", cancel=True),
+            ui.box_button("Send report", kind="primary", form="reportcomment-f", icon_name="send"),
+        ],
+        open=open,
+        close_href=close_href,
+        cls="dx-box",
+    ).replace(
+        "<div class='ui-box",
+        "<div data-t='Report {name}&#39;s comment to Archidekt&#39;s moderators' class='ui-box",
+        1,
     )
 
 
@@ -708,6 +767,12 @@ def boxes_html(
 
     out = report_box_html(deck, csrf, **st("report"))
     out += report_box_html(deck, csrf, card=True, **st("reportcard"))
+    out += report_comment_box_html(
+        csrf,
+        action=f"/decks/{esc(deck.id)}/report-to-archidekt",
+        close_href=f"/decks/{esc(deck.id)}",
+        **st("reportcomment"),
+    )
     pdf = st("pdf")
     out += pdf_box_html(
         deck, csrf, pdf_url=(box_values or {}).get("pdf_url", "") if pdf["open"] else "", **pdf
@@ -1084,24 +1149,35 @@ def add_deck_extras_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
         if isinstance(got, Response):
             return got
         sub, sid, data = got
-        kind = "card" if data.get("report_kind") == "card" else "deck"
-        values = {"message": data.get("message", ""), "card": data.get("card", "")[:200]}
+        kind = data.get("report_kind") if data.get("report_kind") in ("card", "comment") else "deck"
+        values = {
+            "message": data.get("message", ""),
+            "card": data.get("card", "")[:200],
+            "comment_id": data.get("comment_id", "")[:20],
+            "page": data.get("page", "")[:6],
+            "who": data.get("who", "")[:150],
+        }
+        box = {"card": "reportcard", "comment": "reportcomment"}.get(kind, "report")
         params: dict[str, Any] = {"deck_id": deck_id, "report_kind": kind, "message": values["message"]}
         if kind == "card":
             params["card"] = values["card"]
             try:
                 deck = await decks.get_any_deck(sub, deck_id)
                 hit = next((c for c in deck.cards if c.name.casefold() == values["card"].casefold()), None)
-                if hit is not None and hit.custom:
+                # a custom card: one marked so in the cards, or one of Deck.custom_cards
+                if (hit is not None and hit.custom) or any(
+                    c.name.casefold() == values["card"].casefold() for c in deck.custom_cards
+                ):
                     params["report_kind"] = "custom_card"
             except DeckError as exc:
                 return await back_with(request, sub, sid, deck_id, "reportcard", exc, values)
+        elif kind == "comment":
+            params["comment_id"] = int(values["comment_id"]) if values["comment_id"].isdigit() else None
+            params["page"] = int(values["page"]) if values["page"].isdigit() else 1
         try:
             p = await decks.propose_action(sub, "report", **params)
         except DeckError as exc:
-            return await back_with(
-                request, sub, sid, deck_id, "reportcard" if kind == "card" else "report", exc, values
-            )
+            return await back_with(request, sub, sid, deck_id, box, exc, values)
         return to_review(request, p)
 
     @server.custom_route("/decks/{deck_id}/registration", methods=["POST"], include_in_schema=False)

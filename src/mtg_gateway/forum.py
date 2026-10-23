@@ -186,6 +186,8 @@ async def thread(decks: DeckService, sub: str, thread_id: Any, *, page: int = 1)
         "points": _int(body.get("points")),
         "locked": body.get("locked") is True,
         "archived": body.get("archived") is True,
+        # the thread's mark (THREAD_TYPES): a "contest" thread carries the contest strip
+        "type": THREAD_TYPES.get(_int(body.get("type")), ""),
         "reply_count": _int(body.get("childrenCount")),
         "page": page,
         "has_more": bool(isinstance(links, dict) and links.get("next")),

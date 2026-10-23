@@ -4,7 +4,7 @@ open and a desktop with no sideways scroll, 44 px targets on touch and 4.5:1 tex
 themes, and hold together at 200% text; Load more is a button that appends the next page's rows;
 the order choice applies on selection; a thread row has its menu by right-click; the thread's
 replies are drawn from the thread the page already read (no second read) and a reply is posted
-through the deck page's own comment panel after one confirmation; the Add a package box's Color
+through the deck page's own comment panel after the Post this reply? box; the Add a package box's Color
 tag select fills with the member's tags as it opens. Skipped without a Chromium build."""
 
 from __future__ import annotations
@@ -161,11 +161,15 @@ def test_a_reply_is_confirmed_once_and_lands_in_the_thread(server: Server) -> No
         page.wait_for_timeout(800)  # the click guard
         page.fill("#ctext", "Mind Stone too.")
         page.locator("form.newcomment button[type=submit]").click()
-        bar = page.locator("form.newcomment .confirmbar")
-        bar.wait_for(state="visible")
-        assert "Post this comment publicly on Archidekt?" in bar.inner_text()
+        # the mockup's Post this reply? box: the reply as it will appear, asked once more
+        box = page.locator(".mtgbox-scrim .mtgbox")
+        box.wait_for(state="visible")
+        assert box.locator("h2").inner_text() == "Post this reply?"
+        assert box.locator(".post-preview").inner_text() == "Mind Stone too."
+        assert "Posted publicly under “alice” in this thread on Archidekt." in box.inner_text()
+        assert box.locator(".acts button", has_text="Keep editing").count() == 1
         assert [c["text"] for c in ark.comments[700002]] == ["Arcane Signet, every time.", "And Sol Ring."]
-        bar.locator("button", has_text="Post").click()
+        box.locator(".acts button", has_text="Post reply").click()
         page.locator(".comments .cmt", has_text="Mind Stone too.").wait_for(state="visible", timeout=4000)
         assert "Mind Stone too." in ark.comments[700002][-1]["text"]  # kept as Archidekt's document
         assert ark.comments[700002][-1]["owner"]["username"] == "alice"

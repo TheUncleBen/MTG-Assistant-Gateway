@@ -553,14 +553,24 @@ class SocialService:
         return {"deleted": comment_id, "count": after["count"]}
 
     async def comment(
-        self, sub: str, deck_id: str, text: str, parent: int | None, page: int = 1
+        self, sub: str, deck_id: str, text: str, parent: int | None, page: int = 1, *, marks: bool = False
     ) -> dict[str, Any]:
+        """``marks``: the text carries the reply box's own marks (formatting.marks_doc): bold,
+        italic and linked words, written as the document Archidekt's editor would make. Only the
+        page's reply box sends them; an assistant's comment is plain text."""
         self.decks._writes_switch()
         _uid, name = self._me(sub)
         text = comment_text(text)
+        if marks and formatting.has_marks(text):
+            doc = formatting.marks_doc(text)
+            words = formatting.marks_text(text)
+            if doc is not None and comment_text(words) == words.strip():
+                text = QuillDoc(doc)
+            else:
+                text = words
         if not text:
             raise DeckError("invalid", refusals.EMPTY_COMMENT)
-        if len(text) > MAX_COMMENT:
+        if len(rich_text(text) if isinstance(text, QuillDoc) else text) > MAX_COMMENT:
             raise DeckError("invalid", refusals.comment_too_long(MAX_COMMENT))
         if parent is None:
             root = await self._root(sub, deck_id, reuse=True)
@@ -716,7 +726,14 @@ def add_social_routes(server: MCPServer, state: AppState) -> SocialService:
         if not isinstance(data.get("text"), str):
             return _fail("invalid", "text must be a string")
         try:
-            out = await service.comment(sub, deck_id(request), data["text"], parent, page_of(request, data))
+            out = await service.comment(
+                sub,
+                deck_id(request),
+                data["text"],
+                parent,
+                page_of(request, data),
+                marks=data.get("marks") is True,
+            )
         except (DeckError, ArchidektError) as exc:
             return _err(exc)
         return JSONResponse({"ok": True, **out}, status_code=201, headers=NO_STORE)

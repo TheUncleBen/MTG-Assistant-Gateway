@@ -2009,6 +2009,9 @@ ICONS = {
     "back": "<path d='M9 14L4 9l5-5'/><path d='M4 9h10a6 6 0 0 1 0 12h-3'/>",
     "bell": "<path d='M6 16V11a6 6 0 0 1 12 0v5l2 2H4z'/><path d='M10 21h4'/>",
     "send": "<path d='M4 12l16-8-6 16-2-7z'/>",
+    # the forum reply box's text style buttons (static/social.js)
+    "bold": "<path d='M7 4h6a3.5 3.5 0 0 1 0 7H7zM7 11h7a3.5 3.5 0 0 1 0 7H7z'/>",
+    "italic": "<path d='M10 4h8M6 20h8M14 4l-4 16'/>",
     # the one neutral "connected app" mark (ui.app_chip): a plug, never a company's logo
     "app": "<path d='M9 2v5M15 2v5'/><path d='M6 7h12v3a6 6 0 0 1-12 0z'/><path d='M12 16v6'/>",
 }

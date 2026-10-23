@@ -828,6 +828,7 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
             "delist": "Delist",
             "report": "Report",
             "reportcard": "Report",
+            "reportcomment": "Report",
             "pdf": "Registration PDF",
             "package": "Add a package",
             "lock": "Lock personal categories",

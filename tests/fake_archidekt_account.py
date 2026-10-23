@@ -37,6 +37,7 @@ class AccountFake:
         self.uploads: list[tuple[str, bytes, str]] = []  # (who, body, Content-Disposition)
         self.help: dict[int, dict[str, Any]] = {}  # deck id -> request
         self.reports: list[dict[str, Any]] = []
+        self.fail_entries = False  # GET contestSubmission/decks/{thread} answers 503
         self.pdfs: list[dict[str, Any]] = []
         self.private: dict[str, dict[str, Any]] = {}
         self.notes: dict[str, list[dict[str, Any]]] = {}
@@ -358,6 +359,8 @@ class AccountFake:
         # -- contest entries
         if parts[:2] == ["comments", "contestSubmission"]:
             if parts[2:3] == ["decks"] and m == "GET":
+                if self.fail_entries:
+                    return httpx.Response(503, json={"detail": "Down."})
                 return _ok({"results": self.entries.get(int(parts[3]), [])})
             if len(parts) == 2 and m == "POST":
                 deck = self.ark.decks.get(body["deck"])

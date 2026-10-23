@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import re
+from html import unescape as html_unescape
 
 import pytest
 
@@ -16,6 +17,7 @@ from mtg_gateway.forum_page import ARCHIVED, LOCKED
 from mtg_gateway.theme import esc
 
 from .conftest import Stack, stack_with
+from .test_account_actions import _browser_apply
 from .test_approval_modes import SHIPPED
 from .test_decks_and_proxy import Browser, linked_user
 
@@ -176,8 +178,17 @@ async def test_a_thread_shows_its_first_post_and_the_comment_panel_over_its_repl
     assert pre["count"] == 1 and pre["has_more"] is False and isinstance(pre["me"], int)
     assert ark.calls.count(("GET", "/api/comments/700002/")) == 1
     # the reply box, public under the member's name, posting through the same panel
-    assert "<form class='newcomment'" in page and "Your reply" in page
-    assert "Posted publicly on Archidekt under your Archidekt name, after you confirm." in page
+    assert "<form class='newcomment' data-forum='1' data-me-name='alice'>" in page and "Your reply" in page
+    assert esc("Public under “alice”. An assistant's reply always waits for your press.") in page
+    # the text style buttons above the box, the one orange button under it
+    assert "role='toolbar' aria-label='Text style'" in page
+    assert page.count("data-mark=") == 3 and "data-mark='bold'" in page and "data-mark='link'" in page
+    assert "class='btn btn-primary'" in page and "Post reply" in page
+    # the first post carries its ⋮ and who wrote it; the Report comment box is on the page, hidden
+    assert "class='fm-post' id='post-700002' data-id='700002' data-owner='amy' tabindex='0'" in page
+    assert "aria-label='Menu for amy&#39;s post'" in page
+    assert "id='reportcomment'" in page and "action='/forum/thread/700002/report'" in page
+    assert "id='fm-contest'" not in page  # not a contest thread
     assert LOCKED not in page and ARCHIVED not in page
     # a thread by its link opens the same page
     r = await member.http.get("/forum/thread/https://archidekt.com/forum/thread/700002")
@@ -239,3 +250,223 @@ async def test_the_forum_is_in_the_menus_and_needs_a_sign_in(stack: Stack, membe
         assert r.status_code == 302 and "/login" in r.headers["location"]
     finally:
         await anon.aclose()
+
+
+# -- the UI pass: the section column, the contest strip, Report comment… and the text marks ---------
+
+
+def _contest(ark, tid: int = 700007, **more) -> None:
+    ark.forum_threads[tid] = {
+        "title": "October deck contest",
+        "section": "General",
+        "type": 7,
+        "owner": "amy",
+        **more,
+    }
+
+
+async def test_the_thread_table_has_a_section_column_and_two_line_rows(member: Browser) -> None:
+    r = await member.http.get(SECTION)
+    assert r.status_code == 200, r.text
+    page = r.text
+    # the columns as the mockup lists them; the Points column of before is gone
+    head = re.search(r"<div class='tr th'.*?</div>", page, re.S)
+    assert head, page
+    cols = re.findall(r"<span[^>]*>(.*?)</span>", head.group(0))
+    assert [re.sub(r"<[^>]+>", "", c).strip() for c in cols] == [
+        "Thread",
+        "Section",
+        "Started by",
+        "Replies",
+        "Last activity",
+    ]
+    # the section is the page's own (Archidekt's rows carry no section of their own): a label in
+    # the column on a desktop and in the row's second line on a phone
+    assert page.count("class='ui-lbl grey fm-section'") >= 3 or page.count("fm-section") >= 3
+    assert "General" in re.search(r"<a class='tr' href='/forum/thread/700002'.*?</a>", page, re.S).group(0)
+
+
+async def test_a_contest_thread_has_its_strip_the_entries_and_the_enter_and_withdraw_boxes(
+    member: Browser, stack: Stack
+) -> None:
+    ark = stack.ark
+    _contest(ark)
+    ark.account.entries[700007] = [
+        {
+            "id": 1,
+            "deck": {"id": 77, "name": "Amy's pile"},
+            "owner": {"id": ark._user_id("amy"), "username": "amy"},
+        }
+    ]
+    r = await member.http.get("/forum/thread/700007")
+    assert r.status_code == 200, r.text
+    page = html_unescape(r.text)
+    assert "id='fm-contest'" in page and "Contest · 1 deck entered" in page
+    assert "Enter a deck…" in page and "data-box-open='enter'" in page
+    assert "href='/forum/thread/700007/enter'" in page
+    # the entries fold: the deck, by whom; no Reviewed mark when Archidekt's row says nothing of it
+    assert "Entries (1)" in page and "Amy's pile" in page and "by amy" in page
+    assert "Reviewed" not in page and "Not yet reviewed" not in page
+    # the boxes are on the page, hidden; the Enter box reads the decks when it opens
+    assert "id='enter'" in page and "id='fm-enter-f'" in page and "data-src='/api/decks/mine'" in page
+    assert "Summary of the deck (required)" in page and "Shown on the contest page." in page
+    assert "Archidekt replaces the deck's description with this summary." in page
+    assert "Review the entry" in page
+    assert "id='withdraw'" in page and "id='fm-withdraw-f'" in page
+    # the entries were read once, the thread once
+    assert ark.calls.count(("GET", "/api/comments/contestSubmission/decks/700007/")) == 1
+    # the old addresses draw the boxes open, with the deck list in the page (no scripts needed)
+    r = await member.http.get("/forum/thread/700007/enter")
+    assert r.status_code == 200 and "id='enter'" in r.text and "data-open" in r.text
+    assert "Enter a deck in “October deck contest”" in html_unescape(r.text)
+    # entering: the checks, then the review page, where the member applies it
+    csrf = await member.csrf("/forum/thread/700007")
+    bad = await member.http.post(
+        "/forum/thread/700007/contest",
+        data={"csrf": csrf, "entry_action": "enter", "deck": "", "summary": "x"},
+    )
+    assert bad.status_code == 400 and "Pick a deck first." in bad.text
+    bad = await member.http.post(
+        "/forum/thread/700007/contest",
+        data={"csrf": csrf, "entry_action": "enter", "deck": "42", "summary": " "},
+    )
+    assert bad.status_code == 400 and "A summary is required." in bad.text
+    r = await member.http.post(
+        "/forum/thread/700007/contest",
+        data={"csrf": csrf, "entry_action": "enter", "deck": "42", "summary": "Simic ramp"},
+    )
+    assert r.status_code == 303, r.text
+    pid = r.headers["location"].rpartition("/")[2]
+    assert r.headers["location"] == f"/proposals/{pid}"
+    assert ark.account.entries[700007] and len(ark.account.entries[700007]) == 1  # nothing sent yet
+    done = await _browser_apply(stack.h, pid)
+    assert done["state"] == "applied", done
+    assert [e["deck"]["id"] for e in ark.account.entries[700007]] == [77, 42]
+    # entered: the strip shows the member's entry and Withdraw…; the entries fold marks You
+    r = await member.http.get("/forum/thread/700007")
+    page = html_unescape(r.text)
+    assert "Your entry:" in page and "Sample Commander Deck" in page and "Withdraw…" in page
+    assert "Enter a deck…" not in page
+    assert "Contest · 2 decks entered" in page
+    assert ">You<" in page
+    r = await member.http.get("/forum/thread/700007/withdraw")
+    assert (
+        "Withdraw “Sample Commander Deck” from this contest?" in html_unescape(r.text)
+        and "data-open" in r.text
+    )
+    r = await member.http.post(
+        "/forum/thread/700007/contest", data={"csrf": csrf, "entry_action": "withdraw", "deck": "42"}
+    )
+    assert r.status_code == 303
+    done = await _browser_apply(stack.h, r.headers["location"].rpartition("/")[2])
+    assert done["state"] == "applied", done
+    assert [e["deck"]["id"] for e in ark.account.entries[700007]] == [77]
+
+
+async def test_a_contest_whose_entries_cannot_be_read_says_so_and_a_locked_one_offers_nothing(
+    member: Browser, stack: Stack
+) -> None:
+    ark = stack.ark
+    _contest(ark)
+    ark.account.fail_entries = True
+    r = await member.http.get("/forum/thread/700007")
+    assert r.status_code == 200
+    assert "The entries could not be read from Archidekt right now." in r.text
+    _contest(ark, tid=700008, locked=True)
+    r = await member.http.get("/forum/thread/700008")
+    assert r.status_code == 200 and LOCKED in r.text
+    assert "data-box-open='enter'" not in r.text and "id='fm-enter-f'" not in r.text
+
+
+async def test_a_reply_and_the_first_post_are_reported_through_the_review_page(
+    member: Browser, stack: Stack
+) -> None:
+    ark = stack.ark
+    cid = _reply(ark, 700002, "amy", "Buy my cards at spam.example")
+    csrf = await member.csrf("/forum/thread/700002")
+    r = await member.http.post(
+        "/forum/thread/700002/report",
+        data={
+            "csrf": csrf,
+            "report_kind": "comment",
+            "comment_id": str(cid),
+            "page": "1",
+            "message": "Spam.",
+        },
+    )
+    assert r.status_code == 303, r.text
+    pid = r.headers["location"].rpartition("/")[2]
+    shown = (await member.http.get(f"/api/v1/proposals/{pid}")).json()
+    assert "amy's comment" in str(shown) and "Best mana rocks?" in str(shown), shown
+    done = await _browser_apply(stack.h, pid)
+    assert done["state"] == "applied", done
+    sent = ark.account.reports[-1]
+    assert sent["by"] == "alice" and "Spam." in str(sent) and str(cid) in str(sent)
+    # the thread's first post is a comment too (the thread's root)
+    r = await member.http.post(
+        "/forum/thread/700002/report",
+        data={
+            "csrf": csrf,
+            "report_kind": "comment",
+            "comment_id": "700002",
+            "page": "1",
+            "message": "Off topic.",
+        },
+    )
+    assert r.status_code == 303, r.text
+    done = await _browser_apply(stack.h, r.headers["location"].rpartition("/")[2])
+    assert done["state"] == "applied", done
+    assert "Off topic." in str(ark.account.reports[-1])
+    # a report needs a message; a card cannot be reported from a thread
+    bad = await member.http.post(
+        "/forum/thread/700002/report",
+        data={"csrf": csrf, "report_kind": "comment", "comment_id": str(cid), "page": "1", "message": " "},
+    )
+    assert bad.status_code == 400 and "id='reportcomment'" in bad.text and "data-open" in bad.text
+    bad = await member.http.post(
+        "/forum/thread/700002/report",
+        data={"csrf": csrf, "report_kind": "card", "card": "Sol Ring", "message": "x"},
+    )
+    assert bad.status_code == 400
+
+
+def test_the_text_marks_become_archidekts_formatting() -> None:
+    from mtg_gateway.formatting import has_marks, marks_doc, marks_text
+
+    assert not has_marks("plain words") and marks_doc("plain words") is None
+    text = "Try **Sol Ring** and _Arcane Signet_: [the list](https://archidekt.com/decks/42)"
+    assert has_marks(text)
+    assert marks_text(text) == "Try Sol Ring and Arcane Signet: the list"
+    doc = json.loads(marks_doc(text))
+    ops = doc["ops"]
+    assert ops[1] == {"insert": "Sol Ring", "attributes": {"bold": True}}
+    assert ops[3] == {"insert": "Arcane Signet", "attributes": {"italic": True}}
+    assert ops[5] == {"insert": "the list", "attributes": {"link": "https://archidekt.com/decks/42"}}
+    assert ops[-1]["insert"].endswith("\n")
+    # a link that is not a web address stays as typed
+    assert marks_doc("[bad](javascript:1)") is None
+    assert marks_text("[bad](javascript:1)") == "[bad](javascript:1)"
+
+
+async def test_a_reply_with_marks_is_posted_as_archidekts_formatting(member: Browser, stack: Stack) -> None:
+    ark = stack.ark
+    csrf = await member.csrf("/forum/thread/700002")
+    r = await member.http.post(
+        "/social/api/decks/forum:700002/comments",
+        json={"text": "Run **Sol Ring**, see [this](https://archidekt.com/decks/42).", "marks": True},
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert r.status_code in (200, 201), r.text
+    assert r.json()["ok"] is True, r.text
+    posted = ark.comments[700002][-1]["text"]
+    doc = json.loads(posted)
+    assert {"insert": "Sol Ring", "attributes": {"bold": True}} in doc["ops"]
+    assert any(op.get("attributes", {}).get("link") == "https://archidekt.com/decks/42" for op in doc["ops"])
+    # and without the flag the marks are plain words, as typed
+    r = await member.http.post(
+        "/social/api/decks/forum:700002/comments",
+        json={"text": "Not **bold** here."},
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert r.json()["ok"] is True, r.text
+    assert "**bold**" in ark.comments[700002][-1]["text"]
