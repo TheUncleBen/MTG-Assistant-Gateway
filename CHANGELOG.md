@@ -48,7 +48,8 @@ each of them; anything public or about your account waits for your own press.
   a link to what each one is about.
 - **Deck help requests.** Request deck help in the deck menu posts the deck on Archidekt's deck
   help board, and lets you edit or delist it.
-- **Reports to Archidekt's moderators** for a deck or a card, from the deck and card menus.
+- **Reports to Archidekt's moderators** for a deck, a card or a comment, from the deck and card
+  menus and a comment's menu.
 - **Contest entries.** Enter in a contest and Withdraw from a contest in the deck menu. Entering
   replaces the deck's description with your summary, after a snapshot, and the review shows the
   old and new description side by side.
@@ -61,9 +62,15 @@ each of them; anything public or about your account waits for your own press.
   is public under your name and waits for your own press. Starting a new thread stays on Archidekt,
   which asks you to prove you're human first. The section and thread lists are read the way
   Archidekt's own forum pages load them, so if Archidekt changes those pages the gateway says so,
-  and a thread still opens from its link or number.
-- **Custom cards in your decks.** Your own custom cards can be put in a deck, taken out or given a
-  new count, by you or as a proposal from your assistant.
+  and a thread still opens from its link or number. A post's menu has Reply, Copy link, Vote up,
+  Edit and Delete for your own, and Report comment…; the reply box has bold, italic and link
+  buttons and shows your reply once more before posting it; a contest thread lets you enter one of
+  your decks or withdraw it.
+- **Custom cards in your decks.** Your custom cards show in your decks with their pictures, and you
+  can put one in a deck (from My lists), change its count, category, color tag or mana value, or
+  take it out, as on Archidekt; your assistant can propose the same. Taking custom cards out of a
+  deck always waits for your own press, because restoring a snapshot doesn't put them back. My
+  lists shows each custom card's picture too.
 - **A color tag when adding a package.** Add a package can put one of your color tags on every card
   it adds, in the same change.
 - **More device default settings:** Group by, Sort by and the two price sources, as on Archidekt's
