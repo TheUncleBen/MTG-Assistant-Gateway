@@ -257,6 +257,234 @@
     toast((err && err.message) || "No connection; nothing was changed.", { error: true });
   }
 
+  // -- custom cards (deckpage.custom_card_row): the member's own custom cards in the deck ------
+  // Their count, category and removal save through the deck's custom card endpoint (api.py
+  // custom_cards_edit; decks.propose_custom_cards), one change at a time after the page's other
+  // saves. The card changes on the page at once and goes back when the save does not go through.
+  // Archidekt keeps no snapshot of these rows (decks.py), so there is no History step: a removal
+  // offers its own Undo, which adds the card back.
+  var customUrl = "/api/v1/decks/" + enc(deckId) + "/custom_cards";
+  var customQueue = Promise.resolve();
+  var customSteps = [];  // {card, shown, saved, timer}
+  var CUSTOM_LOCK = "Not for custom cards (Archidekt doesn't keep default categories for them).";
+  var CUSTOM_PICK = "Custom cards are changed one at a time, from their own menu.";
+  function isCustom(card) { return !!card && card.hasAttribute("data-custom-id"); }
+  function customIdOf(card) { return parseInt(card.getAttribute("data-custom-id"), 10); }
+  function customPost(changes, pid, version) {
+    var body = pid ? { proposal_id: pid, version: version } : { changes: changes, confirmed: false };
+    return api(customUrl, body).then(function (d) {
+      if (d.ok && d.applied) return d;
+      if (d.ok && d.needs_confirm) {
+        return askConfirm(d.why, d.proposal_id).then(function (yes) {
+          if (!yes) { var c = new Error("Nothing was changed."); c.cancelled = true; throw c; }
+          return customPost(changes, d.proposal_id, d.version);
+        });
+      }
+      if (d.ok && d.status === 202 && d.proposal_id) {
+        var see = el("a", "btn", "Review page");
+        see.href = "/proposals/" + enc(d.proposal_id);
+        toast("Still saving on Archidekt; the review page shows how far it got.", { sticky: true, actions: [see] });
+        return d;
+      }
+      if (d.ok && d.proposal_id) { location.href = "/proposals/" + enc(d.proposal_id); return d; }  // writes are off: kept for review
+      throw new Error(d.message || "The change could not be saved.");
+    }, function (err) {
+      if (err && err.cancelled) throw err;
+      throw new Error("No connection; nothing was changed.");
+    });
+  }
+  // the deck's custom rows as Archidekt has them now: each card's count and category, and off the
+  // page when the row is gone
+  function customDraw(d) {
+    var rows = d.custom_rows;
+    if (!rows) return;
+    $$(".c[data-custom-id], .row[data-custom-id]", cards).forEach(function (card) {
+      var id = card.getAttribute("data-custom-id");
+      var r = rows.filter(function (x) { return String(x.custom_card_id) === id; })[0];
+      if (!r) { card.remove(); return; }
+      setQty(card, r.qty);
+      var cat = (r.categories && r.categories[0]) || "";
+      if (r.relation_id !== null && r.relation_id !== undefined) card.setAttribute("data-rel", String(r.relation_id));
+      if (cat) {
+        card.setAttribute("data-cat", cat);
+        var zone = excluded.indexOf(cat) >= 0 ? "side" : "main";
+        card.setAttribute("data-zone", zone);
+        card.classList.toggle("side", zone === "side" && card.classList.contains("row"));
+      }
+      if (r.categories && r.categories.length > 1) card.setAttribute("data-allcats", JSON.stringify(r.categories));
+      else card.removeAttribute("data-allcats");
+      if (byCategory && cat && stackOf(card) !== cat) {
+        var st = ensureStack(cat);
+        if (st) $(".cards, .rows", st).appendChild(card);
+      }
+    });
+    refreshStacks();
+    drawStats(d);
+    if (menu && !menuCard.isConnected) closeMenu();
+  }
+  // one custom card save at a time, after the page's other saves; back(): puts the card back when
+  // the save does not go through. Resolves with the answer; rejects after the note is shown.
+  function customSave(card, changes, saying, back) {
+    savingNote(saying, false, card, "Custom");
+    var run = function () { return idle().then(function () { return customPost(changes); }); };
+    var p = customQueue.then(run, run);
+    customQueue = p.then(function () {}, function () {});
+    return p.then(function (d) {
+      dropSavingNote(card, "Custom");
+      if (d.applied) customDraw(d);
+      return d;
+    }, function (err) {
+      dropSavingNote(card, "Custom");
+      if (back) back();
+      if (err && err.cancelled) { dismissToast(); throw err; }
+      toast("Not saved: " + ((err && err.message) || "no connection").replace(/\.$/, "") + ".", { error: true });
+      throw err;
+    });
+  }
+  function customStep(card, delta) {
+    var name = card.getAttribute("data-card");
+    var s = customSteps.filter(function (x) { return x.card === card; })[0];
+    var q = (s ? s.shown : qtyOf(card)) + delta;
+    if (q <= 0) { customRemove(card); return; }
+    if (q > 99) return;
+    if (!s) { s = { card: card, shown: q, saved: qtyOf(card), timer: 0 }; customSteps.push(s); }
+    s.shown = q;
+    setQty(card, q);
+    refreshStacks();
+    savingNote("Saving " + name + ": " + copies(q) + "…", false, card, "Custom");
+    clearTimeout(s.timer);
+    s.timer = setTimeout(function () {
+      var i = customSteps.indexOf(s);
+      if (i >= 0) customSteps.splice(i, 1);
+      if (s.shown === s.saved || !card.isConnected) { dropSavingNote(card, "Custom"); return; }
+      var sent = s.shown, was = s.saved;
+      customSave(card, [{ action: "set_quantity", custom_card_id: customIdOf(card), quantity: sent }],
+        "Saving " + name + ": " + copies(sent) + "…",
+        function () { if (card.isConnected) { setQty(card, was); refreshStacks(); } }
+      ).then(function (d) { if (d.applied) toast("Saved " + name + ": " + copies(sent) + "."); }, function () { /* told */ });
+    }, 400);
+  }
+  function customMove(card, to, target) {
+    var name = card.getAttribute("data-card");
+    var spot = spotOf(card);
+    var zone = excluded.indexOf(to) >= 0 ? "side" : "main";
+    card.setAttribute("data-cat", to);
+    card.removeAttribute("data-allcats");
+    card.setAttribute("data-zone", zone);
+    card.classList.toggle("side", zone === "side" && card.classList.contains("row"));
+    target = target || (byCategory ? ensureStack(to) : null);
+    var focused = document.activeElement === card;
+    if (target) $(".cards, .rows", target).appendChild(card);
+    if (focused) card.focus();
+    refreshStacks();
+    customSave(card, [{ action: "set_quantity", custom_card_id: customIdOf(card), quantity: qtyOf(card), category: to }],
+      "Moving " + name + " to " + to + "…",
+      function () { putBack(card, spot); }
+    ).then(function (d) { if (d.applied) toast("Moved " + name + " to " + to + "."); }, function () { /* told */ });
+  }
+  function customRemove(card) {
+    var name = card.getAttribute("data-card"), id = customIdOf(card);
+    var s = customSteps.filter(function (x) { return x.card === card; })[0];
+    if (s) { clearTimeout(s.timer); customSteps.splice(customSteps.indexOf(s), 1); }
+    var spot = spotOf(card), qty = s ? s.saved : qtyOf(card), cat = catOf(card);
+    var near = card.closest(".stack");
+    card.remove();
+    refreshStacks();
+    closeMenu();
+    closeViewer();
+    if (!document.activeElement || document.activeElement === document.body) focusNear(near);
+    customSave(card, [{ action: "remove", custom_card_id: id }], "Removing " + name + "…",
+      function () { putBack(card, spot); setQty(card, qty); refreshStacks(); }
+    ).then(function (d) {
+      if (!d.applied) return;
+      // Undo: the card goes back into the deck with the count and category it had
+      var undo = el("button", "btn", "Undo");
+      undo.type = "button";
+      undo.addEventListener("click", function () {
+        undo.disabled = true;
+        var ch = { action: "add", custom_card_id: id, quantity: qty };
+        if (cat) ch.category = cat;
+        customSave(card, [ch], "Adding " + name + " back…", null).then(function (r) {
+          if (!r.applied) return;
+          var st = (cat && byCategory && (ensureStack(cat) || stackByName(cat))) || (spot.stack && spot.stack.isConnected ? spot.stack : null) || $(".stack", cards);
+          if (st) { $(".cards, .rows", st).appendChild(card); putBack(card, spot, true); }
+          customDraw(r);
+          toast(name + " is back in " + (cat || "the deck") + ".");
+        }, function () { undo.disabled = false; });
+      });
+      toast("Removed " + name + ".", { actions: [undo] });
+    }, function () { /* told */ });
+  }
+  // the menu's items for a custom card: its count, Move to and removal, Copy name; Lock personal
+  // categories is shown but not offered (Archidekt keeps no default categories for them)
+  function customItems(m, card, name) {
+    m.appendChild(menuItem("Open card", "eye", function () { closeMenu(); openViewer(card); }));
+    if (!(own && deckId)) {
+      if (window.MtgMenu) m.appendChild(menuItem("Copy name", "copy", function () { closeMenu(); window.MtgMenu.copyAndSay(name, "Name copied."); }));
+      return;
+    }
+    var row = el("div", "item qtyrow");
+    row.setAttribute("role", "none");
+    row.appendChild(el("span", "lbl", "Quantity"));
+    var minus = el("button", "step", "−");
+    minus.type = "button";
+    minus.setAttribute("role", "menuitem");
+    var n = el("b", "n", String(qtyOf(card)));
+    var plus = el("button", "step", "+");
+    plus.type = "button";
+    plus.setAttribute("role", "menuitem");
+    var relabel = function () {
+      var q = qtyOf(card);
+      n.textContent = String(q);
+      minus.setAttribute("aria-label", q <= 1 ? "Remove the last copy of " + name : "One fewer " + name + ": " + (q - 1));
+      plus.setAttribute("aria-label", "One more " + name + ": " + (q + 1));
+    };
+    relabel();
+    qtyLabels.push({ el: n, card: card, show: relabel });
+    minus.addEventListener("click", function (e) { stop(e); customStep(card, -1); });
+    plus.addEventListener("click", function (e) { stop(e); customStep(card, 1); });
+    row.appendChild(minus); row.appendChild(n); row.appendChild(plus);
+    m.appendChild(row);
+    var moveBtn = menuItem("Move to", "swap", null, "more");
+    moveBtn.setAttribute("aria-haspopup", "true");
+    moveBtn.setAttribute("aria-expanded", "false");
+    moveBtn.appendChild(el("span", "chev", "›"));
+    var sub = el("div", "sub");
+    sub.setAttribute("role", "group");
+    sub.setAttribute("aria-label", "Categories");
+    sub.hidden = true;
+    categoryChoices(card).forEach(function (c) {
+      var b = menuItem(c.name, c.side ? "eye-off" : "tag", function () { closeMenu(); customMove(card, c.name); }, c.current ? "on" : "");
+      if (c.side) b.title = "Not counted in the deck";
+      if (c.current) { b.disabled = true; b.setAttribute("aria-current", "true"); }
+      sub.appendChild(b);
+    });
+    var toggleSub = function (open) {
+      sub.hidden = !open;
+      moveBtn.setAttribute("aria-expanded", open ? "true" : "false");
+      if (!open) return;
+      fit(m);
+      var end = sub.offsetTop + sub.offsetHeight - m.clientHeight;
+      if (m.scrollTop < end) m.scrollTop = Math.min(moveBtn.offsetTop, end);
+      var f = $("button:not([disabled])", sub);
+      if (f) f.focus({ preventScroll: true });
+    };
+    moveBtn.addEventListener("click", function (e) { stop(e); toggleSub(sub.hidden); });
+    moveBtn.addEventListener("keydown", function (e) { if (e.key === "ArrowRight") { stop(e); toggleSub(true); } });
+    sub.addEventListener("keydown", function (e) { if (e.key === "ArrowLeft") { stop(e); toggleSub(false); moveBtn.focus(); } });
+    m.appendChild(moveBtn);
+    m.appendChild(sub);
+    m.appendChild(menuItem("Remove from deck", "x", function () { customRemove(card); }, "danger"));
+    m.appendChild(el("div", "sep"));
+    if (window.MtgDeckExtras && document.getElementById("lock")) {
+      var lock = menuItem("Lock personal categories", "lock", function () { toast(CUSTOM_LOCK); }, "off");
+      lock.setAttribute("aria-disabled", "true");
+      lock.title = CUSTOM_LOCK;
+      m.appendChild(lock);
+    }
+    if (window.MtgMenu) m.appendChild(menuItem("Copy name", "copy", function () { closeMenu(); window.MtgMenu.copyAndSay(name, "Name copied."); }));
+  }
+
   // -- saves in the background: the card's edits from its menu, viewer and drags --------
   // The edit is drawn on the page at once and Archidekt saves it behind, one save at a time in
   // the order they were made: a Saving note until it answers, then Saved with Undo (applyAnswer).
@@ -918,6 +1146,7 @@
   function copies(n) { return n === 1 ? "1 copy" : n + " copies"; }
   function stepOf(card) { return qtySteps.filter(function (s) { return s.card === card; })[0] || null; }
   function stepQty(card, delta) {
+    if (isCustom(card)) { customStep(card, delta); return; }
     var s = stepOf(card);
     var q = (s ? s.shown : qtyOf(card)) + delta;
     if (q <= 0) { removeCard(card); return; }
@@ -968,6 +1197,7 @@
   // Remove from deck: the card leaves the page at once (after the question a card note asks) and
   // comes back in its place when the save does not go through.
   function removeCard(card) {
+    if (isCustom(card)) { customRemove(card); return; }
     var name = card.getAttribute("data-card");
     confirmNotes([card]).then(function (yes) {
       if (!yes) return;
@@ -1006,6 +1236,7 @@
   // Move to (and a drop on another stack): the card is filed under its new category at once, in
   // that stack when the page is grouped by category, and goes back when the save does not go through.
   function moveTo(card, to, target) {
+    if (isCustom(card)) { customMove(card, to, target); return; }
     var name = card.getAttribute("data-card");
     var from = byCategory ? stackOf(card) : catOf(card);
     var ch = changeFor(card, "set_category", to);
@@ -1227,10 +1458,13 @@
         setTimeout(function () { var r = card.getBoundingClientRect(); openMenu(card, r.left + r.width / 2, r.top + r.height / 2, { submenu: true }); }, 50);
       });
       acts.push(move);
-      var editLink = el("a", "btn", "Edit in deck editor");
-      editLink.href = "/decks/" + enc(deckId) + "/edit#card-" + enc(name);
-      acts.push(editLink);
+      if (!isCustom(card)) {
+        var editLink = el("a", "btn", "Edit in deck editor");
+        editLink.href = "/decks/" + enc(deckId) + "/edit#card-" + enc(name);
+        acts.push(editLink);
+      }
     }
+    if (isCustom(card)) { CardView.open(CardView.fromElement(card), acts); return; }  // no collection or Scryfall row for a custom card
     var ownBtn = el("button", "btn", "I own this card");
     ownBtn.type = "button";
     ownBtn.addEventListener("click", function () {
@@ -1304,6 +1538,7 @@
     m.setAttribute("aria-label", "Card: " + name);
     var head = el("div", "head", name);
     m.appendChild(head);
+    if (isCustom(card)) { customItems(m, card, name); } else {
     m.appendChild(menuItem("Open card", "eye", function () { closeMenu(); openViewer(card); }));
     if (document.body.hasAttribute("data-watchlist")) {
       // watch the card's price, or browse its printings and watch one (the picker's browse mode)
@@ -1418,6 +1653,7 @@
       scry.setAttribute("role", "menuitem");
       scry.insertBefore(icon("external"), scry.firstChild);
       m.appendChild(scry);
+    }
     }
     // Report card… (deck_extras.py): to Archidekt's moderators, on any deck the member can read
     if (window.MtgDeckExtras && document.getElementById("reportcard")) {
@@ -1661,6 +1897,7 @@
       status.textContent = "";
     }
     togglePick = function (card) {
+      if (isCustom(card)) { toast(CUSTOM_PICK); return; }
       var on = !card.classList.contains("picked");
       card.classList.toggle("picked", on);
       card.setAttribute("aria-pressed", on ? "true" : "false");
@@ -1670,7 +1907,7 @@
     done.addEventListener("click", function () { setMode(false); });
     all.addEventListener("click", function () {
       $$(".c, .row", cards).forEach(function (c) {
-        if (c.offsetParent === null) return;  // hidden by the filter or a collapsed stack
+        if (c.offsetParent === null || isCustom(c)) return;  // hidden by the filter or a collapsed stack; a custom card changes from its own menu
         c.classList.add("picked");
         c.setAttribute("aria-pressed", "true");
       });

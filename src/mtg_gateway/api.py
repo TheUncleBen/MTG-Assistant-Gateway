@@ -430,6 +430,104 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
         out.update(view(deck, {front_face(ch.card_name).casefold() for ch in changes}, stale=stale))
         return ok(out, 201)
 
+    @route("/decks/{deck_id}/custom_cards", "POST", write=True)
+    async def custom_cards_edit(request: Request, who: Caller) -> Response:
+        """The deck page's own save of one of the member's custom cards in the deck (kind
+        ``custom_cards``): a count change or a removal from the card's menu, a move to another
+        category, or an Undo that adds it back. One proposal (decks.propose_custom_cards) applied
+        at once with its snapshot, as the edit endpoint applies the page's other hand edits; a
+        change big enough to ask first (modes.hand_edit_confirm) answers ``needs_confirm`` and
+        the page sends ``confirmed: true`` or ``{proposal_id, version}``. Answers the deck's
+        custom rows as they are now and the page fragments the edit endpoint answers. Browser
+        session only: an assistant proposes through propose_custom_card_changes and waits."""
+        from .deckpage import checks_panel_html, legal_problems, legality_chip_html, legality_panel_html
+
+        if who.via != "browser":
+            raise DeckError(
+                "browser_required",
+                "This is the deck page's own save; apps propose through propose_custom_card_changes.",
+            )
+        data = await json_body(request)
+        if isinstance(data, Response):
+            return data
+        deck_id = str(request.path_params["deck_id"])
+        pid = data.get("proposal_id")
+        if pid is not None:
+            if not isinstance(pid, str) or not pid:
+                raise DeckError("invalid", "proposal_id must be a string")
+            p = decks.describe(who.sub, pid)
+            if p.get("kind") != "custom_cards" or str(p.get("deck_id")) != deck_id.strip():
+                raise DeckError("invalid", "That proposal is not a custom card change of this deck.")
+            row = state.db.get_proposal(pid, who.sub) or {}
+            if row.get("created_by_client") != BROWSER_CLIENT_ID:
+                raise DeckError(
+                    "invalid",
+                    "That proposal was made by an assistant. Approve it on its review page.",
+                    review_url=f"/proposals/{pid}",
+                )
+            if p.get("state") != "pending":
+                raise DeckError("invalid", f"That proposal is {p.get('state')}, not waiting for an answer.")
+            version = data.get("version")
+            if version is None or isinstance(version, bool) or not isinstance(version, int):
+                raise DeckError("invalid", "Send the version of the proposal the page showed.")
+        else:
+            p = await decks.propose_custom_cards(who.sub, deck_id, data.get("changes"))
+            decks.keep_no_backup(who.sub, p["proposal_id"])
+            why = modes.hand_edit_confirm("custom_cards", p.get("rows"))
+            if why and data.get("confirmed") is not True:
+                return ok(
+                    {
+                        "applied": False,
+                        "needs_confirm": True,
+                        "why": why,
+                        "proposal_id": p["proposal_id"],
+                        "version": int(p.get("version") or 1),
+                    },
+                    201,
+                )
+            version = None
+        pid = p["proposal_id"]
+        if not s.writes_enabled:
+            return ok({"applied": False, "proposal_id": pid, "review_url": f"/proposals/{pid}"}, 201)
+        result = await decks.apply(who.sub, pid, via="browser", archidekt_backup=False, version=version)
+        applied = result.get("state") == "applied"
+        out: dict[str, Any] = {
+            "applied": applied,
+            "proposal_id": pid,
+            "snapshot_id": result.get("snapshot_id"),
+            "result": result,
+        }
+        if not applied:
+            return ok(out, 202)
+        deck = await decks.get_own_deck(who.sub, deck_id)
+        stats = deck_stats.compute(deck)
+        out.update(
+            {
+                "custom_rows": [
+                    {
+                        "name": c.name,
+                        "custom_card_id": c.custom_card_id,
+                        "relation_id": c.relation_id,
+                        "qty": c.quantity,
+                        "categories": list(c.categories),
+                    }
+                    for c in deck.custom_cards
+                ],
+                "stats": {
+                    "legal": bool(deck.format) and not legal_problems(stats),
+                    "card_count": stats.get("card_count", 0),
+                    "distinct": stats.get("distinct", 0),
+                    "land_count": stats.get("land_count", 0),
+                    "price_total": stats.get("price_total"),
+                    "salt_total": stats.get("salt_total"),
+                },
+                "banner_html": legality_chip_html(deck, stats),
+                "checks_html": checks_panel_html(deck, stats),
+                "legality_html": legality_panel_html(deck, stats),
+            }
+        )
+        return ok(out, 201)
+
     # -- proposals ------------------------------------------------------------
     @route("/proposals", "GET")
     async def list_proposals(request: Request, who: Caller) -> Response:

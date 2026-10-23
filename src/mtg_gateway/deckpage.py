@@ -28,6 +28,7 @@ from .archidekt import (
     FORMAT_NAMES,
     VOTE_DOWN,
     VOTE_UP,
+    CustomDeckCard,
     Deck,
     DeckCard,
     featured_scryfall_id,
@@ -1080,6 +1081,122 @@ def _card_data(card: DeckCard, deck: Deck) -> str:
     )
 
 
+# -- the member's own custom cards in the deck (Deck.custom_cards, parity release 2) -------------
+# Drawn in the stacks beside the cards, by their categories, marked "Custom" (the mockup's
+# screens/21-deck-page.js), with the row's own data for the card menu (static/deck.js): a count
+# change, a move and a removal go through the deck page's custom card save (api.py), and
+# Report card… reports it as a custom card. They are never in Deck.cards, so no card edit, the
+# selection bar, Buy cards or the deck's stats read them.
+CUSTOM_WORD = "Custom"
+CUSTOM_TITLE = "One of your custom cards (My lists › Custom cards)"
+
+
+def custom_badge() -> str:
+    return f"<span class='custom-badge' title='{esc(CUSTOM_TITLE)}'>{esc(CUSTOM_WORD)}</span>"
+
+
+def custom_primary_type(card: CustomDeckCard) -> str:
+    head = card.type_line.split(" — ", 1)[0]
+    words = {w.casefold() for w in head.replace("-", " ").split()}
+    return next((t for t in PRIMARY_TYPES if t.casefold() in words), "Other")
+
+
+def custom_zone(card: CustomDeckCard, deck: Deck) -> str:
+    return "main" if deck.categories_count(card.categories) else "side"
+
+
+def custom_group_name(card: CustomDeckCard, deck: Deck, group: str) -> str:
+    """The stack a custom card sits in for the chosen grouping: its first category (else its
+    type, as an uncategorised card's auto category), its type, the deck, or a Custom cards stack
+    for the groupings a custom card has no data for (mana value, color, rarity)."""
+    if group == "category":
+        return card.categories[0] if card.categories else custom_primary_type(card)
+    if group == "type":
+        return custom_primary_type(card)
+    if group == "none":
+        return "Deck" if custom_zone(card, deck) == "main" else "Maybeboard / Sideboard"
+    return "Custom cards"
+
+
+# A custom card's picture is not drawn: Archidekt keeps it on a host of its own, outside the deck
+# page's picture sources (companion.DECK_CSP: the gateway and Scryfall), and which host is not
+# known. The card shows its name and type in the picture's place instead.
+def _custom_data(card: CustomDeckCard, deck: Deck) -> str:
+    cat = card.categories[0] if card.categories else ""
+    rel = f" data-rel='{card.relation_id}'" if card.relation_id is not None else ""
+    cid = f" data-custom-id='{card.custom_card_id}'" if card.custom_card_id is not None else ""
+    allcats = (
+        f" data-allcats='{esc(json.dumps(list(card.categories), separators=(',', ':')))}'"
+        if len(card.categories) > 1
+        else ""
+    )
+    return (
+        f" data-custom='1'{cid}{rel} data-qty='{card.quantity}' data-zone='{custom_zone(card, deck)}' "
+        f"data-cat='{esc(cat)}'{allcats}"
+        + f" data-type='{esc(card.type_line)}' data-finish='{esc(card.modifier)}'"
+        + (f" data-label='{esc(card.label)}'" if split_label(card.label)[0] else "")
+        + (f" data-mv='{mana_value_text(card.custom_cmc)}'" if card.custom_cmc is not None else "")
+    )
+
+
+def custom_card_row(card: CustomDeckCard, *, deck: Deck, view: str = "text") -> str:
+    """A custom card as a row of the list views: its count, name, the Custom mark and its type."""
+    cls = " side" if custom_zone(card, deck) == "side" else ""
+    qty = f"<span class='q'>{card.quantity}</span>"
+    name = f"<span class='name' title='{esc(card.name)}'>{esc(card.name)}</span>{custom_badge()}"
+    if view == "brewer":
+        pic = "<span class='art ph' aria-hidden='true'></span>"
+        cls = " brew" + cls
+        body = (
+            f"{pic}<span class='bd'><span class='n'>{qty}{name}</span>"
+            f"<span class='ty'>{esc(card.type_line)}</span><span class='price'></span></span>"
+        )
+    elif view == "table":
+        mv = mana_value_text(card.custom_cmc) if card.custom_cmc is not None else ""
+        body = (
+            f"{qty}<span class='n'>{name}</span>"
+            f"<span class='ty' title='{esc(card.type_line)}'>{esc(card.type_line)}</span>"
+            f"<span class='mv'>{mv}</span>"
+            "<span class='mc'></span><span class='set'>Custom</span><span class='price'></span>"
+        )
+    else:
+        body = (
+            f"{qty}<span class='n'>{name}</span><span class='mc'></span>"
+            f"<span class='set' title='{esc(CUSTOM_TITLE)}'>Custom</span><span class='price'></span>"
+        )
+    return (
+        f"<li class='row custom{cls}' tabindex='0' role='button' data-name='{esc(card.name.lower())}' "
+        f"data-card='{esc(card.name)}'{_custom_data(card, deck)}>{body}</li>"
+    )
+
+
+def custom_image_card(card: CustomDeckCard, *, deck: Deck) -> str:
+    body = (
+        "<span class='ph'><span class='t'>"
+        f"<span class='nm'>{esc(card.name)}</span></span>"
+        f"<span class='ty'>{esc(card.type_line)}</span></span>"
+    )
+    return (
+        f"<div class='c custom' data-name='{esc(card.name.lower())}' data-card='{esc(card.name)}'"
+        f"{_custom_data(card, deck)} title='{esc(card.name)} ({CUSTOM_TITLE})' tabindex='0' role='button'>"
+        f"{body}<span class='qty'>{card.quantity}</span>{custom_badge()}</div>"
+    )
+
+
+def custom_cards_by_group(deck: Deck, group: str, q: str = "") -> dict[str, list[CustomDeckCard]]:
+    """The deck's custom cards by the stack each sits in (``custom_group_name``), filtered by the
+    local filter ``q`` as the cards are."""
+    needle = q.strip().lower()
+    out: dict[str, list[CustomDeckCard]] = {}
+    for c in deck.custom_cards:
+        if needle and needle not in f"{c.name} {c.type_line}".lower():
+            continue
+        out.setdefault(custom_group_name(c, deck, group), []).append(c)
+    for rows in out.values():
+        rows.sort(key=lambda c: c.name.lower())
+    return out
+
+
 def image_card(card: DeckCard, *, deck: Deck, owned: dict[str, int] | None = None) -> str:
     img = card_image(card)
     body = (
@@ -1109,13 +1226,29 @@ def cards_html(
     deck: Deck, *, view: str, group: str, sort: str, q: str, own: bool, owned: dict[str, int] | None = None
 ) -> str:
     groups = group_cards(deck, group, sort, q)
+    customs = custom_cards_by_group(deck, group, q)
+    # a stack only custom cards sit in (a category of theirs, or "Custom cards") goes after the
+    # cards' stacks, before the maybeboard's when the grouping is by category
+    extra = [(n, []) for n in customs if n not in {g for g, _ in groups}]
+    if group == "category" and extra:
+        side = [i for i, (n, _) in enumerate(groups) if n in deck.excluded_categories()]
+        at = side[0] if side else len(groups)
+        groups = [
+            *groups[:at],
+            *[(n, []) for n, _ in extra if n not in deck.excluded_categories()],
+            *groups[at:],
+            *[(n, []) for n, _ in extra if n in deck.excluded_categories()],
+        ]
+    else:
+        groups = [*groups, *extra]
     if not groups:
         return "<section class='panel'><p class='muted'>No cards match the filter.</p></section>"
     did = esc(deck.id)
     excluded = deck.excluded_categories()
     sections = []
     for name, cards in groups:
-        qty = sum(c.quantity for c in cards)
+        own_customs = customs.get(name, [])
+        qty = sum(c.quantity for c in cards) + sum(c.quantity for c in own_customs)
         price = sum((c.price or 0) * c.quantity for c in cards)
         strike = " strike" if name in excluded else ""
         menu = (
@@ -1138,10 +1271,13 @@ def cards_html(
                 "<ul class='plain rows'>"
                 + (TABLE_HEAD if view == "table" else "")
                 + "".join(card_row(c, deck=deck, view=view, owned=owned) for c in cards)
+                + "".join(custom_card_row(c, deck=deck, view=view) for c in own_customs)
                 + "</ul>"
             )
         else:
-            imgs = "".join(image_card(c, deck=deck, owned=owned) for c in cards)
+            imgs = "".join(image_card(c, deck=deck, owned=owned) for c in cards) + "".join(
+                custom_image_card(c, deck=deck) for c in own_customs
+            )
             body = f"<div class='cards'>{imgs}</div>"
         sections.append(f"<section class='stack' data-group='{esc(name)}'>{head}{body}</section>")
     # data-own marks the member's own deck (the card menu and the viewer offer edits); data-drop
@@ -2843,6 +2979,12 @@ ul.rows .price{font-size:.86rem;color:var(--text-muted);text-align:right;font-va
   border-radius:3px;
   font-size:10px;font-weight:900;background:linear-gradient(135deg,#f6d365,#b7e3ff 50%,#f6a5c0);
   color:#111;flex:none}
+/* one of the member's custom cards in the deck (deckpage.custom_card_row): a small Custom mark */
+.custom-badge{display:inline-flex;align-items:center;height:16px;padding:0 .35rem;border-radius:3px;
+  font-size:10px;font-weight:900;letter-spacing:.02em;text-transform:uppercase;flex:none;
+  background:var(--orange-tint);color:var(--orange-text);border:1px solid var(--orange-text)}
+.deckview .c .custom-badge{position:absolute;right:6px;bottom:6px;background:#fff3e0;color:#7a3d00;
+  border-color:#7a3d00}
 .tagdot{display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--orange);flex:none}
 .deckview .c .tagdot{position:absolute;right:8px;top:8px;width:14px;height:14px;box-shadow:0 0 0 2px #fff}
 .owned{display:inline-block;width:9px;height:9px;border-radius:50%;background:#1ebb6c;flex:none;
@@ -3073,6 +3215,7 @@ html.cardview-open{overflow:hidden}
 .ctxmenu .sub[hidden]{display:none}
 .ctxmenu .sub button{padding-left:2.4rem;min-height:34px;font-size:.95rem}
 .ctxmenu .sub .on:disabled{color:var(--toolbar-active);font-weight:700}
+.ctxmenu .off[aria-disabled=true]{color:var(--text-muted);cursor:default}
 .deckview .c.held,.deckview .row.held{outline:3px solid var(--orange);outline-offset:2px}
 /* the toast after a save (theme .toast, bottom right): the message, Undo and History */
 .deck-toast{display:flex;align-items:center;gap:.75rem;flex-wrap:wrap;padding:.75rem 1rem;z-index:59;
