@@ -857,6 +857,10 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
     @server.custom_route("/decks/{deck_id}", methods=["GET"], include_in_schema=False)
     async def deck_page(request: Request) -> Response:
         deck_id = request.path_params["deck_id"]
+        from .forum import thread_of
+
+        if thread_of(deck_id) is not None:  # a forum reply's History and Changes rows link here
+            return RedirectResponse(f"/forum/thread/{thread_of(deck_id)}", status_code=303)
         sub, sid = browser_session(state, request)
         if not sub:
             return login_redirect(f"/decks/{deck_id}")

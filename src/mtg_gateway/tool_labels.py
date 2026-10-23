@@ -53,6 +53,7 @@ TOOLS: dict[str, ToolWords] = {
     "propose_deck_details": ToolWords("Propose deck settings", "Change my deck's settings"),
     "propose_clone_deck": ToolWords("Propose a copy of a deck", "Copy this deck into my decks"),
     "get_deck_comments": ToolWords("Read deck comments", "Read the comments on this deck"),
+    "get_forum": ToolWords("Read the forum", "Read Archidekt's forum"),
     "propose_deck_social": ToolWords("Propose a like, bookmark or follow", "Bookmark this deck"),
     "propose_comment": ToolWords("Propose a comment", "Comment on this deck"),
     "propose_delete_deck": ToolWords("Propose deleting a deck", "Delete my deck"),

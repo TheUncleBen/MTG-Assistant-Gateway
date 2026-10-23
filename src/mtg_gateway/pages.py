@@ -2127,6 +2127,10 @@ def _deck_meta(p: dict[str, Any]) -> tuple[str, str]:
         return "Target", "Your Archidekt collection"
     if p.get("kind") == "action" and p["deck_id"] == "account":
         return "Target", "Your Archidekt account"
+    if p.get("kind") == "action" and str(p["deck_id"]).startswith("forum:"):
+        tid = str(p["deck_id"]).removeprefix("forum:")
+        title = html.escape(str(p.get("deck_name") or tid))
+        return "Forum thread", f"<a href='/forum/thread/{quote(tid, safe='')}'>{title}</a>"
     if p.get("kind") == "lists":
         return "Target", "<a href='/lists'>Your Archidekt lists</a>"
     return (

@@ -407,6 +407,11 @@ class SocialService:
     async def _root(self, sub: str, deck_id: str, *, reuse: bool) -> int | None:
         """The deck's comment thread root: from the member's own read in the last ROOT_TTL seconds
         when ``reuse`` (their writes), else read from the deck."""
+        from .forum import thread_of
+
+        forum_thread = thread_of(deck_id)
+        if forum_thread is not None:  # a forum thread is its own comment root
+            return forum_thread
         key = (sub, str(deck_id))
         hit = self._roots.get(key)
         if reuse and hit is not None and time.monotonic() - hit[0] < ROOT_TTL:
@@ -610,7 +615,11 @@ def add_social_routes(server: MCPServer, state: AppState) -> SocialService:
         return data if isinstance(data, dict) else _fail("invalid", "expected an object")
 
     def deck_id(request: Request) -> str:
-        return _clean_deck_id(request.path_params["deck_id"])
+        """The deck, or a forum thread ("forum:<number>", whose comments use the same routes)."""
+        from .forum import thread_of
+
+        raw = request.path_params["deck_id"]
+        return raw if thread_of(raw) is not None else _clean_deck_id(raw)
 
     def user_id(request: Request) -> int:
         raw = str(request.path_params["user_id"])

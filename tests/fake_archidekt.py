@@ -13,6 +13,7 @@ import json
 import time
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote
 
 import httpx
 
@@ -182,6 +183,25 @@ class FakeArchidekt:
         self.vote_calls: list[dict[str, Any]] = []  # path and body of each vote PUT
         self.comments: dict[int, list[dict[str, Any]]] = {}  # thread root -> flat list of comments
         self.comment_page_size = 0  # 0: a thread comes on one page; else paged by points
+        # The forum (forum.py): its pages' data as Archidekt's forum scripts read it, and its
+        # threads, whose comments are kept in ``comments`` like a deck's. forum_page_changed: the
+        # pages come without their data, as after a site update the gateway does not know.
+        self.forum_sections = [
+            {
+                "title": "Archidekt",
+                "children": [
+                    {"title": "General", "description": "Talk about anything", "posts": 1200},
+                    {"title": "Deck Help", "description": "Ask for help with a deck", "posts": 300},
+                ],
+            }
+        ]
+        self.forum_threads: dict[int, dict[str, Any]] = {
+            700001: {"title": "Welcome to the forum", "section": "General", "type": 2, "owner": "amy"},
+            700002: {"title": "Best mana rocks?", "section": "General", "type": 0, "owner": "amy"},
+            700003: {"title": "Old news", "section": "General", "type": 0, "owner": "amy", "locked": True},
+        }
+        self.forum_page_changed = False
+        self.site_pages: list[tuple[str, dict[str, str]]] = []
         self.next_comment_id = 800000
         # Hand actions added 2026-10-07: global deck tags (id -> name), each deck's tag relations
         # (deck id -> [{id, tag, name, position}]), deleted deck ids and massUpdate bodies.
@@ -522,9 +542,43 @@ class FakeArchidekt:
             "tags": ([{"id": 1, "name": "ramp"}, {"id": 2, "name": "sea monsters"}] if d["id"] == 42 else []),
         }
 
+    def _site_page(self, path: str, params: dict[str, str]) -> httpx.Response:
+        """archidekt.com's own forum pages: HTML carrying their data as Next.js does."""
+        self.site_pages.append((path, params))
+        parts = [unquote(p) for p in path.strip("/").split("/")]
+        if parts == ["forum"]:
+            props: dict[str, Any] = {"forums": {"results": self.forum_sections}}
+        elif len(parts) == 3:
+            rows = [
+                {
+                    "id": tid,
+                    "title": t["title"],
+                    "type": t["type"],
+                    "archived": False,
+                    "owner": {"username": t["owner"]},
+                    "childrenCount": len(self.comments.get(tid, [])),
+                    "points": 3,
+                    "recentPost": {"createdAt": "2026-10-20T10:00:00Z", "owner": {"username": t["owner"]}},
+                }
+                for tid, t in self.forum_threads.items()
+                if t["section"] == parts[2] and params.get("q", "").lower() in t["title"].lower()
+            ]
+            threads = {"count": len(rows), "results": rows}
+            props = {"category": parts[1], "section": parts[2], "threads": threads}
+        else:
+            return httpx.Response(404, text="<html>Not found</html>")
+        data = "" if self.forum_page_changed else (
+            '<script id="__NEXT_DATA__" type="application/json">'
+            + json.dumps({"props": {"pageProps": props}, "page": "/forum"}).replace("<", "\\u003c")
+            + "</script>"
+        )
+        return httpx.Response(200, text=f"<html><body><div id='__next'></div>{data}</body></html>")
+
     def handle(self, request: httpx.Request) -> httpx.Response:
         path = request.url.path
         self.calls.append((request.method, path))
+        if path.startswith("/forum") and request.method == "GET":
+            return self._site_page(path, dict(request.url.params))
         if request.method != "GET":
             self._deck_printings()  # remember every printing before a write may take it out
         if self.inject:
@@ -1042,7 +1096,13 @@ class FakeArchidekt:
             text = body.get("text")
             if not isinstance(parent, int) or not isinstance(text, str) or not text.strip():
                 return httpx.Response(400, json={"text": ["This field may not be blank."]})
-            root = parent if parent in self.comments or parent >= 300000 and parent < 400000 else None
+            root = (
+                parent
+                if parent in self.comments or 300000 <= parent < 400000 or parent in self.forum_threads
+                else None
+            )
+            if parent in self.forum_threads and self.forum_threads[parent].get("locked"):
+                return httpx.Response(403, json={"detail": "This thread is locked."})
             if root is None:
                 root = next(
                     (r for r, cs in self.comments.items() if any(c["id"] == parent for c in cs)), None
@@ -1070,9 +1130,12 @@ class FakeArchidekt:
             return httpx.Response(201, json=comment)
         if len(parts) == 3 and parts[1] == "comments" and parts[2].isdigit() and request.method == "GET":
             root = int(parts[2])
-            deck = self.decks.get(root - 300000)
-            if deck is None:
+            forum_thread = self.forum_threads.get(root)
+            deck = self.decks.get(root - 300000) if forum_thread is None else None
+            if deck is None and forum_thread is None:
                 return httpx.Response(404, json={"detail": "Not found."})
+            if forum_thread is not None:
+                deck = {"id": None, "owner": {"username": forum_thread["owner"]}}
             flat = self.comments.get(root, [])
 
             def tree(parent: int) -> list[dict[str, Any]]:
@@ -1104,8 +1167,10 @@ class FakeArchidekt:
                 200,
                 json={
                     "id": root,
-                    "title": None,
-                    "text": None,
+                    "title": forum_thread["title"] if forum_thread else None,
+                    "text": json.dumps({"ops": [{"insert": "First post of " + forum_thread["title"] + "\n"}]})
+                    if forum_thread
+                    else None,
                     "owner": {
                         "id": self._user_id(deck["owner"]["username"]),
                         "username": deck["owner"]["username"],
@@ -1123,8 +1188,8 @@ class FakeArchidekt:
                     "points": 0,
                     "userInput": 0,
                     "archived": False,
-                    "locked": False,
-                    "type": 4,
+                    "locked": bool(forum_thread and forum_thread.get("locked")),
+                    "type": forum_thread["type"] if forum_thread else 4,
                 },
             )
         if len(parts) == 4 and parts[1:3] == ["decks", "editors"] and request.method == "DELETE":

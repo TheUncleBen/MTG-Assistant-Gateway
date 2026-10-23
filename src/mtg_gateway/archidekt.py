@@ -19,6 +19,7 @@ import datetime
 import email.utils
 import hashlib
 import heapq
+import html as html_lib
 import http.cookiejar
 import json
 import logging
@@ -35,6 +36,9 @@ import httpx
 from .timing import add_time, archidekt_time
 
 logger = logging.getLogger(__name__)
+# The page data archidekt.com's own pages carry (Next.js), and the most of a page the gateway reads
+NEXT_DATA_RE = re.compile(r'<script id="__NEXT_DATA__" type="application/json"[^>]*>(.*?)</script>', re.S)
+SITE_PAGE_MAX = 3_000_000
 
 TOKEN_FIELDS = ("access_token", "access", "token", "jwt")
 # A member's vote on a deck as its JSON reports it ("userInput"; Archidekt's site bundle maps
@@ -2011,6 +2015,46 @@ class ArchidektClient(AccountRequests):
         if not isinstance(body, dict):
             raise ArchidektError("contract", "unexpected comment thread shape")
         return body
+
+    async def site_page_data(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+        """The data one of archidekt.com's own pages is drawn from (its ``__NEXT_DATA__``
+        ``props.pageProps``), read as an anonymous visitor: how the forum's section and thread
+        lists load, as the site has no API for them (its forum scripts, read 2026-10-22). Not an
+        API, so its shape can change with any update of the site; a page without it is reported
+        as ``changed``."""
+        origin = self.base_url.removesuffix("/api")
+        headers = {"Accept": "text/html", "User-Agent": self.user_agent}
+        async with self.pacer:
+            self.stats["requests"] += 1
+            try:
+                resp = await self._http.request("GET", f"{origin}{path}", headers=headers, params=params)
+            except httpx.HTTPError as exc:
+                self.pacer.record(False)
+                raise ArchidektError(
+                    "unavailable", f"Archidekt request failed: {type(exc).__name__}", retryable=True
+                ) from exc
+            self.pacer.record(resp.status_code < 500 and resp.status_code != 429)
+        if resp.status_code == 404:
+            raise ArchidektError("not_found", "Archidekt has no such forum page.")
+        if resp.status_code == 429:
+            raise ArchidektError(
+                "rate_limited",
+                "Archidekt asked the gateway to slow down; try again later",
+                retry_after=retry_after_seconds(resp.headers.get("Retry-After")),
+            )
+        if resp.status_code >= 400:
+            status = resp.status_code
+            raise ArchidektError("unavailable", f"Archidekt returned HTTP {status}", retryable=status >= 500)
+        if len(resp.content) > SITE_PAGE_MAX:
+            raise ArchidektError("changed", "the forum page is larger than the gateway reads")
+        m = NEXT_DATA_RE.search(resp.text)
+        try:
+            props = json.loads(html_lib.unescape(m.group(1)) if m else "")["props"]["pageProps"]
+        except (ValueError, KeyError, TypeError) as exc:
+            raise ArchidektError("changed", "the forum page has no page data the gateway knows") from exc
+        if not isinstance(props, dict):
+            raise ArchidektError("changed", "the forum page has no page data the gateway knows")
+        return props
 
     async def comment_create(self, token: str, parent: int, text: str) -> dict[str, Any]:
         resp = await self._request(

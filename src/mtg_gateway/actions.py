@@ -54,6 +54,8 @@ LABELS = {
 ACTIONS = frozenset(LABELS)
 DESTRUCTIVE = frozenset({"delete_deck"})  # never applied by an assistant on its own
 CANNOT_UNDO = frozenset({"delete_deck", "comment_delete"})
+# the comment actions, on a deck's thread or a forum thread (thread_id)
+COMMENT_ACTIONS = frozenset({"comment_post", "comment_edit", "comment_delete", "comment_vote"})
 VOTES = {"up": VOTE_UP, "down": VOTE_DOWN, "none": VOTE_NONE}
 COLLABORATOR_ACTIONS = frozenset({"collaborator_add", "collaborator_remove"})
 # Archidekt's own settings page says this of collaborators (2026-10-10 bundle).
@@ -345,7 +347,15 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
     deck = None
     # Follow or unfollow someone by username, not through one of their decks
     by_name = action == "follow" and params.get("username") is not None and not params.get("deck_id")
-    if action not in ("create_folder", "profile") and not by_name:
+    forum_thread = None
+    if action in COMMENT_ACTIONS and params.get("thread_id") not in (None, ""):
+        # a forum thread: its comments are a thread like a deck's, with the thread as the root
+        from . import forum
+
+        forum_thread = await forum.thread(decks, sub, params["thread_id"])
+        changes["deck_id"] = forum.target(forum_thread["id"])
+        where = "in the forum thread"
+    elif action not in ("create_folder", "profile") and not by_name:
         deck_id = _clean_deck_id(str(params.get("deck_id") or ""))
         deck = (
             await decks.get_own_deck(sub, deck_id)
@@ -398,20 +408,32 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
             row["text"] += " (already the case; applying changes nothing)"
     elif action == "comment_post":
         text = _comment_text(params.get("text"))
-        if deck.comment_root is None:
+        if forum_thread is not None and (forum_thread["locked"] or forum_thread["archived"]):
+            raise DeckError("invalid", "This forum thread is locked or archived, so it takes no replies.")
+        if forum_thread is None and deck.comment_root is None:
             raise DeckError("unavailable", "Archidekt reports no comment thread for this deck")
+        target_id = changes["deck_id"]
+        on = where if forum_thread is not None else f"on the deck {where}"
         parent = params.get("reply_to")
         if parent is not None:
-            found = await _thread_comment(decks, sub, deck.id, parent, page=_page(params.get("page")))
+            found = await _thread_comment(decks, sub, target_id, parent, page=_page(params.get("page")))
             changes["page"] = found["_page"]
-            row["text"] = f"Reply publicly to {found['owner']['username'] or 'a comment'} on the deck {where}"
+            row["text"] = f"Reply publicly to {found['owner']['username'] or 'a comment'} {on}"
+        elif forum_thread is not None:
+            row["text"] = f"Post a public reply {on}"
         else:
-            row["text"] = f"Post a public comment on the deck {where}"
+            row["text"] = f"Post a public comment {on}"
         changes.update(text=text, parent=parent)
         row["after_text"] = text
     elif action in ("comment_edit", "comment_delete", "comment_vote"):
+        on = where if forum_thread is not None else f"on the deck {where}"
         found = await _thread_comment(
-            decks, sub, deck.id, params.get("comment_id"), keep_doc=True, page=_page(params.get("page"))
+            decks,
+            sub,
+            changes["deck_id"],
+            params.get("comment_id"),
+            keep_doc=True,
+            page=_page(params.get("page")),
         )
         own = found["_me"] is not None and found["owner"]["id"] == found["_me"]
         changes["comment_id"] = found["id"]
@@ -428,7 +450,7 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
                 VOTE_UP: "Vote up",
                 VOTE_DOWN: "Vote down",
                 VOTE_NONE: "Take back your vote on",
-            }[vote] + f" {found['owner']['username'] or 'a'}'s comment on the deck {where}"
+            }[vote] + f" {found['owner']['username'] or 'a'}'s comment {on}"
         else:
             if not own:
                 raise DeckError("forbidden", refusals.NOT_OWN_COMMENT)
@@ -445,9 +467,9 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
                     # as for descriptions: a comment rewrite that keeps none of its formatting says what goes
                     row["formatting_lost"] = True
                     row["dropped_embeds"] = formatting.embeds(found.get("_doc"))
-                row["text"] = f"Change your comment on the deck {where}"
+                row["text"] = f"Change your comment {on}"
             else:
-                row["text"] = f"Delete your comment on the deck {where}"
+                row["text"] = f"Delete your comment {on}"
     elif action == "delete_deck":
         cards = sum(c.quantity for c in deck.cards)
         changes["name"] = deck.name
@@ -611,8 +633,8 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
             "id": pid,
             "owner_sub": sub,
             "kind": "action",
-            "deck_id": deck.id if deck else ACCOUNT_TARGET,
-            "deck_name": deck.name if deck else ACCOUNT_NAME,
+            "deck_id": deck.id if deck else changes["deck_id"] if forum_thread else ACCOUNT_TARGET,
+            "deck_name": deck.name if deck else forum_thread["title"] if forum_thread else ACCOUNT_NAME,
             "baseline_fingerprint": deck.fingerprint() if action == "delete_deck" else "",
             "changes": changes,
         },
