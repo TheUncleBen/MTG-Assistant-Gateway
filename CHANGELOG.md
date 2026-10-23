@@ -7,17 +7,23 @@ Notable changes for people who run or use the gateway. The format follows
 with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 (`release/1.2.3`); `latest` is always the newest.
 
-## [0.7.44] - 2026-10-23
+## [0.7.43] - 2026-10-23
 
 More of what you can do on Archidekt is now in the gateway too: your account-wide lists, card
 packages, your Archidekt profile and settings, the notification bell, deck help requests, reports to
-Archidekt's moderators, contest entries and the deck registration sheet. Your assistant can propose
-each of them; anything public or about your account waits for your own press.
+Archidekt's moderators, contest entries, the deck registration sheet, Archidekt's forum and your
+custom cards in decks. Your assistant can propose each of them; anything public or about your
+account waits for your own press.
 
 ### Upgrade notes
 - None beyond the [update steps](docs/UPGRADING.md). There is no database change, so this update
-  saves no before-upgrade copy, and going back to 0.7.43 needs only the `MTG_TAG` change.
+  saves no before-upgrade copy, and going back to 0.7.42 needs only the `MTG_TAG` change.
 - No new settings or secrets: your variables file works as it is.
+- **Not tried on Archidekt itself yet.** Everything new in this release follows how Archidekt's own
+  site works and was tested with the gateway only. None of it has been used on Archidekt yet, so try
+  each part on a test deck or with a small change first: My lists, card packages (with a color
+  tag), your profile and settings, the bell, deck help, reports, contest entries, the registration
+  sheet, the forum, and custom cards in decks with their pictures.
 
 ### Added
 - **My lists.** One page for Archidekt's account-wide lists: category templates, default

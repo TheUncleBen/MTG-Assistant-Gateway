@@ -494,7 +494,7 @@ def test_the_profile_cards_without_a_profile_say_so() -> None:
 
 
 async def test_a_link_from_another_site_reads_no_notifications(member: Browser, stack: Stack) -> None:
-    """Security review 0.7.44, S-09: reading the list clears the count, so a link on another site
+    """Security review 0.7.43, S-09: reading the list clears the count, so a link on another site
     opens the page without reading it; one press on the page reads it."""
     stack.ark.calls.clear()
     page = (await member.http.get("/notifications", headers={"Sec-Fetch-Site": "cross-site"})).text
@@ -506,7 +506,7 @@ async def test_a_link_from_another_site_reads_no_notifications(member: Browser, 
 
 
 async def test_unlinking_forgets_the_profile_bell_and_list_counts(member: Browser, stack: Stack) -> None:
-    """Security review 0.7.44, S-11: after an unlink (or Delete my data) nothing read from the
+    """Security review 0.7.43, S-11: after an unlink (or Delete my data) nothing read from the
     old Archidekt account is shown again from memory."""
     from mtg_gateway import account_lists
 

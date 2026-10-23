@@ -69,7 +69,7 @@ COLLABORATOR_NOTE = (
 # goals and issues of 10 to 200 words each, a deck with at least one tag, and a deck size of 80
 # to 120 cards in a Commander-style format, else 50 to 85. It is listed for 7 days.
 HELP_WORDS = (10, 200)
-HELP_CHARS = 4000  # a cap on each box as well (security review 0.7.44): 200 words fit easily
+HELP_CHARS = 4000  # a cap on each box as well (security review 0.7.43): 200 words fit easily
 HELP_SIZE_COMMANDER = (80, 120)
 HELP_SIZE_OTHER = (50, 85)
 # The Commander-style formats, by the gateway's format names (archidekt.FORMAT_IDS): the site's
@@ -610,7 +610,7 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
             row["after_text"] = summary
             if formatting.is_formatted(deck.description):
                 # plain words replace links, bold and pictures: approved on the review page only, as
-                # a description edit that loses its formatting is (security review 0.7.44)
+                # a description edit that loses its formatting is (security review 0.7.43)
                 row["formatting_lost"] = True
                 row["dropped_embeds"] = formatting.embeds(deck.description)
             row["note"] = (

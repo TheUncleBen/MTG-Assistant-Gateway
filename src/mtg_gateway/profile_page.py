@@ -791,7 +791,7 @@ def add_profile_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
         got: dict[str, Any] = {"notifications": [], "unseen": 0}
         error = ""
         # a link on another site opens the page but reads nothing: reading the list clears the
-        # count (security review 0.7.44); one press here reads it
+        # count (security review 0.7.43); one press here reads it
         cross_site = not prefs.from_this_site(request)
         if is_linked and not cross_site:
             try:

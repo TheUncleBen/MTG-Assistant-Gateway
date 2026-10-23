@@ -2830,7 +2830,7 @@ class DeckService:
         self.folder_trees.forget(sub)
         self._forget_page_decks()
         # the Account page's profile, the bell and My lists' counts are the old account's too
-        # (security review 0.7.44)
+        # (security review 0.7.43)
         from . import account_lists, custom_pictures, packages, profile_page
 
         profile_page.forget_all(sub)
@@ -6639,7 +6639,7 @@ class DeckService:
             await self._refuse_unknown_cards(deck, changes)
             stored: Any = [c.as_dict() for c in changes]
             # a card package's line stays first while any of its cards is still added: its import
-            # is counted at apply, and its risk rule holds (security review 0.7.44)
+            # is counted at apply, and its risk rule holds (security review 0.7.43)
             from . import packages
 
             lines = (

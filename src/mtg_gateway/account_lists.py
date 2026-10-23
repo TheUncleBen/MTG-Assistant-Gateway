@@ -53,13 +53,13 @@ DELETES = frozenset(
         ("color_tags", "delete"),
         ("custom_cards", "delete"),
         ("pins", "remove_all"),
-        # they take entries out of a list as well (security review 0.7.44)
+        # they take entries out of a list as well (security review 0.7.43)
         ("pins", "unpin"),
         ("default_categories", "clear"),
     }
 )
 # a Premier template, or default categories naming one, could file a card into the commander zone
-# when it is added with no category of its own (security review 0.7.44): never an assistant's
+# when it is added with no category of its own (security review 0.7.43): never an assistant's
 PREMIER_NOTE = (
     "Premier can make a category's cards count as the deck's commanders, so this waits for your own "
     "press in every approval mode."
@@ -1003,7 +1003,7 @@ def applied_text(changes: dict[str, Any], result: dict[str, Any]) -> str:
 PICTURE_MAX_BYTES = 1_500_000  # Archidekt's own limit for a custom card picture (its upload box)
 PICTURE_SIZE = (500, 700)  # the crop Archidekt's page redraws and sends
 PICTURE_FORMATS = ("JPEG", "PNG", "WEBP")
-# the most pixels a picture is ever decoded to (security review 0.7.44; 12 MP still took about
+# the most pixels a picture is ever decoded to (security review 0.7.43; 12 MP still took about
 # 150 MB to redraw, too close to the container's 256 MB)
 PICTURE_MAX_PIXELS = 8_000_000
 # one picture decoded at a time, off the event loop: a decoded picture can take tens of megabytes,

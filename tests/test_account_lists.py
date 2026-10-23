@@ -310,7 +310,7 @@ async def test_set_picture_uploads_the_redrawn_png_and_sets_only_that_face(stack
 
 
 async def test_unpin_and_clear_wait_for_the_members_press(stack: Stack) -> None:
-    """Security review 0.7.44, S-04: unpinning a card and clearing its default categories take
+    """Security review 0.7.43, S-04: unpinning a card and clearing its default categories take
     entries out of a list, so they wait for the member's press like every delete."""
     h = stack.h
     token = await linked_user(stack)
@@ -327,7 +327,7 @@ async def test_unpin_and_clear_wait_for_the_members_press(stack: Stack) -> None:
 
 
 async def test_a_premier_template_and_defaults_naming_one_wait_for_the_members_press(stack: Stack) -> None:
-    """Security review 0.7.44, S-06: a Premier category template, or default categories naming
+    """Security review 0.7.43, S-06: a Premier category template, or default categories naming
     one, could file a card into the commander zone when it is added with no category, so neither
     is ever applied by an assistant."""
     h = stack.h

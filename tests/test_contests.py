@@ -66,7 +66,7 @@ async def test_an_entry_needs_a_summary_a_contest_and_the_members_own_deck(stack
 async def test_an_entry_that_wipes_a_formatted_description_is_approved_on_the_review_page_only(
     stack: Stack,
 ) -> None:
-    """Security review 0.7.44, S-03: entering replaces the description with plain words, so on a
+    """Security review 0.7.43, S-03: entering replaces the description with plain words, so on a
     deck whose description has links or bold the entry is approved on its review page only, as a
     description edit that loses formatting is: no in-chat card code."""
     import json

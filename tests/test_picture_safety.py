@@ -1,4 +1,4 @@
-"""Pictures a member uploads (security review 0.7.44, S-01 and S-05): a small file that decodes to
+"""Pictures a member uploads (security review 0.7.43, S-01 and S-05): a small file that decodes to
 a huge picture is refused or decoded small, never at full size on the event loop, and nothing but
 the picture leaves the gateway."""
 
@@ -97,7 +97,7 @@ async def test_pictures_are_decoded_off_the_event_loop_one_at_a_time() -> None:
 
 
 def test_the_pixel_cap_leaves_the_gateway_room() -> None:
-    """Confirmation pass 0.7.44 (S-01): a 12 MP picture still took about 150 MB to redraw; 8 MP is
+    """Confirmation pass 0.7.43 (S-01): a 12 MP picture still took about 150 MB to redraw; 8 MP is
     the most decoded, and a picture just over it is refused."""
     assert account_lists.PICTURE_MAX_PIXELS == 8_000_000
     with pytest.raises(Exception, match="too many pixels"):
@@ -107,7 +107,7 @@ def test_the_pixel_cap_leaves_the_gateway_room() -> None:
 
 
 def test_an_avatar_is_made_small_before_it_is_converted() -> None:
-    """Confirmation pass 0.7.44 (S-01): the avatar was converted at full size, then shrunk."""
+    """Confirmation pass 0.7.43 (S-01): the avatar was converted at full size, then shrunk."""
     seen: list[tuple[int, int]] = []
     real = Image.Image.convert
 
@@ -126,7 +126,7 @@ def test_an_avatar_is_made_small_before_it_is_converted() -> None:
 
 
 def test_a_jpeg_cropped_at_its_bottom_edge_has_no_black_band() -> None:
-    """Confirmation pass 0.7.44 (N-1): the decoder's reduction was mapped back with the width's
+    """Confirmation pass 0.7.43 (N-1): the decoder's reduction was mapped back with the width's
     factor only, so a crop at the bottom of a picture whose height did not divide evenly ran past
     the picture and came back with black rows."""
     out = io.BytesIO()
@@ -138,7 +138,7 @@ def test_a_jpeg_cropped_at_its_bottom_edge_has_no_black_band() -> None:
 
 
 async def test_a_waiting_picture_holds_no_worker_thread(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Confirmation pass 0.7.44 (N-3): uploads waiting for their turn wait on the event loop, not
+    """Confirmation pass 0.7.43 (N-3): uploads waiting for their turn wait on the event loop, not
     each in a worker thread of their own that other work needs."""
     started: list[str] = []
     real = asyncio.to_thread

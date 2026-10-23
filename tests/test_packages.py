@@ -280,7 +280,7 @@ async def test_my_decks_marks_packages_and_shows_decks_packages_or_both(stack: S
 
 
 async def test_an_amended_package_add_keeps_its_package_line_and_rule(stack: Stack) -> None:
-    """Security review 0.7.44, S-07: amending a package add keeps the line naming the package, so
+    """Security review 0.7.43, S-07: amending a package add keeps the line naming the package, so
     the import is still counted when it is applied and more than 10 cards are still high risk."""
     token = await linked_user(stack)
     made = await _browser_apply(
@@ -308,7 +308,7 @@ async def test_an_amended_package_add_keeps_its_package_line_and_rule(stack: Sta
 
 
 async def test_mine_keeps_only_the_linked_accounts_packages_and_is_kept_briefly() -> None:
-    """Security review 0.7.44: S-12, "mine" asks Archidekt by username, so an entry whose owner id
+    """Security review 0.7.43: S-12, "mine" asks Archidekt by username, so an entry whose owner id
     is another account's (a username given up and taken) is left out; S-13, the member's own list
     is kept for a minute, so My decks does not ask again on every visit, and a write forgets it."""
     from types import SimpleNamespace
@@ -348,7 +348,7 @@ async def test_mine_keeps_only_the_linked_accounts_packages_and_is_kept_briefly(
 async def test_an_amend_recounts_the_package_line_and_drops_it_when_no_package_card_is_left(
     stack: Stack,
 ) -> None:
-    """Confirmation pass 0.7.44 (N-2): the line kept its first count after an amend, and when no
+    """Confirmation pass 0.7.43 (N-2): the line kept its first count after an amend, and when no
     package card was left the apply still read the package, counting an import on Archidekt."""
     token = await linked_user(stack)
     made = await _browser_apply(
@@ -385,7 +385,7 @@ async def test_an_amend_recounts_the_package_line_and_drops_it_when_no_package_c
 
 
 def test_expired_package_lists_are_let_go() -> None:
-    """Confirmation pass 0.7.44 (N-5): kept lists were replaced or forgotten on a write, never let
+    """Confirmation pass 0.7.43 (N-5): kept lists were replaced or forgotten on a write, never let
     go when they ran out, so a member paging through filters kept every page."""
     import time
 

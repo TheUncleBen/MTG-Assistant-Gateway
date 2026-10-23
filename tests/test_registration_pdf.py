@@ -112,7 +112,7 @@ async def test_the_tool_answers_with_the_pdf_address_and_keeps_no_details(stack:
 
 
 def test_the_pdf_needs_the_write_scope() -> None:
-    """Security review 0.7.44, S-10: it sends the member's typed details to Archidekt in their
+    """Security review 0.7.43, S-10: it sends the member's typed details to Archidekt in their
     name, so an app that may only read cannot ask for it."""
     from mtg_gateway.app import WRITE_TOOLS
 
@@ -120,7 +120,7 @@ def test_the_pdf_needs_the_write_scope() -> None:
 
 
 async def test_the_pdf_tool_says_it_is_not_read_only(stack: Stack) -> None:
-    """Confirmation pass 0.7.44 (N-4): a write tool marked readOnlyHint true may be run by an app
+    """Confirmation pass 0.7.43 (N-4): a write tool marked readOnlyHint true may be run by an app
     without asking, and a read-only token is refused a tool it was told only reads."""
     from .test_decks_and_proxy import sse_json
 

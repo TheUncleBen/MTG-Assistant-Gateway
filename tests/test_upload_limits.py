@@ -1,5 +1,5 @@
 """A picture upload sent without a Content-Length (chunked) stops being read at the size limit
-instead of being buffered whole (security review 0.7.44, S-02)."""
+instead of being buffered whole (security review 0.7.43, S-02)."""
 
 # ruff: noqa: F811 - the fixtures are imported and then named as parameters
 from __future__ import annotations
