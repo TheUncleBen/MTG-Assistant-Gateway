@@ -1530,6 +1530,16 @@ def _delete_card(csrf_in: str, backup_days: int | None = None, *, open: bool = F
     )
 
 
+# What a lists proposal's row is called on the review page (account_lists.KINDS)
+LIST_LABELS = {
+    "templates": "Template",
+    "default_categories": "Default categories",
+    "color_tags": "Color tag",
+    "pins": "Pin",
+    "custom_cards": "Custom card",
+}
+
+
 def _li(kind: str, label: str, name_html: str, qty_html: str = "") -> str:
     return (
         f"<li class='{kind}'><span class='act'>{html.escape(label)}</span>"
@@ -1694,6 +1704,18 @@ def _change_rows(rows: list[dict[str, Any]] | None, diff: str) -> tuple[str, dic
                     "Can't be undone on Archidekt" if r.get("cannot_undo") else "",
                 )
             )
+        elif kind == "list":
+            # a change to one of the member's account-wide lists (account_lists.py)
+            counts["chg"] += 1
+            note = f"<span class='small'>{html.escape(str(r['note']))}</span>" if r.get("note") else ""
+            out.append(
+                _li(
+                    "del action" if r.get("destructive") else "chg action",
+                    LIST_LABELS.get(str(r.get("list")), "List"),
+                    html.escape(str(r.get("text") or "")) + note,
+                    "Waits for your press" if r.get("destructive") else "",
+                )
+            )
         elif kind == "restore":
             out.append(
                 _li(
@@ -1838,6 +1860,12 @@ def _page_step(p: dict[str, Any]) -> str:
             "A new deck was made on Archidekt before this stopped, so it may not match the proposal. "
             "Check it, and delete it from its deck page if you don't want it."
         )
+    if state == "failed" and p.get("kind") == "lists" and result.get("done"):
+        n = int(result["done"])
+        return (
+            f"{n} of the changes {'was' if n == 1 else 'were'} made on Archidekt before this stopped. "
+            "Check My lists; the entries as they were just before are under Before, below."
+        )
     if state == "failed" and result.get("sent_entries"):
         where = "your collection" if p.get("kind") == "collection" else "the deck"
         undo = (
@@ -1941,10 +1969,48 @@ def _deck_meta(p: dict[str, Any]) -> tuple[str, str]:
         return "Target", "Your Archidekt collection"
     if p.get("kind") == "action" and p["deck_id"] == "account":
         return "Target", "Your Archidekt account"
+    if p.get("kind") == "lists":
+        return "Target", "<a href='/lists'>Your Archidekt lists</a>"
     return (
         "Deck",
         f"<a href='/decks/{quote(str(p['deck_id']), safe='')}'>"
         f"{html.escape(str(p.get('deck_name') or p['deck_id']))}</a>",
+    )
+
+
+def _before_line(kind: str, e: dict[str, Any]) -> str:
+    """One entry of a lists change's "before" copy, in words."""
+    if kind == "templates":
+        flags = [
+            w
+            for k, w in (("in_deck", "in deck"), ("in_price", "in price"), ("premier", "Premier"))
+            if e.get(k)
+        ]
+        return f"{e.get('name', '')}: {', '.join(flags) or 'not in deck or price'}"
+    if kind == "color_tags":
+        return f"{e.get('name', '')}: {e.get('color', '')}"
+    if kind == "pins":
+        note = f", note “{e['notes']}”" if e.get("notes") else ""
+        where = f"{e.get('set_code', '')} {e.get('collector_number', '')}".strip()
+        return f"{e.get('name', '')} ({where}), {e.get('quantity', 1)}x {e.get('finish', '')}{note}"
+    if kind == "custom_cards":
+        return f"{e.get('name', '')}: {e.get('frontTypes') or ''} {e.get('frontText') or ''}".strip()
+    return str(e.get("name", ""))
+
+
+def _lists_before(p: dict[str, Any]) -> str:
+    """An applied lists change: the entries as they were just before it (account_lists.apply)."""
+    result = p.get("result") if isinstance(p.get("result"), dict) else {}
+    before = result.get("before")
+    if p.get("kind") != "lists" or not isinstance(before, list) or not before:
+        return ""
+    kind = str((p.get("changes") or {}).get("list") or result.get("list") or "")
+    items = "".join(
+        f"<li>{html.escape(_before_line(kind, e))}</li>" for e in before[:200] if isinstance(e, dict)
+    )
+    return (
+        "<details class='raw'><summary>Before: your list as it was just before</summary>"
+        f"<ul class='small'>{items}</ul></details>"
     )
 
 
@@ -2025,6 +2091,12 @@ def _proposal_body(
             f"card{'s' if abs(net) != 1 else ''}</span>"
         )
         heading, aria = "What will change", "Card changes"
+        if p.get("kind") == "lists":  # the member's account-wide lists: no cards change
+            summary = [
+                f"<span class='ui-lbl grey'>{total} change{'s' if total != 1 else ''} to your Archidekt "
+                "lists; no deck changes</span>"
+            ]
+            heading, aria = "What will change", "List changes"
         if p.get("kind") == "action":  # an Archidekt account action: no cards change
             summary = [
                 f"<span class='ui-lbl grey'>{total} Archidekt action{'s' if total != 1 else ''}; "
@@ -2118,7 +2190,9 @@ def _proposal_body(
         + f"<h3 class='ui-section'>{heading}</h3>"
         f"<div class='pills summary-pills'>{''.join(summary)}</div>"
         f"<ul class='changes' aria-label='{aria}'>{rows}</ul>"
-        f"<details class='raw'><summary>Plain-text diff</summary>{raw}</details>" + _also_waiting(p, others)
+        f"<details class='raw'><summary>Plain-text diff</summary>{raw}</details>"
+        + _lists_before(p)
+        + _also_waiting(p, others)
     )
     if pending and p["writes_enabled"]:
         destroy = p.get("risk") == "destructive"
@@ -2133,6 +2207,21 @@ def _proposal_body(
             )
             # a red outline first; static/proposals.js asks once more with the solid red button
             apply_button = ("apply", "Delete this deck on Archidekt", "btn-outline-danger pr-ask")
+        elif p.get("kind") == "lists":
+            deletes = any(r.get("destructive") for r in p.get("rows") or [])
+            ask = (
+                "<div class='apply'><h3 class='ui-section'>Apply to your Archidekt lists?</h3>"
+                "<p>Applying writes these changes to your lists on Archidekt. The gateway reads the list "
+                "again first and keeps a copy of the entries it changes from just before, then reads "
+                "the list back. Nothing happens until you tap Apply.</p>"
+                + (
+                    "<p class='small'><strong>This deletes from your lists.</strong> Only you can "
+                    "approve it, in every approval mode.</p>"
+                    if deletes
+                    else ""
+                )
+            )
+            apply_button = ("apply", "Apply to my Archidekt lists", "primary btn-primary")
         elif p.get("kind") == "action":
             ask = (
                 "<div class='apply'><h3 class='ui-section'>Do this on Archidekt?</h3>"

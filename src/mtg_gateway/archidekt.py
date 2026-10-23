@@ -664,6 +664,8 @@ def _printing(card: dict[str, Any], *, exact: bool) -> dict[str, Any]:
         "collector_number": str(card.get("collectorNumber", "") or ""),
         "options": [str(o) for o in options] if isinstance(options, list) else [],
         "exact_printing": exact,
+        # the card's oracle id: a member's default categories are kept by it (0.7.43)
+        "oracle_id": oracle.get("id") if isinstance(oracle.get("id"), int) else None,
     }
 
 

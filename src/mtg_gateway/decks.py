@@ -4740,6 +4740,10 @@ class DeckService:
             from . import actions
 
             return await actions.apply(self, sub, row, progress)
+        if row.get("kind") == "lists":
+            from . import account_lists
+
+            return await account_lists.apply(self, sub, row, progress)
         changes = parse_changes(row["changes"], row_flags=True)  # stored: flags only from the deck page
         deck = await self._current_deck_for(sub, row)
         _before, after, _lines, _before_side, after_side = plan_zones(deck, changes)
@@ -5657,6 +5661,14 @@ class DeckService:
         result = {**applied, "verified": applied.get("verified") is True, "snapshot_id": None}
         self.db.finish_proposal(row["id"], state="applied", result=result)
         return self.describe(sub, row["id"])
+
+    @_dedupe
+    async def propose_lists(self, sub: str, kind: str, changes: Any) -> dict[str, Any]:
+        """A proposal (kind ``lists``) for changes to one of the member's account-wide Archidekt
+        lists: account_lists.py."""
+        from . import account_lists
+
+        return await account_lists.propose(self, sub, kind, changes)
 
     @_dedupe
     async def propose_action(self, sub: str, action: str, **params: Any) -> dict[str, Any]:
@@ -9212,6 +9224,8 @@ def clean_target(deck_id: Any) -> str:
     that name instead of a deck number."""
     if str(deck_id).strip().casefold() == DeckService.COLLECTION_TARGET:
         return DeckService.COLLECTION_TARGET
+    if str(deck_id).strip().casefold() == "lists":  # account_lists.LISTS_TARGET
+        return "lists"
     return _clean_deck_id(deck_id)
 
 
@@ -9275,6 +9289,10 @@ def applied_text(
                 "review page."
             )
         return "Your collection on Archidekt has these changes now."
+    if kind == "lists":
+        from .account_lists import applied_text as lists_text
+
+        return lists_text(c, r)
     if kind != "action":
         return ""
     action = c.get("action")

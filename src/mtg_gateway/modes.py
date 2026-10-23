@@ -348,6 +348,10 @@ def risk_of(
         from .actions import risk_of as action_risk
 
         return action_risk(rows)
+    if kind == "lists":
+        from .account_lists import risk_of as lists_risk
+
+        return lists_risk(rows, max_rows=max_rows)
     if kind == "create_deck":
         return "high", "creates a new deck"
     if kind == "restore":
@@ -471,6 +475,10 @@ def auto_waits(
             return COMPANION_REASON  # it changes what the deck is legal with (parity release 1)
         if len(rows) > big_rows:
             return f"changes {len(rows)} rows, more than the {big_rows} Full auto applies by itself"
+        return None
+    if kind == "lists":  # account_lists.py; its deletes wait in every mode (MEMBER_ONLY)
+        if rows is not None and len(rows) > big_rows:
+            return f"changes {len(rows)} entries, more than the {big_rows} Full auto applies by itself"
         return None
     if kind == "details":
         wanted = changes if isinstance(changes, dict) else {}

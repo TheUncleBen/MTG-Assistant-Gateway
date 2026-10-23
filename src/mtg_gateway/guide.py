@@ -219,6 +219,7 @@ _PROPOSES = frozenset(
         "propose_deck_categories",
         "propose_restore_snapshot",
         "propose_collection_changes",
+        "propose_list_change",
     }
 )
 _YOUR_PRESS = frozenset(

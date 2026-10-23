@@ -913,6 +913,8 @@ class FakeArchidekt:
                     (p for p in self._deck_printings() if p["oracleCard"]["name"].lower() == name), None
                 )
                 newer = self.newer_printings.get(name, [])
+                if hit and "id" not in hit["oracleCard"]:  # the oracle id: the printing's own, here
+                    hit = {**hit, "oracleCard": {**hit["oracleCard"], "id": hit["id"]}}
                 return httpx.Response(200, json={"results": newer + ([hit] if hit else [])})
             fillers = [
                 {"id": 70000 + i, "oracleCard": {"name": f"{name.title()} Lookalike {i}"}} for i in range(30)

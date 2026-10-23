@@ -58,6 +58,9 @@ TOOLS: dict[str, ToolWords] = {
     "propose_delete_deck": ToolWords("Propose deleting a deck", "Delete my deck"),
     "propose_create_folder": ToolWords("Propose a new folder", "Make me a folder"),
     "get_deck_collaborators": ToolWords("Read deck collaborators", "Who can edit my deck?"),
+    # tools_lists.py
+    "get_my_lists": ToolWords("Read my Archidekt lists", "List my category templates"),
+    "propose_list_change": ToolWords("Propose a change to my lists", "Add a color tag called Cut, red"),
     "propose_collaborator": ToolWords("Propose a collaborator change", "Let someone edit my deck"),
     "parse_deck_export": ToolWords("Read an Archidekt export", "Read this Archidekt export"),
     # tools_reports.py
