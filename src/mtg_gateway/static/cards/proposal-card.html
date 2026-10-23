@@ -274,6 +274,9 @@ button.danger:disabled{color:var(--red)}
         ? "Your approval mode lets your assistant apply this itself, without asking."
         : "Low-risk change (" + (p.risk_reason || "") + "): your approval mode lets your assistant apply it without asking.";
     }
+    // one member-only tier, three kinds: each says what it does (a deck deletion: review page only)
+    if (p.risk === "destructive" && p.kind === "custom_cards") return "This takes custom cards out of the deck, and restoring a snapshot doesn't put them back. Only you can approve it, every time, in every approval mode.";
+    if (p.risk === "destructive" && p.kind === "lists") return "This deletes from your Archidekt lists. Only you can approve it, every time, in every approval mode.";
     if (p.risk === "destructive") return "This deletes the deck from your Archidekt account. Only you can approve it, on the review page, in every approval mode.";
     if (p.risk === "consent") return "This acts on your Archidekt account under your name. Only you can approve it, every time, in every approval mode.";
     if (p.approval_mode === "semi" && p.risk === "high") return "High risk (" + (p.risk_reason || "") + "), so this one needs your approval.";

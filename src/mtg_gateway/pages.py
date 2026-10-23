@@ -1108,17 +1108,17 @@ OK_MESSAGES = {
     "mode_semi": "Saved: your assistant applies low-risk changes without asking (a small deck or collection "
     "edit, or a private copy of a deck) and asks for everything else. A change to one of your decks keeps "
     "a snapshot you can restore from History; a collection change keeps none. Restoring a snapshot does "
-    "not put back a deck's folder, tags or cover.",
+    "not put back a deck's folder, tags, cover or custom cards.",
     "mode_auto": "Saved: your assistant applies deck and collection changes without asking. Restoring a "
     "snapshot, a commander or companion change, a new deck, an edit of more rows than Full auto applies by "
     "itself, making a deck public or unlisted, any edit of a description that has formatting, such as "
-    "bold text, links or pictures, actions on your Archidekt account and deleting a deck still wait for "
-    "you. So does a held change, a change waiting for another change first, one another app had a hand "
+    "bold text, links or pictures, actions on your Archidekt account, taking custom cards out of a deck "
+    "and deleting a deck still wait for you. So does a held change, a change waiting for another change first, one another app had a hand "
     "in, one that replaces another app's change, or one that another app's waiting change would replace. "
     "When a change waits for "
     "your press, its card and review page say why. A change to one of your decks keeps a snapshot you "
     "can restore from History; a collection change keeps none. Restoring a snapshot does not put back "
-    "a deck's folder, tags or cover.",
+    "a deck's folder, tags, cover or custom cards.",
     # 0.7.29: several waiting changes applied with one press (batch.py), and Undo
     "rejected_some": "Rejected. Nothing was sent to Archidekt.",
     "undone": "Undone. The deck is back as it was before that change.",

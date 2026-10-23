@@ -86,6 +86,8 @@ async def test_only_a_picture_from_a_public_https_address_is_served(stack: Stack
         for url, answer in (
             ("http://cdn.example/41.png", httpx.Response(200, content=_png())),  # not https
             ("https://cdn.example:8443/41.png", httpx.Response(200, content=_png())),  # not port 443
+            ("https://cdn.example:99999/41.png", httpx.Response(200, content=_png())),  # no such port
+            ("https://cdn.example:abc/41.png", httpx.Response(200, content=_png())),  # not a port
             ("https://intranet.local/41.png", httpx.Response(200, content=_png())),  # not public
             (
                 "https://cdn.example/page.html",

@@ -612,8 +612,11 @@ def test_the_semi_auto_notice_names_what_semi_auto_applies() -> None:
         "Saved: your assistant applies low-risk changes without asking (a small deck or collection edit, "
         "or a private copy of a deck) and asks for everything else. A change to one of your decks keeps "
         "a snapshot you can restore from History; a collection change keeps none. Restoring a snapshot "
-        "does not put back a deck's folder, tags or cover."
+        "does not put back a deck's folder, tags, cover or custom cards."
     )
+    # and Full auto's names taking custom cards out among what still waits (confirmation C-2)
+    assert "taking custom cards out of a deck and deleting a deck still wait" in OK_MESSAGES["mode_auto"]
+    assert OK_MESSAGES["mode_auto"].endswith("a deck's folder, tags, cover or custom cards.")
     assert "a private copy of a deck" in modes.mode_help("semi")
 
 

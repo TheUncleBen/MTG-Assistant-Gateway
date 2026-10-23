@@ -93,7 +93,11 @@ async def fetch(url: str, http: httpx.AsyncClient | None = None) -> tuple[bytes,
     parts = urlsplit(url)
     if parts.scheme != "https" or not parts.hostname or parts.username or parts.password:
         return None
-    if parts.port not in (None, 443):  # the picture host's own https port only
+    try:
+        port = parts.port
+    except ValueError:  # not a port at all, or out of range
+        return None
+    if port not in (None, 443):  # the picture host's own https port only
         return None
     if not await asyncio.to_thread(_public_host, parts.hostname):
         return None

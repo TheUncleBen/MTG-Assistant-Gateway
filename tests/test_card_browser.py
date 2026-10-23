@@ -845,3 +845,31 @@ def test_approve_nudges_the_assistant_only_where_the_host_takes_a_message() -> N
             page.close()
         finally:
             browser.close()
+
+
+def test_the_member_only_note_says_what_each_kind_does() -> None:
+    """Confirmation C-1: the one member-only tier covers deleting a deck, deleting from the lists
+    and taking custom cards out; the card's note names the right one."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_or_skip()
+    cases = {
+        "custom_cards": "This takes custom cards out of the deck",
+        "lists": "This deletes from your Archidekt lists",
+        "action": "This deletes the deck from your Archidekt account",
+    }
+    with sync_playwright() as p:
+        browser = _launch(p, exe)
+        try:
+            page = browser.new_page()
+            for kind, words in cases.items():
+                sc = {**PROPOSAL, "kind": kind, "risk": "destructive", "assistant_may_apply": False}
+                card = _open(page, {"structuredContent": sc, "_meta": {APPROVAL_META_KEY: "c"}})
+                card.locator("#title").wait_for()
+                page.wait_for_timeout(300)
+                text = card.locator("body").inner_text()
+                assert words in text, (kind, text)
+                if kind != "action":
+                    assert "deletes the deck" not in text, (kind, text)
+        finally:
+            browser.close()
