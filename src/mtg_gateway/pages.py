@@ -30,6 +30,7 @@ from .decks import (
     commander_row_texts,
     commander_stays_text,
     current_client,
+    custom_card_line,
     row_label,
     row_line,
     tag_change_text,
@@ -1872,6 +1873,19 @@ def _change_rows(rows: list[dict[str, Any]] | None, diff: str) -> tuple[str, dic
                     "Waits for your press" if r.get("destructive") else "",
                 )
             )
+        elif kind == "custom_card":
+            # one of the member's custom cards in the deck (decks.custom_card_line says it all)
+            before, after = int(r.get("before") or 0), int(r.get("after") or 0)
+            net += after - before
+            css, key, word = (
+                ("add", "add", "Add")
+                if r.get("action") == "add"
+                else ("del", "del", "Remove")
+                if r.get("action") == "remove"
+                else ("chg", "chg", "Change")
+            )
+            counts[key] += 1
+            out.append(_li(css, word, html.escape(custom_card_line(r))))
         elif kind == "package":  # where the adds below come from (packages.py); not a change itself
             out.append(_li("chg", "Card package", html.escape(str(r.get("text", "")))))
         elif kind == "restore":

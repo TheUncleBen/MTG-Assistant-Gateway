@@ -143,6 +143,9 @@ class FakeArchidekt:
         self.create_honours_folder = False
         self.last_create_body: dict[str, Any] = {}
         self.fail_deck_reads = False  # signed-in deck reads answer 503
+        # a fault the custom card apply must catch: an add of a custom card answers 200 and
+        # leaves the deck as it was
+        self.custom_adds_dropped = False
         self.next_rel_id = 2000
         self.next_deck_id = 100
         self.private = {43}  # deck ids that need the owner's session
@@ -1298,8 +1301,14 @@ class FakeArchidekt:
                     return httpx.Response(503, json={"detail": "Service unavailable."})
                 body = json.loads(request.content)
                 self.patches.append(body)
+                customs = [e for e in body["cards"] if e.get("customCardId") is not None]
+                plain = [e for e in body["cards"] if e.get("customCardId") is None]
+                for e in customs:
+                    if not self._custom_known(who, e):
+                        return httpx.Response(400, json={"detail": "Invalid custom card."})
                 if not self.fail_patch_silently:
-                    self.apply_patch(deck, body["cards"])
+                    self.apply_custom_patch(deck, customs, who)
+                    self.apply_patch(deck, plain)
                 return httpx.Response(200, json={"ok": True})
         return httpx.Response(404, json={"detail": "Not found."})
 
@@ -1335,6 +1344,49 @@ class FakeArchidekt:
         """A fault a verify must catch: a modify with an empty label (no name, as the site's own
         ",#656565") leaves the old tag."""
         return self.empty_label_ignored and not entry["modifications"]["label"].split(",")[0].strip()
+
+    def _custom_known(self, who: str, e: dict[str, Any]) -> bool:
+        """A custom card entry names one of the writer's own custom cards (the account fake's)
+        and, for a modify or remove, one of the deck's custom rows."""
+        if not any(c["id"] == e["customCardId"] for c in self.account.customs.get(who, [])):
+            return False
+        return e["action"] == "add" or isinstance(e.get("deckRelationId"), int)
+
+    def apply_custom_patch(self, deck: dict[str, Any], entries: list[dict[str, Any]], who: str) -> None:
+        """Custom card entries, in the site's shape (_app.js module 71983 ``add`` and
+        ``prepareSave``): customCardId instead of cardid; a modify or remove names the row by
+        deckRelationId. The rows go to the deck JSON's ``customCards``, as the site reads them."""
+        rows = deck.setdefault("customCards", [])
+        for e in entries:
+            assert e["action"] in ("add", "modify", "remove"), e
+            assert "patchId" in e and "modifications" in e and not e.get("cardid"), e
+            qty = e["modifications"]["quantity"]
+            if e["action"] == "add":
+                if self.custom_adds_dropped:
+                    continue
+                card = next(c for c in self.account.customs[who] if c["id"] == e["customCardId"])
+                self.next_rel_id += 1
+                rows.append(
+                    {
+                        "id": self.next_rel_id,
+                        "quantity": qty,
+                        "categories": e.get("categories") or None,
+                        "modifier": e["modifications"].get("modifier") or "Normal",
+                        "label": e["modifications"].get("label") or ",#656565",
+                        "customCmc": None,
+                        "companion": False,
+                        "flippedDefault": False,
+                        "card": json.loads(json.dumps(card)),
+                    }
+                )
+                continue
+            rel = next((r for r in rows if r["id"] == e["deckRelationId"]), None)
+            if rel is None:
+                continue
+            rel["quantity"] = 0 if e["action"] == "remove" else qty
+            if e["action"] == "modify":
+                rel["categories"] = e.get("categories") or None
+        deck["customCards"] = [r for r in rows if r["quantity"] > 0]
 
     def apply_patch(self, deck: dict[str, Any], entries: list[dict[str, Any]]) -> None:
         """Apply entries in the reference shape: action add|modify|remove, cardid, deckRelationId,

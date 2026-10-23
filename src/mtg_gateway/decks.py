@@ -716,6 +716,8 @@ def row_line(r: dict[str, Any]) -> str:
         return f"{r['before']} -> {r['after']} {label}{side}"
     if kind == "deck_category":  # the deck's own category: renamed or its flags changed
         return category_line(r)
+    if kind == "custom_card":  # one of the member's custom cards in the deck
+        return custom_card_line(r)
     if kind == "category":
         line = f"{r['name']}: category {r['before']} -> {r['after']}"
         if r.get("leaves"):  # moved into a category the deck does not count (Maybeboard...)
@@ -2319,6 +2321,208 @@ def _entry(action: str, card: Any, qty: int, categories: list[str] | None = None
         "categories": list(card.categories if categories is None else categories),
         "modifications": mods,
     }
+
+
+# -- the member's own custom cards in a deck (kind "custom_cards", 2026-10-23) -------------------
+# Archidekt's deck JSON carries them in ``customCards`` beside ``cards`` (Deck.custom_cards). The
+# add is the shape archidekt.com's own deck page sends (_app.js module 71983 ``add``: customCardId
+# in place of cardid); a count change and a remove follow its ``prepareSave``, which sends
+# customCardId and deckRelationId on every modify and remove. Read from the site's scripts, not
+# tried on a live deck yet: the read-back after the write checks every change.
+CUSTOM_CARD_ACTIONS = ("add", "remove", "set_quantity")
+MAX_CUSTOM_CARD_CHANGES = 20
+MAX_CUSTOM_COPIES = 99
+
+
+def parse_custom_card_changes(raw: Any) -> list[dict[str, Any]]:
+    """``[{"action": "add" | "remove" | "set_quantity", "custom_card_id": int, "quantity"?: 1-99,
+    "category"?: str}]`` as stored: an add's quantity defaults to 1; no category means none is
+    sent (Archidekt files the card itself) for an add, and the row keeps its own otherwise."""
+    if not isinstance(raw, list) or not raw:
+        raise DeckError("invalid", "changes must be a non-empty list")
+    if len(raw) > MAX_CUSTOM_CARD_CHANGES:
+        raise DeckError("invalid", f"at most {MAX_CUSTOM_CARD_CHANGES} custom card changes at once")
+    out: list[dict[str, Any]] = []
+    seen: set[int] = set()
+    for i, item in enumerate(raw):
+        if not isinstance(item, dict):
+            raise DeckError("invalid", f"change {i}: must be an object")
+        action = item.get("action")
+        if action not in CUSTOM_CARD_ACTIONS:
+            raise DeckError("invalid", f"change {i}: action must be one of {', '.join(CUSTOM_CARD_ACTIONS)}")
+        cid = item.get("custom_card_id")
+        if isinstance(cid, str) and cid.strip().isdigit():
+            cid = int(cid.strip())
+        if not isinstance(cid, int) or isinstance(cid, bool) or cid < 1:
+            raise DeckError("invalid", f"change {i}: custom_card_id must be the custom card's id (a number)")
+        if cid in seen:
+            raise DeckError(
+                "invalid", f"change {i}: custom card {cid} is named twice; give one change per card"
+            )
+        seen.add(cid)
+        qty = item.get("quantity")
+        if action == "remove":
+            qty = None
+        else:
+            qty = 1 if qty is None and action == "add" else qty
+            if not isinstance(qty, int) or isinstance(qty, bool) or not 1 <= qty <= MAX_CUSTOM_COPIES:
+                raise DeckError(
+                    "invalid", f"change {i}: quantity must be a whole number from 1 to {MAX_CUSTOM_COPIES}"
+                )
+        cat = item.get("category")
+        if cat is not None and not isinstance(cat, str):
+            raise DeckError("invalid", f"change {i}: category must be text")
+        cat = clean_text(cat or "")
+        if len(cat) > 60:
+            raise DeckError("invalid", f"change {i}: a category name is at most 60 characters")
+        if action == "remove" and cat:
+            raise DeckError("invalid", f"change {i}: a remove takes no category")
+        out.append({"action": action, "custom_card_id": cid, "quantity": qty, "category": cat or None})
+    return out
+
+
+def custom_card_rows(
+    deck: Deck, wanted: list[dict[str, Any]], names: dict[int, str]
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """(plan, review rows) for custom card changes on ``deck``. ``names``: the member's own
+    custom cards that may be added, by id (an add of any other id is refused). One row per
+    change: the card's name, its count before and after, and its category."""
+    premier = {c.casefold() for c in deck.premier_categories()}
+    by_id: dict[int, list[Any]] = {}
+    for c in deck.custom_cards:
+        if c.custom_card_id is not None:
+            by_id.setdefault(c.custom_card_id, []).append(c)
+    plan: list[dict[str, Any]] = []
+    rows: list[dict[str, Any]] = []
+    for w in wanted:
+        cid, action, cat = int(w["custom_card_id"]), w["action"], w.get("category")
+        have = by_id.get(cid, [])
+        if len(have) > 1:
+            raise DeckError(
+                "invalid",
+                f"“{have[0].name}” is in this deck in {len(have)} rows; change it on Archidekt.",
+            )
+        cur = have[0] if have else None
+        if action == "add":
+            if cid not in names:
+                raise DeckError(
+                    "not_found",
+                    f"Custom card {cid} is not one of your custom cards, so it can't be added. Only "
+                    "your own custom cards (My lists) go in a deck.",
+                )
+            if cur is not None:
+                raise DeckError(
+                    "invalid",
+                    f"“{cur.name}” is already in this deck ({cur.quantity}); use set_quantity to change "
+                    "its count.",
+                )
+            name, before, after = names[cid], 0, int(w["quantity"])
+            was: list[str] = []
+            now = [cat] if cat else []
+        else:
+            if cur is None:
+                raise DeckError("invalid", f"Custom card {cid} isn't in this deck.")
+            name, before = cur.name, cur.quantity
+            after = 0 if action == "remove" else int(w["quantity"])
+            was = list(cur.categories)
+            now = [cat] if cat else list(was)
+            if action == "set_quantity" and after == before and now == was:
+                raise DeckError(
+                    "invalid", f"“{name}” already has {before} in this deck; nothing would change."
+                )
+        plan.append({"action": action, "custom_card_id": cid, "quantity": after, "categories": now})
+        row: dict[str, Any] = {
+            "kind": "custom_card",
+            "action": action,
+            "custom_card_id": cid,
+            "name": name,
+            "before": before,
+            "after": after,
+            "category_before": ", ".join(was),
+            "category": ", ".join(now),
+        }
+        if any(c.casefold() in premier for c in was + now):
+            row["commander_zone"] = True
+        rows.append(row)
+    return plan, rows
+
+
+def custom_card_line(r: dict[str, Any]) -> str:
+    """A ``custom_card`` review row in words: the same line on the review page, the chat card,
+    History and Activity."""
+    name = clean_text(str(r.get("name") or ""))
+    count = f"{int(r.get('before') or 0)} -> {int(r.get('after') or 0)}"
+    was, now = str(r.get("category_before") or ""), str(r.get("category") or "")
+    if r.get("action") == "add":
+        where = f"category “{now}”" if now else "no category given (Archidekt files it)"
+        return f"Add custom card “{name}”: {count}, {where}"
+    if r.get("action") == "remove":
+        return f"Remove custom card “{name}”: {count}" + (f", from “{was}”" if was else "")
+    if was != now:
+        where = f", category “{was or 'none'}” -> “{now}”"
+    else:
+        where = f", category “{now}”" if now else ""
+    return f"Custom card “{name}”: {count}{where}"
+
+
+def custom_card_entry(p: dict[str, Any], row: Any) -> dict[str, Any]:
+    """One modifyCards entry for a planned custom card change; ``row``: the deck's custom row
+    (Deck.custom_cards) for a count change or remove, None for an add. No ``cardid``, as the
+    site leaves it out for a custom card."""
+    if p["action"] == "add":
+        return {
+            "action": "add",
+            "customCardId": p["custom_card_id"],
+            "categories": list(p["categories"]),  # none given: none sent (a gateway choice)
+            "patchId": uuid.uuid4().hex,
+            "modifications": {
+                "quantity": p["quantity"],
+                "modifier": "Normal",
+                "customCmc": None,
+                "companion": False,
+                "flippedDefault": False,
+                "label": NO_LABEL,
+            },
+        }
+    return {
+        "action": "remove" if p["action"] == "remove" else "modify",
+        "customCardId": p["custom_card_id"],
+        "deckRelationId": row.relation_id,
+        "patchId": uuid.uuid4().hex,
+        "categories": list(p["categories"]),
+        "modifications": {
+            "quantity": p["quantity"] or row.quantity,
+            "modifier": row.modifier or "Normal",
+            "customCmc": row.custom_cmc,
+            "companion": bool(row.companion),
+            "flippedDefault": bool(row.flipped_default),
+            "label": row.label or NO_LABEL,
+        },
+    }
+
+
+def custom_card_mismatches(plan: list[dict[str, Any]], names: dict[int, str], verified: Deck) -> list[str]:
+    """What the deck read back after the write does not show: each card's count, and its
+    category when one was named (an add with none is filed by Archidekt, so any is fine)."""
+    by_id: dict[int, list[Any]] = {}
+    for c in verified.custom_cards:
+        if c.custom_card_id is not None:
+            by_id.setdefault(c.custom_card_id, []).append(c)
+    out: list[str] = []
+    for p in plan:
+        have = by_id.get(p["custom_card_id"], [])
+        name = have[0].name if have else names.get(p["custom_card_id"], f"custom card {p['custom_card_id']}")
+        total = sum(c.quantity for c in have)
+        if total != p["quantity"]:
+            out.append(f"“{name}” ({total} in the deck, not {p['quantity']})")
+        elif (
+            p["quantity"]
+            and p["categories"]
+            and not any(sorted(c.categories) == sorted(p["categories"]) for c in have)
+        ):
+            got = ", ".join(have[0].categories) or "none"
+            out.append(f"“{name}” (category “{got}”, not “{', '.join(p['categories'])}”)")
+    return out
 
 
 def row_key(c: dict[str, Any]) -> tuple[str, str, str]:
@@ -4952,6 +5156,8 @@ class DeckService:
             return await self._apply_details(sub, row, progress)
         if row.get("kind") == "categories":
             return await self._apply_categories(sub, row, progress)
+        if row.get("kind") == "custom_cards":
+            return await self._apply_custom_cards(sub, row, progress)
         if row.get("kind") == "clone":
             return await self._apply_clone(sub, row, progress)
         if row.get("kind") == "collection":
@@ -7271,6 +7477,127 @@ class DeckService:
                 + "; ".join(mismatches)
                 + f". A snapshot ({snapshot_id}) of the deck from just before was kept: Restore under "
                 "History puts the categories back.",
+            )
+        self.db.finish_proposal(row["id"], state="applied", result=result)
+        return self.describe(sub, row["id"])
+
+    # -- the member's own custom cards in a deck (kind "custom_cards") ----------------------------
+    MAX_CUSTOM_LIST_PAGES = 20
+
+    async def own_custom_cards(self, sub: str, ids: list[int]) -> dict[int, str]:
+        """The member's own custom cards among ``ids``, id -> name, read from their custom card
+        list on Archidekt (My lists), page by page until every id is found or the list ends."""
+        from . import account_lists
+
+        want, found = set(ids), {}
+        for page in range(1, self.MAX_CUSTOM_LIST_PAGES + 1):
+            got = await account_lists.read(self, sub, "custom_cards", page=page)
+            for item in got.get("items") or []:
+                if isinstance(item.get("id"), int) and item["id"] in want:
+                    found[item["id"]] = str(item.get("name") or "")
+            if want <= found.keys() or not got.get("more"):
+                break
+        return found
+
+    @_dedupe
+    async def propose_custom_cards(self, sub: str, deck_id: str, changes: Any) -> dict[str, Any]:
+        """A proposal (kind ``custom_cards``) that adds the member's own custom cards to one of
+        their decks, removes custom cards from it or sets their count, one review row per card.
+        The one way in for the assistant (``propose_custom_card_changes``) and the pages (the
+        member's own press, applied at once with ``apply(via="browser")`` as other hand edits are).
+
+        ``changes``: as ``parse_custom_card_changes`` takes them. Refused before anything is
+        stored: an add of a custom card that is not one of the member's own (read from their
+        custom card list), one already in the deck, a count change or remove of one that isn't,
+        and a change that changes nothing.
+
+        Applied (``_apply_custom_cards``) with a snapshot and, when backups are on, a backup copy
+        first, the deck checked again just before writing, one modifyCards entry per change, and
+        the deck read back to check every count and named category. The gateway's snapshots and
+        Restore cover a deck's cards and details, not its custom card rows (a gateway choice): so
+        this kind has no Undo."""
+        deck_id = _clean_deck_id(deck_id)
+        wanted = parse_custom_card_changes(changes)
+        self._room_for_proposal(sub)
+        deck = await self.get_own_deck(sub, deck_id)
+        self.recheck_waiting(sub, deck)
+        adds = [w["custom_card_id"] for w in wanted if w["action"] == "add"]
+        names = await self.own_custom_cards(sub, adds) if adds else {}
+        _plan, rows = custom_card_rows(deck, wanted, names)
+        pid = secrets.token_urlsafe(12)
+        self._save_proposal(
+            {
+                "id": pid,
+                "owner_sub": sub,
+                "kind": "custom_cards",
+                "deck_id": deck.id,
+                "deck_name": deck.name,
+                "baseline_fingerprint": deck.fingerprint(),
+                # the added cards' names as the member's list had them, so the rows can be worked
+                # out again on the deck of later (recheck.rows_now) without another list read
+                "changes": {"custom_cards": wanted, "names": {str(k): v for k, v in names.items()}},
+            },
+            rows,
+        )
+        self._audit(
+            "proposal_created",
+            sub=sub,
+            detail={"proposal_id": pid, "deck_id": deck.id, "kind": "custom_cards", "count": len(rows)},
+        )
+        return self.describe(sub, pid)
+
+    async def _apply_custom_cards(
+        self, sub: str, row: dict[str, Any], progress: dict[str, Any]
+    ) -> dict[str, Any]:
+        from . import recheck
+
+        stored = row["changes"]
+        wanted = list(stored.get("custom_cards") or [])
+        names = {int(k): str(v) for k, v in (stored.get("names") or {}).items()}
+
+        def plan_on(deck: Deck, reason: str) -> list[dict[str, Any]]:
+            # the custom rows are not in the deck's fingerprint: worked out again on the deck of
+            # now, they must give exactly the rows that were reviewed
+            try:
+                plan, rows = custom_card_rows(deck, wanted, names)
+            except DeckError as exc:
+                raise needs_look_error(reason) from exc
+            if recheck._clean(rows) != recheck._clean(row.get("rows")):
+                raise needs_look_error(reason)
+            return plan
+
+        deck = await self._current_deck_for(sub, row)
+        plan_on(deck, recheck.REASON_CHANGED)
+        snapshot_id = self._take_snapshot(sub, row, deck)
+        progress["snapshot_id"] = snapshot_id
+        backup = await self._backup_shared(sub, row, deck, snapshot_id)
+        progress.update(backup)
+        # the backup takes a while: read again just before writing
+        now = await self.get_own_deck(sub, deck.id)
+        if now.rows_fingerprint() != deck.rows_fingerprint():
+            raise needs_look_error(recheck.REASON_DURING_APPLY)
+        plan = plan_on(now, recheck.REASON_DURING_APPLY)
+        rows_by_id = {c.custom_card_id: c for c in now.custom_cards if c.custom_card_id is not None}
+        payload = [custom_card_entry(p, rows_by_id.get(p["custom_card_id"])) for p in plan]
+        await self._send(sub, deck.id, payload, progress)
+        verified = await self.get_deck(sub, deck.id)
+        self.recheck_waiting(sub, verified)
+        mismatches = custom_card_mismatches(plan, names, verified)
+        result = {
+            "snapshot_id": snapshot_id,
+            **backup,
+            "sent_entries": len(payload),
+            "verified": not mismatches,
+            "mismatched_cards": mismatches,
+            "after_fingerprint": verified.fingerprint(),
+        }
+        if mismatches:
+            progress.update(result)  # apply() records it with the error
+            raise DeckError(
+                "verify_mismatch",
+                "Archidekt accepted the request but the deck does not match the proposal for: "
+                + ", ".join(mismatches)
+                + f". A snapshot ({snapshot_id}) of the deck before the change was kept.",
             )
         self.db.finish_proposal(row["id"], state="applied", result=result)
         return self.describe(sub, row["id"])
@@ -9713,6 +10040,8 @@ def _next_step(
         if kind == "details"
         else "these category changes"
         if kind == "categories"
+        else "these custom card changes"
+        if kind == "custom_cards"
         else "this copy"
         if kind == "clone"
         else "this diff"
@@ -9789,6 +10118,8 @@ def _next_step(
         return "Done. The deck's details on Archidekt match this proposal."
     if state == "applied" and kind == "categories":
         return "Done. The deck's categories on Archidekt match this proposal."
+    if state == "applied" and kind == "custom_cards":
+        return "Done. The deck's custom cards on Archidekt match this proposal."
     if state == "applied" and kind == "clone":
         return "Done. The copy exists on Archidekt (see result.deck_url) and matches the source deck."
     if state == "applied":

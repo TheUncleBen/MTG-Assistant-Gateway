@@ -217,6 +217,7 @@ _PROPOSES = frozenset(
         "propose_clone_deck",
         "propose_deck_details",
         "propose_deck_categories",
+        "propose_custom_card_changes",
         "propose_restore_snapshot",
         "propose_collection_changes",
         "propose_list_change",

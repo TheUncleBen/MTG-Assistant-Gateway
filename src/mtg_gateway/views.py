@@ -96,6 +96,12 @@ def deck_out(
         "side_count": sum(c.quantity for c in deck.side_cards),
         "commanders": [c.name for c in deck.cards if "Commander" in c.categories],
         "categories": [c.get("name") for c in deck.categories if isinstance(c.get("name"), str)],
+        # the member's custom cards in the deck (Archidekt's customCards, not in cards or the counts);
+        # id is the custom card's id, as propose_custom_card_changes takes it
+        "custom_cards": [
+            {"id": c.custom_card_id, "name": c.name, "quantity": c.quantity, "categories": list(c.categories)}
+            for c in getattr(deck, "custom_cards", None) or []
+        ],
     }
     if view != "full":
         out["view"] = view
