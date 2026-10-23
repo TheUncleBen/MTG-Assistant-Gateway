@@ -75,7 +75,7 @@
         // Archidekt has no mark-as-read: the count clears once the list was opened
         setCount(0);
       }
-      var note = el("p", "muted small bell-foot", "Archidekt has no “mark as read”: the count clears when you open this list, and the items stay here as Archidekt keeps them. Turn them off under Account › Email and notifications.");
+      var note = el("p", "muted small bell-foot", "The count clears when you open this list. The items stay here for as long as Archidekt keeps them. Turn them off under Account › Email and notifications.");
       wrap.appendChild(note);
       box.setBody(wrap);
       box.focusFirst();

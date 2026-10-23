@@ -140,8 +140,10 @@ async def test_the_four_cards_follow_the_mockup_while_linked(member: Browser) ->
         "These forms ask for your Archidekt password, which the gateway never holds, "
         "so they open on Archidekt in a new tab." in only
     )
-    for text, _href in profile_page.ON_ARCHIDEKT:
+    for text, href in profile_page.ON_ARCHIDEKT:
         assert text in only, text
+        # only an address Archidekt's saved scripts confirm: its settings pages' names are not known
+        assert href == "https://archidekt.com/", href
     assert (
         only.count("target='_blank' rel='noopener noreferrer'") == 4 and only.count("Open on Archidekt") == 4
     )

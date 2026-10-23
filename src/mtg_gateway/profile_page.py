@@ -48,12 +48,14 @@ NOTHING_CHANGED = "Nothing changed: your Archidekt profile already said that."
 PICTURE_SAVED = "Picture saved on Archidekt and read back."
 UNCONFIRMED = "Sent to Archidekt, but the read-back didn't confirm the change. See Result on the review page."
 CARD_NOTICES = frozenset({"profile", "email", "defaults", "picture"})
-# the four forms that need the Archidekt password (R-085): a link to Archidekt, never a form here
+# the four forms that need the Archidekt password (R-085): a link to Archidekt, never a form here.
+# Archidekt's saved scripts confirm only the page accountSettings/[settingsName], not its names, so each
+# opens Archidekt's home page until a TEST-account check confirms the exact address
 ON_ARCHIDEKT = (
-    ("Change your Archidekt password", "https://archidekt.com/accountSettings/password"),
-    ("Change your Archidekt email address", "https://archidekt.com/accountSettings/email"),
-    ("Patreon: connect, confirm or disconnect", "https://archidekt.com/accountSettings/patreon"),
-    ("Delete your Archidekt account", "https://archidekt.com/accountSettings/delete"),
+    ("Change your Archidekt password", "https://archidekt.com/"),
+    ("Change your Archidekt email address", "https://archidekt.com/"),
+    ("Patreon: connect, confirm or disconnect", "https://archidekt.com/"),
+    ("Delete your Archidekt account", "https://archidekt.com/"),
 )
 # the switches, in the mockup's order and words: (name, label, help, inverted)
 EMAIL_ROWS = (
@@ -546,8 +548,8 @@ def notifications_html(got: dict[str, Any], *, linked: bool = True) -> str:
 
 
 BELL_NOTE = (
-    "Archidekt has no “mark as read”: the count clears when you open this list, and the items stay here "
-    "as Archidekt keeps them. Turn them off under Account › Email and notifications."
+    "The count clears when you open this list. The items stay here for as long as Archidekt keeps them. "
+    "Turn them off under Account › Email and notifications."
 )
 
 

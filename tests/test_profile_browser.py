@@ -179,7 +179,7 @@ def test_switches_and_drop_downs_save_in_place_and_the_bell_opens_its_box(server
         assert rows.count() == 4 and page.locator(".bell-row.new").count() == 3
         assert page.locator(".bell-badge").inner_text() == "3 new"
         assert page.locator(".bell-row[href='/decks/42']").count() == 1
-        assert "Archidekt has no “mark as read”" in box.inner_text()
+        assert "The count clears when you open this list." in box.inner_text()
         assert page.evaluate(MEASURE) == []
         assert page.evaluate(CONTRAST, TEXT) == []
         assert min(_targets(page, ".bell-row, .mtgbox .acts button, .mtgbox .acts .btn")) >= 43.5
