@@ -115,12 +115,14 @@ def adds(
     skip_existing: bool = True,
     skip_outside_identity: bool = True,
     singleton: bool | None = None,
+    color_tag: str | None = None,
 ) -> tuple[Deck, list[dict[str, Any]], dict[str, list[str]]]:
     """The package's cards as add changes for ``deck`` (the site's Add package options), and what
     was left out and why. ``categories``: package (each card keeps its package category), default
     (no category given: Archidekt files it) or maybeboard. ``singleton`` None follows the deck's
     format (one copy each in a singleton format). A card the package holds in several printings
-    is one add of the first printing listed, with every copy."""
+    is one add of the first printing listed, with every copy. ``color_tag`` ("Name,#rrggbb") goes
+    on every new row, as the site's Color tag option does."""
     if block_of(package) is None:
         raise _err(f"“{package.name}” is not a card package.")
     if package.id == deck.id:
@@ -156,6 +158,8 @@ def adds(
         }
         if c.set_code and c.collector_number:
             change["set_code"], change["collector_number"] = c.set_code, c.collector_number
+        if color_tag:
+            change["label"] = color_tag
         if categories == "package" and c.categories:
             change["categories"] = list(c.categories)
         elif categories == "maybeboard":
@@ -169,9 +173,16 @@ def adds(
 
 def source_text(name: str, changes: list[dict[str, Any]], skipped: dict[str, list[str]]) -> str:
     """The review's line above a package's adds."""
+    from .decks import split_label
+
     n = sum(int(c["quantity"]) for c in changes)
     left = "; ".join(f"left out, {why}: {', '.join(names)}" for why, names in skipped.items())
-    return f"From card package “{name}”: {n} {'card' if n == 1 else 'cards'}" + (f" ({left})" if left else "")
+    tag = split_label(str(changes[0].get("label") or ""))[0] if changes else ""
+    return (
+        f"From card package “{name}”: {n} {'card' if n == 1 else 'cards'}"
+        + (f", color tag “{tag}”" if tag else "")
+        + (f" ({left})" if left else "")
+    )
 
 
 def amended_line(line: dict[str, Any], changes: list[dict[str, Any]]) -> dict[str, Any] | None:

@@ -64,7 +64,9 @@ def add_package_tools(state: AppState, h: SimpleNamespace) -> None:
             "categories: package (each card keeps its package category, the default), default "
             "(Archidekt files them) or maybeboard. skip_existing (default true) leaves out cards the "
             "deck has; skip_outside_identity (default true) leaves out cards outside the commander's "
-            "colors; singleton (default: the deck's format decides) adds one copy of each. Returns a "
+            "colors; singleton (default: the deck's format decides) adds one copy of each; color_tag "
+            "puts a color tag on every card it adds (one the deck uses or one of the user's color tags "
+            "by name, or any name with color as #rrggbb). Returns a "
             "proposal like propose_deck_changes (kind 'edit': the adds, each reviewed, under a line "
             "naming the package and what was left out), applied with apply_proposal. When it is "
             "applied, Archidekt counts one import of the package, as on the site. Changes nothing on "
@@ -80,6 +82,8 @@ def add_package_tools(state: AppState, h: SimpleNamespace) -> None:
         skip_existing: bool = True,
         skip_outside_identity: bool = True,
         singleton: bool | None = None,
+        color_tag: str | None = None,
+        color: str | None = None,
     ) -> CallToolResult:
         try:
             out = await state.decks.propose_package(
@@ -90,6 +94,8 @@ def add_package_tools(state: AppState, h: SimpleNamespace) -> None:
                 skip_existing=skip_existing,
                 skip_outside_identity=skip_outside_identity,
                 singleton=singleton,
+                color_tag=color_tag,
+                color=color,
             )
             return _proposal({"ok": True, **out})
         except DeckError as exc:

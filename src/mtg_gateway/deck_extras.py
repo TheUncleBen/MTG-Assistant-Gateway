@@ -1082,7 +1082,14 @@ def add_deck_extras_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
         sub, sid, data = got
         values = {
             k: data.get(k, "")
-            for k in ("package", "categories", "skip_existing", "skip_outside_identity", "singleton")
+            for k in (
+                "package",
+                "categories",
+                "skip_existing",
+                "skip_outside_identity",
+                "singleton",
+                "color_tag",
+            )
         }
         try:
             ref = values["package"].strip()
@@ -1097,6 +1104,9 @@ def add_deck_extras_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
                 skip_existing=values["skip_existing"] == "1",
                 skip_outside_identity=values["skip_outside_identity"] == "1",
                 singleton=values["singleton"] == "1",
+                # the box's choice is "Name,#rrggbb" (the deck's tags and the member's color tags)
+                color_tag=values["color_tag"].rsplit(",", 1)[0] if values["color_tag"] else None,
+                color=values["color_tag"].rsplit(",", 1)[1] if "," in values["color_tag"] else None,
             )
         except DeckError as exc:
             return await back_with(request, sub, sid, deck_id, "package", exc, values)

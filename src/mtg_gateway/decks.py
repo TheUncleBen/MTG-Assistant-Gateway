@@ -898,7 +898,7 @@ class Change:
             d["collector_number"] = self.collector_number
         if self.finish:
             d["finish"] = self.finish
-        if self.action == "set_label":
+        if self.action == "set_label" or (self.action == "add" and self.label):
             name, colour = split_label(self.label or "")
             d["label"] = name
             if colour:
@@ -1028,8 +1028,25 @@ def parse_changes(raw: Any, *, row_flags: bool = False) -> list[Change]:
             if given and action != "add":
                 raise DeckError("invalid", f"change {i}: {flag} applies to add only")
             flags[flag] = given
+        label = None
+        if item.get("label") not in (None, ""):
+            if action != "add":
+                raise DeckError("invalid", f"change {i}: label goes with add or set_label only")
+            label = _parse_label_change(i, name, {"label": item["label"], "color": item.get("color")}).label
         out.append(
-            Change(action, name, qty, cat, set_code, number, finish, zone=zone, categories=cats, **flags)
+            Change(
+                action,
+                name,
+                qty,
+                cat,
+                set_code,
+                number,
+                finish,
+                zone=zone,
+                categories=cats,
+                label=label,
+                **flags,
+            )
         )
     # Per zone: the deck proper and the maybeboard or sideboard each take one pinned printing of a card.
     pinned = [(ch.zone, ch.card_name.lower()) for ch in out if ch.pinned]
@@ -2053,8 +2070,14 @@ def build_payload(
     side_flags: dict[str, tuple[bool, bool]] | None = None,
     side_pinned: dict[str, dict[str, Any]] | None = None,
     side_modifiers: dict[str, str] | None = None,
+    labels: dict[str, str] | None = None,
+    side_labels: dict[str, str] | None = None,
 ) -> list[dict[str, Any]]:
     """Per-card entries for PATCH modifyCards/v2, one entry per request.
+
+    ``labels`` and ``side_labels`` (from ``add_labels``) give a new row its colour tag, as the
+    site's add sends one (``label`` in its modifications); a row that is already there and only
+    grows keeps its own tag.
 
     ``flags`` and ``side_flags`` (from ``add_flags``) give a new row its companion and
     flippedDefault flags, as the deck page's Undo of a removal asks; a row that is already
@@ -2096,7 +2119,9 @@ def build_payload(
             continue
         pin = (pinned or {}).get(name)
         if pin:
-            qty, existing = _pinned_entries(payload, name, qty, existing, pin, (flags or {}).get(name))
+            qty, existing = _pinned_entries(
+                payload, name, qty, existing, pin, (flags or {}).get(name), label=(labels or {}).get(name)
+            )
             if qty == sum(c.quantity for c in existing):
                 continue
         if existing:
@@ -2111,6 +2136,7 @@ def build_payload(
                     (categories or {}).get(name),
                     (modifiers or {}).get(name, "Normal"),
                     (flags or {}).get(name, (False, False)),
+                    (labels or {}).get(name),
                 )
             )
     side_by_name: dict[str, list[Any]] = {}
@@ -2123,7 +2149,14 @@ def build_payload(
         pin = (side_pinned or {}).get(name)
         if pin:
             qty, existing = _pinned_entries(
-                payload, name, qty, existing, pin, (side_flags or {}).get(name), side=True
+                payload,
+                name,
+                qty,
+                existing,
+                pin,
+                (side_flags or {}).get(name),
+                side=True,
+                label=(side_labels or {}).get(name),
             )
             if qty == sum(c.quantity for c in existing):
                 continue
@@ -2139,6 +2172,7 @@ def build_payload(
                     (side_categories or {}).get(name) or [deck.side_category()],
                     (side_modifiers or {}).get(name, "Normal"),
                     (side_flags or {}).get(name, (False, False)),
+                    (side_labels or {}).get(name),
                 )
             )
     for card in deck.cards:
@@ -2155,6 +2189,7 @@ def _pinned_entries(
     pin: dict[str, Any],
     flags: tuple[bool, bool] | None,
     side: bool = False,
+    label: str | None = None,
 ) -> tuple[int, list[Any]]:
     """Append the write for a pinned add of ``name`` (one zone's rows in ``existing``): the row
     with the same printing and finish grows, or the printing goes in as a new row. In the
@@ -2181,6 +2216,7 @@ def _pinned_entries(
                 pin.get("categories"),
                 pin["modifier"],
                 flags or (False, False),
+                label,
             )
         )
         qty -= int(pin["quantity"])
@@ -2199,9 +2235,11 @@ def _add_entry(
     categories: list[str] | None,
     modifier: str,
     flags: tuple[bool, bool] = (False, False),
+    label: str | None = None,
 ) -> dict[str, Any]:
-    """A new row; ``flags`` are its companion and flippedDefault (an Undo of a removal)."""
-    return {
+    """A new row; ``flags`` are its companion and flippedDefault (an Undo of a removal); ``label``
+    its colour tag, when the add names one."""
+    entry: dict[str, Any] = {
         "action": "add",
         "cardid": cardid,
         "patchId": uuid.uuid4().hex,
@@ -2213,6 +2251,34 @@ def _add_entry(
             "modifier": modifier,
         },
     }
+    if label:
+        entry["modifications"]["label"] = label
+    return entry
+
+
+def add_labels(changes: list[Change], counts: dict[str, int], zone: str) -> dict[str, str]:
+    """The colour tag each add in ``zone`` asks for, keyed by the spelling in ``counts``, as
+    ``add_flags``; only names with a tag."""
+    out: dict[str, str] = {}
+    for ch in changes:
+        if ch.action == "add" and ch.zone == zone and ch.label:
+            out[next((k for k in counts if k.lower() == ch.card_name.lower()), ch.card_name)] = ch.label
+    return out
+
+
+def label_mismatches(changes: list[Change], deck: Deck, verified: Deck) -> list[str]:
+    """Adds that asked for a colour tag whose new rows came back without it (rows the deck already
+    had keep their own tag, so only new rows are checked)."""
+    had = {c.relation_id for c in deck.cards}
+    out = []
+    for ch in changes:
+        if ch.action != "add" or not ch.label:
+            continue
+        name = ch.card_name.lower()
+        new = [c for c in verified.cards if c.relation_id not in had and c.name.lower() == name]
+        if new and not all(_same_label(c.label, ch.label) for c in new):
+            out.append(f"the color tag on {ch.card_name}")
+    return out
 
 
 def add_flags(changes: list[Change], counts: dict[str, int], zone: str) -> dict[str, tuple[bool, bool]]:
@@ -3547,20 +3613,27 @@ class DeckService:
         skip_existing: bool = True,
         skip_outside_identity: bool = True,
         singleton: bool | None = None,
+        color_tag: str | None = None,
+        color: str | None = None,
     ) -> dict[str, Any]:
         """Add a card package's cards to one of the member's decks, as the site's Add package does:
         its cards as ordinary adds (each reviewed like any other), with a line saying where they
         come from. The package is read as anyone reads a deck now; the read that counts an import
-        on Archidekt is sent only when the change is applied."""
+        on Archidekt is sent only when the change is applied. ``color_tag`` names a colour tag for
+        every new row: one the deck uses or one of the member's color tags, or any name with
+        ``color``."""
         from . import packages
 
+        own = await self.get_own_deck(sub, _clean_deck_id(deck_id))
+        tag = await self._package_tag(sub, own, color_tag, color) if (color_tag or "").strip() else None
         pkg_deck, changes, skipped = packages.adds(
-            await self.get_own_deck(sub, _clean_deck_id(deck_id)),
+            own,
             await self.get_any_deck(sub, package_ref),
             categories=categories,
             skip_existing=skip_existing,
             skip_outside_identity=skip_outside_identity,
             singleton=singleton,
+            color_tag=tag,
         )
         line = _row(
             "package",
@@ -3571,6 +3644,28 @@ class DeckService:
             skipped=skipped,
         )
         return await self.propose(sub, deck_id, changes, source_row=line)
+
+    async def _package_tag(self, sub: str, deck: Deck, name: str | None, color: str | None) -> str:
+        """The colour tag an Add package names, as Archidekt stores it ("Name,#rrggbb"): the colour
+        given, else the one the deck already uses for that name, else the member's color tag of
+        that name (My lists)."""
+        from . import account_lists
+
+        text = clean_text(str(name or ""))
+        if color:
+            return str(_parse_label_change(0, "package", {"label": text, "color": color}).label)
+        for c in deck.cards:
+            have, colour = split_label(c.label)
+            if have.casefold() == text.casefold() and colour:
+                return f"{have},{colour}"
+        mine = await account_lists.read(self, sub, "color_tags")
+        for t in mine.get("items") or []:
+            if str(t.get("name") or "").casefold() == text.casefold():
+                return str(_parse_label_change(0, "package", {"label": t["name"], "color": t["color"]}).label)
+        raise DeckError(
+            "invalid",
+            f"No color tag named “{text}” on this deck or in your color tags. Pick one, or give its color.",
+        )
 
     @_dedupe
     async def propose_new_deck(
@@ -4898,6 +4993,8 @@ class DeckService:
             add_flags(changes, after_side, "side"),
             side_pinned,
             side_modifiers,
+            add_labels(changes, after, "main"),
+            add_labels(changes, after_side, "side"),
         )
         specs, _print_lines = printing_plan_rows(deck, changes)
         payload += await self._printing_entries(sub, deck, specs)
@@ -4917,6 +5014,7 @@ class DeckService:
         verified = await self.get_deck(sub, deck.id)
         self.recheck_waiting(sub, verified)  # the deck's other waiting proposals, at no cost
         mismatches = edit_mismatches(deck, changes, verified, specs)
+        mismatches += label_mismatches(changes, deck, verified)
         result = {
             "snapshot_id": snapshot_id,
             **backup,

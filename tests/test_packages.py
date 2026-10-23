@@ -5,6 +5,8 @@ the package block's own id). Nothing here was recorded from archidekt.com."""
 # ruff: noqa: F811 - the stack fixture is imported and then named as a parameter
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from mtg_gateway import packages
@@ -391,3 +393,52 @@ def test_expired_package_lists_are_let_go() -> None:
     packages._MINE[("s1", ("old",))] = (time.monotonic() - 1, {"rows": []})
     packages._keep(("s1", ("new",)), {"rows": []})
     assert list(packages._MINE) == [("s1", ("new",))]
+
+
+async def test_a_color_tag_goes_on_every_card_the_package_adds(stack: Stack) -> None:
+    """Ben, 23 Oct: Add package's Color tag option in this release, set as part of the add as
+    Archidekt's own add sends it (each new row's label), named on the review line and checked
+    when it comes back."""
+    token = await linked_user(stack)
+    made = await _browser_apply(
+        stack.h,
+        (await _new_package(stack, token, decklist_text="1 Arcane Signet\n1 Opt"))["proposal_id"],
+    )
+    pkg_id = str(made["result"]["deck_id"])
+    stack.ark.account.tags.setdefault("alice", []).append({"id": 9001, "name": "Upgrade", "color": "#2185d0"})
+    p = structured(
+        await call(
+            stack.h,
+            token,
+            "propose_add_package",
+            {"deck_id": "42", "package_id": pkg_id, "color_tag": "upgrade"},
+        )
+    )
+    assert p["ok"] is True, p
+    assert p["diff"].splitlines()[0].startswith("From card package “Fetches”: 2 cards, color tag “Upgrade”")
+    done = await _browser_apply(stack.h, p["proposal_id"])
+    assert done["state"] == "applied", done
+    tagged = {
+        c["card"]["oracleCard"]["name"]: c.get("label")
+        for c in stack.ark.decks[42]["cards"]
+        if c["card"]["oracleCard"]["name"] in ("Arcane Signet", "Opt")
+    }
+    assert tagged == {"Arcane Signet": "Upgrade,#2185d0", "Opt": "Upgrade,#2185d0"}, tagged
+
+
+async def test_a_color_tag_nobody_has_needs_its_color_and_a_lost_tag_is_caught(stack: Stack) -> None:
+    token = await linked_user(stack)
+    made = await _browser_apply(
+        stack.h, (await _new_package(stack, token, decklist_text="1 Arcane Signet"))["proposal_id"]
+    )
+    pkg_id = str(made["result"]["deck_id"])
+    args = {"deck_id": "42", "package_id": pkg_id, "color_tag": "Nowhere"}
+    no = structured(await call(stack.h, token, "propose_add_package", args))
+    assert no["ok"] is False and "No color tag named “Nowhere”" in no["message"], no
+    p = structured(await call(stack.h, token, "propose_add_package", {**args, "color": "#ff0000"}))
+    assert p["ok"] is True, p
+    stack.ark.add_rows_lose_label = True
+    done = await _browser_apply(stack.h, p["proposal_id"])
+    assert done == {"ok": False, "error": "verify_mismatch"}, done
+    row = stack.h.db.get_proposal(p["proposal_id"], "user-1")
+    assert "the color tag on Arcane Signet" in json.dumps(row, default=str), row
