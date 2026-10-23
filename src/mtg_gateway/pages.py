@@ -407,6 +407,9 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             return RedirectResponse(f"/account?{done}#apps", 303)
         if action == "unlink":
             state.decks.unlink(sub)
+            from . import account_lists  # (imports archidekt first: not at the top)
+
+            account_lists.forget_counts(sub)  # the My lists counts were that account's
             return RedirectResponse("/account?ok=unlinked", status_code=303)
         if action == "approval_mode":
             # The only place a mode can be set: the member's own browser session, never an
@@ -1238,6 +1241,33 @@ def _app_card() -> str:
     )
 
 
+def _lists_card(sub: str) -> str:
+    """Your Archidekt lists: the five account-wide lists with the counts known so far (each count
+    comes from that tab's last read, account_lists.counts), one press from My lists."""
+    from . import account_lists  # (imports archidekt first: not at the top)
+    from .lists_page import PAGE, TABS
+
+    counts = account_lists.counts(sub)
+    words = {
+        "templates": ("category template", "category templates"),
+        "default_categories": ("card with default categories", "cards with default categories"),
+        "color_tags": ("color tag", "color tags"),
+        "pins": ("pinned card", "pinned cards"),
+        "custom_cards": ("custom card", "custom cards"),
+    }
+    parts = []
+    for t in TABS:
+        n = counts.get(t.kind)
+        one, many = words[t.kind]
+        text = many if n is None else f"{n:,} {one if n == 1 else many}"
+        parts.append(f"<a href='{PAGE}/{t.slug}'>{text}</a>")
+    return (
+        "<div class='card' id='lists'><h2>Your Archidekt lists</h2>"
+        f"<p>Lists that follow you into every deck, kept on Archidekt: {', '.join(parts)}.</p>"
+        f"<div class='ui-actions'><a class='btn' href='{PAGE}'>{icon('list')} Open My lists</a></div></div>"
+    )
+
+
 def _account_body(
     state: Any,
     sub: str,
@@ -1317,6 +1347,7 @@ def _account_body(
             "Whether the session also stops working on Archidekt's side is not known.</p>"
             f"{link_disclosure.linked_html(_sweep_on(state))}{unlink_box}</div>"
         )
+        out.append(_lists_card(sub))
     else:
         out.append(
             "<div class='card' id='archidekt'><h2>Link your Archidekt account</h2>"

@@ -1,6 +1,6 @@
 """The top bar on a computer: from 1200 px (85.7em of the bar's 14 px text)
 it lists Reports and Watchlist after History; narrower, Proposals and the links after it fold into
-"More ▾", which lists the phone's More sheet (Proposals, History, Reports, Watchlist, Guide,
+"More ▾", which lists the phone's More sheet (Proposals, History, Reports, Watchlist, My lists, Guide,
 Account). Large text folds them too. Phones and the touch rail have no More ▾ in the bar."""
 
 from __future__ import annotations
@@ -43,6 +43,7 @@ def test_the_bar_marks_a_folded_page_on_more(server: Server) -> None:
         "History",
         "Reports",
         "Watchlist",
+        "My lists",
         "Guide",
         "Account",
     ]

@@ -2111,7 +2111,7 @@ NAV_LINKS = [
 NAV_FOLD_FROM = "/proposals"
 # The tabs, as Material's navigation bar (3 to 5 destinations) has them: on a compact screen Home,
 # Decks, Scan, Collection and More, with Search as the icon in the top bar. More opens a sheet with
-# the remaining pages (Proposals, History, Reports, Watchlist, Guide, Account, Admin) so nothing
+# the remaining pages (Proposals, History, Reports, Watchlist, My lists, Guide, Account, Admin) so nothing
 # is more than two taps away; Home is never under More. The rail (an unfolded Fold, a tablet, the app from
 # 600px) is tall enough for every page, so it lists them all as tabs and has no More.
 TAB_LINKS = [
@@ -2126,6 +2126,7 @@ MORE_LINKS = [
     ("/history", "History", "history"),
     ("/reports", "Reports", "report"),
     ("/watchlist", "Watchlist", "stats"),
+    ("/lists", "My lists", "list"),
     ("/guide", "Guide", "guide"),
     ("/account", "Account", "account"),
 ]
@@ -2253,7 +2254,8 @@ def render(
             # Reports: here, in the top bar from 1200 px (its More below that), a tab on the rail
             f"<a href='/reports'>{icon('report')}Reports</a>"
             + (f"<a href='/watchlist'>{icon('stats')}Watchlist</a>" if WATCHLISTS else "")
-            + f"<a href='/activity'>{icon('activity')}My activity</a>"
+            + f"<a href='/lists'>{icon('list')}My lists</a>"
+            f"<a href='/activity'>{icon('activity')}My activity</a>"
             f"<a href='/guide'>{icon('guide')}Guide</a>"
             f"<a href='/install?for=skill'>{icon('report')}Assistant skill</a>"
             + (f"<a href='/install?for=android'>{icon('download')}Android app</a>" if not app else "")

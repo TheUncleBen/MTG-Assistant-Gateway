@@ -119,7 +119,9 @@ def _card_parts(card: Any) -> dict[str, Any]:
         "card_id": card.get("id") if isinstance(card.get("id"), int) else None,
         "name": clean_text(str(oracle.get("name") or card.get("name") or "")),
         "set_code": str(edition.get("editioncode") or "").upper(),
+        "set_name": clean_text(str(edition.get("editionname") or "")),
         "collector_number": str(card.get("collectorNumber") or ""),
+        "uid": str(card.get("uid") or ""),  # the Scryfall id: the My lists page's thumbnail
     }
 
 
@@ -157,10 +159,32 @@ async def _get(decks: DeckService, sub: str, fn: Any) -> Any:
     return await decks._call(sub, fn)  # an Archidekt refusal comes back as a DeckError
 
 
+# Each list's total as last read, per member: the My lists page's tab bar and the Account page's
+# panel show the counts they know without a read of their own (one Archidekt read per tab view).
+# A list never read yet has no count there; a custom card search does not count (it is a subset).
+_COUNTS: dict[str, dict[str, int]] = {}
+
+
+def counts(sub: str) -> dict[str, int]:
+    """The totals of ``sub``'s lists as last read, by kind (only the kinds read so far)."""
+    return dict(_COUNTS.get(sub) or {})
+
+
+def forget_counts(sub: str) -> None:
+    _COUNTS.pop(sub, None)
+
+
 async def read(decks: DeckService, sub: str, kind: str, *, page: int = 1, search: str = "") -> dict[str, Any]:
     """One list as it is on Archidekt now, in the gateway's own words."""
     if kind not in KINDS:
         raise _err(f"list must be one of: {', '.join(KINDS)}")
+    got = await _read(decks, sub, kind, page=page, search=search)
+    if kind != "custom_cards" or not search:
+        _COUNTS.setdefault(sub, {})[kind] = int(got["total"])
+    return got
+
+
+async def _read(decks: DeckService, sub: str, kind: str, *, page: int, search: str) -> dict[str, Any]:
     client = decks.client
     if kind == "templates":
         rows = await _get(decks, sub, lambda token, *_: client.templates(token))
