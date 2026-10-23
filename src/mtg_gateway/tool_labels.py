@@ -140,6 +140,7 @@ API_ROUTES: dict[str, str] = {
     "GET /decks/{deck_id}/history": "Deck history (API)",
     "GET /compare": "Compare two decks (API)",
     "POST /decks/{deck_id}/edit": "Propose deck changes (API)",
+    "POST /decks/{deck_id}/custom_cards": "Change custom cards in a deck (API)",
     "GET /proposals": "List my changes (API)",
     "POST /proposals": "Propose a change (API)",
     "GET /proposals/{pid}": "Read a change (API)",
