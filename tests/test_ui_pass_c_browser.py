@@ -351,14 +351,16 @@ def test_a_custom_cards_menu_on_the_deck_page(server: Server, width: int, theme:
         menu.wait_for(state="visible")
         items = [t.split("\n")[0] for t in _items(page)]
         assert items[0] == "Open card" and "Move to" in items and "Remove from deck" in items, items
-        assert "Lock personal categories" in items and "Copy name" in items and "Report card…" in items
+        assert "Lock personal categories" in items and "Copy name" in items
+        # Archidekt's own custom card menu offers the colour tag and the mana value
+        assert "Color tag…" in items and "Mana value…" in items, items
+        # ... and no report of the member's own card (kept on another member's deck)
         for gone in (
             "Change printing…",
-            "Color tag…",
-            "Mana value…",
             "Edit in deck editor",
             "Open on Scryfall",
             "Add to deck…",
+            "Report card…",
         ):
             assert gone not in items, items
         assert menu.locator(".head").inner_text() == "Grizzled Mentor"
@@ -417,17 +419,170 @@ def test_a_custom_cards_menu_on_the_deck_page(server: Server, width: int, theme:
         )
         assert page.locator(".stack[data-group='Artifact'] .row[data-custom-id='41']").count() == 1
         assert row()["quantity"] == 2 and row()["categories"] == ["Artifact"]
-        # Report card…: the box, for the custom card
+        # Color tag…: the form in the menu; the tag shows at once and is saved as Archidekt's label
         card = page.locator(".deckview .row[data-custom-id='41']")
         card.click(button="right")
         menu.wait_for(state="visible")
-        menu.locator("[role=menuitem]", has_text="Report card…").click()
-        rc = page.locator("#reportcard")
-        rc.wait_for(state="visible")
-        page.wait_for_timeout(700)
-        assert "Report “Grizzled Mentor” to Archidekt's moderators" in rc.locator("h2").inner_text()
-        _fits(page, "report card", width)
-        _close_box(page)
+        menu.locator("[role=menuitem]", has_text="Color tag…").click()
+        form = menu.locator("form.mvform")
+        form.wait_for(state="visible")
+        assert form.locator("label").all_inner_texts() == ["Tag name", "Color"]
+        assert "Archidekt's color tag on this card, in this deck only." in form.inner_text()
+        assert form.locator(".acts .btn").all_inner_texts() == ["Apply tag", "Cancel"]  # no tag yet
+        _fits(page, "color tag form", width)
+        form.locator("button[type=submit]").click()
+        assert form.locator(".status.err").inner_text() == "A tag needs a name, without commas."
+        form.locator("#ct-input").fill("Have")
+        form.locator("button[type=submit]").click()
+        page.locator(".deck-toast", has_text="Tagged Grizzled Mentor Have.").wait_for(
+            state="visible", timeout=4000
+        )
+        assert menu.count() == 0
+        assert card.get_attribute("data-label") == "Have,#37d67a" and card.locator(".tagdot").count() == 1
+        assert row()["label"] == "Have,#37d67a" and row()["quantity"] == 2
+        # Mana value…: the same box as a normal card's, saved for the custom card
+        card.click(button="right")
+        menu.wait_for(state="visible")
+        menu.locator("[role=menuitem]", has_text="Mana value…").click()
+        form = menu.locator("form.mvform")
+        form.wait_for(state="visible")
+        assert form.locator("label").first.inner_text() == "Custom mana value"
+        form.locator("#mv-input").fill("3")
+        form.locator("button[type=submit]").click()
+        page.locator(".deck-toast", has_text="Mana value of Grizzled Mentor saved: 3.").wait_for(
+            state="visible", timeout=4000
+        )
+        assert card.get_attribute("data-mv") == "3" and row()["customCmc"] == 3
+        assert row()["label"] == "Have,#37d67a"  # the tag stays
+        # and taken off again: the card's own value, the tag's button
+        card.click(button="right")
+        menu.wait_for(state="visible")
+        menu.locator("[role=menuitem]", has_text="Mana value…").click()
+        menu.locator("form.mvform .acts .btn", has_text="Clear").click()
+        page.locator(".deck-toast", has_text="Grizzled Mentor uses its own mana value again.").wait_for(
+            state="visible", timeout=4000
+        )
+        assert card.get_attribute("data-mv") is None and row()["customCmc"] is None
+        card.click(button="right")
+        menu.wait_for(state="visible")
+        menu.locator("[role=menuitem]", has_text="Color tag…").click()
+        form = menu.locator("form.mvform")
+        assert form.locator("#ct-input").input_value() == "Have"
+        assert form.locator("#ct-colour").input_value() == "#37d67a"
+        form.locator(".acts .btn", has_text="Take tag off").click()
+        page.locator(".deck-toast", has_text="Tag taken off Grizzled Mentor.").wait_for(
+            state="visible", timeout=4000
+        )
+        assert card.get_attribute("data-label") is None and card.locator(".tagdot").count() == 0
+        assert row()["label"] == ",#656565"  # Archidekt's "no tag"
+        browser.close()
+    assert errors == []
+
+
+@pytest.mark.parametrize("width,theme", SIZES)
+def test_a_custom_cards_picture_on_the_deck_page(server: Server, width: int, theme: str, monkeypatch) -> None:
+    """The custom card's picture, through the gateway's own route, wherever a normal card shows its
+    picture; a card without one keeps its name-and-type placeholder, whose type line stops short
+    of the Custom mark."""
+    import httpx
+    from playwright.sync_api import sync_playwright
+
+    from mtg_gateway import custom_pictures
+
+    from .test_custom_pictures import _png
+
+    custom_pictures._KEPT.clear()
+    picture = _png()  # a picture Chromium can draw (the stub PNG the Scryfall routes answer is not one)
+    monkeypatch.setattr(custom_pictures, "_public_host", lambda host: host == "cdn.example")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if str(request.url) == "https://cdn.example/41.png":
+            return httpx.Response(200, content=picture)
+        return httpx.Response(404)
+
+    gw = server.app.state.gateway
+    gw.custom_picture_http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    ark = server.ark
+    ark.decks[42]["customCards"].append(
+        {"id": 3101, "quantity": 1, "categories": ["Ramp"], "card": _custom(44, "Old Ranger")}
+    )
+    gw.decks.client._cache.clear()
+    sid = _link(server)
+    exe = _chromium()
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, width, theme, exe)
+        page.goto(f"{server.base}/decks/42?view=stacks", wait_until="networkidle")
+        mentor = page.locator(".deckview .c.custom[data-custom-id='41']")
+        ranger = page.locator(".deckview .c.custom[data-custom-id='44']")
+        mentor.scroll_into_view_if_needed()
+        # Grizzled Mentor has a picture: drawn over the placeholder, from the gateway's address
+        pic = mentor.locator("img.pic")
+        page.wait_for_function(
+            "() => { const i = document.querySelector(\".c.custom[data-custom-id='41'] img.pic\");"
+            " return i && i.complete && i.naturalWidth > 0; }"
+        )
+        assert pic.get_attribute("src") == "/decks/api/custom_picture/42/41?face=front"
+        assert mentor.get_attribute("data-img") == "/decks/api/custom_picture/42/41?face=front"
+        assert pic.bounding_box()["height"] >= mentor.bounding_box()["height"] - 6  # the card's border
+        assert mentor.locator(".custom-badge").is_visible() and mentor.locator(".qty").is_visible()
+        # Old Ranger has none (404): the picture is taken off, the placeholder stays, no viewer picture
+        page.wait_for_function(
+            "() => !document.querySelector(\".c.custom[data-custom-id='44'] img\")", timeout=4000
+        )
+        assert ranger.get_attribute("data-img") is None
+        ph = ranger.locator(".ph")
+        assert (
+            ph.is_visible()
+            and "Old Ranger" in ph.inner_text()
+            and "Creature — Human Advisor" in ph.inner_text()
+        )
+        # the type line stops short of the Custom mark (it ran under it)
+        assert (
+            page.evaluate(
+                """() => { const c = document.querySelector(".c.custom[data-custom-id='44']");
+              const b = c.querySelector('.custom-badge').getBoundingClientRect();
+              const r = document.createRange(); r.selectNodeContents(c.querySelector('.ph .ty'));
+              return [...r.getClientRects()].filter(t => t.width > 0 && t.right > b.left + 0.5
+                && t.left < b.right - 0.5 && t.bottom > b.top + 0.5 && t.top < b.bottom - 0.5)
+                .map(t => [t.left, t.top, t.right, t.bottom, b.left, b.top]); }"""
+            )
+            == []
+        ), "the type line runs under the Custom mark"
+        _fits(page, "stacks", width)
+        # the list view's hover picture and the viewer draw the same picture
+        page.goto(f"{server.base}/decks/42?view=text", wait_until="networkidle")
+        row41 = page.locator(".deckview .row[data-custom-id='41']")
+        assert (
+            row41.locator(".hover img").get_attribute("src") == "/decks/api/custom_picture/42/41?face=front"
+        )
+        if width >= 900:
+            # a hover fetches the picture; Old Ranger's 404 takes it off and the hover shows nothing
+            row44 = page.locator(".deckview .row[data-custom-id='44']")
+            row44.scroll_into_view_if_needed()
+            row44.locator(".name").hover()
+            page.wait_for_function(
+                "() => !document.querySelector(\".row[data-custom-id='44'] .hover img\")", timeout=4000
+            )
+            assert not row44.locator(".hover").is_visible()
+            row41.locator(".name").hover()
+            page.wait_for_function(
+                "() => { const i = document.querySelector(\".row[data-custom-id='41'] .hover img\");"
+                " return i && i.complete && i.naturalWidth > 0; }"
+            )
+            assert row41.locator(".hover").is_visible()
+        row41.scroll_into_view_if_needed()
+        row41.click()
+        viewer = page.locator(".cardview.open")
+        viewer.wait_for(state="visible")
+        page.wait_for_function(
+            "() => { const i = document.querySelector('.cardview.open .pane img');"
+            " return i && i.complete && i.naturalWidth > 0; }"
+        )
+        assert (
+            viewer.locator(".pane img").first.get_attribute("src")
+            == "/decks/api/custom_picture/42/41?face=front"
+        )
+        page.keyboard.press("Escape")
         browser.close()
     assert errors == []
 

@@ -406,6 +406,7 @@
     return {
       name: node.getAttribute("data-card") || "",
       img: node.getAttribute("data-img") || "",
+      back_img: node.getAttribute("data-back") || "",  // a custom card's back face, through the gateway
       set: node.getAttribute("data-set") || "",
       type: node.getAttribute("data-type") || "",
       mana: node.getAttribute("data-mana") || "",

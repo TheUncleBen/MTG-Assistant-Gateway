@@ -1118,9 +1118,14 @@ def custom_group_name(card: CustomDeckCard, deck: Deck, group: str) -> str:
     return "Custom cards"
 
 
-# A custom card's picture is not drawn: Archidekt keeps it on a host of its own, outside the deck
-# page's picture sources (companion.DECK_CSP: the gateway and Scryfall), and which host is not
-# known. The card shows its name and type in the picture's place instead.
+def custom_picture_url(deck: Deck, card: CustomDeckCard, face: str = "front") -> str:
+    """The custom card's picture through the gateway's own route (same origin, so the deck page's
+    picture sources stay as they are): the bytes, or 404 when the card has none. The page draws
+    the card's name and type in its place until the picture is there, and keeps them when it
+    is not (static/deck.js takes a failed picture off)."""
+    return f"/decks/api/custom_picture/{esc(str(deck.id))}/{card.custom_card_id}?face={face}"
+
+
 def _custom_data(card: CustomDeckCard, deck: Deck) -> str:
     cat = card.categories[0] if card.categories else ""
     rel = f" data-rel='{card.relation_id}'" if card.relation_id is not None else ""
@@ -1133,6 +1138,12 @@ def _custom_data(card: CustomDeckCard, deck: Deck) -> str:
     return (
         f" data-custom='1'{cid}{rel} data-qty='{card.quantity}' data-zone='{custom_zone(card, deck)}' "
         f"data-cat='{esc(cat)}'{allcats}"
+        + (f" data-img='{custom_picture_url(deck, card)}'" if card.custom_card_id is not None else "")
+        + (
+            f" data-back='{custom_picture_url(deck, card, 'back')}'"
+            if card.custom_card_id is not None and card.back_image_url
+            else ""
+        )
         + f" data-type='{esc(card.type_line)}' data-finish='{esc(card.modifier)}'"
         + (f" data-label='{esc(card.label)}'" if split_label(card.label)[0] else "")
         + (f" data-mv='{mana_value_text(card.custom_cmc)}'" if card.custom_cmc is not None else "")
@@ -1145,7 +1156,11 @@ def custom_card_row(card: CustomDeckCard, *, deck: Deck, view: str = "text") -> 
     qty = f"<span class='q'>{card.quantity}</span>"
     name = f"<span class='name' title='{esc(card.name)}'>{esc(card.name)}</span>{custom_badge()}"
     if view == "brewer":
-        pic = "<span class='art ph' aria-hidden='true'></span>"
+        pic = (
+            f"<img class='art' src='{custom_picture_url(deck, card)}' alt='' loading='lazy'>"
+            if card.custom_card_id is not None
+            else "<span class='art ph' aria-hidden='true'></span>"
+        )
         cls = " brew" + cls
         body = (
             f"{pic}<span class='bd'><span class='n'>{qty}{name}</span>"
@@ -1160,8 +1175,13 @@ def custom_card_row(card: CustomDeckCard, *, deck: Deck, view: str = "text") -> 
             "<span class='mc'></span><span class='set'>Custom</span><span class='price'></span>"
         )
     else:
+        hover = (
+            f"<span class='hover'><img src='{custom_picture_url(deck, card)}' alt='' loading='lazy'></span>"
+            if card.custom_card_id is not None
+            else ""
+        )
         body = (
-            f"{qty}<span class='n'>{name}</span><span class='mc'></span>"
+            f"{qty}<span class='n'>{name}{hover}</span><span class='mc'></span>"
             f"<span class='set' title='{esc(CUSTOM_TITLE)}'>Custom</span><span class='price'></span>"
         )
     return (
@@ -1171,10 +1191,16 @@ def custom_card_row(card: CustomDeckCard, *, deck: Deck, view: str = "text") -> 
 
 
 def custom_image_card(card: CustomDeckCard, *, deck: Deck) -> str:
+    """A custom card in the picture views: its picture over the name-and-type placeholder, which
+    shows until the picture is there and stays when there is none."""
     body = (
         "<span class='ph'><span class='t'>"
         f"<span class='nm'>{esc(card.name)}</span></span>"
         f"<span class='ty'>{esc(card.type_line)}</span></span>"
+    ) + (
+        f"<img class='pic' src='{custom_picture_url(deck, card)}' alt='{esc(card.name)}' loading='lazy'>"
+        if card.custom_card_id is not None
+        else ""
     )
     return (
         f"<div class='c custom' data-name='{esc(card.name.lower())}' data-card='{esc(card.name)}'"
@@ -2988,6 +3014,12 @@ ul.rows .price{font-size:.86rem;color:var(--text-muted);text-align:right;font-va
   background:var(--orange-tint);color:var(--orange-text);border:1px solid var(--orange-text)}
 .deckview .c .custom-badge{position:absolute;right:6px;bottom:6px;background:#fff3e0;color:#7a3d00;
   border-color:#7a3d00}
+.deckview .c.custom .ph .ty{padding-right:4.2rem}  /* the type line stops short of the Custom mark */
+/* the custom card's picture sits over its placeholder (the count, the tag and the mark above both) */
+.deckview .c.custom img.pic{position:absolute;inset:0;z-index:0}
+.deckview .c.custom .ph{z-index:0}
+.deckview .c.custom .qty,.deckview .c.custom .tagdot,.deckview .c.custom .custom-badge{z-index:1}
+ul.rows .hover:empty,ul.rows .row:hover .hover:empty{display:none}  /* a custom card without a picture */
 .tagdot{display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--orange);flex:none}
 .deckview .c .tagdot{position:absolute;right:8px;top:8px;width:14px;height:14px;box-shadow:0 0 0 2px #fff}
 .owned{display:inline-block;width:9px;height:9px;border-radius:50%;background:#1ebb6c;flex:none;
@@ -3201,6 +3233,9 @@ html.cardview-open{overflow:hidden}
 .ctxmenu .mvform{display:flex;flex-direction:column;gap:.4rem;padding:.25rem .75rem .5rem}
 .ctxmenu .mvform label{font-weight:600}
 .ctxmenu .mvform input{width:6rem;min-height:38px}
+/* the custom card's colour tag form (deck.js customTagForm): the name wide, the colour a swatch */
+.ctxmenu .mvform input[type=text]{width:100%;max-width:14rem}
+.ctxmenu .mvform input[type=color]{width:44px;min-width:44px;height:38px;padding:2px;border-radius:6px}
 .ctxmenu .mvform .hint{margin:0;font-size:.85rem;color:var(--text-muted)}
 .ctxmenu .mvform .acts{display:flex;gap:.4rem;flex-wrap:wrap}
 .ctxmenu .mvform .acts .btn{min-height:38px;justify-content:center}

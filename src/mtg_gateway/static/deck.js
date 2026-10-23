@@ -313,6 +313,8 @@
       }
       if (r.categories && r.categories.length > 1) card.setAttribute("data-allcats", JSON.stringify(r.categories));
       else card.removeAttribute("data-allcats");
+      if (r.label !== undefined) setLabel(card, r.label || "");
+      if (r.mana_value !== undefined) setManaValue(card, r.mana_value);
       if (byCategory && cat && stackOf(card) !== cat) {
         var st = ensureStack(cat);
         if (st) $(".cards, .rows", st).appendChild(card);
@@ -321,6 +323,70 @@
     refreshStacks();
     drawStats(d);
     if (menu && !menuCard.isConnected) closeMenu();
+  }
+  // Color tag… for a custom card: a form in the menu (the deck's tags offered), saved as the
+  // card's label through the custom card endpoint; Take tag off clears it
+  function customTagForm(card, m) {
+    var name = card.getAttribute("data-card") || "";
+    var was = card.getAttribute("data-label") || "";
+    var cur = splitLabel(was);
+    m.textContent = "";
+    m.appendChild(el("div", "head", name));
+    var form = el("form", "mvform");
+    form.noValidate = true;
+    var lab = el("label", "", "Tag name");
+    var input = el("input", "");
+    input.type = "text"; input.maxLength = 40; input.placeholder = "e.g. Have"; input.id = "ct-input";
+    input.setAttribute("list", "deck-tags-custom");
+    lab.htmlFor = "ct-input";
+    input.value = cur.name;
+    var known = el("datalist");
+    known.id = "deck-tags-custom";
+    var seen = Object.create(null);
+    $$("[data-label]", cards).forEach(function (c) {
+      var t = splitLabel(c.getAttribute("data-label"));
+      if (!t.name || seen[t.name]) return;
+      seen[t.name] = t.colour || "#656565";
+      var o = el("option"); o.value = t.name; known.appendChild(o);
+    });
+    var colLab = el("label", "", "Color");
+    var colour = el("input", "");
+    colour.type = "color"; colour.id = "ct-colour"; colLab.htmlFor = "ct-colour";
+    colour.value = cur.colour || "#37d67a";
+    input.addEventListener("input", function () { msg.className = "status"; msg.textContent = ""; if (seen[input.value.trim()]) colour.value = seen[input.value.trim()]; });
+    var hint = el("p", "hint", "Archidekt's color tag on this card, in this deck only.");
+    var msg = el("p", "status", "");
+    msg.setAttribute("role", "status");
+    var save = el("button", "btn primary", "Apply tag"); save.type = "submit";
+    var off = el("button", "btn", "Take tag off"); off.type = "button";
+    var cancel = el("button", "btn", "Cancel"); cancel.type = "button";
+    var acts = el("div", "acts");
+    acts.appendChild(save); if (cur.name) acts.appendChild(off); acts.appendChild(cancel);
+    [lab, input, known, colLab, colour, hint, acts, msg].forEach(function (n) { form.appendChild(n); });
+    m.appendChild(form);
+    var send = function (label) {
+      setLabel(card, label);
+      closeMenu();
+      var t = splitLabel(label);
+      customSave(card, [{ action: "set_quantity", custom_card_id: customIdOf(card), label: label }],
+        (t.name ? "Tagging " + name + " " + t.name + "…" : "Taking the tag off " + name + "…"),
+        function () { setLabel(card, was); }
+      ).then(function (d) { if (d.applied) toast(t.name ? "Tagged " + name + " " + t.name + "." : "Tag taken off " + name + "."); }, function () { /* told */ });
+    };
+    form.addEventListener("submit", function (e) {
+      stop(e);
+      var v = input.value.trim();
+      if (!v || v.indexOf(",") >= 0) { msg.className = "status err"; msg.textContent = "A tag needs a name, without commas."; input.focus(); return; }
+      var label = v + "," + colour.value.toLowerCase();
+      if (label === was.toLowerCase()) { closeMenu(); return; }
+      send(label);
+    });
+    off.addEventListener("click", function (e) { stop(e); send(""); });
+    cancel.addEventListener("click", function (e) { stop(e); closeMenu(); });
+    form.addEventListener("keydown", function (e) { if (e.key === "Escape") { stop(e); closeMenu(); } e.stopPropagation(); });
+    fit(m);
+    input.focus();
+    input.select();
   }
   // one custom card save at a time, after the page's other saves; back(): puts the card back when
   // the save does not go through. Resolves with the answer; rejects after the note is shown.
@@ -474,6 +540,9 @@
     sub.addEventListener("keydown", function (e) { if (e.key === "ArrowLeft") { stop(e); toggleSub(false); moveBtn.focus(); } });
     m.appendChild(moveBtn);
     m.appendChild(sub);
+    // Archidekt's card extras for a custom card in your own deck: the color tag and the mana value
+    m.appendChild(menuItem("Color tag…", "tag", function () { customTagForm(card, m); }));
+    m.appendChild(menuItem("Mana value…", "edit", function () { manaValueForm(card, m); }));
     m.appendChild(menuItem("Remove from deck", "x", function () { customRemove(card); }, "danger"));
     m.appendChild(el("div", "sep"));
     if (window.MtgDeckExtras && document.getElementById("lock")) {
@@ -484,6 +553,27 @@
     }
     if (window.MtgMenu) m.appendChild(menuItem("Copy name", "copy", function () { closeMenu(); window.MtgMenu.copyAndSay(name, "Name copied."); }));
   }
+
+  // A custom card's picture comes through the gateway's own route (deckpage.custom_picture_url)
+  // and answers 404 when the card has none: the broken picture goes, the name-and-type
+  // placeholder stays, and the viewer draws its name tile instead (no data-img).
+  function pictureGone(img) {
+    var card = img.closest(".c.custom, .row.custom");
+    if (!card) return;
+    var tile = img.nextElementSibling;  // the name tile feedback.js put after it: the placeholder has the name
+    if (tile && tile.classList.contains("img-fallback")) tile.remove();
+    if (img.classList.contains("art")) img.replaceWith(el("span", "art ph"));
+    else img.remove();
+    if (!$("img", card)) card.removeAttribute("data-img");
+  }
+  cards.addEventListener("error", function (e) {
+    var t = e.target;
+    if (t && t.tagName === "IMG" && t.closest(".c.custom, .row.custom")) pictureGone(t);
+  }, true);
+  $$(".c.custom img, .row.custom img", cards).forEach(function (img) {
+    // failed before this script ran (a lazy picture not fetched yet has no currentSrc)
+    if (img.complete && img.naturalWidth === 0 && img.currentSrc) pictureGone(img);
+  });
 
   // -- saves in the background: the card's edits from its menu, viewer and drags --------
   // The edit is drawn on the page at once and Archidekt saves it behind, one save at a time in
@@ -784,6 +874,15 @@
     // The form closes at once and the card shows the new value while Archidekt saves it (a save
     // in the background, as the menu's other edits are)
     var send = function (value) {
+      if (isCustom(card)) {
+        setManaValue(card, value);
+        closeMenu();
+        customSave(card, [{ action: "set_quantity", custom_card_id: customIdOf(card), mana_value: value }],
+          "Saving the mana value of " + name + "…",
+          function () { setManaValue(card, cur === null ? null : Number(cur)); }
+        ).then(function (d) { if (d.applied) toast(value === null ? name + " uses its own mana value again." : "Mana value of " + name + " saved: " + value + "."); }, function () { /* told */ });
+        return;
+      }
       var ch = { action: "set_mana_value", card_name: name, mana_value: value, zone: card.getAttribute("data-zone") || "main" };
       var inv = { action: "set_mana_value", card_name: name, mana_value: cur === null ? null : Number(cur), zone: ch.zone };
       var saying = "Saving the mana value of " + name + "…";
@@ -1655,8 +1754,9 @@
       m.appendChild(scry);
     }
     }
-    // Report card… (deck_extras.py): to Archidekt's moderators, on any deck the member can read
-    if (window.MtgDeckExtras && document.getElementById("reportcard")) {
+    // Report card… (deck_extras.py): to Archidekt's moderators, on any deck the member can read;
+    // not for the member's own custom card in their own deck (Archidekt's menu hides it there too)
+    if (window.MtgDeckExtras && document.getElementById("reportcard") && !(own && isCustom(card))) {
       m.appendChild(menuItem("Report card…", "flag", function () { closeMenu(); window.MtgDeckExtras.open("reportcard", { card: name }); }));
     }
     m.addEventListener("keydown", function (e) {

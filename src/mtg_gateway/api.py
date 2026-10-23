@@ -29,6 +29,7 @@ from .decks import (
     parse_changes,
     printing_not_shown,
     scopes_allow_writes,
+    split_label,
 )
 from .pages import BROWSER_CLIENT_ID, browser_session, csrf_header_ok, read_limited
 from .views import deck_brief, deck_out
@@ -510,6 +511,8 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
                         "relation_id": c.relation_id,
                         "qty": c.quantity,
                         "categories": list(c.categories),
+                        "label": c.label if split_label(c.label)[0] else "",  # no name: no tag
+                        "mana_value": c.custom_cmc,
                     }
                     for c in deck.custom_cards
                 ],

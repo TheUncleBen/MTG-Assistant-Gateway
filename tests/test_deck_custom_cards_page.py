@@ -194,3 +194,99 @@ async def test_the_save_is_the_browsers_own_and_waits_when_writes_are_off(stack:
         assert 44 in _rows(ark)
     finally:
         await b.aclose()
+
+
+async def test_the_page_saves_a_color_tag_and_a_mana_value_of_a_custom_card(stack: Stack) -> None:
+    """The custom card menu's Color tag… and Mana value… boxes save through the page's own endpoint,
+    as the normal card menu's do, and the answer's rows carry both for the page to redraw."""
+    ark = stack.ark
+    _seed(ark)
+    _in_deck(ark, (3100, 41, "Grizzled Mentor", ["Commander"]), (3101, 44, "Old Ranger", None))
+    b = await linked(stack)
+    try:
+        r = await api(
+            b,
+            "POST",
+            "/api/v1/decks/42/custom_cards",
+            {"changes": [{"action": "set_quantity", "custom_card_id": 44, "label": "Have,#37d67a"}]},
+        )
+        assert r.status_code == 201, r.text
+        assert _rows(ark)[44]["label"] == "Have,#37d67a" and _rows(ark)[44]["quantity"] == 1
+        rows = {x["custom_card_id"]: x for x in r.json()["custom_rows"]}
+        assert rows[44]["label"] == "Have,#37d67a" and rows[44]["mana_value"] is None
+        assert rows[41]["label"] == "" and rows[41]["mana_value"] is None
+        # the page draws the tag as it draws a normal card's
+        page = (await b.http.get("/decks/42")).text
+        ranger = re.search(r"<li class='row custom'[^>]*data-card='Old Ranger'[^>]*>", page).group(0)
+        assert "data-label='Have,#37d67a'" in ranger
+        # the mana value, then its own again
+        r = await api(
+            b,
+            "POST",
+            "/api/v1/decks/42/custom_cards",
+            {"changes": [{"action": "set_quantity", "custom_card_id": 44, "mana_value": 3}]},
+        )
+        assert r.status_code == 201, r.text
+        assert _rows(ark)[44]["customCmc"] == 3 and _rows(ark)[44]["label"] == "Have,#37d67a"
+        rows = {x["custom_card_id"]: x for x in r.json()["custom_rows"]}
+        assert rows[44]["mana_value"] == 3 and rows[44]["label"] == "Have,#37d67a"
+        page = (await b.http.get("/decks/42")).text
+        ranger = re.search(r"<li class='row custom'[^>]*data-card='Old Ranger'[^>]*>", page).group(0)
+        assert "data-mv='3'" in ranger
+        r = await api(
+            b,
+            "POST",
+            "/api/v1/decks/42/custom_cards",
+            {"changes": [{"action": "set_quantity", "custom_card_id": 44, "mana_value": None, "label": ""}]},
+        )
+        assert r.status_code == 201, r.text
+        assert _rows(ark)[44]["customCmc"] is None and _rows(ark)[44]["label"] == ",#656565"  # no name
+        rows = {x["custom_card_id"]: x for x in r.json()["custom_rows"]}
+        assert rows[44]["mana_value"] is None and rows[44]["label"] == ""
+    finally:
+        await b.aclose()
+
+
+async def test_a_custom_cards_picture_is_drawn_from_the_gateways_own_address(stack: Stack) -> None:
+    """Wherever a normal card shows its picture the custom card shows its own, through the
+    gateway's picture route (same origin: the page's picture sources stay as they are); its name
+    and type stay drawn underneath for when there is no picture."""
+    ark = stack.ark
+    _seed(ark)
+    ark.account.customs["alice"][0]["hasBack"] = True
+    ark.account.customs["alice"][0]["backImageUrl"] = "https://cdn.example/41b.png"
+    _in_deck(ark, (3100, 41, "Grizzled Mentor", ["Commander"]), (3101, 44, "Old Ranger", None))
+    ark.decks[42]["customCards"][0]["card"] = ark.account.customs["alice"][0]
+    b = await linked(stack)
+    try:
+        front = "/decks/api/custom_picture/42/41?face=front"
+        # the list views: the viewer's picture and the hover picture
+        page = (await b.http.get("/decks/42")).text
+        mentor = re.search(
+            r"<li class='row custom'[^>]*data-card='Grizzled Mentor'[^>]*>.*?</li>", page, re.S
+        )
+        assert mentor, page
+        assert f"data-img='{front}'" in mentor.group(0)
+        assert "data-back='/decks/api/custom_picture/42/41?face=back'" in mentor.group(0)
+        assert f"<span class='hover'><img src='{front}' alt='' loading='lazy'></span>" in mentor.group(0)
+        ranger = re.search(r"<li class='row custom'[^>]*data-card='Old Ranger'[^>]*>", page).group(0)
+        assert "data-img='/decks/api/custom_picture/42/44?face=front'" in ranger
+        assert "data-back=" not in ranger  # one face
+        assert "https://cdn.example" not in page  # never Archidekt's address itself
+        # the picture views: the picture over the name-and-type placeholder
+        page_s = (await b.http.get("/decks/42?view=stacks")).text
+        card = re.search(
+            r"<div class='c custom'[^>]*data-card='Grizzled Mentor'[^>]*>.*?</div>", page_s, re.S
+        )
+        assert card, page_s
+        assert "<span class='ph'>" in card.group(0) and "Creature — Human Advisor" in card.group(0)
+        assert f"<img class='pic' src='{front}' alt='Grizzled Mentor' loading='lazy'>" in card.group(0)
+        # the type line stops short of the Custom mark (it ran under it)
+        css = (await b.http.get(re.search(r"href='(/static/deck\.css[^']*)'", page_s).group(1))).text
+        assert ".deckview .c.custom .ph .ty{padding-right:4.2rem}" in css
+        assert ".deckview .c.custom img.pic{position:absolute;inset:0;z-index:0}" in css
+        # the brewer view's art
+        page_b = (await b.http.get("/decks/42?view=brewer")).text
+        assert f"<img class='art' src='{front}' alt='' loading='lazy'>" in page_b
+    finally:
+        await b.aclose()
