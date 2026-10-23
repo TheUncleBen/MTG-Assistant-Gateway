@@ -137,6 +137,10 @@ class FakeArchidekt:
         # the live site puts a set still in preview ahead of the released ones
         self.newer_printings: dict[str, list[dict[str, Any]]] = {}
         self.create_returns_full_deck = True  # live Archidekt does not (verified 2026-10-05)
+        # whether the New deck request's parentFolder places the deck (not tried live: the gateway
+        # moves the deck there when the read-back shows it is not)
+        self.create_honours_folder = False
+        self.last_create_body: dict[str, Any] = {}
         self.fail_deck_reads = False  # signed-in deck reads answer 503
         self.next_rel_id = 2000
         self.next_deck_id = 100
@@ -805,6 +809,7 @@ class FakeArchidekt:
             )
         if path == "/api/decks/v2/" and request.method == "POST":
             body = json.loads(request.content)
+            self.last_create_body = body
             self.next_deck_id += 1
             deck = {
                 "id": self.next_deck_id,
@@ -819,6 +824,8 @@ class FakeArchidekt:
                 "cards": [],
             }
             self.decks[self.next_deck_id] = deck
+            if self.create_honours_folder and body.get("parentFolder") is not None:
+                self.deck_folder[deck["id"]] = int(body["parentFolder"])
             if deck["private"]:
                 self.private.add(self.next_deck_id)
             if not self.create_returns_full_deck:

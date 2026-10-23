@@ -749,9 +749,11 @@ def row_line(r: dict[str, Any]) -> str:
         more = (", theorycrafted" if r.get("theorycrafted") else "") + (
             f", {r['game']}" if r.get("game") else ""
         )
+        where = f" in folder “{r['folder']}”" if r.get("folder") else ""
         if r.get("package"):
-            return f"New card package '{r['name']}' ({r['cards']} cards{side}, {visibility}; {r['package']})"
-        return f"New {r['format']} deck '{r['name']}' ({r['cards']} cards{side}, {visibility}{more})"
+            what = f"{r['cards']} cards{side}, {visibility}; {r['package']}"
+            return f"New card package '{r['name']}'{where} ({what})"
+        return f"New {r['format']} deck '{r['name']}'{where} ({r['cards']} cards{side}, {visibility}{more})"
     if kind == "restore":
         if "changes" in r:  # the review lines under it (a restore saved before counted write entries)
             n = int(r["changes"])
@@ -3573,6 +3575,7 @@ class DeckService:
         theorycrafted: bool = False,
         game: str = "any",
         package: dict[str, Any] | None = None,
+        folder_id: int | None = None,
     ) -> dict[str, Any]:
         name = clean_text(name or "")
         if not name or len(name) > 120:
@@ -3595,6 +3598,14 @@ class DeckService:
         )
         _token, link = self._token(sub)  # must be linked before we store a proposal that needs it
         self._room_for_proposal(sub)
+        # an optional folder of the member's own, checked as propose_clone checks it
+        folder = None
+        if folder_id is not None:
+            if isinstance(folder_id, bool) or not str(folder_id).isdigit():
+                raise DeckError("invalid", "That folder is not in your Archidekt account.")
+            _info, folder = await self._folder_in(sub, int(folder_id))
+            if folder.get("backup"):
+                raise DeckError("not_found", "That folder is not in your Archidekt account.")
         # A custom category flagged {noDeck} or {noPrice} keeps its switches (archidekt.com's
         # Create Category): it is made with them after the deck and before any card goes in.
         # Maybeboard and Sideboard are Archidekt's own and already sit outside the deck.
@@ -3644,6 +3655,7 @@ class DeckService:
                 theorycrafted=extra["theorycrafted"] or None,
                 game=GAME_LABELS.get(extra["game"]),
                 package=_package_text(pkg),
+                folder=str(folder.get("name") or "") if folder else None,
             )
         ]
         rows += [
@@ -3684,6 +3696,7 @@ class DeckService:
                     **({"theorycrafted": True} if extra["theorycrafted"] else {}),
                     **({"game": extra["game"]} if extra["game"] != "any" else {}),
                     **({"package": pkg} if pkg else {}),
+                    **({"folder_id": int(folder["id"])} if folder else {}),
                 },
             },
             rows,
@@ -5999,6 +6012,7 @@ class DeckService:
                         "name": spec["name"],
                         "private": bool(spec.get("private", True)),
                         "cardPackage": spec["package"],
+                        "parent_folder": spec.get("folder_id"),
                     },
                 ),
             )
@@ -6013,6 +6027,7 @@ class DeckService:
                     private=bool(spec.get("private", True)),
                     theorycrafted=bool(spec.get("theorycrafted")),
                     game=GAME_IDS.get(str(spec.get("game") or "")),
+                    folder_id=spec.get("folder_id"),
                 ),
             )
         self.db.finish_proposal(row["id"], state="applying", deck_id=created.id)
@@ -6025,6 +6040,17 @@ class DeckService:
         entries = new_deck_entries(cards, resolve, modifiers)
         await self._send(sub, created.id, entries, progress)
         verified = await self.get_deck(sub, created.id)
+        want_folder = spec.get("folder_id")
+        if want_folder is not None and verified.parent_folder != want_folder:
+            # the create request names the folder as archidekt.com's form does; when the deck is not
+            # in it (not tried live), the folder page's own Move request puts it there
+            await self._call(
+                sub,
+                lambda token, *_: self.client.mass_update(
+                    token, [{"type": "deck", "id": int(created.id), "patch": {"parentFolder": want_folder}}]
+                ),
+            )
+            verified = await self.get_deck(sub, created.id)
         # Every row counts here, maybeboard and sideboard rows included: Archidekt keeps them
         # outside the deck proper, and the import sent them all the same.
         want: dict[str, int] = {}
@@ -6039,6 +6065,8 @@ class DeckService:
             got_cat = states.get(f["name"])
             if got_cat is None or any(got_cat[k] != f[k] for k in ("includedInDeck", "includedInPrice")):
                 mismatches.append(f"category “{f['name']}” (its switches)")
+        if want_folder is not None and verified.parent_folder != want_folder:
+            mismatches.append("the folder")
         if spec.get("package"):
             from . import packages
 
@@ -7363,6 +7391,18 @@ class DeckService:
 
         walk(tree, 0, None, False)
         return {"root_id": tree["id"], "folders": out}
+
+    async def folder_named(self, sub: str, name: str) -> int | None:
+        """The id of the member's one folder called ``name`` (any case), None for the top level
+        ("", "top", "top level", "none"); refused as Deck settings' folder field refuses it."""
+        want = clean_text(str(name or "")).casefold()
+        if not want or want in ("top", "top level", "none"):
+            return None
+        info = await self.folders(sub)
+        hits = [f for f in _shown_folders(info) if f["name"].casefold() == want]
+        if len(hits) != 1:
+            raise _no_such_folder(info, name, several=bool(hits))
+        return int(hits[0]["id"])
 
     async def _folder_in(self, sub: str, folder_id: int) -> tuple[dict[str, Any], dict[str, Any]]:
         info = await self.folders(sub)

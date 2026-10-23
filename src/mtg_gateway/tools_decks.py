@@ -311,8 +311,8 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
             "warnings (a deck size the format does not allow, scan cards matched from a misspelt name): "
             "tell the user about each. With package {keywords, budget?, intended_formats?} it makes a "
             "card package instead (Archidekt's New package: no format; cards may be left out for an "
-            "empty one). Nothing is created until the user confirms (or you apply it when "
-            "assistant_may_apply is true)."
+            "empty one). folder puts it in one of the user's folders, by name. Nothing is created until "
+            "the user confirms (or you apply it when assistant_may_apply is true)."
         ),
         annotations={"readOnlyHint": True, "destructiveHint": False, "openWorldHint": True},
         meta=card_meta,
@@ -340,9 +340,13 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
         package: Annotated[
             PackageSettings | None, Field(description="Make a card package with these settings instead.")
         ] = None,
+        folder: Annotated[
+            str | None, Field(description="One of the user's folders, by name (default: the top level).")
+        ] = None,
     ) -> CallToolResult:
         warnings: list[str] = []
         try:
+            folder_id = await state.decks.folder_named(_sub(), folder) if folder else None
             if scan_session:
                 session = _scan_session(_sub(), scan_session)
                 decklist_text = session["decklist_text"]
@@ -361,6 +365,7 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
                 theorycrafted=theorycrafted,
                 game=game,
                 package=package.model_dump(exclude_unset=True) if package else None,
+                folder_id=folder_id,
             )
             warnings += made.pop("warnings", [])
             size = sum(

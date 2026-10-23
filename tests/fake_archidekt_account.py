@@ -266,6 +266,8 @@ class AccountFake:
                 "cardPackage": {**body["cardPackage"], "id": self._new_id(), "importCount": 0},
             }
             self.ark.decks[deck["id"]] = deck
+            if self.ark.create_honours_folder and body.get("parent_folder") is not None:
+                self.ark.deck_folder[deck["id"]] = int(body["parent_folder"])
             if deck["private"]:
                 self.ark.private.add(deck["id"])
             return _ok({"id": deck["id"], "name": deck["name"]}, 201)

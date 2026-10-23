@@ -1807,6 +1807,8 @@ def _change_rows(rows: list[dict[str, Any]] | None, diff: str) -> tuple[str, dic
                 if r.get("package")
                 else f"{r.get('format', '')}, {r.get('cards', 0)} cards, {visibility}"
             )
+            if r.get("folder"):
+                what += f"; in folder “{r['folder']}”"
             out.append(
                 _li(
                     "chg",

@@ -1537,9 +1537,11 @@ class ArchidektClient(AccountRequests):
         unlisted: bool = False,
         theorycrafted: bool = False,
         game: int | None = None,
+        folder_id: int | None = None,
     ) -> Deck:
-        """POST /decks/v2/ (route and body per the nccurry reference). ``theorycrafted`` and
-        ``game`` (None for Any, or a GAME_IDS value) are the New deck form's own fields. Live
+        """POST /decks/v2/ (route and body per the nccurry reference). ``theorycrafted``,
+        ``game`` (None for Any, or a GAME_IDS value) and ``folder_id`` (``parentFolder``; None for
+        the top level) are the New deck form's own fields. Live
         Archidekt creates the deck but answers with a body that is not a full deck (verified
         2026-10-05). Then this returns an empty Deck carrying only the new id, so the caller
         records the id before filling the deck and verifies it by reading it back."""
@@ -1552,7 +1554,7 @@ class ArchidektClient(AccountRequests):
                 "description": rich_doc(description),
                 "deckFormat": format_id,
                 "edhBracket": None,
-                "parentFolder": None,
+                "parentFolder": folder_id,
                 "private": private,
                 "unlisted": unlisted,
                 "theorycrafted": bool(theorycrafted),
