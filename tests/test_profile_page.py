@@ -542,3 +542,37 @@ async def test_group_by_sort_and_price_sources_are_on_the_page_with_archidekts_c
     assert stack.ark.account.profile(WHO)["accountSettings"]["deckPrices"] == [6, 2]
     page = (await member.http.get("/account")).text
     assert "<option value='mana pool' selected>" in page
+
+
+async def test_a_slow_archidekt_never_holds_the_account_page(stack: Stack, monkeypatch) -> None:
+    """The profile read waits PROFILE_WAIT at most; the page then says Archidekt did not answer,
+    and the read carries on unhurried, so a token refresh it may be part of is never cut short."""
+    import asyncio
+
+    profile_page.forget_all("user-1")
+    profile_page._PROFILE.clear()
+    b, _token = await _member(stack)
+    monkeypatch.setattr(profile_page, "PROFILE_WAIT", 0.2)
+    gate = asyncio.Event()
+    real = profile.read
+
+    async def slow(decks, sub):
+        await gate.wait()
+        return await real(decks, sub)
+
+    monkeypatch.setattr(profile, "read", slow)
+    try:
+        page = await asyncio.wait_for(b.http.get("/account"), 5)
+        assert page.status_code == 200
+        assert "Archidekt did not answer" in page.text
+        gate.set()
+        for _ in range(50):  # the read finishes on its own and is kept for the next load
+            if "user-1" in profile_page._PROFILE:
+                break
+            await asyncio.sleep(0.02)
+        assert "user-1" in profile_page._PROFILE
+        page = await b.http.get("/account")
+        assert "Archidekt did not answer" not in page.text
+    finally:
+        gate.set()
+        await b.aclose()

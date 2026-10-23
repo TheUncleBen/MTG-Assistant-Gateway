@@ -42,6 +42,7 @@ from .theme import esc, icon
 PROFILE_TTL = 30.0  # seconds the profile read is kept for the pages (a press forgets it)
 COUNT_TTL = 60.0  # the bell's count
 LIST_TTL = 10.0  # the bell's list: Archidekt's own bell asks at most once every 10 s
+PROFILE_WAIT = 3.0  # seconds a page waits for the profile read before it says Archidekt did not answer
 PICTURE_BODY_LIMIT = profile.AVATAR_MAX_BYTES + 16_000  # the file plus the form's own fields
 HIST = "A copy of your profile from just before is kept under History."
 # the member's own text after a save: the mockup's notices
@@ -186,10 +187,27 @@ async def read_profile(decks: Any, sub: str) -> dict[str, Any]:
         return now
 
 
+_READS: set[asyncio.Task[Any]] = set()  # reads a page stopped waiting for, until they finish
+
+
+def _settle(task: asyncio.Task[Any]) -> None:
+    _READS.discard(task)
+    if not task.cancelled():
+        task.exception()  # read, so a failed read is not reported as never retrieved
+
+
 async def profile_or_none(decks: Any, sub: str) -> dict[str, Any] | None:
-    """The profile, or None when Archidekt can't be asked right now (the page says so)."""
+    """The profile, or None when Archidekt can't be asked right now (the page says so). A page
+    waits PROFILE_WAIT seconds at most; the read itself is never cut short (it may be refreshing
+    the member's Archidekt sign-in, which must be stored once Archidekt has answered) and is kept
+    for the next load when it finishes."""
+    task = asyncio.ensure_future(read_profile(decks, sub))
     try:
-        return await read_profile(decks, sub)
+        return await asyncio.wait_for(asyncio.shield(task), PROFILE_WAIT)
+    except TimeoutError:
+        _READS.add(task)
+        task.add_done_callback(_settle)
+        return None
     except DeckError:
         return None
 
