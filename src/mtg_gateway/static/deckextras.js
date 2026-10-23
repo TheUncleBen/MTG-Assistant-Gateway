@@ -70,6 +70,136 @@
     });
   }
 
+  // -- the Add a package box: the packages list with its chips and filters ---------------------------
+  // The list is read when the box first opens (Mine) and again as the chips, the name box (after
+  // a pause in typing, or Enter), the format or the budget change; Load more is a button that
+  // adds the next page. A package named in the address (Add to a deck… on My decks) is picked
+  // once it is listed. The filters are not part of the form: only the package goes.
+  var WHOSE = {
+    mine: { lbl: "Your packages", loading: "Reading your packages from Archidekt…",
+      none: "You have no packages yet. Paste a package link or id, or make one on My decks.",
+      nomatch: "None of your packages match.",
+      bad: "Your packages could not be read. Paste a package link or id instead.",
+      net: "No connection; your packages could not be read. Paste a package link or id instead." },
+    followed: { lbl: "Packages you follow", loading: "Reading the packages you follow from Archidekt…",
+      none: "No followed packages yet.", nomatch: "No followed packages match.",
+      bad: "The packages you follow could not be read. Paste a package link or id instead.",
+      net: "No connection; the packages you follow could not be read. Paste a package link or id instead." },
+    all: { lbl: "All packages", loading: "Reading packages from Archidekt…",
+      none: "No packages match.", nomatch: "No packages match.",
+      bad: "The packages could not be read. Paste a package link or id instead.",
+      net: "No connection; the packages could not be read. Paste a package link or id instead." }
+  };
+  var MORE_FAILED = "The next packages could not be read. Press Load more to try again.";
+  function packageList(box) {
+    var wrap = $(".dx-mine", box), tree = wrap && $(".tree", wrap);
+    if (!tree) return;
+    if (wrap.__pk) { if (wrap.__pk.failed()) wrap.__pk.reload(); else wrap.__pk.pick(); return; }
+    var st = { whose: "mine", q: "", format: "", budget: "", page: 1, more: false, seq: 0, timer: null, failed: false };
+    var chips = $$(".ui-chip[data-whose]", wrap), q = $("#dx-pkq", wrap), fmt = $("#dx-pkfmt", wrap), bud = $("#dx-pkbud", wrap);
+    var lbl = $(".lbl", wrap), moreWrap = $(".dx-more", wrap), moreBtn = moreWrap && $("button", moreWrap);
+    function words() { return WHOSE[st.whose]; }
+    function filtered() { return !!(st.q || st.format || st.budget); }
+    function status(text, loading) {
+      var p = el("p", "muted small" + (loading ? " loading" : ""), text);
+      if (loading) p.setAttribute("role", "status");
+      return p;
+    }
+    function row(pk) {
+      var lab = el("label");
+      var r = el("input");
+      r.type = "radio"; r.name = "mine"; r.value = pk.id;
+      r.setAttribute("aria-label", pk.name);
+      r.addEventListener("change", function () { setValue(box, "package", pk.id); });
+      lab.appendChild(r);
+      lab.appendChild(Menu.icon("package"));
+      var t = el("span");
+      t.appendChild(el("b", null, pk.name));
+      t.appendChild(el("span", "s", pk.line));
+      lab.appendChild(t);
+      return lab;
+    }
+    // the package the link-or-id field names, when it is listed, shows as picked
+    function pick() {
+      var want = ($("[name=package]", box) || { value: "" }).value.trim();
+      if (!/^\d+$/.test(want)) return;
+      $$("input[type=radio]", tree).forEach(function (r) { if (r.value === want) r.checked = true; });
+    }
+    function url() {
+      var p = new URLSearchParams();
+      p.set("whose", st.whose);
+      if (st.q) p.set("q", st.q);
+      if (st.format) p.set("format", st.format);
+      if (st.budget) p.set("budget", st.budget);
+      p.set("page", String(st.page));
+      return wrap.getAttribute("data-src") + "?" + p.toString();
+    }
+    function showMore() {
+      moreWrap.hidden = !st.more;
+      moreBtn.disabled = false;
+      moreBtn.removeAttribute("aria-busy");
+    }
+    function load(next) {
+      var mine = ++st.seq;
+      clearTimeout(st.timer);
+      if (next) { st.page += 1; moreBtn.disabled = true; moreBtn.setAttribute("aria-busy", "true"); }
+      else { st.page = 1; st.more = false; moreWrap.hidden = true; tree.textContent = ""; tree.appendChild(status(words().loading, true)); }
+      lbl.textContent = words().lbl;
+      Menu.getJSON(url()).then(function (d) {
+        if (mine !== st.seq) return;
+        if (!d.ok) {
+          if (next) { st.page -= 1; showMore(); note(box, d.message || MORE_FAILED); return; }
+          st.failed = true;
+          tree.textContent = "";
+          tree.appendChild(status(d.message || words().bad));
+          return;
+        }
+        st.failed = false;
+        if (!next) tree.textContent = "";
+        if (!d.packages.length && !next) {
+          tree.appendChild(status(filtered() ? words().nomatch : words().none));
+        }
+        d.packages.forEach(function (pk) { tree.appendChild(row(pk)); });
+        st.more = !!d.more;
+        showMore();
+        pick();
+        if (next && d.packages.length) { var first = $$("input[type=radio]", tree)[Math.max(0, $$("input[type=radio]", tree).length - d.packages.length)]; if (first) first.focus(); }
+      }, function () {
+        if (mine !== st.seq) return;
+        if (next) { st.page -= 1; showMore(); note(box, MORE_FAILED); return; }
+        st.failed = true;
+        tree.textContent = "";
+        tree.appendChild(status(words().net));
+      });
+    }
+    chips.forEach(function (c) {
+      c.addEventListener("click", function () {
+        if (c.getAttribute("aria-pressed") === "true") return;
+        chips.forEach(function (x) { x.setAttribute("aria-pressed", String(x === c)); });
+        st.whose = c.getAttribute("data-whose");
+        load(false);
+      });
+    });
+    if (q) {
+      q.addEventListener("input", function () {
+        clearTimeout(st.timer);
+        st.timer = setTimeout(function () { if (q.value.trim() !== st.q) { st.q = q.value.trim(); load(false); } }, 250);
+      });
+      // Enter asks at once and never sends the form
+      q.addEventListener("keydown", function (e) {
+        if (e.key !== "Enter") return;
+        e.preventDefault();
+        st.q = q.value.trim();
+        load(false);
+      });
+    }
+    if (fmt) fmt.addEventListener("change", function () { st.format = fmt.value; load(false); });
+    if (bud) bud.addEventListener("change", function () { st.budget = bud.value; load(false); });
+    if (moreBtn) moreBtn.addEventListener("click", function () { load(true); });
+    wrap.__pk = { pick: pick, reload: function () { load(false); }, failed: function () { return st.failed; } };
+    load(false);
+  }
+
   // -- what each box does when it opens ------------------------------------------------------------
   var openers = {
     help: function (box) { $$("[data-words]", box).forEach(countWords); },
@@ -84,34 +214,7 @@
     },
     contest: function (box) { $$("[data-count]", box).forEach(countChars); },
     withdraw: function (box) {},
-    package: function (box) {
-      var wrap = $(".dx-mine", box), tree = wrap && $(".tree", wrap);
-      if (!tree || wrap.__loaded) return;
-      wrap.__loaded = true;
-      tree.textContent = "";
-      var p = el("p", "muted small loading", "Reading your packages from Archidekt…");
-      p.setAttribute("role", "status");
-      tree.appendChild(p);
-      Menu.getJSON(wrap.getAttribute("data-src")).then(function (d) {
-        tree.textContent = "";
-        if (!d.ok) { wrap.__loaded = false; tree.appendChild(el("p", "muted small", d.message || "Your packages could not be read. Paste a package link or id instead.")); return; }
-        if (!d.packages.length) { tree.appendChild(el("p", "muted small", "You have no packages yet. Paste a package link or id, or make one on My decks.")); return; }
-        d.packages.forEach(function (pk) {
-          var lab = el("label");
-          var r = el("input");
-          r.type = "radio"; r.name = "mine"; r.value = pk.id;
-          r.setAttribute("aria-label", pk.name);
-          r.addEventListener("change", function () { setValue(box, "package", pk.id); });
-          lab.appendChild(r);
-          lab.appendChild(Menu.icon("package"));
-          var t = el("span");
-          t.appendChild(el("b", null, pk.name));
-          t.appendChild(el("span", "s", pk.line));
-          lab.appendChild(t);
-          tree.appendChild(lab);
-        });
-      }, function () { wrap.__loaded = false; tree.textContent = ""; tree.appendChild(el("p", "muted small", "No connection; your packages could not be read. Paste a package link or id instead.")); });
-    },
+    package: function (box) { packageList(box); },
     lock: function (box, o) {
       var name = o.card || "", cats = o.cats || [];
       retitle(box, name);

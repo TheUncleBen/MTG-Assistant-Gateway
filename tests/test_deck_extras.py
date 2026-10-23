@@ -467,3 +467,61 @@ async def test_a_page_proposal_still_needs_the_members_press_on_the_review_page(
         assert out["ok"] is False and out["error"] == "browser_required" and ark.account.help == {}
     finally:
         await b.aclose()
+
+
+# -- the package listing UI (plan rows 6.1 and 6.4) ----------------------------------------------------
+
+
+async def test_the_add_a_package_box_carries_its_filters_and_a_preset(stack: Stack) -> None:
+    b, _token = await _member(stack)
+    try:
+        page = (await b.http.get("/decks/42/package")).text
+        for whose in ("mine", "followed", "all"):
+            assert f"data-whose='{whose}'" in page, whose
+        assert "aria-pressed='true' data-whose='mine'" in page
+        assert "<select id='dx-pkfmt'>" in page and "<option value='commander'>Commander</option>" in page
+        assert "<select id='dx-pkbud'>" in page and "<option value='4'>$$$$</option>" in page
+        assert (
+            "<option value=''>Any budget</option>" in page and "<option value=''>Any format</option>" in page
+        )
+        assert "type='search'" in page and "Package name" in page
+        assert "Load more" in page and "dx-more" in page
+        assert "name='package' value=''" in page
+        # a package named in the address (Add to a deck… on My decks) fills the field; the
+        # switches keep their fresh defaults
+        page = (await b.http.get("/decks/42/package?package=50")).text
+        assert "name='package' value='50'" in page
+        assert page.count("value='1' checked") == 3, page.count("value='1' checked")
+        page = (await b.http.get("/decks/42/package?package=<x>")).text
+        assert "value='&lt;x&gt;'" in page
+    finally:
+        await b.aclose()
+
+
+async def test_packages_json_rows_carry_budget_and_formats_for_the_tiles(stack: Stack) -> None:
+    b, token = await _member(stack)
+    try:
+        await _browser_apply(stack.h, (await _new_package(stack, token))["proposal_id"])
+        listed = (await b.http.get("/decks/api/packages?whose=mine")).json()
+        assert listed["ok"] and listed["packages"][0]["budget"] == "$$$"
+        assert listed["packages"][0]["formats"] == "Commander"
+    finally:
+        await b.aclose()
+
+
+async def test_my_decks_has_a_show_filter_that_the_address_keeps(stack: Stack) -> None:
+    b, _token = await _member(stack)
+    try:
+        page = (await b.http.get("/decks")).text
+        assert "<select id='f-show' name='show'>" in page
+        assert "<option value='' selected>Decks and packages</option>" in page
+        assert "<option value='decks'>Decks only</option>" in page
+        assert "<option value='packages'>Packages only</option>" in page
+        page = (await b.http.get("/decks?show=packages")).text
+        assert "<option value='packages' selected>Packages only</option>" in page
+        page = (await b.http.get("/decks?show=nonsense")).text
+        assert "<option value='' selected>Decks and packages</option>" in page
+        j = (await b.http.get("/api/decks/mine?shape=list&show=packages")).json()
+        assert j["ok"] is True and "Sample Commander Deck" in j["html"]
+    finally:
+        await b.aclose()

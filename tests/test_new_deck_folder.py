@@ -82,3 +82,54 @@ async def test_the_assistant_names_the_folder(stack: Stack) -> None:
         await call(stack.h, token, "propose_new_deck", {"name": "Z", "cards": [], "folder": "Nope"})
     )
     assert bad["ok"] is False and "No folder is called 'Nope'" in bad["message"], bad
+
+
+# -- the boxes on My decks: a Folder field ---------------------------------------------------------------
+
+
+async def test_the_new_deck_and_new_package_boxes_take_a_folder(stack: Stack) -> None:
+    from .test_decks_and_proxy import Browser
+
+    ark = stack.ark
+    await linked_user(stack)
+    decks = stack.h.app.state.gateway.decks
+    folder = await decks.create_folder(SUB, "Brews")
+    fid = int(folder["id"])
+    b = Browser(stack.h)
+    await b.login("/decks")
+    try:
+        page = (await b.http.get("/decks")).text
+        assert "<select id='nd-folder' name='folder_id'>" in page
+        assert "<select id='np-folder' name='folder_id'>" in page
+        assert page.count("<option value='' selected>Top level (no folder)</option>") == 2
+        assert page.count(f"<option value='{fid}'>Brews</option>") == 2
+        # opened from inside a folder, the box starts on that folder
+        page = (await b.http.get(f"/decks?folder={fid}")).text
+        assert page.count(f"<option value='{fid}' selected>Brews</option>") == 2
+        csrf = await b.csrf("/decks")
+        r = await b.http.post(
+            "/decks/new",
+            data={"csrf": csrf, "name": "In Brews", "format": "commander", "folder_id": str(fid)},
+        )
+        assert r.status_code == 303, r.text
+        made = next(d for d in ark.decks.values() if d["name"] == "In Brews")
+        assert ark.deck_folder[made["id"]] == fid
+        r = await b.http.post(
+            "/decks/new-package",
+            data={"csrf": csrf, "name": "Brews package", "keywords": "x", "folder_id": str(fid)},
+        )
+        assert r.status_code == 303, r.text
+        made = next(d for d in ark.decks.values() if d["name"] == "Brews package")
+        assert ark.deck_folder[made["id"]] == fid
+        # a folder that is not the member's comes back in the box, the typed values kept
+        r = await b.http.post(
+            "/decks/new", data={"csrf": csrf, "name": "Nope", "format": "commander", "folder_id": "999999"}
+        )
+        assert r.status_code == 400 and "not in your Archidekt account" in r.text
+        assert "value='Nope'" in r.text
+        r = await b.http.post(
+            "/decks/new-package", data={"csrf": csrf, "name": "Nope", "keywords": "x", "folder_id": "999999"}
+        )
+        assert r.status_code == 400 and "not in your Archidekt account" in r.text
+    finally:
+        await b.aclose()

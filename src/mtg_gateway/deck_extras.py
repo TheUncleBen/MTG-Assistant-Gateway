@@ -27,7 +27,7 @@ from starlette.responses import JSONResponse, RedirectResponse, Response
 from . import account_lists, actions, packages, registration, ui
 from .archidekt import FORMAT_NAMES, Deck, DeckCard, format_label
 from .busy import busy_response
-from .deckpage import deck_title
+from .deckpage import deck_title, folder_options_html
 from .decks import DeckError, current_client
 from .pages import BROWSER_CLIENT_ID, browser_session, login_redirect, read_limited
 from .theme import esc, icon
@@ -56,6 +56,8 @@ PACKAGE_CATEGORIES = (
     ("default", "Automatic (by card type)"),
     ("maybeboard", "Everything into Maybeboard"),
 )
+# the Add a package box's chips: whose packages the list shows (packages.WHOSE)
+PACKAGE_WHOSE = (("mine", "Mine"), ("followed", "Followed"), ("all", "All packages"))
 PACKAGE_NOTE = (
     "The cards go in as one change you review first, after a snapshot. Archidekt counts it as one "
     "import of the package."
@@ -419,10 +421,39 @@ def package_box_html(
         f"<option value='{k}'{' selected' if cat == k else ''}>{label}</option>"
         for k, label in PACKAGE_CATEGORIES
     )
-    fresh = not v
+    # a box drawn with only a package named in its address (Add to a deck… on My decks) is as
+    # fresh as an empty one: the switches keep their defaults
+    fresh = not any(k in v for k in ("categories", "skip_existing", "skip_outside_identity", "singleton"))
+    chips = "".join(
+        f"<button type='button' class='ui-chip' aria-pressed='{'true' if key == 'mine' else 'false'}' "
+        f"data-whose='{key}'>{label}</button>"
+        for key, label in PACKAGE_WHOSE
+    )
+    fmt_opts = "<option value=''>Any format</option>" + "".join(
+        f"<option value='{esc(n)}'>{esc(format_label(n))}</option>" for n in PACKAGE_FORMATS
+    )
+    budget_opts = "<option value=''>Any budget</option>" + "".join(
+        f"<option value='{val}'>{label}</option>" for val, label in BUDGET_CHOICES if val
+    )
     body = (
         f"<form id='dx-pkg-f' method='post' action='/decks/{did}/package' class='stack' novalidate>"
         f"<input type='hidden' name='csrf' value='{esc(csrf)}'>"
+        "<div class='dx-mine' data-src='/decks/api/packages'>"
+        f"<div class='ui-chips' role='group' aria-label='Which packages'>{chips}</div>"
+        "<div class='dx-pkf'>"
+        "<div class='field'><label for='dx-pkq'>Package name</label>"
+        "<input id='dx-pkq' type='search' placeholder='Package name' autocomplete='off' maxlength='100'>"
+        "</div>"
+        "<div class='field'><label for='dx-pkfmt'>Intended format</label><span class='sel'>"
+        f"<select id='dx-pkfmt'>{fmt_opts}</select></span></div>"
+        "<div class='field'><label for='dx-pkbud'>Budget</label><span class='sel'>"
+        f"<select id='dx-pkbud'>{budget_opts}</select></span></div></div>"
+        "<span class='lbl' id='dx-pk-lbl'>Your packages</span>"
+        "<div class='tree' role='radiogroup' aria-labelledby='dx-pk-lbl'>"
+        "<p class='muted small dx-mine-note'>Your packages are listed here when the box opens.</p>"
+        "</div>"
+        "<div class='dx-more' hidden><button type='button' class='btn'>Load more</button></div>"
+        "</div>"
         + field(
             "dx-pk",
             "package",
@@ -431,11 +462,7 @@ def package_box_html(
             placeholder="https://archidekt.com/decks/…",
             required=True,
         )
-        + "<div class='dx-mine' data-src='/decks/api/packages'><span class='lbl'>Your packages</span>"
-        "<div class='tree' role='radiogroup' aria-label='Your packages'>"
-        "<p class='muted small dx-mine-note'>Your packages are listed here when the box opens.</p>"
-        "</div></div>"
-        f"<div class='field'><label for='dx-pcat'>Categories</label><span class='sel'>"
+        + f"<div class='field'><label for='dx-pcat'>Categories</label><span class='sel'>"
         f"<select id='dx-pcat' name='categories'>{opts}</select></span></div>"
         "<div class='dx-switches'>"
         + switch("skip_existing", "Skip cards already in the deck", fresh or v.get("skip_existing") == "1")
@@ -708,15 +735,24 @@ def formats_html(formats: str, *, labelled_by: str = "") -> str:
 
 
 def new_package_box_html(
-    csrf: str, values: dict[str, str] | None = None, *, error: str = "", open: bool = False
+    csrf: str,
+    values: dict[str, str] | None = None,
+    *,
+    error: str = "",
+    open: bool = False,
+    folders: dict[str, Any] | None = None,
+    folder: str = "",
 ) -> str:
     """The New package box on My decks (mockup screens/22-packages.js): Name and Keywords (both
-    required, as Archidekt requires), Budget, Intended formats and Private. Create package is the
-    member's own press: decks.propose_new_deck(package=...) with no cards, applied at once as New
-    deck is. ``values`` are the typed values kept after a refusal (``error`` is its strip)."""
+    required, as Archidekt requires), Budget, Folder, Intended formats and Private. Create package
+    is the member's own press: decks.propose_new_deck(package=...) with no cards, applied at once
+    as New deck is. ``values`` are the typed values kept after a refusal (``error`` is its strip).
+    ``folders``: the member's folder tree for the Folder field (None: the top level alone);
+    ``folder``: the one picked to begin with (the folder My decks has open)."""
     v = values or {}
     name = v.get("name", "")
     private = v.get("private", "" if "name" in v else "1")
+    folder_opts = folder_options_html(folders, v.get("folder_id", folder))
     body = (
         f"<form id='npf' method='post' action='/decks/new-package' novalidate>"
         f"<input type='hidden' name='csrf' value='{esc(csrf)}'>"
@@ -732,9 +768,11 @@ def new_package_box_html(
         f"placeholder='shocklands, fetchlands' required maxlength='{packages.KEYWORDS_MAX}' "
         "autocomplete='off'><div class='dx-under'><span class='muted small'>Words people search packages "
         "by, separated by commas.</span></div></div></div>"
-        + "<div class='field'><span class='lbl' id='np-bl'>Budget</span>"
+        + "<div class='dx-two'><div class='field'><span class='lbl' id='np-bl'>Budget</span>"
         + budget_html(v.get("budget", ""), labelled_by="np-bl")
-        + "</div><div class='field'><span class='lbl' id='np-fl'>Intended formats</span>"
+        + "</div><div class='field'><label for='np-folder'>Folder</label><span class='sel'>"
+        f"<select id='np-folder' name='folder_id'>{folder_opts}</select></span></div></div>"
+        "<div class='field'><span class='lbl' id='np-fl'>Intended formats</span>"
         + formats_html(v.get("formats", ""), labelled_by="np-fl")
         + "</div>"
         + switch("private", "Private", bool(private))
@@ -815,6 +853,24 @@ CSS = """
 .dx-box .body .dx-mine .tree label span{display:block;min-width:0}
 .dx-box .body .dx-mine .tree label .s{color:var(--text-muted);font-size:.86rem}
 .dx-box .body .dx-mine .tree p{margin:.3rem .5rem}
+/* the Add a package box's chips (Mine, Followed, All packages), its name, format and budget
+   filters in one row (one under another on a phone), the list (its own scroll past 18 rem)
+   and Load more */
+.dx-box .body .dx-mine .ui-chips{margin:0 0 .6rem}
+.dx-box .body .dx-mine .ui-chip{margin:0;font:inherit;font-weight:700;font-size:.9rem;line-height:1.2}
+.dx-box .body .dx-pkf{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr) minmax(0,1fr);
+  gap:.5rem .75rem;margin:0 0 .75rem}
+.dx-box .body .dx-pkf .field{margin:0;min-width:0}
+.dx-box .body .dx-pkf .field input[type=search]{width:100%;min-height:44px}
+.dx-box .body .dx-pkf .msel-btn{max-width:100%}
+@media (max-width:599.98px){ .dx-box .body .dx-pkf{grid-template-columns:minmax(0,1fr)} }
+.dx-box .body .dx-mine .tree{max-height:18rem;overflow:auto}
+.dx-box .body .dx-mine .tree label{min-height:44px}
+.dx-box .body .dx-more{margin:.5rem 0 0}
+.dx-box .body .dx-more[hidden]{display:none}
+.dx-box .body .dx-more .btn{margin:0;min-height:44px}
+.dx-box .body .dx-more .btn[aria-busy=true]{cursor:progress;opacity:.7}
+.dx-box .body .dx-mine + .field{margin-top:.75rem}
 .dx-box .body .notice{margin:0}
 .dx-box .acts .dx-gap{flex:1 1 auto}
 .dx-box .acts .dx-delist{margin:0}
@@ -904,6 +960,9 @@ def add_deck_extras_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
                     return login_redirect(f"/decks/{deck_id}/{name}")
                 values: dict[str, str] = {}
                 templates = None
+                if box_name == "package" and request.query_params.get("package"):
+                    # Add to a deck… on a package tile (My decks) names the package
+                    values = {"package": request.query_params["package"][:200]}
                 if box_name == "lock":
                     card = (request.query_params.get("card") or "")[:200]
                     try:
@@ -1167,7 +1226,14 @@ def add_deck_extras_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
                 {"ok": False, "message": str(exc)}, 400, headers={"Cache-Control": "no-store"}
             )
         rows = [
-            {"id": r["id"], "name": r["name"], "line": package_line(r["owner"], r["size"], r["block"])}
+            {
+                "id": r["id"],
+                "name": r["name"],
+                "line": package_line(r["owner"], r["size"], r["block"]),
+                # for a package's tile on My decks: "$$" ("" for any) and "Commander, Modern"
+                "budget": packages.BUDGETS.get(r["block"].get("budget"), "any").replace("any", ""),
+                "formats": package_formats(r["block"]),
+            }
             for r in got["rows"]
         ]
         return JSONResponse(
@@ -1175,19 +1241,21 @@ def add_deck_extras_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
         )
 
 
+def package_formats(block: dict[str, Any]) -> str:
+    """A package's intended formats as 'Commander, Modern' ("" when any)."""
+    return ", ".join(
+        format_label(FORMAT_NAMES.get(f)) for f in block.get("intendedFormats") or [] if f in FORMAT_NAMES
+    )
+
+
 def package_line(owner: str, size: Any, block: dict[str, Any]) -> str:
     """'alice · 14 cards · $$ · Commander' under a package's name."""
-    from .archidekt import FORMAT_NAMES, format_label
-
     parts = [owner] if owner else []
     if isinstance(size, int):
         parts.append(f"{size} card{'s' if size != 1 else ''}")
     budget = packages.BUDGETS.get(block.get("budget"), "any")
     parts.append(budget if budget != "any" else "any budget")
-    formats = [
-        format_label(FORMAT_NAMES.get(f)) for f in block.get("intendedFormats") or [] if f in FORMAT_NAMES
-    ]
-    parts.append(", ".join(formats) or "any format")
+    parts.append(package_formats(block) or "any format")
     return " · ".join(parts)
 
 

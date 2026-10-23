@@ -63,6 +63,31 @@ def _seed(ark) -> None:
     pkg["cards"] = [signet]
     pkg["categories"] = [c for c in pkg["categories"] if c["name"] != "Commander"]
     ark.decks[50] = pkg
+    _amy_packages(ark)
+
+
+def _amy_packages(ark) -> None:
+    """Two public packages of amy's for the Followed and All chips; alice follows Amy burn."""
+    for did, name, block in (
+        (
+            901,
+            "Amy shocks",
+            {"keywords": "shocklands", "budget": 2, "intendedFormats": [3], "importCount": 3},
+        ),
+        (902, "Amy burn", {"keywords": "burn", "budget": 1, "intendedFormats": [2], "importCount": 1}),
+    ):
+        ark.decks[did] = {
+            "id": did,
+            "name": name,
+            "owner": {"username": "amy"},
+            "updatedAt": "2026-10-03T00:00:00Z",
+            "deckFormat": None,
+            "private": False,
+            "categories": [],
+            "cards": [],
+            "cardPackage": {"id": did + 1000, **block},
+        }
+    ark.bookmarks.setdefault("alice", set()).add(902)
 
 
 @pytest.fixture
@@ -394,5 +419,275 @@ def test_new_package_on_my_decks_and_add_to_a_deck_on_my_lists(
         tpl.locator(".acts button", has_text="Add category").click()
         page.wait_for_url("**/proposals/**")
         assert not [c for c in ark.decks[42]["categories"] if c["name"] == "Draw"]
+        browser.close()
+    assert errors == []
+
+
+# -- the package listing UI (plan rows 6.1 and 6.4) ----------------------------------------------------
+
+PKG_TEXT = TEXT + ", .dx-mine .ui-chip, .dx-mine .lbl, .dx-mine .tree b, .dx-mine .tree .s, .dx-mine .btn"
+TILE_TEXT = "ul.decklist .name, ul.decklist .fmt, ul.decklist .fmt .ui-lbl, #pk-note, #decks-total"
+
+
+def _names(box) -> list[str]:
+    return box.locator(".dx-mine .tree label b").all_inner_texts()
+
+
+def _wait_names(page, box, names: list[str]) -> None:
+    page.wait_for_function(
+        "(want) => JSON.stringify([...document.querySelectorAll('#package .dx-mine .tree label b')]"
+        ".map(b => b.textContent)) === JSON.stringify(want)",
+        arg=names,
+    )
+
+
+@pytest.mark.parametrize("width,theme", [(390, "light"), (1366, "dark")])
+def test_the_add_a_package_box_has_chips_filters_and_a_load_more_button(
+    server: Server, width: int, theme: str
+) -> None:
+    from playwright.sync_api import sync_playwright
+
+    sid = _link(server)
+    exe = _chromium()
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, width, theme, exe)
+        page.goto(f"{server.base}/decks/42?view=text", wait_until="networkidle")
+        box = _open_from_deck_menu(page, "Add a package…", "package")
+        _wait_names(page, box, ["Golgari staples"])
+        assert box.locator(".dx-mine .lbl").inner_text() == "Your packages"
+        assert page.evaluate(MEASURE) == [] and page.evaluate(CONTRAST, PKG_TEXT) == []
+        if width < 900:
+            assert (
+                min(_targets(page, "#package .ui-chip, #package .dx-pkf input, #package .dx-pkf .msel-btn"))
+                >= 43.5
+            )
+        # Followed: alice follows Amy burn; All: everyone's public packages
+        box.locator(".ui-chip[data-whose=followed]").click()
+        _wait_names(page, box, ["Amy burn"])
+        assert box.locator(".dx-mine .lbl").inner_text() == "Packages you follow"
+        box.locator(".ui-chip[data-whose=all]").click()
+        _wait_names(page, box, ["Amy shocks", "Amy burn", "Golgari staples"])  # most imported first
+        assert box.locator(".ui-chip[data-whose=all]").get_attribute("aria-pressed") == "true"
+        assert page.evaluate(MEASURE) == [] and page.evaluate(CONTRAST, PKG_TEXT) == []
+        # the name as you type (after a pause), the format and the budget on selection
+        box.locator("#dx-pkq").fill("shocks")
+        _wait_names(page, box, ["Amy shocks"])
+        box.locator("#dx-pkq").fill("")
+        box.locator("#dx-pkq").press("Enter")  # asks at once, never sends the form
+        _wait_names(page, box, ["Amy shocks", "Amy burn", "Golgari staples"])
+        assert page.url.endswith("/decks/42?view=text")
+        box.locator("#dx-pkfmt").select_option("modern")
+        _wait_names(page, box, ["Amy burn"])
+        box.locator("#dx-pkfmt").select_option("")
+        box.locator("#dx-pkbud").select_option("2")
+        _wait_names(page, box, ["Amy shocks", "Golgari staples"])
+        box.locator(".ui-chip[data-whose=followed]").click()
+        box.locator(".dx-mine .tree p", has_text="No followed packages match.").wait_for(state="visible")
+        box.locator(".ui-chip[data-whose=mine]").click()
+        box.locator("#dx-pkbud").select_option("1")
+        box.locator(".dx-mine .tree p", has_text="None of your packages match.").wait_for(state="visible")
+        # Load more is a button, shown while the listing says there is a next page
+        server.ark.account.package_page_size = 1
+        box.locator("#dx-pkbud").select_option("")
+        box.locator(".ui-chip[data-whose=all]").click()
+        _wait_names(page, box, ["Amy shocks"])
+        more = box.locator(".dx-more button")
+        assert more.is_visible() and more.inner_text().strip() == "Load more"
+        more.click()
+        _wait_names(page, box, ["Amy shocks", "Amy burn"])
+        assert page.evaluate(MEASURE) == [] and page.evaluate(CONTRAST, PKG_TEXT) == []
+        more.click()
+        _wait_names(page, box, ["Amy shocks", "Amy burn", "Golgari staples"])
+        page.wait_for_function("() => document.querySelector('#package .dx-more').hidden")
+        # a pick from any list fills the link-or-id field
+        box.locator(".dx-mine .tree input[type=radio][value='901']").check()
+        assert box.locator("input[name=package]").input_value() == "901"
+        if width < 900:
+            page.evaluate(TEXT_200)
+            page.wait_for_timeout(100)
+            assert page.evaluate(MEASURE) == []
+        browser.close()
+    assert errors == []
+
+
+def _show(page, width: int, value: str) -> None:
+    """Pick a Show choice: on a phone the filters are a sheet behind the Filters button."""
+    if width < 600:
+        page.locator(".sp-open").click()
+        page.locator("#f-show").wait_for(state="visible")
+    page.locator("#f-show").select_option(value)
+    if width < 600:
+        page.keyboard.press("Escape")
+        page.wait_for_timeout(200)
+
+
+@pytest.mark.parametrize("width,theme", [(390, "dark"), (1366, "light")])
+def test_my_decks_show_filter_marks_package_tiles_and_adds_one_to_a_deck(
+    server: Server, width: int, theme: str
+) -> None:
+    from playwright.sync_api import sync_playwright
+
+    sid = _link(server)
+    exe = _chromium()
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, width, theme, exe)
+        page.goto(f"{server.base}/decks", wait_until="networkidle")
+        tile = page.locator("li.deck[data-deck-id='50']")
+        page.locator("li.deck[data-deck-id='50'][data-package='1']").wait_for(state="visible")
+        assert "Package" in tile.locator(".fmt").inner_text() and "$$" in tile.locator(".fmt").inner_text()
+        assert tile.locator(".thumb .ini svg").count() == 1
+        assert page.locator("li.deck[data-deck-id='42']").get_attribute("data-package") is None
+        assert page.evaluate(MEASURE) == [] and page.evaluate(CONTRAST, TILE_TEXT) == []
+        # Show applies on selection, in place: no second listing, the address follows
+        _show(page, width, "packages")
+        page.locator("li.deck[data-deck-id='42']").wait_for(state="hidden")
+        assert tile.is_visible() and page.locator("#decks-total").inner_text() == "1 package"
+        assert "show=packages" in page.url
+        assert page.locator("#fv-decks").inner_text().startswith("Packages")
+        _show(page, width, "decks")
+        tile.wait_for(state="hidden")
+        assert page.locator("li.deck[data-deck-id='42']").is_visible()
+        assert page.locator("#decks-total").inner_text() == "1 deck"
+        _show(page, width, "")
+        tile.wait_for(state="visible")
+        assert page.locator("li.deck[data-deck-id='42']").is_visible() and "show=" not in page.url
+        # the package tile's menu: Add to a deck… (a plain deck's has none), from ⋮, a right-click
+        # and a press and hold
+        page.locator("li.deck[data-deck-id='42'] button.kebab").click()
+        assert "Add to a deck…" not in _menu_items(page)
+        _close_menu(page)
+        tile.locator(".name").click(button="right")
+        assert "Add to a deck…" in _menu_items(page)
+        _close_menu(page)
+        if width < 900:
+            page.evaluate(HOLD, "li.deck[data-deck-id='50'] .name")
+            page.wait_for_timeout(900)
+            assert "Add to a deck…" in _menu_items(page)
+            _close_menu(page)
+        tile.locator("button.kebab").click()
+        page.locator(".ctxmenu [role=menuitem]", has_text="Add to a deck…").click()
+        box = page.locator(".mtgbox:not([hidden])")
+        box.wait_for(state="visible")
+        assert "Add “Golgari staples” to a deck" in box.locator("h2").inner_text()
+        sel = box.locator("select")
+        sel.wait_for(state="attached")
+        names = sel.locator("option").all_inner_texts()
+        assert "Sample Commander Deck" in names and "Golgari staples" not in names, names
+        assert page.evaluate(MEASURE) == [] and page.evaluate(CONTRAST, TEXT) == []
+        if width < 900:
+            assert min(_targets(page, ".mtgbox .acts button")) >= 43.5
+        sel.select_option(label="Sample Commander Deck")
+        box.locator(".acts button", has_text="Next").click()
+        page.wait_for_url("**/decks/42/package?package=50")
+        pkg = page.locator("#package")
+        pkg.wait_for(state="visible")
+        assert pkg.locator("input[name=package]").input_value() == "50"
+        page.wait_for_function(
+            "() => document.querySelector('#package .dx-mine input[value=\"50\"]')?.checked"
+        )
+        assert pkg.locator("input[name=skip_existing]").is_checked()
+        browser.close()
+    assert errors == []
+
+
+def test_my_decks_draws_a_package_the_deck_list_left_out_and_says_when_it_cannot_tell(
+    server: Server,
+) -> None:
+    import json
+
+    from playwright.sync_api import sync_playwright
+
+    sid = _link(server)
+    exe = _chromium()
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, 1366, "light", exe)
+        # the packages read names one the deck listing does not carry: its tile is drawn from it
+        ghost = {
+            "id": "777",
+            "name": "Ghost package",
+            "line": "alice · 3 cards · $ · Modern",
+            "budget": "$",
+            "formats": "Modern",
+        }
+        page.route(
+            "**/decks/api/packages**",
+            lambda r: r.fulfill(
+                content_type="application/json",
+                body=json.dumps({"ok": True, "packages": [ghost], "more": False}),
+            ),
+        )
+        page.goto(f"{server.base}/decks?show=packages", wait_until="networkidle")
+        extra = page.locator("li.deck[data-deck-id='777']")
+        extra.wait_for(state="visible")
+        assert extra.locator("a").get_attribute("href") == "/decks/777"
+        assert "Ghost package" in extra.inner_text()
+        assert extra.locator(".fmt").inner_text().strip() == "Package · $"  # the formats: its title
+        assert extra.locator(".fmt").get_attribute("title") == "Package · $ · Modern"
+        assert page.locator("li.deck[data-deck-id='42']").is_hidden()
+        assert page.locator("#decks-total").inner_text() == "1 package"
+        extra.locator("button.kebab").click()
+        assert "Add to a deck…" in _menu_items(page)
+        _close_menu(page)
+        assert page.evaluate(MEASURE) == [] and page.evaluate(CONTRAST, TILE_TEXT) == []
+        page.unroute("**/decks/api/packages**")
+        # the read fails: one muted line, every deck shown, Show still usable
+        page.route("**/decks/api/packages**", lambda r: r.abort())
+        page.goto(f"{server.base}/decks?show=packages", wait_until="networkidle")
+        note = page.locator("#pk-note")
+        note.wait_for(state="visible")
+        assert (
+            note.inner_text() == "Packages couldn't be told apart from decks just now; every deck is shown."
+        )
+        assert page.locator("li.deck[data-deck-id='42']").is_visible()
+        assert page.locator("li.deck[data-deck-id='50']").is_visible()
+        assert page.locator("#f-show").is_enabled()
+        assert page.evaluate(CONTRAST, TILE_TEXT) == []
+        browser.close()
+    assert errors == []
+
+
+@pytest.mark.parametrize("width,theme", [(390, "light"), (1366, "dark")])
+def test_the_new_deck_and_new_package_boxes_pick_a_folder(server: Server, width: int, theme: str) -> None:
+    from playwright.sync_api import sync_playwright
+
+    sid = _link(server)
+    exe = _chromium()
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, width, theme, exe)
+        page.goto(f"{server.base}/decks", wait_until="networkidle")
+        made = page.evaluate(
+            "() => fetch('/decks/api/folders', {method: 'POST', credentials: 'same-origin', headers: "
+            "{'Content-Type': 'application/json', "
+            "'X-CSRF-Token': document.querySelector('input[name=csrf]').value}, "
+            "body: JSON.stringify({name: 'Brews', parent_id: null})}).then(r => r.json())"
+        )
+        assert made["ok"], made
+        page.goto(f"{server.base}/decks", wait_until="networkidle")
+        fid = page.locator("li.folder[data-folder-id]").first.get_attribute("data-folder-id")
+        for opener, box_id, sel_id in (
+            ("newdeck", "newdeck", "nd-folder"),
+            ("newpkg", "newpkg", "np-folder"),
+        ):
+            page.locator(f"[data-box-open='{opener}']").click()
+            box = page.locator(f"#{box_id}")
+            box.wait_for(state="visible")
+            page.wait_for_timeout(300)
+            sel = box.locator(f"#{sel_id}")
+            assert sel.locator("option").all_inner_texts() == ["Top level (no folder)", "Brews"]
+            assert sel.input_value() == ""
+            sel.select_option(fid)
+            page.wait_for_timeout(100)
+            assert box.locator(f"#{sel_id} + .msel-btn, .msel-btn").filter(has_text="Brews").count() >= 1
+            assert page.evaluate(MEASURE) == [] and page.evaluate(CONTRAST, TEXT) == []
+            _close_box(page)
+        # opened from inside the folder, the box starts on it
+        page.goto(f"{server.base}/decks?folder={fid}", wait_until="networkidle")
+        page.locator("[data-box-open='newdeck']").click()
+        page.locator("#newdeck").wait_for(state="visible")
+        assert page.locator("#nd-folder").input_value() == fid
+        _close_box(page)
+        page.locator("[data-box-open='newpkg']").click()
+        page.locator("#newpkg").wait_for(state="visible")
+        assert page.locator("#np-folder").input_value() == fid
         browser.close()
     assert errors == []

@@ -36,6 +36,7 @@ from .deckpage import (
     deck_title,
     decks_unreadable_html,
     featured,
+    folder_options_html,
     reread_href,
 )
 from .decks import MAX_PENDING_PROPOSALS, DeckError, current_client, owns_deck
@@ -90,6 +91,17 @@ def new_deck_error_html(exc: DeckError) -> str:
     return _esc(text if text.endswith((".", "!", "?")) else text + ".")
 
 
+def folder_id_of(data: dict[str, str]) -> int | None:
+    """The folder a form picked (``folder_id``): its id, None for the top level. A value that is
+    not a folder's id is refused as a folder the member does not have."""
+    fid = (data.get("folder_id") or "").strip()
+    if not fid:
+        return None
+    if not re.fullmatch(r"[0-9]{1,12}", fid):
+        raise DeckError("invalid", "That folder is not in your Archidekt account.")
+    return int(fid)
+
+
 def new_deck_box_html(
     csrf: str,
     values: dict[str, str] | None = None,
@@ -98,6 +110,8 @@ def new_deck_box_html(
     open: bool = False,
     scan_name: str = "",
     back: str = "/decks",
+    folders: dict[str, Any] | None = None,
+    folder: str = "",
 ) -> str:
     """The New deck box (F4, a box over the page it was opened from, never a page): Deck name
     (120 characters, a live count), Format, Private, and the cards as three tabs (Empty, Paste a
@@ -149,13 +163,17 @@ def new_deck_box_html(
         "<label class='switch'><input type='checkbox' name='theorycrafted' value='1'"
         + (" checked" if v.get("theorycrafted") else "")
         + "><span class='track'></span>Theorycrafted</label>"
+        "<div class='nd-top'><div class='field nd-folder'><label for='nd-folder'>Folder</label>"
+        "<span class='sel'>"
+        f"<select id='nd-folder' name='folder_id'>{folder_options_html(folders, v.get('folder_id', folder))}"
+        "</select></span></div>"
         "<div class='field nd-game'><label for='game'>Game type</label><span class='sel'>"
         "<select id='game' name='game'>"
         + "".join(
             f"<option value='{k}'{' selected' if v.get('game', 'any') == k else ''}>{label}</option>"
             for k, label in (("any", "Any"), ("paper", "Paper"), ("mtgo", "MTGO"), ("arena", "Arena"))
         )
-        + "</select></span></div>"
+        + "</select></span></div></div>"
         "<div class='nd-cards'><span class='lbl' id='nd-cards-l'>Cards</span>"
         f"<div class='segc nd-tabs' role='tablist' aria-labelledby='nd-cards-l'>{tabs}</div>"
         "<div class='nd-src'>"
@@ -214,6 +232,8 @@ NEW_DECK_CSS = """
 .nd-grid{display:grid;grid-template-columns:minmax(0,1fr) 13rem;gap:1.1rem;align-items:stretch}
 .nd-fields{display:grid;grid-template-columns:minmax(0,1fr);gap:.9rem;min-width:0}
 .nd-top{display:grid;grid-template-columns:minmax(0,1fr) 11rem;gap:.75rem;align-items:start}
+/* side by side: the box's stacked-field gap is not for these */
+.nd-form .nd-top .field + .field{margin-top:0}
 .nd-form .field{margin:0;min-width:0} .nd-form .field label{display:block;font-weight:700;margin:0 0 .25rem}
 .nd-form .msel-btn{max-width:100%}
 /* the three tabs wrap at large text instead of widening the sheet */
@@ -356,16 +376,26 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
         if qp.get("ok") in LIST_OK_MESSAGES:
             notice = f"<p class='notice ok'>{_esc(LIST_OK_MESSAGES[qp['ok']])}</p>"
         nd = new_deck or {}
+        # the boxes' Folder field: the member's tree as My decks has it (the top level alone while
+        # it is still being read), starting on the open folder
+        here = str(folder_id) if folder_id is not None else ""
         box = new_deck_box_html(
             _csrf(s, sid) or "",
             nd.get("values"),
             error_html=nd.get("error_html", ""),
             open=new_deck is not None,
             scan_name=nd.get("scan_name", ""),
+            folders=tree,
+            folder=here,
         )
         np = new_package or {}
         box += deck_extras.new_package_box_html(
-            _csrf(s, sid) or "", np.get("values"), error=np.get("error", ""), open=new_package is not None
+            _csrf(s, sid) or "",
+            np.get("values"),
+            error=np.get("error", ""),
+            open=new_package is not None,
+            folders=tree,
+            folder=here,
         )
         if problem == "not_linked":
             return page(
@@ -409,6 +439,7 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
                 colors=filters["colors"],
                 colour_mode=filters["colour_mode"],
                 fmt=filters["fmt"],
+                show=filters["show"],
             )
             + listing
             + (
@@ -591,7 +622,7 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
         values = {
             k: v
             for k, v in data.items()
-            if k in ("name", "format", "private", "theorycrafted", "game", "source", "kind")
+            if k in ("name", "format", "private", "theorycrafted", "game", "source", "kind", "folder_id")
         }
         if not check_csrf(sid, data):
             # the box comes back with a fresh token and everything typed
@@ -619,6 +650,7 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
                 private=bool(data.get("private")),
                 theorycrafted=bool(data.get("theorycrafted")),
                 game=data.get("game") or "any",
+                folder_id=folder_id_of(data),
             )
         except DeckError as exc:
             return await my_decks_response(
@@ -652,6 +684,7 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
             "budget": data.get("budget", ""),
             "formats": data.get("format_list", ""),
             "private": data.get("private", ""),
+            "folder_id": data.get("folder_id", ""),
         }
         if not check_csrf(sid, data):
             return await my_decks_response(
@@ -685,6 +718,7 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
                     "budget": int(budget) if re.fullmatch(r"[1-4]", budget) else None,
                     "intended_formats": [f for f in values["formats"].split("\n") if f],
                 },
+                folder_id=folder_id_of(data),
             )
         except DeckError as exc:
             return await my_decks_response(

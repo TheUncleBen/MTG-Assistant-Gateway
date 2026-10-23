@@ -611,6 +611,23 @@ def compare_box_html(deck: Deck, *, open: bool = False) -> str:
     )
 
 
+def folder_options_html(folders: dict[str, Any] | None, chosen: str) -> str:
+    """A folder picker's choices (the Clone box, the New deck and New package boxes): the top
+    level, then the member's folders indented by depth, the backup folder left out. ``folders``:
+    decks.folders' flattened tree, or None when it could not be read (the top level is then the
+    only choice). ``chosen``: the picked folder's id, "" for the top level."""
+    opts = "<option value=''" + (" selected" if not chosen else "") + ">Top level (no folder)</option>"
+    for f in (folders or {}).get("folders", []):
+        if f.get("backup") or not f.get("depth"):
+            continue  # the backup folder is no place for a new deck; the root is the top level
+        fid = str(f["id"])
+        opts += (
+            f"<option value='{esc(fid)}'{' selected' if chosen == fid else ''}>"
+            f"{esc(INDENT * (int(f['depth']) - 1) + str(f['name']))}</option>"
+        )
+    return opts
+
+
 def clone_box_html(
     deck: Deck,
     csrf: str | None,
@@ -627,16 +644,7 @@ def clone_box_html(
     did = esc(deck.id)
     v = values or {}
     name = v.get("name") if v.get("name") is not None else f"Copy of - {deck_title(deck)}"
-    chosen = v.get("folder_id", "")
-    opts = "<option value=''" + (" selected" if not chosen else "") + ">Top level (no folder)</option>"
-    for f in (folders or {}).get("folders", []):
-        if f.get("backup") or not f.get("depth"):
-            continue  # the backup folder is no place for a copy; the root is the top level
-        fid = str(f["id"])
-        opts += (
-            f"<option value='{esc(fid)}'{' selected' if chosen == fid else ''}>"
-            f"{esc(INDENT * (int(f['depth']) - 1) + str(f['name']))}</option>"
-        )
+    opts = folder_options_html(folders, v.get("folder_id", ""))
     body = (
         (ui.notice(error, "error", role="alert") if error else "")
         + f"<form id='clonef' method='post' action='/decks/{did}/clone' class='stack'>"
@@ -2539,6 +2547,10 @@ def deck_count_text(total: int | None, *, pending: bool = False) -> str:
     return f"{total} deck{'' if total == 1 else 's'}"
 
 
+# My decks' Show filter: "" (the list as Archidekt gives it), decks only or packages only
+SHOW_CHOICES = (("", "Decks and packages"), ("decks", "Decks only"), ("packages", "Packages only"))
+
+
 def deck_list_controls_html(
     *,
     q: str,
@@ -2551,9 +2563,13 @@ def deck_list_controls_html(
     colors: str = "",
     colour_mode: str = "incl",
     fmt: str = "",
+    show: str = "",
 ) -> str:
     """The filter panel over the deck list (searchpanel.py, the panel the search pages share):
-    the name box, Colors and Format (static/decks.js filters the list as they change), and the
+    the name box, Show (decks and packages, decks only or packages only: static/decks.js tells
+    the member's card packages apart after the list is drawn, from the Packages page's own
+    listing, so the deck list's cold load stays one Archidekt listing), Colors and Format
+    (static/decks.js filters the list as they change), and the
     results bar with the count, Sort by and its direction, Grid or List, the card size and Clear
     filters. ``folder``: the open folder's id ("" at the top level), kept so the sort and the view
     stay in that folder (a name, colour or format filter searches every folder). ``pending``: the
@@ -2563,6 +2579,14 @@ def deck_list_controls_html(
     formats = sorted({(n, format_label(n)) for n in FORMAT_NAMES.values()}, key=lambda f: f[1].lower())
     groups = sp.filter_grid(
         [
+            sp.select_group(
+                label="Show",
+                name="show",
+                options=SHOW_CHOICES,
+                value=show if show in dict(SHOW_CHOICES) else "",
+                input_id="f-show",
+                cls="showf",
+            ),
             sp.colours_group(
                 label="Colors",
                 name="c",

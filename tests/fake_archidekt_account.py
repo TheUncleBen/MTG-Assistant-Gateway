@@ -43,6 +43,7 @@ class AccountFake:
         self.entries: dict[int, list[dict[str, Any]]] = {}  # thread id -> submissions
         self.package_queries: list[dict[str, str]] = []
         self.package_imports: dict[int, int] = {}  # package deck id -> incrementPackageImport reads
+        self.package_page_size = 0  # 0: the package listing comes on one page; else paged (the site: 50)
         self.next_id = 7000
         self.max_pins = 150
 
@@ -317,7 +318,13 @@ class AccountFake:
             mine = [d for d in self.ark.decks.values() if listed(d)]
             mine.sort(key=lambda d: -d["cardPackage"].get("importCount", 0))
             rows = [{**self.ark._listing_row(d), "cardPackage": dict(d["cardPackage"])} for d in mine]
-            return _ok({"count": len(rows), "next": None, "results": rows})
+            more = None
+            if self.package_page_size:
+                page = int(q.get("page") or 1)
+                size = self.package_page_size
+                more = "more" if len(rows) > page * size else None
+                rows = rows[(page - 1) * size : page * size]
+            return _ok({"count": len(rows), "next": more, "results": rows})
         # -- the registration PDF
         if parts == ["decks", "exportPdf"] and m == "POST":
             self.pdfs.append({**body, "by": who})
