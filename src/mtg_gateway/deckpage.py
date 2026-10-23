@@ -1154,7 +1154,7 @@ def cards_html(
         "<template class='icons'>"
         + "".join(
             f"<span data-ic='{n}'>{icon(n)}</span>"
-            for n in ("eye", "bookmark", "swap", "tag", "eye-off", "x", "edit", "external", "image")
+            for n in ("eye", "bookmark", "swap", "tag", "eye-off", "x", "edit", "external", "image", "check")
         )
         + "</template>"
     )

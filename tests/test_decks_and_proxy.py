@@ -616,15 +616,17 @@ async def test_archidekt_nodeck_rows_stay_out_of_a_new_deck_count(stack: Stack) 
     assert "in_deck" not in sol and "no_price" not in sol
 
 
-async def test_custom_nodeck_category_counts_in_a_new_deck_with_a_warning(stack: Stack) -> None:
-    """A new deck gets only category names, so a custom category flagged {noDeck} is made as a
-    plain category and its cards count in the deck: the proposal counts them there and says so,
-    instead of promising a split the created deck would not have."""
+async def test_a_new_deck_keeps_a_custom_categorys_switches(stack: Stack) -> None:
+    """A custom category flagged {noDeck} or {noPrice} keeps its switches in the new deck (0.7.41
+    made it plain, so its cards counted, and warned): the proposal shows the category as a line of
+    its own and does not count its cards; applying makes the deck, then the category with its
+    switches, and only then adds the cards, and reads the switches back."""
+    h, ark = stack.h, stack.ark
     token = await linked_user(stack)
-    text = "1 Sol Ring\n1 Opt [Considering{noDeck}{noPrice}]\n1 Negate [Maybeboard{noDeck}]\n"
+    text = "1 Sol Ring\n1 Opt [Considering{noDeck}{noPrice}]\n1 Island [Maybeboard{noDeck}]\n"
     p = structured(
         await call(
-            stack.h,
+            h,
             token,
             "propose_new_deck",
             {"name": "Flags", "deck_format": "custom", "decklist_text": text},
@@ -632,11 +634,25 @@ async def test_custom_nodeck_category_counts_in_a_new_deck_with_a_warning(stack:
     )
     assert p["ok"], p
     assert p["diff"].splitlines()[0] == (
-        "New custom deck 'Flags' (2 cards, 1 more in the maybeboard or sideboard, private)"
+        "New custom deck 'Flags' (1 cards, 2 more in the maybeboard or sideboard, private)"
     )
+    assert "New category “Considering”: Not in deck on, Not in price on." in p["diff"]
+    assert not p.get("warnings"), p
     opt = next(c for c in p["changes"]["cards"] if c["name"] == "Opt")
-    assert "in_deck" not in opt and opt["categories"] == ["Considering"]
-    assert any("Considering" in w and "count in the deck" in w for w in p["warnings"]), p["warnings"]
+    assert opt["in_deck"] is False and opt["categories"] == ["Considering"]
+    assert p["changes"]["category_flags"] == [
+        {"name": "Considering", "includedInDeck": False, "includedInPrice": False, "isPremier": False}
+    ]
+    a = await apply_any(h, token, p["proposal_id"])
+    assert a["ok"] and a["state"] == "applied" and a["result"]["verified"] is True, a
+    new_id = int(a["result"]["deck_id"])
+    assert [(c["deck"], c["name"]) for c in ark.category_creates] == [(new_id, "Considering")]
+    # the category is made before any card goes in
+    calls = [c for c in ark.calls if str(new_id) in c[1] or "createCategory" in c[1]]
+    first_card = next(i for i, c in enumerate(calls) if "modifyCards" in c[1])
+    assert any("createCategory" in c[1] for c in calls[:first_card]), calls
+    cat = next(c for c in ark.decks[new_id]["categories"] if c["name"] == "Considering")
+    assert cat["includedInDeck"] is False and cat["includedInPrice"] is False
 
 
 def test_new_deck_inputs_mark_rows_outside_the_deck() -> None:
@@ -1209,6 +1225,10 @@ async def test_snapshots_list_and_restore_through_a_proposal(stack: Stack) -> No
         "-1 Aesi, Tyrant of Gyre Strait (cmr 365)",
         "-1 Arcane Signet (xxx 1) [Ramp]",
         "14 -> 15 Forest (cmr 510)",
+        # Ramp came with the Arcane Signet the edit added: the deck had no such category then
+        # (0.7.42: a restore deletes a category added since, once its cards are gone)
+        "Delete category “Ramp” (added since the snapshot). Archidekt tabs already open on this deck "
+        "show the old categories until they are reloaded.",
     }, lines
     assert len(ark.patches) == 3  # proposing wrote nothing
 
@@ -1218,6 +1238,7 @@ async def test_snapshots_list_and_restore_through_a_proposal(stack: Stack) -> No
     rows = {c["card"]["oracleCard"]["name"]: c for c in ark.decks[42]["cards"]}
     assert rows["Acidic Slime"]["quantity"] == 1 and rows["Acidic Slime"]["card"]["id"] == 5000
     assert rows["Forest"]["quantity"] == 15 and "Arcane Signet" not in rows
+    assert "Ramp" not in {c["name"] for c in ark.decks[42]["categories"]}
     assert rows["Aesi, Tyrant of Gyre Strait"]["modifier"] == "Foil"
     assert rows["Aesi, Tyrant of Gyre Strait"]["categories"] == ["Commander"]
     assert a2["snapshot_id"] != a["snapshot_id"]  # the restore itself is undoable

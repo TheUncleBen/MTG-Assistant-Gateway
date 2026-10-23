@@ -44,7 +44,7 @@ TOOLS: dict[str, ToolWords] = {
     "get_proposal": ToolWords("Read a change", "Show me that change"),
     "list_snapshots": ToolWords("List snapshots", "List my deck snapshots"),
     "propose_restore_snapshot": ToolWords("Propose a restore", "Put my deck back to that snapshot"),
-    "propose_deck_categories": ToolWords("Propose category changes", "Rename a category in my deck"),
+    "propose_deck_categories": ToolWords("Propose category changes", "Add, delete or rename a deck category"),
     "apply_proposal": ToolWords("Apply a change", "Apply that change"),
     "confirm_proposal": ToolWords("Approve or reject from a chat card", "Approve (a chat card's button)"),
     "reject_proposal": ToolWords("Reject a change", "Reject that change"),

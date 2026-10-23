@@ -3,6 +3,7 @@ form behind My decks' folder boxes without scripts (POST /folders)."""
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from types import SimpleNamespace
@@ -13,17 +14,30 @@ from starlette.responses import JSONResponse, RedirectResponse, Response
 
 from . import modes, prefs, recheck, ui
 from .actions import COLLABORATOR_NOTE, collaborator_by_hand, collaborator_target, profile_url
-from .archidekt import FORMAT_IDS, ArchidektError, Deck, featured_scryfall_id, format_label, rich_text
+from .archidekt import (
+    FORMAT_IDS,
+    GAME_IDS,
+    GAME_LABELS,
+    ArchidektError,
+    Deck,
+    featured_scryfall_id,
+    format_label,
+    rich_text,
+)
 from .busy import busy_response
 from .companion import DECK_CSP, FORMAT_CHOICES, INDENT, SETTINGS_OK_MESSAGES
 from .deckpage import card_image, deck_title, delete_box_html
 from .decks import (
     CATEGORY_FLAGS,
+    CATEGORY_HAS_CARDS,
+    MAX_CATEGORY_CHANGES,
     DeckError,
     category_change_rows,
+    category_line,
     current_client,
     deck_categories,
     parse_category_changes,
+    unused_category_changes,
 )
 from .pages import (
     BROWSER_CLIENT_ID,
@@ -45,6 +59,9 @@ if TYPE_CHECKING:
 # to their own section (#cover, #tags ...), so the notice shows next to the form that was used.
 OK_SECTIONS = {
     "categories": "categories",
+    "category_created": "categories",
+    "category_deleted": "categories",
+    "categories_unused": "categories",
     "cover": "cover",
     "cover_auto": "cover",
     "tag_added": "tags",
@@ -101,12 +118,22 @@ SETTINGS_CSS = """
 .ds .ds-cats li{align-items:flex-start;padding:.35rem 0}
 .ds .ds-cats .nm{flex:1 1 14rem;min-width:0}
 .ds .ds-cats .nm input{width:100%;min-height:44px;font-weight:700}
-.ds .ds-cats .ds-sw{display:flex;flex-wrap:wrap;gap:0 1rem;flex:0 1 auto}
-.ds .ds-cats .switch.ds-flag{min-height:44px;margin:0;padding:0;border:0;border-radius:0;background:none;
-  font-size:.95rem}
-.ds .ds-cats .ro .why{flex:1 1 100%;color:var(--text-muted);font-size:.9rem}
+.ds .ds-cats .ds-sw,.ds form.catnew .ds-sw{display:flex;flex-wrap:wrap;gap:0 1rem;flex:0 1 auto}
+.ds .ds-cats .switch.ds-flag,.ds form.catnew .switch.ds-flag{min-height:44px;margin:0;padding:0;border:0;
+  border-radius:0;background:none;font-size:.95rem}
+.ds .ds-cats .del{flex:0 0 auto;margin:0;min-height:44px;min-width:44px;width:auto;padding:0 .6rem}
+.ds .ds-cats .cnt{flex:0 0 auto;color:var(--text-muted);font-size:.9rem;min-height:44px;
+  display:inline-flex;align-items:center}
+.ds form.catnew{margin-top:1rem;border-top:1px solid var(--border-soft);padding-top:.75rem}
+.ds form.catnew h3{margin:0 0 .5rem;font-size:1rem}
+.ds form.catnew .row{display:flex;flex-wrap:wrap;gap:.4rem .9rem;align-items:center}
+.ds form.catnew .row input[type=text]{flex:1 1 14rem;min-height:44px;margin:0}
+.ds form.catnew .row .btn{flex:0 0 auto;width:auto;margin:0}
+.ds .confirmform label.mv{display:block;font-weight:700;margin:.75rem 0 .25rem}
 .ds .ds-cats + .acts{border-top:0;padding-top:.5rem}
-@media (max-width:599.98px){.ds .ds-cats .nm{flex-basis:100%}.ds .ds-cats .ds-sw{width:100%;gap:0 .75rem}}
+@media (max-width:599.98px){.ds .ds-cats .nm{flex-basis:100%}.ds .ds-cats .ds-sw{width:100%;gap:0 .75rem}
+  .ds form.catnew .ds-sw{width:100%;gap:0 .75rem}}
+.ds form.catnew .row .btn{max-width:100%;white-space:normal}
 .ds .ds-cover{display:grid;grid-template-columns:9rem minmax(0,1fr);gap:1rem;align-items:center}
 .ds .ds-cover .pv{width:100%;max-width:none;aspect-ratio:4/3;border-radius:var(--radius-panel);
   object-fit:cover;background:var(--surface-2);display:grid;place-items:center;text-align:center;
@@ -137,12 +164,74 @@ SETTINGS_CSS = """
 
 NOTHING_TO_SAVE = "Nothing to save: no name or switch was changed."
 COUNTS_TITLE = modes.CATEGORY_CONFIRM_TITLES[modes.CATEGORY_COUNTS_CONFIRM]
+DELETE_TITLE = modes.CATEGORY_CONFIRM_TITLES[modes.CATEGORY_DELETE_CONFIRM]
 
 
-def category_baseline_fields(c: dict[str, Any]) -> str:
+MAIN_FIELDS = (
+    "name",
+    "description",
+    "deck_format",
+    "edh_bracket",
+    "private",
+    "unlisted",
+    "theorycrafted",
+    "game",
+)
+
+
+def main_values(deck: Deck) -> dict[str, str]:
+    """The Main settings form's fields as the page draws them for ``deck``: the baseline its hidden
+    was_ fields carry, so a save sends only what the member changed and a page opened before a
+    change made elsewhere never puts the old values back (security review 0.7.42). The description
+    is carried as its digest, so the page does not hold it twice."""
+    return {
+        "name": deck.name,
+        "description": _digest(rich_text(deck.description)),
+        "deck_format": deck.format or "",
+        "edh_bracket": str(deck.edh_bracket or ""),
+        "private": "1" if deck.private else "",
+        "unlisted": "1" if deck.unlisted else "",
+        "theorycrafted": "1" if deck.theorycrafted else "",
+        "game": next((k for k, i in GAME_IDS.items() if i == deck.game), "any"),
+    }
+
+
+def _digest(text: str) -> str:
+    return hashlib.sha256(text.replace("\r\n", "\n").encode()).hexdigest()[:32]
+
+
+def posted_main_values(data: dict[str, str]) -> dict[str, str]:
+    """``main_values`` for a posted Main settings form (an unchecked box sends no key)."""
+    return {
+        "name": data.get("name", "").strip(),
+        "description": _digest(data.get("description", "")),
+        "deck_format": data.get("deck_format", ""),
+        "edh_bracket": data.get("edh_bracket", ""),
+        "private": "1" if data.get("private") else "",
+        "unlisted": "1" if data.get("unlisted") else "",
+        "theorycrafted": "1" if data.get("theorycrafted") else "",
+        "game": data.get("game") or "any",
+    }
+
+
+def category_keys(deck: Deck) -> list[tuple[str, dict[str, Any]]]:
+    """Each category of the panel with the key its fields carry: its record id, or ``d1``, ``d2``...
+    in the panel's order for one Archidekt sent without a record (its default Sideboard or
+    Maybeboard until someone creates one; the change gives it its record)."""
+    out, n = [], 0
+    for c in deck_categories(deck):
+        if c["record"]:
+            out.append((str(int(c["id"])), c))
+        else:
+            n += 1
+            out.append((f"d{n}", c))
+    return out
+
+
+def category_baseline_fields(c: dict[str, Any], key: str | None = None) -> str:
     """The hidden fields that carry what an editable category (``deck_categories``) was when the
     page was shown: the Save compares the deck with them before anything is proposed (M-1)."""
-    cid = int(c["id"])
+    cid = key or str(int(c["id"]))
     out = f"<input type='hidden' name='was_name_{cid}' value='{_esc(c['name'])}'>"
     for key, _label, _field, _inv in CATEGORY_FLAGS:
         out += f"<input type='hidden' name='was_{key}_{cid}' value='{'1' if c[key] else '0'}'>"
@@ -168,15 +257,15 @@ def category_changes_from_form(deck: Deck, data: dict[str, str]) -> list[dict[st
     assistant or on Archidekt), or a post without the page's baseline, is refused before
     anything is proposed, so a stale page never puts back a change made since (M-1)."""
     changes: list[dict[str, Any]] = []
-    for c in deck_categories(deck):
-        if not c["editable"] or f"name_{c['id']}" not in data:
+    keys = category_keys(deck)
+    for cid, c in keys:
+        if f"name_{cid}" not in data:
             continue
-        cid = int(c["id"])
         was_name = data.get(f"was_name_{cid}")
         was = {key: data.get(f"was_{key}_{cid}") for key, _l, _f, _i in CATEGORY_FLAGS}
         if was_name != c["name"] or any(was[k] != ("1" if c[k] else "0") for k in was):
             raise stale_categories_error()
-        entry: dict[str, Any] = {"id": cid}
+        entry: dict[str, Any] = {"id": int(cid)} if c["record"] else {"category": c["name"]}
         new = " ".join((data.get(f"name_{cid}") or "").split())
         if new and new != was_name:
             entry["rename_to"] = new
@@ -186,8 +275,8 @@ def category_changes_from_form(deck: Deck, data: dict[str, str]) -> list[dict[st
                 entry[key] = on
         if len(entry) > 1:
             changes.append(entry)
-    posted = {m.group(1) for k in data if (m := re.fullmatch(r"was_name_(\d+)", k))}
-    if posted - {str(c["id"]) for c in deck_categories(deck) if c["editable"]}:
+    posted = {m.group(1) for k in data if (m := re.fullmatch(r"was_name_(d?\d+)", k))}
+    if posted - {cid for cid, _c in keys}:
         raise stale_categories_error()  # a category the page showed is gone
     return changes
 
@@ -269,8 +358,16 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
         # a submitted form carries no key for an unchecked box, so with values a missing key is off
         private = v.get("private", "") if values else ("1" if deck.private else "")
         unlisted = v.get("unlisted", "") if values else ("1" if deck.unlisted else "")
+        theorycrafted = v.get("theorycrafted", "") if values else ("1" if deck.theorycrafted else "")
+        game_current = v.get("game") or next((k for k, i in GAME_IDS.items() if i == deck.game), "any")
+        game_opts = "".join(
+            f"<option value='{k}'{sel(game_current == k)}>{_esc(label)}</option>"
+            for k, label in (("any", "Any"), *GAME_LABELS.items())
+        )
         did = _esc(deck.id)
         title = deck_title(deck)
+        # a form drawn again after a refusal keeps the baseline it was opened with
+        baseline = {k: v.get(f"was_{k}", now) for k, now in main_values(deck).items()}
 
         def switch(name: str, on: str) -> str:
             return (
@@ -302,8 +399,8 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
         nav = (
             "<nav class='ds-nav' aria-label='Sections'><ol>"
             + "".join(
-                f"<li><a href='#{'ds-delete' if k == 'delete' else k}'{' class=dz' if k == 'delete' else ''}>"
-                f"{_esc(t)}</a></li>"
+                f"<li><a href='#{'ds-' + k if k in ('main', 'delete') else k}'"
+                f"{' class=dz' if k == 'delete' else ''}>{_esc(t)}</a></li>"
                 for k, t in sections
             )
             + "</ol></nav>"
@@ -313,9 +410,12 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
             + nav
             + f"<div class='ds'><a class='back' href='/decks/{did}'>← {_esc(title)}</a>"
             + ui.page_head("Deck settings", f"“{title}”")
-            + f"<form method='post' action='/decks/{did}/settings' class='ui-card settings' id='main'>"
+            + f"<form method='post' action='/decks/{did}/settings' class='ui-card settings' id='ds-main'>"
             f"<input type='hidden' name='csrf' value='{_esc(csrf)}'>"
-            "<h2>Main settings</h2>"
+            + "".join(
+                f"<input type='hidden' name='was_{k}' value='{_esc(was)}'>" for k, was in baseline.items()
+            )
+            + "<h2>Main settings</h2>"
             + main_note
             + row(
                 "<label for='name'>Deck name</label>",
@@ -346,6 +446,18 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
                 "<label for='unlisted'>Unlisted</label>",
                 "Viewable with a direct link, but not shown in lists.",
                 switch("unlisted", unlisted),
+            )
+            + row(
+                "<label for='theorycrafted'>Theorycrafted</label>",
+                "Not included by default in the In decks view on Archidekt.",
+                # the marker tells a form from before this release (no switch) from one switched off
+                "<input type='hidden' name='theorycrafted_shown' value='1'>"
+                + switch("theorycrafted", theorycrafted),
+            )
+            + row(
+                "<label for='game'>Game type</label>",
+                "Where the deck is played: paper, MTGO or Arena.",
+                f"<select id='game' name='game'>{game_opts}</select>",
             )
             + f"<div class='acts'><button class='btn btn-primary'>{icon('check')} Save changes</button>"
             f"<a class='btn' href='/decks/{did}'>Cancel</a></div>"
@@ -380,35 +492,28 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
     def categories_section(
         deck: Deck, csrf: str | None, note: str = "", values: dict[str, str] | None = None
     ) -> str:
-        """The deck's categories, editable (F7, Ben 21 Oct: option a): each name in its box and
-        three switches, Premier, Not in deck and Not in price; a plain Save categories (the main
-        settings' Save changes stays the page's one orange button) and Undo changes, which puts
-        the boxes back before saving. Anything that touches Premier, the Commander or a
-        commander's category asks first (a box with scripts, static/menus.js; a confirmation page
-        without), with the backend's own sentence. A category Archidekt sent without a record
-        (its default Sideboard or Maybeboard until someone creates one) is read-only here.
-        ``values``: the fields of a refused save, kept in the boxes to fix."""
+        """The deck's categories, as archidekt.com's deck settings has them (F7, Ben 21 Oct: option
+        a; create and delete, Ben 22 Oct): each name in its box and three switches, Premier, Not in
+        deck and Not in price; a plain Save categories (the main settings' Save changes stays the
+        page's one orange button) and Undo changes, which puts the boxes back before saving. Each
+        category with a record has a Delete button (an empty one is deleted; one with cards asks
+        where its cards go first, as Archidekt only deletes an empty category), and under the list
+        "New category" and, when there are any, "Delete unused categories". Anything that touches
+        Premier, the Commander or a commander's category, or which cards count, asks first, and so
+        does every delete (a box with scripts, static/menus.js; a confirmation page without), with
+        the backend's own sentence. Archidekt's default Sideboard or Maybeboard without a record is
+        edited like any other: the save gives it its record. ``values``: the fields of a refused
+        save, kept in the boxes to fix."""
         did = _esc(deck.id)
         items = ""
-        for c in deck_categories(deck):
+        keys = category_keys(deck)
+        names = [c["name"] for _k, c in keys]
+        for cid, c in keys:
             name = _esc(c["name"])
-            if not c["editable"]:
-                pills = "".join(
-                    f"<span class='ds-flag'>{_esc(label)}</span>"
-                    for key, label, _f, _i in CATEGORY_FLAGS
-                    if c[key]
-                )
-                items += (
-                    f"<li class='ro' data-name='{name}'><span class='nm'>{name}</span>"
-                    f"<span class='ds-flags'>{pills}</span>"
-                    "<span class='why'>Can't be changed from here yet.</span></li>"
-                )
-                continue
-            cid = int(c["id"])
             typed = values.get(f"name_{cid}") if values else None
             shown = _esc(typed) if typed is not None else name
 
-            def on(key: str, c: dict[str, Any] = c, cid: int = cid) -> bool:
+            def on(key: str, c: dict[str, Any] = c, cid: str = cid) -> bool:
                 return values.get(f"{key}_{cid}") == "1" if values else bool(c[key])
 
             switches = "".join(
@@ -418,18 +523,57 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
                 for key, label, _f, _i in CATEGORY_FLAGS
             )
             commander = " data-commander='1'" if c["commander"] else ""
+            n = int(c["cards"])
+            count = f"<span class='cnt'>{n} card{'s' if n != 1 else ''}</span>"
+            delete = ""
+            if c["record"]:
+                # the box adds the commander or counts sentence the gateway's own page adds
+                also = (
+                    modes.CATEGORY_COMMANDER_CONFIRM
+                    if c["commander"] or c["premier"] or c["name"].casefold() == "commander"
+                    else modes.CATEGORY_COUNTS_CONFIRM
+                    if c["name"].casefold() in ("sideboard", "maybeboard")
+                    else ""
+                )
+                delete = (
+                    f"<button class='btn btn-outline-danger del' form='catdel' name='delete' value='{cid}' "
+                    f"data-name='{name}' data-cards='{n}' data-also='{_esc(also)}' "
+                    f"aria-label='Delete “{name}”' "
+                    f"title='Delete “{name}”'>{icon('trash')}</button>"
+                )
             items += (
                 f"<li data-cat='{cid}' data-name='{name}'{commander}>"
                 f"<span class='nm'><label class='sr-only' for='cat-{cid}-name'>Name of “{name}”</label>"
                 f"<input id='cat-{cid}-name' type='text' name='name_{cid}' value='{shown}' maxlength='60' "
-                "required>" + category_baseline_fields(c) + "</span>"
-                f"<span class='ds-sw' role='group' aria-label='Switches of “{name}”'>{switches}</span></li>"
+                "required>" + category_baseline_fields(c, cid) + "</span>"
+                f"<span class='ds-sw' role='group' aria-label='Switches of “{name}”'>{switches}</span>"
+                f"{count}{delete}</li>"
             )
+        unused = unused_category_changes(deck)
+        more = len(unused) > MAX_CATEGORY_CHANGES  # one press deletes the first 30, the rest next time
+        unused = unused[:MAX_CATEGORY_CHANGES]
+        new_switches = "".join(
+            f"<label class='switch ds-flag'><input type='checkbox' name='{key}' value='1'>"
+            f"<span class='track'></span><span class='t'>{_esc(label)}</span></label>"
+            for key, label, _f, _i in CATEGORY_FLAGS
+        )
+        unused_names = ", ".join(f"“{u['category']}”" for u in unused)
+        try:
+            unused_wait = modes.category_wait(category_change_rows(deck, unused)[1]) if unused else None
+        except DeckError:  # a damaged deck answer: the press is checked again, and refused there
+            unused_wait = None
+        unused_also = {
+            modes.CATEGORY_COMMANDER_REASON: modes.CATEGORY_COMMANDER_CONFIRM,
+            modes.CATEGORY_COUNTS_REASON: modes.CATEGORY_COUNTS_CONFIRM,
+        }.get(unused_wait or "", "")
         return (
             "<section class='ui-card' id='categories' data-confirm-title='Change the commander category?' "
             f"data-confirm='{_esc(modes.CATEGORY_COMMANDER_CONFIRM)}' "
             f"data-counts-confirm-title='{_esc(COUNTS_TITLE)}' "
-            f"data-counts-confirm='{_esc(modes.CATEGORY_COUNTS_CONFIRM)}'>"
+            f"data-counts-confirm='{_esc(modes.CATEGORY_COUNTS_CONFIRM)}' "
+            f"data-delete-confirm-title='{_esc(DELETE_TITLE)}' "
+            f"data-delete-confirm='{_esc(modes.CATEGORY_DELETE_CONFIRM)}' "
+            f"data-names='{_esc(json.dumps(names))}'>"
             "<h2>Categories</h2>"
             + note
             + f"<form method='post' action='/decks/{did}/categories#categories' id='catform'>"
@@ -437,11 +581,38 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
             f"<ul class='plain ds-list ds-cats'>{items or '<li class=muted>No categories yet.</li>'}</ul>"
             + (
                 f"<div class='acts'><button class='btn' name='action' value='save'>{icon('check')} "
-                "Save categories</button><button type='reset' class='btn'>Undo changes</button></div>"
+                "Save categories</button><button type='reset' class='btn'>Undo changes</button>"
+                + (
+                    "<button class='btn btn-outline-danger' form='catunused' name='action' value='unused' "
+                    f"data-names='{_esc(unused_names)}' data-also='{_esc(unused_also)}'>{icon('trash')} "
+                    "Delete unused categories "
+                    + (f"({len(unused)} at a time)" if more else f"({len(unused)})")
+                    + "</button>"
+                    if unused
+                    else ""
+                )
+                + "</div>"
                 if items
                 else ""
             )
-            + "</form><p class='muted small foot'>Moving cards between categories stays in the deck editor "
+            + "</form>"
+            # the row Delete buttons and Delete unused belong to these forms (``form`` attribute),
+            # so a delete never sends the panel's typed names along
+            + f"<form method='post' action='/decks/{did}/categories#categories' id='catdel'>"
+            f"<input type='hidden' name='csrf' value='{_esc(csrf)}'>"
+            "<input type='hidden' name='action' value='delete'></form>"
+            + f"<form method='post' action='/decks/{did}/categories#categories' id='catunused'>"
+            f"<input type='hidden' name='csrf' value='{_esc(csrf)}'></form>"
+            + f"<form method='post' action='/decks/{did}/categories#categories' class='catnew' id='catnew'>"
+            f"<input type='hidden' name='csrf' value='{_esc(csrf)}'>"
+            "<input type='hidden' name='action' value='create'>"
+            "<h3><label for='newcat'>New category</label></h3><div class='row'>"
+            "<input id='newcat' type='text' name='category' maxlength='60' required "
+            "placeholder='Name, e.g. Removal'>"
+            "<span class='ds-sw' role='group' aria-label='Switches of the new category'>"
+            f"{new_switches}</span>"
+            f"<button class='btn'>{icon('plus')} Create category</button></div></form>"
+            + "<p class='muted small foot'>Moving single cards between categories is in the deck editor "
             "and on the deck page.</p></section>"
         )
 
@@ -766,7 +937,11 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
                     following=await following_or_none(sub),
                     follow_hint=str(exc.extra.get("follow_username") or ""),
                     typed_tag=(data.get("name") or "")[:40] if data.get("action") == "add" else "",
-                    cat_values=data if anchor == "categories" and not exc.extra.get("fresh") else None,
+                    cat_values=data
+                    if anchor == "categories"
+                    and (data.get("action") or "save") == "save"
+                    and not exc.extra.get("fresh")
+                    else None,
                 ),
                 sub,
                 sid,
@@ -786,19 +961,24 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
         back: str,
         *,
         danger: bool = False,
+        extra: str = "",
+        answer: str = "confirmed",
     ) -> str:
         """The second step of a one-press account action on the member's own pages (0.7.24): the
         question, then a form that sends the same fields again with ``confirmed`` and the page's
-        CSRF token, or Cancel back where they came from. Deleting a deck has its own typed-name form."""
+        CSRF token, or Cancel back where they came from. Deleting a deck has its own typed-name form.
+        ``extra``: more of the form, already escaped (a category delete's "move its cards to");
+        ``answer``: the field the yes sends (``move_ok`` for a pick that may need asking again)."""
         hidden = "".join(
             f"<input type='hidden' name='{_esc(k)}' value='{_esc(v)}'>" for k, v in fields.items()
         )
         return (
             f"<form method='post' action='{_esc(action_url)}' class='panel confirmform'>"
             f"<input type='hidden' name='csrf' value='{_esc(csrf)}'>{hidden}"
-            "<input type='hidden' name='confirmed' value='1'>"
+            f"<input type='hidden' name='{_esc(answer)}' value='1'>"
             f"<h2>{_esc(question)}</h2>"
             + (f"<p class='muted small'>{_esc(note)}</p>" if note else "")
+            + extra
             + "<div class='actions'>"
             + (
                 f"<button class='btn btn-outline-danger'>{icon('trash')} {_esc(yes)}</button>"
@@ -853,29 +1033,100 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
 
         async def run(sub: str, data: dict[str, str], sid: str | None) -> str | Response:
             deck = await decks.get_own_deck(sub, deck_id)
-            changes = category_changes_from_form(deck, data)
-            if not changes:
-                raise DeckError("invalid", NOTHING_TO_SAVE)
-            _plan, rows = category_change_rows(deck, parse_category_changes(changes))
-            why = modes.hand_edit_confirm("categories", rows)
-            if why and data.get("confirmed") != "1":
-                fields = {k: v for k, v in data.items() if k not in ("csrf", "confirmed")}
+            action = data.get("action") or "save"
+            unused = action == "unused"
+            move_field = ""
+            ok, yes = "categories", "Save categories"
+            if action == "create":
+                changes: list[dict[str, Any]] = [
+                    {
+                        "action": "create",
+                        "category": " ".join((data.get("category") or "").split()),
+                        **{key: True for key, _l, _f, _i in CATEGORY_FLAGS if data.get(key) == "1"},
+                    }
+                ]
+                ok, yes = "category_created", "Create category"
+            elif action == "delete":
+                key = data.get("delete") or ""
+                if not re.fullmatch(r"[0-9]{1,12}", key):
+                    raise DeckError("invalid", "That category could not be identified.")
+                cat = next((c for c in deck_categories(deck) if c["id"] == int(key)), None)
+                if cat is None:
+                    raise stale_categories_error()
+                move = " ".join((data.get("move_cards_to") or "").split())
+                changes = [{"action": "delete", "id": int(key), **({"move_cards_to": move} if move else {})}]
+                ok, yes = "category_deleted", f"Delete “{cat['name']}”"
+                if cat["cards"] and not move:
+                    # Archidekt only deletes an empty category: the member picks where its cards go
+                    n = int(cat["cards"])
+                    targets = "".join(
+                        f"<option value='{_esc(c['name'])}'>{_esc(c['name'])}</option>"
+                        for c in deck_categories(deck)
+                        if c["name"] != cat["name"]
+                    )
+                    has_cards = CATEGORY_HAS_CARDS.format(
+                        name=cat["name"], n=n, s="s" if n != 1 else "", them="them" if n != 1 else "it"
+                    )
+                    move_field = (
+                        f"<p>{_esc(has_cards)}</p>"
+                        "<label class='mv' for='move_cards_to'>Move its cards to</label>"
+                        f"<select id='move_cards_to' name='move_cards_to' required>{targets}</select>"
+                    )
+            elif unused:
+                changes = []
+                ok, yes = "categories_unused", "Delete unused categories"
+            else:
+                changes = category_changes_from_form(deck, data)
+                if not changes:
+                    raise DeckError("invalid", NOTHING_TO_SAVE)
+            if move_field:
+                rows: list[dict[str, Any]] = [{"kind": "deck_category", "delete": True}]
+                why: str | None = modes.CATEGORY_DELETE_CONFIRM
+            else:
+                wanted = parse_category_changes(changes) if changes else []
+                if unused:
+                    wanted += unused_category_changes(deck, MAX_CATEGORY_CHANGES)  # the rest next time
+                    if not wanted:
+                        raise DeckError("invalid", "The deck has no unused categories; nothing would change.")
+                _plan, rows = category_change_rows(deck, wanted)
+                why = modes.hand_edit_confirm("categories", rows)
+            # picking where a deleted category's cards go (on its page or in the box, ``move_ok``) is
+            # a yes to the delete only: a pick that makes them commanders or changes which cards
+            # count is asked once more, with that sentence (S-01, review 0.7.42)
+            said_yes = data.get("confirmed") == "1" or (
+                data.get("move_ok") == "1" and why == modes.CATEGORY_DELETE_CONFIRM
+            )
+            if why and not said_yes:
+                drop = ("csrf", "confirmed", "move_ok") + (("move_cards_to",) if move_field else ())
+                fields = {k: v for k, v in data.items() if k not in drop}
+                if action != "save":
+                    fields["action"] = action
+                note, title = why, modes.CATEGORY_CONFIRM_TITLES[why]
+                if action in ("delete", "unused"):
+                    # a delete is asked as a delete, with the commander or counts sentence after
+                    title = modes.CATEGORY_CONFIRM_TITLES[modes.CATEGORY_DELETE_CONFIRM]
+                    note = modes.CATEGORY_DELETE_CONFIRM + (
+                        "" if why == modes.CATEGORY_DELETE_CONFIRM else " " + why
+                    )
+                    if not move_field:
+                        note += " " + " ".join(category_line(r).split(" Archidekt tabs")[0] for r in rows)
                 body = confirm_form(
                     f"/decks/{deck.id}/categories#categories",
                     _csrf(s, sid),
                     fields,
-                    modes.CATEGORY_CONFIRM_TITLES[why],
-                    why,
-                    "Save categories",
+                    title,
+                    note,
+                    yes,
                     f"/decks/{deck.id}/settings#categories",
+                    danger=action in ("delete", "unused"),
+                    extra=move_field,
+                    answer="move_ok" if move_field else "confirmed",
                 )
                 return page("Confirm categories", body, sub=sub, sid=sid, current="/decks", deck_css=True)
-            p = await decks.propose_categories(sub, deck.id, changes)
+            p = await decks.propose_categories(sub, deck.id, changes, delete_unused=unused)
             done = await apply_now(sub, p["proposal_id"], ok="categories", deck_id=deck.id)
             if done.headers.get("location") == f"/decks/{deck.id}?ok=categories":
-                return RedirectResponse(
-                    f"/decks/{deck.id}/settings?ok=categories#categories", status_code=303
-                )
+                return RedirectResponse(f"/decks/{deck.id}/settings?ok={ok}#categories", status_code=303)
             return done  # Archidekt refused or writes are off: the review page says why
 
         return await hand_action(request, deck_id, run, ok="categories", anchor="categories")
@@ -1052,15 +1303,35 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
             "private": bool(data.get("private")),
             "unlisted": bool(data.get("unlisted")),
         }
+        if data.get("theorycrafted_shown"):
+            details["theorycrafted"] = bool(data.get("theorycrafted"))
+        if data.get("game"):
+            details["game"] = data["game"]
         if data.get("deck_format"):
             details["deck_format"] = data["deck_format"]
         bracket = data.get("edh_bracket", "")
         details["edh_bracket"] = int(bracket) if re.fullmatch(r"[1-5]", bracket) else None
+        if "was_name" in data:
+            # only what the member changed on the page is sent: a field left as the page drew it
+            # keeps the deck's current value, even when that changed elsewhere since
+            posted = posted_main_values(data)
+            for k in MAIN_FIELDS:
+                if k in details and f"was_{k}" in data and posted[k] == data[f"was_{k}"]:
+                    del details[k]
         # only a Commander deck has a bracket: archidekt.com's own settings form sends none for
         # another format, so a bracket left picked when the format moves off Commander goes
         fmt = details.get("deck_format") or deck.format
-        if FORMAT_IDS.get(str(fmt or "")) != FORMAT_IDS["commander"]:
+        if FORMAT_IDS.get(str(fmt or "")) != FORMAT_IDS["commander"] and (
+            "edh_bracket" in details or deck.edh_bracket is not None
+        ):
             details["edh_bracket"] = None
+        if not details:
+            return settings_response(
+                settings_form(deck, _csrf(s, sid), data, "Nothing to save: nothing on the form was changed."),
+                sub,
+                sid,
+                400,
+            )
         current_client.set(BROWSER_CLIENT_ID)
         try:
             p = await decks.propose_deck_details(sub, deck.id, details)

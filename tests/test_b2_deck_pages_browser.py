@@ -287,7 +287,7 @@ def test_the_categories_panel_fits_reads_and_saves_everywhere(
         assert not ramp.locator("input[name^=not_in_price_]").is_checked()
         # a plain change saves at once, no box
         ramp.locator("input[type=text]").fill("Mana")
-        panel.locator("button[name=action]").click()
+        panel.locator("button[name=action][value=save]").click()
         page.wait_for_url(lambda u: "ok=categories" in u, timeout=5000)
         page.wait_for_load_state("networkidle")
         assert page.evaluate(OPEN_BOXES) == 0
@@ -297,7 +297,7 @@ def test_the_categories_panel_fits_reads_and_saves_everywhere(
         # touching the commander asks first, in the box, with the backend's sentence
         cmd = page.locator("#categories li[data-name='Commander']")
         cmd.locator("label.ds-flag", has_text="Premier").click()
-        panel.locator("button[name=action]").click()
+        panel.locator("button[name=action][value=save]").click()
         box = page.locator(".mtgbox[role=dialog]:not([hidden])")
         box.wait_for(timeout=3000)
         assert box.locator("h2").inner_text() == "Change the commander category?"
@@ -308,7 +308,7 @@ def test_the_categories_panel_fits_reads_and_saves_everywhere(
         box.wait_for(state="hidden", timeout=3000)
         assert page.evaluate(OPEN_BOXES) == 0
         assert len(server.ark.category_patches) == 1
-        panel.locator("button[name=action]").click()
+        panel.locator("button[name=action][value=save]").click()
         box = page.locator(".mtgbox[role=dialog]:not([hidden])")
         box.wait_for(timeout=3000)
         box.locator(".acts button.primary").click()
@@ -319,7 +319,7 @@ def test_the_categories_panel_fits_reads_and_saves_everywhere(
         sent = len(server.ark.category_patches)
         panel = page.locator("#categories")
         panel.locator("li[data-name='Mana'] label.ds-flag:has(input[name^=not_in_deck_])").click()
-        panel.locator("button[name=action]").click()
+        panel.locator("button[name=action][value=save]").click()
         box = page.locator(".mtgbox[role=dialog]:not([hidden])")
         box.wait_for(timeout=3000)
         assert box.locator("h2").inner_text() == "Change which cards count in the deck?"
@@ -327,5 +327,95 @@ def test_the_categories_panel_fits_reads_and_saves_everywhere(
         box.locator("button", has_text="Cancel").click()
         box.wait_for(state="hidden", timeout=3000)
         assert len(server.ark.category_patches) == sent
+        assert not errors, errors
+        browser.close()
+
+
+@pytest.mark.parametrize(("width", "scheme"), [(344, "light"), (1280, "dark")])
+def test_create_and_delete_categories_ask_in_the_box(server: Server, width: int, scheme: str) -> None:
+    """Create and delete (Ben 22 Oct, one pane of glass): a plain new category is made at once; a
+    row's Delete always asks in the box, and one with cards asks where they go first (Archidekt
+    only deletes an empty category), the cards moving before the delete; every button inside the
+    window, 44 px on a phone."""
+    from playwright.sync_api import sync_playwright
+
+    from .test_deck_categories import RAMP, _give_categories
+
+    _give_categories(server.ark)
+    _chromium()
+    sid = server.sign_in_and_link()
+    with sync_playwright() as p:
+        touch = width < 600
+        browser, page, errors = _page(p, server, sid, width, color_scheme=scheme, has_touch=touch)
+        page.goto(f"{server.base}/decks/42/settings", wait_until="networkidle")
+        assert _overflow(page) == 0
+        panel = page.locator("#categories")
+        for b in panel.locator("button.del").all() + [panel.locator("#catnew button")]:
+            box_ = b.bounding_box()
+            assert box_ and box_["x"] >= 0 and box_["x"] + box_["width"] <= width, box_
+            assert box_["height"] >= (44 if touch else 32), box_
+        # a plain new category: no box, made at once
+        panel.locator("#newcat").fill("Removal")
+        panel.locator("#catnew button").click()
+        page.wait_for_url(lambda u: "ok=category_created" in u, timeout=5000)
+        page.wait_for_load_state("networkidle")
+        assert page.evaluate(OPEN_BOXES) == 0
+        assert [c["name"] for c in server.ark.category_creates] == ["Removal"]
+        # Delete on a category with cards: the box asks where they go
+        panel = page.locator("#categories")
+        panel.locator("li[data-name='Ramp'] button.del").click()
+        box = page.locator(".mtgbox[role=dialog]:not([hidden])")
+        box.wait_for(timeout=3000)
+        assert box.locator("h2").inner_text() == "Delete the category?"
+        assert "“Ramp” still has 2 cards." in box.inner_text()
+        assert "Ramp" not in box.locator("select option").all_inner_texts()
+        box.locator("select").select_option("Removal")
+        assert server.ark.category_deletes == []
+        box.locator(".acts button.danger").click()
+        page.wait_for_url(lambda u: "ok=category_deleted" in u, timeout=5000)
+        page.wait_for_load_state("networkidle")
+        assert len(server.ark.category_deletes) == 1 and server.ark.category_deletes_with_cards == []
+        rows = [r for r in server.ark.decks[42]["cards"] if r["card"]["oracleCard"]["name"] in RAMP]
+        assert rows and all(r["categories"] == ["Removal"] for r in rows), rows
+        assert page.locator("#categories li[data-name='Ramp']").count() == 0
+        assert not errors, errors
+        browser.close()
+
+
+def test_the_delete_box_says_when_the_picked_category_makes_the_cards_commanders(server: Server) -> None:
+    """Fact-check 0.7.42 (S-01's box): moving a deleted category's cards into Commander (or another
+    Premier category) makes them commanders, and into Maybeboard takes them out of the deck; the box
+    says so as soon as that category is picked, not only on the page that asks again after."""
+    from playwright.sync_api import sync_playwright
+
+    from mtg_gateway import modes
+
+    from .test_deck_categories import _give_categories
+
+    _give_categories(server.ark)
+    server.ark.decks[42]["categories"].append({"name": "Removal", "isPremier": False, "includedInDeck": True})
+    _chromium()
+    sid = server.sign_in_and_link()
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, 1280)
+        page.goto(f"{server.base}/decks/42/settings", wait_until="networkidle")
+        page.locator("#categories li[data-name='Ramp'] button.del").click()
+        box = page.locator(".mtgbox[role=dialog]:not([hidden])")
+        box.wait_for(timeout=3000)
+        warn = box.locator("[data-move-warn]")
+        # nothing is picked when the box opens (the first category is often Commander), and
+        # Delete waits for a pick
+        assert box.locator("select").input_value() == ""
+        assert box.locator(".acts button.danger").is_disabled() and not warn.is_visible()
+        for target, says in (
+            ("Commander", modes.CATEGORY_COMMANDER_CONFIRM),
+            ("Maybeboard", modes.CATEGORY_COUNTS_CONFIRM),
+            ("Removal", ""),
+        ):
+            box.locator("select").select_option(target)
+            assert warn.inner_text().strip() == says, (target, warn.inner_text())
+            assert (warn.get_attribute("role") == "status") and warn.is_visible() == bool(says)
+            assert box.locator(".acts button.danger").is_enabled()
+        assert server.ark.category_deletes == []
         assert not errors, errors
         browser.close()

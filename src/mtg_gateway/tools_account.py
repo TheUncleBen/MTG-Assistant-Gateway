@@ -36,7 +36,8 @@ def add_account_tools(state: AppState, h: SimpleNamespace) -> None:
         description=(
             "Step 1 of changing a deck's own settings rather than its cards, for decks the linked account "
             "owns. details holds only the settings to change: name, description, deck_format, "
-            "edh_bracket (null clears it), private, unlisted, and its organization: folder (an existing "
+            "edh_bracket (null clears it), private, unlisted, theorycrafted, game (any, paper, mtgo or "
+            "arena), and its organization: folder (an existing "
             "folder's name, as list_my_decks shows them), add_tags, remove_tags, cover (a card in the "
             "deck). This is the one tool for those; nothing else moves, tags or re-covers a deck. "
             "Fields already set that way are dropped "

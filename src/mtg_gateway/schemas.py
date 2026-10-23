@@ -174,6 +174,8 @@ class DeckChange(_Card):
             "set_printing",
             "set_label",
             "set_mana_value",
+            "set_companion",
+            "set_back_face",
         ],
         BeforeValidator(_lower),
     ] = Field(description="What to do with the card.")
@@ -208,6 +210,12 @@ class DeckChange(_Card):
         ge=0,
         le=15,  # the range the tool enforces
         description="For set_mana_value: the card's custom mana value, 0 to 15; null takes it off.",
+    )
+    companion: StrictBool | None = Field(
+        default=None, description="For set_companion: true makes the card the deck's companion, false not."
+    )
+    back_face: StrictBool | None = Field(
+        default=None, description="For set_back_face (a two-faced card): true shows its back face by default."
     )
 
 
@@ -262,6 +270,12 @@ class DeckDetails(BaseModel):
     )
     private: StrictBool | None = Field(default=None, description="Private deck.")
     unlisted: StrictBool | None = Field(default=None, description="Unlisted deck.")
+    theorycrafted: StrictBool | None = Field(
+        default=None, description="Theorycrafted: not included by default in Archidekt's In decks view."
+    )
+    game: Literal["any", "paper", "mtgo", "arena"] | None = Field(
+        default=None, description="Game type the deck is for: any, paper, mtgo or arena."
+    )
     folder: str | None = Field(
         default=None,
         description='Move the deck into this existing folder (its name; "" or "top" for the top level).',

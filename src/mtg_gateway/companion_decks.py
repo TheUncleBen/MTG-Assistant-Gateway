@@ -146,6 +146,16 @@ def new_deck_box_html(
         "<label class='switch'><input type='checkbox' name='private' value='1'"
         + (" checked" if private else "")
         + "><span class='track'></span>Private</label>"
+        "<label class='switch'><input type='checkbox' name='theorycrafted' value='1'"
+        + (" checked" if v.get("theorycrafted") else "")
+        + "><span class='track'></span>Theorycrafted</label>"
+        "<div class='field nd-game'><label for='game'>Game type</label><span class='sel'>"
+        "<select id='game' name='game'>"
+        + "".join(
+            f"<option value='{k}'{' selected' if v.get('game', 'any') == k else ''}>{label}</option>"
+            for k, label in (("any", "Any"), ("paper", "Paper"), ("mtgo", "MTGO"), ("arena", "Arena"))
+        )
+        + "</select></span></div>"
         "<div class='nd-cards'><span class='lbl' id='nd-cards-l'>Cards</span>"
         f"<div class='segc nd-tabs' role='tablist' aria-labelledby='nd-cards-l'>{tabs}</div>"
         "<div class='nd-src'>"
@@ -563,7 +573,11 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
         if not sub:
             return login_redirect("/decks/new")
         data = await form(request, limit=4_200_000)  # a deck .json export can reach a few MB
-        values = {k: v for k, v in data.items() if k in ("name", "format", "private", "source", "kind")}
+        values = {
+            k: v
+            for k, v in data.items()
+            if k in ("name", "format", "private", "theorycrafted", "game", "source", "kind")
+        }
         if not check_csrf(sid, data):
             # the box comes back with a fresh token and everything typed
             return await my_decks_response(
@@ -588,6 +602,8 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
                 csv_text=source if source and data.get("kind") == "csv" else None,
                 json_text=source if source and data.get("kind") == "json" else None,
                 private=bool(data.get("private")),
+                theorycrafted=bool(data.get("theorycrafted")),
+                game=data.get("game") or "any",
             )
         except DeckError as exc:
             return await my_decks_response(

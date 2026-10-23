@@ -176,6 +176,8 @@ button.danger:disabled{color:var(--red)}
       case "printing": return ["Printing", r.name, arrow(r.before, r.after)];
       case "label": return ["Color tag", r.name, arrow(r.before, r.after)];
       case "mana_value": return ["Mana value", r.name, arrow(r.before, r.after)];
+      case "companion": return ["Companion", r.name, arrow(r.before, r.after)];
+      case "back_face": return ["Show back face", r.name, arrow(r.before, r.after)];
       case "commander": return ["Commander", arrow(r.before, r.after), ""];
       case "clone": return ["Copy", "'" + r.source + "' (" + r.cards + " cards) as '" + r.name + "'", ""];
       case "new_deck": return ["New deck", r.name + " (" + r.format + ", " + r.cards + " cards, " + (r.private ? "private" : "public") + ")", ""];
@@ -209,7 +211,7 @@ button.danger:disabled{color:var(--red)}
   var GROUPS = [
     ["add", "Added"], ["remove", "Removed"], ["change", "Quantity changed"], ["category", "Moved"],
     ["finish", "Finish"], ["printing", "Printing"], ["label", "Color tag"], ["mana_value", "Mana value"],
-    ["commander", "Commander"]
+    ["companion", "Companion"], ["back_face", "Show back face"], ["commander", "Commander"]
   ];
   function groupOf(kind) {
     for (var i = 0; i < GROUPS.length; i++) if (GROUPS[i][0] === kind) return i;
