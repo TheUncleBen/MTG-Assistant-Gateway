@@ -190,9 +190,7 @@ def amended_line(line: dict[str, Any], changes: list[dict[str, Any]]) -> dict[st
     the package's cards, or None when none is left (nothing from the package, so no import)."""
     names = {str(n).casefold() for n in line.get("cards") or []}
     left = [
-        c
-        for c in changes
-        if c.get("action") == "add" and str(c.get("card_name") or "").casefold() in names
+        c for c in changes if c.get("action") == "add" and str(c.get("card_name") or "").casefold() in names
     ]
     if not left:
         return None

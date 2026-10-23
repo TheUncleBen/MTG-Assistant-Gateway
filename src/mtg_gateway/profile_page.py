@@ -799,10 +799,7 @@ def add_profile_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
             except DeckError as exc:
                 error = str(exc)
         if cross_site and is_linked:
-            body = (
-                "<p><a class='btn' href='/notifications'>"
-                f"{icon('bell')} Show my notifications</a></p>"
-            )
+            body = f"<p><a class='btn' href='/notifications'>{icon('bell')} Show my notifications</a></p>"
         elif error:
             body = ui.notice(error, "error", role="alert")
         else:
