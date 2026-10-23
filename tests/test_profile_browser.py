@@ -20,7 +20,7 @@ from .test_text_zoom_browser import ROOT_200, TEXT_200
 
 TEXT = (
     ".acc h2, .acc .ui-row .lab, .acc .ui-row .help, .acc .ui-row label, .acc .btn, .acc button, "
-    ".acc .pr-links li span, .acc .muted, .acc .notice, .col-vis .t, .col-vis .btn, .col-vis button, "
+    ".acc #archidekt-only p, .acc .muted, .acc .notice, .col-vis .t, .col-vis .btn, .col-vis button, "
     ".mtgbox h2, .mtgbox p, .mtgbox .acts button, .bell-row .t, .bell-row .s, .bell-badge, .hq .wdg .lab, "
     ".hq .wdg .big, .hq .wdg .det"
 )

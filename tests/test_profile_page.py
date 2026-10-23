@@ -106,7 +106,7 @@ async def test_the_four_cards_follow_the_mockup_while_linked(member: Browser) ->
         ("Other members can contact me", "Lets members message you through Archidekt."),
         ("Archidekt's newsletter", "Occasional email about the site."),
         ("Email me when someone comments", "On your decks and your forum posts."),
-        ("Turn off Archidekt notifications", "Hides the bell's count and list on Archidekt and here."),
+        ("Turn off Archidekt notifications", "Turns off Archidekt's notifications for your account."),
     ):
         assert _said(mail, label) and _said(mail, help_text), label
     assert "Each switch saves to Archidekt when you press it." in mail
@@ -137,16 +137,13 @@ async def test_the_four_cards_follow_the_mockup_while_linked(member: Browser) ->
     )
     only = _card(page, "archidekt-only")
     assert (
-        "These forms ask for your Archidekt password, which the gateway never holds, "
-        "so they open on Archidekt in a new tab." in only
+        "Your password, e-mail, Patreon link and account deletion are changed on Archidekt's own site."
+        in only
     )
-    for text, href in profile_page.ON_ARCHIDEKT:
-        assert text in only, text
-        # only an address Archidekt's saved scripts confirm: its settings pages' names are not known
-        assert href == "https://archidekt.com/", href
-    assert (
-        only.count("target='_blank' rel='noopener noreferrer'") == 4 and only.count("Open on Archidekt") == 4
-    )
+    # one link, to an address Archidekt's saved scripts confirm: its settings pages' names are not known
+    assert only.count("<a ") == 1 and f"href='{profile_page.ON_ARCHIDEKT_URL}'" in only
+    assert profile_page.ON_ARCHIDEKT_URL == "https://archidekt.com/" and "Open Archidekt</a>" in only
+    assert "target='_blank' rel='noopener noreferrer'" in only and "password, which" not in only
     assert (
         "/static/profile.js" in page
         and "blob:" in (await member.http.get("/account")).headers["content-security-policy"]

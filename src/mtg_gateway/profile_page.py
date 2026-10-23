@@ -48,15 +48,10 @@ NOTHING_CHANGED = "Nothing changed: your Archidekt profile already said that."
 PICTURE_SAVED = "Picture saved on Archidekt and read back."
 UNCONFIRMED = "Sent to Archidekt, but the read-back didn't confirm the change. See Result on the review page."
 CARD_NOTICES = frozenset({"profile", "email", "defaults", "picture"})
-# the four forms that need the Archidekt password (R-085): a link to Archidekt, never a form here.
-# Archidekt's saved scripts confirm only the page accountSettings/[settingsName], not its names, so each
-# opens Archidekt's home page until a TEST-account check confirms the exact address
-ON_ARCHIDEKT = (
-    ("Change your Archidekt password", "https://archidekt.com/"),
-    ("Change your Archidekt email address", "https://archidekt.com/"),
-    ("Patreon: connect, confirm or disconnect", "https://archidekt.com/"),
-    ("Delete your Archidekt account", "https://archidekt.com/"),
-)
+# password, e-mail, Patreon and account deletion stay on Archidekt (R-085): one link, never a form here.
+# Archidekt's saved scripts confirm its settings page accountSettings/[settingsName] but not the names,
+# so the link opens Archidekt's home page
+ON_ARCHIDEKT_URL = "https://archidekt.com/"
 # the switches, in the mockup's order and words: (name, label, help, inverted)
 EMAIL_ROWS = (
     ("contactable", "Other members can contact me", "Lets members message you through Archidekt.", False),
@@ -65,7 +60,7 @@ EMAIL_ROWS = (
     (
         "site_notifications",
         "Turn off Archidekt notifications",
-        "Hides the bell's count and list on Archidekt and here.",
+        "Turns off Archidekt's notifications for your account.",
         True,
     ),
 )
@@ -121,12 +116,6 @@ CSS = """
 .acc .ui-row .ctl form select:not(.msel-native),.acc .ui-row .ctl form .msel-btn{
   flex:1 1 8rem;width:auto;min-width:0;max-width:100%;margin:0}
 .acc .pr-bio{min-height:7rem;width:100%;font:inherit;font-size:1rem;line-height:1.4;resize:vertical}
-.acc .pr-links{list-style:none;margin:.25rem 0 0;padding:0}
-.acc .pr-links li{display:flex;flex-wrap:wrap;align-items:center;gap:.3rem .75rem;min-height:44px;
-  padding:.3rem 0;border-top:1px solid var(--border-soft)}
-.acc .pr-links li:first-child{border-top:0}
-.acc .pr-links li span{flex:1 1 12rem}
-.acc .pr-links li .btn{margin:0}
 .acc .pr-hist{margin:.5rem 0 0}
 .acc .pr-hist svg.i,.pr-box .pr-hist svg.i{width:15px;height:15px;vertical-align:-2px}
 .acc .card .notice{margin:.5rem 0}
@@ -431,16 +420,11 @@ def account_cards(
         "<p class='muted small'>What Archidekt starts with on a device you haven't set up yet. Each choice "
         f"saves when you change it.</p>{note('defaults')}" + "".join(pref_rows) + "</div>"
     )
-    links = "".join(
-        f"<li><span>{esc(text)}</span><a class='btn btn-plain' href='{esc(href)}' target='_blank' "
-        f"rel='noopener noreferrer'>{icon('external')} Open on Archidekt</a></li>"
-        for text, href in ON_ARCHIDEKT
-    )
     only = (
         "<div class='card' id='archidekt-only'><h2>On Archidekt only</h2>"
-        "<p class='muted small'>These forms ask for your Archidekt password, which the gateway never holds, "
-        "so they open on Archidekt in a new tab.</p>"
-        f"<ul class='pr-links'>{links}</ul></div>"
+        "<p>Your password, e-mail, Patreon link and account deletion are changed on Archidekt's own site.</p>"
+        f"<p><a class='btn btn-plain' href='{ON_ARCHIDEKT_URL}' target='_blank' rel='noopener noreferrer'>"
+        f"{icon('external')} Open Archidekt</a></p></div>"
     )
     return prof + email + defaults + only
 
