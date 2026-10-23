@@ -1277,6 +1277,9 @@
     if (card && card.isConnected) { card.focus(); return; }
     focusNear(stack);  // the card was removed
   }
+  // true while the menu's own history.back() has not landed yet: a box the menu opened (Lock
+  // personal categories, Report card…) must not take that popstate for a Back press (static/box.js)
+  window.MtgDeckCardMenu = { backPending: function () { return ignorePop; } };
   function menuItem(text, ic, onClick, cls) {
     var b = el("button", cls || "", "");
     b.type = "button";

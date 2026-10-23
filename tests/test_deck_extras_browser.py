@@ -165,7 +165,10 @@ def test_the_menus_carry_the_new_items_and_every_box_fits(server: Server, width:
         lock = page.locator("#lock")
         lock.wait_for(state="visible")
         lock.locator("[data-sentence] b").wait_for(state="visible")
-        page.wait_for_timeout(300)
+        # on a phone the card menu went back over its own history entry when it closed; that
+        # popstate lands a moment later and must not close the box it opened
+        page.wait_for_timeout(700)
+        assert lock.is_visible() and page.locator(".mtgbox-scrim").count() == 1
         assert (
             "it goes into Ramp" in lock.inner_text()
             and "Left out, not a template: Artifact." in lock.inner_text()
@@ -177,7 +180,8 @@ def test_the_menus_carry_the_new_items_and_every_box_fits(server: Server, width:
         page.locator(".ctxmenu [role=menuitem]", has_text="Report card…").click()
         rc = page.locator("#reportcard")
         rc.wait_for(state="visible")
-        page.wait_for_timeout(300)
+        page.wait_for_timeout(700)
+        assert rc.is_visible() and page.locator(".mtgbox-scrim").count() == 1
         assert "Report “Sol Ring” to Archidekt's moderators" in rc.locator("h2").inner_text()
         assert rc.locator("input[name=card]").input_value() == "Sol Ring"
         assert page.evaluate(MEASURE) == [] and page.evaluate(CONTRAST, TEXT) == []
@@ -349,6 +353,14 @@ def test_new_package_on_my_decks_and_add_to_a_deck_on_my_lists(
                 min(_targets(page, "#newpkg .acts button, #newpkg .budget label, #newpkg .fmts label"))
                 >= 43.5
             )
+        # the pills and the budget choices keep their shape inside a box (whose labels are block)
+        assert (
+            page.evaluate(
+                "() => [...document.querySelectorAll('#newpkg .fmts label, #newpkg .budget label')]"
+                ".map(l => getComputedStyle(l).display).filter(d => !/flex$/.test(d))"
+            )
+            == []
+        )
         go = box.locator(".acts button", has_text="Create package")
         go.click()
         assert "Give the package a name." in box.locator(".boxnote").inner_text()

@@ -54,10 +54,11 @@
       document.body.classList.contains("app");
   }
   // The menu that opened this box may have gone back over its own history entry a moment ago
-  // (static/cardmenu.js); that popstate is not a Back press on the box
+  // (static/cardmenu.js, or the deck page's own card menu in static/deck.js); that popstate is not
+  // a Back press on the box
   function menuBackPending() {
-    var M = window.MtgMenu;
-    return !!(M && M.backPending && M.backPending());
+    var M = window.MtgMenu, D = window.MtgDeckCardMenu;
+    return !!((M && M.backPending && M.backPending()) || (D && D.backPending && D.backPending()));
   }
   function push() {
     try { history.pushState({ mtgbox: 1 }, ""); pushed = true; } catch (e) { pushed = false; }

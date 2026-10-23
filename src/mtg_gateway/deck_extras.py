@@ -780,9 +780,14 @@ PACKAGE_FIELDS_CSS = """
   border:1px solid var(--control-border);border-radius:999px;padding:0 .7rem;cursor:pointer;
   font-weight:400;margin:0}
 .fmts input{width:18px;height:18px;min-height:0;margin:0;accent-color:var(--orange-ctl)}
-/* a box's or a settings row's inputs are otherwise full width: these keep their own size */
+/* a box's or a settings row's inputs are otherwise full width and its labels block: these keep
+   their own shape */
 .mtgbox .body .field .fmts input[type=checkbox],.ds .ui-row .ctl .fmts input{width:18px;height:18px}
 .mtgbox .body .field .budget input[type=radio],.ds .ui-row .ctl .budget input{width:0;height:0}
+.mtgbox .body .field .fmts label,.dx-box .body .field .fmts label{display:inline-flex;margin:0;
+  font-weight:400}
+.mtgbox .body .field .budget label,.dx-box .body .field .budget label{display:inline-flex;margin:0 0 0 -1px}
+.mtgbox .body .field .budget label:first-child,.dx-box .body .field .budget label:first-child{margin-left:0}
 .np-box .body .field .lbl{display:block;font-weight:700;margin:0 0 .25rem}
 .np-box .body .field + .field{margin-top:.75rem}
 .np-box .body .dx-switch{margin-top:.75rem;min-height:44px}
