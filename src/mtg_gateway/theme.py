@@ -2165,6 +2165,7 @@ MORE_LINKS = [
     ("/reports", "Reports", "report"),
     ("/watchlist", "Watchlist", "stats"),
     ("/lists", "My lists", "list"),
+    ("/forum", "Forum", "comment"),
     ("/guide", "Guide", "guide"),
     ("/account", "Account", "account"),
 ]
@@ -2293,6 +2294,7 @@ def render(
             f"<a href='/reports'>{icon('report')}Reports</a>"
             + (f"<a href='/watchlist'>{icon('stats')}Watchlist</a>" if WATCHLISTS else "")
             + f"<a href='/lists'>{icon('list')}My lists</a>"
+            f"<a href='/forum'>{icon('comment')}Forum</a>"
             f"<a href='/activity'>{icon('activity')}My activity</a>"
             f"<a href='/guide'>{icon('guide')}Guide</a>"
             f"<a href='/install?for=skill'>{icon('report')}Assistant skill</a>"

@@ -414,6 +414,7 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
     from .companion_shell import add_shell_routes
     from .companion_tools import add_deck_tool_routes
     from .deck_extras import add_deck_extras_routes
+    from .forum_page import add_forum_routes
     from .lists_page import add_lists_routes
     from .profile_page import add_profile_routes
 
@@ -443,6 +444,7 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
     add_history_routes(server, state, reports, h)
     add_lists_routes(server, state, h)
     add_profile_routes(server, state, h)
+    add_forum_routes(server, state, h)
     add_shell_routes(server, h)
 
 

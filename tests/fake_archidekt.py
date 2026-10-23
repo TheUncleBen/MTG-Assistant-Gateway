@@ -201,6 +201,7 @@ class FakeArchidekt:
             700003: {"title": "Old news", "section": "General", "type": 0, "owner": "amy", "locked": True},
         }
         self.forum_page_changed = False
+        self.forum_page_size = 0  # 0: a section's threads come on one page; else paged
         self.site_pages: list[tuple[str, dict[str, str]]] = []
         self.next_comment_id = 800000
         # Hand actions added 2026-10-07: global deck tags (id -> name), each deck's tag relations
@@ -563,14 +564,22 @@ class FakeArchidekt:
                 for tid, t in self.forum_threads.items()
                 if t["section"] == parts[2] and params.get("q", "").lower() in t["title"].lower()
             ]
-            threads = {"count": len(rows), "results": rows}
+            count = len(rows)
+            if self.forum_page_size:
+                page = int(params.get("page", "1"))
+                rows = rows[(page - 1) * self.forum_page_size : page * self.forum_page_size]
+            threads = {"count": count, "results": rows}
             props = {"category": parts[1], "section": parts[2], "threads": threads}
         else:
             return httpx.Response(404, text="<html>Not found</html>")
-        data = "" if self.forum_page_changed else (
-            '<script id="__NEXT_DATA__" type="application/json">'
-            + json.dumps({"props": {"pageProps": props}, "page": "/forum"}).replace("<", "\\u003c")
-            + "</script>"
+        data = (
+            ""
+            if self.forum_page_changed
+            else (
+                '<script id="__NEXT_DATA__" type="application/json">'
+                + json.dumps({"props": {"pageProps": props}, "page": "/forum"}).replace("<", "\\u003c")
+                + "</script>"
+            )
         )
         return httpx.Response(200, text=f"<html><body><div id='__next'></div>{data}</body></html>")
 

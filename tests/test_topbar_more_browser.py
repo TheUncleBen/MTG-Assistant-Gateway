@@ -44,6 +44,7 @@ def test_the_bar_marks_a_folded_page_on_more(server: Server) -> None:
         "Reports",
         "Watchlist",
         "My lists",
+        "Forum",
         "Guide",
         "Account",
     ]

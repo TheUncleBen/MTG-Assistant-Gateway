@@ -447,7 +447,7 @@ async def test_the_more_menu_and_the_account_page_link_to_my_lists(member: Brows
     menu = nav.split("<div class='menu'>")[1]
     labels = [x.split("</svg>")[1] for x in menu.split("</a>")[:-1]]
     # next to Proposals and History (Watchlist sits between when watchlists are on)
-    assert labels == ["Proposals", "History", "Reports", "My lists", "Guide", "Account"]
+    assert labels == ["Proposals", "History", "Reports", "My lists", "Forum", "Guide", "Account"]
     assert "<a href='/lists'>" in menu
     # the phone's More sheet and the rail list the same pages
     assert page.count("href='/lists'") >= 2

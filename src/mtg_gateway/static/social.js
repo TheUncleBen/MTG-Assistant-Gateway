@@ -366,19 +366,21 @@
       var loading = el("p", "muted", "Loading comments…");
       loading.setAttribute("role", "status");
       thread.appendChild(loading);
-      socialRequest("GET", thread.getAttribute("data-src")).then(function (d) {
-        if (!d.ok) {
-          if (d.error === "not_linked" || d.error === "auth") { thread.textContent = ""; var p = el("p", "muted"); p.appendChild(socialProblem(d)); thread.appendChild(p); return; }
-          failed(d.message || "The comments could not be loaded.");  // Archidekt busy: offer another try
-          return;
-        }
-        thread.textContent = "";
-        me = typeof d.me === "number" ? d.me : null;
-        if (countEl) countEl.textContent = d.count === 1 ? "1 comment" : d.count + " comments";
-        if (!d.comments.length) { thread.appendChild(el("p", "muted", "No comments yet. Be the first.")); return; }
-        d.comments.forEach(function (c) { thread.appendChild(render(c, 1)); });
-        if (d.has_more) showMore(2);
-      }).catch(function () { failed("The comments could not be loaded: no connection."); });
+      socialRequest("GET", thread.getAttribute("data-src")).then(show)
+        .catch(function () { failed("The comments could not be loaded: no connection."); });
+    };
+    var show = function (d) {
+      if (!d.ok) {
+        if (d.error === "not_linked" || d.error === "auth") { thread.textContent = ""; var p = el("p", "muted"); p.appendChild(socialProblem(d)); thread.appendChild(p); return; }
+        failed(d.message || "The comments could not be loaded.");  // Archidekt busy: offer another try
+        return;
+      }
+      thread.textContent = "";
+      me = typeof d.me === "number" ? d.me : null;
+      if (countEl) countEl.textContent = d.count === 1 ? "1 comment" : d.count + " comments";
+      if (!d.comments.length) { thread.appendChild(el("p", "muted", "No comments yet. Be the first.")); return; }
+      d.comments.forEach(function (c) { thread.appendChild(render(c, 1)); });
+      if (d.has_more) showMore(2);
     };
     // The next page of the thread, added under the comments already shown (every page can be
     // voted on and replied to, not only the first).
@@ -412,6 +414,15 @@
         });
       });
     };
+    // A page that read the thread already (the forum's thread page) hands it over as JSON in the
+    // panel, in the comment route's shape: drawn from that, with no second read.
+    var pre = $("script[type='application/json']", commentsPanel);
+    if (pre) {
+      var given = null;
+      try { given = JSON.parse(pre.textContent); } catch (err) { given = null; }
+      pre.remove();
+      if (given && given.comments) { loaded = true; show({ ok: true, root: given.root, count: given.count, comments: given.comments, page: given.page, has_more: given.has_more, me: given.me }); }
+    }
     if ("IntersectionObserver" in window) {
       var io = new IntersectionObserver(function (entries) {
         if (entries.some(function (e) { return e.isIntersecting; })) { load(); io.disconnect(); }
