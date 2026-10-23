@@ -489,9 +489,11 @@ def _this_machine(host: str | bytes | None) -> bool:
 
 
 def _reserved(host: str | None) -> bool:
-    """A name under the reserved .test domain (RFC 2606, such as the fake identity provider
-    idp.test) never resolves, so a request to it fails as it would offline: refused, not counted."""
-    return (host or "").rstrip(".").lower().endswith(".test")
+    """A name under the reserved .test or .example domains (RFC 2606, such as the fake identity
+    provider idp.test or a fake custom card picture at cdn.example) never resolves, so a request
+    to it fails as it would offline: refused, not counted."""
+    name = (host or "").rstrip(".").lower()
+    return name.endswith(".test") or name.endswith(".example")
 
 
 def _refuse(where: str, host: str | None = None) -> None:

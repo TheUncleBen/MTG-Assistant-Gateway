@@ -943,6 +943,22 @@ def pt_text(c: dict[str, Any], face: str = "front") -> str:
     return loyalty
 
 
+def custom_picture_url(card: dict[str, Any], face: str = "front") -> str:
+    """The custom card's picture through the gateway's own route (custom_pictures: the address
+    the tab's last read gave; 404 when there is none), or '' when the card has no such face."""
+    if not card.get(f"{face}ImageUrl") or not isinstance(card.get("id"), int):
+        return ""
+    return f"/lists/api/custom_picture/{card['id']}?face={face}"
+
+
+def custom_thumb(card: dict[str, Any]) -> str:
+    """A custom card's thumbnail on its row (lists.js takes a failed one off, leaving the slot)."""
+    src = custom_picture_url(card)
+    if src:
+        return f"<img class='lp-thumb custom' src='{esc(src)}' alt='' loading='lazy' width='34' height='47'>"
+    return "<span class='lp-thumb' aria-hidden='true'></span>"
+
+
 def custom_rows(items: list[dict[str, Any]]) -> str:
     out = []
     for c in items:
@@ -978,8 +994,8 @@ def custom_rows(items: list[dict[str, Any]]) -> str:
         )
         out.append(
             f"<div {row_attrs('custom', name, c)}>"
-            f"<span class='title'><span class='t'>{esc(name)}</span><span "
-            f"class='sm-only'>{esc(sm)}</span></span>"
+            f"<span class='title'><span class='cardc'>{custom_thumb(c)}<span class='tx'>"
+            f"<span class='t'>{esc(name)}</span><span class='sm-only'>{esc(sm)}</span></span></span></span>"
             f"<span class='sm-hide'>{esc(tl)}{(' <span class=muted>' + esc(pt) + '</span>') if pt else ''}"
             "</span>"
             f"<span class='sm-hide lp-setnum'>{esc(setnum)}</span>{menu}</div>"
@@ -1102,6 +1118,9 @@ def custom_add_box(csrf: str, st: dict[str, Any]) -> str:
 def face_fields(face: str, v: dict[str, Any], *, editing: bool, has_picture: bool) -> str:
     p = "f" if face == "front" else "b"
     req = face == "front"
+    # the card's current picture over the frame's words (which stay when it can't be served)
+    cur = custom_picture_url(v, face) if editing and has_picture else ""
+    current = f"<img class='lp-cur' src='{esc(cur)}' alt=''>" if cur else ""
 
     def fld(label: str, key: str, placeholder: str = "", limit: int = 200) -> str:
         return text_field(
@@ -1126,7 +1145,7 @@ def face_fields(face: str, v: dict[str, Any], *, editing: bool, has_picture: boo
         f"maxlength='{account_lists.CUSTOM_TEXT_MAX}'>{esc(text)}</textarea></div>"
         f"<div class='lp-three'>{fld('Power', 'p')}{fld('Toughness', 'tg')}{fld('Loyalty', 'l')}</div>"
         "<div class='lp-img'><div class='lp-crop' "
-        f"data-crop='{p}'>{'Picture set' if has_picture else 'No picture yet'}</div><div>"
+        f"data-crop='{p}'>{'Picture set' if has_picture else 'No picture yet'}{current}</div><div>"
         f"<p class='lbl'>Picture</p>"
         + (
             f"<input type='file' id='{p}-file' name='picture' form='cc-pic-f' "
@@ -1365,6 +1384,8 @@ CSS = """
 .lp-crop img{position:absolute; left:0; top:0; max-width:none; user-select:none; -webkit-user-drag:none;
   touch-action:none}
 .lp-crop.has{border-style:solid;cursor:grab}
+/* the card's current picture (lists_page.face_fields / lists.js resetCrop), until another is chosen */
+.lp-crop img.lp-cur{inset:0;width:100%;height:100%;max-width:100%;object-fit:cover;border-radius:inherit}
 .lp-cropper{display:grid;gap:.5rem;margin:.25rem 0 .5rem}
 .lp-cropper .lp-zoom{display:flex;align-items:center;gap:.5rem;margin:0}
 .lp-cropper .lp-zoom input{flex:1;margin:0;min-height:44px}

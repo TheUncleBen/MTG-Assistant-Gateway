@@ -596,6 +596,77 @@ def test_a_custom_cards_picture_on_the_deck_page(server: Server, width: int, the
 
 
 @pytest.mark.parametrize("width,theme", SIZES)
+def test_custom_card_pictures_on_my_lists(server: Server, width: int, theme: str, monkeypatch) -> None:
+    """My lists › Custom cards: a thumbnail on each row and the card's current picture in its Edit
+    box, through the gateway's own route; a picture it can't serve leaves the slot empty and the
+    frame's words."""
+    import httpx
+    from playwright.sync_api import sync_playwright
+
+    from mtg_gateway import custom_pictures
+
+    from .test_custom_pictures import _png
+
+    custom_pictures._KEPT.clear()
+    monkeypatch.setattr(custom_pictures, "_public_host", lambda host: host == "cdn.example")
+    picture = _png()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if str(request.url) == "https://cdn.example/41.png":
+            return httpx.Response(200, content=picture)
+        return httpx.Response(404)
+
+    server.app.state.gateway.custom_picture_http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    sid = _link(server)
+    exe = _chromium()
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, width, theme, exe)
+        page.goto(f"{server.base}/lists/custom", wait_until="networkidle")
+        rows = page.locator(".lp .ui-table .tr[data-row]")
+        mentor = rows.filter(has_text="Grizzled Mentor").first
+        ranger = rows.filter(has_text="Old Ranger").first
+        page.wait_for_function(
+            "() => { const i = document.querySelector(\".tr[data-name='Grizzled Mentor'] img.lp-thumb\");"
+            " return i && i.complete && i.naturalWidth > 0; }"
+        )
+        thumb = mentor.locator("img.lp-thumb")
+        assert thumb.get_attribute("src") == "/lists/api/custom_picture/41?face=front"
+        assert thumb.bounding_box()["width"] == 34
+        # Old Ranger's picture can't be served: an empty slot, no name tile
+        page.wait_for_function(
+            "() => !document.querySelector(\".tr[data-name='Old Ranger'] img\")", timeout=4000
+        )
+        assert ranger.locator("span.lp-thumb").count() == 1 and ranger.locator(".img-fallback").count() == 0
+        assert ranger.locator(".title").inner_text().startswith("Old Ranger")
+        _fits(page, "custom rows", width)
+        # the Edit box: the current picture over the frame; then Old Ranger's frame with its words
+        mentor.locator(".kebab").click()
+        page.locator(".ctxmenu [role=menuitem]", has_text="Edit…").click()
+        box = page.locator("#cc-box")
+        box.wait_for(state="visible")
+        page.wait_for_function(
+            "() => { const i = document.querySelector(\"#cc-box .lp-crop[data-crop='f'] img.lp-cur\");"
+            " return i && i.complete && i.naturalWidth > 0; }"
+        )
+        crop = box.locator(".lp-crop[data-crop='f']")
+        cur = crop.locator("img.lp-cur")
+        assert cur.get_attribute("src") == "/lists/api/custom_picture/41?face=front"
+        assert abs(cur.bounding_box()["width"] - crop.bounding_box()["width"]) <= 6  # the frame's border
+        _fits(page, "edit box", width)
+        _close_box(page)
+        ranger.locator(".kebab").click()
+        page.locator(".ctxmenu [role=menuitem]", has_text="Edit…").click()
+        box.wait_for(state="visible")
+        page.wait_for_timeout(800)
+        crop = box.locator(".lp-crop[data-crop='f']")
+        assert crop.locator("img").count() == 0 and crop.locator(".img-fallback").count() == 0
+        assert crop.inner_text().strip() == "Picture set"
+        _close_box(page)
+        browser.close()
+    assert errors == []
+
+
+@pytest.mark.parametrize("width,theme", SIZES)
 def test_add_to_deck_on_my_lists_custom_cards(server: Server, width: int, theme: str) -> None:
     from playwright.sync_api import sync_playwright
 

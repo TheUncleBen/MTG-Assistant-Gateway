@@ -199,7 +199,8 @@
           setValue(box, pf[0] + "_" + k, editing ? (d[pf[1] + keys[k]] || "") : "");
         });
         var crop = $(".lp-crop[data-crop='" + pf[0] + "']", box);
-        if (crop) resetCrop(crop, editing && !!d[pf[1] + "ImageUrl"]);
+        var has = editing && !!d[pf[1] + "ImageUrl"];
+        if (crop) resetCrop(crop, has, has ? "/lists/api/custom_picture/" + d.id + "?face=" + pf[1] : "");
       });
       setValue(box, "set_code", editing ? (d.setCode || "") : "");
       setValue(box, "collector_number", editing ? (d.collectorNumber || "") : "");
@@ -574,16 +575,42 @@
       var has = $(".lp-crop", b.closest(".lp-img"));
       var editing = $("[name=action]", ccBox).value === "edit";
       b.disabled = !editing;
-      if (has) resetCrop(has, has.textContent.trim() === "Picture set");
+      var cur = has && has.querySelector("img.lp-cur");
+      if (has) resetCrop(has, has.textContent.trim() === "Picture set", cur ? cur.getAttribute("src") : "");
     });
     ccBox.__ccName = $("[name=was_name]", ccBox).value;
   }
+  // A custom card's picture the gateway can't serve (404): the row's thumbnail leaves its slot
+  // empty and the edit box's frame keeps its words; the name tile feedback.js adds goes too
+  document.addEventListener("error", function (e) {
+    var img = e.target;
+    if (!(img instanceof HTMLImageElement) || !(img.classList.contains("lp-cur") || img.classList.contains("custom"))) return;
+    if (!img.classList.contains("lp-thumb") && !img.classList.contains("lp-cur")) return;
+    var tile = img.nextElementSibling;
+    if (tile && tile.classList.contains("img-fallback")) tile.remove();
+    if (img.classList.contains("lp-thumb")) {
+      var slot = el("span", "lp-thumb");
+      slot.setAttribute("aria-hidden", "true");
+      img.replaceWith(slot);
+    } else {
+      img.remove();
+    }
+  }, true);
   // The picture: chosen here, shown over the card-shaped frame, dragged and sized to the crop, then
   // sent as the file itself with the crop box in its pixels (the gateway redraws it).
   var MAX_BYTES = 1500000;
-  function resetCrop(crop, has) {
+  // cur: the address of the card's current picture (the gateway's own route), drawn over the words
+  // until another picture is chosen; one that can't be served goes, and the words stay
+  function resetCrop(crop, has, cur) {
     if (crop.__url) { try { URL.revokeObjectURL(crop.__url); } catch (e) { /* gone */ } crop.__url = null; }
     crop.textContent = has ? "Picture set" : "No picture yet";
+    if (has && cur) {
+      var im = el("img", "lp-cur");
+      im.alt = "";
+      im.draggable = false;
+      im.src = cur;
+      crop.appendChild(im);
+    }
     crop.classList.remove("has");
     crop.__img = null;
     var ui = crop.parentNode.querySelector(".lp-cropper");

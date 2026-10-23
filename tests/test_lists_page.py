@@ -534,3 +534,45 @@ async def test_a_custom_card_is_added_to_a_deck_from_its_row(member: Browser, st
     )
     assert r.status_code == 303 and r.headers["location"].startswith("/proposals/"), r.text
     assert not ark.decks[42]["customCards"]
+
+
+async def test_custom_cards_rows_and_the_edit_box_show_the_cards_picture(
+    member: Browser, stack: Stack
+) -> None:
+    """A thumbnail on each row and the current picture in the Edit box (front and back), through
+    the gateway's own route (custom_pictures); a card without a picture keeps the empty slot and
+    the frame's words."""
+    ark = stack.ark
+    card = ark.account.customs[WHO][0]
+    card["frontImageUrl"] = "https://cdn.example/41.png"
+    ark.account.customs[WHO].append(
+        {
+            "id": 44,
+            "owner": card["owner"],
+            "frontName": "Old Ranger",
+            "frontTypes": "Creature",
+            "hasBack": False,
+        }
+    )
+    page = (await member.http.get("/lists/custom")).text
+    assert (
+        "<img class='lp-thumb custom' src='/lists/api/custom_picture/41?face=front' alt='' loading='lazy'"
+        in page
+    )
+    ranger = re.search(r"<div class='tr'[^>]*data-name='Old Ranger'[^>]*>.*?</div>", page, re.S).group(0)
+    assert "<span class='lp-thumb' aria-hidden='true'></span>" in ranger and "custom_picture" not in ranger
+    assert "src='https://cdn.example" not in page  # never drawn from Archidekt's address itself
+    # the Edit box: the front face's picture; no back face, no back picture
+    page = (await member.http.get("/lists/custom?edit=41")).text
+    front = "<img class='lp-cur' src='/lists/api/custom_picture/41?face=front' alt=''>"
+    assert f"data-crop='f'>Picture set{front}</div>" in page
+    assert "data-crop='b'>No picture yet</div>" in page
+    card["hasBack"] = True
+    card["backImageUrl"] = "https://cdn.example/41b.png"
+    page = (await member.http.get("/lists/custom?edit=41")).text
+    assert "<img class='lp-cur' src='/lists/api/custom_picture/41?face=back' alt=''>" in page
+    page = (await member.http.get("/lists/custom?edit=44")).text
+    assert "data-crop='f'>No picture yet</div>" in page and "class='lp-cur'" not in page
+    # a new card's box has none either
+    page = (await member.http.get("/lists/custom?new=1")).text
+    assert "class='lp-cur'" not in page
