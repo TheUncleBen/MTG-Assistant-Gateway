@@ -1031,7 +1031,7 @@ def guide_body(
         "it changes the cards or details of one of your decks, the Archidekt write, a read-back, an audit "
         "row. That is why every change, yours or the assistant's, has a record under Proposals and "
         "History, and why such a change to one of your decks can be undone by restoring its snapshot. "
-        "Restoring a snapshot does not put back a deck's folder, tags or cover.</p>"
+        "Restoring a snapshot does not put back a deck's folder, tags, cover or custom cards.</p>"
         f"{_h4('exp-approvals-proposal', 'Proposals')}"
         "<p>An assistant never writes to Archidekt directly. It proposes: the exact list of rows that "
         "would change, stored on the gateway with a review page and, in a chat that shows cards, a card "

@@ -193,8 +193,8 @@ so:
      assistant apply changes without asking, such a change can land on
      Archidekt without your press. A change to one of your decks keeps a
      snapshot you can restore from the History page; a collection change
-     keeps none. Restoring a snapshot does not put back a deck's folder, tags
-     or cover.
+     keeps none. Restoring a snapshot does not put back a deck's folder, tags,
+     cover or custom cards.
 
    Either way, for an edit the gateway first checks the change still fits
    the deck as it is now, saves a copy of it (a snapshot), and puts a private

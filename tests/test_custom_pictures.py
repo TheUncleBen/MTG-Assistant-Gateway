@@ -85,6 +85,7 @@ async def test_only_a_picture_from_a_public_https_address_is_served(stack: Stack
     try:
         for url, answer in (
             ("http://cdn.example/41.png", httpx.Response(200, content=_png())),  # not https
+            ("https://cdn.example:8443/41.png", httpx.Response(200, content=_png())),  # not port 443
             ("https://intranet.local/41.png", httpx.Response(200, content=_png())),  # not public
             (
                 "https://cdn.example/page.html",
@@ -102,6 +103,7 @@ async def test_only_a_picture_from_a_public_https_address_is_served(stack: Stack
             stack.h.app.state.gateway.decks.client._cache.clear()
             r = await b.http.get("/decks/api/custom_picture/42/41")
             assert r.status_code == 404, url
+        assert "https://cdn.example:8443/41.png" not in seen
         assert "http://cdn.example/41.png" not in seen and "https://intranet.local/41.png" not in seen
         assert all("x.example" not in u for u in seen)  # no redirect followed
     finally:

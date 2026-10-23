@@ -46,7 +46,7 @@ async def test_custom_cards_are_drawn_in_their_stacks_marked_custom(stack: Stack
         assert "data-custom='1'" in row and "data-custom-id='41'" in row and "data-rel='3100'" in row
         assert "data-qty='1'" in row and "data-cat='Commander'" in row and "data-zone='main'" in row
         # marked Custom, with the one line where custom cards live
-        assert "class='custom-badge'" in page and "One of your custom cards (My lists › Custom cards)" in page
+        assert "class='custom-badge'" in page and "A custom card, made on Archidekt" in page
         assert page.count("class='custom-badge'") == 2
         # filed by category: Grizzled Mentor under Commander, Old Ranger (no category) under its type
         commander = re.search(r"<section class='stack'[^>]*data-group='Commander'.*?</section>", page, re.S)

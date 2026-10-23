@@ -1088,7 +1088,7 @@ def _card_data(card: DeckCard, deck: Deck) -> str:
 # Report card… reports it as a custom card. They are never in Deck.cards, so no card edit, the
 # selection bar, Buy cards or the deck's stats read them.
 CUSTOM_WORD = "Custom"
-CUSTOM_TITLE = "One of your custom cards (My lists › Custom cards)"
+CUSTOM_TITLE = "A custom card, made on Archidekt"
 
 
 def custom_badge() -> str:

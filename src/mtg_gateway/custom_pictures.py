@@ -6,10 +6,14 @@ load pictures only from the gateway and Scryfall (their CSP), so the gateway fet
 itself and serves it from its own address: ``/decks/api/custom_picture/{deck_id}/{custom_card_id}``.
 
 The address is never taken from the request: only from the deck as Archidekt answers it for the
-signed-in member. The fetch is https only, never follows a redirect, refuses a host that resolves
+signed-in member. The fetch is https only (port 443), never follows a redirect, ignores proxy
+settings from the environment, takes FETCH_TIMEOUT seconds at most in all, refuses a host that resolves
 to a private, loopback or other non-public address, reads at most MAX_BYTES, and keeps the answer
 only when its first bytes are a PNG, JPEG, GIF or WebP picture. Pictures are kept a while in memory
-(at most KEEP pictures), so a deck page's pictures cost one fetch each.
+(at most KEEP pictures), so a deck page's pictures cost one fetch each. The host is checked when
+the address is resolved, before the connection; a host that answers a public address then and
+another one a moment later (DNS rebinding) is not caught, which the address coming from Archidekt
+only makes acceptable.
 """
 
 from __future__ import annotations
@@ -89,18 +93,25 @@ async def fetch(url: str, http: httpx.AsyncClient | None = None) -> tuple[bytes,
     parts = urlsplit(url)
     if parts.scheme != "https" or not parts.hostname or parts.username or parts.password:
         return None
+    if parts.port not in (None, 443):  # the picture host's own https port only
+        return None
     if not await asyncio.to_thread(_public_host, parts.hostname):
         return None
-    client = http or httpx.AsyncClient(timeout=FETCH_TIMEOUT, follow_redirects=False)
+    # no proxy settings from the environment (as cimd.py), and one time limit for the whole fetch
+    client = http or httpx.AsyncClient(timeout=FETCH_TIMEOUT, follow_redirects=False, trust_env=False)
+    buf = bytearray()
     try:
-        async with client.stream("GET", url, headers={"Accept": "image/*"}) as resp:
-            if resp.status_code != 200:
-                return None
-            buf = bytearray()
-            async for chunk in resp.aiter_bytes():
-                buf += chunk
-                if len(buf) > MAX_BYTES:
+        async with asyncio.timeout(FETCH_TIMEOUT):
+            async with client.stream("GET", url, headers={"Accept": "image/*"}) as resp:
+                if resp.status_code != 200:
                     return None
+                async for chunk in resp.aiter_bytes():
+                    buf += chunk
+                    if len(buf) > MAX_BYTES:
+                        return None
+    except TimeoutError:
+        logger.info("a custom card picture took longer than %s s", FETCH_TIMEOUT)
+        return None
     except httpx.HTTPError as exc:
         logger.info("could not fetch a custom card picture: %s", type(exc).__name__)
         return None

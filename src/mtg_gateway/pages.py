@@ -2371,8 +2371,20 @@ def _proposal_body(
         + _also_waiting(p, others)
     )
     if pending and p["writes_enabled"]:
-        destroy = p.get("risk") == "destructive"
-        if destroy:
+        # the member-only tier is shared: deleting a deck, deleting from the lists (below) and
+        # taking custom cards out of a deck each say what they do
+        destroy = p.get("risk") == "destructive" and p.get("kind") == "action"
+        if p.get("risk") == "destructive" and p.get("kind") == "custom_cards":
+            ask = (
+                "<div class='apply destroy'><h3 class='ui-section'>Take custom cards out of the deck?</h3>"
+                "<p class='notice warn'><strong>Restoring a snapshot doesn't put custom cards back.</strong> "
+                "To have one again, add it from My lists › Custom cards.</p>"
+                "<p class='small'>The gateway checks the deck again first and reads it back after. Only "
+                "you can approve this, in every approval mode. Nothing happens until you tap "
+                "Take them out on Archidekt.</p>"
+            )
+            apply_button = ("apply", "Take them out on Archidekt", "btn-outline-danger")
+        elif destroy:
             ask = (
                 "<div class='apply destroy'><h3 class='ui-section'>Delete this deck on Archidekt?</h3>"
                 "<p class='notice error'><strong>This deletes the deck from your Archidekt account. "

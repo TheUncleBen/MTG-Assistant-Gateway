@@ -276,7 +276,7 @@ assistant applies what the mode allows with `apply_proposal` and tells you;
 the card then shows the change without buttons. A change to one of your
 decks still keeps a snapshot you can restore from the History page; a
 collection change keeps none. Restoring a snapshot does not put back a
-deck's folder, tags or cover. The cost: an assistant can be tricked by text
+deck's folder, tags, cover or custom cards. The cost: an assistant can be tricked by text
 it reads into making changes you did not ask for. If you let your assistant
 apply changes without asking, such a change can land on Archidekt without
 your press.

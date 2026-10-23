@@ -350,3 +350,27 @@ async def test_a_lost_custom_color_tag_is_caught(stack: Stack) -> None:
     )
     assert out["ok"] is False and out["error"] == "verify_mismatch", out
     assert "“Grizzled Mentor” (color tag no tag, not Combo (#656565))" in out["message"], out
+
+
+async def test_taking_a_custom_card_out_is_never_called_deleting_the_deck(stack: Stack) -> None:
+    """Fact-check N-1: the member-only tier a custom card removal shares with deleting a deck must
+    not read as deleting the deck, on the review page, its pill or the assistant's next step."""
+    from .test_decks_and_proxy import Browser
+
+    h, ark = stack.h, stack.ark
+    _seed(ark)
+    token = await linked_user(stack)
+    await _set_mode(h, "semi")
+    p = await _propose(h, token, [{"action": "add", "custom_card_id": 41, "quantity": 3}])
+    assert (await _apply(h, token, p))["state"] == "applied"
+    p = await _propose(h, token, [{"action": "set_quantity", "custom_card_id": 41, "quantity": 2}])
+    assert p["risk"] == "destructive", p
+    assert "Archidekt account" not in p["next_step"] and "custom cards" in p["next_step"], p["next_step"]
+    b = Browser(h)
+    try:
+        await b.login(f"/proposals/{p['proposal_id']}")
+        page = (await b.http.get(f"/proposals/{p['proposal_id']}")).text
+    finally:
+        await b.aclose()
+    assert "Delete this deck" not in page and "Deletes a deck" not in page
+    assert "Take custom cards out of the deck?" in page

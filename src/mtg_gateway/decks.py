@@ -7675,7 +7675,8 @@ class DeckService:
                 "verify_mismatch",
                 "Archidekt accepted the request but the deck does not match the proposal for: "
                 + ", ".join(mismatches)
-                + f". A snapshot ({snapshot_id}) of the deck before the change was kept.",
+                + f". A snapshot ({snapshot_id}) of the deck's cards and details before the change "
+                "was kept; it does not hold custom cards.",
             )
         self.db.finish_proposal(row["id"], state="applied", result=result)
         return self.describe(sub, row["id"])
@@ -10155,6 +10156,13 @@ def _next_step(
                 f"Show the user {what} and the review link: deleting a deck is approved only on its "
                 "review page, in every approval mode (the in-chat card only opens that page). Do "
                 "not call apply_proposal."
+            )
+        if kind == "custom_cards":  # the member-only tier, as no snapshot puts custom cards back
+            return (
+                f"Show the user {what} and the review link: it takes custom cards out of the deck, "
+                "which a snapshot can't put back, so they approve it themselves, in every approval "
+                "mode, on the proposal card in the chat (where your app shows it) or on the review "
+                "page. Do not call apply_proposal."
             )
         return (
             f"Show the user {what} and the review link: this acts on their Archidekt account, so "
