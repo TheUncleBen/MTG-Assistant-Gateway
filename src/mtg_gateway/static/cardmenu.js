@@ -295,6 +295,9 @@
     return a;
   }
   function sep() { return el("div", "sep"); }
+  // the ⋮ a menu is opening from (bind sets it for the call): the menu's right edge sits on the
+  // button's, so a ⋮ at the end of a row or column never pushes the menu out of that column
+  var anchor = null;
   /* s: {head (the item's name), label (for readers; default "Menu: head"), items (nodes), cls,
      focusBack (an element)}; x, y: where it opens (the pointer, or the ⋮). */
   function openMenu(s, x, y) {
@@ -321,6 +324,7 @@
     m.style.visibility = "hidden";
     document.body.appendChild(m);
     var pad = 8, w = m.offsetWidth, h = m.offsetHeight;
+    if (anchor && anchor.right - w >= pad) x = anchor.right - w;
     m.style.left = Math.max(pad, Math.min(x, window.innerWidth - w - pad)) + "px";
     m.style.top = Math.max(pad, Math.min(y, window.innerHeight - h - pad)) + "px";
     m.style.maxHeight = (window.innerHeight - parseFloat(m.style.top) - pad) + "px";
@@ -374,7 +378,8 @@
         e.preventDefault();
         e.stopPropagation();
         var r = b.getBoundingClientRect();
-        o.open(o.itemOf(b), r.left, r.bottom, "button");
+        anchor = r;
+        try { o.open(o.itemOf(b), r.left, r.bottom, "button"); } finally { anchor = null; }
         return;
       }
       if (!swallow) return;

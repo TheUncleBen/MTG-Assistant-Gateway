@@ -35,7 +35,8 @@ TEXT = (
     ".mtgbox .ui-lbl, .deckview .row .name, .deckview .custom-badge, .lp .ui-table .t, .lp-under span"
 )
 TARGETS = (
-    ".fm a.tr, .fm .btn, .fm .fm-post .kebab, .comments .cmt .who .kebab, .comments .rt button, "
+    ".fm a.tr, .fm .btn, .fm .fm-post .kebab, .comments .cmt .who .kebab, .comments .cmt .acts button, "
+    ".comments .rt button, "
     ".comments form.newcomment button, .dx-strip .btn, .ctxmenu [role=menuitem], .mtgbox .acts button, "
     ".mtgbox .bx, .lp .ui-table .kebab"
 )
@@ -110,13 +111,16 @@ def test_the_thread_table_and_the_posts_menus_fit_and_open_every_way(
         page.goto(f"{server.base}/forum/Archidekt/General", wait_until="networkidle")
         _fits(page, "section", width)
         row = page.locator(".fm a.tr[data-id='700002']")
-        # the Section column on a desktop; the section in the row's second line on a phone
+        # no Section column or chip: the page's heading names the section (every row is in it)
+        assert page.locator(".fm .ui-table .th span", has_text="Section").count() == 0
+        assert row.locator(".fm-section").count() == 0 and "General" not in row.inner_text()
         if width >= 900:
-            assert page.locator(".fm .ui-table .th span", has_text="Section").is_visible()
-            assert row.locator(".fm-section").count() >= 1
-        else:
-            assert row.locator(".sub .fm-section").is_visible()
-            assert row.locator(".sub").inner_text().count("General") == 1
+            # the Last activity column keeps the row as tall as the others: who and when on one line
+            last = row.locator(".fm-last")
+            assert last.locator(".fm-by").inner_text() == "amy" and last.locator("time").count() == 1
+            assert last.evaluate("e => e.getBoundingClientRect().height") <= row.locator(".title").evaluate(
+                "e => e.getBoundingClientRect().height"
+            )
         # the thread: the first post's ⋮ opens its menu; so do a right-click and a press and hold
         page.goto(f"{server.base}/forum/thread/700002", wait_until="networkidle")
         page.locator(".comments .cmt .who .kebab").first.wait_for(state="visible")

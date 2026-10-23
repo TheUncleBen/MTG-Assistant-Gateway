@@ -89,7 +89,8 @@ def test_the_comment_confirms_show_a_focus_ring(server: Server) -> None:
             form.locator(".confirmbar button").first.click()
             mine = page.locator(".cmt", has_text="Nice deck").first
             mine.wait_for(timeout=5000)
-            mine.locator("button", has_text="Edit").click()
+            mine.locator("> .who .kebab").click()
+            page.locator(".ctxmenu [role=menuitem]", has_text="Edit…").click()
             edit = mine.locator("form.editcomment")
             edit.locator("textarea").fill("Nice deck, changed")
             edit.locator("button", has_text="Save").click()

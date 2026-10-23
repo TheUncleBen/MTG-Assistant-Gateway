@@ -17,6 +17,7 @@ the thread it read to the script as JSON, so the panel does not read it again.""
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from types import SimpleNamespace
 from typing import Any
@@ -93,7 +94,10 @@ CSS = """
 .fm .ui-table .t .ui-lbl{margin-left:.35rem;vertical-align:middle}
 .fm .ui-table .sub,.fm .ui-table .sub .ui-when{color:var(--text-muted);font-size:.86rem}
 .fm .ui-table .fm-n{font-variant-numeric:tabular-nums}
-.fm .ui-table .fm-last .deck{display:block}
+/* the Last activity column: who and when on one line, cut short with an ellipsis, so the row
+   stays as tall as the others */
+.fm .ui-table .fm-last{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.fm .ui-table .fm-last .fm-by{color:var(--text-muted)}
 .fm .fm-post{border:1px solid var(--card-border);border-radius:var(--radius-panel);background:var(--surface);
   padding:.75rem .9rem;margin:0 0 .75rem}
 .fm .fm-post .ph{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem;margin:0 0 .35rem;
@@ -217,8 +221,14 @@ def new_thread_html(section: str = "") -> str:
     )
 
 
+def group_anchor(group: str) -> str:
+    """The id of a group's list on the forum's front page, for the crumbs' link to it."""
+    slug = re.sub(r"[^A-Za-z0-9_-]+", "-", group).strip("-").lower() or "group"
+    return f"group-{slug}"
+
+
 def crumbs_html(*parts: tuple[str, str]) -> str:
-    """Forum › group › section: each but the last a link."""
+    """Forum › group › section: every crumb a link (a group's goes to its list on the front page)."""
     out = [f"<a href='{PAGE}'>Forum</a>"]
     for text, href in parts:
         out.append("<span aria-hidden='true'>›</span>")
@@ -269,12 +279,15 @@ def sections_html(got: dict[str, Any]) -> str:
             )
         if not rows:
             continue
-        out.append(ui.list_head(g["group"]))
         out.append(
-            ui.table_open("minmax(0,1fr) 7rem", "minmax(0,1fr) 6rem", "minmax(0,1fr) auto", label=g["group"])
+            f"<div class='fm-group' id='{group_anchor(g['group'])}'>"
+            + ui.list_head(g["group"])
+            + ui.table_open(
+                "minmax(0,1fr) 7rem", "minmax(0,1fr) 6rem", "minmax(0,1fr) auto", label=g["group"]
+            )
             + ui.table_header([ui.Column("Section"), ui.Column("Posts", "fm-n")])
             + "".join(rows)
-            + "</div>"
+            + "</div></div>"
         )
     if not out:
         out.append("<p class='muted'>Archidekt's forum lists no sections right now.</p>")
@@ -286,11 +299,11 @@ def section_label(section: str) -> str:
     return ui.label(section, "grey", "comment", cls="fm-section")
 
 
-def thread_rows_html(threads: list[dict[str, Any]], section: str = "") -> str:
-    """One row a thread (the mockup's table: title, section, who, replies, last activity): a link
-    to its page; on a phone the section, the author, the replies and the date fold under the
-    title as a second line. ``section``: the section the list is of (Archidekt's thread rows do
-    not name it; a section's page lists its own threads)."""
+def thread_rows_html(threads: list[dict[str, Any]]) -> str:
+    """One row a thread (the mockup's table: title, who, replies, last activity): a link to its
+    page; on a phone the author, the replies and the date fold under the title as a second line.
+    A section's page lists that section's threads, which the heading names, so no row repeats
+    it (Archidekt's thread rows carry no section of their own)."""
     rows = []
     for t in threads:
         mark = MARKS.get(t["type"])
@@ -299,20 +312,21 @@ def thread_rows_html(threads: list[dict[str, Any]], section: str = "") -> str:
             label += ui.label("Archived", "grey", "lock")
         last = t["last_post"]
         when = _when(last["at"])
-        by = f"<span class='deck'>{esc(last['by'])}</span>" if last["by"] else ""
-        sec = section_label(section) if section else ""
+        # who and when on one line (the column is cut short with an ellipsis, so the row stays
+        # as tall as the others)
+        by = f"<span class='fm-by'>{esc(last['by'])}</span>" if last["by"] else ""
+        last_html = by + (" · " if by and when else "") + when
         # on a phone the date takes a line of its own under the owner and the replies
-        sub = " · ".join(((sec + " " if sec else "") + esc(t["owner"]), _plural(t["responses"], "reply"))) + (
+        sub = " · ".join((esc(t["owner"]), _plural(t["responses"], "reply"))) + (
             f"<span class='sm-only fm-when'>{when}</span>" if when else ""
         )
         rows.append(
             f"<a class='tr' href='{thread_href(t['id'])}' data-id='{t['id']}'>"
             f"<span class='title'><span class='t'>{esc(t['title'])}{label}</span>"
             f"<span class='sub'>{sub}</span></span>"
-            f"<span class='md-hide'>{sec}</span>"
             f"<span class='md-hide'>{esc(t['owner'])}</span>"
             f"<span class='md-hide fm-n'>{t['responses']:,}</span>"
-            f"<span class='fm-last sm-hide'>{when}{by}</span></a>"
+            f"<span class='fm-last sm-hide'>{last_html}</span></a>"
         )
     return "".join(rows) or "<div class='tr'><span class='muted'>No threads here yet.</span></div>"
 
@@ -347,8 +361,8 @@ def threads_html(got: dict[str, Any]) -> str:
     )
     table = (
         ui.table_open(
-            "minmax(0,2.6fr) 8rem 9rem 5rem 9rem",
-            "minmax(0,1fr) 9rem",
+            "minmax(0,2.6fr) 9rem 5rem 11rem",
+            "minmax(0,1fr) 11rem",
             "minmax(0,1fr)",
             cls="fm-threads",
             label="Threads",
@@ -356,13 +370,12 @@ def threads_html(got: dict[str, Any]) -> str:
         + ui.table_header(
             [
                 ui.Column("Thread"),
-                ui.Column("Section", "md-hide"),
                 ui.Column("Started by", "md-hide"),
                 ui.Column("Replies", "md-hide fm-n"),
                 ui.Column("Last activity", "sm-hide"),
             ]
         )
-        + thread_rows_html(got["threads"], section)
+        + thread_rows_html(got["threads"])
         + "</div>"
     )
     more = ""
@@ -375,7 +388,7 @@ def threads_html(got: dict[str, Any]) -> str:
     elif got["count"] and page > 1:
         more = ui.load_more("", done=load_more_words(got)["done"])
     return (
-        crumbs_html((group, ""), (section, section_href(group, section)))
+        crumbs_html((group, f"{PAGE}#{group_anchor(group)}"), (section, section_href(group, section)))
         + head
         + new_thread_html(section)
         + tools

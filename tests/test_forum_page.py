@@ -89,7 +89,10 @@ async def test_a_sections_threads_with_their_marks_search_order_and_paging(
     assert r.status_code == 200, r.text
     page = r.text
     assert "<h1>General</h1>" in page
-    assert "href='/forum'>Forum</a>" in page  # the crumbs
+    # the crumbs: every one a link, the group's to its list on the front page
+    assert "href='/forum'>Forum</a>" in page
+    assert "href='/forum#group-archidekt'>Archidekt</a>" in page
+    assert "href='/forum/Archidekt/General'>General</a>" in page
     # one row a thread, each a link to the thread page, with its author, responses and points
     rows = re.findall(r"<a class='tr' href='/forum/thread/(\d+)'", page)
     assert rows == ["700001", "700002", "700003"]
@@ -102,6 +105,9 @@ async def test_a_sections_threads_with_their_marks_search_order_and_paging(
     assert "<option value='points'>Points</option>" in page
     assert "name='q'" in page
     assert ark.site_pages[-1] == ("/forum/Archidekt/General", {"page": "1", "orderBy": "-updatedAt"})
+    # the front page carries the anchor the group crumb links to
+    front = (await member.http.get("/forum")).text
+    assert "<div class='fm-group' id='group-archidekt'>" in front
     # the New thread button names the section
     assert "href='https://archidekt.com/forum/thread/new?section=General'" in page
     # three threads: no Load more
@@ -275,15 +281,18 @@ async def test_the_thread_table_has_a_section_column_and_two_line_rows(member: B
     cols = re.findall(r"<span[^>]*>(.*?)</span>", head.group(0))
     assert [re.sub(r"<[^>]+>", "", c).strip() for c in cols] == [
         "Thread",
-        "Section",
         "Started by",
         "Replies",
         "Last activity",
     ]
-    # the section is the page's own (Archidekt's rows carry no section of their own): a label in
-    # the column on a desktop and in the row's second line on a phone
-    assert page.count("class='ui-lbl grey fm-section'") >= 3 or page.count("fm-section") >= 3
-    assert "General" in re.search(r"<a class='tr' href='/forum/thread/700002'.*?</a>", page, re.S).group(0)
+    # the section is the page's own (its heading names it; Archidekt's rows carry no section of
+    # their own), so no row repeats it as a chip
+    assert "fm-section" not in page
+    row = re.search(r"<a class='tr' href='/forum/thread/700002'.*?</a>", page, re.S).group(0)
+    assert "General" not in row
+    # the Last activity column: who and when on one line
+    last = re.search(r"<span class='fm-last sm-hide'>(.*?)</span></a>", row, re.S).group(1)
+    assert last.startswith("<span class='fm-by'>amy</span> · <time class='ui-when'"), last
 
 
 async def test_a_contest_thread_has_its_strip_the_entries_and_the_enter_and_withdraw_boxes(

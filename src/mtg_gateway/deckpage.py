@@ -2890,7 +2890,16 @@ h3 .count{font-weight:400;color:var(--text-muted);font-size:.9rem}
 .comments .cmt .confirmbar{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;margin:.3rem 0}
 .comments .cmt .acts button{margin:0;height:28px;padding:0 .6rem;font-size:.8rem}
 .comments .cmt .acts{display:flex;flex-wrap:wrap;gap:.25rem;align-items:center}
+/* the footer's points: a ▲ button that votes (and takes the vote back) on someone else's comment,
+   plain words on your own (social.js) */
+.comments .cmt .acts .pts{font-size:.85rem;color:var(--text-muted);padding:0 .3rem}
+.comments .cmt .acts button.vote{display:inline-flex;align-items:center;gap:.3rem;
+  font-variant-numeric:tabular-nums}
+.comments .cmt .acts button.vote svg.i{width:16px;height:16px}
 .comments .cmt .acts button.vote[aria-pressed=true]{color:var(--orange-text);font-weight:700}
+@media (pointer:coarse),(max-width:599.98px){
+  .comments .cmt .acts button{min-height:44px;height:auto;padding:0 .75rem}
+}
 .comments .cmt .acts .confirm{display:inline-flex;flex-wrap:wrap;gap:.4rem;align-items:center;min-width:0;
   font-size:.85rem}
 .comments .cmt .acts .confirm > span{min-width:0;overflow-wrap:anywhere}

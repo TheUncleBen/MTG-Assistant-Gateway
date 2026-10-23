@@ -6,7 +6,10 @@
    Parity release 2 (mockup screens/60-forum.js): each comment has a ⋮ (also a right-click, a press
    and hold, or the Menu key) with Reply and Copy link, Edit… and Delete… on your own, Vote up and
    Report comment… on others' (the page's Report comment box, #reportcomment, which sends the report
-   to its review page). The forum's reply box has Bold, Italic and Link buttons that put the reply's
+   to its review page). Under the comment sit its points as a vote button (▲ 3: a press votes it
+   up, a second takes the vote back) and Reply, as the mockup's post footer; everything else is
+   in the ⋮. The date is the site's one list date (feedback.js MtgText.rel, with the full date
+   and time as its tooltip). The forum's reply box has Bold, Italic and Link buttons that put the reply's
    marks around the selected words (**bold**, _italic_, [words](https://…); formatting.marks_doc
    writes them as Archidekt's own formatting), and Post reply first shows the reply as it will
    appear and asks once more (Keep editing / Post reply). window.MtgComments lets the thread page's
@@ -213,10 +216,17 @@
     var parentId = null, parentPage = 1;  // the comment replied to, and the thread page it is on
     var me = null;  // the member's Archidekt user id, from the thread load; own comments get Edit and Delete
     var deckUrl = "/social/api/decks/" + encodeURIComponent(commentsPanel.getAttribute("data-deck")) + "/comments";
-    var when = function (iso) {  // one date format across the site (feedback.js)
-      if (window.MtgText) return window.MtgText.when(iso);
-      var d = new Date(iso);
-      return isNaN(d) ? "" : d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+    // the comment's date: the site's one list date (ui.when on the server, MtgText.rel here:
+    // "2 h ago", then "Oct 12"), with the full date and time as its tooltip; feedback.js keeps
+    // the text current while the page stays open
+    var when = function (iso) {
+      var t = el("time", "ui-when");
+      t.setAttribute("datetime", iso || "");
+      t.setAttribute("data-fmt", "rel");
+      var T = window.MtgText, d = new Date(iso);
+      if (T && T.rel) { t.textContent = T.rel(iso); t.title = T.when(iso); }
+      else t.textContent = isNaN(d) ? "" : d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+      return t;
     };
     // pg: the page of the thread the comment came on, sent with every write so the gateway finds it there
     // the reply box set to answer one comment (or the thread itself, with no id)
@@ -244,11 +254,14 @@
       var who = el("div", "who");
       var b = el("b", "", c.owner.username || "someone");
       who.appendChild(b);
-      who.appendChild(document.createTextNode(" · " + when(c.created_at) + (c.edited_at ? " · edited" : "")));
+      who.appendChild(document.createTextNode(" · "));
+      who.appendChild(when(c.created_at));
+      if (c.edited_at) who.appendChild(document.createTextNode(" · edited"));
+      // the points, under the comment: a vote button on someone else's comment, plain on your own
       var pts = el("span", "pts");
-      var showPoints = function () { pts.textContent = c.points ? " · " + c.points + (c.points === 1 || c.points === -1 ? " point" : " points") : ""; };
+      var pointsText = function () { var n = c.points || 0; return n + (n === 1 || n === -1 ? " point" : " points"); };
+      var showPoints = function () { pts.textContent = pointsText(); };
       showPoints();
-      who.appendChild(pts);
       // the ⋮: the same menu a right-click, a press and hold or the Menu key opens (menuFor);
       // with writes off the comments are read only and carry no buttons (the menu's Copy link
       // stays on a right-click)
@@ -262,46 +275,52 @@
       var acts = el("div", "acts");
       var does = { reply: null, up: null, edit: null, del: null, own: !!(me !== null && c.owner && c.owner.id === me) };
       box.__cmt = { c: c, pg: pg, does: does };
+      // the vote on someone else's comment (Archidekt's vote up), asked first like the deck's
+      // Like: the footer's ▲ button carries the points and takes the vote back on a second press
+      if (canWrite && me !== null && c.id && !(c.owner && c.owner.id === me)) {
+        var btn = el("button", "btn-ghost vote");
+        btn.type = "button";
+        if (window.MtgMenu) btn.appendChild(window.MtgMenu.icon("plus")); else btn.appendChild(document.createTextNode("▲ "));
+        var count = el("span", "n", String(c.points || 0));
+        btn.appendChild(count);
+        var mine = function () { return c.user_vote === 1; };
+        var label = function () {
+          count.textContent = String(c.points || 0);
+          btn.setAttribute("aria-pressed", mine() ? "true" : "false");
+          btn.setAttribute("aria-label", pointsText() + ". " + (mine() ? "Take back your vote" : "Vote up") + ": comment by " + (c.owner.username || "someone"));
+          btn.title = mine() ? "You voted this up" : "Vote up";
+        };
+        label();
+        btn.addEventListener("click", function () {
+          var undoing = mine();
+          confirmChip(btn, undoing ? "Take back your vote?" : "Vote this comment up on Archidekt?", undoing ? "Take back" : "Vote", function () {
+            btn.disabled = true;
+            socialRequest("POST", deckUrl + "/" + encodeURIComponent(c.id) + "/vote", { vote: undoing ? "none" : "up", page: pg }).then(function (d) {
+              btn.disabled = false;
+              if (!d.ok) { var n = el("p", "notice error"); n.appendChild(socialProblem(d)); acts.appendChild(n); setTimeout(function () { n.remove(); }, 8000); return; }
+              c.user_vote = d.vote; c.points = d.points;
+              showPoints();
+              label();
+            }).catch(function () {
+              btn.disabled = false;
+              var n = el("p", "notice error", "No connection; the vote was not sent."); n.setAttribute("role", "alert");
+              acts.appendChild(n); setTimeout(function () { n.remove(); }, 8000);
+            });
+          });
+        });
+        btn.relabel = label;
+        does.up = btn;
+        acts.appendChild(btn);
+      } else {
+        acts.appendChild(pts);
+      }
       var reply = el("button", "btn-ghost", "Reply");
       reply.type = "button";
       reply.setAttribute("aria-label", "Reply to " + (c.owner.username || "this comment"));
       reply.addEventListener("click", function () { replyingTo(c.id, c.owner.username, pg); });
       if (canWrite) { acts.appendChild(reply); does.reply = reply; }
-      // votes on other people's comments (Archidekt's comment vote), asked first like the deck's Like
-      if (canWrite && me !== null && c.id && !(c.owner && c.owner.id === me)) {
-        var voteBtn = function (up) {
-          var btn = el("button", "btn-ghost vote", up ? "▲ Up" : "▼ Down");
-          btn.type = "button";
-          var mine = function () { return c.user_vote === (up ? 1 : 2); };
-          var label = function () {
-            btn.setAttribute("aria-pressed", mine() ? "true" : "false");
-            btn.setAttribute("aria-label", (mine() ? "Take back your " : "Vote ") + (up ? "up" : "down") + ": comment by " + (c.owner.username || "someone"));
-          };
-          label();
-          btn.addEventListener("click", function () {
-            var undoing = mine();
-            confirmChip(btn, undoing ? "Take back your vote?" : (up ? "Vote this comment up on Archidekt?" : "Vote this comment down on Archidekt?"), undoing ? "Take back" : "Vote", function () {
-              btn.disabled = true;
-              socialRequest("POST", deckUrl + "/" + encodeURIComponent(c.id) + "/vote", { vote: undoing ? "none" : (up ? "up" : "down"), page: pg }).then(function (d) {
-                btn.disabled = false;
-                if (!d.ok) { var n = el("p", "notice error"); n.appendChild(socialProblem(d)); acts.appendChild(n); setTimeout(function () { n.remove(); }, 8000); return; }
-                c.user_vote = d.vote; c.points = d.points;
-                showPoints();
-                Array.prototype.forEach.call(acts.querySelectorAll("button.vote"), function (x) { if (x.relabel) x.relabel(); });
-              }).catch(function () {
-                btn.disabled = false;
-                var n = el("p", "notice error", "No connection; the vote was not sent."); n.setAttribute("role", "alert");
-                acts.appendChild(n); setTimeout(function () { n.remove(); }, 8000);
-              });
-            });
-          });
-          btn.relabel = label;
-          return btn;
-        };
-        does.up = voteBtn(true);
-        acts.appendChild(does.up);
-        acts.appendChild(voteBtn(false));
-      }
+      // Edit and Delete on your own comment live in the ⋮ (Edit…, Delete…), as the mockup has
+      // them: the buttons the menu presses are kept off the page
       if (canWrite && me !== null && c.owner && c.owner.id === me) {
         var edit = el("button", "btn-ghost", "Edit");
         edit.type = "button";
@@ -337,7 +356,6 @@
           box.insertBefore(f, acts);
           ta.focus();
         });
-        acts.appendChild(edit);
         does.edit = edit;
         var del = el("button", "btn-ghost del", "Delete");
         del.type = "button";
@@ -365,7 +383,6 @@
           box.insertBefore(bar, acts.nextSibling);
           yes.focus();
         });
-        acts.appendChild(del);
         does.del = del;
       }
       box.appendChild(acts);
@@ -491,7 +508,7 @@
         if (does.edit) items.push(Menu.item("Edit…", "edit", function () { does.edit.click(); }));
         if (does.del) { items.push(Menu.sep()); items.push(Menu.item("Delete…", "trash", function () { does.del.click(); }, { danger: true })); }
       } else {
-        if (does.up) items.push(Menu.item("Vote up", "plus", function () { does.up.click(); }));
+        if (does.up) items.push(Menu.item(c.user_vote === 1 ? "Take back your vote" : "Vote up", "plus", function () { does.up.click(); }));
         if (reportBox) { items.push(Menu.sep()); items.push(Menu.item("Report comment…", "flag", function () { openReport(c.id, who, pg, box); })); }
       }
       Menu.open({ head: who + "'s comment", label: "Menu for " + who + "'s comment", items: items, focusBack: box }, x, y);
