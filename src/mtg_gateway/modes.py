@@ -124,8 +124,9 @@ def low_risk_text(max_rows: int = DEFAULT_MAX_ROWS) -> str:
 
 # Which proposals are high risk (risk_of), as one sentence.
 HIGH_RISK_TEXT = (
-    "Everything else: more rows than that, a commander change, a new deck, restoring a snapshot, "
-    "the deck's details (name, format, bracket, description, visibility, folder, tags and cover), "
+    "Everything else: more rows than that, adding more than 10 cards from a card package, a commander "
+    "change, a new deck, restoring a snapshot, the deck's details (name, format, bracket, description, "
+    "visibility, folder, tags and cover), "
     "and its categories (a new category, a new name, Premier, Not in deck or Not in price, or "
     "deleting one)."
 )

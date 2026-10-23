@@ -159,7 +159,7 @@ def add_community_tools(state: AppState, h: SimpleNamespace) -> None:
         title="Read my Archidekt notifications",
         description=(
             "The user's Archidekt notifications (the bell): kind, text, whether it was seen, and the "
-            "page it points to. Archidekt has no way to mark them read from here. Changes nothing."
+            "page it points to. Nothing here marks them read. Changes nothing."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": True},
     )

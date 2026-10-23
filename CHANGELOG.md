@@ -7,6 +7,58 @@ Notable changes for people who run or use the gateway. The format follows
 with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 (`release/1.2.3`); `latest` is always the newest.
 
+## [0.7.44] - 2026-10-23
+
+More of what you can do on Archidekt is now in the gateway too: your account-wide lists, card
+packages, your Archidekt profile and settings, the notification bell, deck help requests, reports to
+Archidekt's moderators, contest entries and the deck registration sheet. Your assistant can propose
+each of them; anything public or about your account waits for your own press.
+
+### Upgrade notes
+- None beyond the [update steps](docs/UPGRADING.md). There is no database change, so this update
+  saves no before-upgrade copy, and going back to 0.7.43 needs only the `MTG_TAG` change.
+- No new settings or secrets: your variables file works as it is.
+
+### Added
+- **My lists.** One page for Archidekt's account-wide lists: category templates, default
+  categories, color tags, pinned cards and custom cards, including a custom card's picture (checked,
+  then redrawn as a 500×700 PNG before it is sent). Your assistant can read them and propose
+  changes; a small change with no delete is low risk, and a delete always waits for your press.
+- **Categories from your templates.** Deck settings has Add template, and a template's menu on
+  My lists has Add to a deck…; your assistant can do the same.
+- **Card packages.** New package on My decks (name, keywords, budget, intended formats, private,
+  folder); a package's keywords, budget and formats in its Deck settings; Add a package in the deck
+  menu, choosing from your packages, the ones you follow or everyone's, by name, format and budget,
+  with Archidekt's options (keep the package's categories, let Archidekt file them, or put them in
+  the Maybeboard; skip cards already in the deck or outside the commander's colors; one copy of
+  each). The cards are added as one change you review first, and Archidekt counts one import of
+  the package when it is applied. Adding more than 10 cards from a package is high risk. My decks
+  has a Show filter (decks and packages, decks only, packages only), and a package's menu has Add
+  to a deck….
+- **A folder for a new deck.** New deck and New package can put the deck straight into one of your
+  folders, and so can your assistant.
+- **Your Archidekt profile and settings** on the Account page: bio, username, profile picture,
+  e-mail and notification switches, and new device default settings. Each change is applied only
+  by your own press. Password, e-mail address, Patreon and deleting your account stay on Archidekt,
+  with a link to it.
+- **Collection visibility.** My collection says whether it is private or public on Archidekt, and
+  can change it; making it public asks once first.
+- **The notification bell.** Archidekt's notifications in the top bar and on their own page, with
+  a link to what each one is about.
+- **Deck help requests.** Request deck help in the deck menu posts the deck on Archidekt's deck
+  help board, and lets you edit or delist it.
+- **Reports to Archidekt's moderators** for a deck or a card, from the deck and card menus.
+- **Contest entries.** Enter in a contest and Withdraw from a contest in the deck menu. Entering
+  replaces the deck's description with your summary, after a snapshot, and the review shows the
+  old and new description side by side.
+- **Registration PDF.** Archidekt fills the tournament deck registration sheet from a deck and the
+  details you type; nothing you type is kept by the gateway.
+- **Lock personal categories** in the card menu saves a card's template categories as its default
+  categories.
+
+### Changed
+- **Approval mode** on the Account page is one line per mode, each with a fold that explains it.
+
 ## [0.7.42] - 2026-10-22
 
 Everything you can do with a deck's categories and settings on Archidekt, you can now do in the

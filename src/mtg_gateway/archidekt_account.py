@@ -460,7 +460,7 @@ class AccountRequests:
         uid = _id(user_id, "user id")
         return await self._request("PUT", f"/users/uploadAvatar/{uid}/", token=token, upload=(picture, name))
 
-    # -- notifications (reads only: Archidekt has no mark-as-read) -------------------------------
+    # -- notifications (reads only: no mark-as-read request was seen in its scripts) ----------------
 
     async def notification_count(self: ArchidektClient, token: str, user_id: int) -> int:
         uid = _id(user_id, "user id")

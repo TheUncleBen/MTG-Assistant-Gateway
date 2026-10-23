@@ -199,7 +199,8 @@ async def notification_list(decks: Any, sub: str) -> dict[str, Any]:
         return hit[1]
     got = await profile.notifications(decks, sub)
     _LIST[sub] = (time.monotonic() + LIST_TTL, got)
-    # the site zeroes its badge once the list was read (Archidekt has no mark-as-read)
+    # the site zeroes its badge once the list was read (no mark-as-read request was seen in its
+    # scripts)
     _COUNT[sub] = (time.monotonic() + COUNT_TTL, 0)
     return got
 

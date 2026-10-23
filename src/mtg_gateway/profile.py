@@ -1,8 +1,8 @@
 """The member's Archidekt profile and account settings (parity release 2, REQUESTS.md section 9):
 each a ``PATCH /users/{id}/private/`` with one group, as the site sends them, proposed as an
 account action (actions.py) that only the member's own press applies. Also the reads: the profile
-as it is now and the notification list (Archidekt has no mark-as-read, so the gateway only shows
-them).
+as it is now and the notification list (no mark-as-read request was seen in Archidekt's scripts, so
+the gateway only shows them).
 
 Unknown, and so held to the gateway's own limits (said in the tool's description): the bio's
 length on Archidekt (BIO_MAX here) and its username rules (Django's default pattern here; Archidekt
