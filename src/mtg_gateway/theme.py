@@ -89,7 +89,9 @@ _LIGHT = """
     --menu-head:#595959; /* 5.2:1 on --surface-2 */
     --toolbar-bg:#dcdcdc; --toolbar-text:#383838;
     --navbar-bg:#313131; --navbar-text:#ffffff; --navbar-muted:#d6d6d6;
-    --banner-a:rgba(40,40,40,.82); --banner-b:rgba(40,40,40,.5);
+    /* the deck banner's shade: dark enough over --surface-2 or a light blurred art for its
+       #d6d6d6 text (deckpage.py .banner .row) to read at 4.5:1 across the whole gradient */
+    --banner-a:rgba(40,40,40,.86); --banner-b:rgba(40,40,40,.76);
     /* coloured text: at least 4.5:1 on --bg, --surface, --surface-2 and on its own tint */
     --orange-text:#944b00; --green-text:#0d6639; --red-text:#b3262e; --blue-text:#1d55b3;
     --orange-ctl:#c45f00; /* a checked box or radio: 3.1:1 on --surface-2, 4:1 on --surface */

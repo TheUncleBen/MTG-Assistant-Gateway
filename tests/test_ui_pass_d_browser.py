@@ -176,3 +176,76 @@ def test_forum_dates_votes_and_the_menu_in_its_column(server: Server, width: int
         assert page.evaluate(MEASURE) == []
         browser.close()
     assert errors == []
+
+
+@pytest.mark.parametrize("width,theme", SIZES)
+def test_the_deck_pages_custom_card_viewer_and_a_failed_picture(
+    server: Server, width: int, theme: str, monkeypatch
+) -> None:
+    from playwright.sync_api import sync_playwright
+
+    _pictures(server, monkeypatch)
+    sid = _link(server)
+    exe = _chromium()
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, width, theme, exe)
+        page.goto(f"{server.base}/decks/42?view=stacks", wait_until="networkidle")
+        # the banner's date reads at 4.5:1 in both themes
+        when = page.locator(".banner .row time.ui-when")
+        assert when.count() == 1 and when.inner_text()
+        # its colour is the row's own (the list date's muted grey was faint on the banner), and
+        # that reads at 4.5:1 over the whole shade
+        assert when.evaluate(
+            "e => getComputedStyle(e).color === getComputedStyle(e.parentNode.parentNode).color"
+        )
+        assert _banner_contrast(page) >= 4.5
+        # the card whose picture failed: its name and type line in the stack, no broken picture
+        ranger = page.locator(".deckview .c.custom[data-custom-id='44']")
+        ranger.scroll_into_view_if_needed()
+        page.wait_for_function("() => !document.querySelector(\".c.custom[data-custom-id='44'] img\")")
+        assert ranger.locator(".ph .nm").inner_text() == "Old Ranger"
+        assert ranger.locator(".ph .ty").inner_text() == "Creature — Human Advisor"
+        assert ranger.locator(".ph .nm").is_visible() and ranger.locator(".ph .ty").is_visible()
+        tile_text = ".c.custom[data-custom-id='44'] .ph .nm, .c.custom[data-custom-id='44'] .ph .ty"
+        assert page.evaluate(CONTRAST, tile_text) == []
+        # the viewer of that card: the name and the type line where the picture would be, the
+        # Custom mark, and what the deck knows of it; no rulings, prices or card links
+        ranger.focus()
+        page.keyboard.press("Enter")
+        view = page.locator(".cardview.open")
+        view.wait_for(state="visible")
+        page.wait_for_timeout(300)
+        tile = view.locator(".pane .ph")
+        assert tile.locator(".nm").inner_text() == "Old Ranger"
+        assert tile.locator(".ty").inner_text() == "Creature — Human Advisor"
+        assert view.locator(".pane img:not(.img-broken)").count() == 0
+        assert view.locator("h3 .custom-badge").inner_text().lower() == "custom"
+        facts = view.locator(".facts").inner_text()
+        assert "In this deck" in facts and "1 copy · Ramp" in facts
+        assert "Printing" in facts and "CST #001" in facts
+        assert "Custom card, made on Archidekt" in facts
+        assert view.locator(".more").count() == 0  # no Rulings, EDHREC or Price history
+        assert view.locator(".acts button", has_text="Remove from deck").count() == 1
+        assert page.evaluate(MEASURE) == []
+        view_text = ".cardview .ph .nm, .cardview .ph .ty, .cardview .facts dt, .cardview .facts dd"
+        assert page.evaluate(CONTRAST, view_text) == []
+        page.keyboard.press("Escape")
+        view.wait_for(state="hidden")
+        # the card with a picture: the viewer shows it (and the same facts)
+        mentor = page.locator(".deckview .c.custom[data-custom-id='41']")
+        mentor.scroll_into_view_if_needed()
+        page.wait_for_function(
+            "() => { const i = document.querySelector(\".c.custom[data-custom-id='41'] img.pic\");"
+            " return i && i.complete && i.naturalWidth > 0; }"
+        )
+        mentor.focus()
+        page.keyboard.press("Enter")
+        view.wait_for(state="visible")
+        page.wait_for_function(
+            "() => { const i = document.querySelector('.cardview.open .pane img');"
+            " return i && i.complete && i.naturalWidth > 0; }"
+        )
+        assert "In this deck" in view.locator(".facts").inner_text()
+        page.keyboard.press("Escape")
+        browser.close()
+    assert errors == []

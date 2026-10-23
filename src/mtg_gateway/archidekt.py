@@ -502,6 +502,21 @@ class CustomDeckCard:
     custom_cmc: float | None = None
     companion: bool = False
     flipped_default: bool = False
+    # the card's own text, as the card viewer shows it (the front face; a back face is its picture)
+    mana_cost: str = ""
+    rules_text: str = ""
+    pt: str = ""  # "2/3" when the card has power and toughness
+    loyalty: str = ""
+    artist: str = ""
+    set_code: str = ""
+    collector_number: str = ""
+
+
+def _custom_pt(card: dict[str, Any]) -> str:
+    p, t = card.get("frontPower"), card.get("frontToughness")
+    if p in (None, "") and t in (None, ""):
+        return ""
+    return f"{p if p not in (None, '') else '?'}/{t if t not in (None, '') else '?'}"
 
 
 def _custom_type_line(card: dict[str, Any]) -> str:
@@ -543,6 +558,13 @@ def parse_custom_rows(raw: Any) -> list[CustomDeckCard]:
                 custom_cmc=_number(entry.get("customCmc")),
                 companion=entry.get("companion") is True,
                 flipped_default=entry.get("flippedDefault") is True,
+                mana_cost=str(card.get("frontManaCost") or "").strip(),
+                rules_text=str(card.get("frontText") or "").strip(),
+                pt=_custom_pt(card),
+                loyalty=str(card.get("frontLoyalty") or "").strip(),
+                artist=str(card.get("frontArtistName") or "").strip(),
+                set_code=str(card.get("setCode") or "").strip(),
+                collector_number=str(card.get("collectorNumber") or "").strip(),
             )
         )
     return out

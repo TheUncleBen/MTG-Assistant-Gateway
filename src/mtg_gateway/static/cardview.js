@@ -127,8 +127,18 @@
     dl.appendChild(dd);
   }
   /* card: {name, img, set, type, mana, text, pt, loyalty, finish, faces: [{name, mana, type, text, pt, loyalty}],
-            rarity, price, artist, flavor, salt, rank, legal (comma list of formats), gc, mv, notes}
+            rarity, price, artist, flavor, salt, rank, legal (comma list of formats), gc, mv, notes,
+            custom (one of the member's custom cards: no rulings, prices or links, which are of
+            printed cards), qty, cat, label (its count, category and colour tag in this deck)}
      actions: elements (buttons, links) shown under the text */
+  // the name tile where the picture would be: the name and the type line, readable
+  function nameTile(card, cls) {
+    var tile = el("div", cls || "ph");
+    tile.appendChild(el("b", "nm", card.name || ""));
+    if (card.type) tile.appendChild(el("span", "ty", card.type));
+    if (card.custom) tile.appendChild(el("span", "custom-badge", "Custom"));
+    return tile;
+  }
   function open(card, actions) {
     var v = ensure();
     lastFocus = document.activeElement;
@@ -158,8 +168,19 @@
       pic.src = card.img.replace("/small/", "/normal/");
       pic.alt = card.name || "";
       pic.decoding = "async";
+      // a picture that fails to load: the name and the type line in its place (feedback.js puts
+      // a name-only tile after it first; this one replaces that)
+      pic.addEventListener("error", function () {
+        var was = pane.querySelector(".img-fallback");
+        if (was) was.remove();
+        pic.classList.add("img-broken");
+        var tile = nameTile(card, "ph img-fallback");
+        tile.setAttribute("role", "img");
+        tile.setAttribute("aria-label", (card.name || "") + " (image unavailable)");
+        pic.insertAdjacentElement("afterend", tile);
+      });
     } else {
-      pic = el("div", "ph", card.name || "");
+      pic = nameTile(card);
     }
     pane.appendChild(pic);
     /* A double-faced card's back: from the page's data or the card's links read below; the
@@ -193,6 +214,11 @@
     title.id = "cardview-title";
     v.setAttribute("aria-labelledby", "cardview-title");  // the dialog is named after the card
     if (card.mana) title.appendChild(mana(card.mana));
+    if (card.custom) {
+      var mark = el("span", "custom-badge", "Custom");
+      mark.title = "A custom card, made on Archidekt";
+      title.appendChild(mark);
+    }
     head.appendChild(title);
     var closeBtn = el("button", "close icon-only");
     closeBtn.type = "button";
@@ -207,7 +233,7 @@
       if (faces.length > 1 && i === faces.length - 1 && card.flavor && !f.flavor) f.flavor = card.flavor;
       text.appendChild(faceBlock(f, faces.length === 1));
     });
-    if (!card.text && !(card.faces && card.faces.length)) text.appendChild(el("p", "muted", card.loading ? "Reading the card text…" : "No rules text available for this card."));
+    if (!card.text && !(card.faces && card.faces.length)) text.appendChild(el("p", "muted", card.loading ? "Reading the card text…" : (card.custom ? "This custom card has no rules text." : "No rules text available for this card.")));
     side.appendChild(text);
     var dl = el("dl", "facts");
     var printing = [printLabel(card.set), card.rarity ? titleCase(card.rarity) : "",
@@ -220,6 +246,14 @@
     if (card.gc) fact(dl, "Note", "Game changer", "gc");
     fact(dl, "Custom mana value", card.mv);
     fact(dl, "Card notes", card.notes, "notes");  // Archidekt's per-card notes, shown read-only
+    if (card.custom) {
+      // what the deck knows of the member's custom card: its place in this deck and its tag
+      var inDeck = card.qty ? (String(card.qty) + (String(card.qty) === "1" ? " copy" : " copies")) : "";
+      if (card.cat) inDeck += (inDeck ? " · " : "") + card.cat;
+      fact(dl, "In this deck", inDeck);
+      fact(dl, "Color tag", card.label ? String(card.label).split(",")[0] : "");
+      fact(dl, "Note", "Custom card, made on Archidekt; not on Scryfall or in price lists");
+    }
     if (card.legal) {
       var chips = el("span", "chips");
       card.legal.split(",").filter(Boolean).forEach(function (f) { chips.appendChild(el("span", "chip", FORMATS[f] || titleCase(f))); });
@@ -227,6 +261,19 @@
     }
     if (dl.childNodes.length) side.appendChild(dl);
     var more = el("div", "more");
+    if (card.custom) {
+      // no rulings, prices or card links: those are of printed cards
+      if (actions && actions.length) {
+        var cacts = el("div", "acts");
+        actions.forEach(function (a) { cacts.appendChild(a); });
+        side.appendChild(cacts);
+      }
+      box.appendChild(pane);
+      box.appendChild(head);
+      box.appendChild(side);
+      v.appendChild(box);
+      return closeBtn;
+    }
     var rbtn = el("button", "btn small", "Rulings");
     rbtn.type = "button";
     rbtn.setAttribute("aria-expanded", "false");
@@ -424,7 +471,11 @@
       legal: node.getAttribute("data-legal") || "",
       gc: node.hasAttribute("data-gc"),
       mv: node.getAttribute("data-mv") || "",
-      notes: node.getAttribute("data-notes") || ""
+      notes: node.getAttribute("data-notes") || "",
+      custom: node.hasAttribute("data-custom"),
+      qty: node.getAttribute("data-qty") || "",
+      cat: node.getAttribute("data-cat") || "",
+      label: node.getAttribute("data-label") || ""
     };
   }
   window.MtgCardView = { text: extraFor, open: open, update: update, close: close, fromElement: fromElement, mana: mana, symbolize: symbolize };

@@ -1145,6 +1145,17 @@ def _custom_data(card: CustomDeckCard, deck: Deck) -> str:
             else ""
         )
         + f" data-type='{esc(card.type_line)}' data-finish='{esc(card.modifier)}'"
+        # the card's own text and printing, for the viewer (cardview.js draws what it has)
+        + (f" data-mana='{esc(card.mana_cost)}'" if card.mana_cost else "")
+        + (f" data-text='{esc(card.rules_text)}'" if card.rules_text else "")
+        + (f" data-pt='{esc(card.pt)}'" if card.pt else "")
+        + (f" data-loyalty='{esc(card.loyalty)}'" if card.loyalty else "")
+        + (f" data-artist='{esc(card.artist)}'" if card.artist else "")
+        + (
+            f" data-set='{esc((card.set_code + ' ' + card.collector_number).strip())}'"
+            if card.set_code or card.collector_number
+            else ""
+        )
         + (f" data-label='{esc(card.label)}'" if split_label(card.label)[0] else "")
         + (f" data-mv='{mana_value_text(card.custom_cmc)}'" if card.custom_cmc is not None else "")
     )
@@ -2827,13 +2838,16 @@ DECK_CSS = (
 .banner h1.deckname{display:flex;align-items:center;gap:.5rem;margin:0 0 .5rem;font-size:28px;
   font-weight:700;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .banner h1.deckname > span{overflow:hidden;text-overflow:ellipsis}
-.banner .privacy{color:#ababab;display:inline-flex}
-.banner .row{display:flex;flex-wrap:wrap;column-gap:1rem;row-gap:.2rem;font-size:16px;color:#ababab;
+/* the banner's grey text: #d6d6d6 reads at 4.5:1 over the whole shade (theme.py --banner-a/b)
+   in both themes; the list date in the first row takes this colour, not its muted grey */
+.banner .privacy{color:#d6d6d6;display:inline-flex}
+.banner .row{display:flex;flex-wrap:wrap;column-gap:1rem;row-gap:.2rem;font-size:16px;color:#d6d6d6;
   margin:.15rem 0;align-items:center}
 .banner .row b.orange{color:var(--orange);font-weight:700}
+.banner .row .ui-when{color:inherit;font-size:inherit}  /* the list date's muted grey: faint here */
 .banner .legal{display:inline-flex;align-items:center;gap:.3rem}
 .banner .legal.ok svg{color:#1ebb6c} .banner .legal.bad svg{color:#f21b3f}
-.banner .tags{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem;margin-top:1rem;color:#ababab}
+.banner .tags{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem;margin-top:1rem;color:#d6d6d6}
 .banner .tags .pill{background:var(--toolbar-bg);color:var(--toolbar-text)}
 .banner .notags{opacity:.8}
 .banner .controls{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:.5rem;
@@ -3181,8 +3195,10 @@ html.cardview-open{overflow:hidden}
 .cardview .pane{grid-area:pic;min-width:0;align-self:start}
 .cardview img,.cardview .ph{width:100%;aspect-ratio:5/7;border-radius:4.5%;object-fit:cover;
   background:var(--surface-2);display:block}
-.cardview .ph{display:flex;align-items:center;justify-content:center;color:var(--text-muted);padding:1rem;
-  text-align:center;font-weight:700}
+.cardview .ph{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:.35rem;
+  color:var(--text);padding:1rem;text-align:center;font-weight:700;font-size:1rem;overflow-wrap:anywhere}
+.cardview .ph .ty{font-weight:400;color:var(--text-muted);font-size:.9rem}
+.cardview .ph .custom-badge{margin-top:.25rem}
 .cardview .info{grid-area:info;min-width:0;display:flex;flex-direction:column;gap:.75rem;min-height:0}
 .cardview .head{grid-area:head;display:flex;align-items:flex-start;justify-content:space-between;gap:.75rem;
   min-width:0}
