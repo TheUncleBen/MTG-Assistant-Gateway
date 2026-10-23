@@ -22,7 +22,7 @@ from urllib.parse import parse_qs, quote, urlencode
 from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
 
-from . import account_lists, ui
+from . import account_lists, modes, ui
 from .busy import busy_response
 from .companion import DECK_CSP
 from .deckpage import image_url
@@ -85,6 +85,7 @@ NOTICES = {
     "card_created": "Custom card created on Archidekt and read back.",
     "card_saved": "Custom card saved on Archidekt and read back.",
     "card_deleted": "Deleted “{name}” on Archidekt.",
+    "card_added": "Added “{name}” to the deck on Archidekt and read back.",
     "picture_saved": "Picture saved on Archidekt and read back.",
 }
 UNCONFIRMED = (
@@ -960,6 +961,12 @@ def custom_rows(items: list[dict[str, Any]]) -> str:
                     tab_href("custom", edit=c["id"]),
                     {"data-box": "cc-box", "data-mode": "edit"},
                 ),
+                (
+                    "Add to deck…",
+                    "plus",
+                    tab_href("custom", add=c["id"]),
+                    {"data-box": "cc-add"},
+                ),
                 None,
                 (
                     "Delete…",
@@ -1030,7 +1037,66 @@ def custom_tab(got: dict[str, Any], csrf: str, box: dict[str, Any], q: str) -> s
         + more
         + custom_box(csrf, box if box.get("box") == "cc-box" else {})
         + custom_delete_box(csrf, box if box.get("box") == "cc-del" else {})
+        + custom_add_box(csrf, box if box.get("box") == "cc-add" else {})
     )
+
+
+ADD_DEFAULT_CATEGORY = "The deck's default"
+ADD_CUSTOM_NOTE = (
+    "The card goes in by its custom card id, as Archidekt's deck page adds it. With no category, "
+    "Archidekt files it itself. The deck is read back to check."
+)
+
+
+def custom_add_box(csrf: str, st: dict[str, Any]) -> str:
+    """Add to deck… on a custom card's row (the mockup's Add to deck box): one of the member's
+    decks (read as the box opens, static/lists.js; drawn without scripts, the list is in the
+    page), how many copies and, once a deck is picked, one of its categories or the deck's
+    default. The card is proposed for the deck (decks.propose_custom_cards) and, when nothing
+    needs a second look, applied through the member's press here; otherwise it goes to its
+    review page."""
+    v = st.get("values") or {}
+    name = v.get("name", "")
+    rows = st.get("decks") or []
+    picked = str(v.get("deck", ""))
+    opts = "".join(
+        f"<option value='{esc(str(d['id']))}'{' selected' if str(d['id']) == picked else ''}>{esc(d['name'])}"
+        "</option>"
+        for d in rows
+    )
+    qty = str(v.get("quantity") or "1")
+    cat = str(v.get("category") or "")
+    cat_opt = f"<option value='{esc(cat)}' selected>{esc(cat)}</option>" if cat else ""
+    body = (
+        f"<form id='cc-add-f' method='post' action='{PAGE}/custom' class='stack' novalidate>"
+        f"<input type='hidden' name='csrf' value='{esc(csrf)}'><input type='hidden' name='action' "
+        f"value='add_to_deck'><input type='hidden' name='custom_id' value='{esc(str(v.get('id', '')))}'>"
+        f"<input type='hidden' name='was_name' value='{esc(name)}'>"
+        "<div class='field'><label for='cc-add-deck'>Deck</label><span class='sel'>"
+        f"<select id='cc-add-deck' name='deck' required data-src='/api/decks/mine'>{opts}</select></span>"
+        "</div>"
+        "<div class='lp-two'>"
+        "<div class='field'><label for='cc-add-qty'>Copies</label>"
+        f"<input id='cc-add-qty' name='quantity' type='number' min='1' max='99' step='1' "
+        f"inputmode='numeric' value='{esc(qty)}' required></div>"
+        "<div class='field'><label for='cc-add-cat'>Category</label><span class='sel'>"
+        "<select id='cc-add-cat' name='category' data-src='/api/v1/decks/{id}?cards=0'>"
+        f"<option value=''>{esc(ADD_DEFAULT_CATEGORY)}</option>{cat_opt}</select></span></div>"
+        "</div></form>"
+        f"<p class='muted small'>{esc(ADD_CUSTOM_NOTE)}</p>" + box_note(st.get("error", ""))
+    )
+    return ui.box(
+        "cc-add",
+        f"Add “{name}” to a deck",
+        body,
+        actions=[
+            ui.box_button("Cancel", cancel=True),
+            ui.box_button("Add to deck", kind="primary", form="cc-add-f", icon_name="plus"),
+        ],
+        open=bool(st),
+        close_href=f"{PAGE}/custom",
+        cls="lp-box",
+    ).replace("<div class='ui-box", "<div data-t='Add “{name}” to a deck' class='ui-box", 1)
 
 
 def face_fields(face: str, v: dict[str, Any], *, editing: bool, has_picture: bool) -> str:
@@ -1421,6 +1487,8 @@ def add_lists_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
                 return {"box": "cc-box", "mode": "edit", "values": {**c, "was_name": c["name"]}}
             if c := by_id(items, q.get("delete")):
                 return {"box": "cc-del", "values": c}
+            if c := by_id(items, q.get("add")):
+                return {"box": "cc-add", "values": c}
         return {}
 
     def tab_body(
@@ -1520,7 +1588,7 @@ def add_lists_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
                 }
             )
         box = box_from_query(tab, got, q)
-        if box.get("box") == "tpl-deck":  # the deck list, for the box drawn open without scripts
+        if box.get("box") in ("tpl-deck", "cc-add"):  # the deck list, for the box drawn open without scripts
             box["decks"] = await decks_or_none(sub)
         body = page_body(tab, got, _csrf(s, sid) or "", box, search, sub, top_notice(q))
         return respond(body, sub, sid)
@@ -1566,6 +1634,75 @@ def add_lists_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
         if wants_json(request):
             return JSONResponse({"ok": True, "location": where})
         return RedirectResponse(where, status_code=303)
+
+    async def add_custom_to_deck(
+        request: Request, sub: str, sid: str | None, data: dict[str, str]
+    ) -> Response:
+        """Add to deck… on a custom card's row: the card proposed for the deck by its custom card
+        id (decks.propose_custom_cards) and applied through this press, as the deck page applies
+        its own custom card edits (api.custom_cards_edit); a change that needs a second look
+        (modes.hand_edit_confirm: a commander-zone category) or writes being off send the member
+        to the review page instead."""
+        tab = BY_SLUG["custom"]
+        name = (data.get("was_name") or "").strip()
+        deck_id = (data.get("deck") or "").strip()
+        raw_id = (data.get("custom_id") or "").strip()  # not "id": a field of that name shadows form.id
+        raw_qty = (data.get("quantity") or "1").strip()
+        category = (data.get("category") or "").strip()
+        try:
+            if not _ID.fullmatch(raw_id):
+                raise DeckError(
+                    "invalid", "That custom card is not on this page any more. Reload and try again."
+                )
+            if not deck_id:
+                raise DeckError("invalid", "Pick a deck first.")
+            if not re.fullmatch(r"[0-9]{1,2}", raw_qty) or int(raw_qty) < 1:
+                raise DeckError("invalid", "Copies must be a whole number from 1 to 99.")
+            change: dict[str, Any] = {
+                "action": "add",
+                "custom_card_id": int(raw_id),
+                "quantity": int(raw_qty),
+            }
+            if category:
+                change["category"] = category
+            current_client.set(BROWSER_CLIENT_ID)
+            p = await decks.propose_custom_cards(sub, deck_id, [change])
+            pid = p["proposal_id"]
+            decks.keep_no_backup(sub, pid)
+            why = modes.hand_edit_confirm("custom_cards", p.get("rows"))
+            if why or not s.writes_enabled:
+                where = f"/proposals/{pid}"
+                if wants_json(request):
+                    return JSONResponse({"ok": True, "location": where})
+                return RedirectResponse(where, status_code=303)
+            out = await decks.apply(sub, pid, via="browser", archidekt_backup=False)
+        except DeckError as exc:
+            if wants_json(request):
+                return JSONResponse({"ok": False, "message": str(exc)}, status_code=400)
+            try:
+                got = await read_tab(sub, tab)
+            except DeckError as again:
+                return problem(request, again, sub, sid, tab)
+            box = {
+                "box": "cc-add",
+                "values": {
+                    "name": name,
+                    "id": raw_id,
+                    "deck": deck_id,
+                    "quantity": raw_qty,
+                    "category": category,
+                },
+                "error": str(exc),
+                "decks": await decks_or_none(sub),
+            }
+            body = page_body(tab, got, _csrf(s, sid) or "", box, "", sub)
+            return respond(body, sub, sid, status=400)
+        if out.get("state") != "applied":  # still going on Archidekt: the review page shows how far it got
+            where = f"/proposals/{pid}"
+            if wants_json(request):
+                return JSONResponse({"ok": True, "location": where})
+            return RedirectResponse(where, status_code=303)
+        return done(request, tab, {"proposal_id": pid, "result": out.get("result")}, "card_added", name)
 
     # -- the member's own press --------------------------------------------------------------------
 
@@ -1757,6 +1894,8 @@ def add_lists_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
             return page(TITLE, h.EXPIRED, sub=sub, sid=sid, status=403)
         if tab.slug == "templates" and data.get("action") == "add_to_deck":
             return await add_template_to_deck(request, sub, sid, data)
+        if tab.slug == "custom" and data.get("action") == "add_to_deck":
+            return await add_custom_to_deck(request, sub, sid, data)
         box_id = ""
         try:
             change, code, box_id = change_of(tab, data)

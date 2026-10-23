@@ -77,6 +77,58 @@
     var n = $(".boxnote", box);
     if (n) { n.hidden = true; n.textContent = ""; }
   }
+  // the member's decks into a box's Deck select, read when the box opens, once; then(sel) runs
+  // once they are in (and at once when they already were)
+  function readDecks(box, then) {
+    var sel = $("select[name=deck]", box);
+    if (!sel) return;
+    if (box.__decks) { if (then && !sel.disabled) then(sel); return; }
+    box.__decks = true;
+    // the themed control (static/select.js) shows the select's label: told after each change
+    function show(text) {
+      sel.textContent = "";
+      if (text) sel.appendChild(el("option", null, text));
+      if (window.MtgSelect) window.MtgSelect.refresh(sel);
+    }
+    show("Reading your decks…");
+    sel.disabled = true;
+    Menu.getJSON(sel.getAttribute("data-src")).then(function (r) {
+      var rows = (r.decks || []).slice().sort(function (a, b) { return (a.name || "").localeCompare(b.name || ""); });
+      if (!rows.length) { box.__decks = false; show(r.message || "No decks to add it to."); return; }
+      show("");
+      rows.forEach(function (dk) { var o = el("option", null, dk.name); o.value = dk.id; sel.appendChild(o); });
+      sel.disabled = false;
+      if (window.MtgSelect) window.MtgSelect.refresh(sel);
+      if (then) then(sel);
+    }, function () { box.__decks = false; show("No connection; your decks could not be read."); });
+  }
+  // the Category select of Add to deck…: the deck's default first, then the deck's categories
+  // (null: no deck picked yet; a text: what is going on)
+  function showCats(cat, names, text) {
+    var keep = cat.value;
+    cat.textContent = "";
+    var first = el("option", null, text || "The deck's default");
+    first.value = "";
+    cat.appendChild(first);
+    (names || []).forEach(function (n) { var o = el("option", null, n); o.value = n; cat.appendChild(o); });
+    cat.value = keep;
+    if (cat.selectedIndex < 0) cat.selectedIndex = 0;
+    cat.disabled = !names;
+    if (window.MtgSelect) window.MtgSelect.refresh(cat);
+  }
+  function loadCats(box, deckId) {
+    var cat = $("select[name=category]", box);
+    if (!cat || !/^\d+$/.test(deckId || "")) return;
+    var src = cat.getAttribute("data-src").replace("{id}", deckId);
+    var cached = (box.__cats = box.__cats || {})[deckId];
+    if (cached) { showCats(cat, cached); return; }
+    showCats(cat, null, "Reading the deck's categories…");
+    Menu.getJSON(src).then(function (r) {
+      var names = r.ok ? (r.categories || []) : [];
+      box.__cats[deckId] = names;
+      if ($("select[name=deck]", box).value === deckId) showCats(cat, names);
+    }, function () { showCats(cat, []); });
+  }
   var fillers = {
     "tpl-box": function (box, mode, d) {
       var editing = mode === "edit";
@@ -97,25 +149,23 @@
     "tpl-deck": function (box, mode, d) {
       // Add to a deck…: the member's decks are read when the box opens, once
       setValue(box, "was_name", d.name);
-      var sel = $("select[name=deck]", box);
-      if (!sel || box.__decks) return;
-      box.__decks = true;
-      // the themed control (static/select.js) shows the select's label: told after each change
-      function show(text) {
-        sel.textContent = "";
-        if (text) sel.appendChild(el("option", null, text));
-        if (window.MtgSelect) window.MtgSelect.refresh(sel);
-      }
-      show("Reading your decks…");
-      sel.disabled = true;
-      Menu.getJSON(sel.getAttribute("data-src")).then(function (r) {
-        var rows = (r.decks || []).slice().sort(function (a, b) { return (a.name || "").localeCompare(b.name || ""); });
-        if (!rows.length) { box.__decks = false; show(r.message || "No decks to add it to."); return; }
-        show("");
-        rows.forEach(function (dk) { var o = el("option", null, dk.name); o.value = dk.id; sel.appendChild(o); });
-        sel.disabled = false;
-        if (window.MtgSelect) window.MtgSelect.refresh(sel);
-      }, function () { box.__decks = false; show("No connection; your decks could not be read."); });
+      readDecks(box);
+    },
+    "cc-add": function (box, mode, d) {
+      // Add to deck… on a custom card: the decks as above; the deck's categories once one is picked
+      setValue(box, "was_name", d.name);
+      setValue(box, "custom_id", d.id);
+      var qty = setValue(box, "quantity", "1");
+      var cat = $("select[name=category]", box);
+      if (cat) { showCats(cat, null); }
+      readDecks(box, function (sel) {
+        if (!sel.__cats) {
+          sel.__cats = true;
+          sel.addEventListener("change", function () { loadCats(box, sel.value); });
+        }
+        if (sel.value) loadCats(box, sel.value);
+      });
+      if (qty) qty.focus();
     },
     "def-box": function (box, mode, d) {
       setValue(box, "card", d.name);
@@ -242,6 +292,20 @@
     var f = e.target;
     if (!f || !f.closest || !f.closest(".lp-box") || f.hasAttribute("data-fetches")) return;
     var box = f.closest(".ui-box");
+    if (f.getAttribute("id") === "cc-add-f") {
+      // the two checks before anything is sent
+      var sel = $("select[name=deck]", f), qty = $("input[name=quantity]", f), bad = "";
+      if (!sel || sel.disabled || !/^\d+$/.test(sel.value || "")) bad = "Pick a deck first.";
+      else if (!/^[0-9]{1,2}$/.test(qty.value.trim()) || parseInt(qty.value, 10) < 1) bad = "Copies must be a whole number from 1 to 99.";
+      if (bad) {
+        e.preventDefault();
+        var n = $(".boxnote", box);
+        if (!n) { n = el("p", "notice error boxnote"); n.setAttribute("role", "alert"); $("form", box).insertAdjacentElement("afterend", n); }
+        n.hidden = false; n.textContent = bad;
+        (bad === "Pick a deck first." ? sel : qty).focus();
+        return;
+      }
+    }
     $$(".acts button[type=submit]", box).forEach(function (b) { b.disabled = true; b.setAttribute("aria-busy", "true"); });
   });
 

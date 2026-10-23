@@ -5,6 +5,7 @@ its own route, and the links to the page from the More menu and the Account page
 
 from __future__ import annotations
 
+import html
 import re
 
 import pytest
@@ -468,3 +469,68 @@ async def test_the_more_menu_and_the_account_page_link_to_my_lists(member: Brows
     assert "<a href='/lists/pins'>1 pinned card</a>" in acc
     assert "<a href='/lists/custom'>1 custom card</a>" in acc
     assert account_lists.counts("user-1")["templates"] == 2
+
+
+async def test_a_custom_card_is_added_to_a_deck_from_its_row(member: Browser, stack: Stack) -> None:
+    ark = stack.ark
+    page = html.unescape((await member.http.get("/lists/custom")).text)
+    # the row's menu offers Add to deck…; the box is on the page, hidden, and reads the decks
+    assert "Add to deck…" in page and "href='/lists/custom?add=41'" in page and "data-box='cc-add'" in page
+    assert "id='cc-add'" in page and "id='cc-add-f'" in page and "data-src='/api/decks/mine'" in page
+    assert "data-src='/api/v1/decks/{id}?cards=0'" in page and "The deck's default" in page
+    # the old address draws it open with the deck list in the page (no scripts)
+    page = html.unescape((await member.http.get("/lists/custom?add=41")).text)
+    assert "Add “Grizzled Mentor” to a deck" in page and "data-open" in page
+    assert "<option value='42'>Sample Commander Deck</option>" in page
+    assert ">Add to deck</button>" in page
+    # the checks
+    r = await _post(
+        member, "custom", action="add_to_deck", custom_id="41", was_name="Grizzled Mentor", deck=""
+    )
+    assert r.status_code == 400 and "Pick a deck first." in r.text
+    r = await _post(
+        member,
+        "custom",
+        action="add_to_deck",
+        custom_id="41",
+        was_name="Grizzled Mentor",
+        deck="42",
+        quantity="0",
+    )
+    assert r.status_code == 400 and "Copies must be a whole number from 1 to 99." in r.text
+    assert not ark.decks[42].get("customCards")
+    # the add: proposed and applied through this press, the deck read back
+    r = await _post(
+        member,
+        "custom",
+        action="add_to_deck",
+        custom_id="41",
+        was_name="Grizzled Mentor",
+        deck="42",
+        quantity="2",
+        category="Ramp",
+    )
+    assert r.status_code == 303, r.text
+    assert r.headers["location"] == "/lists/custom?ok=card_added&n=Grizzled+Mentor"
+    rows = ark.decks[42]["customCards"]
+    assert len(rows) == 1 and rows[0]["quantity"] == 2 and rows[0]["categories"] == ["Ramp"]
+    assert rows[0]["card"]["id"] == 41
+    page = (await member.http.get(r.headers["location"])).text
+    assert _notice(page) == "Added “Grizzled Mentor” to the deck on Archidekt and read back."
+    # the proposal is the member's own, applied
+    listed = (await member.http.get("/api/v1/proposals")).json()["proposals"]
+    assert listed[0]["kind"] == "custom_cards" and listed[0]["state"] == "applied"
+    # a second add of the same card is refused in the box, with what was picked kept
+    r = await _post(
+        member, "custom", action="add_to_deck", custom_id="41", was_name="Grizzled Mentor", deck="42"
+    )
+    assert r.status_code == 400 and "already in this deck" in r.text
+    assert "data-open" in r.text and "<option value='42' selected>" in r.text
+    # with writes off the add waits on its review page
+    object.__setattr__(stack.h.app.state.gateway.settings, "writes_enabled", False)
+    ark.decks[42]["customCards"] = []
+    r = await _post(
+        member, "custom", action="add_to_deck", custom_id="41", was_name="Grizzled Mentor", deck="42"
+    )
+    assert r.status_code == 303 and r.headers["location"].startswith("/proposals/"), r.text
+    assert not ark.decks[42]["customCards"]
