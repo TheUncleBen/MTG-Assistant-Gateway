@@ -769,7 +769,8 @@ class FakeArchidekt:
                 self._category_ids(d)
             return self._category_create(request, who)
         if path == "/api/users/category/" or path.startswith("/api/users/category/"):
-            # the account's category templates: the gateway must never touch them
+            # the account's category templates are answered by self.account above; anything it
+            # leaves unanswered is a request the gateway should never send
             raise AssertionError(f"the gateway called the category templates route {path}")
         if path == "/api/decks/copy/" and request.method == "POST":
             if self.fail_backup:

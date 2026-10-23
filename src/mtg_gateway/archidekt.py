@@ -2070,7 +2070,8 @@ class ArchidektClient(AccountRequests):
           deck already has before anything is sent.
         - The answer's shape is unknown: it is not trusted; the caller re-reads the deck.
         ``deck_id`` is not part of the route; it is checked so a call always names its deck.
-        Account category templates (``/users/category/``) are a different route, never used."""
+        Account category templates (``/users/category/``) are a different route, used only by
+        account_lists.py."""
         if not DECK_ID_RE.fullmatch(str(deck_id)):
             raise ArchidektError("contract", "deck id is not a number")
         cid = category.get("id")

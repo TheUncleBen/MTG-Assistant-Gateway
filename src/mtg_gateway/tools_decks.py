@@ -66,6 +66,13 @@ class CategoryChange(BaseModel):
     premier: bool | None = Field(None, description="Premier on or off: its cards are the commanders.")
     not_in_deck: bool | None = Field(None, description="Not in deck on or off: its cards don't count.")
     not_in_price: bool | None = Field(None, description="Not in price on or off: left out of the price.")
+    from_template: str | None = Field(
+        None,
+        description=(
+            "create only: one of the user's category templates (get_my_lists), by name; the new "
+            "category gets its name and switches."
+        ),
+    )
 
 
 MAX_PROPOSALS_PAGE = 100
@@ -754,7 +761,9 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
             "categories, up to 30 at a time (Archidekt's Delete unused categories). Moving single "
             "cards between categories is propose_deck_changes. A change that touches the commander "
             "or Not in deck, or a Sideboard or Maybeboard rename or delete, always waits for the "
-            "user's own press, in every approval mode. Returns the same fields as propose_deck_changes (kind "
+            "user's own press, in every approval mode. create with from_template adds one of the "
+            "user's category templates with its switches. Returns the same fields as "
+            "propose_deck_changes (kind "
             "'categories', one line per category and the review URL); it is applied with "
             "apply_proposal like any other proposal, which keeps a snapshot first: after the user's "
             "press, or in Full auto, for any other category change, without one. "
@@ -777,6 +786,10 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
     ) -> CallToolResult:
         try:
             raw = [c.model_dump(exclude_none=True) for c in changes or []]
+            if any(c.get("from_template") for c in raw):
+                from .account_lists import from_templates
+
+                raw = await from_templates(state.decks, _sub(), raw)
             return _proposal(
                 {
                     "ok": True,

@@ -1017,3 +1017,31 @@ async def set_picture(
         sub, "custom_cards", [{"op": "edit", "name": found["name"]}], picture={f"{face}ImageUrl": url}
     )
     return await decks.apply(sub, p["proposal_id"], via="browser")
+
+
+async def from_templates(decks: DeckService, sub: str, changes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Category changes with ``from_template`` made into plain creates: the template's name (or the
+    change's own ``category``) and its three switches, as Archidekt's Add template does. Read once."""
+    names = (await read(decks, sub, "templates"))["items"]
+    out = []
+    for c in changes:
+        want = c.get("from_template")
+        if not want:
+            out.append(c)
+            continue
+        if c.get("action") not in (None, "create"):
+            raise _err("from_template goes with action create")
+        extra = sorted(set(c) - {"action", "category", "from_template"})
+        if extra:
+            raise _err(f"from_template takes the template's switches, so leave out {', '.join(extra)}")
+        t = _one(names, want, "category template")
+        out.append(
+            {
+                "action": "create",
+                "category": c.get("category") or t["name"],
+                "premier": t["premier"],
+                "not_in_deck": not t["in_deck"],
+                "not_in_price": not t["in_price"],
+            }
+        )
+    return out
