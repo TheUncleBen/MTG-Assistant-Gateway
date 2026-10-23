@@ -27,7 +27,15 @@ from .busy import busy_response
 from .companion import DECK_CSP
 from .deckpage import image_url
 from .decks import DeckError, current_client
-from .pages import BROWSER_CLIENT_ID, _csrf, browser_session, login_redirect, read_limited
+from .pages import (
+    BROWSER_CLIENT_ID,
+    TOO_BIG,
+    _csrf,
+    browser_session,
+    limited_form,
+    login_redirect,
+    read_limited,
+)
 from .theme import esc, icon
 
 PAGE = "/lists"
@@ -1806,16 +1814,12 @@ def add_lists_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
         sub, sid = browser_session(state, request)
         if not sub:
             return login_redirect(f"{PAGE}/custom")
-        declared = request.headers.get("content-length", "")
-        if declared.isdigit() and int(declared) > PICTURE_BODY_LIMIT:
+        posted = await limited_form(request, PICTURE_BODY_LIMIT, max_files=1, max_fields=20)
+        if posted is TOO_BIG:
             exc = DeckError(
                 "invalid", "The picture is larger than 1.5 MB, Archidekt's limit. Choose a smaller one."
             )
             return await fail(request, tab, exc, sub, sid, "", {})
-        try:
-            posted = await request.form(max_files=1, max_fields=20)
-        except Exception:  # noqa: BLE001  # a body that is not a form
-            posted = None
         data: dict[str, str] = {}
         raw = b""
         if posted is not None:

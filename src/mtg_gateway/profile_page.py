@@ -25,13 +25,15 @@ from urllib.parse import parse_qs
 from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
 
-from . import profile, ui
+from . import prefs, profile, ui
 from .decks import DeckError, current_client
 from .pages import (
     BROWSER_CLIENT_ID,
+    TOO_BIG,
     _csrf,
     apply_own_press,
     browser_session,
+    limited_form,
     login_redirect,
     read_limited,
 )
@@ -682,15 +684,11 @@ def add_profile_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
         sub, sid = browser_session(state, request)
         if not sub:
             return login_redirect("/account")
-        declared = request.headers.get("content-length", "")
-        too_big = declared.isdigit() and int(declared) > PICTURE_BODY_LIMIT
+        posted = await limited_form(request, PICTURE_BODY_LIMIT, max_files=1, max_fields=10)
+        too_big = posted is TOO_BIG
         data: dict[str, str] = {}
         raw = b""
         if not too_big:
-            try:
-                posted = await request.form(max_files=1, max_fields=10)
-            except Exception:  # noqa: BLE001  # a body that is not a form
-                posted = None
             if posted is not None:
                 for k, v in posted.multi_items():
                     if hasattr(v, "read"):
@@ -746,12 +744,23 @@ def add_profile_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
         is_linked = linked(sub)
         got: dict[str, Any] = {"notifications": [], "unseen": 0}
         error = ""
-        if is_linked:
+        # a link on another site opens the page but reads nothing: reading the list clears the
+        # count (security review 0.7.44); one press here reads it
+        cross_site = not prefs.from_this_site(request)
+        if is_linked and not cross_site:
             try:
                 got = await notification_list(decks, sub)
             except DeckError as exc:
                 error = str(exc)
-        body = ui.notice(error, "error", role="alert") if error else notifications_html(got, linked=is_linked)
+        if cross_site and is_linked:
+            body = (
+                "<p><a class='btn' href='/notifications'>"
+                f"{icon('bell')} Show my notifications</a></p>"
+            )
+        elif error:
+            body = ui.notice(error, "error", role="alert")
+        else:
+            body = notifications_html(got, linked=is_linked)
         if wants_json(request):
             return JSONResponse(
                 {"ok": not error, "unseen": int(got.get("unseen") or 0), "html": body, "message": error},

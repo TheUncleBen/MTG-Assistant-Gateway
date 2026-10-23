@@ -175,6 +175,16 @@ def source_text(name: str, changes: list[dict[str, Any]], skipped: dict[str, lis
 
 
 WHOSE = ("mine", "followed", "all")
+MINE_TTL = 60.0  # seconds the member's own packages are kept (My decks asks after every visit)
+# (sub, filters) -> (expiry, Archidekt's answer); only "mine", the one My decks reads
+_MINE: dict[tuple[str, tuple[Any, ...]], tuple[float, dict[str, Any]]] = {}
+
+
+def forget(sub: str, *_: Any) -> None:
+    """Drop the member's kept package list: after any write the gateway sends for them (a
+    DeckService write hook) and when their link changes."""
+    for key in [k for k in _MINE if k[0] == sub]:
+        _MINE.pop(key, None)
 
 
 async def listing(
@@ -199,23 +209,37 @@ async def listing(
         raise _err("budget is 1 to 4 ($ to $$$$), or null for any")
     name = " ".join(str(name_contains or "").split())[:100]
     fmt = None if not intended_format else _format_id(intended_format)
+    import time
+
+    from .archidekt import _owned_by
+
     _token, link = decks._token(sub)
     owner = link["archidekt_username"] if whose == "mine" else None
-    body = await decks._call(
-        sub,
-        lambda token, *_: decks.client.packages_list(
-            token,
-            owner=owner,
-            bookmarks=whose == "followed",
-            name=name,
-            intended_format=fmt,
-            budget=budget,
-            page=page,
-        ),
-    )
+    key = (sub, (name, fmt, budget, page))
+    hit = _MINE.get(key) if whose == "mine" else None
+    if hit is not None and hit[0] > time.monotonic():
+        body = hit[1]
+    else:
+        body = await decks._call(
+            sub,
+            lambda token, *_: decks.client.packages_list(
+                token,
+                owner=owner,
+                bookmarks=whose == "followed",
+                name=name,
+                intended_format=fmt,
+                budget=budget,
+                page=page,
+            ),
+        )
+        if whose == "mine":
+            _MINE[key] = (time.monotonic() + MINE_TTL, body)
     rows = []
     for r in body["results"]:
         if not isinstance(r, dict) or not str(r.get("id") or "").isdigit():
+            continue
+        # asked for by username: the account's id decides, as for the deck list
+        if whose == "mine" and not _owned_by(r.get("owner"), owner or "", link.get("archidekt_user_id")):
             continue
         block = r.get("cardPackage") if isinstance(r.get("cardPackage"), dict) else {}
         who = r.get("owner") if isinstance(r.get("owner"), dict) else {}

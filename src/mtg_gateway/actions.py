@@ -67,6 +67,7 @@ COLLABORATOR_NOTE = (
 # goals and issues of 10 to 200 words each, a deck with at least one tag, and a deck size of 80
 # to 120 cards in a Commander-style format, else 50 to 85. It is listed for 7 days.
 HELP_WORDS = (10, 200)
+HELP_CHARS = 4000  # a cap on each box as well (security review 0.7.44): 200 words fit easily
 HELP_SIZE_COMMANDER = (80, 120)
 HELP_SIZE_OTHER = (50, 85)
 # The Commander-style formats, by the gateway's format names (archidekt.FORMAT_IDS): the site's
@@ -124,7 +125,10 @@ def _words(text: str) -> int:
 
 
 def _help_text(value: Any, what: str) -> str:
-    text = clean_text(str(value or ""))
+    raw = str(value or "")
+    if len(raw) > HELP_CHARS:  # before any cleaning: a 200-"word" box of megabytes is refused at once
+        raise DeckError("invalid", f"{what} must be at most {HELP_CHARS} characters")
+    text = clean_text(raw)
     low, high = HELP_WORDS
     if not low <= _words(text) <= high:
         raise DeckError("invalid", f"{what} must be {low} to {high} words (it has {_words(text)})")
@@ -563,6 +567,11 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
             row["text"] = f"Enter your deck {where} in the contest (thread {thread}) on Archidekt, publicly"
             row["before_text"] = rich_text(deck.description) or "(empty)"
             row["after_text"] = summary
+            if formatting.is_formatted(deck.description):
+                # plain words replace links, bold and pictures: approved on the review page only, as
+                # a description edit that loses its formatting is (security review 0.7.44)
+                row["formatting_lost"] = True
+                row["dropped_embeds"] = formatting.embeds(deck.description)
             row["note"] = (
                 "Archidekt's contest entry replaces the deck's description with your summary. The gateway "
                 "keeps a snapshot first, so History can put the old description back."

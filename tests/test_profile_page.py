@@ -490,3 +490,29 @@ def test_the_profile_cards_without_a_profile_say_so() -> None:
             {"notifications": [{"kind": "Deck", "text": "t", "seen": True, "url": None}]}
         ),
     )
+
+
+async def test_a_link_from_another_site_reads_no_notifications(member: Browser, stack: Stack) -> None:
+    """Security review 0.7.44, S-09: reading the list clears the count, so a link on another site
+    opens the page without reading it; one press on the page reads it."""
+    stack.ark.calls.clear()
+    page = (await member.http.get("/notifications", headers={"Sec-Fetch-Site": "cross-site"})).text
+    assert not [c for c in stack.ark.calls if "notification" in c[1]]
+    assert "href='/notifications'" in page and "Show my notifications" in page
+    page = (await member.http.get("/notifications", headers={"Sec-Fetch-Site": "same-origin"})).text
+    assert [c for c in stack.ark.calls if c[1].endswith("notifications/")]
+    assert "Show my notifications" not in page
+
+
+async def test_unlinking_forgets_the_profile_bell_and_list_counts(member: Browser, stack: Stack) -> None:
+    """Security review 0.7.44, S-11: after an unlink (or Delete my data) nothing read from the
+    old Archidekt account is shown again from memory."""
+    from mtg_gateway import account_lists
+
+    await member.http.get("/account")
+    await member.http.get("/notifications/count")
+    account_lists._COUNTS["user-1"] = (10**12, {"pins": 3})
+    assert "user-1" in profile_page._PROFILE and "user-1" in profile_page._COUNT
+    stack.h.app.state.gateway.decks.unlink("user-1")
+    assert "user-1" not in profile_page._PROFILE and "user-1" not in profile_page._COUNT
+    assert "user-1" not in account_lists._COUNTS

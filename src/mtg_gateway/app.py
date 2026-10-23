@@ -242,6 +242,9 @@ WRITE_TOOLS = frozenset(
         "propose_report",
         "propose_profile_change",
         "propose_contest_entry",
+        # sends the typed name, DCI number and event to Archidekt in the member's name (security
+        # review 0.7.44)
+        "get_registration_pdf",
         "apply_proposal",
         "confirm_proposal",
         "reject_proposal",

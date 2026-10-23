@@ -109,3 +109,11 @@ async def test_the_tool_answers_with_the_pdf_address_and_keeps_no_details(stack:
     assert len(rows) == 1 and "Smith" not in rows[0][0] and "FNM" not in rows[0][0]
     bad = structured(await call(stack.h, token, "get_registration_pdf", {"deck_id": "42", "dci_number": "x"}))
     assert bad["ok"] is False and len(stack.ark.account.pdfs) == 1
+
+
+def test_the_pdf_needs_the_write_scope() -> None:
+    """Security review 0.7.44, S-10: it sends the member's typed details to Archidekt in their
+    name, so an app that may only read cannot ask for it."""
+    from mtg_gateway.app import WRITE_TOOLS
+
+    assert "get_registration_pdf" in WRITE_TOOLS

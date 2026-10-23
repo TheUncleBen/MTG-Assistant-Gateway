@@ -136,7 +136,8 @@ async def test_default_categories_take_template_names_only(stack: Stack) -> None
     got = structured(await call(h, token, "get_my_lists", {"which_list": "default_categories"}))
     assert got["items"] == [{"oracle_id": 9003, "name": "Sol Ring", "categories": ["Draw", "Ramp"]}]
     p = await _propose(h, token, "default_categories", [{"op": "clear", "card": "Sol Ring"}])
-    await _apply(h, token, p)
+    assert p["risk"] == "destructive", p  # a clear takes entries out: the member's press only
+    await _browser_apply(h, p["proposal_id"])
     assert ark.account.defaults["alice"][9003] == []
 
 
@@ -306,3 +307,46 @@ async def test_set_picture_uploads_the_redrawn_png_and_sets_only_that_face(stack
     assert card["frontImageUrl"].startswith("https://") and card["backImageUrl"] is None
     with pytest.raises(DeckError):  # no back face yet
         await account_lists.set_picture(decks, "user-1", "Mentor", "back", _picture("PNG"))
+
+
+async def test_unpin_and_clear_wait_for_the_members_press(stack: Stack) -> None:
+    """Security review 0.7.44, S-04: unpinning a card and clearing its default categories take
+    entries out of a list, so they wait for the member's press like every delete."""
+    h = stack.h
+    token = await linked_user(stack)
+    await _set_mode(h, "semi")
+    p = await _propose(h, token, "pins", [{"op": "pin", "card": "Sol Ring"}])
+    assert (await _apply(h, token, p))["state"] == "applied"
+    p = await _propose(h, token, "pins", [{"op": "unpin", "card": "Sol Ring"}])
+    assert p["risk"] == "destructive" and p["assistant_may_apply"] is False, p
+    assert (await _apply(h, token, p))["ok"] is False
+    p = await _propose(h, token, "templates", [{"op": "create", "name": "Ramp"}])
+    await _apply(h, token, p)
+    p = await _propose(h, token, "default_categories", [{"op": "clear", "card": "Sol Ring"}])
+    assert p["risk"] == "destructive" and p["assistant_may_apply"] is False, p
+
+
+async def test_a_premier_template_and_defaults_naming_one_wait_for_the_members_press(stack: Stack) -> None:
+    """Security review 0.7.44, S-06: a Premier category template, or default categories naming
+    one, could file a card into the commander zone when it is added with no category, so neither
+    is ever applied by an assistant."""
+    h = stack.h
+    token = await linked_user(stack)
+    await _set_mode(h, "auto")
+    p = await _propose(h, token, "templates", [{"op": "create", "name": "Leader", "premier": True}])
+    assert p["risk"] == "destructive" and p["assistant_may_apply"] is False, p
+    assert (await _browser_apply(h, p["proposal_id"]))["state"] == "applied"
+    p = await _propose(h, token, "templates", [{"op": "create", "name": "Ramp"}])
+    assert p["risk"] == "low", p
+    await _apply(h, token, p)
+    p = await _propose(h, token, "templates", [{"op": "edit", "name": "Ramp", "premier": True}])
+    assert p["risk"] == "destructive", p
+    p = await _propose(
+        h, token, "default_categories", [{"op": "set", "card": "Sol Ring", "categories": ["Leader"]}]
+    )
+    assert p["risk"] == "destructive" and p["assistant_may_apply"] is False, p
+    assert "Premier" in p["rows"][0].get("note", ""), p["rows"]
+    p = await _propose(
+        h, token, "default_categories", [{"op": "set", "card": "Sol Ring", "categories": ["Ramp"]}]
+    )
+    assert p["risk"] == "low", p

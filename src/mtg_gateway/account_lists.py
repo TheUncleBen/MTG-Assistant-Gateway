@@ -15,7 +15,9 @@ been run against archidekt.com yet, so the read-back decides what the member is 
 
 from __future__ import annotations
 
+import asyncio
 import secrets
+import threading
 from typing import TYPE_CHECKING, Any
 
 from .archidekt_account import CUSTOM_CARD_FIELDS, HEX_COLOR_RE
@@ -45,7 +47,20 @@ OPS = {
 }
 # Waits for the member's own press in every approval mode
 DELETES = frozenset(
-    {("templates", "delete"), ("color_tags", "delete"), ("custom_cards", "delete"), ("pins", "remove_all")}
+    {
+        ("templates", "delete"),
+        ("color_tags", "delete"),
+        ("custom_cards", "delete"),
+        ("pins", "remove_all"),
+        # they take entries out of a list as well (security review 0.7.44)
+        ("pins", "unpin"),
+        ("default_categories", "clear"),
+    }
+)
+# a Premier template, or default categories naming one, could file a card into the commander zone
+# when it is added with no category of its own (security review 0.7.44): never an assistant's
+PREMIER_NOTE = (
+    "Premier categories decide a deck's commanders, so this waits for your own press in every approval mode."
 )
 MAX_CHANGES = 30  # changes in one proposal
 TEMPLATE_NAME_MAX = 60
@@ -201,6 +216,9 @@ async def _read(decks: DeckService, sub: str, kind: str, *, page: int, search: s
             "page": max(1, int(page)),
             "more": bool(body.get("next")),
             "templates": [_template(t)["name"] for t in cats if isinstance(t, dict)],
+            "premier": [
+                _template(t)["name"] for t in cats if isinstance(t, dict) and _template(t)["premier"]
+            ],
         }
     if kind == "color_tags":
         rows = await _get(decks, sub, lambda token, *_: client.color_tags(token))
@@ -295,7 +313,7 @@ async def _plan(  # noqa: C901, PLR0912, PLR0915
             raise _err(f"the same {NOUNS[kind][:-1]} is changed twice: give one change per entry")
         seen.add(key)
         ops.append(op)
-        destructive = (kind, op["op"]) in DELETES
+        destructive = (kind, op["op"]) in DELETES or bool(extra.pop("premier", False))
         rows.append(_row("list", list=kind, op=op["op"], text=text, destructive=destructive or None, **extra))
 
     for c in changes:
@@ -315,7 +333,11 @@ async def _plan(  # noqa: C901, PLR0912, PLR0915
                     "in_price": _bool(c.get("in_price"), "in_price", True),
                     "premier": _bool(c.get("premier"), "premier", False),
                 }
-                add({"op": op, **t}, f"New category template “{name}” ({_flags_text(t)})")
+                add(
+                    {"op": op, **t},
+                    f"New category template “{name}” ({_flags_text(t)})",
+                    **({"premier": True, "note": PREMIER_NOTE} if t["premier"] else {}),
+                )
                 continue
             t = _one(items, c.get("name"), "category template")
             if op == "delete":
@@ -356,7 +378,9 @@ async def _plan(  # noqa: C901, PLR0912, PLR0915
                 note=(
                     "Cards with this name in their default categories follow the change. "
                     "Cards already in decks don't change."
+                    + (" " + PREMIER_NOTE if new["premier"] and not t["premier"] else "")
                 ),
+                premier=new["premier"] and not t["premier"],
             )
         elif kind == "default_categories":
             printing = await _resolve(decks, sub, c)
@@ -388,9 +412,11 @@ async def _plan(  # noqa: C901, PLR0912, PLR0915
                     )
                 if hit not in picked:
                     picked.append(hit)
+            premier = [n for n in picked if any(_same(n, x) for x in now.get("premier") or [])]
             add(
                 {"op": op, "oracle_id": oid, "name": name, "categories": picked},
                 f"Default categories of “{name}”: " + ", ".join(picked) + " (main: " + picked[0] + ")",
+                **({"premier": True, "note": f"{', '.join(premier)}: " + PREMIER_NOTE} if premier else {}),
             )
         elif kind == "color_tags":
             if op == "create":
@@ -651,6 +677,11 @@ def _custom_fields(raw: Any, base: dict[str, Any]) -> dict[str, Any]:
 def risk_of(rows: list[dict[str, Any]] | None, *, max_rows: int) -> tuple[str, str]:
     """The approval tier of a lists proposal (modes.risk_of hands ``lists`` proposals here)."""
     rows = rows or []
+    if any(r.get("destructive") and (r.get("note") or "").endswith(PREMIER_NOTE) for r in rows):
+        return (
+            "destructive",
+            "a Premier category in your Archidekt lists; an assistant never applies this by itself",
+        )
     if any(r.get("destructive") for r in rows):
         return "destructive", "deletes from your Archidekt lists; an assistant never applies this by itself"
     if len(rows) > max_rows:
@@ -970,13 +1001,36 @@ def applied_text(changes: dict[str, Any], result: dict[str, Any]) -> str:
 PICTURE_MAX_BYTES = 1_500_000  # Archidekt's own limit for a custom card picture (its upload box)
 PICTURE_SIZE = (500, 700)  # the crop Archidekt's page redraws and sends
 PICTURE_FORMATS = ("JPEG", "PNG", "WEBP")
-PICTURE_MAX_PIXELS = 40_000_000  # refuse a picture that would take too much memory to decode
+PICTURE_MAX_PIXELS = 12_000_000  # the most pixels a picture is ever decoded to (security review 0.7.44)
+# one picture decoded at a time, off the event loop: a decoded picture can take tens of megabytes,
+# and the gateway's container is small (the profile picture shares it)
+DECODE_LOCK = threading.Lock()
+
+
+def jpeg_scale(img: Any, want: tuple[int, int]) -> float:
+    """Ask the JPEG decoder for the picture at a fraction of its size (1/2, 1/4 or 1/8) that still
+    covers ``want`` pixels, before anything is decoded; the factor from the decoded picture back
+    to the file's own pixels (1.0 when nothing was saved)."""
+    w, h = img.size
+    if img.format == "JPEG":
+        img.draft("RGB", (max(1, want[0]), max(1, want[1])))
+    return w / img.size[0]
 
 
 def redraw_picture(raw: bytes, crop: tuple[int, int, int, int] | None = None) -> bytes:
     """The member's picture checked and redrawn as Archidekt's page does: JPEG, PNG or WebP up to
     1.5 MB, the crop (left, top, width, height in the picture's own pixels; the middle at 5:7 when
-    none) scaled to 500 x 700 and saved as a PNG. Nothing else of the file is kept."""
+    none) scaled to 500 x 700 and saved as a PNG. Nothing else of the file is kept. One at a time
+    (DECODE_LOCK); redraw_picture_async runs it off the event loop."""
+    with DECODE_LOCK:
+        return _redraw(raw, crop)
+
+
+async def redraw_picture_async(raw: bytes, crop: tuple[int, int, int, int] | None = None) -> bytes:
+    return await asyncio.to_thread(redraw_picture, raw, crop)
+
+
+def _redraw(raw: bytes, crop: tuple[int, int, int, int] | None) -> bytes:
     import io
 
     from PIL import Image, UnidentifiedImageError
@@ -993,8 +1047,6 @@ def redraw_picture(raw: bytes, crop: tuple[int, int, int, int] | None = None) ->
         raise _err("That file is not a picture the gateway can read. Use JPEG, PNG or WebP.") from exc
     if fmt not in PICTURE_FORMATS:
         raise _err("Use a JPEG, PNG or WebP picture.")
-    if w * h > PICTURE_MAX_PIXELS:
-        raise _err("The picture has too many pixels. Choose a smaller one.")
     if crop is None:
         cw = min(w, h * PICTURE_SIZE[0] // PICTURE_SIZE[1])
         ch = min(h, w * PICTURE_SIZE[1] // PICTURE_SIZE[0])
@@ -1003,8 +1055,13 @@ def redraw_picture(raw: bytes, crop: tuple[int, int, int, int] | None = None) ->
     if min(cw, ch) < 1 or left < 0 or top < 0 or left + cw > w or top + ch > h:
         raise _err("The crop is outside the picture. Crop it again.")
     with Image.open(io.BytesIO(raw)) as img:
-        img.load()
-        art = img.convert("RGBA").crop((left, top, left + cw, top + ch)).resize(PICTURE_SIZE, Image.LANCZOS)
+        # the decoder's own reduction keeps the crop at least 500 x 700 (a JPEG only)
+        f = jpeg_scale(img, (w * PICTURE_SIZE[0] // cw, h * PICTURE_SIZE[1] // ch))
+        if img.size[0] * img.size[1] > PICTURE_MAX_PIXELS:
+            raise _err("The picture has too many pixels. Choose a smaller one.")
+        box = (round(left / f), round(top / f), round((left + cw) / f), round((top + ch) / f))
+        art = img.crop(box).convert("RGBA").resize(PICTURE_SIZE, Image.LANCZOS)
+    art.info.clear()
     out = io.BytesIO()
     art.save(out, format="PNG", optimize=True)
     return out.getvalue()
@@ -1030,7 +1087,7 @@ async def set_picture(
     edit. Only the page calls this; an assistant never sets a picture."""
     if face not in ("front", "back"):
         raise _err("Pick the front or the back.")
-    png = redraw_picture(raw, crop)
+    png = await redraw_picture_async(raw, crop)
     found = await _custom_by_name(decks, sub, {"name": name})
     if face == "back" and not found.get("hasBack"):
         raise _err("Switch on Has a back face and save the card first.")

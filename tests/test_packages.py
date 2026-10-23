@@ -275,3 +275,69 @@ async def test_my_decks_marks_packages_and_shows_decks_packages_or_both(stack: S
     assert "42" in await listed()  # include: the list as Archidekt gives it, one listing
     bad = structured(await call(stack.h, token, "list_my_decks", {"packages": "some"}))
     assert bad.get("ok") is not True
+
+
+async def test_an_amended_package_add_keeps_its_package_line_and_rule(stack: Stack) -> None:
+    """Security review 0.7.44, S-07: amending a package add keeps the line naming the package, so
+    the import is still counted when it is applied and more than 10 cards are still high risk."""
+    token = await linked_user(stack)
+    made = await _browser_apply(
+        stack.h, (await _new_package(stack, token, decklist_text="1 Arcane Signet"))["proposal_id"]
+    )
+    pkg_id = int(made["result"]["deck_id"])
+    p = structured(
+        await call(stack.h, token, "propose_add_package", {"deck_id": "42", "package_id": str(pkg_id)})
+    )
+    more = [{"action": "add", "card_name": n, "quantity": 4} for n in ("Arcane Signet", "Opt", "Island")]
+    amended = structured(
+        await call(
+            stack.h,
+            token,
+            "amend_proposal",
+            {"proposal_id": p["proposal_id"], "version": p["version"], "changes": more},
+        )
+    )
+    assert amended["ok"] is True, amended
+    assert amended["rows"][0]["kind"] == "package", amended["rows"]
+    assert amended["risk"] == "high", amended
+    done = await _browser_apply(stack.h, p["proposal_id"])
+    assert done["state"] == "applied", done
+    assert stack.ark.account.package_imports == {pkg_id: 1}
+
+
+async def test_mine_keeps_only_the_linked_accounts_packages_and_is_kept_briefly() -> None:
+    """Security review 0.7.44: S-12, "mine" asks Archidekt by username, so an entry whose owner id
+    is another account's (a username given up and taken) is left out; S-13, the member's own list
+    is kept for a minute, so My decks does not ask again on every visit, and a write forgets it."""
+    from types import SimpleNamespace
+
+    calls: list[dict] = []
+
+    async def packages_list(token, **kw):
+        calls.append(kw)
+        return {
+            "results": [
+                {"id": 1, "name": "Mine", "owner": {"id": 77, "username": "alice"}, "cardPackage": {}},
+                {"id": 2, "name": "Not mine", "owner": {"id": 99, "username": "alice"}, "cardPackage": {}},
+            ],
+            "next": None,
+        }
+
+    async def _call(sub, fn):
+        return await fn("tok")
+
+    decks = SimpleNamespace(
+        client=SimpleNamespace(packages_list=packages_list),
+        _token=lambda sub: ("tok", {"archidekt_username": "alice", "archidekt_user_id": "77"}),
+        _call=_call,
+    )
+    packages.forget("s1")
+    got = await packages.listing(decks, "s1")
+    assert [r["id"] for r in got["rows"]] == ["1"]
+    await packages.listing(decks, "s1")
+    assert len(calls) == 1  # kept
+    every = await packages.listing(decks, "s1", whose="all")
+    assert [r["id"] for r in every["rows"]] == ["1", "2"] and len(calls) == 2  # everyone's: never kept
+    packages.forget("s1", "/decks/5/update/")
+    await packages.listing(decks, "s1")
+    assert len(calls) == 3

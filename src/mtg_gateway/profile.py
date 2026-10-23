@@ -10,6 +10,7 @@ answers a name it refuses, and the review says so)."""
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 import unicodedata
@@ -256,17 +257,28 @@ def summary(now: dict[str, Any]) -> dict[str, Any]:
 
 
 AVATAR_MAX_BYTES = 1_000_000  # Archidekt's own upload box: JPEG or PNG up to 1 MB
-AVATAR_MAX_PIXELS = 25_000_000
 AVATAR_FORMATS = {"JPEG": "image/jpeg", "PNG": "image/png"}
+AVATAR_SIDE = 1024  # a bigger picture is saved at most this many pixels across
 
 
 def clean_avatar(raw: bytes) -> tuple[bytes, str]:
     """The member's profile picture checked as Archidekt's box checks it (JPEG or PNG, 1 MB at
-    most) and saved again in its own format at its own size, so nothing but the picture leaves the
-    gateway (no location or camera details). (picture, file name)."""
+    most) and saved again in its own format, at most AVATAR_SIDE pixels across, from a fresh copy
+    of its pixels, so nothing but the picture leaves the gateway (no location, camera details or
+    comments). Decoded one at a time (account_lists.DECODE_LOCK), and never to more than
+    account_lists.PICTURE_MAX_PIXELS. (picture, file name)."""
+    from .account_lists import DECODE_LOCK
+
+    with DECODE_LOCK:
+        return _clean_avatar(raw)
+
+
+def _clean_avatar(raw: bytes) -> tuple[bytes, str]:
     import io
 
     from PIL import Image, UnidentifiedImageError
+
+    from .account_lists import PICTURE_MAX_PIXELS, jpeg_scale
 
     if not raw:
         raise _err("Choose a picture first.")
@@ -280,16 +292,21 @@ def clean_avatar(raw: bytes) -> tuple[bytes, str]:
         raise _err("That file is not a picture the gateway can read. Use JPEG or PNG.") from exc
     if fmt not in AVATAR_FORMATS:
         raise _err("Use a JPEG or PNG picture.")
-    if w * h > AVATAR_MAX_PIXELS:
-        raise _err("The picture has too many pixels. Choose a smaller one.")
     with Image.open(io.BytesIO(raw)) as img:
+        ratio = min(1.0, AVATAR_SIDE / max(w, h))
+        jpeg_scale(img, (round(w * ratio), round(h * ratio)))
+        if img.size[0] * img.size[1] > PICTURE_MAX_PIXELS:
+            raise _err("The picture has too many pixels. Choose a smaller one.")
         img.load()
         pic = img.convert("RGB") if fmt == "JPEG" else img.convert("RGBA")
+    pic.thumbnail((AVATAR_SIDE, AVATAR_SIDE), Image.LANCZOS)
+    clean = Image.new(pic.mode, pic.size)
+    clean.paste(pic)
     out = io.BytesIO()
     if fmt == "JPEG":
-        pic.save(out, format="JPEG", quality=92)
+        clean.save(out, format="JPEG", quality=92)
     else:
-        pic.save(out, format="PNG", optimize=True)
+        clean.save(out, format="PNG", optimize=True)
     data = out.getvalue()
     if len(data) > AVATAR_MAX_BYTES:
         raise _err("The picture is larger than 1 MB once saved again. Choose a smaller one.")
@@ -300,7 +317,7 @@ async def set_avatar(decks: DeckService, sub: str, raw: bytes) -> dict[str, Any]
     """The member's own press on the Account page: the picture checked, saved again and sent as
     Archidekt's box sends it (PUT /users/uploadAvatar/{id}/), then the profile read back. Never
     from an assistant."""
-    data, name = clean_avatar(raw)
+    data, name = await asyncio.to_thread(clean_avatar, raw)
     decks._writes_switch()
     uid = user_id(decks, sub)
     client = decks.client

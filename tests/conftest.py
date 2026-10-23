@@ -453,6 +453,15 @@ def _reset_theme_globals(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(theme, "WATCHLISTS", theme.WATCHLISTS)
 
 
+@pytest.fixture(autouse=True)
+def _forget_package_lists() -> None:
+    """packages.listing keeps a member's own package list for a minute; tests share member ids,
+    so each test starts with that memory empty."""
+    from mtg_gateway import packages
+
+    packages._MINE.clear()
+
+
 # Tests stay offline. A gateway built without a Scryfall client of its own (create_app makes one)
 # gets one that answers from the recorded fixtures, so its start-up download of the card-name
 # catalog never reaches api.scryfall.com; and any request that still heads for a host other than

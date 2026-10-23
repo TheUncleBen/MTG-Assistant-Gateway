@@ -1171,6 +1171,23 @@ async def read_limited(request: Request, limit: int) -> bytes | None:
     return bytes(buf)
 
 
+TOO_BIG = object()  # limited_form's answer for a body over its limit
+
+
+async def limited_form(request: Request, limit: int, **kw: Any) -> Any:
+    """The request's form, read only up to ``limit`` bytes (read_limited) whether or not it says
+    its length; TOO_BIG past the limit, None when the body is not a form. ``kw`` go to
+    ``request.form`` (max_files, max_fields)."""
+    body = await read_limited(request, limit)
+    if body is None:
+        return TOO_BIG
+    request._body = body  # request.form() reads the buffered body, never the stream again
+    try:
+        return await request.form(**kw)
+    except Exception:  # noqa: BLE001  # a body that is not a form
+        return None
+
+
 def _err_code(kind: str, *, proposal_exists: bool = False) -> str:
     """The notice code for a failed apply. ``not_found`` from an apply of a proposal that does exist
     means a card, printing, deck or snapshot was missing on Archidekt, not the proposal itself."""

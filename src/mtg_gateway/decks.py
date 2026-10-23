@@ -2451,6 +2451,9 @@ class DeckService:
         self.page_deck_seconds = min(PAGE_DECK_SECONDS, float(settings.archidekt_cache_seconds))
         # Other member caches (the collection's first page) hear about writes here: (sub, path).
         self.write_hooks: list[Callable[[str, str], None]] = []
+        from . import packages
+
+        self.write_hooks.append(packages.forget)  # My decks' kept package list
         listeners = getattr(self.client, "write_listeners", None)  # a test double may lack it
         if listeners is not None:
             listeners.append(self._on_archidekt_write)
@@ -2479,6 +2482,13 @@ class DeckService:
         self.deck_lists.forget(sub)
         self.folder_trees.forget(sub)
         self._forget_page_decks()
+        # the Account page's profile, the bell and My lists' counts are the old account's too
+        # (security review 0.7.44)
+        from . import account_lists, packages, profile_page
+
+        profile_page.forget_all(sub)
+        account_lists.forget_counts(sub)
+        packages.forget(sub)
         for hook in self.write_hooks:
             hook(sub, "")
 
@@ -6244,6 +6254,9 @@ class DeckService:
             _before, _after, rows = plan_rows(deck, changes)
             await self._refuse_unknown_cards(deck, changes)
             stored: Any = [c.as_dict() for c in changes]
+            # a card package's line stays first: its import is counted at apply, and its risk rule
+            # holds (security review 0.7.44)
+            rows = [*(r for r in row.get("rows") or [] if r.get("kind") == "package"), *rows]
         else:
             raw = dict(raw_changes) if isinstance(raw_changes, dict) else raw_changes
             organise_raw = (

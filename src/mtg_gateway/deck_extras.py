@@ -518,7 +518,7 @@ def lock_box_html(
         )
     else:
         sentence = (
-            f"From now on, when you add “<span data-card>{esc(name)}</span>” to any deck, it goes into "
+            f"From now on, when you add “<span data-lock-card>{esc(name)}</span>” to any deck, it goes into "
             f"<b data-cats>{esc(', '.join(kept))}</b> (its categories in this deck). Saved to My lists › "
             "Default categories."
         )

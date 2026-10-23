@@ -1559,3 +1559,13 @@ async def test_reports_name_the_page_and_never_apply_by_themselves(stack: Stack)
             "by": "alice",
         }
     ]
+
+
+def test_a_help_box_has_a_character_cap_as_well() -> None:
+    """Security review 0.7.44, S-08: 200 "words" of megabytes are refused before anything else."""
+    from mtg_gateway import actions
+
+    long_words = " ".join(["x" * 1000] * 12)  # 12 words, 12 KB
+    with pytest.raises(DeckError, match="at most 4000 characters"):
+        actions._help_text(long_words, "goals")
+    assert actions._help_text(" ".join(["word"] * 150), "goals").startswith("word")

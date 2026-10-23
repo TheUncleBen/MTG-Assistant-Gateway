@@ -61,3 +61,33 @@ async def test_an_entry_needs_a_summary_a_contest_and_the_members_own_deck(stack
         )
     )
     assert other["ok"] is False
+
+
+async def test_an_entry_that_wipes_a_formatted_description_is_approved_on_the_review_page_only(
+    stack: Stack,
+) -> None:
+    """Security review 0.7.44, S-03: entering replaces the description with plain words, so on a
+    deck whose description has links or bold the entry is approved on its review page only, as a
+    description edit that loses formatting is: no in-chat card code."""
+    import json
+
+    from mtg_gateway.approve import APPROVAL_META_KEY
+
+    stack.ark.decks[42]["description"] = json.dumps(
+        {"ops": [{"insert": "Primer", "attributes": {"link": "https://example.com/p"}}, {"insert": "\n"}]}
+    )
+    token = await linked_user(stack)
+    res = await call(
+        stack.h, token, "propose_contest_entry", {"deck_id": "42", "contest": "881", "summary": "x"}
+    )
+    p = structured(res)
+    assert p["ok"] is True, p
+    assert not (res.get("_meta") or {}).get(APPROVAL_META_KEY), "offered on the in-chat card"
+    row = next(r for r in p["rows"] if r.get("kind") == "action")
+    assert row.get("formatting_lost") is True
+    # a plain description keeps the card
+    stack.ark.decks[42]["description"] = "plain words"
+    res = await call(
+        stack.h, token, "propose_contest_entry", {"deck_id": "42", "contest": "882", "summary": "y"}
+    )
+    assert (res.get("_meta") or {}).get(APPROVAL_META_KEY)

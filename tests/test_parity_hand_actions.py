@@ -67,7 +67,7 @@ async def test_cover_tags_and_folder_from_the_settings_page(stack: Stack) -> Non
         assert stack.ark.updates[-1] == {"deck_id": 42, "customFeatured": ""}
         # tags: Archidekt's own tags only; a name it doesn't have is refused and never created
         r = await _form(b, "/decks/42/tags", {"action": "add", "name": "Budget"}, follow=True)
-        assert "Tag added" in r.text and "Budget" not in r.text.split("Deck tags")[0]
+        assert "Tag added" in r.text and "Budget" not in r.text.split("<main")[1].split("Deck tags")[0]
         rels = stack.ark.deck_tags[42]
         assert [(x["tag"], x["name"]) for x in rels] == [(1, "budget")]
         r = await _form(b, "/decks/42/tags", {"action": "add", "name": "sea monsters"}, follow=True)
