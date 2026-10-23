@@ -385,7 +385,11 @@ def test_new_package_on_my_decks_and_add_to_a_deck_on_my_lists(
         assert "Add “Draw” to a deck" in tpl.locator("h2").inner_text()
         sel = tpl.locator("select[name=deck]")
         page.wait_for_function("() => !document.querySelector('#tpl-deck select[name=deck]').disabled")
+        # the themed control shows the first deck once the list is read, not a blank
+        assert tpl.locator(".msel-btn").inner_text().strip() == "Fetches"  # the package made above
         sel.select_option(label="Sample Commander Deck")
+        page.wait_for_timeout(100)
+        assert tpl.locator(".msel-btn").inner_text().strip() == "Sample Commander Deck"
         assert page.evaluate(MEASURE) == [] and page.evaluate(CONTRAST, TEXT) == []
         tpl.locator(".acts button", has_text="Add category").click()
         page.wait_for_url("**/proposals/**")

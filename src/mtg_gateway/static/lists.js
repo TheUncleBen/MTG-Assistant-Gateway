@@ -100,16 +100,22 @@
       var sel = $("select[name=deck]", box);
       if (!sel || box.__decks) return;
       box.__decks = true;
-      sel.textContent = "";
-      sel.appendChild(el("option", null, "Reading your decks…"));
+      // the themed control (static/select.js) shows the select's label: told after each change
+      function show(text) {
+        sel.textContent = "";
+        if (text) sel.appendChild(el("option", null, text));
+        if (window.MtgSelect) window.MtgSelect.refresh(sel);
+      }
+      show("Reading your decks…");
       sel.disabled = true;
       Menu.getJSON(sel.getAttribute("data-src")).then(function (r) {
-        sel.textContent = "";
         var rows = (r.decks || []).slice().sort(function (a, b) { return (a.name || "").localeCompare(b.name || ""); });
-        if (!rows.length) { box.__decks = false; sel.appendChild(el("option", null, r.message || "No decks to add it to.")); return; }
+        if (!rows.length) { box.__decks = false; show(r.message || "No decks to add it to."); return; }
+        show("");
         rows.forEach(function (dk) { var o = el("option", null, dk.name); o.value = dk.id; sel.appendChild(o); });
         sel.disabled = false;
-      }, function () { box.__decks = false; sel.textContent = ""; sel.appendChild(el("option", null, "No connection; your decks could not be read.")); });
+        if (window.MtgSelect) window.MtgSelect.refresh(sel);
+      }, function () { box.__decks = false; show("No connection; your decks could not be read."); });
     },
     "def-box": function (box, mode, d) {
       setValue(box, "card", d.name);
