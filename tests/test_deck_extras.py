@@ -109,6 +109,9 @@ async def test_a_deck_and_a_card_are_reported_through_the_review_page(stack: Sta
     try:
         page = html.unescape((await b.http.get("/decks/42/report-to-archidekt")).text)
         assert "Report “Sample Commander Deck” to Archidekt's moderators" in page and "data-open" in page
+        # a report's privacy on Archidekt is not known, so the box says nothing of it
+        assert "Your assistant can draft a report, but it always waits for your press." in page
+        assert "A report is public" not in page
         r = await _post(b, "/decks/42/report-to-archidekt", message="Stolen list.")
         done = await _browser_apply(stack.h, _pid(r))
         assert done["state"] == "applied", done
@@ -159,6 +162,10 @@ async def test_the_registration_pdf_answers_with_its_address_and_keeps_no_detail
     try:
         page = (await b.http.get("/decks/42/registration")).text
         assert "Registration PDF" in page and "data-open" in page and "Make the PDF" in page
+        assert (
+            "Main deck: every card whose first category counts in the deck. "
+            "Sideboard: the Sideboard category." in html.unescape(page)
+        )
         csrf = await b.csrf("/decks/42")
         r = await b.http.post(
             "/decks/42/registration",
@@ -194,6 +201,8 @@ async def test_a_package_is_added_through_the_review_page_and_listed_for_the_box
         assert listed["ok"] and [p["id"] for p in listed["packages"]] == [pkg_id]
         assert listed["packages"][0]["name"] == "Fetches" and "$$$" in listed["packages"][0]["line"]
         page = (await b.http.get("/decks/42/package")).text
+        assert "High when it adds more than 10 cards." in page
+        assert "More rows than your low-risk limit also wait for your press." in page
         assert "Add a package" in page and "data-open" in page and "Review the cards" in page
         empty = await _post(b, "/decks/42/package", package="")
         assert empty.status_code == 400 and "paste a package link or id" in empty.text
@@ -292,6 +301,7 @@ async def test_lock_saves_the_cards_template_categories_as_its_defaults(stack: S
         assert got["ok"] and [t["name"] for t in got["templates"]] == ["Ramp", "Draw"]
         page = (await b.http.get("/decks/42/lock?card=Sol%20Ring")).text
         assert "data-open" in page and "Lock personal categories for “Sol Ring”" in page
+        assert "Only names that are category templates are kept; others are left out.</p>" in page
         assert "it goes into <b data-cats>Ramp</b>" in page and "Left out, not a template: Artifact." in page
         r = await _post(b, "/decks/42/lock", card="Sol Ring")
         assert r.status_code == 303 and r.headers["location"] == "/decks/42?ok=locked&n=Sol+Ring", r.text

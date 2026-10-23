@@ -57,6 +57,7 @@ DEFAULT_MODE = "manual"
 DEFAULT_MAX_ROWS = 5
 DEFAULT_BIG_EDIT_ROWS = 20  # an edit with more rows than this waits for a card press in auto
 MAX_COPIES_PER_ROW = 4  # a row that adds, removes or changes more copies than this is not small
+PACKAGE_LOW_CARDS = 10  # adding a card package is low risk up to this many cards (plan 6.4)
 
 # Row kinds (decks.row_line) a low-risk edit may consist of, each with the word the wording below
 # uses for it, so the list risk_of checks and the list the member reads are one list.
@@ -384,6 +385,7 @@ def risk_of(
     if rows is None:  # stored before review rows existed: nothing to judge it by
         return "high", NO_ROWS_REASON
     # a card package's own line only says where the adds come from (packages.py); not a change
+    from_package = any(r.get("kind") == "package" for r in rows)
     rows = [r for r in rows if r.get("kind") != "package"]
     kinds = [str(r.get("kind")) for r in rows]
     if any(k == "commander" for k in kinds):
@@ -398,6 +400,9 @@ def risk_of(
         )
     if len(rows) > max_rows:
         return "high", f"changes {len(rows)} rows, more than the {max_rows} a low-risk edit may have"
+    cards = sum(_copies_moved(r) for r in rows)
+    if from_package and cards > PACKAGE_LOW_CARDS:
+        return "high", f"adds {cards} cards from a card package, more than {PACKAGE_LOW_CARDS}"
     for r in rows:
         if _copies_moved(r) > MAX_COPIES_PER_ROW:
             return (

@@ -38,6 +38,7 @@ PUBLIC_LINE = (
     "{what} is public on Archidekt under your name. Your assistant can draft it, but it always waits for "
     "your press."
 )
+REPORT_LINE = "Your assistant can draft a report, but it always waits for your press."
 HIST_LINE = "{what} is kept under History, and the result is read back to check."
 HELP_INTRO = (
     "Posts the deck on Archidekt's deck help board for seven days; you can reopen it after. Needs 10 to "
@@ -48,10 +49,7 @@ PDF_INTRO = (
     "Archidekt fills the tournament deck registration sheet from this deck and your details below. "
     "Nothing here is stored by the gateway."
 )
-PDF_MAIN = (
-    "Main deck: every card whose first category counts in the deck; the Sideboard category is the "
-    "sideboard, as Archidekt builds it."
-)
+PDF_MAIN = "Main deck: every card whose first category counts in the deck. Sideboard: the Sideboard category."
 PDF_SORTS = (("alpha", "Alphabet"), ("manaValue", "Mana value"), ("color", "Color"), ("type", "Type"))
 PACKAGE_CATEGORIES = (
     ("package", "Keep the package's categories"),
@@ -62,7 +60,9 @@ PACKAGE_NOTE = (
     "The cards go in as one change you review first, after a snapshot. Archidekt counts it as one "
     "import of the package."
 )
-LOCK_NOTE = "Only names that are category templates are kept; others are left out, as on Archidekt."
+PACKAGE_HIGH = "High when it adds more than 10 cards."
+PACKAGE_ROWS = "More rows than your low-risk limit also wait for your press."
+LOCK_NOTE = "Only names that are category templates are kept; others are left out."
 CONTEST_WARN = (
     "The review shows the old description and the new one side by side; a snapshot of the deck is kept first."
 )
@@ -305,7 +305,7 @@ def report_box_html(
             if card
             else ""
         )
-        + _pub("A report")
+        + f"<p class='muted small'>{icon('hand')} {esc(REPORT_LINE)}</p>"
         + "</form>"
         + _err(error)
     )
@@ -447,7 +447,7 @@ def package_box_html(
         + switch("singleton", "One copy of each (singleton)", fresh or v.get("singleton") == "1")
         + "</div>"
         f"<p class='muted small'>{icon('history')} {esc(PACKAGE_NOTE)} "
-        f"{ui.label('High when it adds more than 10 cards', 'orange', 'triangle')}</p>"
+        f"{ui.label(PACKAGE_HIGH, 'orange', 'triangle')} {esc(PACKAGE_ROWS)}</p>"
         "</form>" + _err(error)
     )
     return ui.box(
@@ -800,9 +800,11 @@ CSS = """
 .dx-box .body .field label{display:block;font-weight:700;margin:0 0 .25rem}
 .dx-box .body .field input[type=text],.dx-box .body .field select,.dx-box .body .field textarea{width:100%}
 .dx-box .body textarea{min-height:5rem;font-family:inherit;font-size:.95rem;line-height:1.4}
-.dx-box .body .dx-two{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,10rem),1fr));
+.dx-box .body .dx-two{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,13rem),1fr));
   gap:.5rem .75rem}
 .dx-box .body .dx-two .field + .field{margin-top:0}
+.mtgbox .body .dx-two + .field,.mtgbox .body form > p + .dx-two,
+.mtgbox .body form > p + .field{margin-top:.75rem}
 .dx-under{display:flex;justify-content:space-between;gap:.5rem;margin-top:.2rem}
 .dx-bad{color:var(--danger-text);font-weight:700}
 .dx-why{display:flex;flex-wrap:wrap;gap:.3rem .5rem;align-items:center}

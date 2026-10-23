@@ -187,3 +187,22 @@ async def test_a_package_is_added_as_reviewed_adds_and_counts_one_import_when_ap
         await call(stack.h, token, "propose_add_package", {"deck_id": "42", "package_id": str(pkg_id)})
     )
     assert again["ok"] is False and "Nothing to add" in again["message"]
+
+
+def test_a_package_add_is_low_risk_only_up_to_ten_cards() -> None:
+    """The approved plan (6.4): adding a package is low risk up to 10 cards, high above, whatever
+    the member's own low-risk row limit; the package's own line counts as no change."""
+    from mtg_gateway import modes
+
+    head = {"kind": "package", "text": "From card package “P”: 11 cards"}
+
+    def adds(*qty: int) -> list[dict]:
+        return [head] + [{"kind": "add", "name": f"C{i}", "qty": q} for i, q in enumerate(qty)]
+
+    assert modes.risk_of("edit", adds(*[1] * 10), max_rows=20)[0] == "low"
+    got, why = modes.risk_of("edit", adds(*[1] * 11), max_rows=20)
+    assert got == "high" and why == "adds 11 cards from a card package, more than 10", why
+    assert modes.risk_of("edit", adds(4, 4, 3), max_rows=20)[0] == "high"
+    assert modes.risk_of("edit", adds(1, 1), max_rows=1)[0] == "high"  # the row limit still holds
+    # an edit that is not from a package keeps the row limit alone
+    assert modes.risk_of("edit", adds(*[1] * 11)[1:], max_rows=20)[0] == "low"
