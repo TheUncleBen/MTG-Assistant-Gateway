@@ -69,9 +69,9 @@ account waits for your own press.
   which asks you to prove you're human first. The section and thread lists are read the way
   Archidekt's own forum pages load them, so if Archidekt changes those pages the gateway says so,
   and a thread still opens from its link or number. A post's menu has Reply, Copy link, Vote up,
-  Edit and Delete for your own, and Report comment…; the reply box has bold, italic and link
-  buttons and shows your reply once more before posting it; a contest thread lets you enter one of
-  your decks or withdraw it.
+  Vote down, Edit and Delete for your own, and Report comment…; the reply box has bold, italic
+  and link buttons and shows your reply once more before posting it; a contest thread lets you
+  enter one of your decks or withdraw it.
 - **Custom cards in your decks.** Your custom cards show in your decks with their pictures, and you
   can put one in a deck (from My lists), change its count, category, color tag or mana value, or
   take it out, as on Archidekt; your assistant can propose the same. Taking custom cards out of a
@@ -84,6 +84,10 @@ account waits for your own press.
 
 ### Changed
 - **Approval mode** on the Account page is one line per mode, each with a fold that explains it.
+- **Deck comments** work like forum replies: the vote count and Reply sit under each comment, and
+  Vote up, Vote down, Edit… and Delete… are in the comment's ⋮ menu.
+- **The deck page's banner** text is lighter, and its shade deeper in the light theme, so the
+  deck's details and dates are easier to read.
 
 ## [0.7.42] - 2026-10-22
 
