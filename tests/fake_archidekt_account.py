@@ -71,7 +71,7 @@ class AccountFake:
                     "deckView": 0,
                     "deckStack": 0,
                     "deckSorting": 0,
-                    "deckPrices": [0, 1],
+                    "deckPrices": [1, 2],  # Card Kingdom, TCGplayer (the ids of the site's price picker)
                     "searchUnique": 1,
                     "noUseDefaultCategories": False,
                     "searchGame": 1,

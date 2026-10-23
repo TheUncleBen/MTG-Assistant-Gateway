@@ -75,6 +75,14 @@ PREF_ROWS: tuple[tuple[str, str, str, tuple[tuple[str, str], ...] | None], ...] 
         "",
         tuple((k, k.capitalize()) for k in profile.DECK_VIEWS),
     ),
+    ("group_by", "Group by", "", tuple((profile.choice_key(w), w) for w, _v in profile.GROUP_BY_LABELS)),
+    ("sort_by", "Sort by", "", tuple((profile.choice_key(w), w) for w, _v in profile.SORT_LABELS)),
+    (
+        "price_sources",
+        "Price sources",
+        "Two shops, in order.",
+        tuple((profile.choice_key(w), w) for w, _v in profile.PRICE_SOURCE_LABELS),
+    ),
     ("unique_search", "Search unique printings", "Show one result per card name in card search.", None),
     (
         "use_default_categories",
@@ -119,6 +127,7 @@ CSS = """
   flex:1 1 8rem;width:auto;min-width:0;max-width:100%;margin:0}
 .acc .pr-bio{min-height:7rem;width:100%;font:inherit;font-size:1rem;line-height:1.4;resize:vertical}
 .acc .pr-hist{margin:.5rem 0 0}
+.acc .pr-two{display:grid;gap:6px}
 .acc .pr-hist svg.i,.pr-box .pr-hist svg.i{width:15px;height:15px;vertical-align:-2px}
 .acc .card .notice{margin:.5rem 0}
 .pr-box .pr-me{display:flex;align-items:center;gap:1rem;flex-wrap:wrap;margin:.75rem 0}
@@ -415,6 +424,18 @@ def account_cards(
                 on=cur == "on",
             )
             pref_rows.append(_row(f"<label for='pr-{name}'>{esc(label)}</label>", help_text, ctl, cls="sw"))
+        elif name == "price_sources":  # Archidekt's two pickers, side by side in one row
+            ctl = "".join(
+                _select_form(
+                    csrf_in, name=slot, label=words, choices=choices, cur=me["preferences"].get(slot)
+                )
+                for slot, words in (
+                    ("price_source_1", "First price source"),
+                    ("price_source_2", "Second price source"),
+                )
+            )
+            head = f"<label for='pr-price_source_1'>{esc(label)}</label>"
+            pref_rows.append(_row(head, help_text, f"<div class='pr-two'>{ctl}</div>"))
         else:
             ctl = _select_form(csrf_in, name=name, label=label, choices=choices, cur=cur)
             pref_rows.append(_row(f"<label for='pr-{name}'>{esc(label)}</label>", help_text, ctl))

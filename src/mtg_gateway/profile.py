@@ -33,8 +33,50 @@ EMAIL_SWITCHES = {
 # New Device Default Settings: the choices the site's controls offer (REQUESTS.md section 9)
 DECK_VIEWS = {"card": 0, "text": 1, "grid": 2, "scroll": 3, "table": 4, "brewer": 5}
 GAMES = {"paper": 1, "mtgo": 2, "arena": 3}
+# Group by, sort and price sources: the value lists of Archidekt's own controls, in their order
+# (_app script, read 2026-10-22: the group-by and sort maps its Account settings page lists, and
+# the price sources its picker lists, with the picker's names)
+GROUP_BY_LABELS = (
+    ("Categories", 0), ("Categories (multiple)", 6), ("Type", 1), ("Mana value", 2),
+    ("Mana value (spells)", 18), ("Full deck", 3), ("Color tag", 4), ("EDH Bracket Info", 20),
+    ("Collection", 5), ("Foiling", 22), ("Rarity", 7), ("Salt", 8), ("Price", 9), ("Color", 10),
+    ("Color (Spells)", 21), ("Identity", 11), ("Date added", 12), ("Edition name", 13),
+    ("Print date (range)", 26), ("Artist name", 14), ("Power", 15), ("Toughness", 16),
+    ("Category quantity", 17), ("Canlander pts", 19),
+)  # fmt: skip
+SORT_LABELS = (
+    ("Alphabet", 0), ("Mana value", 1), ("Type", 9), ("Price", 2), ("Edition", 3), ("Edition date", 16),
+    ("Color", 4), ("Identity", 14), ("Color tag", 5), ("Collection", 6), ("Salt", 7), ("EDHREC Rank", 15),
+    ("Date added", 8), ("Power", 10), ("Toughness", 11), ("Rarity", 17), ("Category quantity", 12),
+    ("Card finish", 13), ("Artist name", 18), ("Mana value (default)", 19),
+)  # fmt: skip
+PRICE_SOURCE_LABELS = (
+    ("Card Kingdom ($)", 1), ("TCGplayer ($)", 2), ("Mana Pool ($)", 6), ("Star City Games ($)", 5),
+    ("Cardsphere ($)", 10), ("Cardhoarder (tix)", 3), ("Cardmarket (€)", 4), ("Card Trader (€)", 8),
+    ("TCG Land (MXN)", 7), ("None", 99),
+)  # fmt: skip
+
+
+def choice_key(label: str) -> str:
+    """The word a tool passes for one of Archidekt's choices: its name in lower case, without the
+    currency in brackets ("Card Kingdom ($)" is "card kingdom")."""
+    words = label.lower()
+    for money in (" ($)", " (tix)", " (€)", " (mxn)"):
+        words = words.removesuffix(money)
+    return words
+
+
+GROUP_BY = {choice_key(w): v for w, v in GROUP_BY_LABELS}
+SORT_BY = {choice_key(w): v for w, v in SORT_LABELS}
+PRICE_SOURCES = {choice_key(w): v for w, v in PRICE_SOURCE_LABELS}
+# Archidekt keeps two price sources as one list; each is set by itself, the whole list sent
+PRICE_SLOTS = {"price_source_1": 0, "price_source_2": 1}
 PREFERENCES = {
     "deck_view": ("deckView", "Deck view", DECK_VIEWS),
+    "group_by": ("deckStack", "Group by", GROUP_BY),
+    "sort_by": ("deckSorting", "Sort by", SORT_BY),
+    "price_source_1": ("deckPrices", "First price source", PRICE_SOURCES),
+    "price_source_2": ("deckPrices", "Second price source", PRICE_SOURCES),
     "search_game": ("searchGame", "Card search shows", GAMES),
     "unique_search": ("searchUnique", "Card search shows one printing per card", {"on": 1, "off": 0}),
     "use_default_categories": (
@@ -128,6 +170,19 @@ def plan(field: Any, params: dict[str, Any], now: dict[str, Any]) -> tuple[dict[
         if pick not in choices:
             raise _err(f"{pref} takes one of: {', '.join(choices)}")
         value = choices[pick]
+        if pref in PRICE_SLOTS:
+            now_list = sett.get(key)
+            if not isinstance(now_list, list) or len(now_list) != len(PRICE_SLOTS):
+                raise _err(
+                    "Archidekt has no price sources for your account yet. Choose them once on Archidekt."
+                )
+            was_value = now_list[PRICE_SLOTS[pref]]
+            sources = list(now_list)
+            sources[PRICE_SLOTS[pref]] = value
+            return {"accountSettings": {key: sources}}, {
+                "text": f"{label}: {pick} (Archidekt's New Device Default Settings)",
+                "same": was_value == value,
+            }
         return {"accountSettings": {key: value}}, {
             "text": f"{label}: {pick} (Archidekt's New Device Default Settings)",
             "same": sett.get(key) == value,
@@ -246,7 +301,10 @@ def summary(now: dict[str, Any]) -> dict[str, Any]:
             email[name] = (not got) if key == "noArchidektNotifications" else got
     prefs = {}
     for name, (key, _label, choices) in PREFERENCES.items():
-        prefs[name] = next((k for k, v in choices.items() if v == sett.get(key)), None)
+        got = sett.get(key)
+        if name in PRICE_SLOTS:
+            got = got[PRICE_SLOTS[name]] if isinstance(got, list) and len(got) == len(PRICE_SLOTS) else None
+        prefs[name] = next((k for k, v in choices.items() if v == got), None)
     return {
         "username": str(now.get("username") or ""),
         "bio": bio_words(prof.get("bio")),

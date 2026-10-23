@@ -43,6 +43,19 @@ async def _propose(stack: Stack, token: str, **args: object) -> dict:
             lambda me: me["accountSettings"]["deckView"] == 4,
         ),
         (
+            {"field": "preference", "preference": "group_by", "value": "Mana value"},
+            lambda me: me["accountSettings"]["deckStack"] == 2,
+        ),
+        (
+            {"field": "preference", "preference": "sort_by", "value": "price"},
+            lambda me: me["accountSettings"]["deckSorting"] == 2,
+        ),
+        (
+            # one of the two sources: the whole list is sent, the other kept
+            {"field": "preference", "preference": "price_source_2", "value": "Cardmarket"},
+            lambda me: me["accountSettings"]["deckPrices"] == [1, 4],
+        ),
+        (
             {"field": "preference", "preference": "use_default_categories", "value": "off"},
             lambda me: me["accountSettings"]["noUseDefaultCategories"] is True,
         ),

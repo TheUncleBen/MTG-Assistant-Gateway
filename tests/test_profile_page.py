@@ -123,14 +123,15 @@ async def test_the_four_cards_follow_the_mockup_while_linked(member: Browser) ->
     )
     for label in (
         "Deck view",
+        "Group by",
+        "Sort by",
+        "Price sources",
         "Search unique printings",
         "Use my default categories",
         "Search game",
         "Show custom uploads",
     ):
         assert label in defs, label
-    for absent in ("Group by", "Sort by", "Price sources"):  # not in profile.PREFERENCES
-        assert absent not in defs, absent
     assert (
         "<option value='card' selected>Card</option>" in defs
         and "<option value='paper' selected>Paper</option>" in defs
@@ -516,3 +517,28 @@ async def test_unlinking_forgets_the_profile_bell_and_list_counts(member: Browse
     stack.h.app.state.gateway.decks.unlink("user-1")
     assert "user-1" not in profile_page._PROFILE and "user-1" not in profile_page._COUNT
     assert "user-1" not in account_lists._COUNTS
+
+
+async def test_group_by_sort_and_price_sources_are_on_the_page_with_archidekts_choices(
+    member: Browser, stack: Stack
+) -> None:
+    """Ben, 23 Oct: the three new-device defaults the first build left out, with every choice
+    Archidekt's own Account settings page lists (its saved script), and the two price sources set
+    one at a time."""
+    page = (await member.http.get("/account")).text
+    for name in ("group_by", "sort_by", "price_source_1", "price_source_2"):
+        assert f"id='pr-{name}'" in page, name
+    for words in (
+        "Categories (multiple)",
+        "Canlander pts",
+        "EDHREC Rank",
+        "Mana value (default)",
+        "TCG Land (MXN)",
+    ):
+        assert words in page, words
+    assert "<option value='card kingdom' selected>" in page and "<option value='tcgplayer' selected>" in page
+    r = await _post(member, action="preference", preference="price_source_1", value="mana pool")
+    assert r.status_code == 303
+    assert stack.ark.account.profile(WHO)["accountSettings"]["deckPrices"] == [6, 2]
+    page = (await member.http.get("/account")).text
+    assert "<option value='mana pool' selected>" in page
