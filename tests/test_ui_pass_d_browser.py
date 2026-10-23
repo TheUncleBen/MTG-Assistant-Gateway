@@ -17,6 +17,7 @@ import pytest
 from .test_card_search_filters_browser import CONTRAST
 from .test_cardsearch_browser import _chromium, _page
 from .test_deck_custom_cards import _custom
+from .test_deck_extras_browser import _open_from_deck_menu
 from .test_editor_browser import _link
 from .test_overflow_sweep_browser import MEASURE
 from .test_suggest_browser import Server
@@ -247,5 +248,66 @@ def test_the_deck_pages_custom_card_viewer_and_a_failed_picture(
         )
         assert "In this deck" in view.locator(".facts").inner_text()
         page.keyboard.press("Escape")
+        browser.close()
+    assert errors == []
+
+
+@pytest.mark.parametrize("width,theme", [(344, "light"), (390, "dark"), (1280, "light")])
+def test_my_lists_tabs_sit_on_one_row(server: Server, width: int, theme: str) -> None:
+    from playwright.sync_api import sync_playwright
+
+    sid = _link(server)
+    exe = _chromium()
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, width, theme, exe)
+        page.goto(f"{server.base}/lists/custom", wait_until="networkidle")
+        page.wait_for_timeout(300)
+        tabs = page.locator(".lp-tabs a")
+        assert tabs.count() == 5
+        tops = [_rect(tabs.nth(i))["t"] for i in range(5)]
+        heights = [_rect(tabs.nth(i))["h"] for i in range(5)]
+        if width < 600:
+            # one row that scrolls sideways, every tab the same height, the current one in view
+            assert len(set(round(t) for t in tops)) == 1, tops
+            nav = _rect(page.locator(".lp-tabs"))
+            cur = _rect(page.locator(".lp-tabs a[aria-current]"))
+            assert cur["l"] >= nav["l"] - 1 and cur["r"] <= nav["r"] + 1, (cur, nav)
+            assert page.locator(".lp-tabs a[aria-current]").inner_text().startswith("Custom cards")
+            sizes = _targets(page, ".lp-tabs a")
+            assert min(sizes) >= 43.5, sizes
+        else:
+            assert len(set(round(t) for t in tops)) == 1, tops
+        assert len(set(round(h) for h in heights)) == 1, heights
+        assert page.evaluate(MEASURE) == []
+        assert page.evaluate(CONTRAST, ".lp-tabs a, .lp-tabs a .n") == []
+        browser.close()
+    assert errors == []
+
+
+@pytest.mark.parametrize("width,theme", [(344, "dark"), (390, "light")])
+def test_the_color_tag_sheet_never_covers_its_field(server: Server, width: int, theme: str) -> None:
+    from playwright.sync_api import sync_playwright
+
+    sid = _link(server)
+    exe = _chromium()
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, width, theme, exe)
+        page.goto(f"{server.base}/decks/42?view=text", wait_until="networkidle")
+        box = _open_from_deck_menu(page, "Add a package…", "package")
+        btn = box.locator("#dx-ptag-btn")
+        btn.scroll_into_view_if_needed()
+        page.wait_for_timeout(200)
+        btn.click()
+        sheet = page.locator(".msel-list.sheet")
+        sheet.wait_for(state="visible")
+        page.wait_for_timeout(300)
+        b, s = _rect(btn), _rect(sheet)
+        label = _rect(box.locator("label[for='dx-ptag']"))
+        assert b["b"] <= s["t"], (b, s)  # the field sits above the sheet
+        assert label["t"] >= 0 and label["b"] <= s["t"], (label, s)  # and so does its label
+        assert sheet.locator(".head.title").inner_text().lower() == "color tag"
+        page.keyboard.press("Escape")
+        sheet.wait_for(state="detached")
+        assert box.is_visible()
         browser.close()
     assert errors == []

@@ -7,6 +7,11 @@
    for Change printing…. */
 (function () {
   "use strict";
+  // the tab bar scrolls sideways on a phone: the current tab is brought into view
+  var curTab = document.querySelector(".lp-tabs a[aria-current]");
+  if (curTab && curTab.scrollIntoView) {
+    try { curTab.scrollIntoView({ inline: "center", block: "nearest" }); } catch (e) { /* older browser */ }
+  }
   var Menu = window.MtgMenu, Box = window.MtgBox;
   var root = document.querySelector(".lp[data-tab]");
   if (!root || !Menu || !Box) return;

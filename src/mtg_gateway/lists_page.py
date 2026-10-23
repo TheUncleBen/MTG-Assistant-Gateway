@@ -1279,6 +1279,14 @@ CSS = """
 .lp .list-head .acts .btn{margin:0}
 .lp-tabs{margin:0 0 1rem}
 .lp-tabs a{white-space:normal;text-align:center;line-height:1.15;padding:.2rem .4rem;gap:.35rem}
+/* on a phone the five tabs are one row that scrolls sideways (the admin bar's even rows would
+   leave a hole), the current one brought into view by lists.js */
+@media (max-width:599.98px){
+  .lp-tabs{display:flex;overflow-x:auto;overscroll-behavior-x:contain;scroll-snap-type:x proximity;
+    scrollbar-width:none;margin-left:-1rem;margin-right:-1rem;padding:0 1rem 2px;scroll-padding:0 1rem}
+  .lp-tabs::-webkit-scrollbar{display:none}
+  .lp-tabs a{flex:0 0 auto;white-space:nowrap;scroll-snap-align:start;padding:0 .75rem}
+}
 .lp-tabs a .n{font-weight:400;color:var(--text-muted);margin-left:.1rem}
 .lp-tabs a[aria-current] .n{color:inherit}
 .lp .ui-table .tr{min-height:52px}
