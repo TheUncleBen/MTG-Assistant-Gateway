@@ -200,6 +200,38 @@
     load(false);
   }
 
+  // -- the Add a package box's Color tag: the member's own tags, read once as the box first opens,
+  //    added to the deck's own; the dot beside the select takes the chosen tag's colour ----------------
+  function colorTags(box) {
+    var sel = $("#dx-ptag", box), dot = $(".dx-tagdot", box);
+    if (!sel) return;
+    function swatch() {
+      var v = sel.value, m = /,(#[0-9a-fA-F]{6})$/.exec(v);
+      if (!dot) return;
+      if (m) { dot.style.background = m[1]; dot.hidden = false; } else { dot.hidden = true; }
+    }
+    if (!sel.__tags) {
+      sel.__tags = true;
+      sel.addEventListener("change", swatch);
+      Menu.getJSON(sel.getAttribute("data-src")).then(function (d) {
+        if (!d.ok) return;  // the deck's own tags stay on offer
+        var have = {};
+        $$("option", sel).forEach(function (o) { have[o.value.split(",")[0].toLowerCase()] = true; });
+        (d.tags || []).forEach(function (t) {
+          var key = String(t.name || "").toLowerCase();
+          if (!t.name || have[key]) return;
+          have[key] = true;
+          var colour = /^#[0-9a-fA-F]{6}$/.test(t.color || "") ? t.color.toLowerCase() : "";
+          var o = el("option", null, t.name);
+          o.value = colour ? t.name + "," + colour : t.name;
+          sel.appendChild(o);
+        });
+        if (window.MtgSelect) window.MtgSelect.refresh(sel);
+      }, function () { /* no connection: the deck's own tags stay on offer */ });
+    }
+    swatch();
+  }
+
   // -- what each box does when it opens ------------------------------------------------------------
   var openers = {
     help: function (box) { $$("[data-words]", box).forEach(countWords); },
@@ -214,7 +246,7 @@
     },
     contest: function (box) { $$("[data-count]", box).forEach(countChars); },
     withdraw: function (box) {},
-    package: function (box) { packageList(box); },
+    package: function (box) { packageList(box); colorTags(box); },
     lock: function (box, o) {
       var name = o.card || "", cats = o.cats || [];
       retitle(box, name);

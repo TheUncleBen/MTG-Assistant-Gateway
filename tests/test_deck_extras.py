@@ -525,3 +525,55 @@ async def test_my_decks_has_a_show_filter_that_the_address_keeps(stack: Stack) -
         assert j["ok"] is True and "Sample Commander Deck" in j["html"]
     finally:
         await b.aclose()
+
+
+async def test_the_add_a_package_box_offers_the_decks_tags_and_my_color_tags(stack: Stack) -> None:
+    """The mockup's Color tag select beside Categories: None, the tags this deck already uses
+    (from its cards, no extra read) and the member's own color tags, read only when the box opens
+    (the script asks /decks/api/color_tags; the box's own address reads them for the page without
+    scripts), never on a plain deck page load. The choice is kept when the box comes back with a
+    refusal, even one the script added."""
+    ark = stack.ark
+    ark.account.tags[WHO] = [
+        {"id": 21, "name": "Cut", "color": "#ff4d4f"},
+        {"id": 22, "name": "Have", "color": "#37d67a"},
+    ]
+    for row in ark.decks[42]["cards"]:
+        if row["card"]["oracleCard"]["name"] == "Sol Ring":
+            row["label"] = "Have,#37d67a"
+        elif row["card"]["oracleCard"]["name"] == "Beast Within":
+            row["label"] = "Maybe,#2185d0"
+    b, _token = await _member(stack)
+    try:
+        page = (await b.http.get("/decks/42")).text
+        assert "<label for='dx-ptag'>Color tag</label>" in page
+        assert "<select id='dx-ptag' name='color_tag' data-src='/decks/api/color_tags'>" in page
+        assert "<option value='' selected>None</option>" in page
+        assert "<option value='Have,#37d67a'>Have</option>" in page
+        assert "<option value='Maybe,#2185d0'>Maybe</option>" in page
+        assert "<option value='Cut,#ff4d4f'>" not in page
+        assert ("GET", "/api/decks/colorTags/") not in ark.calls  # the deck page's speed rule
+        # the box by its own address (no scripts): the member's tags too, each name once
+        page = (await b.http.get("/decks/42/package")).text
+        assert "<option value='Cut,#ff4d4f'>Cut</option>" in page
+        assert page.count("<option value='Have,#37d67a'>Have</option>") == 1
+        assert ("GET", "/api/decks/colorTags/") in ark.calls
+        # what the script reads when the box opens
+        got = (await b.http.get("/decks/api/color_tags")).json()
+        assert got == {
+            "ok": True,
+            "tags": [{"name": "Cut", "color": "#ff4d4f"}, {"name": "Have", "color": "#37d67a"}],
+        }
+        # a refusal keeps the choice
+        r = await _post(b, "/decks/42/package", package="", color_tag="Keep,#123456")
+        assert r.status_code == 400
+        assert "<option value='Keep,#123456' selected>Keep</option>" in r.text
+        r = await _post(b, "/decks/42/package", package="", color_tag="Have,#37d67a")
+        assert "<option value='Have,#37d67a' selected>Have</option>" in r.text
+        assert "<option value='' selected>None</option>" not in r.text
+        # the swatch beside the select carries the chosen tag's colour (only a plain hex colour)
+        assert "class='tagdot dx-tagdot' style='background:#37d67a'" in r.text
+        r = await _post(b, "/decks/42/package", package="", color_tag="Odd,url(x)")
+        assert "url(x)" not in r.text and "<option value='Odd' selected>Odd</option>" in r.text
+    finally:
+        await b.aclose()

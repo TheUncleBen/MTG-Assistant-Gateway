@@ -28,7 +28,7 @@ from . import account_lists, actions, packages, registration, ui
 from .archidekt import FORMAT_NAMES, Deck, DeckCard, format_label
 from .busy import busy_response
 from .deckpage import deck_title, folder_options_html
-from .decks import DeckError, current_client
+from .decks import DeckError, current_client, split_label
 from .pages import BROWSER_CLIENT_ID, browser_session, login_redirect, read_limited
 from .theme import esc, icon
 
@@ -406,6 +406,33 @@ def pdf_box_html(
     )
 
 
+def color_tag_options(
+    deck: Deck, color_tags: list[dict[str, Any]] | None = None, *, chosen: str = ""
+) -> tuple[str, str]:
+    """The Color tag select's options and the chosen tag's colour: None, the tags this deck's cards
+    already carry (no extra read), then the member's own color tags (``color_tags``, read only when
+    the box opens), each name once, each value "Name,#rrggbb". A chosen tag the list does not
+    hold (one the script added, or typed) stays as an option, so a refusal keeps the choice."""
+    seen: dict[str, str] = {}
+    for card in deck.cards:
+        name, colour = split_label(card.label)
+        if name and name.casefold() not in seen:
+            seen[name.casefold()] = f"{name},{colour}" if colour else name
+    for t in color_tags or []:
+        name, colour = split_label(f"{t.get('name') or ''},{t.get('color') or ''}")
+        if name and name.casefold() not in seen:
+            seen[name.casefold()] = f"{name},{colour}" if colour else name
+    want_name, want_colour = split_label(chosen)
+    want = (f"{want_name},{want_colour}" if want_colour else want_name) if want_name else ""
+    if want and want_name.casefold() not in seen:
+        seen[want_name.casefold()] = want
+    out = [f"<option value=''{' selected' if not want else ''}>None</option>"]
+    for value in seen.values():
+        name = value.rsplit(",", 1)[0]
+        out.append(f"<option value='{esc(value)}'{' selected' if value == want else ''}>{esc(name)}</option>")
+    return "".join(out), (want_colour if want else "")
+
+
 def package_box_html(
     deck: Deck,
     csrf: str,
@@ -413,6 +440,7 @@ def package_box_html(
     open: bool = False,
     error: str = "",
     values: dict[str, str] | None = None,
+    color_tags: list[dict[str, Any]] | None = None,
 ) -> str:
     did = esc(deck.id)
     v = values or {}
@@ -420,6 +448,12 @@ def package_box_html(
     opts = "".join(
         f"<option value='{k}'{' selected' if cat == k else ''}>{label}</option>"
         for k, label in PACKAGE_CATEGORIES
+    )
+    tag_opts, tag_colour = color_tag_options(deck, color_tags, chosen=v.get("color_tag", ""))
+    swatch = (
+        f"<span class='tagdot dx-tagdot' style='background:{tag_colour}' aria-hidden='true'></span>"
+        if tag_colour
+        else "<span class='tagdot dx-tagdot' aria-hidden='true' hidden></span>"
     )
     # a box drawn with only a package named in its address (Add to a deck… on My decks) is as
     # fresh as an empty one: the switches keep their defaults
@@ -462,8 +496,12 @@ def package_box_html(
             placeholder="https://archidekt.com/decks/…",
             required=True,
         )
-        + f"<div class='field'><label for='dx-pcat'>Categories</label><span class='sel'>"
+        + "<div class='dx-two'>"
+        f"<div class='field'><label for='dx-pcat'>Categories</label><span class='sel'>"
         f"<select id='dx-pcat' name='categories'>{opts}</select></span></div>"
+        f"<div class='field'><label for='dx-ptag'>Color tag</label><span class='dx-tagsel'>{swatch}"
+        "<span class='sel'><select id='dx-ptag' name='color_tag' data-src='/decks/api/color_tags'>"
+        f"{tag_opts}</select></span></span></div></div>"
         "<div class='dx-switches'>"
         + switch("skip_existing", "Skip cards already in the deck", fresh or v.get("skip_existing") == "1")
         + switch(
@@ -655,8 +693,11 @@ def boxes_html(
     box_error: str = "",
     box_values: dict[str, str] | None = None,
     templates: list[str] | None = None,
+    color_tags: list[dict[str, Any]] | None = None,
 ) -> str:
-    """Every release-2 box the deck page holds, hidden; ``open_box`` names the one drawn open."""
+    """Every release-2 box the deck page holds, hidden; ``open_box`` names the one drawn open.
+    ``templates`` and ``color_tags`` are the member's lists, read only for the Lock box and the
+    Add a package box drawn open from their own addresses (the scripts read them as a box opens)."""
     if not csrf:
         return ""
     help_req = actions.deck_help_of(deck)
@@ -676,7 +717,7 @@ def boxes_html(
         out += delist_box_html(
             deck, csrf, open=open_box == "delist", error=box_error if open_box == "delist" else ""
         )
-        out += package_box_html(deck, csrf, **st("package"))
+        out += package_box_html(deck, csrf, color_tags=color_tags, **st("package"))
         out += lock_box_html(deck, csrf, templates=templates, **st("lock"))
         out += contest_box_html(deck, csrf, **st("contest"))
         out += withdraw_box_html(deck, csrf, **st("withdraw"))
@@ -871,6 +912,11 @@ CSS = """
 .dx-box .body .dx-more .btn{margin:0;min-height:44px}
 .dx-box .body .dx-more .btn[aria-busy=true]{cursor:progress;opacity:.7}
 .dx-box .body .dx-mine + .field{margin-top:.75rem}
+/* the Color tag select with the chosen tag's colour beside it */
+.dx-box .body .dx-tagsel{display:flex;align-items:center;gap:.5rem}
+.dx-box .body .dx-tagsel .sel{flex:1 1 auto;min-width:0}
+.dx-box .body .dx-tagsel .dx-tagdot{width:16px;height:16px;border:1px solid var(--border)}
+.dx-box .body .dx-tagsel .dx-tagdot[hidden]{display:none}
 .dx-box .body .notice{margin:0}
 .dx-box .acts .dx-gap{flex:1 1 auto}
 .dx-box .acts .dx-delist{margin:0}
@@ -960,9 +1006,17 @@ def add_deck_extras_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
                     return login_redirect(f"/decks/{deck_id}/{name}")
                 values: dict[str, str] = {}
                 templates = None
+                color_tags = None
                 if box_name == "package" and request.query_params.get("package"):
                     # Add to a deck… on a package tile (My decks) names the package
                     values = {"package": request.query_params["package"][:200]}
+                if box_name == "package":
+                    # the Color tag select's member tags, for the page without scripts (with
+                    # them, the box reads /decks/api/color_tags as it opens)
+                    try:
+                        color_tags = (await account_lists.read(decks, sub, "color_tags"))["items"]
+                    except DeckError:
+                        color_tags = None  # the box still opens with the deck's own tags
                 if box_name == "lock":
                     card = (request.query_params.get("card") or "")[:200]
                     try:
@@ -978,7 +1032,14 @@ def add_deck_extras_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
                         "categories": "\n".join(hit.categories) if hit else "",
                     }
                 return await h.deck_page_response(
-                    request, sub, sid, deck_id, box=box_name, box_values=values, templates=templates
+                    request,
+                    sub,
+                    sid,
+                    deck_id,
+                    box=box_name,
+                    box_values=values,
+                    templates=templates,
+                    color_tags=color_tags,
                 )
 
             return opened
@@ -1200,6 +1261,24 @@ def add_deck_extras_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
                 {"ok": False, "message": str(exc)}, 400, headers={"Cache-Control": "no-store"}
             )
         return JSONResponse({"ok": True, "templates": got["items"]}, headers={"Cache-Control": "no-store"})
+
+    @server.custom_route("/decks/api/color_tags", methods=["GET"], include_in_schema=False)
+    async def color_tags_json(request: Request) -> Response:
+        """The member's color tags for the Add a package box's Color tag select, read as the box
+        opens (never on a deck page load)."""
+        sub, _sid = browser_session(state, request)
+        if not sub:
+            return JSONResponse(
+                {"ok": False, "error": "unauthenticated"}, 401, headers={"Cache-Control": "no-store"}
+            )
+        try:
+            got = await account_lists.read(decks, sub, "color_tags")
+        except DeckError as exc:
+            return JSONResponse(
+                {"ok": False, "message": str(exc)}, 400, headers={"Cache-Control": "no-store"}
+            )
+        tags = [{"name": t["name"], "color": t["color"]} for t in got["items"] if t["name"]]
+        return JSONResponse({"ok": True, "tags": tags}, headers={"Cache-Control": "no-store"})
 
     @server.custom_route("/decks/api/packages", methods=["GET"], include_in_schema=False)
     async def packages_json(request: Request) -> Response:

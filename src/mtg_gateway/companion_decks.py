@@ -738,6 +738,7 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
         box_values: dict[str, str] | None = None,
         status: int = 200,
         templates: list[str] | None = None,
+        color_tags: list[dict[str, Any]] | None = None,
     ) -> Response:
         """The deck page. ``box`` names one of its boxes (deckpage.DECK_BOXES, or one of the
         release-2 boxes, deck_extras.EXTRA_BOXES) drawn open: the old /export and /delete
@@ -814,6 +815,7 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
                 box_error=box_error,
                 box_values=box_values,
                 templates=templates,
+                color_tags=color_tags,
             ),
             before=deck_extras.help_strip_html(deck, actions.deck_help_of(deck)) if own and csrf else "",
         ) + prefs.page_prefs(state.db, sub, f"{prefs.STACK}{deck.id}:", prefs.EDHPLAY_STEPS, prefs.DECKSTATS)
