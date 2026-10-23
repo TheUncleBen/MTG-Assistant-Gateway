@@ -263,7 +263,7 @@ printing, color tag or custom mana value, no more than 4 copies a row,
 never a change to which cards are the commanders or to the categories of a row in the commander zone, and never fewer copies of
 a card that has a row in the commander zone and another row, both in the deck or both in the maybeboard or sideboard; it also makes a private copy of a deck; a new deck,
 a restore, the deck's details and bigger edits still ask you) or *Full
-auto*, shown as "Apply deck and collection changes without asking" (it applies the rest too, except a restore, a commander change, a new deck, an edit of more
+auto*, shown as "Apply deck and collection changes without asking" (it applies the rest too, except a restore, a commander or companion change, a new deck, an edit of more
 than 20 rows (by default), making a deck public or unlisted, a category change that touches the commander or which cards count in the deck, and any edit of a description that has formatting, such as bold text, links or pictures, which still wait for your press; so does a held change, a change waiting for
 another change first, one another app had a hand in, one that replaces another app's change, or one
 that another app's waiting change would replace).

@@ -496,6 +496,39 @@
     cards.insertBefore(st, after || null);
     return st;
   }
+  // The card menu's Companion and Show back face switches (Archidekt's companion and
+  // flippedDefault, set_companion and set_back_face): saved in the background like the menu's other
+  // edits, the card showing the new state at once and put back if Archidekt refuses it
+  var SWITCHES = {
+    companion: { attr: "data-companion", action: "set_companion", field: "companion", what: "Companion" },
+    back_face: { attr: "data-flipped", action: "set_back_face", field: "back_face", what: "Show back face" }
+  };
+  function switchRow(card, kind) {
+    var sw = SWITCHES[kind], name = card.getAttribute("data-card") || "";
+    var cur = card.hasAttribute(sw.attr), want = !cur;
+    var set = function (on) { if (on) card.setAttribute(sw.attr, "1"); else card.removeAttribute(sw.attr); };
+    var ch = { action: sw.action, card_name: name, zone: card.getAttribute("data-zone") || "main" };
+    var inv = { action: sw.action, card_name: name, zone: ch.zone };
+    ch[sw.field] = want; inv[sw.field] = cur;
+    var saying = "Saving " + sw.what.toLowerCase() + " for " + name + "…";
+    var held = holdConfirmed(card, sw.what, function () { return cur; }), gen = held.gen;
+    held.queued++;
+    set(want);
+    closeMenu();
+    savingNote(saying, false, card, sw.what);
+    background({
+      card: card, what: sw.what,
+      start: function () { return held.gen === gen ? { changes: [ch], inverse: [inv], saying: saying } : null; },
+      saved: function () { held.state = want; },
+      undo: function () {
+        held.gen++;
+        set(held.state);
+        return name + ": " + sw.what.toLowerCase() + " is " + (held.state ? "on" : "off") + " again." +
+          droppedNote(held, "Your later change of it was not sent.", "Your later changes of it were not sent.");
+      },
+      done: function () { held.queued--; releaseConfirmed(held); }
+    });
+  }
   // The card menu's "Mana value…" form: a whole number from 0 to 15, or Clear to use the card's own
   function manaValueForm(card, m) {
     var name = card.getAttribute("data-card") || "";
@@ -668,7 +701,7 @@
   function undoSteps(list) {
     var steps = [[]];
     list.forEach(function (ch) {
-      if (ch.action !== "set_label" && ch.action !== "set_mana_value") { steps[0].push(ch); return; }
+      if (["set_label", "set_mana_value", "set_companion", "set_back_face"].indexOf(ch.action) < 0) { steps[0].push(ch); return; }
       var key = frontFace(ch.card_name) + (ch.zone === "side" ? " side" : "");
       for (var i = 1; i < steps.length; i++) {
         if (!steps[i].some(function (o) { return frontFace(o.card_name) + (o.zone === "side" ? " side" : "") === key; })) { steps[i].push(ch); return; }
@@ -1336,6 +1369,17 @@
       if (window.MtgPrintPick && zoneOf(card) === "main") m.appendChild(menuItem("Change printing…", "image", function () { closeMenu(); changePrinting(card); }));
       if (window.MtgDeckTag) m.appendChild(menuItem("Color tag…", "tag", function () { closeMenu(); window.MtgDeckTag(card); }));
       m.appendChild(menuItem("Mana value…", "edit", function () { manaValueForm(card, m); }));
+      // Archidekt's card menu switches: on shows a check, as the Move to list's current category
+      var comp = menuItem("Companion", card.hasAttribute("data-companion") ? "check" : "", function () { switchRow(card, "companion"); }, card.hasAttribute("data-companion") ? "on" : "");
+      comp.setAttribute("role", "menuitemcheckbox");
+      comp.setAttribute("aria-checked", card.hasAttribute("data-companion") ? "true" : "false");
+      m.appendChild(comp);
+      if ((card.getAttribute("data-card") || "").indexOf("//") >= 0) {
+        var back = menuItem("Show back face", card.hasAttribute("data-flipped") ? "check" : "", function () { switchRow(card, "back_face"); }, card.hasAttribute("data-flipped") ? "on" : "");
+        back.setAttribute("role", "menuitemcheckbox");
+        back.setAttribute("aria-checked", card.hasAttribute("data-flipped") ? "true" : "false");
+        m.appendChild(back);
+      }
       m.appendChild(menuItem("Remove from deck", "x", function () { removeCard(card); }, "danger"));
       m.appendChild(el("div", "sep"));
       // the shared card menu's items on your own deck too (F6, M9): Add to deck… and Open on Scryfall
@@ -1364,7 +1408,7 @@
       m.appendChild(scry);
     }
     m.addEventListener("keydown", function (e) {
-      var items = $$("[role=menuitem]:not([disabled])", m).filter(function (b) { return b.offsetParent !== null; });
+      var items = $$("[role=menuitem]:not([disabled]), [role=menuitemcheckbox]:not([disabled])", m).filter(function (b) { return b.offsetParent !== null; });
       var i = items.indexOf(document.activeElement);
       if (e.key === "Escape") { stop(e); closeMenu(); return; }
       if (e.key === "ArrowDown") { stop(e); (items[i + 1] || items[0]).focus(); }

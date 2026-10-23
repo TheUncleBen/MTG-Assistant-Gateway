@@ -968,3 +968,42 @@ def test_a_late_refresh_that_takes_a_card_off_closes_its_menu(server: Server) ->
         assert page.locator(".ctxmenu").count() == 0
         assert errors == []
         browser.close()
+
+
+def test_the_card_menu_switches_companion_and_back_face(server: Server) -> None:
+    """Archidekt's card menu switches (parity release 1): Companion on any card, Show back face on a
+    two-faced card only; each saves in the background and the card shows it at once."""
+    from playwright.sync_api import sync_playwright
+
+    server.ark.add_side_row(42, "Delver of Secrets // Insectile Aberration", category="Sideboard")
+    _chromium()
+    sid = server.sign_in_and_link()
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, 1366)
+        page.goto(f"{server.base}/decks/42?view=grid", wait_until="networkidle")
+        card = page.locator(".deckview .c[data-card='Cultivate']").first
+        card.scroll_into_view_if_needed()
+        card.click(button="right")
+        menu = page.locator(".ctxmenu[role=menu]")
+        menu.wait_for(timeout=3000)
+        comp = menu.locator("[role=menuitemcheckbox]", has_text="Companion")
+        assert comp.get_attribute("aria-checked") == "false"
+        assert menu.locator("[role=menuitemcheckbox]", has_text="Show back face").count() == 0
+        with page.expect_request(EDIT_URL) as req:
+            comp.click()
+        assert json.loads(req.value.post_data)["changes"] == [
+            {"action": "set_companion", "card_name": "Cultivate", "zone": "main", "companion": True}
+        ]
+        page.locator(".deck-toast .msg", has_text="Saved").wait_for(timeout=8000)
+        row = next(c for c in server.ark.decks[42]["cards"] if c["card"]["oracleCard"]["name"] == "Cultivate")
+        assert row["companion"] is True and card.get_attribute("data-companion") == "1"
+        delver = page.locator(".deckview .c[data-card^='Delver of Secrets']").first
+        delver.scroll_into_view_if_needed()
+        delver.click(button="right")
+        menu.wait_for(timeout=3000)
+        with page.expect_request(EDIT_URL) as req:
+            menu.locator("[role=menuitemcheckbox]", has_text="Show back face").click()
+        assert json.loads(req.value.post_data)["changes"][0]["back_face"] is True
+        page.locator(".deck-toast .msg", has_text="Saved").wait_for(timeout=8000)
+        assert errors == []
+        browser.close()

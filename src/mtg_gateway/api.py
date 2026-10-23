@@ -476,6 +476,8 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
                     decklist_text=data.get("decklist_text"),
                     csv_text=data.get("csv_text"),
                     private=data.get("private", True) is not False,
+                    theorycrafted=data.get("theorycrafted", False),
+                    game=data.get("game") or "any",
                 ),
                 201,
             )

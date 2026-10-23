@@ -157,11 +157,16 @@ a bearer token. They answer `401` without a browser session, and `404` to signed
   `{"action": "set_label", "card_name", "label", "color"?, "zone"?}` (Archidekt's colour tag on every
   row of the card; `color` is `#rrggbb`, an empty `label` takes the tag off), or
   `{"action": "set_mana_value", "card_name", "mana_value", "zone"?}` (Archidekt's custom mana value,
-  0 to 15, on every row of the card; `null` takes it off).
+  0 to 15, on every row of the card; `null` takes it off), or
+  `{"action": "set_companion", "card_name", "companion", "zone"?}` and
+  `{"action": "set_back_face", "card_name", "back_face", "zone"?}` (Archidekt's Companion and
+  "show back face" switches, `true` or `false`, on every row of the card; a back face needs a
+  two-faced card).
   At most 40 changes; one card takes one kind of change (count, category or printing) per proposal.
-- `new_deck`: `{"name", "format"?, "cards"? | "decklist_text"? | "csv_text"?, "private"?}`.
+- `new_deck`: `{"name", "format"?, "cards"? | "decklist_text"? | "csv_text"?, "private"?, "theorycrafted"?, "game"?}`.
+  A category marked not in deck or not in price in the list is made with those switches.
 - `restore`: `{"snapshot_id"}` puts a deck back exactly as a snapshot recorded it.
-- `details`: `{"deck_id", "details": {"name"?, "description"?, "deck_format"?, "edh_bracket"?, "private"?, "unlisted"?, "folder"?, "add_tags"?, "remove_tags"?, "cover"?}}`.
+- `details`: `{"deck_id", "details": {"name"?, "description"?, "deck_format"?, "edh_bracket"?, "private"?, "unlisted"?, "theorycrafted"?, "game"?, "folder"?, "add_tags"?, "remove_tags"?, "cover"?}}`.
   `folder` is an existing folder's name (`""` or `"top"` for the top level), the tags are lists of
   names, `cover` is the name of a card in the deck.
 - `clone`: `{"deck_id", "name"?}` copies one of your decks into a new private deck ("Copy of - …" by

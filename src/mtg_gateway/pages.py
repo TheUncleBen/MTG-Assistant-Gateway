@@ -1073,12 +1073,12 @@ OK_MESSAGES = {
     "a snapshot you can restore from History; a collection change keeps none. Restoring a snapshot does "
     "not put back a deck's folder, tags or cover.",
     "mode_auto": "Saved: your assistant applies deck and collection changes without asking. Restoring a "
-    "snapshot, a commander change, a new deck, an edit of more rows than Full auto applies by itself, "
-    "making a deck public or unlisted, any edit of a description that has formatting, such as bold text, "
-    "links or pictures, actions on your Archidekt account and deleting a deck still wait for you. So "
-    "does a held change, a change waiting for another change first, one another app had a hand in, one "
-    "that replaces another app's change, or one that another app's waiting change would replace. When "
-    "a change waits for "
+    "snapshot, a commander or companion change, a new deck, an edit of more rows than Full auto applies by "
+    "itself, making a deck public or unlisted, any edit of a description that has formatting, such as "
+    "bold text, links or pictures, actions on your Archidekt account and deleting a deck still wait for "
+    "you. So does a held change, a change waiting for another change first, one another app had a hand "
+    "in, one that replaces another app's change, or one that another app's waiting change would replace. "
+    "When a change waits for "
     "your press, its card and review page say why. A change to one of your decks keeps a snapshot you "
     "can restore from History; a collection change keeps none. Restoring a snapshot does not put back "
     "a deck's folder, tags or cover.",
@@ -1554,7 +1554,7 @@ def _change_rows(rows: list[dict[str, Any]] | None, diff: str) -> tuple[str, dic
         return "".join(out), counts, net
     for r in rows:
         kind = r.get("kind")
-        name = html.escape(row_label(r))
+        name = html.escape(row_label(r) + (" (the deck's companion)" if r.get("companion_card") else ""))
         if kind == "add":
             qty = int(r.get("qty") or 0)
             counts["add"] += 1
@@ -1617,13 +1617,18 @@ def _change_rows(rows: list[dict[str, Any]] | None, diff: str) -> tuple[str, dic
         elif kind == "finish":
             counts["cat"] += 1
             out.append(_li("chg", "Finish", name, _was_now(r.get("before", ""), r.get("after", ""))))
-        elif kind in ("label", "mana_value"):
+        elif kind in ("label", "mana_value", "companion", "back_face"):
             counts["cat"] += 1
             where = " (maybeboard/sideboard)" if r.get("zone") == "side" else ""
             out.append(
                 _li(
                     "chg",
-                    "Color tag" if kind == "label" else "Custom mana value",
+                    {
+                        "label": "Color tag",
+                        "mana_value": "Custom mana value",
+                        "companion": "Companion",
+                        "back_face": "Show back face",
+                    }[kind],
                     name + html.escape(where),
                     _was_now(r.get("before", ""), r.get("after", "")),
                 )

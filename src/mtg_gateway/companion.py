@@ -202,6 +202,10 @@ INDENT = "\u2003"  # an em space per folder level in folder pickers
 # Notices the settings page shows after one of its hand actions (?ok=).
 SETTINGS_OK_MESSAGES = {
     "categories": CATEGORIES_SAVED,
+    "category_created": "Category created on Archidekt. A snapshot from just before is under History.",
+    "category_deleted": "Category deleted on Archidekt. A snapshot from just before is under History.",
+    "categories_unused": "Unused categories deleted on Archidekt. A snapshot from just before is under "
+    "History.",
     "cover": "Cover image saved to Archidekt. A snapshot from just before is under History.",
     "cover_auto": "Archidekt picks the cover image again. A snapshot from just before is under History.",
     "tag_added": "Tag added on Archidekt.",

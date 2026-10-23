@@ -283,6 +283,10 @@ FORMAT_NAMES: dict[int, str] = {}
 for _name, _fid in FORMAT_IDS.items():
     FORMAT_NAMES.setdefault(_fid, _name)
 FORMAT_NAMES[19] = "pioneer"  # Explorer, folded into Pioneer by Archidekt
+# The deck settings' "Game Type" (archidekt.com's deck settings code, read 2026-10-22): Any is
+# null, and these three numbers. The gateway's names are the site's own labels, lower case.
+GAME_IDS = {"paper": 1, "mtgo": 2, "arena": 3}
+GAME_LABELS = {"paper": "Paper", "mtgo": "MTGO", "arena": "Arena"}
 REFRESH_FIELDS = ("refresh_token", "refresh")
 # Sort orders archidekt.com/search/decks offers (its Updated At, Created At, Views, Size, EDH Bracket menu).
 SEARCH_ORDERS = {
@@ -485,6 +489,10 @@ class Deck:
     edh_bracket: int | None = None
     private: bool = False
     unlisted: bool = False
+    # Archidekt's Theorycrafted switch (left out of "In decks" by default) and its Game Type:
+    # None (Any), or GAME_IDS' 1 Paper, 2 MTGO, 3 Arena (the site's deck settings code, read 2026-10-22)
+    theorycrafted: bool = False
+    game: int | None = None
     tags: list[str] = field(default_factory=list)
     # The tag relations as the deck JSON's deckTags carries them ({id, tag, name, position}; the
     # relation id is what removes a tag) and the cover art URL (``featured``, auto or chosen).
@@ -1499,11 +1507,14 @@ class ArchidektClient:
         description: str = "",
         private: bool = True,
         unlisted: bool = False,
+        theorycrafted: bool = False,
+        game: int | None = None,
     ) -> Deck:
-        """POST /decks/v2/ (route and body per the nccurry reference). Live Archidekt creates the
-        deck but answers with a body that is not a full deck (verified 2026-10-05). Then this
-        returns an empty Deck carrying only the new id, so the caller records the id before
-        filling the deck and verifies it by reading it back."""
+        """POST /decks/v2/ (route and body per the nccurry reference). ``theorycrafted`` and
+        ``game`` (None for Any, or a GAME_IDS value) are the New deck form's own fields. Live
+        Archidekt creates the deck but answers with a body that is not a full deck (verified
+        2026-10-05). Then this returns an empty Deck carrying only the new id, so the caller
+        records the id before filling the deck and verifies it by reading it back."""
         body = await self._request(
             "POST",
             "/decks/v2/",
@@ -1516,8 +1527,8 @@ class ArchidektClient:
                 "parentFolder": None,
                 "private": private,
                 "unlisted": unlisted,
-                "theorycrafted": False,
-                "game": None,
+                "theorycrafted": bool(theorycrafted),
+                "game": game if game in GAME_IDS.values() else None,
                 "cardPackage": None,
                 "extras": {
                     "decksToInclude": [],
@@ -1985,7 +1996,8 @@ class ArchidektClient:
     async def update_deck(self, token: str, deck_id: str, fields: dict[str, Any]) -> dict[str, Any]:
         """PATCH /decks/{id}/update/ with the deck's own details: any of ``name``, ``description``,
         ``deckFormat`` (int, see FORMAT_IDS), ``edhBracket`` (int or None), ``private`` and
-        ``unlisted`` (bool), and the cover: ``customFeatured`` (a card-art URL, see ``art_url``; the
+        ``unlisted`` (bool), ``theorycrafted`` (bool), ``game`` (None or a GAME_IDS value, the
+        site's "Game Type"), and the cover: ``customFeatured`` (a card-art URL, see ``art_url``; the
         site's "Set Deck Image" sends only that key, its bundle read 2026-10-14) or ``""`` for its
         "Autoselect deck image". ``featured`` is Archidekt's own automatic pick and is never sent.
         Only the keys given are sent. ``description`` is rich text: it is sent as a Quill document
@@ -2004,6 +2016,8 @@ class ArchidektClient:
             "edhBracket",
             "private",
             "unlisted",
+            "theorycrafted",
+            "game",
             "customFeatured",
         )
         body = {k: fields[k] for k in allowed if k in fields}
@@ -2051,6 +2065,46 @@ class ArchidektClient:
             "id": cid,
         }
         return await self._request("PATCH", f"/decks/category/{cid}/", token=token, json_body=body)
+
+    async def create_category(self, token: str, deck_id: str, category: dict[str, Any]) -> dict[str, Any]:
+        """POST /decks/createCategory/ with ``{name, includedInDeck, includedInPrice, isPremier,
+        id: null, deck}``, as archidekt.com's category form sends it (its category service, read
+        from the site's public code on 2026-10-21 and 2026-10-22; never called by that reading).
+        Deck settings' Create Category and Add template to deck both send it. The answer's shape
+        is unknown, so it is not trusted: the caller re-reads the deck and finds the new category
+        by name. The caller refuses a name the deck already has before anything is sent, as the
+        site's own form does ("Deck already has category named ...")."""
+        if not DECK_ID_RE.fullmatch(str(deck_id)):
+            raise ArchidektError("contract", "deck id is not a number")
+        name = category.get("name")
+        if not isinstance(name, str) or not name.strip():
+            raise ArchidektError("contract", "category name is empty")
+        flags = ("includedInDeck", "includedInPrice", "isPremier")
+        if any(not isinstance(category.get(k), bool) for k in flags):
+            raise ArchidektError("contract", "category flags must be true or false")
+        body = {
+            "name": name,
+            "includedInDeck": category["includedInDeck"],
+            "includedInPrice": category["includedInPrice"],
+            "isPremier": category["isPremier"],
+            "id": None,
+            "deck": int(deck_id),
+        }
+        resp = await self._request("POST", "/decks/createCategory/", token=token, json_body=body)
+        return resp if isinstance(resp, dict) else {}
+
+    async def delete_category(self, token: str, deck_id: str, category_id: int) -> None:
+        """DELETE /decks/category/{categoryId}/ with no body, as archidekt.com's deck settings and
+        stack menu send it. The site only ever deletes an EMPTY category (its Remove is greyed out
+        and its stack menu hides Delete while a category holds cards); what the server does with
+        one that still has cards is unknown, so callers re-read the deck just before and send this
+        only for a category with no card filed under it. ``deck_id`` is not part of the route; it
+        is checked so a call always names its deck."""
+        if not DECK_ID_RE.fullmatch(str(deck_id)):
+            raise ArchidektError("contract", "deck id is not a number")
+        if isinstance(category_id, bool) or not isinstance(category_id, int) or category_id <= 0:
+            raise ArchidektError("contract", "category id is not a number")
+        await self._request("DELETE", f"/decks/category/{category_id}/", token=token)
 
     # -- a member's own hand actions on their decks: delete, folders, tags, comments ---------------
     # Routes read from archidekt.com's bundle on 2026-10-07 (the deck service, folder service, tag
@@ -2351,6 +2405,10 @@ def parse_deck(body: Any) -> Deck:
         edh_bracket=bracket if isinstance(bracket, int) and not isinstance(bracket, bool) else None,
         private=body.get("private") is True,
         unlisted=body.get("unlisted") is True,
+        theorycrafted=body.get("theorycrafted") is True,
+        game=body["game"]
+        if body.get("game") in GAME_IDS.values() and not isinstance(body.get("game"), bool)
+        else None,
         tags=tags,
         tag_relations=relations,
         featured=str(featured) if isinstance(featured, str) else "",

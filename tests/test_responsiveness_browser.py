@@ -574,3 +574,46 @@ def _loading_looks(d: Driver) -> None:
         held.routes[0].continue_()
         page.unroute(held.pattern)
     d.escape()
+
+
+def test_category_boxes_and_the_companion_switch_respond_at_once(server: Server) -> None:
+    """0.7.42's new controls: a category's Delete box and Delete unused categories' box come within
+    BOX_MS (both drawn by the page, before any answer from the gateway), and the card menu's
+    Companion switch shows its new state within CHIP_MS (saved in the background)."""
+    from playwright.sync_api import sync_playwright
+
+    from .test_deck_categories import _give_categories
+
+    _give_categories(server.ark)
+    server.ark.decks[42]["categories"].append({"name": "Spare", "isPremier": False, "includedInDeck": True})
+    sid, _pending = _seed(server)
+    exe = _exe()  # its own Playwright: before ours opens
+    slow: list[tuple] = []
+    with sync_playwright() as p:
+        for d in _drivers(p, server, sid, exe):
+            page = d.page
+            d.goto("/decks/42/settings")
+            for what, button in (
+                ("category Delete", "#categories li[data-name='Ramp'] button.del"),
+                ("Delete unused", "#categories button[value=unused]"),
+            ):
+                opener = page.locator(button).first
+                opener.scroll_into_view_if_needed()
+                ms = d.measure(partial(opener.click, no_wait_after=True), reset=d.escape)
+                assert d.box().is_visible(), what
+                slow.append((what, d.width, ms, BOX_MS))
+                d.escape()
+                page.wait_for_timeout(300)
+            d.goto("/decks/42")
+            card = page.locator(".deckview li[data-card]").first
+            was = card.get_attribute("data-companion")  # on after the phone's run: this turns it off
+            card.click(button="right", position={"x": 10, "y": 10}, no_wait_after=True)
+            d.menu().wait_for()
+            item = d.menu().locator("[role=menuitemcheckbox]", has_text="Companion").first
+            ms = d.measure(partial(item.click, no_wait_after=True), tries=1)
+            assert card.get_attribute("data-companion") == (None if was else "1")
+            slow.append(("Companion switch", d.width, ms, CHIP_MS))
+            assert d.errors == [], d.errors
+    print("0.7.42 controls (ms at 4x):", slow)
+    over = [s for s in slow if s[2] > s[3]]
+    assert not over, f"over budget at 4x: {over}; all: {slow}"
