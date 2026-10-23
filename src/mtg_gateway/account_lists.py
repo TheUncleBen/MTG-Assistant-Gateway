@@ -250,9 +250,16 @@ async def _resolve(decks: DeckService, sub: str, c: dict[str, Any]) -> dict[str,
 
 
 async def _plan(  # noqa: C901, PLR0912, PLR0915
-    decks: DeckService, sub: str, kind: str, changes: list[Any], now: dict[str, Any]
+    decks: DeckService,
+    sub: str,
+    kind: str,
+    changes: list[Any],
+    now: dict[str, Any],
+    picture: dict[str, str] | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """(ops, review rows) for ``changes`` against the list as it is now (``now`` from read)."""
+    """(ops, review rows) for ``changes`` against the list as it is now (``now`` from read).
+    ``picture``: a custom card picture the member uploaded on the page (set_picture), never
+    anything an assistant sent."""
     items = now["items"]
     ops: list[dict[str, Any]] = []
     rows: list[dict[str, Any]] = []
@@ -471,14 +478,24 @@ async def _plan(  # noqa: C901, PLR0912, PLR0915
                     note="It is also blanked in every deck that holds it, on Archidekt.",
                 )
                 continue
-            fields = _custom_fields(c.get("fields"), found)
+            fields = _custom_fields(c.get("fields") or ({} if picture else None), found)
+            fields.update(picture or {})
             changed = [
-                k for k in CUSTOM_CARD_FIELDS if k not in PICTURE_FIELDS and fields.get(k) != found.get(k)
+                k
+                for k in CUSTOM_CARD_FIELDS
+                if (k not in PICTURE_FIELDS or k in (picture or {})) and fields.get(k) != found.get(k)
             ]
             if not changed:
                 raise _err(f"That changes nothing on the custom card “{found['name']}”.")
             add(
-                {"op": op, "id": found["id"], "name": found["name"], "fields": fields, "was": found},
+                {
+                    "op": op,
+                    "id": found["id"],
+                    "name": found["name"],
+                    "fields": fields,
+                    "was": found,
+                    "pictures": sorted(picture or {}),
+                },
                 f"Custom card “{found['name']}”: " + ", ".join(_FIELD_WORDS.get(k, k) for k in changed),
             )
     if not ops:
@@ -567,6 +584,8 @@ async def _custom_by_name(decks: DeckService, sub: str, c: dict[str, Any]) -> di
 def _custom_fields(raw: Any, base: dict[str, Any]) -> dict[str, Any]:
     """A custom card's text fields: ``base`` (the card as it is, for an edit) with ``raw`` on
     top. Pictures are never taken from ``raw``."""
+    if raw == {} and base:  # a new picture alone (set_picture)
+        return {k: base.get(k) for k in CUSTOM_CARD_FIELDS}
     if not isinstance(raw, dict) or not raw:
         raise _err(
             "fields must give the card's fields ("
@@ -615,8 +634,11 @@ def risk_of(rows: list[dict[str, Any]] | None, *, max_rows: int) -> tuple[str, s
     return "low", f"{len(rows)} change{'s' if len(rows) != 1 else ''} to your Archidekt lists, no deletes"
 
 
-async def propose(decks: DeckService, sub: str, kind: str, changes: Any) -> dict[str, Any]:
-    """Check ``changes`` against the list as it is now and store them as one waiting proposal."""
+async def propose(
+    decks: DeckService, sub: str, kind: str, changes: Any, *, picture: dict[str, str] | None = None
+) -> dict[str, Any]:
+    """Check ``changes`` against the list as it is now and store them as one waiting proposal.
+    ``picture`` only from set_picture: the member's own upload on the page."""
     if kind not in KINDS:
         raise _err(f"list must be one of: {', '.join(KINDS)}")
     if not isinstance(changes, list) or not changes:
@@ -625,7 +647,7 @@ async def propose(decks: DeckService, sub: str, kind: str, changes: Any) -> dict
         raise _err(f"at most {MAX_CHANGES} changes in one proposal")
     decks._room_for_proposal(sub)
     now = await read(decks, sub, kind) if kind != "custom_cards" else {"items": []}
-    ops, rows = await _plan(decks, sub, kind, changes, now)
+    ops, rows = await _plan(decks, sub, kind, changes, now, picture)
     pid = secrets.token_urlsafe(12)
     decks._save_proposal(
         {
@@ -779,7 +801,9 @@ async def apply(  # noqa: C901, PLR0912, PLR0915
                     )
                 elif kind_op == "edit":
                     hit = next(b for b in before if b["id"] == op["id"])
-                    fields = {**op["fields"], **{k: hit.get(k) for k in PICTURE_FIELDS}}  # its pictures stay
+                    # its pictures stay, but for one the member just uploaded on the page
+                    keep = {k: hit.get(k) for k in PICTURE_FIELDS if k not in (op.get("pictures") or [])}
+                    fields = {**op["fields"], **keep}
                     await _send(
                         decks,
                         sub,
@@ -915,3 +939,81 @@ def applied_text(changes: dict[str, Any], result: dict[str, Any]) -> str:
             "Sent to Archidekt, but the read-back didn't confirm every change. See Result on the review page."
         )
     return f"Your {NOUNS.get(str(changes.get('list')), 'lists')} on Archidekt have these changes now."
+
+
+# -- the member's own press on the My lists page -------------------------------------------------
+
+PICTURE_MAX_BYTES = 1_500_000  # Archidekt's own limit for a custom card picture (its upload box)
+PICTURE_SIZE = (500, 700)  # the crop Archidekt's page redraws and sends
+PICTURE_FORMATS = ("JPEG", "PNG", "WEBP")
+PICTURE_MAX_PIXELS = 40_000_000  # refuse a picture that would take too much memory to decode
+
+
+def redraw_picture(raw: bytes, crop: tuple[int, int, int, int] | None = None) -> bytes:
+    """The member's picture checked and redrawn as Archidekt's page does: JPEG, PNG or WebP up to
+    1.5 MB, the crop (left, top, width, height in the picture's own pixels; the middle at 5:7 when
+    none) scaled to 500 x 700 and saved as a PNG. Nothing else of the file is kept."""
+    import io
+
+    from PIL import Image, UnidentifiedImageError
+
+    if not raw:
+        raise _err("Choose a picture first.")
+    if len(raw) > PICTURE_MAX_BYTES:
+        raise _err("The picture is larger than 1.5 MB, Archidekt's limit. Choose a smaller one.")
+    try:
+        with Image.open(io.BytesIO(raw)) as probe:
+            fmt = probe.format
+            w, h = probe.size
+    except (UnidentifiedImageError, OSError, ValueError) as exc:
+        raise _err("That file is not a picture the gateway can read. Use JPEG, PNG or WebP.") from exc
+    if fmt not in PICTURE_FORMATS:
+        raise _err("Use a JPEG, PNG or WebP picture.")
+    if w * h > PICTURE_MAX_PIXELS:
+        raise _err("The picture has too many pixels. Choose a smaller one.")
+    if crop is None:
+        cw = min(w, h * PICTURE_SIZE[0] // PICTURE_SIZE[1])
+        ch = min(h, w * PICTURE_SIZE[1] // PICTURE_SIZE[0])
+        crop = ((w - cw) // 2, (h - ch) // 2, cw, ch)
+    left, top, cw, ch = crop
+    if min(cw, ch) < 1 or left < 0 or top < 0 or left + cw > w or top + ch > h:
+        raise _err("The crop is outside the picture. Crop it again.")
+    with Image.open(io.BytesIO(raw)) as img:
+        img.load()
+        art = img.convert("RGBA").crop((left, top, left + cw, top + ch)).resize(PICTURE_SIZE, Image.LANCZOS)
+    out = io.BytesIO()
+    art.save(out, format="PNG", optimize=True)
+    return out.getvalue()
+
+
+async def hand_change(decks: DeckService, sub: str, kind: str, change: dict[str, Any]) -> dict[str, Any]:
+    """The member's own press on the My lists page: the same proposal an assistant makes, applied
+    at once (the caller has set the browser as the client), as a hand edit is."""
+    p = await decks.propose_lists(sub, kind, [change])
+    return await decks.apply(sub, p["proposal_id"], via="browser")
+
+
+async def set_picture(
+    decks: DeckService,
+    sub: str,
+    name: str,
+    face: str,
+    raw: bytes,
+    crop: tuple[int, int, int, int] | None = None,
+) -> dict[str, Any]:
+    """The member's own picture for one face of their custom card ``name``: checked and redrawn
+    here, uploaded to Archidekt (which answers with its address), then set on the card as a hand
+    edit. Only the page calls this; an assistant never sets a picture."""
+    if face not in ("front", "back"):
+        raise _err("Pick the front or the back.")
+    png = redraw_picture(raw, crop)
+    found = await _custom_by_name(decks, sub, {"name": name})
+    if face == "back" and not found.get("hasBack"):
+        raise _err("Switch on Has a back face and save the card first.")
+    decks._writes_switch()
+    url = await decks._call(sub, lambda token, *_: decks.client.upload_image(token, png))
+    decks._audit("custom_card_picture_uploaded", sub=sub, detail={"face": face})
+    p = await decks.propose_lists(
+        sub, "custom_cards", [{"op": "edit", "name": found["name"]}], picture={f"{face}ImageUrl": url}
+    )
+    return await decks.apply(sub, p["proposal_id"], via="browser")

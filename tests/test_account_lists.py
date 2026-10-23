@@ -9,6 +9,7 @@ import pytest
 
 from mtg_gateway import account_lists, modes
 from mtg_gateway.approve import APPROVAL_META_KEY
+from mtg_gateway.decks import BROWSER_CLIENT, DeckError, current_client
 
 from .conftest import Stack, stack_with
 from .test_account_actions import _browser_apply
@@ -243,3 +244,65 @@ async def test_the_review_page_and_history_show_a_lists_change(stack: Stack) -> 
         assert "Your Archidekt lists" in history
     finally:
         await b.aclose()
+
+
+def _picture(fmt: str, size: tuple[int, int] = (800, 1000)) -> bytes:
+    import io
+
+    from PIL import Image
+
+    out = io.BytesIO()
+    Image.new("RGB", size, (200, 30, 30)).save(out, format=fmt)
+    return out.getvalue()
+
+
+@pytest.mark.parametrize("fmt", ["PNG", "JPEG", "WEBP"])
+def test_a_picture_is_redrawn_as_a_500_by_700_png(fmt: str) -> None:
+    import io
+
+    from PIL import Image
+
+    png = account_lists.redraw_picture(_picture(fmt), (10, 20, 500, 700))
+    with Image.open(io.BytesIO(png)) as img:
+        assert img.format == "PNG" and img.size == (500, 700)
+    with Image.open(io.BytesIO(account_lists.redraw_picture(_picture(fmt)))) as img:  # the middle
+        assert img.size == (500, 700)
+
+
+@pytest.mark.parametrize(
+    ("raw", "crop", "words"),
+    [
+        (b"", None, "Choose a picture"),
+        (b"x" * (account_lists.PICTURE_MAX_BYTES + 1), None, "1.5 MB"),
+        (b"GIF89a not really", None, "not a picture"),
+        (_picture("GIF"), None, "JPEG, PNG or WebP"),
+        (_picture("PNG"), (700, 0, 200, 200), "outside the picture"),
+    ],
+)
+def test_a_picture_that_is_not_allowed_is_refused(raw: bytes, crop, words: str) -> None:
+    with pytest.raises(DeckError) as exc:
+        account_lists.redraw_picture(raw, crop)
+    assert words in str(exc.value)
+
+
+async def test_set_picture_uploads_the_redrawn_png_and_sets_only_that_face(stack: Stack) -> None:
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    await _set_mode(h, "semi")
+    p = await _propose(
+        h,
+        token,
+        "custom_cards",
+        [{"op": "create", "fields": {"frontName": "Mentor", "frontTypes": "Creature"}}],
+    )
+    await _apply(h, token, p)
+    decks = h.app.state.gateway.decks
+    current_client.set(BROWSER_CLIENT)
+    out = await account_lists.set_picture(decks, "user-1", "Mentor", "front", _picture("JPEG"))
+    assert out["state"] == "applied" and out["result"]["verified"] is True, out
+    who, body, disposition = ark.account.uploads[-1]
+    assert who == "alice" and body.startswith(b"\x89PNG") and disposition == 'attachment; filename="tmp.png"'
+    card = ark.account.customs["alice"][0]
+    assert card["frontImageUrl"].startswith("https://") and card["backImageUrl"] is None
+    with pytest.raises(DeckError):  # no back face yet
+        await account_lists.set_picture(decks, "user-1", "Mentor", "back", _picture("PNG"))

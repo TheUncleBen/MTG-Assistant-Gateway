@@ -5663,12 +5663,14 @@ class DeckService:
         return self.describe(sub, row["id"])
 
     @_dedupe
-    async def propose_lists(self, sub: str, kind: str, changes: Any) -> dict[str, Any]:
+    async def propose_lists(
+        self, sub: str, kind: str, changes: Any, *, picture: dict[str, str] | None = None
+    ) -> dict[str, Any]:
         """A proposal (kind ``lists``) for changes to one of the member's account-wide Archidekt
         lists: account_lists.py."""
         from . import account_lists
 
-        return await account_lists.propose(self, sub, kind, changes)
+        return await account_lists.propose(self, sub, kind, changes, picture=picture)
 
     @_dedupe
     async def propose_action(self, sub: str, action: str, **params: Any) -> dict[str, Any]:
