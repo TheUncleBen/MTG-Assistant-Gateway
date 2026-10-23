@@ -999,8 +999,9 @@ async def test_the_refusal_list_covers_every_account_action(stack: Stack) -> Non
 
 
 def test_only_the_review_page_passes_the_marker() -> None:
-    """REVIEW_PAGE is defined in decks.py and passed only by pages.py's review form, which carries
-    the CSRF check and the click-timing guard; no other module may name it."""
+    """REVIEW_PAGE is defined in decks.py and passed only by pages.py: its review form and
+    apply_own_press (the Account page's and My collection's own presses, profile_page), both of
+    which carry the CSRF check and the click-timing guard; no other module may name it."""
     from pathlib import Path
 
     src = Path(__file__).resolve().parents[1] / "src" / "mtg_gateway"

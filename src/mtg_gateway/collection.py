@@ -51,8 +51,11 @@ from .pages import (
     csrf_form_ok,
     csrf_header_ok,
     login_redirect,
+    press_stamp,
     read_limited,
 )
+from .profile_page import COLLECTION_CSS as VISIBILITY_CSS
+from .profile_page import collection_visibility, profile_or_none
 from .schemas import CollectionAdd, CollectionRemove, card_aliases, dumped
 from .theme import display_name, icon, render, stylesheet_link
 from .theme import esc as _esc
@@ -1640,7 +1643,7 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
             heading=heading,
             body_class="collection",
             current="/collection",
-            head_extra=f"{stylesheet_link('deck.css')}<style>{CARDS_CSS}{COLLECTION_CSS}</style>"
+            head_extra=f"{stylesheet_link('deck.css')}<style>{CARDS_CSS}{COLLECTION_CSS}{VISIBILITY_CSS}</style>"
             + (
                 "<script src='/static/cardview.js' defer></script>"
                 "<script src='/static/deck.js' defer></script><script "
@@ -1897,9 +1900,19 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
                 details_row = None
         details_box = details_box_html(details_row, csrf, open=details_row is not None)
         add_box = add_box_html(csrf, tab=add_tab, open=open_add)
+        # the Visibility line by the title (profile_page): the profile as read a short while ago
+        vis = collection_visibility(
+            await profile_or_none(state.decks, sub),
+            csrf,
+            sub,
+            stamp=press_stamp(state.settings, sub),
+            open_box=bool(qp.get("visibility")),
+            ok=qp.get("ok") or "",
+        )
         if not rows and not lq["q"] and not lq["offset"]:
             body = (
                 head()
+                + vis
                 + f"<div id='col-notes'>{notes}</div>"
                 + "<section class='panel coll-empty'><h2>No cards yet</h2>"
                 "<p>Scan a pile, or add cards by name.</p><div class='actions'>"
@@ -1927,6 +1940,7 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
             )
             body = (
                 head(acts)
+                + vis
                 + f"<div id='col-notes'>{notes}</div>"
                 + widgets_html(whole, arch_user)
                 + panel_html(q=lq["q"], sort=lq["sort"], direction=lq["dir"], view=view, count=got["total"])

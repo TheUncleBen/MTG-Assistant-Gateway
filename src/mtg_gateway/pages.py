@@ -38,6 +38,7 @@ from .formatting import DOC_CSS, doc_html
 from .proposals_view import PROPOSALS_CSS
 from .refusals import WRITES_OFF_KEPT, WRITES_OFF_KEPT_MANY
 from .theme import (
+    DEFAULT_CSP,
     LAYOUT_COOKIE,
     THEME_COOKIE,
     VIEW_COOKIE,
@@ -326,16 +327,27 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             name = state.db.client_name(cid) if state.db.member_used_client(sub, cid) else None
             notice = _ok(f"Disconnected “{ui.app_name(name)}”.")
         else:
-            notice = _notice(
-                None if ok in notify.CARD_NOTICES else ok, None if err in notify.CARD_NOTICES else err
-            )
+            from .profile_page import CARD_NOTICES as PROFILE_NOTICES
+
+            inside = notify.CARD_NOTICES | PROFILE_NOTICES | {"unconfirmed"}
+            notice = _notice(None if ok in inside else ok, None if err in notify.CARD_NOTICES else err)
         # The old one-press forms' addresses open the page with the matching box open (no-JS path
-        # of the red-outline buttons): ?unlink=1, ?disconnect=<client id>, ?disconnect_all=1, ?delete=1.
-        open_box = next((k for k in ("unlink", "disconnect", "disconnect_all", "delete") if k in q), None)
-        body = _account_body(
-            state, sub, _csrf(s, sid), ok=ok, err=err, open_box=open_box, open_client=q.get("disconnect")
+        # of the red-outline buttons): ?unlink=1, ?disconnect=<client id>, ?disconnect_all=1,
+        # ?delete=1, ?picture=1 (the Archidekt profile picture box).
+        open_box = next(
+            (k for k in ("unlink", "disconnect", "disconnect_all", "delete", "picture") if k in q), None
         )
-        return page("Account", notice + body, sub=sub, sid=sid, head_extra=ACCOUNT_HEAD)
+        body = await account_html(
+            state,
+            sub,
+            _csrf(s, sid),
+            ok=ok,
+            err=err,
+            open_box=open_box,
+            open_client=q.get("disconnect"),
+            saved=q.get("saved") or "",
+        )
+        return account_response(page, notice + body, sub, sid)
 
     @server.custom_route("/account/avatar", methods=["GET"], include_in_schema=False)
     async def account_avatar(request: Request) -> Response:
@@ -998,6 +1010,26 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
 NO_STORE = {"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"}
 
 
+def press_stamp(s: Any, sub: str) -> str:
+    """The render stamp (``shown``) of a page whose own press applies an account action: the
+    Account page's profile switches and My collection's Visibility line (profile_page). It is the
+    review page's click-timing guard (clickguard.py), by the scope ``press:<sub>``."""
+    return form_stamp(s.session_secret, f"press:{sub}")
+
+
+async def apply_own_press(state: Any, sub: str, pid: str, shown: str | None) -> dict[str, Any]:
+    """The member's own press on their signed-in page applies the account action the page just
+    proposed (profile_page: the profile fields, the e-mail switches, the new device settings, the
+    collection's visibility). It is the review page's press and carries the same guards: the
+    caller checked the page's CSRF token, and the render stamp refuses a submit that comes faster
+    than a person reads the page. No other route, and never an assistant, applies such a
+    proposal (decks.apply refuses kind "action" by any other way)."""
+    if submitted_too_soon(state.settings.session_secret, f"press:{sub}", shown):
+        raise DeckError("too_soon", "The page was only just drawn. Make the change again.")
+    current_client.set(BROWSER_CLIENT_ID)  # the audit rows name the browser as the actor
+    return await state.decks.apply(sub, pid, via=REVIEW_PAGE)
+
+
 def _csrf(s: Any, sid: str | None) -> str | None:
     if not sid:
         return None
@@ -1181,6 +1213,72 @@ ACCOUNT_CSS = (
 ACCOUNT_HEAD = f"<style>{ACCOUNT_CSS}</style><script src='{smallpage.SCRIPT}' defer></script>"
 
 
+async def account_html(
+    state: Any,
+    sub: str,
+    csrf: str | None,
+    *,
+    ok: str | None = None,
+    err: str | None = None,
+    open_box: str | None = None,
+    open_client: str | None = None,
+    saved: str = "",
+    profile_error: str = "",
+    profile_error_in: str = "",
+    profile_values: dict[str, str] | None = None,
+) -> str:
+    """The Account page's body: the cards, with the Archidekt profile cards read first while
+    Archidekt is linked (profile_page: one read, kept a short while). ``profile_error`` is
+    Archidekt's refusal of a profile press, shown in the card ``profile_error_in``."""
+    from . import profile_page
+
+    html_profile = ""
+    if state.decks.status(sub)["linked"]:
+        now = await profile_page.profile_or_none(state.decks, sub)
+        html_profile = profile_page.account_cards(
+            now,
+            csrf,
+            stamp=press_stamp(state.settings, sub),
+            ok=ok or "",
+            saved=saved,
+            error=profile_error,
+            error_in=profile_error_in,
+            values=profile_values,
+            open_box=open_box,
+        )
+    return _account_body(
+        state,
+        sub,
+        csrf,
+        ok=ok,
+        err=err,
+        open_box=open_box,
+        open_client=open_client,
+        profile_html=html_profile,
+    )
+
+
+def account_response(page: Any, body: str, sub: str, sid: str | None, *, status: int = 200) -> Response:
+    """The Account page rendered: its own style and scripts (pages.js, profile.js), and a page
+    policy that lets the chosen picture show before it is sent (a blob: address)."""
+    from .profile_page import CSS as PROFILE_CSS
+
+    resp = page(
+        "Account",
+        body,
+        sub=sub,
+        sid=sid,
+        status=status,
+        head_extra=ACCOUNT_HEAD
+        + f"<style>{PROFILE_CSS}</style><script src='/static/profile.js' defer></script>",
+    )
+    resp.headers["Content-Security-Policy"] = ACCOUNT_CSP
+    return resp
+
+
+ACCOUNT_CSP = DEFAULT_CSP.replace("img-src 'self'", "img-src 'self' blob:")
+
+
 def _notice(ok: str | None, err: str | None) -> str:
     if ok in OK_MESSAGES:
         return f"<div class='notice ok'>{html.escape(OK_MESSAGES[ok])}</div>"
@@ -1278,10 +1376,12 @@ def _account_body(
     err: str | None = None,
     open_box: str | None = None,
     open_client: str | None = None,
+    profile_html: str = "",
 ) -> str:
     """The Account page's cards in their order. ``open_box`` names the box drawn open (the old
-    one-press forms' addresses: unlink, disconnect, disconnect_all, delete), ``open_client`` the
-    app a ?disconnect= address names."""
+    one-press forms' addresses: unlink, disconnect, disconnect_all, delete, picture), ``open_client``
+    the app a ?disconnect= address names, ``profile_html`` the Archidekt profile cards
+    (profile_page.account_cards, read before this runs) while Archidekt is linked."""
     info = state.decks.status(sub)
     user = state.db.get_user(sub) or {}
     who = html.escape(user.get("preferred_username") or user.get("email") or sub)
@@ -1348,6 +1448,7 @@ def _account_body(
             f"{link_disclosure.linked_html(_sweep_on(state))}{unlink_box}</div>"
         )
         out.append(_lists_card(sub))
+        out.append(profile_html)
     else:
         out.append(
             "<div class='card' id='archidekt'><h2>Link your Archidekt account</h2>"

@@ -1239,7 +1239,9 @@ CSS = """
   margin:.25rem 0 .5rem}
 .lp-img .lbl{font-weight:700;margin:0 0 .3rem}
 .lp-img .lp-pichelp{margin:.35rem 0 .5rem}
-.lp-img .field{margin-top:.5rem}
+/* the Artist row under the picture's help line: the same .5rem the other rows keep (the shared
+   box rule .mtgbox .body .field{margin:0} would otherwise win over .lp-img .field) */
+.mtgbox .body .lp-img .field,.lp-img .field{margin-top:.5rem}
 .lp-crop{aspect-ratio:5/7; width:min(12rem,100%); border:2px dashed var(--control-border);
   border-radius:4.5%/3.2%;
   display:grid;place-items:center;text-align:center;color:var(--text-muted);font-size:.86rem;padding:.5rem;

@@ -411,6 +411,7 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
     from .companion_shell import add_shell_routes
     from .companion_tools import add_deck_tool_routes
     from .lists_page import add_lists_routes
+    from .profile_page import add_profile_routes
 
     # The helpers above, for the route modules (each takes what it uses). Registered in this
     # order, as before the split: /decks/new and /decks/open must come before /decks/{deck_id}.
@@ -436,6 +437,7 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
     add_deck_tool_routes(server, state, reports, h)
     add_history_routes(server, state, reports, h)
     add_lists_routes(server, state, h)
+    add_profile_routes(server, state, h)
     add_shell_routes(server, h)
 
 

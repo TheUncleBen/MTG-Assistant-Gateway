@@ -263,6 +263,13 @@ svg.i{width:1em;height:1em;fill:none;stroke:currentColor;stroke-width:2;stroke-l
 .topbar nav form{display:inline;margin:0}
 .topbar .icon-btn{width:40px;padding:0;justify-content:center;font-size:1.2rem}
 .topbar .icon-btn img.av{width:28px;height:28px;border-radius:50%;object-fit:cover;display:block}
+/* the bell with Archidekt's unseen count (static/bell.js), between the search and the picture */
+.topbar .bell{position:relative;border-radius:50%}
+.topbar .bell svg.i{width:22px;height:22px}
+.topbar .bell .n{position:absolute;top:1px;right:0;min-width:18px;height:18px;border-radius:9px;
+  background:var(--orange);color:var(--on-orange);font-size:.72rem;font-weight:900;line-height:18px;
+  text-align:center;padding:0 4px;font-style:normal;box-sizing:border-box}
+.topbar .bell .n[hidden]{display:none}
 
 /* dropdown menus (details/summary, no script): phatDropdown trigger + menu panel. The panel
    styling is the shared .menu class, so a script-made menu (the deck page's card menu) looks the
@@ -1640,6 +1647,28 @@ html.mtgbox-open,html.mtgbox-open body{overflow:hidden}
 """
 CSS += BOX_CSS
 
+# The bell's list (profile_page.py, static/bell.js): in the box on every page and on the
+# /notifications page. Unseen rows are tinted; a row links to its target where there is one.
+BELL_CSS = """
+.bell-list{list-style:none;margin:0;padding:0}
+.bell-row{display:flex;gap:.6rem;align-items:flex-start;min-height:44px;padding:.45rem 0;
+  border-top:1px solid var(--border-soft);text-decoration:none;color:var(--text)}
+.bell-list > li:first-child > .bell-row{border-top:0}
+.bell-row i{width:32px;height:32px;border-radius:50%;background:var(--surface-3);display:grid;
+  place-items:center;font-style:normal;font-weight:900;flex:none;color:var(--text)}
+.bell-row .t{flex:1;min-width:0;overflow-wrap:anywhere}
+.bell-row .t .s{display:block;color:var(--text-muted);font-size:.86rem}
+.bell-row.new{background:var(--orange-tint);margin:0 -16px;padding:.45rem 16px}
+a.bell-row:hover .t{text-decoration:underline}
+.bell-badge{display:inline-grid;place-items:center;min-width:20px;height:20px;border-radius:10px;
+  background:var(--orange);color:var(--on-orange);font-size:.75rem;font-weight:900;padding:0 5px;
+  vertical-align:middle;margin-left:.3rem;line-height:1}
+.bell-page .bell-row.new{margin:0;padding:.45rem .5rem}
+.bell-foot{margin:.75rem 0 0}
+.mtgbox .body .bell-foot{margin-top:.75rem}
+"""
+CSS += BELL_CSS
+
 
 # The top bar's search box (cards and decks, static/suggest.js in its site mode): in the bar from
 # 900 px and on the touch rail (600 to 1279 px); under 600 px folded behind the magnifier
@@ -2322,7 +2351,15 @@ def render(
             "placeholder='Search cards and decks' data-suggest='cards' data-suggest-site='/cards?q=' "
             "data-suggest-menu autocomplete='off' enterkeyhint='search'></span></form>"
         )
-        right = f"{search_form}<nav class='user' aria-label='Account'>{search_btn}{account_menu}</nav>"
+        # The bell (parity release 2): Archidekt's unseen count, read after the page has loaded
+        # (static/bell.js asks /notifications/count), and the list as a box; a link to the
+        # /notifications page without scripts. Between the search and the picture at every width.
+        bell = (
+            "<a class='icon-btn bell' href='/notifications' aria-label='Notifications' title='Notifications' "
+            f"data-bell{' aria-current=page' if cur == '/notifications' else ''}>{icon('bell')}"
+            "<span class='n' hidden aria-hidden='true'></span></a>"
+        )
+        right = f"{search_form}<nav class='user' aria-label='Account'>{search_btn}{bell}{account_menu}</nav>"
         # The More pages are tabs on the rail too (railonly: hidden on the phone bar, which has More)
         rail_more = [(href, label, ic, "railonly") for href, label, ic in more_links]
         tabbar = (
@@ -2449,6 +2486,7 @@ def render(
         "<script src='/static/mana.js' defer></script><script src='/static/suggest.js' defer></script>"
         "<script src='/static/select.js' defer></script>"
         + ("<script src='/static/sitesearch.js' defer></script>" if signed_in else "")
+        + ("<script src='/static/bell.js' defer></script>" if signed_in else "")
         + "</body></html>"
     )
     return HTMLResponse(
