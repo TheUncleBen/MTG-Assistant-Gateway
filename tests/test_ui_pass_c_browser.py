@@ -151,11 +151,12 @@ def test_the_thread_table_and_the_posts_menus_fit_and_open_every_way(
         assert rc.locator("input[name=comment_id]").input_value() == "700002"
         _fits(page, "report box", width)
         _close_box(page)
-        # a reply's ⋮: someone else's offers Vote up and Report comment…, the member's own Edit and Delete
+        # a reply's ⋮: someone else's offers Vote up, Vote down and Report comment…, the member's own
+        # Edit and Delete
         amy = page.locator(".comments .cmt[data-owner='amy']").first
         amy.locator("> .who .kebab").click()
         page.locator(".ctxmenu").wait_for(state="visible")
-        assert _items(page) == ["Reply", "Copy link", "Vote up", "Report comment…"]
+        assert _items(page) == ["Reply", "Copy link", "Vote up", "Vote down", "Report comment…"]
         _close_menu(page)
         mine = page.locator(".comments .cmt[data-owner='alice']").first
         mine.scroll_into_view_if_needed()

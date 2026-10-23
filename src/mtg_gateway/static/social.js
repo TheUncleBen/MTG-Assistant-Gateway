@@ -4,8 +4,8 @@
    it (every control is a form).
 
    Parity release 2 (mockup screens/60-forum.js): each comment has a ⋮ (also a right-click, a press
-   and hold, or the Menu key) with Reply and Copy link, Edit… and Delete… on your own, Vote up and
-   Report comment… on others' (the page's Report comment box, #reportcomment, which sends the report
+   and hold, or the Menu key) with Reply and Copy link, Edit… and Delete… on your own, Vote up,
+   Vote down and Report comment… on others' (the page's Report comment box, #reportcomment, which sends the report
    to its review page). Under the comment sit its points as a vote button (▲ 3: a press votes it
    up, a second takes the vote back) and Reply, as the mockup's post footer; everything else is
    in the ⋮. The date is the site's one list date (feedback.js MtgText.rel, with the full date
@@ -273,10 +273,11 @@
       var p = el("p", "", c.text);
       box.appendChild(p);
       var acts = el("div", "acts");
-      var does = { reply: null, up: null, edit: null, del: null, own: !!(me !== null && c.owner && c.owner.id === me) };
+      var does = { reply: null, up: null, down: null, edit: null, del: null, own: !!(me !== null && c.owner && c.owner.id === me) };
       box.__cmt = { c: c, pg: pg, does: does };
       // the vote on someone else's comment (Archidekt's vote up), asked first like the deck's
-      // Like: the footer's ▲ button carries the points and takes the vote back on a second press
+      // Like: the footer's ▲ button carries the points and takes the vote back on a second press;
+      // Vote down lives in the ⋮ only (does.down), asked with the same chip on the ▲ button
       if (canWrite && me !== null && c.id && !(c.owner && c.owner.id === me)) {
         var btn = el("button", "btn-ghost vote");
         btn.type = "button";
@@ -291,11 +292,11 @@
           btn.title = mine() ? "You voted this up" : "Vote up";
         };
         label();
-        btn.addEventListener("click", function () {
-          var undoing = mine();
-          confirmChip(btn, undoing ? "Take back your vote?" : "Vote this comment up on Archidekt?", undoing ? "Take back" : "Vote", function () {
+        // asks on the ▲ button, then sends the vote ("up", "down" or "none" to take it back)
+        var cast = function (want, question, yesLabel) {
+          confirmChip(btn, question, yesLabel, function () {
             btn.disabled = true;
-            socialRequest("POST", deckUrl + "/" + encodeURIComponent(c.id) + "/vote", { vote: undoing ? "none" : "up", page: pg }).then(function (d) {
+            socialRequest("POST", deckUrl + "/" + encodeURIComponent(c.id) + "/vote", { vote: want, page: pg }).then(function (d) {
               btn.disabled = false;
               if (!d.ok) { var n = el("p", "notice error"); n.appendChild(socialProblem(d)); acts.appendChild(n); setTimeout(function () { n.remove(); }, 8000); return; }
               c.user_vote = d.vote; c.points = d.points;
@@ -307,9 +308,15 @@
               acts.appendChild(n); setTimeout(function () { n.remove(); }, 8000);
             });
           });
+        };
+        btn.addEventListener("click", function () {
+          if (mine()) cast("none", "Take back your vote?", "Take back"); else cast("up", "Vote this comment up on Archidekt?", "Vote");
         });
         btn.relabel = label;
         does.up = btn;
+        does.down = function () {
+          if (c.user_vote === 2) cast("none", "Take back your vote?", "Take back"); else cast("down", "Vote this comment down on Archidekt?", "Vote");
+        };
         acts.appendChild(btn);
       } else {
         acts.appendChild(pts);
@@ -480,7 +487,7 @@
     $$("[data-social=comments]").forEach(function (a) { a.addEventListener("click", load); });
 
     // -- the comment's ⋮ menu (static/cardmenu.js's layer): Reply, Copy link; Edit…, Delete… on
-    //    your own; Vote up, Report comment… on others' ---------------------------------------------
+    //    your own; Vote up, Vote down, Report comment… on others' -----------------------------------
     var Menu = window.MtgMenu, Box = window.MtgBox;
     var isForum = commentsPanel.hasAttribute("data-forum");
     var reportBox = document.getElementById("reportcomment");
@@ -509,6 +516,7 @@
         if (does.del) { items.push(Menu.sep()); items.push(Menu.item("Delete…", "trash", function () { does.del.click(); }, { danger: true })); }
       } else {
         if (does.up) items.push(Menu.item(c.user_vote === 1 ? "Take back your vote" : "Vote up", "plus", function () { does.up.click(); }));
+        if (does.down) items.push(Menu.item(c.user_vote === 2 ? "Take back your vote" : "Vote down", "minus", function () { does.down(); }));
         if (reportBox) { items.push(Menu.sep()); items.push(Menu.item("Report comment…", "flag", function () { openReport(c.id, who, pg, box); })); }
       }
       Menu.open({ head: who + "'s comment", label: "Menu for " + who + "'s comment", items: items, focusBack: box }, x, y);

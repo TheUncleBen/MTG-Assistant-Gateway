@@ -1,7 +1,8 @@
 """The second UI pass over the Forum, the Deck page's custom cards, My lists and the Add a package
 box, in headless Chromium: one list date on every forum post and reply (the first post's and
 the replies' dates are the same ``<time data-fmt=rel>``); a reply's points as the footer's ▲
-button, with Vote up (and Take back your vote) in its ⋮ and no Down button; a ⋮ menu that stays
+button, with Vote up and Vote down (each Take back your vote once cast) in its ⋮ and no Down
+button in the footer; a ⋮ menu that stays
 inside its column; the deck banner's date at 4.5:1; My lists' tabs on one row on a phone, the
 current tab in view; the card viewer of a custom card filled with what the card has, and a
 failed picture shown as the card's name and type line (in the stacks and in the viewer); the
@@ -148,7 +149,7 @@ def test_forum_dates_votes_and_the_menu_in_its_column(server: Server, width: int
         # the ⋮: Vote up on another's, Edit… and Delete… on your own
         amy.locator("> .who .kebab").click()
         page.locator(".ctxmenu").wait_for(state="visible")
-        assert _items(page) == ["Reply", "Copy link", "Vote up", "Report comment…"]
+        assert _items(page) == ["Reply", "Copy link", "Vote up", "Vote down", "Report comment…"]
         # the menu keeps inside the panel's column and the window
         menu, panel = _rect(page.locator(".ctxmenu")), _rect(page.locator("#comments"))
         vw = page.evaluate("() => window.innerWidth")
@@ -172,7 +173,35 @@ def test_forum_dates_votes_and_the_menu_in_its_column(server: Server, width: int
         assert vote.get_attribute("aria-pressed") == "true"
         amy.locator("> .who .kebab").click()
         page.locator(".ctxmenu").wait_for(state="visible")
-        assert _items(page) == ["Reply", "Copy link", "Take back your vote", "Report comment…"]
+        assert _items(page) == ["Reply", "Copy link", "Take back your vote", "Vote down", "Report comment…"]
+        # Vote down from the ⋮: asked with the same chip; the footer's count follows; on its own
+        # undo the up item reads Vote up again
+        page.locator(".ctxmenu [role=menuitem]", has_text="Vote down").click()
+        chip = page.locator(".cmt[data-owner='amy'] > .acts .confirm")
+        assert chip.get_attribute("aria-label") == "Vote this comment down on Archidekt?"
+        chip.locator("button", has_text="Vote").click()
+        page.wait_for_function(
+            "() => document.querySelector(\".cmt[data-owner='amy'] > .acts button.vote .n\")"
+            ".textContent === '-1'"
+        )
+        amy_id = int(amy.get_attribute("data-id"))
+        assert server.ark.votes == {("alice", amy_id): 2}
+        assert vote.get_attribute("aria-pressed") == "false"
+        assert vote.get_attribute("aria-label") == "-1 point. Vote up: comment by amy"
+        amy.locator("> .who .kebab").click()
+        page.locator(".ctxmenu").wait_for(state="visible")
+        assert _items(page) == ["Reply", "Copy link", "Vote up", "Take back your vote", "Report comment…"]
+        page.locator(".ctxmenu [role=menuitem]", has_text="Take back your vote").click()
+        assert chip.get_attribute("aria-label") == "Take back your vote?"
+        chip.locator("button", has_text="Take back").click()
+        page.wait_for_function(
+            "() => document.querySelector(\".cmt[data-owner='amy'] > .acts button.vote .n\")"
+            ".textContent === '0'"
+        )
+        assert server.ark.votes == {}
+        amy.locator("> .who .kebab").click()
+        page.locator(".ctxmenu").wait_for(state="visible")
+        assert _items(page) == ["Reply", "Copy link", "Vote up", "Vote down", "Report comment…"]
         _close_menu(page)
         assert page.evaluate(MEASURE) == []
         browser.close()
