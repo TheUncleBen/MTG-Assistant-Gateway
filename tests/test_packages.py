@@ -253,3 +253,25 @@ async def test_packages_are_listed_as_the_sites_packages_page_lists_them(stack: 
         await call(stack.h, token, "list_card_packages", {"whose": "all", "intended_format": "x"})
     )
     assert bad["ok"] is False and "format" in bad["message"]
+
+
+async def test_my_decks_marks_packages_and_shows_decks_packages_or_both(stack: Stack) -> None:
+    """My decks' Show filter (plan 6.1): list_my_decks packages only or none reads the member's
+    packages from the Packages page's own listing, whether or not Archidekt's deck listing carries
+    them; include (default) stays the one deck listing."""
+    token = await linked_user(stack)
+    made = await _browser_apply(stack.h, (await _new_package(stack, token))["proposal_id"])
+    pkg = str(made["result"]["deck_id"])
+
+    async def listed(**args: object) -> dict[str, dict]:
+        got = structured(await call(stack.h, token, "list_my_decks", args))
+        assert got["ok"] is True, got
+        return {d["id"]: d for d in got["decks"]}
+
+    only = await listed(packages="only")
+    assert list(only) == [pkg] and only[pkg]["package"] == "keywords “fetchlands”, budget $$$, for Commander"
+    plain = await listed(packages="none")
+    assert pkg not in plain and plain["42"]["package"] is None
+    assert "42" in await listed()  # include: the list as Archidekt gives it, one listing
+    bad = structured(await call(stack.h, token, "list_my_decks", {"packages": "some"}))
+    assert bad.get("ok") is not True

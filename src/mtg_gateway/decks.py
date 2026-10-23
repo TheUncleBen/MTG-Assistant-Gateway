@@ -67,6 +67,7 @@ from .archidekt import (
     finish_modifier,
     front_face,
     jwt_exp,
+    list_row,
     no_retry,
     page_turn,
     parse_deck,
@@ -153,6 +154,7 @@ ORGANISE_FIELDS = ("folder", "add_tags", "remove_tags", "cover", "package")
 # Set by the MCP tool layer and the browser pages; None when the actor is not known.
 current_client: ContextVar[str | None] = ContextVar("current_client", default=None)
 MAX_CHANGES = 40
+MAX_PACKAGE_PAGES = 4  # the member's own card packages read for My decks, 50 a page
 # How long an apply call waits for the apply to finish before it answers "applying". The apply
 # itself carries on in the background (a 100-card new deck is a few hundred paced requests, longer
 # than an assistant app waits for one tool call); get_proposal and the review page show its
@@ -3021,6 +3023,48 @@ class DeckService:
             held = self.folder_trees.last(sub, DECK_LIST_LAST)
             info = self._flatten_folders(held[1]) if held is not None and held[1] is not None else None
         return {f["id"] for f in (info or {}).get("folders", []) if f.get("backup")}
+
+    async def mark_packages(self, sub: str, rows: list[dict[str, Any]]) -> bool:
+        """Mark the member's card packages in a copy of their deck list (``package``: the settings
+        in words, None on a plain deck), from the Packages page's own listing, and add any package
+        the deck listing left out. Read only when asked (list_my_decks), never on the deck list's
+        own cold load, which stays one Archidekt listing. False when the package listing couldn't
+        be read: the rows are left unmarked and the list as it was."""
+        from . import packages
+
+        _token, link = self._token(sub)
+        username, user_id = link["archidekt_username"], link.get("archidekt_user_id")
+
+        for d in rows:
+            d.setdefault("package", None)
+        found: list[dict[str, Any]] = []
+        try:
+            for page in range(1, MAX_PACKAGE_PAGES + 1):
+                body = await self._call(
+                    sub,
+                    lambda token, *_, p=page: self.client.packages_list(token, owner=username, page=p),
+                )
+                found += [
+                    r for r in body["results"] if isinstance(r, dict) and str(r.get("id") or "").isdigit()
+                ]
+                if not body.get("next"):
+                    break
+        except (DeckError, ArchidektError) as exc:
+            logger.info("deck list: card packages not read (%s)", exc)
+            return False
+        by_id = {str(d["id"]): d for d in rows}
+        for r in found:
+            block = r.get("cardPackage") if isinstance(r.get("cardPackage"), dict) else {}
+            words = packages.text(block) if block else None
+            have = by_id.get(str(r["id"]))
+            if have is not None:
+                have["package"] = words
+            elif _owned_by(r.get("owner"), username, user_id):
+                extra = list_row(r)
+                extra.update(owner=username, package=words)
+                rows.append(extra)
+        rows.sort(key=lambda d: d.get("updated_at") or "", reverse=True)
+        return True
 
     async def list_decks_quick(
         self, sub: str, *, wait: float | None = None, folder_names: bool = False

@@ -77,6 +77,10 @@ class CategoryChange(BaseModel):
 
 
 MAX_PROPOSALS_PAGE = 100
+# list_my_decks' note when the member's card packages couldn't be read, so none is marked
+PACKAGES_UNREAD = (
+    "Card packages couldn't be read from Archidekt just now, so decks and packages can't be told apart."
+)
 # list_my_decks' note when the folder tree couldn't be read, so decks Archidekt listed by folder id
 # only have no folder name
 FOLDER_NAMES_UNREAD = (
@@ -167,12 +171,17 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
             "even when a cover is set, so never take null as the deck having no cover. "
             "unreadable counts decks Archidekt listed without a readable owner, which are left out; when "
             "it is above 0, note says so in words to pass on to the member. note also says when folder "
-            "names couldn't be read, so folder is null on some decks and a folder filter may miss them."
+            "names couldn't be read, so folder is null on some decks and a folder filter may miss them. "
+            "packages: include (default: the list as Archidekt gives it), only (the user's card "
+            "packages, each with package, its settings in words) or none (plain decks only)."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": True},
     )
     async def list_my_decks(
-        name_contains: str | None = None, deck_format: str | None = None, folder: str | None = None
+        name_contains: str | None = None,
+        deck_format: str | None = None,
+        folder: str | None = None,
+        packages: Literal["include", "only", "none"] = "include",
     ) -> dict[str, object]:
         try:
             # folder names filled in before the folder filter, which matches on the name
@@ -185,6 +194,11 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
         notes = [LIST_PARTLY_UNREADABLE if len(rows) > 0 else LIST_UNREADABLE] if unreadable else []
         if getattr(rows, "folder_names_unread", False):
             notes.append(FOLDER_NAMES_UNREAD)  # no silent empty folder
+        if packages != "include":
+            # one more listing, only when asked: the packages page's own (the deck list stays one read)
+            rows = [dict(d) for d in rows]  # marked and filtered here, never in the shared list
+            if not await state.decks.mark_packages(_sub(), rows):
+                return {"ok": False, "error": "upstream", "message": PACKAGES_UNREAD}
         note = " ".join(notes) or None
         if name_contains:
             rows = [d for d in rows if name_contains.strip().lower() in str(d.get("name", "")).lower()]
@@ -193,6 +207,8 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
             rows = [d for d in rows if str(d.get("format_name") or d.get("format") or "").lower() == want]
         if folder is not None:
             rows = [d for d in rows if (d.get("folder") or "") == folder]
+        if packages != "include":
+            rows = [d for d in rows if bool(d.get("package")) == (packages == "only")]
         for d in rows:
             d.setdefault("url", f"https://archidekt.com/decks/{d['id']}")
         out: dict[str, object] = {"ok": True, "decks": rows, "count": len(rows), "unreadable": unreadable}
