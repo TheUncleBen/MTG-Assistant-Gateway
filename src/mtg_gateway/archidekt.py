@@ -482,6 +482,71 @@ class DeckCard:
 
 
 @dataclass
+class CustomDeckCard:
+    """One of the deck's custom card rows: the deck JSON's ``customCards`` beside ``cards`` (the
+    site builds its deck page from both, read from its scripts 2026-10-23; not seen live yet).
+    Kept apart from ``Deck.cards`` so no card edit, snapshot restore, legality check or
+    fingerprint reads them."""
+
+    relation_id: int | None
+    custom_card_id: int | None
+    name: str  # frontName, " // " backName when the card has a back
+    quantity: int
+    categories: list[str]
+    label: str = ""
+    modifier: str = ""
+    type_line: str = ""
+    image_url: str = ""
+    # the row's own settings, sent back unchanged with a count or category change
+    custom_cmc: float | None = None
+    companion: bool = False
+    flipped_default: bool = False
+
+
+def _custom_type_line(card: dict[str, Any]) -> str:
+    head = " ".join(
+        str(card.get(k) or "").strip() for k in ("frontSuperTypes", "frontTypes") if card.get(k)
+    ).strip()
+    sub = str(card.get("frontSubTypes") or "").strip()
+    return head + (" — " + sub if sub else "")
+
+
+def parse_custom_rows(raw: Any) -> list[CustomDeckCard]:
+    """The deck JSON's ``customCards`` rows; anything not in the expected shape is skipped (a
+    custom row must never stop the deck from being read)."""
+    out: list[CustomDeckCard] = []
+    for entry in raw if isinstance(raw, list) else []:
+        if not isinstance(entry, dict) or entry.get("deletedAt"):
+            continue
+        card = entry.get("card") if isinstance(entry.get("card"), dict) else None
+        qty = entry.get("quantity", 1)
+        if card is None or not isinstance(qty, int) or isinstance(qty, bool) or qty < 1:
+            continue
+        cid = card.get("id")
+        name = str(card.get("frontName") or "").strip()
+        if card.get("hasBack") and str(card.get("backName") or "").strip():
+            name += " // " + str(card["backName"]).strip()
+        rid = entry.get("id")
+        out.append(
+            CustomDeckCard(
+                relation_id=rid if isinstance(rid, int) and not isinstance(rid, bool) else None,
+                custom_card_id=cid if isinstance(cid, int) and not isinstance(cid, bool) else None,
+                name=name or "?",
+                quantity=qty,
+                categories=[str(c) for c in (entry.get("categories") or []) if isinstance(c, str)],
+                label=str(entry.get("label") or ""),
+                modifier=str(entry.get("modifier") or ""),
+                type_line=_custom_type_line(card),
+                image_url=str(card.get("frontImageUrl") or ""),
+                custom_cmc=_number(entry.get("customCmc")),
+                companion=entry.get("companion") is True,
+                flipped_default=entry.get("flippedDefault") is True,
+            )
+        )
+    return out
+
+
+@dataclass
 class Deck:
     id: str
     name: str
@@ -518,6 +583,8 @@ class Deck:
     # Set by DeckService.get_any_deck on a copy of the deck it read without a sign-in because the
     # member's link was dropped on that request: what the member is told (relink).
     link_notice: str = field(default="", repr=False, compare=False)
+    # The member's custom cards in the deck (``customCards``); never in cards or fingerprint()
+    custom_cards: list[CustomDeckCard] = field(default_factory=list)
 
     def _rows(self) -> list[tuple[Any, ...]]:
         return sorted(
@@ -2497,4 +2564,5 @@ def parse_deck(body: Any) -> Deck:
         user_vote=_int(body.get("userInput")) if _int(body.get("userInput")) in (0, 1, 2) else 0,
         bookmarked=body.get("bookmarked") is True,
         comment_root=_int(body.get("commentRoot")) or None,
+        custom_cards=parse_custom_rows(body.get("customCards")),
     )

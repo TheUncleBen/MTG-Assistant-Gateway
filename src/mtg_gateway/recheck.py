@@ -100,6 +100,10 @@ def rows_now(svc: Any, sub: str, row: dict[str, Any], deck: Deck) -> list[dict[s
             raise d.DeckError("stale", "The deck's folder, tags or cover changed since.")
         kept = [r for r in row.get("rows") or [] if r.get("field") in ORGANISE_ROW_FIELDS]
         return [*rows, *kept]
+    if kind == "custom_cards":
+        stored = row["changes"]
+        names = {int(k): str(v) for k, v in (stored.get("names") or {}).items()}
+        return d.custom_card_rows(deck, list(stored.get("custom_cards") or []), names)[1]
     return None
 
 

@@ -76,6 +76,31 @@ class CategoryChange(BaseModel):
     )
 
 
+class CustomCardChange(BaseModel):
+    """One custom card change of propose_custom_card_changes."""
+
+    model_config = ConfigDict(extra="forbid")
+    action: Literal["add", "remove", "set_quantity"] = Field(
+        description="add one of the user's own custom cards, remove one from the deck, or set its count."
+    )
+    custom_card_id: int = Field(
+        description=(
+            "The custom card's id: get_my_lists (custom_cards) for an add, get_deck's custom_cards "
+            "for one already in the deck."
+        )
+    )
+    quantity: int | None = Field(
+        None, ge=1, le=99, description="add (default 1) and set_quantity: the count it should have."
+    )
+    category: str | None = Field(
+        None,
+        description=(
+            "add and set_quantity: the category to file it under. Left out, an add sends none "
+            "(Archidekt files it) and a count change keeps the card's own."
+        ),
+    )
+
+
 MAX_PROPOSALS_PAGE = 100
 # list_my_decks' note when the member's card packages couldn't be read, so none is marked
 PACKAGES_UNREAD = (
@@ -828,6 +853,37 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
                     ),
                 }
             )
+        except DeckError as exc:
+            return _proposal(_tool_error(exc))
+
+    @server.tool(
+        name="propose_custom_card_changes",
+        title="Propose custom card changes in a deck (write, two-step)",
+        description=(
+            "Step 1 of putting the user's own custom cards in a deck they own, taking them out, or "
+            "changing how many copies it has. Only the user's own custom cards (get_my_lists, "
+            "custom_cards) can be added; get_deck lists the ones already in the deck under "
+            "custom_cards. One review line per card with its count before and after and its "
+            "category. Low risk like a small card edit, unless it touches the commander zone or "
+            "moves more than 4 copies of a card. Returns the same fields as propose_deck_changes "
+            "(kind 'custom_cards'); it is applied with apply_proposal like any other proposal, "
+            "which keeps a snapshot first. Changes nothing on Archidekt."
+        ),
+        annotations={"readOnlyHint": True, "destructiveHint": False, "openWorldHint": True},
+        meta=card_meta,
+    )
+    async def propose_custom_card_changes(
+        deck_id: Annotated[
+            str, Field(description="The Archidekt deck id (the number in the deck URL) or URL.")
+        ],
+        changes: Annotated[
+            list[CustomCardChange],
+            Field(description="One entry per custom card.", min_length=1, max_length=20),
+        ],
+    ) -> CallToolResult:
+        try:
+            raw = [c.model_dump() for c in changes]
+            return _proposal({"ok": True, **(await state.decks.propose_custom_cards(_sub(), deck_id, raw))})
         except DeckError as exc:
             return _proposal(_tool_error(exc))
 

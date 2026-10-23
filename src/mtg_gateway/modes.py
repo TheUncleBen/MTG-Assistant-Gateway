@@ -384,6 +384,8 @@ def risk_of(
         return "high", "changes the deck's details"
     if kind == "categories":
         return "high", category_wait(rows) or CATEGORY_REASON
+    if kind == "custom_cards":
+        return custom_cards_risk(rows, max_rows=max_rows)
     if kind not in ("edit", "collection"):
         return "high", "not a plain deck or collection edit"
     if rows is None:  # stored before review rows existed: nothing to judge it by
@@ -416,6 +418,34 @@ def risk_of(
     return "low", f"{len(rows)} card row{'s' if len(rows) != 1 else ''}, no commander change"
 
 
+def custom_cards_risk(
+    rows: list[dict[str, Any]] | None, *, max_rows: int = DEFAULT_MAX_ROWS
+) -> tuple[str, str]:
+    """A custom card change in a deck (decks.custom_card_rows) is judged as a card edit: low
+    when it has at most ``max_rows`` rows, none moves more than MAX_COPIES_PER_ROW copies and
+    none is in the deck's commander zone (a Premier category)."""
+    if rows is None:
+        return "high", NO_ROWS_REASON
+    if any(r.get("commander_zone") for r in rows):
+        return "high", COMMANDER_ZONE_REASON
+    if len(rows) > max_rows:
+        return "high", f"changes {len(rows)} rows, more than the {max_rows} a low-risk edit may have"
+    for r in rows:
+        if _custom_copies(r) > MAX_COPIES_PER_ROW:
+            return (
+                "high",
+                f"moves {_custom_copies(r)} copies of {r.get('name')}, more than {MAX_COPIES_PER_ROW}",
+            )
+    return "low", f"{len(rows)} custom card row{'s' if len(rows) != 1 else ''}, no commander change"
+
+
+def _custom_copies(row: dict[str, Any]) -> int:
+    try:
+        return abs(int(row.get("after") or 0) - int(row.get("before") or 0))
+    except (TypeError, ValueError):
+        return MAX_COPIES_PER_ROW + 1  # a count that cannot be read is not small
+
+
 # A hand edit in the app is the member's own approval, so it applies at once; only these get an
 # explicit confirmation first, as Archidekt itself asks before destructive steps.
 HAND_EDIT_CONFIRM_COPIES = 10  # removing more copies than this in one go
@@ -435,6 +465,15 @@ def hand_edit_confirm(kind: str, rows: list[dict[str, Any]] | None) -> str | Non
             return CATEGORY_COUNTS_CONFIRM
         deletes = any(isinstance(r, dict) and r.get("delete") for r in rows or [])
         return CATEGORY_DELETE_CONFIRM if deletes else None
+    if kind == "custom_cards":  # a page's own custom card add, count or remove
+        if any(isinstance(r, dict) and r.get("commander_zone") for r in rows or []):
+            return "This adds or changes a row with a commander-zone category."
+        gone = sum(
+            max(0, int(r.get("before") or 0) - int(r.get("after") or 0))
+            for r in rows or []
+            if isinstance(r, dict)
+        )
+        return f"This removes {gone} cards from the deck." if gone > HAND_EDIT_CONFIRM_COPIES else None
     if kind != "edit" or not rows:
         return None
     if any(r.get("kind") == "commander" for r in rows):
@@ -503,6 +542,14 @@ def auto_waits(
             return commander_reason(rows)
         if any(str(r.get("kind")) == "companion" or r.get("companion_card") for r in rows):
             return COMPANION_REASON  # it changes what the deck is legal with (parity release 1)
+        if len(rows) > big_rows:
+            return f"changes {len(rows)} rows, more than the {big_rows} Full auto applies by itself"
+        return None
+    if kind == "custom_cards":  # waits as a card edit does: the commander zone or a big change
+        if rows is None:
+            return NO_ROWS_REASON
+        if any(r.get("commander_zone") for r in rows):
+            return COMMANDER_ZONE_REASON
         if len(rows) > big_rows:
             return f"changes {len(rows)} rows, more than the {big_rows} Full auto applies by itself"
         return None

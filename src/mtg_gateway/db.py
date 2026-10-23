@@ -2389,7 +2389,7 @@ class Database:
             ).fetchall()
             props = self._conn.execute(
                 "SELECT deck_id, created_at FROM proposals WHERE owner_sub = ? "
-                "AND kind IN ('edit', 'details', 'categories', 'restore', 'create_deck') "
+                "AND kind IN ('edit', 'details', 'categories', 'custom_cards', 'restore', 'create_deck') "
                 "UNION ALL SELECT deck_id, taken_at FROM snapshots WHERE owner_sub = ? "
                 "AND deck_owner_id IS NULL",
                 (owner_sub, owner_sub),

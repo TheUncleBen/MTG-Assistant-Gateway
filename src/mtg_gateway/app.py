@@ -228,6 +228,7 @@ WRITE_TOOLS = frozenset(
         "propose_restore_snapshot",
         "propose_deck_details",
         "propose_deck_categories",
+        "propose_custom_card_changes",  # the member's own custom cards in a deck
         "propose_clone_deck",
         "propose_list_change",  # the member's account-wide lists (account_lists.py)
         "propose_add_package",  # a card package's cards into a deck (packages.py)
