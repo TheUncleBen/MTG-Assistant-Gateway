@@ -888,9 +888,11 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
             "custom_cards) can be added; get_deck lists the ones already in the deck under "
             "custom_cards. One review line per card with its count before and after and its "
             "category. Low risk like a small card edit, unless it touches the commander zone or "
-            "moves more than 4 copies of a card. Returns the same fields as propose_deck_changes "
+            "moves more than 4 copies of a card. Taking custom cards out or lowering their count "
+            "always waits for the user's own press: a snapshot restore does not put custom cards "
+            "back. Returns the same fields as propose_deck_changes "
             "(kind 'custom_cards'); it is applied with apply_proposal like any other proposal, "
-            "which keeps a snapshot first. Changes nothing on Archidekt."
+            "which keeps a snapshot first (of the deck's cards and details). Changes nothing on Archidekt."
         ),
         annotations={"readOnlyHint": True, "destructiveHint": False, "openWorldHint": True},
         meta=card_meta,

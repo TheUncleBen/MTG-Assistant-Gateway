@@ -121,7 +121,8 @@ async def threads(
 ) -> dict[str, Any]:
     """One section's threads, 20 a page, as the section's own page lists them."""
     group, section = _text(group, 100), _text(section, 100)
-    if not group or not section:
+    if not group or not section or not group.strip(".") or not section.strip("."):
+        # a name of dots would lead the page read out of /forum/ (security review F-03)
         raise DeckError("invalid", "Name the forum group and section (get_forum lists them).")
     if order not in ORDERS:
         raise DeckError("invalid", f"order must be one of: {', '.join(ORDERS)}")

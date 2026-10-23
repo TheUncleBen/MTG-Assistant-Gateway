@@ -187,11 +187,12 @@ async def read_profile(decks: Any, sub: str) -> dict[str, Any]:
         return now
 
 
-_READS: set[asyncio.Task[Any]] = set()  # reads a page stopped waiting for, until they finish
+_READS: dict[str, asyncio.Task[Any]] = {}  # one profile read at a time per member
 
 
-def _settle(task: asyncio.Task[Any]) -> None:
-    _READS.discard(task)
+def _settle(sub: str, task: asyncio.Task[Any]) -> None:
+    if _READS.get(sub) is task:
+        del _READS[sub]
     if not task.cancelled():
         task.exception()  # read, so a failed read is not reported as never retrieved
 
@@ -199,14 +200,16 @@ def _settle(task: asyncio.Task[Any]) -> None:
 async def profile_or_none(decks: Any, sub: str) -> dict[str, Any] | None:
     """The profile, or None when Archidekt can't be asked right now (the page says so). A page
     waits PROFILE_WAIT seconds at most; the read itself is never cut short (it may be refreshing
-    the member's Archidekt sign-in, which must be stored once Archidekt has answered) and is kept
-    for the next load when it finishes."""
-    task = asyncio.ensure_future(read_profile(decks, sub))
+    the member's Archidekt sign-in, which must be stored once Archidekt has answered), is shared
+    by pages loaded meanwhile, and is kept for the next load when it finishes."""
+    task = _READS.get(sub)
+    if task is None:
+        task = asyncio.ensure_future(read_profile(decks, sub))
+        _READS[sub] = task
+        task.add_done_callback(lambda t: _settle(sub, t))
     try:
         return await asyncio.wait_for(asyncio.shield(task), PROFILE_WAIT)
     except TimeoutError:
-        _READS.add(task)
-        task.add_done_callback(_settle)
         return None
     except DeckError:
         return None

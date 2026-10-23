@@ -17,17 +17,13 @@ async def test_sections_and_a_sections_threads_come_from_the_forums_own_pages(st
     assert got["ok"] is True, got
     assert got["groups"][0]["group"] == "Archidekt"
     assert [s["section"] for s in got["groups"][0]["sections"]] == ["General", "Deck Help"]
-    listed = structured(
-        await call(stack.h, token, "get_forum", {**GENERAL, "order": "points"})
-    )
+    listed = structured(await call(stack.h, token, "get_forum", {**GENERAL, "order": "points"}))
     assert listed["ok"] is True, listed
     assert [t["id"] for t in listed["threads"]] == [700001, 700002, 700003]
     assert listed["threads"][0]["type"] == "sticky" and listed["pages"] == 1
     # the site's own page and query: the section page, 1st page, ordered by points
     assert stack.ark.site_pages[-1] == ("/forum/Archidekt/General", {"page": "1", "orderBy": "-points"})
-    found = structured(
-        await call(stack.h, token, "get_forum", {**GENERAL, "search": "mana"})
-    )
+    found = structured(await call(stack.h, token, "get_forum", {**GENERAL, "search": "mana"}))
     assert [t["title"] for t in found["threads"]] == ["Best mana rocks?"]
 
 
@@ -110,3 +106,46 @@ async def test_the_thread_page_reads_and_posts_through_the_deck_comment_routes(s
         assert r.status_code in (400, 404)
     finally:
         await b.aclose()
+
+
+async def test_a_dot_name_never_leaves_the_forum(stack: Stack) -> None:
+    """Security review F-03: a group or section named "." or ".." is refused, so the page read
+    stays under /forum/."""
+    token = await linked_user(stack)
+    before = len(stack.ark.site_pages)
+    for bad in ({"group": "..", "section": "users"}, {"group": "Archidekt", "section": "."}):
+        got = structured(await call(stack.h, token, "get_forum", bad))
+        assert got["ok"] is False, got
+    assert len(stack.ark.site_pages) == before
+
+
+async def test_an_oversized_forum_page_is_not_read_whole() -> None:
+    """Security review F-04: the 3 MB page limit stops the read as it goes, not after it."""
+    import httpx
+
+    from mtg_gateway.archidekt import SITE_PAGE_MAX, ArchidektClient, ArchidektError, Pacer
+
+    sent = 0
+
+    class Endless(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            nonlocal sent
+            while sent < SITE_PAGE_MAX * 4:
+                sent += 65536
+                yield b"x" * 65536
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, stream=Endless(), headers={"content-type": "text/html"})
+
+    client = ArchidektClient(
+        "https://archidekt.com/api",
+        "test",
+        Pacer(0.0),
+        http=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+    try:
+        await client.site_page_data("/forum")
+        raise AssertionError("an oversized page was read")
+    except ArchidektError as exc:
+        assert exc.kind == "changed"
+    assert sent <= SITE_PAGE_MAX + 2 * 65536

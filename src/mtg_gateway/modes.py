@@ -98,6 +98,12 @@ def lists_low_text(max_rows: int = DEFAULT_MAX_ROWS) -> str:
 LISTS_DELETE_TEXT = "deleting from your Archidekt lists"
 # account_lists.PREMIER_NOTE: a Premier category template is never applied by an assistant either
 LISTS_PREMIER_TEXT = "Premier in your default categories"
+# A snapshot restore does not put a deck's custom cards back (decks.propose_custom_cards), so
+# taking them out or lowering their count is never applied by an assistant either.
+CUSTOM_OUT_TEXT = "taking custom cards out of a deck"
+CUSTOM_OUT_REASON = (
+    "takes custom cards out of the deck, which a snapshot can't put back, so it waits for your own press"
+)
 # What each mode means, in the member's words, for the Account page and the docs.
 MODE_LABELS = {
     "manual": "Ask me every time",
@@ -135,7 +141,7 @@ HIGH_RISK_TEXT = (
 # What no mode lets an assistant apply (MEMBER_ONLY), as one sentence.
 MEMBER_ONLY_TEXT = (
     f"Actions on your Archidekt account ({ACCOUNT_ACTIONS_TEXT}), {LISTS_DELETE_TEXT}, "
-    f"{LISTS_PREMIER_TEXT} and deleting a deck are never "
+    f"{LISTS_PREMIER_TEXT}, {CUSTOM_OUT_TEXT} and deleting a deck are never "
     "applied by an assistant: each one waits for your own press, in every mode, on the card in the "
     "chat or on its review page (deleting a deck, and an edit of a comment that has formatting: on "
     "the review page only). An edit of a description that has formatting is also approved on its "
@@ -175,7 +181,8 @@ def mode_help(mode: str, *, max_rows: int = DEFAULT_MAX_ROWS, big_rows: int = DE
             f"changes nothing that exists), and {lists_low_text(max_rows)}. A new deck built from a list, "
             "restores, deck details and categories, commander "
             f"changes, bigger edits, and anything on your Archidekt account ({ACCOUNT_ACTIONS_TEXT}), "
-            f"{LISTS_DELETE_TEXT}, {LISTS_PREMIER_TEXT} or deleting a deck still wait for your press. "
+            f"{LISTS_DELETE_TEXT}, {LISTS_PREMIER_TEXT}, {CUSTOM_OUT_TEXT} or deleting a deck still wait for "
+            "your press. "
             "So does a held change, a change waiting for another change first, one another app had a "
             "hand in, one that replaces another app's change, or one that another app's waiting change "
             "would replace."
@@ -241,7 +248,7 @@ def mode_points(
                     "deck details and categories",
                     "commander changes and bigger edits",
                     f"anything on your Archidekt account ({ACCOUNT_ACTIONS_TEXT}), {LISTS_DELETE_TEXT}, "
-                    f"{LISTS_PREMIER_TEXT} or deleting a deck",
+                    f"{LISTS_PREMIER_TEXT}, {CUSTOM_OUT_TEXT} or deleting a deck",
                     _STILL_WAITS,
                 ],
             ),
@@ -426,6 +433,8 @@ def custom_cards_risk(
     none is in the deck's commander zone (a Premier category)."""
     if rows is None:
         return "high", NO_ROWS_REASON
+    if any(_custom_fewer(r) for r in rows):
+        return "destructive", CUSTOM_OUT_REASON
     if any(r.get("commander_zone") for r in rows):
         return "high", COMMANDER_ZONE_REASON
     if len(rows) > max_rows:
@@ -437,6 +446,13 @@ def custom_cards_risk(
                 f"moves {_custom_copies(r)} copies of {r.get('name')}, more than {MAX_COPIES_PER_ROW}",
             )
     return "low", f"{len(rows)} custom card row{'s' if len(rows) != 1 else ''}, no commander change"
+
+
+def _custom_fewer(row: dict[str, Any]) -> bool:
+    try:
+        return int(row.get("after") or 0) < int(row.get("before") or 0)
+    except (TypeError, ValueError):
+        return True
 
 
 def _custom_copies(row: dict[str, Any]) -> int:

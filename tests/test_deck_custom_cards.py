@@ -15,6 +15,7 @@ from mtg_gateway.archidekt import parse_deck
 from mtg_gateway.decks import BROWSER_CLIENT, DeckError, current_client, custom_card_line
 
 from .conftest import Stack, stack_with
+from .test_account_actions import _browser_apply
 from .test_approval_modes import SHIPPED, _set_mode
 from .test_decks_and_proxy import call, linked_user, structured
 
@@ -120,6 +121,14 @@ def test_tiers() -> None:
     assert modes.hand_edit_confirm("custom_cards", [row]) is None
     gone = {**row, "action": "remove", "before": 12, "after": 0}
     assert modes.hand_edit_confirm("custom_cards", [gone]) == "This removes 12 cards from the deck."
+    # a snapshot restore does not put custom cards back, so taking them out, or lowering their
+    # count, is never applied by an assistant (security review F-02)
+    out = {**row, "action": "remove", "before": 1, "after": 0}
+    fewer = {**row, "action": "set_quantity", "before": 3, "after": 2}
+    for r in (out, fewer):
+        assert modes.risk_of("custom_cards", [r]) == ("destructive", modes.CUSTOM_OUT_REASON)
+        assert not modes.assistant_may_apply("auto", modes.risk_of("custom_cards", [r])[0])
+    assert modes.CUSTOM_OUT_TEXT in modes.MEMBER_ONLY_TEXT
 
 
 def test_review_lines() -> None:
@@ -172,7 +181,10 @@ async def test_add_your_own_custom_card_then_count_then_remove(stack: Stack) -> 
 
     p = await _propose(h, token, [{"action": "remove", "custom_card_id": 41}])
     assert p["diff"] == "Remove custom card “Grizzled Mentor”: 3 -> 0, from “Tech”", p
-    assert (await _apply(h, token, p))["state"] == "applied"
+    # a snapshot can't put custom cards back: taking them out is the member's own press
+    assert p["risk"] == "destructive" and not p["assistant_may_apply"], p
+    assert (await _apply(h, token, p))["ok"] is False and 41 in _rows(ark)
+    assert (await _browser_apply(h, p["proposal_id"]))["state"] == "applied"
     assert ark.patches[-1]["cards"][0]["action"] == "remove"
     assert 41 not in _rows(ark)
 

@@ -576,3 +576,33 @@ async def test_a_slow_archidekt_never_holds_the_account_page(stack: Stack, monke
     finally:
         gate.set()
         await b.aclose()
+
+
+async def test_pages_loaded_while_archidekt_hangs_share_one_profile_read(stack: Stack, monkeypatch) -> None:
+    """Security review F-06: five loads while Archidekt hangs start one read, not five."""
+    import asyncio
+
+    profile_page.forget_all("user-1")
+    profile_page._PROFILE.clear()
+    b, _token = await _member(stack)
+    monkeypatch.setattr(profile_page, "PROFILE_WAIT", 0.05)
+    gate = asyncio.Event()
+    started = 0
+    real = profile.read
+
+    async def slow(decks, sub):
+        nonlocal started
+        started += 1
+        await gate.wait()
+        return await real(decks, sub)
+
+    monkeypatch.setattr(profile, "read", slow)
+    try:
+        for _ in range(5):
+            assert (await b.http.get("/account")).status_code == 200
+        reads = [t for t in asyncio.all_tasks() if t.get_coro().__name__ == "read_profile"]
+        assert started == 1 and len(reads) == 1, reads
+    finally:
+        gate.set()
+        await asyncio.sleep(0.05)
+        await b.aclose()

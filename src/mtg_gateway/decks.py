@@ -681,6 +681,8 @@ def row_label(r: dict[str, Any]) -> str:
         label += f" [{r['category']}]"
     if r.get("guessed_from"):
         label += f" (name guessed from '{r['guessed_from']}'; check it)"
+    if r.get("tag"):  # the colour tag an add puts on its new row
+        label += f", color tag {clean_text(str(r['tag']))}"
     return label
 
 
@@ -1759,6 +1761,8 @@ def plan_zones(
         else:
             cats = {n: ", ".join(_side_categories(deck, chs)) for n, chs in adds_by_name.items()}
         pinned_names = {n for n, chs in adds_by_name.items() if any(c.pinned for c in chs)}
+        # the colour tag an add puts on its new row is part of what is reviewed (security review F-05)
+        tags = {n: next((c.label for c in chs if c.label), "") for n, chs in adds_by_name.items()}
         side = "side" if zone == "side" else None
         for name in sorted(set(b_counts) | set(a_counts), key=str.lower):
             b, a = b_counts.get(name, 0), a_counts.get(name, 0)
@@ -1769,7 +1773,10 @@ def plan_zones(
             if not (cat and (b == 0 or name.lower() in pinned_names)):  # a new row is made in that category
                 cat = None
             if b == 0:
-                lines.append(_row("add", name=name, qty=a, printing=printing, category=cat, zone=side))
+                row = _row("add", name=name, qty=a, printing=printing, category=cat, zone=side)
+                if tags.get(name.lower()):
+                    row["tag"] = label_text(tags[name.lower()])
+                lines.append(row)
             elif a == 0:
                 lines.append(_row("remove", name=name, qty=b, zone=side))
             else:

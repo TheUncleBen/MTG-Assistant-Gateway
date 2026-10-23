@@ -2091,10 +2091,21 @@ class ArchidektClient(AccountRequests):
         as ``changed``."""
         origin = self.base_url.removesuffix("/api")
         headers = {"Accept": "text/html", "User-Agent": self.user_agent}
+        body = bytearray()
+        too_big = False
         async with self.pacer:
             self.stats["requests"] += 1
             try:
-                resp = await self._http.request("GET", f"{origin}{path}", headers=headers, params=params)
+                # read as it comes, so the size limit also bounds memory (security review F-04)
+                async with self._http.stream(
+                    "GET", f"{origin}{path}", headers=headers, params=params
+                ) as resp:
+                    if resp.status_code < 400:
+                        async for chunk in resp.aiter_bytes():
+                            body += chunk
+                            if len(body) > SITE_PAGE_MAX:
+                                too_big = True
+                                break
             except httpx.HTTPError as exc:
                 self.pacer.record(False)
                 raise ArchidektError(
@@ -2112,9 +2123,9 @@ class ArchidektClient(AccountRequests):
         if resp.status_code >= 400:
             status = resp.status_code
             raise ArchidektError("unavailable", f"Archidekt returned HTTP {status}", retryable=status >= 500)
-        if len(resp.content) > SITE_PAGE_MAX:
+        if too_big:
             raise ArchidektError("changed", "the forum page is larger than the gateway reads")
-        m = NEXT_DATA_RE.search(resp.text)
+        m = NEXT_DATA_RE.search(body.decode(resp.encoding or "utf-8", errors="replace"))
         try:
             props = json.loads(html_lib.unescape(m.group(1)) if m else "")["props"]["pageProps"]
         except (ValueError, KeyError, TypeError) as exc:

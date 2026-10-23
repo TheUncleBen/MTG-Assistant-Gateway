@@ -442,3 +442,25 @@ async def test_a_color_tag_nobody_has_needs_its_color_and_a_lost_tag_is_caught(s
     assert done == {"ok": False, "error": "verify_mismatch"}, done
     row = stack.h.db.get_proposal(p["proposal_id"], "user-1")
     assert "the color tag on Arcane Signet" in json.dumps(row, default=str), row
+
+
+async def test_a_plain_add_names_its_color_tag_on_the_review_line(stack: Stack) -> None:
+    """Security review F-05: an assistant's card add with a colour tag says so on its row."""
+    token = await linked_user(stack)
+    p = structured(
+        await call(
+            stack.h,
+            token,
+            "propose_deck_changes",
+            {
+                "deck_id": "42",
+                "changes": [{"action": "add", "card_name": "Opt", "label": "Combo", "color": "#00ff00"}],
+            },
+        )
+    )
+    assert p["ok"], p
+    assert "+1 Opt, color tag Combo (#00ff00)" in p["diff"].splitlines(), p["diff"]
+    from mtg_gateway.pages import _change_rows
+
+    html_rows, _counts, _net = _change_rows(p["rows"], p["diff"])
+    assert "Opt, color tag Combo (#00ff00)" in html_rows  # the review page says it too
