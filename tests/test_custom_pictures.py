@@ -114,3 +114,24 @@ async def test_a_signed_out_visitor_gets_nothing(stack: Stack, pictures) -> None
     ) as c:
         r = await c.get("/decks/api/custom_picture/42/41")
     assert r.status_code == 401
+
+
+async def test_my_lists_rows_pictures_come_from_the_lists_last_read(stack: Stack, pictures) -> None:
+    seen, answers = pictures
+    answers["https://cdn.example/41.png"] = httpx.Response(200, content=_png())
+    _seed(stack.ark)
+    await linked_user(stack)
+    b = Browser(stack.h)
+    try:
+        await b.login("/lists")
+        # nothing read yet: nothing served
+        assert (await b.http.get("/lists/api/custom_picture/41")).status_code == 404
+        assert (await b.http.get("/lists/custom")).status_code == 200
+        r = await b.http.get("/lists/api/custom_picture/41")
+        assert r.status_code == 200 and r.headers["content-type"] == "image/png"
+        assert (await b.http.get("/lists/api/custom_picture/51")).status_code == 404  # amy's card
+        # a relink forgets them
+        stack.h.app.state.gateway.decks.forget_member("user-1")
+        assert (await b.http.get("/lists/api/custom_picture/41")).status_code == 404
+    finally:
+        await b.aclose()

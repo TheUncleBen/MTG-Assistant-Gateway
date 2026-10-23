@@ -41,6 +41,27 @@ FACES = ("front", "back")
 _KEPT: OrderedDict[str, tuple[float, bytes, str]] = OrderedDict()
 
 
+# The picture addresses of each member's own custom cards, as My lists last read them: the My lists
+# rows' pictures are served from these, with no Archidekt read of their own.
+_LISTED: dict[str, dict[int, tuple[str, str]]] = {}
+LISTED_MAX = 1000  # custom cards remembered per member
+
+
+def remember(sub: str, items: list[dict[str, Any]]) -> None:
+    """Keep the picture addresses of ``items`` (account_lists custom card rows) for ``sub``."""
+    mine = _LISTED.setdefault(sub, {})
+    for i in items:
+        cid = i.get("id")
+        if isinstance(cid, int) and not isinstance(cid, bool):
+            mine[cid] = (str(i.get("frontImageUrl") or ""), str(i.get("backImageUrl") or ""))
+    while len(mine) > LISTED_MAX:
+        mine.pop(next(iter(mine)))
+
+
+def forget(sub: str) -> None:
+    _LISTED.pop(sub, None)
+
+
 def picture_url(deck: Any, custom_card_id: int, face: str) -> str:
     """The picture address of one custom card in ``deck`` (Deck.custom_cards), or ''."""
     for c in getattr(deck, "custom_cards", []) or []:
@@ -97,6 +118,37 @@ async def fetch(url: str, http: httpx.AsyncClient | None = None) -> tuple[bytes,
 
 
 def add_custom_picture_routes(server: Any, state: Any) -> None:
+    async def _serve(url: str) -> Response:
+        got = await fetch(url, getattr(state, "custom_picture_http", None)) if url else None
+        if got is None:
+            return Response(status_code=404, headers={"Cache-Control": "no-store"})
+        data, kind = got
+        return Response(
+            data,
+            media_type=kind,
+            headers={
+                "Cache-Control": "private, max-age=3600",
+                "X-Content-Type-Options": "nosniff",
+                "Content-Security-Policy": "default-src 'none'; sandbox",
+            },
+        )
+
+    @server.custom_route(
+        "/lists/api/custom_picture/{custom_card_id}", methods=["GET"], include_in_schema=False
+    )
+    async def listed_picture(request: Request) -> Response:
+        """One of the member's own custom cards' pictures on My lists, from the address the page's
+        last read of the list gave (no Archidekt read of its own); 404 for any other card."""
+        sub, _sid = browser_session(state, request)
+        if not sub:
+            return Response(status_code=401, headers={"Cache-Control": "no-store"})
+        raw_id = str(request.path_params["custom_card_id"])
+        face = request.query_params.get("face") or "front"
+        if not raw_id.isdigit() or face not in FACES:
+            return Response(status_code=404, headers={"Cache-Control": "no-store"})
+        front, back = _LISTED.get(sub, {}).get(int(raw_id), ("", ""))
+        return await _serve(back if face == "back" else front)
+
     @server.custom_route(
         "/decks/api/custom_picture/{deck_id}/{custom_card_id}", methods=["GET"], include_in_schema=False
     )
@@ -115,17 +167,4 @@ def add_custom_picture_routes(server: Any, state: Any) -> None:
             deck = await state.decks.get_deck(sub, str(request.path_params["deck_id"]))
         except DeckError:
             return Response(status_code=404, headers={"Cache-Control": "no-store"})
-        url = picture_url(deck, int(raw_id), face)
-        got = await fetch(url, getattr(state, "custom_picture_http", None)) if url else None
-        if got is None:
-            return Response(status_code=404, headers={"Cache-Control": "no-store"})
-        data, kind = got
-        return Response(
-            data,
-            media_type=kind,
-            headers={
-                "Cache-Control": "private, max-age=3600",
-                "X-Content-Type-Options": "nosniff",
-                "Content-Security-Policy": "default-src 'none'; sandbox",
-            },
-        )
+        return await _serve(picture_url(deck, int(raw_id), face))

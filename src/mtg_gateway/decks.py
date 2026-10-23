@@ -2831,11 +2831,12 @@ class DeckService:
         self._forget_page_decks()
         # the Account page's profile, the bell and My lists' counts are the old account's too
         # (security review 0.7.44)
-        from . import account_lists, packages, profile_page
+        from . import account_lists, custom_pictures, packages, profile_page
 
         profile_page.forget_all(sub)
         account_lists.forget_counts(sub)
         packages.forget(sub)
+        custom_pictures.forget(sub)
         for hook in self.write_hooks:
             hook(sub, "")
 

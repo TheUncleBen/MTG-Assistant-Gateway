@@ -22,7 +22,7 @@ from urllib.parse import parse_qs, quote, urlencode
 from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
 
-from . import account_lists, modes, ui
+from . import account_lists, custom_pictures, modes, ui
 from .busy import busy_response
 from .companion import DECK_CSP
 from .deckpage import image_url
@@ -1444,9 +1444,12 @@ def add_lists_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
         return ui.notice(text, "ok", role="status") if text else ""
 
     async def read_tab(sub: str, tab: Tab, *, page_no: int = 1, q: str = "") -> dict[str, Any]:
-        return await account_lists.read(
+        got = await account_lists.read(
             decks, sub, tab.kind, page=page_no, search=q if tab.kind == "custom_cards" else ""
         )
+        if tab.kind == "custom_cards":  # the rows' pictures, served by custom_pictures
+            custom_pictures.remember(sub, got["items"])
+        return got
 
     def by_id(items: list[dict[str, Any]], raw: str | None, key: str = "id") -> dict[str, Any] | None:
         if not raw or not _ID.fullmatch(raw):
