@@ -548,6 +548,14 @@ def test_a_custom_cards_picture_on_the_deck_page(server: Server, width: int, the
             )
             == []
         ), "the type line runs under the Custom mark"
+        # the next card in the stack covers the picture's card, its count, tag and mark included
+        assert page.evaluate(
+            """() => { const c = document.querySelector(".c.custom[data-custom-id='41']");
+              const n = c.nextElementSibling; if (!n) return true;
+              const b = c.querySelector('.custom-badge').getBoundingClientRect();
+              const hit = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2);
+              return !!hit && n.contains(hit); }"""
+        ), "the Custom mark shows through the card stacked over it"
         _fits(page, "stacks", width)
         # the list view's hover picture and the viewer draw the same picture
         page.goto(f"{server.base}/decks/42?view=text", wait_until="networkidle")

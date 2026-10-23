@@ -3016,6 +3016,7 @@ ul.rows .price{font-size:.86rem;color:var(--text-muted);text-align:right;font-va
   border-color:#7a3d00}
 .deckview .c.custom .ph .ty{padding-right:4.2rem}  /* the type line stops short of the Custom mark */
 /* the custom card's picture sits over its placeholder (the count, the tag and the mark above both) */
+.deckview .c.custom{isolation:isolate}  /* the order below is the card's own, under the next stacked card */
 .deckview .c.custom img.pic{position:absolute;inset:0;z-index:0}
 .deckview .c.custom .ph{z-index:0}
 .deckview .c.custom .qty,.deckview .c.custom .tagdot,.deckview .c.custom .custom-badge{z-index:1}
