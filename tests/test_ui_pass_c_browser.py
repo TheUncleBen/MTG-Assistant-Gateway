@@ -386,7 +386,11 @@ def test_a_custom_cards_menu_on_the_deck_page(server: Server, width: int, theme:
         page.wait_for_timeout(1200)
         assert row()["quantity"] == 2
         page.locator(".deck-toast", has_text="Saved Grizzled Mentor: 2 copies.").wait_for(state="visible")
-        # Move to: the card files under Artifact
+        # Move to: the card files under Artifact, from the menu opened afresh (a page scroll, such as
+        # the saved message settling on a narrow screen, closes an open menu by design)
+        _close_menu(page) if page.locator(".ctxmenu").count() else None
+        card.click(button="right")
+        menu.wait_for(state="visible")
         menu.locator(".more").click()
         menu.locator(".sub button", has_text="Artifact").click()
         page.wait_for_timeout(1200)

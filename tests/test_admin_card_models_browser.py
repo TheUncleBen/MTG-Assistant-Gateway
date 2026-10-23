@@ -97,8 +97,8 @@ def test_the_card_models_page_fits_reads_and_removes_from_the_row_menu(
         row.click(button="right")
         assert page.locator(".ctxmenu").is_visible()
         page.locator(".ctxmenu [role=menuitem]", has_text="Remove…").click()
-        page.wait_for_load_state("networkidle")
         box = page.locator("#remove")
+        box.wait_for(state="visible")  # Remove… is a link: the box is on the page it opens
         assert box.is_visible() and box.get_attribute("role") == "dialog"
         assert "Remove the model of “Opt”?" in box.inner_text()
         assert page.evaluate(MEASURE) == []
