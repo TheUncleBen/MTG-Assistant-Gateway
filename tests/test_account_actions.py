@@ -902,14 +902,25 @@ ALL_ACCOUNT_ACTIONS = ACCOUNT_ACTIONS + [
     ("propose_deck_social", {"deck_id": "43", "action": "unfollow_owner"}),
     ("propose_collaborator", {"deck_id": "42", "action": "add", "username": "amy"}),
     ("propose_collaborator", {"deck_id": "42", "action": "remove", "username": "amy"}),
+    ("propose_report", {"deck_id": "43", "report_kind": "deck", "message": "Spam deck"}),
+    (
+        "propose_deck_help",
+        {"deck_id": "42", "goals": " ".join(["win"] * 12), "issues": " ".join(["mana"] * 12)},
+    ),
 ]
+
+
+def _help_ready(ark: FakeArchidekt, deck_id: int = 42) -> None:
+    """A deck Archidekt's help form takes: Commander, 100 cards, one deck tag."""
+    ark.decks[deck_id]["deckFormat"] = 3
+    ark.deck_tags[deck_id] = [{"id": 1, "tag": 1, "name": "Combo", "position": 0}]
 
 
 @pytest.mark.parametrize("via", ["browser", "mcp", "auto", ""])
 @pytest.mark.parametrize(
     ("tool", "args"),
     ALL_ACCOUNT_ACTIONS,
-    ids=[f"{t}:{a.get('action', 'folder')}" for t, a in ALL_ACCOUNT_ACTIONS],
+    ids=[f"{t}:{a.get('action', a.get('report_kind', 'folder'))}" for t, a in ALL_ACCOUNT_ACTIONS],
 )
 async def test_only_the_review_page_marker_applies_an_account_action(
     stack: Stack, via: str, tool: str, args: dict
@@ -927,6 +938,7 @@ async def test_only_the_review_page_marker_applies_an_account_action(
     ark.follows["alice"] = {78}
     if args.get("action") == "remove" and tool == "propose_collaborator":
         ark.editors[42] = [_amy_row()]
+    _help_ready(ark)
     await _set_mode(h, "auto")
     p = structured(await call(h, token, tool, args))
     assert p["ok"] and p["kind"] == "action", p
@@ -958,6 +970,7 @@ async def test_the_refusal_list_covers_every_account_action(stack: Stack) -> Non
     ark.comments[300043].append(own)
     ark.follows["alice"] = {78}
     ark.editors[42] = [_amy_row()]
+    _help_ready(ark)
     seen = set()
     for tool, args in ALL_ACCOUNT_ACTIONS:
         if tool == "propose_collaborator" and args["action"] == "add":
@@ -1461,3 +1474,72 @@ async def test_apply_all_on_the_card_lists_account_actions_before_the_press(stac
     lines = {x["proposal_id"]: x["summary"] for x in info["set_lines"]}
     assert len(ids) == 2 and set(lines) == set(ids), (ids, lines)
     assert any("Like" in s for s in lines.values()) and any("Follow" in s for s in lines.values()), lines
+
+
+async def test_a_deck_help_request_posts_edits_and_delists(stack: Stack) -> None:
+    """0.7.43: archidekt.com's own checks first (10 to 200 words each, a deck tag, the deck's size),
+    then post, edit and delist, each the member's own press, read back from the deck."""
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    words = " ".join(["ramp"] * 12)
+    untagged = structured(
+        await call(h, token, "propose_deck_help", {"deck_id": "42", "goals": words, "issues": words})
+    )
+    assert untagged["ok"] is False and "deck tag" in untagged["message"]
+    _help_ready(ark)
+    short = structured(
+        await call(h, token, "propose_deck_help", {"deck_id": "42", "goals": "win", "issues": words})
+    )
+    assert short["ok"] is False and "10 to 200 words" in short["message"]
+    others = structured(
+        await call(h, token, "propose_deck_help", {"deck_id": "43", "goals": words, "issues": words})
+    )
+    assert others["ok"] is False  # not the member's own deck
+    out = await _propose_and_apply(
+        h, token, "propose_deck_help", {"deck_id": "42", "goals": words, "issues": words}
+    )
+    assert out["result"]["verified"] is True and "listed on Archidekt for 7 days" in out["applied_text"], out
+    assert json.loads(ark.account.help[42]["goals"])["ops"][0]["insert"].strip() == words
+    again = structured(
+        await call(h, token, "propose_deck_help", {"deck_id": "42", "goals": words, "issues": words})
+    )
+    assert again["ok"] is False and "already has a help request" in again["message"]
+    new = " ".join(["draw"] * 15)
+    await _propose_and_apply(
+        h, token, "propose_deck_help", {"deck_id": "42", "help_action": "edit", "goals": new, "issues": words}
+    )
+    assert json.loads(ark.account.help[42]["goals"])["ops"][0]["insert"].strip() == new
+    out = await _propose_and_apply(h, token, "propose_deck_help", {"deck_id": "42", "help_action": "delist"})
+    assert ark.account.help[42]["active"] is False and out["result"]["verified"] is True
+
+
+async def test_reports_name_the_page_and_never_apply_by_themselves(stack: Stack) -> None:
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    await _set_mode(h, "auto")
+    bad = structured(
+        await call(h, token, "propose_report", {"deck_id": "43", "report_kind": "user", "message": "x"})
+    )
+    assert bad["ok"] is False
+    empty = structured(
+        await call(h, token, "propose_report", {"deck_id": "43", "report_kind": "deck", "message": " "})
+    )
+    assert empty["ok"] is False
+    res = await call(
+        h,
+        token,
+        "propose_report",
+        {"deck_id": "43", "report_kind": "card", "card": "beast within", "message": "Wrong art"},
+    )
+    p = structured(res)
+    assert p["ok"] and p["assistant_may_apply"] is False and "Beast Within" in p["rows"][0]["text"], p
+    assert ark.account.reports == []
+    await _press(h, token, res)
+    assert ark.account.reports == [
+        {
+            "url": "https://archidekt.com/decks/43",
+            "type": "Card",
+            "message": "Beast Within: Wrong art",
+            "by": "alice",
+        }
+    ]

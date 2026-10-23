@@ -80,7 +80,21 @@ LOW_RISK_ROW_KINDS = frozenset(LOW_RISK_ROW_WORDS)
 _CHANGED = [w for k, w in LOW_RISK_ROW_WORDS.items() if k not in ("add", "remove")]
 LOW_RISK_CHANGES = "a card added or removed, or a new " + ", ".join(_CHANGED[:-1]) + " or " + _CHANGED[-1]
 # The Archidekt account actions of actions.py, in the member's words.
-ACCOUNT_ACTIONS_TEXT = "likes, votes, bookmarks, follows, comments, new folders and collaborator changes"
+ACCOUNT_ACTIONS_TEXT = (
+    "likes, votes, bookmarks, follows, comments, new folders, collaborator changes, deck help requests, "
+    "reports to Archidekt's moderators, contest entries, and profile and email settings"
+)
+
+
+def lists_low_text(max_rows: int = DEFAULT_MAX_ROWS) -> str:
+    """The low-risk change to the member's account-wide lists (account_lists.risk_of), in words."""
+    return (
+        "a change to your Archidekt lists (category templates, default categories, color tags, pins or "
+        f"custom cards) of at most {max_rows} entr{'ies' if max_rows != 1 else 'y'}, with no deletes"
+    )
+
+
+LISTS_DELETE_TEXT = "deleting from your Archidekt lists"
 # What each mode means, in the member's words, for the Account page and the docs.
 MODE_LABELS = {
     "manual": "Ask me every time",
@@ -102,8 +116,8 @@ def low_risk_text(max_rows: int = DEFAULT_MAX_ROWS) -> str:
         f"{LOW_RISK_CHANGES}, no more than {MAX_COPIES_PER_ROW} copies a row, never a change to which "
         "cards are the commanders or to the categories of a row in the commander zone, and never fewer "
         "copies of a card that has a row in the commander zone and another row, both in the deck or "
-        "both in the maybeboard or sideboard; and a private copy of a deck (a clone), which changes "
-        "nothing that exists."
+        "both in the maybeboard or sideboard; a private copy of a deck (a clone), which changes "
+        f"nothing that exists; and {lists_low_text(max_rows)}."
     )
 
 
@@ -116,7 +130,8 @@ HIGH_RISK_TEXT = (
 )
 # What no mode lets an assistant apply (MEMBER_ONLY), as one sentence.
 MEMBER_ONLY_TEXT = (
-    f"Actions on your Archidekt account ({ACCOUNT_ACTIONS_TEXT}) and deleting a deck are never "
+    f"Actions on your Archidekt account ({ACCOUNT_ACTIONS_TEXT}), {LISTS_DELETE_TEXT} and deleting a "
+    "deck are never "
     "applied by an assistant: each one waits for your own press, in every mode, on the card in the "
     "chat or on its review page (deleting a deck, and an edit of a comment that has formatting: on "
     "the review page only). An edit of a description that has formatting is also approved on its "
@@ -128,7 +143,8 @@ def auto_waits_text(big_rows: int = DEFAULT_BIG_EDIT_ROWS) -> str:
     """What still waits for a press in auto mode, as one sentence."""
     return (
         "Restoring a snapshot, a commander or companion change, a new deck, an edit of more than "
-        f"{_rows(big_rows)}, making a deck public or unlisted, a category change that touches the "
+        f"{_rows(big_rows)} or a change to your lists of more than {big_rows} entries, making a deck "
+        "public or unlisted, a category change that touches the "
         "commander or which cards count in the deck, and any edit of a description that has "
         "formatting, such as bold text, links or pictures, still wait for your press. So does a held "
         "change, a change waiting for another change first, one another app had a hand in, one that "
@@ -152,15 +168,15 @@ def mode_help(mode: str, *, max_rows: int = DEFAULT_MAX_ROWS, big_rows: int = DE
             "row in the commander zone, or fewer copies of a card that has a row in the commander zone "
             "and another row, both in the deck or both in the maybeboard or sideboard) and a private "
             "copy of a deck (a clone, which "
-            "changes nothing that exists). A new deck built from a list, restores, deck details and "
-            "categories, commander "
-            f"changes, bigger edits, and anything on your Archidekt account ({ACCOUNT_ACTIONS_TEXT}) "
-            "or deleting a deck still wait for your press. So does a held change, a change waiting for "
-            "another change first, one another app had a hand in, one that replaces another app's change, "
-            "or one that another app's waiting change would replace."
+            f"changes nothing that exists), and {lists_low_text(max_rows)}. A new deck built from a list, "
+            "restores, deck details and categories, commander "
+            f"changes, bigger edits, and anything on your Archidekt account ({ACCOUNT_ACTIONS_TEXT}), "
+            f"{LISTS_DELETE_TEXT} or deleting a deck still wait for your press. So does a held change, "
+            "a change waiting for another change first, one another app had a hand in, one that "
+            "replaces another app's change, or one that another app's waiting change would replace."
         )
     return (
-        "Your assistant applies the deck and collection changes it proposes, without asking you. "
+        "Your assistant applies the deck, collection and list changes it proposes, without asking you. "
         + auto_waits_text(big_rows)
         + " "
         + MEMBER_ONLY_TEXT
@@ -203,6 +219,7 @@ def mode_points(
                     f"a small edit to a deck or your collection: at most {_rows(max_rows)}, each "
                     f"{LOW_RISK_CHANGES}, no more than {MAX_COPIES_PER_ROW} copies each",
                     "a private copy of a deck (a clone), which changes nothing that exists",
+                    lists_low_text(max_rows),
                 ],
             ),
             (
@@ -218,14 +235,15 @@ def mode_points(
                     "restores",
                     "deck details and categories",
                     "commander changes and bigger edits",
-                    f"anything on your Archidekt account ({ACCOUNT_ACTIONS_TEXT}) or deleting a deck",
+                    f"anything on your Archidekt account ({ACCOUNT_ACTIONS_TEXT}), {LISTS_DELETE_TEXT} "
+                    "or deleting a deck",
                     _STILL_WAITS,
                 ],
             ),
             (AUTO_WARNING, []),
         ]
     return [
-        ("Your assistant applies the deck and collection changes it proposes, without asking you.", []),
+        ("Your assistant applies the deck, collection and list changes it proposes, without asking you.", []),
         (
             "These still wait for your press:",
             [
@@ -233,6 +251,7 @@ def mode_points(
                 "a commander or companion change",
                 "a new deck",
                 f"an edit of more than {_rows(big_rows)}",
+                f"a change to your lists of more than {big_rows} entries",
                 "making a deck public or unlisted",
                 "a category change that touches the commander or which cards count in the deck",
                 "any edit of a description that has formatting, such as bold text, links or pictures",

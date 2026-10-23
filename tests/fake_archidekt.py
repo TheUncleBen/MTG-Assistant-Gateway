@@ -379,6 +379,8 @@ class FakeArchidekt:
         out["bookmarked"] = who is not None and out["id"] in self.bookmarks.get(who, set())
         out["viewCount"] = out.get("viewCount", 0)
         out["deckTags"] = [dict(r) for r in self.deck_tags.get(out["id"], [])]
+        if out["id"] in self.account.help:  # the deck's help request (parity release 2)
+            out["deckHelp"] = dict(self.account.help[out["id"]])
         out["parentFolder"] = self.deck_folder.get(out["id"], 1000 + self._user_id(owner))
         out.setdefault("featured", "")
         out.setdefault("customFeatured", "")

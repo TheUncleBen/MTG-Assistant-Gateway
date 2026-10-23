@@ -237,6 +237,8 @@ WRITE_TOOLS = frozenset(
         "propose_delete_deck",
         "propose_create_folder",
         "propose_collaborator",
+        "propose_deck_help",  # 0.7.43: public, the member's own press only (actions.py)
+        "propose_report",
         "apply_proposal",
         "confirm_proposal",
         "reject_proposal",
@@ -841,6 +843,7 @@ def build_mcp_server(state: AppState) -> MCPServer:
     # The tool and route modules import this module, so they are imported here, not at the top.
     from .gateway_routes import add_gateway_routes
     from .tools_account import add_account_tools
+    from .tools_community import add_community_tools
     from .tools_decks import add_deck_tools
     from .tools_lists import add_list_tools
     from .tools_reports import add_report_tools
@@ -860,6 +863,7 @@ def build_mcp_server(state: AppState) -> MCPServer:
     add_report_tools(state, h)
     add_account_tools(state, h)
     add_list_tools(state, h)
+    add_community_tools(state, h)
 
     add_browser_routes(server, state)
     add_skill_routes(server, state)

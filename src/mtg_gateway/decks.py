@@ -9338,6 +9338,15 @@ def applied_text(
         return "They can edit your deck on Archidekt now."
     if action == "collaborator_remove":
         return "They can no longer edit your deck on Archidekt."
+    if action == "deck_help":
+        if r.get("verified") is False:
+            return "Sent to Archidekt, but reading the deck back didn't show the request as sent."
+        return {
+            "delist": "Your help request is taken down on Archidekt.",
+            "edit": "Your help request is changed on Archidekt.",
+        }.get(str(c.get("help_action")), "Your help request is listed on Archidekt for 7 days.")
+    if action == "report":
+        return "Your report is sent to Archidekt's moderators."
     return ""
 
 

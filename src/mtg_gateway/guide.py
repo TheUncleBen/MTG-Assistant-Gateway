@@ -229,6 +229,8 @@ _YOUR_PRESS = frozenset(
         "propose_create_folder",
         "propose_collaborator",
         "propose_delete_deck",
+        "propose_deck_help",
+        "propose_report",
     }
 )
 _ON_PROPOSALS = frozenset(
