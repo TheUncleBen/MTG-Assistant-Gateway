@@ -233,6 +233,7 @@ _YOUR_PRESS = frozenset(
         "propose_deck_help",
         "propose_report",
         "propose_profile_change",
+        "propose_contest_entry",
     }
 )
 _ON_PROPOSALS = frozenset(

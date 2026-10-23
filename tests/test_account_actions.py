@@ -908,7 +908,16 @@ ALL_ACCOUNT_ACTIONS = ACCOUNT_ACTIONS + [
         {"deck_id": "42", "goals": " ".join(["win"] * 12), "issues": " ".join(["mana"] * 12)},
     ),
     ("propose_profile_change", {"field": "collection_public", "on": True}),
+    ("propose_contest_entry", {"deck_id": "42", "contest": "881", "summary": "Sea monsters"}),
+    ("propose_contest_entry", {"deck_id": "42", "contest": "880", "entry_action": "withdraw"}),
 ]
+
+
+def _contest_ready(ark: FakeArchidekt) -> None:
+    """alice's deck 42 entered in contest 880 (to withdraw); contest 881 has no entry yet."""
+    ark.account.entries[880] = [
+        {"id": 9100, "deck": {"id": 42, "name": "x"}, "owner": {"id": 77, "username": "alice"}}
+    ]
 
 
 def _help_ready(ark: FakeArchidekt, deck_id: int = 42) -> None:
@@ -922,7 +931,7 @@ def _help_ready(ark: FakeArchidekt, deck_id: int = 42) -> None:
     ("tool", "args"),
     ALL_ACCOUNT_ACTIONS,
     ids=[
-        f"{t}:{a.get('action', a.get('report_kind', a.get('field', 'folder')))}"
+        f"{t}:{a.get('action', a.get('report_kind', a.get('field', a.get('entry_action', 'folder'))))}"
         for t, a in ALL_ACCOUNT_ACTIONS
     ],
 )
@@ -943,6 +952,7 @@ async def test_only_the_review_page_marker_applies_an_account_action(
     if args.get("action") == "remove" and tool == "propose_collaborator":
         ark.editors[42] = [_amy_row()]
     _help_ready(ark)
+    _contest_ready(ark)
     await _set_mode(h, "auto")
     p = structured(await call(h, token, tool, args))
     assert p["ok"] and p["kind"] == "action", p
@@ -975,6 +985,7 @@ async def test_the_refusal_list_covers_every_account_action(stack: Stack) -> Non
     ark.follows["alice"] = {78}
     ark.editors[42] = [_amy_row()]
     _help_ready(ark)
+    _contest_ready(ark)
     seen = set()
     for tool, args in ALL_ACCOUNT_ACTIONS:
         if tool == "propose_collaborator" and args["action"] == "add":

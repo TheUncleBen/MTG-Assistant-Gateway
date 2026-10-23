@@ -212,3 +212,31 @@ def add_community_tools(state: AppState, h: SimpleNamespace) -> None:
             return _proposal({"ok": True, **out})
         except DeckError as exc:
             return _proposal(_tool_error(exc))
+
+    @server.tool(
+        name="propose_contest_entry",
+        title="Propose entering a deck in an Archidekt contest (public, two-step)",
+        description=(
+            "Step 1 of entering one of the user's own decks in an Archidekt deck-building contest, or "
+            "withdrawing it, under their name. contest: the contest's id or its page address. enter "
+            "needs a summary (plain text, 5000 characters at most here): as on Archidekt, entering "
+            "replaces the deck's description with the summary, and the gateway keeps a snapshot "
+            "first. Returns the proposal (kind 'action'); only the user's own press applies it, in "
+            "every approval mode. Changes nothing on Archidekt by itself."
+        ),
+        annotations={"readOnlyHint": True, "destructiveHint": False, "openWorldHint": True},
+        meta=h.card_meta,
+    )
+    async def propose_contest_entry(
+        deck_id: Annotated[str, Field(description="The user's own deck: its id or URL.")],
+        contest: Annotated[str, Field(description="The contest's id or its page address.")],
+        entry_action: Literal["enter", "withdraw"] = "enter",
+        summary: str | None = None,
+    ) -> CallToolResult:
+        try:
+            out = await state.decks.propose_action(
+                _sub(), f"contest_{entry_action}", deck_id=deck_id, contest=contest, summary=summary
+            )
+            return _proposal({"ok": True, **out})
+        except DeckError as exc:
+            return _proposal(_tool_error(exc))

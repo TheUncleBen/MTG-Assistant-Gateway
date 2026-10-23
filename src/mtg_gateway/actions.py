@@ -48,6 +48,8 @@ LABELS = {
     "deck_help": "Deck help request",
     "report": "Report",
     "profile": "Profile and settings",
+    "contest_enter": "Contest entry",
+    "contest_withdraw": "Withdraw contest entry",
 }
 ACTIONS = frozenset(LABELS)
 DESTRUCTIVE = frozenset({"delete_deck"})  # never applied by an assistant on its own
@@ -87,6 +89,34 @@ HELP_ACTIONS = ("post", "edit", "delist")
 # What a report is about, and the type Archidekt's report box sends for it
 REPORT_KINDS = {"deck": "Deck", "card": "Card", "custom_card": "Custom card", "comment": "Comment"}
 REPORT_MESSAGE_MAX = 1000
+CONTEST_SUMMARY_MAX = 5000  # the gateway's own limit: Archidekt's is unknown
+CONTEST_ACTIONS = ("contest_enter", "contest_withdraw")
+
+
+def contest_thread(value: Any) -> int:
+    """A contest's thread id: the number, or a contest page's address ending in it."""
+    import re
+
+    m = re.search(r"(\d{1,12})/?$", str(value or "").strip())
+    if not m or int(m.group(1)) <= 0:
+        raise DeckError("invalid", "Give the contest's id or its page address.")
+    return int(m.group(1))
+
+
+async def contest_entry(decks: DeckService, sub: str, thread_id: int, deck_id: str) -> dict[str, Any] | None:
+    """The member's entry of this deck in the contest, as Archidekt lists the entries now."""
+    from . import profile
+
+    uid = profile.user_id(decks, sub)
+    rows = await decks._call_unslotted(sub, lambda token, *_: decks.client.contest_entries(token, thread_id))
+    for e in rows:
+        deck = e.get("deck") if isinstance(e, dict) else None
+        owner = e.get("owner") if isinstance(e, dict) else None
+        did = deck.get("id") if isinstance(deck, dict) else deck
+        oid = owner.get("id") if isinstance(owner, dict) else owner
+        if str(did) == str(deck_id) and str(oid) == str(uid):
+            return e
+    return None
 
 
 def _words(text: str) -> int:
@@ -300,7 +330,7 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
         raise DeckError("invalid", f"unknown action {action!r}")
     social = (
         _social(decks)
-        if action not in ("delete_deck", "create_folder", "deck_help", "report", "profile")
+        if action not in ("delete_deck", "create_folder", "deck_help", "report", "profile", *CONTEST_ACTIONS)
         else None
     )
     if social is not None:
@@ -315,7 +345,7 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
         deck_id = _clean_deck_id(str(params.get("deck_id") or ""))
         deck = (
             await decks.get_own_deck(sub, deck_id)
-            if action in ("delete_deck", "deck_help") or action in COLLABORATOR_ACTIONS
+            if action in ("delete_deck", "deck_help", *CONTEST_ACTIONS) or action in COLLABORATOR_ACTIONS
             else await decks.get_any_deck(sub, deck_id)
         )
         changes["deck_id"] = deck.id
@@ -518,6 +548,31 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
         row["after_text"] = message
         row["note"] = "Archidekt's moderators see your username with the report. It can't be taken back."
         row["cannot_undo"] = True
+    elif action in CONTEST_ACTIONS:
+        from .archidekt import rich_text
+
+        thread = contest_thread(params.get("contest"))
+        async with decks.archidekt_slot(sub):
+            entry = await contest_entry(decks, sub, thread, deck.id)
+        changes["thread_id"] = thread
+        if action == "contest_enter":
+            if entry is not None:
+                raise DeckError("invalid", "This deck is entered in that contest already.")
+            summary = summary_text(params.get("summary"))
+            changes["summary"] = summary
+            row["text"] = f"Enter your deck {where} in the contest (thread {thread}) on Archidekt, publicly"
+            row["before_text"] = rich_text(deck.description) or "(empty)"
+            row["after_text"] = summary
+            row["note"] = (
+                "Archidekt's contest entry replaces the deck's description with your summary. The gateway "
+                "keeps a snapshot first, so History can put the old description back."
+            )
+        else:
+            if entry is None:
+                raise DeckError("not_found", "This deck has no entry in that contest.")
+            changes["entry_id"] = int(entry["id"])
+            row["text"] = f"Withdraw your deck {where} from the contest (thread {thread}) on Archidekt"
+            row["note"] = "Archidekt says you can enter again after withdrawing."
     elif action == "profile":
         from . import profile
 
@@ -641,6 +696,18 @@ async def apply(
         from . import profile
 
         result = await profile.send(decks, sub, dict(c["body"]))
+    elif action == "contest_enter":
+        result = await _apply_contest_enter(decks, sub, deck_id, c, row["id"])
+    elif action == "contest_withdraw":
+        decks._writes_switch()
+        thread = int(c["thread_id"])
+        entry = await contest_entry(decks, sub, thread, deck_id)
+        if entry is None or int(entry["id"]) != int(c["entry_id"]):
+            raise needs_look_error("The contest entry changed on Archidekt since this was reviewed.")
+        await decks._call_unslotted(
+            sub, lambda token, *_: decks.client.contest_withdraw(token, int(c["entry_id"]))
+        )
+        result = {"verified": await contest_entry(decks, sub, thread, deck_id) is None}
     elif action == "collaborator_add":
         result = await _social(decks).add_collaborator(sub, deck_id, int(c["user_id"]))
     elif action == "collaborator_remove":
@@ -686,3 +753,47 @@ async def _apply_help(decks: DeckService, sub: str, deck_id: str, c: dict[str, A
         and (not want_active or (back["goals"].strip() == goals and back["issues"].strip() == issues))
     )
     return {"help_action": what, "verified": ok}
+
+
+def summary_text(value: Any) -> str:
+    """A contest summary as plain lines (a Quill document reduced to its words), required."""
+    from .archidekt import plain_text
+
+    lines = plain_text(str(value or "")).strip().splitlines()
+    text = "\n".join(clean_text(line) for line in lines).strip()
+    if not text:
+        raise DeckError("invalid", "A contest entry needs a summary.")
+    if len(text) > CONTEST_SUMMARY_MAX:
+        raise DeckError("invalid", f"A contest summary is at most {CONTEST_SUMMARY_MAX} characters here.")
+    return text
+
+
+async def _apply_contest_enter(
+    decks: DeckService, sub: str, deck_id: str, c: dict[str, Any], proposal_id: str
+) -> dict[str, Any]:
+    """As the site enters a contest: the deck's description becomes the summary, then the entry is
+    sent. A snapshot of the deck is kept first. (update_deck writes the summary as the plain
+    Quill document the gateway's description edits send.)"""
+    from . import profile
+    from .archidekt import rich_text
+
+    decks._writes_switch()
+    thread = int(c["thread_id"])
+    deck = await decks.get_own_deck(sub, deck_id)
+    if await contest_entry(decks, sub, thread, deck.id) is not None:
+        raise needs_look_error("This deck was entered in that contest on Archidekt since this was reviewed.")
+    snapshot_id = decks._hand_snapshot(sub, deck, proposal_id)
+    summary = str(c["summary"])
+    await decks._call_unslotted(
+        sub, lambda token, *_: decks.client.update_deck(token, deck.id, {"description": summary})
+    )
+    uid = profile.user_id(decks, sub)
+    await decks._call_unslotted(
+        sub, lambda token, *_: decks.client.contest_submit(token, uid, thread, deck.id)
+    )
+    back = await decks.get_deck(sub, deck.id)
+    entered = await contest_entry(decks, sub, thread, deck.id) is not None
+    return {
+        "snapshot_id": snapshot_id,
+        "verified": entered and rich_text(back.description).strip() == summary.strip(),
+    }

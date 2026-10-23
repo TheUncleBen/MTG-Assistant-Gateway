@@ -241,6 +241,7 @@ WRITE_TOOLS = frozenset(
         "propose_deck_help",  # 0.7.43: public, the member's own press only (actions.py)
         "propose_report",
         "propose_profile_change",
+        "propose_contest_entry",
         "apply_proposal",
         "confirm_proposal",
         "reject_proposal",
