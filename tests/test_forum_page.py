@@ -470,3 +470,14 @@ async def test_a_reply_with_marks_is_posted_as_archidekts_formatting(member: Bro
     )
     assert r.json()["ok"] is True, r.text
     assert "**bold**" in ark.comments[700002][-1]["text"]
+
+
+async def test_reply_counts_are_worded_right(member: Browser, stack: Stack) -> None:
+    from mtg_gateway.forum_page import _plural
+
+    assert _plural(0, "reply") == "0 replies" and _plural(1, "reply") == "1 reply"
+    assert _plural(2, "thread") == "2 threads" and _plural(1200, "post") == "1,200 posts"
+    r = await member.http.get("/forum/thread/700003")
+    assert "0 replies" in r.text and "replys" not in r.text
+    r = await member.http.get(SECTION)
+    assert "replys" not in r.text and "0 replies" in r.text

@@ -1312,6 +1312,9 @@ def cards_html(
                 "check",
                 "lock",
                 "flag",
+                "copy",
+                "plus",
+                "collection",
             )
         )
         + "</template>"

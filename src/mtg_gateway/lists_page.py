@@ -1075,7 +1075,7 @@ def custom_add_box(csrf: str, st: dict[str, Any]) -> str:
         "<div class='field'><label for='cc-add-deck'>Deck</label><span class='sel'>"
         f"<select id='cc-add-deck' name='deck' required data-src='/api/decks/mine'>{opts}</select></span>"
         "</div>"
-        "<div class='lp-two'>"
+        "<div class='lp-two lp-copies'>"
         "<div class='field'><label for='cc-add-qty'>Copies</label>"
         f"<input id='cc-add-qty' name='quantity' type='number' min='1' max='99' step='1' "
         f"inputmode='numeric' value='{esc(qty)}' required></div>"
@@ -1348,6 +1348,9 @@ CSS = """
 .mtgbox.lp-box .body textarea{min-height:5rem;font-family:inherit;font-size:.95rem;line-height:1.4}
 .mtgbox .body .lp-two .field + .field,.mtgbox .body .lp-three .field + .field{margin-top:0}
 .lp-two .field,.lp-three .field{margin-bottom:.5rem}
+/* Add to deck…: the copies take a short column, the category the rest; one column on a narrow screen */
+.lp-two.lp-copies{grid-template-columns:7rem minmax(0,1fr)}
+@media (max-width:359.98px){.lp-two.lp-copies{grid-template-columns:minmax(0,1fr)}}
 .lp-img{display:grid; grid-template-columns:auto minmax(0,1fr); gap:12px; align-items:start;
   margin:.25rem 0 .5rem}
 .lp-img .lbl{font-weight:700;margin:0 0 .3rem}

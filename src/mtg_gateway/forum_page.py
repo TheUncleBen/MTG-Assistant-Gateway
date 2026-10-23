@@ -154,6 +154,7 @@ CSS = """
 .fm .post-preview a{word-break:break-all}
 .fm .loadmore .btn[aria-busy=true]{cursor:progress;opacity:.7}
 @media (max-width:599.98px){
+  .fm .ui-table .sub .fm-when{display:block}
   .fm .fm-why .btn{flex:1 1 100%}
   .fm .ui-head.phead .acts{flex:1 1 100%}
   .fm .ui-head.phead .acts .btn{width:100%}
@@ -201,7 +202,10 @@ def _when(iso: str) -> str:
 
 
 def _plural(n: int, word: str) -> str:
-    return f"{n:,} {word}" if n == 1 else f"{n:,} {word}s"
+    if n == 1:
+        return f"{n:,} {word}"
+    many = word[:-1] + "ies" if word.endswith("y") else word + "s"  # reply -> replies
+    return f"{n:,} {many}"
 
 
 def new_thread_html(section: str = "") -> str:
@@ -298,14 +302,9 @@ def thread_rows_html(threads: list[dict[str, Any]], section: str = "") -> str:
         when = _when(last["at"])
         by = f"<span class='deck'>{esc(last['by'])}</span>" if last["by"] else ""
         sec = section_label(section) if section else ""
-        sub = " · ".join(
-            x
-            for x in (
-                (sec + " " if sec else "") + esc(t["owner"]),
-                _plural(t["responses"], "reply"),
-                f"<span class='sm-only'>{when}</span>" if when else "",
-            )
-            if x
+        # on a phone the date takes a line of its own under the owner and the replies
+        sub = " · ".join(((sec + " " if sec else "") + esc(t["owner"]), _plural(t["responses"], "reply"))) + (
+            f"<span class='sm-only fm-when'>{when}</span>" if when else ""
         )
         rows.append(
             f"<a class='tr' href='{thread_href(t['id'])}' data-id='{t['id']}'>"

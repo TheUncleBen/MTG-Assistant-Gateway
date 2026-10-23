@@ -206,6 +206,7 @@
     var countEl = $("[data-count]", commentsPanel);
     // writes switched off on this gateway: the thread is read-only (no form, Reply, votes or edits)
     var canWrite = commentsPanel.getAttribute("data-writes") !== "off";
+    var noneYet = commentsPanel.hasAttribute("data-forum") ? "No replies yet. Be the first." : "No comments yet. Be the first.";
     var form = $("form.newcomment", commentsPanel);
     var textarea = form ? $("textarea", form) : null;
     var replyTo = form ? $(".replyto", form) : null;
@@ -358,7 +359,7 @@
               if (!d.ok) { yes.disabled = false; bar.textContent = ""; bar.appendChild(socialProblem(d)); bar.appendChild(no); return; }
               box.remove();
               if (countEl) countEl.textContent = d.count === 1 ? "1 comment" : d.count + " comments";
-              if (!$(".cmt", thread)) thread.appendChild(el("p", "muted", "No comments yet. Be the first."));
+              if (!$(".cmt", thread)) thread.appendChild(el("p", "muted", noneYet));
             }).catch(function () { yes.disabled = false; bar.textContent = "No connection; the comment was not deleted."; });
           });
           box.insertBefore(bar, acts.nextSibling);
@@ -408,7 +409,7 @@
       thread.textContent = "";
       me = typeof d.me === "number" ? d.me : null;
       if (countEl) countEl.textContent = d.count === 1 ? "1 comment" : d.count + " comments";
-      if (!d.comments.length) { thread.appendChild(el("p", "muted", "No comments yet. Be the first.")); return; }
+      if (!d.comments.length) { thread.appendChild(el("p", "muted", noneYet)); return; }
       d.comments.forEach(function (c) { thread.appendChild(render(c, 1)); });
       if (d.has_more) showMore(2);
     };

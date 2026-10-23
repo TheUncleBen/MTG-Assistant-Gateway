@@ -263,6 +263,9 @@ def test_a_contest_thread_enters_and_withdraws_a_deck(server: Server, width: int
         page.goto(f"{server.base}/forum/thread/700007", wait_until="networkidle")
         strip = page.locator("#fm-contest")
         assert strip.is_visible() and "Contest · No decks entered yet" in strip.inner_text()
+        page.locator(".comments .thread p.muted", has_text="No replies yet. Be the first.").wait_for(
+            state="visible"
+        )
         _fits(page, "contest", width)
         strip.locator(".btn", has_text="Enter a deck…").click()
         box = page.locator("#enter")
