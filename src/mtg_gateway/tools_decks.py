@@ -90,13 +90,35 @@ class CustomCardChange(BaseModel):
         )
     )
     quantity: int | None = Field(
-        None, ge=1, le=99, description="add (default 1) and set_quantity: the count it should have."
+        None,
+        ge=1,
+        le=99,
+        description=(
+            "add (default 1) and set_quantity: the count it should have (left out: the count it has)."
+        ),
     )
     category: str | None = Field(
         None,
         description=(
             "add and set_quantity: the category to file it under. Left out, an add sends none "
             "(Archidekt files it) and a count change keeps the card's own."
+        ),
+    )
+    label: str | None = Field(
+        None,
+        description=(
+            'add and set_quantity: a color tag for the card, as set_label takes it ("Name" with color, '
+            'or "Name,#rrggbb"); an empty label takes the tag off. Left out, the card keeps its own.'
+        ),
+    )
+    color: str | None = Field(None, description="The color tag's color, like #37d67a (grey when none).")
+    mana_value: int | None = Field(
+        None,
+        ge=0,
+        le=15,
+        description=(
+            "add and set_quantity: the card's custom mana value in this deck, 0 to 15; null takes it "
+            "off. Left out, the card keeps its own."
         ),
     )
 
@@ -861,7 +883,8 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
         title="Propose custom card changes in a deck (write, two-step)",
         description=(
             "Step 1 of putting the user's own custom cards in a deck they own, taking them out, or "
-            "changing how many copies it has. Only the user's own custom cards (get_my_lists, "
+            "changing how many copies it has, its category, color tag or mana value, as Archidekt's card "
+            "menu does for a custom card. Only the user's own custom cards (get_my_lists, "
             "custom_cards) can be added; get_deck lists the ones already in the deck under "
             "custom_cards. One review line per card with its count before and after and its "
             "category. Low risk like a small card edit, unless it touches the commander zone or "
@@ -882,7 +905,7 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
         ],
     ) -> CallToolResult:
         try:
-            raw = [c.model_dump() for c in changes]
+            raw = [c.model_dump(exclude_unset=True) for c in changes]
             return _proposal({"ok": True, **(await state.decks.propose_custom_cards(_sub(), deck_id, raw))})
         except DeckError as exc:
             return _proposal(_tool_error(exc))

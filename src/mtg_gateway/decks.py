@@ -2336,8 +2336,12 @@ MAX_CUSTOM_COPIES = 99
 
 def parse_custom_card_changes(raw: Any) -> list[dict[str, Any]]:
     """``[{"action": "add" | "remove" | "set_quantity", "custom_card_id": int, "quantity"?: 1-99,
-    "category"?: str}]`` as stored: an add's quantity defaults to 1; no category means none is
-    sent (Archidekt files the card itself) for an add, and the row keeps its own otherwise."""
+    "category"?: str, "label"?: str, "color"?: str, "mana_value"?: int | None}]`` as stored: an
+    add's quantity defaults to 1 and a set_quantity's to the count the deck has; no category means
+    none is sent (Archidekt files the card itself) for an add, and the row keeps its own otherwise.
+    ``label`` puts a colour tag on the card as set_label does (an empty one takes it off), and
+    ``mana_value`` its custom mana value as set_mana_value does (null takes it off): both as
+    Archidekt's own card menu sets them on a custom card. Left out, the row keeps its own."""
     if not isinstance(raw, list) or not raw:
         raise DeckError("invalid", "changes must be a non-empty list")
     if len(raw) > MAX_CUSTOM_CARD_CHANGES:
@@ -2361,10 +2365,25 @@ def parse_custom_card_changes(raw: Any) -> list[dict[str, Any]]:
             )
         seen.add(cid)
         qty = item.get("quantity")
+        label: str | None = None
+        mana: dict[str, Any] = {}
         if action == "remove":
             qty = None
+            if item.get("label") is not None or "mana_value" in item:
+                raise DeckError("invalid", f"change {i}: a remove takes no label or mana_value")
         else:
+            if item.get("label") is not None:
+                label = _parse_label_change(i, "", {"label": item["label"], "color": item.get("color")}).label
+            if "mana_value" in item:
+                mana = {
+                    "mana_value": _parse_mana_value_change(
+                        i, "", {"mana_value": item["mana_value"]}
+                    ).mana_value
+                }
             qty = 1 if qty is None and action == "add" else qty
+        if qty is None and action == "set_quantity":
+            pass  # the count the deck has (custom_card_rows)
+        elif action != "remove":
             if not isinstance(qty, int) or isinstance(qty, bool) or not 1 <= qty <= MAX_CUSTOM_COPIES:
                 raise DeckError(
                     "invalid", f"change {i}: quantity must be a whole number from 1 to {MAX_CUSTOM_COPIES}"
@@ -2377,7 +2396,16 @@ def parse_custom_card_changes(raw: Any) -> list[dict[str, Any]]:
             raise DeckError("invalid", f"change {i}: a category name is at most 60 characters")
         if action == "remove" and cat:
             raise DeckError("invalid", f"change {i}: a remove takes no category")
-        out.append({"action": action, "custom_card_id": cid, "quantity": qty, "category": cat or None})
+        out.append(
+            {
+                "action": action,
+                "custom_card_id": cid,
+                "quantity": qty,
+                "category": cat or None,
+                "label": label,
+                **mana,
+            }
+        )
     return out
 
 
@@ -2419,18 +2447,31 @@ def custom_card_rows(
             name, before, after = names[cid], 0, int(w["quantity"])
             was: list[str] = []
             now = [cat] if cat else []
+            label_was, cmc_was = "", None
         else:
             if cur is None:
                 raise DeckError("invalid", f"Custom card {cid} isn't in this deck.")
             name, before = cur.name, cur.quantity
-            after = 0 if action == "remove" else int(w["quantity"])
+            after = 0 if action == "remove" else int(w["quantity"] or before)
             was = list(cur.categories)
             now = [cat] if cat else list(was)
-            if action == "set_quantity" and after == before and now == was:
-                raise DeckError(
-                    "invalid", f"“{name}” already has {before} in this deck; nothing would change."
-                )
-        plan.append({"action": action, "custom_card_id": cid, "quantity": after, "categories": now})
+            label_was, cmc_was = cur.label or "", cur.custom_cmc
+        label_now = label_was if w.get("label") is None else w["label"]
+        cmc_now = w["mana_value"] if "mana_value" in w else cmc_was
+        same_label = _same_label(label_was, label_now)
+        same_cmc = _same_mana_value(cmc_was, cmc_now)
+        if action == "set_quantity" and after == before and now == was and same_label and same_cmc:
+            raise DeckError("invalid", f"“{name}” already has {before} in this deck; nothing would change.")
+        plan.append(
+            {
+                "action": action,
+                "custom_card_id": cid,
+                "quantity": after,
+                "categories": now,
+                "label": label_now,
+                "mana_value": cmc_now,
+            }
+        )
         row: dict[str, Any] = {
             "kind": "custom_card",
             "action": action,
@@ -2441,6 +2482,10 @@ def custom_card_rows(
             "category_before": ", ".join(was),
             "category": ", ".join(now),
         }
+        if action != "remove" and not same_label:
+            row["label_before"], row["label"] = label_text(label_was), label_text(label_now)
+        if action != "remove" and not same_cmc:
+            row["mana_value_before"], row["mana_value"] = mana_value_text(cmc_was), mana_value_text(cmc_now)
         if any(c.casefold() in premier for c in was + now):
             row["commander_zone"] = True
         rows.append(row)
@@ -2455,14 +2500,23 @@ def custom_card_line(r: dict[str, Any]) -> str:
     was, now = str(r.get("category_before") or ""), str(r.get("category") or "")
     if r.get("action") == "add":
         where = f"category “{now}”" if now else "no category given (Archidekt files it)"
-        return f"Add custom card “{name}”: {count}, {where}"
+        return f"Add custom card “{name}”: {count}, {where}{_custom_extras(r)}"
     if r.get("action") == "remove":
         return f"Remove custom card “{name}”: {count}" + (f", from “{was}”" if was else "")
     if was != now:
         where = f", category “{was or 'none'}” -> “{now}”"
     else:
         where = f", category “{now}”" if now else ""
-    return f"Custom card “{name}”: {count}{where}"
+    return f"Custom card “{name}”: {count}{where}{_custom_extras(r)}"
+
+
+def _custom_extras(r: dict[str, Any]) -> str:
+    out = ""
+    if "label" in r:
+        out += f", color tag {clean_text(str(r.get('label_before')))} -> {clean_text(str(r.get('label')))}"
+    if "mana_value" in r:
+        out += f", mana value {r.get('mana_value_before')} -> {r.get('mana_value')}"
+    return out
 
 
 def custom_card_entry(p: dict[str, Any], row: Any) -> dict[str, Any]:
@@ -2478,10 +2532,10 @@ def custom_card_entry(p: dict[str, Any], row: Any) -> dict[str, Any]:
             "modifications": {
                 "quantity": p["quantity"],
                 "modifier": "Normal",
-                "customCmc": None,
+                "customCmc": p.get("mana_value"),
                 "companion": False,
                 "flippedDefault": False,
-                "label": NO_LABEL,
+                "label": p.get("label") or NO_LABEL,
             },
         }
     return {
@@ -2493,10 +2547,10 @@ def custom_card_entry(p: dict[str, Any], row: Any) -> dict[str, Any]:
         "modifications": {
             "quantity": p["quantity"] or row.quantity,
             "modifier": row.modifier or "Normal",
-            "customCmc": row.custom_cmc,
+            "customCmc": p["mana_value"] if "mana_value" in p else row.custom_cmc,
             "companion": bool(row.companion),
             "flippedDefault": bool(row.flipped_default),
-            "label": row.label or NO_LABEL,
+            "label": (p["label"] if "label" in p else row.label) or NO_LABEL,
         },
     }
 
@@ -2522,6 +2576,22 @@ def custom_card_mismatches(plan: list[dict[str, Any]], names: dict[int, str], ve
         ):
             got = ", ".join(have[0].categories) or "none"
             out.append(f"“{name}” (category “{got}”, not “{', '.join(p['categories'])}”)")
+        elif (
+            p["quantity"] and have and "label" in p and not _same_label(have[0].label or "", p["label"] or "")
+        ):
+            out.append(
+                f"“{name}” (color tag {label_text(have[0].label or '')}, not {label_text(p['label'] or '')})"
+            )
+        elif (
+            p["quantity"]
+            and have
+            and "mana_value" in p
+            and not _same_mana_value(have[0].custom_cmc, p["mana_value"])
+        ):
+            out.append(
+                f"“{name}” (mana value {mana_value_text(have[0].custom_cmc)}, "
+                f"not {mana_value_text(p['mana_value'])})"
+            )
     return out
 
 

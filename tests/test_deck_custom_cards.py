@@ -256,3 +256,85 @@ async def test_bad_changes_are_refused_before_anything_is_stored(stack: Stack) -
     ):
         with pytest.raises(DeckError):
             await svc.propose_custom_cards(SUB, "42", bad)
+
+
+async def test_a_custom_cards_color_tag_and_mana_value_as_archidekts_card_menu_sets_them(
+    stack: Stack,
+) -> None:
+    """Archidekt's card menu on a custom card keeps Move to, the color tag and the mana value
+    (its "Card extras"); the same change sets them here, and the deck read back checks them."""
+    h, ark = stack.h, stack.ark
+    _seed(ark)
+    token = await linked_user(stack)
+    await _set_mode(h, "semi")
+    p = await _propose(h, token, [{"action": "add", "custom_card_id": 41, "category": "Tech"}])
+    assert (await _apply(h, token, p))["state"] == "applied"
+    p = await _propose(
+        h,
+        token,
+        [
+            {
+                "action": "set_quantity",
+                "custom_card_id": 41,
+                "label": "Combo",
+                "color": "#00FF00",
+                "mana_value": 3,
+            }
+        ],
+    )
+    assert p["ok"], p
+    assert p["diff"] == (
+        "Custom card “Grizzled Mentor”: 1 -> 1, category “Tech”, color tag no tag -> Combo (#00ff00), "
+        "mana value none -> 3"
+    ), p
+    out = await _apply(h, token, p)
+    assert out["state"] == "applied" and out["result"]["verified"] is True, out
+    mods = ark.patches[-1]["cards"][0]["modifications"]
+    assert mods["label"] == "Combo,#00ff00" and mods["customCmc"] == 3 and mods["quantity"] == 1
+    assert _rows(ark)[41]["label"] == "Combo,#00ff00" and _rows(ark)[41]["customCmc"] == 3
+    # an empty label and a null mana value take them off; the count stays
+    p = await _propose(
+        h, token, [{"action": "set_quantity", "custom_card_id": 41, "label": "", "mana_value": None}]
+    )
+    assert p["diff"].endswith("color tag Combo (#00ff00) -> no tag, mana value 3 -> none"), p
+    assert (await _apply(h, token, p))["state"] == "applied"
+    assert _rows(ark)[41]["label"] == ",#656565" and _rows(ark)[41]["customCmc"] is None
+    # the same again changes nothing and is refused; a remove takes neither
+    svc = _svc(stack)
+    with pytest.raises(DeckError):
+        await svc.propose_custom_cards(
+            SUB, "42", [{"action": "set_quantity", "custom_card_id": 41, "label": ""}]
+        )
+    with pytest.raises(DeckError):
+        await svc.propose_custom_cards(
+            SUB, "42", [{"action": "remove", "custom_card_id": 41, "mana_value": 2}]
+        )
+    with pytest.raises(DeckError):
+        await svc.propose_custom_cards(
+            SUB, "42", [{"action": "set_quantity", "custom_card_id": 41, "mana_value": 99}]
+        )
+
+
+async def test_a_lost_custom_color_tag_is_caught(stack: Stack) -> None:
+    h, ark = stack.h, stack.ark
+    _seed(ark)
+    token = await linked_user(stack)
+    await _set_mode(h, "semi")
+    assert (await _apply(h, token, await _propose(h, token, [{"action": "add", "custom_card_id": 41}])))[
+        "state"
+    ] == "applied"
+    real = ark.apply_custom_patch
+
+    def drop_label(deck, entries, who):  # noqa: ANN001
+        for e in entries:
+            e["modifications"]["label"] = None
+        real(deck, entries, who)
+
+    ark.apply_custom_patch = drop_label
+    out = await _apply(
+        h,
+        token,
+        await _propose(h, token, [{"action": "set_quantity", "custom_card_id": 41, "label": "Combo"}]),
+    )
+    assert out["ok"] is False and out["error"] == "verify_mismatch", out
+    assert "“Grizzled Mentor” (color tag no tag, not Combo (#656565))" in out["message"], out

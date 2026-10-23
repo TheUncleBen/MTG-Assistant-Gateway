@@ -1373,7 +1373,7 @@ class FakeArchidekt:
                         "categories": e.get("categories") or None,
                         "modifier": e["modifications"].get("modifier") or "Normal",
                         "label": e["modifications"].get("label") or ",#656565",
-                        "customCmc": None,
+                        "customCmc": e["modifications"].get("customCmc"),
                         "companion": False,
                         "flippedDefault": False,
                         "card": json.loads(json.dumps(card)),
@@ -1386,6 +1386,8 @@ class FakeArchidekt:
             rel["quantity"] = 0 if e["action"] == "remove" else qty
             if e["action"] == "modify":
                 rel["categories"] = e.get("categories") or None
+                rel["label"] = e["modifications"].get("label") or ",#656565"
+                rel["customCmc"] = e["modifications"].get("customCmc")
         deck["customCards"] = [r for r in rows if r["quantity"] > 0]
 
     def apply_patch(self, deck: dict[str, Any], entries: list[dict[str, Any]]) -> None:
