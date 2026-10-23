@@ -537,6 +537,7 @@ def test_the_account_actions_wording_names_every_account_action() -> None:
         "delete_deck": "deleting a deck",
         "deck_help": "deck help requests",
         "report": "reports to Archidekt's moderators",
+        "profile": "profile and email settings",
     }
     assert set(words) == set(LABELS)
     for action, word in words.items():

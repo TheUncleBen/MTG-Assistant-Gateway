@@ -550,6 +550,7 @@ EVENT_LABELS = {
     "folder_created": "Folder created",
     "custom_card_picture_uploaded": "Custom card picture uploaded to Archidekt",
     "registration_pdf": "Deck registration sheet made",
+    "profile_picture_uploaded": "Profile picture uploaded to Archidekt",
     "groups_changed": "Your groups changed",
     "membership_revoked": "Membership removed",
     "membership_unverifiable": "Membership could not be checked",

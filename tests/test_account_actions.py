@@ -907,6 +907,7 @@ ALL_ACCOUNT_ACTIONS = ACCOUNT_ACTIONS + [
         "propose_deck_help",
         {"deck_id": "42", "goals": " ".join(["win"] * 12), "issues": " ".join(["mana"] * 12)},
     ),
+    ("propose_profile_change", {"field": "collection_public", "on": True}),
 ]
 
 
@@ -920,7 +921,10 @@ def _help_ready(ark: FakeArchidekt, deck_id: int = 42) -> None:
 @pytest.mark.parametrize(
     ("tool", "args"),
     ALL_ACCOUNT_ACTIONS,
-    ids=[f"{t}:{a.get('action', a.get('report_kind', 'folder'))}" for t, a in ALL_ACCOUNT_ACTIONS],
+    ids=[
+        f"{t}:{a.get('action', a.get('report_kind', a.get('field', 'folder')))}"
+        for t, a in ALL_ACCOUNT_ACTIONS
+    ],
 )
 async def test_only_the_review_page_marker_applies_an_account_action(
     stack: Stack, via: str, tool: str, args: dict

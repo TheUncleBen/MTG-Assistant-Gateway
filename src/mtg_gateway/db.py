@@ -1999,6 +1999,12 @@ class Database:
             ).fetchall()
         return [dict(r) for r in rows]
 
+    def set_link_username(self, sub: str, username: str) -> None:
+        """The linked account's new username, after the member changed it on Archidekt through the
+        gateway (profile.py); the account's id, which ownership is judged by, stays."""
+        with self.tx() as c:
+            c.execute("UPDATE archidekt_links SET archidekt_username = ? WHERE sub = ?", (username, sub))
+
     def update_link_secret(self, sub: str, secret_enc: str, *, only_secret: str | None = None) -> bool:
         """Replace the stored session of an *active* link. False when the link was revoked or
         removed in the meantime, so a refresh that raced an unlink cannot bring it back. With

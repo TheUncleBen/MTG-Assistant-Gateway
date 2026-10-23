@@ -5,7 +5,7 @@ tournament registration sheet (registration.py, a read)."""
 from __future__ import annotations
 
 from types import SimpleNamespace
-from typing import Annotated
+from typing import Annotated, Literal
 
 from mcp_types import CallToolResult
 from pydantic import Field
@@ -134,3 +134,81 @@ def add_community_tools(state: AppState, h: SimpleNamespace) -> None:
         except DeckError as exc:
             return _tool_error(exc)
         return {"ok": True, **out}
+
+    @server.tool(
+        name="get_my_profile",
+        title="Read my Archidekt profile and settings",
+        description=(
+            "The user's own Archidekt profile and account settings as they are now: username, bio "
+            "(its words), whether their collection is public, their email and notification switches "
+            "and their New Device Default Settings. Changes nothing."
+        ),
+        annotations={"readOnlyHint": True, "openWorldHint": True},
+    )
+    async def get_my_profile() -> dict[str, object]:
+        from . import profile
+
+        try:
+            now = await profile.read(state.decks, _sub())
+        except DeckError as exc:
+            return _tool_error(exc)
+        return {"ok": True, **profile.summary(now)}
+
+    @server.tool(
+        name="get_my_notifications",
+        title="Read my Archidekt notifications",
+        description=(
+            "The user's Archidekt notifications (the bell): kind, text, whether it was seen, and the "
+            "page it points to. Archidekt has no way to mark them read from here. Changes nothing."
+        ),
+        annotations={"readOnlyHint": True, "openWorldHint": True},
+    )
+    async def get_my_notifications() -> dict[str, object]:
+        from . import profile
+
+        try:
+            out = await profile.notifications(state.decks, _sub())
+        except DeckError as exc:
+            return _tool_error(exc)
+        return {"ok": True, **out}
+
+    @server.tool(
+        name="propose_profile_change",
+        title="Propose a change to my Archidekt profile or settings (two-step)",
+        description=(
+            "Step 1 of changing one thing on the user's own Archidekt account, as its settings page "
+            "does, one change a proposal. field: bio (bio, plain text, 1000 characters at most here; "
+            "empty clears it), username (username), email (switch: contactable, newsletter, "
+            "comment_emails or site_notifications; on: true or false), preference (preference: "
+            "deck_view card/text/grid/scroll/table/brewer, search_game paper/mtgo/arena, "
+            "unique_search on/off, use_default_categories on/off, show_custom_uploads on/off; value) "
+            "or collection_public (on: true or false). A profile picture is changed only on the "
+            "gateway's Account page, by the user. Returns the proposal (kind 'action'); only the user's "
+            "own press applies it, in every approval mode. Changes nothing on Archidekt by itself."
+        ),
+        annotations={"readOnlyHint": True, "destructiveHint": False, "openWorldHint": True},
+        meta=h.card_meta,
+    )
+    async def propose_profile_change(
+        field: Literal["bio", "username", "email", "preference", "collection_public"],
+        bio: str | None = None,
+        username: str | None = None,
+        switch: str | None = None,
+        on: bool | None = None,
+        preference: str | None = None,
+        value: str | None = None,
+    ) -> CallToolResult:
+        params = {
+            "field": field,
+            "bio": bio,
+            "username": username,
+            "switch": switch,
+            "on": on,
+            "preference": preference,
+            "value": value,
+        }
+        try:
+            out = await state.decks.propose_action(_sub(), "profile", **params)
+            return _proposal({"ok": True, **out})
+        except DeckError as exc:
+            return _proposal(_tool_error(exc))

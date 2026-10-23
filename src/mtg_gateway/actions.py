@@ -47,6 +47,7 @@ LABELS = {
     # 0.7.43 (Archidekt parity release 2)
     "deck_help": "Deck help request",
     "report": "Report",
+    "profile": "Profile and settings",
 }
 ACTIONS = frozenset(LABELS)
 DESTRUCTIVE = frozenset({"delete_deck"})  # never applied by an assistant on its own
@@ -297,7 +298,11 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
     review row saying exactly what will happen, and return the proposal."""
     if action not in ACTIONS:
         raise DeckError("invalid", f"unknown action {action!r}")
-    social = _social(decks) if action not in ("delete_deck", "create_folder", "deck_help", "report") else None
+    social = (
+        _social(decks)
+        if action not in ("delete_deck", "create_folder", "deck_help", "report", "profile")
+        else None
+    )
     if social is not None:
         social._me(sub)  # a linked account first: every social action is sent under it
     decks._room_for_proposal(sub)
@@ -306,7 +311,7 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
     deck = None
     # Follow or unfollow someone by username, not through one of their decks
     by_name = action == "follow" and params.get("username") is not None and not params.get("deck_id")
-    if action != "create_folder" and not by_name:
+    if action not in ("create_folder", "profile") and not by_name:
         deck_id = _clean_deck_id(str(params.get("deck_id") or ""))
         deck = (
             await decks.get_own_deck(sub, deck_id)
@@ -513,6 +518,17 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
         row["after_text"] = message
         row["note"] = "Archidekt's moderators see your username with the report. It can't be taken back."
         row["cannot_undo"] = True
+    elif action == "profile":
+        from . import profile
+
+        field = params.get("field")
+        body, words = profile.plan(field, params, await profile.read(decks, sub))
+        if words.pop("same"):
+            raise DeckError(
+                "invalid", "Your Archidekt account is already set that way; nothing would change."
+            )
+        changes.update(field=field, body=body)
+        row.update(words)
     elif action in COLLABORATOR_ACTIONS:
         user_id, name = await collaborator_target(decks, sub, deck, action, params.get("username"))
         if action == "collaborator_add":
@@ -621,6 +637,10 @@ async def apply(
             ),
         )
         result = {"reported": True, "verified": True}  # Archidekt keeps no list of reports to read back
+    elif action == "profile":
+        from . import profile
+
+        result = await profile.send(decks, sub, dict(c["body"]))
     elif action == "collaborator_add":
         result = await _social(decks).add_collaborator(sub, deck_id, int(c["user_id"]))
     elif action == "collaborator_remove":
