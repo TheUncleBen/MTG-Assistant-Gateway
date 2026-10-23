@@ -517,3 +517,38 @@ async def test_forum_is_in_the_more_sheet_and_the_account_menu_but_not_a_rail_ta
     assert "/lists" in rail and "/forum" not in rail, rail
     account = page[page.index("<nav class='user'") : page.index("<nav class='tabbar'")]
     assert "href='/forum'" in account
+
+
+async def test_a_forum_reply_is_voted_down_and_back_through_the_comment_routes(
+    member: Browser, stack: Stack
+) -> None:
+    from .test_social_layout import post
+
+    ark = stack.ark
+    cid = _reply(ark, 700002, "amy", "Arcane Signet.")
+    path = f"/social/api/decks/forum:700002/comments/{cid}/vote"
+    r = await post(member, path, {"vote": "down"})
+    assert r.status_code == 200, r.text
+    assert r.json() == {"ok": True, "comment": cid, "vote": 2, "points": -1}
+    assert ark.votes[("alice", cid)] == 2
+    assert ark.vote_calls[-1] == {"path": f"/api/comments/vote/{cid}/", "up": False, "remove": False}
+    got = (await member.http.get("/social/api/decks/forum:700002/comments")).json()["comments"][0]
+    assert got["points"] == -1 and got["user_vote"] == 2
+    # from down to up in one press, then taken back
+    r = await post(member, path, {"vote": "up"})
+    assert r.json()["vote"] == 1 and r.json()["points"] == 1 and ark.votes[("alice", cid)] == 1
+    r = await post(member, path, {"vote": "none"})
+    assert r.json() == {"ok": True, "comment": cid, "vote": 0, "points": 0}
+    assert ("alice", cid) not in ark.votes
+    # the same vote again sends nothing
+    sent = len(ark.vote_calls)
+    r = await post(member, path, {"vote": "none"})
+    assert r.status_code == 200 and len(ark.vote_calls) == sent
+    # a reply of the member's own, one outside the thread and a bad vote are refused
+    mine = _reply(ark, 700002, "alice", "Mine.")
+    r = await post(member, f"/social/api/decks/forum:700002/comments/{mine}/vote", {"vote": "down"})
+    assert r.status_code == 400
+    r = await post(member, "/social/api/decks/forum:700002/comments/999999/vote", {"vote": "down"})
+    assert r.status_code == 404
+    r = await post(member, path, {"vote": "sideways"})
+    assert r.status_code == 400

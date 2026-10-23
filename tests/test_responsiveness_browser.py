@@ -34,6 +34,7 @@ from .test_editor_browser import PNG
 from .test_overflow_sweep_browser import CARDS, _seed
 from .test_scan_browser import _chromium_path
 from .test_suggest_browser import Server
+from .test_ui_pass_c_browser import _seed as _parity_seed
 
 pytest.importorskip("playwright")
 
@@ -65,6 +66,9 @@ MAIN_PAGES = (
     "/admin",
     "/admin/users",
     "/admin/activity",
+    "/forum",
+    "/forum/Archidekt/General",
+    "/forum/thread/700002",
 )
 HEAVY_PAGES = (
     "/decks/42",
@@ -74,6 +78,8 @@ HEAVY_PAGES = (
     "/cards?q=sol",
     "/admin",
     "/history/reports/r1",
+    "/forum/thread/700002",
+    "/account",
 )
 
 # Input to visible response, inside the page's own clock: the first input event after __arm()
@@ -117,6 +123,8 @@ def server(tmp_path: Path):
     s.ark.users["alice"]["decks"].append(44)
     s.ark.folders.setdefault("alice", []).append({"id": 501, "name": "Brews", "private": False})
     s.ark.add_side_row(42, "Sol Ring")
+    # parity release 2: a forum thread with replies, and a custom card in deck 42
+    _parity_seed(s.ark)
     # a second member, for the admin's row menu (alice's own row has no Disable)
     s.db.upsert_user("user-2", email="bob@example.test", name="Bob", preferred_username="bob", groups=[])
     s.start()
@@ -284,6 +292,23 @@ def test_menus_open_within_one_beat(server: Server) -> None:
             ms = d.measure(right, reset=d.escape)
             assert d.menu().is_visible()
             slow.append(("deck card right-click", d.width, ms))
+            d.escape()
+            # a custom card's menu on the deck page (parity release 2)
+            d.goto("/decks/42?view=text")
+            custom = page.locator(".deckview .row[data-custom-id='41']")
+            custom.scroll_into_view_if_needed()
+            right = partial(custom.click, button="right", position={"x": 10, "y": 10}, no_wait_after=True)
+            ms = d.measure(right, reset=d.escape)
+            assert d.menu().is_visible()
+            slow.append(("custom card right-click", d.width, ms))
+            d.escape()
+            # a forum reply's ⋮ (static/social.js through cardmenu.js)
+            d.goto("/forum/thread/700002")
+            reply_kebab = page.locator("#comments .kebab").first
+            reply_kebab.scroll_into_view_if_needed()
+            ms = d.measure(partial(reply_kebab.click, no_wait_after=True), reset=d.escape)
+            assert d.menu().is_visible()
+            slow.append(("forum reply ⋮", d.width, ms))
             d.escape()
             # an admin row's ⋮ (static/admin.js)
             d.goto("/admin/users")
