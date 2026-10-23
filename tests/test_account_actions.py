@@ -1566,6 +1566,7 @@ def test_a_help_box_has_a_character_cap_as_well() -> None:
     from mtg_gateway import actions
 
     long_words = " ".join(["x" * 1000] * 12)  # 12 words, 12 KB
-    with pytest.raises(DeckError, match="at most 4000 characters"):
+    with pytest.raises(DeckError) as err:
         actions._help_text(long_words, "goals")
+    assert str(err.value) == "Messages can be up to 4,000 characters."  # our own limit, worded as ours
     assert actions._help_text(" ".join(["word"] * 150), "goals").startswith("word")

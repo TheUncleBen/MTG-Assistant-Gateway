@@ -127,7 +127,7 @@ def _words(text: str) -> int:
 def _help_text(value: Any, what: str) -> str:
     raw = str(value or "")
     if len(raw) > HELP_CHARS:  # before any cleaning: a 200-"word" box of megabytes is refused at once
-        raise DeckError("invalid", f"{what} must be at most {HELP_CHARS} characters")
+        raise DeckError("invalid", f"Messages can be up to {HELP_CHARS:,} characters.")
     text = clean_text(raw)
     low, high = HELP_WORDS
     if not low <= _words(text) <= high:

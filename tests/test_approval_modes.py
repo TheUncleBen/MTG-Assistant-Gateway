@@ -1134,3 +1134,21 @@ async def test_a_raised_commander_with_another_row_says_the_rows_fold(stack: Sta
     finally:
         await b.aclose()
     assert html.escape(fold) in page
+
+
+def test_premier_in_default_categories_is_named_with_the_members_own_presses() -> None:
+    """A Premier template is never applied by an assistant (account_lists.risk_of: destructive), so it
+    is named wherever the always-your-press list is, in the app and in every doc that copies it."""
+    from pathlib import Path
+
+    from mtg_gateway import account_lists
+
+    assert "Premier in your default categories" in modes.MEMBER_ONLY_TEXT
+    assert "Premier in your default categories" in modes.mode_help("semi")
+    assert account_lists.PREMIER_NOTE == (
+        "Premier can make a category's cards count as the deck's commanders, so this waits for your "
+        "own press in every approval mode."
+    )
+    docs = Path(__file__).resolve().parents[1] / "docs"
+    for name in ("CAPABILITIES.md", "OPERATIONS.md", "ONBOARDING.md", "CONNECT.md"):
+        assert modes.MEMBER_ONLY_TEXT in (docs / name).read_text(encoding="utf-8"), name

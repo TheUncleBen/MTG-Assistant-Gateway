@@ -60,7 +60,8 @@ DELETES = frozenset(
 # a Premier template, or default categories naming one, could file a card into the commander zone
 # when it is added with no category of its own (security review 0.7.44): never an assistant's
 PREMIER_NOTE = (
-    "Premier categories decide a deck's commanders, so this waits for your own press in every approval mode."
+    "Premier can make a category's cards count as the deck's commanders, so this waits for your own "
+    "press in every approval mode."
 )
 MAX_CHANGES = 30  # changes in one proposal
 TEMPLATE_NAME_MAX = 60
