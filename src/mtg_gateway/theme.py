@@ -2374,8 +2374,10 @@ def render(
             "<span class='n' hidden aria-hidden='true'></span></a>"
         )
         right = f"{search_form}<nav class='user' aria-label='Account'>{search_btn}{bell}{account_menu}</nav>"
-        # The More pages are tabs on the rail too (railonly: hidden on the phone bar, which has More)
-        rail_more = [(href, label, ic, "railonly") for href, label, ic in more_links]
+        # The More pages are tabs on the rail too (railonly: hidden on the phone bar, which has More),
+        # except Forum: one more tab put the rail past a short screen (an unfolded Fold, the app in
+        # landscape); on the rail Forum is in the account menu
+        rail_more = [(href, label, ic, "railonly") for href, label, ic in more_links if href != "/forum"]
         tabbar = (
             "<nav class='tabbar' aria-label='Sections'>"
             + "".join(

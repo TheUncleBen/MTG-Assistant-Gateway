@@ -17,7 +17,6 @@ the thread it read to the script as JSON, so the panel does not read it again.""
 
 from __future__ import annotations
 
-import json
 from datetime import datetime
 from types import SimpleNamespace
 from typing import Any
@@ -27,7 +26,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
 
 from . import actions, deck_extras, forum, ui
-from .companion import DECK_CSP
+from .companion import DECK_CSP, _json_for_html
 from .decks import DeckError, current_client
 from .pages import BROWSER_CLIENT_ID, _csrf, browser_session, login_redirect
 from .theme import esc, icon
@@ -654,7 +653,7 @@ def thread_html(
         "has_more": t["has_more"],
         "me": me,
     }
-    data = json.dumps(pre, separators=(",", ":")).replace("</", "<\\/")
+    data = _json_for_html(pre)  # every < escaped: no reply can open a tag inside the block
     if can_write:
         form = reply_form_html(csrf, me_name)
     elif closed:

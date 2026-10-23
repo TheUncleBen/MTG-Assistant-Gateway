@@ -128,7 +128,11 @@ CSS = """
   flex:1 1 8rem;width:auto;min-width:0;max-width:100%;margin:0}
 .acc .pr-bio{min-height:7rem;width:100%;font:inherit;font-size:1rem;line-height:1.4;resize:vertical}
 .acc .pr-hist{margin:.5rem 0 0}
-.acc .pr-two{display:grid;gap:6px}
+.acc .pr-two{display:grid;grid-template-columns:minmax(0,1fr);gap:6px}
+/* each picker shrinks with its column (a grid item's own minimum is its longest choice, which
+   at 200% text ran past a 360 px screen); the choice's words are cut with an ellipsis instead */
+.acc .pr-two > form{min-width:0}
+.acc .pr-two .msel-btn{overflow:hidden;text-overflow:ellipsis}
 .acc .pr-hist svg.i,.pr-box .pr-hist svg.i{width:15px;height:15px;vertical-align:-2px}
 .acc .card .notice{margin:.5rem 0}
 .pr-box .pr-me{display:flex;align-items:center;gap:1rem;flex-wrap:wrap;margin:.75rem 0}

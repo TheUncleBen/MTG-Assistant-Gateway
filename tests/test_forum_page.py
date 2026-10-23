@@ -481,3 +481,30 @@ async def test_reply_counts_are_worded_right(member: Browser, stack: Stack) -> N
     assert "0 replies" in r.text and "replys" not in r.text
     r = await member.http.get(SECTION)
     assert "replys" not in r.text and "0 replies" in r.text
+
+
+async def test_a_reply_cannot_break_out_of_the_threads_json_block(member: Browser, stack: Stack) -> None:
+    """Security review F-01: the thread handed to the script sits in a <script type=application/json>
+    block; a reply holding "<!--<script>" must not open a script that swallows the page."""
+    _reply(stack.ark, 700002, "amy", "look <!--<script>alert(1)</script> at this </script><b>x</b>")
+    r = await member.http.get("/forum/thread/700002")
+    assert r.status_code == 200
+    m = re.search(r"<script type='application/json' id='forum-thread'>(.*?)</script>", r.text, re.S)
+    assert m, r.text
+    block = m.group(1)
+    assert "<" not in block, block  # every < is <
+    assert "alert(1)" in json.loads(block)["comments"][-1]["text"]
+    assert "<form class='newcomment'" in r.text  # the rest of the page is still there
+
+
+async def test_forum_is_in_the_more_sheet_and_the_account_menu_but_not_a_rail_tab(member: Browser) -> None:
+    """The rail lists every More page as a tab and had grown past a short screen (the Fold
+    unfolded, the app in landscape); Forum stays in the phone's More sheet and the account menu
+    and is left off the rail."""
+    page = (await member.http.get("/forum")).text
+    sheet = re.search(r"<div class='menu sheet'>(.*?)</div></details></nav>", page, re.S)
+    assert sheet and "href='/forum'" in sheet.group(1), page
+    rail = re.findall(r"<a href='([^']+)' class='railonly'", page)
+    assert "/lists" in rail and "/forum" not in rail, rail
+    account = page[page.index("<nav class='user'") : page.index("<nav class='tabbar'")]
+    assert "href='/forum'" in account
