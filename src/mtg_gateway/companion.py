@@ -548,6 +548,8 @@ EVENT_LABELS = {
     "scan_session_saved": "Scan saved",
     "scan_session_deleted": "Scan deleted",
     "folder_created": "Folder created",
+    "custom_card_picture_uploaded": "Custom card picture uploaded to Archidekt",
+    "registration_pdf": "Deck registration sheet made",
     "groups_changed": "Your groups changed",
     "membership_revoked": "Membership removed",
     "membership_unverifiable": "Membership could not be checked",

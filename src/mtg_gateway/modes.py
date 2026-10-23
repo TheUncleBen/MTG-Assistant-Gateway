@@ -383,6 +383,8 @@ def risk_of(
         return "high", "not a plain deck or collection edit"
     if rows is None:  # stored before review rows existed: nothing to judge it by
         return "high", NO_ROWS_REASON
+    # a card package's own line only says where the adds come from (packages.py); not a change
+    rows = [r for r in rows if r.get("kind") != "package"]
     kinds = [str(r.get("kind")) for r in rows]
     if any(k == "commander" for k in kinds):
         return "high", commander_reason(rows)

@@ -220,6 +220,7 @@ _PROPOSES = frozenset(
         "propose_restore_snapshot",
         "propose_collection_changes",
         "propose_list_change",
+        "propose_add_package",
     }
 )
 _YOUR_PRESS = frozenset(

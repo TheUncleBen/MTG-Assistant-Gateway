@@ -42,14 +42,14 @@ def add_list_tools(state: AppState, h: SimpleNamespace) -> None:
         annotations={"readOnlyHint": True, "openWorldHint": True},
     )
     async def get_my_lists(
-        list_name: Annotated[str, LIST_FIELD],
+        which_list: Annotated[str, LIST_FIELD],
         page: int = 1,
         search: str = "",
     ) -> dict[str, object]:
         if not isinstance(page, int) or isinstance(page, bool) or not 1 <= page <= 1000:
             return {"ok": False, "error": "invalid", "message": "page must be a number from 1 to 1000"}
         try:
-            got = await account_lists.read(state.decks, _sub(), list_name, page=page, search=search[:100])
+            got = await account_lists.read(state.decks, _sub(), which_list, page=page, search=search[:100])
         except DeckError as exc:
             return _tool_error(exc)
         return {"ok": True, **got}
@@ -86,14 +86,14 @@ def add_list_tools(state: AppState, h: SimpleNamespace) -> None:
         meta=h.card_meta,
     )
     async def propose_list_change(
-        list_name: Annotated[str, LIST_FIELD],
+        which_list: Annotated[str, LIST_FIELD],
         changes: Annotated[
             list[dict[str, Any]],
             Field(description="The changes to that list, each with op (see the description)."),
         ],
     ) -> CallToolResult:
         try:
-            out = await state.decks.propose_lists(_sub(), list_name, changes)
+            out = await state.decks.propose_lists(_sub(), which_list, changes)
             return _proposal({"ok": True, **out})
         except DeckError as exc:
             return _proposal(_tool_error(exc))

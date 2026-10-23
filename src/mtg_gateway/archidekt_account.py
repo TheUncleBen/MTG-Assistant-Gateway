@@ -329,6 +329,27 @@ class AccountRequests:
         pid = _id(package_id, "package id")
         return await self._request("PATCH", f"/decks/packages/{pid}/", token=token, json_body=block)
 
+    async def my_packages(self: ArchidektClient, token: str, username: str, page: int = 1) -> dict[str, Any]:
+        """``{count, next, results}``: the member's own card packages, most imported first, as the
+        site's Packages page asks for them (``packages=true`` with ``ownerUsername``)."""
+        body = await self._request(
+            "GET",
+            "/decks/v3/",
+            token=token,
+            params={
+                "name": "",
+                "orderBy": "-importCount",
+                "packages": "true",
+                "ownerUsername": username,
+                "ascending": "false",
+                "page": str(int(page)),
+            },
+            fresh=True,
+        )
+        if not isinstance(body, dict) or not isinstance(body.get("results"), list):
+            raise ArchidektError("contract", "unexpected package list shape")
+        return body
+
     async def package_cards(self: ArchidektClient, token: str, package_deck_id: str) -> dict[str, Any]:
         """GET /decks/{id}/?incrementPackageImport=true: the package's cards, read as the site
         reads them when one is added to a deck, which counts one import of the package. Sent

@@ -1670,12 +1670,17 @@ def _change_rows(rows: list[dict[str, Any]] | None, diff: str) -> tuple[str, dic
             )
         elif kind == "new_deck":
             visibility = "private" if r.get("private") else "PUBLIC"
+            what = (
+                f"{r.get('cards', 0)} cards, {visibility}; {r['package']}"
+                if r.get("package")
+                else f"{r.get('format', '')}, {r.get('cards', 0)} cards, {visibility}"
+            )
             out.append(
                 _li(
                     "chg",
-                    "New deck",
+                    "New card package" if r.get("package") else "New deck",
                     html.escape(str(r.get("name", ""))),
-                    html.escape(f"{r.get('format', '')}, {r.get('cards', 0)} cards, {visibility}"),
+                    html.escape(what),
                 )
             )
         elif kind == "action":
@@ -1716,6 +1721,8 @@ def _change_rows(rows: list[dict[str, Any]] | None, diff: str) -> tuple[str, dic
                     "Waits for your press" if r.get("destructive") else "",
                 )
             )
+        elif kind == "package":  # where the adds below come from (packages.py); not a change itself
+            out.append(_li("chg", "Card package", html.escape(str(r.get("text", "")))))
         elif kind == "restore":
             out.append(
                 _li(

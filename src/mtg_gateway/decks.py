@@ -148,7 +148,7 @@ GAME_CHOICES = ("any", *GAME_IDS)
 MAX_DESCRIPTION = 20_000
 # Deck organisation propose_deck_details may also change, resolved against the member's account
 # when the proposal is made: the folder the deck sits in, its tags and its cover card.
-ORGANISE_FIELDS = ("folder", "add_tags", "remove_tags", "cover")
+ORGANISE_FIELDS = ("folder", "add_tags", "remove_tags", "cover", "package")
 # The OAuth client (or "__browser__") acting on the current request, recorded in the audit log.
 # Set by the MCP tool layer and the browser pages; None when the actor is not known.
 current_client: ContextVar[str | None] = ContextVar("current_client", default=None)
@@ -747,6 +747,8 @@ def row_line(r: dict[str, Any]) -> str:
         more = (", theorycrafted" if r.get("theorycrafted") else "") + (
             f", {r['game']}" if r.get("game") else ""
         )
+        if r.get("package"):
+            return f"New card package '{r['name']}' ({r['cards']} cards{side}, {visibility}; {r['package']})"
         return f"New {r['format']} deck '{r['name']}' ({r['cards']} cards{side}, {visibility}{more})"
     if kind == "restore":
         if "changes" in r:  # the review lines under it (a restore saved before counted write entries)
@@ -3444,9 +3446,16 @@ class DeckService:
     # -- proposals ------------------------------------------------------------
     @_dedupe
     async def propose(
-        self, sub: str, deck_id: str, raw_changes: Any, *, row_flags: bool = False
+        self,
+        sub: str,
+        deck_id: str,
+        raw_changes: Any,
+        *,
+        row_flags: bool = False,
+        source_row: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """``row_flags`` only for the deck page's own save (parse_changes)."""
+        """``row_flags`` only for the deck page's own save (parse_changes). ``source_row``: a line
+        put first that says where the changes come from (a card package's, propose_package)."""
         deck_id = _clean_deck_id(deck_id)
         changes = parse_changes(raw_changes, row_flags=row_flags)
         self._room_for_proposal(sub)
@@ -3454,6 +3463,8 @@ class DeckService:
         self.recheck_waiting(sub, deck)  # the deck's other waiting proposals, at no cost
         _before, _after, rows = plan_rows(deck, changes)
         await self._refuse_unknown_cards(deck, changes)
+        if source_row is not None:
+            rows = [source_row, *rows]
         pid = secrets.token_urlsafe(12)
         self._save_proposal(
             {
@@ -3470,6 +3481,40 @@ class DeckService:
         return self._board_note(sub, self.describe(sub, pid), deck.id, rows, pid)
 
     @_dedupe
+    async def propose_package(
+        self,
+        sub: str,
+        deck_id: str,
+        package_ref: str,
+        *,
+        categories: str = "package",
+        skip_existing: bool = True,
+        skip_outside_identity: bool = True,
+        singleton: bool | None = None,
+    ) -> dict[str, Any]:
+        """Add a card package's cards to one of the member's decks, as the site's Add package does:
+        its cards as ordinary adds (each reviewed like any other), with a line saying where they
+        come from. The package is read as anyone reads a deck now; the read that counts an import
+        on Archidekt is sent only when the change is applied."""
+        from . import packages
+
+        pkg_deck, changes, skipped = packages.adds(
+            await self.get_own_deck(sub, _clean_deck_id(deck_id)),
+            await self.get_any_deck(sub, package_ref),
+            categories=categories,
+            skip_existing=skip_existing,
+            skip_outside_identity=skip_outside_identity,
+            singleton=singleton,
+        )
+        line = _row(
+            "package",
+            package_id=pkg_deck.id,
+            name=pkg_deck.name,
+            text=packages.source_text(pkg_deck.name, changes, skipped),
+        )
+        return await self.propose(sub, deck_id, changes, source_row=line)
+
+    @_dedupe
     async def propose_new_deck(
         self,
         sub: str,
@@ -3483,6 +3528,7 @@ class DeckService:
         private: bool = True,
         theorycrafted: bool = False,
         game: str = "any",
+        package: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         name = clean_text(name or "")
         if not name or len(name) > 120:
@@ -3492,6 +3538,14 @@ class DeckService:
             raise DeckError("invalid", f"deck_format must be one of: {', '.join(sorted(FORMAT_IDS))}")
         # the New deck form's Theorycrafted and Game type, checked as deck settings checks them
         extra = parse_details({"theorycrafted": theorycrafted, "game": game or "any"})
+        # a card package (packages.py): made with the New package form's request, no format
+        pkg = None
+        if package is not None:
+            from . import packages
+
+            pkg = packages.parse(package)
+            if cards is None and not (decklist_text or csv_text or json_text):
+                cards = []  # an empty package, as the New package form makes one
         entries = normalise_cards(
             cards=cards, decklist_text=decklist_text, csv_text=csv_text, json_text=json_text
         )
@@ -3545,6 +3599,7 @@ class DeckService:
                 private=bool(private),
                 theorycrafted=extra["theorycrafted"] or None,
                 game=GAME_LABELS.get(extra["game"]),
+                package=_package_text(pkg),
             )
         ]
         rows += [
@@ -3584,6 +3639,7 @@ class DeckService:
                     **({"category_flags": category_flags} if category_flags else {}),
                     **({"theorycrafted": True} if extra["theorycrafted"] else {}),
                     **({"game": extra["game"]} if extra["game"] != "any" else {}),
+                    **({"package": pkg} if pkg else {}),
                 },
             },
             rows,
@@ -4781,6 +4837,13 @@ class DeckService:
         backup = await self._backup_shared(sub, row, deck, snapshot_id)
         progress.update(backup)
         await self._rows_unchanged(sub, deck)  # lookups and backup take a while: check again
+        for r in row.get("rows") or []:
+            if r.get("kind") == "package":
+                # the site reads a package it adds with this one read, which counts one import of
+                # it on Archidekt: sent here, at the apply, never when the change was proposed
+                await self._call(
+                    sub, lambda token, *_, i=str(r["package_id"]): self.client.package_cards(token, i)
+                )
         await self._send(sub, deck.id, payload, progress)
         verified = await self.get_deck(sub, deck.id)
         self.recheck_waiting(sub, verified)  # the deck's other waiting proposals, at no cost
@@ -5883,17 +5946,31 @@ class DeckService:
                     f"{card['set_code'].upper()} {card['collector_number']}".strip() or "its default printing"
                 )
                 printing_notes.append(f"{c['name']}: {wanted} not found on Archidekt, added {got} instead")
-        created: Deck = await self._call(
-            sub,
-            lambda token, *_: self.client.create_deck(
-                token,
-                name=spec["name"],
-                format_id=FORMAT_IDS[spec["format"]],
-                private=bool(spec.get("private", True)),
-                theorycrafted=bool(spec.get("theorycrafted")),
-                game=GAME_IDS.get(str(spec.get("game") or "")),
-            ),
-        )
+        if spec.get("package"):  # a card package: the New package form's one request
+            made = await self._call(
+                sub,
+                lambda token, *_: self.client.create_package(
+                    token,
+                    {
+                        "name": spec["name"],
+                        "private": bool(spec.get("private", True)),
+                        "cardPackage": spec["package"],
+                    },
+                ),
+            )
+            created = Deck(str(made["id"]), spec["name"], "", "", [], [], {})
+        else:
+            created = await self._call(
+                sub,
+                lambda token, *_: self.client.create_deck(
+                    token,
+                    name=spec["name"],
+                    format_id=FORMAT_IDS[spec["format"]],
+                    private=bool(spec.get("private", True)),
+                    theorycrafted=bool(spec.get("theorycrafted")),
+                    game=GAME_IDS.get(str(spec.get("game") or "")),
+                ),
+            )
         self.db.finish_proposal(row["id"], state="applying", deck_id=created.id)
         progress.update(deck_id=created.id, deck_url=f"https://archidekt.com/decks/{created.id}")
         # each custom category with its switches first, so the cards go into it as it should be
@@ -5918,6 +5995,11 @@ class DeckService:
             got_cat = states.get(f["name"])
             if got_cat is None or any(got_cat[k] != f[k] for k in ("includedInDeck", "includedInPrice")):
                 mismatches.append(f"category “{f['name']}” (its switches)")
+        if spec.get("package"):
+            from . import packages
+
+            if not packages.same(packages.block_of(verified), spec["package"]):
+                mismatches.append("the package's keywords, budget or formats")
         result = {
             "deck_id": created.id,
             "deck_url": f"https://archidekt.com/decks/{created.id}",
@@ -6640,6 +6722,20 @@ class DeckService:
                 )
                 before = was or ("a card not in this deck" if chosen else "automatic")
                 rows.append(_row("detail", field="cover", before=before, after=card.name))
+        if "package" in raw:
+            from . import packages
+
+            block = packages.block_of(deck)
+            if block is None:
+                raise DeckError(
+                    "invalid", "This deck is not a card package; package settings are for packages"
+                )
+            new = packages.changed(block, packages.parse(raw["package"], partial=True))
+            if new is not None:
+                plan["package"] = {"id": int(block["id"]), "block": new}
+                rows.append(
+                    _row("detail", field="package", before=packages.text(block), after=packages.text(new))
+                )
         if plan:
             from .recheck import organise_was
 
@@ -6668,6 +6764,9 @@ class DeckService:
         if "cover_uid" in plan:
             await self.set_cover(sub, deck_id, plan["cover_uid"], progress=progress)
             done.append("cover")
+        if "package" in plan:
+            await self.set_package(sub, deck_id, plan["package"], progress=progress)
+            done.append("package")
         return done
 
     async def _apply_details(self, sub: str, row: dict[str, Any], progress: dict[str, Any]) -> dict[str, Any]:
@@ -7078,6 +7177,31 @@ class DeckService:
                 f"Archidekt accepted the request but '{deck.name}' can still be read. Check it on Archidekt.",
             )
         return {"deck_id": deck.id, "name": deck.name, "snapshot_id": snapshot_id, **backup}
+
+    async def set_package(
+        self, sub: str, deck_id: str, plan: dict[str, Any], *, progress: dict[str, Any] | None = None
+    ) -> None:
+        """A card package's keywords, budget and formats: the deck settings' second request, by the
+        package block's own id, with the whole block. Verified by re-reading the deck."""
+        from . import packages
+
+        self._writes_switch()
+        deck = await self.get_own_deck(sub, deck_id)
+        block = packages.block_of(deck)
+        if block is None or int(block["id"]) != int(plan["id"]):
+            raise DeckError("invalid", "The deck is no longer that card package; its settings were not sent.")
+        want = plan["block"]
+        pid = int(block["id"])
+        await _writing(
+            progress, self._call(sub, lambda token, *_: self.client.update_package(token, pid, want))
+        )
+        verified = await self.get_deck(sub, deck.id)
+        if not packages.same(packages.block_of(verified), want):
+            raise DeckError(
+                "verify_mismatch",
+                "Archidekt accepted the request but the package's keywords, budget or formats did not "
+                "change as asked.",
+            )
 
     async def set_cover(
         self, sub: str, deck_id: str, scryfall_uid: str | None, *, progress: dict[str, Any] | None = None
@@ -7794,6 +7918,14 @@ class DeckService:
                 raise DeckError(exc.kind, str(exc), retry_after=archidekt_wait(exc)) from exc
         self._precon_cache = (now, listing)
         return listing
+
+
+def _package_text(block: dict[str, Any] | None) -> str | None:
+    if not block:
+        return None
+    from . import packages
+
+    return packages.text(block)
 
 
 def parse_details(raw: Any) -> dict[str, Any]:

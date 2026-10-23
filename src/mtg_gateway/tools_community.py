@@ -10,12 +10,13 @@ from typing import Annotated
 from mcp_types import CallToolResult
 from pydantic import Field
 
+from . import registration
 from .app import AppState, _tool_error
 from .decks import DeckError
 
 
 def add_community_tools(state: AppState, h: SimpleNamespace) -> None:
-    """Register propose_deck_help and propose_report."""
+    """Register propose_deck_help, propose_report and get_registration_pdf."""
     _proposal = h._proposal
     _sub = h._sub
     server = h.server
@@ -87,3 +88,49 @@ def add_community_tools(state: AppState, h: SimpleNamespace) -> None:
             return _proposal({"ok": True, **out})
         except DeckError as exc:
             return _proposal(_tool_error(exc))
+
+    @server.tool(
+        name="get_registration_pdf",
+        title="Make a deck registration sheet (PDF)",
+        description=(
+            "Archidekt's Deck Registration PDF for a tournament, for any deck the user can open: "
+            "Archidekt fills the sheet and answers with the PDF's address (pdf_url; give it to the user "
+            "as a link; how long the address keeps working is not known). The main deck is every card "
+            "whose first category counts in the deck; the sideboard is every card whose first category "
+            "is Sideboard; other categories left out of the deck (a Maybeboard) are left off the sheet. "
+            "sort: alpha (the default, by name), manaValue, color or type. The details are optional, "
+            "60 characters each (date 20, free text such as 10/24/2026; dci_number digits only, at "
+            "most 10) and go to Archidekt only: only pass what the user gave you for this sheet. "
+            "Changes nothing in the deck or the account."
+        ),
+        annotations={"readOnlyHint": True, "destructiveHint": False, "openWorldHint": True},
+    )
+    async def get_registration_pdf(
+        deck_id: Annotated[str, Field(description="The deck: its id or URL.")],
+        sort: str = "alpha",
+        first_name: str | None = None,
+        last_name: str | None = None,
+        dci_number: str | None = None,
+        event: str | None = None,
+        location: str | None = None,
+        date: str | None = None,
+        designer: str | None = None,
+        deck_name: Annotated[
+            str | None, Field(description="The name printed on the sheet; the deck's own name if left out.")
+        ] = None,
+    ) -> dict[str, object]:
+        details = {
+            "first_name": first_name,
+            "last_name": last_name,
+            "dci_number": dci_number,
+            "event": event,
+            "location": location,
+            "date": date,
+            "designer": designer,
+            "deck_name": deck_name,
+        }
+        try:
+            out = await registration.make(state.decks, _sub(), deck_id, details, sort)
+        except DeckError as exc:
+            return _tool_error(exc)
+        return {"ok": True, **out}

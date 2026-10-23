@@ -41,6 +41,7 @@ class AccountFake:
         self.private: dict[str, dict[str, Any]] = {}
         self.notes: dict[str, list[dict[str, Any]]] = {}
         self.entries: dict[int, list[dict[str, Any]]] = {}  # thread id -> submissions
+        self.package_imports: dict[int, int] = {}  # package deck id -> incrementPackageImport reads
         self.next_id = 7000
         self.max_pins = 150
 
@@ -249,6 +250,56 @@ class AccountFake:
         if parts == ["users", "moderator", "report"] and m == "POST":
             self.reports.append({**body, "by": who})
             return _ok({"ok": True}, 201)
+        # -- card packages: a deck with a cardPackage block
+        if parts == ["decks", "packages"] and m == "POST":
+            self.ark.next_deck_id += 1
+            deck = {
+                "id": self.ark.next_deck_id,
+                "name": body["name"],
+                "owner": {"username": who},
+                "updatedAt": "2026-10-03T00:00:00Z",
+                "deckFormat": body.get("deckFormat"),
+                "private": body.get("private", False),
+                "categories": [],
+                "cards": [],
+                "cardPackage": {**body["cardPackage"], "id": self._new_id(), "importCount": 0},
+            }
+            self.ark.decks[deck["id"]] = deck
+            if deck["private"]:
+                self.ark.private.add(deck["id"])
+            return _ok({"id": deck["id"], "name": deck["name"]}, 201)
+        if parts[:2] == ["decks", "packages"] and len(parts) == 3 and m == "PATCH":
+            for d in self.ark.decks.values():
+                block = d.get("cardPackage")
+                if isinstance(block, dict) and block["id"] == int(parts[2]):
+                    if d["owner"]["username"] != who:
+                        return httpx.Response(403, json={"detail": "Not your package."})
+                    block.update({k: body[k] for k in ("keywords", "budget", "intendedFormats") if k in body})
+                    return _ok(block)
+            return httpx.Response(404, json={"detail": "Not found."})
+        if (
+            len(parts) == 2
+            and parts[0] == "decks"
+            and parts[1].isdigit()
+            and m == "GET"
+            and request.url.params.get("incrementPackageImport") == "true"
+        ):
+            did = int(parts[1])
+            block = (self.ark.decks.get(did) or {}).get("cardPackage")
+            if isinstance(block, dict):
+                block["importCount"] = block.get("importCount", 0) + 1
+                self.package_imports[did] = self.package_imports.get(did, 0) + 1
+            return None  # the deck itself, as any read answers it
+        if parts == ["decks", "v3"] and m == "GET" and request.url.params.get("packages") == "true":
+            mine = [
+                d
+                for d in self.ark.decks.values()
+                if isinstance(d.get("cardPackage"), dict)
+                and d["owner"]["username"] == request.url.params.get("ownerUsername")
+            ]
+            mine.sort(key=lambda d: -d["cardPackage"].get("importCount", 0))
+            rows = [{**self.ark._listing_row(d), "cardPackage": dict(d["cardPackage"])} for d in mine]
+            return _ok({"count": len(rows), "next": None, "results": rows})
         # -- the registration PDF
         if parts == ["decks", "exportPdf"] and m == "POST":
             self.pdfs.append({**body, "by": who})

@@ -20,7 +20,7 @@ stack_options = stack_with(SHIPPED)
 
 
 async def _propose(h, token: str, kind: str, changes: list[dict]) -> dict:
-    return structured(await call(h, token, "propose_list_change", {"list_name": kind, "changes": changes}))
+    return structured(await call(h, token, "propose_list_change", {"which_list": kind, "changes": changes}))
 
 
 async def _apply(h, token: str, p: dict) -> dict:
@@ -82,7 +82,7 @@ async def test_a_delete_can_be_approved_on_the_chat_card(stack: Stack) -> None:
         h,
         token,
         "propose_list_change",
-        {"list_name": "color_tags", "changes": [{"op": "delete", "name": "Cut"}]},
+        {"which_list": "color_tags", "changes": [{"op": "delete", "name": "Cut"}]},
     )
     code = (res.get("_meta") or {}).get(APPROVAL_META_KEY)
     assert code, res.get("_meta")
@@ -133,7 +133,7 @@ async def test_default_categories_take_template_names_only(stack: Stack) -> None
     out = await _apply(h, token, p)
     assert out["result"]["verified"] is True, out
     assert ark.account.defaults["alice"][9003] == ["Draw", "Ramp"]
-    got = structured(await call(h, token, "get_my_lists", {"list_name": "default_categories"}))
+    got = structured(await call(h, token, "get_my_lists", {"which_list": "default_categories"}))
     assert got["items"] == [{"oracle_id": 9003, "name": "Sol Ring", "categories": ["Draw", "Ramp"]}]
     p = await _propose(h, token, "default_categories", [{"op": "clear", "card": "Sol Ring"}])
     await _apply(h, token, p)
@@ -146,7 +146,7 @@ async def test_pins(stack: Stack) -> None:
     await _set_mode(h, "semi")
     p = await _propose(h, token, "pins", [{"op": "pin", "card": "Sol Ring", "notes": "for Meren"}])
     assert (await _apply(h, token, p))["state"] == "applied"
-    pins = structured(await call(h, token, "get_my_lists", {"list_name": "pins"}))
+    pins = structured(await call(h, token, "get_my_lists", {"which_list": "pins"}))
     assert pins["items"][0]["name"] == "Sol Ring" and pins["items"][0]["notes"] == "for Meren"
     assert pins["limit"] == account_lists.MAX_PINS
     p = await _propose(
@@ -222,7 +222,7 @@ async def test_a_change_made_on_archidekt_since_stops_the_apply(stack: Stack) ->
 @pytest.mark.parametrize("kind", account_lists.KINDS)
 async def test_every_list_reads(stack: Stack, kind: str) -> None:
     token = await linked_user(stack)
-    got = structured(await call(stack.h, token, "get_my_lists", {"list_name": kind}))
+    got = structured(await call(stack.h, token, "get_my_lists", {"which_list": kind}))
     assert got["ok"] and got["list"] == kind and got["items"] == [], got
 
 

@@ -61,6 +61,10 @@ TOOLS: dict[str, ToolWords] = {
     # tools_community.py
     "propose_deck_help": ToolWords("Propose a deck help request", "Ask for help with this deck"),
     "propose_report": ToolWords("Propose a report to Archidekt", "Report this deck to Archidekt"),
+    "get_registration_pdf": ToolWords("Make a deck registration sheet", "Make a registration PDF"),
+    # tools_packages.py
+    "list_my_packages": ToolWords("List my card packages", "List my card packages"),
+    "propose_add_package": ToolWords("Propose adding a card package", "Add my Fetches package to this deck"),
     # tools_lists.py
     "get_my_lists": ToolWords("Read my Archidekt lists", "List my category templates"),
     "propose_list_change": ToolWords("Propose a change to my lists", "Add a color tag called Cut, red"),

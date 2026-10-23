@@ -61,7 +61,11 @@ def _clean(rows: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
     """Rows as compared: without the scan's name-guess warning, which the save adds, and without a
     commander row's list of names, which its before and after already hold (rows saved before
     the list was added lack it)."""
-    return [{k: v for k, v in r.items() if k not in ("guessed_from", "names")} for r in rows or []]
+    return [
+        {k: v for k, v in r.items() if k not in ("guessed_from", "names")}
+        for r in rows or []
+        if r.get("kind") != "package"  # where a package's adds come from, not a change (packages.py)
+    ]
 
 
 def rows_now(svc: Any, sub: str, row: dict[str, Any], deck: Deck) -> list[dict[str, Any]] | None:

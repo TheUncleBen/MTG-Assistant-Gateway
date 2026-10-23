@@ -230,6 +230,7 @@ WRITE_TOOLS = frozenset(
         "propose_deck_categories",
         "propose_clone_deck",
         "propose_list_change",  # the member's account-wide lists (account_lists.py)
+        "propose_add_package",  # a card package's cards into a deck (packages.py)
         # the Archidekt account actions (actions.py): proposals too, even though none of them is
         # ever applied by an assistant
         "propose_deck_social",
@@ -846,6 +847,7 @@ def build_mcp_server(state: AppState) -> MCPServer:
     from .tools_community import add_community_tools
     from .tools_decks import add_deck_tools
     from .tools_lists import add_list_tools
+    from .tools_packages import add_package_tools
     from .tools_reports import add_report_tools
 
     # The helpers above, for the tool and route modules (each takes what it uses). Tools are
@@ -864,6 +866,7 @@ def build_mcp_server(state: AppState) -> MCPServer:
     add_account_tools(state, h)
     add_list_tools(state, h)
     add_community_tools(state, h)
+    add_package_tools(state, h)
 
     add_browser_routes(server, state)
     add_skill_routes(server, state)

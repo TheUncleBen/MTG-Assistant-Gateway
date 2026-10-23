@@ -36,6 +36,7 @@ from .schemas import (
     DeckChange,
     DeckFormat,
     NewDeckCard,
+    PackageSettings,
     change_for_assistant,
     deck_change_for_service,
     new_deck_card_for_service,
@@ -292,7 +293,9 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
             "deck as get_deck or the Export page's .json returns it: an object with a cards list) or "
             "scan_session (the id or name of a scan session). Returns the proposal, a review URL and "
             "warnings (a deck size the format does not allow, scan cards matched from a misspelt name): "
-            "tell the user about each. Nothing is created until the user confirms (or you apply it when "
+            "tell the user about each. With package {keywords, budget?, intended_formats?} it makes a "
+            "card package instead (Archidekt's New package: no format; cards may be left out for an "
+            "empty one). Nothing is created until the user confirms (or you apply it when "
             "assistant_may_apply is true)."
         ),
         annotations={"readOnlyHint": True, "destructiveHint": False, "openWorldHint": True},
@@ -318,6 +321,9 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
             Literal["any", "paper", "mtgo", "arena"], Field(description="Game type (default any).")
         ] = "any",
         scan_session: Annotated[str | None, Field(description="Or a scan session's id or name.")] = None,
+        package: Annotated[
+            PackageSettings | None, Field(description="Make a card package with these settings instead.")
+        ] = None,
     ) -> CallToolResult:
         warnings: list[str] = []
         try:
@@ -338,6 +344,7 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
                 private=private,
                 theorycrafted=theorycrafted,
                 game=game,
+                package=package.model_dump(exclude_unset=True) if package else None,
             )
             warnings += made.pop("warnings", [])
             size = sum(
