@@ -67,7 +67,7 @@ TOOLS: dict[str, ToolWords] = {
     "propose_contest_entry": ToolWords("Propose a contest entry", "Enter this deck in the contest"),
     "get_registration_pdf": ToolWords("Make a deck registration sheet", "Make a registration PDF"),
     # tools_packages.py
-    "list_my_packages": ToolWords("List my card packages", "List my card packages"),
+    "list_card_packages": ToolWords("List card packages", "List card packages"),
     "propose_add_package": ToolWords("Propose adding a card package", "Add my Fetches package to this deck"),
     # tools_lists.py
     "get_my_lists": ToolWords("Read my Archidekt lists", "List my category templates"),

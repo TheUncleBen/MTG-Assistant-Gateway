@@ -169,7 +169,7 @@ async def test_a_package_is_added_as_reviewed_adds_and_counts_one_import_when_ap
         (await _new_package(stack, token, decklist_text="1 Sol Ring\n1 Arcane Signet"))["proposal_id"],
     )
     pkg_id = int(made["result"]["deck_id"])
-    listed = structured(await call(stack.h, token, "list_my_packages", {}))
+    listed = structured(await call(stack.h, token, "list_card_packages", {}))
     assert [p["id"] for p in listed["packages"]] == [str(pkg_id)] and listed["packages"][0]["imports"] == 0
     p = structured(
         await call(stack.h, token, "propose_add_package", {"deck_id": "42", "package_id": str(pkg_id)})
@@ -206,3 +206,50 @@ def test_a_package_add_is_low_risk_only_up_to_ten_cards() -> None:
     assert modes.risk_of("edit", adds(1, 1), max_rows=1)[0] == "high"  # the row limit still holds
     # an edit that is not from a package keeps the row limit alone
     assert modes.risk_of("edit", adds(*[1] * 11)[1:], max_rows=20)[0] == "low"
+
+
+async def test_packages_are_listed_as_the_sites_packages_page_lists_them(stack: Stack) -> None:
+    """Mine, followed (bookmarked) or everyone's public packages, by name and the site's format and
+    budget filters (REQUESTS.md section 6, "Listing packages")."""
+    ark = stack.ark
+    token = await linked_user(stack)
+    mine = await _browser_apply(stack.h, (await _new_package(stack, token))["proposal_id"])
+    mine_id = int(mine["result"]["deck_id"])
+
+    def other(did: int, name: str, block: dict, private: bool = False) -> None:
+        ark.decks[did] = {
+            "id": did,
+            "name": name,
+            "owner": {"username": "amy"},
+            "updatedAt": "2026-10-03T00:00:00Z",
+            "deckFormat": None,
+            "private": private,
+            "categories": [],
+            "cards": [],
+            "cardPackage": {"id": did + 1000, "importCount": 3, **block},
+        }
+        if private:
+            ark.private.add(did)
+
+    other(901, "Amy shocks", {"keywords": "shocklands", "budget": 2, "intendedFormats": [3]})
+    other(902, "Amy burn", {"keywords": "burn", "budget": 1, "intendedFormats": [2]})
+    other(903, "Amy secret", {"keywords": "x", "budget": None, "intendedFormats": [3]}, private=True)
+    ark.bookmarks.setdefault("alice", set()).add(902)
+
+    async def ids(**args: object) -> list[int]:
+        got = structured(await call(stack.h, token, "list_card_packages", args))
+        assert got["ok"] is True, got
+        return [int(p["id"]) for p in got["packages"]]
+
+    assert await ids() == [mine_id]
+    assert await ids(whose="followed") == [902]
+    assert sorted(await ids(whose="all")) == sorted([mine_id, 901, 902])  # never another's private one
+    assert await ids(whose="all", name_contains="shocks") == [901]
+    assert sorted(await ids(whose="all", intended_format="commander")) == sorted([mine_id, 901])
+    assert await ids(whose="all", budget=1) == [902]
+    sent = ark.account.package_queries[-1]
+    assert sent["budget"] == "1" and sent["orderBy"] == "-importCount" and "ownerUsername" not in sent
+    bad = structured(
+        await call(stack.h, token, "list_card_packages", {"whose": "all", "intended_format": "x"})
+    )
+    assert bad["ok"] is False and "format" in bad["message"]

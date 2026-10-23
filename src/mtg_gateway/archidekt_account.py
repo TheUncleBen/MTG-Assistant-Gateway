@@ -329,23 +329,35 @@ class AccountRequests:
         pid = _id(package_id, "package id")
         return await self._request("PATCH", f"/decks/packages/{pid}/", token=token, json_body=block)
 
-    async def my_packages(self: ArchidektClient, token: str, username: str, page: int = 1) -> dict[str, Any]:
-        """``{count, next, results}``: the member's own card packages, most imported first, as the
-        site's Packages page asks for them (``packages=true`` with ``ownerUsername``)."""
-        body = await self._request(
-            "GET",
-            "/decks/v3/",
-            token=token,
-            params={
-                "name": "",
-                "orderBy": "-importCount",
-                "packages": "true",
-                "ownerUsername": username,
-                "ascending": "false",
-                "page": str(int(page)),
-            },
-            fresh=True,
-        )
+    async def packages_list(
+        self: ArchidektClient,
+        token: str,
+        *,
+        owner: str | None = None,
+        bookmarks: bool = False,
+        name: str = "",
+        intended_format: int | None = None,
+        budget: int | None = None,
+        page: int = 1,
+    ) -> dict[str, Any]:
+        """``{count, next, results}``: card packages, most imported first, as the site's Packages
+        page asks for them (``packages=true``): ``owner`` for one member's ("mine"), ``bookmarks``
+        for the ones the member follows, neither for everyone's; ``name``, ``intended_format`` (a
+        format id) and ``budget`` (1 to 4) are the page's filters."""
+        params = {
+            "name": name,
+            "orderBy": "-importCount",
+            "intendedFormat": "" if intended_format is None else str(int(intended_format)),
+            "budget": "" if budget is None else str(int(budget)),
+            "packages": "true",
+            "ascending": "false",
+            "page": str(int(page)),
+        }
+        if owner is not None:
+            params["ownerUsername"] = owner
+        if bookmarks:
+            params["bookmarks"] = "true"
+        body = await self._request("GET", "/decks/v3/", token=token, params=params, fresh=True)
         if not isinstance(body, dict) or not isinstance(body.get("results"), list):
             raise ArchidektError("contract", "unexpected package list shape")
         return body

@@ -41,6 +41,7 @@ class AccountFake:
         self.private: dict[str, dict[str, Any]] = {}
         self.notes: dict[str, list[dict[str, Any]]] = {}
         self.entries: dict[int, list[dict[str, Any]]] = {}  # thread id -> submissions
+        self.package_queries: list[dict[str, str]] = []
         self.package_imports: dict[int, int] = {}  # package deck id -> incrementPackageImport reads
         self.next_id = 7000
         self.max_pins = 150
@@ -291,12 +292,27 @@ class AccountFake:
                 self.package_imports[did] = self.package_imports.get(did, 0) + 1
             return None  # the deck itself, as any read answers it
         if parts == ["decks", "v3"] and m == "GET" and request.url.params.get("packages") == "true":
-            mine = [
-                d
-                for d in self.ark.decks.values()
-                if isinstance(d.get("cardPackage"), dict)
-                and d["owner"]["username"] == request.url.params.get("ownerUsername")
-            ]
+            q = dict(request.url.params)
+            self.package_queries.append(q)
+            owner, marked = q.get("ownerUsername"), q.get("bookmarks") == "true"
+
+            def listed(d: dict) -> bool:
+                block = d.get("cardPackage")
+                if not isinstance(block, dict):
+                    return False
+                if owner is not None and d["owner"]["username"] != owner:
+                    return False
+                if marked and d["id"] not in self.ark.bookmarks.get(who or "", set()):
+                    return False
+                if d["owner"]["username"] != who and d.get("private"):
+                    return False
+                if q.get("name") and q["name"].casefold() not in d["name"].casefold():
+                    return False
+                if q.get("intendedFormat") and int(q["intendedFormat"]) not in block["intendedFormats"]:
+                    return False
+                return not (q.get("budget") and block.get("budget") != int(q["budget"]))
+
+            mine = [d for d in self.ark.decks.values() if listed(d)]
             mine.sort(key=lambda d: -d["cardPackage"].get("importCount", 0))
             rows = [{**self.ark._listing_row(d), "cardPackage": dict(d["cardPackage"])} for d in mine]
             return _ok({"count": len(rows), "next": None, "results": rows})

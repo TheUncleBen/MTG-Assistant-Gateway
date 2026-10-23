@@ -172,3 +172,64 @@ def source_text(name: str, changes: list[dict[str, Any]], skipped: dict[str, lis
     n = sum(int(c["quantity"]) for c in changes)
     left = "; ".join(f"left out, {why}: {', '.join(names)}" for why, names in skipped.items())
     return f"From card package “{name}”: {n} {'card' if n == 1 else 'cards'}" + (f" ({left})" if left else "")
+
+
+WHOSE = ("mine", "followed", "all")
+
+
+async def listing(
+    decks: Any,
+    sub: str,
+    *,
+    whose: str = "mine",
+    name_contains: str | None = None,
+    intended_format: str | None = None,
+    budget: int | None = None,
+    page: int = 1,
+) -> dict[str, Any]:
+    """One page of card packages as the site's Packages page lists them: the member's own
+    (``mine``), the ones they follow (``followed``) or everyone's public ones (``all``), most
+    imported first, filtered by name, one intended format and a budget. ``{rows, more}``; each row
+    has id, name, owner, url, private, size, settings and imports."""
+    if whose not in WHOSE:
+        raise _err(f"whose is one of: {', '.join(WHOSE)}")
+    if isinstance(page, bool) or not isinstance(page, int) or not 1 <= page <= 100:
+        raise _err("page must be a number from 1 to 100")
+    if budget is not None and (isinstance(budget, bool) or budget not in (1, 2, 3, 4)):
+        raise _err("budget is 1 to 4 ($ to $$$$), or null for any")
+    name = " ".join(str(name_contains or "").split())[:100]
+    fmt = None if not intended_format else _format_id(intended_format)
+    _token, link = decks._token(sub)
+    owner = link["archidekt_username"] if whose == "mine" else None
+    body = await decks._call(
+        sub,
+        lambda token, *_: decks.client.packages_list(
+            token,
+            owner=owner,
+            bookmarks=whose == "followed",
+            name=name,
+            intended_format=fmt,
+            budget=budget,
+            page=page,
+        ),
+    )
+    rows = []
+    for r in body["results"]:
+        if not isinstance(r, dict) or not str(r.get("id") or "").isdigit():
+            continue
+        block = r.get("cardPackage") if isinstance(r.get("cardPackage"), dict) else {}
+        who = r.get("owner") if isinstance(r.get("owner"), dict) else {}
+        rows.append(
+            {
+                "id": str(r["id"]),
+                "name": str(r.get("name") or "Unnamed deck"),
+                "owner": str(who.get("username") or ""),
+                "url": f"https://archidekt.com/decks/{r['id']}",
+                "private": bool(r.get("private")),
+                "size": r.get("size") if isinstance(r.get("size"), int) else None,
+                "settings": text(block) if block else None,
+                "block": block,
+                "imports": block.get("importCount"),
+            }
+        )
+    return {"rows": rows, "more": bool(body.get("next"))}

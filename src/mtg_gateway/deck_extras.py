@@ -1134,35 +1134,45 @@ def add_deck_extras_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
 
     @server.custom_route("/decks/api/packages", methods=["GET"], include_in_schema=False)
     async def packages_json(request: Request) -> Response:
-        """The member's own packages (the Add a package box's list), read when the box opens."""
+        """Card packages for the Add a package box, read when it opens and when its chips or
+        filters change: ``whose`` (mine, followed, all), ``q`` (name), ``format``, ``budget``,
+        ``page``, as packages.listing takes them."""
         sub, _sid = browser_session(state, request)
         if not sub:
             return JSONResponse(
                 {"ok": False, "error": "unauthenticated"}, 401, headers={"Cache-Control": "no-store"}
             )
+        q = request.query_params
         try:
-            _token, link = decks._token(sub)
-            body = await decks._call(
-                sub, lambda token, *_: decks.client.my_packages(token, link["archidekt_username"], 1)
+            budget = int(q["budget"]) if q.get("budget") else None
+            page = int(q.get("page") or 1)
+        except ValueError:
+            return JSONResponse(
+                {"ok": False, "message": "budget and page are numbers"},
+                400,
+                headers={"Cache-Control": "no-store"},
+            )
+        try:
+            got = await packages.listing(
+                decks,
+                sub,
+                whose=q.get("whose") or "mine",
+                name_contains=q.get("q"),
+                intended_format=q.get("format") or None,
+                budget=budget,
+                page=page,
             )
         except DeckError as exc:
             return JSONResponse(
                 {"ok": False, "message": str(exc)}, 400, headers={"Cache-Control": "no-store"}
             )
-        rows = []
-        for r in body.get("results") or []:
-            if not isinstance(r, dict) or not str(r.get("id") or "").isdigit():
-                continue
-            block = r.get("cardPackage") if isinstance(r.get("cardPackage"), dict) else {}
-            owner = r.get("owner") if isinstance(r.get("owner"), dict) else {}
-            rows.append(
-                {
-                    "id": str(r["id"]),
-                    "name": str(r.get("name") or "Unnamed deck"),
-                    "line": package_line(str(owner.get("username") or ""), r.get("size"), block),
-                }
-            )
-        return JSONResponse({"ok": True, "packages": rows}, headers={"Cache-Control": "no-store"})
+        rows = [
+            {"id": r["id"], "name": r["name"], "line": package_line(r["owner"], r["size"], r["block"])}
+            for r in got["rows"]
+        ]
+        return JSONResponse(
+            {"ok": True, "packages": rows, "more": got["more"]}, headers={"Cache-Control": "no-store"}
+        )
 
 
 def package_line(owner: str, size: Any, block: dict[str, Any]) -> str:
