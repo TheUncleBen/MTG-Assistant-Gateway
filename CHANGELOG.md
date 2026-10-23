@@ -40,7 +40,8 @@ each of them; anything public or about your account waits for your own press.
 - **Your Archidekt profile and settings** on the Account page: bio, username, profile picture,
   e-mail and notification switches, and new device default settings. Each change is applied only
   by your own press. Password, e-mail address, Patreon and deleting your account stay on Archidekt,
-  with a link to it.
+  with a link to it. If Archidekt takes more than 3 seconds to send them, the page shows
+  without them and says so, and the next load has them.
 - **Collection visibility.** My collection says whether it is private or public on Archidekt, and
   can change it; making it public asks once first.
 - **The notification bell.** Archidekt's notifications in the top bar and on their own page, with
@@ -55,6 +56,18 @@ each of them; anything public or about your account waits for your own press.
   details you type; nothing you type is kept by the gateway.
 - **Lock personal categories** in the card menu saves a card's template categories as its default
   categories.
+- **Archidekt's forum.** A Forum page with Archidekt's sections, each section's threads and a
+  thread's posts, and a reply box; your assistant can read the forum and propose a reply. A reply
+  is public under your name and waits for your own press. Starting a new thread stays on Archidekt,
+  which asks you to prove you're human first. The section and thread lists are read the way
+  Archidekt's own forum pages load them, so if Archidekt changes those pages the gateway says so,
+  and a thread still opens from its link or number.
+- **Custom cards in your decks.** Your own custom cards can be put in a deck, taken out or given a
+  new count, by you or as a proposal from your assistant.
+- **A color tag when adding a package.** Add a package can put one of your color tags on every card
+  it adds, in the same change.
+- **More device default settings:** Group by, Sort by and the two price sources, as on Archidekt's
+  account settings.
 
 ### Changed
 - **Approval mode** on the Account page is one line per mode, each with a fold that explains it.
