@@ -91,7 +91,7 @@ async def test_a_sections_threads_with_their_marks_search_order_and_paging(
     assert "<h1>General</h1>" in page
     # the crumbs: every one a link, the group's to its list on the front page
     assert "href='/forum'>Forum</a>" in page
-    assert "href='/forum#group-archidekt'>Archidekt</a>" in page
+    assert "href='/forum#group-Archidekt'>Archidekt</a>" in page
     assert "href='/forum/Archidekt/General'>General</a>" in page
     # one row a thread, each a link to the thread page, with its author, responses and points
     rows = re.findall(r"<a class='tr' href='/forum/thread/(\d+)'", page)
@@ -107,7 +107,7 @@ async def test_a_sections_threads_with_their_marks_search_order_and_paging(
     assert ark.site_pages[-1] == ("/forum/Archidekt/General", {"page": "1", "orderBy": "-updatedAt"})
     # the front page carries the anchor the group crumb links to
     front = (await member.http.get("/forum")).text
-    assert "<div class='fm-group' id='group-archidekt'>" in front
+    assert "<div class='fm-group' id='group-Archidekt'>" in front
     # the New thread button names the section
     assert "href='https://archidekt.com/forum/thread/new?section=General'" in page
     # three threads: no Load more
@@ -552,3 +552,26 @@ async def test_a_forum_reply_is_voted_down_and_back_through_the_comment_routes(
     assert r.status_code == 404
     r = await post(member, path, {"vote": "sideways"})
     assert r.status_code == 400
+
+
+def test_group_anchors_differ_for_every_group_name() -> None:
+    from mtg_gateway.forum_page import group_anchor
+
+    names = ["Deck Help", "Deck-Help", "deck help", "Deck_Help", "Deck  Help", "Déck Help", "", "-"]
+    anchors = [group_anchor(n) for n in names]
+    assert len(set(anchors)) == len(names), anchors
+    assert all(re.fullmatch(r"group-[A-Za-z0-9_-]*", a) for a in anchors), anchors
+    assert group_anchor("Archidekt") == "group-Archidekt"
+
+
+async def test_a_comment_vote_without_the_page_token_is_refused(member: Browser, stack: Stack) -> None:
+    ark = stack.ark
+    cid = _reply(ark, 700002, "amy", "Arcane Signet.")
+    sent = len(ark.vote_calls)
+    r = await member.http.post(
+        f"/social/api/decks/forum:700002/comments/{cid}/vote",
+        content=json.dumps({"vote": "down"}),
+        headers={"Content-Type": "application/json"},
+    )
+    assert r.status_code == 403 and r.json()["error"] == "csrf", r.text
+    assert len(ark.vote_calls) == sent and ("alice", cid) not in ark.votes

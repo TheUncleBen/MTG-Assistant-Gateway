@@ -222,8 +222,9 @@ def new_thread_html(section: str = "") -> str:
 
 
 def group_anchor(group: str) -> str:
-    """The id of a group's list on the forum's front page, for the crumbs' link to it."""
-    slug = re.sub(r"[^A-Za-z0-9_-]+", "-", group).strip("-").lower() or "group"
+    """The id of a group's list on the forum's front page, for the crumbs' link to it: letters,
+    digits and "-" kept, any other character as "_<hex>_", so two group names never share an id."""
+    slug = re.sub(r"[^A-Za-z0-9-]", lambda m: f"_{ord(m.group()):x}_", group)
     return f"group-{slug}"
 
 
