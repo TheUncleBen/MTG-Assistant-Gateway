@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import secrets
 import threading
+import weakref
 from typing import TYPE_CHECKING, Any
 
 from .archidekt_account import CUSTOM_CARD_FIELDS, HEX_COLOR_RE
@@ -1002,20 +1003,34 @@ def applied_text(changes: dict[str, Any], result: dict[str, Any]) -> str:
 PICTURE_MAX_BYTES = 1_500_000  # Archidekt's own limit for a custom card picture (its upload box)
 PICTURE_SIZE = (500, 700)  # the crop Archidekt's page redraws and sends
 PICTURE_FORMATS = ("JPEG", "PNG", "WEBP")
-PICTURE_MAX_PIXELS = 12_000_000  # the most pixels a picture is ever decoded to (security review 0.7.44)
+# the most pixels a picture is ever decoded to (security review 0.7.44; 12 MP still took about
+# 150 MB to redraw, too close to the container's 256 MB)
+PICTURE_MAX_PIXELS = 8_000_000
 # one picture decoded at a time, off the event loop: a decoded picture can take tens of megabytes,
 # and the gateway's container is small (the profile picture shares it)
 DECODE_LOCK = threading.Lock()
+# the async callers wait for their turn on the event loop, so a queue of uploads holds no worker
+# thread (each event loop has its own; tests run many loops)
+_TURNS: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Lock] = weakref.WeakKeyDictionary()
 
 
-def jpeg_scale(img: Any, want: tuple[int, int]) -> float:
+def decode_turn() -> asyncio.Lock:
+    """This event loop's turn to decode a picture: held around the worker thread that does it."""
+    loop = asyncio.get_running_loop()
+    turn = _TURNS.get(loop)
+    if turn is None:
+        turn = _TURNS[loop] = asyncio.Lock()
+    return turn
+
+
+def jpeg_scale(img: Any, want: tuple[int, int]) -> tuple[float, float]:
     """Ask the JPEG decoder for the picture at a fraction of its size (1/2, 1/4 or 1/8) that still
     covers ``want`` pixels, before anything is decoded; the factor from the decoded picture back
-    to the file's own pixels (1.0 when nothing was saved)."""
+    to the file's own pixels, across and down ((1.0, 1.0) when nothing was saved)."""
     w, h = img.size
     if img.format == "JPEG":
         img.draft("RGB", (max(1, want[0]), max(1, want[1])))
-    return w / img.size[0]
+    return w / img.size[0], h / img.size[1]
 
 
 def redraw_picture(raw: bytes, crop: tuple[int, int, int, int] | None = None) -> bytes:
@@ -1028,7 +1043,8 @@ def redraw_picture(raw: bytes, crop: tuple[int, int, int, int] | None = None) ->
 
 
 async def redraw_picture_async(raw: bytes, crop: tuple[int, int, int, int] | None = None) -> bytes:
-    return await asyncio.to_thread(redraw_picture, raw, crop)
+    async with decode_turn():
+        return await asyncio.to_thread(redraw_picture, raw, crop)
 
 
 def _redraw(raw: bytes, crop: tuple[int, int, int, int] | None) -> bytes:
@@ -1057,10 +1073,15 @@ def _redraw(raw: bytes, crop: tuple[int, int, int, int] | None) -> bytes:
         raise _err("The crop is outside the picture. Crop it again.")
     with Image.open(io.BytesIO(raw)) as img:
         # the decoder's own reduction keeps the crop at least 500 x 700 (a JPEG only)
-        f = jpeg_scale(img, (w * PICTURE_SIZE[0] // cw, h * PICTURE_SIZE[1] // ch))
+        fx, fy = jpeg_scale(img, (w * PICTURE_SIZE[0] // cw, h * PICTURE_SIZE[1] // ch))
         if img.size[0] * img.size[1] > PICTURE_MAX_PIXELS:
             raise _err("The picture has too many pixels. Choose a smaller one.")
-        box = (round(left / f), round(top / f), round((left + cw) / f), round((top + ch) / f))
+        # each side by its own factor, and never past the decoded picture's edge (a black band)
+        dw, dh = img.size
+        x0, y0 = min(dw - 1, round(left / fx)), min(dh - 1, round(top / fy))
+        x1 = max(x0 + 1, min(dw, round((left + cw) / fx)))
+        y1 = max(y0 + 1, min(dh, round((top + ch) / fy)))
+        box = (x0, y0, x1, y1)
         art = img.crop(box).convert("RGBA").resize(PICTURE_SIZE, Image.LANCZOS)
     art.info.clear()
     out = io.BytesIO()

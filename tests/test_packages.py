@@ -341,3 +341,53 @@ async def test_mine_keeps_only_the_linked_accounts_packages_and_is_kept_briefly(
     packages.forget("s1", "/decks/5/update/")
     await packages.listing(decks, "s1")
     assert len(calls) == 3
+
+
+async def test_an_amend_recounts_the_package_line_and_drops_it_when_no_package_card_is_left(
+    stack: Stack,
+) -> None:
+    """Confirmation pass 0.7.44 (N-2): the line kept its first count after an amend, and when no
+    package card was left the apply still read the package, counting an import on Archidekt."""
+    token = await linked_user(stack)
+    made = await _browser_apply(
+        stack.h, (await _new_package(stack, token, decklist_text="1 Arcane Signet\n1 Opt"))["proposal_id"]
+    )
+    pkg_id = int(made["result"]["deck_id"])
+
+    async def amend(p: dict, changes: list[dict]) -> dict:
+        out = structured(
+            await call(
+                stack.h,
+                token,
+                "amend_proposal",
+                {"proposal_id": p["proposal_id"], "version": p["version"], "changes": changes},
+            )
+        )
+        assert out["ok"] is True, out
+        return out
+
+    p = structured(
+        await call(stack.h, token, "propose_add_package", {"deck_id": "42", "package_id": str(pkg_id)})
+    )
+    fewer = await amend(p, [{"action": "add", "card_name": "Opt", "quantity": 1}])
+    assert fewer["rows"][0]["kind"] == "package"
+    assert ": 1 card" in fewer["rows"][0]["text"], fewer["rows"][0]
+    p = structured(
+        await call(stack.h, token, "propose_add_package", {"deck_id": "42", "package_id": str(pkg_id)})
+    )
+    none = await amend(p, [{"action": "add", "card_name": "Island", "quantity": 1}])
+    assert all(r.get("kind") != "package" for r in none["rows"]), none["rows"]
+    done = await _browser_apply(stack.h, p["proposal_id"])
+    assert done["state"] == "applied", done
+    assert stack.ark.account.package_imports.get(pkg_id, 0) == 0
+
+
+def test_expired_package_lists_are_let_go() -> None:
+    """Confirmation pass 0.7.44 (N-5): kept lists were replaced or forgotten on a write, never let
+    go when they ran out, so a member paging through filters kept every page."""
+    import time
+
+    packages._MINE.clear()
+    packages._MINE[("s1", ("old",))] = (time.monotonic() - 1, {"rows": []})
+    packages._keep(("s1", ("new",)), {"rows": []})
+    assert list(packages._MINE) == [("s1", ("new",))]

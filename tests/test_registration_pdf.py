@@ -117,3 +117,14 @@ def test_the_pdf_needs_the_write_scope() -> None:
     from mtg_gateway.app import WRITE_TOOLS
 
     assert "get_registration_pdf" in WRITE_TOOLS
+
+
+async def test_the_pdf_tool_says_it_is_not_read_only(stack: Stack) -> None:
+    """Confirmation pass 0.7.44 (N-4): a write tool marked readOnlyHint true may be run by an app
+    without asking, and a read-only token is refused a tool it was told only reads."""
+    from .test_decks_and_proxy import sse_json
+
+    token = await linked_user(stack)
+    tools = sse_json(await stack.h.mcp(token, "tools/list", {}, rid=7))["result"]["tools"]
+    pdf = next(t for t in tools if t["name"] == "get_registration_pdf")
+    assert pdf["annotations"]["readOnlyHint"] is False

@@ -3567,6 +3567,8 @@ class DeckService:
             package_id=pkg_deck.id,
             name=pkg_deck.name,
             text=packages.source_text(pkg_deck.name, changes, skipped),
+            cards=[c["card_name"] for c in changes],
+            skipped=skipped,
         )
         return await self.propose(sub, deck_id, changes, source_row=line)
 
@@ -6254,9 +6256,14 @@ class DeckService:
             _before, _after, rows = plan_rows(deck, changes)
             await self._refuse_unknown_cards(deck, changes)
             stored: Any = [c.as_dict() for c in changes]
-            # a card package's line stays first: its import is counted at apply, and its risk rule
-            # holds (security review 0.7.44)
-            rows = [*(r for r in row.get("rows") or [] if r.get("kind") == "package"), *rows]
+            # a card package's line stays first while any of its cards is still added: its import
+            # is counted at apply, and its risk rule holds (security review 0.7.44)
+            from . import packages
+
+            lines = (
+                packages.amended_line(r, stored) for r in row.get("rows") or [] if r.get("kind") == "package"
+            )
+            rows = [*(r for r in lines if r is not None), *rows]
         else:
             raw = dict(raw_changes) if isinstance(raw_changes, dict) else raw_changes
             organise_raw = (

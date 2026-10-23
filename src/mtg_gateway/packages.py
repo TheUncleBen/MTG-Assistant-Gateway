@@ -174,10 +174,34 @@ def source_text(name: str, changes: list[dict[str, Any]], skipped: dict[str, lis
     return f"From card package “{name}”: {n} {'card' if n == 1 else 'cards'}" + (f" ({left})" if left else "")
 
 
+def amended_line(line: dict[str, Any], changes: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """A package's line after its adds were amended: counted again from the adds that are still
+    the package's cards, or None when none is left (nothing from the package, so no import)."""
+    names = {str(n).casefold() for n in line.get("cards") or []}
+    left = [
+        c
+        for c in changes
+        if c.get("action") == "add" and str(c.get("card_name") or "").casefold() in names
+    ]
+    if not left:
+        return None
+    return {**line, "text": source_text(str(line.get("name") or ""), left, line.get("skipped") or {})}
+
+
 WHOSE = ("mine", "followed", "all")
 MINE_TTL = 60.0  # seconds the member's own packages are kept (My decks asks after every visit)
 # (sub, filters) -> (expiry, Archidekt's answer); only "mine", the one My decks reads
 _MINE: dict[tuple[str, tuple[Any, ...]], tuple[float, dict[str, Any]]] = {}
+
+
+def _keep(key: tuple[str, tuple[Any, ...]], body: dict[str, Any]) -> None:
+    """Keep one member's list for MINE_TTL, letting go of every list that has run out."""
+    import time
+
+    now = time.monotonic()
+    for old in [k for k, (expires, _body) in _MINE.items() if expires <= now]:
+        _MINE.pop(old, None)
+    _MINE[key] = (now + MINE_TTL, body)
 
 
 def forget(sub: str, *_: Any) -> None:
@@ -233,7 +257,7 @@ async def listing(
             ),
         )
         if whose == "mine":
-            _MINE[key] = (time.monotonic() + MINE_TTL, body)
+            _keep(key, body)
     rows = []
     for r in body["results"]:
         if not isinstance(r, dict) or not str(r.get("id") or "").isdigit():

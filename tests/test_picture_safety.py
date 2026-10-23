@@ -94,3 +94,65 @@ async def test_pictures_are_decoded_off_the_event_loop_one_at_a_time() -> None:
         account_lists._redraw = real  # type: ignore[assignment]
     assert threading.main_thread().name not in threads
     assert busy["most"] == 1
+
+
+def test_the_pixel_cap_leaves_the_gateway_room() -> None:
+    """Confirmation pass 0.7.44 (S-01): a 12 MP picture still took about 150 MB to redraw; 8 MP is
+    the most decoded, and a picture just over it is refused."""
+    assert account_lists.PICTURE_MAX_PIXELS == 8_000_000
+    with pytest.raises(Exception, match="too many pixels"):
+        account_lists.redraw_picture(_png(3000, 2700))
+    with pytest.raises(Exception, match="too many pixels"):
+        profile.clean_avatar(_png(3000, 2700))
+
+
+def test_an_avatar_is_made_small_before_it_is_converted() -> None:
+    """Confirmation pass 0.7.44 (S-01): the avatar was converted at full size, then shrunk."""
+    seen: list[tuple[int, int]] = []
+    real = Image.Image.convert
+
+    def spy(self, *a, **kw):
+        seen.append(self.size)
+        return real(self, *a, **kw)
+
+    Image.Image.convert = spy  # type: ignore[method-assign]
+    try:
+        data, _name = profile.clean_avatar(_png(2800, 2800))
+    finally:
+        Image.Image.convert = real  # type: ignore[method-assign]
+    with Image.open(io.BytesIO(data)) as out:
+        assert out.size == (profile.AVATAR_SIDE, profile.AVATAR_SIDE)
+    assert seen and max(w * h for w, h in seen) <= profile.AVATAR_SIDE**2, seen
+
+
+def test_a_jpeg_cropped_at_its_bottom_edge_has_no_black_band() -> None:
+    """Confirmation pass 0.7.44 (N-1): the decoder's reduction was mapped back with the width's
+    factor only, so a crop at the bottom of a picture whose height did not divide evenly ran past
+    the picture and came back with black rows."""
+    out = io.BytesIO()
+    Image.new("RGB", (1001, 8000), (255, 255, 255)).save(out, format="JPEG", quality=95)
+    png = account_lists.redraw_picture(out.getvalue(), (0, 6599, 1001, 1401))
+    with Image.open(io.BytesIO(png)) as pic:
+        rgb = pic.convert("RGB")
+        assert min(min(rgb.getpixel((x, rgb.size[1] - 1))) for x in range(0, rgb.size[0], 25)) > 200
+
+
+async def test_a_waiting_picture_holds_no_worker_thread(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Confirmation pass 0.7.44 (N-3): uploads waiting for their turn wait on the event loop, not
+    each in a worker thread of their own that other work needs."""
+    started: list[str] = []
+    real = asyncio.to_thread
+
+    async def counting(fn, *a, **kw):
+        started.append(getattr(fn, "__name__", "?"))
+        return await real(fn, *a, **kw)
+
+    monkeypatch.setattr(asyncio, "to_thread", counting)
+    raw = _png(700, 980)
+    async with account_lists.decode_turn():
+        waiting = [asyncio.create_task(account_lists.redraw_picture_async(raw)) for _ in range(3)]
+        waiting.append(asyncio.create_task(profile.clean_avatar_async(raw)))
+        await asyncio.sleep(0.05)
+        assert started == []
+    await asyncio.gather(*waiting)
+    assert len(started) == 4

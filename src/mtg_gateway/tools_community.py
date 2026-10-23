@@ -103,7 +103,7 @@ def add_community_tools(state: AppState, h: SimpleNamespace) -> None:
             "most 10) and go to Archidekt only: only pass what the user gave you for this sheet. "
             "Changes nothing in the deck or the account."
         ),
-        annotations={"readOnlyHint": True, "destructiveHint": False, "openWorldHint": True},
+        annotations={"readOnlyHint": False, "destructiveHint": False, "openWorldHint": True},
     )
     async def get_registration_pdf(
         deck_id: Annotated[str, Field(description="The deck: its id or URL.")],

@@ -273,6 +273,14 @@ def clean_avatar(raw: bytes) -> tuple[bytes, str]:
         return _clean_avatar(raw)
 
 
+async def clean_avatar_async(raw: bytes) -> tuple[bytes, str]:
+    """clean_avatar off the event loop, waiting for its turn there (account_lists.decode_turn)."""
+    from .account_lists import decode_turn
+
+    async with decode_turn():
+        return await asyncio.to_thread(clean_avatar, raw)
+
+
 def _clean_avatar(raw: bytes) -> tuple[bytes, str]:
     import io
 
@@ -298,6 +306,8 @@ def _clean_avatar(raw: bytes) -> tuple[bytes, str]:
         if img.size[0] * img.size[1] > PICTURE_MAX_PIXELS:
             raise _err("The picture has too many pixels. Choose a smaller one.")
         img.load()
+        if img.mode not in ("1", "P"):  # shrunk first, so only the small picture is converted
+            img.thumbnail((AVATAR_SIDE, AVATAR_SIDE), Image.LANCZOS)
         pic = img.convert("RGB") if fmt == "JPEG" else img.convert("RGBA")
     pic.thumbnail((AVATAR_SIDE, AVATAR_SIDE), Image.LANCZOS)
     clean = Image.new(pic.mode, pic.size)
@@ -317,7 +327,7 @@ async def set_avatar(decks: DeckService, sub: str, raw: bytes) -> dict[str, Any]
     """The member's own press on the Account page: the picture checked, saved again and sent as
     Archidekt's box sends it (PUT /users/uploadAvatar/{id}/), then the profile read back. Never
     from an assistant."""
-    data, name = await asyncio.to_thread(clean_avatar, raw)
+    data, name = await clean_avatar_async(raw)
     decks._writes_switch()
     uid = user_id(decks, sub)
     client = decks.client
