@@ -135,10 +135,10 @@ CSS = """
   .acc .ui-row.sw .ctl{justify-self:start}}
 """
 COLLECTION_CSS = """
-.col-vis{display:flex;flex-wrap:wrap;align-items:center;gap:.4rem 1rem;margin:0 0 .9rem;padding:.4rem .8rem;
+.col-vis{display:flex;flex-wrap:wrap;align-items:center;gap:.4rem 1rem;margin:0 0 .9rem;padding:.6rem .8rem;
   border:1px solid var(--card-border);border-radius:var(--radius-panel);background:var(--surface)}
 .col-vis .t{flex:1 1 14rem;min-width:0;font-size:.95rem}
-.col-vis .t b{display:inline-flex;align-items:center;gap:.3rem}
+.col-vis .t b{display:inline-flex;align-items:center;gap:.3rem;vertical-align:-3px}
 .col-vis .t b svg.i{width:16px;height:16px}
 .col-vis form{margin:0}
 .col-vis .btn,.col-vis button{margin:0}
