@@ -462,6 +462,9 @@ class DeckCard:
     canlander_points: int | None = None
     atomic_combos: list[str] = field(default_factory=list)
     oracle_id: str = ""
+    # one of the member's custom cards (the row carries ``customCard``, 0.7.43): no default
+    # categories on Archidekt, and reported as a custom card
+    custom: bool = False
 
     @property
     def type_line(self) -> str:
@@ -2401,6 +2404,7 @@ def parse_deck(body: Any) -> Deck:
                 canlander_points=_int(oracle.get("canlanderPoints")) or None,
                 atomic_combos=[str(i) for i in atomic if isinstance(i, (int, str))],
                 oracle_id=str(oracle.get("id") or ""),
+                custom=bool(entry.get("customCard")),
             )
         )
     owner = body.get("owner") if isinstance(body.get("owner"), dict) else {}

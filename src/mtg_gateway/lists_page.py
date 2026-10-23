@@ -262,6 +262,7 @@ def templates_rows(items: list[dict[str, Any]]) -> str:
             name,
             [
                 ("Edit…", "edit", tab_href(slug, edit=t["id"]), {"data-box": "tpl-box", "data-mode": "edit"}),
+                ("Add to a deck…", "plus", tab_href(slug, add=t["id"]), {"data-box": "tpl-deck"}),
                 None,
                 (
                     "Delete…",
@@ -278,6 +279,43 @@ def templates_rows(items: list[dict[str, Any]]) -> str:
             f"<span class='sm-hide flags'>{lbls}</span>{menu}</div>"
         )
     return "".join(out)
+
+
+def template_deck_box(csrf: str, st: dict[str, Any]) -> str:
+    """Add to a deck… (parity release 2): the deck picked from the member's decks (read when the
+    box opens, static/lists.js; the old address ?add= draws it with the list read here), then the
+    deck gets one category made from the template (account_lists.from_templates), proposed as a
+    categories change and sent to its review page."""
+    name = (st.get("values") or {}).get("name", "")
+    rows = st.get("decks") or []
+    picked = (st.get("values") or {}).get("deck", "")
+    opts = "".join(
+        f"<option value='{esc(str(d['id']))}'{' selected' if str(d['id']) == picked else ''}>{esc(d['name'])}"
+        "</option>"
+        for d in rows
+    )
+    body = (
+        f"<form id='tpl-deck-f' method='post' action='{PAGE}/templates'>"
+        f"<input type='hidden' name='csrf' value='{esc(csrf)}'><input type='hidden' name='action' "
+        f"value='add_to_deck'><input type='hidden' name='was_name' value='{esc(name)}'>"
+        "<div class='field'><label for='tpl-deck-sel'>Deck</label><span class='sel'>"
+        f"<select id='tpl-deck-sel' name='deck' required data-src='/api/decks/mine'>{opts}</select></span>"
+        "</div></form>"
+        "<p class='muted small'>The deck gets a category with this name and these flags. The same as "
+        "Deck settings › Categories › Add template.</p>" + box_note(st.get("error", ""))
+    )
+    return ui.box(
+        "tpl-deck",
+        f"Add “{name}” to a deck",
+        body,
+        actions=[
+            ui.box_button("Cancel", cancel=True),
+            ui.box_button("Add category", kind="primary", form="tpl-deck-f", icon_name="plus"),
+        ],
+        open=bool(st),
+        close_href=f"{PAGE}/templates",
+        cls="lp-box",
+    ).replace("<div class='ui-box", "<div data-t='Add “{name}” to a deck' class='ui-box", 1)
 
 
 def templates_tab(got: dict[str, Any], csrf: str, box: dict[str, Any]) -> str:
@@ -311,6 +349,7 @@ def templates_tab(got: dict[str, Any], csrf: str, box: dict[str, Any]) -> str:
         + table
         + template_box(csrf, box if box.get("box") == "tpl-box" else {})
         + template_delete_box(csrf, box if box.get("box") == "tpl-del" else {})
+        + template_deck_box(csrf, box if box.get("box") == "tpl-deck" else {})
     )
 
 
@@ -1348,6 +1387,8 @@ def add_lists_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
                 return {"box": "tpl-box", "mode": "edit", "values": {**t, "was_name": t["name"]}}
             if t := by_id(items, q.get("delete")):
                 return {"box": "tpl-del", "values": t}
+            if t := by_id(items, q.get("add")):
+                return {"box": "tpl-deck", "values": t}
         elif tab.slug == "defaults":
             if d := by_id(items, q.get("edit"), "oracle_id"):
                 return {"box": "def-box", "values": d}
@@ -1471,8 +1512,52 @@ def add_lists_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
                 }
             )
         box = box_from_query(tab, got, q)
+        if box.get("box") == "tpl-deck":  # the deck list, for the box drawn open without scripts
+            box["decks"] = await decks_or_none(sub)
         body = page_body(tab, got, _csrf(s, sid) or "", box, search, sub, top_notice(q))
         return respond(body, sub, sid)
+
+    async def decks_or_none(sub: str) -> list[dict[str, Any]]:
+        try:
+            return sorted(await decks.list_decks(sub), key=lambda d: (d.get("name") or "").casefold())
+        except DeckError:
+            return []
+
+    async def add_template_to_deck(
+        request: Request, sub: str, sid: str | None, data: dict[str, str]
+    ) -> Response:
+        """Add to a deck… on a template's row: one category from the template, proposed for the
+        deck (decks.propose_categories) and sent to its review page, where the member applies it."""
+        tab = BY_SLUG["templates"]
+        name = (data.get("was_name") or "").strip()
+        deck_id = (data.get("deck") or "").strip()
+        try:
+            if not deck_id:
+                raise DeckError("invalid", "Pick a deck first.")
+            current_client.set(BROWSER_CLIENT_ID)
+            changes = await account_lists.from_templates(
+                decks, sub, [{"action": "create", "from_template": name}]
+            )
+            p = await decks.propose_categories(sub, deck_id, changes)
+        except DeckError as exc:
+            if wants_json(request):
+                return JSONResponse({"ok": False, "message": str(exc)}, status_code=400)
+            try:
+                got = await read_tab(sub, tab)
+            except DeckError as again:
+                return problem(request, again, sub, sid, tab)
+            box = {
+                "box": "tpl-deck",
+                "values": {"name": name, "deck": deck_id},
+                "error": str(exc),
+                "decks": await decks_or_none(sub),
+            }
+            body = page_body(tab, got, _csrf(s, sid) or "", box, "", sub)
+            return respond(body, sub, sid, status=400)
+        where = f"/proposals/{p['proposal_id']}"
+        if wants_json(request):
+            return JSONResponse({"ok": True, "location": where})
+        return RedirectResponse(where, status_code=303)
 
     # -- the member's own press --------------------------------------------------------------------
 
@@ -1662,6 +1747,8 @@ def add_lists_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
                     {"ok": False, "message": "This form expired. Reload and try again."}, status_code=403
                 )
             return page(TITLE, h.EXPIRED, sub=sub, sid=sid, status=403)
+        if tab.slug == "templates" and data.get("action") == "add_to_deck":
+            return await add_template_to_deck(request, sub, sid, data)
         box_id = ""
         try:
             change, code, box_id = change_of(tab, data)

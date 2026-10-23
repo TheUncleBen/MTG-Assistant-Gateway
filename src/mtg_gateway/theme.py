@@ -390,7 +390,9 @@ select.msel-native{position:absolute;width:1px;height:1px;margin:-1px;padding:0;
   background-repeat:no-repeat;background-position:right .75rem center;background-size:10px 6px;
   transition:background-color .2s ease-in-out}
 .msel-btn:hover,.menu button.msel-btn:hover,details.dd .menu button.msel-btn:hover{
-  background-color:var(--surface-2);background-image:url(/static/chevron.svg);color:var(--text)}
+  background-color:var(--surface-2);background-image:url(/static/chevron.svg);color:var(--text);
+  /* button:hover's shorthand would reset these: the chevron stays one, at the right */
+  background-repeat:no-repeat;background-position:right .75rem center;background-size:10px 6px}
 .msel-btn:focus-visible,.menu button.msel-btn:focus-visible,details.dd .menu button.msel-btn:focus-visible{
   outline:2px solid var(--focus);outline-offset:1px;
   border-color:var(--orange);background-color:var(--surface)}
@@ -1938,6 +1940,13 @@ ICONS = {
     "trash": "<path d='M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13'/><path d='M10 11v6M14 11v6'/>",
     "folder": "<path d='M3 6h6l2 2h10v11H3z'/>",
     "lock": "<rect x='5' y='11' width='14' height='10' rx='2'/><path d='M8 11V8a4 4 0 0 1 8 0v3'/>",
+    "flag": "<path d='M5 21V4h12l-2 4 2 4H5'/>",
+    "package": "<path d='M12 3l8 4.5v9L12 21l-8-4.5v-9z'/><path d='M4 7.5l8 4.5 8-4.5M12 12v9'/>",
+    "trophy": (
+        "<path d='M7 4h10v5a5 5 0 0 1-10 0z'/>"
+        "<path d='M7 6H4a3 3 0 0 0 3 3M17 6h3a3 3 0 0 1-3 3M12 14v4M8 21h8'/>"
+    ),
+    "pdf": "<path d='M6 3h8l4 4v14H6z'/><path d='M14 3v4h4'/><path d='M9 13h6M9 17h6'/>",
     "image": "<path d='M4 5h16v14H4z'/><circle cx='9' cy='10' r='1.5'/><path d='M4 17l5-5 4 4 3-3 4 4'/>",
     "box": "<path d='M3 8l9-5 9 5-9 5z'/><path d='M3 8v8l9 5 9-5V8'/><path d='M12 13v8'/>",
     "play": "<circle cx='12' cy='12' r='9'/><path d='M10 8l6 4-6 4z' fill='currentColor'/>",

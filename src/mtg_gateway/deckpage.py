@@ -1068,6 +1068,7 @@ def _card_data(card: DeckCard, deck: Deck) -> str:
         + (f" data-notes='{esc(card.notes)}'" if card.notes else "")
         + (" data-companion='1'" if card.companion else "")
         + (" data-flipped='1'" if card.flipped_default else "")
+        + (" data-custom='1'" if card.custom else "")
     )
 
 
@@ -1154,7 +1155,20 @@ def cards_html(
         "<template class='icons'>"
         + "".join(
             f"<span data-ic='{n}'>{icon(n)}</span>"
-            for n in ("eye", "bookmark", "swap", "tag", "eye-off", "x", "edit", "external", "image", "check")
+            for n in (
+                "eye",
+                "bookmark",
+                "swap",
+                "tag",
+                "eye-off",
+                "x",
+                "edit",
+                "external",
+                "image",
+                "check",
+                "lock",
+                "flag",
+            )
         )
         + "</template>"
     )
@@ -1754,14 +1768,17 @@ def deck_page_html(
     forge_on: bool = False,
     waiting: list[dict[str, Any]] | None = None,
     boxes: str = "",
+    before: str = "",
 ) -> str:
     # ``waiting``: the "Waiting changes" strip's rows (waiting_strip.py), drawn at the top under
-    # the banner; ``boxes``: the page's boxes (deck_boxes_html), hidden until opened
+    # the banner; ``boxes``: the page's boxes (deck_boxes_html), hidden until opened; ``before``:
+    # a strip above the banner (the deck help listing, deck_extras.py)
     view = view if view in VIEWS else "text"
     group = group if group in GROUPS else "category"
     sort = sort if sort in SORTS else "name"
     return (
-        banner_html(deck, stats, own=own, csrf=csrf, writes_enabled=writes_enabled, forge_on=forge_on)
+        before
+        + banner_html(deck, stats, own=own, csrf=csrf, writes_enabled=writes_enabled, forge_on=forge_on)
         + boxes
         + waiting_strip.strip_html(waiting or [], csrf=csrf, deck_id=str(deck.id))
         + notice

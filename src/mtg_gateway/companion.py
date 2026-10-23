@@ -213,6 +213,9 @@ SETTINGS_OK_MESSAGES = {
     "moved": "Deck moved to that folder on Archidekt.",
     "collaborator_added": "Collaborator added on Archidekt.",
     "collaborator_removed": "Collaborator removed on Archidekt.",
+    "package": "Package settings saved to Archidekt and read back. A snapshot from just before is under "
+    "History.",
+    "template_added": "Category added on Archidekt; a snapshot from just before is under History.",
 }
 # Notices My decks shows (?ok=).
 LIST_OK_MESSAGES = {
@@ -410,6 +413,7 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
     from .companion_settings import add_settings_routes
     from .companion_shell import add_shell_routes
     from .companion_tools import add_deck_tool_routes
+    from .deck_extras import add_deck_extras_routes
     from .lists_page import add_lists_routes
     from .profile_page import add_profile_routes
 
@@ -433,6 +437,7 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
     )
     state.folder_jobs = add_folder_routes(server, state)
     add_deck_routes(server, state, h)
+    add_deck_extras_routes(server, state, h)
     add_settings_routes(server, state, h)
     add_deck_tool_routes(server, state, reports, h)
     add_history_routes(server, state, reports, h)

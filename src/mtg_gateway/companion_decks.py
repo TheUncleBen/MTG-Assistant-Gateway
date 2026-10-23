@@ -12,7 +12,7 @@ from urllib.parse import urlencode
 from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
 
-from . import deck_stats, prefs, ui
+from . import actions, deck_extras, deck_stats, prefs, ui
 from .archidekt import format_label
 from .busy import busy_response
 from .companion import (
@@ -59,7 +59,7 @@ if TYPE_CHECKING:
 
     from .app import AppState
 
-NEW_DECK_SCRIPTS = ("filepick.js", "newdeck.js")
+NEW_DECK_SCRIPTS = ("filepick.js", "newdeck.js", "newpackage.js")
 NEW_DECK_EXPIRED = "This form expired. Press Create deck again."
 NEW_DECK_NOT_LINKED = "Link your Archidekt account first. The deck is made in your Archidekt account."
 NEW_DECK_TOO_MANY = (
@@ -206,6 +206,8 @@ def new_deck_box_html(
     )
 
 
+NEW_PACKAGE_CSS = deck_extras.CSS + deck_extras.PACKAGE_FIELDS_CSS  # the New package box
+
 NEW_DECK_CSS = """
 /* the New deck box: the fields left, the tile preview right (a computer); a sheet on a phone */
 .mtgbox.nd-box{width:min(100%,50rem)}
@@ -302,10 +304,12 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
         sid: str | None,
         *,
         new_deck: dict[str, Any] | None = None,
+        new_package: dict[str, Any] | None = None,
         status: int = 200,
     ) -> Response:
         """The My decks page. ``new_deck``: the New deck box drawn open (the /decks/new address, or
-        a refused form): ``values``, ``error_html``, ``scan_name``."""
+        a refused form): ``values``, ``error_html``, ``scan_name``. ``new_package``: the New
+        package box drawn open the same way (/decks/new-package): ``values``, ``error``."""
         qp = request.query_params
         chosen, remember = prefs.view_choice(state.db, sub, request, "decks", LIST_VIEWS, "grid")
         q, order, view, folder = list_query(qp, chosen)
@@ -334,11 +338,14 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
         unread_html = (
             decks_unreadable_html(some_shown=total > 0, again=reread_href("/decks", qp)) if unreadable else ""
         ) + (deck_list_held_html(last_read) if last_read is not None else "")
-        # the heading with its two actions: + New folder (a box, static/menus.js) and New deck (the
-        # New deck box; its link is the old address, which opens this page with the box open)
+        # the heading with its three actions: + New folder (a box, static/menus.js), New package (a
+        # plain button; parity release 2) and New deck (the one orange button): the boxes' links
+        # are the old addresses, which open this page with the box open
         head = (
             "<div class='ui-head phead'><h1>My decks</h1><span class='acts'>"
             f"<button type='button' class='btn' data-new-folder>{icon('plus')} New folder</button>"
+            f"<a class='btn' href='/decks/new-package' {ui.box_open_attr('newpkg')}>"
+            f"{icon('package')} New package</a>"
             f"<a class='btn btn-primary' href='/decks/new' {ui.box_open_attr('newdeck')}>"
             f"{icon('plus')} New deck</a>"
             "</span></div>"
@@ -356,6 +363,10 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
             open=new_deck is not None,
             scan_name=nd.get("scan_name", ""),
         )
+        np = new_package or {}
+        box += deck_extras.new_package_box_html(
+            _csrf(s, sid) or "", np.get("values"), error=np.get("error", ""), open=new_package is not None
+        )
         if problem == "not_linked":
             return page(
                 "My decks",
@@ -365,7 +376,7 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
                 current="/decks",
                 status=status,
                 extra_scripts=NEW_DECK_SCRIPTS,
-                extra_css=NEW_DECK_CSS,
+                extra_css=NEW_DECK_CSS + NEW_PACKAGE_CSS,
             )
         if pending:
             src = "/api/decks/mine?" + urlencode(
@@ -410,7 +421,11 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
             )
         )
         resp = page(
-            "My decks" if new_deck is None else "New deck",
+            "My decks"
+            if new_deck is None and new_package is None
+            else "New deck"
+            if new_deck
+            else "New package",
             body,
             sub=sub,
             sid=sid,
@@ -422,7 +437,7 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
             csp=DECK_CSP,  # the covers are Scryfall images
             deck_css=True,
             extra_scripts=("searchpanel.js", "decks.js") + NEW_DECK_SCRIPTS,
-            extra_css=FOLDER_CSS + NEW_DECK_CSS,
+            extra_css=FOLDER_CSS + NEW_DECK_CSS + NEW_PACKAGE_CSS,
         )
         return prefs.remember_view(state.db, sub, resp, "decks", view, secure=secure) if remember else resp
 
@@ -615,6 +630,68 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
             )
         return await apply_now(sub, p["proposal_id"], ok="created")
 
+    # -- new package: the New package box over My decks (parity release 2) ------------------------
+    @server.custom_route("/decks/new-package", methods=["GET"], include_in_schema=False)
+    async def new_package_page(request: Request) -> Response:
+        sub, sid = browser_session(state, request)
+        if not sub:
+            return login_redirect("/decks/new-package")
+        return await my_decks_response(request, sub, sid, new_package={"values": {}})
+
+    @server.custom_route("/decks/new-package", methods=["POST"], include_in_schema=False)
+    async def new_package_post(request: Request) -> Response:
+        """Create package: the member's own press. A new deck with the package block and no cards
+        (decks.propose_new_deck with ``package``), applied at once as Create deck is."""
+        sub, sid = browser_session(state, request)
+        if not sub:
+            return login_redirect("/decks/new-package")
+        data = await deck_extras.read_form(request, lists=("format",))
+        values = {
+            "name": data.get("name", ""),
+            "keywords": data.get("keywords", ""),
+            "budget": data.get("budget", ""),
+            "formats": data.get("format_list", ""),
+            "private": data.get("private", ""),
+        }
+        if not check_csrf(sid, data):
+            return await my_decks_response(
+                request,
+                sub,
+                sid,
+                new_package={"values": values, "error": "This form expired. Press Create package again."},
+                status=403,
+            )
+        if not values["name"].strip():
+            error = deck_extras.NEW_PACKAGE_NAME
+        elif not values["keywords"].strip():
+            error = deck_extras.NEW_PACKAGE_KEYWORDS
+        else:
+            error = ""
+        if error:
+            return await my_decks_response(
+                request, sub, sid, new_package={"values": values, "error": error}, status=400
+            )
+        budget = values["budget"]
+        current_client.set(BROWSER_CLIENT_ID)
+        try:
+            p = await decks.propose_new_deck(
+                sub,
+                name=values["name"],
+                deck_format="commander",
+                cards=[],
+                private=bool(values["private"]),
+                package={
+                    "keywords": values["keywords"],
+                    "budget": int(budget) if re.fullmatch(r"[1-4]", budget) else None,
+                    "intended_formats": [f for f in values["formats"].split("\n") if f],
+                },
+            )
+        except DeckError as exc:
+            return await my_decks_response(
+                request, sub, sid, new_package={"values": values, "error": str(exc)}, status=400
+            )
+        return await apply_now(sub, p["proposal_id"], ok="created")
+
     # -- one deck ---------------------------------------------------------------
     async def deck_page_response(
         request: Request,
@@ -626,10 +703,13 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
         box_error: str = "",
         box_values: dict[str, str] | None = None,
         status: int = 200,
+        templates: list[str] | None = None,
     ) -> Response:
-        """The deck page. ``box`` names one of its boxes (deckpage.DECK_BOXES) drawn open: the old
-        /export and /delete addresses render the page this way, and a refused clone or delete
-        comes back with ``box_error`` in its box."""
+        """The deck page. ``box`` names one of its boxes (deckpage.DECK_BOXES, or one of the
+        release-2 boxes, deck_extras.EXTRA_BOXES) drawn open: the old /export and /delete
+        addresses render the page this way, and a refused clone or delete comes back with
+        ``box_error`` in its box. ``templates``: the member's template names, read for the Lock box
+        drawn open from its address."""
         # The browser's Reload sends max-age=0 (no-cache for a hard reload): read Archidekt again.
         reload = re.search(r"max-age=0|no-cache", request.headers.get("cache-control", "")) is not None
         try:
@@ -649,6 +729,8 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
         ok_code, err_code = qp.get("ok"), qp.get("err")
         if ok_code in DECK_OK_MESSAGES:
             notice = f"<p class='notice ok'>{_esc(DECK_OK_MESSAGES[ok_code])}</p>"
+        elif ok_code in deck_extras.OK_MESSAGES:
+            notice = deck_extras.notice_html(ok_code, (qp.get("n") or "")[:200])
         elif err_code in DECK_ERR_MESSAGES:
             # Only known codes; the text is fixed here, so a link cannot choose the words.
             notice = f"<p class='notice error'>{_esc(DECK_ERR_MESSAGES[err_code])}</p>"
@@ -689,9 +771,33 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
                 open_box=box if box in DECK_BOXES else "",
                 box_error=box_error,
                 box_values=box_values,
+            )
+            + deck_extras.boxes_html(
+                deck,
+                own=own,
+                csrf=csrf,
+                open_box=box if box in deck_extras.EXTRA_BOXES else "",
+                box_error=box_error,
+                box_values=box_values,
+                templates=templates,
             ),
+            before=deck_extras.help_strip_html(deck, actions.deck_help_of(deck)) if own and csrf else "",
         ) + prefs.page_prefs(state.db, sub, f"{prefs.STACK}{deck.id}:", prefs.EDHPLAY_STEPS, prefs.DECKSTATS)
-        titles = {"export": "Export", "delete": "Delete", "compare": "Compare", "clone": "Clone"}
+        titles = {
+            "export": "Export",
+            "delete": "Delete",
+            "compare": "Compare",
+            "clone": "Clone",
+            "help": "Request deck help",
+            "delist": "Delist",
+            "report": "Report",
+            "reportcard": "Report",
+            "pdf": "Registration PDF",
+            "package": "Add a package",
+            "lock": "Lock personal categories",
+            "contest": "Contest entry",
+            "withdraw": "Withdraw contest entry",
+        }
         title = f"{titles[box]}: {deck_title(deck)}" if box in titles else deck_title(deck)
         resp = page(
             title,
@@ -707,7 +813,8 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
             deck_css=True,
             # social.js: the banner's like, bookmark and follow and the comments; export.js: the
             # Export box's Copy buttons
-            extra_scripts=("social.js", "deckstats.js", "printpick.js", "export.js"),
+            extra_scripts=("social.js", "deckstats.js", "printpick.js", "export.js", "deckextras.js"),
+            extra_css=deck_extras.CSS,
         )
         return prefs.remember_view(state.db, sub, resp, "deck", view, secure=secure) if remember else resp
 

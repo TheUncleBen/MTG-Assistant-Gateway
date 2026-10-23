@@ -1382,6 +1382,15 @@
       }
       m.appendChild(menuItem("Remove from deck", "x", function () { removeCard(card); }, "danger"));
       m.appendChild(el("div", "sep"));
+      // Lock personal categories (deck_extras.py): the card's categories here become its default
+      // categories on Archidekt; not for a custom card, which has none there
+      if (window.MtgDeckExtras && document.getElementById("lock") && !card.hasAttribute("data-custom")) {
+        m.appendChild(menuItem("Lock personal categories", "lock", function () {
+          var cats = catsOf(card);
+          closeMenu();
+          window.MtgDeckExtras.open("lock", { card: name, cats: cats });
+        }));
+      }
       // the shared card menu's items on your own deck too (F6, M9): Add to deck… and Open on Scryfall
       var addLink = el("a", "", "");
       addLink.setAttribute("role", "menuitem");
@@ -1406,6 +1415,10 @@
       scry.setAttribute("role", "menuitem");
       scry.insertBefore(icon("external"), scry.firstChild);
       m.appendChild(scry);
+    }
+    // Report card… (deck_extras.py): to Archidekt's moderators, on any deck the member can read
+    if (window.MtgDeckExtras && document.getElementById("reportcard")) {
+      m.appendChild(menuItem("Report card…", "flag", function () { closeMenu(); window.MtgDeckExtras.open("reportcard", { card: name }); }));
     }
     m.addEventListener("keydown", function (e) {
       var items = $$("[role=menuitem]:not([disabled]), [role=menuitemcheckbox]:not([disabled])", m).filter(function (b) { return b.offsetParent !== null; });
@@ -2525,14 +2538,34 @@
     out.push(link("Deck stats", "report", "/decks/" + id + "#stats"));
     out.push(link("History and snapshots", "history", "/history?deck_id=" + id));
     out.push(link("Proposals for this deck", "proposals", "/proposals?deck_id=" + id));
+    // the release-2 boxes (deck_extras.py, static/deckextras.js): a package, the registration
+    // sheet, a help request and a contest entry on your own deck; a report on any deck
+    if (d.can && document.getElementById("pdf")) {
+      out.push(sep());
+      if (d.own) out.push(item("Add a package…", "package", extras("package")));
+      out.push(item("Registration PDF…", "pdf", extras("pdf")));
+      if (d.own) {
+        out.push(item("Request deck help…", "hand", extras("help")));
+        out.push(item("Enter in a contest…", "trophy", extras("contest")));
+        out.push(item("Withdraw from a contest…", "trophy", extras("withdraw")));
+      }
+    }
     out.push(sep());
     out.push(item("Copy link", "link", function () { Menu.copyAndSay(location.origin + "/decks/" + id, "Link copied."); }));
     out.push(link("Open on Archidekt", "external", "https://archidekt.com/decks/" + id, { ext: true }));
+    if (d.can && document.getElementById("report")) out.push(item("Report deck…", "flag", extras("report")));
     if (d.own) {
       out.push(sep());
       out.push(item("Delete deck…", "trash", openBox("delete"), { danger: true }));
     }
     return out;
+  }
+  function extras(which) {
+    return function () {
+      var X = window.MtgDeckExtras;
+      if (X) X.open(which, { returnFocus: btn });
+      else go("/decks/" + enc(d.id) + "/" + ({ pdf: "registration", report: "report-to-archidekt" }[which] || which));
+    };
   }
   function open(_it, x, y) {
     Menu.open({ head: d.name, label: "Deck: " + d.name, items: items(), focusBack: btn }, x, y);

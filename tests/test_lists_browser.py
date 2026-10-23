@@ -69,7 +69,7 @@ def test_every_tab_fits_and_its_menu_opens_three_ways(server: Server, width: int
         menu = page.locator(".ctxmenu")
         assert menu.is_visible() and page.locator(".lp details.rowmenu[open]").count() == 0
         items = [t.strip() for t in menu.locator("[role=menuitem]").all_inner_texts()]
-        assert items == ["Edit…", "Delete…"]
+        assert items == ["Edit…", "Add to a deck…", "Delete…"]
         last = menu.locator("[role=menuitem]").last
         assert "danger" in (last.get_attribute("class") or "")
         if width < 900:

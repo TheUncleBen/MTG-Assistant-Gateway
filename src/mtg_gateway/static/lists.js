@@ -94,6 +94,23 @@
       var n = $("[data-name]", box);
       if (n) n.textContent = d.name;
     },
+    "tpl-deck": function (box, mode, d) {
+      // Add to a deck…: the member's decks are read when the box opens, once
+      setValue(box, "was_name", d.name);
+      var sel = $("select[name=deck]", box);
+      if (!sel || box.__decks) return;
+      box.__decks = true;
+      sel.textContent = "";
+      sel.appendChild(el("option", null, "Reading your decks…"));
+      sel.disabled = true;
+      Menu.getJSON(sel.getAttribute("data-src")).then(function (r) {
+        sel.textContent = "";
+        var rows = (r.decks || []).slice().sort(function (a, b) { return (a.name || "").localeCompare(b.name || ""); });
+        if (!rows.length) { box.__decks = false; sel.appendChild(el("option", null, r.message || "No decks to add it to.")); return; }
+        rows.forEach(function (dk) { var o = el("option", null, dk.name); o.value = dk.id; sel.appendChild(o); });
+        sel.disabled = false;
+      }, function () { box.__decks = false; sel.textContent = ""; sel.appendChild(el("option", null, "No connection; your decks could not be read.")); });
+    },
     "def-box": function (box, mode, d) {
       setValue(box, "card", d.name);
       var cats = d.categories || [];
