@@ -365,22 +365,19 @@ MODE_LINES = """
   };
 })
 """
-# "Apply deck and collection changes without asking" (Full auto) is 48 characters: at the name's
-# own size it asks 294.8px, while a folded Fold leaves 239.9px and a 390px phone 285.9px for it,
-# so no padding, gutter or size that keeps the name readable puts it on one row. Only shorter
-# words would, and the words are the owner's. The other two names do fit, and did not before.
-WRAPS_ON_A_PHONE = "Apply deck and collection changes without asking"
 
 
 @pytest.mark.parametrize(
     "width,theme",
     [(344, "dark"), (344, "light"), (390, "dark"), (390, "light"), (1280, "dark"), (1280, "light")],
 )
-def test_every_approval_mode_name_that_can_fit_keeps_one_row(server: Server, width: int, theme: str) -> None:
+def test_every_approval_mode_name_keeps_one_row(server: Server, width: int, theme: str) -> None:
     """Ben (2026-10-23): the Approval mode list is one row per mode, the name on that row and what
     it means in the fold. "Apply low-risk changes without asking" (Semi-auto) wrapped to two rows
-    on a folded Fold (344px) and on a phone (390px); it is one row at every size now. Layout only:
-    tighter gutters, the list to the card's edges on a phone, the name a little smaller there."""
+    on a folded Fold (344px) and on a phone (390px); it is one row at every size now: tighter
+    gutters, the list to the card's edges on a phone, the name a little smaller there. Full auto's
+    old name ("Apply deck and collection changes without asking", 48 characters) could not fit a
+    phone, so Ben renamed it "Apply changes without asking" everywhere (2026-10-24)."""
     from playwright.sync_api import sync_playwright
 
     sid = _link(server)
@@ -395,12 +392,9 @@ def test_every_approval_mode_name_that_can_fit_keeps_one_row(server: Server, wid
         assert [r["label"] for r in rows] == [
             "Ask me every time",
             "Apply low-risk changes without asking",
-            WRAPS_ON_A_PHONE,
+            "Apply changes without asking",
         ], rows
         for r in rows:
-            if r["label"] == WRAPS_ON_A_PHONE and width < 600:
-                assert r["lines"] <= 2, (width, theme, r)  # 48 characters: no room at any size
-                continue
             assert r["lines"] == 1, (width, theme, r)
             assert r["rects"] == 1, (width, theme, r)
             assert r["have"] >= r["need"] - 0.5, (width, theme, r)

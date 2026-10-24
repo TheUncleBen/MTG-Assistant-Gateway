@@ -358,7 +358,7 @@ settings change, restore or collection change is first saved as a
 in the chat or on the review page (deleting a deck, and any edit of a
 description or comment that has formatting: on the review page only), or
 pick an approval mode on your Account page (Manual, shown as "Ask me every
-time"; Semi-auto, shown as "Apply low-risk changes without asking", for small deck or collection edits and copies of a deck; Full auto, shown as "Apply deck and collection changes without asking") and the
+time"; Semi-auto, shown as "Apply low-risk changes without asking", for small deck or collection edits and copies of a deck; Full auto, shown as "Apply changes without asking") and the
 assistant applies what that mode allows, with a snapshot first for a change to one of your decks. Adding, removing or swapping a deck's commander always waits for your press.
 
 - **Proposals** lists what is waiting. Open one to read the diff and press

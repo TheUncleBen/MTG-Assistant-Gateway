@@ -10140,7 +10140,7 @@ def _next_step(
         return rate_limited
     if state == "pending" and may_apply:
         chose = (
-            "to apply deck and collection changes without asking"
+            "to apply changes without asking"
             if mode == "auto"
             else f"to apply low-risk changes without asking, and this one is low risk ({risk_reason})"
         )

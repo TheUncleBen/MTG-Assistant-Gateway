@@ -110,7 +110,7 @@ CUSTOM_OUT_REASON = (
 MODE_LABELS = {
     "manual": "Ask me every time",
     "semi": "Apply low-risk changes without asking",
-    "auto": "Apply deck and collection changes without asking",
+    "auto": "Apply changes without asking",
 }
 # Each mode's name, as the Guide and the Account page write it
 MODE_NAMES = {"manual": "Manual", "semi": "Semi-auto", "auto": "Full auto"}

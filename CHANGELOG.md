@@ -84,6 +84,8 @@ account waits for your own press.
 
 ### Changed
 - **Approval mode** on the Account page is one line per mode, each with a fold that explains it.
+- **Full auto** is now shown as “Apply changes without asking” everywhere, so each approval mode
+  fits one line on a phone.
 - **Deck comments** work like forum replies: the vote count and Reply sit under each comment, and
   Vote up, Vote down, Edit… and Delete… are in the comment's ⋮ menu.
 - **The deck page's banner** text is lighter, and its shade deeper in the light theme, so the

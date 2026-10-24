@@ -1109,7 +1109,7 @@ OK_MESSAGES = {
     "edit, or a private copy of a deck) and asks for everything else. A change to one of your decks keeps "
     "a snapshot you can restore from History; a collection change keeps none. Restoring a snapshot does "
     "not put back a deck's folder, tags, cover or custom cards.",
-    "mode_auto": "Saved: your assistant applies deck and collection changes without asking. Restoring a "
+    "mode_auto": "Saved: your assistant applies changes without asking. Restoring a "
     "snapshot, a commander or companion change, a new deck, an edit of more rows than Full auto applies by "
     "itself, making a deck public or unlisted, any edit of a description that has formatting, such as "
     "bold text, links or pictures, actions on your Archidekt account, taking custom cards out of a deck "
