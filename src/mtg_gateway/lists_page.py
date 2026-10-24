@@ -708,7 +708,7 @@ def tag_box(csrf: str, st: dict[str, Any]) -> str:
         f"<input type='text' class='hex' id='tag-h' name='color' value='{esc(color)}' aria-label='Color as "
         f"hex' maxlength='7' pattern='#[0-9a-fA-F]{{6}}' autocomplete='off' required>"
         "<span class='lp-chip' id='tag-pv' "
-        f"style='border-color:{esc(color)};color:{esc(color)}'>{swatch(color)}<span "
+        f"style='border-color:{esc(color)}'>{swatch(color)}<span "
         f"class='nm'>{esc(name or 'Preview')}</span></span>"
         "</div></div>"
         + f"<div data-edit-only{'' if editing else ' hidden'}>"
@@ -952,7 +952,7 @@ def custom_picture_url(card: dict[str, Any], face: str = "front") -> str:
 
 
 def custom_thumb(card: dict[str, Any]) -> str:
-    """A custom card's thumbnail on its row (lists.js takes a failed one off, leaving the slot)."""
+    """A custom card's thumbnail on its row (lists.js turns a failed one into a labelled tile)."""
     src = custom_picture_url(card)
     if src:
         return f"<img class='lp-thumb custom' src='{esc(src)}' alt='' loading='lazy' width='34' height='47'>"
@@ -1045,9 +1045,8 @@ def custom_tab(got: dict[str, Any], csrf: str, box: dict[str, Any], q: str) -> s
         else (ui.load_more("", done=f"All {total:,} shown.") if total else "")
     )
     return (
-        head
-        + "<p class='ui-sub'>Cards you made up. Add one to a deck from its menu; deleting one blanks it in "
-        "every deck that has it.</p>"
+        head + "<p class='ui-sub'>Cards you made on Archidekt. Add one to a deck from its menu; deleting one "
+        "blanks it in every deck that has it.</p>"
         + ui.toolbar(f"{PAGE}/custom", search_label="Search by card name", placeholder="Card name", q=q)
         + table
         + more
@@ -1134,7 +1133,7 @@ def face_fields(face: str, v: dict[str, Any], *, editing: bool, has_picture: boo
         )
 
     name_label = "Name (required)" if req else "Name"
-    types_label = "Types (at least one)" if req else "Types"
+    types_label = "Types (1 or more)" if req else "Types"  # short enough for one line on a phone
     text = str(v.get(f"{face}Text") or "")
     return (
         f"<div class='lp-face' id='cc-face-{p}'{'' if req else ' hidden'}>"
@@ -1145,7 +1144,8 @@ def face_fields(face: str, v: dict[str, Any], *, editing: bool, has_picture: boo
         f"maxlength='{account_lists.CUSTOM_TEXT_MAX}'>{esc(text)}</textarea></div>"
         f"<div class='lp-three'>{fld('Power', 'p')}{fld('Toughness', 'tg')}{fld('Loyalty', 'l')}</div>"
         "<div class='lp-img'><div class='lp-crop' "
-        f"data-crop='{p}'>{'Picture set' if has_picture else 'No picture yet'}{current}</div><div>"
+        f"data-crop='{p}'{' data-has=1' if has_picture else ''}>"
+        f"{'Picture set' if has_picture else 'No picture yet'}{current}</div><div>"
         f"<p class='lbl'>Picture</p>"
         + (
             f"<input type='file' id='{p}-file' name='picture' form='cc-pic-f' "
@@ -1299,6 +1299,10 @@ CSS = """
 .lp .cardc .tx{min-width:0;flex:1}
 .lp-thumb{display:block;width:34px;height:47px;border-radius:3px;border:1px solid var(--border);flex:none;
   object-fit:cover;background:linear-gradient(160deg,var(--surface-3),var(--surface-2))}
+/* a custom card whose picture can't be shown (lists.js): a labelled tile with an image-off glyph */
+.lp-thumb-none{display:grid;place-items:center;background:var(--surface-2);border-color:var(--border-soft);
+  color:var(--text-muted)}
+.lp-thumb-none svg.i{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8}
 .lp-chip{display:inline-flex;align-items:center;gap:.25rem;border:1px solid var(--border);border-radius:999px;
   padding:.1rem .6rem;font-size:.86rem;line-height:1.5;white-space:nowrap;color:var(--text)}
 .lp-chip.main{border-color:var(--orange-text); color:var(--orange-text); background:var(--orange-tint);
@@ -1382,9 +1386,15 @@ CSS = """
   margin:.25rem 0 .5rem}
 .lp-img .lbl{font-weight:700;margin:0 0 .3rem}
 .lp-img .lp-pichelp{margin:.35rem 0 .5rem}
-/* the Artist row under the picture's help line: the same .5rem the other rows keep (the shared
-   box rule .mtgbox .body .field{margin:0} would otherwise win over .lp-img .field) */
-.mtgbox .body .lp-img .field,.lp-img .field{margin-top:.5rem}
+/* the Artist row under the picture's help line: clear of the help (the shared box rule
+   .mtgbox .body .field{margin:0} would otherwise win over .lp-img .field) */
+.mtgbox .body .lp-img .field,.lp-img .field{margin-top:.75rem}
+/* the three type fields line up at their inputs when a label wraps on a phone */
+.lp-three{align-items:end}
+/* the frame's words when the card's picture can't be shown (lists.js pictureWords) */
+.lp-crop .lp-nm{display:block;font-weight:700;color:var(--text)}
+.lp-crop .lp-ty,.lp-crop .lp-why{display:block}
+.lp-crop .lp-why{margin-top:.5rem}
 .lp-crop{aspect-ratio:5/7; width:min(12rem,100%); border:2px dashed var(--control-border);
   border-radius:4.5%/3.2%;
   display:grid;place-items:center;text-align:center;color:var(--text-muted);font-size:.86rem;padding:.5rem;
@@ -1401,7 +1411,8 @@ CSS = """
 .lp-file{position:absolute;width:1px;height:1px;opacity:0;overflow:hidden}
 .lp-check{margin:.75rem 0 0}
 .lp-check input{width:20px;height:20px;min-height:0;margin:0;accent-color:var(--orange-ctl);flex:none}
-.lp .lp-switch{margin:.5rem 0 .25rem;min-height:44px}
+/* the box's switch (Has a back face) keeps its 44 px once the box has moved out of .lp into the scrim */
+.lp-switch{margin:.5rem 0 .25rem;min-height:44px;display:flex;align-items:center}
 .lp-ccbox .mtgbox .body,.lp-ccbox .body{overflow-x:hidden}
 @media (min-width:600px) and (max-width:899.98px){
   .lp-pin .tr:not(.th){grid-template-columns:var(--cols-md);
@@ -1479,6 +1490,18 @@ def add_lists_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
         if tab.kind == "custom_cards":  # the rows' pictures, served by custom_pictures
             custom_pictures.remember(sub, got["items"])
         return got
+
+    async def read_counts(sub: str) -> None:
+        """Every tab shows its count: the lists not read yet are read once (one cheap read each,
+        kept as account_lists.counts keeps them), so a first visit does not show a number on the
+        open tab alone. A list that can't be read right now keeps no number; the page still draws."""
+        for kind in account_lists.KINDS:
+            if kind in account_lists.counts(sub):
+                continue
+            try:
+                await account_lists.read(decks, sub, kind)
+            except DeckError:
+                continue
 
     def by_id(items: list[dict[str, Any]], raw: str | None, key: str = "id") -> dict[str, Any] | None:
         if not raw or not _ID.fullmatch(raw):
@@ -1601,6 +1624,8 @@ def add_lists_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
             if wants_json(request):
                 return JSONResponse({"ok": False, "message": str(exc)}, status_code=400)
             return problem(request, exc, sub, sid, tab)
+        if not wants_json(request):
+            await read_counts(sub)
         if wants_json(request) and tab.slug in ("defaults", "custom"):
             # Load more with scripts: the next page's rows, appended in place (static/lists.js)
             if tab.slug == "defaults":

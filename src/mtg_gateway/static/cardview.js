@@ -255,7 +255,8 @@
       if (card.cat) inDeck += (inDeck ? " · " : "") + card.cat;
       fact(dl, "In this deck", inDeck);
       fact(dl, "Color tag", card.label ? String(card.label).split(",")[0] : "");
-      fact(dl, "Note", "Custom card, made on Archidekt; not on Scryfall or in price lists");
+      // only what the gateway knows: no Scryfall card, and deck_stats leaves custom cards out of its price
+      fact(dl, "Note", "Custom card, made on Archidekt: not on Scryfall, and not counted in the deck's price here.");
     }
     if (card.legal) {
       var chips = el("span", "chips");

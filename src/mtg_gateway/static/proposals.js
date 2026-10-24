@@ -12,6 +12,24 @@
   var strip = document.querySelector("details.wstrip[data-open-wide]");
   if (strip && window.matchMedia && window.matchMedia("(min-width: 701px)").matches) strip.open = true;
 
+  // A question's proposal rejected late (static/cardmenu.js settles one the deck page owed): its
+  // row goes, the strip's count follows, and an emptied strip goes altogether.
+  document.addEventListener("mtg:rejected", function (e) {
+    var pid = e.detail && e.detail.proposal_id;
+    if (!pid) return;
+    var sel = "form.wform input[name=pick][value='" + (window.CSS && CSS.escape ? CSS.escape(pid) : pid) + "']";
+    var pick = document.querySelector(sel);
+    var row = pick ? pick.closest("li.wrow") : null;
+    if (!row) return;
+    var form = pick.form, own = pick.closest("details.wstrip");
+    row.parentNode.removeChild(row);
+    var left = form ? form.querySelectorAll("li.wrow").length : 0;
+    if (own && !left) { own.parentNode.removeChild(own); return; }
+    var b = own ? own.querySelector("summary b") : null;
+    if (b) b.textContent = left + " waiting change" + (left === 1 ? "" : "s");
+    if (form) form.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+
   // A deck deletion: the red outline button first, then "Delete this deck on Archidekt?" with
   // the solid red one, in place.
   document.addEventListener("click", function (e) {

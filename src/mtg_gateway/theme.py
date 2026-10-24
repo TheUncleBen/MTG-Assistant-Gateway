@@ -413,7 +413,11 @@ details.dd .menu .actions button.primary:hover,details.dd .menu .actions button.
 .msel-list{position:fixed;z-index:200;max-width:calc(100vw - 1rem);overflow:auto;overscroll-behavior:contain;
   border:1px solid var(--border)}
 .msel-list [role=option]{min-height:40px;white-space:normal;overflow-wrap:anywhere;padding:.3rem 1rem}
-.msel-list [role=option][aria-selected=true]{background:var(--border);box-shadow:inset 3px 0 0 var(--orange)}
+/* the current option: its orange words (--toolbar-active) need the softer fill for 4.5:1 in both
+   themes (on --border they were 3.7:1 light, 2.6:1 dark); the 3 px orange bar says "current" on
+   its own, so a row the mouse hovers (the menu's --border) never reads as a second current row */
+.msel-list [role=option][aria-selected=true]{background:var(--border-soft);
+  box-shadow:inset 3px 0 0 var(--orange)}
 .msel-list .head.title{padding:.6rem 1rem .4rem;font-size:.9rem}
 .msel-scrim{position:fixed;inset:0;z-index:199;background:var(--scrim)}
 .msel-list.sheet{left:0;right:0;bottom:0;top:auto;width:auto;max-width:none;max-height:min(70vh,70dvh);
@@ -483,12 +487,13 @@ details.mode-info[open] > summary svg{transform:rotate(180deg)}
 .mode-body p.warn{margin-top:.6rem;padding:8px 12px;border-left:3px solid var(--orange);
   background:var(--surface);border-radius:var(--radius)}
 /* On a phone the list runs to the card's edges and the gutters round the name are tighter, so a
-   mode's name keeps its one row at 344px (a folded Fold) as well as at 390px. The row stays a
-   44px tap target, and at 200% text the name may wrap — nothing scrolls sideways. */
+   mode's name keeps its one row at 344px (a folded Fold) as well as at 390px with the chevron's
+   full 44px. The row stays a 44px tap target, and at 200% text the name may wrap — nothing
+   scrolls sideways. */
 @media (max-width:599.98px){
   .mode-list{margin-inline:-1rem;border-left:0;border-right:0;border-radius:0}
-  .mode-pick{gap:8px;padding:13px 38px 13px 12px;font-size:.86rem}
-  details.mode-info > summary{right:0;width:38px;top:max(0px,calc(13px + .6em - 22px))}
+  .mode-pick{gap:8px;padding:13px 44px 13px 12px;font-size:.84rem}
+  details.mode-info > summary{right:0;width:44px;top:max(0px,calc(13px + .6em - 22px))}
   .mode-body{padding:0 12px 14px 30px;font-size:.9rem}
 }
 /* toggle switch 40x20, orange when on */
@@ -1687,7 +1692,8 @@ a.bell-row:hover .t{text-decoration:underline}
 .bell-badge{display:inline-grid;place-items:center;min-width:20px;height:20px;border-radius:10px;
   background:var(--orange);color:var(--on-orange);font-size:.75rem;font-weight:900;padding:0 5px;
   vertical-align:middle;margin-left:.3rem;line-height:1}
-.bell-page .bell-row.new{margin:0;padding:.45rem .5rem}
+.bell-page .bell-row{padding:.45rem .5rem}  /* read and unread rows line up: the tint is a fill only */
+.bell-page .bell-row.new{margin:0}
 .bell-foot{margin:.75rem 0 0}
 .mtgbox .body .bell-foot{margin-top:.75rem}
 """

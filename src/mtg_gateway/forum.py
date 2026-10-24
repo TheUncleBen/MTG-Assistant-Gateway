@@ -109,6 +109,25 @@ async def sections(decks: DeckService, sub: str) -> dict[str, Any]:
     return {"groups": [g for g in out if g["group"]]}
 
 
+# Which group and section a thread was listed in, from the section pages read so far: Archidekt's
+# thread data names no section, so a thread page's trail (Forum › group › section) is known once
+# its section's list has been read in this process. Bounded: the newest IN_SECTION_MAX threads.
+IN_SECTION_MAX = 5000
+_IN_SECTION: dict[int, tuple[str, str]] = {}
+
+
+def in_section(thread_id: int) -> tuple[str, str] | None:
+    """(group, section) the thread was last listed in, or None when no list of it has been read."""
+    return _IN_SECTION.get(thread_id)
+
+
+def _remember_section(thread_id: int, group: str, section: str) -> None:
+    _IN_SECTION.pop(thread_id, None)
+    _IN_SECTION[thread_id] = (group, section)
+    while len(_IN_SECTION) > IN_SECTION_MAX:
+        del _IN_SECTION[next(iter(_IN_SECTION))]
+
+
 async def threads(
     decks: DeckService,
     sub: str,
@@ -143,6 +162,7 @@ async def threads(
         owner = t.get("owner") if isinstance(t.get("owner"), dict) else {}
         recent = t.get("recentPost") if isinstance(t.get("recentPost"), dict) else {}
         by = recent.get("owner") if isinstance(recent.get("owner"), dict) else {}
+        _remember_section(_int(t.get("id")), group, section)
         out.append(
             {
                 "id": _int(t.get("id")),
@@ -190,6 +210,7 @@ async def thread(decks: DeckService, sub: str, thread_id: Any, *, page: int = 1)
         # the thread's mark (THREAD_TYPES): a "contest" thread carries the contest strip
         "type": THREAD_TYPES.get(_int(body.get("type")), ""),
         "reply_count": _int(body.get("childrenCount")),
+        "in": in_section(tid),  # (group, section) when a section listing has named it, else None
         "page": page,
         "has_more": bool(isinstance(links, dict) and links.get("next")),
         "replies": [comment_out(c) for c in results if isinstance(c, dict)],

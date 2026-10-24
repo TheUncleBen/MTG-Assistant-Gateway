@@ -9,7 +9,8 @@
    never leaves anything marked: nothing is added to the item while the finger is down, a drag the
    browser starts under a finger is refused, and only the tap that ends the hold is swallowed.
    `kebab(label)` makes a ⋮ button; `toast`, `post`, `getJSON`, `copyText` and `collect` (add one
-   copy of a card to the collection) are the small shared actions.
+   copy of a card to the collection) are the small shared actions; `oweReject(pid)` notes a
+   proposal to reject on the next page load (see settleOwed).
 
    window.MtgBox (static/box.js, loaded before this file): the box (dialog) every pop-up shares;
    opening a box closes an open menu.
@@ -49,6 +50,9 @@
     check: "<path d='M5 12l4 4L19 6'/>",
     eye: "<path d='M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12z'/><circle cx='12' cy='12' r='3'/>",
     image: "<path d='M4 5h16v14H4z'/><circle cx='9' cy='10' r='1.5'/><path d='M4 17l5-5 4 4 3-3 4 4'/>",
+    "vote-up": "<path d='M6 15l6-6 6 6'/>",
+    "image-off": "<path d='M4 5h16v14H4z'/><path d='M4 17l5-5 4 4 3-3 4 4'/><path d='M3 3l18 18'/>",
+    send: "<path d='M4 12l16-8-6 16-2-7z'/>",
     more: "<circle cx='12' cy='5' r='1.5' fill='currentColor'/><circle cx='12' cy='12' r='1.5' fill='currentColor'/><circle cx='12' cy='19' r='1.5' fill='currentColor'/>",
     edit: "<path d='M4 20h4l11-11-4-4L4 16z'/><path d='M13 7l4 4'/>",
     clone: "<path d='M9 9h11v11H9z'/><path d='M4 15V4h11'/>",
@@ -100,6 +104,33 @@
   function getJSON(path) {
     return fetch(path, { credentials: "same-origin", headers: { Accept: "application/json" } }).then(function (r) {
       return r.json().then(function (d) { d.status = r.status; return d; }, function () { return { ok: false, status: r.status, message: ODD }; });
+    });
+  }
+  // A proposal the deck page owes a reject (static/deck.js: a question left open when the page
+  // was left). The reject goes out as the page leaves, but a request that outlives its page is
+  // dropped where a service worker controls the page (Chromium), so the proposal is noted here
+  // too and rejected by the next page that loads this script (any page: the note is shared by
+  // the tabs); rejecting one rejected already is harmless. A settled one is announced
+  // (mtg:rejected) so a waiting-changes list on the page can drop its row (static/proposals.js).
+  var OWED = "mtg_reject_owed";
+  function owed() {
+    try { var v = JSON.parse(localStorage.getItem(OWED) || "[]"); return Array.isArray(v) ? v : []; } catch (e) { return []; }
+  }
+  function oweReject(pid) {
+    if (!pid) return;
+    try {
+      var v = owed();
+      if (v.indexOf(pid) < 0) v.push(pid);
+      localStorage.setItem(OWED, JSON.stringify(v.slice(-20)));
+    } catch (e) { /* no storage: the leaving request was the one try */ }
+  }
+  function settleOwed() {
+    if (!csrf()) return;  // a page without a token can't send it; the next one with one does
+    owed().forEach(function (pid) {
+      post("/api/v1/proposals/" + enc(pid) + "/reject", {}).then(function () {
+        try { localStorage.setItem(OWED, JSON.stringify(owed().filter(function (x) { return x !== pid; }))); } catch (e) { /* no storage */ }
+        document.dispatchEvent(new CustomEvent("mtg:rejected", { detail: { proposal_id: pid } }));
+      }, function () { /* no connection: still owed */ });
     });
   }
   var norm = function (n) { return String(n || "").toLowerCase().replace(/\s+/g, " ").trim(); };
@@ -248,6 +279,10 @@
 
   // -- the menu ----------------------------------------------------------------------------------
   var menu = null, menuBack = null, scrim = null, menuPushed = false, ignorePop = false, menuScroll = [0, 0];
+  // until when the scrim ignores a click: the lift of the finger whose hold opened the sheet lands
+  // as a click wherever the finger was, and under a phone's bottom sheet that is the scrim, which
+  // would close the menu the moment it opened (bind sets it on the lift)
+  var scrimGuardUntil = 0;
   function close(focusBack, fromHistory) {
     if (!menu) return;
     menu.remove();
@@ -319,7 +354,7 @@
     });
     m.addEventListener("contextmenu", function (e) { e.preventDefault(); });
     scrim = el("div", "cs-scrim");
-    scrim.addEventListener("click", function () { close(true); });
+    scrim.addEventListener("click", function () { if (Date.now() < scrimGuardUntil) return; close(true); });
     document.body.appendChild(scrim);
     m.style.visibility = "hidden";
     document.body.appendChild(m);
@@ -369,7 +404,8 @@
   function bind(root, o) {
     // As static/deck.js: a finger or a pen (an S Pen press and hold too) holds; the hold is off
     // once the pointer has slid 8 px from where it started, or lifts, or the browser cancels it.
-    // The tap that ends a hold which opened the menu is swallowed for a moment only, so nothing
+    // The tap that ends a hold which opened the menu is swallowed for a moment only (inside root
+    // here; on the scrim, where a phone's sheet leaves the finger, by scrimGuardUntil), so nothing
     // sticks when no tap follows (a later Enter on the item, or a tap elsewhere, works as ever).
     var hold = null, opened = false, swallow = 0, lift = false, startX = 0, startY = 0, touchPress = false;
     root.addEventListener("click", function (e) {
@@ -413,6 +449,7 @@
         if (t === "pointerup" && opened) {
           opened = false;
           lift = true;
+          scrimGuardUntil = Date.now() + 400;
           clearTimeout(swallow);
           swallow = setTimeout(function () { swallow = 0; lift = false; }, 400);
         }
@@ -449,11 +486,12 @@
   window.MtgMenu = {
     open: openMenu, close: close, isOpen: function () { return !!menu; }, bind: bind,
     item: item, link: link, sep: sep, kebab: kebab, icon: icon, el: el,
-    toast: toast, dismissToast: dismissToast, post: post, getJSON: getJSON, csrf: csrf,
+    toast: toast, dismissToast: dismissToast, post: post, getJSON: getJSON, csrf: csrf, oweReject: oweReject,
     copyText: copyText, copyAndSay: copyAndSay, collect: collect, enabled: enabled, phone: phone, norm: norm,
     // true while the menu's own history.back() has not landed yet (static/box.js asks)
     backPending: function () { return ignorePop; }
   };
+  settleOwed();
 
   // -- the card menu -----------------------------------------------------------------------------
   /* s: {name, onOpen(), watch: {watched, onWatch(), onArt() or null} or null (watchlists off),

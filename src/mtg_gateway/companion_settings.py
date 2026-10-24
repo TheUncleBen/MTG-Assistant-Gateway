@@ -556,12 +556,7 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
                 f"<input id='pkg-kw' type='text' name='keywords' value='{_esc(keywords)}' required "
                 f"maxlength='{packages.KEYWORDS_MAX}'>",
             )
-            + row(
-                "Budget",
-                "How much the cards cost, roughly. Leave it unset if you'd rather not say.",
-                deck_extras.budget_html(budget),
-                cls="wctl",  # the five choices in one row
-            )
+            + row("Budget", "How much the cards cost, roughly.", deck_extras.budget_html(budget))
             + "<div class='ui-row full'><p class='lab' id='pkg-fl'>Intended formats</p><p class='help'>Pick "
             "every format the package is meant for.</p><div class='ctl'>"
             f"{deck_extras.formats_html(picked, labelled_by='pkg-fl')}</div></div>"

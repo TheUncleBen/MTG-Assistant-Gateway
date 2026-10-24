@@ -128,7 +128,11 @@
       if (on) b.setAttribute("aria-busy", "true"); else b.removeAttribute("aria-busy");
     });
   }
-  // the member's decks are read when the box opens, once (as My lists' Add to a deck…)
+  // the member's decks are read when the box opens, once (as My lists' Add to a deck…): the list
+  // starts on "Pick a deck…", never on a deck (the entry replaces that deck's description on
+  // Archidekt, so no deck may be picked by accident), and leaves card packages out (a package
+  // is no contest entry; /api/decks/mine?packages=1 marks them); a pick made before the box was
+  // closed is kept
   function fillDecks(box) {
     var sel = $("select[name=deck]", box);
     if (!sel || box.__decks || !Menu) return;
@@ -142,11 +146,15 @@
     show("Reading your decks…");
     sel.disabled = true;
     Menu.getJSON(sel.getAttribute("data-src")).then(function (r) {
-      var rows = (r.decks || []).slice().sort(function (a, b) { return (a.name || "").localeCompare(b.name || ""); });
+      var rows = (r.decks || []).filter(function (dk) { return !dk.package && !dk.cardPackage; })
+        .sort(function (a, b) { return (a.name || "").localeCompare(b.name || ""); });
       if (!rows.length) { box.__decks = false; show(r.message || "No decks to enter."); return; }
       show("");
+      var pick = el("option", null, "Pick a deck…");
+      pick.value = ""; pick.disabled = true; pick.selected = true; pick.hidden = true;
+      sel.appendChild(pick);
       rows.forEach(function (dk) { var o = el("option", null, dk.name); o.value = dk.id; sel.appendChild(o); });
-      if (keep) sel.value = keep;
+      if (keep && rows.some(function (dk) { return String(dk.id) === keep; })) sel.value = keep;
       sel.disabled = false;
       if (window.MtgSelect) window.MtgSelect.refresh(sel);
     }, function () { box.__decks = false; show("No connection; your decks could not be read."); });

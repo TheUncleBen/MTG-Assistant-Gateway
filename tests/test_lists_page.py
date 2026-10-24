@@ -565,7 +565,7 @@ async def test_custom_cards_rows_and_the_edit_box_show_the_cards_picture(
     # the Edit box: the front face's picture; no back face, no back picture
     page = (await member.http.get("/lists/custom?edit=41")).text
     front = "<img class='lp-cur' src='/lists/api/custom_picture/41?face=front' alt=''>"
-    assert f"data-crop='f'>Picture set{front}</div>" in page
+    assert f"data-crop='f' data-has=1>Picture set{front}</div>" in page
     assert "data-crop='b'>No picture yet</div>" in page
     card["hasBack"] = True
     card["backImageUrl"] = "https://cdn.example/41b.png"

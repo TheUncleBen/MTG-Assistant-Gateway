@@ -71,8 +71,8 @@ async def test_the_forum_page_lists_the_groups_and_their_sections(member: Browse
     assert f"href='{SECTION}'" in page and "href='/forum/Archidekt/Deck%20Help'" in page
     assert "Talk about anything" in page and "Ask for help with a deck" in page
     assert "1,200" in page and ">300<" in page
-    # the section chips at the top
-    assert "class='ui-chip' href='/forum/Archidekt/Deck%20Help'" in page
+    # no section chips above the tables: the rows name every section once (0.7.44 L13)
+    assert "ui-chip" not in page
     # starting a thread stays on Archidekt, with the one line why
     assert "href='https://archidekt.com/forum/thread/new'" in page and "New thread on Archidekt" in page
     assert esc("Archidekt asks you to prove you're human before starting a thread") in page
@@ -317,7 +317,9 @@ async def test_a_contest_thread_has_its_strip_the_entries_and_the_enter_and_with
     assert "Entries (1)" in page and "Amy's pile" in page and "by amy" in page
     assert "Reviewed" not in page and "Not yet reviewed" not in page
     # the boxes are on the page, hidden; the Enter box reads the decks when it opens
-    assert "id='enter'" in page and "id='fm-enter-f'" in page and "data-src='/api/decks/mine'" in page
+    assert (
+        "id='enter'" in page and "id='fm-enter-f'" in page and "data-src='/api/decks/mine?packages=1'" in page
+    )
     assert "Summary of the deck (required)" in page and "Shown on the contest page." in page
     assert "Archidekt replaces the deck's description with this summary." in page
     assert "Review the entry" in page

@@ -562,7 +562,10 @@ class FakeArchidekt:
                     "type": t["type"],
                     "archived": False,
                     "owner": {"username": t["owner"]},
-                    "childrenCount": len(self.comments.get(tid, [])),
+                    # the thread's direct replies, as the thread itself counts them (a comment's
+                    # childrenCount is its own children's; Archidekt's thread view shows "Replies
+                    # N" from it and loads children while fewer are held)
+                    "childrenCount": len([c for c in self.comments.get(tid, []) if c["parent"] == tid]),
                     "points": 3,
                     "recentPost": {"createdAt": "2026-10-20T10:00:00Z", "owner": {"username": t["owner"]}},
                 }

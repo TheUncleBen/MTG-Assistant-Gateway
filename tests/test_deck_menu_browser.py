@@ -637,8 +637,9 @@ def test_a_mouse_drag_the_browser_never_ended_is_cleared_by_the_next_press(serve
 
 
 def test_a_declined_confirmation_rejects_the_proposal_it_made(server: Server) -> None:
-    """The edit endpoint makes the proposal before it asks "Save anyway?"; saying no (Cancel or the
-    dialog's close button) rejects that proposal, so it never waits pending until it expires."""
+    """The edit endpoint makes the proposal before it asks; a removal asks in the shared box (0.7.44
+    M3), and saying no (Keep them or the box's ×) rejects that proposal, so it never waits pending
+    until it expires."""
     from playwright.sync_api import sync_playwright
 
     _chromium()
@@ -676,14 +677,15 @@ def test_a_declined_confirmation_rejects_the_proposal_it_made(server: Server) ->
                 menu = page.locator(".ctxmenu[role=menu]")
                 menu.wait_for(timeout=3000)
                 menu.locator("[role=menuitem]", has_text="Remove from deck").click()
-            dialog = page.locator(".deck-toast[role='alertdialog']")
+            dialog = page.locator(".mtgbox-scrim .mtgbox")
             dialog.wait_for(timeout=5000)
-            assert "Save anyway?" in dialog.inner_text()
+            assert dialog.locator("h2").inner_text() == "Remove 9 cards?"
+            assert dialog.locator(".acts button.danger").inner_text().strip() == "Remove 9 cards"
             if close == "Dismiss":
-                dialog.locator("button[aria-label='Dismiss']").click()
+                dialog.locator("button[aria-label='Close']").click()
             else:
-                dialog.locator("button", has_text="Cancel").click(timeout=3000)
-            gone = "() => !document.querySelector('.deck-toast[role=alertdialog]')"
+                dialog.locator("button", has_text="Keep them").click(timeout=3000)
+            gone = "() => !document.querySelector('.mtgbox-scrim')"
             page.wait_for_function(gone, timeout=3000)
             page.wait_for_timeout(200)
             page.keyboard.press("Escape")

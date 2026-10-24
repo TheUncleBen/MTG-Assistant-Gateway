@@ -194,22 +194,61 @@
   }
   var editUrl = "/api/v1/decks/" + enc(deckId) + "/edit";
   var saving = false;
-  function askConfirm(why, pid) {
+  // -- a change big enough to ask first (modes.hand_edit_confirm): the endpoint made the proposal
+  // and waits for the answer. A removal asks in the shared box, which ends on the solid red button;
+  // a commander question keeps the page's own dialog strip. The proposal made for the check is
+  // not wanted when the answer is no (Keep them, Cancel, Escape, the × or the scrim): it is
+  // rejected, so Proposals stays clean and it does not count toward the pending cap. One still
+  // unanswered when the page is left (a reload, Back, the tab closed) is rejected on the way out,
+  // or it would wait in Proposals and the deck's waiting-changes strip. That leaving request is
+  // dropped where a service worker controls the page (Chromium), so the proposal is noted for
+  // the next page too (MtgMenu.oweReject, static/cardmenu.js), which rejects it and drops its
+  // row from the strip.
+  var asking = null;  // the proposal id of the question on screen
+  function rejectProposal(pid, leaving) {
+    var o = { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json", "X-CSRF-Token": CSRF }, body: "{}" };
+    if (leaving) {
+      o.keepalive = true;  // the request outlives the page
+      if (window.MtgMenu && window.MtgMenu.oweReject) window.MtgMenu.oweReject(pid);
+    }
+    try { fetch("/api/v1/proposals/" + enc(pid) + "/reject", o).catch(function () { /* a leftover pending proposal is harmless */ }); } catch (e) { /* no fetch */ }
+  }
+  window.addEventListener("pagehide", function () { if (asking) { rejectProposal(asking, true); asking = null; } });
+  /* why: the endpoint's reason; pid: the proposal it made; about: {name, cat, custom} when the
+     page knows the one card the question is about (a custom card's menu), else null */
+  function askConfirm(why, pid, about) {
+    asking = pid;
+    var declined = false;
+    var decline = function () {
+      if (declined) return;
+      declined = true;
+      asking = null;
+      rejectProposal(pid);
+    };
+    var removal = /^This removes (\d+) (different )?cards/.exec(why || "");
+    if (removal && window.MtgBox) {
+      return new Promise(function (resolve) {
+        var n = removal[1], what = n + (removal[2] ? " different cards" : n === "1" ? " card" : " cards");
+        var copies = n + (n === "1" ? " copy" : " copies");
+        var body = el("div");
+        body.appendChild(el("p", "", about && about.cat ? "They come out of “" + about.cat + "”." : "They come out of the deck."));
+        if (about && about.custom) body.appendChild(el("p", "muted small", "Restoring a snapshot doesn't put custom cards back."));
+        var answered = false;
+        window.MtgBox.confirm({
+          title: about && about.name ? "Remove " + copies + " of “" + about.name + "”?" : "Remove " + what + "?",
+          body: body, ok: "Remove " + what, danger: true, cancel: "Keep them",
+          onOk: function () { answered = true; asking = null; resolve(true); },
+          onClose: function () { if (!answered) { decline(); resolve(false); } }
+        });
+      });
+    }
     return new Promise(function (resolve) {
       var yes = el("button", "btn-primary", "Save anyway");
       yes.type = "button";
       var no = el("button", "", "Cancel");
       no.type = "button";
       var done = function (v) { dismissToast(); resolve(v); };
-      var declined = false;
-      var decline = function () {
-        // the proposal made for the check is not wanted (Cancel, Escape or the toast closed):
-        // reject it so Proposals stays clean and it does not count toward the pending cap
-        if (declined) return;
-        declined = true;
-        api("/api/v1/proposals/" + enc(pid) + "/reject", {}).catch(function () { /* a leftover pending proposal is harmless */ });
-      };
-      yes.addEventListener("click", function () { done(true); });
+      yes.addEventListener("click", function () { asking = null; done(true); });
       no.addEventListener("click", function () { decline(); done(false); });
       toast(why + " Save anyway?", { warn: true, dialog: true, sticky: true, actions: [yes, no], onDismiss: function () { decline(); resolve(false); } });
       yes.focus();
@@ -270,14 +309,14 @@
   var CUSTOM_PICK = "Custom cards are changed one at a time, from their own menu.";
   function isCustom(card) { return !!card && card.hasAttribute("data-custom-id"); }
   function customIdOf(card) { return parseInt(card.getAttribute("data-custom-id"), 10); }
-  function customPost(changes, pid, version) {
+  function customPost(changes, pid, version, about) {
     var body = pid ? { proposal_id: pid, version: version } : { changes: changes, confirmed: false };
     return api(customUrl, body).then(function (d) {
       if (d.ok && d.applied) return d;
       if (d.ok && d.needs_confirm) {
-        return askConfirm(d.why, d.proposal_id).then(function (yes) {
+        return askConfirm(d.why, d.proposal_id, about).then(function (yes) {
           if (!yes) { var c = new Error("Nothing was changed."); c.cancelled = true; throw c; }
-          return customPost(changes, d.proposal_id, d.version);
+          return customPost(changes, d.proposal_id, d.version, about);
         });
       }
       if (d.ok && d.status === 202 && d.proposal_id) {
@@ -392,7 +431,9 @@
   // the save does not go through. Resolves with the answer; rejects after the note is shown.
   function customSave(card, changes, saying, back) {
     savingNote(saying, false, card, "Custom");
-    var run = function () { return idle().then(function () { return customPost(changes); }); };
+    // the card the question (a big removal) is about: its name and the category it leaves
+    var about = { name: card.getAttribute("data-card") || "", cat: catOf(card), custom: true };
+    var run = function () { return idle().then(function () { return customPost(changes, null, null, about); }); };
     var p = customQueue.then(run, run);
     customQueue = p.then(function () {}, function () {});
     return p.then(function (d) {
@@ -544,14 +585,12 @@
     m.appendChild(menuItem("Color tag…", "tag", function () { customTagForm(card, m); }));
     m.appendChild(menuItem("Mana value…", "edit", function () { manaValueForm(card, m); }));
     m.appendChild(menuItem("Remove from deck", "x", function () { customRemove(card); }, "danger"));
-    m.appendChild(el("div", "sep"));
-    if (window.MtgDeckExtras && document.getElementById("lock")) {
-      var lock = menuItem("Lock personal categories", "lock", function () { toast(CUSTOM_LOCK); }, "off");
-      lock.setAttribute("aria-disabled", "true");
-      lock.title = CUSTOM_LOCK;
-      m.appendChild(lock);
+    // no Lock personal categories: Archidekt keeps no default categories for a custom card
+    // (the endpoint says so, CUSTOM_LOCK, should a tool ask)
+    if (window.MtgMenu) {
+      m.appendChild(el("div", "sep"));
+      m.appendChild(menuItem("Copy name", "copy", function () { closeMenu(); window.MtgMenu.copyAndSay(name, "Name copied."); }));
     }
-    if (window.MtgMenu) m.appendChild(menuItem("Copy name", "copy", function () { closeMenu(); window.MtgMenu.copyAndSay(name, "Name copied."); }));
   }
 
   // A custom card's picture comes through the gateway's own route (deckpage.custom_picture_url)

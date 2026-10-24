@@ -278,7 +278,9 @@ def test_a_contest_thread_enters_and_withdraws_a_deck(server: Server, width: int
         page.wait_for_timeout(300)
         assert box.locator("h2").inner_text() == "Enter a deck in “October deck contest”"
         page.wait_for_function("() => !document.querySelector('#enter select[name=deck]').disabled")
-        assert box.locator(".msel-btn").inner_text().strip() == "Sample Commander Deck"
+        # the list starts on "Pick a deck…" (0.7.44, M4); the member picks the deck
+        assert box.locator(".msel-btn").inner_text().strip() == "Pick a deck…"
+        box.locator("select[name=deck]").select_option(label="Sample Commander Deck")
         _fits(page, "enter box", width)
         if width < 900:
             page.evaluate(TEXT_200)
@@ -288,6 +290,7 @@ def test_a_contest_thread_enters_and_withdraws_a_deck(server: Server, width: int
             strip.locator(".btn", has_text="Enter a deck…").click()
             box.wait_for(state="visible")
             page.wait_for_function("() => !document.querySelector('#enter select[name=deck]').disabled")
+            box.locator("select[name=deck]").select_option(label="Sample Commander Deck")
         # the summary is checked before anything is sent
         box.locator(".acts button", has_text="Review the entry").click()
         assert "A summary is required." in box.inner_text()
@@ -343,7 +346,8 @@ def test_a_custom_cards_menu_on_the_deck_page(server: Server, width: int, theme:
         page.goto(f"{server.base}/decks/42?view=text", wait_until="networkidle")
         card = page.locator(".deckview .row[data-custom-id='41']")
         card.scroll_into_view_if_needed()
-        assert card.locator(".custom-badge").is_visible()
+        # the Set column says Custom; no Custom mark beside the name as well (it took the name's room)
+        assert card.locator(".set").inner_text() == "Custom" and card.locator(".custom-badge").count() == 0
         assert (
             card.locator("..")
             .locator("xpath=ancestor::section[contains(@class,'stack')]")
@@ -356,7 +360,8 @@ def test_a_custom_cards_menu_on_the_deck_page(server: Server, width: int, theme:
         menu.wait_for(state="visible")
         items = [t.split("\n")[0] for t in _items(page)]
         assert items[0] == "Open card" and "Move to" in items and "Remove from deck" in items, items
-        assert "Lock personal categories" in items and "Copy name" in items
+        # no Lock personal categories (Archidekt keeps no default categories for a custom card)
+        assert "Lock personal categories" not in items and "Copy name" in items
         # Archidekt's own custom card menu offers the colour tag and the mana value
         assert "Color tag…" in items and "Mana value…" in items, items
         # ... and no report of the member's own card (kept on another member's deck)
@@ -372,16 +377,6 @@ def test_a_custom_cards_menu_on_the_deck_page(server: Server, width: int, theme:
         # the deck page's own card menu (static/deck.js), as the deck's other cards have it: its
         # fit and contrast are checked; its item heights are the menu's own, not this pass's
         assert page.evaluate(MEASURE) == [] and page.evaluate(CONTRAST, TEXT) == []
-        # Lock personal categories is shown but not offered: the one line why
-        lock = menu.locator("[role=menuitem]", has_text="Lock personal categories")
-        assert lock.get_attribute("aria-disabled") == "true"
-        lock.click(force=True)  # Playwright holds back from an aria-disabled item; a member's press lands
-        toast = page.locator(".deck-toast")
-        toast.wait_for(state="visible")
-        assert (
-            "Not for custom cards (Archidekt doesn't keep default categories for them)." in toast.inner_text()
-        )
-        assert menu.count() == 1  # the menu stays
         # one more copy: shown at once, saved through the page's own custom card endpoint
         menu.locator(".qtyrow .step", has_text="+").click()
         assert menu.locator(".qtyrow .n").inner_text() == "2"
@@ -641,12 +636,19 @@ def test_custom_card_pictures_on_my_lists(server: Server, width: int, theme: str
         thumb = mentor.locator("img.lp-thumb")
         assert thumb.get_attribute("src") == "/lists/api/custom_picture/41?face=front"
         assert thumb.bounding_box()["width"] == 34
-        # Old Ranger's picture can't be served: an empty slot, no name tile
+        # Old Ranger's picture can't be served: a labelled tile (no empty slot, no name tile) and
+        # the row says so
         page.wait_for_function(
             "() => !document.querySelector(\".tr[data-name='Old Ranger'] img\")", timeout=4000
         )
-        assert ranger.locator("span.lp-thumb").count() == 1 and ranger.locator(".img-fallback").count() == 0
+        tile = ranger.locator("span.lp-thumb.lp-thumb-none")
+        assert tile.count() == 1 and ranger.locator(".img-fallback").count() == 0
+        assert tile.get_attribute("role") == "img" and tile.locator("svg.i").count() == 1
+        assert (
+            tile.get_attribute("aria-label") == "Old Ranger, Creature — Human Advisor (picture unavailable)"
+        )
         assert ranger.locator(".title").inner_text().startswith("Old Ranger")
+        assert ranger.locator(".lp-nopic").first.inner_text().strip() == "· picture unavailable"
         _fits(page, "custom rows", width)
         # the Edit box: the current picture over the frame; then Old Ranger's frame with its words
         mentor.locator(".kebab").click()
@@ -669,7 +671,10 @@ def test_custom_card_pictures_on_my_lists(server: Server, width: int, theme: str
         page.wait_for_timeout(800)
         crop = box.locator(".lp-crop[data-crop='f']")
         assert crop.locator("img").count() == 0 and crop.locator(".img-fallback").count() == 0
-        assert crop.inner_text().strip() == "Picture set"
+        # the frame says which card it is, as the deck's viewer does, and the one line why
+        assert crop.locator(".lp-nm").inner_text() == "Old Ranger"
+        assert crop.locator(".lp-ty").inner_text() == "Creature — Human Advisor"
+        assert crop.locator(".lp-why").inner_text() == "Picture set, but it can't be shown right now"
         _close_box(page)
         browser.close()
     assert errors == []

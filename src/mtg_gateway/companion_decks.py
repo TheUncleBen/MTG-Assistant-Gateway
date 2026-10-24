@@ -571,6 +571,10 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
             out["count_text"] = deck_count_text(out["total"])
         for d in rows or []:
             d.setdefault("url", f"https://archidekt.com/decks/{d['id']}")
+        if rows is not None and qp.get("packages") == "1":
+            # ?packages=1 (the forum's Enter a deck… box): the member's card packages marked, one
+            # more Archidekt read, so the box can leave them out; unmarked when that read fails
+            out["packages_marked"] = await decks.mark_packages(sub, rows)
         out["decks"] = rows or []
         resp = JSONResponse(out, headers={"Cache-Control": "no-store"})
         if shape == "list" and qp.get("view") in LIST_VIEWS:

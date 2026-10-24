@@ -1201,11 +1201,14 @@ def _custom_data(card: CustomDeckCard, deck: Deck) -> str:
 
 
 def custom_card_row(card: CustomDeckCard, *, deck: Deck, view: str = "text") -> str:
-    """A custom card as a row of the list views: its count, name, the Custom mark and its type."""
+    """A custom card as a row of the list views: its count, name and type. The Set column says
+    Custom, so the rows carry no Custom mark as well (it took the room the name needs); the
+    brewer rows, with no Set column, keep the mark."""
     cls = " side" if custom_zone(card, deck) == "side" else ""
     qty = f"<span class='q'>{card.quantity}</span>"
-    name = f"<span class='name' title='{esc(card.name)}'>{esc(card.name)}</span>{custom_badge()}"
+    name = f"<span class='name' title='{esc(card.name)}'>{esc(card.name)}</span>"
     if view == "brewer":
+        name += custom_badge()
         pic = (
             f"<img class='art' src='{custom_picture_url(deck, card)}' alt='' loading='lazy'>"
             if card.custom_card_id is not None
@@ -2933,8 +2936,16 @@ h3 .count{font-weight:400;color:var(--text-muted);font-size:.9rem}
 .toolbar form.views .field,.toolbar form.views .sel,.toolbar form.views select{min-width:0}
 .comments .thread{margin:.75rem 0 1rem}
 .comments .cmt{border-top:1px solid var(--border);padding:.6rem 0 .4rem}
-.comments .cmt .who{display:flex;gap:.5rem;align-items:center;font-size:.85rem;color:var(--text-muted)}
+.comments .cmt .who{display:flex;gap:.5rem;align-items:center;font-size:.85rem;color:var(--text-muted);
+  min-height:44px}
 .comments .cmt .who b{color:var(--text)}
+/* the comment's ⋮ (social.js): at the row's right edge, 44 px, here and on the forum's thread page */
+.comments .cmt .who .kebab{display:inline-flex;align-items:center;justify-content:center;width:44px;
+  height:44px;margin:-8px 0 -8px auto;padding:0;border:0;background:transparent;border-radius:50%;
+  color:var(--text-muted);cursor:pointer}
+.comments .cmt .who .kebab:hover,.comments .cmt .who .kebab:focus-visible{background:var(--surface-2);
+  color:var(--text)}
+.comments .cmt .who .kebab svg.i{width:20px;height:20px;fill:currentColor;stroke:currentColor}
 .comments .cmt p{margin:.3rem 0;white-space:pre-wrap;overflow-wrap:anywhere}
 .comments .cmt .replies{margin-left:1rem;border-left:2px solid var(--border);padding-left:.75rem}
 .comments .cmt .acts .del{color:var(--danger-text)}
@@ -3339,6 +3350,9 @@ html.cardview-open{overflow:hidden}
   .ctxmenu .qtyrow .step{width:44px;min-width:44px;height:44px;min-height:44px}
   .ctxmenu .sub button{min-height:44px}
   .ctxmenu .mvform input,.ctxmenu .mvform .acts .btn{min-height:44px}
+  /* the viewer's × and its − / + steppers: finger-sized (set after their own rules, so this wins) */
+  .cardview .close{width:44px;height:44px;min-height:44px}
+  .cardview .acts .qtyctl button{width:44px;min-width:44px;min-height:44px}
 }
 .deckview .c.held,.deckview .row.held{outline:3px solid var(--orange);outline-offset:2px}
 /* the toast after a save (theme .toast, bottom right): the message, Undo and History */

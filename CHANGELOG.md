@@ -36,6 +36,19 @@ app, and Show back face now shows the card's back picture, as Archidekt does.
 - **Theorycrafted's help** reads "Left out of Archidekt’s “In decks” view unless you choose to
   show it."
 - Card menu rows without an icon keep the icon's space, so their words line up.
+- **Removing many copies of a custom card** asks in a box ending on a red button, instead of in a
+  message at the foot of the page; a question left open when you leave the page is turned down.
+- **Enter a deck in a contest** starts on "Pick a deck…" and lists only decks, not packages.
+- **The forum** lists threads in two lines on a phone, shows a thread's section in its trail once
+  the section's list has been read, and no longer repeats the section names above the table. A
+  vote button shows an up arrow, Post reply has its icon, and a deck comment's ⋮ sits at the
+  right edge.
+- **My lists** counts every tab on the first visit and keeps the current tab in view; a custom card
+  whose picture can't be shown is drawn with its name and type.
+- **Account's Archidekt settings** show each switch's words once, and Price sources lines up with
+  its two lists. Some of the page's wording is clearer.
+- A custom card's note reads "Custom card, made on Archidekt: not on Scryfall, and not counted in
+  the deck's price here."
 
 ### Fixed
 - Card menu rows, the quantity buttons and the menu's other buttons were smaller than a finger on
@@ -61,6 +74,16 @@ app, and Show back face now shows the card's back picture, as Archidekt does.
 - In Change printing, with the keyboard on Use this printing, a card sliding under a resting mouse
   pointer redrew the preview and dropped the keyboard's place onto the page behind the box. The
   preview now stays put while the keyboard is in it.
+- In every drop-down list (Group by, Sort by, Price sources, the folder pickers, My decks' Show
+  filter), the current choice was too faint to read; it now has full contrast and an orange mark.
+- The Archidekt notifications switch on the Account page showed the opposite of the setting.
+- Holding a finger on a card or a post opened its menu, and lifting the finger could close it
+  again; the menu now stays open.
+- On touch screens, the Approval mode folds, the "Has a back face" switch, and the card viewer's
+  close, − and + buttons are now 44 pixels, finger-sized.
+- The Add template box said "Add 1 category" with nothing ticked; it now says "Add categories".
+- The New package box, Package settings' Budget, the notification rows and a custom card's list
+  row now line up with the rest of the app.
 
 ## [0.7.43] - 2026-10-23
 
