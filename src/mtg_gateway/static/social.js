@@ -281,14 +281,14 @@
       if (canWrite && me !== null && c.id && !(c.owner && c.owner.id === me)) {
         var btn = el("button", "btn-ghost vote");
         btn.type = "button";
-        if (window.MtgMenu) btn.appendChild(window.MtgMenu.icon("plus")); else btn.appendChild(document.createTextNode("▲ "));
+        if (window.MtgMenu) btn.appendChild(window.MtgMenu.icon("vote-up")); else btn.appendChild(document.createTextNode("▲ "));
         var count = el("span", "n", String(c.points || 0));
         btn.appendChild(count);
         var mine = function () { return c.user_vote === 1; };
         var label = function () {
           count.textContent = String(c.points || 0);
           btn.setAttribute("aria-pressed", mine() ? "true" : "false");
-          btn.setAttribute("aria-label", pointsText() + ". " + (mine() ? "Take back your vote" : "Vote up") + ": comment by " + (c.owner.username || "someone"));
+          btn.setAttribute("aria-label", (mine() ? "Take back your vote" : "Vote up") + " (" + pointsText() + "): comment by " + (c.owner.username || "someone"));
           btn.title = mine() ? "You voted this up" : "Vote up";
         };
         label();

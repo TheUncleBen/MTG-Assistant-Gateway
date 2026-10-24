@@ -232,9 +232,10 @@ NEW_DECK_CSS = """
 .nd-grid{display:grid;grid-template-columns:minmax(0,1fr) 13rem;gap:1.1rem;align-items:stretch}
 .nd-fields{display:grid;grid-template-columns:minmax(0,1fr);gap:.9rem;min-width:0}
 .nd-top{display:grid;grid-template-columns:minmax(0,1fr) 11rem;gap:.75rem;align-items:start}
-/* side by side: the box's stacked-field gap is not for these */
-.nd-form .nd-top .field + .field{margin-top:0}
-.nd-form .field{margin:0;min-width:0} .nd-form .field label{display:block;font-weight:700;margin:0 0 .25rem}
+/* the grids space the fields; the box's own .field + .field margin would set Format 12 px lower
+   than Deck name (0.7.44) */
+.nd-form .field,.mtgbox .body .nd-form .field + .field{margin:0;min-width:0}
+.nd-form .field label{display:block;font-weight:700;margin:0 0 .25rem}
 .nd-form .msel-btn{max-width:100%}
 /* the three tabs wrap at large text instead of widening the sheet */
 
@@ -270,8 +271,9 @@ NEW_DECK_CSS = """
   color:var(--link);font-size:.92rem;font-weight:700}
 .nd-help summary svg.i{width:16px;height:16px}
 .nd-help p{margin:.2rem 0 0;max-width:30rem}
-.nd-prev{display:flex;flex-direction:column;justify-content:center;border-left:1px solid var(--border-soft);
-  padding-left:1.1rem}
+/* the tile at the top of its column, level with the fields (0.7.43: it floated mid-column) */
+.nd-prev{display:flex;flex-direction:column;justify-content:flex-start;padding-left:1.1rem;
+  border-left:1px solid var(--border-soft)}
 .ndtile{display:block;border:1px solid var(--card-border);border-radius:var(--radius-panel);overflow:hidden;
   background:var(--surface)}
 .ndtile .thumb{position:relative;display:block;height:110px;
@@ -569,6 +571,10 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
             out["count_text"] = deck_count_text(out["total"])
         for d in rows or []:
             d.setdefault("url", f"https://archidekt.com/decks/{d['id']}")
+        if rows is not None and qp.get("packages") == "1":
+            # ?packages=1 (the forum's Enter a deck… box): the member's card packages marked, one
+            # more Archidekt read, so the box can leave them out; unmarked when that read fails
+            out["packages_marked"] = await decks.mark_packages(sub, rows)
         out["decks"] = rows or []
         resp = JSONResponse(out, headers={"Cache-Control": "no-store"})
         if shape == "list" and qp.get("view") in LIST_VIEWS:

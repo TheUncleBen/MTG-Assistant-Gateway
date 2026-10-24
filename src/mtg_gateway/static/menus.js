@@ -855,14 +855,30 @@
   // on the section; without scripts the gateway asks on a page of its own)
   var cats = $("#categories[data-confirm]");
   var countsByName = ["sideboard", "maybeboard"];
-  function catConfirm(form, pre, okText, extra, danger, icon, submitter) {
-    var body = el("div");
-    body.appendChild(el("p", null, cats.getAttribute(pre) || ""));
-    if (extra) body.appendChild(extra);
+  // the boxes' titles and sentences are the backend's (modes.CATEGORY_WORDS, on the section), with
+  // {name}, {n} and {names} filled in here; a key with a _one form takes it for one card or category
+  var WORDS = {};
+  try { WORDS = JSON.parse((cats && cats.getAttribute("data-words")) || "{}"); } catch (err) { WORDS = {}; }
+  function words(key, fill) {
+    fill = fill || {};
+    if (fill.n === 1 && WORDS[key + "_one"]) key += "_one";
+    return (WORDS[key] || "").replace(/\{(name|n|names)\}/g, function (_m, k) { return fill[k] === undefined ? "" : String(fill[k]); });
+  }
+  function quotedList(names) {
+    var q = names.map(function (x) { return "“" + x + "”"; });
+    return q.length < 2 ? q.join("") : q.slice(0, -1).join(", ") + " and " + q[q.length - 1];
+  }
+  // opts: title (the box's), text (its first sentence), ok, extra (more of the body), danger
+  // (the final solid red button, with "Keep it" as the way back), icon, submitter
+  function catConfirm(form, opts) {
+    var body = el("div", "stack");
+    body.appendChild(el("p", null, opts.text || ""));
+    if (opts.extra) body.appendChild(opts.extra);
+    var danger = opts.danger, submitter = opts.submitter;
     var box = Box.open({
-      title: cats.getAttribute(pre + "-title") || "",
+      title: opts.title || "",
       body: body,
-      actions: [cancelButton(), Box.button(okText, danger ? "danger" : "primary", function () {
+      actions: [cancelButton(danger ? words("keep") : undefined), Box.button(opts.ok, danger ? "danger" : "primary", function () {
         function hidden(name, value) {
           var c = el("input");
           c.type = "hidden"; c.name = name; c.value = value;
@@ -877,7 +893,7 @@
         if (pick) hidden("move_cards_to", pick.value);
         box.busy(true);
         form.submit();
-      }, { icon: icon })],
+      }, { icon: opts.icon })],
       returnFocus: submitter || $("button", form)
     });
     var pick = $("select", body), ok = body.closest(".mtgbox") && $(".acts button.danger, .acts button.primary", body.closest(".mtgbox"));
@@ -896,10 +912,11 @@
     if (form.id === "catdel" || form.id === "catunused") {
       if (!by) return;  // no idea which was pressed: the gateway's own confirmation page asks
       e.preventDefault();
-      var extra = null, okText = "Delete unused categories";
+      var extra = null, okText = "", title = "";
       if (form.id === "catdel") {
         var name = by.getAttribute("data-name") || "", n = +by.getAttribute("data-cards") || 0;
         okText = "Delete “" + name + "”";
+        title = words("delete_title", { name: name });
         if (n > 0) {
           var names = [];
           try { names = JSON.parse(cats.getAttribute("data-names") || "[]"); } catch (err) { names = []; }
@@ -934,11 +951,13 @@
             var c = li && $("input[name^=" + key + "_]", li);
             return !!(c && c.defaultChecked);
           };
+          // the member is moving cards, not changing a category: the move sentences, by count
           var note = function () {
             var to = sel.value, li = row(to), from = row(name);
             var text = "";
-            if (flag(li, "premier") || to.toLowerCase() === "commander") text = cats.getAttribute("data-confirm") || "";
-            else if (flag(li, "not_in_deck") !== flag(from, "not_in_deck")) text = cats.getAttribute("data-counts-confirm") || "";
+            if (!to) text = "";
+            else if (flag(li, "premier") || to.toLowerCase() === "commander") text = words("move_commander", { n: n });
+            else if (flag(li, "not_in_deck") !== flag(from, "not_in_deck")) text = words("move_counts", { n: n });
             warn.textContent = text;
             warn.hidden = !text;
           };
@@ -947,26 +966,36 @@
           extra.appendChild(warn);
         }
       } else {
-        extra = el("p", null, "Deletes " + (by.getAttribute("data-names") || "") + ".");
+        // Delete unused: the title and button count them, and the list names each one
+        var unusedNames = [];
+        try { unusedNames = JSON.parse(by.getAttribute("data-names") || "[]"); } catch (err) { unusedNames = []; }
+        var fill = { n: unusedNames.length, name: unusedNames[0] || "", names: quotedList(unusedNames) };
+        title = words("unused_title", fill);
+        okText = words("unused_ok", fill);
+        extra = el("p", null, words("deletes", fill));
       }
       var also = by.getAttribute("data-also");
       if (also) {
-        var both = el("div");
+        var both = el("div", "stack");
         both.appendChild(el("p", null, also));
         if (extra) both.appendChild(extra);
         extra = both;
       }
-      catConfirm(form, "data-delete-confirm", okText, extra, true, "trash", by);
+      catConfirm(form, { title: title, text: cats.getAttribute("data-delete-confirm") || "", ok: okText,
+        extra: extra, danger: true, icon: "trash", submitter: by });
       return;
     }
     if (form.id === "catnew") {
-      var nm = ($("input[name=category]", form) || {}).value || "";
+      // a category is being created, not changed: the create titles and sentences (Premier wins
+      // when both apply)
+      var nm = (($("input[name=category]", form) || {}).value || "").trim();
       var p = $("input[name=premier]", form), nd = $("input[name=not_in_deck]", form);
-      var pre = p && p.checked ? "data-confirm" :
-        ((nd && nd.checked) || countsByName.indexOf(nm.trim().toLowerCase()) >= 0) ? "data-counts-confirm" : null;
-      if (!pre) return;
+      var kind = p && p.checked ? "create_commander" :
+        ((nd && nd.checked) || countsByName.indexOf(nm.toLowerCase()) >= 0) ? "create_counts" : null;
+      if (!kind) return;
       e.preventDefault();
-      catConfirm(form, pre, "Create category", null, false, "plus", by);
+      catConfirm(form, { title: words(kind + "_title", { name: nm }), text: words(kind), ok: "Create category",
+        icon: "plus", submitter: by });
       return;
     }
     var commander = false, counts = false;
@@ -983,8 +1012,9 @@
     });
     if (!commander && !counts) return;
     e.preventDefault();
-    catConfirm(form, commander ? "data-confirm" : "data-counts-confirm", "Save categories", null, false, "check",
-      $("button[name=action][value=save]", form));
+    var pre = commander ? "data-confirm" : "data-counts-confirm";
+    catConfirm(form, { title: cats.getAttribute(pre + "-title") || "", text: cats.getAttribute(pre) || "",
+      ok: "Save categories", icon: "check", submitter: $("button[name=action][value=save]", form) });
   });
 
   // -- the deck Settings page: the collaborator forms ask in a box first ------------------------

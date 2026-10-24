@@ -448,6 +448,7 @@ class DeckCard:
     custom_cmc: float | None = None
     companion: bool = False
     flipped_default: bool = False  # the row shows its back face by default (the site's flippedDefault)
+    layout: str = ""  # Scryfall's layout as Archidekt's oracleCard carries it (transform, split, normal...)
     image_hash: str = ""
     scryfall_uid: str = ""
     default_category: str = ""  # Archidekt's auto category for cards with categories null
@@ -2536,6 +2537,7 @@ def parse_deck(body: Any) -> Deck:
                 custom_cmc=_number(entry.get("customCmc")),
                 companion=entry.get("companion") is True,
                 flipped_default=entry.get("flippedDefault") is True,
+                layout=str(oracle.get("layout") or ""),
                 image_hash=str(card.get("scryfallImageHash") or ""),
                 scryfall_uid=str(card.get("uid") or ""),
                 default_category=str(oracle.get("defaultCategory") or ""),

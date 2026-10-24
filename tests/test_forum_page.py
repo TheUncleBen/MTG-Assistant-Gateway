@@ -71,8 +71,8 @@ async def test_the_forum_page_lists_the_groups_and_their_sections(member: Browse
     assert f"href='{SECTION}'" in page and "href='/forum/Archidekt/Deck%20Help'" in page
     assert "Talk about anything" in page and "Ask for help with a deck" in page
     assert "1,200" in page and ">300<" in page
-    # the section chips at the top
-    assert "class='ui-chip' href='/forum/Archidekt/Deck%20Help'" in page
+    # no section chips above the tables: the rows name every section once (0.7.44 L13)
+    assert "ui-chip" not in page
     # starting a thread stays on Archidekt, with the one line why
     assert "href='https://archidekt.com/forum/thread/new'" in page and "New thread on Archidekt" in page
     assert esc("Archidekt asks you to prove you're human before starting a thread") in page
@@ -317,7 +317,9 @@ async def test_a_contest_thread_has_its_strip_the_entries_and_the_enter_and_with
     assert "Entries (1)" in page and "Amy's pile" in page and "by amy" in page
     assert "Reviewed" not in page and "Not yet reviewed" not in page
     # the boxes are on the page, hidden; the Enter box reads the decks when it opens
-    assert "id='enter'" in page and "id='fm-enter-f'" in page and "data-src='/api/decks/mine'" in page
+    assert (
+        "id='enter'" in page and "id='fm-enter-f'" in page and "data-src='/api/decks/mine?packages=1'" in page
+    )
     assert "Summary of the deck (required)" in page and "Shown on the contest page." in page
     assert "Archidekt replaces the deck's description with this summary." in page
     assert "Review the entry" in page
@@ -575,3 +577,37 @@ async def test_a_comment_vote_without_the_page_token_is_refused(member: Browser,
     )
     assert r.status_code == 403 and r.json()["error"] == "csrf", r.text
     assert len(ark.vote_calls) == sent and ("alice", cid) not in ark.votes
+
+
+async def test_a_trail_is_only_archidekts_own_names_never_a_members_url(stack: Stack) -> None:
+    """Security review 0.7.44 S-02: a thread's trail is stored only under a group and section that
+    the forum's own section listing names, in Archidekt's spelling. One member's made-up group in
+    the URL never becomes another member's trail."""
+    from mtg_gateway import forum
+
+    from .test_access_control import AMY, browser_for
+
+    h = stack.h
+    forum._IN_SECTION.clear()
+    alice_user = dict(h.idp.user)
+    amy = await browser_for(h, AMY, "amy", "pw-amy")
+    assert (await amy.http.get("/forum")).status_code == 200  # the listing has been read
+    r = await amy.http.get("/forum/Made%20up/General")
+    assert r.status_code == 200, r.text  # the fake serves General's threads under any group name
+    assert forum.in_section(700001) is None
+    await amy.aclose()
+
+    h.idp.user = alice_user
+    alice = await browser_for(h, None, "alice", "pw-alice")
+    page = (await alice.http.get("/forum/thread/700001")).text
+    crumbs = re.search(r"<nav class='crumbs'.*?</nav>", page).group(0)
+    assert "Made up" not in crumbs and crumbs.count("<a ") == 1  # the plain Forum crumb
+    # a real section, typed in another case: stored in Archidekt's own spelling
+    assert (await alice.http.get("/forum/archidekt/General")).status_code == 200
+    assert forum.in_section(700001) == ("Archidekt", "General")
+    page = (await alice.http.get("/forum/thread/700001")).text
+    crumbs = re.search(r"<nav class='crumbs'.*?</nav>", page).group(0)
+    assert "href='/forum#group-Archidekt'>Archidekt</a>" in crumbs
+    assert "href='/forum/Archidekt/General'>General</a>" in crumbs
+    await alice.aclose()
+    forum._IN_SECTION.clear()

@@ -842,3 +842,99 @@ def test_the_account_page_fits_a_phone_at_200_percent_text(chromium, server: Ser
                     problems.append(f"@{width}px {zoom}: {got}")
                 ctx.close()
     assert problems == [], "\n".join(problems)
+
+
+# The magnifier and the text start of the top bar's search box: the icon must end before the
+# text (the input's left padding) begins, so it never sits on "Search cards and decks".
+SEARCH_ICON = """() => {
+  const i = document.querySelector('.topbar .topsearch input');
+  if (!i || !i.getClientRects().length) return null;
+  const s = document.querySelector('.topbar .topsearch .box > svg.i');
+  const ir = i.getBoundingClientRect(), sr = s.getBoundingClientRect();
+  const textStart = ir.left + parseFloat(getComputedStyle(i).paddingLeft);
+  return {clear: sr.right + 2 <= textStart, iconRight: sr.right, textStart, wrapped: !!i.closest('.suggest'),
+    height: ir.height, radius: getComputedStyle(i).borderTopLeftRadius};
+}"""
+
+
+@pytest.mark.parametrize("theme", ["light", "dark"])
+@pytest.mark.parametrize("script", [True, False])
+def test_the_search_boxs_magnifier_sits_clear_of_its_text(
+    chromium, server: Server, script: bool, theme: str
+) -> None:
+    """0.7.43: the box's rules addressed the input through the .suggest wrapper the script puts
+    around it, so without scripts (and before they run) the input had no room for the magnifier,
+    which sat on "Search". In the bar (desktop), on the touch rail (Fold) and, with scripts, opened
+    under the phone's bar, on every page, the icon ends before the text begins."""
+    sid = server.sign_in()
+    problems: list[str] = []
+    with _session(chromium) as browser:
+        for width, touch in ((1366, False), (1000, False), (810, True), (390, True)):
+            if width == 390 and not script:
+                continue  # without scripts the phone's magnifier is a link to /search
+            ctx = browser.new_context(
+                viewport={"width": width, "height": 800},
+                java_script_enabled=script,
+                color_scheme=theme,
+                has_touch=touch,
+                is_mobile=touch,
+            )
+            ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
+            page = ctx.new_page()
+            for path in ("/history", "/account", "/search"):
+                _open(page, f"{server.base}{path}")
+                if width == 390:
+                    page.locator(".topbar .searchbtn").click()
+                    page.locator(".topbar .topsearch input").wait_for(state="visible", timeout=3000)
+                m = page.evaluate(SEARCH_ICON)
+                if m is None:
+                    problems.append(f"@{width}px {path} scripts={script}: no search box")
+                elif not m["clear"] or m["wrapped"] != script or m["height"] != (44 if touch else 36):
+                    problems.append(f"@{width}px {path} scripts={script}: {m}")
+            ctx.close()
+    assert problems == [], "\n".join(problems)
+
+
+# Counts layout reads made right after a write to <html>'s style in the same script run: each one
+# makes the browser restyle and lay out the whole page there and then, before the frame does it
+# again (a write on <html> reaches every element).
+FORCED = """
+(() => {
+  const html = () => document.documentElement && document.documentElement.style;
+  let dirty = false;
+  window.__forced = 0;
+  const S = CSSStyleDeclaration.prototype;
+  for (const k of ['setProperty', 'removeProperty']) {
+    const f = S[k];
+    S[k] = function (...a) {
+      if (this === html()) { dirty = true; queueMicrotask(() => { dirty = false; }); }
+      return f.apply(this, a);
+    };
+  }
+  const read = (proto, k) => {
+    const f = proto[k];
+    proto[k] = function (...a) { if (dirty) window.__forced++; return f.apply(this, a); };
+  };
+  read(Element.prototype, 'getBoundingClientRect');
+  const gcs = window.getComputedStyle;
+  window.getComputedStyle = function (...a) { if (dirty) window.__forced++; return gcs.apply(this, a); };
+})();
+"""
+
+
+@pytest.mark.parametrize("width", [390, 1366])
+def test_the_bars_room_is_measured_before_it_is_written(chromium, server: Server, width: int) -> None:
+    """topbar.js reads every size first and then writes its rooms on <html>: a read after a write
+    restyled and laid out a 100-card deck page again (the phone's longest task on load)."""
+    sid = server.sign_in()
+    with _session(chromium) as browser:
+        ctx = browser.new_context(viewport={"width": width, "height": 800}, has_touch=width < 1000)
+        ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
+        ctx.add_init_script(FORCED)
+        page = ctx.new_page()
+        _open(page, f"{server.base}/decks/42")
+        page.evaluate(SETTLE)
+        page.evaluate("() => window.dispatchEvent(new Event('resize'))")
+        page.evaluate(SETTLE)
+        assert page.evaluate(SCRIPTS_RAN)
+        assert page.evaluate("() => window.__forced") == 0

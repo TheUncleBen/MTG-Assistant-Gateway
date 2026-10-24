@@ -3207,7 +3207,8 @@ class DeckService:
         if exp is None or exp - time.time() < 300:
             token = await refreshed("expiring")
         acting = _acting_sub.set(sub)
-        quiet = no_retry.set(background)
+        # a caller that asked for no retries itself keeps them off (lists_page.read_counts)
+        quiet = no_retry.set(background or no_retry.get())
         try:
             try:
                 result = await fn(token, *args)
@@ -3387,9 +3388,9 @@ class DeckService:
     async def mark_packages(self, sub: str, rows: list[dict[str, Any]]) -> bool:
         """Mark the member's card packages in a copy of their deck list (``package``: the settings
         in words, None on a plain deck), from the Packages page's own listing, and add any package
-        the deck listing left out. Read only when asked (list_my_decks), never on the deck list's
-        own cold load, which stays one Archidekt listing. False when the package listing couldn't
-        be read: the rows are left unmarked and the list as it was."""
+        the deck listing left out. Read only when asked (list_my_decks, /api/decks/mine?packages=1),
+        never on the deck list's own cold load, which stays one Archidekt listing. False when the
+        package listing couldn't be read: the rows are left unmarked and the list as it was."""
         from . import packages
 
         _token, link = self._token(sub)

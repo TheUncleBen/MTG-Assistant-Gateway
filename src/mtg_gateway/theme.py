@@ -413,7 +413,11 @@ details.dd .menu .actions button.primary:hover,details.dd .menu .actions button.
 .msel-list{position:fixed;z-index:200;max-width:calc(100vw - 1rem);overflow:auto;overscroll-behavior:contain;
   border:1px solid var(--border)}
 .msel-list [role=option]{min-height:40px;white-space:normal;overflow-wrap:anywhere;padding:.3rem 1rem}
-.msel-list [role=option][aria-selected=true]{background:var(--border);box-shadow:inset 3px 0 0 var(--orange)}
+/* the current option: its orange words (--toolbar-active) need the softer fill for 4.5:1 in both
+   themes (on --border they were 3.7:1 light, 2.6:1 dark); the 3 px orange bar says "current" on
+   its own, so a row the mouse hovers (the menu's --border) never reads as a second current row */
+.msel-list [role=option][aria-selected=true]{background:var(--border-soft);
+  box-shadow:inset 3px 0 0 var(--orange)}
 .msel-list .head.title{padding:.6rem 1rem .4rem;font-size:.9rem}
 .msel-scrim{position:fixed;inset:0;z-index:199;background:var(--scrim)}
 .msel-list.sheet{left:0;right:0;bottom:0;top:auto;width:auto;max-width:none;max-height:min(70vh,70dvh);
@@ -483,12 +487,13 @@ details.mode-info[open] > summary svg{transform:rotate(180deg)}
 .mode-body p.warn{margin-top:.6rem;padding:8px 12px;border-left:3px solid var(--orange);
   background:var(--surface);border-radius:var(--radius)}
 /* On a phone the list runs to the card's edges and the gutters round the name are tighter, so a
-   mode's name keeps its one row at 344px (a folded Fold) as well as at 390px. The row stays a
-   44px tap target, and at 200% text the name may wrap — nothing scrolls sideways. */
+   mode's name keeps its one row at 344px (a folded Fold) as well as at 390px with the chevron's
+   full 44px. The row stays a 44px tap target, and at 200% text the name may wrap — nothing
+   scrolls sideways. */
 @media (max-width:599.98px){
   .mode-list{margin-inline:-1rem;border-left:0;border-right:0;border-radius:0}
-  .mode-pick{gap:8px;padding:13px 38px 13px 12px;font-size:.86rem}
-  details.mode-info > summary{right:0;width:38px;top:max(0px,calc(13px + .6em - 22px))}
+  .mode-pick{gap:8px;padding:13px 44px 13px 12px;font-size:.84rem}
+  details.mode-info > summary{right:0;width:44px;top:max(0px,calc(13px + .6em - 22px))}
   .mode-body{padding:0 12px 14px 30px;font-size:.9rem}
 }
 /* toggle switch 40x20, orange when on */
@@ -660,6 +665,12 @@ details.disclosure[open] > summary::before{content:'\\25BE'}
   border:1px solid var(--border);border-radius:var(--radius-sheet);background:var(--surface);padding:1rem;
   box-shadow:var(--shadow)}
 .toast.error{border-color:var(--red)}
+/* a toast's × keeps the top right corner at every width: out of the flow, so a message with
+   buttons (Undo, History) wraps under the text instead of pushing the × onto a line of its own
+   (0.7.43: it wrapped at 810 px); the toast keeps the corner clear for it, 44 px wide on touch
+   (in px: a phone's rem is 14 px) */
+.toast:has(> .close){padding-right:calc(1rem + 44px)}
+.toast > .close{position:absolute;top:.75rem;right:.75rem;margin:0}
 
 /* key/value meta rows */
 .meta{display:grid;grid-template-columns:max-content 1fr;gap:.3rem 1rem;margin:0 0 1rem;font-size:.93rem}
@@ -817,7 +828,7 @@ form.guarded button[data-guard]:disabled{pointer-events:none}
      2rem and 30px and would otherwise win */
   .hrow details > summary:not(._),.report details summary:not(._){min-height:44px;display:flex;
     align-items:center}
-  ul.rows .row:not(._){height:44px}
+  ul.rows .row:not(._){--rowh:44px}
 }
 /* A narrow window with a mouse (600 to 800 px, a half-width desktop window or an open Fold):
    the bar keeps its text links and drops the brand's word, so nothing runs under the account
@@ -1117,11 +1128,10 @@ html[data-card-size=s] .deckview.grid .cards{grid-template-columns:repeat(auto-f
 html[data-card-size=l] .deckview.grid .cards{grid-template-columns:repeat(auto-fill,minmax(230px,1fr))}
 html[data-card-size=s] .deckview.scroll .c{flex-basis:clamp(105px,16.5vw,150px)}
 /* at S a stack's name gets its own line under the grip and menu, so a narrow stack still shows it
-   whole, and a tile without a picture starts its name below the 38 px quantity corner */
+   whole (a tile without a picture keeps its text clear of the corners at every size: deckpage.py) */
 html[data-card-size=s] .deckview.stacks .stackhead h2{flex-wrap:wrap;row-gap:0}
 html[data-card-size=s] .deckview.stacks .stackhead .title{
   order:2;flex:1 0 100%;white-space:normal;overflow-wrap:anywhere;hyphens:auto;-webkit-hyphens:auto}
-html[data-card-size=s] .deckview .c .ph{padding-top:max(12%,34px)}
 html[data-card-size=l] .deckview.scroll .c{flex-basis:clamp(190px,30vw,270px)}
 /* My decks and the folders in it: as many deck tiles as fit (S 160, M 220, L 300 px at least) */
 html[data-card-size=s] ul.decklist.grid{grid-template-columns:repeat(auto-fill,minmax(min(100%,160px),1fr))}
@@ -1142,10 +1152,16 @@ html[data-card-size=l] ul.collgrid{
 html[data-card-size=s] .printpick .ppgrid{grid-template-columns:repeat(auto-fill,minmax(112px,1fr))}
 html[data-card-size=l] .printpick .ppgrid{grid-template-columns:repeat(auto-fill,minmax(203px,1fr))}
 /* list views (R-175): the row pictures follow the same choice through --thumb-scale (S 0.75, L 1.35);
-   a page's own list thumbnail multiplies its width and height by it (ui.thumb_size_css) */
+   a page's own list thumbnail multiplies its width and height by it (ui.thumb_size_css). The scale
+   is set on the thumbnails themselves, never on <html>: a custom property changed on the root is
+   inherited by every element, so the switch would restyle the whole page instead of the pictures */
 html{--thumb-scale:1}
-html[data-card-size=s]{--thumb-scale:.75}
-html[data-card-size=l]{--thumb-scale:1.35}
+html[data-card-size=s] :is(ul.decklist.list .thumb,.cardlist .pic,ul.colllist .thumb,
+  .watch-page .w-t .thumb,.erow .thumb,ul.colllist .qc,
+  .scan ul.items img,.scan ul.items .thumb,.scan ul.items .img-fallback){--thumb-scale:.75}
+html[data-card-size=l] :is(ul.decklist.list .thumb,.cardlist .pic,ul.colllist .thumb,
+  .watch-page .w-t .thumb,.erow .thumb,ul.colllist .qc,
+  .scan ul.items img,.scan ul.items .thumb,.scan ul.items .img-fallback){--thumb-scale:1.35}
 html[data-card-size=s] ul.decklist.list .thumb,html[data-card-size=l] ul.decklist.list .thumb{
   width:calc(90px * var(--thumb-scale));height:calc(60px * var(--thumb-scale))}
 html[data-card-size=s] .cardlist .pic,html[data-card-size=l] .cardlist .pic{
@@ -1551,13 +1567,17 @@ CARD_MENU_CSS = """
   .wbtn{height:44px;min-height:44px;min-width:44px}
   .wbtn.icon{width:44px}
   .suggest-list li.watchable{padding-right:4rem}
-  .ctxmenu.cs-menu a,.ctxmenu.cs-menu button{min-height:44px}
+  .ctxmenu a,.ctxmenu button,.ctxmenu .item{min-height:44px}
 }
+/* a row without an icon keeps an empty slot the icon's width, so every row's text lines up */
+.ctxmenu .ic-slot{display:inline-block;width:18px;height:18px;flex:none}
 /* the toast after a watch (and after an add on Card search) */
 .toast.cards-toast{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem .75rem;z-index:95}
 .toast.cards-toast .msg{flex:1 1 12rem;min-width:0;overflow-wrap:anywhere}
 .toast.cards-toast .btn,.toast.cards-toast button{margin:0}
 .toast.cards-toast .close{width:2rem;min-height:2rem;height:2rem;padding:0;border-radius:50%;font-size:1.2rem}
+/* finger-sized on touch, in the corner the toast keeps clear for it (.toast > .close above) */
+@media (pointer:coarse){.toast.cards-toast .close{width:44px;height:44px;min-height:44px}}
 .toast.cards-toast .ok{width:18px;height:18px;flex:none;fill:none;stroke:var(--green-text);stroke-width:2.4}
 """
 CSS += CARD_MENU_CSS
@@ -1672,7 +1692,8 @@ a.bell-row:hover .t{text-decoration:underline}
 .bell-badge{display:inline-grid;place-items:center;min-width:20px;height:20px;border-radius:10px;
   background:var(--orange);color:var(--on-orange);font-size:.75rem;font-weight:900;padding:0 5px;
   vertical-align:middle;margin-left:.3rem;line-height:1}
-.bell-page .bell-row.new{margin:0;padding:.45rem .5rem}
+.bell-page .bell-row{padding:.45rem .5rem}  /* read and unread rows line up: the tint is a fill only */
+.bell-page .bell-row.new{margin:0}
 .bell-foot{margin:.75rem 0 0}
 .mtgbox .body .bell-foot{margin-top:.75rem}
 """
@@ -1682,19 +1703,21 @@ CSS += BELL_CSS
 # The top bar's search box (cards and decks, static/suggest.js in its site mode): in the bar from
 # 900 px and on the touch rail (600 to 1279 px); under 600 px folded behind the magnifier
 # (static/sitesearch.js opens it under the bar). A narrow window with a mouse (600 to 899 px)
-# keeps its text links, Search among them, and has no room for the box.
+# keeps its text links, Search among them, and has no room for the box. The box's rules address
+# the input through .box, not the .suggest wrapper the script puts around it, so the room for the
+# magnifier is there before the script runs and without it (0.7.43: the icon sat on "Search").
 _TOPSEARCH_CSS = """
 .topbar .topsearch{display:none;margin:0;flex:0 1 20rem;min-width:9rem}
 .topbar .topsearch .box{position:relative;display:block}
 .topbar .topsearch .box > svg.i{position:absolute;left:.75rem;top:50%;transform:translateY(-50%);z-index:1;
   color:var(--navbar-muted);pointer-events:none}
-.topbar .topsearch .suggest > input{height:36px;padding:0 .9rem 0 2.3rem;border-radius:18px;
+.topbar .topsearch .box input{height:36px;padding:0 .9rem 0 2.3rem;border-radius:18px;
   background:rgba(255,255,255,.1);border-color:rgba(255,255,255,.2);color:var(--navbar-text)}
-@media (pointer:coarse){ .topbar .topsearch .suggest > input{height:44px;border-radius:22px} }
-.topbar .topsearch .suggest > input::placeholder{color:var(--navbar-muted)}
-.topbar .topsearch .suggest > input:focus{background:var(--surface);color:var(--text);
+@media (pointer:coarse){ .topbar .topsearch .box input{height:44px;border-radius:22px} }
+.topbar .topsearch .box input::placeholder{color:var(--navbar-muted)}
+.topbar .topsearch .box input:focus{background:var(--surface);color:var(--text);
   border-color:var(--orange);outline-offset:1px}
-.topbar .topsearch .suggest > input:focus::placeholder{color:var(--text-muted)}
+.topbar .topsearch .box input:focus::placeholder{color:var(--text-muted)}
 .topbar .topsearch .box:focus-within > svg.i{color:var(--orange)}
 /* the list keeps the page's text colour and weight, not the bar's white bold */
 .topbar .topsearch .suggest-list{left:auto;right:0;width:min(27rem,calc(100vw - 2rem));

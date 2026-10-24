@@ -78,3 +78,38 @@ def test_viewer_draws_symbols_and_fits(server: Server, width: int) -> None:
         assert page.locator(".cardview.open").count() == 0
         assert errors == []
         browser.close()
+
+
+@pytest.mark.parametrize("width", [760, 1366])
+def test_the_viewers_buttons_follow_its_text(server: Server, width: int) -> None:
+    """0.7.43: the action buttons come right after the viewer's text (the Rulings row) with the
+    column's own gap, not pushed to the bottom of the picture's height with a void between."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_path()
+    if exe == "missing":
+        pytest.skip("no Chromium available for Playwright")
+    sid = server.sign_in_and_link()
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+        ctx = browser.new_context(viewport={"width": width, "height": 900})
+        ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
+        ctx.route(
+            re.compile(r"https://cards\.scryfall\.io/.*"),
+            lambda route: route.fulfill(status=200, content_type="image/png", body=PNG),
+        )
+        page = ctx.new_page()
+        page.goto(f"{server.base}/decks/42?view=grid", wait_until="networkidle")
+        page.locator(".deckview .c[data-card='Sol Ring']").first.click()
+        page.wait_for_selector(".cardview.open", timeout=3000)
+        page.wait_for_timeout(250)
+        gap = page.evaluate(
+            "() => { const info = document.querySelector('.cardview .info');"
+            " const acts = info.querySelector('.acts'); let bottom = -1e9;"
+            " for (const c of info.children) { if (c === acts || !c.getClientRects().length) continue;"
+            " bottom = Math.max(bottom, c.getBoundingClientRect().bottom); }"
+            " const rem = parseFloat(getComputedStyle(document.documentElement).fontSize);"
+            " return (acts.getBoundingClientRect().top - bottom) / rem; }"
+        )
+        assert 0 <= gap <= 1.1, gap  # the column's .75rem gap plus the strip's .25rem top padding
+        browser.close()

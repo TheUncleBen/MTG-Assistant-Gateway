@@ -156,7 +156,7 @@ def test_vote_on_someone_elses_comment(server: Server) -> None:
         up = page.locator(".cmt[data-id='555001'] > .acts button.vote")
         up.wait_for(timeout=5000)
         assert up.locator(".n").inner_text() == "2"
-        assert up.get_attribute("aria-label") == "2 points. Vote up: comment by amy"
+        assert up.get_attribute("aria-label") == "Vote up (2 points): comment by amy"
         up.click()
         # asked first; nothing sent yet
         assert server.ark.votes == {}
@@ -167,7 +167,7 @@ def test_vote_on_someone_elses_comment(server: Server) -> None:
         )
         assert server.ark.votes == {("alice", 555001): 1}
         assert up.get_attribute("aria-pressed") == "true"
-        assert up.get_attribute("aria-label") == "3 points. Take back your vote: comment by amy"
+        assert up.get_attribute("aria-label") == "Take back your vote (3 points): comment by amy"
         _shot(page, "comment-voted-390")
         up.click()
         page.locator(".cmt .confirm button", has_text="Take back").click()

@@ -86,7 +86,7 @@ async def test_the_four_cards_follow_the_mockup_while_linked(member: Browser) ->
     ):
         assert h in page, h
     prof = _card(page, "profile")
-    assert "Your own JPEG or PNG up to 1 MB. Only you can change it, here." in prof
+    assert "A JPEG or PNG up to 1 MB." in prof
     assert "Shown on your decks and comments on Archidekt. Archidekt says if a name is taken." in prof
     assert "value='alice' maxlength='150'" in prof
     # the bio is plain text on Archidekt's side here: a textarea, no formatting toolbar, no presets
@@ -106,15 +106,15 @@ async def test_the_four_cards_follow_the_mockup_while_linked(member: Browser) ->
         ("Other members can contact me", "Lets members message you through Archidekt."),
         ("Archidekt's newsletter", "Occasional email about the site."),
         ("Email me when someone comments", "On your decks and your forum posts."),
-        ("Turn off Archidekt notifications", "Turns off Archidekt's notifications for your account."),
+        ("Archidekt notifications", "Shows Archidekt's notifications in the bell."),
     ):
         assert _said(mail, label) and _said(mail, help_text), label
     assert "Each switch saves to Archidekt when you press it." in mail
-    # the switches show Archidekt's values: contactable on, newsletter off, notifications on (the
-    # "turn off" switch off)
+    # the switches show Archidekt's values: contactable on, newsletter off, notifications on
     assert "id='pr-contactable' type='checkbox' name='on' value='1' checked" in mail
     assert "id='pr-newsletter' type='checkbox' name='on' value='1'>" in mail
-    assert "id='pr-site_notifications' type='checkbox' name='on' value='1'>" in mail
+    # notifications are on (noArchidektNotifications is False): the switch is on
+    assert "id='pr-site_notifications' type='checkbox' name='on' value='1' checked>" in mail
     defs = _card(page, "defaults")
     assert _said(
         defs,
@@ -177,10 +177,10 @@ async def test_a_switch_and_a_drop_down_save_on_the_members_press(member: Browse
     page = (await member.http.get(r.headers["location"])).text
     assert "<div class='notice ok' role='status'>Saved on Archidekt.</div>" in _card(page, "email")
     assert "id='pr-newsletter' type='checkbox' name='on' value='1' checked" in page
-    # "Turn off Archidekt notifications" is the inverted one: on means no notifications
-    r = await _post(member, action="email", switch="site_notifications", on="1")
-    assert r.status_code == 303 and me["accountSettings"]["noArchidektNotifications"] is True
+    # "Archidekt notifications": on means notifications, stored the other way round by Archidekt
     r = await _post(member, action="email", switch="site_notifications", on="0")
+    assert r.status_code == 303 and me["accountSettings"]["noArchidektNotifications"] is True
+    r = await _post(member, action="email", switch="site_notifications", on="1")
     assert me["accountSettings"]["noArchidektNotifications"] is False
     r = await _post(member, action="preference", preference="deck_view", value="grid")
     assert r.status_code == 303 and r.headers["location"] == "/account?ok=defaults#defaults"

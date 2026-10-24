@@ -117,15 +117,14 @@ CSS = """
 .fm form.fm-open .btn{margin:0;min-height:44px}
 .fm .fm-links{margin:.5rem 0 1rem}
 .fm .loadmore .btn{margin:0;min-width:12rem}
-/* the thread's first post: its ⋮ at the end of the header line */
-.fm .fm-post .ph .kebab,.comments .cmt .who .kebab{display:inline-flex;align-items:center;
-  justify-content:center;width:44px;height:44px;margin:-8px 0 -8px auto;padding:0;border:0;
-  background:transparent;border-radius:50%;color:var(--text-muted);cursor:pointer}
-.fm .fm-post .ph .kebab:hover,.fm .fm-post .ph .kebab:focus-visible,.comments .cmt .who .kebab:hover,
-.comments .cmt .who .kebab:focus-visible{background:var(--surface-2);color:var(--text)}
-.fm .fm-post .ph .kebab svg.i,.comments .cmt .who .kebab svg.i{width:20px;height:20px;fill:currentColor;
-  stroke:currentColor}
-.comments .cmt .who{min-height:44px}
+/* the thread's first post: its ⋮ at the end of the header line (a reply's ⋮ is the deck page's
+   comment panel's, deckpage.py) */
+.fm .fm-post .ph .kebab{display:inline-flex;align-items:center;justify-content:center;width:44px;height:44px;
+  margin:-8px 0 -8px auto;padding:0;border:0;background:transparent;border-radius:50%;
+  color:var(--text-muted);cursor:pointer}
+.fm .fm-post .ph .kebab:hover,.fm .fm-post .ph .kebab:focus-visible{background:var(--surface-2);
+  color:var(--text)}
+.fm .fm-post .ph .kebab svg.i{width:20px;height:20px;fill:currentColor;stroke:currentColor}
 /* the reply box: the text style buttons above it, the public line and Post reply under it */
 .comments form.newcomment .rt{display:flex;gap:.25rem;margin:0}
 .comments form.newcomment .rt button{width:44px;min-height:44px;margin:0;padding:0;display:inline-flex;
@@ -157,7 +156,8 @@ CSS = """
 .fm .post-preview a{word-break:break-all}
 .fm .loadmore .btn[aria-busy=true]{cursor:progress;opacity:.7}
 @media (max-width:599.98px){
-  .fm .ui-table .sub .fm-when{display:block}
+  /* on the one second line (.sm-only alone would take a line of its own) */
+  .fm .ui-table .sub .fm-when{flex:0 1 auto}
   .fm .fm-why .btn{flex:1 1 100%}
   .fm .ui-head.phead .acts{flex:1 1 100%}
   .fm .ui-head.phead .acts .btn{width:100%}
@@ -261,14 +261,10 @@ def changed_html(message: str, *, value: str = "", error: str = "") -> str:
 
 
 def sections_html(got: dict[str, Any]) -> str:
-    """The groups and their sections: chips to each section, then a table a group."""
+    """The groups and their sections: a table a group (no chips above it: they named every
+    section a second time, and the tables are short enough to read down)."""
     groups = got.get("groups") or []
-    chips = [
-        ui.Chip(s["section"], s["posts"], section_href(g["group"], s["section"]))
-        for g in groups
-        for s in g["sections"]
-    ]
-    out = [ui.chips(chips, label="Sections")] if chips else []
+    out = []
     for g in groups:
         rows = []
         for s in g["sections"]:
@@ -302,7 +298,8 @@ def section_label(section: str) -> str:
 
 def thread_rows_html(threads: list[dict[str, Any]]) -> str:
     """One row a thread (the mockup's table: title, who, replies, last activity): a link to its
-    page; on a phone the author, the replies and the date fold under the title as a second line.
+    page; on a phone the author, the replies and the last post's date fold under the title as one
+    second line (two-line rows, as the app's other long lists below 600 px).
     A section's page lists that section's threads, which the heading names, so no row repeats
     it (Archidekt's thread rows carry no section of their own)."""
     rows = []
@@ -317,9 +314,13 @@ def thread_rows_html(threads: list[dict[str, Any]]) -> str:
         # as tall as the others)
         by = f"<span class='fm-by'>{esc(last['by'])}</span>" if last["by"] else ""
         last_html = by + (" · " if by and when else "") + when
-        # on a phone the date takes a line of its own under the owner and the replies
-        sub = " · ".join((esc(t["owner"]), _plural(t["responses"], "reply"))) + (
-            f"<span class='sm-only fm-when'>{when}</span>" if when else ""
+        # on a phone the last post's date joins the owner and the replies on the second line
+        # (one flex item, so the row's gap doesn't open a space before the date's dot)
+        sub = (
+            "<span>"
+            + " · ".join((esc(t["owner"]), _plural(t["responses"], "reply")))
+            + (f"<span class='sm-only fm-when'> · {when}</span>" if when else "")
+            + "</span>"
         )
         rows.append(
             f"<a class='tr' href='{thread_href(t['id'])}' data-id='{t['id']}'>"
@@ -542,7 +543,7 @@ def enter_box_html(
         f"<input type='hidden' name='csrf' value='{esc(csrf)}'>"
         "<input type='hidden' name='entry_action' value='enter'>"
         "<div class='field'><label for='fm-ed'>Deck</label><span class='sel'>"
-        "<select id='fm-ed' name='deck' required data-src='/api/decks/mine'>"
+        "<select id='fm-ed' name='deck' required data-src='/api/decks/mine?packages=1'>"
         + (
             f"<option value='{esc(v['deck'])}' selected>Deck {esc(v['deck'])}</option>"
             if v.get("deck")
@@ -636,9 +637,11 @@ def thread_html(
     closed = t["locked"] or t["archived"]
     can_write = writes_enabled and not closed
     contest = t.get("type") == "contest"
+    # the title, its line (who started it, the replies), then Open on Archidekt on a line of its
+    # own: the order the section page keeps (its heading, its line, New thread on Archidekt)
     opens = (
-        f"<a class='btn btn-plain' href='{esc(t['url'])}' target='_blank' rel='noreferrer noopener'>"
-        f"{icon('external')}Open on Archidekt</a>"
+        f"<p class='fm-links'><a class='btn btn-plain' href='{esc(t['url'])}' target='_blank' "
+        f"rel='noreferrer noopener'>{icon('external')}Open on Archidekt</a></p>"
     )
     sub = f"started by {t['owner']} · {_plural(t['reply_count'], 'reply')}"
     initial = esc((t["owner"] or "?")[:1].upper())
@@ -710,15 +713,15 @@ def thread_html(
             boxes += withdraw_box_html(
                 t, csrf, mine, open=open_box == "withdraw", error=box_error if open_box == "withdraw" else ""
             )
-    return (
-        crumbs_html()
-        + ui.page_head(t["title"], sub, actions_html=opens)
-        + boxes
-        + note
-        + strip
-        + post
-        + panel
+    # Forum › group › section when the thread's section is known (forum.thread: Archidekt's
+    # thread data does not name it; a section listing read earlier does)
+    where = t.get("in")
+    crumbs = (
+        crumbs_html((where[0], f"{PAGE}#{group_anchor(where[0])}"), (where[1], section_href(*where)))
+        if where
+        else crumbs_html()
     )
+    return crumbs + ui.page_head(t["title"], sub) + opens + boxes + note + strip + post + panel
 
 
 # -- the routes --------------------------------------------------------------------------------------

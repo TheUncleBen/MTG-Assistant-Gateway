@@ -1,6 +1,6 @@
 "use strict";
 // The New deck box (F4): the Cards tabs (Empty, Paste a list, From a file) show one source at a
-// time, the tile preview follows the name, format and Private switch, the name is checked before
+// time, the tile preview follows the name, format, Private, Theorycrafted and the game type, the name is checked before
 // the form goes, and Create deck reads "Creating…" while it does. Without scripts every field
 // shows and the form posts as it always did.
 (function () {
@@ -11,7 +11,7 @@
   var tabs = $$(".nd-tabs [role=tab]");
   var src = $(".nd-src"), pick = $(".nd-src .filepick"), area = $("#source"), readAs = $(".nd-as");
   var name = $("#name"), count = $(".nd-cnt"), nameErr = $("#nd-ne");
-  var fmt = $("#format"), priv = $("input[name=private]");
+  var fmt = $("#format"), priv = $("input[name=private]"), theory = $("input[name=theorycrafted]"), game = $("#game");
   var tileName = $(".nd-pt"), tileFmt = $(".nd-pf"), tileN = $(".nd-pn"), tileIni = $(".ndtile .ini"), tileCards = $(".nd-pc");
 
   function show(key) {
@@ -60,7 +60,10 @@
     if (tileIni) tileIni.textContent = (nm || "?").charAt(0).toUpperCase();
     if (tileFmt && fmt) {
       var label = fmt.options[fmt.selectedIndex] ? fmt.options[fmt.selectedIndex].text : "";
-      tileFmt.textContent = label + " · " + (priv && priv.checked ? "Private" : "Public");
+      // Theorycrafted and the game type (nothing for Any) follow their controls too
+      var gameLabel = game && game.value !== "any" && game.options[game.selectedIndex] ? game.options[game.selectedIndex].text : "";
+      tileFmt.textContent = label + " · " + (priv && priv.checked ? "Private" : "Public") +
+        (theory && theory.checked ? " · Theorycrafted" : "") + (gameLabel ? " · " + gameLabel : "");
     }
     var n = cards();
     if (tileN) tileN.textContent = n + (n === 1 ? " card" : " cards");

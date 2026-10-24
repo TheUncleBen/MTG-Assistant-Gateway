@@ -535,7 +535,13 @@
       if (mark) b.classList.add(mark === "Current" ? "current" : "picked");
       if (st.pinned && samePrint(p, { set: st.pinned.set, number: st.pinned.collector_number })) b.classList.add("on");
       b.addEventListener("click", function () { pin(p, b); });
-      b.addEventListener("mouseenter", function () { if (wide() && hoverQuery && hoverQuery.matches) showPreview(p); });
+      // a pointer resting over the list (a tile slides under it as Tab scrolls) never rebuilds the
+      // preview the keyboard is in: that removed the focused button and dropped the focus behind
+      // the dialog
+      b.addEventListener("mouseenter", function () {
+        if (st.pv.contains(document.activeElement)) return;
+        if (wide() && hoverQuery && hoverQuery.matches) showPreview(p);
+      });
       b.addEventListener("focus", function () { if (wide()) showPreview(p); });
       li.appendChild(b);
       st.grid.appendChild(li);

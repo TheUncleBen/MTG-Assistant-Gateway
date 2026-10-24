@@ -230,10 +230,18 @@ def test_the_app_chip_shows_the_full_name_beside_the_connected_app_icon() -> Non
 def test_the_card_size_control_stays_in_list_views_and_sizes_their_thumbnails() -> None:
     css = theme.CSS
     assert ":has(input[name=view][value=list]:checked) .cardsize{display:none}" not in css
-    assert (
-        "html[data-card-size=s]{--thumb-scale:.75}" in css
-        and "html[data-card-size=l]{--thumb-scale:1.35}" in css
+    # the scale is set on the thumbnails only, never on <html>: a custom property changed on the
+    # root is inherited by every element, so the switch restyled the whole page (174 ms on a
+    # phone profile at 4x in CI); on the thumbnails it restyles just them
+    assert "html[data-card-size=s]{--thumb-scale" not in css
+    assert "html[data-card-size=l]{--thumb-scale" not in css
+    thumbs = (
+        "ul.decklist.list .thumb,.cardlist .pic,ul.colllist .thumb,\n  "
+        ".watch-page .w-t .thumb,.erow .thumb,ul.colllist .qc,\n  "
+        ".scan ul.items img,.scan ul.items .thumb,.scan ul.items .img-fallback"
     )
+    assert f"html[data-card-size=s] :is({thumbs}){{--thumb-scale:.75}}" in css
+    assert f"html[data-card-size=l] :is({thumbs}){{--thumb-scale:1.35}}" in css
     for sel in (
         "ul.decklist.list .thumb",
         ".cardlist .pic",
@@ -243,10 +251,15 @@ def test_the_card_size_control_stays_in_list_views_and_sizes_their_thumbnails() 
     ):
         assert f"html[data-card-size=s] {sel},html[data-card-size=l] {sel}{{" in css, sel
     assert ui.thumb_size_css(".scan ul.items .thumb", "2.6rem", "3.6rem") == (
-        "html[data-card-size] .scan ul.items .thumb{width:calc(2.6rem * var(--thumb-scale));"
-        "height:calc(3.6rem * var(--thumb-scale))}"
+        "html[data-card-size=s] .scan ul.items .thumb{--thumb-scale:.75}"
+        "html[data-card-size=l] .scan ul.items .thumb{--thumb-scale:1.35}"
+        "html[data-card-size] .scan ul.items .thumb{width:calc(2.6rem * var(--thumb-scale,1));"
+        "height:calc(3.6rem * var(--thumb-scale,1))}"
     )
-    assert ui.thumb_size_css(".x", "3rem") == "html[data-card-size] .x{width:calc(3rem * var(--thumb-scale))}"
+    assert ui.thumb_size_css(".x", "3rem") == (
+        "html[data-card-size=s] .x{--thumb-scale:.75}html[data-card-size=l] .x{--thumb-scale:1.35}"
+        "html[data-card-size] .x{width:calc(3rem * var(--thumb-scale,1))}"
+    )
 
 
 def test_the_card_size_control_helper_is_shared_and_takes_the_toolbars_class() -> None:

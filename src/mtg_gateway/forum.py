@@ -106,7 +106,49 @@ async def sections(decks: DeckService, sub: str) -> dict[str, Any]:
                 ],
             }
         )
-    return {"groups": [g for g in out if g["group"]]}
+    groups_out = [g for g in out if g["group"]]
+    _remember_listing(groups_out)
+    return {"groups": groups_out}
+
+
+# Which group and section a thread was listed in, from the section pages read so far: Archidekt's
+# thread data names no section, so a thread page's trail (Forum › group › section) is known once
+# its section's list has been read in this process. Bounded: the newest IN_SECTION_MAX threads.
+IN_SECTION_MAX = 5000
+_IN_SECTION: dict[int, tuple[str, str]] = {}
+# The (group, section) pairs of the forum's own section listing as last read (sections()), by
+# their casefolded names, in Archidekt's spelling. A trail is stored only under a pair found here,
+# never under the names a caller put in the URL or an assistant's get_forum (security review
+# 0.7.44 S-02: one member's made-up group name must not become every member's trail). Replaced
+# whole on each read; bounded like the trail.
+_LISTED: dict[tuple[str, str], tuple[str, str]] = {}
+
+
+def _remember_listing(groups: list[dict[str, Any]]) -> None:
+    pairs: dict[tuple[str, str], tuple[str, str]] = {}
+    for g in groups:
+        for k in g["sections"]:
+            if len(pairs) < IN_SECTION_MAX:
+                pairs[(g["group"].casefold(), k["section"].casefold())] = (g["group"], k["section"])
+    _LISTED.clear()
+    _LISTED.update(pairs)
+
+
+def listed_as(group: str, section: str) -> tuple[str, str] | None:
+    """(group, section) in Archidekt's own spelling when its section listing names them, else None."""
+    return _LISTED.get((group.casefold(), section.casefold()))
+
+
+def in_section(thread_id: int) -> tuple[str, str] | None:
+    """(group, section) the thread was last listed in, or None when no list of it has been read."""
+    return _IN_SECTION.get(thread_id)
+
+
+def _remember_section(thread_id: int, group: str, section: str) -> None:
+    _IN_SECTION.pop(thread_id, None)
+    _IN_SECTION[thread_id] = (group, section)
+    while len(_IN_SECTION) > IN_SECTION_MAX:
+        del _IN_SECTION[next(iter(_IN_SECTION))]
 
 
 async def threads(
@@ -136,6 +178,7 @@ async def threads(
     if not isinstance(rows, list):
         raise DeckError("unavailable", FORUM_CHANGED)
     count = _int(body.get("count"))
+    known = listed_as(group, section)  # the trail's names, only as Archidekt's listing gives them
     out = []
     for t in rows:
         if not isinstance(t, dict) or not _int(t.get("id")):
@@ -143,6 +186,8 @@ async def threads(
         owner = t.get("owner") if isinstance(t.get("owner"), dict) else {}
         recent = t.get("recentPost") if isinstance(t.get("recentPost"), dict) else {}
         by = recent.get("owner") if isinstance(recent.get("owner"), dict) else {}
+        if known:
+            _remember_section(_int(t.get("id")), *known)
         out.append(
             {
                 "id": _int(t.get("id")),
@@ -190,6 +235,7 @@ async def thread(decks: DeckService, sub: str, thread_id: Any, *, page: int = 1)
         # the thread's mark (THREAD_TYPES): a "contest" thread carries the contest strip
         "type": THREAD_TYPES.get(_int(body.get("type")), ""),
         "reply_count": _int(body.get("childrenCount")),
+        "in": in_section(tid),  # (group, section) when a section listing has named it, else None
         "page": page,
         "has_more": bool(isinstance(links, dict) and links.get("next")),
         "replies": [comment_out(c) for c in results if isinstance(c, dict)],

@@ -34,6 +34,7 @@
     x: "<path d='M6 6l12 12M18 6L6 18'/>",
     check: "<path d='M5 12l4 4L19 6'/>",
     plus: "<path d='M12 5v14M5 12h14'/>",
+    send: "<path d='M4 12l16-8-6 16-2-7z'/>",
     trash: "<path d='M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13'/><path d='M10 11v6M14 11v6'/>"
   };
   function icon(name) {

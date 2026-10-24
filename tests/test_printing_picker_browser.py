@@ -1137,3 +1137,26 @@ def test_a_filter_list_stays_open_after_a_scroll_that_came_before_it(tmp_path: P
             assert errors == []
     finally:
         s.stop()
+
+
+def test_a_resting_pointer_never_takes_the_keyboards_place_in_the_preview(server: Server) -> None:
+    """With the focus on Use this printing, a tile that slides under the resting mouse (Tab
+    scrolls the list) must not rebuild the preview: that removed the focused button and dropped
+    the focus out of the dialog, onto the page behind it."""
+    from playwright.sync_api import sync_playwright
+
+    _chromium()
+    sid = server.sign_in_and_link()
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, 1280)
+        page.goto(f"{server.base}/decks/42?view=text", wait_until="networkidle")
+        card = page.locator(".deckview .row[data-card='Sol Ring'][data-zone='main']")
+        _open_picker(page, card)
+        page.locator(".printpick .pptile", has_text="LEA #270").focus()
+        page.keyboard.press("Enter")
+        assert page.evaluate("() => document.activeElement.innerText") == "Use this printing"
+        page.locator(".printpick .pptile", has_text="SLD #1075").hover()
+        assert page.evaluate("() => document.activeElement.innerText") == "Use this printing"
+        assert "Limited Edition Alpha" in page.locator(".pppreview h3").inner_text()
+        assert errors == []
+        browser.close()

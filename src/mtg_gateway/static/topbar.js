@@ -32,16 +32,27 @@
     return room;
   }
   var tabs = document.querySelector(".tabbar");
+  // A property set on <html> restyles the whole page, so every measure is read first, and a
+  // property is written only when its value changes: a write between two reads made the second
+  // read restyle and lay out the whole page again (a 100-card deck page on a phone paid three
+  // times per fit, and once more for the ResizeObserver's first call with nothing changed).
+  var last = {};
+  function put(name, value) {
+    if (last[name] === value) return;
+    last[name] = value;
+    if (value === null) root.style.removeProperty(name);
+    else root.style.setProperty(name, value);
+  }
   function fit() {
-    root.style.setProperty("--bar-room", Math.ceil(bar.getBoundingClientRect().height) + 10 + "px");
+    var high = Math.ceil(bar.getBoundingClientRect().height) + 10 + "px";
     // the waiting changes' Apply bar sits on the phone's tab bar, which grows with large text
     var tab = tabs && tabs.getBoundingClientRect();
-    if (tab && tab.height && tab.top > window.innerHeight / 2)
-      root.style.setProperty("--tab-room", Math.floor(window.innerHeight - tab.top) + "px");
-    else root.style.removeProperty("--tab-room");
+    var tabRoom = tab && tab.height && tab.top > window.innerHeight / 2
+      ? Math.floor(window.innerHeight - tab.top) + "px" : null;
     var room = footRoom();
-    if (room) root.style.setProperty("--foot-room", Math.ceil(room) + 10 + "px");
-    else root.style.removeProperty("--foot-room");
+    put("--bar-room", high);
+    put("--tab-room", tabRoom);
+    put("--foot-room", room ? Math.ceil(room) + 10 + "px" : null);
   }
   // The first measure waits for the first frame: read right away, while the other deferred
   // scripts are still changing the page, it would force a layout of the whole page that the

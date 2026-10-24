@@ -7,11 +7,16 @@
    for Change printing…. */
 (function () {
   "use strict";
-  // the tab bar scrolls sideways on a phone: the current tab is brought into view
+  // the tab bar scrolls sideways on a phone: the current tab is brought into view, and again when
+  // its size changes (larger text after the load, a turn of the phone), as the bar's own scroll
+  // only (block nearest keeps the page where it is)
   var curTab = document.querySelector(".lp-tabs a[aria-current]");
-  if (curTab && curTab.scrollIntoView) {
-    try { curTab.scrollIntoView({ inline: "center", block: "nearest" }); } catch (e) { /* older browser */ }
+  function showTab() {
+    if (!curTab || !curTab.scrollIntoView) return;
+    try { curTab.scrollIntoView({ inline: "nearest", block: "nearest" }); } catch (e) { /* older browser */ }
   }
+  showTab();
+  if (curTab && window.ResizeObserver) new ResizeObserver(showTab).observe(curTab);
   var Menu = window.MtgMenu, Box = window.MtgBox;
   var root = document.querySelector(".lp[data-tab]");
   if (!root || !Menu || !Box) return;
@@ -315,7 +320,8 @@
     $$(".acts button[type=submit]", box).forEach(function (b) { b.disabled = true; b.setAttribute("aria-busy", "true"); });
   });
 
-  // -- Color tags: the picker, the hex and the preview ------------------------------------------------
+  // -- Color tags: the picker, the hex and the preview (the colour on the dot and the border; the
+  // name stays in the text colour, which any tag colour would fail for contrast) -----------------
   function tagPreview(box) {
     var hex = $("#tag-h", box), pick = $("#tag-c", box), pv = $("#tag-pv", box), name = $("#tag-n", box);
     if (!hex || !pv) return;
@@ -323,7 +329,7 @@
     var ok = /^#[0-9a-fA-F]{6}$/.test(v);
     if (ok) {
       if (pick) pick.value = v.toLowerCase();
-      pv.style.borderColor = v; pv.style.color = v;
+      pv.style.borderColor = v;
       var sw = $(".lp-swatch", pv);
       if (sw) sw.style.background = v;
     }
@@ -581,12 +587,14 @@
       var editing = $("[name=action]", ccBox).value === "edit";
       b.disabled = !editing;
       var cur = has && has.querySelector("img.lp-cur");
-      if (has) resetCrop(has, has.textContent.trim() === "Picture set", cur ? cur.getAttribute("src") : "");
+      if (has) resetCrop(has, has.hasAttribute("data-has"), cur ? cur.getAttribute("src") : "");
     });
     ccBox.__ccName = $("[name=was_name]", ccBox).value;
   }
-  // A custom card's picture the gateway can't serve (404): the row's thumbnail leaves its slot
-  // empty and the edit box's frame keeps its words; the name tile feedback.js adds goes too
+  // A custom card's picture the gateway can't serve (404), as the deck views show the same case:
+  // the row's thumbnail becomes a labelled mini tile (an image-off glyph; the name and type for a
+  // screen reader) and the row says so; the edit box's frame shows the card's name and type with
+  // the one line why. The name tile feedback.js adds (too narrow for words here) goes.
   document.addEventListener("error", function (e) {
     var img = e.target;
     if (!(img instanceof HTMLImageElement) || !(img.classList.contains("lp-cur") || img.classList.contains("custom"))) return;
@@ -594,13 +602,32 @@
     var tile = img.nextElementSibling;
     if (tile && tile.classList.contains("img-fallback")) tile.remove();
     if (img.classList.contains("lp-thumb")) {
-      var slot = el("span", "lp-thumb");
-      slot.setAttribute("aria-hidden", "true");
+      var tr = img.closest(".tr"), name = tr ? nameOf(tr) : "";
+      var type = tr ? $(".sm-hide", tr) : null, sub = tr ? $(".tx .sm-only", tr) : null;
+      var slot = el("span", "lp-thumb lp-thumb-none");
+      slot.setAttribute("role", "img");
+      slot.setAttribute("aria-label", [name, type ? type.textContent.trim() : ""].filter(Boolean).join(", ") + " (picture unavailable)");
+      slot.appendChild(icon("image-off"));
       img.replaceWith(slot);
+      if (sub && !$(".lp-nopic", sub)) sub.appendChild(el("span", "lp-nopic", " · picture unavailable"));
+      if (type && !$(".lp-nopic", type)) type.appendChild(el("span", "muted lp-nopic", " · picture unavailable"));
     } else {
-      img.remove();
+      pictureWords(img.closest(".lp-crop"));
     }
   }, true);
+  // the frame's words when the card's picture can't be shown: its name and type line, as the
+  // deck's card viewer draws a custom card without a picture, then the one line why
+  function pictureWords(crop) {
+    if (!crop) return;
+    var p = crop.getAttribute("data-crop") || "f", box = crop.closest(".ui-box") || document;
+    var v = function (k) { var i = $("#" + p + "-" + k, box); return i ? i.value.trim() : ""; };
+    var type = [v("su"), v("t")].filter(Boolean).join(" ");
+    if (v("st")) type = type ? type + " — " + v("st") : v("st");
+    crop.textContent = "";
+    if (v("n")) crop.appendChild(el("span", "lp-nm", v("n")));
+    if (type) crop.appendChild(el("span", "lp-ty", type));
+    crop.appendChild(el("span", "lp-why", "Picture set, but it can't be shown right now"));
+  }
   // The picture: chosen here, shown over the card-shaped frame, dragged and sized to the crop, then
   // sent as the file itself with the crop box in its pixels (the gateway redraws it).
   var MAX_BYTES = 1500000;
@@ -609,6 +636,7 @@
   function resetCrop(crop, has, cur) {
     if (crop.__url) { try { URL.revokeObjectURL(crop.__url); } catch (e) { /* gone */ } crop.__url = null; }
     crop.textContent = has ? "Picture set" : "No picture yet";
+    if (has) crop.setAttribute("data-has", "1"); else crop.removeAttribute("data-has");
     if (has && cur) {
       var im = el("img", "lp-cur");
       im.alt = "";

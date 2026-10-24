@@ -92,11 +92,19 @@ TYPE_ORDER = list(PRIMARY_TYPES)  # deck_stats owns the order (and primary_type,
 RARITY_ORDER = {"mythic": 0, "rare": 1, "uncommon": 2, "common": 3, "special": 4}
 
 
-def image_url(uid: str | None, size: str = "normal") -> str | None:
-    """A Scryfall card image by Scryfall id (the scheme Scryfall's own image URIs use)."""
+def image_url(uid: str | None, size: str = "normal", face: str = "front") -> str | None:
+    """A Scryfall card image by Scryfall id (the scheme Scryfall's own image URIs use); ``face``
+    "back" is the back face's picture, which only the layouts in BACK_FACE_LAYOUTS have."""
     if not uid or not _UUID.fullmatch(uid):
         return None
-    return f"https://cards.scryfall.io/{size}/front/{uid[0]}/{uid[1]}/{uid}.jpg"
+    return f"https://cards.scryfall.io/{size}/{face}/{uid[0]}/{uid[1]}/{uid}.jpg"
+
+
+# The layouts whose two faces have a picture each (Scryfall's card_faces with their own image_uris):
+# a split, adventure or flip card is two faces on one picture, so it has no back to show.
+BACK_FACE_LAYOUTS = frozenset(
+    {"transform", "modal_dfc", "double_faced_token", "reversible_card", "art_series"}
+)
 
 
 def print_label(set_code: str | None, number: str | None) -> str:
@@ -108,6 +116,23 @@ def print_label(set_code: str | None, number: str | None) -> str:
 
 def card_image(card: DeckCard, size: str = "normal") -> str | None:
     return image_url(getattr(card, "scryfall_uid", "") or None, size)
+
+
+def card_back_image(card: DeckCard, size: str = "normal") -> str | None:
+    """The back face's picture, for a card whose layout has one; None otherwise."""
+    if getattr(card, "layout", "") not in BACK_FACE_LAYOUTS:
+        return None
+    return image_url(getattr(card, "scryfall_uid", "") or None, size, "back")
+
+
+def shown_image(card: DeckCard, size: str = "normal") -> str | None:
+    """The picture the deck page draws for the card: its back when Show back face is on and the
+    card has one (as archidekt.com does), else its front."""
+    if getattr(card, "flipped_default", False):
+        back = card_back_image(card, size)
+        if back:
+            return back
+    return card_image(card, size)
 
 
 def mana_html(cost: str) -> str:
@@ -923,6 +948,17 @@ def _finish_badge(card: DeckCard) -> str:
     return ""
 
 
+# The companion's mark: the pink corner on a grid tile (with its words for a screen reader, as
+# colour never carries the meaning alone) and the word itself on a list row; deck.js adds and
+# removes both as the card menu's Companion switch is pressed.
+COMPANION_CORNER = "<span class='corner comp' role='img' aria-label='Companion' title='Companion'></span>"
+COMPANION_MARK = "<span class='compmark'>Companion</span>"
+
+
+def _companion_mark(card: DeckCard) -> str:
+    return COMPANION_MARK if card.companion else ""
+
+
 def _label_dot(card: DeckCard) -> str:
     """Archidekt's colour tag: a dot in the tag's colour, its name for screen readers and on hover
     (a tag with no name, Archidekt's empty one, shows nothing)."""
@@ -968,12 +1004,12 @@ def card_row(card: DeckCard, *, deck: Deck, view: str = "text", owned: dict[str,
     card has one, the printed one on hover."""
     cls = " side" if not deck.in_deck(card) else ""
     qty = f"<span class='q'>{card.quantity}</span>"
-    marks = f"{_label_dot(card)}{_owned_dot(card, owned)}"
+    marks = f"{_label_dot(card)}{_owned_dot(card, owned)}"  # the Companion word follows the name cell
     name = f"<span class='name' title='{esc(card.name)}'>{esc(card.name)}</span>{_finish_badge(card)}"
     cost = f"<span class='mc'>{mana_html(card.mana_cost)}</span>"
     price = f"<span class='price'>{money(card.price) if card.price is not None else ''}</span>"
     if view == "brewer":
-        img = card_image(card)
+        img = shown_image(card)
         pic = (
             f"<img class='art' src='{esc(img)}' alt='' loading='lazy'>"
             if img
@@ -981,7 +1017,7 @@ def card_row(card: DeckCard, *, deck: Deck, view: str = "text", owned: dict[str,
         )
         cls = " brew" + cls
         body = (
-            f"{pic}<span class='bd'><span class='n'>{qty}{marks}{name}{cost}</span>"
+            f"{pic}<span class='bd'><span class='n'>{qty}{marks}{name}{cost}</span>{_companion_mark(card)}"
             f"<span class='ty'>{esc(card.type_line)}</span>"
             + (f"<span class='tx'>{esc(card.oracle_text)}</span>" if card.oracle_text else "")
             + f"{price}</span>"
@@ -995,16 +1031,16 @@ def card_row(card: DeckCard, *, deck: Deck, view: str = "text", owned: dict[str,
             else ""
         )
         body = (
-            f"{qty}<span class='n'>{marks}{name}</span>"
+            f"{qty}<span class='n'>{marks}{name}</span>{_companion_mark(card)}"
             f"<span class='ty' title='{esc(card.type_line)}'>{esc(card.type_line)}</span>"
             f"<span class='mv'{printed}>{f'{mv:g}' if mv is not None else ''}</span>{cost}"
             f"<span class='set' title='{esc(printing)}'>{esc(printing)}</span>{price}"
         )
     else:
-        img = card_image(card)
+        img = shown_image(card)
         hover = f"<span class='hover'><img src='{esc(img)}' alt='' loading='lazy'></span>" if img else ""
         body = (
-            f"{qty}<span class='n'>{marks}{name}{hover}</span>{cost}"
+            f"{qty}<span class='n'>{marks}{name}{hover}</span>{_companion_mark(card)}{cost}"
             f"<span class='set' title='{esc(print_label(card.set_code, card.collector_number))}'>"
             f"{esc(card.set_code.upper())}</span>{price}"
         )
@@ -1015,8 +1051,9 @@ def card_row(card: DeckCard, *, deck: Deck, view: str = "text", owned: dict[str,
 
 
 def card_view_attrs(card: DeckCard, *, img: str | None = None) -> str:
-    """Data attributes ``static/cardview.js`` reads to show the whole card: image, printing,
-    finish, mana cost, type line, rules text, power and toughness or loyalty, and every face."""
+    """Data attributes ``static/cardview.js`` reads to show the whole card: image (the front;
+    ``data-back`` is the back face's picture when the card has one), printing, finish, mana cost,
+    type line, rules text, power and toughness or loyalty, and every face."""
     pt = f"{card.power}/{card.toughness}" if card.power or card.toughness else ""
     faces = [
         {
@@ -1030,8 +1067,10 @@ def card_view_attrs(card: DeckCard, *, img: str | None = None) -> str:
         for f in card.faces
     ]
     legal = ",".join(sorted(k for k, v in card.legalities.items() if v == "legal"))
+    back = card_back_image(card)
     return (
         (f" data-img='{esc(img)}'" if img else "")
+        + (f" data-back='{esc(back)}'" if img and back else "")
         + f" data-set='{esc(card.set_code.upper())} {esc(card.collector_number)}'"
         f" data-type='{esc(card.type_line)}'"
         f" data-mana='{esc(card.mana_cost)}'"
@@ -1162,10 +1201,14 @@ def _custom_data(card: CustomDeckCard, deck: Deck) -> str:
 
 
 def custom_card_row(card: CustomDeckCard, *, deck: Deck, view: str = "text") -> str:
-    """A custom card as a row of the list views: its count, name, the Custom mark and its type."""
+    """A custom card as a row of the list views: its count, name and type, marked Custom once at
+    every width: the mark sits on its own line under the name (the Companion word's place, so the
+    name keeps its room), and the Set cell, hidden on a phone, is left blank rather than saying
+    Custom a second time where it shows."""
     cls = " side" if custom_zone(card, deck) == "side" else ""
     qty = f"<span class='q'>{card.quantity}</span>"
-    name = f"<span class='name' title='{esc(card.name)}'>{esc(card.name)}</span>{custom_badge()}"
+    name = f"<span class='name' title='{esc(card.name)}'>{esc(card.name)}</span>"
+    mark = custom_badge()
     if view == "brewer":
         pic = (
             f"<img class='art' src='{custom_picture_url(deck, card)}' alt='' loading='lazy'>"
@@ -1174,16 +1217,16 @@ def custom_card_row(card: CustomDeckCard, *, deck: Deck, view: str = "text") -> 
         )
         cls = " brew" + cls
         body = (
-            f"{pic}<span class='bd'><span class='n'>{qty}{name}</span>"
+            f"{pic}<span class='bd'><span class='n'>{qty}{name}</span>{mark}"
             f"<span class='ty'>{esc(card.type_line)}</span><span class='price'></span></span>"
         )
     elif view == "table":
         mv = mana_value_text(card.custom_cmc) if card.custom_cmc is not None else ""
         body = (
-            f"{qty}<span class='n'>{name}</span>"
+            f"{qty}<span class='n'>{name}</span>{mark}"
             f"<span class='ty' title='{esc(card.type_line)}'>{esc(card.type_line)}</span>"
             f"<span class='mv'>{mv}</span>"
-            "<span class='mc'></span><span class='set'>Custom</span><span class='price'></span>"
+            "<span class='mc'></span><span class='set'></span><span class='price'></span>"
         )
     else:
         hover = (
@@ -1192,8 +1235,8 @@ def custom_card_row(card: CustomDeckCard, *, deck: Deck, view: str = "text") -> 
             else ""
         )
         body = (
-            f"{qty}<span class='n'>{name}{hover}</span><span class='mc'></span>"
-            f"<span class='set' title='{esc(CUSTOM_TITLE)}'>Custom</span><span class='price'></span>"
+            f"{qty}<span class='n'>{name}{hover}</span>{mark}<span class='mc'></span>"
+            "<span class='set'></span><span class='price'></span>"
         )
     return (
         f"<li class='row custom{cls}' tabindex='0' role='button' data-name='{esc(card.name.lower())}' "
@@ -1235,7 +1278,7 @@ def custom_cards_by_group(deck: Deck, group: str, q: str = "") -> dict[str, list
 
 
 def image_card(card: DeckCard, *, deck: Deck, owned: dict[str, int] | None = None) -> str:
-    img = card_image(card)
+    img = shown_image(card)
     body = (
         f"<img src='{esc(img)}' alt='{esc(card.name)}' loading='lazy'>"
         if img
@@ -1248,7 +1291,7 @@ def image_card(card: DeckCard, *, deck: Deck, owned: dict[str, int] | None = Non
     qty = f"<span class='qty'>{card.quantity}</span>"
     extra = ""
     if card.companion:
-        extra += "<span class='corner comp' title='Companion'></span>"
+        extra += COMPANION_CORNER
     if card.game_changer:
         extra += "<span class='corner gc' title='Game changer'></span>"
     return (
@@ -2894,8 +2937,16 @@ h3 .count{font-weight:400;color:var(--text-muted);font-size:.9rem}
 .toolbar form.views .field,.toolbar form.views .sel,.toolbar form.views select{min-width:0}
 .comments .thread{margin:.75rem 0 1rem}
 .comments .cmt{border-top:1px solid var(--border);padding:.6rem 0 .4rem}
-.comments .cmt .who{display:flex;gap:.5rem;align-items:center;font-size:.85rem;color:var(--text-muted)}
+.comments .cmt .who{display:flex;gap:.5rem;align-items:center;font-size:.85rem;color:var(--text-muted);
+  min-height:44px}
 .comments .cmt .who b{color:var(--text)}
+/* the comment's ⋮ (social.js): at the row's right edge, 44 px, here and on the forum's thread page */
+.comments .cmt .who .kebab{display:inline-flex;align-items:center;justify-content:center;width:44px;
+  height:44px;margin:-8px 0 -8px auto;padding:0;border:0;background:transparent;border-radius:50%;
+  color:var(--text-muted);cursor:pointer}
+.comments .cmt .who .kebab:hover,.comments .cmt .who .kebab:focus-visible{background:var(--surface-2);
+  color:var(--text)}
+.comments .cmt .who .kebab svg.i{width:20px;height:20px;fill:currentColor;stroke:currentColor}
 .comments .cmt p{margin:.3rem 0;white-space:pre-wrap;overflow-wrap:anywhere}
 .comments .cmt .replies{margin-left:1rem;border-left:2px solid var(--border);padding-left:.75rem}
 .comments .cmt .acts .del{color:var(--danger-text)}
@@ -3017,8 +3068,11 @@ h3 .count{font-weight:400;color:var(--text-muted);font-size:.9rem}
 .deckview.text{columns:300px;column-gap:2rem}
 .deckview.text .stack{break-inside:avoid;page-break-inside:avoid;margin-bottom:.75rem}
 ul.rows{list-style:none;margin:0;padding:0}
+/* --rowh: the row's one line (44 px on touch, theme.py); a row with a second line (the Companion
+   word) keeps that first line and grows under it */
 ul.rows .row{display:grid;grid-template-columns:1.6rem minmax(0,1fr) auto 3rem 4.5rem;align-items:center;
-  gap:.4rem;height:30px;border-top:1px solid var(--surface-2);position:relative;font-size:1rem}
+  gap:.4rem;--rowh:30px;min-height:var(--rowh);grid-template-rows:minmax(var(--rowh),auto);
+  border-top:1px solid var(--surface-2);position:relative;font-size:1rem}
 ul.rows .row:hover{background:var(--surface-2)}
 ul.rows .row.side{opacity:.7}
 ul.rows .q{color:var(--text-muted);text-align:right;font-variant-numeric:tabular-nums}
@@ -3045,6 +3099,16 @@ ul.rows .price{font-size:.86rem;color:var(--text-muted);text-align:right;font-va
 .deckview .c.custom .qty,.deckview .c.custom .tagdot,.deckview .c.custom .custom-badge{z-index:1}
 ul.rows .hover:empty,ul.rows .row:hover .hover:empty{display:none}  /* a custom card without a picture */
 .tagdot{display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--orange);flex:none}
+.compmark{display:inline-flex;align-items:center;flex:none;min-height:18px;padding:0 .4rem;
+  border-radius:999px;font-size:.72rem;font-weight:700;line-height:1;color:#fff;background:#b8236f}
+/* the word sits on its own line under the name, in the name's column, so the name keeps every
+   pixel it had without it (0.7.43: beside the name it cut "Delver of Se…" at 390 px) */
+ul.rows .row > .compmark{grid-column:2;grid-row:2;justify-self:start;margin:-.2rem 0 .35rem}
+ul.rows .row.brew .compmark{align-self:flex-start}
+/* a custom card's mark takes the same line under the name in every list view (the Set cell, hidden
+   on a phone, is blank for custom rows: the word is said once at every width) */
+ul.rows .row > .custom-badge{grid-column:2;grid-row:2;justify-self:start;margin:-.2rem 0 .35rem}
+ul.rows .row.brew .custom-badge{align-self:flex-start}
 .deckview .c .tagdot{position:absolute;right:8px;top:8px;width:14px;height:14px;box-shadow:0 0 0 2px #fff}
 .owned{display:inline-block;width:9px;height:9px;border-radius:50%;background:#1ebb6c;flex:none;
   box-shadow:0 0 0 2px var(--bg)}
@@ -3153,14 +3217,19 @@ ul.rows .row.brew{display:flex;align-items:flex-start;gap:.6rem;height:auto;padd
 .deckview .c .corner{position:absolute;top:0;right:0;width:30px;height:30px;
   clip-path:polygon(100% 0,0 0,100% 100%)}
 .deckview .c .corner.comp{background:#e03997} .deckview .c .corner.gc{background:#fa890d}
+/* a tile without a picture: its name starts below the 38 px quantity corner (and clear of the
+   30 px companion corner), and its type line sits above the owned dot and the finish badge in the
+   bottom corners, at every card size (0.7.43: the dot sat on "Artifact") */
 .deckview .c .ph{position:absolute;inset:0;display:flex;flex-direction:column;justify-content:space-between;
-  padding:12% 8% 8%;background:linear-gradient(160deg,var(--surface-3),var(--surface-2));font-size:.8rem}
+  padding:max(12%,34px) 8% max(8%,26px);background:linear-gradient(160deg,var(--surface-3),var(--surface-2));
+  font-size:.8rem}
 .deckview .c .ph .t{display:flex;justify-content:space-between;gap:.3rem;align-items:flex-start}
 .deckview .c .ph .nm{font-weight:700;overflow-wrap:anywhere}
 .deckview .c .ph .ty{color:var(--text-muted);font-size:.72rem}
 .deckview.stacks .cards{display:flex;flex-direction:column}
 .deckview.stacks .c + .c{margin-top:-123%}
-.deckview.stacks .c .ph{padding:3% 6% 8% 42px}
+.deckview.stacks .c .ph{padding:3% 6% max(8%,26px) 42px}
+.deckview.stacks .c:has(.corner) .ph .t{padding-right:26px}
 .deckview.stacks .c .ph .t{align-items:center;min-height:0}
 .deckview.stacks .c .ph .nm{flex:1 1 auto;min-width:0;white-space:nowrap;overflow:hidden;
   text-overflow:ellipsis}
@@ -3238,7 +3307,7 @@ html.cardview-open{overflow:hidden}
 .cardview .prices table{border-collapse:collapse;font-variant-numeric:tabular-nums;margin:.3rem 0}
 .cardview .prices th,.cardview .prices td{padding:.15rem .6rem .15rem 0;text-align:left;
   border-bottom:1px solid var(--border-soft)}
-.cardview .acts{display:flex;flex-wrap:wrap;gap:.5rem;margin-top:auto;padding-top:.25rem}
+.cardview .acts{display:flex;flex-wrap:wrap;gap:.5rem;padding-top:.25rem}
 .cardview .acts .btn,.cardview .acts button{margin:0;flex:1 1 auto}
 @media (max-width:700px){
   .cardview{padding:0;align-items:flex-end;-webkit-backdrop-filter:none;backdrop-filter:none}
@@ -3280,6 +3349,16 @@ html.cardview-open{overflow:hidden}
 .ctxmenu .sub button{padding-left:2.4rem;min-height:34px;font-size:.95rem}
 .ctxmenu .sub .on:disabled{color:var(--toolbar-active);font-weight:700}
 .ctxmenu .off[aria-disabled=true]{color:var(--text-muted);cursor:default}
+/* finger-sized on touch screens: every row, the − and + steps and the Move to list's rows */
+@media (pointer:coarse){
+  .ctxmenu .qtyrow{min-height:44px}
+  .ctxmenu .qtyrow .step{width:44px;min-width:44px;height:44px;min-height:44px}
+  .ctxmenu .sub button{min-height:44px}
+  .ctxmenu .mvform input,.ctxmenu .mvform .acts .btn{min-height:44px}
+  /* the viewer's × and its − / + steppers: finger-sized (set after their own rules, so this wins) */
+  .cardview .close{width:44px;height:44px;min-height:44px}
+  .cardview .acts .qtyctl button{width:44px;min-width:44px;min-height:44px}
+}
 .deckview .c.held,.deckview .row.held{outline:3px solid var(--orange);outline-offset:2px}
 /* the toast after a save (theme .toast, bottom right): the message, Undo and History */
 .deck-toast{display:flex;align-items:center;gap:.75rem;flex-wrap:wrap;padding:.75rem 1rem;z-index:59;
@@ -3292,7 +3371,7 @@ html.cardview-open{overflow:hidden}
 .deck-toast .acts{display:inline-flex;align-items:center;gap:.5rem;flex-wrap:wrap}
 .deck-toast .acts button,.deck-toast .acts .btn{margin:0;min-height:34px;padding:0 .75rem}
 .deck-toast .acts a:not(.btn){color:var(--orange-text);font-weight:700;text-decoration:underline}
-.deck-toast .close{width:2rem;min-height:2rem;height:2rem;padding:0;margin:0 0 0 auto;border:0;
+.deck-toast .close{width:2rem;min-height:2rem;height:2rem;padding:0;top:.5rem;border:0;
   background:transparent;font-size:1.3rem;line-height:1;color:var(--text-muted)}
 .deck-toast .close:hover{color:var(--text)}
 /* Play on EDHPlay's note: one line per point (deck.js) */

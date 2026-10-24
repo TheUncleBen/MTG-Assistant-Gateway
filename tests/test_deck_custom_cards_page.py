@@ -45,9 +45,14 @@ async def test_custom_cards_are_drawn_in_their_stacks_marked_custom(stack: Stack
         row = mentor.group(0)
         assert "data-custom='1'" in row and "data-custom-id='41'" in row and "data-rel='3100'" in row
         assert "data-qty='1'" in row and "data-cat='Commander'" in row and "data-zone='main'" in row
-        # marked Custom, with the one line where custom cards live
+        # marked Custom once a row, the mark under the name (after the name cell, as the Companion
+        # word), with the one line where custom cards live; the Set cell is blank, not a second word
         assert "class='custom-badge'" in page and "A custom card, made on Archidekt" in page
         assert page.count("class='custom-badge'") == 2
+        full = re.search(r"<li class='row custom'[^>]*data-card='Grizzled Mentor'.*?</li>", page, re.S)
+        full = full.group(0)
+        assert full.count("class='custom-badge'") == 1 and "</span><span class='custom-badge'" in full
+        assert "<span class='set'></span>" in full and full.count(">Custom<") == 1
         # filed by category: Grizzled Mentor under Commander, Old Ranger (no category) under its type
         commander = re.search(r"<section class='stack'[^>]*data-group='Commander'.*?</section>", page, re.S)
         assert commander and "Grizzled Mentor" in commander.group(0)

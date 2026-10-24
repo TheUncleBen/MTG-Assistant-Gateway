@@ -390,7 +390,7 @@ def test_new_package_on_my_decks_and_add_to_a_deck_on_my_lists(
         go.click()
         assert "Give the package a name." in box.locator(".boxnote").inner_text()
         box.locator("input[name=name]").fill("Fetches")
-        assert "7 / 120" in box.inner_text()
+        assert "7/120" in box.inner_text()  # as New deck counts
         go.click()
         assert "Give it at least one keyword." in box.locator(".boxnote").inner_text()
         box.locator("input[name=keywords]").fill("fetchlands")
