@@ -189,6 +189,31 @@ def counts(sub: str) -> dict[str, int]:
 
 def forget_counts(sub: str) -> None:
     _COUNTS.pop(sub, None)
+    _COUNT_FAILED.pop(sub, None)
+
+
+# A list whose count read failed, per member, and until when it is left alone (security review
+# 0.7.44 S-01): the My lists page reads the missing counts on every view, so a list Archidekt can't
+# answer would otherwise be read again by each view and add to the shared breaker every time.
+COUNT_RETRY_AFTER = 300.0  # seconds
+_COUNT_FAILED: dict[str, dict[str, float]] = {}
+
+
+def count_failed(sub: str, kind: str, now: float) -> None:
+    """Leave ``kind``'s count read alone for ``sub`` until COUNT_RETRY_AFTER from ``now``."""
+    _COUNT_FAILED.setdefault(sub, {})[kind] = now + COUNT_RETRY_AFTER
+
+
+def count_resting(sub: str, now: float) -> set[str]:
+    """The kinds whose count read failed for ``sub`` lately (the expired ones are dropped)."""
+    held = _COUNT_FAILED.get(sub)
+    if not held:
+        return set()
+    for kind in [k for k, until in held.items() if until <= now]:
+        del held[kind]
+    if not held:
+        del _COUNT_FAILED[sub]
+    return set(held)
 
 
 async def read(decks: DeckService, sub: str, kind: str, *, page: int = 1, search: str = "") -> dict[str, Any]:

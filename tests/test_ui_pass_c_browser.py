@@ -346,8 +346,8 @@ def test_a_custom_cards_menu_on_the_deck_page(server: Server, width: int, theme:
         page.goto(f"{server.base}/decks/42?view=text", wait_until="networkidle")
         card = page.locator(".deckview .row[data-custom-id='41']")
         card.scroll_into_view_if_needed()
-        # the Set column says Custom; no Custom mark beside the name as well (it took the name's room)
-        assert card.locator(".set").inner_text() == "Custom" and card.locator(".custom-badge").count() == 0
+        # one Custom mark, under the name (the Set column is hidden on a phone, so its cell is blank)
+        assert card.locator(".set").inner_text() == "" and card.locator(".custom-badge").count() == 1
         assert (
             card.locator("..")
             .locator("xpath=ancestor::section[contains(@class,'stack')]")

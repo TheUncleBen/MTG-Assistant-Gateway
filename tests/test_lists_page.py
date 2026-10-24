@@ -7,7 +7,9 @@ from __future__ import annotations
 
 import html
 import re
+import time
 
+import httpx
 import pytest
 
 from mtg_gateway import account_lists
@@ -576,3 +578,46 @@ async def test_custom_cards_rows_and_the_edit_box_show_the_cards_picture(
     # a new card's box has none either
     page = (await member.http.get("/lists/custom?new=1")).text
     assert "class='lp-cur'" not in page
+
+
+async def test_the_tab_counts_never_open_the_shared_breaker(
+    member: Browser, stack: Stack, monkeypatch
+) -> None:
+    """Security review 0.7.44 S-01: with two lists' endpoints at 503 and the shipped GET retries,
+    the counts reads are sent once each (no retries), a view stops at its first failure, a list
+    that failed is not read again for a while, and Archidekt is never paused for every member."""
+    ark = stack.ark
+    account_lists.forget_counts("user-1")
+    real = ark.handle
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET" and (
+            "/users/pins/" in request.url.path or "/decks/colorTags/" in request.url.path
+        ):
+            ark.calls.append((request.method, request.url.path))
+            return httpx.Response(503, json={"detail": "down"})
+        return real(request)
+
+    monkeypatch.setattr(ark.transport, "handler", handle)
+    client = stack.h.app.state.gateway.decks.client
+    monkeypatch.setattr(client, "retries", 2)  # the shipped MTG_ARCHIDEKT_RETRIES (the test client has 0)
+    monkeypatch.setattr(client, "backoff_base", 0.01)
+    client.pacer._open_until = 0
+    failing_by_view = []
+    for _view in range(3):
+        ark.calls.clear()
+        r = await member.http.get("/lists/templates")
+        assert r.status_code == 200  # the page still draws
+        failing_by_view.append(
+            ["pins" if "pins" in p else "colorTags" for _m, p in ark.calls if "pins" in p or "colorTags" in p]
+        )
+        assert time.monotonic() >= client.pacer._open_until  # the breaker stays closed
+    # first view: color tags fails once, sent once, and the view stops there (pins is not asked)
+    assert failing_by_view[0] == ["colorTags"]
+    # second view: color tags is remembered as failed and skipped; pins is asked once
+    assert failing_by_view[1] == ["pins"]
+    # third view: both are remembered; nothing failing is sent
+    assert failing_by_view[2] == []
+    counts = account_lists.counts("user-1")
+    assert "color_tags" not in counts and "pins" not in counts and "templates" in counts
+    account_lists.forget_counts("user-1")

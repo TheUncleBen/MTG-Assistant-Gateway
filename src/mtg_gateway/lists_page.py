@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from types import SimpleNamespace
 from typing import Any, NamedTuple
 from urllib.parse import parse_qs, quote, urlencode
@@ -23,6 +24,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
 
 from . import account_lists, custom_pictures, modes, ui
+from .archidekt import no_retry
 from .busy import busy_response
 from .companion import DECK_CSP
 from .deckpage import image_url
@@ -1494,14 +1496,25 @@ def add_lists_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
     async def read_counts(sub: str) -> None:
         """Every tab shows its count: the lists not read yet are read once (one cheap read each,
         kept as account_lists.counts keeps them), so a first visit does not show a number on the
-        open tab alone. A list that can't be read right now keeps no number; the page still draws."""
-        for kind in account_lists.KINDS:
-            if kind in account_lists.counts(sub):
-                continue
-            try:
-                await account_lists.read(decks, sub, kind)
-            except DeckError:
-                continue
+        open tab alone. A list that can't be read right now keeps no number; the page still draws.
+        Gentle on a struggling Archidekt (security review 0.7.44 S-01): each read is sent once,
+        without the client's GET retries (archidekt.no_retry, as the deck sync's reads), the view
+        stops at its first failure, and a list that failed is left alone for
+        account_lists.COUNT_RETRY_AFTER, so page views never add up to the shared breaker."""
+        now = time.monotonic()
+        resting = account_lists.count_resting(sub, now)
+        quiet = no_retry.set(True)
+        try:
+            for kind in account_lists.KINDS:
+                if kind in account_lists.counts(sub) or kind in resting:
+                    continue
+                try:
+                    await account_lists.read(decks, sub, kind)
+                except DeckError:
+                    account_lists.count_failed(sub, kind, now)
+                    return
+        finally:
+            no_retry.reset(quiet)
 
     def by_id(items: list[dict[str, Any]], raw: str | None, key: str = "id") -> dict[str, Any] | None:
         if not raw or not _ID.fullmatch(raw):

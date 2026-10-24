@@ -3207,7 +3207,8 @@ class DeckService:
         if exp is None or exp - time.time() < 300:
             token = await refreshed("expiring")
         acting = _acting_sub.set(sub)
-        quiet = no_retry.set(background)
+        # a caller that asked for no retries itself keeps them off (lists_page.read_counts)
+        quiet = no_retry.set(background or no_retry.get())
         try:
             try:
                 result = await fn(token, *args)

@@ -1201,14 +1201,15 @@ def _custom_data(card: CustomDeckCard, deck: Deck) -> str:
 
 
 def custom_card_row(card: CustomDeckCard, *, deck: Deck, view: str = "text") -> str:
-    """A custom card as a row of the list views: its count, name and type. The Set column says
-    Custom, so the rows carry no Custom mark as well (it took the room the name needs); the
-    brewer rows, with no Set column, keep the mark."""
+    """A custom card as a row of the list views: its count, name and type, marked Custom once at
+    every width: the mark sits on its own line under the name (the Companion word's place, so the
+    name keeps its room), and the Set cell, hidden on a phone, is left blank rather than saying
+    Custom a second time where it shows."""
     cls = " side" if custom_zone(card, deck) == "side" else ""
     qty = f"<span class='q'>{card.quantity}</span>"
     name = f"<span class='name' title='{esc(card.name)}'>{esc(card.name)}</span>"
+    mark = custom_badge()
     if view == "brewer":
-        name += custom_badge()
         pic = (
             f"<img class='art' src='{custom_picture_url(deck, card)}' alt='' loading='lazy'>"
             if card.custom_card_id is not None
@@ -1216,16 +1217,16 @@ def custom_card_row(card: CustomDeckCard, *, deck: Deck, view: str = "text") -> 
         )
         cls = " brew" + cls
         body = (
-            f"{pic}<span class='bd'><span class='n'>{qty}{name}</span>"
+            f"{pic}<span class='bd'><span class='n'>{qty}{name}</span>{mark}"
             f"<span class='ty'>{esc(card.type_line)}</span><span class='price'></span></span>"
         )
     elif view == "table":
         mv = mana_value_text(card.custom_cmc) if card.custom_cmc is not None else ""
         body = (
-            f"{qty}<span class='n'>{name}</span>"
+            f"{qty}<span class='n'>{name}</span>{mark}"
             f"<span class='ty' title='{esc(card.type_line)}'>{esc(card.type_line)}</span>"
             f"<span class='mv'>{mv}</span>"
-            "<span class='mc'></span><span class='set'>Custom</span><span class='price'></span>"
+            "<span class='mc'></span><span class='set'></span><span class='price'></span>"
         )
     else:
         hover = (
@@ -1234,8 +1235,8 @@ def custom_card_row(card: CustomDeckCard, *, deck: Deck, view: str = "text") -> 
             else ""
         )
         body = (
-            f"{qty}<span class='n'>{name}{hover}</span><span class='mc'></span>"
-            f"<span class='set' title='{esc(CUSTOM_TITLE)}'>Custom</span><span class='price'></span>"
+            f"{qty}<span class='n'>{name}{hover}</span>{mark}<span class='mc'></span>"
+            "<span class='set'></span><span class='price'></span>"
         )
     return (
         f"<li class='row custom{cls}' tabindex='0' role='button' data-name='{esc(card.name.lower())}' "
@@ -3104,6 +3105,10 @@ ul.rows .hover:empty,ul.rows .row:hover .hover:empty{display:none}  /* a custom 
    pixel it had without it (0.7.43: beside the name it cut "Delver of Se…" at 390 px) */
 ul.rows .row > .compmark{grid-column:2;grid-row:2;justify-self:start;margin:-.2rem 0 .35rem}
 ul.rows .row.brew .compmark{align-self:flex-start}
+/* a custom card's mark takes the same line under the name in every list view (the Set cell, hidden
+   on a phone, is blank for custom rows: the word is said once at every width) */
+ul.rows .row > .custom-badge{grid-column:2;grid-row:2;justify-self:start;margin:-.2rem 0 .35rem}
+ul.rows .row.brew .custom-badge{align-self:flex-start}
 .deckview .c .tagdot{position:absolute;right:8px;top:8px;width:14px;height:14px;box-shadow:0 0 0 2px #fff}
 .owned{display:inline-block;width:9px;height:9px;border-radius:50%;background:#1ebb6c;flex:none;
   box-shadow:0 0 0 2px var(--bg)}

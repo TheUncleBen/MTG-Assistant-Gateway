@@ -112,23 +112,52 @@
   // too and rejected by the next page that loads this script (any page: the note is shared by
   // the tabs); rejecting one rejected already is harmless. A settled one is announced
   // (mtg:rejected) so a waiting-changes list on the page can drop its row (static/proposals.js).
+  // The note is the member's (security review 0.7.44 S-03): it is kept under a short hash of the
+  // name the account menu's "Signed in as" line carries, so the next member on a shared browser
+  // neither sends nor drops it, and signing out clears it. A page that names no member keeps and
+  // sends nothing. It is dropped only when the reject went through or the server says the
+  // proposal is no longer pending or not there (S-04); a refusal for now (403, 429, 5xx) or no
+  // connection keeps it for the next page, which tries once more (one try a page load).
   var OWED = "mtg_reject_owed";
-  function owed() {
-    try { var v = JSON.parse(localStorage.getItem(OWED) || "[]"); return Array.isArray(v) ? v : []; } catch (e) { return []; }
+  var signingOut = false;
+  function owedKey() {
+    var name = "";
+    try {
+      var who = document.querySelector("header.topbar .who[title]");
+      name = (who && who.getAttribute("title")) || "";
+    } catch (e) { name = ""; }
+    if (!name) return "";
+    var h = 5381;
+    for (var i = 0; i < name.length; i++) h = ((h * 33) ^ name.charCodeAt(i)) >>> 0;
+    return OWED + ":" + h.toString(36);
+  }
+  function owed(key) {
+    try { var v = JSON.parse(localStorage.getItem(key) || "[]"); return Array.isArray(v) ? v : []; } catch (e) { return []; }
   }
   function oweReject(pid) {
-    if (!pid) return;
+    var key = owedKey();
+    if (!pid || !key || signingOut) return;
     try {
-      var v = owed();
+      var v = owed(key);
       if (v.indexOf(pid) < 0) v.push(pid);
-      localStorage.setItem(OWED, JSON.stringify(v.slice(-20)));
+      localStorage.setItem(key, JSON.stringify(v.slice(-20)));
     } catch (e) { /* no storage: the leaving request was the one try */ }
   }
+  function forgetOwed() {
+    var key = owedKey();
+    signingOut = true;  // a deck page's leaving reject after this notes nothing
+    try { if (key) localStorage.removeItem(key); } catch (e) { /* no storage */ }
+  }
+  function settled(d) {
+    return !!d && (d.status === 200 || d.error === "not_pending" || d.error === "not_found");
+  }
   function settleOwed() {
-    if (!csrf()) return;  // a page without a token can't send it; the next one with one does
-    owed().forEach(function (pid) {
-      post("/api/v1/proposals/" + enc(pid) + "/reject", {}).then(function () {
-        try { localStorage.setItem(OWED, JSON.stringify(owed().filter(function (x) { return x !== pid; }))); } catch (e) { /* no storage */ }
+    var key = owedKey();
+    if (!csrf() || !key) return;  // a page without a token or a member can't send it; the next one does
+    owed(key).forEach(function (pid) {
+      post("/api/v1/proposals/" + enc(pid) + "/reject", {}).then(function (d) {
+        if (!settled(d)) return;  // refused for now: still owed, the next page tries once more
+        try { localStorage.setItem(key, JSON.stringify(owed(key).filter(function (x) { return x !== pid; }))); } catch (e) { /* no storage */ }
         document.dispatchEvent(new CustomEvent("mtg:rejected", { detail: { proposal_id: pid } }));
       }, function () { /* no connection: still owed */ });
     });
@@ -491,7 +520,15 @@
     // true while the menu's own history.back() has not landed yet (static/box.js asks)
     backPending: function () { return ignorePop; }
   };
-  settleOwed();
+  // Settled once every deferred script has run (DOMContentLoaded): a list that drops the row on
+  // mtg:rejected (static/proposals.js) loads after this script, and an answer that came back
+  // before it was listening left the row on the page.
+  if (document.readyState === "complete") settleOwed();
+  else document.addEventListener("DOMContentLoaded", settleOwed);
+  document.addEventListener("submit", function (e) {
+    var f = e.target;
+    if (f && f.getAttribute && f.getAttribute("action") === "/logout") forgetOwed();
+  });
 
   // -- the card menu -----------------------------------------------------------------------------
   /* s: {name, onOpen(), watch: {watched, onWatch(), onArt() or null} or null (watchlists off),

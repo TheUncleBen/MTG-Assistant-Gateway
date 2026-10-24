@@ -172,6 +172,33 @@ def test_the_account_switch_rows_and_the_price_sources_row(server: Server, width
     assert errors == []
 
 
+def _reload_with_the_list_script_late(page, server: Server) -> None:
+    """Reload with the strip's script (static/proposals.js) held back until the server has taken
+    the owed reject, or for 1.5 s when it is not sent before the page's scripts have all run.
+    Under load the reject's answer could come back before that later deferred script was
+    listening for mtg:rejected, and the row stayed (the 8 s wait below timed out on 4 workers);
+    cardmenu.js now settles at DOMContentLoaded, and this makes the late script happen every run."""
+    cdp = page.context.new_cdp_session(page)
+    held: list[str] = []
+    cdp.on("Fetch.requestPaused", lambda e: held.append(e["requestId"]))
+    cdp.send("Fetch.enable", {"patterns": [{"urlPattern": "*/static/proposals.js*"}]})
+    page.reload(wait_until="commit")
+    for _ in range(100):  # the request for the script, at most 5 s
+        if held:
+            break
+        page.wait_for_timeout(50)
+    assert held, "the deck page did not ask for static/proposals.js"
+    for _ in range(30):  # the server takes the reject (the page is not told yet), at most 1.5 s
+        if server.db.count_pending_proposals("user-1") == 0:
+            break
+        page.wait_for_timeout(50)
+    page.wait_for_timeout(200)  # time for its answer to reach the page
+    for rid in held:
+        cdp.send("Fetch.continueRequest", {"requestId": rid})
+    cdp.send("Fetch.disable")
+    page.wait_for_load_state("networkidle")
+
+
 @pytest.mark.parametrize("width,theme", [(390, "dark"), (1280, "light")])
 def test_a_big_removal_asks_in_a_box_and_a_question_left_open_is_rejected(
     server: Server, width: int, theme: str
@@ -219,12 +246,17 @@ def test_a_big_removal_asks_in_a_box_and_a_question_left_open_is_rejected(
             )
         # the question's proposal waits while the box is open; leaving the page rejects it
         assert server.db.count_pending_proposals("user-1") == 1
-        page.reload(wait_until="networkidle")
+        _reload_with_the_list_script_late(page, server)
         # the leaving request is lost under the service worker (as on the site), so the next page
         # rejects it (static/cardmenu.js) and the strip it was drawn in goes (static/proposals.js)
         page.wait_for_function("() => !document.querySelector('#waiting')", timeout=8000)
         assert server.db.count_pending_proposals("user-1") == 0
-        assert page.evaluate("() => localStorage.getItem('mtg_reject_owed')") in (None, "[]")
+        # the note was the member's own (security review 0.7.44 S-03), and it is settled now
+        owed = page.evaluate(
+            "() => Object.keys(localStorage).filter(k => k.startsWith('mtg_reject_owed'))"
+            ".map(k => [k, localStorage.getItem(k)])"
+        )
+        assert all(k.startswith("mtg_reject_owed:") and v == "[]" for k, v in owed), owed
         page.reload(wait_until="networkidle")
         assert copies() == 20 and page.locator("#waiting").count() == 0
         # saying no rejects it too, and the card is back where it was

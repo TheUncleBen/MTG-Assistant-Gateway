@@ -577,3 +577,37 @@ async def test_a_comment_vote_without_the_page_token_is_refused(member: Browser,
     )
     assert r.status_code == 403 and r.json()["error"] == "csrf", r.text
     assert len(ark.vote_calls) == sent and ("alice", cid) not in ark.votes
+
+
+async def test_a_trail_is_only_archidekts_own_names_never_a_members_url(stack: Stack) -> None:
+    """Security review 0.7.44 S-02: a thread's trail is stored only under a group and section that
+    the forum's own section listing names, in Archidekt's spelling. One member's made-up group in
+    the URL never becomes another member's trail."""
+    from mtg_gateway import forum
+
+    from .test_access_control import AMY, browser_for
+
+    h = stack.h
+    forum._IN_SECTION.clear()
+    alice_user = dict(h.idp.user)
+    amy = await browser_for(h, AMY, "amy", "pw-amy")
+    assert (await amy.http.get("/forum")).status_code == 200  # the listing has been read
+    r = await amy.http.get("/forum/Made%20up/General")
+    assert r.status_code == 200, r.text  # the fake serves General's threads under any group name
+    assert forum.in_section(700001) is None
+    await amy.aclose()
+
+    h.idp.user = alice_user
+    alice = await browser_for(h, None, "alice", "pw-alice")
+    page = (await alice.http.get("/forum/thread/700001")).text
+    crumbs = re.search(r"<nav class='crumbs'.*?</nav>", page).group(0)
+    assert "Made up" not in crumbs and crumbs.count("<a ") == 1  # the plain Forum crumb
+    # a real section, typed in another case: stored in Archidekt's own spelling
+    assert (await alice.http.get("/forum/archidekt/General")).status_code == 200
+    assert forum.in_section(700001) == ("Archidekt", "General")
+    page = (await alice.http.get("/forum/thread/700001")).text
+    crumbs = re.search(r"<nav class='crumbs'.*?</nav>", page).group(0)
+    assert "href='/forum#group-Archidekt'>Archidekt</a>" in crumbs
+    assert "href='/forum/Archidekt/General'>General</a>" in crumbs
+    await alice.aclose()
+    forum._IN_SECTION.clear()

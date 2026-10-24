@@ -93,6 +93,9 @@ async def test_a_thread_page_knows_its_section_once_the_list_has_been_read(
     member: Browser, stack: Stack
 ) -> None:
     ark = stack.ark
+    # the front page's listing first, as a member gets there: a trail is stored only under the
+    # names Archidekt's own listing gives (security review 0.7.44 S-02)
+    assert (await member.http.get("/forum")).status_code == 200
     r = await member.http.get(SECTION)
     assert r.status_code == 200
     page = (await member.http.get("/forum/thread/700002")).text
@@ -158,11 +161,12 @@ async def test_list_rows_of_a_custom_card_say_custom_once(member: Browser, stack
     for view in ("text", "table"):
         page = (await member.http.get(f"/decks/42?view={view}")).text
         row = re.search(r"<li class='row custom[^>]*>.*?</li>", page, re.S).group(0)
-        assert "<span class='set'" in row and ">Custom</span>" in row
-        assert "custom-badge" not in row, view
+        # the mark under the name (the Set cell is hidden on a phone, so it is blank, not a second word)
+        assert "<span class='set'></span>" in row and row.count(">Custom<") == 1, view
+        assert "</span><span class='custom-badge'" in row, view
     grid = (await member.http.get("/decks/42?view=grid")).text
     tile = re.search(r"<div class='c custom'.*?</div>", grid, re.S).group(0)
-    assert "custom-badge" in tile  # no Set column there: the mark stays
+    assert "custom-badge" in tile
 
 
 async def test_the_package_panels_budget_sits_in_the_controls_column(member: Browser, stack: Stack) -> None:
