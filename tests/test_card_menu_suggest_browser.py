@@ -309,3 +309,36 @@ def server_cards(tmp_path: Path):
         yield s, _exe()
     finally:
         s.stop()
+
+
+def test_the_list_stays_open_when_the_box_gets_its_focus_back_at_once(tmp_path: Path) -> None:
+    """The box closes its list a moment after it loses the focus (a click elsewhere). When the focus
+    comes straight back before that moment, as when Escape closes a card menu opened from the list on
+    a slow phone, the list stays: the box has the focus and its suggestions again. Before, the late
+    close hid the list, and the focus coming back found it still open, so it never asked again."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _exe()
+    server = _server(tmp_path)
+    try:
+        sid = server.sign_in()
+        with sync_playwright() as p:
+            browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+            page = _context(browser, server, sid, 1280).new_page()
+            page.goto(f"{server.base}/account", wait_until="networkidle")
+            box = page.locator("#site-q")
+            box.click()
+            box.press_sequentially("sol", delay=30)
+            page.locator("#site-q-list li.go").first.wait_for(timeout=3000)
+            # the focus leaves and comes back within one task, before the deferred close runs
+            page.evaluate("() => { const q = document.getElementById('site-q'); q.blur(); q.focus(); }")
+            page.wait_for_timeout(300)
+            assert page.locator("#site-q-list").is_visible()
+            assert page.locator("#site-q-list li.go").first.is_visible()
+            # a real move away still closes it
+            page.evaluate("() => document.getElementById('site-q').blur()")
+            page.wait_for_timeout(300)
+            assert not page.locator("#site-q-list").is_visible()
+            browser.close()
+    finally:
+        server.stop()
