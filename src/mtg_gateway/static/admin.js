@@ -28,7 +28,7 @@
       f.appendChild(i);
     });
     document.body.appendChild(f);
-    f.submit();
+    Menu.whenClosed(function () { f.submit(); });
   }
 
   // -- Users ------------------------------------------------------------------------------------

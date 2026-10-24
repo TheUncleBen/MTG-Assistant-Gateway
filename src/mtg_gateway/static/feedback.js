@@ -356,6 +356,7 @@
     navStart.timer = setTimeout(navEnd, 20000); // a download or a stopped load: never stuck on
   }
   function navEnd() { document.documentElement.classList.remove("navigating"); }
+  window.MtgNavStart = navStart;  // a menu link that waits for the menu's Back (static/cardmenu.js)
   document.addEventListener("click", function (e) {
     if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
     var a = e.target instanceof Element ? e.target.closest("a[href]") : null;

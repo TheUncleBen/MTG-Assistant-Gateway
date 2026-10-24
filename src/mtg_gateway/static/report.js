@@ -27,7 +27,7 @@
       });
       return;
     }
-    location.href = "/cards?q=" + enc(name);
+    Menu.whenClosed(function () { location.href = "/cards?q=" + enc(name); });
   }
   function openRowMenu(row, x, y) {
     var name = row.getAttribute("data-card");

@@ -515,7 +515,7 @@
   function changePrinting(tr) {
     var Pick = window.MtgPrintPick;
     var d = dataOf(tr);
-    if (!Pick) { location.href = "/cards?q=" + encodeURIComponent(d.name); return; }
+    if (!Pick) { Menu.whenClosed(function () { location.href = "/cards?q=" + encodeURIComponent(d.name); }); return; }
     var finish = String(d.finish || "normal").toLowerCase();
     Pick.open({
       name: d.name,

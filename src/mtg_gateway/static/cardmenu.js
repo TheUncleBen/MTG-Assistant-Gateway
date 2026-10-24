@@ -355,7 +355,17 @@
     if (o.ext) { a.target = "_blank"; a.rel = "noreferrer noopener"; }
     if (ic) a.appendChild(icon(ic));
     a.appendChild(document.createTextNode(text));
-    a.addEventListener("click", function () { close(false); });
+    a.addEventListener("click", function (e) {
+      close(false);
+      if (!ignorePop || o.ext || a.hasAttribute("download") || e.defaultPrevented || e.button || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
+      // the menu's own Back is on its way: the link goes once it has landed (whenClosed)
+      e.preventDefault();
+      // the progress bar, as for any link to another gateway page (static/feedback.js)
+      if (window.MtgNavStart && a.origin === location.origin &&
+          a.pathname + a.search !== location.pathname + location.search && !/\.[A-Za-z0-9]{2,8}$/.test(a.pathname))
+        window.MtgNavStart();
+      whenClosed(function () { location.assign(a.href); });
+    });
     return a;
   }
   function sep() { return el("div", "sep"); }
@@ -409,8 +419,26 @@
     if (!menu || (e.target instanceof Element && menu.contains(e.target))) return;
     if (Math.abs(window.scrollX - menuScroll[0]) > 4 || Math.abs(window.scrollY - menuScroll[1]) > 4) close(false);
   }, { capture: true, passive: true });
+  // Runs go (a change of page) once the menu's own Back has landed. A page change started while
+  // that history.back() is still on its way races it, and the Back can win: a tap on Remove… left
+  // the member on the same page, or took them back to it after the box had opened.
+  var afterPop = [];
+  function flushAfterPop() {
+    var list = afterPop;
+    afterPop = [];
+    list.forEach(function (go) { go(); });
+  }
+  function whenClosed(go) {
+    if (!ignorePop) { go(); return; }
+    afterPop.push(go);
+    // a Back that never reports: go anyway (this one only, so an older call's wait never hurries it)
+    setTimeout(function () {
+      var at = afterPop.indexOf(go);
+      if (at >= 0) { afterPop.splice(at, 1); go(); }
+    }, 1500);
+  }
   window.addEventListener("popstate", function () {
-    if (ignorePop) { ignorePop = false; return; }
+    if (ignorePop) { ignorePop = false; flushAfterPop(); return; }
     if (menu && menuPushed) { menuPushed = false; close(true, true); }
   });
 
@@ -518,7 +546,9 @@
     toast: toast, dismissToast: dismissToast, post: post, getJSON: getJSON, csrf: csrf, oweReject: oweReject,
     copyText: copyText, copyAndSay: copyAndSay, collect: collect, enabled: enabled, phone: phone, norm: norm,
     // true while the menu's own history.back() has not landed yet (static/box.js asks)
-    backPending: function () { return ignorePop; }
+    backPending: function () { return ignorePop; },
+    // a page change a menu item starts (a form sent, an address opened) goes through this
+    whenClosed: whenClosed
   };
   // Settled once every deferred script has run (DOMContentLoaded): a list that drops the row on
   // mtg:rejected (static/proposals.js) loads after this script, and an answer that came back
