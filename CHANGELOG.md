@@ -91,6 +91,10 @@ account waits for your own press.
 - **The deck page's banner** text is lighter, and its shade deeper in the light theme, so the
   deck's details and dates are easier to read.
 
+### Fixed
+- **Search suggestions** stay open when you close a card's menu from them with Escape. On a slow
+  phone they could close and not come back until you typed again.
+
 ## [0.7.42] - 2026-10-22
 
 Everything you can do with a deck's categories and settings on Archidekt, you can now do in the
