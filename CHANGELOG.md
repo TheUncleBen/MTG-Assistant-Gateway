@@ -7,6 +7,24 @@ Notable changes for people who run or use the gateway. The format follows
 with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 (`release/1.2.3`); `latest` is always the newest.
 
+## [0.7.45] - 2026-10-24
+
+An assistant now reads the same Forge seed the report page shows, and Forge's load problems leave
+out Java's own warnings.
+
+### Upgrade notes
+- None beyond the [update steps](docs/UPGRADING.md). There is no database change, so this update
+  saves no before-upgrade copy, and going back to 0.7.44 needs only the `MTG_TAG` change.
+- No new settings or secrets: your variables file works as it is.
+
+### Fixed
+- **Forge seeds in Claude and ChatGPT.** The seed the gateway picks for a report's Forge games and
+  its Forge solo test could be too large for the apps to show exactly, so an assistant read a
+  rounded number that Forge never used. The gateway now picks seeds every app shows in full. Seeds
+  you give yourself are used as they are.
+- **Forge's load problems** no longer list the Java runtime's own start-up warnings ("Skipping
+  jdk/proxy1/…: Unsupported location"), which an assistant could read as cards Forge could not load.
+
 ## [0.7.44] - 2026-10-24
 
 A review of the screens 0.7.42 and 0.7.43 added, brought to the same standard as the rest of the

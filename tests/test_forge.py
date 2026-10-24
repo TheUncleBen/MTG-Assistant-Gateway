@@ -232,6 +232,29 @@ async def test_start_solo_run_sends_one_deck_and_refresh_summarises_it() -> None
     assert "seats" not in done["result"]
 
 
+async def test_java_warnings_are_not_load_problems() -> None:
+    """On the live 0.7.44 gateway (a Pi 4) a report's Forge section listed twenty Java start-up
+    warnings ("[457.852s][warning][cds] Skipping jdk/proxy1/$Proxy0: Unsupported location") as
+    load problems, so the assistant read them as cards Forge could not load. A real problem stays."""
+    fake = FakeForge()
+    client = fake.client()
+    section = await start_run(client, DECK_TEXT, "Liesa", games=1)
+    real = "Could not find card: Fake Sticker Card"
+    fake.jobs[section["job_id"]].update(
+        state="done",
+        results=[{"game": 1, "winner": 1}],
+        load_problems=[
+            "[457.852s][warning][cds] Skipping jdk/proxy1/$Proxy0: Unsupported location",
+            "[642.946s][warning][cds] Skipping com/sun/proxy/jdk/proxy1/$Proxy3: Unsupported location",
+            real,
+        ],
+    )
+    done = await refresh(client, section)
+    assert done["load_problems"] == [real]
+    fake.jobs[section["job_id"]]["load_problems"] = ["[1.0s][warning][cds] Skipping x: Unsupported location"]
+    assert "load_problems" not in await refresh(client, section)
+
+
 async def test_start_solo_run_plays_a_deck_without_commander_against_one() -> None:
     fake = FakeForge()
     await start_solo_run(fake.client(), "4 Lightning Bolt\n20 Mountain\n", "Burn", games=2, until_turn=5)
@@ -470,6 +493,20 @@ async def test_forge_runs_are_always_seeded() -> None:
     assert fake.started[0]["seed"] == section["seed"] and section["seed_source"] == "gateway"
     given = await start_run(fake.client(), DECK_TEXT, "Liesa", games=1, seed=9)
     assert given["seed"] == 9 and given["seed_source"] == "request"
+
+
+async def test_gateway_seeds_stay_exact_in_javascript() -> None:
+    """On the live 0.7.44 gateway Claude was shown the Forge seeds 976859563464622600 and
+    4554215052401555000: JSON numbers above 2**53 lose their last digits in a JavaScript app, so
+    the assistant read a seed other than the one Forge used, and one it could not replay. The
+    seeds the gateway picks stay below 2**53; a seed asked for is still sent as it is."""
+    fake = FakeForge()
+    for _ in range(20):
+        played = await start_run(fake.client(), DECK_TEXT, "Liesa", games=1)
+        solo = await start_solo_run(fake.client(), DECK_TEXT, "Liesa", games=1)
+        assert 0 <= played["seed"] < 2**53 and 0 <= solo["seed"] < 2**53
+    big = await start_run(fake.client(), DECK_TEXT, "Liesa", games=1, seed=2**60)
+    assert big["seed"] == 2**60 and fake.started[-1]["seed"] == 2**60
 
 
 def test_report_page_and_markdown_show_forge_results() -> None:
