@@ -379,7 +379,9 @@
     input.addEventListener("focus", function () { if ((whole || fold(text()).length >= MIN) && !items.length) lookup(); });
     // a click in a box that already has the focus (after Escape or a pick) opens the list again
     if (whole) input.addEventListener("click", function () { if (list.hidden) lookup(); });
-    input.addEventListener("blur", function () { setTimeout(close, 0); });
+    // closed a moment later (a click on a row lands first), unless the focus is back by then: Escape
+    // on a card menu opened from the list hands it straight back on a slow phone
+    input.addEventListener("blur", function () { setTimeout(function () { if (document.activeElement !== input) close(); }, 0); });
     input.addEventListener("keydown", function (e) {
       if (list.hidden) {
         if (e.key === "ArrowDown" && (whole || fold(text()).length >= MIN)) { e.preventDefault(); lookup(); }
