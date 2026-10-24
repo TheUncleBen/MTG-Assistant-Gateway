@@ -59,7 +59,9 @@ LABELS: dict[str, Label] = {
     "low": Label("Low", "green", "shield", "A small deck or collection change."),
     "high": Label("High", "orange", "triangle", "Bigger, or touches commanders or deck details."),
     "your_press": Label("Your press", "blue", "hand", "An account action. It always waits for you."),
-    "delete": Label("Delete", "red", "trash", "Deletes a deck. It always waits for you."),
+    "delete": Label(
+        "Delete", "red", "trash", "Deletes or takes out something for good. It always waits for you."
+    ),
     # Activity pages only
     "refused": Label(
         "Refused", "red", "ban", "The gateway turned down a sign-in, an app's access or an approval."

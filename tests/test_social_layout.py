@@ -168,8 +168,9 @@ async def test_social_routes_need_session_csrf_and_a_linked_account(stack: Stack
 
 # -- adaptive navigation -----------------------------------------------------------------------
 def test_navigation_has_three_tiers_in_the_stylesheet() -> None:
-    compact = CSS[CSS.index("@media (max-width:599.98px){") :]
-    assert ".tabbar{display:grid" in compact.split("}\n@media", 1)[0]
+    # the phone tier: one of the stylesheet's phone blocks lays the tab bar out as a grid
+    phone_blocks = [b.split("}\n@media", 1)[0] for b in CSS.split("@media (max-width:599.98px){")[1:]]
+    assert any(".tabbar{display:grid" in b for b in phone_blocks)
     rail = CSS[
         CSS.index(
             "@media (min-width:600px) and (max-width:1279.98px) and ((pointer:coarse) or (hover:none)){"

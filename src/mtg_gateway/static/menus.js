@@ -336,8 +336,33 @@
     return {
       el: li, id: li.getAttribute("data-deck-id"), name: li.getAttribute("data-deck-name") || "Unnamed deck",
       own: li.getAttribute("data-own") === "1", folder: li.getAttribute("data-folder") || "",
+      pkg: li.getAttribute("data-package") === "1", // a card package (My decks marks them, decks.js)
       href: a ? a.getAttribute("href") : "/decks/" + li.getAttribute("data-deck-id"), focus: a || li
     };
+  }
+  // Add to a deck… on a package's tile: pick one of the member's decks, then that deck's page
+  // opens with the Add a package box on it and the package picked (deck_extras.py)
+  function addPackageToDeck(d) {
+    var box = Box.open({ title: "Add “" + d.name + "” to a deck", body: loading("Reading your decks…"), actions: [cancelButton()], returnFocus: d.focus });
+    getJSON("/api/decks/mine").then(function (r) {
+      if (!r.ok) return failed(box, r);
+      var known = window.MtgPackages || {};
+      var rows = (r.decks || []).filter(function (dk) {
+        return String(dk.id) !== String(d.id) && !known[String(dk.id)];
+      }).sort(function (a, b) { return (a.name || "").localeCompare(b.name || ""); });
+      if (!rows.length) { box.setBody(el("p", "muted", "No decks to add it to.")); return; }
+      var body = el("div", "stack");
+      var sel = el("select");
+      rows.forEach(function (dk) { var o = el("option", null, dk.name || "Unnamed deck"); o.value = String(dk.id); sel.appendChild(o); });
+      body.appendChild(field("Deck", sel, "mb-pkdeck"));
+      body.appendChild(el("p", "muted small", "Then the Add a package box opens on that deck with its options."));
+      var next = Box.button("Next", "primary", function () {
+        location.href = "/decks/" + enc(sel.value) + "/package?package=" + enc(d.id);
+      }, { icon: "package" });
+      box.setBody(body);
+      box.setActions([cancelButton(), next]);
+      box.focusFirst();
+    }, function () { failed(box); });
   }
   function deckItems(d) {
     var id = enc(d.id), items = [];
@@ -355,6 +380,7 @@
       items.push(item("Move to folder…", "folder", function () { moveDeck(d); }));
     }
     items.push(item("Export…", "download", function () { exportDeck(d); }));
+    if (d.own && d.pkg) items.push(item("Add to a deck…", "package", function () { addPackageToDeck(d); }));
     items.push(item("Compare with…", "layers", function () { compareDeck(d); }));
     if (!d.own) items.push(item("Bookmark", "bookmark", function () { bookmarkDeck(d); }));
     if (Menu.enabled()) items.push(item("Watch deck price", "eye", function () { watchDeck(d); }));

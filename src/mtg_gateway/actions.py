@@ -44,10 +44,18 @@ LABELS = {
     "create_folder": "New folder",
     "collaborator_add": "Add collaborator",
     "collaborator_remove": "Remove collaborator",
+    # 0.7.43 (Archidekt parity release 2)
+    "deck_help": "Deck help request",
+    "report": "Report",
+    "profile": "Profile and settings",
+    "contest_enter": "Contest entry",
+    "contest_withdraw": "Withdraw contest entry",
 }
 ACTIONS = frozenset(LABELS)
 DESTRUCTIVE = frozenset({"delete_deck"})  # never applied by an assistant on its own
 CANNOT_UNDO = frozenset({"delete_deck", "comment_delete"})
+# the comment actions, on a deck's thread or a forum thread (thread_id)
+COMMENT_ACTIONS = frozenset({"comment_post", "comment_edit", "comment_delete", "comment_vote"})
 VOTES = {"up": VOTE_UP, "down": VOTE_DOWN, "none": VOTE_NONE}
 COLLABORATOR_ACTIONS = frozenset({"collaborator_add", "collaborator_remove"})
 # Archidekt's own settings page says this of collaborators (2026-10-10 bundle).
@@ -55,6 +63,116 @@ COLLABORATOR_NOTE = (
     "A collaborator can make any change to the deck that you can, except its main settings. "
     "Archidekt's own settings page offers only people you follow, and so does the gateway."
 )
+
+
+# A deck help request, as archidekt.com's own form checks it (read from its scripts, 2026-10-22):
+# goals and issues of 10 to 200 words each, a deck with at least one tag, and a deck size of 80
+# to 120 cards in a Commander-style format, else 50 to 85. It is listed for 7 days.
+HELP_WORDS = (10, 200)
+HELP_CHARS = 4000  # a cap on each box as well (security review 0.7.43): 200 words fit easily
+HELP_SIZE_COMMANDER = (80, 120)
+HELP_SIZE_OTHER = (50, 85)
+# The Commander-style formats, by the gateway's format names (archidekt.FORMAT_IDS): the site's
+# own list was not readable in its scripts, so this is the gateway's reading of "commander-type"
+HELP_COMMANDER_FORMATS = frozenset(
+    {
+        "commander",
+        "1v1",
+        "duel",
+        "brawl",
+        "oathbreaker",
+        "paupercommander",
+        "historicbrawl",
+        "predh",
+        "competitivebrawl",
+        "canlander",
+    }
+)
+HELP_ACTIONS = ("post", "edit", "delist")
+# What a report is about, and the type Archidekt's report box sends for it
+REPORT_KINDS = {"deck": "Deck", "card": "Card", "custom_card": "Custom card", "comment": "Comment"}
+REPORT_MESSAGE_MAX = 1000
+CONTEST_SUMMARY_MAX = 5000  # the gateway's own limit: Archidekt's is unknown
+CONTEST_ACTIONS = ("contest_enter", "contest_withdraw")
+
+
+def contest_thread(value: Any) -> int:
+    """A contest's thread id: the number, or a contest page's address ending in it."""
+    import re
+
+    m = re.search(r"(\d{1,12})/?$", str(value or "").strip())
+    if not m or int(m.group(1)) <= 0:
+        raise DeckError("invalid", "Give the contest's id or its page address.")
+    return int(m.group(1))
+
+
+async def contest_entry(decks: DeckService, sub: str, thread_id: int, deck_id: str) -> dict[str, Any] | None:
+    """The member's entry of this deck in the contest, as Archidekt lists the entries now."""
+    from . import profile
+
+    uid = profile.user_id(decks, sub)
+    rows = await decks._call_unslotted(sub, lambda token, *_: decks.client.contest_entries(token, thread_id))
+    for e in rows:
+        deck = e.get("deck") if isinstance(e, dict) else None
+        owner = e.get("owner") if isinstance(e, dict) else None
+        did = deck.get("id") if isinstance(deck, dict) else deck
+        oid = owner.get("id") if isinstance(owner, dict) else owner
+        if str(did) == str(deck_id) and str(oid) == str(uid):
+            return e
+    return None
+
+
+def _words(text: str) -> int:
+    return len(text.split())
+
+
+def _help_text(value: Any, what: str) -> str:
+    raw = str(value or "")
+    if len(raw) > HELP_CHARS:  # before any cleaning: a 200-"word" box of megabytes is refused at once
+        raise DeckError("invalid", f"Messages can be up to {HELP_CHARS:,} characters.")
+    text = clean_text(raw)
+    low, high = HELP_WORDS
+    if not low <= _words(text) <= high:
+        raise DeckError("invalid", f"{what} must be {low} to {high} words (it has {_words(text)})")
+    return text
+
+
+def _help_checks(deck: Any) -> None:
+    """archidekt.com's own checks before a help request is posted."""
+    if not deck.tags:
+        raise DeckError("invalid", "Archidekt asks for at least one deck tag before a help request.")
+    low, high = HELP_SIZE_COMMANDER if (deck.format or "") in HELP_COMMANDER_FORMATS else HELP_SIZE_OTHER
+    size = sum(c.quantity for c in deck.main_cards)
+    if not low <= size <= high:
+        raise DeckError(
+            "invalid",
+            f"Archidekt asks for a deck of {low} to {high} cards for a help request (this one has {size}).",
+        )
+
+
+def deck_help_of(deck: Any) -> dict[str, Any] | None:
+    """The deck's current help request as the deck JSON carries it (``deckHelp``), or None."""
+    found = (deck.raw or {}).get("deckHelp") if isinstance(getattr(deck, "raw", None), dict) else None
+    if not isinstance(found, dict) or not isinstance(found.get("id"), int):
+        return None
+    from .archidekt import rich_text
+
+    return {
+        "id": found["id"],
+        "goals": rich_text(found.get("goals") or ""),
+        "issues": rich_text(found.get("issues") or ""),
+        "active": found.get("active") is not False,
+        "created_at": str(found.get("createdAt") or ""),
+    }
+
+
+def report_url(kind: str, deck_id: str | None, comment_id: int | None) -> str:
+    """The page a report names, as archidekt.com's report box sends it (the page it was opened
+    on): the deck's page for a deck, card or custom card in it, the comment's thread for a
+    comment."""
+    if kind == "comment":
+        return f"https://archidekt.com/forum/thread/{int(comment_id or 0)}"
+    return f"https://archidekt.com/decks/{deck_id}"
 
 
 def risk_of(rows: list[dict[str, Any]] | None) -> tuple[str, str]:
@@ -216,7 +334,11 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
     review row saying exactly what will happen, and return the proposal."""
     if action not in ACTIONS:
         raise DeckError("invalid", f"unknown action {action!r}")
-    social = _social(decks) if action not in ("delete_deck", "create_folder") else None
+    social = (
+        _social(decks)
+        if action not in ("delete_deck", "create_folder", "deck_help", "report", "profile", *CONTEST_ACTIONS)
+        else None
+    )
     if social is not None:
         social._me(sub)  # a linked account first: every social action is sent under it
     decks._room_for_proposal(sub)
@@ -225,11 +347,19 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
     deck = None
     # Follow or unfollow someone by username, not through one of their decks
     by_name = action == "follow" and params.get("username") is not None and not params.get("deck_id")
-    if action != "create_folder" and not by_name:
+    forum_thread = None
+    if (action in COMMENT_ACTIONS or action == "report") and params.get("thread_id") not in (None, ""):
+        # a forum thread: its comments are a thread like a deck's, with the thread as the root
+        from . import forum
+
+        forum_thread = await forum.thread(decks, sub, params["thread_id"])
+        changes["deck_id"] = forum.target(forum_thread["id"])
+        where = "in the forum thread"
+    elif action not in ("create_folder", "profile") and not by_name:
         deck_id = _clean_deck_id(str(params.get("deck_id") or ""))
         deck = (
             await decks.get_own_deck(sub, deck_id)
-            if action == "delete_deck" or action in COLLABORATOR_ACTIONS
+            if action in ("delete_deck", "deck_help", *CONTEST_ACTIONS) or action in COLLABORATOR_ACTIONS
             else await decks.get_any_deck(sub, deck_id)
         )
         changes["deck_id"] = deck.id
@@ -278,20 +408,32 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
             row["text"] += " (already the case; applying changes nothing)"
     elif action == "comment_post":
         text = _comment_text(params.get("text"))
-        if deck.comment_root is None:
+        if forum_thread is not None and (forum_thread["locked"] or forum_thread["archived"]):
+            raise DeckError("invalid", "This forum thread is locked or archived, so it takes no replies.")
+        if forum_thread is None and deck.comment_root is None:
             raise DeckError("unavailable", "Archidekt reports no comment thread for this deck")
+        target_id = changes["deck_id"]
+        on = where if forum_thread is not None else f"on the deck {where}"
         parent = params.get("reply_to")
         if parent is not None:
-            found = await _thread_comment(decks, sub, deck.id, parent, page=_page(params.get("page")))
+            found = await _thread_comment(decks, sub, target_id, parent, page=_page(params.get("page")))
             changes["page"] = found["_page"]
-            row["text"] = f"Reply publicly to {found['owner']['username'] or 'a comment'} on the deck {where}"
+            row["text"] = f"Reply publicly to {found['owner']['username'] or 'a comment'} {on}"
+        elif forum_thread is not None:
+            row["text"] = f"Post a public reply {on}"
         else:
-            row["text"] = f"Post a public comment on the deck {where}"
+            row["text"] = f"Post a public comment {on}"
         changes.update(text=text, parent=parent)
         row["after_text"] = text
     elif action in ("comment_edit", "comment_delete", "comment_vote"):
+        on = where if forum_thread is not None else f"on the deck {where}"
         found = await _thread_comment(
-            decks, sub, deck.id, params.get("comment_id"), keep_doc=True, page=_page(params.get("page"))
+            decks,
+            sub,
+            changes["deck_id"],
+            params.get("comment_id"),
+            keep_doc=True,
+            page=_page(params.get("page")),
         )
         own = found["_me"] is not None and found["owner"]["id"] == found["_me"]
         changes["comment_id"] = found["id"]
@@ -308,7 +450,7 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
                 VOTE_UP: "Vote up",
                 VOTE_DOWN: "Vote down",
                 VOTE_NONE: "Take back your vote on",
-            }[vote] + f" {found['owner']['username'] or 'a'}'s comment on the deck {where}"
+            }[vote] + f" {found['owner']['username'] or 'a'}'s comment {on}"
         else:
             if not own:
                 raise DeckError("forbidden", refusals.NOT_OWN_COMMENT)
@@ -325,9 +467,9 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
                     # as for descriptions: a comment rewrite that keeps none of its formatting says what goes
                     row["formatting_lost"] = True
                     row["dropped_embeds"] = formatting.embeds(found.get("_doc"))
-                row["text"] = f"Change your comment on the deck {where}"
+                row["text"] = f"Change your comment {on}"
             else:
-                row["text"] = f"Delete your comment on the deck {where}"
+                row["text"] = f"Delete your comment {on}"
     elif action == "delete_deck":
         cards = sum(c.quantity for c in deck.cards)
         changes["name"] = deck.name
@@ -361,6 +503,137 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
         changes.update(name=name, parent=parent["id"])
         where_to = "your top level" if not parent["depth"] else f"'{parent['name']}'"
         row["text"] = f"Create the folder '{name}' in {where_to}"
+    elif action == "deck_help":
+        what = str(params.get("help_action") or "post")
+        if what not in HELP_ACTIONS:
+            raise DeckError("invalid", "help_action must be post, edit or delist")
+        current = deck_help_of(deck)
+        if what == "post":
+            if current is not None and current["active"]:
+                raise DeckError("invalid", "This deck already has a help request listed: edit or delist it.")
+            _help_checks(deck)
+            goals, issues = (
+                _help_text(params.get("goals"), "goals"),
+                _help_text(params.get("issues"), "issues"),
+            )
+            changes.update(help_action=what, goals=goals, issues=issues)
+            if current is not None:  # a delisted or expired one is opened again
+                changes["help_id"] = current["id"]
+            row["text"] = f"Ask for help with your deck publicly on Archidekt's deck help board {where}"
+            row["after_text"] = f"Goals: {goals}\n\nIssues: {issues}"
+            row["note"] = "Listed for 7 days, under your name."
+        else:
+            if current is None:
+                raise DeckError("not_found", "This deck has no help request.")
+            if what == "edit":
+                goals, issues = (
+                    _help_text(params.get("goals"), "goals"),
+                    _help_text(params.get("issues"), "issues"),
+                )
+                row["text"] = f"Change your public help request for your deck {where}"
+                row["before_text"] = f"Goals: {current['goals']}\n\nIssues: {current['issues']}"
+                row["after_text"] = f"Goals: {goals}\n\nIssues: {issues}"
+            else:
+                if not current["active"]:
+                    raise DeckError("invalid", "This deck's help request is not listed.")
+                goals, issues = current["goals"], current["issues"]
+                row["text"] = f"Take down your help request for your deck {where}"
+            changes.update(help_action=what, help_id=current["id"], goals=goals, issues=issues)
+    elif action == "report":
+        kind = str(params.get("report_kind") or "")
+        if kind not in REPORT_KINDS:
+            raise DeckError("invalid", "report_kind must be deck, card, custom_card or comment")
+        message = clean_text(str(params.get("message") or ""))
+        if not message:
+            raise DeckError("invalid", "Say what is wrong: a report needs a message.")
+        if len(message) > REPORT_MESSAGE_MAX:
+            raise DeckError("invalid", f"A report's message must be at most {REPORT_MESSAGE_MAX} characters.")
+        about = ""
+        comment_id = None
+        if forum_thread is not None and kind != "comment":
+            raise DeckError("invalid", "In a forum thread only a comment can be reported.")
+        if kind in ("card", "custom_card"):
+            card = clean_text(str(params.get("card") or ""))
+            hit = next((c for c in deck.cards if c.name.casefold() == card.casefold()), None)
+            if hit is None:
+                # one of the member's own custom cards in the deck (Deck.custom_cards, kept apart
+                # from the cards): reported as a custom card whatever kind was asked for
+                hit = next((c for c in deck.custom_cards if c.name.casefold() == card.casefold()), None)
+                if hit is not None:
+                    kind = "custom_card"
+            if hit is None:
+                raise DeckError("not_found", f"“{card}” is not in this deck.")
+            about = f"the {'custom ' if kind == 'custom_card' else ''}card “{hit.name}” in the deck {where}"
+            # Archidekt's own box sends the page's address only: the card is named in the message
+            message = f"{hit.name}: {message}"
+        elif kind == "comment":
+            target_id = changes["deck_id"]
+            cid = params.get("comment_id")
+            if forum_thread is not None and cid == forum_thread["id"]:
+                # the thread's own first post: the thread is its root comment, which the comment
+                # list does not carry, so it is taken from the thread read
+                found = {
+                    "id": forum_thread["id"],
+                    "owner": {"username": forum_thread["owner"]},
+                    "text": forum_thread["text"],
+                    "_page": 1,
+                }
+            else:
+                found = await _thread_comment(decks, sub, target_id, cid, page=_page(params.get("page")))
+            comment_id = found["id"]
+            changes["page"] = found["_page"]
+            on = where if forum_thread is not None else f"on the deck {where}"
+            about = f"{found['owner']['username'] or 'a'}'s comment {on}"
+            row["before_text"] = found["text"]
+        else:
+            about = f"the deck {where}"
+        url = report_url(kind, deck.id if deck is not None else None, comment_id)
+        changes.update(report_kind=kind, message=message, url=url, comment_id=comment_id)
+        row["text"] = f"Report {about} to Archidekt's moderators"
+        row["after_text"] = message
+        row["note"] = "Archidekt's moderators see your username with the report. It can't be taken back."
+        row["cannot_undo"] = True
+    elif action in CONTEST_ACTIONS:
+        from .archidekt import rich_text
+
+        thread = contest_thread(params.get("contest"))
+        async with decks.archidekt_slot(sub):
+            entry = await contest_entry(decks, sub, thread, deck.id)
+        changes["thread_id"] = thread
+        if action == "contest_enter":
+            if entry is not None:
+                raise DeckError("invalid", "This deck is entered in that contest already.")
+            summary = summary_text(params.get("summary"))
+            changes["summary"] = summary
+            row["text"] = f"Enter your deck {where} in the contest (thread {thread}) on Archidekt, publicly"
+            row["before_text"] = rich_text(deck.description) or "(empty)"
+            row["after_text"] = summary
+            if formatting.is_formatted(deck.description):
+                # plain words replace links, bold and pictures: approved on the review page only, as
+                # a description edit that loses its formatting is (security review 0.7.43)
+                row["formatting_lost"] = True
+                row["dropped_embeds"] = formatting.embeds(deck.description)
+            row["note"] = (
+                "Archidekt's contest entry replaces the deck's description with your summary. The gateway "
+                "keeps a snapshot first, so History can put the old description back."
+            )
+        else:
+            if entry is None:
+                raise DeckError("not_found", "This deck has no entry in that contest.")
+            changes["entry_id"] = int(entry["id"])
+            row["text"] = f"Withdraw your deck {where} from the contest (thread {thread}) on Archidekt"
+            row["note"] = "Archidekt says you can enter again after withdrawing."
+    elif action == "profile":
+        from . import profile
+
+        field = params.get("field")
+        body, words = profile.plan(field, params, await profile.read(decks, sub))
+        if words.pop("same"):
+            raise DeckError(
+                "invalid", "Your Archidekt account is already set that way; nothing would change."
+            )
+        changes.update(field=field, body=body)
+        row.update(words)
     elif action in COLLABORATOR_ACTIONS:
         user_id, name = await collaborator_target(decks, sub, deck, action, params.get("username"))
         if action == "collaborator_add":
@@ -379,8 +652,8 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
             "id": pid,
             "owner_sub": sub,
             "kind": "action",
-            "deck_id": deck.id if deck else ACCOUNT_TARGET,
-            "deck_name": deck.name if deck else ACCOUNT_NAME,
+            "deck_id": deck.id if deck else changes["deck_id"] if forum_thread else ACCOUNT_TARGET,
+            "deck_name": deck.name if deck else forum_thread["title"] if forum_thread else ACCOUNT_NAME,
             "baseline_fingerprint": deck.fingerprint() if action == "delete_deck" else "",
             "changes": changes,
         },
@@ -458,6 +731,33 @@ async def apply(
                     row["id"], state="pending", result={"error": "backup_failed", "detail": str(exc)}
                 )
             raise
+    elif action == "deck_help":
+        result = await _apply_help(decks, sub, deck_id, c)
+    elif action == "report":
+        decks._writes_switch()
+        await decks._call_unslotted(
+            sub,
+            lambda token, *_: decks.client.report(
+                token, str(c["url"]), REPORT_KINDS[str(c["report_kind"])], str(c["message"])
+            ),
+        )
+        result = {"reported": True, "verified": True}  # Archidekt keeps no list of reports to read back
+    elif action == "profile":
+        from . import profile
+
+        result = await profile.send(decks, sub, dict(c["body"]))
+    elif action == "contest_enter":
+        result = await _apply_contest_enter(decks, sub, deck_id, c, row["id"])
+    elif action == "contest_withdraw":
+        decks._writes_switch()
+        thread = int(c["thread_id"])
+        entry = await contest_entry(decks, sub, thread, deck_id)
+        if entry is None or int(entry["id"]) != int(c["entry_id"]):
+            raise needs_look_error("The contest entry changed on Archidekt since this was reviewed.")
+        await decks._call_unslotted(
+            sub, lambda token, *_: decks.client.contest_withdraw(token, int(c["entry_id"]))
+        )
+        result = {"verified": await contest_entry(decks, sub, thread, deck_id) is None}
     elif action == "collaborator_add":
         result = await _social(decks).add_collaborator(sub, deck_id, int(c["user_id"]))
     elif action == "collaborator_remove":
@@ -469,3 +769,81 @@ async def apply(
         raise DeckError("invalid", "This proposal names an action this gateway does not know.")
     decks.db.finish_proposal(row["id"], state="applied", snapshot_id=result.get("snapshot_id"), result=result)
     return decks.describe(sub, row["id"])
+
+
+async def _apply_help(decks: DeckService, sub: str, deck_id: str, c: dict[str, Any]) -> dict[str, Any]:
+    """Post, edit or delist a deck help request, then read the deck back for it."""
+    decks._writes_switch()
+    deck = await decks.get_own_deck(sub, deck_id)
+    current = deck_help_of(deck)
+    what = str(c["help_action"])
+    goals, issues = str(c["goals"]), str(c["issues"])
+    client = decks.client
+    if what == "post" and current is None:
+        _help_checks(deck)
+        await decks._call_unslotted(
+            sub, lambda token, *_: client.create_deck_help(token, deck_id, goals, issues)
+        )
+    else:
+        if current is None or (c.get("help_id") is not None and current["id"] != c["help_id"]):
+            raise needs_look_error("The deck's help request changed on Archidekt since this was reviewed.")
+        if what == "post":
+            _help_checks(deck)
+        await decks._call_unslotted(
+            sub,
+            lambda token, *_: client.update_deck_help(
+                token, current["id"], goals, issues, active=what != "delist"
+            ),
+        )
+    back = deck_help_of(await decks.get_deck(sub, deck_id))
+    want_active = what != "delist"
+    ok = (
+        back is not None
+        and back["active"] == want_active
+        and (not want_active or (back["goals"].strip() == goals and back["issues"].strip() == issues))
+    )
+    return {"help_action": what, "verified": ok}
+
+
+def summary_text(value: Any) -> str:
+    """A contest summary as plain lines (a Quill document reduced to its words), required."""
+    from .archidekt import plain_text
+
+    lines = plain_text(str(value or "")).strip().splitlines()
+    text = "\n".join(clean_text(line) for line in lines).strip()
+    if not text:
+        raise DeckError("invalid", "A contest entry needs a summary.")
+    if len(text) > CONTEST_SUMMARY_MAX:
+        raise DeckError("invalid", f"A contest summary is at most {CONTEST_SUMMARY_MAX} characters here.")
+    return text
+
+
+async def _apply_contest_enter(
+    decks: DeckService, sub: str, deck_id: str, c: dict[str, Any], proposal_id: str
+) -> dict[str, Any]:
+    """As the site enters a contest: the deck's description becomes the summary, then the entry is
+    sent. A snapshot of the deck is kept first. (update_deck writes the summary as the plain
+    Quill document the gateway's description edits send.)"""
+    from . import profile
+    from .archidekt import rich_text
+
+    decks._writes_switch()
+    thread = int(c["thread_id"])
+    deck = await decks.get_own_deck(sub, deck_id)
+    if await contest_entry(decks, sub, thread, deck.id) is not None:
+        raise needs_look_error("This deck was entered in that contest on Archidekt since this was reviewed.")
+    snapshot_id = decks._hand_snapshot(sub, deck, proposal_id)
+    summary = str(c["summary"])
+    await decks._call_unslotted(
+        sub, lambda token, *_: decks.client.update_deck(token, deck.id, {"description": summary})
+    )
+    uid = profile.user_id(decks, sub)
+    await decks._call_unslotted(
+        sub, lambda token, *_: decks.client.contest_submit(token, uid, thread, deck.id)
+    )
+    back = await decks.get_deck(sub, deck.id)
+    entered = await contest_entry(decks, sub, thread, deck.id) is not None
+    return {
+        "snapshot_id": snapshot_id,
+        "verified": entered and rich_text(back.description).strip() == summary.strip(),
+    }

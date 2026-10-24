@@ -935,5 +935,5 @@ def test_settings_refusals_read_as_the_pages_do() -> None:
         MANAGED_SETTINGS["approval_mode_default"].parse("yolo")
     assert refused.value.message == (
         'must be one of "Ask me every time", "Apply low-risk changes without asking" or '
-        '"Apply deck and collection changes without asking"'
+        '"Apply changes without asking"'
     )

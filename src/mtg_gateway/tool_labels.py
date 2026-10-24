@@ -45,6 +45,9 @@ TOOLS: dict[str, ToolWords] = {
     "list_snapshots": ToolWords("List snapshots", "List my deck snapshots"),
     "propose_restore_snapshot": ToolWords("Propose a restore", "Put my deck back to that snapshot"),
     "propose_deck_categories": ToolWords("Propose category changes", "Add, delete or rename a deck category"),
+    "propose_custom_card_changes": ToolWords(
+        "Propose custom card changes", "Put one of my custom cards in this deck"
+    ),
     "apply_proposal": ToolWords("Apply a change", "Apply that change"),
     "confirm_proposal": ToolWords("Approve or reject from a chat card", "Approve (a chat card's button)"),
     "reject_proposal": ToolWords("Reject a change", "Reject that change"),
@@ -53,11 +56,26 @@ TOOLS: dict[str, ToolWords] = {
     "propose_deck_details": ToolWords("Propose deck settings", "Change my deck's settings"),
     "propose_clone_deck": ToolWords("Propose a copy of a deck", "Copy this deck into my decks"),
     "get_deck_comments": ToolWords("Read deck comments", "Read the comments on this deck"),
+    "get_forum": ToolWords("Read the forum", "Read Archidekt's forum"),
     "propose_deck_social": ToolWords("Propose a like, bookmark or follow", "Bookmark this deck"),
     "propose_comment": ToolWords("Propose a comment", "Comment on this deck"),
     "propose_delete_deck": ToolWords("Propose deleting a deck", "Delete my deck"),
     "propose_create_folder": ToolWords("Propose a new folder", "Make me a folder"),
     "get_deck_collaborators": ToolWords("Read deck collaborators", "Who can edit my deck?"),
+    # tools_community.py
+    "propose_deck_help": ToolWords("Propose a deck help request", "Ask for help with this deck"),
+    "propose_report": ToolWords("Propose a report to Archidekt", "Report this deck to Archidekt"),
+    "get_my_profile": ToolWords("Read my Archidekt profile", "Show my Archidekt profile"),
+    "get_my_notifications": ToolWords("Read my Archidekt notifications", "Any new notifications?"),
+    "propose_profile_change": ToolWords("Propose a profile or settings change", "Change my Archidekt bio"),
+    "propose_contest_entry": ToolWords("Propose a contest entry", "Enter this deck in the contest"),
+    "get_registration_pdf": ToolWords("Make a deck registration sheet", "Make a registration PDF"),
+    # tools_packages.py
+    "list_card_packages": ToolWords("List card packages", "List card packages"),
+    "propose_add_package": ToolWords("Propose adding a card package", "Add my Fetches package to this deck"),
+    # tools_lists.py
+    "get_my_lists": ToolWords("Read my Archidekt lists", "List my category templates"),
+    "propose_list_change": ToolWords("Propose a change to my lists", "Add a color tag called Cut, red"),
     "propose_collaborator": ToolWords("Propose a collaborator change", "Let someone edit my deck"),
     "parse_deck_export": ToolWords("Read an Archidekt export", "Read this Archidekt export"),
     # tools_reports.py
@@ -122,6 +140,7 @@ API_ROUTES: dict[str, str] = {
     "GET /decks/{deck_id}/history": "Deck history (API)",
     "GET /compare": "Compare two decks (API)",
     "POST /decks/{deck_id}/edit": "Propose deck changes (API)",
+    "POST /decks/{deck_id}/custom_cards": "Change custom cards in a deck (API)",
     "GET /proposals": "List my changes (API)",
     "POST /proposals": "Propose a change (API)",
     "GET /proposals/{pid}": "Read a change (API)",

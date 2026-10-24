@@ -61,7 +61,11 @@ def _clean(rows: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
     """Rows as compared: without the scan's name-guess warning, which the save adds, and without a
     commander row's list of names, which its before and after already hold (rows saved before
     the list was added lack it)."""
-    return [{k: v for k, v in r.items() if k not in ("guessed_from", "names")} for r in rows or []]
+    return [
+        {k: v for k, v in r.items() if k not in ("guessed_from", "names")}
+        for r in rows or []
+        if r.get("kind") != "package"  # where a package's adds come from, not a change (packages.py)
+    ]
 
 
 def rows_now(svc: Any, sub: str, row: dict[str, Any], deck: Deck) -> list[dict[str, Any]] | None:
@@ -96,6 +100,10 @@ def rows_now(svc: Any, sub: str, row: dict[str, Any], deck: Deck) -> list[dict[s
             raise d.DeckError("stale", "The deck's folder, tags or cover changed since.")
         kept = [r for r in row.get("rows") or [] if r.get("field") in ORGANISE_ROW_FIELDS]
         return [*rows, *kept]
+    if kind == "custom_cards":
+        stored = row["changes"]
+        names = {int(k): str(v) for k, v in (stored.get("names") or {}).items()}
+        return d.custom_card_rows(deck, list(stored.get("custom_cards") or []), names)[1]
     return None
 
 

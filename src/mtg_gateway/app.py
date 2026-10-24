@@ -228,7 +228,10 @@ WRITE_TOOLS = frozenset(
         "propose_restore_snapshot",
         "propose_deck_details",
         "propose_deck_categories",
+        "propose_custom_card_changes",  # the member's own custom cards in a deck
         "propose_clone_deck",
+        "propose_list_change",  # the member's account-wide lists (account_lists.py)
+        "propose_add_package",  # a card package's cards into a deck (packages.py)
         # the Archidekt account actions (actions.py): proposals too, even though none of them is
         # ever applied by an assistant
         "propose_deck_social",
@@ -236,6 +239,13 @@ WRITE_TOOLS = frozenset(
         "propose_delete_deck",
         "propose_create_folder",
         "propose_collaborator",
+        "propose_deck_help",  # 0.7.43: public, the member's own press only (actions.py)
+        "propose_report",
+        "propose_profile_change",
+        "propose_contest_entry",
+        # sends the typed name, DCI number and event to Archidekt in the member's name (security
+        # review 0.7.43)
+        "get_registration_pdf",
         "apply_proposal",
         "confirm_proposal",
         "reject_proposal",
@@ -840,7 +850,10 @@ def build_mcp_server(state: AppState) -> MCPServer:
     # The tool and route modules import this module, so they are imported here, not at the top.
     from .gateway_routes import add_gateway_routes
     from .tools_account import add_account_tools
+    from .tools_community import add_community_tools
     from .tools_decks import add_deck_tools
+    from .tools_lists import add_list_tools
+    from .tools_packages import add_package_tools
     from .tools_reports import add_report_tools
 
     # The helpers above, for the tool and route modules (each takes what it uses). Tools are
@@ -857,6 +870,9 @@ def build_mcp_server(state: AppState) -> MCPServer:
     add_deck_tools(state, h)
     add_report_tools(state, h)
     add_account_tools(state, h)
+    add_list_tools(state, h)
+    add_community_tools(state, h)
+    add_package_tools(state, h)
 
     add_browser_routes(server, state)
     add_skill_routes(server, state)

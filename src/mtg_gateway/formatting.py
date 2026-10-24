@@ -366,3 +366,67 @@ DOC_CSS = """
 .qdoc .qcard{text-decoration:underline dotted}
 .qdoc .qpic{color:var(--text-muted);font-style:italic}
 """
+
+
+# -- the reply box's own formatting: bold, italics and links from a small marked-up text ----------
+# The forum reply box (static/social.js, its Bold, Italic and Link buttons) writes a plain text
+# with marks: **bold**, _italic_ and [words](https://link). ``marks_doc`` turns that, and only
+# that, into the Quill document Archidekt's own editor would make for the same bold, italic and
+# linked words: a checked document from the member's own text (archidekt.py, the note on
+# formatted text), never one a caller supplied. An assistant's comment stays plain text.
+# The words the document shows are the text with its marks stripped (``marks_text``), so a
+# review or a read-back compares the words, and a link's address is kept only when it is an
+# http(s) address (anything else stays as it was typed).
+
+_MARK = re.compile(
+    r"\*\*(?P<bold>[^*\n]+?)\*\*|_(?P<italic>[^_\n]+?)_|\[(?P<ltext>[^\]\n]+?)\]\((?P<href>[^)\s]+?)\)"
+)
+
+
+def _mark_words(m: re.Match[str]) -> str:
+    """The words a mark shows; a link that is not a web address stays as it was typed."""
+    if m.group("href") and not _href(m.group("href")):
+        return m.group(0)
+    return m.group("bold") or m.group("italic") or m.group("ltext")
+
+
+def marks_text(text: str) -> str:
+    """The words of a marked-up text: what ``marks_doc`` writes, shown as plain text."""
+    return _MARK.sub(_mark_words, str(text or ""))
+
+
+def has_marks(text: str) -> bool:
+    """Whether the text holds a bold, italic or link mark that ``marks_doc`` would keep."""
+    return any(_href(m.group("href")) if m.group("href") else True for m in _MARK.finditer(str(text or "")))
+
+
+def marks_doc(text: str) -> str | None:
+    """The Quill document for a marked-up text, as JSON text, or None when the text has no mark
+    (then it is plain text and goes as plain text does). The document's plain text is
+    ``marks_text(text)`` exactly."""
+    text = str(text or "")
+    out: list[dict[str, Any]] = []
+    pos = 0
+    kept = False
+    for m in _MARK.finditer(text):
+        attrs: dict[str, Any]
+        if m.group("bold"):
+            attrs, words = {"bold": True}, m.group("bold")
+        elif m.group("italic"):
+            attrs, words = {"italic": True}, m.group("italic")
+        else:
+            href = _href(m.group("href"))
+            if not href:  # not a web address: the brackets stay as typed
+                continue
+            attrs, words = {"link": href}, m.group("ltext")
+        _push(out, text[pos : m.start()])
+        _push(out, words, attrs)
+        kept = True
+        pos = m.end()
+    if not kept:
+        return None
+    _push(out, text[pos:])
+    if not out or not isinstance(out[-1].get("insert"), str) or not out[-1]["insert"].endswith("\n"):
+        _push(out, "\n")
+    doc = json.dumps({"ops": out}, ensure_ascii=False, separators=(",", ":"))
+    return doc if rich_text(doc) == marks_text(text) else None

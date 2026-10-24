@@ -623,9 +623,9 @@ class Names:
         if key not in self._proposals:
             prop = self.db.get_proposal(str(proposal_id), sub)
             deck_id = (prop or {}).get("deck_id")
-            if prop and prop.get("deck_name") and deck_id not in (None, "", "account"):
+            if prop and prop.get("deck_name") and deck_id not in (None, "", "account", "lists"):
                 self._deck_info(sub)[0].setdefault(str(deck_id), str(prop["deck_name"]))
-            self._proposals[key] = deck_id if deck_id not in (None, "", "account") else None
+            self._proposals[key] = deck_id if deck_id not in (None, "", "account", "lists") else None
         return self._proposals[key]
 
     def folder(self, sub: str | None, folder_id: Any) -> str | None:

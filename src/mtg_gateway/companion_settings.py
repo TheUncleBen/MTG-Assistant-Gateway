@@ -12,10 +12,11 @@ from typing import TYPE_CHECKING, Any
 from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
 
-from . import modes, prefs, recheck, ui
+from . import account_lists, deck_extras, modes, packages, prefs, recheck, ui
 from .actions import COLLABORATOR_NOTE, collaborator_by_hand, collaborator_target, profile_url
 from .archidekt import (
     FORMAT_IDS,
+    FORMAT_NAMES,
     GAME_IDS,
     GAME_LABELS,
     ArchidektError,
@@ -44,6 +45,7 @@ from .pages import (
     _csrf,
     browser_session,
     login_redirect,
+    read_limited,
 )
 from .theme import esc as _esc
 from .theme import icon
@@ -69,7 +71,10 @@ OK_SECTIONS = {
     "moved": "folder",
     "collaborator_added": "collaborators",
     "collaborator_removed": "collaborators",
+    "package": "package",
+    "template_added": "categories",
 }
+TEMPLATES_NONE_LEFT = "Every template's name is already a category in this deck."
 
 SETTINGS_CSS = """
 .ds-wrap{display:grid;grid-template-columns:minmax(0,52rem);justify-content:center;gap:24px}
@@ -159,6 +164,15 @@ SETTINGS_CSS = """
   .ds .ds-inline{flex-wrap:wrap}.ds .ds-inline > *{flex:1 1 100%}
   .ds .ds-inline > .btn,.ds .ds-inline > button{flex:1 1 100%;width:100%}
   .ds .acts .btn,.ds .acts button{flex:1 1 auto}}
+/* the Package panel (packages.py): the budget row and the format pills are deck_extras.PACKAGE_FIELDS_CSS;
+   their inputs keep their own size (the row's inputs are otherwise full width) */
+.ds .ds-pkg h2{display:flex;align-items:center;gap:.5rem}
+.ds .ds-pkg h2 svg.i{width:20px;height:20px}
+/* the Add template box: a checklist of the templates the deck doesn't have yet */
+.mtgbox.ds-tplbox .tree label{font-weight:400}
+.mtgbox.ds-tplbox .tree label input{width:20px;height:20px;accent-color:var(--orange-ctl)}
+.mtgbox.ds-tplbox .body p + .tree{margin-top:.5rem}
+.mtgbox.ds-tplbox .body .tree + p{margin-top:.5rem}
 """
 
 
@@ -313,10 +327,15 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
         typed_tag: str = "",
         ok: str = "",
         cat_values: dict[str, str] | None = None,
+        pkg_values: dict[str, str] | None = None,
+        templates: list[dict[str, Any]] | None = None,
+        template_error: str = "",
     ) -> str:
-        """The settings page on the shared form rows (F7). ``error`` shows in the main panel (the main
-        settings form's own refusal) or, with ``error_in``, inside that section next to its form, as
-        the ?ok= notices of the section forms do (OK_SECTIONS): each panel carries its own strip."""
+        """The settings page on the shared form rows (F7). ``templates``: the member's category
+        templates, read for the Add template box drawn open (its old address, or a refusal).
+        ``error`` shows in the main panel (the main settings form's own refusal) or, with
+        ``error_in``, inside that section next to its form, as the ?ok= notices of the section
+        forms do (OK_SECTIONS): each panel carries its own strip."""
         v = values or {}
 
         def note(section: str) -> str:
@@ -378,6 +397,9 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
                 + "</span></label>"
             )
 
+        is_package = packages.block_of(deck) is not None
+        if error_in == "package" and not is_package:
+            error_in = ""  # no Package panel to carry it: the main panel says so
         main_note = (
             ui.notice(error, "error", role="alert", cls="ds-note")
             if error and not error_in
@@ -389,6 +411,7 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
         )
         sections = [
             ("main", "Main settings"),
+            *([("package", "Package")] if is_package else []),
             ("categories", "Categories"),
             ("cover", "Cover image"),
             ("tags", "Deck tags"),
@@ -409,7 +432,7 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
             "<div class='ds-wrap'>"
             + nav
             + f"<div class='ds'><a class='back' href='/decks/{did}'>← {_esc(title)}</a>"
-            + ui.page_head("Deck settings", f"“{title}”")
+            + ui.page_head("Deck settings", f"“{title}”" + (" · package" if is_package else ""))
             + f"<form method='post' action='/decks/{did}/settings' class='ui-card settings' id='ds-main'>"
             f"<input type='hidden' name='csrf' value='{_esc(csrf)}'>"
             + "".join(
@@ -463,7 +486,9 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
             f"<a class='btn' href='/decks/{did}'>Cancel</a></div>"
             "<p class='muted small foot'>Saved to Archidekt when you press Save changes; a snapshot from "
             "just before is kept under History.</p></form>"
+            + (package_section(deck, csrf, note("package"), pkg_values) if is_package else "")
             + categories_section(deck, csrf, note("categories"), cat_values)
+            + template_box_html(deck, csrf, templates, open=templates is not None, error=template_error)
             + cover_section(deck, csrf, note("cover"))
             + tags_section(deck, csrf, note("tags"), typed_tag if error_in == "tags" else "")
             + folder_section(deck, csrf, folders, note("folder"))
@@ -488,6 +513,102 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
             + "</section></div></div>"
             + delete_box_html(deck, csrf, backups=bool(state.live.get("archidekt_backups")))
         )
+
+    def package_section(
+        deck: Deck, csrf: str | None, note: str = "", values: dict[str, str] | None = None
+    ) -> str:
+        """The Package panel (parity release 2): keywords, budget and intended formats, saved as
+        the deck's package settings (decks.propose_deck_details with ``package``, applied at once
+        as the page's other saves are)."""
+        did = _esc(deck.id)
+        block = packages.block_of(deck) or {}
+        v = values or {}
+        keywords = v.get("keywords", str(block.get("keywords") or ""))
+        budget = (
+            v.get("budget", str(block.get("budget") or ""))
+            if block.get("budget") in (1, 2, 3, 4) or v
+            else ""
+        )
+        picked = (
+            v.get("formats", "")
+            if v
+            else "\n".join(FORMAT_NAMES[i] for i in block.get("intendedFormats") or [] if i in FORMAT_NAMES)
+        )
+        return (
+            f"<form method='post' action='/decks/{did}/package-settings#package' class='ui-card ds-pkg' "
+            f"id='package'><input type='hidden' name='csrf' value='{_esc(csrf)}'>"
+            f"<h2>{icon('package')} Package</h2>"
+            + note
+            + row(
+                "<label for='pkg-kw'>Keywords</label>",
+                "Required. Words people search packages by, separated by commas.",
+                f"<input id='pkg-kw' type='text' name='keywords' value='{_esc(keywords)}' required "
+                f"maxlength='{packages.KEYWORDS_MAX}'>",
+            )
+            + row(
+                "Budget",
+                "How much the cards cost, roughly. Leave it unset if you'd rather not say.",
+                deck_extras.budget_html(budget),
+                cls="wctl",  # the five choices in one row
+            )
+            + "<div class='ui-row full'><p class='lab' id='pkg-fl'>Intended formats</p><p class='help'>Pick "
+            "every format the package is meant for.</p><div class='ctl'>"
+            f"{deck_extras.formats_html(picked, labelled_by='pkg-fl')}</div></div>"
+            f"<div class='acts'><button class='btn'>{icon('check')} Save package</button></div>"
+            "<p class='muted small foot'>Saved to Archidekt when you press Save package; "
+            "a snapshot from just before is kept under History.</p></form>"
+        )
+
+    def template_box_html(
+        deck: Deck,
+        csrf: str | None,
+        templates: list[dict[str, Any]] | None,
+        *,
+        open: bool = False,
+        error: str = "",
+    ) -> str:
+        """Add a template to this deck (parity release 2): a checklist of the member's category
+        templates whose names the deck doesn't have yet; each ticked one becomes a category made
+        from the template (account_lists.from_templates). The list is read when the box opens
+        (static/decksettings.js, /decks/api/templates); the old address ?templates=1 draws it with
+        the list read here."""
+        did = _esc(deck.id)
+        have = {c["name"].casefold() for c in deck_categories(deck)}
+        free = [t for t in templates or [] if t["name"].casefold() not in have]
+        rows = "".join(
+            f"<label><input type='checkbox' name='template' value='{_esc(t['name'])}'>{icon('tag')} "
+            f"{_esc(t['name'])}</label>"
+            for t in free
+        )
+        if templates is not None and not free:
+            rows = f"<p class='muted small'>{_esc(TEMPLATES_NONE_LEFT)}</p>"
+        elif templates is None:
+            rows = "<p class='muted small'>Your templates are listed here when the box opens.</p>"
+        body = (
+            f"<form id='tplbox-f' method='post' action='/decks/{did}/categories#categories' novalidate>"
+            f"<input type='hidden' name='csrf' value='{_esc(csrf)}'>"
+            "<input type='hidden' name='action' value='template'>"
+            "<p class='muted small'>Only templates whose name the deck doesn't have yet. The deck gets a "
+            "category with the template's name and flags; after that the two are not linked.</p>"
+            f"<div class='tree' role='group' aria-label='Templates'>{rows}</div>"
+            f"<template class='tpl-icon'>{icon('tag')}</template>"
+            f"<p class='muted small'>{icon('history')} A snapshot of the deck is kept first; one category is "
+            "created per template, then the deck is read back. "
+            "<a href='/lists/templates'>Manage templates</a></p></form>"
+            + (ui.notice(error, "error", role="alert", cls="boxnote") if error else "")
+        )
+        return ui.box(
+            "tplbox",
+            "Add a template to this deck",
+            body,
+            actions=[
+                ui.box_button("Cancel", cancel=True),
+                ui.box_button("Add 1 category", kind="primary", form="tplbox-f", icon_name="plus"),
+            ],
+            open=open,
+            close_href=f"/decks/{did}/settings#categories",
+            cls="ds-tplbox",
+        ).replace("<div class='ui-box", f"<div data-none-left='{_esc(TEMPLATES_NONE_LEFT)}' class='ui-box", 1)
 
     def categories_section(
         deck: Deck, csrf: str | None, note: str = "", values: dict[str, str] | None = None
@@ -582,6 +703,8 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
             + (
                 f"<div class='acts'><button class='btn' name='action' value='save'>{icon('check')} "
                 "Save categories</button><button type='reset' class='btn'>Undo changes</button>"
+                f"<a class='btn' href='/decks/{did}/settings?templates=1#categories' data-box-open='tplbox'>"
+                f"{icon('tag')} Add template…</a>"
                 + (
                     "<button class='btn btn-outline-danger' form='catunused' name='action' value='unused' "
                     f"data-names='{_esc(unused_names)}' data-also='{_esc(unused_also)}'>{icon('trash')} "
@@ -847,6 +970,36 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
         except (DeckError, ArchidektError):
             return None
 
+    # The settings forms with tick lists (Add template, the package's formats) send one value per
+    # tick under the same name; h.form keeps the first only, so those come as ``<name>_list``,
+    # the values joined by newlines, for the handlers (template_list, format_list).
+    LIST_FIELDS = ("template", "format")
+
+    async def form_with_lists(request: Request) -> dict[str, str]:
+        from urllib.parse import parse_qs
+
+        raw = await read_limited(request, 16_384)
+        if raw is None:
+            return {}
+        multi = parse_qs(raw.decode("utf-8", "replace"), keep_blank_values=True)
+        data = {k: v[0] for k, v in multi.items()}
+        for key in LIST_FIELDS:
+            data[f"{key}_list"] = "\n".join(x for x in multi.get(key, []) if x)
+        return data
+
+    async def templates_or_none(sub: str) -> list[dict[str, Any]] | None:
+        try:
+            return (await account_lists.read(decks, sub, "templates"))["items"]
+        except DeckError:
+            return None
+
+    def posted_package_values(data: dict[str, str]) -> dict[str, str]:
+        return {
+            "keywords": data.get("keywords", ""),
+            "budget": data.get("budget", ""),
+            "formats": data.get("format_list", ""),
+        }
+
     async def folders_or_none(sub: str) -> dict[str, Any] | None:
         try:
             return await decks.folders(sub)
@@ -878,6 +1031,12 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
         except DeckError as exc:
             return settings_problem(request, deck_id, exc, sub, sid)
         ok = request.query_params.get("ok") or ""
+        templates = None
+        if request.query_params.get("templates"):
+            try:
+                templates = (await account_lists.read(decks, sub, "templates"))["items"]
+            except DeckError as exc:
+                return settings_problem(request, deck_id, exc, sub, sid)
         return settings_response(
             settings_form(
                 deck,
@@ -886,6 +1045,7 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
                 collaborators=await collaborators_or_none(sub, deck.id),
                 following=await following_or_none(sub),
                 ok=ok,
+                templates=templates,
             ),
             sub,
             sid,
@@ -902,7 +1062,8 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
             csp=DECK_CSP,
             deck_css=True,
             heading=False,
-            extra_css=SETTINGS_CSS,
+            extra_css=SETTINGS_CSS + deck_extras.PACKAGE_FIELDS_CSS,
+            extra_scripts=("decksettings.js",),
         )
 
     async def hand_action(request: Request, deck_id: str, run: Any, *, ok: str, anchor: str) -> Response:
@@ -915,7 +1076,7 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
         sub, sid = browser_session(state, request)
         if not sub:
             return login_redirect(f"/decks/{deck_id}/settings")
-        data = await form(request)
+        data = await form_with_lists(request)
         if not check_csrf(sid, data):
             return page("Deck settings", EXPIRED, sub=sub, sid=sid, status=403)
         current_client.set(BROWSER_CLIENT_ID)
@@ -942,6 +1103,9 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
                     and (data.get("action") or "save") == "save"
                     and not exc.extra.get("fresh")
                     else None,
+                    pkg_values=posted_package_values(data) if anchor == "package" else None,
+                    templates=(await templates_or_none(sub) if data.get("action") == "template" else None),
+                    template_error=str(exc) if data.get("action") == "template" else "",
                 ),
                 sub,
                 sid,
@@ -1037,8 +1201,16 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
             unused = action == "unused"
             move_field = ""
             ok, yes = "categories", "Save categories"
-            if action == "create":
-                changes: list[dict[str, Any]] = [
+            if action == "template":
+                names = [n.strip() for n in data.get("template_list", "").split("\n") if n.strip()]
+                if not names:
+                    raise DeckError("invalid", "Tick at least one template.")
+                changes: list[dict[str, Any]] = await account_lists.from_templates(
+                    decks, sub, [{"action": "create", "from_template": n} for n in names]
+                )
+                ok, yes = "template_added", f"Add {len(names)} categor{'y' if len(names) == 1 else 'ies'}"
+            elif action == "create":
+                changes = [
                     {
                         "action": "create",
                         "category": " ".join((data.get("category") or "").split()),
@@ -1130,6 +1302,30 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
             return done  # Archidekt refused or writes are off: the review page says why
 
         return await hand_action(request, deck_id, run, ok="categories", anchor="categories")
+
+    @server.custom_route("/decks/{deck_id}/package-settings", methods=["POST"], include_in_schema=False)
+    async def package_post(request: Request) -> Response:
+        """Save package: the member's own press on a package's settings page (keywords, budget,
+        formats), a details proposal with ``package`` applied at once as Save changes is."""
+        deck_id = request.path_params["deck_id"]
+
+        async def run(sub: str, data: dict[str, str], sid: str | None) -> str | Response:
+            deck = await decks.get_own_deck(sub, deck_id)
+            if packages.block_of(deck) is None:
+                raise DeckError("invalid", "This deck is not a card package.")
+            budget = data.get("budget") or ""
+            wanted: dict[str, Any] = {
+                "keywords": data.get("keywords", ""),
+                "budget": int(budget) if re.fullmatch(r"[1-4]", budget) else None,
+                "intended_formats": [f for f in data.get("format_list", "").split("\n") if f],
+            }
+            p = await decks.propose_deck_details(sub, deck.id, {"package": wanted})
+            done = await apply_now(sub, p["proposal_id"], ok="saved", deck_id=deck.id)
+            if done.headers.get("location") == f"/decks/{deck.id}?ok=saved":
+                return RedirectResponse(f"/decks/{deck.id}/settings?ok=package#package", status_code=303)
+            return done  # Archidekt refused or writes are off: the review page says why
+
+        return await hand_action(request, deck_id, run, ok="package", anchor="package")
 
     @server.custom_route("/decks/{deck_id}/cover", methods=["POST"], include_in_schema=False)
     async def cover_post(request: Request) -> Response:

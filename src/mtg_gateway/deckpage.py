@@ -28,6 +28,7 @@ from .archidekt import (
     FORMAT_NAMES,
     VOTE_DOWN,
     VOTE_UP,
+    CustomDeckCard,
     Deck,
     DeckCard,
     featured_scryfall_id,
@@ -611,6 +612,23 @@ def compare_box_html(deck: Deck, *, open: bool = False) -> str:
     )
 
 
+def folder_options_html(folders: dict[str, Any] | None, chosen: str) -> str:
+    """A folder picker's choices (the Clone box, the New deck and New package boxes): the top
+    level, then the member's folders indented by depth, the backup folder left out. ``folders``:
+    decks.folders' flattened tree, or None when it could not be read (the top level is then the
+    only choice). ``chosen``: the picked folder's id, "" for the top level."""
+    opts = "<option value=''" + (" selected" if not chosen else "") + ">Top level (no folder)</option>"
+    for f in (folders or {}).get("folders", []):
+        if f.get("backup") or not f.get("depth"):
+            continue  # the backup folder is no place for a new deck; the root is the top level
+        fid = str(f["id"])
+        opts += (
+            f"<option value='{esc(fid)}'{' selected' if chosen == fid else ''}>"
+            f"{esc(INDENT * (int(f['depth']) - 1) + str(f['name']))}</option>"
+        )
+    return opts
+
+
 def clone_box_html(
     deck: Deck,
     csrf: str | None,
@@ -627,16 +645,7 @@ def clone_box_html(
     did = esc(deck.id)
     v = values or {}
     name = v.get("name") if v.get("name") is not None else f"Copy of - {deck_title(deck)}"
-    chosen = v.get("folder_id", "")
-    opts = "<option value=''" + (" selected" if not chosen else "") + ">Top level (no folder)</option>"
-    for f in (folders or {}).get("folders", []):
-        if f.get("backup") or not f.get("depth"):
-            continue  # the backup folder is no place for a copy; the root is the top level
-        fid = str(f["id"])
-        opts += (
-            f"<option value='{esc(fid)}'{' selected' if chosen == fid else ''}>"
-            f"{esc(INDENT * (int(f['depth']) - 1) + str(f['name']))}</option>"
-        )
+    opts = folder_options_html(folders, v.get("folder_id", ""))
     body = (
         (ui.notice(error, "error", role="alert") if error else "")
         + f"<form id='clonef' method='post' action='/decks/{did}/clone' class='stack'>"
@@ -1068,7 +1077,161 @@ def _card_data(card: DeckCard, deck: Deck) -> str:
         + (f" data-notes='{esc(card.notes)}'" if card.notes else "")
         + (" data-companion='1'" if card.companion else "")
         + (" data-flipped='1'" if card.flipped_default else "")
+        + (" data-custom='1'" if card.custom else "")
     )
+
+
+# -- the member's own custom cards in the deck (Deck.custom_cards, parity release 2) -------------
+# Drawn in the stacks beside the cards, by their categories, marked "Custom" (the mockup's
+# screens/21-deck-page.js), with the row's own data for the card menu (static/deck.js): a count
+# change, a move and a removal go through the deck page's custom card save (api.py), and
+# Report card… reports it as a custom card. They are never in Deck.cards, so no card edit, the
+# selection bar, Buy cards or the deck's stats read them.
+CUSTOM_WORD = "Custom"
+CUSTOM_TITLE = "A custom card, made on Archidekt"
+
+
+def custom_badge() -> str:
+    return f"<span class='custom-badge' title='{esc(CUSTOM_TITLE)}'>{esc(CUSTOM_WORD)}</span>"
+
+
+def custom_primary_type(card: CustomDeckCard) -> str:
+    head = card.type_line.split(" — ", 1)[0]
+    words = {w.casefold() for w in head.replace("-", " ").split()}
+    return next((t for t in PRIMARY_TYPES if t.casefold() in words), "Other")
+
+
+def custom_zone(card: CustomDeckCard, deck: Deck) -> str:
+    return "main" if deck.categories_count(card.categories) else "side"
+
+
+def custom_group_name(card: CustomDeckCard, deck: Deck, group: str) -> str:
+    """The stack a custom card sits in for the chosen grouping: its first category (else its
+    type, as an uncategorised card's auto category), its type, the deck, or a Custom cards stack
+    for the groupings a custom card has no data for (mana value, color, rarity)."""
+    if group == "category":
+        return card.categories[0] if card.categories else custom_primary_type(card)
+    if group == "type":
+        return custom_primary_type(card)
+    if group == "none":
+        return "Deck" if custom_zone(card, deck) == "main" else "Maybeboard / Sideboard"
+    return "Custom cards"
+
+
+def custom_picture_url(deck: Deck, card: CustomDeckCard, face: str = "front") -> str:
+    """The custom card's picture through the gateway's own route (same origin, so the deck page's
+    picture sources stay as they are): the bytes, or 404 when the card has none. The page draws
+    the card's name and type in its place until the picture is there, and keeps them when it
+    is not (static/deck.js takes a failed picture off)."""
+    return f"/decks/api/custom_picture/{esc(str(deck.id))}/{card.custom_card_id}?face={face}"
+
+
+def _custom_data(card: CustomDeckCard, deck: Deck) -> str:
+    cat = card.categories[0] if card.categories else ""
+    rel = f" data-rel='{card.relation_id}'" if card.relation_id is not None else ""
+    cid = f" data-custom-id='{card.custom_card_id}'" if card.custom_card_id is not None else ""
+    allcats = (
+        f" data-allcats='{esc(json.dumps(list(card.categories), separators=(',', ':')))}'"
+        if len(card.categories) > 1
+        else ""
+    )
+    return (
+        f" data-custom='1'{cid}{rel} data-qty='{card.quantity}' data-zone='{custom_zone(card, deck)}' "
+        f"data-cat='{esc(cat)}'{allcats}"
+        + (f" data-img='{custom_picture_url(deck, card)}'" if card.custom_card_id is not None else "")
+        + (
+            f" data-back='{custom_picture_url(deck, card, 'back')}'"
+            if card.custom_card_id is not None and card.back_image_url
+            else ""
+        )
+        + f" data-type='{esc(card.type_line)}' data-finish='{esc(card.modifier)}'"
+        # the card's own text and printing, for the viewer (cardview.js draws what it has)
+        + (f" data-mana='{esc(card.mana_cost)}'" if card.mana_cost else "")
+        + (f" data-text='{esc(card.rules_text)}'" if card.rules_text else "")
+        + (f" data-pt='{esc(card.pt)}'" if card.pt else "")
+        + (f" data-loyalty='{esc(card.loyalty)}'" if card.loyalty else "")
+        + (f" data-artist='{esc(card.artist)}'" if card.artist else "")
+        + (
+            f" data-set='{esc((card.set_code + ' ' + card.collector_number).strip())}'"
+            if card.set_code or card.collector_number
+            else ""
+        )
+        + (f" data-label='{esc(card.label)}'" if split_label(card.label)[0] else "")
+        + (f" data-mv='{mana_value_text(card.custom_cmc)}'" if card.custom_cmc is not None else "")
+    )
+
+
+def custom_card_row(card: CustomDeckCard, *, deck: Deck, view: str = "text") -> str:
+    """A custom card as a row of the list views: its count, name, the Custom mark and its type."""
+    cls = " side" if custom_zone(card, deck) == "side" else ""
+    qty = f"<span class='q'>{card.quantity}</span>"
+    name = f"<span class='name' title='{esc(card.name)}'>{esc(card.name)}</span>{custom_badge()}"
+    if view == "brewer":
+        pic = (
+            f"<img class='art' src='{custom_picture_url(deck, card)}' alt='' loading='lazy'>"
+            if card.custom_card_id is not None
+            else "<span class='art ph' aria-hidden='true'></span>"
+        )
+        cls = " brew" + cls
+        body = (
+            f"{pic}<span class='bd'><span class='n'>{qty}{name}</span>"
+            f"<span class='ty'>{esc(card.type_line)}</span><span class='price'></span></span>"
+        )
+    elif view == "table":
+        mv = mana_value_text(card.custom_cmc) if card.custom_cmc is not None else ""
+        body = (
+            f"{qty}<span class='n'>{name}</span>"
+            f"<span class='ty' title='{esc(card.type_line)}'>{esc(card.type_line)}</span>"
+            f"<span class='mv'>{mv}</span>"
+            "<span class='mc'></span><span class='set'>Custom</span><span class='price'></span>"
+        )
+    else:
+        hover = (
+            f"<span class='hover'><img src='{custom_picture_url(deck, card)}' alt='' loading='lazy'></span>"
+            if card.custom_card_id is not None
+            else ""
+        )
+        body = (
+            f"{qty}<span class='n'>{name}{hover}</span><span class='mc'></span>"
+            f"<span class='set' title='{esc(CUSTOM_TITLE)}'>Custom</span><span class='price'></span>"
+        )
+    return (
+        f"<li class='row custom{cls}' tabindex='0' role='button' data-name='{esc(card.name.lower())}' "
+        f"data-card='{esc(card.name)}'{_custom_data(card, deck)}>{body}</li>"
+    )
+
+
+def custom_image_card(card: CustomDeckCard, *, deck: Deck) -> str:
+    """A custom card in the picture views: its picture over the name-and-type placeholder, which
+    shows until the picture is there and stays when there is none."""
+    body = (
+        "<span class='ph'><span class='t'>"
+        f"<span class='nm'>{esc(card.name)}</span></span>"
+        f"<span class='ty'>{esc(card.type_line)}</span></span>"
+    ) + (
+        f"<img class='pic' src='{custom_picture_url(deck, card)}' alt='{esc(card.name)}' loading='lazy'>"
+        if card.custom_card_id is not None
+        else ""
+    )
+    return (
+        f"<div class='c custom' data-name='{esc(card.name.lower())}' data-card='{esc(card.name)}'"
+        f"{_custom_data(card, deck)} title='{esc(card.name)} ({CUSTOM_TITLE})' tabindex='0' role='button'>"
+        f"{body}<span class='qty'>{card.quantity}</span>{custom_badge()}</div>"
+    )
+
+
+def custom_cards_by_group(deck: Deck, group: str, q: str = "") -> dict[str, list[CustomDeckCard]]:
+    """The deck's custom cards by the stack each sits in (``custom_group_name``), filtered by the
+    local filter ``q`` as the cards are."""
+    needle = q.strip().lower()
+    out: dict[str, list[CustomDeckCard]] = {}
+    for c in deck.custom_cards:
+        if needle and needle not in f"{c.name} {c.type_line}".lower():
+            continue
+        out.setdefault(custom_group_name(c, deck, group), []).append(c)
+    for rows in out.values():
+        rows.sort(key=lambda c: c.name.lower())
+    return out
 
 
 def image_card(card: DeckCard, *, deck: Deck, owned: dict[str, int] | None = None) -> str:
@@ -1100,13 +1263,29 @@ def cards_html(
     deck: Deck, *, view: str, group: str, sort: str, q: str, own: bool, owned: dict[str, int] | None = None
 ) -> str:
     groups = group_cards(deck, group, sort, q)
+    customs = custom_cards_by_group(deck, group, q)
+    # a stack only custom cards sit in (a category of theirs, or "Custom cards") goes after the
+    # cards' stacks, before the maybeboard's when the grouping is by category
+    extra = [(n, []) for n in customs if n not in {g for g, _ in groups}]
+    if group == "category" and extra:
+        side = [i for i, (n, _) in enumerate(groups) if n in deck.excluded_categories()]
+        at = side[0] if side else len(groups)
+        groups = [
+            *groups[:at],
+            *[(n, []) for n, _ in extra if n not in deck.excluded_categories()],
+            *groups[at:],
+            *[(n, []) for n, _ in extra if n in deck.excluded_categories()],
+        ]
+    else:
+        groups = [*groups, *extra]
     if not groups:
         return "<section class='panel'><p class='muted'>No cards match the filter.</p></section>"
     did = esc(deck.id)
     excluded = deck.excluded_categories()
     sections = []
     for name, cards in groups:
-        qty = sum(c.quantity for c in cards)
+        own_customs = customs.get(name, [])
+        qty = sum(c.quantity for c in cards) + sum(c.quantity for c in own_customs)
         price = sum((c.price or 0) * c.quantity for c in cards)
         strike = " strike" if name in excluded else ""
         menu = (
@@ -1129,10 +1308,13 @@ def cards_html(
                 "<ul class='plain rows'>"
                 + (TABLE_HEAD if view == "table" else "")
                 + "".join(card_row(c, deck=deck, view=view, owned=owned) for c in cards)
+                + "".join(custom_card_row(c, deck=deck, view=view) for c in own_customs)
                 + "</ul>"
             )
         else:
-            imgs = "".join(image_card(c, deck=deck, owned=owned) for c in cards)
+            imgs = "".join(image_card(c, deck=deck, owned=owned) for c in cards) + "".join(
+                custom_image_card(c, deck=deck) for c in own_customs
+            )
             body = f"<div class='cards'>{imgs}</div>"
         sections.append(f"<section class='stack' data-group='{esc(name)}'>{head}{body}</section>")
     # data-own marks the member's own deck (the card menu and the viewer offer edits); data-drop
@@ -1154,7 +1336,23 @@ def cards_html(
         "<template class='icons'>"
         + "".join(
             f"<span data-ic='{n}'>{icon(n)}</span>"
-            for n in ("eye", "bookmark", "swap", "tag", "eye-off", "x", "edit", "external", "image", "check")
+            for n in (
+                "eye",
+                "bookmark",
+                "swap",
+                "tag",
+                "eye-off",
+                "x",
+                "edit",
+                "external",
+                "image",
+                "check",
+                "lock",
+                "flag",
+                "copy",
+                "plus",
+                "collection",
+            )
         )
         + "</template>"
     )
@@ -1754,14 +1952,17 @@ def deck_page_html(
     forge_on: bool = False,
     waiting: list[dict[str, Any]] | None = None,
     boxes: str = "",
+    before: str = "",
 ) -> str:
     # ``waiting``: the "Waiting changes" strip's rows (waiting_strip.py), drawn at the top under
-    # the banner; ``boxes``: the page's boxes (deck_boxes_html), hidden until opened
+    # the banner; ``boxes``: the page's boxes (deck_boxes_html), hidden until opened; ``before``:
+    # a strip above the banner (the deck help listing, deck_extras.py)
     view = view if view in VIEWS else "text"
     group = group if group in GROUPS else "category"
     sort = sort if sort in SORTS else "name"
     return (
-        banner_html(deck, stats, own=own, csrf=csrf, writes_enabled=writes_enabled, forge_on=forge_on)
+        before
+        + banner_html(deck, stats, own=own, csrf=csrf, writes_enabled=writes_enabled, forge_on=forge_on)
         + boxes
         + waiting_strip.strip_html(waiting or [], csrf=csrf, deck_id=str(deck.id))
         + notice
@@ -2522,6 +2723,10 @@ def deck_count_text(total: int | None, *, pending: bool = False) -> str:
     return f"{total} deck{'' if total == 1 else 's'}"
 
 
+# My decks' Show filter: "" (the list as Archidekt gives it), decks only or packages only
+SHOW_CHOICES = (("", "Decks and packages"), ("decks", "Decks only"), ("packages", "Packages only"))
+
+
 def deck_list_controls_html(
     *,
     q: str,
@@ -2534,9 +2739,13 @@ def deck_list_controls_html(
     colors: str = "",
     colour_mode: str = "incl",
     fmt: str = "",
+    show: str = "",
 ) -> str:
     """The filter panel over the deck list (searchpanel.py, the panel the search pages share):
-    the name box, Colors and Format (static/decks.js filters the list as they change), and the
+    the name box, Show (decks and packages, decks only or packages only: static/decks.js tells
+    the member's card packages apart after the list is drawn, from the Packages page's own
+    listing, so the deck list's cold load stays one Archidekt listing), Colors and Format
+    (static/decks.js filters the list as they change), and the
     results bar with the count, Sort by and its direction, Grid or List, the card size and Clear
     filters. ``folder``: the open folder's id ("" at the top level), kept so the sort and the view
     stay in that folder (a name, colour or format filter searches every folder). ``pending``: the
@@ -2546,6 +2755,14 @@ def deck_list_controls_html(
     formats = sorted({(n, format_label(n)) for n in FORMAT_NAMES.values()}, key=lambda f: f[1].lower())
     groups = sp.filter_grid(
         [
+            sp.select_group(
+                label="Show",
+                name="show",
+                options=SHOW_CHOICES,
+                value=show if show in dict(SHOW_CHOICES) else "",
+                input_id="f-show",
+                cls="showf",
+            ),
             sp.colours_group(
                 label="Colors",
                 name="c",
@@ -2621,13 +2838,16 @@ DECK_CSS = (
 .banner h1.deckname{display:flex;align-items:center;gap:.5rem;margin:0 0 .5rem;font-size:28px;
   font-weight:700;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .banner h1.deckname > span{overflow:hidden;text-overflow:ellipsis}
-.banner .privacy{color:#ababab;display:inline-flex}
-.banner .row{display:flex;flex-wrap:wrap;column-gap:1rem;row-gap:.2rem;font-size:16px;color:#ababab;
+/* the banner's grey text: #d6d6d6 reads at 4.5:1 over the whole shade (theme.py --banner-a/b)
+   in both themes; the list date in the first row takes this colour, not its muted grey */
+.banner .privacy{color:#d6d6d6;display:inline-flex}
+.banner .row{display:flex;flex-wrap:wrap;column-gap:1rem;row-gap:.2rem;font-size:16px;color:#d6d6d6;
   margin:.15rem 0;align-items:center}
 .banner .row b.orange{color:var(--orange);font-weight:700}
+.banner .row .ui-when{color:inherit;font-size:inherit}  /* the list date's muted grey: faint here */
 .banner .legal{display:inline-flex;align-items:center;gap:.3rem}
 .banner .legal.ok svg{color:#1ebb6c} .banner .legal.bad svg{color:#f21b3f}
-.banner .tags{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem;margin-top:1rem;color:#ababab}
+.banner .tags{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem;margin-top:1rem;color:#d6d6d6}
 .banner .tags .pill{background:var(--toolbar-bg);color:var(--toolbar-text)}
 .banner .notags{opacity:.8}
 .banner .controls{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:.5rem;
@@ -2684,7 +2904,16 @@ h3 .count{font-weight:400;color:var(--text-muted);font-size:.9rem}
 .comments .cmt .confirmbar{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;margin:.3rem 0}
 .comments .cmt .acts button{margin:0;height:28px;padding:0 .6rem;font-size:.8rem}
 .comments .cmt .acts{display:flex;flex-wrap:wrap;gap:.25rem;align-items:center}
+/* the footer's points: a ▲ button that votes (and takes the vote back) on someone else's comment,
+   plain words on your own (social.js) */
+.comments .cmt .acts .pts{font-size:.85rem;color:var(--text-muted);padding:0 .3rem}
+.comments .cmt .acts button.vote{display:inline-flex;align-items:center;gap:.3rem;
+  font-variant-numeric:tabular-nums}
+.comments .cmt .acts button.vote svg.i{width:16px;height:16px}
 .comments .cmt .acts button.vote[aria-pressed=true]{color:var(--orange-text);font-weight:700}
+@media (pointer:coarse),(max-width:599.98px){
+  .comments .cmt .acts button{min-height:44px;height:auto;padding:0 .75rem}
+}
 .comments .cmt .acts .confirm{display:inline-flex;flex-wrap:wrap;gap:.4rem;align-items:center;min-width:0;
   font-size:.85rem}
 .comments .cmt .acts .confirm > span{min-width:0;overflow-wrap:anywhere}
@@ -2802,6 +3031,19 @@ ul.rows .price{font-size:.86rem;color:var(--text-muted);text-align:right;font-va
   border-radius:3px;
   font-size:10px;font-weight:900;background:linear-gradient(135deg,#f6d365,#b7e3ff 50%,#f6a5c0);
   color:#111;flex:none}
+/* one of the member's custom cards in the deck (deckpage.custom_card_row): a small Custom mark */
+.custom-badge{display:inline-flex;align-items:center;height:16px;padding:0 .35rem;border-radius:3px;
+  font-size:10px;font-weight:900;letter-spacing:.02em;text-transform:uppercase;flex:none;
+  background:var(--orange-tint);color:var(--orange-text);border:1px solid var(--orange-text)}
+.deckview .c .custom-badge{position:absolute;right:6px;bottom:6px;background:#fff3e0;color:#7a3d00;
+  border-color:#7a3d00}
+.deckview .c.custom .ph .ty{padding-right:4.2rem}  /* the type line stops short of the Custom mark */
+/* the custom card's picture sits over its placeholder (the count, the tag and the mark above both) */
+.deckview .c.custom{isolation:isolate}  /* the order below is the card's own, under the next stacked card */
+.deckview .c.custom img.pic{position:absolute;inset:0;z-index:0}
+.deckview .c.custom .ph{z-index:0}
+.deckview .c.custom .qty,.deckview .c.custom .tagdot,.deckview .c.custom .custom-badge{z-index:1}
+ul.rows .hover:empty,ul.rows .row:hover .hover:empty{display:none}  /* a custom card without a picture */
 .tagdot{display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--orange);flex:none}
 .deckview .c .tagdot{position:absolute;right:8px;top:8px;width:14px;height:14px;box-shadow:0 0 0 2px #fff}
 .owned{display:inline-block;width:9px;height:9px;border-radius:50%;background:#1ebb6c;flex:none;
@@ -2953,8 +3195,10 @@ html.cardview-open{overflow:hidden}
 .cardview .pane{grid-area:pic;min-width:0;align-self:start}
 .cardview img,.cardview .ph{width:100%;aspect-ratio:5/7;border-radius:4.5%;object-fit:cover;
   background:var(--surface-2);display:block}
-.cardview .ph{display:flex;align-items:center;justify-content:center;color:var(--text-muted);padding:1rem;
-  text-align:center;font-weight:700}
+.cardview .ph{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:.35rem;
+  color:var(--text);padding:1rem;text-align:center;font-weight:700;font-size:1rem;overflow-wrap:anywhere}
+.cardview .ph .ty{font-weight:400;color:var(--text-muted);font-size:.9rem}
+.cardview .ph .custom-badge{margin-top:.25rem}
 .cardview .info{grid-area:info;min-width:0;display:flex;flex-direction:column;gap:.75rem;min-height:0}
 .cardview .head{grid-area:head;display:flex;align-items:flex-start;justify-content:space-between;gap:.75rem;
   min-width:0}
@@ -3015,6 +3259,9 @@ html.cardview-open{overflow:hidden}
 .ctxmenu .mvform{display:flex;flex-direction:column;gap:.4rem;padding:.25rem .75rem .5rem}
 .ctxmenu .mvform label{font-weight:600}
 .ctxmenu .mvform input{width:6rem;min-height:38px}
+/* the custom card's colour tag form (deck.js customTagForm): the name wide, the colour a swatch */
+.ctxmenu .mvform input[type=text]{width:100%;max-width:14rem}
+.ctxmenu .mvform input[type=color]{width:44px;min-width:44px;height:38px;padding:2px;border-radius:6px}
 .ctxmenu .mvform .hint{margin:0;font-size:.85rem;color:var(--text-muted)}
 .ctxmenu .mvform .acts{display:flex;gap:.4rem;flex-wrap:wrap}
 .ctxmenu .mvform .acts .btn{min-height:38px;justify-content:center}
@@ -3032,6 +3279,7 @@ html.cardview-open{overflow:hidden}
 .ctxmenu .sub[hidden]{display:none}
 .ctxmenu .sub button{padding-left:2.4rem;min-height:34px;font-size:.95rem}
 .ctxmenu .sub .on:disabled{color:var(--toolbar-active);font-weight:700}
+.ctxmenu .off[aria-disabled=true]{color:var(--text-muted);cursor:default}
 .deckview .c.held,.deckview .row.held{outline:3px solid var(--orange);outline-offset:2px}
 /* the toast after a save (theme .toast, bottom right): the message, Undo and History */
 .deck-toast{display:flex;align-items:center;gap:.75rem;flex-wrap:wrap;padding:.75rem 1rem;z-index:59;

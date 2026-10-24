@@ -24,6 +24,8 @@ STRICT_CSP = (
     "manifest-src 'self'; worker-src 'self'; connect-src 'self'; "
     "img-src 'self' https://cards.scryfall.io; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
 )
+# The Account page also shows a chosen picture before it is sent (a blob: address).
+ACCOUNT_CSP = STRICT_CSP.replace("img-src 'self'", "img-src 'self' blob:")
 HOME_CSP = (
     "default-src 'none'; style-src 'self' 'unsafe-inline'; script-src 'self'; "
     "manifest-src 'self'; connect-src 'self'; "
@@ -151,7 +153,7 @@ def test_scan_page_has_its_own_csp_and_the_rest_keep_the_strict_one(clients, env
             assert await scan.header_value("permissions-policy") == "camera=(self)"
             assert "Scan cards" in await page.inner_text("body")
             account = await page.goto(f"{PUBLIC_URL}/account")
-            assert await account.header_value("content-security-policy") == STRICT_CSP
+            assert await account.header_value("content-security-policy") == ACCOUNT_CSP
             proposals = await page.goto(f"{PUBLIC_URL}/proposals")
             assert await proposals.header_value("content-security-policy") == STRICT_CSP
             landing = await page.goto(f"{PUBLIC_URL}/")

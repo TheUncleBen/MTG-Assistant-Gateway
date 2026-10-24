@@ -23,6 +23,14 @@ def card(page: str, card_id: str) -> str:
 
 
 def orange(text: str) -> int:
+    """The orange buttons on the page itself: a box's own final button (the picture box's Use
+    this picture, hidden until the box opens) is the one orange button of that box, not the page's."""
+    text = re.sub(
+        r"<div class='ui-box mtgbox[^>]*id='picture'.*?</div><div class='acts'>.*?</div></div>",
+        "",
+        text,
+        flags=re.S,
+    )
     return len(re.findall(r"class='primary'|class='btn btn-primary'|class='btn-primary'", text))
 
 

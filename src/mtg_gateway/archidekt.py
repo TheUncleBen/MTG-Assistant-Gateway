@@ -19,6 +19,7 @@ import datetime
 import email.utils
 import hashlib
 import heapq
+import html as html_lib
 import http.cookiejar
 import json
 import logging
@@ -35,6 +36,9 @@ import httpx
 from .timing import add_time, archidekt_time
 
 logger = logging.getLogger(__name__)
+# The page data archidekt.com's own pages carry (Next.js), and the most of a page the gateway reads
+NEXT_DATA_RE = re.compile(r'<script id="__NEXT_DATA__" type="application/json"[^>]*>(.*?)</script>', re.S)
+SITE_PAGE_MAX = 3_000_000
 
 TOKEN_FIELDS = ("access_token", "access", "token", "jwt")
 # A member's vote on a deck as its JSON reports it ("userInput"; Archidekt's site bundle maps
@@ -462,6 +466,9 @@ class DeckCard:
     canlander_points: int | None = None
     atomic_combos: list[str] = field(default_factory=list)
     oracle_id: str = ""
+    # one of the member's custom cards (the row carries ``customCard``, 0.7.43): no default
+    # categories on Archidekt, and reported as a custom card
+    custom: bool = False
 
     @property
     def type_line(self) -> str:
@@ -472,6 +479,95 @@ class DeckCard:
     # Copies of this printing in the signed-in member's Archidekt Collection ("owned" on each
     # deck card when the deck is read with the member's session; 0 otherwise).
     owned: int = 0
+
+
+@dataclass
+class CustomDeckCard:
+    """One of the deck's custom card rows: the deck JSON's ``customCards`` beside ``cards`` (the
+    site builds its deck page from both, read from its scripts 2026-10-23; not seen live yet).
+    Kept apart from ``Deck.cards`` so no card edit, snapshot restore, legality check or
+    fingerprint reads them."""
+
+    relation_id: int | None
+    custom_card_id: int | None
+    name: str  # frontName, " // " backName when the card has a back
+    quantity: int
+    categories: list[str]
+    label: str = ""
+    modifier: str = ""
+    type_line: str = ""
+    image_url: str = ""
+    back_image_url: str = ""
+    # the row's own settings, sent back unchanged with a count or category change
+    custom_cmc: float | None = None
+    companion: bool = False
+    flipped_default: bool = False
+    # the card's own text, as the card viewer shows it (the front face; a back face is its picture)
+    mana_cost: str = ""
+    rules_text: str = ""
+    pt: str = ""  # "2/3" when the card has power and toughness
+    loyalty: str = ""
+    artist: str = ""
+    set_code: str = ""
+    collector_number: str = ""
+
+
+def _custom_pt(card: dict[str, Any]) -> str:
+    p, t = card.get("frontPower"), card.get("frontToughness")
+    if p in (None, "") and t in (None, ""):
+        return ""
+    return f"{p if p not in (None, '') else '?'}/{t if t not in (None, '') else '?'}"
+
+
+def _custom_type_line(card: dict[str, Any]) -> str:
+    head = " ".join(
+        str(card.get(k) or "").strip() for k in ("frontSuperTypes", "frontTypes") if card.get(k)
+    ).strip()
+    sub = str(card.get("frontSubTypes") or "").strip()
+    return head + (" — " + sub if sub else "")
+
+
+def parse_custom_rows(raw: Any) -> list[CustomDeckCard]:
+    """The deck JSON's ``customCards`` rows; anything not in the expected shape is skipped (a
+    custom row must never stop the deck from being read)."""
+    out: list[CustomDeckCard] = []
+    for entry in raw if isinstance(raw, list) else []:
+        if not isinstance(entry, dict) or entry.get("deletedAt"):
+            continue
+        card = entry.get("card") if isinstance(entry.get("card"), dict) else None
+        qty = entry.get("quantity", 1)
+        if card is None or not isinstance(qty, int) or isinstance(qty, bool) or qty < 1:
+            continue
+        cid = card.get("id")
+        name = str(card.get("frontName") or "").strip()
+        if card.get("hasBack") and str(card.get("backName") or "").strip():
+            name += " // " + str(card["backName"]).strip()
+        rid = entry.get("id")
+        out.append(
+            CustomDeckCard(
+                relation_id=rid if isinstance(rid, int) and not isinstance(rid, bool) else None,
+                custom_card_id=cid if isinstance(cid, int) and not isinstance(cid, bool) else None,
+                name=name or "?",
+                quantity=qty,
+                categories=[str(c) for c in (entry.get("categories") or []) if isinstance(c, str)],
+                label=str(entry.get("label") or ""),
+                modifier=str(entry.get("modifier") or ""),
+                type_line=_custom_type_line(card),
+                image_url=str(card.get("frontImageUrl") or ""),
+                back_image_url=str(card.get("backImageUrl") or "") if card.get("hasBack") else "",
+                custom_cmc=_number(entry.get("customCmc")),
+                companion=entry.get("companion") is True,
+                flipped_default=entry.get("flippedDefault") is True,
+                mana_cost=str(card.get("frontManaCost") or "").strip(),
+                rules_text=str(card.get("frontText") or "").strip(),
+                pt=_custom_pt(card),
+                loyalty=str(card.get("frontLoyalty") or "").strip(),
+                artist=str(card.get("frontArtistName") or "").strip(),
+                set_code=str(card.get("setCode") or "").strip(),
+                collector_number=str(card.get("collectorNumber") or "").strip(),
+            )
+        )
+    return out
 
 
 @dataclass
@@ -511,6 +607,8 @@ class Deck:
     # Set by DeckService.get_any_deck on a copy of the deck it read without a sign-in because the
     # member's link was dropped on that request: what the member is told (relink).
     link_notice: str = field(default="", repr=False, compare=False)
+    # The member's custom cards in the deck (``customCards``); never in cards or fingerprint()
+    custom_cards: list[CustomDeckCard] = field(default_factory=list)
 
     def _rows(self) -> list[tuple[Any, ...]]:
         return sorted(
@@ -664,6 +762,8 @@ def _printing(card: dict[str, Any], *, exact: bool) -> dict[str, Any]:
         "collector_number": str(card.get("collectorNumber", "") or ""),
         "options": [str(o) for o in options] if isinstance(options, list) else [],
         "exact_printing": exact,
+        # the card's oracle id: a member's default categories are kept by it (0.7.43)
+        "oracle_id": oracle.get("id") if isinstance(oracle.get("id"), int) else None,
     }
 
 
@@ -1032,7 +1132,12 @@ def _refusal_detail(resp: httpx.Response) -> str:
     return " ".join(body.split())[:200]
 
 
-class ArchidektClient:
+# The account-wide requests (parity release 2) live in their own module; it reads the names above
+# from this partly loaded one, so it is imported here, never before this module.
+from .archidekt_account import AccountRequests  # noqa: E402
+
+
+class ArchidektClient(AccountRequests):
     """Every Archidekt request goes through ``_request``: paced by the shared Pacer, sent with the
     gateway's own honest User-Agent (no disguise), read caches as described above, and bounded
     retries with jittered exponential backoff for GETs that failed on a timeout, a network error
@@ -1146,8 +1251,11 @@ class ArchidektClient:
         json_body: Any | None = None,
         params: dict[str, Any] | None = None,
         fresh: bool = False,
+        upload: tuple[bytes, str] | None = None,
     ) -> Any:
-        """``fresh`` skips a cached answer (the read still refreshes the cache)."""
+        """``fresh`` skips a cached answer (the read still refreshes the cache). ``upload`` is a
+        file sent as the raw body, ``(bytes, file name)``, as the site's own upload sends a picture:
+        a PUT with the file as it is and a Content-Disposition naming it."""
         key = self._cache_key(method, path, token, params)
         if key is not None and not fresh:
             found, value = self._cache_get(key, path)
@@ -1166,7 +1274,13 @@ class ArchidektClient:
         while True:
             try:
                 value = await self._send(
-                    method, path, token=token, scheme=scheme, json_body=json_body, params=params
+                    method,
+                    path,
+                    token=token,
+                    scheme=scheme,
+                    json_body=json_body,
+                    params=params,
+                    upload=upload,
                 )
             except ArchidektError as exc:
                 if exc.kind == "rate_limited":
@@ -1235,14 +1349,17 @@ class ArchidektClient:
         scheme: str,
         json_body: Any | None,
         params: dict[str, Any] | None,
+        upload: tuple[bytes, str] | None = None,
     ) -> Any:
         """One request through the pacer: no retry and no cache here."""
         headers = {"Accept": "application/json", "User-Agent": self.user_agent}
         if token:
             headers["Authorization"] = f"{scheme} {token}"
+        if upload is not None:
+            headers["Content-Disposition"] = f'attachment; filename="{upload[1]}"'
         started = time.perf_counter()
         try:
-            return await self._paced_send(method, path, headers, json_body, params)
+            return await self._paced_send(method, path, headers, json_body, params, upload)
         finally:
             add_time(archidekt_time, time.perf_counter() - started)  # pacer wait and transfer alike
 
@@ -1253,13 +1370,19 @@ class ArchidektClient:
         headers: dict[str, str],
         json_body: Any | None,
         params: dict[str, Any] | None,
+        upload: tuple[bytes, str] | None = None,
     ) -> Any:
         async with self.pacer:
             self.stats["requests"] += 1
             try:
-                resp = await self._http.request(
-                    method, f"{self.base_url}{path}", headers=headers, json=json_body, params=params
-                )
+                if upload is not None:
+                    resp = await self._http.request(
+                        method, f"{self.base_url}{path}", headers=headers, content=upload[0], params=params
+                    )
+                else:
+                    resp = await self._http.request(
+                        method, f"{self.base_url}{path}", headers=headers, json=json_body, params=params
+                    )
             except httpx.HTTPError as exc:
                 self.pacer.record(False)
                 raise ArchidektError(
@@ -1509,9 +1632,11 @@ class ArchidektClient:
         unlisted: bool = False,
         theorycrafted: bool = False,
         game: int | None = None,
+        folder_id: int | None = None,
     ) -> Deck:
-        """POST /decks/v2/ (route and body per the nccurry reference). ``theorycrafted`` and
-        ``game`` (None for Any, or a GAME_IDS value) are the New deck form's own fields. Live
+        """POST /decks/v2/ (route and body per the nccurry reference). ``theorycrafted``,
+        ``game`` (None for Any, or a GAME_IDS value) and ``folder_id`` (``parentFolder``; None for
+        the top level) are the New deck form's own fields. Live
         Archidekt creates the deck but answers with a body that is not a full deck (verified
         2026-10-05). Then this returns an empty Deck carrying only the new id, so the caller
         records the id before filling the deck and verifies it by reading it back."""
@@ -1524,7 +1649,7 @@ class ArchidektClient:
                 "description": rich_doc(description),
                 "deckFormat": format_id,
                 "edhBracket": None,
-                "parentFolder": None,
+                "parentFolder": folder_id,
                 "private": private,
                 "unlisted": unlisted,
                 "theorycrafted": bool(theorycrafted),
@@ -1982,6 +2107,57 @@ class ArchidektClient:
             raise ArchidektError("contract", "unexpected comment thread shape")
         return body
 
+    async def site_page_data(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+        """The data one of archidekt.com's own pages is drawn from (its ``__NEXT_DATA__``
+        ``props.pageProps``), read as an anonymous visitor: how the forum's section and thread
+        lists load, as the site has no API for them (its forum scripts, read 2026-10-22). Not an
+        API, so its shape can change with any update of the site; a page without it is reported
+        as ``changed``."""
+        origin = self.base_url.removesuffix("/api")
+        headers = {"Accept": "text/html", "User-Agent": self.user_agent}
+        body = bytearray()
+        too_big = False
+        async with self.pacer:
+            self.stats["requests"] += 1
+            try:
+                # read as it comes, so the size limit also bounds memory (security review F-04)
+                async with self._http.stream(
+                    "GET", f"{origin}{path}", headers=headers, params=params
+                ) as resp:
+                    if resp.status_code < 400:
+                        async for chunk in resp.aiter_bytes():
+                            body += chunk
+                            if len(body) > SITE_PAGE_MAX:
+                                too_big = True
+                                break
+            except httpx.HTTPError as exc:
+                self.pacer.record(False)
+                raise ArchidektError(
+                    "unavailable", f"Archidekt request failed: {type(exc).__name__}", retryable=True
+                ) from exc
+            self.pacer.record(resp.status_code < 500 and resp.status_code != 429)
+        if resp.status_code == 404:
+            raise ArchidektError("not_found", "Archidekt has no such forum page.")
+        if resp.status_code == 429:
+            raise ArchidektError(
+                "rate_limited",
+                "Archidekt asked the gateway to slow down; try again later",
+                retry_after=retry_after_seconds(resp.headers.get("Retry-After")),
+            )
+        if resp.status_code >= 400:
+            status = resp.status_code
+            raise ArchidektError("unavailable", f"Archidekt returned HTTP {status}", retryable=status >= 500)
+        if too_big:
+            raise ArchidektError("changed", "the forum page is larger than the gateway reads")
+        m = NEXT_DATA_RE.search(body.decode(resp.encoding or "utf-8", errors="replace"))
+        try:
+            props = json.loads(html_lib.unescape(m.group(1)) if m else "")["props"]["pageProps"]
+        except (ValueError, KeyError, TypeError) as exc:
+            raise ArchidektError("changed", "the forum page has no page data the gateway knows") from exc
+        if not isinstance(props, dict):
+            raise ArchidektError("changed", "the forum page has no page data the gateway knows")
+        return props
+
     async def comment_create(self, token: str, parent: int, text: str) -> dict[str, Any]:
         resp = await self._request(
             "POST",
@@ -2045,7 +2221,8 @@ class ArchidektClient:
           deck already has before anything is sent.
         - The answer's shape is unknown: it is not trusted; the caller re-reads the deck.
         ``deck_id`` is not part of the route; it is checked so a call always names its deck.
-        Account category templates (``/users/category/``) are a different route, never used."""
+        Account category templates (``/users/category/``) are a different route, used only by
+        account_lists.py."""
         if not DECK_ID_RE.fullmatch(str(deck_id)):
             raise ArchidektError("contract", "deck id is not a number")
         cid = category.get("id")
@@ -2375,6 +2552,7 @@ def parse_deck(body: Any) -> Deck:
                 canlander_points=_int(oracle.get("canlanderPoints")) or None,
                 atomic_combos=[str(i) for i in atomic if isinstance(i, (int, str))],
                 oracle_id=str(oracle.get("id") or ""),
+                custom=bool(entry.get("customCard")),
             )
         )
     owner = body.get("owner") if isinstance(body.get("owner"), dict) else {}
@@ -2421,4 +2599,5 @@ def parse_deck(body: Any) -> Deck:
         user_vote=_int(body.get("userInput")) if _int(body.get("userInput")) in (0, 1, 2) else 0,
         bookmarked=body.get("bookmarked") is True,
         comment_root=_int(body.get("commentRoot")) or None,
+        custom_cards=parse_custom_rows(body.get("customCards")),
     )

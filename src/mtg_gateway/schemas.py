@@ -258,6 +258,21 @@ class CollectionRemove(BaseModel):
     )
 
 
+class PackageSettings(BaseModel):
+    """A card package's own settings (Archidekt's New package form and its deck settings)."""
+
+    model_config = ConfigDict(extra="forbid")
+    keywords: str | None = Field(
+        default=None, description="Search keywords, 1 to 200 characters (e.g. shocklands, fetchlands)."
+    )
+    budget: StrictInt | None = Field(
+        default=None, ge=1, le=4, description="1 to 4 ($ to $$$$); null for any."
+    )
+    intended_formats: list[str] | None = Field(
+        default=None, description="The formats it is meant for, by name (commander, modern, ...)."
+    )
+
+
 class DeckDetails(BaseModel):
     model_config = ConfigDict(extra="forbid")
     name: str | None = Field(default=None, description="New deck name, 1 to 200 characters.")
@@ -286,6 +301,9 @@ class DeckDetails(BaseModel):
     )
     remove_tags: list[str] | None = Field(default=None, description="Tags to take off the deck (names).")
     cover: str | None = Field(default=None, description="A card in the deck whose art becomes the cover.")
+    package: PackageSettings | None = Field(
+        default=None, description="Card packages only: keywords, budget, intended_formats to change."
+    )
 
 
 class Mulligan(BaseModel):

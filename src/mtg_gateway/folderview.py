@@ -68,8 +68,10 @@ def sort_decks(rows: list[dict[str, Any]], order: str, direction: str = "auto") 
 
 def read_filters(qp: Any) -> dict[str, str]:
     """The deck list's filters beyond the name, order and view, each limited to its known values:
-    the sort direction (``dir``), the colours (``c``, repeated) with how they match (``cm``) and the
-    format (``format``, a format name)."""
+    the sort direction (``dir``), the colours (``c``, repeated) with how they match (``cm``), the
+    format (``format``, a format name) and Show (``show``: "" for decks and packages, decks or
+    packages; the browser applies it, static/decks.js, since which decks are packages is read
+    after the list is drawn)."""
     picked = [v.upper() for v in (qp.getlist("c") if hasattr(qp, "getlist") else [])]
     colors = "".join(c for c in "WUBRGC" if c in picked)
     return {
@@ -77,6 +79,7 @@ def read_filters(qp: Any) -> dict[str, str]:
         "colors": colors,
         "colour_mode": qp.get("cm") if qp.get("cm") in dict(DECK_COLOUR_MODES) else "incl",
         "fmt": (qp.get("format") or "").strip()[:40],
+        "show": qp.get("show") if qp.get("show") in ("decks", "packages") else "",
     }
 
 
@@ -96,6 +99,8 @@ def filter_params(
         params.append(("cm", filters["colour_mode"]))
     if filters.get("fmt"):
         params.append(("format", filters["fmt"]))
+    if filters.get("show"):
+        params.append(("show", filters["show"]))
     if view and view != "grid":
         params.append(("view", view))
     if folder:
@@ -130,9 +135,11 @@ def arrange(
     colors: str = "",
     colour_mode: str = "incl",
     fmt: str = "",
+    show: str = "",
 ) -> Level:
     """One level of My decks from the member's decks (backups already left out) and folder tree.
-    A name, a colour or a format filter searches every folder."""
+    A name, a colour or a format filter searches every folder. ``show`` (decks or packages only)
+    is kept for the address; the browser applies it once it knows the member's packages."""
     needle = q.strip().casefold()
     filtered = bool(colors or fmt)
 
@@ -336,6 +343,18 @@ def level_html(
 
 
 FOLDER_CSS = """
+/* My decks' Show filter (Decks and packages, Decks only, Packages only), the package tiles
+   static/decks.js marks (the package icon in place of the initial, a Package label in the
+   detail line) and the tiles it hides */
+.spanel .fgrid > .showf{--gw:200px}
+ul.decklist li.deck.sh-off{display:none}
+ul.decklist .deck.pkg .thumb .ini svg.i{width:3.5rem;height:3.5rem;color:rgba(255,255,255,.45);
+  stroke-width:1.6}
+ul.decklist.list .deck.pkg .thumb .ini svg.i{width:1.6rem;height:1.6rem}
+ul.decklist .info .fmt .ui-lbl{height:20px;font-size:.78rem;padding:0 .45rem 0 .35rem;vertical-align:-5px}
+ul.decklist .deck.pkg-extra .info.plain{min-height:75px}
+#pk-note{margin:0 0 8px}
+#pk-note[hidden]{display:none}
 /* My decks by folder (folderview.py): breadcrumb, then the Folders and Decks areas, each a
    heading with its count over the tiles (8 px inside a group, 12 to 16 px between) */
 .crumbs{margin:0 0 8px}

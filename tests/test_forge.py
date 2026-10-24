@@ -1881,8 +1881,13 @@ async def test_a_lost_or_never_started_solo_test_ends(tmp_path: Path) -> None:
     quick = await reports.run("alice", "42", games=300, options={"seed": 2}, forge=False)
     reports._save_solo(quick["report_id"], {"state": "queued", "started_at": 1})
     reports._ensure_forge_refresher()
+    # both are settled by the refresher, in either order: wait for both (waiting for the first
+    # alone made this fail on a busy machine)
     for _ in range(200):
-        if reports.get("alice", out["report_id"])["forge_solo"]["state"] == "lost":
+        if (
+            reports.get("alice", out["report_id"])["forge_solo"]["state"] == "lost"
+            and reports.get("alice", quick["report_id"])["forge_solo"]["state"] != "queued"
+        ):
             break
         await asyncio.sleep(0.02)
     assert reports.get("alice", out["report_id"])["forge_solo"]["state"] == "lost"

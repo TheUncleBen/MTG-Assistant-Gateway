@@ -67,6 +67,7 @@ from .archidekt import (
     finish_modifier,
     front_face,
     jwt_exp,
+    list_row,
     no_retry,
     page_turn,
     parse_deck,
@@ -148,11 +149,12 @@ GAME_CHOICES = ("any", *GAME_IDS)
 MAX_DESCRIPTION = 20_000
 # Deck organisation propose_deck_details may also change, resolved against the member's account
 # when the proposal is made: the folder the deck sits in, its tags and its cover card.
-ORGANISE_FIELDS = ("folder", "add_tags", "remove_tags", "cover")
+ORGANISE_FIELDS = ("folder", "add_tags", "remove_tags", "cover", "package")
 # The OAuth client (or "__browser__") acting on the current request, recorded in the audit log.
 # Set by the MCP tool layer and the browser pages; None when the actor is not known.
 current_client: ContextVar[str | None] = ContextVar("current_client", default=None)
 MAX_CHANGES = 40
+MAX_PACKAGE_PAGES = 4  # the member's own card packages read for My decks, 50 a page
 # How long an apply call waits for the apply to finish before it answers "applying". The apply
 # itself carries on in the background (a 100-card new deck is a few hundred paced requests, longer
 # than an assistant app waits for one tool call); get_proposal and the review page show its
@@ -679,6 +681,8 @@ def row_label(r: dict[str, Any]) -> str:
         label += f" [{r['category']}]"
     if r.get("guessed_from"):
         label += f" (name guessed from '{r['guessed_from']}'; check it)"
+    if r.get("tag"):  # the colour tag an add puts on its new row
+        label += f", color tag {clean_text(str(r['tag']))}"
     return label
 
 
@@ -714,6 +718,8 @@ def row_line(r: dict[str, Any]) -> str:
         return f"{r['before']} -> {r['after']} {label}{side}"
     if kind == "deck_category":  # the deck's own category: renamed or its flags changed
         return category_line(r)
+    if kind == "custom_card":  # one of the member's custom cards in the deck
+        return custom_card_line(r)
     if kind == "category":
         line = f"{r['name']}: category {r['before']} -> {r['after']}"
         if r.get("leaves"):  # moved into a category the deck does not count (Maybeboard...)
@@ -747,7 +753,11 @@ def row_line(r: dict[str, Any]) -> str:
         more = (", theorycrafted" if r.get("theorycrafted") else "") + (
             f", {r['game']}" if r.get("game") else ""
         )
-        return f"New {r['format']} deck '{r['name']}' ({r['cards']} cards{side}, {visibility}{more})"
+        where = f" in folder “{r['folder']}”" if r.get("folder") else ""
+        if r.get("package"):
+            what = f"{r['cards']} cards{side}, {visibility}; {r['package']}"
+            return f"New card package '{r['name']}'{where} ({what})"
+        return f"New {r['format']} deck '{r['name']}'{where} ({r['cards']} cards{side}, {visibility}{more})"
     if kind == "restore":
         if "changes" in r:  # the review lines under it (a restore saved before counted write entries)
             n = int(r["changes"])
@@ -892,7 +902,7 @@ class Change:
             d["collector_number"] = self.collector_number
         if self.finish:
             d["finish"] = self.finish
-        if self.action == "set_label":
+        if self.action == "set_label" or (self.action == "add" and self.label):
             name, colour = split_label(self.label or "")
             d["label"] = name
             if colour:
@@ -1022,8 +1032,25 @@ def parse_changes(raw: Any, *, row_flags: bool = False) -> list[Change]:
             if given and action != "add":
                 raise DeckError("invalid", f"change {i}: {flag} applies to add only")
             flags[flag] = given
+        label = None
+        if item.get("label") not in (None, ""):
+            if action != "add":
+                raise DeckError("invalid", f"change {i}: label goes with add or set_label only")
+            label = _parse_label_change(i, name, {"label": item["label"], "color": item.get("color")}).label
         out.append(
-            Change(action, name, qty, cat, set_code, number, finish, zone=zone, categories=cats, **flags)
+            Change(
+                action,
+                name,
+                qty,
+                cat,
+                set_code,
+                number,
+                finish,
+                zone=zone,
+                categories=cats,
+                label=label,
+                **flags,
+            )
         )
     # Per zone: the deck proper and the maybeboard or sideboard each take one pinned printing of a card.
     pinned = [(ch.zone, ch.card_name.lower()) for ch in out if ch.pinned]
@@ -1734,6 +1761,8 @@ def plan_zones(
         else:
             cats = {n: ", ".join(_side_categories(deck, chs)) for n, chs in adds_by_name.items()}
         pinned_names = {n for n, chs in adds_by_name.items() if any(c.pinned for c in chs)}
+        # the colour tag an add puts on its new row is part of what is reviewed (security review F-05)
+        tags = {n: next((c.label for c in chs if c.label), "") for n, chs in adds_by_name.items()}
         side = "side" if zone == "side" else None
         for name in sorted(set(b_counts) | set(a_counts), key=str.lower):
             b, a = b_counts.get(name, 0), a_counts.get(name, 0)
@@ -1744,7 +1773,10 @@ def plan_zones(
             if not (cat and (b == 0 or name.lower() in pinned_names)):  # a new row is made in that category
                 cat = None
             if b == 0:
-                lines.append(_row("add", name=name, qty=a, printing=printing, category=cat, zone=side))
+                row = _row("add", name=name, qty=a, printing=printing, category=cat, zone=side)
+                if tags.get(name.lower()):
+                    row["tag"] = label_text(tags[name.lower()])
+                lines.append(row)
             elif a == 0:
                 lines.append(_row("remove", name=name, qty=b, zone=side))
             else:
@@ -2047,8 +2079,14 @@ def build_payload(
     side_flags: dict[str, tuple[bool, bool]] | None = None,
     side_pinned: dict[str, dict[str, Any]] | None = None,
     side_modifiers: dict[str, str] | None = None,
+    labels: dict[str, str] | None = None,
+    side_labels: dict[str, str] | None = None,
 ) -> list[dict[str, Any]]:
     """Per-card entries for PATCH modifyCards/v2, one entry per request.
+
+    ``labels`` and ``side_labels`` (from ``add_labels``) give a new row its colour tag, as the
+    site's add sends one (``label`` in its modifications); a row that is already there and only
+    grows keeps its own tag.
 
     ``flags`` and ``side_flags`` (from ``add_flags``) give a new row its companion and
     flippedDefault flags, as the deck page's Undo of a removal asks; a row that is already
@@ -2090,7 +2128,9 @@ def build_payload(
             continue
         pin = (pinned or {}).get(name)
         if pin:
-            qty, existing = _pinned_entries(payload, name, qty, existing, pin, (flags or {}).get(name))
+            qty, existing = _pinned_entries(
+                payload, name, qty, existing, pin, (flags or {}).get(name), label=(labels or {}).get(name)
+            )
             if qty == sum(c.quantity for c in existing):
                 continue
         if existing:
@@ -2105,6 +2145,7 @@ def build_payload(
                     (categories or {}).get(name),
                     (modifiers or {}).get(name, "Normal"),
                     (flags or {}).get(name, (False, False)),
+                    (labels or {}).get(name),
                 )
             )
     side_by_name: dict[str, list[Any]] = {}
@@ -2117,7 +2158,14 @@ def build_payload(
         pin = (side_pinned or {}).get(name)
         if pin:
             qty, existing = _pinned_entries(
-                payload, name, qty, existing, pin, (side_flags or {}).get(name), side=True
+                payload,
+                name,
+                qty,
+                existing,
+                pin,
+                (side_flags or {}).get(name),
+                side=True,
+                label=(side_labels or {}).get(name),
             )
             if qty == sum(c.quantity for c in existing):
                 continue
@@ -2133,6 +2181,7 @@ def build_payload(
                     (side_categories or {}).get(name) or [deck.side_category()],
                     (side_modifiers or {}).get(name, "Normal"),
                     (side_flags or {}).get(name, (False, False)),
+                    (side_labels or {}).get(name),
                 )
             )
     for card in deck.cards:
@@ -2149,6 +2198,7 @@ def _pinned_entries(
     pin: dict[str, Any],
     flags: tuple[bool, bool] | None,
     side: bool = False,
+    label: str | None = None,
 ) -> tuple[int, list[Any]]:
     """Append the write for a pinned add of ``name`` (one zone's rows in ``existing``): the row
     with the same printing and finish grows, or the printing goes in as a new row. In the
@@ -2175,6 +2225,7 @@ def _pinned_entries(
                 pin.get("categories"),
                 pin["modifier"],
                 flags or (False, False),
+                label,
             )
         )
         qty -= int(pin["quantity"])
@@ -2193,9 +2244,11 @@ def _add_entry(
     categories: list[str] | None,
     modifier: str,
     flags: tuple[bool, bool] = (False, False),
+    label: str | None = None,
 ) -> dict[str, Any]:
-    """A new row; ``flags`` are its companion and flippedDefault (an Undo of a removal)."""
-    return {
+    """A new row; ``flags`` are its companion and flippedDefault (an Undo of a removal); ``label``
+    its colour tag, when the add names one."""
+    entry: dict[str, Any] = {
         "action": "add",
         "cardid": cardid,
         "patchId": uuid.uuid4().hex,
@@ -2207,6 +2260,34 @@ def _add_entry(
             "modifier": modifier,
         },
     }
+    if label:
+        entry["modifications"]["label"] = label
+    return entry
+
+
+def add_labels(changes: list[Change], counts: dict[str, int], zone: str) -> dict[str, str]:
+    """The colour tag each add in ``zone`` asks for, keyed by the spelling in ``counts``, as
+    ``add_flags``; only names with a tag."""
+    out: dict[str, str] = {}
+    for ch in changes:
+        if ch.action == "add" and ch.zone == zone and ch.label:
+            out[next((k for k in counts if k.lower() == ch.card_name.lower()), ch.card_name)] = ch.label
+    return out
+
+
+def label_mismatches(changes: list[Change], deck: Deck, verified: Deck) -> list[str]:
+    """Adds that asked for a colour tag whose new rows came back without it (rows the deck already
+    had keep their own tag, so only new rows are checked)."""
+    had = {c.relation_id for c in deck.cards}
+    out = []
+    for ch in changes:
+        if ch.action != "add" or not ch.label:
+            continue
+        name = ch.card_name.lower()
+        new = [c for c in verified.cards if c.relation_id not in had and c.name.lower() == name]
+        if new and not all(_same_label(c.label, ch.label) for c in new):
+            out.append(f"the color tag on {ch.card_name}")
+    return out
 
 
 def add_flags(changes: list[Change], counts: dict[str, int], zone: str) -> dict[str, tuple[bool, bool]]:
@@ -2247,6 +2328,278 @@ def _entry(action: str, card: Any, qty: int, categories: list[str] | None = None
         "categories": list(card.categories if categories is None else categories),
         "modifications": mods,
     }
+
+
+# -- the member's own custom cards in a deck (kind "custom_cards", 2026-10-23) -------------------
+# Archidekt's deck JSON carries them in ``customCards`` beside ``cards`` (Deck.custom_cards). The
+# add is the shape archidekt.com's own deck page sends (_app.js module 71983 ``add``: customCardId
+# in place of cardid); a count change and a remove follow its ``prepareSave``, which sends
+# customCardId and deckRelationId on every modify and remove. Read from the site's scripts, not
+# tried on a live deck yet: the read-back after the write checks every change.
+CUSTOM_CARD_ACTIONS = ("add", "remove", "set_quantity")
+MAX_CUSTOM_CARD_CHANGES = 20
+MAX_CUSTOM_COPIES = 99
+
+
+def parse_custom_card_changes(raw: Any) -> list[dict[str, Any]]:
+    """``[{"action": "add" | "remove" | "set_quantity", "custom_card_id": int, "quantity"?: 1-99,
+    "category"?: str, "label"?: str, "color"?: str, "mana_value"?: int | None}]`` as stored: an
+    add's quantity defaults to 1 and a set_quantity's to the count the deck has; no category means
+    none is sent (Archidekt files the card itself) for an add, and the row keeps its own otherwise.
+    ``label`` puts a colour tag on the card as set_label does (an empty one takes it off), and
+    ``mana_value`` its custom mana value as set_mana_value does (null takes it off): both as
+    Archidekt's own card menu sets them on a custom card. Left out, the row keeps its own."""
+    if not isinstance(raw, list) or not raw:
+        raise DeckError("invalid", "changes must be a non-empty list")
+    if len(raw) > MAX_CUSTOM_CARD_CHANGES:
+        raise DeckError("invalid", f"at most {MAX_CUSTOM_CARD_CHANGES} custom card changes at once")
+    out: list[dict[str, Any]] = []
+    seen: set[int] = set()
+    for i, item in enumerate(raw):
+        if not isinstance(item, dict):
+            raise DeckError("invalid", f"change {i}: must be an object")
+        action = item.get("action")
+        if action not in CUSTOM_CARD_ACTIONS:
+            raise DeckError("invalid", f"change {i}: action must be one of {', '.join(CUSTOM_CARD_ACTIONS)}")
+        cid = item.get("custom_card_id")
+        if isinstance(cid, str) and cid.strip().isdigit():
+            cid = int(cid.strip())
+        if not isinstance(cid, int) or isinstance(cid, bool) or cid < 1:
+            raise DeckError("invalid", f"change {i}: custom_card_id must be the custom card's id (a number)")
+        if cid in seen:
+            raise DeckError(
+                "invalid", f"change {i}: custom card {cid} is named twice; give one change per card"
+            )
+        seen.add(cid)
+        qty = item.get("quantity")
+        label: str | None = None
+        mana: dict[str, Any] = {}
+        if action == "remove":
+            qty = None
+            if item.get("label") is not None or "mana_value" in item:
+                raise DeckError("invalid", f"change {i}: a remove takes no label or mana_value")
+        else:
+            if item.get("label") is not None:
+                label = _parse_label_change(i, "", {"label": item["label"], "color": item.get("color")}).label
+            if "mana_value" in item:
+                mana = {
+                    "mana_value": _parse_mana_value_change(
+                        i, "", {"mana_value": item["mana_value"]}
+                    ).mana_value
+                }
+            qty = 1 if qty is None and action == "add" else qty
+        if qty is None and action == "set_quantity":
+            pass  # the count the deck has (custom_card_rows)
+        elif action != "remove":
+            if not isinstance(qty, int) or isinstance(qty, bool) or not 1 <= qty <= MAX_CUSTOM_COPIES:
+                raise DeckError(
+                    "invalid", f"change {i}: quantity must be a whole number from 1 to {MAX_CUSTOM_COPIES}"
+                )
+        cat = item.get("category")
+        if cat is not None and not isinstance(cat, str):
+            raise DeckError("invalid", f"change {i}: category must be text")
+        cat = clean_text(cat or "")
+        if len(cat) > 60:
+            raise DeckError("invalid", f"change {i}: a category name is at most 60 characters")
+        if action == "remove" and cat:
+            raise DeckError("invalid", f"change {i}: a remove takes no category")
+        out.append(
+            {
+                "action": action,
+                "custom_card_id": cid,
+                "quantity": qty,
+                "category": cat or None,
+                "label": label,
+                **mana,
+            }
+        )
+    return out
+
+
+def custom_card_rows(
+    deck: Deck, wanted: list[dict[str, Any]], names: dict[int, str]
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """(plan, review rows) for custom card changes on ``deck``. ``names``: the member's own
+    custom cards that may be added, by id (an add of any other id is refused). One row per
+    change: the card's name, its count before and after, and its category."""
+    premier = {c.casefold() for c in deck.premier_categories()}
+    by_id: dict[int, list[Any]] = {}
+    for c in deck.custom_cards:
+        if c.custom_card_id is not None:
+            by_id.setdefault(c.custom_card_id, []).append(c)
+    plan: list[dict[str, Any]] = []
+    rows: list[dict[str, Any]] = []
+    for w in wanted:
+        cid, action, cat = int(w["custom_card_id"]), w["action"], w.get("category")
+        have = by_id.get(cid, [])
+        if len(have) > 1:
+            raise DeckError(
+                "invalid",
+                f"“{have[0].name}” is in this deck in {len(have)} rows; change it on Archidekt.",
+            )
+        cur = have[0] if have else None
+        if action == "add":
+            if cid not in names:
+                raise DeckError(
+                    "not_found",
+                    f"Custom card {cid} is not one of your custom cards, so it can't be added. Only "
+                    "your own custom cards (My lists) go in a deck.",
+                )
+            if cur is not None:
+                raise DeckError(
+                    "invalid",
+                    f"“{cur.name}” is already in this deck ({cur.quantity}); use set_quantity to change "
+                    "its count.",
+                )
+            name, before, after = names[cid], 0, int(w["quantity"])
+            was: list[str] = []
+            now = [cat] if cat else []
+            label_was, cmc_was = "", None
+        else:
+            if cur is None:
+                raise DeckError("invalid", f"Custom card {cid} isn't in this deck.")
+            name, before = cur.name, cur.quantity
+            after = 0 if action == "remove" else int(w["quantity"] or before)
+            was = list(cur.categories)
+            now = [cat] if cat else list(was)
+            label_was, cmc_was = cur.label or "", cur.custom_cmc
+        label_now = label_was if w.get("label") is None else w["label"]
+        cmc_now = w["mana_value"] if "mana_value" in w else cmc_was
+        same_label = _same_label(label_was, label_now)
+        same_cmc = _same_mana_value(cmc_was, cmc_now)
+        if action == "set_quantity" and after == before and now == was and same_label and same_cmc:
+            raise DeckError("invalid", f"“{name}” already has {before} in this deck; nothing would change.")
+        plan.append(
+            {
+                "action": action,
+                "custom_card_id": cid,
+                "quantity": after,
+                "categories": now,
+                "label": label_now,
+                "mana_value": cmc_now,
+            }
+        )
+        row: dict[str, Any] = {
+            "kind": "custom_card",
+            "action": action,
+            "custom_card_id": cid,
+            "name": name,
+            "before": before,
+            "after": after,
+            "category_before": ", ".join(was),
+            "category": ", ".join(now),
+        }
+        if action != "remove" and not same_label:
+            row["label_before"], row["label"] = label_text(label_was), label_text(label_now)
+        if action != "remove" and not same_cmc:
+            row["mana_value_before"], row["mana_value"] = mana_value_text(cmc_was), mana_value_text(cmc_now)
+        if any(c.casefold() in premier for c in was + now):
+            row["commander_zone"] = True
+        rows.append(row)
+    return plan, rows
+
+
+def custom_card_line(r: dict[str, Any]) -> str:
+    """A ``custom_card`` review row in words: the same line on the review page, the chat card,
+    History and Activity."""
+    name = clean_text(str(r.get("name") or ""))
+    count = f"{int(r.get('before') or 0)} -> {int(r.get('after') or 0)}"
+    was, now = str(r.get("category_before") or ""), str(r.get("category") or "")
+    if r.get("action") == "add":
+        where = f"category “{now}”" if now else "no category given (Archidekt files it)"
+        return f"Add custom card “{name}”: {count}, {where}{_custom_extras(r)}"
+    if r.get("action") == "remove":
+        return f"Remove custom card “{name}”: {count}" + (f", from “{was}”" if was else "")
+    if was != now:
+        where = f", category “{was or 'none'}” -> “{now}”"
+    else:
+        where = f", category “{now}”" if now else ""
+    return f"Custom card “{name}”: {count}{where}{_custom_extras(r)}"
+
+
+def _custom_extras(r: dict[str, Any]) -> str:
+    out = ""
+    if "label" in r:
+        out += f", color tag {clean_text(str(r.get('label_before')))} -> {clean_text(str(r.get('label')))}"
+    if "mana_value" in r:
+        out += f", mana value {r.get('mana_value_before')} -> {r.get('mana_value')}"
+    return out
+
+
+def custom_card_entry(p: dict[str, Any], row: Any) -> dict[str, Any]:
+    """One modifyCards entry for a planned custom card change; ``row``: the deck's custom row
+    (Deck.custom_cards) for a count change or remove, None for an add. No ``cardid``, as the
+    site leaves it out for a custom card."""
+    if p["action"] == "add":
+        return {
+            "action": "add",
+            "customCardId": p["custom_card_id"],
+            "categories": list(p["categories"]),  # none given: none sent (a gateway choice)
+            "patchId": uuid.uuid4().hex,
+            "modifications": {
+                "quantity": p["quantity"],
+                "modifier": "Normal",
+                "customCmc": p.get("mana_value"),
+                "companion": False,
+                "flippedDefault": False,
+                "label": p.get("label") or NO_LABEL,
+            },
+        }
+    return {
+        "action": "remove" if p["action"] == "remove" else "modify",
+        "customCardId": p["custom_card_id"],
+        "deckRelationId": row.relation_id,
+        "patchId": uuid.uuid4().hex,
+        "categories": list(p["categories"]),
+        "modifications": {
+            "quantity": p["quantity"] or row.quantity,
+            "modifier": row.modifier or "Normal",
+            "customCmc": p["mana_value"] if "mana_value" in p else row.custom_cmc,
+            "companion": bool(row.companion),
+            "flippedDefault": bool(row.flipped_default),
+            "label": (p["label"] if "label" in p else row.label) or NO_LABEL,
+        },
+    }
+
+
+def custom_card_mismatches(plan: list[dict[str, Any]], names: dict[int, str], verified: Deck) -> list[str]:
+    """What the deck read back after the write does not show: each card's count, and its
+    category when one was named (an add with none is filed by Archidekt, so any is fine)."""
+    by_id: dict[int, list[Any]] = {}
+    for c in verified.custom_cards:
+        if c.custom_card_id is not None:
+            by_id.setdefault(c.custom_card_id, []).append(c)
+    out: list[str] = []
+    for p in plan:
+        have = by_id.get(p["custom_card_id"], [])
+        name = have[0].name if have else names.get(p["custom_card_id"], f"custom card {p['custom_card_id']}")
+        total = sum(c.quantity for c in have)
+        if total != p["quantity"]:
+            out.append(f"“{name}” ({total} in the deck, not {p['quantity']})")
+        elif (
+            p["quantity"]
+            and p["categories"]
+            and not any(sorted(c.categories) == sorted(p["categories"]) for c in have)
+        ):
+            got = ", ".join(have[0].categories) or "none"
+            out.append(f"“{name}” (category “{got}”, not “{', '.join(p['categories'])}”)")
+        elif (
+            p["quantity"] and have and "label" in p and not _same_label(have[0].label or "", p["label"] or "")
+        ):
+            out.append(
+                f"“{name}” (color tag {label_text(have[0].label or '')}, not {label_text(p['label'] or '')})"
+            )
+        elif (
+            p["quantity"]
+            and have
+            and "mana_value" in p
+            and not _same_mana_value(have[0].custom_cmc, p["mana_value"])
+        ):
+            out.append(
+                f"“{name}” (mana value {mana_value_text(have[0].custom_cmc)}, "
+                f"not {mana_value_text(p['mana_value'])})"
+            )
+    return out
 
 
 def row_key(c: dict[str, Any]) -> tuple[str, str, str]:
@@ -2445,6 +2798,9 @@ class DeckService:
         self.page_deck_seconds = min(PAGE_DECK_SECONDS, float(settings.archidekt_cache_seconds))
         # Other member caches (the collection's first page) hear about writes here: (sub, path).
         self.write_hooks: list[Callable[[str, str], None]] = []
+        from . import packages
+
+        self.write_hooks.append(packages.forget)  # My decks' kept package list
         listeners = getattr(self.client, "write_listeners", None)  # a test double may lack it
         if listeners is not None:
             listeners.append(self._on_archidekt_write)
@@ -2473,6 +2829,14 @@ class DeckService:
         self.deck_lists.forget(sub)
         self.folder_trees.forget(sub)
         self._forget_page_decks()
+        # the Account page's profile, the bell and My lists' counts are the old account's too
+        # (security review 0.7.43)
+        from . import account_lists, custom_pictures, packages, profile_page
+
+        profile_page.forget_all(sub)
+        account_lists.forget_counts(sub)
+        packages.forget(sub)
+        custom_pictures.forget(sub)
         for hook in self.write_hooks:
             hook(sub, "")
 
@@ -3020,6 +3384,48 @@ class DeckService:
             info = self._flatten_folders(held[1]) if held is not None and held[1] is not None else None
         return {f["id"] for f in (info or {}).get("folders", []) if f.get("backup")}
 
+    async def mark_packages(self, sub: str, rows: list[dict[str, Any]]) -> bool:
+        """Mark the member's card packages in a copy of their deck list (``package``: the settings
+        in words, None on a plain deck), from the Packages page's own listing, and add any package
+        the deck listing left out. Read only when asked (list_my_decks), never on the deck list's
+        own cold load, which stays one Archidekt listing. False when the package listing couldn't
+        be read: the rows are left unmarked and the list as it was."""
+        from . import packages
+
+        _token, link = self._token(sub)
+        username, user_id = link["archidekt_username"], link.get("archidekt_user_id")
+
+        for d in rows:
+            d.setdefault("package", None)
+        found: list[dict[str, Any]] = []
+        try:
+            for page in range(1, MAX_PACKAGE_PAGES + 1):
+                body = await self._call(
+                    sub,
+                    lambda token, *_, p=page: self.client.packages_list(token, owner=username, page=p),
+                )
+                found += [
+                    r for r in body["results"] if isinstance(r, dict) and str(r.get("id") or "").isdigit()
+                ]
+                if not body.get("next"):
+                    break
+        except (DeckError, ArchidektError) as exc:
+            logger.info("deck list: card packages not read (%s)", exc)
+            return False
+        by_id = {str(d["id"]): d for d in rows}
+        for r in found:
+            block = r.get("cardPackage") if isinstance(r.get("cardPackage"), dict) else {}
+            words = packages.text(block) if block else None
+            have = by_id.get(str(r["id"]))
+            if have is not None:
+                have["package"] = words
+            elif _owned_by(r.get("owner"), username, user_id):
+                extra = list_row(r)
+                extra.update(owner=username, package=words)
+                rows.append(extra)
+        rows.sort(key=lambda d: d.get("updated_at") or "", reverse=True)
+        return True
+
     async def list_decks_quick(
         self, sub: str, *, wait: float | None = None, folder_names: bool = False
     ) -> list[dict[str, Any]] | None:
@@ -3444,9 +3850,16 @@ class DeckService:
     # -- proposals ------------------------------------------------------------
     @_dedupe
     async def propose(
-        self, sub: str, deck_id: str, raw_changes: Any, *, row_flags: bool = False
+        self,
+        sub: str,
+        deck_id: str,
+        raw_changes: Any,
+        *,
+        row_flags: bool = False,
+        source_row: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """``row_flags`` only for the deck page's own save (parse_changes)."""
+        """``row_flags`` only for the deck page's own save (parse_changes). ``source_row``: a line
+        put first that says where the changes come from (a card package's, propose_package)."""
         deck_id = _clean_deck_id(deck_id)
         changes = parse_changes(raw_changes, row_flags=row_flags)
         self._room_for_proposal(sub)
@@ -3454,6 +3867,8 @@ class DeckService:
         self.recheck_waiting(sub, deck)  # the deck's other waiting proposals, at no cost
         _before, _after, rows = plan_rows(deck, changes)
         await self._refuse_unknown_cards(deck, changes)
+        if source_row is not None:
+            rows = [source_row, *rows]
         pid = secrets.token_urlsafe(12)
         self._save_proposal(
             {
@@ -3470,6 +3885,71 @@ class DeckService:
         return self._board_note(sub, self.describe(sub, pid), deck.id, rows, pid)
 
     @_dedupe
+    async def propose_package(
+        self,
+        sub: str,
+        deck_id: str,
+        package_ref: str,
+        *,
+        categories: str = "package",
+        skip_existing: bool = True,
+        skip_outside_identity: bool = True,
+        singleton: bool | None = None,
+        color_tag: str | None = None,
+        color: str | None = None,
+    ) -> dict[str, Any]:
+        """Add a card package's cards to one of the member's decks, as the site's Add package does:
+        its cards as ordinary adds (each reviewed like any other), with a line saying where they
+        come from. The package is read as anyone reads a deck now; the read that counts an import
+        on Archidekt is sent only when the change is applied. ``color_tag`` names a colour tag for
+        every new row: one the deck uses or one of the member's color tags, or any name with
+        ``color``."""
+        from . import packages
+
+        own = await self.get_own_deck(sub, _clean_deck_id(deck_id))
+        tag = await self._package_tag(sub, own, color_tag, color) if (color_tag or "").strip() else None
+        pkg_deck, changes, skipped = packages.adds(
+            own,
+            await self.get_any_deck(sub, package_ref),
+            categories=categories,
+            skip_existing=skip_existing,
+            skip_outside_identity=skip_outside_identity,
+            singleton=singleton,
+            color_tag=tag,
+        )
+        line = _row(
+            "package",
+            package_id=pkg_deck.id,
+            name=pkg_deck.name,
+            text=packages.source_text(pkg_deck.name, changes, skipped),
+            cards=[c["card_name"] for c in changes],
+            skipped=skipped,
+        )
+        return await self.propose(sub, deck_id, changes, source_row=line)
+
+    async def _package_tag(self, sub: str, deck: Deck, name: str | None, color: str | None) -> str:
+        """The colour tag an Add package names, as Archidekt stores it ("Name,#rrggbb"): the colour
+        given, else the one the deck already uses for that name, else the member's color tag of
+        that name (My lists)."""
+        from . import account_lists
+
+        text = clean_text(str(name or ""))
+        if color:
+            return str(_parse_label_change(0, "package", {"label": text, "color": color}).label)
+        for c in deck.cards:
+            have, colour = split_label(c.label)
+            if have.casefold() == text.casefold() and colour:
+                return f"{have},{colour}"
+        mine = await account_lists.read(self, sub, "color_tags")
+        for t in mine.get("items") or []:
+            if str(t.get("name") or "").casefold() == text.casefold():
+                return str(_parse_label_change(0, "package", {"label": t["name"], "color": t["color"]}).label)
+        raise DeckError(
+            "invalid",
+            f"No color tag named “{text}” on this deck or in your color tags. Pick one, or give its color.",
+        )
+
+    @_dedupe
     async def propose_new_deck(
         self,
         sub: str,
@@ -3483,6 +3963,8 @@ class DeckService:
         private: bool = True,
         theorycrafted: bool = False,
         game: str = "any",
+        package: dict[str, Any] | None = None,
+        folder_id: int | None = None,
     ) -> dict[str, Any]:
         name = clean_text(name or "")
         if not name or len(name) > 120:
@@ -3492,11 +3974,27 @@ class DeckService:
             raise DeckError("invalid", f"deck_format must be one of: {', '.join(sorted(FORMAT_IDS))}")
         # the New deck form's Theorycrafted and Game type, checked as deck settings checks them
         extra = parse_details({"theorycrafted": theorycrafted, "game": game or "any"})
+        # a card package (packages.py): made with the New package form's request, no format
+        pkg = None
+        if package is not None:
+            from . import packages
+
+            pkg = packages.parse(package)
+            if cards is None and not (decklist_text or csv_text or json_text):
+                cards = []  # an empty package, as the New package form makes one
         entries = normalise_cards(
             cards=cards, decklist_text=decklist_text, csv_text=csv_text, json_text=json_text
         )
         _token, link = self._token(sub)  # must be linked before we store a proposal that needs it
         self._room_for_proposal(sub)
+        # an optional folder of the member's own, checked as propose_clone checks it
+        folder = None
+        if folder_id is not None:
+            if isinstance(folder_id, bool) or not str(folder_id).isdigit():
+                raise DeckError("invalid", "That folder is not in your Archidekt account.")
+            _info, folder = await self._folder_in(sub, int(folder_id))
+            if folder.get("backup"):
+                raise DeckError("not_found", "That folder is not in your Archidekt account.")
         # A custom category flagged {noDeck} or {noPrice} keeps its switches (archidekt.com's
         # Create Category): it is made with them after the deck and before any card goes in.
         # Maybeboard and Sideboard are Archidekt's own and already sit outside the deck.
@@ -3545,6 +4043,8 @@ class DeckService:
                 private=bool(private),
                 theorycrafted=extra["theorycrafted"] or None,
                 game=GAME_LABELS.get(extra["game"]),
+                package=_package_text(pkg),
+                folder=str(folder.get("name") or "") if folder else None,
             )
         ]
         rows += [
@@ -3584,6 +4084,8 @@ class DeckService:
                     **({"category_flags": category_flags} if category_flags else {}),
                     **({"theorycrafted": True} if extra["theorycrafted"] else {}),
                     **({"game": extra["game"]} if extra["game"] != "any" else {}),
+                    **({"package": pkg} if pkg else {}),
+                    **({"folder_id": int(folder["id"])} if folder else {}),
                 },
             },
             rows,
@@ -4732,6 +5234,8 @@ class DeckService:
             return await self._apply_details(sub, row, progress)
         if row.get("kind") == "categories":
             return await self._apply_categories(sub, row, progress)
+        if row.get("kind") == "custom_cards":
+            return await self._apply_custom_cards(sub, row, progress)
         if row.get("kind") == "clone":
             return await self._apply_clone(sub, row, progress)
         if row.get("kind") == "collection":
@@ -4740,6 +5244,10 @@ class DeckService:
             from . import actions
 
             return await actions.apply(self, sub, row, progress)
+        if row.get("kind") == "lists":
+            from . import account_lists
+
+            return await account_lists.apply(self, sub, row, progress)
         changes = parse_changes(row["changes"], row_flags=True)  # stored: flags only from the deck page
         deck = await self._current_deck_for(sub, row)
         _before, after, _lines, _before_side, after_side = plan_zones(deck, changes)
@@ -4769,6 +5277,8 @@ class DeckService:
             add_flags(changes, after_side, "side"),
             side_pinned,
             side_modifiers,
+            add_labels(changes, after, "main"),
+            add_labels(changes, after_side, "side"),
         )
         specs, _print_lines = printing_plan_rows(deck, changes)
         payload += await self._printing_entries(sub, deck, specs)
@@ -4777,10 +5287,18 @@ class DeckService:
         backup = await self._backup_shared(sub, row, deck, snapshot_id)
         progress.update(backup)
         await self._rows_unchanged(sub, deck)  # lookups and backup take a while: check again
+        for r in row.get("rows") or []:
+            if r.get("kind") == "package":
+                # the site reads a package it adds with this one read, which counts one import of
+                # it on Archidekt: sent here, at the apply, never when the change was proposed
+                await self._call(
+                    sub, lambda token, *_, i=str(r["package_id"]): self.client.package_cards(token, i)
+                )
         await self._send(sub, deck.id, payload, progress)
         verified = await self.get_deck(sub, deck.id)
         self.recheck_waiting(sub, verified)  # the deck's other waiting proposals, at no cost
         mismatches = edit_mismatches(deck, changes, verified, specs)
+        mismatches += label_mismatches(changes, deck, verified)
         result = {
             "snapshot_id": snapshot_id,
             **backup,
@@ -5659,6 +6177,16 @@ class DeckService:
         return self.describe(sub, row["id"])
 
     @_dedupe
+    async def propose_lists(
+        self, sub: str, kind: str, changes: Any, *, picture: dict[str, str] | None = None
+    ) -> dict[str, Any]:
+        """A proposal (kind ``lists``) for changes to one of the member's account-wide Archidekt
+        lists: account_lists.py."""
+        from . import account_lists
+
+        return await account_lists.propose(self, sub, kind, changes, picture=picture)
+
+    @_dedupe
     async def propose_action(self, sub: str, action: str, **params: Any) -> dict[str, Any]:
         """A proposal (kind ``action``) for one Archidekt account action: actions.py."""
         from . import actions
@@ -5869,17 +6397,33 @@ class DeckService:
                     f"{card['set_code'].upper()} {card['collector_number']}".strip() or "its default printing"
                 )
                 printing_notes.append(f"{c['name']}: {wanted} not found on Archidekt, added {got} instead")
-        created: Deck = await self._call(
-            sub,
-            lambda token, *_: self.client.create_deck(
-                token,
-                name=spec["name"],
-                format_id=FORMAT_IDS[spec["format"]],
-                private=bool(spec.get("private", True)),
-                theorycrafted=bool(spec.get("theorycrafted")),
-                game=GAME_IDS.get(str(spec.get("game") or "")),
-            ),
-        )
+        if spec.get("package"):  # a card package: the New package form's one request
+            made = await self._call(
+                sub,
+                lambda token, *_: self.client.create_package(
+                    token,
+                    {
+                        "name": spec["name"],
+                        "private": bool(spec.get("private", True)),
+                        "cardPackage": spec["package"],
+                        "parent_folder": spec.get("folder_id"),
+                    },
+                ),
+            )
+            created = Deck(str(made["id"]), spec["name"], "", "", [], [], {})
+        else:
+            created = await self._call(
+                sub,
+                lambda token, *_: self.client.create_deck(
+                    token,
+                    name=spec["name"],
+                    format_id=FORMAT_IDS[spec["format"]],
+                    private=bool(spec.get("private", True)),
+                    theorycrafted=bool(spec.get("theorycrafted")),
+                    game=GAME_IDS.get(str(spec.get("game") or "")),
+                    folder_id=spec.get("folder_id"),
+                ),
+            )
         self.db.finish_proposal(row["id"], state="applying", deck_id=created.id)
         progress.update(deck_id=created.id, deck_url=f"https://archidekt.com/decks/{created.id}")
         # each custom category with its switches first, so the cards go into it as it should be
@@ -5890,6 +6434,17 @@ class DeckService:
         entries = new_deck_entries(cards, resolve, modifiers)
         await self._send(sub, created.id, entries, progress)
         verified = await self.get_deck(sub, created.id)
+        want_folder = spec.get("folder_id")
+        if want_folder is not None and verified.parent_folder != want_folder:
+            # the create request names the folder as archidekt.com's form does; when the deck is not
+            # in it (not tried live), the folder page's own Move request puts it there
+            await self._call(
+                sub,
+                lambda token, *_: self.client.mass_update(
+                    token, [{"type": "deck", "id": int(created.id), "patch": {"parentFolder": want_folder}}]
+                ),
+            )
+            verified = await self.get_deck(sub, created.id)
         # Every row counts here, maybeboard and sideboard rows included: Archidekt keeps them
         # outside the deck proper, and the import sent them all the same.
         want: dict[str, int] = {}
@@ -5904,6 +6459,13 @@ class DeckService:
             got_cat = states.get(f["name"])
             if got_cat is None or any(got_cat[k] != f[k] for k in ("includedInDeck", "includedInPrice")):
                 mismatches.append(f"category “{f['name']}” (its switches)")
+        if want_folder is not None and verified.parent_folder != want_folder:
+            mismatches.append("the folder")
+        if spec.get("package"):
+            from . import packages
+
+            if not packages.same(packages.block_of(verified), spec["package"]):
+                mismatches.append("the package's keywords, budget or formats")
         result = {
             "deck_id": created.id,
             "deck_url": f"https://archidekt.com/decks/{created.id}",
@@ -6076,6 +6638,14 @@ class DeckService:
             _before, _after, rows = plan_rows(deck, changes)
             await self._refuse_unknown_cards(deck, changes)
             stored: Any = [c.as_dict() for c in changes]
+            # a card package's line stays first while any of its cards is still added: its import
+            # is counted at apply, and its risk rule holds (security review 0.7.43)
+            from . import packages
+
+            lines = (
+                packages.amended_line(r, stored) for r in row.get("rows") or [] if r.get("kind") == "package"
+            )
+            rows = [*(r for r in lines if r is not None), *rows]
         else:
             raw = dict(raw_changes) if isinstance(raw_changes, dict) else raw_changes
             organise_raw = (
@@ -6626,6 +7196,20 @@ class DeckService:
                 )
                 before = was or ("a card not in this deck" if chosen else "automatic")
                 rows.append(_row("detail", field="cover", before=before, after=card.name))
+        if "package" in raw:
+            from . import packages
+
+            block = packages.block_of(deck)
+            if block is None:
+                raise DeckError(
+                    "invalid", "This deck is not a card package; package settings are for packages"
+                )
+            new = packages.changed(block, packages.parse(raw["package"], partial=True))
+            if new is not None:
+                plan["package"] = {"id": int(block["id"]), "block": new}
+                rows.append(
+                    _row("detail", field="package", before=packages.text(block), after=packages.text(new))
+                )
         if plan:
             from .recheck import organise_was
 
@@ -6654,6 +7238,9 @@ class DeckService:
         if "cover_uid" in plan:
             await self.set_cover(sub, deck_id, plan["cover_uid"], progress=progress)
             done.append("cover")
+        if "package" in plan:
+            await self.set_package(sub, deck_id, plan["package"], progress=progress)
+            done.append("package")
         return done
 
     async def _apply_details(self, sub: str, row: dict[str, Any], progress: dict[str, Any]) -> dict[str, Any]:
@@ -6972,6 +7559,128 @@ class DeckService:
         self.db.finish_proposal(row["id"], state="applied", result=result)
         return self.describe(sub, row["id"])
 
+    # -- the member's own custom cards in a deck (kind "custom_cards") ----------------------------
+    MAX_CUSTOM_LIST_PAGES = 20
+
+    async def own_custom_cards(self, sub: str, ids: list[int]) -> dict[int, str]:
+        """The member's own custom cards among ``ids``, id -> name, read from their custom card
+        list on Archidekt (My lists), page by page until every id is found or the list ends."""
+        from . import account_lists
+
+        want, found = set(ids), {}
+        for page in range(1, self.MAX_CUSTOM_LIST_PAGES + 1):
+            got = await account_lists.read(self, sub, "custom_cards", page=page)
+            for item in got.get("items") or []:
+                if isinstance(item.get("id"), int) and item["id"] in want:
+                    found[item["id"]] = str(item.get("name") or "")
+            if want <= found.keys() or not got.get("more"):
+                break
+        return found
+
+    @_dedupe
+    async def propose_custom_cards(self, sub: str, deck_id: str, changes: Any) -> dict[str, Any]:
+        """A proposal (kind ``custom_cards``) that adds the member's own custom cards to one of
+        their decks, removes custom cards from it or sets their count, one review row per card.
+        The one way in for the assistant (``propose_custom_card_changes``) and the pages (the
+        member's own press, applied at once with ``apply(via="browser")`` as other hand edits are).
+
+        ``changes``: as ``parse_custom_card_changes`` takes them. Refused before anything is
+        stored: an add of a custom card that is not one of the member's own (read from their
+        custom card list), one already in the deck, a count change or remove of one that isn't,
+        and a change that changes nothing.
+
+        Applied (``_apply_custom_cards``) with a snapshot and, when backups are on, a backup copy
+        first, the deck checked again just before writing, one modifyCards entry per change, and
+        the deck read back to check every count and named category. The gateway's snapshots and
+        Restore cover a deck's cards and details, not its custom card rows (a gateway choice): so
+        this kind has no Undo."""
+        deck_id = _clean_deck_id(deck_id)
+        wanted = parse_custom_card_changes(changes)
+        self._room_for_proposal(sub)
+        deck = await self.get_own_deck(sub, deck_id)
+        self.recheck_waiting(sub, deck)
+        adds = [w["custom_card_id"] for w in wanted if w["action"] == "add"]
+        names = await self.own_custom_cards(sub, adds) if adds else {}
+        _plan, rows = custom_card_rows(deck, wanted, names)
+        pid = secrets.token_urlsafe(12)
+        self._save_proposal(
+            {
+                "id": pid,
+                "owner_sub": sub,
+                "kind": "custom_cards",
+                "deck_id": deck.id,
+                "deck_name": deck.name,
+                "baseline_fingerprint": deck.fingerprint(),
+                # the added cards' names as the member's list had them, so the rows can be worked
+                # out again on the deck of later (recheck.rows_now) without another list read
+                "changes": {"custom_cards": wanted, "names": {str(k): v for k, v in names.items()}},
+            },
+            rows,
+        )
+        self._audit(
+            "proposal_created",
+            sub=sub,
+            detail={"proposal_id": pid, "deck_id": deck.id, "kind": "custom_cards", "count": len(rows)},
+        )
+        return self.describe(sub, pid)
+
+    async def _apply_custom_cards(
+        self, sub: str, row: dict[str, Any], progress: dict[str, Any]
+    ) -> dict[str, Any]:
+        from . import recheck
+
+        stored = row["changes"]
+        wanted = list(stored.get("custom_cards") or [])
+        names = {int(k): str(v) for k, v in (stored.get("names") or {}).items()}
+
+        def plan_on(deck: Deck, reason: str) -> list[dict[str, Any]]:
+            # the custom rows are not in the deck's fingerprint: worked out again on the deck of
+            # now, they must give exactly the rows that were reviewed
+            try:
+                plan, rows = custom_card_rows(deck, wanted, names)
+            except DeckError as exc:
+                raise needs_look_error(reason) from exc
+            if recheck._clean(rows) != recheck._clean(row.get("rows")):
+                raise needs_look_error(reason)
+            return plan
+
+        deck = await self._current_deck_for(sub, row)
+        plan_on(deck, recheck.REASON_CHANGED)
+        snapshot_id = self._take_snapshot(sub, row, deck)
+        progress["snapshot_id"] = snapshot_id
+        backup = await self._backup_shared(sub, row, deck, snapshot_id)
+        progress.update(backup)
+        # the backup takes a while: read again just before writing
+        now = await self.get_own_deck(sub, deck.id)
+        if now.rows_fingerprint() != deck.rows_fingerprint():
+            raise needs_look_error(recheck.REASON_DURING_APPLY)
+        plan = plan_on(now, recheck.REASON_DURING_APPLY)
+        rows_by_id = {c.custom_card_id: c for c in now.custom_cards if c.custom_card_id is not None}
+        payload = [custom_card_entry(p, rows_by_id.get(p["custom_card_id"])) for p in plan]
+        await self._send(sub, deck.id, payload, progress)
+        verified = await self.get_deck(sub, deck.id)
+        self.recheck_waiting(sub, verified)
+        mismatches = custom_card_mismatches(plan, names, verified)
+        result = {
+            "snapshot_id": snapshot_id,
+            **backup,
+            "sent_entries": len(payload),
+            "verified": not mismatches,
+            "mismatched_cards": mismatches,
+            "after_fingerprint": verified.fingerprint(),
+        }
+        if mismatches:
+            progress.update(result)  # apply() records it with the error
+            raise DeckError(
+                "verify_mismatch",
+                "Archidekt accepted the request but the deck does not match the proposal for: "
+                + ", ".join(mismatches)
+                + f". A snapshot ({snapshot_id}) of the deck's cards and details before the change "
+                "was kept; it does not hold custom cards.",
+            )
+        self.db.finish_proposal(row["id"], state="applied", result=result)
+        return self.describe(sub, row["id"])
+
     # -- hand actions (the member's own browser; the assistant reaches folder, tag and cover only
     # through a details proposal, which calls these after the member approves) ----------------
     # Deleting a deck, picking its cover, moving it between folders and tagging it are done on the
@@ -7064,6 +7773,31 @@ class DeckService:
                 f"Archidekt accepted the request but '{deck.name}' can still be read. Check it on Archidekt.",
             )
         return {"deck_id": deck.id, "name": deck.name, "snapshot_id": snapshot_id, **backup}
+
+    async def set_package(
+        self, sub: str, deck_id: str, plan: dict[str, Any], *, progress: dict[str, Any] | None = None
+    ) -> None:
+        """A card package's keywords, budget and formats: the deck settings' second request, by the
+        package block's own id, with the whole block. Verified by re-reading the deck."""
+        from . import packages
+
+        self._writes_switch()
+        deck = await self.get_own_deck(sub, deck_id)
+        block = packages.block_of(deck)
+        if block is None or int(block["id"]) != int(plan["id"]):
+            raise DeckError("invalid", "The deck is no longer that card package; its settings were not sent.")
+        want = plan["block"]
+        pid = int(block["id"])
+        await _writing(
+            progress, self._call(sub, lambda token, *_: self.client.update_package(token, pid, want))
+        )
+        verified = await self.get_deck(sub, deck.id)
+        if not packages.same(packages.block_of(verified), want):
+            raise DeckError(
+                "verify_mismatch",
+                "Archidekt accepted the request but the package's keywords, budget or formats did not "
+                "change as asked.",
+            )
 
     async def set_cover(
         self, sub: str, deck_id: str, scryfall_uid: str | None, *, progress: dict[str, Any] | None = None
@@ -7181,6 +7915,18 @@ class DeckService:
 
         walk(tree, 0, None, False)
         return {"root_id": tree["id"], "folders": out}
+
+    async def folder_named(self, sub: str, name: str) -> int | None:
+        """The id of the member's one folder called ``name`` (any case), None for the top level
+        ("", "top", "top level", "none"); refused as Deck settings' folder field refuses it."""
+        want = clean_text(str(name or "")).casefold()
+        if not want or want in ("top", "top level", "none"):
+            return None
+        info = await self.folders(sub)
+        hits = [f for f in _shown_folders(info) if f["name"].casefold() == want]
+        if len(hits) != 1:
+            raise _no_such_folder(info, name, several=bool(hits))
+        return int(hits[0]["id"])
 
     async def _folder_in(self, sub: str, folder_id: int) -> tuple[dict[str, Any], dict[str, Any]]:
         info = await self.folders(sub)
@@ -7780,6 +8526,14 @@ class DeckService:
                 raise DeckError(exc.kind, str(exc), retry_after=archidekt_wait(exc)) from exc
         self._precon_cache = (now, listing)
         return listing
+
+
+def _package_text(block: dict[str, Any] | None) -> str | None:
+    if not block:
+        return None
+    from . import packages
+
+    return packages.text(block)
 
 
 def parse_details(raw: Any) -> dict[str, Any]:
@@ -9212,6 +9966,8 @@ def clean_target(deck_id: Any) -> str:
     that name instead of a deck number."""
     if str(deck_id).strip().casefold() == DeckService.COLLECTION_TARGET:
         return DeckService.COLLECTION_TARGET
+    if str(deck_id).strip().casefold() == "lists":  # account_lists.LISTS_TARGET
+        return "lists"
     return _clean_deck_id(deck_id)
 
 
@@ -9275,6 +10031,10 @@ def applied_text(
                 "review page."
             )
         return "Your collection on Archidekt has these changes now."
+    if kind == "lists":
+        from .account_lists import applied_text as lists_text
+
+        return lists_text(c, r)
     if kind != "action":
         return ""
     action = c.get("action")
@@ -9318,6 +10078,15 @@ def applied_text(
         return "They can edit your deck on Archidekt now."
     if action == "collaborator_remove":
         return "They can no longer edit your deck on Archidekt."
+    if action == "deck_help":
+        if r.get("verified") is False:
+            return "Sent to Archidekt, but reading the deck back didn't show the request as sent."
+        return {
+            "delist": "Your help request is taken down on Archidekt.",
+            "edit": "Your help request is changed on Archidekt.",
+        }.get(str(c.get("help_action")), "Your help request is listed on Archidekt for 7 days.")
+    if action == "report":
+        return "Your report is sent to Archidekt's moderators."
     return ""
 
 
@@ -9350,6 +10119,8 @@ def _next_step(
         if kind == "details"
         else "these category changes"
         if kind == "categories"
+        else "these custom card changes"
+        if kind == "custom_cards"
         else "this copy"
         if kind == "clone"
         else "this diff"
@@ -9369,7 +10140,7 @@ def _next_step(
         return rate_limited
     if state == "pending" and may_apply:
         chose = (
-            "to apply deck and collection changes without asking"
+            "to apply changes without asking"
             if mode == "auto"
             else f"to apply low-risk changes without asking, and this one is low risk ({risk_reason})"
         )
@@ -9385,6 +10156,13 @@ def _next_step(
                 f"Show the user {what} and the review link: deleting a deck is approved only on its "
                 "review page, in every approval mode (the in-chat card only opens that page). Do "
                 "not call apply_proposal."
+            )
+        if kind == "custom_cards":  # the member-only tier, as no snapshot puts custom cards back
+            return (
+                f"Show the user {what} and the review link: it takes custom cards out of the deck, "
+                "which a snapshot can't put back, so they approve it themselves, in every approval "
+                "mode, on the proposal card in the chat (where your app shows it) or on the review "
+                "page. Do not call apply_proposal."
             )
         return (
             f"Show the user {what} and the review link: this acts on their Archidekt account, so "
@@ -9426,6 +10204,8 @@ def _next_step(
         return "Done. The deck's details on Archidekt match this proposal."
     if state == "applied" and kind == "categories":
         return "Done. The deck's categories on Archidekt match this proposal."
+    if state == "applied" and kind == "custom_cards":
+        return "Done. The deck's custom cards on Archidekt match this proposal."
     if state == "applied" and kind == "clone":
         return "Done. The copy exists on Archidekt (see result.deck_url) and matches the source deck."
     if state == "applied":

@@ -137,6 +137,25 @@
       list.style.top = Math.max(margin, r.top - gap - list.offsetHeight) + "px";
     }
   }
+  // The sheet rises from the bottom over the page: the field the list is for (its label and
+  // button) is scrolled up above the sheet when the sheet would cover it, so the person sees
+  // what they are choosing for. The nearest box that scrolls moves, else the page.
+  function keepAbove(btn, list) {
+    var field = btn.closest(".field") || btn.parentNode, top = list.getBoundingClientRect().top - 8;
+    var r = field.getBoundingClientRect(), b = btn.getBoundingClientRect();
+    if (b.bottom <= top) return;
+    var need = Math.min(b.bottom - top, Math.max(0, r.top - 8));
+    for (var el = btn.parentNode; el && el.nodeType === 1 && el !== document.body; el = el.parentNode) {
+      var cs = getComputedStyle(el);
+      if (/(auto|scroll)/.test(cs.overflowY) && el.scrollHeight > el.clientHeight + 1) {
+        var was = el.scrollTop;
+        el.scrollTop = was + need;
+        need -= el.scrollTop - was;
+        if (need <= 0) return;
+      }
+    }
+    if (need > 0) window.scrollBy(0, need);
+  }
   function show(select) {
     if (open) close();
     var btn = buttons.get(select);
@@ -163,6 +182,7 @@
     }
     document.body.appendChild(list);
     if (!sheet) place(btn, list);
+    else keepAbove(btn, list);
     // how far each box around the button was scrolled when the list opened (see the scroll closer)
     var scrolled = [];
     for (var el = btn.parentNode; el && el.nodeType === 1; el = el.parentNode) {

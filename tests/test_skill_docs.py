@@ -39,6 +39,8 @@ NOT_TOOLS = {
     "archidekt_password",
     "apply_needs_user",
     "price_total",
+    "price_source_1",
+    "price_source_2",
     "watchlist_url",
     "archidekt_bracket",
     "archidekt_text",

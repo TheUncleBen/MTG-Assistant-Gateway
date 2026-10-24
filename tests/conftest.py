@@ -453,6 +453,15 @@ def _reset_theme_globals(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(theme, "WATCHLISTS", theme.WATCHLISTS)
 
 
+@pytest.fixture(autouse=True)
+def _forget_package_lists() -> None:
+    """packages.listing keeps a member's own package list for a minute; tests share member ids,
+    so each test starts with that memory empty."""
+    from mtg_gateway import packages
+
+    packages._MINE.clear()
+
+
 # Tests stay offline. A gateway built without a Scryfall client of its own (create_app makes one)
 # gets one that answers from the recorded fixtures, so its start-up download of the card-name
 # catalog never reaches api.scryfall.com; and any request that still heads for a host other than
@@ -480,9 +489,11 @@ def _this_machine(host: str | bytes | None) -> bool:
 
 
 def _reserved(host: str | None) -> bool:
-    """A name under the reserved .test domain (RFC 2606, such as the fake identity provider
-    idp.test) never resolves, so a request to it fails as it would offline: refused, not counted."""
-    return (host or "").rstrip(".").lower().endswith(".test")
+    """A name under the reserved .test or .example domains (RFC 2606, such as the fake identity
+    provider idp.test or a fake custom card picture at cdn.example) never resolves, so a request
+    to it fails as it would offline: refused, not counted."""
+    name = (host or "").rstrip(".").lower()
+    return name.endswith(".test") or name.endswith(".example")
 
 
 def _refuse(where: str, host: str | None = None) -> None:

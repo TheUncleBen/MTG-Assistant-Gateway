@@ -378,6 +378,13 @@ def add_home_routes(server: MCPServer, state: AppState) -> None:
                 actions=(ui.button_link("Review them" if pending else "Open proposals", "/proposals"),),
                 tone="accent" if pending else "",
             ),
+        ]
+        if link["linked"]:
+            # On Archidekt: the bell's count, read after the page has loaded (static/bell.js)
+            from .profile_page import home_widget
+
+            items.append(home_widget())
+        items += [
             quick(
                 "/history",
                 "history",

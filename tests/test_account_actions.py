@@ -902,14 +902,38 @@ ALL_ACCOUNT_ACTIONS = ACCOUNT_ACTIONS + [
     ("propose_deck_social", {"deck_id": "43", "action": "unfollow_owner"}),
     ("propose_collaborator", {"deck_id": "42", "action": "add", "username": "amy"}),
     ("propose_collaborator", {"deck_id": "42", "action": "remove", "username": "amy"}),
+    ("propose_report", {"deck_id": "43", "report_kind": "deck", "message": "Spam deck"}),
+    (
+        "propose_deck_help",
+        {"deck_id": "42", "goals": " ".join(["win"] * 12), "issues": " ".join(["mana"] * 12)},
+    ),
+    ("propose_profile_change", {"field": "collection_public", "on": True}),
+    ("propose_contest_entry", {"deck_id": "42", "contest": "881", "summary": "Sea monsters"}),
+    ("propose_contest_entry", {"deck_id": "42", "contest": "880", "entry_action": "withdraw"}),
 ]
+
+
+def _contest_ready(ark: FakeArchidekt) -> None:
+    """alice's deck 42 entered in contest 880 (to withdraw); contest 881 has no entry yet."""
+    ark.account.entries[880] = [
+        {"id": 9100, "deck": {"id": 42, "name": "x"}, "owner": {"id": 77, "username": "alice"}}
+    ]
+
+
+def _help_ready(ark: FakeArchidekt, deck_id: int = 42) -> None:
+    """A deck Archidekt's help form takes: Commander, 100 cards, one deck tag."""
+    ark.decks[deck_id]["deckFormat"] = 3
+    ark.deck_tags[deck_id] = [{"id": 1, "tag": 1, "name": "Combo", "position": 0}]
 
 
 @pytest.mark.parametrize("via", ["browser", "mcp", "auto", ""])
 @pytest.mark.parametrize(
     ("tool", "args"),
     ALL_ACCOUNT_ACTIONS,
-    ids=[f"{t}:{a.get('action', 'folder')}" for t, a in ALL_ACCOUNT_ACTIONS],
+    ids=[
+        f"{t}:{a.get('action', a.get('report_kind', a.get('field', a.get('entry_action', 'folder'))))}"
+        for t, a in ALL_ACCOUNT_ACTIONS
+    ],
 )
 async def test_only_the_review_page_marker_applies_an_account_action(
     stack: Stack, via: str, tool: str, args: dict
@@ -927,6 +951,8 @@ async def test_only_the_review_page_marker_applies_an_account_action(
     ark.follows["alice"] = {78}
     if args.get("action") == "remove" and tool == "propose_collaborator":
         ark.editors[42] = [_amy_row()]
+    _help_ready(ark)
+    _contest_ready(ark)
     await _set_mode(h, "auto")
     p = structured(await call(h, token, tool, args))
     assert p["ok"] and p["kind"] == "action", p
@@ -958,6 +984,8 @@ async def test_the_refusal_list_covers_every_account_action(stack: Stack) -> Non
     ark.comments[300043].append(own)
     ark.follows["alice"] = {78}
     ark.editors[42] = [_amy_row()]
+    _help_ready(ark)
+    _contest_ready(ark)
     seen = set()
     for tool, args in ALL_ACCOUNT_ACTIONS:
         if tool == "propose_collaborator" and args["action"] == "add":
@@ -971,8 +999,9 @@ async def test_the_refusal_list_covers_every_account_action(stack: Stack) -> Non
 
 
 def test_only_the_review_page_passes_the_marker() -> None:
-    """REVIEW_PAGE is defined in decks.py and passed only by pages.py's review form, which carries
-    the CSRF check and the click-timing guard; no other module may name it."""
+    """REVIEW_PAGE is defined in decks.py and passed only by pages.py: its review form and
+    apply_own_press (the Account page's and My collection's own presses, profile_page), both of
+    which carry the CSRF check and the click-timing guard; no other module may name it."""
     from pathlib import Path
 
     src = Path(__file__).resolve().parents[1] / "src" / "mtg_gateway"
@@ -1461,3 +1490,83 @@ async def test_apply_all_on_the_card_lists_account_actions_before_the_press(stac
     lines = {x["proposal_id"]: x["summary"] for x in info["set_lines"]}
     assert len(ids) == 2 and set(lines) == set(ids), (ids, lines)
     assert any("Like" in s for s in lines.values()) and any("Follow" in s for s in lines.values()), lines
+
+
+async def test_a_deck_help_request_posts_edits_and_delists(stack: Stack) -> None:
+    """0.7.43: archidekt.com's own checks first (10 to 200 words each, a deck tag, the deck's size),
+    then post, edit and delist, each the member's own press, read back from the deck."""
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    words = " ".join(["ramp"] * 12)
+    untagged = structured(
+        await call(h, token, "propose_deck_help", {"deck_id": "42", "goals": words, "issues": words})
+    )
+    assert untagged["ok"] is False and "deck tag" in untagged["message"]
+    _help_ready(ark)
+    short = structured(
+        await call(h, token, "propose_deck_help", {"deck_id": "42", "goals": "win", "issues": words})
+    )
+    assert short["ok"] is False and "10 to 200 words" in short["message"]
+    others = structured(
+        await call(h, token, "propose_deck_help", {"deck_id": "43", "goals": words, "issues": words})
+    )
+    assert others["ok"] is False  # not the member's own deck
+    out = await _propose_and_apply(
+        h, token, "propose_deck_help", {"deck_id": "42", "goals": words, "issues": words}
+    )
+    assert out["result"]["verified"] is True and "listed on Archidekt for 7 days" in out["applied_text"], out
+    assert json.loads(ark.account.help[42]["goals"])["ops"][0]["insert"].strip() == words
+    again = structured(
+        await call(h, token, "propose_deck_help", {"deck_id": "42", "goals": words, "issues": words})
+    )
+    assert again["ok"] is False and "already has a help request" in again["message"]
+    new = " ".join(["draw"] * 15)
+    await _propose_and_apply(
+        h, token, "propose_deck_help", {"deck_id": "42", "help_action": "edit", "goals": new, "issues": words}
+    )
+    assert json.loads(ark.account.help[42]["goals"])["ops"][0]["insert"].strip() == new
+    out = await _propose_and_apply(h, token, "propose_deck_help", {"deck_id": "42", "help_action": "delist"})
+    assert ark.account.help[42]["active"] is False and out["result"]["verified"] is True
+
+
+async def test_reports_name_the_page_and_never_apply_by_themselves(stack: Stack) -> None:
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    await _set_mode(h, "auto")
+    bad = structured(
+        await call(h, token, "propose_report", {"deck_id": "43", "report_kind": "user", "message": "x"})
+    )
+    assert bad["ok"] is False
+    empty = structured(
+        await call(h, token, "propose_report", {"deck_id": "43", "report_kind": "deck", "message": " "})
+    )
+    assert empty["ok"] is False
+    res = await call(
+        h,
+        token,
+        "propose_report",
+        {"deck_id": "43", "report_kind": "card", "card": "beast within", "message": "Wrong art"},
+    )
+    p = structured(res)
+    assert p["ok"] and p["assistant_may_apply"] is False and "Beast Within" in p["rows"][0]["text"], p
+    assert ark.account.reports == []
+    await _press(h, token, res)
+    assert ark.account.reports == [
+        {
+            "url": "https://archidekt.com/decks/43",
+            "type": "Card",
+            "message": "Beast Within: Wrong art",
+            "by": "alice",
+        }
+    ]
+
+
+def test_a_help_box_has_a_character_cap_as_well() -> None:
+    """Security review 0.7.43, S-08: 200 "words" of megabytes are refused before anything else."""
+    from mtg_gateway import actions
+
+    long_words = " ".join(["x" * 1000] * 12)  # 12 words, 12 KB
+    with pytest.raises(DeckError) as err:
+        actions._help_text(long_words, "goals")
+    assert str(err.value) == "Messages can be up to 4,000 characters."  # our own limit, worded as ours
+    assert actions._help_text(" ".join(["word"] * 150), "goals").startswith("word")
