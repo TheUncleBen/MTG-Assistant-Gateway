@@ -7,6 +7,90 @@ Notable changes for people who run or use the gateway. The format follows
 with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 (`release/1.2.3`); `latest` is always the newest.
 
+## [0.7.43] - 2026-10-23
+
+More of what you can do on Archidekt is now in the gateway too: your account-wide lists, card
+packages, your Archidekt profile and settings, the notification bell, deck help requests, reports to
+Archidekt's moderators, contest entries, the deck registration sheet, Archidekt's forum and your
+custom cards in decks. Your assistant can propose each of them; anything public or about your
+account waits for your own press.
+
+### Upgrade notes
+- None beyond the [update steps](docs/UPGRADING.md). There is no database change, so this update
+  saves no before-upgrade copy, and going back to 0.7.42 needs only the `MTG_TAG` change.
+- No new settings or secrets: your variables file works as it is.
+- **Not tried on Archidekt itself yet.** Everything new in this release follows how Archidekt's own
+  site works and was tested with the gateway only. None of it has been used on Archidekt yet, so try
+  each part on a test deck or with a small change first: My lists, card packages (with a color
+  tag), your profile and settings, the bell, deck help, reports, contest entries, the registration
+  sheet, the forum, and custom cards in decks with their pictures.
+
+### Added
+- **My lists.** One page for Archidekt's account-wide lists: category templates, default
+  categories, color tags, pinned cards and custom cards, including a custom card's picture (checked,
+  then redrawn as a 500×700 PNG before it is sent). Your assistant can read them and propose
+  changes; a small change with no delete is low risk, and a delete always waits for your press.
+- **Categories from your templates.** Deck settings has Add template, and a template's menu on
+  My lists has Add to a deck…; your assistant can do the same.
+- **Card packages.** New package on My decks (name, keywords, budget, intended formats, private,
+  folder); a package's keywords, budget and formats in its Deck settings; Add a package in the deck
+  menu, choosing from your packages, the ones you follow or everyone's, by name, format and budget,
+  with Archidekt's options (keep the package's categories, let Archidekt file them, or put them in
+  the Maybeboard; skip cards already in the deck or outside the commander's colors; one copy of
+  each). The cards are added as one change you review first, and Archidekt counts one import of
+  the package when it is applied. Adding more than 10 cards from a package is high risk. My decks
+  has a Show filter (decks and packages, decks only, packages only), and a package's menu has Add
+  to a deck….
+- **A folder for a new deck.** New deck and New package can put the deck straight into one of your
+  folders, and so can your assistant.
+- **Your Archidekt profile and settings** on the Account page: bio, username, profile picture,
+  e-mail and notification switches, and new device default settings. Each change is applied only
+  by your own press. Password, e-mail address, Patreon and deleting your account stay on Archidekt,
+  with a link to it. If Archidekt takes more than 3 seconds to send them, the page shows
+  without them and says so, and the next load has them.
+- **Collection visibility.** My collection says whether it is private or public on Archidekt, and
+  can change it; making it public asks once first.
+- **The notification bell.** Archidekt's notifications in the top bar and on their own page, with
+  a link to what each one is about.
+- **Deck help requests.** Request deck help in the deck menu posts the deck on Archidekt's deck
+  help board, and lets you edit or delist it.
+- **Reports to Archidekt's moderators** for a deck, a card or a comment, from the deck and card
+  menus and a comment's menu.
+- **Contest entries.** Enter in a contest and Withdraw from a contest in the deck menu. Entering
+  replaces the deck's description with your summary, after a snapshot, and the review shows the
+  old and new description side by side.
+- **Registration PDF.** Archidekt fills the tournament deck registration sheet from a deck and the
+  details you type; nothing you type is kept by the gateway.
+- **Lock personal categories** in the card menu saves a card's template categories as its default
+  categories.
+- **Archidekt's forum.** A Forum page with Archidekt's sections, each section's threads and a
+  thread's posts, and a reply box; your assistant can read the forum and propose a reply. A reply
+  is public under your name and waits for your own press. Starting a new thread stays on Archidekt,
+  which asks you to prove you're human first. The section and thread lists are read the way
+  Archidekt's own forum pages load them, so if Archidekt changes those pages the gateway says so,
+  and a thread still opens from its link or number. A post's menu has Reply, Copy link, Vote up,
+  Vote down, Edit and Delete for your own, and Report comment…; the reply box has bold, italic
+  and link buttons and shows your reply once more before posting it; a contest thread lets you
+  enter one of your decks or withdraw it.
+- **Custom cards in your decks.** Your custom cards show in your decks with their pictures, and you
+  can put one in a deck (from My lists), change its count, category, color tag or mana value, or
+  take it out, as on Archidekt; your assistant can propose the same. Taking custom cards out of a
+  deck always waits for your own press, because restoring a snapshot doesn't put them back. My
+  lists shows each custom card's picture too.
+- **A color tag when adding a package.** Add a package can put one of your color tags on every card
+  it adds, in the same change.
+- **More device default settings:** Group by, Sort by and the two price sources, as on Archidekt's
+  account settings.
+
+### Changed
+- **Approval mode** on the Account page is one line per mode, each with a fold that explains it.
+- **Full auto** is now shown as “Apply changes without asking” everywhere, so each approval mode
+  fits one line on a phone.
+- **Deck comments** work like forum replies: the vote count and Reply sit under each comment, and
+  Vote up, Vote down, Edit… and Delete… are in the comment's ⋮ menu.
+- **The deck page's banner** text is lighter, and its shade deeper in the light theme, so the
+  deck's details and dates are easier to read.
+
 ## [0.7.42] - 2026-10-22
 
 Everything you can do with a deck's categories and settings on Archidekt, you can now do in the

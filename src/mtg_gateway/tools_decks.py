@@ -36,6 +36,7 @@ from .schemas import (
     DeckChange,
     DeckFormat,
     NewDeckCard,
+    PackageSettings,
     change_for_assistant,
     deck_change_for_service,
     new_deck_card_for_service,
@@ -66,9 +67,67 @@ class CategoryChange(BaseModel):
     premier: bool | None = Field(None, description="Premier on or off: its cards are the commanders.")
     not_in_deck: bool | None = Field(None, description="Not in deck on or off: its cards don't count.")
     not_in_price: bool | None = Field(None, description="Not in price on or off: left out of the price.")
+    from_template: str | None = Field(
+        None,
+        description=(
+            "create only: one of the user's category templates (get_my_lists), by name; the new "
+            "category gets its name and switches."
+        ),
+    )
+
+
+class CustomCardChange(BaseModel):
+    """One custom card change of propose_custom_card_changes."""
+
+    model_config = ConfigDict(extra="forbid")
+    action: Literal["add", "remove", "set_quantity"] = Field(
+        description="add one of the user's own custom cards, remove one from the deck, or set its count."
+    )
+    custom_card_id: int = Field(
+        description=(
+            "The custom card's id: get_my_lists (custom_cards) for an add, get_deck's custom_cards "
+            "for one already in the deck."
+        )
+    )
+    quantity: int | None = Field(
+        None,
+        ge=1,
+        le=99,
+        description=(
+            "add (default 1) and set_quantity: the count it should have (left out: the count it has)."
+        ),
+    )
+    category: str | None = Field(
+        None,
+        description=(
+            "add and set_quantity: the category to file it under. Left out, an add sends none "
+            "(Archidekt files it) and a count change keeps the card's own."
+        ),
+    )
+    label: str | None = Field(
+        None,
+        description=(
+            'add and set_quantity: a color tag for the card, as set_label takes it ("Name" with color, '
+            'or "Name,#rrggbb"); an empty label takes the tag off. Left out, the card keeps its own.'
+        ),
+    )
+    color: str | None = Field(None, description="The color tag's color, like #37d67a (grey when none).")
+    mana_value: int | None = Field(
+        None,
+        ge=0,
+        le=15,
+        description=(
+            "add and set_quantity: the card's custom mana value in this deck, 0 to 15; null takes it "
+            "off. Left out, the card keeps its own."
+        ),
+    )
 
 
 MAX_PROPOSALS_PAGE = 100
+# list_my_decks' note when the member's card packages couldn't be read, so none is marked
+PACKAGES_UNREAD = (
+    "Card packages couldn't be read from Archidekt just now, so decks and packages can't be told apart."
+)
 # list_my_decks' note when the folder tree couldn't be read, so decks Archidekt listed by folder id
 # only have no folder name
 FOLDER_NAMES_UNREAD = (
@@ -159,12 +218,17 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
             "even when a cover is set, so never take null as the deck having no cover. "
             "unreadable counts decks Archidekt listed without a readable owner, which are left out; when "
             "it is above 0, note says so in words to pass on to the member. note also says when folder "
-            "names couldn't be read, so folder is null on some decks and a folder filter may miss them."
+            "names couldn't be read, so folder is null on some decks and a folder filter may miss them. "
+            "packages: include (default: the list as Archidekt gives it), only (the user's card "
+            "packages, each with package, its settings in words) or none (plain decks only)."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": True},
     )
     async def list_my_decks(
-        name_contains: str | None = None, deck_format: str | None = None, folder: str | None = None
+        name_contains: str | None = None,
+        deck_format: str | None = None,
+        folder: str | None = None,
+        packages: Literal["include", "only", "none"] = "include",
     ) -> dict[str, object]:
         try:
             # folder names filled in before the folder filter, which matches on the name
@@ -177,6 +241,11 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
         notes = [LIST_PARTLY_UNREADABLE if len(rows) > 0 else LIST_UNREADABLE] if unreadable else []
         if getattr(rows, "folder_names_unread", False):
             notes.append(FOLDER_NAMES_UNREAD)  # no silent empty folder
+        if packages != "include":
+            # one more listing, only when asked: the packages page's own (the deck list stays one read)
+            rows = [dict(d) for d in rows]  # marked and filtered here, never in the shared list
+            if not await state.decks.mark_packages(_sub(), rows):
+                return {"ok": False, "error": "upstream", "message": PACKAGES_UNREAD}
         note = " ".join(notes) or None
         if name_contains:
             rows = [d for d in rows if name_contains.strip().lower() in str(d.get("name", "")).lower()]
@@ -185,6 +254,8 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
             rows = [d for d in rows if str(d.get("format_name") or d.get("format") or "").lower() == want]
         if folder is not None:
             rows = [d for d in rows if (d.get("folder") or "") == folder]
+        if packages != "include":
+            rows = [d for d in rows if bool(d.get("package")) == (packages == "only")]
         for d in rows:
             d.setdefault("url", f"https://archidekt.com/decks/{d['id']}")
         out: dict[str, object] = {"ok": True, "decks": rows, "count": len(rows), "unreadable": unreadable}
@@ -285,8 +356,10 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
             "deck as get_deck or the Export page's .json returns it: an object with a cards list) or "
             "scan_session (the id or name of a scan session). Returns the proposal, a review URL and "
             "warnings (a deck size the format does not allow, scan cards matched from a misspelt name): "
-            "tell the user about each. Nothing is created until the user confirms (or you apply it when "
-            "assistant_may_apply is true)."
+            "tell the user about each. With package {keywords, budget?, intended_formats?} it makes a "
+            "card package instead (Archidekt's New package: no format; cards may be left out for an "
+            "empty one). folder puts it in one of the user's folders, by name. Nothing is created until "
+            "the user confirms (or you apply it when assistant_may_apply is true)."
         ),
         annotations={"readOnlyHint": True, "destructiveHint": False, "openWorldHint": True},
         meta=card_meta,
@@ -311,9 +384,16 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
             Literal["any", "paper", "mtgo", "arena"], Field(description="Game type (default any).")
         ] = "any",
         scan_session: Annotated[str | None, Field(description="Or a scan session's id or name.")] = None,
+        package: Annotated[
+            PackageSettings | None, Field(description="Make a card package with these settings instead.")
+        ] = None,
+        folder: Annotated[
+            str | None, Field(description="One of the user's folders, by name (default: the top level).")
+        ] = None,
     ) -> CallToolResult:
         warnings: list[str] = []
         try:
+            folder_id = await state.decks.folder_named(_sub(), folder) if folder else None
             if scan_session:
                 session = _scan_session(_sub(), scan_session)
                 decklist_text = session["decklist_text"]
@@ -331,6 +411,8 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
                 private=private,
                 theorycrafted=theorycrafted,
                 game=game,
+                package=package.model_dump(exclude_unset=True) if package else None,
+                folder_id=folder_id,
             )
             warnings += made.pop("warnings", [])
             size = sum(
@@ -754,7 +836,9 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
             "categories, up to 30 at a time (Archidekt's Delete unused categories). Moving single "
             "cards between categories is propose_deck_changes. A change that touches the commander "
             "or Not in deck, or a Sideboard or Maybeboard rename or delete, always waits for the "
-            "user's own press, in every approval mode. Returns the same fields as propose_deck_changes (kind "
+            "user's own press, in every approval mode. create with from_template adds one of the "
+            "user's category templates with its switches. Returns the same fields as "
+            "propose_deck_changes (kind "
             "'categories', one line per category and the review URL); it is applied with "
             "apply_proposal like any other proposal, which keeps a snapshot first: after the user's "
             "press, or in Full auto, for any other category change, without one. "
@@ -777,6 +861,10 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
     ) -> CallToolResult:
         try:
             raw = [c.model_dump(exclude_none=True) for c in changes or []]
+            if any(c.get("from_template") for c in raw):
+                from .account_lists import from_templates
+
+                raw = await from_templates(state.decks, _sub(), raw)
             return _proposal(
                 {
                     "ok": True,
@@ -787,6 +875,40 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
                     ),
                 }
             )
+        except DeckError as exc:
+            return _proposal(_tool_error(exc))
+
+    @server.tool(
+        name="propose_custom_card_changes",
+        title="Propose custom card changes in a deck (write, two-step)",
+        description=(
+            "Step 1 of putting the user's own custom cards in a deck they own, taking them out, or "
+            "changing how many copies it has, its category, color tag or mana value, as Archidekt's card "
+            "menu does for a custom card. Only the user's own custom cards (get_my_lists, "
+            "custom_cards) can be added; get_deck lists the ones already in the deck under "
+            "custom_cards. One review line per card with its count before and after and its "
+            "category. Low risk like a small card edit, unless it touches the commander zone or "
+            "moves more than 4 copies of a card. Taking custom cards out or lowering their count "
+            "always waits for the user's own press: a snapshot restore does not put custom cards "
+            "back. Returns the same fields as propose_deck_changes "
+            "(kind 'custom_cards'); it is applied with apply_proposal like any other proposal, "
+            "which keeps a snapshot first (of the deck's cards and details). Changes nothing on Archidekt."
+        ),
+        annotations={"readOnlyHint": True, "destructiveHint": False, "openWorldHint": True},
+        meta=card_meta,
+    )
+    async def propose_custom_card_changes(
+        deck_id: Annotated[
+            str, Field(description="The Archidekt deck id (the number in the deck URL) or URL.")
+        ],
+        changes: Annotated[
+            list[CustomCardChange],
+            Field(description="One entry per custom card.", min_length=1, max_length=20),
+        ],
+    ) -> CallToolResult:
+        try:
+            raw = [c.model_dump(exclude_unset=True) for c in changes]
+            return _proposal({"ok": True, **(await state.decks.propose_custom_cards(_sub(), deck_id, raw))})
         except DeckError as exc:
             return _proposal(_tool_error(exc))
 

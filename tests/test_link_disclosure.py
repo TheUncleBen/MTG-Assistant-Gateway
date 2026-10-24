@@ -217,6 +217,8 @@ async def test_expiry_comes_from_the_refresh_token_and_is_shown(stack: Stack) ->
     exp = int(time.time()) + 40 * 86400
     access_exp = int(time.time()) + 3600
     access = _jwt({"exp": access_exp})
+    # Archidekt knows this session: the Account page reads the member's profile with it (0.7.43)
+    stack.ark.tokens[access] = "alice"
     h.db.update_link_secret(
         "user-1", decks._seal("user-1", access, _jwt({"exp": exp, "token_type": "refresh"}))
     )

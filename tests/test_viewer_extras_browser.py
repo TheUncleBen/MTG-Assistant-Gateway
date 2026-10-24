@@ -152,23 +152,28 @@ def test_vote_on_someone_elses_comment(server: Server) -> None:
         page.on("pageerror", lambda e: errors.append(str(e)))
         page.goto(f"{server.base}/decks/43", wait_until="networkidle")
         page.locator("#comments").scroll_into_view_if_needed()
-        up = page.locator(".cmt[data-id='555001'] button.vote", has_text="Up")
+        # the footer's ▲ button carries the points (the mockup's post footer); its menu says Vote up
+        up = page.locator(".cmt[data-id='555001'] > .acts button.vote")
         up.wait_for(timeout=5000)
-        assert "2 points" in page.locator(".cmt[data-id='555001'] .who").inner_text()
+        assert up.locator(".n").inner_text() == "2"
+        assert up.get_attribute("aria-label") == "2 points. Vote up: comment by amy"
         up.click()
         # asked first; nothing sent yet
         assert server.ark.votes == {}
         page.locator(".cmt .confirm button", has_text="Vote").click()
         page.wait_for_function(
-            "() => document.querySelector(\".cmt[data-id='555001'] .who\").textContent.includes('3 points')"
+            "() => document.querySelector(\".cmt[data-id='555001'] > .acts button.vote .n\")"
+            ".textContent === '3'"
         )
         assert server.ark.votes == {("alice", 555001): 1}
         assert up.get_attribute("aria-pressed") == "true"
+        assert up.get_attribute("aria-label") == "3 points. Take back your vote: comment by amy"
         _shot(page, "comment-voted-390")
         up.click()
         page.locator(".cmt .confirm button", has_text="Take back").click()
         page.wait_for_function(
-            "() => document.querySelector(\".cmt[data-id='555001'] .who\").textContent.includes('2 points')"
+            "() => document.querySelector(\".cmt[data-id='555001'] > .acts button.vote .n\")"
+            ".textContent === '2'"
         )
         assert server.ark.votes == {}
         assert page.evaluate("() => document.documentElement.scrollWidth - innerWidth") == 0

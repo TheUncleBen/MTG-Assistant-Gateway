@@ -13,10 +13,13 @@ import json
 import time
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote
 
 import httpx
 
 from mtg_gateway.archidekt_csv import parse_export, to_deck_json
+
+from .fake_archidekt_account import AccountFake
 
 
 def _now_iso() -> str:
@@ -97,6 +100,8 @@ class FakeArchidekt:
         self.access_ttl = 3600  # live access JWTs expire 3600 s after issue (verified 2026-10-05)
         self.issue_refresh = True  # login answers with a refresh token
         self.refresh_calls = 0
+        # the account-wide lists and community routes of parity release 2
+        self.account = AccountFake(self)
         self.decks: dict[int, dict[str, Any]] = {
             42: to_deck_json(
                 cards,
@@ -133,7 +138,14 @@ class FakeArchidekt:
         # the live site puts a set still in preview ahead of the released ones
         self.newer_printings: dict[str, list[dict[str, Any]]] = {}
         self.create_returns_full_deck = True  # live Archidekt does not (verified 2026-10-05)
+        # whether the New deck request's parentFolder places the deck (not tried live: the gateway
+        # moves the deck there when the read-back shows it is not)
+        self.create_honours_folder = False
+        self.last_create_body: dict[str, Any] = {}
         self.fail_deck_reads = False  # signed-in deck reads answer 503
+        # a fault the custom card apply must catch: an add of a custom card answers 200 and
+        # leaves the deck as it was
+        self.custom_adds_dropped = False
         self.next_rel_id = 2000
         self.next_deck_id = 100
         self.private = {43}  # deck ids that need the owner's session
@@ -174,6 +186,26 @@ class FakeArchidekt:
         self.vote_calls: list[dict[str, Any]] = []  # path and body of each vote PUT
         self.comments: dict[int, list[dict[str, Any]]] = {}  # thread root -> flat list of comments
         self.comment_page_size = 0  # 0: a thread comes on one page; else paged by points
+        # The forum (forum.py): its pages' data as Archidekt's forum scripts read it, and its
+        # threads, whose comments are kept in ``comments`` like a deck's. forum_page_changed: the
+        # pages come without their data, as after a site update the gateway does not know.
+        self.forum_sections = [
+            {
+                "title": "Archidekt",
+                "children": [
+                    {"title": "General", "description": "Talk about anything", "posts": 1200},
+                    {"title": "Deck Help", "description": "Ask for help with a deck", "posts": 300},
+                ],
+            }
+        ]
+        self.forum_threads: dict[int, dict[str, Any]] = {
+            700001: {"title": "Welcome to the forum", "section": "General", "type": 2, "owner": "amy"},
+            700002: {"title": "Best mana rocks?", "section": "General", "type": 0, "owner": "amy"},
+            700003: {"title": "Old news", "section": "General", "type": 0, "owner": "amy", "locked": True},
+        }
+        self.forum_page_changed = False
+        self.forum_page_size = 0  # 0: a section's threads come on one page; else paged
+        self.site_pages: list[tuple[str, dict[str, str]]] = []
         self.next_comment_id = 800000
         # Hand actions added 2026-10-07: global deck tags (id -> name), each deck's tag relations
         # (deck id -> [{id, tag, name, position}]), deleted deck ids and massUpdate bodies.
@@ -375,6 +407,8 @@ class FakeArchidekt:
         out["bookmarked"] = who is not None and out["id"] in self.bookmarks.get(who, set())
         out["viewCount"] = out.get("viewCount", 0)
         out["deckTags"] = [dict(r) for r in self.deck_tags.get(out["id"], [])]
+        if out["id"] in self.account.help:  # the deck's help request (parity release 2)
+            out["deckHelp"] = dict(self.account.help[out["id"]])
         out["parentFolder"] = self.deck_folder.get(out["id"], 1000 + self._user_id(owner))
         out.setdefault("featured", "")
         out.setdefault("customFeatured", "")
@@ -512,9 +546,51 @@ class FakeArchidekt:
             "tags": ([{"id": 1, "name": "ramp"}, {"id": 2, "name": "sea monsters"}] if d["id"] == 42 else []),
         }
 
+    def _site_page(self, path: str, params: dict[str, str]) -> httpx.Response:
+        """archidekt.com's own forum pages: HTML carrying their data as Next.js does."""
+        self.site_pages.append((path, params))
+        parts = [unquote(p) for p in path.strip("/").split("/")]
+        if parts == ["forum"]:
+            props: dict[str, Any] = {"forums": {"results": self.forum_sections}}
+        elif len(parts) == 3:
+            rows = [
+                {
+                    "id": tid,
+                    "title": t["title"],
+                    "type": t["type"],
+                    "archived": False,
+                    "owner": {"username": t["owner"]},
+                    "childrenCount": len(self.comments.get(tid, [])),
+                    "points": 3,
+                    "recentPost": {"createdAt": "2026-10-20T10:00:00Z", "owner": {"username": t["owner"]}},
+                }
+                for tid, t in self.forum_threads.items()
+                if t["section"] == parts[2] and params.get("q", "").lower() in t["title"].lower()
+            ]
+            count = len(rows)
+            if self.forum_page_size:
+                page = int(params.get("page", "1"))
+                rows = rows[(page - 1) * self.forum_page_size : page * self.forum_page_size]
+            threads = {"count": count, "results": rows}
+            props = {"category": parts[1], "section": parts[2], "threads": threads}
+        else:
+            return httpx.Response(404, text="<html>Not found</html>")
+        data = (
+            ""
+            if self.forum_page_changed
+            else (
+                '<script id="__NEXT_DATA__" type="application/json">'
+                + json.dumps({"props": {"pageProps": props}, "page": "/forum"}).replace("<", "\\u003c")
+                + "</script>"
+            )
+        )
+        return httpx.Response(200, text=f"<html><body><div id='__next'></div>{data}</body></html>")
+
     def handle(self, request: httpx.Request) -> httpx.Response:
         path = request.url.path
         self.calls.append((request.method, path))
+        if path.startswith("/forum") and request.method == "GET":
+            return self._site_page(path, dict(request.url.params))
         if request.method != "GET":
             self._deck_printings()  # remember every printing before a write may take it out
         if self.inject:
@@ -578,6 +654,10 @@ class FakeArchidekt:
             if auth:
                 return httpx.Response(401, json={"detail": "Given token not valid for any token type"})
             return httpx.Response(401, json={"detail": "Authentication credentials were not provided."})
+        if who is not None:
+            answered = self.account.handle(request, who, path)
+            if answered is not None:
+                return answered
         if path == "/api/decks/folderTree/" and request.method == "GET":
             root = 1000 + self.users[who]["id"]
             mine = self.folders.get(who, [])
@@ -759,7 +839,8 @@ class FakeArchidekt:
                 self._category_ids(d)
             return self._category_create(request, who)
         if path == "/api/users/category/" or path.startswith("/api/users/category/"):
-            # the account's category templates: the gateway must never touch them
+            # the account's category templates are answered by self.account above; anything it
+            # leaves unanswered is a request the gateway should never send
             raise AssertionError(f"the gateway called the category templates route {path}")
         if path == "/api/decks/copy/" and request.method == "POST":
             if self.fail_backup:
@@ -794,6 +875,7 @@ class FakeArchidekt:
             )
         if path == "/api/decks/v2/" and request.method == "POST":
             body = json.loads(request.content)
+            self.last_create_body = body
             self.next_deck_id += 1
             deck = {
                 "id": self.next_deck_id,
@@ -808,6 +890,8 @@ class FakeArchidekt:
                 "cards": [],
             }
             self.decks[self.next_deck_id] = deck
+            if self.create_honours_folder and body.get("parentFolder") is not None:
+                self.deck_folder[deck["id"]] = int(body["parentFolder"])
             if deck["private"]:
                 self.private.add(self.next_deck_id)
             if not self.create_returns_full_deck:
@@ -905,6 +989,8 @@ class FakeArchidekt:
                     (p for p in self._deck_printings() if p["oracleCard"]["name"].lower() == name), None
                 )
                 newer = self.newer_printings.get(name, [])
+                if hit and "id" not in hit["oracleCard"]:  # the oracle id: the printing's own, here
+                    hit = {**hit, "oracleCard": {**hit["oracleCard"], "id": hit["id"]}}
                 return httpx.Response(200, json={"results": newer + ([hit] if hit else [])})
             fillers = [
                 {"id": 70000 + i, "oracleCard": {"name": f"{name.title()} Lookalike {i}"}} for i in range(30)
@@ -1022,7 +1108,13 @@ class FakeArchidekt:
             text = body.get("text")
             if not isinstance(parent, int) or not isinstance(text, str) or not text.strip():
                 return httpx.Response(400, json={"text": ["This field may not be blank."]})
-            root = parent if parent in self.comments or parent >= 300000 and parent < 400000 else None
+            root = (
+                parent
+                if parent in self.comments or 300000 <= parent < 400000 or parent in self.forum_threads
+                else None
+            )
+            if parent in self.forum_threads and self.forum_threads[parent].get("locked"):
+                return httpx.Response(403, json={"detail": "This thread is locked."})
             if root is None:
                 root = next(
                     (r for r, cs in self.comments.items() if any(c["id"] == parent for c in cs)), None
@@ -1050,9 +1142,12 @@ class FakeArchidekt:
             return httpx.Response(201, json=comment)
         if len(parts) == 3 and parts[1] == "comments" and parts[2].isdigit() and request.method == "GET":
             root = int(parts[2])
-            deck = self.decks.get(root - 300000)
-            if deck is None:
+            forum_thread = self.forum_threads.get(root)
+            deck = self.decks.get(root - 300000) if forum_thread is None else None
+            if deck is None and forum_thread is None:
                 return httpx.Response(404, json={"detail": "Not found."})
+            if forum_thread is not None:
+                deck = {"id": None, "owner": {"username": forum_thread["owner"]}}
             flat = self.comments.get(root, [])
 
             def tree(parent: int) -> list[dict[str, Any]]:
@@ -1084,8 +1179,10 @@ class FakeArchidekt:
                 200,
                 json={
                     "id": root,
-                    "title": None,
-                    "text": None,
+                    "title": forum_thread["title"] if forum_thread else None,
+                    "text": json.dumps({"ops": [{"insert": "First post of " + forum_thread["title"] + "\n"}]})
+                    if forum_thread
+                    else None,
                     "owner": {
                         "id": self._user_id(deck["owner"]["username"]),
                         "username": deck["owner"]["username"],
@@ -1103,8 +1200,8 @@ class FakeArchidekt:
                     "points": 0,
                     "userInput": 0,
                     "archived": False,
-                    "locked": False,
-                    "type": 4,
+                    "locked": bool(forum_thread and forum_thread.get("locked")),
+                    "type": forum_thread["type"] if forum_thread else 4,
                 },
             )
         if len(parts) == 4 and parts[1:3] == ["decks", "editors"] and request.method == "DELETE":
@@ -1204,8 +1301,14 @@ class FakeArchidekt:
                     return httpx.Response(503, json={"detail": "Service unavailable."})
                 body = json.loads(request.content)
                 self.patches.append(body)
+                customs = [e for e in body["cards"] if e.get("customCardId") is not None]
+                plain = [e for e in body["cards"] if e.get("customCardId") is None]
+                for e in customs:
+                    if not self._custom_known(who, e):
+                        return httpx.Response(400, json={"detail": "Invalid custom card."})
                 if not self.fail_patch_silently:
-                    self.apply_patch(deck, body["cards"])
+                    self.apply_custom_patch(deck, customs, who)
+                    self.apply_patch(deck, plain)
                 return httpx.Response(200, json={"ok": True})
         return httpx.Response(404, json={"detail": "Not found."})
 
@@ -1241,6 +1344,51 @@ class FakeArchidekt:
         """A fault a verify must catch: a modify with an empty label (no name, as the site's own
         ",#656565") leaves the old tag."""
         return self.empty_label_ignored and not entry["modifications"]["label"].split(",")[0].strip()
+
+    def _custom_known(self, who: str, e: dict[str, Any]) -> bool:
+        """A custom card entry names one of the writer's own custom cards (the account fake's)
+        and, for a modify or remove, one of the deck's custom rows."""
+        if not any(c["id"] == e["customCardId"] for c in self.account.customs.get(who, [])):
+            return False
+        return e["action"] == "add" or isinstance(e.get("deckRelationId"), int)
+
+    def apply_custom_patch(self, deck: dict[str, Any], entries: list[dict[str, Any]], who: str) -> None:
+        """Custom card entries, in the site's shape (_app.js module 71983 ``add`` and
+        ``prepareSave``): customCardId instead of cardid; a modify or remove names the row by
+        deckRelationId. The rows go to the deck JSON's ``customCards``, as the site reads them."""
+        rows = deck.setdefault("customCards", [])
+        for e in entries:
+            assert e["action"] in ("add", "modify", "remove"), e
+            assert "patchId" in e and "modifications" in e and not e.get("cardid"), e
+            qty = e["modifications"]["quantity"]
+            if e["action"] == "add":
+                if self.custom_adds_dropped:
+                    continue
+                card = next(c for c in self.account.customs[who] if c["id"] == e["customCardId"])
+                self.next_rel_id += 1
+                rows.append(
+                    {
+                        "id": self.next_rel_id,
+                        "quantity": qty,
+                        "categories": e.get("categories") or None,
+                        "modifier": e["modifications"].get("modifier") or "Normal",
+                        "label": e["modifications"].get("label") or ",#656565",
+                        "customCmc": e["modifications"].get("customCmc"),
+                        "companion": False,
+                        "flippedDefault": False,
+                        "card": json.loads(json.dumps(card)),
+                    }
+                )
+                continue
+            rel = next((r for r in rows if r["id"] == e["deckRelationId"]), None)
+            if rel is None:
+                continue
+            rel["quantity"] = 0 if e["action"] == "remove" else qty
+            if e["action"] == "modify":
+                rel["categories"] = e.get("categories") or None
+                rel["label"] = e["modifications"].get("label") or ",#656565"
+                rel["customCmc"] = e["modifications"].get("customCmc")
+        deck["customCards"] = [r for r in rows if r["quantity"] > 0]
 
     def apply_patch(self, deck: dict[str, Any], entries: list[dict[str, Any]]) -> None:
         """Apply entries in the reference shape: action add|modify|remove, cardid, deckRelationId,

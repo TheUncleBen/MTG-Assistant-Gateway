@@ -511,3 +511,38 @@ async def test_the_shared_category_fixture_gives_one_maybeboard(stack: Stack) ->
     _give_categories(stack.ark)
     names = [c["name"] for c in stack.ark.decks[42]["categories"]]
     assert names.count("Maybeboard") == 1, names
+
+
+async def test_a_new_category_from_a_template_takes_its_switches(stack: Stack) -> None:
+    token = await _ready(stack)
+    stack.ark.account.templates["alice"] = [
+        {"id": 1, "name": "Lands", "includedInDeck": True, "includedInPrice": False, "isPremier": False},
+    ]
+
+    def propose(change: dict) -> dict:
+        return {"deck_id": "42", "changes": [change]}
+
+    p = structured(
+        await call(
+            stack.h, token, "propose_deck_categories", propose({"action": "create", "from_template": "lands"})
+        )
+    )
+    assert p["ok"] is True, p
+    assert p["diff"].startswith("New category “Lands”: Not in price on."), p["diff"]
+    named = structured(
+        await call(
+            stack.h,
+            token,
+            "propose_deck_categories",
+            propose({"action": "create", "from_template": "Lands", "category": "Basics"}),
+        )
+    )
+    assert named["diff"].startswith("New category “Basics”: Not in price on."), named["diff"]
+    for bad, says in (
+        ({"action": "create", "from_template": "Nope"}, "category template"),
+        ({"action": "delete", "category": "Ramp", "from_template": "Lands"}, "goes with action create"),
+        ({"action": "create", "from_template": "Lands", "premier": True}, "leave out premier"),
+    ):
+        out = structured(await call(stack.h, token, "propose_deck_categories", propose(bad)))
+        assert out["ok"] is False and says in out["message"], out
+    assert stack.ark.category_creates == []

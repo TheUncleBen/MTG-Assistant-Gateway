@@ -1999,6 +1999,12 @@ class Database:
             ).fetchall()
         return [dict(r) for r in rows]
 
+    def set_link_username(self, sub: str, username: str) -> None:
+        """The linked account's new username, after the member changed it on Archidekt through the
+        gateway (profile.py); the account's id, which ownership is judged by, stays."""
+        with self.tx() as c:
+            c.execute("UPDATE archidekt_links SET archidekt_username = ? WHERE sub = ?", (username, sub))
+
     def update_link_secret(self, sub: str, secret_enc: str, *, only_secret: str | None = None) -> bool:
         """Replace the stored session of an *active* link. False when the link was revoked or
         removed in the meantime, so a refresh that raced an unlink cannot bring it back. With
@@ -2383,7 +2389,7 @@ class Database:
             ).fetchall()
             props = self._conn.execute(
                 "SELECT deck_id, created_at FROM proposals WHERE owner_sub = ? "
-                "AND kind IN ('edit', 'details', 'categories', 'restore', 'create_deck') "
+                "AND kind IN ('edit', 'details', 'categories', 'custom_cards', 'restore', 'create_deck') "
                 "UNION ALL SELECT deck_id, taken_at FROM snapshots WHERE owner_sub = ? "
                 "AND deck_owner_id IS NULL",
                 (owner_sub, owner_sub),

@@ -27,6 +27,7 @@ async def test_set_and_number_pin_the_printing() -> None:
         "collector_number": "267",
         "options": ["Normal", "Foil"],
         "exact_printing": True,
+        "oracle_id": None,  # the fake's printing search leaves the oracle card's id out
     }
 
 

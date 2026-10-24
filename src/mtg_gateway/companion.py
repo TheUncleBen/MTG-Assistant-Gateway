@@ -213,6 +213,9 @@ SETTINGS_OK_MESSAGES = {
     "moved": "Deck moved to that folder on Archidekt.",
     "collaborator_added": "Collaborator added on Archidekt.",
     "collaborator_removed": "Collaborator removed on Archidekt.",
+    "package": "Package settings saved to Archidekt and read back. A snapshot from just before is under "
+    "History.",
+    "template_added": "Category added on Archidekt; a snapshot from just before is under History.",
 }
 # Notices My decks shows (?ok=).
 LIST_OK_MESSAGES = {
@@ -410,6 +413,11 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
     from .companion_settings import add_settings_routes
     from .companion_shell import add_shell_routes
     from .companion_tools import add_deck_tool_routes
+    from .custom_pictures import add_custom_picture_routes
+    from .deck_extras import add_deck_extras_routes
+    from .forum_page import add_forum_routes
+    from .lists_page import add_lists_routes
+    from .profile_page import add_profile_routes
 
     # The helpers above, for the route modules (each takes what it uses). Registered in this
     # order, as before the split: /decks/new and /decks/open must come before /decks/{deck_id}.
@@ -430,10 +438,15 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         secure=secure,
     )
     state.folder_jobs = add_folder_routes(server, state)
+    add_custom_picture_routes(server, state)
     add_deck_routes(server, state, h)
+    add_deck_extras_routes(server, state, h)
     add_settings_routes(server, state, h)
     add_deck_tool_routes(server, state, reports, h)
     add_history_routes(server, state, reports, h)
+    add_lists_routes(server, state, h)
+    add_profile_routes(server, state, h)
+    add_forum_routes(server, state, h)
     add_shell_routes(server, h)
 
 
@@ -548,6 +561,9 @@ EVENT_LABELS = {
     "scan_session_saved": "Scan saved",
     "scan_session_deleted": "Scan deleted",
     "folder_created": "Folder created",
+    "custom_card_picture_uploaded": "Custom card picture uploaded to Archidekt",
+    "registration_pdf": "Deck registration sheet made",
+    "profile_picture_uploaded": "Profile picture uploaded to Archidekt",
     "groups_changed": "Your groups changed",
     "membership_revoked": "Membership removed",
     "membership_unverifiable": "Membership could not be checked",

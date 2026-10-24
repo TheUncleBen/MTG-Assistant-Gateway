@@ -17,7 +17,8 @@ In every mode an assistant never applies a proposal that is held (a proposal it 
 rejected, withdrawn or failed) or that another app changed after it was made.
 
 Every apply to one of the member's decks snapshots the deck first, so an auto-applied deck change
-can be restored from the History page (a restore leaves the folder, tags and cover as they are); a
+can be restored from the History page (a restore leaves the folder, tags, cover and custom cards as
+they are); a
 collection change, a clone and a new deck keep no snapshot. The risk tiers are decided from the
 proposal's stored review rows, so a proposal is low risk only if what the review page would show is
 small and safe:
@@ -33,8 +34,9 @@ small and safe:
   follows, posting, editing, deleting and voting on comments, creating a folder, and adding or
   removing a deck's collaborators. Each one waits for the member's own press, in every mode: on
   the card in the chat (0.7.29) or on its review page.
-* **destructive**: deleting a deck. Like consent, no mode lets an assistant apply it, and
-  only its review page applies it (not the card in the chat).
+* **destructive**: deleting a deck, deleting from the member's Archidekt lists, and taking custom
+  cards out of a deck (no snapshot puts them back). Like consent, no mode lets an assistant apply
+  it; a deck deletion is applied only on its review page (not the card in the chat).
 
 The operator may set the default mode for members who have not chosen (``MTG_APPROVAL_MODE_DEFAULT``)
 and cap what members may choose (``MTG_APPROVAL_MODE_MAX``, default ``auto`` = no cap).
@@ -57,6 +59,7 @@ DEFAULT_MODE = "manual"
 DEFAULT_MAX_ROWS = 5
 DEFAULT_BIG_EDIT_ROWS = 20  # an edit with more rows than this waits for a card press in auto
 MAX_COPIES_PER_ROW = 4  # a row that adds, removes or changes more copies than this is not small
+PACKAGE_LOW_CARDS = 10  # adding a card package is low risk up to this many cards (plan 6.4)
 
 # Row kinds (decks.row_line) a low-risk edit may consist of, each with the word the wording below
 # uses for it, so the list risk_of checks and the list the member reads are one list.
@@ -80,12 +83,34 @@ LOW_RISK_ROW_KINDS = frozenset(LOW_RISK_ROW_WORDS)
 _CHANGED = [w for k, w in LOW_RISK_ROW_WORDS.items() if k not in ("add", "remove")]
 LOW_RISK_CHANGES = "a card added or removed, or a new " + ", ".join(_CHANGED[:-1]) + " or " + _CHANGED[-1]
 # The Archidekt account actions of actions.py, in the member's words.
-ACCOUNT_ACTIONS_TEXT = "likes, votes, bookmarks, follows, comments, new folders and collaborator changes"
+ACCOUNT_ACTIONS_TEXT = (
+    "likes, votes, bookmarks, follows, comments, new folders, collaborator changes, deck help requests, "
+    "reports to Archidekt's moderators, contest entries, and profile and email settings"
+)
+
+
+def lists_low_text(max_rows: int = DEFAULT_MAX_ROWS) -> str:
+    """The low-risk change to the member's account-wide lists (account_lists.risk_of), in words."""
+    return (
+        "a change to your Archidekt lists (category templates, default categories, color tags, pins or "
+        f"custom cards) of at most {max_rows} entr{'ies' if max_rows != 1 else 'y'}, with no deletes"
+    )
+
+
+LISTS_DELETE_TEXT = "deleting from your Archidekt lists"
+# account_lists.PREMIER_NOTE: a Premier category template is never applied by an assistant either
+LISTS_PREMIER_TEXT = "Premier in your default categories"
+# A snapshot restore does not put a deck's custom cards back (decks.propose_custom_cards), so
+# taking them out or lowering their count is never applied by an assistant either.
+CUSTOM_OUT_TEXT = "taking custom cards out of a deck"
+CUSTOM_OUT_REASON = (
+    "takes custom cards out of the deck, which a snapshot can't put back, so it waits for your own press"
+)
 # What each mode means, in the member's words, for the Account page and the docs.
 MODE_LABELS = {
     "manual": "Ask me every time",
     "semi": "Apply low-risk changes without asking",
-    "auto": "Apply deck and collection changes without asking",
+    "auto": "Apply changes without asking",
 }
 # Each mode's name, as the Guide and the Account page write it
 MODE_NAMES = {"manual": "Manual", "semi": "Semi-auto", "auto": "Full auto"}
@@ -102,21 +127,23 @@ def low_risk_text(max_rows: int = DEFAULT_MAX_ROWS) -> str:
         f"{LOW_RISK_CHANGES}, no more than {MAX_COPIES_PER_ROW} copies a row, never a change to which "
         "cards are the commanders or to the categories of a row in the commander zone, and never fewer "
         "copies of a card that has a row in the commander zone and another row, both in the deck or "
-        "both in the maybeboard or sideboard; and a private copy of a deck (a clone), which changes "
-        "nothing that exists."
+        "both in the maybeboard or sideboard; a private copy of a deck (a clone), which changes "
+        f"nothing that exists; and {lists_low_text(max_rows)}."
     )
 
 
 # Which proposals are high risk (risk_of), as one sentence.
 HIGH_RISK_TEXT = (
-    "Everything else: more rows than that, a commander change, a new deck, restoring a snapshot, "
-    "the deck's details (name, format, bracket, description, visibility, folder, tags and cover), "
+    "Everything else: more rows than that, adding more than 10 cards from a card package, a commander "
+    "change, a new deck, restoring a snapshot, the deck's details (name, format, bracket, description, "
+    "visibility, folder, tags and cover), "
     "and its categories (a new category, a new name, Premier, Not in deck or Not in price, or "
     "deleting one)."
 )
 # What no mode lets an assistant apply (MEMBER_ONLY), as one sentence.
 MEMBER_ONLY_TEXT = (
-    f"Actions on your Archidekt account ({ACCOUNT_ACTIONS_TEXT}) and deleting a deck are never "
+    f"Actions on your Archidekt account ({ACCOUNT_ACTIONS_TEXT}), {LISTS_DELETE_TEXT}, "
+    f"{LISTS_PREMIER_TEXT}, {CUSTOM_OUT_TEXT} and deleting a deck are never "
     "applied by an assistant: each one waits for your own press, in every mode, on the card in the "
     "chat or on its review page (deleting a deck, and an edit of a comment that has formatting: on "
     "the review page only). An edit of a description that has formatting is also approved on its "
@@ -128,7 +155,8 @@ def auto_waits_text(big_rows: int = DEFAULT_BIG_EDIT_ROWS) -> str:
     """What still waits for a press in auto mode, as one sentence."""
     return (
         "Restoring a snapshot, a commander or companion change, a new deck, an edit of more than "
-        f"{_rows(big_rows)}, making a deck public or unlisted, a category change that touches the "
+        f"{_rows(big_rows)} or a change to your lists of more than {big_rows} entries, making a deck "
+        "public or unlisted, a category change that touches the "
         "commander or which cards count in the deck, and any edit of a description that has "
         "formatting, such as bold text, links or pictures, still wait for your press. So does a held "
         "change, a change waiting for another change first, one another app had a hand in, one that "
@@ -152,19 +180,96 @@ def mode_help(mode: str, *, max_rows: int = DEFAULT_MAX_ROWS, big_rows: int = DE
             "row in the commander zone, or fewer copies of a card that has a row in the commander zone "
             "and another row, both in the deck or both in the maybeboard or sideboard) and a private "
             "copy of a deck (a clone, which "
-            "changes nothing that exists). A new deck built from a list, restores, deck details and "
-            "categories, commander "
-            f"changes, bigger edits, and anything on your Archidekt account ({ACCOUNT_ACTIONS_TEXT}) "
-            "or deleting a deck still wait for your press. So does a held change, a change waiting for "
-            "another change first, one another app had a hand in, one that replaces another app's change, "
-            "or one that another app's waiting change would replace."
+            f"changes nothing that exists), and {lists_low_text(max_rows)}. A new deck built from a list, "
+            "restores, deck details and categories, commander "
+            f"changes, bigger edits, and anything on your Archidekt account ({ACCOUNT_ACTIONS_TEXT}), "
+            f"{LISTS_DELETE_TEXT}, {LISTS_PREMIER_TEXT}, {CUSTOM_OUT_TEXT} or deleting a deck still wait for "
+            "your press. "
+            "So does a held change, a change waiting for another change first, one another app had a "
+            "hand in, one that replaces another app's change, or one that another app's waiting change "
+            "would replace."
         )
     return (
-        "Your assistant applies the deck and collection changes it proposes, without asking you. "
+        "Your assistant applies the deck, collection and list changes it proposes, without asking you. "
         + auto_waits_text(big_rows)
         + " "
         + MEMBER_ONLY_TEXT
     )
+
+
+_STILL_WAITS = (
+    "a held change, a change waiting for another change first, one another app had a hand in, one "
+    "that replaces another app's change, or one that another app's waiting change would replace"
+)
+
+
+def mode_points(
+    mode: str, *, max_rows: int = DEFAULT_MAX_ROWS, big_rows: int = DEFAULT_BIG_EDIT_ROWS
+) -> list[tuple[str, list[str]]]:
+    """What ``mode`` means, as the Account page's details show it (Ben, 2026-10-22: short, not a
+    block): ``(lead sentence, its points)`` pairs, the same meaning as ``mode_help`` broken up.
+    A test checks each point against mode_help, so the two never say different things."""
+    if mode == "manual":
+        return [
+            ("Every change waits for your own press, on the card in the chat or on the review page.", []),
+            ("Actions on your Archidekt account wait too.", []),
+            (
+                "Deleting a deck, and any edit of a description or comment that has formatting, are "
+                "approved on the review page only.",
+                [],
+            ),
+            ("The safest choice, and the default.", []),
+        ]
+    if mode == "semi":
+        return [
+            (
+                "Your assistant applies low-risk changes itself:",
+                [
+                    f"a small edit to a deck or your collection: at most {_rows(max_rows)}, each "
+                    f"{LOW_RISK_CHANGES}, no more than {MAX_COPIES_PER_ROW} copies each",
+                    "a private copy of a deck (a clone), which changes nothing that exists",
+                    lists_low_text(max_rows),
+                ],
+            ),
+            (
+                "A small edit never changes which cards are the commanders or the categories of a row in "
+                "the commander zone, and never takes copies from a card that has a row in the commander "
+                "zone and another row, both in the deck or both in the maybeboard or sideboard.",
+                [],
+            ),
+            (
+                "These still wait for your press:",
+                [
+                    "a new deck built from a list",
+                    "restores",
+                    "deck details and categories",
+                    "commander changes and bigger edits",
+                    f"anything on your Archidekt account ({ACCOUNT_ACTIONS_TEXT}), {LISTS_DELETE_TEXT}, "
+                    f"{LISTS_PREMIER_TEXT}, {CUSTOM_OUT_TEXT} or deleting a deck",
+                    _STILL_WAITS,
+                ],
+            ),
+            (AUTO_WARNING, []),
+        ]
+    return [
+        ("Your assistant applies the deck, collection and list changes it proposes, without asking you.", []),
+        (
+            "These still wait for your press:",
+            [
+                "restoring a snapshot",
+                "a commander or companion change",
+                "a new deck",
+                f"an edit of more than {_rows(big_rows)}",
+                f"a change to your lists of more than {big_rows} entries",
+                "making a deck public or unlisted",
+                "a category change that touches the commander or which cards count in the deck",
+                "any edit of a description that has formatting, such as bold text, links or pictures",
+                _STILL_WAITS,
+            ],
+        ),
+        (MEMBER_ONLY_TEXT, []),
+        (AUTO_WARNING, []),
+    ]
 
 
 # Shown next to the semi and auto choices, because turning them on has a real cost.
@@ -173,7 +278,7 @@ AUTO_WARNING = (
     "list) into making changes you did not ask for. If you let your assistant apply changes "
     "without asking, such a change can land on Archidekt without your press. A change to one of "
     "your decks still keeps a snapshot you can restore from the History page; a collection change "
-    "keeps none. Restoring a snapshot does not put back a deck's folder, tags or cover."
+    "keeps none. Restoring a snapshot does not put back a deck's folder, tags, cover or custom cards."
 )
 
 
@@ -271,6 +376,10 @@ def risk_of(
         from .actions import risk_of as action_risk
 
         return action_risk(rows)
+    if kind == "lists":
+        from .account_lists import risk_of as lists_risk
+
+        return lists_risk(rows, max_rows=max_rows)
     if kind == "create_deck":
         return "high", "creates a new deck"
     if kind == "restore":
@@ -279,10 +388,15 @@ def risk_of(
         return "high", "changes the deck's details"
     if kind == "categories":
         return "high", category_wait(rows) or CATEGORY_REASON
+    if kind == "custom_cards":
+        return custom_cards_risk(rows, max_rows=max_rows)
     if kind not in ("edit", "collection"):
         return "high", "not a plain deck or collection edit"
     if rows is None:  # stored before review rows existed: nothing to judge it by
         return "high", NO_ROWS_REASON
+    # a card package's own line only says where the adds come from (packages.py); not a change
+    from_package = any(r.get("kind") == "package" for r in rows)
+    rows = [r for r in rows if r.get("kind") != "package"]
     kinds = [str(r.get("kind")) for r in rows]
     if any(k == "commander" for k in kinds):
         return "high", commander_reason(rows)
@@ -296,6 +410,9 @@ def risk_of(
         )
     if len(rows) > max_rows:
         return "high", f"changes {len(rows)} rows, more than the {max_rows} a low-risk edit may have"
+    cards = sum(_copies_moved(r) for r in rows)
+    if from_package and cards > PACKAGE_LOW_CARDS:
+        return "high", f"adds {cards} cards from a card package, more than {PACKAGE_LOW_CARDS}"
     for r in rows:
         if _copies_moved(r) > MAX_COPIES_PER_ROW:
             return (
@@ -303,6 +420,43 @@ def risk_of(
                 f"moves {_copies_moved(r)} copies of {r.get('name')}, more than {MAX_COPIES_PER_ROW}",
             )
     return "low", f"{len(rows)} card row{'s' if len(rows) != 1 else ''}, no commander change"
+
+
+def custom_cards_risk(
+    rows: list[dict[str, Any]] | None, *, max_rows: int = DEFAULT_MAX_ROWS
+) -> tuple[str, str]:
+    """A custom card change in a deck (decks.custom_card_rows) is judged as a card edit: low
+    when it has at most ``max_rows`` rows, none moves more than MAX_COPIES_PER_ROW copies and
+    none is in the deck's commander zone (a Premier category)."""
+    if rows is None:
+        return "high", NO_ROWS_REASON
+    if any(_custom_fewer(r) for r in rows):
+        return "destructive", CUSTOM_OUT_REASON
+    if any(r.get("commander_zone") for r in rows):
+        return "high", COMMANDER_ZONE_REASON
+    if len(rows) > max_rows:
+        return "high", f"changes {len(rows)} rows, more than the {max_rows} a low-risk edit may have"
+    for r in rows:
+        if _custom_copies(r) > MAX_COPIES_PER_ROW:
+            return (
+                "high",
+                f"moves {_custom_copies(r)} copies of {r.get('name')}, more than {MAX_COPIES_PER_ROW}",
+            )
+    return "low", f"{len(rows)} custom card row{'s' if len(rows) != 1 else ''}, no commander change"
+
+
+def _custom_fewer(row: dict[str, Any]) -> bool:
+    try:
+        return int(row.get("after") or 0) < int(row.get("before") or 0)
+    except (TypeError, ValueError):
+        return True
+
+
+def _custom_copies(row: dict[str, Any]) -> int:
+    try:
+        return abs(int(row.get("after") or 0) - int(row.get("before") or 0))
+    except (TypeError, ValueError):
+        return MAX_COPIES_PER_ROW + 1  # a count that cannot be read is not small
 
 
 # A hand edit in the app is the member's own approval, so it applies at once; only these get an
@@ -324,6 +478,15 @@ def hand_edit_confirm(kind: str, rows: list[dict[str, Any]] | None) -> str | Non
             return CATEGORY_COUNTS_CONFIRM
         deletes = any(isinstance(r, dict) and r.get("delete") for r in rows or [])
         return CATEGORY_DELETE_CONFIRM if deletes else None
+    if kind == "custom_cards":  # a page's own custom card add, count or remove
+        if any(isinstance(r, dict) and r.get("commander_zone") for r in rows or []):
+            return "This adds or changes a row with a commander-zone category."
+        gone = sum(
+            max(0, int(r.get("before") or 0) - int(r.get("after") or 0))
+            for r in rows or []
+            if isinstance(r, dict)
+        )
+        return f"This removes {gone} cards from the deck." if gone > HAND_EDIT_CONFIRM_COPIES else None
     if kind != "edit" or not rows:
         return None
     if any(r.get("kind") == "commander" for r in rows):
@@ -394,6 +557,18 @@ def auto_waits(
             return COMPANION_REASON  # it changes what the deck is legal with (parity release 1)
         if len(rows) > big_rows:
             return f"changes {len(rows)} rows, more than the {big_rows} Full auto applies by itself"
+        return None
+    if kind == "custom_cards":  # waits as a card edit does: the commander zone or a big change
+        if rows is None:
+            return NO_ROWS_REASON
+        if any(r.get("commander_zone") for r in rows):
+            return COMMANDER_ZONE_REASON
+        if len(rows) > big_rows:
+            return f"changes {len(rows)} rows, more than the {big_rows} Full auto applies by itself"
+        return None
+    if kind == "lists":  # account_lists.py; its deletes wait in every mode (MEMBER_ONLY)
+        if rows is not None and len(rows) > big_rows:
+            return f"changes {len(rows)} entries, more than the {big_rows} Full auto applies by itself"
         return None
     if kind == "details":
         wanted = changes if isinstance(changes, dict) else {}

@@ -30,6 +30,7 @@ from .decks import (
     commander_row_texts,
     commander_stays_text,
     current_client,
+    custom_card_line,
     row_label,
     row_line,
     tag_change_text,
@@ -38,12 +39,14 @@ from .formatting import DOC_CSS, doc_html
 from .proposals_view import PROPOSALS_CSS
 from .refusals import WRITES_OFF_KEPT, WRITES_OFF_KEPT_MANY
 from .theme import (
+    DEFAULT_CSP,
     LAYOUT_COOKIE,
     THEME_COOKIE,
     VIEW_COOKIE,
     VIEW_KINDS,
     app_version,
     display_name,
+    icon,
     in_app,
     layout_from_cookie,
     plural,
@@ -325,16 +328,27 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             name = state.db.client_name(cid) if state.db.member_used_client(sub, cid) else None
             notice = _ok(f"Disconnected “{ui.app_name(name)}”.")
         else:
-            notice = _notice(
-                None if ok in notify.CARD_NOTICES else ok, None if err in notify.CARD_NOTICES else err
-            )
+            from .profile_page import CARD_NOTICES as PROFILE_NOTICES
+
+            inside = notify.CARD_NOTICES | PROFILE_NOTICES | {"unconfirmed"}
+            notice = _notice(None if ok in inside else ok, None if err in notify.CARD_NOTICES else err)
         # The old one-press forms' addresses open the page with the matching box open (no-JS path
-        # of the red-outline buttons): ?unlink=1, ?disconnect=<client id>, ?disconnect_all=1, ?delete=1.
-        open_box = next((k for k in ("unlink", "disconnect", "disconnect_all", "delete") if k in q), None)
-        body = _account_body(
-            state, sub, _csrf(s, sid), ok=ok, err=err, open_box=open_box, open_client=q.get("disconnect")
+        # of the red-outline buttons): ?unlink=1, ?disconnect=<client id>, ?disconnect_all=1,
+        # ?delete=1, ?picture=1 (the Archidekt profile picture box).
+        open_box = next(
+            (k for k in ("unlink", "disconnect", "disconnect_all", "delete", "picture") if k in q), None
         )
-        return page("Account", notice + body, sub=sub, sid=sid, head_extra=ACCOUNT_HEAD)
+        body = await account_html(
+            state,
+            sub,
+            _csrf(s, sid),
+            ok=ok,
+            err=err,
+            open_box=open_box,
+            open_client=q.get("disconnect"),
+            saved=q.get("saved") or "",
+        )
+        return account_response(page, notice + body, sub, sid)
 
     @server.custom_route("/account/avatar", methods=["GET"], include_in_schema=False)
     async def account_avatar(request: Request) -> Response:
@@ -406,6 +420,9 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             return RedirectResponse(f"/account?{done}#apps", 303)
         if action == "unlink":
             state.decks.unlink(sub)
+            from . import account_lists  # (imports archidekt first: not at the top)
+
+            account_lists.forget_counts(sub)  # the My lists counts were that account's
             return RedirectResponse("/account?ok=unlinked", status_code=303)
         if action == "approval_mode":
             # The only place a mode can be set: the member's own browser session, never an
@@ -994,6 +1011,26 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
 NO_STORE = {"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"}
 
 
+def press_stamp(s: Any, sub: str) -> str:
+    """The render stamp (``shown``) of a page whose own press applies an account action: the
+    Account page's profile switches and My collection's Visibility line (profile_page). It is the
+    review page's click-timing guard (clickguard.py), by the scope ``press:<sub>``."""
+    return form_stamp(s.session_secret, f"press:{sub}")
+
+
+async def apply_own_press(state: Any, sub: str, pid: str, shown: str | None) -> dict[str, Any]:
+    """The member's own press on their signed-in page applies the account action the page just
+    proposed (profile_page: the profile fields, the e-mail switches, the new device settings, the
+    collection's visibility). It is the review page's press and carries the same guards: the
+    caller checked the page's CSRF token, and the render stamp refuses a submit that comes faster
+    than a person reads the page. No other route, and never an assistant, applies such a
+    proposal (decks.apply refuses kind "action" by any other way)."""
+    if submitted_too_soon(state.settings.session_secret, f"press:{sub}", shown):
+        raise DeckError("too_soon", "The page was only just drawn. Make the change again.")
+    current_client.set(BROWSER_CLIENT_ID)  # the audit rows name the browser as the actor
+    return await state.decks.apply(sub, pid, via=REVIEW_PAGE)
+
+
 def _csrf(s: Any, sid: str | None) -> str | None:
     if not sid:
         return None
@@ -1071,17 +1108,18 @@ OK_MESSAGES = {
     "mode_semi": "Saved: your assistant applies low-risk changes without asking (a small deck or collection "
     "edit, or a private copy of a deck) and asks for everything else. A change to one of your decks keeps "
     "a snapshot you can restore from History; a collection change keeps none. Restoring a snapshot does "
-    "not put back a deck's folder, tags or cover.",
-    "mode_auto": "Saved: your assistant applies deck and collection changes without asking. Restoring a "
+    "not put back a deck's folder, tags, cover or custom cards.",
+    "mode_auto": "Saved: your assistant applies changes without asking. Restoring a "
     "snapshot, a commander or companion change, a new deck, an edit of more rows than Full auto applies by "
     "itself, making a deck public or unlisted, any edit of a description that has formatting, such as "
-    "bold text, links or pictures, actions on your Archidekt account and deleting a deck still wait for "
-    "you. So does a held change, a change waiting for another change first, one another app had a hand "
+    "bold text, links or pictures, actions on your Archidekt account, taking custom cards out of a deck "
+    "and deleting a deck still wait for you. So does a held change, a change waiting for another "
+    "change first, one another app had a hand "
     "in, one that replaces another app's change, or one that another app's waiting change would replace. "
     "When a change waits for "
     "your press, its card and review page say why. A change to one of your decks keeps a snapshot you "
     "can restore from History; a collection change keeps none. Restoring a snapshot does not put back "
-    "a deck's folder, tags or cover.",
+    "a deck's folder, tags, cover or custom cards.",
     # 0.7.29: several waiting changes applied with one press (batch.py), and Undo
     "rejected_some": "Rejected. Nothing was sent to Archidekt.",
     "undone": "Undone. The deck is back as it was before that change.",
@@ -1135,6 +1173,23 @@ async def read_limited(request: Request, limit: int) -> bytes | None:
     return bytes(buf)
 
 
+TOO_BIG = object()  # limited_form's answer for a body over its limit
+
+
+async def limited_form(request: Request, limit: int, **kw: Any) -> Any:
+    """The request's form, read only up to ``limit`` bytes (read_limited) whether or not it says
+    its length; TOO_BIG past the limit, None when the body is not a form. ``kw`` go to
+    ``request.form`` (max_files, max_fields)."""
+    body = await read_limited(request, limit)
+    if body is None:
+        return TOO_BIG
+    request._body = body  # request.form() reads the buffered body, never the stream again
+    try:
+        return await request.form(**kw)
+    except Exception:  # noqa: BLE001  # a body that is not a form
+        return None
+
+
 def _err_code(kind: str, *, proposal_exists: bool = False) -> str:
     """The notice code for a failed apply. ``not_found`` from an apply of a proposal that does exist
     means a card, printing, deck or snapshot was missing on Archidekt, not the proposal itself."""
@@ -1175,6 +1230,72 @@ ACCOUNT_CSS = (
     "grid-row:auto}.acc .ui-actions .btn,.acc .ui-actions button{flex:1 1 auto}}"
 )
 ACCOUNT_HEAD = f"<style>{ACCOUNT_CSS}</style><script src='{smallpage.SCRIPT}' defer></script>"
+
+
+async def account_html(
+    state: Any,
+    sub: str,
+    csrf: str | None,
+    *,
+    ok: str | None = None,
+    err: str | None = None,
+    open_box: str | None = None,
+    open_client: str | None = None,
+    saved: str = "",
+    profile_error: str = "",
+    profile_error_in: str = "",
+    profile_values: dict[str, str] | None = None,
+) -> str:
+    """The Account page's body: the cards, with the Archidekt profile cards read first while
+    Archidekt is linked (profile_page: one read, kept a short while). ``profile_error`` is
+    Archidekt's refusal of a profile press, shown in the card ``profile_error_in``."""
+    from . import profile_page
+
+    html_profile = ""
+    if state.decks.status(sub)["linked"]:
+        now = await profile_page.profile_or_none(state.decks, sub)
+        html_profile = profile_page.account_cards(
+            now,
+            csrf,
+            stamp=press_stamp(state.settings, sub),
+            ok=ok or "",
+            saved=saved,
+            error=profile_error,
+            error_in=profile_error_in,
+            values=profile_values,
+            open_box=open_box,
+        )
+    return _account_body(
+        state,
+        sub,
+        csrf,
+        ok=ok,
+        err=err,
+        open_box=open_box,
+        open_client=open_client,
+        profile_html=html_profile,
+    )
+
+
+def account_response(page: Any, body: str, sub: str, sid: str | None, *, status: int = 200) -> Response:
+    """The Account page rendered: its own style and scripts (pages.js, profile.js), and a page
+    policy that lets the chosen picture show before it is sent (a blob: address)."""
+    from .profile_page import CSS as PROFILE_CSS
+
+    resp = page(
+        "Account",
+        body,
+        sub=sub,
+        sid=sid,
+        status=status,
+        head_extra=ACCOUNT_HEAD
+        + f"<style>{PROFILE_CSS}</style><script src='/static/profile.js' defer></script>",
+    )
+    resp.headers["Content-Security-Policy"] = ACCOUNT_CSP
+    return resp
+
+
+ACCOUNT_CSP = DEFAULT_CSP.replace("img-src 'self'", "img-src 'self' blob:")
 
 
 def _notice(ok: str | None, err: str | None) -> str:
@@ -1237,6 +1358,33 @@ def _app_card() -> str:
     )
 
 
+def _lists_card(sub: str) -> str:
+    """Your Archidekt lists: the five account-wide lists with the counts known so far (each count
+    comes from that tab's last read, account_lists.counts), one press from My lists."""
+    from . import account_lists  # (imports archidekt first: not at the top)
+    from .lists_page import PAGE, TABS
+
+    counts = account_lists.counts(sub)
+    words = {
+        "templates": ("category template", "category templates"),
+        "default_categories": ("card with default categories", "cards with default categories"),
+        "color_tags": ("color tag", "color tags"),
+        "pins": ("pinned card", "pinned cards"),
+        "custom_cards": ("custom card", "custom cards"),
+    }
+    parts = []
+    for t in TABS:
+        n = counts.get(t.kind)
+        one, many = words[t.kind]
+        text = many if n is None else f"{n:,} {one if n == 1 else many}"
+        parts.append(f"<a href='{PAGE}/{t.slug}'>{text}</a>")
+    return (
+        "<div class='card' id='lists'><h2>Your Archidekt lists</h2>"
+        f"<p>Lists that follow you into every deck, kept on Archidekt: {', '.join(parts)}.</p>"
+        f"<div class='ui-actions'><a class='btn' href='{PAGE}'>{icon('list')} Open My lists</a></div></div>"
+    )
+
+
 def _account_body(
     state: Any,
     sub: str,
@@ -1247,10 +1395,12 @@ def _account_body(
     err: str | None = None,
     open_box: str | None = None,
     open_client: str | None = None,
+    profile_html: str = "",
 ) -> str:
     """The Account page's cards in their order. ``open_box`` names the box drawn open (the old
-    one-press forms' addresses: unlink, disconnect, disconnect_all, delete), ``open_client`` the
-    app a ?disconnect= address names."""
+    one-press forms' addresses: unlink, disconnect, disconnect_all, delete, picture), ``open_client``
+    the app a ?disconnect= address names, ``profile_html`` the Archidekt profile cards
+    (profile_page.account_cards, read before this runs) while Archidekt is linked."""
     info = state.decks.status(sub)
     user = state.db.get_user(sub) or {}
     who = html.escape(user.get("preferred_username") or user.get("email") or sub)
@@ -1316,6 +1466,8 @@ def _account_body(
             "Whether the session also stops working on Archidekt's side is not known.</p>"
             f"{link_disclosure.linked_html(_sweep_on(state))}{unlink_box}</div>"
         )
+        out.append(_lists_card(sub))
+        out.append(profile_html)
     else:
         out.append(
             "<div class='card' id='archidekt'><h2>Link your Archidekt account</h2>"
@@ -1369,9 +1521,16 @@ def _sweep_on(state: Any) -> bool:
     return bool(sweep is not None and sweep.enabled)
 
 
+# Under an approval mode above the gateway's cap
+NOT_ALLOWED = "<span class='small muted'> (not allowed on this gateway)</span>"
+
+
 def _mode_card(state: Any, sub: str, csrf_in: str, *, primary: bool = True) -> str:
     """The member's approval mode (modes.py): three radio choices, the current one checked,
-    choices above the gateway's cap shown disabled, and the plain cost of the auto modes.
+    choices above the gateway's cap shown disabled. A tight list (Ben, 2026-10-22): each choice
+    is one row, its name, with what it means in a fold opened by the chevron at the row's end.
+    The whole warning (AUTO_WARNING) is in the two auto modes' details, and nowhere else on the
+    page: no line about it under the list (Ben, 2026-10-23, "line hide").
     ``primary`` makes Save the page's orange button (not while Link account is)."""
     live = state.decks.live  # the admin's Settings page values, read now
     current = state.decks.mode_of(sub)
@@ -1380,24 +1539,28 @@ def _mode_card(state: Any, sub: str, csrf_in: str, *, primary: bool = True) -> s
     choices = []
     for mode in modes.MODES:
         allowed = modes.rank(mode) <= modes.rank(str(live.get("approval_mode_max")))
+        label = html.escape(modes.MODE_LABELS[mode])
+        body = ""
+        for lead, points in modes.mode_points(mode, max_rows=rows, big_rows=big):
+            cls = " class='warn'" if lead == modes.AUTO_WARNING else ""
+            body += f"<p{cls}>{html.escape(lead)}</p>"
+            if points:
+                body += "<ul>" + "".join(f"<li>{html.escape(p)}</li>" for p in points) + "</ul>"
         choices.append(
-            f"<label class='check mode{'' if allowed else ' muted'}'>"
+            f"<div class='mode-opt{'' if allowed else ' off'}'><label class='mode-pick'>"
             f"<input type='radio' name='mode' value='{mode}'{' checked' if mode == current else ''}"
-            f"{'' if allowed else ' disabled'}><span><strong>{html.escape(modes.MODE_LABELS[mode])}</strong>"
-            f"<br><span class='small'>"
-            f"{html.escape(modes.mode_help(mode, max_rows=rows, big_rows=big))}"
-            f"{'' if allowed else ' (not allowed on this gateway)'}</span></span></label>"
+            f"{'' if allowed else ' disabled'}><span>{label}"
+            f"{'' if allowed else NOT_ALLOWED}</span></label>"
+            f"<details class='mode-info'><summary title='What this mode does'>{icon('chev')}"
+            f"<span class='sr-only'>What this mode does: {label}</span></summary>"
+            f"<div class='mode-body'>{body}</div></details></div>"
         )
     return (
         "<div class='card' id='mode'><h2>Approval mode</h2>"
         "<p>How much your assistant may change on Archidekt without asking you first. It applies to "
         "your account only, and to nobody else.</p>"
         f"<form method='post'>{csrf_in}<input type='hidden' name='action' value='approval_mode'>"
-        f"{''.join(choices)}"
-        f"<p class='muted small'><strong>Low risk:</strong> {html.escape(modes.low_risk_text(rows))} "
-        f"<strong>High risk:</strong> {html.escape(modes.HIGH_RISK_TEXT)}</p>"
-        f"<p class='muted small'>{html.escape(modes.MEMBER_ONLY_TEXT)}</p>"
-        f"<div class='notice warn'>{html.escape(modes.AUTO_WARNING)}</div>"
+        f"<div class='mode-list'>{''.join(choices)}</div>"
         f"<button class='{'primary' if primary else 'btn-plain'}'>Save approval mode</button></form></div>"
     )
 
@@ -1515,6 +1678,16 @@ def _delete_card(csrf_in: str, backup_days: int | None = None, *, open: bool = F
         + ui.box_opener("Delete my data…", "/account?delete=1", "delete", kind="danger", icon_name="trash")
         + f"</div>{box}</div>"
     )
+
+
+# What a lists proposal's row is called on the review page (account_lists.KINDS)
+LIST_LABELS = {
+    "templates": "Template",
+    "default_categories": "Default categories",
+    "color_tags": "Color tag",
+    "pins": "Pin",
+    "custom_cards": "Custom card",
+}
 
 
 def _li(kind: str, label: str, name_html: str, qty_html: str = "") -> str:
@@ -1647,12 +1820,19 @@ def _change_rows(rows: list[dict[str, Any]] | None, diff: str) -> tuple[str, dic
             )
         elif kind == "new_deck":
             visibility = "private" if r.get("private") else "PUBLIC"
+            what = (
+                f"{r.get('cards', 0)} cards, {visibility}; {r['package']}"
+                if r.get("package")
+                else f"{r.get('format', '')}, {r.get('cards', 0)} cards, {visibility}"
+            )
+            if r.get("folder"):
+                what += f"; in folder “{r['folder']}”"
             out.append(
                 _li(
                     "chg",
-                    "New deck",
+                    "New card package" if r.get("package") else "New deck",
                     html.escape(str(r.get("name", ""))),
-                    html.escape(f"{r.get('format', '')}, {r.get('cards', 0)} cards, {visibility}"),
+                    html.escape(what),
                 )
             )
         elif kind == "action":
@@ -1681,6 +1861,33 @@ def _change_rows(rows: list[dict[str, Any]] | None, diff: str) -> tuple[str, dic
                     "Can't be undone on Archidekt" if r.get("cannot_undo") else "",
                 )
             )
+        elif kind == "list":
+            # a change to one of the member's account-wide lists (account_lists.py)
+            counts["chg"] += 1
+            note = f"<span class='small'>{html.escape(str(r['note']))}</span>" if r.get("note") else ""
+            out.append(
+                _li(
+                    "del action" if r.get("destructive") else "chg action",
+                    LIST_LABELS.get(str(r.get("list")), "List"),
+                    html.escape(str(r.get("text") or "")) + note,
+                    "Waits for your press" if r.get("destructive") else "",
+                )
+            )
+        elif kind == "custom_card":
+            # one of the member's custom cards in the deck (decks.custom_card_line says it all)
+            before, after = int(r.get("before") or 0), int(r.get("after") or 0)
+            net += after - before
+            css, key, word = (
+                ("add", "add", "Add")
+                if r.get("action") == "add"
+                else ("del", "del", "Remove")
+                if r.get("action") == "remove"
+                else ("chg", "chg", "Change")
+            )
+            counts[key] += 1
+            out.append(_li(css, word, html.escape(custom_card_line(r))))
+        elif kind == "package":  # where the adds below come from (packages.py); not a change itself
+            out.append(_li("chg", "Card package", html.escape(str(r.get("text", "")))))
         elif kind == "restore":
             out.append(
                 _li(
@@ -1825,6 +2032,12 @@ def _page_step(p: dict[str, Any]) -> str:
             "A new deck was made on Archidekt before this stopped, so it may not match the proposal. "
             "Check it, and delete it from its deck page if you don't want it."
         )
+    if state == "failed" and p.get("kind") == "lists" and result.get("done"):
+        n = int(result["done"])
+        return (
+            f"{n} of the changes {'was' if n == 1 else 'were'} made on Archidekt before this stopped. "
+            "Check My lists; the entries as they were just before are under Before, below."
+        )
     if state == "failed" and result.get("sent_entries"):
         where = "your collection" if p.get("kind") == "collection" else "the deck"
         undo = (
@@ -1928,10 +2141,52 @@ def _deck_meta(p: dict[str, Any]) -> tuple[str, str]:
         return "Target", "Your Archidekt collection"
     if p.get("kind") == "action" and p["deck_id"] == "account":
         return "Target", "Your Archidekt account"
+    if p.get("kind") == "action" and str(p["deck_id"]).startswith("forum:"):
+        tid = str(p["deck_id"]).removeprefix("forum:")
+        title = html.escape(str(p.get("deck_name") or tid))
+        return "Forum thread", f"<a href='/forum/thread/{quote(tid, safe='')}'>{title}</a>"
+    if p.get("kind") == "lists":
+        return "Target", "<a href='/lists'>Your Archidekt lists</a>"
     return (
         "Deck",
         f"<a href='/decks/{quote(str(p['deck_id']), safe='')}'>"
         f"{html.escape(str(p.get('deck_name') or p['deck_id']))}</a>",
+    )
+
+
+def _before_line(kind: str, e: dict[str, Any]) -> str:
+    """One entry of a lists change's "before" copy, in words."""
+    if kind == "templates":
+        flags = [
+            w
+            for k, w in (("in_deck", "in deck"), ("in_price", "in price"), ("premier", "Premier"))
+            if e.get(k)
+        ]
+        return f"{e.get('name', '')}: {', '.join(flags) or 'not in deck or price'}"
+    if kind == "color_tags":
+        return f"{e.get('name', '')}: {e.get('color', '')}"
+    if kind == "pins":
+        note = f", note “{e['notes']}”" if e.get("notes") else ""
+        where = f"{e.get('set_code', '')} {e.get('collector_number', '')}".strip()
+        return f"{e.get('name', '')} ({where}), {e.get('quantity', 1)}x {e.get('finish', '')}{note}"
+    if kind == "custom_cards":
+        return f"{e.get('name', '')}: {e.get('frontTypes') or ''} {e.get('frontText') or ''}".strip()
+    return str(e.get("name", ""))
+
+
+def _lists_before(p: dict[str, Any]) -> str:
+    """An applied lists change: the entries as they were just before it (account_lists.apply)."""
+    result = p.get("result") if isinstance(p.get("result"), dict) else {}
+    before = result.get("before")
+    if p.get("kind") != "lists" or not isinstance(before, list) or not before:
+        return ""
+    kind = str((p.get("changes") or {}).get("list") or result.get("list") or "")
+    items = "".join(
+        f"<li>{html.escape(_before_line(kind, e))}</li>" for e in before[:200] if isinstance(e, dict)
+    )
+    return (
+        "<details class='raw'><summary>Before: your list as it was just before</summary>"
+        f"<ul class='small'>{items}</ul></details>"
     )
 
 
@@ -2012,6 +2267,12 @@ def _proposal_body(
             f"card{'s' if abs(net) != 1 else ''}</span>"
         )
         heading, aria = "What will change", "Card changes"
+        if p.get("kind") == "lists":  # the member's account-wide lists: no cards change
+            summary = [
+                f"<span class='ui-lbl grey'>{total} change{'s' if total != 1 else ''} to your Archidekt "
+                "lists; no deck changes</span>"
+            ]
+            heading, aria = "What will change", "List changes"
         if p.get("kind") == "action":  # an Archidekt account action: no cards change
             summary = [
                 f"<span class='ui-lbl grey'>{total} Archidekt action{'s' if total != 1 else ''}; "
@@ -2105,11 +2366,25 @@ def _proposal_body(
         + f"<h3 class='ui-section'>{heading}</h3>"
         f"<div class='pills summary-pills'>{''.join(summary)}</div>"
         f"<ul class='changes' aria-label='{aria}'>{rows}</ul>"
-        f"<details class='raw'><summary>Plain-text diff</summary>{raw}</details>" + _also_waiting(p, others)
+        f"<details class='raw'><summary>Plain-text diff</summary>{raw}</details>"
+        + _lists_before(p)
+        + _also_waiting(p, others)
     )
     if pending and p["writes_enabled"]:
-        destroy = p.get("risk") == "destructive"
-        if destroy:
+        # the member-only tier is shared: deleting a deck, deleting from the lists (below) and
+        # taking custom cards out of a deck each say what they do
+        destroy = p.get("risk") == "destructive" and p.get("kind") == "action"
+        if p.get("risk") == "destructive" and p.get("kind") == "custom_cards":
+            ask = (
+                "<div class='apply destroy'><h3 class='ui-section'>Take custom cards out of the deck?</h3>"
+                "<p class='notice warn'><strong>Restoring a snapshot doesn't put custom cards back.</strong> "
+                "To have one again, add it from My lists › Custom cards.</p>"
+                "<p class='small'>The gateway checks the deck again first and reads it back after. Only "
+                "you can approve this, in every approval mode. Nothing happens until you tap "
+                "Take them out on Archidekt.</p>"
+            )
+            apply_button = ("apply", "Take them out on Archidekt", "btn-outline-danger")
+        elif destroy:
             ask = (
                 "<div class='apply destroy'><h3 class='ui-section'>Delete this deck on Archidekt?</h3>"
                 "<p class='notice error'><strong>This deletes the deck from your Archidekt account. "
@@ -2120,6 +2395,21 @@ def _proposal_body(
             )
             # a red outline first; static/proposals.js asks once more with the solid red button
             apply_button = ("apply", "Delete this deck on Archidekt", "btn-outline-danger pr-ask")
+        elif p.get("kind") == "lists":
+            deletes = any(r.get("destructive") for r in p.get("rows") or [])
+            ask = (
+                "<div class='apply'><h3 class='ui-section'>Apply to your Archidekt lists?</h3>"
+                "<p>Applying writes these changes to your lists on Archidekt. The gateway reads the list "
+                "again first and keeps a copy of the entries it changes from just before, then reads "
+                "the list back. Nothing happens until you tap Apply.</p>"
+                + (
+                    "<p class='small'><strong>This deletes from your lists.</strong> Only you can "
+                    "approve it, in every approval mode.</p>"
+                    if deletes
+                    else ""
+                )
+            )
+            apply_button = ("apply", "Apply to my Archidekt lists", "primary btn-primary")
         elif p.get("kind") == "action":
             ask = (
                 "<div class='apply'><h3 class='ui-section'>Do this on Archidekt?</h3>"

@@ -128,6 +128,56 @@ async def test_default_is_manual_and_the_account_page_sets_the_mode(stack: Stack
     assert structured(await call(h, token, "account_status"))["approval_mode"] == "manual"
 
 
+async def test_each_mode_is_one_line_with_its_explanation_folded(stack: Stack) -> None:
+    """Ben (2026-10-22): the Approval mode panel is a tight list, each mode one row with its
+    name; what it means is in a closed fold opened by the chevron at the row's end, so the page is
+    not a wall of text. The approved words are kept, and the cost of the auto modes is said in
+    those modes' own folds: no line about it under the list any more (Ben, "line hide")."""
+    h = stack.h
+    await linked_user(stack)
+    b = Browser(h)
+    await b.login()
+    page = (await b.http.get("/account")).text
+    await b.aclose()
+    card = page[page.index("<div class='card' id='mode'>") :]
+    card = card[: card.index("</form></div>")]
+    folds = re.findall(r"<details class='mode-info'>(.*?)</details>", card, re.S)
+    assert len(folds) == 3 and "<details class='mode-info' open" not in card
+    live = h.app.state.gateway.live
+    rows, big = int(live.get("auto_apply_max_rows")), int(live.get("auto_big_edit_rows"))
+    for fold, mode in zip(folds, modes.MODES, strict=True):
+        # the chevron is the fold's whole summary, named for the mode it explains
+        assert f"What this mode does: {html.escape(modes.MODE_LABELS[mode])}" in fold
+        for lead, points in modes.mode_points(mode, max_rows=rows, big_rows=big):
+            assert html.escape(lead) in fold and all(f"<li>{html.escape(p)}</li>" in fold for p in points)
+        # the whole warning is in the two modes that let an assistant apply changes
+        assert (html.escape(modes.AUTO_WARNING) in fold) == (mode != "manual")
+    outside = re.sub(r"<details class='mode-info'>.*?</details>", "", card, flags=re.S)
+    assert html.escape(modes.AUTO_WARNING) not in outside
+    # no warning line under the list: the whole warning lives in the auto modes' folds alone
+    assert "class='mode-warn'" not in card and "role='note'" not in card
+    assert "tricked into making changes" not in outside
+
+
+def test_the_account_page_points_say_what_mode_help_says() -> None:
+    """mode_points breaks mode_help into short lines for the Account page; the numbers, the
+    lists and the sentences quoted elsewhere stay the same in both."""
+    for rows, big in ((5, 20), (3, 7)):
+        for mode in modes.MODES:
+            help_text = modes.mode_help(mode, max_rows=rows, big_rows=big)
+            flat = " ".join(
+                lead + " " + " ".join(p) for lead, p in modes.mode_points(mode, max_rows=rows, big_rows=big)
+            )
+            if mode == "semi":
+                for part in (f"at most {rows} card row", modes.LOW_RISK_CHANGES, modes.ACCOUNT_ACTIONS_TEXT):
+                    assert part in help_text and part in flat
+            if mode == "auto":
+                for part in (f"more than {big} card row", modes.MEMBER_ONLY_TEXT):
+                    assert part in help_text and part in flat
+            for word in ("held change", "another app") if mode != "manual" else ("review page", "default"):
+                assert word in help_text and word in flat
+
+
 async def test_account_page_needs_a_valid_form(stack: Stack) -> None:
     """No CSRF token, no change; a bearer token (an assistant) cannot post the form at all."""
     h = stack.h
@@ -306,7 +356,7 @@ async def test_auto_mode_applies_everything_with_a_snapshot(stack: Stack) -> Non
     await _set_mode(h, "auto")
     p = structured(await _adds(h, token, 6))
     assert p["risk"] == "high" and p["assistant_may_apply"] is True
-    assert "deck and collection changes" in p["next_step"]
+    assert "to apply changes without asking" in p["next_step"]
     a = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
     sent = len(ark.patches)
     assert a["ok"] and a["state"] == "applied" and a["snapshot_id"] and sent >= 1
@@ -487,6 +537,11 @@ def test_the_account_actions_wording_names_every_account_action() -> None:
         "collaborator_add": "collaborator changes",
         "collaborator_remove": "collaborator changes",
         "delete_deck": "deleting a deck",
+        "deck_help": "deck help requests",
+        "report": "reports to Archidekt's moderators",
+        "profile": "profile and email settings",
+        "contest_enter": "contest entries",
+        "contest_withdraw": "contest entries",
     }
     assert set(words) == set(LABELS)
     for action, word in words.items():
@@ -508,9 +563,11 @@ async def test_the_account_page_and_guide_use_the_one_wording(stack: Stack) -> N
     finally:
         await b.aclose()
     guide = _flat(guide_body(site="Gateway", writes_enabled=True, has_collection=True, max_rows=3))
+    assert modes.HIGH_RISK_TEXT in guide  # the Account page lists what waits in each mode instead
     for text in (page, guide):
-        assert modes.HIGH_RISK_TEXT in text and modes.MEMBER_ONLY_TEXT in text
-    assert modes.low_risk_text(5) in page and modes.low_risk_text(3) in guide
+        assert modes.MEMBER_ONLY_TEXT in text
+    # the Account page says what a low-risk change is in Semi's own details (mode_points)
+    assert modes.LOW_RISK_CHANGES in page and modes.low_risk_text(3) in guide
     assert "Account action or deck deletion" in guide  # the mode table has the column (bug 6)
 
 
@@ -557,8 +614,11 @@ def test_the_semi_auto_notice_names_what_semi_auto_applies() -> None:
         "Saved: your assistant applies low-risk changes without asking (a small deck or collection edit, "
         "or a private copy of a deck) and asks for everything else. A change to one of your decks keeps "
         "a snapshot you can restore from History; a collection change keeps none. Restoring a snapshot "
-        "does not put back a deck's folder, tags or cover."
+        "does not put back a deck's folder, tags, cover or custom cards."
     )
+    # and Full auto's names taking custom cards out among what still waits (confirmation C-2)
+    assert "taking custom cards out of a deck and deleting a deck still wait" in OK_MESSAGES["mode_auto"]
+    assert OK_MESSAGES["mode_auto"].endswith("a deck's folder, tags, cover or custom cards.")
     assert "a private copy of a deck" in modes.mode_help("semi")
 
 
@@ -1079,3 +1139,21 @@ async def test_a_raised_commander_with_another_row_says_the_rows_fold(stack: Sta
     finally:
         await b.aclose()
     assert html.escape(fold) in page
+
+
+def test_premier_in_default_categories_is_named_with_the_members_own_presses() -> None:
+    """A Premier template is never applied by an assistant (account_lists.risk_of: destructive), so it
+    is named wherever the always-your-press list is, in the app and in every doc that copies it."""
+    from pathlib import Path
+
+    from mtg_gateway import account_lists
+
+    assert "Premier in your default categories" in modes.MEMBER_ONLY_TEXT
+    assert "Premier in your default categories" in modes.mode_help("semi")
+    assert account_lists.PREMIER_NOTE == (
+        "Premier can make a category's cards count as the deck's commanders, so this waits for your "
+        "own press in every approval mode."
+    )
+    docs = Path(__file__).resolve().parents[1] / "docs"
+    for name in ("CAPABILITIES.md", "OPERATIONS.md", "ONBOARDING.md", "CONNECT.md"):
+        assert modes.MEMBER_ONLY_TEXT in (docs / name).read_text(encoding="utf-8"), name

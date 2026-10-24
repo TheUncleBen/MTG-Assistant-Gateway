@@ -217,8 +217,11 @@ _PROPOSES = frozenset(
         "propose_clone_deck",
         "propose_deck_details",
         "propose_deck_categories",
+        "propose_custom_card_changes",
         "propose_restore_snapshot",
         "propose_collection_changes",
+        "propose_list_change",
+        "propose_add_package",
     }
 )
 _YOUR_PRESS = frozenset(
@@ -228,6 +231,10 @@ _YOUR_PRESS = frozenset(
         "propose_create_folder",
         "propose_collaborator",
         "propose_delete_deck",
+        "propose_deck_help",
+        "propose_report",
+        "propose_profile_change",
+        "propose_contest_entry",
     }
 )
 _ON_PROPOSALS = frozenset(
@@ -1024,7 +1031,7 @@ def guide_body(
         "it changes the cards or details of one of your decks, the Archidekt write, a read-back, an audit "
         "row. That is why every change, yours or the assistant's, has a record under Proposals and "
         "History, and why such a change to one of your decks can be undone by restoring its snapshot. "
-        "Restoring a snapshot does not put back a deck's folder, tags or cover.</p>"
+        "Restoring a snapshot does not put back a deck's folder, tags, cover or custom cards.</p>"
         f"{_h4('exp-approvals-proposal', 'Proposals')}"
         "<p>An assistant never writes to Archidekt directly. It proposes: the exact list of rows that "
         "would change, stored on the gateway with a review page and, in a chat that shows cards, a card "

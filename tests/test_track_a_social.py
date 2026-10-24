@@ -237,10 +237,11 @@ def test_post_reply_edit_and_delete_a_comment_in_the_browser(tmp_path) -> None:
             page.locator("#comments .confirmbar button.btn-primary").click()
             page.wait_for_selector("#comments .cmt[data-id='555001'] .replies .cmt", timeout=10000)
             assert count.inner_text() == "2 comments"
-            # the new comment is the member's own at once: Edit and Delete, no vote buttons
+            # the new comment is the member's own at once: Edit… and Delete… in its ⋮, no vote button
             mine = page.locator("#comments .thread > .cmt").first
             assert mine.locator("button.vote").count() == 0
-            mine.locator("button", has_text="Edit").click()
+            mine.locator("> .who .kebab").click()
+            page.locator(".ctxmenu [role=menuitem]", has_text="Edit…").click()
             mine.locator("form.editcomment textarea").fill("Nice deck, great curve.")
             mine.locator("form.editcomment button", has_text="Save").click()
             chip = mine.locator(".confirm")
@@ -259,7 +260,8 @@ def test_post_reply_edit_and_delete_a_comment_in_the_browser(tmp_path) -> None:
             )
             assert any(rich_text(c["text"]) == "Nice deck, great curve." for c in server.ark.comments[ROOT])
             # delete: asked first, then gone
-            mine.locator("button", has_text="Delete").click()
+            mine.locator("> .who .kebab").click()
+            page.locator(".ctxmenu [role=menuitem]", has_text="Delete…").click()
             mine.locator(".confirmbar button.btn-danger").click()
             page.wait_for_function("() => document.querySelectorAll('#comments .thread > .cmt').length === 1")
             assert count.inner_text() == "1 comment"

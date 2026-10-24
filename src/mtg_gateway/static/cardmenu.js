@@ -68,7 +68,15 @@
     undo: "<path d='M9 14L4 9l5-5'/><path d='M4 9h10a6 6 0 0 1 0 12h-3'/>",
     history: "<circle cx='12' cy='12' r='9'/><path d='M12 7v5l3 2'/>",
     decks: "<path d='M4 7h16v13H4z'/><path d='M7 4h13v13'/>",
-    proposals: "<path d='M9 11l3 3 8-8'/><path d='M20 12v6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h9'/>"
+    proposals: "<path d='M9 11l3 3 8-8'/><path d='M20 12v6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h9'/>",
+    hand: "<path d='M8 13V6a1.5 1.5 0 0 1 3 0v5M11 11V4.5a1.5 1.5 0 0 1 3 0V11M14 11V6a1.5 1.5 0 0 1 3 0v7'/><path d='M17 13v3a6 6 0 0 1-6 6h-1a6 6 0 0 1-5-2.7L3 15a1.5 1.5 0 0 1 2.4-1.8L8 15v-2'/>",
+    flag: "<path d='M5 21V4h12l-2 4 2 4H5'/>",
+    lock: "<rect x='5' y='11' width='14' height='10' rx='2'/><path d='M8 11V8a4 4 0 0 1 8 0v3'/>",
+    package: "<path d='M12 3l8 4.5v9L12 21l-8-4.5v-9z'/><path d='M4 7.5l8 4.5 8-4.5M12 12v9'/>",
+    trophy: "<path d='M7 4h10v5a5 5 0 0 1-10 0z'/><path d='M7 6H4a3 3 0 0 0 3 3M17 6h3a3 3 0 0 1-3 3M12 14v4M8 21h8'/>",
+    pdf: "<path d='M6 3h8l4 4v14H6z'/><path d='M14 3v4h4'/><path d='M9 13h6M9 17h6'/>",
+    comment: "<path d='M4 5h16v11H9l-5 4z'/>",
+    tag: "<path d='M3 12V4h8l9 9-8 8z'/><circle cx='7' cy='8' r='1.2' fill='currentColor'/>"
   };
   function icon(name) {
     var span = el("span");
@@ -287,6 +295,9 @@
     return a;
   }
   function sep() { return el("div", "sep"); }
+  // the ⋮ a menu is opening from (bind sets it for the call): the menu's right edge sits on the
+  // button's, so a ⋮ at the end of a row or column never pushes the menu out of that column
+  var anchor = null;
   /* s: {head (the item's name), label (for readers; default "Menu: head"), items (nodes), cls,
      focusBack (an element)}; x, y: where it opens (the pointer, or the ⋮). */
   function openMenu(s, x, y) {
@@ -313,6 +324,7 @@
     m.style.visibility = "hidden";
     document.body.appendChild(m);
     var pad = 8, w = m.offsetWidth, h = m.offsetHeight;
+    if (anchor && anchor.right - w >= pad) x = anchor.right - w;
     m.style.left = Math.max(pad, Math.min(x, window.innerWidth - w - pad)) + "px";
     m.style.top = Math.max(pad, Math.min(y, window.innerHeight - h - pad)) + "px";
     m.style.maxHeight = (window.innerHeight - parseFloat(m.style.top) - pad) + "px";
@@ -366,7 +378,8 @@
         e.preventDefault();
         e.stopPropagation();
         var r = b.getBoundingClientRect();
-        o.open(o.itemOf(b), r.left, r.bottom, "button");
+        anchor = r;
+        try { o.open(o.itemOf(b), r.left, r.bottom, "button"); } finally { anchor = null; }
         return;
       }
       if (!swallow) return;

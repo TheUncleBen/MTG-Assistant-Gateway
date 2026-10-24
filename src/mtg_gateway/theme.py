@@ -89,7 +89,9 @@ _LIGHT = """
     --menu-head:#595959; /* 5.2:1 on --surface-2 */
     --toolbar-bg:#dcdcdc; --toolbar-text:#383838;
     --navbar-bg:#313131; --navbar-text:#ffffff; --navbar-muted:#d6d6d6;
-    --banner-a:rgba(40,40,40,.82); --banner-b:rgba(40,40,40,.5);
+    /* the deck banner's shade: dark enough over --surface-2 or a light blurred art for its
+       #d6d6d6 text (deckpage.py .banner .row) to read at 4.5:1 across the whole gradient */
+    --banner-a:rgba(40,40,40,.86); --banner-b:rgba(40,40,40,.76);
     /* coloured text: at least 4.5:1 on --bg, --surface, --surface-2 and on its own tint */
     --orange-text:#944b00; --green-text:#0d6639; --red-text:#b3262e; --blue-text:#1d55b3;
     --orange-ctl:#c45f00; /* a checked box or radio: 3.1:1 on --surface-2, 4:1 on --surface */
@@ -263,6 +265,13 @@ svg.i{width:1em;height:1em;fill:none;stroke:currentColor;stroke-width:2;stroke-l
 .topbar nav form{display:inline;margin:0}
 .topbar .icon-btn{width:40px;padding:0;justify-content:center;font-size:1.2rem}
 .topbar .icon-btn img.av{width:28px;height:28px;border-radius:50%;object-fit:cover;display:block}
+/* the bell with Archidekt's unseen count (static/bell.js), between the search and the picture */
+.topbar .bell{position:relative;border-radius:50%}
+.topbar .bell svg.i{width:22px;height:22px}
+.topbar .bell .n{position:absolute;top:1px;right:0;min-width:18px;height:18px;border-radius:9px;
+  background:var(--orange);color:var(--on-orange);font-size:.72rem;font-weight:900;line-height:18px;
+  text-align:center;padding:0 4px;font-style:normal;box-sizing:border-box}
+.topbar .bell .n[hidden]{display:none}
 
 /* dropdown menus (details/summary, no script): phatDropdown trigger + menu panel. The panel
    styling is the shared .menu class, so a script-made menu (the deck page's card menu) looks the
@@ -383,7 +392,9 @@ select.msel-native{position:absolute;width:1px;height:1px;margin:-1px;padding:0;
   background-repeat:no-repeat;background-position:right .75rem center;background-size:10px 6px;
   transition:background-color .2s ease-in-out}
 .msel-btn:hover,.menu button.msel-btn:hover,details.dd .menu button.msel-btn:hover{
-  background-color:var(--surface-2);background-image:url(/static/chevron.svg);color:var(--text)}
+  background-color:var(--surface-2);background-image:url(/static/chevron.svg);color:var(--text);
+  /* button:hover's shorthand would reset these: the chevron stays one, at the right */
+  background-repeat:no-repeat;background-position:right .75rem center;background-size:10px 6px}
 .msel-btn:focus-visible,.menu button.msel-btn:focus-visible,details.dd .menu button.msel-btn:focus-visible{
   outline:2px solid var(--focus);outline-offset:1px;
   border-color:var(--orange);background-color:var(--surface)}
@@ -445,6 +456,41 @@ input[type=radio]:focus-visible{outline:2px solid var(--focus);outline-offset:2p
 /* a choice with a description under its label: the dot sits level with the label's first line */
 .check.mode{align-items:flex-start}
 .check.mode input{margin-top:.15rem}
+/* Account › Approval mode: a tight list, one row per mode (radio and name) with the same fixed
+   padding, its meaning in a fold opened by the chevron at the row's end. The radio, the name and
+   the chevron share the first line at any text size; the fold's text lines up with the name. */
+.mode-list{border:1px solid var(--card-border);border-radius:var(--radius-panel);margin:.75rem 0}
+.mode-opt{position:relative;border-top:1px solid var(--border);background-clip:padding-box}
+.mode-opt:first-child{border-top:0}
+.mode-opt:has(input:checked){background-color:var(--orange-tint)}
+.mode-pick{display:flex;align-items:flex-start;gap:10px;margin:0;padding:12px 48px 12px 14px;
+  min-height:44px;font-weight:700;line-height:1.35;cursor:pointer}
+.mode-pick input[type=radio]{font-size:inherit;margin-top:calc((1.35em - 1.15rem) / 2)}
+.mode-opt.off .mode-pick{color:var(--text-muted);cursor:default}
+details.mode-info > summary{position:absolute;right:2px;top:max(0px,calc(12px + .675em - 22px));
+  width:44px;height:44px;display:grid;place-items:center;list-style:none;cursor:pointer;
+  color:var(--text-muted);border-radius:var(--radius)}
+details.mode-info > summary::-webkit-details-marker{display:none}
+details.mode-info > summary:hover{color:var(--text)}
+details.mode-info > summary:focus-visible{outline:2px solid var(--focus);outline-offset:-4px}
+details.mode-info > summary svg{transition:transform .15s}
+details.mode-info[open] > summary svg{transform:rotate(180deg)}
+.mode-body{margin:-4px 0 0;padding:0 16px 14px 46px;line-height:1.45;font-size:.95rem;color:var(--text)}
+.mode-body p{margin:0 0 .45rem}
+.mode-body ul{margin:-.2rem 0 .55rem;padding-left:1.1rem}
+.mode-body li{margin:.15rem 0}
+.mode-body > :last-child{margin-bottom:0}
+.mode-body p.warn{margin-top:.6rem;padding:8px 12px;border-left:3px solid var(--orange);
+  background:var(--surface);border-radius:var(--radius)}
+/* On a phone the list runs to the card's edges and the gutters round the name are tighter, so a
+   mode's name keeps its one row at 344px (a folded Fold) as well as at 390px. The row stays a
+   44px tap target, and at 200% text the name may wrap — nothing scrolls sideways. */
+@media (max-width:599.98px){
+  .mode-list{margin-inline:-1rem;border-left:0;border-right:0;border-radius:0}
+  .mode-pick{gap:8px;padding:13px 38px 13px 12px;font-size:.86rem}
+  details.mode-info > summary{right:0;width:38px;top:max(0px,calc(13px + .6em - 22px))}
+  .mode-body{padding:0 12px 14px 30px;font-size:.9rem}
+}
 /* toggle switch 40x20, orange when on */
 .switch{position:relative;display:flex;align-items:center;gap:.6rem;cursor:pointer;font-weight:400;
   margin:.5rem 0;min-height:2rem}
@@ -1610,6 +1656,28 @@ html.mtgbox-open,html.mtgbox-open body{overflow:hidden}
 """
 CSS += BOX_CSS
 
+# The bell's list (profile_page.py, static/bell.js): in the box on every page and on the
+# /notifications page. Unseen rows are tinted; a row links to its target where there is one.
+BELL_CSS = """
+.bell-list{list-style:none;margin:0;padding:0}
+.bell-row{display:flex;gap:.6rem;align-items:flex-start;min-height:44px;padding:.45rem 0;
+  border-top:1px solid var(--border-soft);text-decoration:none;color:var(--text)}
+.bell-list > li:first-child > .bell-row{border-top:0}
+.bell-row i{width:32px;height:32px;border-radius:50%;background:var(--surface-3);display:grid;
+  place-items:center;font-style:normal;font-weight:900;flex:none;color:var(--text)}
+.bell-row .t{flex:1;min-width:0;overflow-wrap:anywhere}
+.bell-row .t .s{display:block;color:var(--text-muted);font-size:.86rem}
+.bell-row.new{background:var(--orange-tint);margin:0 -16px;padding:.45rem 16px}
+a.bell-row:hover .t{text-decoration:underline}
+.bell-badge{display:inline-grid;place-items:center;min-width:20px;height:20px;border-radius:10px;
+  background:var(--orange);color:var(--on-orange);font-size:.75rem;font-weight:900;padding:0 5px;
+  vertical-align:middle;margin-left:.3rem;line-height:1}
+.bell-page .bell-row.new{margin:0;padding:.45rem .5rem}
+.bell-foot{margin:.75rem 0 0}
+.mtgbox .body .bell-foot{margin-top:.75rem}
+"""
+CSS += BELL_CSS
+
 
 # The top bar's search box (cards and decks, static/suggest.js in its site mode): in the bar from
 # 900 px and on the touch rail (600 to 1279 px); under 600 px folded behind the magnifier
@@ -1879,6 +1947,13 @@ ICONS = {
     "trash": "<path d='M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13'/><path d='M10 11v6M14 11v6'/>",
     "folder": "<path d='M3 6h6l2 2h10v11H3z'/>",
     "lock": "<rect x='5' y='11' width='14' height='10' rx='2'/><path d='M8 11V8a4 4 0 0 1 8 0v3'/>",
+    "flag": "<path d='M5 21V4h12l-2 4 2 4H5'/>",
+    "package": "<path d='M12 3l8 4.5v9L12 21l-8-4.5v-9z'/><path d='M4 7.5l8 4.5 8-4.5M12 12v9'/>",
+    "trophy": (
+        "<path d='M7 4h10v5a5 5 0 0 1-10 0z'/>"
+        "<path d='M7 6H4a3 3 0 0 0 3 3M17 6h3a3 3 0 0 1-3 3M12 14v4M8 21h8'/>"
+    ),
+    "pdf": "<path d='M6 3h8l4 4v14H6z'/><path d='M14 3v4h4'/><path d='M9 13h6M9 17h6'/>",
     "image": "<path d='M4 5h16v14H4z'/><circle cx='9' cy='10' r='1.5'/><path d='M4 17l5-5 4 4 3-3 4 4'/>",
     "box": "<path d='M3 8l9-5 9 5-9 5z'/><path d='M3 8v8l9 5 9-5V8'/><path d='M12 13v8'/>",
     "play": "<circle cx='12' cy='12' r='9'/><path d='M10 8l6 4-6 4z' fill='currentColor'/>",
@@ -1941,6 +2016,9 @@ ICONS = {
     "back": "<path d='M9 14L4 9l5-5'/><path d='M4 9h10a6 6 0 0 1 0 12h-3'/>",
     "bell": "<path d='M6 16V11a6 6 0 0 1 12 0v5l2 2H4z'/><path d='M10 21h4'/>",
     "send": "<path d='M4 12l16-8-6 16-2-7z'/>",
+    # the forum reply box's text style buttons (static/social.js)
+    "bold": "<path d='M7 4h6a3.5 3.5 0 0 1 0 7H7zM7 11h7a3.5 3.5 0 0 1 0 7H7z'/>",
+    "italic": "<path d='M10 4h8M6 20h8M14 4l-4 16'/>",
     # the one neutral "connected app" mark (ui.app_chip): a plug, never a company's logo
     "app": "<path d='M9 2v5M15 2v5'/><path d='M6 7h12v3a6 6 0 0 1-12 0z'/><path d='M12 16v6'/>",
 }
@@ -2081,7 +2159,7 @@ NAV_LINKS = [
 NAV_FOLD_FROM = "/proposals"
 # The tabs, as Material's navigation bar (3 to 5 destinations) has them: on a compact screen Home,
 # Decks, Scan, Collection and More, with Search as the icon in the top bar. More opens a sheet with
-# the remaining pages (Proposals, History, Reports, Watchlist, Guide, Account, Admin) so nothing
+# the remaining pages (Proposals, History, Reports, Watchlist, My lists, Guide, Account, Admin) so nothing
 # is more than two taps away; Home is never under More. The rail (an unfolded Fold, a tablet, the app from
 # 600px) is tall enough for every page, so it lists them all as tabs and has no More.
 TAB_LINKS = [
@@ -2096,6 +2174,8 @@ MORE_LINKS = [
     ("/history", "History", "history"),
     ("/reports", "Reports", "report"),
     ("/watchlist", "Watchlist", "stats"),
+    ("/lists", "My lists", "list"),
+    ("/forum", "Forum", "comment"),
     ("/guide", "Guide", "guide"),
     ("/account", "Account", "account"),
 ]
@@ -2223,7 +2303,9 @@ def render(
             # Reports: here, in the top bar from 1200 px (its More below that), a tab on the rail
             f"<a href='/reports'>{icon('report')}Reports</a>"
             + (f"<a href='/watchlist'>{icon('stats')}Watchlist</a>" if WATCHLISTS else "")
-            + f"<a href='/activity'>{icon('activity')}My activity</a>"
+            + f"<a href='/lists'>{icon('list')}My lists</a>"
+            f"<a href='/forum'>{icon('comment')}Forum</a>"
+            f"<a href='/activity'>{icon('activity')}My activity</a>"
             f"<a href='/guide'>{icon('guide')}Guide</a>"
             f"<a href='/install?for=skill'>{icon('report')}Assistant skill</a>"
             + (f"<a href='/install?for=android'>{icon('download')}Android app</a>" if not app else "")
@@ -2290,9 +2372,19 @@ def render(
             "placeholder='Search cards and decks' data-suggest='cards' data-suggest-site='/cards?q=' "
             "data-suggest-menu autocomplete='off' enterkeyhint='search'></span></form>"
         )
-        right = f"{search_form}<nav class='user' aria-label='Account'>{search_btn}{account_menu}</nav>"
-        # The More pages are tabs on the rail too (railonly: hidden on the phone bar, which has More)
-        rail_more = [(href, label, ic, "railonly") for href, label, ic in more_links]
+        # The bell (parity release 2): Archidekt's unseen count, read after the page has loaded
+        # (static/bell.js asks /notifications/count), and the list as a box; a link to the
+        # /notifications page without scripts. Between the search and the picture at every width.
+        bell = (
+            "<a class='icon-btn bell' href='/notifications' aria-label='Notifications' title='Notifications' "
+            f"data-bell{' aria-current=page' if cur == '/notifications' else ''}>{icon('bell')}"
+            "<span class='n' hidden aria-hidden='true'></span></a>"
+        )
+        right = f"{search_form}<nav class='user' aria-label='Account'>{search_btn}{bell}{account_menu}</nav>"
+        # The More pages are tabs on the rail too (railonly: hidden on the phone bar, which has More),
+        # except Forum: one more tab put the rail past a short screen (an unfolded Fold, the app in
+        # landscape); on the rail Forum is in the account menu
+        rail_more = [(href, label, ic, "railonly") for href, label, ic in more_links if href != "/forum"]
         tabbar = (
             "<nav class='tabbar' aria-label='Sections'>"
             + "".join(
@@ -2417,6 +2509,7 @@ def render(
         "<script src='/static/mana.js' defer></script><script src='/static/suggest.js' defer></script>"
         "<script src='/static/select.js' defer></script>"
         + ("<script src='/static/sitesearch.js' defer></script>" if signed_in else "")
+        + ("<script src='/static/bell.js' defer></script>" if signed_in else "")
         + "</body></html>"
     )
     return HTMLResponse(

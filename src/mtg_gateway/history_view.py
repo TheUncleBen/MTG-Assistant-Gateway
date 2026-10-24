@@ -447,6 +447,8 @@ def details_panel(e: dict[str, Any], query: dict[str, Any]) -> str:
 
 COLLECTION_ID = "collection"  # decks.Decks.COLLECTION_TARGET: collection proposals file under it
 COLLECTION_LABEL = "Your Archidekt collection"
+LISTS_ID = "lists"  # account_lists.LISTS_TARGET: changes to the member's lists file under it
+LISTS_LABEL = "Your Archidekt lists"
 
 
 def deck_filter_groups(
@@ -473,6 +475,8 @@ def deck_filter_groups(
             continue
         if did == COLLECTION_ID:
             current[did] = COLLECTION_LABEL
+        elif did == LISTS_ID:
+            current[did] = LISTS_LABEL
         elif did in names:
             current[did] = names[did] or recorded
         elif listed is not None and did not in listed and did in own:

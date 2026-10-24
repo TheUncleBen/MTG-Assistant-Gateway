@@ -263,22 +263,20 @@ printing, color tag or custom mana value, no more than 4 copies a row,
 never a change to which cards are the commanders or to the categories of a row in the commander zone, and never fewer copies of
 a card that has a row in the commander zone and another row, both in the deck or both in the maybeboard or sideboard; it also makes a private copy of a deck; a new deck,
 a restore, the deck's details and bigger edits still ask you) or *Full
-auto*, shown as "Apply deck and collection changes without asking" (it applies the rest too, except a restore, a commander or companion change, a new deck, an edit of more
+auto*, shown as "Apply changes without asking" (it applies the rest too, except a restore, a commander or companion change, a new deck, an edit of more
 than 20 rows (by default), making a deck public or unlisted, a category change that touches the commander or which cards count in the deck, and any edit of a description that has formatting, such as bold text, links or pictures, which still wait for your press; so does a held change, a change waiting for
 another change first, one another app had a hand in, one that replaces another app's change, or one
 that another app's waiting change would replace).
 Those numbers are the defaults: your Account page shows this gateway's
 numbers, and which modes it allows.
-Actions on your Archidekt account (likes, votes, bookmarks, follows,
-comments, new folders and collaborator changes) and deleting a deck are
-never applied by an assistant: each one waits for your own press, in every mode, on the card in the chat or on its review page (deleting a deck, and an edit of a comment that has formatting: on the review page only). An edit of a description that has formatting is also approved on its review page only. It is your own setting:
+Actions on your Archidekt account (likes, votes, bookmarks, follows, comments, new folders, collaborator changes, deck help requests, reports to Archidekt's moderators, contest entries, and profile and email settings), deleting from your Archidekt lists, Premier in your default categories, taking custom cards out of a deck and deleting a deck are never applied by an assistant: each one waits for your own press, in every mode, on the card in the chat or on its review page (deleting a deck, and an edit of a comment that has formatting: on the review page only). An edit of a description that has formatting is also approved on its review page only. It is your own setting:
 it covers only your account, your decks and the apps you connected, and
 only you can change it, in your browser. In Semi-auto and Full auto the
 assistant applies what the mode allows with `apply_proposal` and tells you;
 the card then shows the change without buttons. A change to one of your
 decks still keeps a snapshot you can restore from the History page; a
 collection change keeps none. Restoring a snapshot does not put back a
-deck's folder, tags or cover. The cost: an assistant can be tricked by text
+deck's folder, tags, cover or custom cards. The cost: an assistant can be tricked by text
 it reads into making changes you did not ask for. If you let your assistant
 apply changes without asking, such a change can land on Archidekt without
 your press.

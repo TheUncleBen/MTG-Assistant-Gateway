@@ -108,7 +108,8 @@ def test_a_plain_fold_out_keeps_its_marker_on_a_touch_screen(server: Server) -> 
         for path in ("/admin/users", "/account"):
             page.goto(f"{server.base}{path}", wait_until="networkidle")
             rows += page.evaluate(
-                "() => [...document.querySelectorAll('details:not(.dd) > summary')]"
+                # the approval mode's own chevron fold (mode-info) is drawn by its own rules
+                "() => [...document.querySelectorAll('details:not(.dd):not(.mode-info) > summary')]"
                 ".filter(s => s.innerText.trim() && !getComputedStyle(s, '::before').content.includes('▸'))"
                 ".map(s => [s.innerText.trim().slice(0, 24), getComputedStyle(s).display,"
                 " Math.round(s.getBoundingClientRect().height)])"

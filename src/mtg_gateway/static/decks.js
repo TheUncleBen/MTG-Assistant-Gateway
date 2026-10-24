@@ -71,6 +71,159 @@
   var form = $("#listform[data-live]"), list = $("#decks-list");
   if (!form || !list) return;
   var timer = null;
+
+  // -- My decks: which decks are card packages, and the Show filter ----------------------------------
+  // Read once from the Packages page's own listing (/decks/api/packages?whose=mine, every page up
+  // to four) only after the list is drawn, so the deck list's cold load stays one Archidekt
+  // listing. A package's tile then carries the package icon in place of its initial and a
+  // Package label with its budget and formats; the Show filter (Decks and packages, Decks only,
+  // Packages only) applies in place as it changes, never asking the gateway again. A package the
+  // deck listing left out is drawn from this read at the top level. When the read fails, Show
+  // stays usable for Decks and packages and one muted line says packages couldn't be told apart.
+  var pkgs = null, pkgFailed = false, pkgAsked = false, PKG_PAGES = 4;
+  var NOT_TOLD = "Packages couldn't be told apart from decks just now; every deck is shown.";
+  function el(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text !== undefined) e.textContent = text;
+    return e;
+  }
+  function pkgIcon() {
+    if (window.MtgMenu && window.MtgMenu.icon) return window.MtgMenu.icon("package");
+    return el("span", null, "P");
+  }
+  function showMode() {
+    var s = form.querySelector("select[name=show]");
+    return s ? s.value : "";
+  }
+  function pkgNote() {
+    var n = document.getElementById("pk-note");
+    if (!n) {
+      n = el("p", "muted small", NOT_TOLD);
+      n.id = "pk-note";
+      n.hidden = true;
+      n.setAttribute("role", "status");
+      list.parentNode.insertBefore(n, list);
+    }
+    return n;
+  }
+  function readPackages() {
+    if (pkgAsked) return;
+    pkgAsked = true;
+    var found = {}, page = 1;
+    function one() {
+      return fetch("/decks/api/packages?whose=mine&page=" + page, { credentials: "same-origin", headers: { Accept: "application/json" } })
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          if (!d || !d.ok) throw new Error("packages");
+          (d.packages || []).forEach(function (p) { found[String(p.id)] = p; });
+          if (d.more && page < PKG_PAGES) { page += 1; return one(); }
+          return null;
+        });
+    }
+    one().then(function () { pkgs = found; window.MtgPackages = found; mark(); },
+      function () { pkgFailed = true; mark(); });
+  }
+  function pkgLabel(pk) {
+    var lb = el("span", "ui-lbl grey");
+    lb.appendChild(pkgIcon());
+    lb.appendChild(document.createTextNode("Package"));
+    return lb;
+  }
+  // the detail line as the mockup draws it: the Package label and the budget; the formats are
+  // on the tile's title and on Deck settings
+  function pkgLine(fmt, pk) {
+    fmt.textContent = "";
+    fmt.appendChild(pkgLabel(pk));
+    if (pk.budget) fmt.appendChild(document.createTextNode(" · " + pk.budget));
+    var bits = [pk.budget, pk.formats].filter(Boolean);
+    fmt.title = "Package" + (bits.length ? " · " + bits.join(" · ") : "");
+  }
+  function decorate(li, pk) {
+    li.classList.add("pkg");
+    li.setAttribute("data-package", "1");
+    var ini = li.querySelector(".thumb .ini");
+    if (ini) { ini.textContent = ""; ini.appendChild(pkgIcon()); }
+    var fmt = li.querySelector(".info .fmt");
+    if (fmt) pkgLine(fmt, pk);
+  }
+  // a package the deck listing left out: a tile of its own, from the packages read
+  function extraTile(pk) {
+    var li = el("li", "deck pkg pkg-extra");
+    li.setAttribute("data-deck-id", String(pk.id));
+    li.setAttribute("data-deck-name", pk.name);
+    li.setAttribute("data-own", "1");
+    li.setAttribute("data-package", "1");
+    var a = el("a");
+    a.href = "/decks/" + encodeURIComponent(String(pk.id));
+    var thumb = el("span", "thumb noart"), ini = el("span", "ini");
+    ini.appendChild(pkgIcon());
+    thumb.appendChild(ini);
+    a.appendChild(thumb);
+    var info = el("span", "info plain"), text = el("span", "text");
+    var name = el("span", "name", pk.name); name.title = pk.name;
+    var fmt = el("span", "fmt");
+    pkgLine(fmt, pk);
+    text.appendChild(name); text.appendChild(fmt);
+    info.appendChild(text);
+    a.appendChild(info);
+    li.appendChild(a);
+    if (window.MtgMenu && window.MtgMenu.kebab) li.appendChild(window.MtgMenu.kebab("Menu for " + pk.name));
+    return li;
+  }
+  function decksArea() { return list.querySelector(".fv-area[aria-labelledby='fv-decks']"); }
+  function extrasList() {
+    var ul = list.querySelector("ul.decklist");
+    if (ul) return ul;
+    var area = decksArea();
+    if (!area) return null;
+    var empty = area.querySelector(".empty");
+    if (empty) empty.hidden = true;
+    var view = (form.querySelector("input[name=view]:checked") || { value: "grid" }).value;
+    ul = el("ul", "plain decklist " + (view === "list" ? "list" : "grid"));
+    area.appendChild(ul);
+    return ul;
+  }
+  function plural(n, word) { return n + " " + word + (n === 1 ? "" : "s"); }
+  function mark() {
+    var mode = showMode(), note = pkgNote();
+    note.hidden = !pkgFailed;
+    if (pkgFailed) mode = "";
+    var shownPk = 0, shownDk = 0;
+    Array.prototype.slice.call(list.querySelectorAll("li.deck[data-deck-id]")).forEach(function (li) {
+      var id = li.getAttribute("data-deck-id"), pk = pkgs && pkgs[id];
+      if (pk && !li.hasAttribute("data-package")) decorate(li, pk);
+      var isPk = li.hasAttribute("data-package");
+      var off = mode === "decks" ? isPk : mode === "packages" ? !isPk : false;
+      li.classList.toggle("sh-off", off);
+      if (!off) { if (isPk) shownPk += 1; else shownDk += 1; }
+    });
+    var top = !form.querySelector("input[name=folder]");
+    if (pkgs && top && mode !== "decks") {
+      Object.keys(pkgs).forEach(function (id) {
+        if (list.querySelector("li.deck[data-deck-id='" + id + "']")) return;
+        var ul = extrasList();
+        if (!ul) return;
+        ul.appendChild(extraTile(pkgs[id]));
+        shownPk += 1;
+      });
+    }
+    var total = $("#decks-total"), head = list.querySelector("#fv-decks");
+    if (mode === "packages") {
+      if (total) total.textContent = plural(shownPk, "package");
+      if (head) { head.textContent = "Packages "; head.appendChild(el("span", "n", String(shownPk))); }
+    } else if (mode === "decks") {
+      if (total) total.textContent = plural(shownDk, "deck");
+      if (head) { head.textContent = "Decks "; head.appendChild(el("span", "n", String(shownDk))); }
+    }
+    list.dispatchEvent(new CustomEvent("decks:marked", { bubbles: true }));
+  }
+  function setAddress() {
+    var q = params().toString();
+    history.replaceState(null, "", "/decks" + (q ? "?" + q : ""));
+  }
+  list.addEventListener("decks:loaded", function () { if (pkgs || pkgFailed) mark(); else readPackages(); });
+  if (!list.hasAttribute("data-decks-src")) setTimeout(readPackages, 0); // the list came drawn
   function params() {
     var fd = new FormData(form), out = new URLSearchParams();
     fd.forEach(function (v, k) { if (String(v) !== "") out.append(k, String(v)); });
@@ -109,6 +262,7 @@
     var t = e.target;
     if (!t || t.closest(".sortcw")) return; // the phone's combined sort sets the real boxes, which change
     if (t.type === "search") return;
+    if (t.name === "show") { mark(); setAddress(); return; } // applied here, nothing asked again
     if (t.type === "checkbox" || t.type === "radio" || t.tagName === "SELECT") { clearTimeout(timer); refresh(); }
   });
 })();
