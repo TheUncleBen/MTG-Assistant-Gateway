@@ -463,13 +463,13 @@ input[type=radio]:focus-visible{outline:2px solid var(--focus);outline-offset:2p
 .mode-opt{position:relative;border-top:1px solid var(--border);background-clip:padding-box}
 .mode-opt:first-child{border-top:0}
 .mode-opt:has(input:checked){background-color:var(--orange-tint)}
-.mode-pick{display:flex;align-items:flex-start;gap:12px;margin:0;padding:12px 52px 12px 16px;
-  font-weight:700;line-height:1.35;cursor:pointer}
+.mode-pick{display:flex;align-items:flex-start;gap:10px;margin:0;padding:12px 48px 12px 14px;
+  min-height:44px;font-weight:700;line-height:1.35;cursor:pointer}
 .mode-pick input[type=radio]{font-size:inherit;margin-top:calc((1.35em - 1.15rem) / 2)}
 .mode-opt.off .mode-pick{color:var(--text-muted);cursor:default}
-details.mode-info > summary{position:absolute;right:4px;top:calc(12px + .675em - 22px);width:44px;
-  height:44px;display:grid;place-items:center;list-style:none;cursor:pointer;color:var(--text-muted);
-  border-radius:var(--radius)}
+details.mode-info > summary{position:absolute;right:2px;top:max(0px,calc(12px + .675em - 22px));
+  width:44px;height:44px;display:grid;place-items:center;list-style:none;cursor:pointer;
+  color:var(--text-muted);border-radius:var(--radius)}
 details.mode-info > summary::-webkit-details-marker{display:none}
 details.mode-info > summary:hover{color:var(--text)}
 details.mode-info > summary:focus-visible{outline:2px solid var(--focus);outline-offset:-4px}
@@ -482,10 +482,15 @@ details.mode-info[open] > summary svg{transform:rotate(180deg)}
 .mode-body > :last-child{margin-bottom:0}
 .mode-body p.warn{margin-top:.6rem;padding:8px 12px;border-left:3px solid var(--orange);
   background:var(--surface);border-radius:var(--radius)}
-.mode-warn{display:none;margin:0 0 .75rem;padding:10px 16px;border-left:3px solid var(--orange);
-  background:var(--orange-tint);border-radius:var(--radius-panel);line-height:1.4;font-size:.95rem}
-form:has(input[name=mode][value=semi]:checked) .mode-warn,
-form:has(input[name=mode][value=auto]:checked) .mode-warn{display:block}
+/* On a phone the list runs to the card's edges and the gutters round the name are tighter, so a
+   mode's name keeps its one row at 344px (a folded Fold) as well as at 390px. The row stays a
+   44px tap target, and at 200% text the name may wrap — nothing scrolls sideways. */
+@media (max-width:599.98px){
+  .mode-list{margin-inline:-1rem;border-left:0;border-right:0;border-radius:0}
+  .mode-pick{gap:8px;padding:13px 38px 13px 12px;font-size:.86rem}
+  details.mode-info > summary{right:0;width:38px;top:max(0px,calc(13px + .6em - 22px))}
+  .mode-body{padding:0 12px 14px 30px;font-size:.9rem}
+}
 /* toggle switch 40x20, orange when on */
 .switch{position:relative;display:flex;align-items:center;gap:.6rem;cursor:pointer;font-weight:400;
   margin:.5rem 0;min-height:2rem}

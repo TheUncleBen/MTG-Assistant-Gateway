@@ -131,8 +131,8 @@ async def test_default_is_manual_and_the_account_page_sets_the_mode(stack: Stack
 async def test_each_mode_is_one_line_with_its_explanation_folded(stack: Stack) -> None:
     """Ben (2026-10-22): the Approval mode panel is a tight list, each mode one row with its
     name; what it means is in a closed fold opened by the chevron at the row's end, so the page is
-    not a wall of text. The approved words are kept, and the cost of the auto modes is said once,
-    under the list, shown while one of them is picked."""
+    not a wall of text. The approved words are kept, and the cost of the auto modes is said in
+    those modes' own folds: no line about it under the list any more (Ben, "line hide")."""
     h = stack.h
     await linked_user(stack)
     b = Browser(h)
@@ -154,7 +154,9 @@ async def test_each_mode_is_one_line_with_its_explanation_folded(stack: Stack) -
         assert (html.escape(modes.AUTO_WARNING) in fold) == (mode != "manual")
     outside = re.sub(r"<details class='mode-info'>.*?</details>", "", card, flags=re.S)
     assert html.escape(modes.AUTO_WARNING) not in outside
-    assert outside.count(html.escape(modes.AUTO_WARNING_LINE)) == 1 and "class='mode-warn'" in outside
+    # no warning line under the list: the whole warning lives in the auto modes' folds alone
+    assert "class='mode-warn'" not in card and "role='note'" not in card
+    assert "tricked into making changes" not in outside
 
 
 def test_the_account_page_points_say_what_mode_help_says() -> None:

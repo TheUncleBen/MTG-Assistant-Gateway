@@ -197,11 +197,6 @@ def mode_help(mode: str, *, max_rows: int = DEFAULT_MAX_ROWS, big_rows: int = DE
     )
 
 
-# Under the Approval mode list while Semi or Full auto is picked: one line; the whole warning is
-# in that mode's details on the Account page (AUTO_WARNING, in mode_points)
-AUTO_WARNING_LINE = (
-    "An assistant can be tricked into making changes you did not ask for. Read this mode's details first."
-)
 _STILL_WAITS = (
     "a held change, a change waiting for another change first, one another app had a hand in, one "
     "that replaces another app's change, or one that another app's waiting change would replace"

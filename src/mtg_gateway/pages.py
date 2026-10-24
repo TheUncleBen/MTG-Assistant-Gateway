@@ -1529,8 +1529,8 @@ def _mode_card(state: Any, sub: str, csrf_in: str, *, primary: bool = True) -> s
     """The member's approval mode (modes.py): three radio choices, the current one checked,
     choices above the gateway's cap shown disabled. A tight list (Ben, 2026-10-22): each choice
     is one row, its name, with what it means in a fold opened by the chevron at the row's end.
-    While Semi or Full auto is picked a one-line warning shows under the list (CSS :has); the
-    whole warning (AUTO_WARNING) is in those two modes' details.
+    The whole warning (AUTO_WARNING) is in the two auto modes' details, and nowhere else on the
+    page: no line about it under the list (Ben, 2026-10-23, "line hide").
     ``primary`` makes Save the page's orange button (not while Link account is)."""
     live = state.decks.live  # the admin's Settings page values, read now
     current = state.decks.mode_of(sub)
@@ -1561,7 +1561,6 @@ def _mode_card(state: Any, sub: str, csrf_in: str, *, primary: bool = True) -> s
         "your account only, and to nobody else.</p>"
         f"<form method='post'>{csrf_in}<input type='hidden' name='action' value='approval_mode'>"
         f"<div class='mode-list'>{''.join(choices)}</div>"
-        f"<p class='mode-warn' role='note'>{html.escape(modes.AUTO_WARNING_LINE)}</p>"
         f"<button class='{'primary' if primary else 'btn-plain'}'>Save approval mode</button></form></div>"
     )
 
