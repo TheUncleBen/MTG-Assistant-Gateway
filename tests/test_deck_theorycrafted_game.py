@@ -59,6 +59,19 @@ async def test_propose_apply_read_back_and_restore(stack: Stack) -> None:
     assert ark.decks[42]["theorycrafted"] is False and ark.decks[42].get("game") is None
 
 
+async def test_the_theorycrafted_help_explains_archidekts_view(stack: Stack) -> None:
+    """UI review 0.7.42 (L3): the help line names the view in curly quotes and says what happens."""
+    from .test_companion import NAV, linked_browser
+
+    b = await linked_browser(stack)
+    try:
+        page = (await b.http.get("/decks/42/settings", headers=NAV)).text
+        assert "Left out of Archidekt’s “In decks” view unless you choose to show it." in page
+        assert "Not included by default" not in page
+    finally:
+        await b.aclose()
+
+
 async def test_the_settings_page_shows_and_saves_both(stack: Stack) -> None:
     import re
 

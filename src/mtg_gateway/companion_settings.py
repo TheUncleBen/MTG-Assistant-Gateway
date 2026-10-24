@@ -120,15 +120,22 @@ SETTINGS_CSS = """
   font-size:.85rem;border:1px solid var(--control-border);background:var(--surface-2);color:var(--text)}
 /* editable rows (F7): the name in its box, three switches that say their word, one under the
    other on a phone; a row without a record stays read-only pills with its reason */
-.ds .ds-cats li{align-items:flex-start;padding:.35rem 0}
-.ds .ds-cats .nm{flex:1 1 14rem;min-width:0}
+/* one grid per row at every width (UI review 0.7.42, M5): the name, the count and Delete on the
+   first line, the switches under them, so every Delete lines up and no row leaves a near-empty line */
+.ds ul.ds-cats li{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:.25rem .75rem;
+  align-items:center;padding:.35rem 0}
+.ds ul.ds-cats li .nm{grid-column:1;grid-row:1;min-width:0}
 .ds .ds-cats .nm input{width:100%;min-height:44px;font-weight:700}
 .ds .ds-cats .ds-sw,.ds form.catnew .ds-sw{display:flex;flex-wrap:wrap;gap:0 1rem;flex:0 1 auto}
+.ds .ds-cats .ds-sw{grid-column:1/-1}
 .ds .ds-cats .switch.ds-flag,.ds form.catnew .switch.ds-flag{min-height:44px;margin:0;padding:0;border:0;
   border-radius:0;background:none;font-size:.95rem}
-.ds .ds-cats .del{flex:0 0 auto;margin:0;min-height:44px;min-width:44px;width:auto;padding:0 .6rem}
-.ds .ds-cats .cnt{flex:0 0 auto;color:var(--text-muted);font-size:.9rem;min-height:44px;
-  display:inline-flex;align-items:center}
+.ds ul.ds-cats li .del{grid-column:3;grid-row:1;margin:0;min-height:44px;min-width:44px;width:auto;
+  padding:0 .6rem}
+.ds ul.ds-cats li .cnt{grid-column:2;grid-row:1;min-width:4.5em;justify-content:flex-end;
+  color:var(--text-muted);font-size:.9rem;min-height:44px;display:inline-flex;align-items:center}
+/* Delete unused categories: its own right-aligned line under the list, apart from Save and Undo */
+.ds .acts.ds-unused{justify-content:flex-end;border-top:0;padding-top:0;margin-top:.5rem}
 .ds form.catnew{margin-top:1rem;border-top:1px solid var(--border-soft);padding-top:.75rem}
 .ds form.catnew h3{margin:0 0 .5rem;font-size:1rem}
 .ds form.catnew .row{display:flex;flex-wrap:wrap;gap:.4rem .9rem;align-items:center}
@@ -136,8 +143,12 @@ SETTINGS_CSS = """
 .ds form.catnew .row .btn{flex:0 0 auto;width:auto;margin:0}
 .ds .confirmform label.mv{display:block;font-weight:700;margin:.75rem 0 .25rem}
 .ds .ds-cats + .acts{border-top:0;padding-top:.5rem}
-@media (max-width:599.98px){.ds .ds-cats .nm{flex-basis:100%}.ds .ds-cats .ds-sw{width:100%;gap:0 .75rem}
-  .ds form.catnew .ds-sw{width:100%;gap:0 .75rem}}
+/* on a phone the three switches wrap (390 px holds two): the 44 px finger boxes overlap by 12 px
+   from line to line, so the wrapped switch sits as close under the others (12 px track to track)
+   as the switches sit beside each other, not a 44 px line of its own (0.7.43) */
+@media (max-width:599.98px){.ds .ds-cats .ds-sw{width:100%;gap:0 .75rem}
+  .ds form.catnew .ds-sw{width:100%;gap:0 .75rem}
+  .ds .ds-cats .switch.ds-flag,.ds form.catnew .switch.ds-flag{margin:-6px 0}}
 .ds form.catnew .row .btn{max-width:100%;white-space:normal}
 .ds .ds-cover{display:grid;grid-template-columns:9rem minmax(0,1fr);gap:1rem;align-items:center}
 .ds .ds-cover .pv{width:100%;max-width:none;aspect-ratio:4/3;border-radius:var(--radius-panel);
@@ -472,7 +483,7 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
             )
             + row(
                 "<label for='theorycrafted'>Theorycrafted</label>",
-                "Not included by default in the In decks view on Archidekt.",
+                "Left out of Archidekt’s “In decks” view unless you choose to show it.",
                 # the marker tells a form from before this release (no switch) from one switched off
                 "<input type='hidden' name='theorycrafted_shown' value='1'>"
                 + switch("theorycrafted", theorycrafted),
@@ -678,7 +689,7 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
             f"<span class='track'></span><span class='t'>{_esc(label)}</span></label>"
             for key, label, _f, _i in CATEGORY_FLAGS
         )
-        unused_names = ", ".join(f"“{u['category']}”" for u in unused)
+        unused_names = [u["category"] for u in unused]
         try:
             unused_wait = modes.category_wait(category_change_rows(deck, unused)[1]) if unused else None
         except DeckError:  # a damaged deck answer: the press is checked again, and refused there
@@ -694,7 +705,8 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
             f"data-counts-confirm='{_esc(modes.CATEGORY_COUNTS_CONFIRM)}' "
             f"data-delete-confirm-title='{_esc(DELETE_TITLE)}' "
             f"data-delete-confirm='{_esc(modes.CATEGORY_DELETE_CONFIRM)}' "
-            f"data-names='{_esc(json.dumps(names))}'>"
+            f"data-names='{_esc(json.dumps(names))}' "
+            f"data-words='{_esc(json.dumps(modes.CATEGORY_WORDS))}'>"
             "<h2>Categories</h2>"
             + note
             + f"<form method='post' action='/decks/{did}/categories#categories' id='catform'>"
@@ -704,17 +716,18 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
                 f"<div class='acts'><button class='btn' name='action' value='save'>{icon('check')} "
                 "Save categories</button><button type='reset' class='btn'>Undo changes</button>"
                 f"<a class='btn' href='/decks/{did}/settings?templates=1#categories' data-box-open='tplbox'>"
-                f"{icon('tag')} Add template…</a>"
+                f"{icon('tag')} Add template…</a></div>"
+                # Delete unused is another form's destructive action: its own line, right-aligned
                 + (
+                    "<div class='acts ds-unused'>"
                     "<button class='btn btn-outline-danger' form='catunused' name='action' value='unused' "
-                    f"data-names='{_esc(unused_names)}' data-also='{_esc(unused_also)}'>{icon('trash')} "
-                    "Delete unused categories "
+                    f"data-names='{_esc(json.dumps(unused_names))}' data-also='{_esc(unused_also)}'>"
+                    f"{icon('trash')} Delete unused categories "
                     + (f"({len(unused)} at a time)" if more else f"({len(unused)})")
-                    + "</button>"
+                    + "</button></div>"
                     if unused
                     else ""
                 )
-                + "</div>"
                 if items
                 else ""
             )
@@ -1120,19 +1133,26 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
         csrf: str | None,
         fields: dict[str, str],
         question: str,
-        note: str,
+        note: str | list[str],
         yes: str,
         back: str,
         *,
         danger: bool = False,
         extra: str = "",
         answer: str = "confirmed",
+        cancel: str = "Cancel",
+        error: str = "",
     ) -> str:
         """The second step of a one-press account action on the member's own pages (0.7.24): the
         question, then a form that sends the same fields again with ``confirmed`` and the page's
         CSRF token, or Cancel back where they came from. Deleting a deck has its own typed-name form.
         ``extra``: more of the form, already escaped (a category delete's "move its cards to");
-        ``answer``: the field the yes sends (``move_ok`` for a pick that may need asking again)."""
+        ``answer``: the field the yes sends (``move_ok`` for a pick that may need asking again);
+        ``cancel``: the words of the way back ("Keep it" on a delete); ``error``: what was wrong with
+        the last submit, said above the buttons. Cancel comes first and a delete's final button is
+        solid red, as the boxes do it (UI review 0.7.42, M6). The note and the rest of the form read
+        in one style, body size in the text colour (0.7.43: the note was small grey print above a
+        body-size sentence); a list of notes is one paragraph each, as the box shows them."""
         hidden = "".join(
             f"<input type='hidden' name='{_esc(k)}' value='{_esc(v)}'>" for k, v in fields.items()
         )
@@ -1141,15 +1161,16 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
             f"<input type='hidden' name='csrf' value='{_esc(csrf)}'>{hidden}"
             f"<input type='hidden' name='{_esc(answer)}' value='1'>"
             f"<h2>{_esc(question)}</h2>"
-            + (f"<p class='muted small'>{_esc(note)}</p>" if note else "")
+            + "".join(f"<p>{_esc(n)}</p>" for n in ([note] if isinstance(note, str) else note) if n)
             + extra
-            + "<div class='actions'>"
+            + (f"<p class='notice error' role='alert'>{_esc(error)}</p>" if error else "")
+            + f"<div class='actions'><a class='btn' href='{_esc(back)}'>{_esc(cancel)}</a>"
             + (
-                f"<button class='btn btn-outline-danger'>{icon('trash')} {_esc(yes)}</button>"
+                f"<button class='btn btn-danger'>{icon('trash')} {_esc(yes)}</button>"
                 if danger
                 else f"<button class='btn btn-primary'>{icon('check')} {_esc(yes)}</button>"
             )
-            + f"<a class='btn' href='{_esc(back)}'>Cancel</a></div></form>"
+            + "</div></form>"
         )
 
     @server.custom_route("/decks/{deck_id}/collaborators", methods=["POST"], include_in_schema=False)
@@ -1199,7 +1220,8 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
             deck = await decks.get_own_deck(sub, deck_id)
             action = data.get("action") or "save"
             unused = action == "unused"
-            move_field = ""
+            move_field = pick_error = title_name = ""
+            move_n = 0
             ok, yes = "categories", "Save categories"
             if action == "template":
                 names = [n.strip() for n in data.get("template_list", "").split("\n") if n.strip()]
@@ -1228,10 +1250,15 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
                 move = " ".join((data.get("move_cards_to") or "").split())
                 changes = [{"action": "delete", "id": int(key), **({"move_cards_to": move} if move else {})}]
                 ok, yes = "category_deleted", f"Delete “{cat['name']}”"
+                title_name, move_n = cat["name"], int(cat["cards"])
                 if cat["cards"] and not move:
                     # Archidekt only deletes an empty category: the member picks where its cards go
+                    # (nothing picked to start with, as the first category is often Commander; a
+                    # submit without a pick is refused here, said on the page)
                     n = int(cat["cards"])
-                    targets = "".join(
+                    if data.get("move_ok") == "1" or data.get("confirmed") == "1":
+                        pick_error = modes.CATEGORY_WORDS["pick_target"]
+                    targets = "<option value='' disabled selected hidden>Pick a category…</option>" + "".join(
                         f"<option value='{_esc(c['name'])}'>{_esc(c['name'])}</option>"
                         for c in deck_categories(deck)
                         if c["name"] != cat["name"]
@@ -1246,7 +1273,10 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
                     )
             elif unused:
                 changes = []
-                ok, yes = "categories_unused", "Delete unused categories"
+                unused_names = [u["category"] for u in unused_category_changes(deck, MAX_CATEGORY_CHANGES)]
+                ok = "categories_unused"
+                title_name = unused_names[0] if unused_names else ""
+                yes = modes.category_words("unused_ok", name=title_name, n=len(unused_names))
             else:
                 changes = category_changes_from_form(deck, data)
                 if not changes:
@@ -1265,8 +1295,9 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
             # picking where a deleted category's cards go (on its page or in the box, ``move_ok``) is
             # a yes to the delete only: a pick that makes them commanders or changes which cards
             # count is asked once more, with that sentence (S-01, review 0.7.42)
-            said_yes = data.get("confirmed") == "1" or (
-                data.get("move_ok") == "1" and why == modes.CATEGORY_DELETE_CONFIRM
+            said_yes = not pick_error and (
+                data.get("confirmed") == "1"
+                or (data.get("move_ok") == "1" and why == modes.CATEGORY_DELETE_CONFIRM)
             )
             if why and not said_yes:
                 drop = ("csrf", "confirmed", "move_ok") + (("move_cards_to",) if move_field else ())
@@ -1274,14 +1305,28 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
                 if action != "save":
                     fields["action"] = action
                 note, title = why, modes.CATEGORY_CONFIRM_TITLES[why]
+                if action == "create":
+                    # a new category is created, not changed: the box's own title and sentence
+                    kind = "create_commander" if why == modes.CATEGORY_COMMANDER_CONFIRM else "create_counts"
+                    title = modes.category_words(f"{kind}_title", name=changes[0]["category"])
+                    note = modes.CATEGORY_WORDS[kind]
                 if action in ("delete", "unused"):
-                    # a delete is asked as a delete, with the commander or counts sentence after
-                    title = modes.CATEGORY_CONFIRM_TITLES[modes.CATEGORY_DELETE_CONFIRM]
-                    note = modes.CATEGORY_DELETE_CONFIRM + (
-                        "" if why == modes.CATEGORY_DELETE_CONFIRM else " " + why
-                    )
-                    if not move_field:
-                        note += " " + " ".join(category_line(r).split(" Archidekt tabs")[0] for r in rows)
+                    # a delete is asked as a delete, named; after a pick, the move sentence follows;
+                    # each sentence is a paragraph of its own, as in the box (0.7.43)
+                    title = modes.category_words("delete_title", name=title_name)
+                    notes = [modes.CATEGORY_DELETE_CONFIRM]
+                    if why == modes.CATEGORY_COMMANDER_CONFIRM and action == "delete" and move_n:
+                        notes.append(modes.category_words("move_commander", n=move_n))
+                    elif why == modes.CATEGORY_COUNTS_CONFIRM and action == "delete" and move_n:
+                        notes.append(modes.category_words("move_counts", n=move_n))
+                    elif why != modes.CATEGORY_DELETE_CONFIRM:
+                        notes.append(why)
+                    if unused:
+                        title = modes.category_words("unused_title", name=title_name, n=len(unused_names))
+                        notes.append(modes.category_names_line(unused_names))
+                    elif not move_field:
+                        notes.append(" ".join(category_line(r).split(" Archidekt tabs")[0] for r in rows))
+                    note = notes
                 body = confirm_form(
                     f"/decks/{deck.id}/categories#categories",
                     _csrf(s, sid),
@@ -1293,8 +1338,18 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
                     danger=action in ("delete", "unused"),
                     extra=move_field,
                     answer="move_ok" if move_field else "confirmed",
+                    cancel=modes.CATEGORY_WORDS["keep"] if action in ("delete", "unused") else "Cancel",
+                    error=pick_error,
                 )
-                return page("Confirm categories", body, sub=sub, sid=sid, current="/decks", deck_css=True)
+                return page(
+                    "Confirm categories",
+                    body,
+                    sub=sub,
+                    sid=sid,
+                    current="/decks",
+                    deck_css=True,
+                    status=400 if pick_error else 200,
+                )
             p = await decks.propose_categories(sub, deck.id, changes, delete_unused=unused)
             done = await apply_now(sub, p["proposal_id"], ok="categories", deck_id=deck.id)
             if done.headers.get("location") == f"/decks/{deck.id}?ok=categories":

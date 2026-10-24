@@ -821,10 +821,45 @@
     companion: { attr: "data-companion", action: "set_companion", field: "companion", what: "Companion" },
     back_face: { attr: "data-flipped", action: "set_back_face", field: "back_face", what: "Show back face" }
   };
+  // The companion's mark follows the switch (and Undo): the pink corner on a grid tile, with its
+  // words for a screen reader; the word itself on a list row (deckpage.COMPANION_CORNER and
+  // COMPANION_MARK draw the same on the server)
+  function companionMark(card, on) {
+    var tile = card.classList.contains("c");
+    var mark = card.querySelector(tile ? ".corner.comp" : ".compmark");
+    if (on && !mark) {
+      if (tile) {
+        mark = el("span", "corner comp");
+        mark.setAttribute("role", "img");
+        mark.setAttribute("aria-label", "Companion");
+        mark.title = "Companion";
+        card.appendChild(mark);
+      } else {
+        // the word goes right after the name cell, where the server draws it (under the name)
+        mark = el("span", "compmark", "Companion");
+        var n = card.querySelector(".n");
+        if (n) n.insertAdjacentElement("afterend", mark); else card.appendChild(mark);
+      }
+    } else if (!on && mark) mark.remove();
+  }
+  // Show back face swaps the card's pictures (the tile, the list row's hover preview) between its
+  // front (data-img) and its back (data-back, when the card has one), as the page draws them
+  function showFace(card, back) {
+    var front = card.getAttribute("data-img"), rear = card.getAttribute("data-back");
+    if (!front || !rear) return;
+    $$("img", card).forEach(function (i) {
+      var src = i.getAttribute("src");
+      if (src === (back ? front : rear)) i.src = back ? rear : front;
+    });
+  }
   function switchRow(card, kind) {
     var sw = SWITCHES[kind], name = card.getAttribute("data-card") || "";
     var cur = card.hasAttribute(sw.attr), want = !cur;
-    var set = function (on) { if (on) card.setAttribute(sw.attr, "1"); else card.removeAttribute(sw.attr); };
+    var set = function (on) {
+      if (on) card.setAttribute(sw.attr, "1"); else card.removeAttribute(sw.attr);
+      if (kind === "companion") companionMark(card, on);
+      if (kind === "back_face") showFace(card, on);
+    };
     var ch = { action: sw.action, card_name: name, zone: card.getAttribute("data-zone") || "main" };
     var inv = { action: sw.action, card_name: name, zone: ch.zone };
     ch[sw.field] = want; inv[sw.field] = cur;
@@ -1617,16 +1652,22 @@
     var b = el("button", cls || "", "");
     b.type = "button";
     b.setAttribute("role", "menuitem");
-    if (ic) b.appendChild(icon(ic));
+    b.appendChild(ic ? icon(ic) : iconSlot());
     b.appendChild(document.createTextNode(text));
     if (onClick) b.addEventListener("click", function (e) { stop(e); onClick(); });
     return b;
   }
-  // the gateway's own icons, rendered by the server into a template under #cards (theme.icon)
+  // the gateway's own icons, rendered by the server into a template under #cards (theme.icon); a
+  // row without one keeps an empty slot of the same width, so every row's text lines up
+  function iconSlot() {
+    var s = el("span", "ic-slot");
+    s.setAttribute("aria-hidden", "true");
+    return s;
+  }
   function icon(name) {
     var tpl = $("template.icons", cards);
     var src = tpl ? tpl.content.querySelector("[data-ic='" + name + "'] svg") : null;
-    return src ? src.cloneNode(true) : document.createTextNode("");
+    return src ? src.cloneNode(true) : iconSlot();
   }
   function openMenu(card, x, y, opts) {
     opts = opts || {};

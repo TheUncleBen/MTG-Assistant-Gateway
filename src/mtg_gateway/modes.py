@@ -328,6 +328,62 @@ CATEGORY_CONFIRM_TITLES = {
     CATEGORY_COUNTS_CONFIRM: "Change which cards count in the deck?",
     CATEGORY_DELETE_CONFIRM: "Delete the category?",
 }
+# The words of the Categories panel's boxes and of the no-script pages that ask the same (UI review
+# 0.7.42, M2 to M4): each box's title says what it does, and the delete box names its category.
+# ``{name}`` and ``{n}`` are filled in by category_words() here and by static/menus.js from the
+# panel's data-words attribute, so the box and the page always say the same.
+CATEGORY_WORDS = {
+    "delete_title": "Delete the category “{name}”?",
+    "unused_title": "Delete {n} unused categories?",
+    "unused_title_one": "Delete the unused category “{name}”?",
+    "unused_ok": "Delete {n} categories",
+    "unused_ok_one": "Delete “{name}”",
+    "deletes": "Deletes {names}.",
+    "create_commander_title": "Create “{name}” as a Premier category?",
+    "create_commander": (
+        "Cards in a Premier category are the deck's commanders. Cards you put in it later count as "
+        "commanders, which can change the deck's legality and its colours."
+    ),
+    "create_counts_title": "Create “{name}” as a category that doesn't count?",
+    "create_counts": (
+        "Cards in a Not in deck category, or in one named Sideboard or Maybeboard, don't count in the deck."
+    ),
+    # after the member picks where a deleted category's cards go
+    "move_commander": (
+        "Cards in a Premier category are the deck's commanders. Moving these {n} cards there makes "
+        "them commanders, which can change the deck's legality and its colours."
+    ),
+    "move_commander_one": (
+        "Cards in a Premier category are the deck's commanders. Moving this card there makes it a "
+        "commander, which can change the deck's legality and its colours."
+    ),
+    "move_counts": (
+        "Moving these {n} cards there changes whether they count in the deck, so its card count and "
+        "its legality can change."
+    ),
+    "move_counts_one": (
+        "Moving this card there changes whether it counts in the deck, so its card count and its "
+        "legality can change."
+    ),
+    "keep": "Keep it",
+    "pick_target": "Pick the category its cards move to.",
+}
+
+
+def category_names_line(names: list[str]) -> str:
+    """``Deletes “A”, “B” and “C”.`` (one name: ``Deletes “A”.``)."""
+    quoted = [f"“{n}”" for n in names]
+    joined = (
+        quoted[0] if len(quoted) == 1 else ", ".join(quoted[:-1]) + " and " + quoted[-1] if quoted else ""
+    )
+    return CATEGORY_WORDS["deletes"].format(names=joined)
+
+
+def category_words(key: str, *, name: str = "", n: int = 0) -> str:
+    """One of CATEGORY_WORDS filled in; a key with a ``_one`` form takes it when ``n`` is 1."""
+    if n == 1 and f"{key}_one" in CATEGORY_WORDS:
+        key = f"{key}_one"
+    return CATEGORY_WORDS[key].format(name=name, n=n)
 
 
 def category_wait(rows: list[dict[str, Any]] | None) -> str | None:

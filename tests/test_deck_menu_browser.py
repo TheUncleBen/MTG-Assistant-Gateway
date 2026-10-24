@@ -1007,3 +1007,241 @@ def test_the_card_menu_switches_companion_and_back_face(server: Server) -> None:
         page.locator(".deck-toast .msg", has_text="Saved").wait_for(timeout=8000)
         assert errors == []
         browser.close()
+
+
+MENU_ROWS = """() => [...document.querySelectorAll(
+    '.ctxmenu[role=menu] [role=menuitem], .ctxmenu[role=menu] [role=menuitemcheckbox], ' +
+    '.ctxmenu[role=menu] .qtyrow')]
+  .filter(e => e.getClientRects().length)
+  .map(e => { const r = e.getBoundingClientRect(); return { text: e.textContent.trim().slice(0, 24),
+    cls: e.className, h: r.height, w: r.width, x: r.left }; })"""
+
+MENU_TEXT_X = """() => [...document.querySelectorAll(
+    '.ctxmenu[role=menu] button[role=menuitem], .ctxmenu[role=menu] a[role=menuitem], ' +
+    '.ctxmenu[role=menu] [role=menuitemcheckbox]')]
+  .filter(e => e.getClientRects().length && !e.closest('.sub') && !e.closest('.qtyrow'))
+  .map(e => { const t = [...e.childNodes].find(n => n.nodeType === 3 && n.textContent.trim());
+    if (!t) return null; const r = document.createRange(); r.selectNodeContents(t);
+    return { text: t.textContent.trim(), x: Math.round(r.getBoundingClientRect().left) }; })
+  .filter(Boolean)"""
+
+
+def test_every_card_menu_row_and_step_is_finger_sized_on_a_phone(server: Server) -> None:
+    """UI review 0.7.42 (H1): with a coarse pointer every row of the card menu, the Companion and
+    Show back face switches among them, the − and + steps and the Move to list's rows are at least
+    44 px tall (the steps 44 wide too), with the menu inside the window."""
+    from playwright.sync_api import sync_playwright
+
+    server.ark.add_side_row(42, "Delver of Secrets // Insectile Aberration", category="Sideboard")
+    _chromium()
+    sid = server.sign_in_and_link()
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, 390, has_touch=True, is_mobile=True)
+        page.goto(f"{server.base}/decks/42?view=text", wait_until="networkidle")
+        card = page.locator(".deckview .row[data-card^='Delver of Secrets']").first
+        card.scroll_into_view_if_needed()
+        box = card.bounding_box()
+        cdp = page.context.new_cdp_session(page)
+        x, y = box["x"] + 60, box["y"] + box["height"] / 2
+        cdp.send("Input.dispatchTouchEvent", {"type": "touchStart", "touchPoints": [{"x": x, "y": y}]})
+        page.wait_for_timeout(500)
+        cdp.send("Input.dispatchTouchEvent", {"type": "touchEnd", "touchPoints": []})
+        menu = page.locator(".ctxmenu[role=menu]")
+        menu.wait_for(timeout=3000)
+        menu.locator("button.more", has_text="Move to").click()
+        page.wait_for_timeout(100)
+        rows = page.evaluate(MENU_ROWS)
+        texts = [r["text"] for r in rows]
+        assert "Companion" in texts and "Show back face" in texts and "−" in texts and "+" in texts, texts
+        assert any("Maybeboard" in t or "Sideboard" in t for t in texts), texts  # the Move to list is open
+        short = [r for r in rows if r["h"] < 44]
+        assert not short, short
+        steps = [r for r in rows if "step" in r["cls"]]
+        assert len(steps) == 2 and all(r["w"] >= 44 for r in steps), steps
+        assert _overflow(page) == 0
+        assert errors == []
+        browser.close()
+
+
+def test_the_companion_corner_follows_the_switch_in_the_grid_and_the_list(server: Server) -> None:
+    """UI review 0.7.42 (M1): the pink corner (role img, labelled Companion) appears on the tile as
+    soon as Companion is switched on and goes when it is switched off, without a reload; a list row
+    shows and drops the word; a refused save (Undo) puts the mark back as it was."""
+    from playwright.sync_api import sync_playwright
+
+    _chromium()
+    sid = server.sign_in_and_link()
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, 1366)
+        page.goto(f"{server.base}/decks/42?view=grid", wait_until="networkidle")
+        card = page.locator(".deckview .c[data-card='Cultivate']").first
+        corner = card.locator(".corner.comp")
+        assert corner.count() == 0
+        menu = page.locator(".ctxmenu[role=menu]")
+
+        def switch() -> None:
+            card.scroll_into_view_if_needed()
+            card.click(button="right")
+            menu.wait_for(timeout=3000)
+            with page.expect_request(EDIT_URL):
+                menu.locator("[role=menuitemcheckbox]", has_text="Companion").click()
+            page.locator(".deck-toast .msg", has_text="Saved").wait_for(timeout=8000)
+
+        switch()
+        assert corner.count() == 1 and card.get_attribute("data-companion") == "1"
+        assert corner.get_attribute("role") == "img" and corner.get_attribute("aria-label") == "Companion"
+        assert corner.bounding_box()["width"] >= 20
+        page.reload(wait_until="networkidle")
+        card = page.locator(".deckview .c[data-card='Cultivate']").first
+        corner = card.locator(".corner.comp")
+        assert corner.count() == 1
+        switch()
+        assert corner.count() == 0 and card.get_attribute("data-companion") is None
+        # the list view shows the word, and drops it, the same way
+        page.goto(f"{server.base}/decks/42?view=text", wait_until="networkidle")
+        card = page.locator(".deckview .row[data-card='Cultivate']").first
+        mark = card.locator(".compmark")
+        assert mark.count() == 0
+        switch()
+        assert mark.count() == 1 and mark.inner_text() == "Companion"
+        switch()
+        assert mark.count() == 0
+        assert errors == []
+        browser.close()
+
+
+def test_card_menu_rows_without_an_icon_keep_the_slot_so_text_lines_up(server: Server) -> None:
+    """UI review 0.7.42 (L5): a switch row that is off has no check, but keeps an empty slot the
+    icon's width, so the text of every row starts at the same place."""
+    from playwright.sync_api import sync_playwright
+
+    _chromium()
+    sid = server.sign_in_and_link()
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, 1366)
+        page.goto(f"{server.base}/decks/42?view=grid", wait_until="networkidle")
+        card = page.locator(".deckview .c[data-card='Cultivate']").first
+        card.scroll_into_view_if_needed()
+        card.click(button="right")
+        menu = page.locator(".ctxmenu[role=menu]")
+        menu.wait_for(timeout=3000)
+        comp = menu.locator("[role=menuitemcheckbox]", has_text="Companion")
+        assert comp.get_attribute("aria-checked") == "false"
+        assert comp.locator(".ic-slot[aria-hidden=true]").count() == 1 and comp.locator("svg").count() == 0
+        starts = page.evaluate(MENU_TEXT_X)
+        assert {s["text"] for s in starts} >= {"Open card", "Companion", "Add to collection", "Copy name"}, (
+            starts
+        )
+        xs = {s["x"] for s in starts}
+        assert len(xs) == 1, starts
+        assert errors == []
+        browser.close()
+
+
+def test_show_back_face_swaps_the_picture_at_once_and_the_viewer_opens_on_it(server: Server) -> None:
+    """L6 (Ben, 23 Oct): the card menu's Show back face swaps the tile's picture to the back face
+    without a reload, Undo (a refused save) swaps it back, the card view opens on the back with a
+    Show front button, and switching it off brings the front back. The fake Scryfall pictures are
+    a different PNG per face (tests/fake_faces.py), so the picture the browser drew, not only the
+    address, says which face shows."""
+    from playwright.sync_api import sync_playwright
+
+    from .fake_faces import FACES, serve_faces
+
+    server.ark.add_side_row(42, "Delver of Secrets // Insectile Aberration", category="Sideboard")
+    _chromium()
+    sid = server.sign_in_and_link()
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, 1366)
+        page.route(re.compile(r"https://cards\.scryfall\.io/.*"), serve_faces)  # before the context's PNG
+        page.goto(f"{server.base}/decks/42?view=grid", wait_until="networkidle")
+        card = page.locator(".deckview .c[data-card^='Delver of Secrets']").first
+        img = card.locator("img")
+        front, back = card.get_attribute("data-img"), card.get_attribute("data-back")
+        assert front and "/front/" in front and back and "/back/" in back
+        assert img.get_attribute("src") == front
+        menu = page.locator(".ctxmenu[role=menu]")
+
+        def drawn(face: str, where=img) -> None:
+            """The picture on screen is that face's PNG (by its size: the back is 260 px wide)."""
+            where.scroll_into_view_if_needed()
+            page.wait_for_function(
+                "([e, w]) => e.complete && e.naturalWidth === w",
+                arg=[where.element_handle(), FACES[face][0][0]],
+            )
+
+        drawn("front")
+
+        def switch() -> None:
+            card.scroll_into_view_if_needed()
+            card.click(button="right")
+            menu.wait_for(timeout=3000)
+            with page.expect_request(EDIT_URL):
+                menu.locator("[role=menuitemcheckbox]", has_text="Show back face").click()
+            page.locator(".deck-toast .msg", has_text="Saved").wait_for(timeout=8000)
+
+        switch()
+        assert img.get_attribute("src") == back and card.get_attribute("data-flipped") == "1"
+        drawn("back")
+        # the viewer opens on the back face, with the way to the front
+        card.click()
+        viewer = page.locator(".cardview.open")
+        viewer.wait_for(timeout=3000)
+        assert viewer.locator(".pane img").get_attribute("src") == back
+        drawn("back", viewer.locator(".pane img"))
+        flip = viewer.locator("button.flip")
+        assert flip.inner_text() == "Show front" and flip.get_attribute("aria-pressed") == "true"
+        flip.click()
+        assert viewer.locator(".pane img").get_attribute("src") == front
+        page.keyboard.press("Escape")
+        viewer.wait_for(state="hidden", timeout=3000)
+        page.reload(wait_until="networkidle")
+        card = page.locator(".deckview .c[data-card^='Delver of Secrets']").first
+        img = card.locator("img")
+        assert img.get_attribute("src") == back
+        drawn("back")
+        switch()
+        assert img.get_attribute("src") == front and card.get_attribute("data-flipped") is None
+        drawn("front")
+        # the list row's hover preview follows too
+        page.goto(f"{server.base}/decks/42?view=text", wait_until="networkidle")
+        row = page.locator(".deckview .row[data-card^='Delver of Secrets']").first
+        row.scroll_into_view_if_needed()
+        row.click(button="right")
+        menu.wait_for(timeout=3000)
+        with page.expect_request(EDIT_URL):
+            menu.locator("[role=menuitemcheckbox]", has_text="Show back face").click()
+        page.locator(".deck-toast .msg", has_text="Saved").wait_for(timeout=8000)
+        assert row.locator(".hover img").get_attribute("src") == back
+        assert errors == []
+        browser.close()
+
+
+def test_a_refused_back_face_save_puts_the_front_picture_back(server: Server) -> None:
+    """L6: a save Archidekt refuses is undone on the page: the front picture comes back with the
+    switch, and the toast says so."""
+    from playwright.sync_api import sync_playwright
+
+    server.ark.add_side_row(42, "Delver of Secrets // Insectile Aberration", category="Sideboard")
+    _chromium()
+    sid = server.sign_in_and_link()
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, 1366)
+        server.ark.fail_card_writes = True  # Archidekt refuses the save
+        page.goto(f"{server.base}/decks/42?view=grid", wait_until="networkidle")
+        card = page.locator(".deckview .c[data-card^='Delver of Secrets']").first
+        front = card.get_attribute("data-img")
+        card.scroll_into_view_if_needed()
+        card.click(button="right")
+        menu = page.locator(".ctxmenu[role=menu]")
+        menu.wait_for(timeout=3000)
+        with page.expect_request(EDIT_URL):
+            menu.locator("[role=menuitemcheckbox]", has_text="Show back face").click()
+        err = page.locator(".deck-toast.error .msg")
+        err.wait_for(timeout=8000)
+        assert err.inner_text().startswith("Show back face not saved:"), err.inner_text()
+        assert (
+            card.locator("img").get_attribute("src") == front and card.get_attribute("data-flipped") is None
+        )
+        assert errors == []
+        browser.close()

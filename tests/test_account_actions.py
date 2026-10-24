@@ -758,7 +758,12 @@ async def test_settings_page_collaborators_take_one_press_and_a_confirmation(sta
             "/decks/42/collaborators", data={"csrf": csrf, "action": "remove", "username": "AMY"}
         )
         assert r.status_code == 200 and "Stop “amy” editing" in r.text and "name='confirmed'" in r.text
-        assert "btn btn-outline-danger'>" in r.text and "Remove “amy”" in r.text
+        # the confirmation page's final step is the solid red button, after Cancel (UI review 0.7.42, M6)
+        assert (
+            "<a class='btn' href='/decks/42/settings#collaborators'>Cancel</a><button class='btn btn-danger'>"
+            in r.text
+        )
+        assert "Remove “amy”</button>" in r.text
         assert "/decks/42/settings#collaborators" in r.text  # Cancel goes back
         assert len(ark.editors[42]) == 1 and h.db.list_proposals(SUB) == []
         # the confirmation removes them at once

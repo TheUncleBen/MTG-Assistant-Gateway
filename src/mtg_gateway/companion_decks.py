@@ -232,9 +232,10 @@ NEW_DECK_CSS = """
 .nd-grid{display:grid;grid-template-columns:minmax(0,1fr) 13rem;gap:1.1rem;align-items:stretch}
 .nd-fields{display:grid;grid-template-columns:minmax(0,1fr);gap:.9rem;min-width:0}
 .nd-top{display:grid;grid-template-columns:minmax(0,1fr) 11rem;gap:.75rem;align-items:start}
-/* side by side: the box's stacked-field gap is not for these */
-.nd-form .nd-top .field + .field{margin-top:0}
-.nd-form .field{margin:0;min-width:0} .nd-form .field label{display:block;font-weight:700;margin:0 0 .25rem}
+/* the grids space the fields; the box's own .field + .field margin would set Format 12 px lower
+   than Deck name (0.7.44) */
+.nd-form .field,.mtgbox .body .nd-form .field + .field{margin:0;min-width:0}
+.nd-form .field label{display:block;font-weight:700;margin:0 0 .25rem}
 .nd-form .msel-btn{max-width:100%}
 /* the three tabs wrap at large text instead of widening the sheet */
 
@@ -270,8 +271,9 @@ NEW_DECK_CSS = """
   color:var(--link);font-size:.92rem;font-weight:700}
 .nd-help summary svg.i{width:16px;height:16px}
 .nd-help p{margin:.2rem 0 0;max-width:30rem}
-.nd-prev{display:flex;flex-direction:column;justify-content:center;border-left:1px solid var(--border-soft);
-  padding-left:1.1rem}
+/* the tile at the top of its column, level with the fields (0.7.43: it floated mid-column) */
+.nd-prev{display:flex;flex-direction:column;justify-content:flex-start;padding-left:1.1rem;
+  border-left:1px solid var(--border-soft)}
 .ndtile{display:block;border:1px solid var(--card-border);border-radius:var(--radius-panel);overflow:hidden;
   background:var(--surface)}
 .ndtile .thumb{position:relative;display:block;height:110px;

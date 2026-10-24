@@ -168,6 +168,36 @@ async def test_create_a_category_from_the_panel(stack: Stack) -> None:
         )
         assert r.status_code == 200 and len(stack.ark.category_creates) == 1, r.text
         assert "name='confirmed' value='1'" in r.text and "Create category</button>" in r.text
+        assert "<h2>Create “Big” as a Premier category?</h2>" in r.text
+        assert esc(modes.CATEGORY_WORDS["create_commander"]) in r.text
+        assert "Changing it" not in r.text and "Cancel</a>" in r.text and "btn-primary" in r.text
+        # Not in deck on, or a name that doesn't count: the counts words; Premier wins when both apply
+        r = await b.http.post(
+            POST,
+            data={"csrf": csrf, "action": "create", "category": "Spare", "not_in_deck": "1"},
+            headers=NAV,
+        )
+        assert r.status_code == 200
+        assert f"<h2>{esc(modes.category_words('create_counts_title', name='Spare'))}</h2>" in r.text
+        assert "doesn&#x27;t count?</h2>" in r.text
+        assert esc(modes.CATEGORY_WORDS["create_counts"]) in r.text
+        r = await b.http.post(
+            POST, data={"csrf": csrf, "action": "create", "category": "Sideboard"}, headers=NAV
+        )
+        assert r.status_code == 200
+        assert f"<h2>{esc(modes.category_words('create_counts_title', name='Sideboard'))}</h2>" in r.text
+        r = await b.http.post(
+            POST,
+            data={
+                "csrf": csrf,
+                "action": "create",
+                "category": "Sideboard",
+                "premier": "1",
+                "not_in_deck": "1",
+            },
+            headers=NAV,
+        )
+        assert r.status_code == 200 and "<h2>Create “Sideboard” as a Premier category?</h2>" in r.text
         # a name already used is refused in the panel, nothing sent
         r = await b.http.post(POST, data={"csrf": csrf, "action": "create", "category": "ramp"}, headers=NAV)
         assert r.status_code == 400 and len(stack.ark.category_creates) == 1
@@ -187,7 +217,14 @@ async def test_delete_asks_first_and_a_category_with_cards_moves_them(stack: Sta
             POST, data={"csrf": csrf, "action": "delete", "delete": str(ids["Maybeboard"])}, headers=NAV
         )
         assert r.status_code == 200 and stack.ark.category_deletes == []
-        assert "<h2>Delete the category?</h2>" in r.text and "move_cards_to" not in r.text
+        assert "<h2>Delete the category “Maybeboard”?</h2>" in r.text and "move_cards_to" not in r.text
+        # Keep it comes first, then the solid red final button (UI review 0.7.42, M3 and M6)
+        assert f"<div class='actions'><a class='btn' href='{SETTINGS}#categories'>Keep it</a>" in r.text
+        assert (
+            "<button class='btn btn-danger'>" in r.text
+            and "btn-outline-danger" not in r.text.split("<form")[1]
+        )
+        assert "Delete “Maybeboard”</button>" in r.text
         r = await b.http.post(
             POST,
             data={"csrf": csrf, "action": "delete", "delete": str(ids["Maybeboard"]), "confirmed": "1"},
@@ -201,9 +238,35 @@ async def test_delete_asks_first_and_a_category_with_cards_moves_them(stack: Sta
             POST, data={"csrf": csrf, "action": "delete", "delete": str(ids["Ramp"])}, headers=NAV
         )
         assert r.status_code == 200, r.text
-        assert "“Ramp” still has 2 cards." in r.text
-        assert "<select id='move_cards_to' name='move_cards_to' required>" in r.text
+        assert "<h2>Delete the category “Ramp”?</h2>" in r.text
+        # the note and the cards sentence read in one style: body size, the text colour (0.7.43)
+        form = r.text.split("<form", 1)[1]
+        assert f"<p>{modes.CATEGORY_DELETE_CONFIRM}</p><p>“Ramp” still has 2 cards." in form
+        assert "muted small" not in form.split("</form>")[0]
+        # nothing is picked in advance (the first category is often Commander)
+        assert (
+            "<select id='move_cards_to' name='move_cards_to' required>"
+            "<option value='' disabled selected hidden>Pick a category…</option><option value='Commander'>"
+        ) in r.text
         assert "<option value='Ramp'>" not in r.text
+        # a submit without a pick is refused, plainly, on the same page
+        r = await b.http.post(
+            POST,
+            data={"csrf": csrf, "action": "delete", "delete": str(ids["Ramp"]), "move_ok": "1"},
+            headers=NAV,
+        )
+        assert r.status_code == 400 and stack.ark.category_deletes == [ids["Maybeboard"]], r.text
+        assert "<p class='notice error' role='alert'>Pick the category its cards move to.</p>" in r.text
+        assert "<select id='move_cards_to' name='move_cards_to' required>" in r.text
+        # a forged yes without a pick gets the same page, not a bare refusal
+        r = await b.http.post(
+            POST,
+            data={"csrf": csrf, "action": "delete", "delete": str(ids["Ramp"]), "confirmed": "1"},
+            headers=NAV,
+        )
+        assert r.status_code == 400 and stack.ark.category_deletes == [ids["Maybeboard"]], r.text
+        assert "<p class='notice error' role='alert'>Pick the category its cards move to.</p>" in r.text
+        assert "<select id='move_cards_to' name='move_cards_to' required>" in r.text
         r = await b.http.post(
             POST,
             data={
@@ -238,7 +301,18 @@ async def test_delete_unused_lists_them_and_asks_first(stack: Stack) -> None:
         assert "form='catunused' name='action' value='unused'" in page
         r = await b.http.post(POST, data={"csrf": csrf, "action": "unused"}, headers=NAV)
         assert r.status_code == 200 and stack.ark.category_deletes == []
-        assert "<h2>Delete the category?</h2>" in r.text and "Delete category “Empty”." in r.text
+        # Empty and the (empty) Maybeboard are unused: the title and button count them, the list
+        # names them, and Keep it is the way back; the three sentences are three paragraphs, as in
+        # the box (0.7.43: the page ran them together in one)
+        assert (
+            "<h2>Delete 2 unused categories?</h2>" in r.text and "Deletes “Empty” and “Maybeboard”." in r.text
+        )
+        assert (
+            f"<p>{esc(modes.CATEGORY_DELETE_CONFIRM)}</p><p>{esc(modes.CATEGORY_COUNTS_CONFIRM)}</p>"
+            "<p>Deletes “Empty” and “Maybeboard”.</p>" in r.text
+        )
+        assert "Delete 2 categories</button>" in r.text and "Keep it</a>" in r.text
+        assert "Delete category “Empty”." not in r.text
         r = await b.http.post(POST, data={"csrf": csrf, "action": "unused", "confirmed": "1"}, headers=NAV)
         assert r.status_code == 303 and r.headers["location"].endswith("?ok=categories_unused#categories")
         assert _ids(page)["Empty"] in stack.ark.category_deletes
@@ -488,9 +562,13 @@ async def test_moving_cards_into_the_commander_category_asks_with_the_commander_
             headers=NAV,
         )
         assert r.status_code == 200 and stack.ark.category_deletes == [], r.text
-        assert esc(modes.CATEGORY_COMMANDER_CONFIRM) in r.text
+        # the member is moving cards, not changing a category: the move sentence, by count
+        assert "<h2>Delete the category “Ramp”?</h2>" in r.text
+        assert esc(modes.category_words("move_commander", n=2)) in r.text
+        assert "Moving these 2 cards there makes them commanders" in r.text
+        assert esc(modes.CATEGORY_COMMANDER_CONFIRM) not in r.text
         assert "name='move_cards_to' value='Commander'" in r.text and "name='confirmed' value='1'" in r.text
-        # an ordinary target goes ahead on the pick alone
+        # ... and the counts sentence into Maybeboard
         r = await b.http.post(
             POST,
             data={
@@ -502,7 +580,24 @@ async def test_moving_cards_into_the_commander_category_asks_with_the_commander_
             },
             headers=NAV,
         )
-        assert r.status_code in (200, 303)
+        assert r.status_code == 200 and stack.ark.category_deletes == [], r.text
+        assert "Moving these 2 cards there changes whether they count in the deck" in r.text
+        # an ordinary target goes ahead on the pick alone
+        stack.ark.decks[42]["categories"].append(
+            {"name": "Removal", "isPremier": False, "includedInDeck": True, "includedInPrice": True}
+        )
+        r = await b.http.post(
+            POST,
+            data={
+                "csrf": csrf,
+                "action": "delete",
+                "delete": str(ids["Ramp"]),
+                "move_cards_to": "Removal",
+                "move_ok": "1",
+            },
+            headers=NAV,
+        )
+        assert r.status_code == 303, r.text
     finally:
         await b.aclose()
 
@@ -542,3 +637,53 @@ async def test_delete_unused_over_30_deletes_the_first_30(stack: Stack) -> None:
         assert "Delete unused categories (2)" in page
     finally:
         await b.aclose()
+
+
+async def test_the_panel_carries_the_boxes_words_and_lays_delete_unused_on_its_own_line(stack: Stack) -> None:
+    """UI review 0.7.42 (M2, L2): the box's titles and sentences are the backend's, on the section
+    as data-words, with the unused names as a list; Delete unused categories sits on its own
+    right-aligned line, not with Save categories and Undo changes."""
+    import json
+
+    _give_categories(stack.ark)
+    stack.ark.decks[42]["categories"].append(
+        {"name": "Empty", "isPremier": False, "includedInDeck": True, "includedInPrice": True}
+    )
+    b = await linked_browser(stack)
+    try:
+        page, _ = await _csrf(b)
+        assert f"data-words='{esc(json.dumps(modes.CATEGORY_WORDS))}'" in page
+        acts = page.split("id='catform'")[1].split("<div class='acts'>")[1].split("</div>")[0]
+        assert "Save categories" in acts and "Undo changes" in acts and "unused" not in acts
+        assert (
+            "<div class='acts ds-unused'><button class='btn btn-outline-danger' form='catunused' "
+            f"name='action' value='unused' data-names='{esc(json.dumps(['Empty', 'Maybeboard']))}'" in page
+        )
+    finally:
+        await b.aclose()
+
+
+def test_the_category_words_fill_in_names_and_counts() -> None:
+    assert modes.category_words("delete_title", name="Ramp") == "Delete the category “Ramp”?"
+    assert modes.category_words("unused_title", n=3) == "Delete 3 unused categories?"
+    assert modes.category_words("unused_title", name="Spare", n=1) == "Delete the unused category “Spare”?"
+    assert modes.category_words("unused_ok", n=3) == "Delete 3 categories"
+    assert modes.category_words("unused_ok", name="Spare", n=1) == "Delete “Spare”"
+    assert (
+        modes.category_names_line(["Maybeboard", "Old ideas", "Spare"])
+        == "Deletes “Maybeboard”, “Old ideas” and “Spare”."
+    )
+    assert modes.category_names_line(["A", "B"]) == "Deletes “A” and “B”."
+    assert modes.category_names_line(["A"]) == "Deletes “A”."
+    assert modes.category_words("move_commander", n=1) == (
+        "Cards in a Premier category are the deck's commanders. Moving this card there makes it a "
+        "commander, which can change the deck's legality and its colours."
+    )
+    assert modes.category_words("move_counts", n=1).startswith(
+        "Moving this card there changes whether it counts"
+    )
+    assert modes.category_words("move_counts", n=3).startswith(
+        "Moving these 3 cards there changes whether they count"
+    )
+    for text in modes.CATEGORY_WORDS.values():
+        assert "—" not in text and "verify" not in text.lower() and '"' not in text

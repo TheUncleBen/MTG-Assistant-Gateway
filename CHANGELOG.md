@@ -7,6 +7,61 @@ Notable changes for people who run or use the gateway. The format follows
 with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 (`release/1.2.3`); `latest` is always the newest.
 
+## [0.7.44] - 2026-10-24
+
+A review of the screens 0.7.42 and 0.7.43 added, brought to the same standard as the rest of the
+app, and Show back face now shows the card's back picture, as Archidekt does.
+
+### Upgrade notes
+- None beyond the [update steps](docs/UPGRADING.md). There is no database change, so this update
+  saves no before-upgrade copy, and going back to 0.7.43 needs only the `MTG_TAG` change.
+- No new settings or secrets: your variables file works as it is.
+
+### Changed
+- **Show back face shows the back.** With the switch on, the deck page draws the card's back
+  picture in every view, and the card viewer opens on the back with a Show front button. Cards
+  with no back picture of their own (split cards, for example) keep the front.
+- **Category boxes say what they do.** Delete unused categories names each category it deletes
+  and counts them on its button; New category asks before it makes a Premier category or one
+  that doesn't count in the deck; deleting a category is titled with its name, its cancel button
+  reads Keep it, and after you pick where its cards move, the box says when that changes the
+  commander or the deck's card count.
+- **Deck settings' categories** line up as one grid: name, card count and Delete on the first
+  line, the switches under them, on every screen size. Delete unused categories sits on its own
+  line under Save categories.
+- **Pages that work without scripts** ask you to pick where a category's cards move (no category
+  is picked for you), list Cancel first, and show the final delete button in solid red. The
+  remove-collaborator confirmation follows the same order.
+- **New deck's preview** shows Theorycrafted and the game type.
+- **Theorycrafted's help** reads "Left out of Archidekt’s “In decks” view unless you choose to
+  show it."
+- Card menu rows without an icon keep the icon's space, so their words line up.
+
+### Fixed
+- Card menu rows, the quantity buttons and the menu's other buttons were smaller than a finger on
+  phones and tablets; they are now 44 pixels tall.
+- Turning Companion on or off from the card menu didn't add or remove the Companion mark on the
+  card until the page was opened again. The mark now follows the switch at once, Undo included,
+  and in the list views it reads "Companion".
+- The top bar's search box drew its magnifier over "Search cards and decks" on pages shown
+  without scripts, and for a moment before scripts ran on every page.
+- On a card tile without a picture, the green owned dot and the finish badge sat on the type line
+  and the quantity corner could touch the name; the text now keeps clear of them at every card
+  size.
+- The card viewer left a void between its text and its buttons; the New deck box's Format field
+  sat lower than Deck name and its preview tile floated mid-column; on a phone the third category
+  switch sat on a line of its own; the no-script category delete pages mixed small grey print with
+  body text and ran their sentences together in one paragraph.
+- The × of the "Saved" toast on the deck page could wrap onto a line of its own (at 810 pixels,
+  for example). Every toast's × now stays in the top right corner, finger-sized on touch, with
+  the toast's text and buttons kept clear of it.
+- A long deck page opened slowly on phones: the top bar measured its room and wrote it in turns,
+  so the phone laid out the whole page several times as it loaded. It now measures once and
+  writes once.
+- In Change printing, with the keyboard on Use this printing, a card sliding under a resting mouse
+  pointer redrew the preview and dropped the keyboard's place onto the page behind the box. The
+  preview now stays put while the keyboard is in it.
+
 ## [0.7.43] - 2026-10-23
 
 More of what you can do on Archidekt is now in the gateway too: your account-wide lists, card
