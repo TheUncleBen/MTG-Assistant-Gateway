@@ -79,6 +79,10 @@ app, and Show back face now shows the card's back picture, as Archidekt does.
 - The Archidekt notifications switch on the Account page showed the opposite of the setting.
 - Holding a finger on a card or a post opened its menu, and lifting the finger could close it
   again; the menu now stays open.
+- On a phone, choosing a menu item that opens another page or sends a form (Remove… on Card
+  models, Apply or Reject on a waiting change, Clone, Run full test, Revoke tokens and sessions)
+  could leave you on the same page, or bring you back to it a moment after the new page opened.
+  The menu now finishes closing before the page changes.
 - On touch screens, the Approval mode folds, the "Has a back face" switch, and the card viewer's
   close, − and + buttons are now 44 pixels, finger-sized.
 - The Add template box said "Add 1 category" with nothing ticked; it now says "Add categories".

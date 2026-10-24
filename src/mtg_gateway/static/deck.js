@@ -2873,10 +2873,10 @@
     return function () {
       var f = $(sel, banner);
       if (!f) return;
-      if (f.requestSubmit) f.requestSubmit(); else f.submit();
+      Menu.whenClosed(function () { if (f.requestSubmit) f.requestSubmit(); else f.submit(); });
     };
   }
-  function go(href) { location.assign(href); }
+  function go(href) { Menu.whenClosed(function () { location.assign(href); }); }
   function cancelButton(text) { return Box.button(text || "Cancel", "btn", null, { cancel: true }); }
   function failed(box, r) { box.busy(false); box.note((r && r.message) || "The gateway could not be reached. Check your connection and try again.", true); }
 
@@ -2937,7 +2937,8 @@
       var forms = banner.querySelectorAll("form[action$='/report']");
       for (var i = 0; i < forms.length; i++) {
         if (!forms[i].querySelector("input[name=forge]")) {
-          if (forms[i].requestSubmit) forms[i].requestSubmit(); else forms[i].submit();
+          var f = forms[i];
+          Menu.whenClosed(function () { if (f.requestSubmit) f.requestSubmit(); else f.submit(); });
           return;
         }
       }

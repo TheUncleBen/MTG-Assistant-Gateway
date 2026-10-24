@@ -158,7 +158,11 @@
     if (window.MtgSelect && window.MtgSelect.refresh) window.MtgSelect.refresh(sel);
   }
   function openDetails(item, returnFocus) {
-    if (!detailsBox) { location.href = "/collection?details=" + encodeURIComponent(item.getAttribute("data-id")); return; }
+    if (!detailsBox) {
+      var href = "/collection?details=" + encodeURIComponent(item.getAttribute("data-id"));
+      if (window.MtgMenu) window.MtgMenu.whenClosed(function () { location.href = href; }); else location.href = href;
+      return;
+    }
     var form = $("form", detailsBox);
     var name = nameOf(item);
     var h = $("#col-details-title");

@@ -39,7 +39,7 @@
     document.body.appendChild(f);
     return f;
   }
-  function submitForm(action, fields) { hiddenForm(action, fields).submit(); }
+  function submitForm(action, fields) { Menu.whenClosed(function () { hiddenForm(action, fields).submit(); }); }
   function field(labelText, input, id) {
     var wrap = el("div", "field");
     var lab = el("label", null, labelText);
@@ -599,7 +599,7 @@
     o = o || {};
     var spec = {
       name: name,
-      onOpen: o.onOpen || function () { location.href = "/cards?q=" + enc(name); },
+      onOpen: o.onOpen || function () { Menu.whenClosed(function () { location.href = "/cards?q=" + enc(name); }); },
       addHref: o.noAdd ? null : "/cards?q=" + enc(name),
       collect: !o.noCollect,
       watch: Menu.enabled() && !o.noWatch ? { watched: !!o.watched, onWatch: function () { Card.watch({ name: name }, { was: !!o.watched }).catch(function () {}); } } : null,
@@ -738,7 +738,7 @@
         var a = el("input");
         a.type = "hidden"; a.name = "action"; a.value = action;
         form.appendChild(a);
-        form.submit();
+        Menu.whenClosed(function () { form.submit(); });
       };
       // only a change a press here may apply: a deck delete, or a change that needs its review
       // page, is approved there
