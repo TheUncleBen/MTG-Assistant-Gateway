@@ -39,9 +39,11 @@ CARD_DB = {
     # Names that break a first-page substring search on the real site (verified 2026-10-04):
     "opt": {"id": 9007, "oracleCard": {"name": "Opt"}},
     "swamp": {"id": 9008, "oracleCard": {"name": "Swamp"}},
+    # a two-faced card with a picture per face (Archidekt's oracleCard carries Scryfall's layout)
     "delver of secrets // insectile aberration": {
         "id": 9009,
-        "oracleCard": {"name": "Delver of Secrets // Insectile Aberration"},
+        "uid": "11bf83bb-c95b-4b4f-9a56-ce7a1816307a",
+        "oracleCard": {"name": "Delver of Secrets // Insectile Aberration", "layout": "transform"},
     },
     "acidic slime": {"id": 9010, "oracleCard": {"name": "Acidic Slime"}},
 }
@@ -560,7 +562,10 @@ class FakeArchidekt:
                     "type": t["type"],
                     "archived": False,
                     "owner": {"username": t["owner"]},
-                    "childrenCount": len(self.comments.get(tid, [])),
+                    # the thread's direct replies, as the thread itself counts them (a comment's
+                    # childrenCount is its own children's; Archidekt's thread view shows "Replies
+                    # N" from it and loads children while fewer are held)
+                    "childrenCount": len([c for c in self.comments.get(tid, []) if c["parent"] == tid]),
                     "points": 3,
                     "recentPost": {"createdAt": "2026-10-20T10:00:00Z", "owner": {"username": t["owner"]}},
                 }
@@ -1330,6 +1335,7 @@ class FakeArchidekt:
                     "collectorNumber": "1",
                     "edition": {"editioncode": "xxx"},
                     "oracleCard": v["oracleCard"],
+                    **({"uid": v["uid"]} if "uid" in v else {}),
                 }
         for d in self.decks.values():
             for c in d["cards"]:

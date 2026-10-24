@@ -88,7 +88,7 @@ def test_the_forum_pages_fit_every_width_in_both_themes(server: Server, width: i
     with sync_playwright() as p:
         browser, page, errors = _page(p, server, sid, width, theme, exe)
         page.goto(f"{server.base}/forum", wait_until="networkidle")
-        assert page.locator(".fm .ui-chip").count() == 2
+        assert page.locator(".fm .ui-chip").count() == 0  # the sections are the tables' rows alone
         _fits(page, "/forum", width)
         # a section: the table, then Load more appends the next page's rows in place
         page.goto(f"{server.base}/forum/Archidekt/General", wait_until="networkidle")

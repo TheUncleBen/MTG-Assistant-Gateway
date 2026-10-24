@@ -55,17 +55,14 @@ CARD_NOTICES = frozenset({"profile", "email", "defaults", "picture"})
 # Archidekt's saved scripts confirm its settings page accountSettings/[settingsName] but not the names,
 # so the link opens Archidekt's home page
 ON_ARCHIDEKT_URL = "https://archidekt.com/"
-# the switches, in the mockup's order and words: (name, label, help, inverted)
+# the switches, in the mockup's order and words: (name, label, help). Each is on when the thing it
+# names is on, in profile's words too: Archidekt stores the last one the other way round
+# (noArchidektNotifications), and profile.py alone turns it round, on the read and on the save.
 EMAIL_ROWS = (
-    ("contactable", "Other members can contact me", "Lets members message you through Archidekt.", False),
-    ("newsletter", "Archidekt's newsletter", "Occasional email about the site.", False),
-    ("comment_emails", "Email me when someone comments", "On your decks and your forum posts.", False),
-    (
-        "site_notifications",
-        "Turn off Archidekt notifications",
-        "Turns off Archidekt's notifications for your account.",
-        True,
-    ),
+    ("contactable", "Other members can contact me", "Lets members message you through Archidekt."),
+    ("newsletter", "Archidekt's newsletter", "Occasional email about the site."),
+    ("comment_emails", "Email me when someone comments", "On your decks and your forum posts."),
+    ("site_notifications", "Archidekt notifications", "Shows Archidekt's notifications in the bell."),
 )
 # the new-device defaults profile.PREFERENCES supports, in the mockup's order: (name, label,
 # help, choices as (value, words) for a drop-down, or None for a switch)
@@ -81,7 +78,7 @@ PREF_ROWS: tuple[tuple[str, str, str, tuple[tuple[str, str], ...] | None], ...] 
     (
         "price_sources",
         "Price sources",
-        "Two shops, in order.",
+        "The deck page shows prices from these two shops, first one first.",
         tuple((profile.choice_key(w), w) for w, _v in profile.PRICE_SOURCE_LABELS),
     ),
     ("unique_search", "Search unique printings", "Show one result per card name in card search.", None),
@@ -119,8 +116,8 @@ CSS = """
 .acc .ui-row.sw .ctl{justify-self:end}
 .acc .ui-row.full{grid-template-columns:minmax(0,1fr)}
 .acc .ui-row.full .ctl{grid-column:1;grid-row:auto}
-.acc .ui-row .ctl .switch .sw-text{font-size:.95rem}
-.acc .ui-row.sw .switch{margin:0;min-height:44px;font-weight:400}
+/* the track is 40 px wide: the label (its words are for a reader only) makes the 44 px target */
+.acc .ui-row.sw .switch{margin:0;min-height:44px;min-width:44px;justify-content:flex-end;font-weight:400}
 .acc .ui-row .ctl input[type=text]{width:100%}
 .acc .ui-row .ctl form{margin:0;display:flex;align-items:center;gap:.5rem;flex-wrap:wrap}
 /* the drop-down is the themed button (static/select.js); its native select stays off-screen */
@@ -128,6 +125,9 @@ CSS = """
   flex:1 1 8rem;width:auto;min-width:0;max-width:100%;margin:0}
 .acc .pr-bio{min-height:7rem;width:100%;font:inherit;font-size:1rem;line-height:1.4;resize:vertical}
 .acc .pr-hist{margin:.5rem 0 0}
+/* Price sources: the label and its help sit at the top, level with the first of the two pickers */
+.acc .ui-row.two{grid-template-rows:auto 1fr}
+.acc .ui-row.two .lab,.acc .ui-row.two .help{align-self:start}
 .acc .pr-two{display:grid;grid-template-columns:minmax(0,1fr);gap:6px}
 /* each picker shrinks with its column (a grid item's own minimum is its longest choice, which
    at 200% text ran past a 360 px screen); the choice's words are cut with an ellipsis instead */
@@ -138,8 +138,11 @@ CSS = """
 .pr-box .pr-me{display:flex;align-items:center;gap:1rem;flex-wrap:wrap;margin:.75rem 0}
 .pr-box .pr-file{position:absolute;width:1px;height:1px;opacity:0;overflow:hidden}
 .pr-box .pr-name{color:var(--text-muted);font-size:.9rem;margin:.3rem 0 0;overflow-wrap:anywhere}
+/* on a phone a switch keeps the label's line, at the row's end (the Deck settings layout); the
+   other controls drop under their label */
 @media (max-width:599.98px){.acc .ui-row{grid-template-columns:minmax(0,1fr)}
-  .acc .ui-row.sw .ctl{justify-self:start}}
+  .acc .ui-row.sw{grid-template-columns:minmax(0,1fr) auto}
+  .acc .ui-row.sw .ctl{grid-column:2;grid-row:1 / span 2;justify-self:end;align-self:start}}
 """
 COLLECTION_CSS = """
 .col-vis{display:flex;flex-wrap:wrap;align-items:center;gap:.4rem 1rem;margin:0 0 .9rem;padding:.6rem .8rem;
@@ -276,7 +279,7 @@ def _switch_form(
         f"<input type='hidden' name='was' value='{'1' if on else '0'}'>"
         f"<label class='switch'><input id='{fid}' type='checkbox' name='on' value='1'"
         f"{' checked' if on else ''}>"
-        f"<span class='track' aria-hidden='true'></span><span class='sw-text'>{esc(label)}</span></label>"
+        f"<span class='track' aria-hidden='true'></span><span class='sr-only'>{esc(label)}</span></label>"
         "<noscript><button class='btn-plain inline'>Save</button></noscript></form>"
     )
 
@@ -394,7 +397,7 @@ def account_cards(
     prof = (
         f"<div class='card' id='profile'><h2>Archidekt profile</h2>{note('profile')}{note('picture')}"
         "<div class='ui-row full'><p class='lab'>Picture</p>"
-        "<p class='help'>Your own JPEG or PNG up to 1 MB. Only you can change it, here.</p>"
+        "<p class='help'>A JPEG or PNG up to 1 MB.</p>"
         "<div class='ctl'><div class='pr-me'><span class='big' aria-hidden='true'>"
         f"{esc(_initial(me['username']))}"
         "</span><div class='ui-actions'>"
@@ -420,9 +423,8 @@ def account_cards(
         + "</div>"
     )
     email_rows = []
-    for name, label, help_text, inverted in EMAIL_ROWS:
-        got = me["email"].get(name)
-        on = (not got) if inverted else bool(got)
+    for name, label, help_text in EMAIL_ROWS:
+        on = bool(me["email"].get(name))
         email_rows.append(
             _row(
                 f"<label for='pr-{name}'>{esc(label)}</label>",
@@ -460,7 +462,7 @@ def account_cards(
                 )
             )
             head = f"<label for='pr-price_source_1'>{esc(label)}</label>"
-            pref_rows.append(_row(head, help_text, f"<div class='pr-two'>{ctl}</div>"))
+            pref_rows.append(_row(head, help_text, f"<div class='pr-two'>{ctl}</div>", cls="two"))
         else:
             ctl = _select_form(csrf_in, name=name, label=label, choices=choices, cur=cur)
             pref_rows.append(_row(f"<label for='pr-{name}'>{esc(label)}</label>", help_text, ctl))
@@ -690,9 +692,7 @@ def add_profile_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
                 code = "ok=unconfirmed" if unconfirmed else f"ok=profile&saved={','.join(saved)}"
                 return RedirectResponse(f"/account?{code}#profile", status_code=303)
             if action == "email":
-                switch = data.get("switch") or ""
-                inverted = switch == "site_notifications"
-                out = await press(sub, shown, field="email", switch=switch, on=(not on) if inverted else on)
+                out = await press(sub, shown, field="email", switch=data.get("switch") or "", on=on)
             elif action == "preference":
                 # a drop-down sends its value; a switch sends on=1 or 0
                 value = data.get("value") if "value" in data else ("on" if on else "off")
@@ -813,7 +813,7 @@ def add_profile_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
         return page(
             "Notifications",
             f"<div class='bell-page'><div class='ui-head'><h1>Notifications{badge}</h1></div>"
-            "<p class='ui-sub'>What Archidekt's bell holds for you.</p>"
+            "<p class='ui-sub'>Your notifications from Archidekt.</p>"
             f"<div class='card'>{body}<p class='muted small bell-foot'>{esc(BELL_NOTE)}</p>"
             "<div class='ui-actions'><a class='btn btn-plain' href='/account#email'>"
             f"{icon('settings')} Settings</a>"

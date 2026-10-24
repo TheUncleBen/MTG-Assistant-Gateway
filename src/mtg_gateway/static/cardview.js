@@ -190,8 +190,8 @@
     flip.type = "button";
     flip.hidden = true;
     var flipped = false;
-    flip.addEventListener("click", function () {
-      flipped = !flipped;
+    function showFace(back) {
+      flipped = back;
       // a face that failed to load earlier left a name tile (feedback.js); the other face gets its chance
       pic.classList.remove("img-broken");
       var tile = pane.querySelector(".img-fallback");
@@ -200,12 +200,15 @@
       pic.alt = (card.name || "") + (flipped ? " (back face)" : "");
       flip.textContent = flipped ? "Show front" : "Show back";
       flip.setAttribute("aria-pressed", flipped ? "true" : "false");
-    });
+    }
+    flip.addEventListener("click", function () { showFace(!flipped); });
     function offerBack(url) {
       if (!url || !front || flip.getAttribute("data-back")) return;
       flip.setAttribute("data-back", url);
       flip.setAttribute("aria-pressed", "false");
       flip.hidden = false;
+      // a deck row with Show back face on opens on its back, as the page draws it; Show front is there
+      if (card.flipped) showFace(true);
     }
     pane.appendChild(flip);
     var side = el("div", "info");
@@ -252,7 +255,8 @@
       if (card.cat) inDeck += (inDeck ? " · " : "") + card.cat;
       fact(dl, "In this deck", inDeck);
       fact(dl, "Color tag", card.label ? String(card.label).split(",")[0] : "");
-      fact(dl, "Note", "Custom card, made on Archidekt; not on Scryfall or in price lists");
+      // only what the gateway knows: no Scryfall card, and deck_stats leaves custom cards out of its price
+      fact(dl, "Note", "Custom card, made on Archidekt: not on Scryfall, and not counted in the deck's price here.");
     }
     if (card.legal) {
       var chips = el("span", "chips");
@@ -338,8 +342,8 @@
       if (pbtn) side.appendChild(pbtn.box);
     }
     offerLinks(card.links);
-    offerBack(card.back_img);
-    if (card.name && (!card.links || (!card.back_img && card.faces && card.faces.length > 1))) {
+    offerBack(card.back_img || card.back);
+    if (card.name && (!card.links || (!card.back_img && !card.back && card.faces && card.faces.length > 1))) {
       extraFor(card.name).then(function (x) {
         if (!x || !viewer || !viewer.classList.contains("open") || !v.contains(more)) return;
         offerLinks(x.links);
@@ -453,7 +457,10 @@
     return {
       name: node.getAttribute("data-card") || "",
       img: node.getAttribute("data-img") || "",
-      back_img: node.getAttribute("data-back") || "",  // a custom card's back face, through the gateway
+      // the back face's picture: a two-faced card's (Show back face) or a custom card's, through
+      // the gateway
+      back_img: node.getAttribute("data-back") || "",
+      flipped: node.hasAttribute("data-flipped"),
       set: node.getAttribute("data-set") || "",
       type: node.getAttribute("data-type") || "",
       mana: node.getAttribute("data-mana") || "",

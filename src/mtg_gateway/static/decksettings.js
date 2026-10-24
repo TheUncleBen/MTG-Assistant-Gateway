@@ -25,7 +25,8 @@
     var n = $$("input[name=template]:checked", box).length;
     if (!go) return;
     var last = go.lastChild;
-    var text = " Add " + (n || 1) + (n === 1 || n === 0 ? " category" : " categories");
+    // nothing ticked: "Add categories" (the button stays off), never a count it does not have
+    var text = n === 0 ? " Add categories" : " Add " + n + (n === 1 ? " category" : " categories");
     if (last && last.nodeType === 3) last.textContent = text; else go.appendChild(document.createTextNode(text));
     go.disabled = !$$("input[name=template]", box).length || n === 0;
   }

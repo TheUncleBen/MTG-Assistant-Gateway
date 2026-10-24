@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import re
 
+import pytest
+
 from .conftest import Stack
 from .test_companion import NAV, linked_browser
 
@@ -33,6 +35,118 @@ async def test_the_deck_page_holds_its_boxes_and_one_orange_button(stack: Stack)
         assert "Deck stats" in page and "Open on Archidekt" in page
     finally:
         await b.aclose()
+
+
+async def test_the_companion_mark_has_words_in_the_grid_and_the_list(stack: Stack) -> None:
+    """UI review 0.7.42 (M1): the grid's pink corner is an image with the word for a screen reader
+    (colour never carries the meaning alone), and a list row shows the word itself."""
+    from mtg_gateway.deckpage import COMPANION_CORNER, COMPANION_MARK
+
+    for row in stack.ark.decks[42]["cards"]:
+        if row["card"]["oracleCard"]["name"] == "Cultivate":
+            row["companion"] = True
+    b = await linked_browser(stack)
+    try:
+        grid = (await b.http.get(f"{DECK}?view=grid", headers=NAV)).text
+        assert COMPANION_CORNER == (
+            "<span class='corner comp' role='img' aria-label='Companion' title='Companion'></span>"
+        )
+        assert grid.count(COMPANION_CORNER) == 1 and "<span class='corner comp' title=" not in grid
+        tile = grid.split("data-card='Cultivate'")[1].split("</div>")[0]
+        assert COMPANION_CORNER in tile
+        text = (await b.http.get(f"{DECK}?view=text", headers=NAV)).text
+        assert text.count(COMPANION_MARK) == 1
+        row = text.split("data-card='Cultivate'")[1].split("</li>")[0]
+        assert "<span class='compmark'>Companion</span>" in row
+    finally:
+        await b.aclose()
+
+
+async def test_show_back_face_draws_the_back_picture_in_every_view(stack: Stack) -> None:
+    """L6 (Ben, 23 Oct): a row with Show back face on draws the card's back face in the grid, the
+    Brewer view and the list row's hover preview, as archidekt.com does; the viewer's data keeps the
+    front as data-img and carries the back as data-back; a card without a back keeps its front."""
+    from mtg_gateway.deckpage import BACK_FACE_LAYOUTS
+
+    stack.ark.add_side_row(42, "Delver of Secrets // Insectile Aberration", category="Sideboard")
+    uid = "11bf83bb-c95b-4b4f-9a56-ce7a1816307a"
+    front = f"https://cards.scryfall.io/normal/front/{uid[0]}/{uid[1]}/{uid}.jpg"
+    back = f"https://cards.scryfall.io/normal/back/{uid[0]}/{uid[1]}/{uid}.jpg"
+    assert "transform" in BACK_FACE_LAYOUTS and "split" not in BACK_FACE_LAYOUTS
+    # (set before the first read: the gateway keeps the deck it read for a while)
+    for row in stack.ark.decks[42]["cards"]:
+        if (
+            row["card"]["oracleCard"]["name"].startswith("Delver")
+            or row["card"]["oracleCard"]["name"] == "Sol Ring"
+        ):
+            row["flippedDefault"] = True
+    b = await linked_browser(stack)
+    try:
+        grid = (await b.http.get(f"{DECK}?view=grid", headers=NAV)).text
+        tile = grid.split("data-card='Delver of Secrets // Insectile Aberration'")[1].split("</div>")[0]
+        assert f"data-img='{front}'" in tile and f"data-back='{back}'" in tile and "data-flipped='1'" in tile
+        assert f"<img src='{back}'" in tile and f"<img src='{front}'" not in tile
+        text = (await b.http.get(f"{DECK}?view=text", headers=NAV)).text
+        row = text.split("data-card='Delver of Secrets // Insectile Aberration'")[1].split("</li>")[0]
+        assert f"<span class='hover'><img src='{back}'" in row
+        brewer = (await b.http.get(f"{DECK}?view=brewer", headers=NAV)).text
+        row = brewer.split("data-card='Delver of Secrets // Insectile Aberration'")[1].split("</li>")[0]
+        assert f"<img class='art' src='{back}'" in row
+        # a one-faced card never gets a back, flipped or not
+        sol = grid.split("data-card='Sol Ring'")[1].split("</div>")[0]
+        assert "data-flipped='1'" in sol and "data-back" not in sol and "/back/" not in sol
+    finally:
+        await b.aclose()
+
+
+@pytest.mark.parametrize(
+    ("layout", "back"),
+    [
+        ("transform", True),
+        ("modal_dfc", True),
+        ("double_faced_token", True),
+        ("reversible_card", True),
+        ("art_series", True),
+        ("normal", False),
+        ("split", False),
+        ("flip", False),
+        ("adventure", False),
+        ("meld", False),
+        ("saga", False),
+        ("leveler", False),
+        ("", False),
+    ],
+)
+def test_show_back_face_draws_the_back_only_for_a_layout_with_two_pictures(layout: str, back: bool) -> None:
+    """The five Scryfall layouts whose faces have a picture each get their back when Show back
+    face is on; a split, flip, adventure or meld card (two faces on one picture) and every one-faced
+    layout keep the front, flipped or not. The back is never offered while the switch is off."""
+    from mtg_gateway.archidekt import DeckCard
+    from mtg_gateway.deckpage import card_back_image, shown_image
+
+    uid = "11bf83bb-c95b-4b4f-9a56-ce7a1816307a"
+    front = f"https://cards.scryfall.io/normal/front/1/1/{uid}.jpg"
+    rear = f"https://cards.scryfall.io/normal/back/1/1/{uid}.jpg"
+
+    def card(flipped: bool) -> DeckCard:
+        return DeckCard(
+            relation_id=1,
+            card_id=1,
+            name="Some Card",
+            quantity=1,
+            categories=[],
+            modifier="Normal",
+            set_code="xxx",
+            collector_number="1",
+            layout=layout,
+            scryfall_uid=uid,
+            flipped_default=flipped,
+        )
+
+    assert card_back_image(card(True)) == (rear if back else None)
+    assert shown_image(card(True)) == (rear if back else front)
+    assert shown_image(card(False)) == front
+    assert shown_image(card(True), "small") == (rear if back else front).replace("/normal/", "/small/")
 
 
 async def test_the_old_export_and_delete_addresses_open_the_deck_page_with_the_box(stack: Stack) -> None:

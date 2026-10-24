@@ -138,7 +138,7 @@ def test_forum_dates_votes_and_the_menu_in_its_column(server: Server, width: int
         amy = page.locator(".comments .cmt[data-owner='amy']").first
         vote = amy.locator("> .acts button.vote")
         assert vote.count() == 1 and vote.locator(".n").inner_text() == "0"
-        assert vote.get_attribute("aria-label") == "0 points. Vote up: comment by amy"
+        assert vote.get_attribute("aria-label") == "Vote up (0 points): comment by amy"
         assert amy.locator("> .acts").inner_text().count("Down") == 0
         assert [b.strip() for b in amy.locator("> .acts button").all_inner_texts()] == ["0", "Reply"]
         mine = page.locator(".comments .cmt[data-owner='alice']").first
@@ -189,7 +189,7 @@ def test_forum_dates_votes_and_the_menu_in_its_column(server: Server, width: int
         amy_id = int(amy.get_attribute("data-id"))
         assert server.ark.votes == {("alice", amy_id): 2}
         assert vote.get_attribute("aria-pressed") == "false"
-        assert vote.get_attribute("aria-label") == "-1 point. Vote up: comment by amy"
+        assert vote.get_attribute("aria-label") == "Vote up (-1 point): comment by amy"
         amy.locator("> .who .kebab").click()
         page.locator(".ctxmenu").wait_for(state="visible")
         assert _items(page) == ["Reply", "Copy link", "Vote up", "Take back your vote", "Report comment…"]

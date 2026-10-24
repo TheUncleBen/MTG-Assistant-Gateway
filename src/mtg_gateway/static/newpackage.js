@@ -15,7 +15,7 @@
     var n = box.querySelector(".boxnote");
     if (n) { n.hidden = !text; n.textContent = text; }
   }
-  function recount() { if (count && name) count.textContent = name.value.length + " / 120"; }
+  function recount() { if (count && name) count.textContent = name.value.length + "/120"; }  // as New deck's
   if (name) name.addEventListener("input", recount);
   recount();
   form.addEventListener("submit", function (e) {

@@ -708,5 +708,10 @@ def box(
 def thumb_size_css(selector: str, width: str, height: str = "") -> str:
     """The rule that makes a page's own list thumbnails follow the card size (R-175): ``width`` and
     ``height`` are their M sizes ("40px"); S and L multiply them by the theme's --thumb-scale."""
-    h = f";height:calc({height} * var(--thumb-scale))" if height else ""
-    return f"html[data-card-size] {selector}{{width:calc({width} * var(--thumb-scale)){h}}}"
+    # the scale is set on the thumbnails, not on <html>, so the switch restyles only them
+    h = f";height:calc({height} * var(--thumb-scale,1))" if height else ""
+    return (
+        f"html[data-card-size=s] {selector}{{--thumb-scale:.75}}"
+        f"html[data-card-size=l] {selector}{{--thumb-scale:1.35}}"
+        f"html[data-card-size] {selector}{{width:calc({width} * var(--thumb-scale,1)){h}}}"
+    )

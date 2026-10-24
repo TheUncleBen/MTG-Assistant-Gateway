@@ -865,10 +865,10 @@ def new_package_box_html(
         f"<p class='muted small'>{esc(NEW_PACKAGE_INTRO)}</p>"
         "<div class='dx-two'>"
         "<div class='field'><label for='np-name'>Name (required)</label>"
-        f"<input id='np-name' type='text' name='name' value='{esc(name)}' placeholder='Golgari staples' "
-        "required maxlength='120' autocomplete='off' data-count='np-name-c'>"
+        f"<input id='np-name' type='text' name='name' value='{esc(name)}' placeholder='e.g. Golgari staples' "
+        "required maxlength='120' autocomplete='off'>"  # counted by static/newpackage.js, as New deck's name
         "<div class='dx-under'><span></span>"
-        f"<span class='muted small' id='np-name-c' aria-live='polite'>{len(name)} / 120</span></div></div>"
+        f"<span class='muted small' id='np-name-c' aria-live='polite'>{len(name)}/120</span></div></div>"
         "<div class='field'><label for='np-kw'>Keywords (required)</label>"
         f"<input id='np-kw' type='text' name='keywords' value='{esc(v.get('keywords', ''))}' "
         f"placeholder='shocklands, fetchlands' required maxlength='{packages.KEYWORDS_MAX}' "
@@ -947,6 +947,7 @@ CSS = """
 .dx-box .body .dx-two{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,13rem),1fr));
   gap:.5rem .75rem}
 .dx-box .body .dx-two .field + .field{margin-top:0}
+.dx-box .body .dx-two + .dx-two{margin-top:.75rem}  /* a row's help line clear of the next row's labels */
 .mtgbox .body .dx-two + .field,.mtgbox .body form > p + .dx-two,
 .mtgbox .body form > p + .field{margin-top:.75rem}
 .dx-under{display:flex;justify-content:space-between;gap:.5rem;margin-top:.2rem}

@@ -38,7 +38,7 @@ GAMES = {"paper": 1, "mtgo": 2, "arena": 3}
 # the price sources its picker lists, with the picker's names)
 GROUP_BY_LABELS = (
     ("Categories", 0), ("Categories (multiple)", 6), ("Type", 1), ("Mana value", 2),
-    ("Mana value (spells)", 18), ("Full deck", 3), ("Color tag", 4), ("EDH Bracket Info", 20),
+    ("Mana value (spells)", 18), ("Full deck", 3), ("Color tag", 4), ("EDH bracket", 20),
     ("Collection", 5), ("Foiling", 22), ("Rarity", 7), ("Salt", 8), ("Price", 9), ("Color", 10),
     ("Color (Spells)", 21), ("Identity", 11), ("Date added", 12), ("Edition name", 13),
     ("Print date (range)", 26), ("Artist name", 14), ("Power", 15), ("Toughness", 16),
