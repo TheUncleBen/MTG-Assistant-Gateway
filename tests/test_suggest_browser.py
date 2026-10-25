@@ -197,7 +197,7 @@ def test_no_match_and_escape(server: Server) -> None:
 def test_no_page_renders_a_datalist(server: Server) -> None:
     sid = server.sign_in()
     h = httpx.Client(base_url=server.base, cookies={"mtg_session": sid})
-    csrf = re.search(r"name='csrf' value='([0-9a-f]+)'", h.get("/account").text).group(1)
+    csrf = re.search(r"name='csrf' value='([0-9a-f]+)'", h.get("/account/details").text).group(1)
     h.post(
         "/account",
         data={
@@ -235,10 +235,10 @@ def test_sign_out_acts_on_the_first_click_and_says_so(server: Server) -> None:
         )
         page = ctx.new_page()
         page.goto(f"{server.base}/account", wait_until="networkidle")
-        button = page.locator(".form-actions form[action='/logout'] button:not([name])")
+        button = page.locator("form.ysignout button:not([name])")
         button.click()
         page.wait_for_function(  # the lock comes a tick after the form is handed to the browser
-            "() => { const b = document.querySelector(\".form-actions form[action='/logout'] button\");"
+            "() => { const b = document.querySelector('form.ysignout button');"
             " return b.getAttribute('aria-busy') === 'true' && b.textContent.trim() === 'Signing out…'"
             " && b.disabled; }",
             timeout=3000,

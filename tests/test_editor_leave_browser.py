@@ -207,16 +207,20 @@ def test_save_from_the_question_and_the_browser_box_on_tab_close(server: Server)
             page.goto(edit, wait_until="networkidle")
             assert dialogs in ([], ["beforeunload"]), dialogs
             dialogs.clear()
-            # a form that leaves the page (the account menu's theme switch) asks too; Discard sends
-            # it with the button that was pressed, and still no browser box
+            # a form that leaves the page (the top bar's search) asks too; Discard sends it, and
+            # still no browser box
             _make_a_change(page)
-            page.locator("summary[aria-label='Account menu']").click()
-            page.locator("form[action='/theme'] button[value=dark]").click()
+            page.evaluate(
+                "() => { document.getElementById('site-q').value = 'sol';"
+                " document.getElementById('topsearch').requestSubmit(); }"
+            )
             page.locator(".leavebar").wait_for(state="visible", timeout=3000)
             assert page.url == edit and dialogs == []
             page.locator(".leavebar button", has_text="Discard changes").click()
-            page.wait_for_function("() => document.documentElement.dataset.theme === 'dark'", timeout=5000)
-            assert dialogs == [] and page.locator(".pendingbox .n").inner_text() == "0"
+            page.wait_for_url("**/search?q=sol", timeout=5000)
+            assert dialogs == []
+            page.goto(edit, wait_until="networkidle")
+            assert page.locator(".pendingbox .n").inner_text() == "0"
             # closing the tab with a change pending: the browser's own box
             _make_a_change(page)
             helper = ctx.new_page()

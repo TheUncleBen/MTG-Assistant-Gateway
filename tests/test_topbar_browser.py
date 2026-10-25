@@ -1,4 +1,4 @@
-"""The top bar in headless Chromium: the account menu keeps the menu's own colours on the light
+"""The top bar in headless Chromium: More ▾'s menu keeps the menu's own colours on the light
 theme, and a narrow window with a mouse (600 to 800 px, an open Fold or a
 half-width desktop window) keeps its text links clear of the account button without a sideways
 scroll. Skipped without a Chromium build."""
@@ -72,10 +72,10 @@ GEOMETRY = """() => {
     .filter(a => getComputedStyle(a).display !== 'none' && a.getClientRects().length > 0);
   return {doc: document.documentElement.scrollWidth, win: innerWidth, links: links.length,
     last: links.length ? r(links[links.length - 1])[1] : 0,
-    avatar: r(document.querySelector('.topbar nav.user details.dd > summary'))[0]};
+    avatar: r(document.querySelector('.topbar nav.user .acct'))[0]};
 }"""
 MENU_LINK = """() => {
-  const d = document.querySelector('.topbar nav.user details.dd'); d.open = true;
+  const d = document.querySelector('.topbar nav.site details.navmore'); d.open = true;
   const c = getComputedStyle(d.querySelector('.menu a'));
   const v = n => getComputedStyle(document.body).getPropertyValue(n).trim();
   d.open = false;
@@ -118,7 +118,7 @@ def _zoom(page, zoom: str) -> None:
 
 
 @pytest.mark.parametrize("theme", ["light", "dark"])
-def test_account_menu_links_use_the_menu_colours(chromium, server: Server, theme: str) -> None:
+def test_more_menu_links_use_the_menu_colours(chromium, server: Server, theme: str) -> None:
     sid = server.sign_in()
     with _session(chromium) as browser:
         ctx = browser.new_context(viewport={"width": 1366, "height": 800})
@@ -141,7 +141,7 @@ def test_a_narrow_window_with_a_mouse_keeps_the_links_clear_of_the_account_butto
     chromium,
     server: Server,
 ) -> None:
-    # an admin: under 1200 px five links and More ▾ (Proposals, History, Reports and Admin under it)
+    # an admin: the four places and More ▾ at every width (navigation round 2)
     sid = _admin(server)
     with _session(chromium) as browser:
         ctx = browser.new_context(viewport={"width": 1000, "height": 700})
@@ -157,7 +157,7 @@ def test_a_narrow_window_with_a_mouse_keeps_the_links_clear_of_the_account_butto
         page.wait_for_timeout(50)
         phone = page.evaluate(GEOMETRY)
     for width, g in seen.items():
-        assert g["links"] == 6, (width, g)
+        assert g["links"] == 5, (width, g)
         assert g["doc"] == g["win"] == width, (width, g)  # no sideways scroll
         assert g["last"] + 8 <= g["avatar"], (width, g)  # the last link ends before the account button
     assert phone["links"] == 0, phone  # the phone layout: links move to the tab bar
@@ -188,8 +188,8 @@ HOME_PLACE = """() => {
 )
 def test_home_is_never_under_more(chromium, server: Server, where: str) -> None:
     """Home sits left of Decks in the top bar and the phone tab bar and above Decks in the rail,
-    never under More; the rail (an unfolded Fold, the app from 600 px) shows every page as a tab
-    and has no More."""
+    never under More. Navigation round 2: the phone bar and the rail carry the four places (the
+    rail adds Alerts) and end with More, which holds Find and Your cards."""
     width, height, touch, app = {
         "desktop": (1280, 800, False, False),
         "phone": (390, 844, True, False),
@@ -211,29 +211,20 @@ def test_home_is_never_under_more(chromium, server: Server, where: str) -> None:
     assert got["home"] and got["decks"], got
     assert not got["homeInMore"], got
     assert got["doc"] == got["win"], got  # no sideways scroll
-    if where.startswith("fold"):  # the rail: Home above Decks, every page a tab, no More
+    if where.startswith("fold"):  # the rail: Home above Decks, the places, Alerts, then More
         assert got["home"]["bottom"] <= got["decks"]["y"] + 1, got
         assert abs(got["home"]["x"] - got["decks"]["x"]) < 1, got
-        assert not got["moreShown"], got
-        for href in (
-            "/",
-            "/decks",
-            "/search",
-            "/scan",
-            "/collection",
-            "/proposals",
-            "/history",
-            "/reports",
-            "/guide",
-        ):
-            assert href in got["tabs"], (href, got)
+        assert got["tabs"] == ["/", "/decks", "/collection", "/proposals", "/notifications"], got
+        assert got["moreShown"], got
         assert got["tabsBottom"] <= got["height"], got  # every tab on screen without scrolling the rail
     else:  # a row: Home left of Decks
         assert got["home"]["x"] < got["decks"]["x"], got
         assert abs(got["home"]["y"] - got["decks"]["y"]) < 1, got
-    if where.startswith("phone"):  # the bar: Home, Decks, Scan, Collection and More
-        assert got["tabs"] == ["/", "/decks", "/scan", "/collection"], got
-        assert got["moreShown"] and "/proposals" in got["moreItems"] and "/reports" in got["moreItems"], got
+    if where.startswith("phone"):  # the bar: the four places and More
+        assert got["tabs"] == ["/", "/decks", "/collection", "/proposals"], got
+    if where != "desktop":
+        more = ["/search", "/precons", "/scan", "/watchlist", "/lists"]
+        assert got["moreShown"] and got["moreItems"] == more, got
 
 
 REPORTS_PLACE = """() => {
@@ -247,30 +238,18 @@ REPORTS_PLACE = """() => {
       if (c && !c.startsWith('rgba(0, 0, 0, 0)') && c !== 'transparent') return c; }
     return getComputedStyle(document.body).backgroundColor; };
   const contrast = e => ratio(getComputedStyle(e).color, bg(e));
-  const more = document.querySelector('.tabbar details.more');
-  const summary = more && more.querySelector('summary');
   const tabs = [...document.querySelectorAll('.tabbar > a')].filter(shown);
-  const tab = tabs.find(a => a.getAttribute('href') === '/reports');
-  const out = {moreShown: shown(summary), moreOn: !!summary && summary.classList.contains('on'),
-    tabs: tabs.map(a => a.getAttribute('href')),
+  const place = tabs.find(a => a.getAttribute('href') === '/proposals');
+  const part = document.querySelector("nav.hubseg a[href='/reports']");
+  const b = part ? part.getBoundingClientRect() : null;
+  return {tabs: tabs.map(a => a.getAttribute('href')),
     tabsBottom: Math.max(0, ...tabs.map(a => a.getBoundingClientRect().bottom)), height: innerHeight,
-    tabCurrent: !!tab && tab.getAttribute('aria-current') === 'page',
-    tabContrast: tab ? contrast(tab) : null,
+    placeCurrent: !!place && place.getAttribute('aria-current') === 'page',
+    placeContrast: place ? contrast(place) : null,
+    partCurrent: !!part && part.getAttribute('aria-current') === 'page',
+    partText: part ? part.textContent.trim() : null, partContrast: part ? contrast(part) : null,
+    partInside: !!b && b.left >= -1 && b.right <= innerWidth + 1,
     doc: document.documentElement.scrollWidth, win: innerWidth};
-  if (out.moreShown) {
-    more.open = true;
-    const items = [...more.querySelectorAll('.menu a')];
-    const item = items.find(a => a.getAttribute('href') === '/reports');
-    const b = item ? item.getBoundingClientRect() : null;
-    Object.assign(out, {moreItems: items.map(a => a.getAttribute('href')),
-      itemCurrent: !!item && item.getAttribute('aria-current') === 'page',
-      itemText: item ? item.textContent.trim() : null,
-      itemContrast: item ? contrast(item) : null,
-      itemInside: !!b && b.left >= -1 && b.right <= innerWidth + 1 && b.top >= -1
-        && b.bottom <= innerHeight + 1});
-    more.open = false;
-  }
-  return out;
 }"""
 
 
@@ -280,12 +259,13 @@ REPORTS_PLACE = """() => {
     "where",
     ["phone", "fold-folded", "phone-app", "fold-unfolded", "fold-unfolded-app", "fold-landscape-app"],
 )
-def test_reports_is_under_more_on_the_phone_bar_and_a_tab_on_the_rail(
+def test_reports_is_in_the_assistant_switch_and_marks_assistant(
     chromium, server: Server, where: str, theme: str, zoom: str
 ) -> None:
-    """Reports (0.7.30) sits under More after History on the phone bar's sheet, is a tab on the rail
-    with every tab still on screen, and marks More (or its own rail tab) as the current page on
-    /reports, at normal and 200% text, light and dark."""
+    """Reports (0.7.30) is the third part of the Assistant place's switch (navigation round 2): on
+    /reports the phone bar's or the rail's Assistant is the current place and the switch's
+    Reports the current part, readable, every tab on screen, at normal and 200% text, light and
+    dark."""
     width, height, app = {
         "phone": (390, 844, False),
         "fold-folded": (344, 882, False),
@@ -312,18 +292,13 @@ def test_reports_is_under_more_on_the_phone_bar_and_a_tab_on_the_rail(
         _settle(page)
         got = page.evaluate(REPORTS_PLACE)
     assert got["doc"] == got["win"], got  # no sideways scroll
-    if got["moreShown"]:  # the phone bar: Reports under More, right after History
-        assert got["moreItems"][got["moreItems"].index("/history") + 1] == "/reports", got
-        assert got["moreOn"] and got["itemCurrent"], got
-        assert got["itemText"] == "Reports" and got["itemInside"], got
-        assert got["itemContrast"] >= 4.5, got
-        assert "/reports" not in got["tabs"], got
-    else:  # the rail: Reports is a tab after History, every tab on screen, the current one marked
-        assert where != "phone" and where != "fold-folded", got
-        assert got["tabs"][got["tabs"].index("/history") + 1] == "/reports", got
-        assert got["tabCurrent"], got
-        assert got["tabsBottom"] <= got["height"], got
-        assert got["tabContrast"] >= 4.5, got
+    assert "/reports" not in got["tabs"] and got["placeCurrent"], got
+    assert got["placeContrast"] >= 4.5, got
+    assert got["partCurrent"] and got["partText"] == "Reports", got
+    assert got["partContrast"] >= 4.5, got
+    assert got["tabsBottom"] <= got["height"], got
+    if zoom == "none":  # at 200% text the switch may scroll sideways inside itself
+        assert got["partInside"], got
 
 
 # The top bar with large text (review note, 0.7.29): with a mouse, the eight text links of an
@@ -357,7 +332,7 @@ NAV_FIT = """() => {
 def test_the_top_bar_links_fit_at_every_width_and_text_size(chromium, server: Server, theme: str) -> None:
     from .test_text_zoom_browser import ROOT_200, TEXT_200
 
-    sid = _admin(server)  # ten links from 1200 px (watchlists on): the most the bar carries
+    sid = _admin(server)  # an admin: Admin is on the Account page, so the bar is the same
     problems: list[str] = []
     with _session(chromium) as browser:
         for touch in (False, True):
@@ -384,10 +359,9 @@ def test_the_top_bar_links_fit_at_every_width_and_text_size(chromium, server: Se
                             problems.append(where)
                         if g["links"] and g["contrast"] < 4.5:
                             problems.append(f"contrast {where}")
-                        # a mouse from 600 px shows the links: an admin's ten from 1200 px at the
-                        # normal size, else five and More ▾; at the normal size on one row in
-                        # the 50 px bar, as before
-                        want = 10 if width >= 1200 and zoom == "none" else 6
+                        # a mouse from 600 px shows the four places and More ▾ (navigation
+                        # round 2); at the normal size on one row in the 50 px bar, as before
+                        want = 5
                         if not touch and width >= 600 and g["links"] != want:
                             problems.append(f"links {where}")
                         if (
@@ -563,8 +537,8 @@ BRAND_AND_SEARCH = """() => {
 
 
 def test_a_long_server_name_gives_way_before_the_search_box_and_the_links(chromium, server: Server) -> None:
-    """The order the one-row bar gives up room in: the brand's word first
-    (an ellipsis), then the search box down to 9rem; the links never."""
+    """The order the one-row bar gives up room in: the search box's growth past its 20rem, then
+    the brand's word (an ellipsis), then the search box down to 9rem; the links never."""
     sid = _admin(server)
     settings = server.app.state.gateway.settings
     short_name = settings.server_name
@@ -592,16 +566,19 @@ def test_a_long_server_name_gives_way_before_the_search_box_and_the_links(chromi
                     # measured with the usual short name at the same width and text size.
                     full = measure(short_name, width, zoom)["search"]
                     b = measure(LONG_NAME, width, zoom)
-                    if b["search"] < 9 - 0.05 or (b["search"] < full - 0.05 and not b["cut"]):
+                    # the box grows into the room the four places leave (up to 40rem), so a
+                    # long name takes from that growth first; below its own 20rem the name gives
+                    # way before the box does
+                    if b["search"] < 9 - 0.05 or (b["search"] < min(full, 20) - 0.05 and not b["cut"]):
                         problems.append(f"@{width}px {zoom}: search box shrank first: {b}, full {full}")
             full_1280 = measure(short_name, 1280, "none")["search"]
             at_1280 = measure(LONG_NAME, 1280, "none")
         finally:
             object.__setattr__(settings, "server_name", short_name)
     assert problems == [], "\n".join(problems)
-    # at 1280 the closer links leave room: with a browser's narrower fonts the long name may fit
-    # whole, else it is the name that is cut; the box keeps its full width either way
-    assert at_1280["search"] >= full_1280 - 0.05, (at_1280, full_1280)
+    # at 1280 the four places leave room: the long name fits whole and the box keeps at least
+    # its own 20rem
+    assert at_1280["search"] >= min(full_1280, 20) - 0.05, (at_1280, full_1280)
 
 
 def test_without_scripts_the_scroll_room_is_large_only_where_the_bar_wraps(chromium, server: Server) -> None:
@@ -766,6 +743,7 @@ APP_BAR = """() => {
     leftEnd: box('.topbar .left').right, brandEnd: box('.topbar .brand').right,
     wordStart: box('.topbar .brand .word').left, wordEnd: box('.topbar .brand .word').right,
     rightStart: box('.topbar .right').left, gap: parseFloat(cs('.topbar .wrap').columnGap),
+    nav: q('.topbar nav.site').getClientRects().length > 0,
     navStart: box('.topbar nav.site').left, navEnd: box('.topbar nav.site').right,
     leftGap: parseFloat(cs('.topbar .left').columnGap), margin: parseFloat(cs('.topbar .brand').marginRight),
     full: word.scrollWidth, cut: word.scrollWidth > word.clientWidth + 1};
@@ -801,9 +779,11 @@ def test_the_app_bar_keeps_its_own_spacing(chromium, server: Server, width: int)
         assert got["left"] == "flex" and got["pad"] == "0px", (name, got)
         assert got["doc"] == got["win"], (name, got)
         assert got["leftEnd"] <= got["rightStart"] - got["gap"] + 0.5, (name, got)
-        assert got["navEnd"] <= got["leftEnd"] + 0.5, (name, got)  # the left side holds the brand
-        end = got["navStart"] - got["leftGap"] - got["margin"]  # where the brand's room ends
-        assert abs(got["brandEnd"] - end) <= 0.5, (name, got)
+        # where the brand's room ends: the left side's end (the places are in the tab bar or the
+        # rail, so the bar has no links, navigation round 2)
+        assert not got["nav"], (name, got)
+        end = got["leftEnd"] - got["margin"]
+        assert got["brandEnd"] <= end + 0.5, (name, got)  # a whole name may end sooner
         assert got["cut"] == (got["full"] > end - got["wordStart"] + 0.5), (name, got)
         if got["cut"]:
             assert abs(got["wordEnd"] - end) <= 0.5, (name, got)
@@ -829,7 +809,7 @@ def test_the_account_page_fits_a_phone_at_200_percent_text(chromium, server: Ser
                 )
                 ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
                 page = ctx.new_page()
-                _open(page, f"{server.base}/account")
+                _open(page, f"{server.base}/account/details")
                 _zoom(page, zoom)
                 _settle(page)
                 got = page.evaluate(

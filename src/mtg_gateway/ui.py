@@ -17,7 +17,7 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from typing import NamedTuple
 from urllib.parse import urlsplit
 
-from .theme import card_size_control, esc, icon
+from .theme import ASSISTANT_PAGES, card_size_control, esc, hub_switch, icon
 
 __all__ = ["card_size_control"]  # re-exported: the one card size switch (R-175), theme.card_size_control
 
@@ -344,6 +344,16 @@ def page_head(title: str, sub: str = "", *, actions_html: str = "") -> str:
     acts = f"<span class='acts'>{actions_html}</span>" if actions_html else ""
     cls = "ui-head phead" if actions_html else "ui-head"
     return f"<div class='{cls}'><h1>{esc(title)}</h1>{acts}</div>{line}"
+
+
+def assistant_head(current: str, title: str, sub: str = "", *, sub_html: str = "") -> str:
+    """The head of the Assistant place's pages (Proposals, History, Reports): their switch in the
+    middle, which names the page, so the page's heading is for screen readers only, then the
+    purpose line (``sub`` as text, or ``sub_html`` already escaped). ``current``: the page's path."""
+    sub_html = sub_html or esc(sub)
+    line = f"<p class='ui-sub'>{sub_html}</p>" if sub_html else ""
+    switch = hub_switch("Assistant", [(href, text, href) for href, text, _ic in ASSISTANT_PAGES], current)
+    return f"<div class='hubbar'><h1 class='sr-only'>{esc(title)}</h1>{switch}</div>{line}"
 
 
 def list_head(title: str, total: int | None = None, note: str = "") -> str:

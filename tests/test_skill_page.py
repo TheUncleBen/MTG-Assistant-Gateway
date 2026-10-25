@@ -56,7 +56,7 @@ async def test_signed_in_user_gets_page_and_zip(harness: Harness) -> None:
         assert "mtg-gateway/reference/tools.md" in names
         assert all(n.startswith("mtg-gateway/") for n in names)
 
-        account = await b.http.get("/account")
+        account = await b.http.get("/account/details")
         assert "href='/install?for=skill'" in account.text
     finally:
         await b.aclose()

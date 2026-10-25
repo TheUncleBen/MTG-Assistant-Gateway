@@ -244,12 +244,9 @@ async def test_a_thread_that_is_not_there_and_a_bad_number(member: Browser, stac
 
 
 async def test_the_forum_is_in_the_menus_and_needs_a_sign_in(stack: Stack, member: Browser) -> None:
-    page = (await member.http.get("/forum")).text
-    menu = page[page.index("<div class='menu'>") :]
-    assert "<a href='/forum'>" in menu
-    # the phone's More sheet and the rail list the same pages
-    assert page.count("href='/forum'") >= 2
-    assert "<a href='/forum' aria-current=page>" in page
+    # Forum is a row on the Account page (Your account), the same on every screen
+    hub = (await member.http.get("/account")).text
+    assert "<a class='yrow' href='/forum'>" in hub
     anon = Browser(stack.h)
     try:
         r = await anon.http.get("/forum/thread/700001")
@@ -508,17 +505,15 @@ async def test_a_reply_cannot_break_out_of_the_threads_json_block(member: Browse
     assert "<form class='newcomment'" in r.text  # the rest of the page is still there
 
 
-async def test_forum_is_in_the_more_sheet_and_the_account_menu_but_not_a_rail_tab(member: Browser) -> None:
-    """The rail lists every More page as a tab and had grown past a short screen (the Fold
-    unfolded, the app in landscape); Forum stays in the phone's More sheet and the account menu
-    and is left off the rail."""
+async def test_forum_is_on_the_account_page_and_off_the_bars(member: Browser) -> None:
+    """The navigation is four places and More (Ben, 2026-10-25): Forum is a row on the Account page
+    the picture opens, not a tab, a rail place or a More item."""
     page = (await member.http.get("/forum")).text
-    sheet = re.search(r"<div class='menu sheet'>(.*?)</div></details></nav>", page, re.S)
-    assert sheet and "href='/forum'" in sheet.group(1), page
-    rail = re.findall(r"<a href='([^']+)' class='railonly'", page)
-    assert "/lists" in rail and "/forum" not in rail, rail
-    account = page[page.index("<nav class='user'") : page.index("<nav class='tabbar'")]
-    assert "href='/forum'" in account
+    header = page[page.index("<header") : page.index("</header>")]
+    tabbar = re.search(r"<nav class='tabbar'.*?</details></nav>", page, re.S)
+    assert tabbar and "href='/forum'" not in header + tabbar.group(0)
+    hub = (await member.http.get("/account")).text
+    assert "<a class='yrow' href='/forum'>" in hub
 
 
 async def test_a_forum_reply_is_voted_down_and_back_through_the_comment_routes(

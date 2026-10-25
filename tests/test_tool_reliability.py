@@ -597,13 +597,13 @@ async def test_linking_archidekt_needs_the_risk_note_acknowledged(stack: Stack) 
     b = Browser(stack.h)
     await b.login("/account")
     try:
-        page = await b.http.get("/account", headers=NAV)
+        page = await b.http.get("/account/details", headers=NAV)
         assert "terms of service restrict automated access" in page.text
         assert (
             "name='accept_risk'" in page.text
             and "The key that opens the session is on the same server" in page.text
         )
-        csrf = await b.csrf("/account")
+        csrf = await b.csrf("/account/details")
         r = await b.http.post(
             "/account",
             data={

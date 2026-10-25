@@ -185,7 +185,7 @@ def test_the_top_bar_suggestions_get_the_card_menu_only(tmp_path: Path, width: i
             page = _context(browser, server, sid, width).new_page()
             errors: list[str] = []
             page.on("pageerror", lambda e: errors.append(str(e)))
-            page.goto(f"{server.base}/account", wait_until="networkidle")
+            page.goto(f"{server.base}/account/details", wait_until="networkidle")
             if width < 600:
                 page.locator(".topbar .searchbtn").click()
             box = page.locator("#site-q")
@@ -229,7 +229,7 @@ def test_the_top_bar_menu_has_no_watch_with_watchlists_off(tmp_path: Path) -> No
         with sync_playwright() as p:
             browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
             page = _context(browser, server, sid, 1280).new_page()
-            page.goto(f"{server.base}/account", wait_until="networkidle")
+            page.goto(f"{server.base}/account/details", wait_until="networkidle")
             box = page.locator("#site-q")
             box.click()
             box.press_sequentially("sol", delay=30)
@@ -325,7 +325,7 @@ def test_the_list_stays_open_when_the_box_gets_its_focus_back_at_once(tmp_path: 
         with sync_playwright() as p:
             browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
             page = _context(browser, server, sid, 1280).new_page()
-            page.goto(f"{server.base}/account", wait_until="networkidle")
+            page.goto(f"{server.base}/account/details", wait_until="networkidle")
             box = page.locator("#site-q")
             box.click()
             box.press_sequentially("sol", delay=30)

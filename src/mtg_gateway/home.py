@@ -26,7 +26,7 @@ from .companion_decks import NEW_DECK_CSS, NEW_DECK_SCRIPTS, new_deck_box_html
 from .deckpage import covers_for, deck_list_held_html, decks_unreadable_html, image_url, reread_href
 from .decks import DeckError, is_busy
 from .pages import _csrf, browser_session, login_redirect
-from .theme import display_name, icon, render
+from .theme import icon, render
 from .watchlist_page import due_line
 
 if TYPE_CHECKING:
@@ -299,7 +299,8 @@ def add_home_routes(server: MCPServer, state: AppState) -> None:
             )
             + "</div>"
             + (
-                f"<a class='btn btn-primary' href='/account'>{icon('account')} Link Archidekt</a>"
+                "<a class='btn btn-primary' href='/account/details#archidekt'>"
+                f"{icon('account')} Link Archidekt</a>"
                 if not link["linked"]
                 else f"<a class='btn btn-primary' href='/decks/new' data-box-open='newdeck'>{icon('plus')} "
                 "New deck</a>"
@@ -338,6 +339,8 @@ def add_home_routes(server: MCPServer, state: AppState) -> None:
         )
         now = time.time()
         board = state.db.pending_board(sub) if pending else []
+        # The navigation's order (Ben, 2026-10-25): its places (Decks, Binder, Assistant's Proposals,
+        # History and Reports), then the More menu's (Search, Scan, Watchlist), then Guide and Account
         items = [
             quick(
                 "/decks",
@@ -348,26 +351,11 @@ def add_home_routes(server: MCPServer, state: AppState) -> None:
                 actions=(ui.button_link("All decks", "/decks"),),
             ),
             quick(
-                "/search",
-                "search",
-                "Search",
-                "Public decks by name, commander, format or owner.",
-                actions=(ui.button_link("Card search", "/cards"), ui.button_link("Precons", "/precons")),
-            ),
-            quick(
-                "/scan",
-                "scan",
-                "Scan",
-                "Point your phone at cards to build a list, a deck or your collection.",
-                big_html=_n(scans, "open", "open") if scans else "",
-                actions=(ui.button_link("Start a scan", "/scan"),),
-            ),
-            quick(
                 "/collection",
                 "collection",
-                "Collection",
-                "The cards you own, on your Archidekt account; they get a green dot on every deck.",
-                actions=(ui.button_link("Open collection", "/collection"),),
+                "Binder",
+                "The cards you own, your Archidekt collection; they get a green dot on every deck.",
+                actions=(ui.button_link("Open binder", "/collection"),),
             ),
             quick(
                 "/proposals",
@@ -378,13 +366,6 @@ def add_home_routes(server: MCPServer, state: AppState) -> None:
                 actions=(ui.button_link("Review them" if pending else "Open proposals", "/proposals"),),
                 tone="accent" if pending else "",
             ),
-        ]
-        if link["linked"]:
-            # On Archidekt: the bell's count, read after the page has loaded (static/bell.js)
-            from .profile_page import home_widget
-
-            items.append(home_widget())
-        items += [
             quick(
                 "/history",
                 "history",
@@ -397,8 +378,30 @@ def add_home_routes(server: MCPServer, state: AppState) -> None:
             index = state.reports.index(sub)
             latest = (state.reports.summaries(sub, [index[0]["report_id"]]) or [None])[0] if index else None
             items.append(reports_widget(index, latest, len(state.reports.forge_queue(sub)), now=now))
+        items += [
+            quick(
+                "/search",
+                "search",
+                "Search",
+                "Public decks by name, commander, format or owner.",
+                actions=(ui.button_link("Card search", "/cards"), ui.button_link("Precons", "/precons")),
+            ),
+            quick(
+                "/scan",
+                "scan",
+                "Scan",
+                "Point your phone at cards to build a list, a deck or your binder.",
+                big_html=_n(scans, "open", "open") if scans else "",
+                actions=(ui.button_link("Start a scan", "/scan"),),
+            ),
+        ]
         if state.prices is not None:
             items.append(watchlist_widget(state.prices.overview(sub, days=31)))
+        if link["linked"]:
+            # On Archidekt: the bell's count, read after the page has loaded (static/bell.js)
+            from .profile_page import home_widget
+
+            items.append(home_widget())
         items += [
             quick(
                 "/guide",
@@ -411,7 +414,7 @@ def add_home_routes(server: MCPServer, state: AppState) -> None:
                 "/account",
                 "account",
                 "Account",
-                "Your Archidekt link, notifications and the Android app.",
+                "Your Archidekt link, notifications, look and apps.",
                 actions=(ui.button_link("Open account", "/account"),),
             ),
         ]
@@ -419,14 +422,14 @@ def add_home_routes(server: MCPServer, state: AppState) -> None:
             items.append(
                 quick(
                     "/admin",
-                    "settings",
+                    "shield",
                     "Admin",
                     "Members, activity and the system.",
                     actions=(ui.button_link("Open admin", "/admin"),),
                 )
             )
         tiles = (
-            ui.list_head("Quick access", note="The same sections, in the same order, as the app's side bar")
+            ui.list_head("Quick access", note="In the same order as the navigation")
             + "<section class='ui-widgets hq' aria-label='Quick access'>"
             + "".join(items)
             + "</section>"
@@ -452,7 +455,7 @@ def add_home_routes(server: MCPServer, state: AppState) -> None:
             signed_in=True,
             csrf=csrf,
             admin=admin,
-            user=display_name(user),
+            sub=sub,
             wide=True,
             current="/",
             heading=False,

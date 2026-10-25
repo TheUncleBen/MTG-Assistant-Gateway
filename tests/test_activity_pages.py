@@ -294,7 +294,7 @@ async def test_my_activity_has_every_row_in_words_without_ids(gw: Harness) -> No
         assert "Refused <span class='n'>1</span>" in chips and "Failed <span class='n'>1</span>" in chips
         widgets = page.split("<section class='ui-widgets'", 1)[1].split("</section>", 1)[0]
         assert "Refused or failed" in widgets and "Your assistants" in widgets
-        assert "href='/account#apps'>Connected apps</a>" in widgets
+        assert "href='/account/details#apps'>Connected apps</a>" in widgets
         older = (await b.http.get("/activity?offset=125", headers=NAVIGATE)).text
         assert f"126–{total} of {total:,}" in older
         byadmin = (await b.http.get("/activity?kind=byadmin", headers=NAVIGATE)).text

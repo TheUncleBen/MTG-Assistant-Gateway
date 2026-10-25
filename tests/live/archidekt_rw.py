@@ -185,7 +185,7 @@ class Run:
         await self.browser_login()
 
         # 1. Link the account through the account page, as a person would.
-        csrf = await self.csrf("/account")
+        csrf = await self.csrf("/account/details")
         r = await self.browser.post(
             "/account",
             data={
@@ -196,7 +196,7 @@ class Run:
                 "accept_risk": "1",
             },
         )
-        linked = r.status_code == 303 and r.headers.get("location") == "/account?ok=linked"
+        linked = r.status_code == 303 and r.headers.get("location") == "/account/details?ok=linked"
         detail = {
             "http": r.status_code,
             "location": r.headers.get("location"),
@@ -493,7 +493,7 @@ class Run:
             page.status_code == 200 and "editor-config" in page.text and "/static/companion.js" in page.text,
             {"http": page.status_code, "csp": page.headers.get("content-security-policy")},
         )
-        csrf = await self.csrf("/account")
+        csrf = await self.csrf("/account/details")
         body = {
             "kind": "edit",
             "deck_id": new_id,
@@ -660,7 +660,7 @@ class Run:
     async def cleanup(self) -> None:
         try:
             if self.token:
-                csrf = await self.csrf("/account")
+                csrf = await self.csrf("/account/details")
                 await self.browser.post("/account", data={"csrf": csrf, "action": "unlink"})
                 st = await self.tool("account_status")
                 self.step("cleanup: unlink (stored session deleted)", st.get("linked") is False, st)

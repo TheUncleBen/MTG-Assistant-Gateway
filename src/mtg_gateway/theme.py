@@ -280,6 +280,9 @@ svg.i{width:1em;height:1em;fill:none;stroke:currentColor;stroke-width:2;stroke-l
 details.dd{position:relative;margin:0}
 details.dd > summary{list-style:none;cursor:pointer;user-select:none}
 details.dd > summary::-webkit-details-marker{display:none}
+/* A closed drop-down's panel takes no room: Chromium lays out a closed details' content (hidden
+   from view), so a fixed More sheet off to the side widened a phone's page */
+details.dd:not([open]) > .menu{display:none}
 .menu{z-index:30;min-width:200px;
   background:var(--surface-2);border-radius:var(--radius-panel);box-shadow:var(--shadow);padding:.25rem 0;
   display:flex;flex-direction:column}
@@ -844,15 +847,15 @@ form.guarded button[data-guard]:disabled{pointer-events:none}
    leaves, and a long gateway name shortens the brand's word (an ellipsis). */
 .topbar .left{flex:1 1 0}
 .topbar nav.site{flex:none}
-/* More ▾ on a computer narrower than 85.7em of the bar's 14 px text (1200 px at the normal size;
-   a container query, so large text folds the links too): Proposals and the links after it go
-   under it */
-.topbar nav.site .navmore{display:none}
+/* More ▾ on a computer: its groups (Find, Your cards) under the four places */
 .topbar nav.site .navmore > summary.on{color:var(--orange)}
 .topbar nav.site .navmore > summary span{font-size:.8em}
-@container topbar (width < 85.7em){
-  body:not(.app) .topbar nav.site a.fold{display:none}
-  body:not(.app) .topbar nav.site .navmore{display:block} }
+.topbar nav.site .navmore .menu{left:0;right:auto;min-width:14rem}
+/* the count of proposals waiting (Assistant), in the bell's orange */
+.nb{display:inline-grid;place-items:center;min-width:18px;height:18px;border-radius:9px;padding:0 5px;
+  background:var(--orange);color:var(--on-orange);font-size:.72rem;font-weight:900;line-height:1;
+  font-style:normal;box-sizing:border-box}
+.topbar nav.site .nb{margin-left:.1rem}
 .topbar .right{flex:0 1 auto}
 .brand{min-width:0}
 /* Where it has them (600 px and wider, not the app): the brand, the links and the account side
@@ -969,6 +972,13 @@ body .tabbar:has(details.more[open]){z-index:25}
   z-index:30;border-radius:16px;padding:.5rem}
 .tabbar details.more .menu.sheet a{min-height:44px;padding:0 1rem}
 .tabbar details.more .menu.sheet a svg{width:20px;height:20px}
+.tabbar details.more .menu.sheet .head{padding:.6rem 1rem .2rem}
+/* the counts on the tabs (proposals waiting, the bell's unseen) sit on the icon's top right */
+.tabbar > a .nb,.tabbar > a.bell .n{position:absolute;top:6px;left:calc(50% + 3px);z-index:2}
+.tabbar > a.bell .n{min-width:18px;height:18px;border-radius:9px;background:var(--orange);
+  color:var(--on-orange);font-size:.72rem;font-weight:900;line-height:18px;text-align:center;padding:0 4px;
+  font-style:normal;box-sizing:border-box}
+.tabbar > a.bell .n[hidden]{display:none}
 __MOBILE__
 /* search / filter rows */
 .search{display:flex;gap:0;margin:0 0 .75rem}
@@ -1010,10 +1020,9 @@ footer.site .legal{color:#ababab;max-width:60rem}
 # query cannot see a body class, so the rules are emitted per condition). {b} prefixes selectors
 # on <body>.
 _MOBILE_RULES = """
-  body{b} .topbar nav.site .navmore{display:none !important}
+  body{b} .topbar nav.site{display:none}
   body{b} .topbar .wrap{padding:0 1rem;gap:.5rem;padding-left:max(1rem,env(safe-area-inset-left));
     padding-right:max(1rem,env(safe-area-inset-right))}
-  body{b} .topbar nav.site a:not(.keep){display:none}
   body{b} .topbar .searchbtn{display:inline-flex}
   body{b} .tabbar > a.railonly{display:none}
   body{b}.has-tabbar main.wrap{padding-bottom:calc(5.5rem + env(safe-area-inset-bottom))}
@@ -1051,10 +1060,11 @@ _MOBILE_RULES = """
 # all of them, and on a shorter one still it scrolls. The body is padded by the rail's width so
 # every page re-centres in the remaining space.
 _RAIL_RULES = """
-  body{b} .topbar nav.site .navmore{display:none !important}
-  body{b} .topbar nav.site a:not(.keep){display:none}
+  body{b} .topbar nav.site{display:none}
+  body{b} .topbar a.bell{display:none}
   body{b}.has-tabbar{padding-left:calc(80px + env(safe-area-inset-left))}
-  body{b} .topbar .wrap{padding:0 1.25rem;padding-right:max(1.25rem,env(safe-area-inset-right))}
+  body{b} .topbar .wrap{padding:0 1.25rem;padding-right:max(1.25rem,env(safe-area-inset-right));height:56px}
+  html:has(> body{b}){scroll-padding-top:var(--bar-room,66px)}  /* the rail's 56 px bar; the app's only */
   body{b} .tabbar{display:flex;flex-direction:column;align-items:stretch;gap:.25rem;position:fixed;left:0;
     top:0;bottom:0;width:calc(80px + env(safe-area-inset-left));z-index:9;background:var(--toolbar-bg);
     color:var(--toolbar-text);border-right:1px solid var(--border);overflow-y:auto;scrollbar-width:none;
@@ -1073,7 +1083,20 @@ _RAIL_RULES = """
   body{b} .tabbar > a:focus-visible::before{background:rgba(127,127,127,.18)}
   body{b} .tabbar > a[aria-current=page]{color:var(--toolbar-active)}
   body{b} .tabbar > a[aria-current=page]::before{background:rgba(255,111,0,.22)}
-  body{b} .tabbar details.more{display:none}
+  body{b} .tabbar details.more{display:block}
+  body{b} .tabbar details.more summary{position:relative;display:flex;flex-direction:column;
+    align-items:center;justify-content:center;gap:.3rem;height:64px;min-height:52px;color:var(--toolbar-text);font-weight:700;
+    font-size:11px;-webkit-tap-highlight-color:transparent}
+  body{b} .tabbar details.more summary svg{width:24px;height:24px;position:relative;z-index:1}
+  body{b} .tabbar details.more summary::before{content:'';position:absolute;top:7px;left:50%;width:56px;
+    height:32px;margin-left:-28px;border-radius:16px;background:transparent;transition:background .15s ease}
+  body{b} .tabbar details.more summary:hover::before,
+  body{b} .tabbar details.more[open] summary::before{background:rgba(127,127,127,.18)}
+  body{b} .tabbar details.more summary.on{color:var(--toolbar-active)}
+  body{b} .tabbar details.more summary.on::before{background:rgba(255,111,0,.22)}
+  /* More opens beside the rail, at its foot */
+  body{b} .tabbar details.more .menu.sheet{left:calc(80px + env(safe-area-inset-left) + 8px);transform:none;
+    top:auto;bottom:calc(.5rem + env(safe-area-inset-bottom));width:18rem}
   body{b} details.dd .menu{min-width:min(14rem,calc(100vw - 16px))}
 """
 CSS = CSS.replace(
@@ -1207,6 +1230,21 @@ html[data-card-size=s] .erow .thumb,html[data-card-size=l] .erow .thumb{
 UI_CSS = """
 /* width: lists and tables are wide, up to 1200 px (render(main_class='ui-wide')) */
 main.wrap.ui-wide{max-width:1200px}
+/* A place's switch (theme.hub_switch): a segmented control, as iOS draws one; it names the page.
+   Alone, it sits in the middle; beside a page's buttons it starts the row. Full width on a phone. */
+.hubseg{display:inline-flex;gap:2px;padding:3px;border-radius:12px;background:var(--surface-3);max-width:100%}
+.hubseg a{display:inline-flex;align-items:center;justify-content:center;gap:.4rem;flex:1 1 0;min-height:38px;
+  padding:0 1.1rem;border-radius:9px;color:var(--text);text-decoration:none;font-weight:700}
+.hubseg a{white-space:nowrap}
+.hubseg a:hover{background:var(--surface-2)}
+.hubseg a[aria-current=page]{background:var(--surface);box-shadow:0 1px 3px rgba(0,0,0,.18)}
+@media (pointer:coarse){ .hubseg a{min-height:44px} }
+.hubbar{display:flex;justify-content:center;margin:0 0 14px}
+@media (max-width:599.98px){ .hubseg{display:flex;width:100%;overflow-x:auto;scrollbar-width:none}
+  .hubbar{display:block}
+  /* large text on a narrow phone: a part's name wraps between words, and a word longer than its
+     part scrolls the switch sideways instead of the page */
+  .hubseg a{white-space:normal;text-align:center;padding:.3rem .5rem;line-height:1.15} }
 .ui-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:.25rem 1rem;margin:0 0 .25rem}
 .ui-head h1{margin:0}
 /* enlarged text on a phone: the heading shrinks with the screen so a short word stays whole
@@ -1258,8 +1296,12 @@ main.wrap.ui-wide{max-width:1200px}
   border-radius:999px;
   background:var(--surface-2);color:var(--text);font-size:.8rem}
 
-/* quick-filter chips with counts */
-.ui-chips{display:flex;flex-wrap:wrap;gap:.4rem;margin:0 0 .6rem}
+/* quick-filter chips with counts: one row that scrolls sideways when it runs out of room, as a
+   phone's filter strips do, never a ragged second row (Ben, 2026-10-25) */
+.ui-chips{display:flex;flex-wrap:nowrap;gap:.4rem;margin:0 0 .6rem;overflow-x:auto;scrollbar-width:none;
+  overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch;scroll-padding:0 1rem;padding:1px 0}
+.ui-chips::-webkit-scrollbar{display:none}
+.ui-chip{flex:none;white-space:nowrap}
 .ui-chip{display:inline-flex;align-items:center;gap:.35rem;min-height:44px;padding:0 .8rem;
   border-radius:999px;
   border:1px solid var(--control-border);color:var(--text);font-weight:700;font-size:.9rem;
@@ -1278,9 +1320,11 @@ main.wrap.ui-wide{max-width:1200px}
 .list-head h2 .ui-sub{font-size:1rem;margin:0}
 .list-head > .ui-sub{margin:0}
 
-/* toolbar: one search box, then the filters */
+/* toolbar: one search box, then the filters; every piece grows, so each row is filled edge to edge
+   and a filter that wraps never sits alone beside empty space */
 .ui-tools{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;margin:0 0 .75rem}
-.ui-tools .search{flex:1 1 16rem;position:relative;min-width:0;align-self:stretch;display:flex;
+.ui-tools > *{min-width:0}
+.ui-tools .search{flex:2 1 20rem;position:relative;min-width:0;align-self:stretch;display:flex;
   align-items:center}
 .ui-tools label.search{margin:0;font-weight:400}
 .ui-tools .search svg.i{position:absolute;left:.7rem;top:50%;transform:translateY(-50%);width:16px;
@@ -1288,9 +1332,10 @@ main.wrap.ui-wide{max-width:1200px}
   color:var(--text-muted);pointer-events:none}
 .ui-tools .search input{width:100%;margin:0;padding-left:2.2rem;font-weight:400;
   border-right:1px solid var(--control-border);border-radius:var(--radius)}
-.ui-tools .f{flex:0 1 10.5rem;min-width:8.5rem;display:flex;align-items:center}
+.ui-tools .f{flex:1 1 9.5rem;display:flex;align-items:center}
+.ui-tools .f > :not(.msel-native){width:100%}  /* the hidden native select keeps its own size */
 .ui-tools select{margin:0}
-@media (max-width:599.98px){.ui-tools .f{flex:1 1 calc(50% - .5rem)}}
+@media (max-width:599.98px){ .ui-tools .f{flex:1 1 calc(50% - .5rem)} }
 .ui-note{color:var(--text-muted);font-size:.88rem;margin:.25rem 0 .75rem}
 
 /* the table: lined-up columns from 900 px (--cols); 600-899 px the low-priority columns
@@ -1537,6 +1582,8 @@ CARD_MENU_CSS = """
   overscroll-behavior:contain;border:1px solid var(--border)}
 .ctxmenu .head{text-transform:none;letter-spacing:0;font-size:.9rem;color:var(--text);white-space:normal;
   overflow-wrap:anywhere;padding-bottom:.35rem;border-bottom:1px solid var(--border);margin-bottom:.25rem}
+.ctxmenu .ghead{padding:.55rem 1rem .15rem;font-size:.75rem;font-weight:700;text-transform:uppercase;
+  letter-spacing:.04em;color:var(--menu-head)}
 .ctxmenu .ic,.ctxmenu .i{width:18px;height:18px;flex:none;color:var(--orange);fill:none;stroke:currentColor;
   stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 .ctxmenu a,.ctxmenu button,.ctxmenu .item{white-space:normal;min-height:38px}
@@ -1733,6 +1780,17 @@ _TOPSEARCH_CSS = """
   .topbar .topsearch{display:block} }
 @media (min-width:600px){ body.app .topbar .topsearch{display:block} }
 @media (min-width:900px){ .topbar .topsearch{display:block} .topbar .searchbtn{display:none} }
+/* Fill (Ben, 2026-10-25): where the box shows, it grows into the room between the brand (and a
+   computer's links) and the icons, up to 40rem, instead of a fixed 20rem with a gap before it */
+@media (min-width:600px) and (max-width:1279.98px) and ((pointer:coarse) or (hover:none)){
+  .topbar .right{flex:1 1 auto;justify-content:flex-end} .topbar .left{flex:0 1 auto}
+  .topbar .topsearch{flex:1 1 auto;max-width:40rem;margin:0 auto} }
+@media (min-width:600px){
+  body.app .topbar .right{flex:1 1 auto;justify-content:flex-end} body.app .topbar .left{flex:0 1 auto}
+  body.app .topbar .topsearch{flex:1 1 auto;max-width:40rem;margin:0 auto} }
+@media (min-width:900px){
+  body:not(.app) .topbar .right{flex:1 1 auto;justify-content:flex-end}
+  body:not(.app) .topbar .topsearch{flex:1 1 auto;max-width:40rem;margin:0 auto 0 1rem} }
 @media (max-width:599.98px){
   body.search-open .topbar .topsearch{display:block;position:absolute;left:0;right:0;top:100%;
     padding:.5rem max(1rem,env(safe-area-inset-right)) .6rem max(1rem,env(safe-area-inset-left));
@@ -1854,7 +1912,13 @@ SEARCH_PANEL_CSS = """
   max-width:100%;margin:0}
 .spanel .rbar .sortw .msel-btn{min-width:8rem} .spanel .rbar .dirw .msel-btn{min-width:7rem}
 .spanel .rbar .brk,.spanel .rbar .brka{display:none;flex-basis:100%;height:0;margin-top:-8px}
-@container sp (max-width:799.98px){ .spanel .rbar .brk{display:block} }
+/* A narrower panel (an open Fold) keeps the count, Sort, the view and the card size on one row:
+   "Sort by" is read out but not shown (the box says what it sorts by), and the bar breaks only
+   when even that row can't fit (Ben, 2026-10-25: no empty corner under the row) */
+@container sp (max-width:799.98px){ .spanel .rbar{column-gap:8px}
+  .spanel .rbar .sort > .lbl{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);
+    white-space:nowrap} }
+@container sp (max-width:659.98px){ .spanel .rbar .brk{display:block} }
 @container sp (max-width:879.98px){ .spanel .rbar.cards .brk{display:block} }
 @container sp (max-width:499.98px){ .spanel .rbar.cards .brk{display:none} .spanel .rbar.cards
   .brka{display:block} }
@@ -2170,45 +2234,57 @@ def card_size_control(*, cls: str = "field cardsize") -> str:
     )
 
 
-# The site navigation, in Archidekt's order of sections as far as the gateway has them: Home, then
-# decks, deck search, cards you own, scanning, then the gateway's own review pages. The same list
-# feeds the top bar on wide screens and the bottom tab bar on phones.
+# The site navigation (Ben, 2026-10-25): four places and More, the same on every screen. The top bar
+# on a computer, the bottom tab bar on a phone and the rail (an unfolded Fold, a tablet, the app from
+# 600 px) list these; the rail adds Alerts (the bell) before More. Assistant is the assistant's own
+# pages, Proposals, History and Reports, behind one switch (ASSISTANT_PAGES), with the count of
+# proposals waiting for the member.
 NAV_LINKS = [
     ("/", "Home", "home"),
     ("/decks", "Decks", "decks"),
-    ("/search", "Search", "search"),
-    ("/collection", "Collection", "collection"),
-    ("/scan", "Scan", "scan"),
+    ("/collection", "Binder", "collection"),
+    ("/proposals", "Assistant", "proposals"),
+]
+# The pages one nav place stands for: Assistant's switch (Proposals, History, Reports)
+ASSISTANT_PAGES = (
     ("/proposals", "Proposals", "proposals"),
     ("/history", "History", "history"),
     ("/reports", "Reports", "report"),
-    ("/watchlist", "Watchlist", "stats"),
+)
+NAV_PLACE = {"/history": "/proposals", "/reports": "/proposals"}
+# More, in groups. Account, Guide, Forum and Admin live on the Account page your picture opens.
+MORE_GROUPS = [
+    ("Find", [("/search", "Search decks and cards", "search"), ("/precons", "Precons", "box")]),
+    (
+        "Your cards",
+        [("/scan", "Scan", "scan"), ("/watchlist", "Watchlist", "stats"), ("/lists", "My lists", "list")],
+    ),
 ]
-# On a computer the links from Proposals on fold into "More ▾" while the bar is narrower than
-# 85.7em (1200 px at the normal text size): the More menu lists the phone's More sheet.
-NAV_FOLD_FROM = "/proposals"
-# The tabs, as Material's navigation bar (3 to 5 destinations) has them: on a compact screen Home,
-# Decks, Scan, Collection and More, with Search as the icon in the top bar. More opens a sheet with
-# the remaining pages (Proposals, History, Reports, Watchlist, My lists, Guide, Account, Admin) so nothing
-# is more than two taps away; Home is never under More. The rail (an unfolded Fold, a tablet, the app from
-# 600px) is tall enough for every page, so it lists them all as tabs and has no More.
-TAB_LINKS = [
-    ("/", "Home", "home", ""),
-    ("/decks", "Decks", "decks", ""),
-    ("/search", "Search", "search", "railonly"),
-    ("/scan", "Scan", "scan", ""),
-    ("/collection", "Collection", "collection", ""),
-]
-MORE_LINKS = [
-    ("/proposals", "Proposals", "proposals"),
-    ("/history", "History", "history"),
-    ("/reports", "Reports", "report"),
-    ("/watchlist", "Watchlist", "stats"),
-    ("/lists", "My lists", "list"),
-    ("/forum", "Forum", "comment"),
-    ("/guide", "Guide", "guide"),
-    ("/account", "Account", "account"),
-]
+
+
+def more_groups() -> list[tuple[str, list[tuple[str, str, str]]]]:
+    """More's groups, without Watchlist while watchlists are off."""
+    return [(head, [x for x in links if WATCHLISTS or x[0] != "/watchlist"]) for head, links in MORE_GROUPS]
+
+
+def hub_switch(label: str, items: list[tuple[str, str, str]], current: str, *, badge: int = 0) -> str:
+    """A place's own switch at the top of its pages (Decks: My Decks or Packages; Assistant:
+    Proposals, History or Reports), drawn as a segmented control. The switch names the page, so the
+    page shows no heading of its own under it (one for screen readers only). ``items``: (href,
+    label, key); ``badge``: the count on the first item (proposals waiting)."""
+    links = "".join(
+        f"<a href='{html.escape(href)}'{' aria-current=page' if key == current else ''}>"
+        + html.escape(text)
+        + (f"<span class='nb'>{badge if badge < 100 else '99+'}</span>" if i == 0 and badge else "")
+        + "</a>"
+        for i, (href, text, key) in enumerate(items)
+    )
+    return f"<nav class='hubseg' aria-label='{html.escape(label)}'>{links}</nav>"
+
+
+# The proposals waiting for a member (db.count_pending_proposals), set by create_app: the Assistant
+# place's badge. None (tests, pages without a database): no badge.
+WAITING_COUNT: Callable[[str], int] | None = None
 
 
 # The site's public origin (MTG_PUBLIC_URL), set by create_app: link previews need an absolute image.
@@ -2280,14 +2356,14 @@ def render(
     head_extra: str = "",
     body_class: str = "",
     main_class: str = "",
-    user: str | None = None,
+    sub: str | None = None,
 ) -> HTMLResponse:
     """Render a page. ``form_action`` adds exact origins a form on this page may submit or be
     redirected to (browsers apply form-action to the redirect that follows a POST too).
     Scripts load only from the gateway's own origin (``script-src 'self'``; inline script stays
     forbidden). ``current`` names the nav link to mark as the current page (its path);
-    ``heading=False`` leaves the <h1> to the body (deck banner). ``user`` is the signed-in
-    member's name for the account menu's "Signed in as" line. ``main_class`` adds classes to
+    ``heading=False`` leaves the <h1> to the body (deck banner). ``sub`` is the signed-in
+    member, for the Assistant place's count of waiting proposals. ``main_class`` adds classes to
     <main> (``ui-wide`` for the UI standard's 1200 px list pages)."""
     theme = current_theme()
     app = in_app()
@@ -2299,94 +2375,50 @@ def render(
     tabbar = ""
     cur = current or ""
     if signed_in:
-        csrf_in = f"<input type='hidden' name='csrf' value='{html.escape(csrf or '')}'>"
-        links = [x for x in NAV_LINKS if WATCHLISTS or x[0] != "/watchlist"]
-        if admin:
-            links.append(("/admin", "Admin", "settings"))
-        fold_at = [x[0] for x in links].index(NAV_FOLD_FROM)
+        place = NAV_PLACE.get(cur, cur)  # History and Reports light up Assistant
+        waiting = WAITING_COUNT(sub) if WAITING_COUNT is not None and sub else 0
+        groups = more_groups()
+        more_open = cur in {href for _h, links in groups for href, _l, _i in links}
 
-        def a(href: str, label: str, keep: bool = False, fold: bool = False) -> str:
-            aria = " aria-current='page'" if cur == href else ""
-            cls = "keep" if keep else "fold" if fold else ""
-            return f"<a href='{href}'{aria}{f' class={cls}' if cls else ''}>{label}</a>"
-
-        theme_items = "".join(
-            f"<button name='theme' value='{t}'{' class=on' if theme == t else ''} "
-            f"aria-pressed='{'true' if theme == t else 'false'}'>"
-            f"{icon('check') if theme == t else '<span class=i></span>'}{label} theme</button>"
-            for t, label in (("light", "Light"), ("dark", "Dark"), ("system", "System"))
-        )
-        who = (
-            f"<div class='head who' title='{html.escape(user)}'>Signed in as <b>{html.escape(user)}</b></div>"
-            if user
-            else ""
-        )
-        account_menu = (
-            "<details class='dd'><summary class='icon-btn' aria-label='Account menu' title='Account menu'>"
-            # The member's own picture (their provider's, else their initials: /account/avatar).
-            "<img class='av' src='/account/avatar' alt='' width='28' height='28'></summary>"
-            "<div class='menu acct'>"
-            f"{who}"
-            f"<a href='/'>{icon('home')}Home</a>"
-            f"<a href='/account'>{icon('account')}Account</a>"
-            f"<a href='/proposals'>{icon('proposals')}Proposals</a>"
-            f"<a href='/history'>{icon('history')}History</a>"
-            # Reports: here, in the top bar from 1200 px (its More below that), a tab on the rail
-            f"<a href='/reports'>{icon('report')}Reports</a>"
-            + (f"<a href='/watchlist'>{icon('stats')}Watchlist</a>" if WATCHLISTS else "")
-            + f"<a href='/lists'>{icon('list')}My lists</a>"
-            f"<a href='/forum'>{icon('comment')}Forum</a>"
-            f"<a href='/activity'>{icon('activity')}My activity</a>"
-            f"<a href='/guide'>{icon('guide')}Guide</a>"
-            f"<a href='/install?for=skill'>{icon('report')}Assistant skill</a>"
-            + (f"<a href='/install?for=android'>{icon('download')}Android app</a>" if not app else "")
-            + (
-                # The Android app's own actions (its floating button offers them over other pages);
-                # feedback.js calls window.MtgNative for each data-native button. Open a copied link
-                # and Check for app updates live in the app's own menu and the Account page's App card.
-                "<div class='sep'></div><div class='head'>App</div>"
-                f"<button type='button' data-native='openCamera'>{icon('camera')}Scan with the app's camera"
-                "</button>"
-                f"<button type='button' data-native='reload'>{icon('refresh')}Reload</button>"
-                f"<button type='button' data-native='openInBrowser'>{icon('link')}Open in browser</button>"
-                f"<button type='button' data-native='changeGateway'>{icon('settings')}Change gateway</button>"
-                if app
+        def badge(n: int, label: str) -> str:
+            # the count in the bell's orange; read out with the place's name
+            return (
+                f"<span class='nb' aria-hidden='true'>{n if n < 100 else '99+'}</span>"
+                f"<span class='sr-only'>, {n} {label}</span>"
+                if n
                 else ""
             )
-            + "<div class='sep'></div><div class='head'>Site theme</div>"
-            f"<form method='post' action='/theme'>{csrf_in}"
-            f"<input type='hidden' name='next' value='{html.escape(current_path())}'>"
-            f"{theme_items}</form>"
-            "<div class='sep'></div><div class='head'>Site layout</div>"
-            f"<form method='post' action='/layout'>{csrf_in}"
-            f"<input type='hidden' name='next' value='{html.escape(current_path())}'>"
-            f"<button name='layout' value='auto'{' class=on' if not desktop else ''} "
-            f"aria-pressed='{'false' if desktop else 'true'}'>"
-            f"{icon('check') if not desktop else '<span class=i></span>'}Fit the screen</button>"
-            f"<button name='layout' value='desktop'{' class=on' if desktop else ''} "
-            f"aria-pressed='{'true' if desktop else 'false'}'>"
-            f"{icon('check') if desktop else '<span class=i></span>'}Desktop layout</button></form>"
-            "<div class='sep'></div>"
-            f"<form method='post' action='/logout'>{csrf_in}"
-            f"<button data-busy-text='Signing out…'>{icon('x')}Sign out</button></form>"
-            "</div></details>"
-        )
-        more_links = [m for m in MORE_LINKS if WATCHLISTS or m[0] != "/watchlist"] + (
-            [("/admin", "Admin", "settings")] if admin else []
-        )
-        more_open = cur in {href for href, _l, _i in more_links}
-        nav = (
-            "<nav class='site' aria-label='Site'>"
-            + "".join(a(href, label, fold=i >= fold_at) for i, (href, label, _ic) in enumerate(links))
-            # the folded links (and Guide and Account) under More ▾ on a narrower computer screen
-            + "<details class='dd navmore'><summary"
-            + (" class='on'" if more_open else "")
-            + ">More<span aria-hidden='true'>▾</span></summary><div class='menu'>"
+
+        def a(href: str, label: str) -> str:
+            aria = " aria-current='page'" if place == href else ""
+            extra = badge(waiting, "waiting") if href == "/proposals" else ""
+            return f"<a href='{href}'{aria}>{label}{extra}</a>"
+
+        more_menu = "".join(
+            f"<div class='head'>{head}</div>"
             + "".join(
                 f"<a href='{href}'{' aria-current=page' if cur == href else ''}>{icon(ic)}{label}</a>"
-                for href, label, ic in more_links
+                for href, label, ic in links
             )
-            + "</div></details></nav>"
+            for head, links in groups
+        )
+        # Your picture opens the Account page (account settings, the look, guides and apps, sign out).
+        # data-who: who is signed in, as a hash of the member's id, so a note this browser keeps
+        # for one member (static/cardmenu.js, the deck page's owed reject) is never sent for another
+        who = f" data-who='{hashlib.sha256(sub.encode()).hexdigest()[:16]}'" if sub else ""
+        account_link = (
+            f"<a class='icon-btn acct' href='/account' aria-label='Account' title='Account'{who}"
+            f"{' aria-current=page' if cur in ('/account', '/account/details') else ''}>"
+            # The member's own picture (their provider's, else their initials: /account/avatar).
+            "<img class='av' src='/account/avatar' alt='' width='28' height='28'></a>"
+        )
+        nav = (
+            "<nav class='site' aria-label='Site'>"
+            + "".join(a(href, label) for href, label, _ic in NAV_LINKS)
+            + "<details class='dd navmore'><summary"
+            + (" class='on'" if more_open else "")
+            + ">More<span aria-hidden='true'>▾</span></summary>"
+            f"<div class='menu'>{more_menu}</div></details></nav>"
         )
         search_btn = (
             f"<a class='icon-btn searchbtn' href='/search' aria-label='Search cards and decks'"
@@ -2395,7 +2427,8 @@ def render(
         )
         # The site search (cards and decks; cardsearch.py, static/suggest.js): Enter on plain text
         # is the deck search, a card row opens /cards for it, and a right-click or a press and hold
-        # on one opens the card menu (static/cardmenu.js). Folded behind the magnifier on phones.
+        # on one opens the card menu (static/cardmenu.js). It fills the bar between the brand and
+        # the icons; folded behind the magnifier on phones.
         search_form = (
             "<form class='topsearch' id='topsearch' role='search' method='get' action='/search'>"
             "<label for='site-q' class='sr-only'>Search cards and decks</label>"
@@ -2405,32 +2438,42 @@ def render(
         )
         # The bell (parity release 2): Archidekt's unseen count, read after the page has loaded
         # (static/bell.js asks /notifications/count), and the list as a box; a link to the
-        # /notifications page without scripts. Between the search and the picture at every width.
+        # /notifications page without scripts. Beside the picture on a phone and a computer; the
+        # rail has it as Alerts instead.
         bell = (
             "<a class='icon-btn bell' href='/notifications' aria-label='Notifications' title='Notifications' "
             f"data-bell{' aria-current=page' if cur == '/notifications' else ''}>{icon('bell')}"
             "<span class='n' hidden aria-hidden='true'></span></a>"
         )
-        right = f"{search_form}<nav class='user' aria-label='Account'>{search_btn}{bell}{account_menu}</nav>"
-        # The More pages are tabs on the rail too (railonly: hidden on the phone bar, which has More),
-        # except Forum: one more tab put the rail past a short screen (an unfolded Fold, the app in
-        # landscape); on the rail Forum is in the account menu
-        rail_more = [(href, label, ic, "railonly") for href, label, ic in more_links if href != "/forum"]
+        right = f"{search_form}<nav class='user' aria-label='Account'>{search_btn}{bell}{account_link}</nav>"
+
+        def tab(href: str, label: str, ic: str, cls: str = "", extra: str = "", attrs: str = "") -> str:
+            cls_attr = f" class='{cls}'" if cls else ""
+            return (
+                f"<a href='{href}'{cls_attr}{attrs}"
+                f"{' aria-current=page' if place == href else ''}>{icon(ic)}{extra}"
+                f"<span class='lbl'>{label}</span></a>"
+            )
+
         tabbar = (
             "<nav class='tabbar' aria-label='Sections'>"
             + "".join(
-                f"<a href='{href}' class='{cls}'{' aria-current=page' if cur == href else ''}>"
-                f"{icon(ic)}<span class='lbl'>{label}</span></a>"
-                for href, label, ic, cls in TAB_LINKS + rail_more
+                tab(href, label, ic, extra=badge(waiting, "waiting") if href == "/proposals" else "")
+                for href, label, ic in NAV_LINKS
+            )
+            # the bell as a rail place (railonly: the phone bar keeps it in the top bar)
+            + tab(
+                "/notifications",
+                "Alerts",
+                "bell",
+                "railonly bell",
+                "<span class='n' hidden aria-hidden='true'></span>",
+                " data-bell data-bell-label='Alerts'",
             )
             + "<details class='dd more'><summary"
             + (" class='on'" if more_open else "")
-            + f" aria-label='More sections'>{icon('more')}More</summary><div class='menu sheet'>"
-            + "".join(
-                f"<a href='{href}'{' aria-current=page' if cur == href else ''}>{icon(ic)}{label}</a>"
-                for href, label, ic in more_links
-            )
-            + "</div></details></nav>"
+            + f" aria-label='More sections'>{icon('more')}<span class='lbl'>More</span></summary>"
+            f"<div class='menu sheet'>{more_menu}</div></details></nav>"
         )
     else:
         # Signed out: the way in sits where the account menu would be.
@@ -2510,7 +2553,11 @@ def render(
         + f"{head_extra}</head>"
         f"<body class='{classes}'{' data-watchlist' if WATCHLISTS else ''}>"
         f"<a class='skip' href='#main'>Skip to content</a>{SPRITE}"
-        "<header class='topbar'><div class='wrap'><div class='left'>"
+        "<header class='topbar'>"
+        # The page's form token, the first on the page: the scripts read the first csrf input
+        # (cardmenu.js, deck.js and the rest); the old account menu's forms carried it
+        + (f"<input type='hidden' name='csrf' value='{html.escape(csrf)}'>" if signed_in and csrf else "")
+        + "<div class='wrap'><div class='left'>"
         f"<a class='brand' href='/'{' aria-current=page' if cur == '/' else ''} title='{html.escape(site)}'>"
         f"<span class='mark'>{icon('brand')}</span>"
         f"<span class='word'>{html.escape(site)}</span></a>{nav}</div>"
@@ -2519,14 +2566,9 @@ def render(
         f"{h1}{body}</main>"
         + (
             # The website footer; the Android app has no footer (its pages end at the tab bar).
+            # (the top bar already has Decks, Binder, Search and Scan)
             "<footer class='site'><div class='links'>"
-            + (
-                "<a href='/decks'>Decks</a><a href='/search'>Search</a>"
-                "<a href='/collection'>Collection</a><a href='/scan'>Scan</a>"
-                if signed_in
-                else ""
-            )
-            + "<a href='/guide'>Guide</a><a href='/install?for=skill'>Assistant</a>"
+            "<a href='/guide'>Guide</a><a href='/install?for=skill'>Assistant</a>"
             + "<a href='/install?for=android'>Apps</a>"
             + ("<a href='/account'>Account</a>" if signed_in else "<a href='/login'>Sign in</a>")
             + "</div>"

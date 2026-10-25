@@ -47,7 +47,7 @@
   function socialProblem(d) {
     if (d && (d.error === "not_linked" || d.error === "auth")) {
       var a = el("a", "", "Link your Archidekt account");
-      a.href = "/account";
+      a.href = "/account/details#archidekt";
       var frag = document.createDocumentFragment();
       frag.appendChild(a);
       frag.appendChild(document.createTextNode(" to like, bookmark, follow or comment."));

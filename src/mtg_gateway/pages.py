@@ -19,7 +19,18 @@ from urllib.parse import parse_qs, quote
 from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
 
-from . import app_signin, link_disclosure, masked, modes, notify, prefs, proposals_view, smallpage, ui
+from . import (
+    account_hub,
+    app_signin,
+    link_disclosure,
+    masked,
+    modes,
+    notify,
+    prefs,
+    proposals_view,
+    smallpage,
+    ui,
+)
 from .archidekt import PATIENCE_SPENT, page_turn
 from .auth_provider import BROWSER_COOKIE, LoginError, cookie_name
 from .avatars import initials_svg
@@ -44,8 +55,6 @@ from .theme import (
     THEME_COOKIE,
     VIEW_COOKIE,
     VIEW_KINDS,
-    app_version,
-    display_name,
     icon,
     in_app,
     layout_from_cookie,
@@ -94,7 +103,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             admin=_is_admin(sub),
             head_extra=head_extra,
             current=current,
-            user=display_name(state.db.get_user(sub)) if sub else None,
+            sub=sub,
             main_class=main_class,
             heading=heading,
         )
@@ -182,11 +191,11 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             "<form method='post' action='/logout'>"
             f"<input type='hidden' name='csrf' value='{html.escape(_csrf(s, sid) or '')}'>"
             "<div class='form-actions'>"
-            "<button class='primary' data-busy-text='Signing out…'>Sign out</button>"
+            f"<button class='primary' data-busy-text='Signing out…'>{icon('x')}<span>Sign out</span></button>"
             "<button name='everywhere' value='1' data-busy-text='Signing out…'>"
-            "Sign out on all my devices</button></div></form>"
+            f"{icon('x')}<span>Sign out on all my devices</span></button></div></form>"
             "<p class='muted small'>All devices signs out every browser and the Android app. "
-            "Connected AI apps keep working; disconnect them on your Account page.</p></div>",
+            "Connected AI apps keep working; disconnect them under Account details.</p></div>",
             sub=sub,
             sid=sid,
         )
@@ -314,9 +323,29 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
     # -- account ------------------------------------------------------------
     @server.custom_route("/account", methods=["GET"], include_in_schema=False)
     async def account(request: Request) -> Response:
+        """The Account page your picture opens (account_hub.py). An address with a notice or a box
+        to open (the forms' redirects, the old one-press forms' addresses) is Account details."""
         sub, sid = current(request)
         if not sub:
             return to_login("/account")
+        if request.query_params:
+            return await account_details(request)
+        resp = page(
+            "Account",
+            account_hub.hub_html(state, sub, _csrf(s, sid) or "", admin=_is_admin(sub)),
+            sub=sub,
+            sid=sid,
+            current="/account",
+            head_extra=f"<style>{account_hub.HUB_CSS}</style><script src='{smallpage.SCRIPT}' defer>"
+            "</script>",
+        )
+        return resp
+
+    @server.custom_route("/account/details", methods=["GET"], include_in_schema=False)
+    async def account_details(request: Request) -> Response:
+        sub, sid = current(request)
+        if not sub:
+            return to_login("/account/details")
         q = request.query_params
         ok, err = q.get("ok"), q.get("err")
         # The Notifications and Summary cards show their own notices inside them (where the
@@ -390,7 +419,10 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             return small(
                 "Form expired",
                 smallpage.form_expired(
-                    "Reload Account", "/account", "/account", nothing="Nothing was changed."
+                    "Reload Account details",
+                    "/account/details",
+                    "/account/details",
+                    nothing="Nothing was changed.",
                 ),
                 status=403,
                 sub=sub,
@@ -417,13 +449,13 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
                     detail={"proposal_id": pid, "origin": "browser", "reason": "app disconnected"},
                 )
             done = f"ok=disconnected&app={quote(client_id, safe='')}" if client_id else "ok=disconnected_all"
-            return RedirectResponse(f"/account?{done}#apps", 303)
+            return RedirectResponse(f"/account/details?{done}#apps", 303)
         if action == "unlink":
             state.decks.unlink(sub)
             from . import account_lists  # (imports archidekt first: not at the top)
 
             account_lists.forget_counts(sub)  # the My lists counts were that account's
-            return RedirectResponse("/account?ok=unlinked", status_code=303)
+            return RedirectResponse("/account/details?ok=unlinked", status_code=303)
         if action == "approval_mode":
             # The only place a mode can be set: the member's own browser session, never an
             # assistant over MCP or the API (modes.py).
@@ -431,7 +463,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             # the cap as it is now: the Settings page changes it without a restart (LiveSettings)
             cap = str(state.live.get("approval_mode_max"))
             if not modes.valid_mode(mode) or modes.rank(mode) > modes.rank(cap):
-                return RedirectResponse("/account?err=mode_invalid", status_code=303)
+                return RedirectResponse("/account/details?err=mode_invalid", status_code=303)
             before = state.decks.mode_of(sub)
             state.db.set_approval_mode(sub, mode)
             state.db.audit(
@@ -440,19 +472,19 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
                 client_id=BROWSER_CLIENT_ID,
                 detail={"from": before, "to": mode, "by": "user"},
             )
-            return RedirectResponse(f"/account?ok=mode_{mode}", status_code=303)
+            return RedirectResponse(f"/account/details?ok=mode_{mode}", status_code=303)
         if action == "forget_choices":
             if data.get("confirm") != "yes":
-                return RedirectResponse("/account?err=confirm_forget#choices", status_code=303)
+                return RedirectResponse("/account/details?err=confirm_forget#choices", status_code=303)
             n = prefs.forget(state.db, sub)
             state.db.audit("view_choices_forgotten", sub=sub, client_id=BROWSER_CLIENT_ID, detail={"n": n})
-            resp = RedirectResponse("/account?ok=choices_forgotten#choices", status_code=303)
+            resp = RedirectResponse("/account/details?ok=choices_forgotten#choices", status_code=303)
             for kind in VIEW_KINDS:  # this browser's pre-0.7.29 view cookies, if any are left
                 resp.delete_cookie(VIEW_COOKIE + kind, path="/", secure=secure, httponly=True, samesite="lax")
             return resp
         if action == "delete_data":
             if data.get("confirm") != "yes":
-                return RedirectResponse("/account?delete=1&err=confirm_delete", status_code=303)
+                return RedirectResponse("/account/details?delete=1&err=confirm_delete", status_code=303)
             if getattr(state, "reports", None) is not None:  # their unfinished Forge games stop too
                 state.reports.forget_member(sub)
             state.db.delete_member_data(sub)
@@ -467,40 +499,40 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             login_name = data.get("archidekt_login", "").strip()
             password = data.get("archidekt_password", "")
             if data.get("accept_risk") != "1":
-                return page(
-                    "Account",
+                return account_response(
+                    page,
                     _err("Tick the box to confirm you have read what linking Archidekt gives this gateway.")
                     + _account_body(state, sub, _csrf(s, sid)),
+                    sub,
+                    sid,
                     status=400,
-                    sub=sub,
-                    sid=sid,
                 )
             if not login_name or not password:
-                return page(
-                    "Account",
+                return account_response(
+                    page,
                     _err("Enter your Archidekt username or email and password.")
                     + _account_body(state, sub, _csrf(s, sid), disclosure_read=True),
+                    sub,
+                    sid,
                     status=400,
-                    sub=sub,
-                    sid=sid,
                 )
             try:
                 await state.decks.link(sub, login_name, password)
             except DeckError as exc:
                 # The member ticked the box after opening the detail: keep it open, not folded again.
-                return page(
-                    "Account",
+                return account_response(
+                    page,
                     _err(str(exc)) + _account_body(state, sub, _csrf(s, sid), disclosure_read=True),
+                    sub,
+                    sid,
                     status=400,
-                    sub=sub,
-                    sid=sid,
                 )
-            return RedirectResponse("/account?ok=linked", status_code=303)
+            return RedirectResponse("/account/details?ok=linked", status_code=303)
         done = await notify.account_action(state, sub, action or "", data)
         if done is not None:
             anchor = "#summary" if action in ("summary_save", "summary_send") else "#notifications"
-            return RedirectResponse(f"/account?{done}{anchor}", status_code=303)
-        return page("Account", _err("Unknown action."), status=400, sub=sub, sid=sid)
+            return RedirectResponse(f"/account/details?{done}{anchor}", status_code=303)
+        return account_response(page, _err("Unknown action."), sub, sid, status=400)
 
     # -- proposals ----------------------------------------------------------
     @server.custom_route("/proposals", methods=["GET"], include_in_schema=False)
@@ -1172,7 +1204,7 @@ ERR_MESSAGES = {
     "backup_failed": "The backup copy of the deck could not be made on Archidekt, so nothing was "
     "changed. The proposal is still pending; try again once Archidekt answers.",
     "not_linked": "Your Archidekt account is not linked, or Archidekt no longer accepts the stored "
-    "session. Relink it on the Account page.",
+    "session. Relink it under Account details.",
     "forbidden": "Archidekt did not allow this change, so nothing more was changed. The reason is in "
     "the result below. Your Archidekt link is fine; there is no need to relink.",
     "other_account": "This new deck was proposed for another Archidekt account than the one linked now, "
@@ -1239,6 +1271,9 @@ DELETED_LIST = (
 
 # The Account page: connected app rows, the disclosure as a tinted strip, buttons that wrap.
 ACCOUNT_CSS = (
+    ".yback{display:inline-flex;align-items:center;gap:.3rem;min-height:44px;margin:0 0 -.25rem;"
+    "color:var(--orange-text);font-weight:700;text-decoration:none}"
+    ".yback svg.i{width:18px;height:18px;transform:rotate(90deg)}"
     ".acc .apps{list-style:none;margin:.5rem 0;padding:0}"
     ".acc .apps li{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:.1rem 1rem;align-items:center;"
     "padding:.6rem 0;border-top:1px solid var(--border-soft)}"
@@ -1306,11 +1341,14 @@ def account_response(page: Any, body: str, sub: str, sid: str | None, *, status:
     from .profile_page import CSS as PROFILE_CSS
 
     resp = page(
-        "Account",
-        body,
+        "Account details",
+        # back to the Account page, as a phone's settings go back a level
+        f"<a class='yback' href='/account'>{icon('chev')}Account</a><h1>Account details</h1>{body}",
         sub=sub,
         sid=sid,
         status=status,
+        current="/account/details",
+        heading=False,
         head_extra=ACCOUNT_HEAD
         + f"<style>{PROFILE_CSS}</style><script src='/static/profile.js' defer></script>",
     )
@@ -1359,26 +1397,6 @@ def actor_html(label: str | None) -> str:
     if label.startswith("app: "):  # no registered name: never the raw client id
         return f"<span class='badge' title='{html.escape(label)}'>an assistant</span>"
     return f"<span class='badge' title='{html.escape(label)}'>{html.escape(label)}</span>"
-
-
-def _app_card() -> str:
-    """The Android app's own card on the Account page, shown only inside the app.
-
-    The version comes from the app's user agent. The buttons call the app (window.MtgNative through
-    feedback.js, like the account menu's App section) and stay hidden in an app too old to have them.
-    """
-    version = app_version()
-    return (
-        "<div class='card' id='app'><h2>App</h2><dl class='meta'>"
-        f"<dt>Installed version</dt><dd>{html.escape(version or 'unknown')}</dd></dl>"
-        "<p class='muted small'>The app looks for a new version on its own each time it starts and "
-        "after you sign in (at most once an hour), and when you come back to it after 12 hours. "
-        "When there is one, a bar at the top offers Update.</p>"
-        "<div class='form-actions'>"
-        "<button type='button' data-native='checkForUpdates'>Check for app updates</button>"
-        "<button type='button' class='inline' data-native='openCopiedLink'>Open a copied link</button>"
-        "</div></div>"
-    )
 
 
 def _lists_card(sub: str) -> str:
@@ -1439,17 +1457,11 @@ def _account_body(
         "<p class='muted small'>Set for the whole gateway by the person who runs it. While they are "
         "off, changes can be reviewed but not applied.</p>"
         f"{_identity_details(user)}"
-        "<div class='form-actions'>"
-        "<a class='btn' href='/install?for=skill'>Get the assistant skill for Claude or ChatGPT</a>"
-        # Inside the app the App card below takes its place: the app is already installed.
-        + ("" if in_app() else "<a class='btn' href='/install?for=android'>Get the Android app</a>")
-        + f"<form method='post' action='/logout'>{csrf_in}"
-        "<button class='inline' data-busy-text='Signing out…'>Sign out</button>"
-        "<button class='inline' name='everywhere' value='1' data-busy-text='Signing out…'>"
-        "Sign out on all my devices</button></form></div></div>"
+        # Sign out, the assistant skill and the Android app are on the Account page itself
+        f"<form method='post' action='/logout' class='form-actions'>{csrf_in}"
+        "<button name='everywhere' value='1' data-busy-text='Signing out…'>"
+        f"{icon('x')}<span>Sign out on all my devices</span></button></form></div>"
     ]
-    if in_app():
-        out.append(_app_card())
     # One orange button on the page: Save approval mode while Archidekt is linked, Link account
     # while it is not (as Compare switches its main button by state).
     out.append(_mode_card(state, sub, csrf_in, primary=linked))
@@ -1472,7 +1484,7 @@ def _account_body(
                 ui.box_button("Unlink and delete stored session", kind="danger-solid", form="unlinkf"),
             ],
             open=open_box == "unlink",
-            close_href="/account",
+            close_href="/account/details",
         )
         out.append(
             "<div class='card' id='archidekt'><h2>Archidekt</h2>"
@@ -1483,7 +1495,9 @@ def _account_body(
             + (f" Archidekt's session stops working on {expires}; then you link again." if expires else "")
             + "</p>"
             "<div class='ui-actions'>"
-            + ui.box_opener("Unlink and delete stored session", "/account?unlink=1", "unlink", kind="danger")
+            + ui.box_opener(
+                "Unlink and delete stored session", "/account/details?unlink=1", "unlink", kind="danger"
+            )
             + "</div>"
             "<p class='muted small'>Unlinking deletes the gateway's copy of the session at once. "
             "Whether the session also stops working on Archidekt's side is not known.</p>"
@@ -1604,7 +1618,7 @@ def _apps_card(
     for n, a in enumerate(apps, 1):
         name = ui.app_name(a["name"])
         box_id = f"disc{n}"
-        href = f"/account?disconnect={quote(a['client_id'], safe='')}"
+        href = f"/account/details?disconnect={quote(a['client_id'], safe='')}"
         rows.append(
             f"<li><span class='nm'>{ui.app_chip(a['name'], unnamed=True, client_id=a['client_id'])}</span>"
             f"<span class='sub'>Last signed in or refreshed {ui.when(a['last_issued_at'])}</span>"
@@ -1624,7 +1638,7 @@ def _apps_card(
                     ui.box_button("Disconnect", kind="danger-solid", form=f"{box_id}f"),
                 ],
                 open=open_box == "disconnect" and open_client == a["client_id"],
-                close_href="/account",
+                close_href="/account/details",
             )
         )
     all_box = ui.box(
@@ -1639,14 +1653,14 @@ def _apps_card(
             ui.box_button("Disconnect all apps", kind="danger-solid", form="discallf"),
         ],
         open=open_box == "disconnect_all",
-        close_href="/account",
+        close_href="/account/details",
     )
     return (
         "<div class='card' id='apps'><h2>Connected apps</h2>"
         "<p class='muted small'>Disconnect any you don't recognize.</p>"
         f"<ul class='apps'>{''.join(rows)}</ul>"
         "<div class='ui-actions'>"
-        + ui.box_opener("Disconnect all apps", "/account?disconnect_all=1", "discall", kind="danger")
+        + ui.box_opener("Disconnect all apps", "/account/details?disconnect_all=1", "discall", kind="danger")
         + f"</div>{''.join(boxes)}{all_box}</div>"
     )
 
@@ -1691,14 +1705,16 @@ def _delete_card(csrf_in: str, backup_days: int | None = None, *, open: bool = F
             ),
         ],
         open=open,
-        close_href="/account",
+        close_href="/account/details",
     )
     return (
         "<div class='card' id='delete-data'><h2>Delete my data</h2>"
         f"<p>Delete everything this gateway keeps for your account: {DELETED_LIST}. Your decks on "
         f"Archidekt are not touched. This can't be undone.{kept}</p>"
         "<div class='ui-actions'>"
-        + ui.box_opener("Delete my data…", "/account?delete=1", "delete", kind="danger", icon_name="trash")
+        + ui.box_opener(
+            "Delete my data…", "/account/details?delete=1", "delete", kind="danger", icon_name="trash"
+        )
         + f"</div>{box}</div>"
     )
 

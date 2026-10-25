@@ -152,7 +152,7 @@ def test_scan_page_has_its_own_csp_and_the_rest_keep_the_strict_one(clients, env
             assert "frame-ancestors 'none'" in csp and "base-uri 'none'" in csp, csp
             assert await scan.header_value("permissions-policy") == "camera=(self)"
             assert "Scan cards" in await page.inner_text("body")
-            account = await page.goto(f"{PUBLIC_URL}/account")
+            account = await page.goto(f"{PUBLIC_URL}/account/details")
             assert await account.header_value("content-security-policy") == ACCOUNT_CSP
             proposals = await page.goto(f"{PUBLIC_URL}/proposals")
             assert await proposals.header_value("content-security-policy") == STRICT_CSP

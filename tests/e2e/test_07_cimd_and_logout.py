@@ -154,7 +154,7 @@ def test_sign_out_in_the_browser_ends_the_session_and_clears_site_data(env: Env)
             # The session is gone on the server too: the account page sends the browser through
             # /login again (Authentik may still remember the person and sign them straight back in,
             # which is its single sign-on doing its job; what matters is that the gateway asked).
-            resp = await page.goto(f"{PUBLIC_URL}/account")
+            resp = await page.goto(f"{PUBLIC_URL}/account/details")
             chain, req = [], resp.request
             while req is not None:
                 chain.append(req.url)

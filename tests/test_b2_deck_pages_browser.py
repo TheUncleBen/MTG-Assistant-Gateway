@@ -54,25 +54,25 @@ def test_the_deck_menu_opens_from_more_and_a_right_click(server: Server, width: 
         menu = _menu(page)
         labels = [t.strip() for t in menu.locator("[role=menuitem]").all_inner_texts()]
         assert menu.locator(".head").inner_text() == "Sample Commander Deck"
+        # navigation round 2 (Ben, 2026-10-25): Edit, Test and play and Proposals sit on the
+        # banner, Copy link is in Share…, and the deck page opens in this tab
         for want in (
-            "Open in a new tab",
-            "Edit deck",
-            "Goldfish",
-            "Run full test",
-            "Clone…",
             "Rename…",
             "Move to folder…",
+            "Add a package…",
+            "Share…",
             "Export…",
             "Compare with…",
             "Deck settings",
             "Deck stats",
+            "Deck reports",
             "History and snapshots",
-            "Proposals for this deck",
-            "Copy link",
             "Open on Archidekt",
             "Delete deck…",
         ):
             assert any(x == want for x in labels), (want, labels)
+        for gone in ("Open in a new tab", "Edit deck", "Goldfish", "Copy link", "Proposals for this deck"):
+            assert gone not in labels, (gone, labels)
         assert "More" not in labels and "Solo test only" not in labels  # Forge is off here
         assert menu.locator("[role=menuitem].danger", has_text="Delete deck…").count() == 1
         assert _overflow(page) == 0

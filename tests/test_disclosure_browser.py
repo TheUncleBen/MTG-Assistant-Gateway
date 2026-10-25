@@ -49,7 +49,7 @@ def _open(browser, body: str, *, scripts: bool = True):
             route.fulfill(body=body, content_type="text/html", headers=headers)
 
     page.route(f"{ORIGIN}/**", handle)
-    page.goto(f"{ORIGIN}/account")
+    page.goto(f"{ORIGIN}/account/details")
     page.wait_for_load_state("load")
     return ctx, page
 

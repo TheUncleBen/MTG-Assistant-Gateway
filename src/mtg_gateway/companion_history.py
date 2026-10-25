@@ -230,8 +230,11 @@ def add_history_routes(
             f"<span class='ui-sub'>Newest first</span></div>"
         )
         list_html = (
-            ui.page_head("History" if not deck_id else "Deck history")
-            + f"<p class='ui-sub'>{_esc(PAGE_SUB_TEXT)} <a href='/proposals'>Proposals</a>.</p>"
+            ui.assistant_head(
+                "/history",
+                "History" if not deck_id else "Deck history",
+                sub_html=f"{_esc(PAGE_SUB_TEXT)} <a href='/proposals'>Proposals</a>.",
+            )
             + back
             + _history_widgets(sub, deck_id, copies, now=now)
             + trend

@@ -348,13 +348,16 @@ def banner_html(
     csrf: str | None,
     writes_enabled: bool,
     forge_on: bool = False,
+    waiting: int = 0,
 ) -> str:
-    """The deck banner: name, facts, the buttons (Edit deck the page's one orange button) and the
-    deck menu. The menu is the shared deck menu (static/deck.js builds it with cardmenu.js's
-    layer, from the ⋮ More button, a right-click on the banner or a press and hold) plus the old
-    More's page-only items. Without scripts the same items are a details drop-down, and its
-    Export…, Compare with… and Delete deck… links go to the old addresses, which open this page
-    with that box open (deck_boxes_html)."""
+    """The deck banner: name, facts, the buttons (Edit deck the page's one orange button, Clone
+    deck, Test and play, More; the same on every screen, Ben 2026-10-25) and the deck menu.
+    ``waiting``: the member's proposals waiting on this deck, the count on the Proposals pill.
+    The menu is the shared deck menu (static/deck.js builds it with cardmenu.js's layer, from the
+    ⋮ More button, a right-click on the banner or a press and hold). Without scripts it is a
+    details drop-down of the items that work as links, and its Export…, Compare with… and Delete
+    deck… links go to the old addresses, which open this page with that box open
+    (deck_boxes_html)."""
     stats = stats or {}
     art = featured(deck)
     art_url = card_image(art, "art_crop") if art else None
@@ -391,63 +394,71 @@ def banner_html(
             "title='Copy this deck into your own Archidekt account'>"
             f"{icon('clone')} Clone deck</button>"
         )
-    # Archidekt's own playtester (draw, mulligan, play by hand) in its own tab: a frame
-    # inside the gateway never carries the person's Archidekt sign-in, so a private deck stayed empty
-    # there. The app opens the link in the phone's browser, where that sign-in lives.
-    primary += (
-        f"<a class='btn' href='https://archidekt.com/playtester-v2/{did}' target='_blank' "
-        "rel='noreferrer noopener' title='Draw and play this deck by hand in Archidekt&#39;s playtester, "
-        f"in a new tab'>{icon('play')} Playtest</a>"
+    # Test and play: the ways to try the deck out, on the gateway and on other sites, in one menu
+    # (static/deck.js opens it as the shared menu; without scripts it is this drop-down).
+    test = [
         # The gateway's own goldfish: shuffle, mulligan, draw and play turns by hand in this
         # browser, on the deck this page read (static/goldfish.js).
-        f"<a class='btn' href='/decks/{did}/goldfish' title='Shuffle, draw an opening hand and play "
-        f"turns by hand, here on the gateway'>{icon('layers')} Goldfish</a>"
-    )
-    # Play on EDHPlay: EDHPlay is the online table; it has no import by link, so the
-    # button opens a short box whose Copy and Open EDHPlay.com copies the whole deck in its import
-    # format and opens the site (deck.js). The box asks /decks/{id}/edhplay.json for the list when it
-    # opens (companion_tools.py), so the page itself doesn't carry the whole list. Without script the
-    # link still opens EDHPlay, and Export has the list.
-    primary += (
-        f"<a class='btn' href='{EDHPLAY_URL}' target='_blank' rel='noreferrer noopener' data-edhplay "
-        f"data-src='/decks/{did}/edhplay.json' "
-        "title='Copy this deck list and open EDHPlay to play it online'>"
-        f"{icon('play')} Play on EDHPlay</a>"
-    )
+        "<div class='head'>On the gateway</div>"
+        f"<a href='/decks/{did}/goldfish' title='Shuffle, draw an opening hand and play turns by hand, "
+        f"here on the gateway'>{icon('layers')} Goldfish</a>"
+    ]
     if csrf:
         # The same run as the assistant's run_deck_report: statistics, validation and the solo
         # test on the research service, plus Forge games when Forge is on, stored under History.
-        # "Solo test", not "goldfish": Goldfish is the button beside it, where the member plays by
-        # hand.
-        primary += (
-            f"<form method='post' action='/decks/{did}/report' class='inline'>{csrf_in}"
+        # "Solo test", not "goldfish": Goldfish is the item above, where the member plays by hand.
+        test.append(
+            f"<form method='post' action='/decks/{did}/report' id='fullf'>{csrf_in}"
             "<button type='submit' data-busy-label='Testing…' title='The solo test (300 games, no "
             "opponents), a legality check and the deck statistics, plus Forge games against precons when "
             "Forge is on and the deck has a commander; saved under History. The solo test takes up to a "
             f"minute; the result page opens when the solo test is done.'>{icon('stats')} Run full test"
             "</button></form>"
         )
-    more_items = []
     if csrf and forge_on:
         # The same run without the Forge games, for a quick result (forge=0, companion_tools.py).
-        more_items.append(
+        test.append(
             f"<form method='post' action='/decks/{did}/report' id='solof'>{csrf_in}"
             "<input type='hidden' name='forge' value='0'>"
             "<button type='submit' data-busy-label='Testing…' title='The same run without Forge games: "
             f"the solo test, the legality check and the statistics'>{icon('stats')} "
             "Solo test only</button></form>"
         )
+    test.append(
+        "<div class='sep'></div><div class='head'>On other sites</div>"
+        # Archidekt's own playtester (draw, mulligan, play by hand) in its own tab: a frame
+        # inside the gateway never carries the person's Archidekt sign-in, so a private deck stayed
+        # empty there. The app opens the link in the phone's browser, where that sign-in lives.
+        f"<a href='https://archidekt.com/playtester-v2/{did}' target='_blank' rel='noreferrer noopener' "
+        "title='Draw and play this deck by hand in Archidekt&#39;s playtester, in a new tab' "
+        f"data-test='playtest'>{icon('play')} Playtest on Archidekt</a>"
+        # Play on EDHPlay: EDHPlay is the online table; it has no import by link, so the item
+        # opens a short box whose Copy and Open EDHPlay.com copies the whole deck in its import
+        # format and opens the site (deck.js). The box asks /decks/{id}/edhplay.json for the list
+        # when it opens (companion_tools.py), so the page itself doesn't carry the whole list.
+        # Without script the link still opens EDHPlay, and Export has the list.
+        f"<a href='{EDHPLAY_URL}' target='_blank' rel='noreferrer noopener' data-edhplay "
+        f"data-src='/decks/{did}/edhplay.json' title='Copy this deck list and open EDHPlay to play it "
+        f"online'>{icon('play')} Play on EDHPlay</a>"
+    )
+    primary += (
+        f"<details class='dd decktest'><summary class='btn'>{icon('play')} Test and play</summary>"
+        f"<div class='menu left'>{''.join(test)}</div></details>"
+    )
+    # The deck menu without scripts (static/deck.js draws the full one, grouped, from ⋮ More): the
+    # items that work as plain links
+    more_items = []
     if own and csrf:
         more_items.append(f"<a href='/decks/{did}/settings'>{icon('settings')} Deck settings</a>")
-    more_items.append(
-        f"<a href='/decks/{did}/export' {ui.box_open_attr('export')}>{icon('download')} Export…</a>"
-    )
-    more_items.append(f"<a href='/history?deck_id={did}'>{icon('history')} History and snapshots</a>")
-    more_items.append(f"<a href='/proposals?deck_id={did}'>{icon('proposals')} Proposals for this deck</a>")
+    more_items.append(f"<a href='/decks/{did}#stats'>{icon('report')} Deck stats</a>")
+    more_items.append(f"<a href='/reports?deck_id={did}'>{icon('stats')} Deck reports</a>")
     more_items.append(
         f"<a href='/decks/{did}/compare' {ui.box_open_attr('compare')}>{icon('layers')} Compare with…</a>"
     )
-    more_items.append(f"<a href='/decks/{did}#stats'>{icon('report')} Deck stats</a>")
+    more_items.append(f"<a href='/history?deck_id={did}'>{icon('history')} History and snapshots</a>")
+    more_items.append(
+        f"<a href='/decks/{did}/export' {ui.box_open_attr('export')}>{icon('download')} Export…</a>"
+    )
     more_items.append(
         f"<a href='https://archidekt.com/decks/{did}' target='_blank' rel='noreferrer noopener'>"
         f"{icon('external')} Open on Archidekt</a>"
@@ -494,7 +505,7 @@ def banner_html(
         "</div>"
         f"<div class='tags'>{icon('tag')} {tags}</div>"
         f"<div class='controls'><div class='primary'>{primary}{more}</div></div>{writes_note}"
-        f"{social_html(deck, own=own, writes_enabled=writes_enabled) if csrf else ''}"
+        f"{social_html(deck, own=own, writes_enabled=writes_enabled, waiting=waiting) if csrf else ''}"
         "</div>"
         "</div></div></section>"
     )
@@ -738,8 +749,10 @@ WRITES_OFF_LINE = "Archidekt writes are switched off on this gateway, so these b
 WRITES_OFF_FOLLOW = "Archidekt writes are switched off on this gateway, so following can't be changed here."
 
 
-def social_html(deck: Deck, *, own: bool, writes_enabled: bool = True) -> str:
-    """Like, Bookmark, Follow and Comments, as Archidekt's deck page offers them. The buttons are
+def social_html(deck: Deck, *, own: bool, writes_enabled: bool = True, waiting: int = 0) -> str:
+    """Like, Bookmark, Follow and Comments, as Archidekt's deck page offers them, and Proposals
+    (Ben, 2026-10-25): the member's proposals for this deck, with the count waiting, in a box
+    (waiting_strip.deck_box_html; the deck's Proposals list without scripts). The buttons are
     the person's own clicks: social.js asks for a confirmation and posts to /social/api; without
     script they are inert and the More menu's "Open on Archidekt" link is the way. With Archidekt
     writes switched off they show their state but are disabled, saying why (social review)."""
@@ -785,10 +798,16 @@ def social_html(deck: Deck, *, own: bool, writes_enabled: bool = True) -> str:
     comments = (
         f"<a class='soc' href='#comments' data-social='comments'>{icon('comment')}<span>Comments</span></a>"
     )
+    proposals = (
+        f"<a class='soc prop' href='/proposals?deck_id={did}' {ui.box_open_attr('proposals')}>"
+        f"{icon('proposals')}<span>Proposals</span>"
+        + (f"<b class='nb'>{waiting}</b><span class='sr-only'> waiting</span>" if waiting else "")
+        + "</a>"
+    )
     off = "" if writes_enabled else " data-writes='off' aria-describedby='social-off'"
     return (
-        f"<div class='social' role='group' data-deck='{did}' aria-label='Archidekt actions'{off}>"
-        f"{like}{bookmark}{follow}{comments}</div>"
+        f"<div class='social' role='group' data-deck='{did}' aria-label='Deck actions'{off}>"
+        f"{like}{bookmark}{follow}{comments}{proposals}</div>"
         + (
             ""
             if writes_enabled
@@ -849,17 +868,34 @@ DECK_CSS_A = (
 /* the deck menu (deck.js): the ⋮ More button replaces the no-script drop-down once the script runs */
 .banner .deckmenu{display:inline-flex;align-items:center;gap:.4rem;margin:0}
 .banner[data-menu-ready] details.deckmore{display:none}
+.banner[data-menu-ready] details.decktest{display:none}
+.banner .decktestbtn{display:inline-flex;align-items:center;gap:.4rem;margin:0}
+/* the Proposals pill's count: a small orange disc, as the nav's badge */
+.banner .social .soc.prop .nb{display:inline-flex;align-items:center;justify-content:center;
+  min-width:20px;height:20px;padding:0 6px;border-radius:10px;background:var(--orange);
+  color:var(--on-orange);font-size:.75rem;font-weight:700;line-height:1;box-sizing:border-box}
+/* Share's box (a browser without the app): one row per way out, its note muted at the end */
+.sharebox{display:flex;flex-direction:column;border:1px solid var(--border-soft);border-radius:14px;
+  overflow:hidden}
+.sharebox .sharerow{display:flex;align-items:center;gap:.8rem;width:100%;min-height:48px;margin:0;
+  padding:0 1rem;border:0;border-radius:0;background:var(--surface);color:var(--text);font-weight:400;
+  justify-content:flex-start;text-align:left;text-decoration:none}
+.sharebox .sharerow + .sharerow{border-top:1px solid var(--border-soft)}
+.sharebox .sharerow svg{width:20px;height:20px;flex:none;color:var(--orange-text)}
+.sharebox .sharerow .t{flex:1;min-width:0}
+.sharebox .sharerow small{color:var(--text-muted)}
+.sharebox .sharerow:hover{background:var(--surface-2)}
 .banner h1.deckname.unnamed > span{color:#cfcfcf;font-style:italic}
-/* the waiting changes strip: Apply plain, Reject a red outline, a divider line instead of a
-   nested bordered bar (the markup is waiting_strip.py's) */
-.wstrip .wbar.inline{border:0;border-top:1px solid var(--border-soft);border-radius:0;background:transparent;
+/* the Proposals box: Apply plain, Reject a red outline, a divider line instead of a nested
+   bordered bar (the markup is waiting_strip.py's) */
+.ybox .wbar.inline{border:0;border-top:1px solid var(--border-soft);border-radius:0;background:transparent;
   padding:.6rem 0 .3rem;margin-top:.25rem}
-.wstrip .wbar button.btn-primary{background:transparent;border:1px solid var(--control-border);
+.ybox .wbar button.btn-primary{background:transparent;border:1px solid var(--control-border);
   color:var(--text);font-weight:700}
-.wstrip .wbar button.btn-primary:hover:not(:disabled){background:var(--surface-2)}
-.wstrip .wbar button.danger{background:transparent;color:var(--danger-text);
+.ybox .wbar button.btn-primary:hover:not(:disabled){background:var(--surface-2)}
+.ybox .wbar button.danger{background:transparent;color:var(--danger-text);
   border:1px solid var(--danger-text)}
-.wstrip .wbar button.danger:hover:not(:disabled){background:var(--red-tint);color:var(--danger-text)}
+.ybox .wbar button.danger:hover:not(:disabled){background:var(--red-tint);color:var(--danger-text)}
 /* the drag hint is the grip icon's hover text */
 .toolbar .views .hint{display:inline-flex;align-items:center;justify-content:center;width:44px;
   min-height:44px;
@@ -910,7 +946,11 @@ def toolbar_html(deck: Deck, *, own: bool, view: str, group: str, sort: str, q: 
         "autocomplete='off'>"
         # on a phone the label is hidden and only the icon shows: the name stays the same
         f"<button type='submit' aria-label='Card search'>{icon('search')} "
-        "<span>Card search</span></button></div></form>"
+        "<span>Card search</span></button>"
+        # Add a package, where cards are added (Ben, 2026-10-25: packages easy to find): the
+        # package box (deck_extras.py); its old address opens this page with the box open
+        f"<a class='btn addpkg' href='/decks/{{did}}/package' {ui.box_open_attr('package')}>"
+        f"{icon('package')} <span>Add a package</span></a></div></form>"
         if own
         else ""
     ).replace("{did}", did)
@@ -1997,17 +2037,25 @@ def deck_page_html(
     boxes: str = "",
     before: str = "",
 ) -> str:
-    # ``waiting``: the "Waiting changes" strip's rows (waiting_strip.py), drawn at the top under
-    # the banner; ``boxes``: the page's boxes (deck_boxes_html), hidden until opened; ``before``:
+    # ``waiting``: the member's waiting proposals for the deck (waiting_strip.py), behind the
+    # banner's Proposals pill; ``boxes``: the page's boxes (deck_boxes_html), hidden until opened; ``before``:
     # a strip above the banner (the deck help listing, deck_extras.py)
     view = view if view in VIEWS else "text"
     group = group if group in GROUPS else "category"
     sort = sort if sort in SORTS else "name"
     return (
         before
-        + banner_html(deck, stats, own=own, csrf=csrf, writes_enabled=writes_enabled, forge_on=forge_on)
+        + banner_html(
+            deck,
+            stats,
+            own=own,
+            csrf=csrf,
+            writes_enabled=writes_enabled,
+            forge_on=forge_on,
+            waiting=len(waiting or []),
+        )
         + boxes
-        + waiting_strip.strip_html(waiting or [], csrf=csrf, deck_id=str(deck.id))
+        + waiting_strip.deck_box_html(waiting or [], csrf=csrf, deck_id=str(deck.id))
         + notice
         + toolbar_html(deck, own=own, view=view, group=group, sort=sort, q=q)
         + cards_html(deck, view=view, group=group, sort=sort, q=q, own=own, owned=owned)
@@ -2766,10 +2814,6 @@ def deck_count_text(total: int | None, *, pending: bool = False) -> str:
     return f"{total} deck{'' if total == 1 else 's'}"
 
 
-# My decks' Show filter: "" (the list as Archidekt gives it), decks only or packages only
-SHOW_CHOICES = (("", "Decks and packages"), ("decks", "Decks only"), ("packages", "Packages only"))
-
-
 def deck_list_controls_html(
     *,
     q: str,
@@ -2785,27 +2829,23 @@ def deck_list_controls_html(
     show: str = "",
 ) -> str:
     """The filter panel over the deck list (searchpanel.py, the panel the search pages share):
-    the name box, Show (decks and packages, decks only or packages only: static/decks.js tells
-    the member's card packages apart after the list is drawn, from the Packages page's own
-    listing, so the deck list's cold load stays one Archidekt listing), Colors and Format
+    the name box, Colors and Format
     (static/decks.js filters the list as they change), and the
     results bar with the count, Sort by and its direction, Grid or List, the card size and Clear
     filters. ``folder``: the open folder's id ("" at the top level), kept so the sort and the view
-    stay in that folder (a name, colour or format filter searches every folder). ``pending``: the
-    list is still being read (no count yet; decks.js fills it). ``total`` None: the list couldn't
-    be read, so no count."""
-    here = f"/decks?{urlencode({'folder': folder})}" if folder else "/decks"
+    stay in that folder (a name, colour or format filter searches every folder). ``show``: the
+    switch over the page, "" for My Decks or "packages" (static/decks.js tells the member's card
+    packages apart after the list is drawn, from the Packages page's own listing, so the deck
+    list's cold load stays one Archidekt listing); it rides in the form so a filter keeps it.
+    ``pending``: the list is still being read (no count yet; decks.js fills it). ``total`` None:
+    the list couldn't be read, so no count."""
+    keep = [("folder", folder)] if folder else []
+    if show == "packages":
+        keep.append(("show", show))
+    here = f"/decks?{urlencode(keep)}" if keep else "/decks"
     formats = sorted({(n, format_label(n)) for n in FORMAT_NAMES.values()}, key=lambda f: f[1].lower())
     groups = sp.filter_grid(
         [
-            sp.select_group(
-                label="Show",
-                name="show",
-                options=SHOW_CHOICES,
-                value=show if show in dict(SHOW_CHOICES) else "",
-                input_id="f-show",
-                cls="showf",
-            ),
             sp.colours_group(
                 label="Colors",
                 name="c",
@@ -2841,6 +2881,7 @@ def deck_list_controls_html(
         "<section class='panel spanel'><form method='get' action='/decks' id='listform' "
         "data-live>"
         + (f"<input type='hidden' name='folder' value='{esc(folder)}'>" if folder else "")
+        + ("<input type='hidden' name='show' value='packages'>" if show == "packages" else "")
         + sp.name_row(
             label="Filter deck name",
             name="q",
@@ -3019,6 +3060,8 @@ h3 .count{font-weight:400;color:var(--text-muted);font-size:.9rem}
 .toolbar form.quick{margin:0} .toolbar .quickrow{display:flex;gap:.5rem}
 .toolbar .quickrow input{min-width:0;flex:1}
 .toolbar .quickrow button{margin:0;flex:none}
+.toolbar .quickrow{flex-wrap:wrap} .toolbar .quickrow input{flex:1 1 10rem}
+.toolbar .quickrow .addpkg{margin:0;flex:none;white-space:nowrap}
 .toolbar .views{display:grid;grid-template-columns:repeat(3,minmax(0,1fr)) minmax(10rem,1.4fr);
   gap:.5rem 1rem;margin:0}
 .toolbar .views .field{margin:0}
@@ -3049,7 +3092,9 @@ h3 .count{font-weight:400;color:var(--text-muted);font-size:.9rem}
   .toolbar .views .field:nth-child(3){grid-column:1 / -1}
   .toolbar .views:has(.cardsize) .field:nth-child(3){grid-column:auto}
   .toolbar .quickrow button span{display:none} .toolbar .quickrow button{width:var(--ctl);padding:0;
-    justify-content:center} }
+    justify-content:center}
+  .toolbar .quickrow .addpkg{flex:1 1 100%;justify-content:center;min-width:0;white-space:normal;
+    text-align:center;height:auto;min-height:var(--ctl)} }
 
 /* category (stack) headers */
 .stackhead{padding-top:.5rem;margin-bottom:.25rem}

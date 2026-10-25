@@ -509,18 +509,23 @@ async def test_packages_json_rows_carry_budget_and_formats_for_the_tiles(stack: 
         await b.aclose()
 
 
-async def test_my_decks_has_a_show_filter_that_the_address_keeps(stack: Stack) -> None:
+async def test_my_decks_and_packages_is_a_switch_that_the_address_keeps(stack: Stack) -> None:
+    """The Decks page's switch (Ben, 2026-10-25): My Decks lists decks only, Packages packages
+    only; the choice rides in the address and the list's form, and keeps the open folder."""
     b, _token = await _member(stack)
     try:
         page = (await b.http.get("/decks")).text
-        assert "<select id='f-show' name='show'>" in page
-        assert "<option value='' selected>Decks and packages</option>" in page
-        assert "<option value='decks'>Decks only</option>" in page
-        assert "<option value='packages'>Packages only</option>" in page
+        assert "<select id='f-show'" not in page
+        assert (
+            "<nav class='hubseg' aria-label='Decks'><a href='/decks' aria-current=page>My Decks</a>" in page
+        )
+        assert "<a href='/decks?show=packages'>Packages</a>" in page
+        assert "name='show' value='packages'" not in page
         page = (await b.http.get("/decks?show=packages")).text
-        assert "<option value='packages' selected>Packages only</option>" in page
+        assert "<a href='/decks?show=packages' aria-current=page>Packages</a>" in page
+        assert "<input type='hidden' name='show' value='packages'>" in page
         page = (await b.http.get("/decks?show=nonsense")).text
-        assert "<option value='' selected>Decks and packages</option>" in page
+        assert "<a href='/decks' aria-current=page>My Decks</a>" in page
         j = (await b.http.get("/api/decks/mine?shape=list&show=packages")).json()
         assert j["ok"] is True and "Sample Commander Deck" in j["html"]
     finally:

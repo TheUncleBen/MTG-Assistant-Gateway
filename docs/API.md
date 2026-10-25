@@ -178,7 +178,7 @@ Nothing changes on Archidekt until the proposal is applied, and an apply to one 
 
 Server-rendered pages behind the identity provider sign-in (and `MTG_REQUIRED_GROUP`), laid out the way
 Archidekt lays out its own (top bar, bottom tab bar on phones, deck banner, toolbar, text / stacks /
-grid views). Light, Dark or System is a per-browser choice in the account menu (the `mtg_theme`
+grid views). Light, Dark or System is a per-browser choice under Look on the Account page (the `mtg_theme`
 cookie, set by `POST /theme`); internal links never open a new tab.
 
 | Path | Page |
@@ -221,7 +221,7 @@ cookie, set by `POST /theme`); internal links never open a new tab.
 | `/scan` | The card scanner (see SCANNING.md) |
 | `/account`, `/login`, `/logout`, `/signed-out`, `/data-deleted` | Account, Archidekt link, sign-in and sign-out, and the page shown after a member deletes their data |
 | `POST /login/app` | The Android app finishing a sign-in made in the phone's browser: a one-time code and the app's secret ([ANDROID.md](ANDROID.md#13-privacy-and-security-notes)) |
-| `/account/avatar` | The signed-in member's picture (the provider's, else Gravatar, else initials) for the account menu |
+| `/account/avatar` | The signed-in member's picture (the provider's, else Gravatar, else initials) for the top bar and the Account page |
 | `/app`, `/app/mtg-assistant-gateway.apk`, `/app/latest.json` | `/app` redirects to `/install?for=android`; the APK download and the version file the app checks for updates ([ANDROID.md](ANDROID.md)) |
 | `/admin`, `/admin/users`, `/admin/activity`, `/admin/metrics` | Admin page (members of `MTG_ADMIN_GROUP`) |
 | `/admin/models` (GET, POST) | Admin: the simulator's kept card models, who added each and when, with a Remove button per model |

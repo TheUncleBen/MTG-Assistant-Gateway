@@ -372,7 +372,7 @@ def test_boxes_open_within_one_beat(server: Server) -> None:
             assert d.box().is_visible() and "Disable" in d.box().inner_text()
             d.escape()
             # account: the first box opener on the page
-            d.goto("/account")
+            d.goto("/account/details")
             acct = page.locator("main [data-box-open]").first
             if acct.count():
                 ms = d.measure(partial(acct.click, no_wait_after=True), reset=d.escape)

@@ -39,8 +39,8 @@ from .deckpage import (
 )
 from .decks import DeckError, _clean_deck_id
 from .pages import NO_STORE, _csrf, browser_session, login_redirect
-from .theme import display_name, icon, render, stylesheet_link
 from .theme import esc as _esc
+from .theme import icon, render, stylesheet_link
 
 SearchOrder = Literal["-viewCount", "-updatedAt", "-createdAt", "-size", "edhBracket"]  # SEARCH_ORDERS
 
@@ -634,7 +634,7 @@ def add_browse_routes(server: MCPServer, state: AppState) -> None:
             signed_in=True,
             csrf=_csrf(s, sid),
             admin=admin,
-            user=display_name(user),
+            sub=sub,
             wide=True,
             heading=not body_class,  # the precons and a profile draw their own title
             body_class=body_class,
