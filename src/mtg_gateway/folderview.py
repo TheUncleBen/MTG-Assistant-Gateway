@@ -336,9 +336,11 @@ def level_html(
             "new deck.</p>"
         )
     heading = f"Decks matching “{esc(q)}”" if q else "Matching decks" if level.searching else "Decks"
+    # no count beside it: the results bar above already says "4 decks" (the folders' count stays,
+    # since that bar counts decks only)
     out += (
         "<section class='fv-area' aria-labelledby='fv-decks'>"
-        f"<h2 id='fv-decks'>{heading} <span class='n'>{len(level.decks)}</span></h2>{listing}</section>"
+        f"<h2 id='fv-decks'>{heading}</h2>{listing}</section>"
     )
     return out
 
