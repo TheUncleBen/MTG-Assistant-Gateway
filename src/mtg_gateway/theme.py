@@ -1777,7 +1777,14 @@ CSS += BELL_CSS
 # magnifier is there before the script runs and without it (0.7.43: the icon sat on "Search").
 _TOPSEARCH_CSS = """
 .topbar .topsearch{display:none;margin:0;flex:0 1 20rem;min-width:9rem}
-.topbar .topsearch .box{position:relative;display:block}
+/* The box's own width, which the bar starts from before it grows or gives way: 20rem, not the
+   input's width, which follows the browser's fonts (on CI's fonts it was 16rem, and a long
+   gateway name then kept its whole word while the box stayed under 20rem). A grid column of
+   minmax(9rem,20rem) gives the box 20rem as its widest own width and 9rem as its narrowest, so
+   it still gives way down to 9rem on a narrow screen at large text; the auto column takes the
+   rest when the box grows. */
+.topbar .topsearch .box{position:relative;display:grid;grid-template-columns:minmax(9rem,20rem) auto}
+.topbar .topsearch .box > input{grid-column:1 / -1}
 .topbar .topsearch .box > svg.i{position:absolute;left:.75rem;top:50%;transform:translateY(-50%);z-index:1;
   color:var(--navbar-muted);pointer-events:none}
 .topbar .topsearch .box input{height:36px;padding:0 .9rem 0 2.3rem;border-radius:18px;
@@ -1796,19 +1803,16 @@ _TOPSEARCH_CSS = """
 @media (min-width:600px){ body.app .topbar .topsearch{display:block} }
 @media (min-width:900px){ .topbar .topsearch{display:block} .topbar .searchbtn{display:none} }
 /* Fill (Ben, 2026-10-25): where the box shows, it grows into the room between the brand (and a
-   computer's links) and the icons, up to 40rem, instead of a fixed 20rem with a gap before it.
-   It starts from 20rem (width), not from the input's own width: that one depends on the
-   browser's fonts, and a box that started smaller let a long gateway name keep its whole word
-   while the box stayed under 20rem (the brand's word gives way first). */
+   computer's links) and the icons, up to 40rem, instead of a fixed 20rem with a gap before it */
 @media (min-width:600px) and (max-width:1279.98px) and ((pointer:coarse) or (hover:none)){
   .topbar .right{flex:1 1 auto;justify-content:flex-end} .topbar .left{flex:0 1 auto}
-  .topbar .topsearch{flex:1 1 auto;width:20rem;max-width:40rem;margin:0 auto} }
+  .topbar .topsearch{flex:1 1 auto;max-width:40rem;margin:0 auto} }
 @media (min-width:600px){
   body.app .topbar .right{flex:1 1 auto;justify-content:flex-end} body.app .topbar .left{flex:0 1 auto}
-  body.app .topbar .topsearch{flex:1 1 auto;width:20rem;max-width:40rem;margin:0 auto} }
+  body.app .topbar .topsearch{flex:1 1 auto;max-width:40rem;margin:0 auto} }
 @media (min-width:900px){
   body:not(.app) .topbar .right{flex:1 1 auto;justify-content:flex-end}
-  body:not(.app) .topbar .topsearch{flex:1 1 auto;width:20rem;max-width:40rem;margin:0 auto 0 1rem} }
+  body:not(.app) .topbar .topsearch{flex:1 1 auto;max-width:40rem;margin:0 auto 0 1rem} }
 @media (max-width:599.98px){
   body.search-open .topbar .topsearch{display:block;position:absolute;left:0;right:0;top:100%;
     padding:.5rem max(1rem,env(safe-area-inset-right)) .6rem max(1rem,env(safe-area-inset-left));
