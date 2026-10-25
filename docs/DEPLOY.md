@@ -533,7 +533,7 @@ licence, from upstream). It's built from upstream commit
 rules, precon and goldfish tools, and the gateway relays an allowlisted set
 of them to signed-in users.
 
-Upstream code is unchanged apart from ten patches in
+Upstream code is unchanged apart from eleven patches in
 `docker/mystic-forge/patches/`, which is where the `-mag6` in the image tag
 `1.3.2-mag6` comes from:
 
@@ -595,6 +595,11 @@ Upstream code is unchanged apart from ten patches in
   restart don't come from the older copy built into the image; and in card
   search results a card's second face is headed "Other face of …" instead
   of a bare `---`, which read like the start of another result.
+- `0012-goldfish-set-aside-opponent-cards-and-read-more-wording.patch`: the
+  solo test sets aside cards that only act on opponents or their creatures
+  (votes, mass bounce, "bite" spells, Auras that shut a creature down) as
+  needing opponents, instead of listing them as played without their
+  effect, and it reads more card wording.
 
 What to know about it:
 
