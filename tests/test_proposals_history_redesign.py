@@ -360,7 +360,7 @@ async def test_one_proposal_is_a_side_panel_or_a_page(stack: Stack) -> None:
         closed = (await b.http.get("/proposals/p00", headers=NAV)).text.split("<main")[1]
         assert "href='/proposals?show=all'>← Back to Proposals" in closed
         assert "<dt>Expires</dt>" not in closed
-        assert "<summary>Technical details</summary>" in closed
+        assert "<summary class='fold-btn'>Technical details</summary>" in closed
     finally:
         await b.aclose()
 
