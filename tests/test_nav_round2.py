@@ -255,3 +255,34 @@ def test_the_header_token_is_the_sessions_own(server: Server) -> None:
     token = re.search(r"name='csrf' value='([0-9a-f]+)'", h.get("/").text).group(1)
     r = h.post("/theme", data={"csrf": token, "theme": "dark", "next": "/decks"})
     assert r.status_code == 303 and r.headers["location"] == "/decks"
+
+
+# -- the independent screenshot check's findings ---------------------------------------------------
+
+
+def test_the_decks_buttons_lead_with_new_deck() -> None:
+    from mtg_gateway import companion_decks
+
+    src = Path(companion_decks.__file__).read_text(encoding="utf-8")
+    acts = src.split("\"<span class='acts'>\"")[1].split('"</span></div>"')[0]
+    assert acts.index("New deck</a>") < acts.index("New folder</button>") < acts.index("New package</a>")
+
+
+def test_the_packages_side_names_packages_and_says_when_there_are_none(server: Server) -> None:
+    from mtg_gateway import deckpage
+
+    src = Path(deckpage.__file__).read_text(encoding="utf-8")
+    assert 'label="Filter package name" if show == "packages" else "Filter deck name"' in src
+    js = (Path(theme.__file__).parent / "static" / "decks.js").read_text(encoding="utf-8")
+    assert '"No packages here yet. New package makes one."' in js
+
+
+def test_the_switch_raises_its_chosen_part_in_both_themes() -> None:
+    assert "--seg-track:#2f2f2f; --seg-on:#5a5a5a;" in theme.CSS
+    assert ".hubseg a[aria-current=page]{background:var(--seg-on);" in theme.CSS
+
+
+def test_the_deck_pills_go_two_by_two_on_a_phone() -> None:
+    from mtg_gateway.deckpage import DECK_CSS
+
+    assert ".banner .social{display:grid;grid-template-columns:1fr 1fr}" in DECK_CSS

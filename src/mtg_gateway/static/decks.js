@@ -211,6 +211,14 @@
       });
     }
     var total = $("#decks-total"), head = list.querySelector("#fv-decks");
+    var empty = $("#pk-empty");
+    if (mode === "packages" && !shownPk && !empty) {
+      empty = el("p", "muted", "No packages here yet. New package makes one.");
+      empty.id = "pk-empty";
+      empty.setAttribute("role", "status");
+      list.parentNode.insertBefore(empty, list);
+    }
+    if (empty) empty.hidden = mode !== "packages" || shownPk > 0;
     if (mode === "packages") {
       if (total) total.textContent = plural(shownPk, "package");
       if (head) { head.textContent = "Packages "; head.appendChild(el("span", "n", String(shownPk))); }
