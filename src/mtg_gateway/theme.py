@@ -1785,16 +1785,19 @@ _TOPSEARCH_CSS = """
 @media (min-width:600px){ body.app .topbar .topsearch{display:block} }
 @media (min-width:900px){ .topbar .topsearch{display:block} .topbar .searchbtn{display:none} }
 /* Fill (Ben, 2026-10-25): where the box shows, it grows into the room between the brand (and a
-   computer's links) and the icons, up to 40rem, instead of a fixed 20rem with a gap before it */
+   computer's links) and the icons, up to 40rem, instead of a fixed 20rem with a gap before it.
+   It starts from 20rem (width), not from the input's own width: that one depends on the
+   browser's fonts, and a box that started smaller let a long gateway name keep its whole word
+   while the box stayed under 20rem (the brand's word gives way first). */
 @media (min-width:600px) and (max-width:1279.98px) and ((pointer:coarse) or (hover:none)){
   .topbar .right{flex:1 1 auto;justify-content:flex-end} .topbar .left{flex:0 1 auto}
-  .topbar .topsearch{flex:1 1 auto;max-width:40rem;margin:0 auto} }
+  .topbar .topsearch{flex:1 1 auto;width:20rem;max-width:40rem;margin:0 auto} }
 @media (min-width:600px){
   body.app .topbar .right{flex:1 1 auto;justify-content:flex-end} body.app .topbar .left{flex:0 1 auto}
-  body.app .topbar .topsearch{flex:1 1 auto;max-width:40rem;margin:0 auto} }
+  body.app .topbar .topsearch{flex:1 1 auto;width:20rem;max-width:40rem;margin:0 auto} }
 @media (min-width:900px){
   body:not(.app) .topbar .right{flex:1 1 auto;justify-content:flex-end}
-  body:not(.app) .topbar .topsearch{flex:1 1 auto;max-width:40rem;margin:0 auto 0 1rem} }
+  body:not(.app) .topbar .topsearch{flex:1 1 auto;width:20rem;max-width:40rem;margin:0 auto 0 1rem} }
 @media (max-width:599.98px){
   body.search-open .topbar .topsearch{display:block;position:absolute;left:0;right:0;top:100%;
     padding:.5rem max(1rem,env(safe-area-inset-right)) .6rem max(1rem,env(safe-area-inset-left));
