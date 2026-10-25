@@ -170,17 +170,18 @@ step_stack_up() {
   MTG_OIDC_ISSUER="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["issuer"])' "$GEN/authentik.json")"
   MTG_OIDC_CLIENT_ID="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["client_id"])' "$GEN/authentik.json")"
   MTG_REQUIRED_GROUP="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["required_group"])' "$GEN/authentik.json")"
-  export MTG_DATA_DIR="$GEN/data" MTG_BACKUP_DIR="$GEN/backups" MTG_NODE="$NODE" MF_NODE="$NODE"
-  export PUID=1000 PGID=1000 TIMEZONE=UTC MTG_LOG_LEVEL=DEBUG
-  # Deck tools talk to the local mock, never to archidekt.com (deck writes stay off by default,
-  # as in stack.env.example; test_05 switches them on and off again with docker service update).
-  export MTG_ARCHIDEKT_BASE="${MTG_ARCHIDEKT_BASE:-http://archidektmock:8000/api}"
+  export MTG_DATA_DIR="$GEN/data" MTG_BACKUP_DIR="$GEN/backups" MTG_NODE="$NODE"
+  export PUID=1000 PGID=1000 TIMEZONE=UTC
+  # Deck tools talk to the local mock, never to archidekt.com (stacks/test-overrides.yml). Writes
+  # start off here; test_05 switches them on and off again with docker service update.
+  export MTG_ARCHIDEKT_BASE="${MTG_ARCHIDEKT_BASE:-http://archidektmock:8000/api}" MTG_WRITES_ENABLED=false
   export MTG_TAG="$MTG_TAG-trusted"
   # Forge is on in the example files, but this run builds no Forge image: it deploys with Forge
-  # turned off the documented way (both settings), and FORGE_NODE set as the stack requires.
-  export FORGE_NODE="$NODE" FORGE_REPLICAS=0 MTG_FORGE_URL=
-  docker stack config -c "$REPO/deploy/portainer-stack.yml" > "$GEN/rendered-stack.yml"
-  docker stack deploy --resolve-image never -c "$REPO/deploy/portainer-stack.yml" mtg
+  # turned off the documented way (FORGE_REPLICAS=0), and FORGE_NODE set as the stack requires.
+  export FORGE_NODE="$NODE" FORGE_REPLICAS=0
+  local files=(-c "$REPO/deploy/portainer-stack.yml" -c "$HERE/stacks/test-overrides.yml")
+  docker stack config "${files[@]}" > "$GEN/rendered-stack.yml"
+  docker stack deploy --resolve-image never "${files[@]}" mtg
   if [ "${E2E_SWARM_DNSRR:-}" = "1" ]; then
     # Sandboxes without IPVS cannot route Swarm virtual IPs; production Swarms can, so the
     # stack file keeps the default and only the test run switches the services to DNS round robin.

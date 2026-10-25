@@ -288,6 +288,10 @@ details.dd > summary::-webkit-details-marker{display:none}
 details.dd .menu{position:absolute;top:calc(100% + .25rem);right:0;width:max-content;
   max-width:min(30rem,calc(100vw - 16px))}
 details.dd .menu.left{left:0;right:auto}
+/* the account menu ends above a phone's bottom tab bar, and scrolls on a short screen */
+details.dd .menu.acct{max-height:calc(100vh - var(--bar-room,60px) - var(--tab-room,0px));
+  max-height:calc(100dvh - var(--bar-room,60px) - var(--tab-room,0px));overflow-y:auto;
+  overscroll-behavior:contain}
 /* Each item rule is written twice, plain and under details.dd: inside the top bar the plain
    .menu rule would lose to .topbar nav a (the bar's white text, 40px, bold) and the account
    menu's links would be white on the light theme's menu. */
@@ -836,7 +840,7 @@ form.guarded button[data-guard]:disabled{pointer-events:none}
 @media (min-width:600px) and (max-width:799.98px) and (hover:hover) and (pointer:fine){
   .topbar .brand .word{display:none} }
 /* Where the bar has no text links (a phone, the app): the brand takes the room the account side
-   leaves, and a long MTG_SERVER_NAME shortens the brand's word (an ellipsis). */
+   leaves, and a long gateway name shortens the brand's word (an ellipsis). */
 .topbar .left{flex:1 1 0}
 .topbar nav.site{flex:none}
 /* More ▾ on a computer narrower than 85.7em of the bar's 14 px text (1200 px at the normal size;
@@ -1042,8 +1046,9 @@ _MOBILE_RULES = """
 # The medium layout: the same tabs as a navigation rail (80px wide, icon in a pill with the label
 # under it, as Material's rail draws it) fixed to the left edge; the top bar keeps the brand and
 # the account menu and loses its text links. The rail lists every page (More's too) and drops
-# More; on a short screen it scrolls. The body is padded by the rail's width so every page
-# re-centres in the remaining space.
+# More; its 64 px tabs give up a little height (down to 52 px) when the screen is too short for
+# all of them, and on a shorter one still it scrolls. The body is padded by the rail's width so
+# every page re-centres in the remaining space.
 _RAIL_RULES = """
   body{b} .topbar nav.site .navmore{display:none !important}
   body{b} .topbar nav.site a:not(.keep){display:none}
@@ -1055,7 +1060,8 @@ _RAIL_RULES = """
     padding:calc(.75rem + env(safe-area-inset-top)) 0 calc(.5rem + env(safe-area-inset-bottom))
       env(safe-area-inset-left)}
   body{b} .tabbar > a{position:relative;display:flex;flex-direction:column;align-items:center;
-    justify-content:center;gap:.3rem;height:64px;flex:none;color:var(--toolbar-text);text-decoration:none;
+    justify-content:center;gap:.3rem;height:64px;flex:0 1 auto;min-height:52px;color:var(--toolbar-text);
+    text-decoration:none;
     font-weight:700;font-size:11px;-webkit-tap-highlight-color:transparent}
   body{b} .tabbar > a svg{width:24px;height:24px;position:relative;z-index:1}
   body{b} .tabbar > a > .lbl{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
@@ -2317,7 +2323,8 @@ def render(
         account_menu = (
             "<details class='dd'><summary class='icon-btn' aria-label='Account menu' title='Account menu'>"
             # The member's own picture (their provider's, else their initials: /account/avatar).
-            "<img class='av' src='/account/avatar' alt='' width='28' height='28'></summary><div class='menu'>"
+            "<img class='av' src='/account/avatar' alt='' width='28' height='28'></summary>"
+            "<div class='menu acct'>"
             f"{who}"
             f"<a href='/'>{icon('home')}Home</a>"
             f"<a href='/account'>{icon('account')}Account</a>"

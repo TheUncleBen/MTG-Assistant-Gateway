@@ -170,7 +170,7 @@ def add_history_routes(
         unfiltered = want == "all" and not search and not query["when"] and not query["offset"]
         copies_panel = (
             backup_copies_html(
-                copies, folder=s.archidekt_backup_folder, deck_id=deck_id, names={**seen, **current}, now=now
+                copies, folder=decks.backup_folder, deck_id=deck_id, names={**seen, **current}, now=now
             )
             if unfiltered
             else ""
@@ -313,7 +313,7 @@ def add_history_routes(
             "clone",
             n_copies,
             unit="on Archidekt",
-            detail=f'In the folder "{s.archidekt_backup_folder}"',
+            detail=f'In the folder "{decks.backup_folder}"',
             # to the table, which is on the unfiltered page
             actions=[
                 ui.button_link("See them", "/history" + query_string({"deck_id": deck_id or ""}) + "#backups")

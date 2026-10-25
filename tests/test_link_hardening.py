@@ -66,6 +66,16 @@ async def test_a_cookie_archidekt_sets_at_sign_in_is_never_sent_again() -> None:
 
 
 # -- logs -----------------------------------------------------------------------------------------
+def _log_level(monkeypatch: pytest.MonkeyPatch, level: str) -> None:
+    """Start as if the Settings page's "Log detail" said ``level``."""
+    import dataclasses
+
+    from mtg_gateway import __main__ as entry
+
+    load = entry.load_settings
+    monkeypatch.setattr(entry, "load_settings", lambda: dataclasses.replace(load(), log_level=level))
+
+
 @pytest.mark.parametrize("level", ["INFO", "DEBUG"])
 def test_response_headers_are_never_logged(
     level: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
@@ -75,7 +85,7 @@ def test_response_headers_are_never_logged(
     from .test_backup_and_config import _write_secrets
 
     _write_secrets(tmp_path, monkeypatch)
-    monkeypatch.setenv("MTG_LOG_LEVEL", level)
+    _log_level(monkeypatch, level)
     loggers = [logging.getLogger(n) for n in ("httpx", "httpcore")]
     before = [lg.level for lg in loggers]
     try:
@@ -98,7 +108,7 @@ def test_debug_logs_never_carry_a_members_topic(
     from .test_backup_and_config import _write_secrets
 
     _write_secrets(tmp_path, monkeypatch)
-    monkeypatch.setenv("MTG_LOG_LEVEL", "DEBUG")
+    _log_level(monkeypatch, "DEBUG")
     topic = "mtg-" + "Ab3_" * 5 + "xy"
     httpx_log = logging.getLogger("httpx")
     before = httpx_log.level

@@ -197,9 +197,9 @@ so:
      cover or custom cards.
 
    Either way, for an edit the gateway first checks the change still fits
-   the deck as it is now, saves a copy of it (a snapshot), and puts a private
-   backup copy in a folder called "MTG Gateway backups" in your Archidekt
-   account (unless the owner switched backups off). Then it makes the change and reads the deck back to confirm it
+   the deck as it is now, saves a copy of it (a snapshot), and (unless the
+   owner switched backups off) puts a private backup copy in your backup
+   folder on Archidekt, called "MTG Gateway Backups" unless the owner renamed it. Then it makes the change and reads the deck back to confirm it
    matches. The assistant should tell you the deck was read back and matched, give you the
    snapshot id (or the new deck's link), and say how to undo it. You can
    always use the review link instead of answering in chat, just not both.
@@ -237,7 +237,7 @@ Good to know:
   sideboard and maybeboard. The deck's name, description, format, bracket
   and privacy go back too, so a settings change
   can be undone as well (folder, tags and cover stay). The backup copies in your
-  "MTG Gateway backups" folder are there too if you ever want to look at or
+  backup folder on Archidekt are there too if you ever want to look at or
   copy an old version yourself; they don't show up in the assistant's list
   of your decks.
 - The assistant can propose deleting a deck, but only your own press on the
@@ -264,8 +264,8 @@ Good to know:
 - Predict multiplayer win rates. The solo test (goldfish simulation) plays your deck alone.
   A good report gives the seed, number of games, mulligan settings, what it
   couldn't simulate, and the confidence intervals.
-- Keep price watchlists or price history unless whoever runs the gateway has
-  turned watchlists on, or run step-by-step practice games through the
+- Keep price watchlists or price history when whoever runs the gateway has
+  turned watchlists off, or run step-by-step practice games through the
   assistant (the deck page's **Goldfish** lets you play a deck by hand).
   Deck reports, including goldfish results, are saved by the gateway itself.
 
@@ -323,8 +323,7 @@ doesn't land in your account.
    sessions, deck covers, the stored Archidekt session, connected apps,
    the copy of your profile picture and your sign-in. Your decks on Archidekt (and the backup copies in your
    Archidekt account) stay yours. The owner's nightly database backups, if
-   they keep them, still hold a copy (without your Archidekt session) until they age out (14 days by default,
-   `MTG_BACKUP_KEEP_DAYS`). The owner's security log keeps a record that your
+   they keep them, still hold a copy (without your Archidekt session) until they age out (14 days by default). The owner's security log keeps a record that your
    account existed and was deleted until it ages out after a year. If you only want to stop
    using Archidekt through the gateway, press the unlink button instead.
 2. Unlinking and deleting your data delete the gateway's copy of your

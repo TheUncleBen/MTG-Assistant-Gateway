@@ -657,11 +657,11 @@ def _record_daily_jobs(monkeypatch: pytest.MonkeyPatch) -> list[tuple]:
     return made
 
 
-def test_the_switch_is_off_by_default(monkeypatch, tmp_path: Path) -> None:
+def test_the_switch_is_on_by_default(monkeypatch, tmp_path: Path) -> None:
     _env(monkeypatch, tmp_path)
-    assert load_settings().watchlists_enabled is False
-    monkeypatch.setenv("MTG_WATCHLISTS_ENABLED", "true")
     assert load_settings().watchlists_enabled is True
+    monkeypatch.setenv("MTG_WATCHLISTS_ENABLED", "false")
+    assert load_settings().watchlists_enabled is False
 
 
 async def test_watchlists_off_hide_the_page_links_tools_and_daily_job(

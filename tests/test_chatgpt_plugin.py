@@ -119,7 +119,7 @@ def test_owner_name_becomes_a_valid_plugin_name(site: str, expected: str) -> Non
     skill = zf.read(f"skills/{expected}/SKILL.md").decode()
     assert skill.startswith(f"---\nname: {expected}\n")
     ui = manifest["extensions"]["com.openai"]["interface"]
-    assert ui["displayName"] == plugin_page.plugin_label(site)
+    assert ui["displayName"] == plugin_page.chatgpt_label(site)  # cut at a word to 80
     # The project's own name, homepage and author are gone under an owner's name.
     assert "homepage" not in manifest and manifest["author"] == {"name": plugin_page.plugin_label(site)}
     for n in zf.namelist():
@@ -132,7 +132,7 @@ def test_owner_name_becomes_a_valid_plugin_name(site: str, expected: str) -> Non
 async def test_route_serves_this_gateways_plugin_without_sign_in(
     tmp_path: Path, idp: FakeIdP, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("MTG_PLUGIN_DIR", str(REPO_PLUGIN))
+    monkeypatch.setattr("mtg_gateway.plugin_page.PLUGIN_DIRS", (REPO_PLUGIN,))
     async with running(Harness(make_settings(tmp_path, server_name="Deck Helper"), idp)) as h:
         r = await h.http.get("/plugin/deck-helper-chatgpt.zip")  # no session cookie, like the Claude ZIP
         assert r.status_code == 200
@@ -166,6 +166,6 @@ async def test_route_serves_this_gateways_plugin_without_sign_in(
 async def test_route_gives_503_without_the_plugin_folder(
     tmp_path: Path, idp: FakeIdP, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("MTG_PLUGIN_DIR", str(tmp_path / "nowhere"))
+    monkeypatch.setattr("mtg_gateway.plugin_page.PLUGIN_DIRS", (tmp_path / "nowhere",))
     async with running(Harness(make_settings(tmp_path), idp)) as h:
         assert (await h.http.get("/plugin/mtg-gateway-chatgpt.zip")).status_code == 503

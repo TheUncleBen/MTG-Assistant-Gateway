@@ -67,13 +67,13 @@ def test_card_viewer_watches_a_card_and_shows_its_price(server: Server) -> None:
 
 
 def test_card_viewer_has_no_price_buttons_with_watchlists_off(tmp_path: Path) -> None:
-    """MTG_WATCHLISTS_ENABLED off (the default): the viewer offers no Price history."""
+    """MTG_WATCHLISTS_ENABLED=false: the viewer offers no Price history."""
     from playwright.sync_api import sync_playwright
 
     exe = _chromium_path()
     if exe == "missing":
         pytest.skip("no Chromium available for Playwright")
-    server = Server(tmp_path)
+    server = Server(tmp_path, watchlists_enabled=False)
     server.app.state.gateway.scan.names.set_names(["Sol Ring", *server.sf.catalog])
     server.start()
     try:

@@ -9,22 +9,73 @@ with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 
 ## [0.7.45] - 2026-10-24
 
-An assistant now reads the same Forge seed the report page shows, Forge's load problems leave out
-Java's own warnings, a solo test shorter than five turns no longer talks about turn 5, and the
-research service has the current rules from the moment it starts.
+Shorter stack and example variables files with every feature on by default, the tuning settings on
+the Settings page only, a new Settings row for the Archidekt backup folder, the Claude logo beside
+Claude's connection, an assistant reading the same Forge seed the report page shows, Forge's
+load problems leaving out Java's own warnings, a solo test shorter than five turns no longer talking
+about turn 5, and the research service having the current rules from the moment it starts.
 
 ### Upgrade notes
-- Update as usual ([docs/UPGRADING.md](docs/UPGRADING.md)): the newest stack file and example
-  variables file, with your values in it. The research service image is new (`1.3.2-mag6`), and the
-  newest stack file and example variables file already name it. If your variables file sets
-  `MF_TAG`, it must read `1.3.2-mag6`: an older tag keeps an older research service, whose solo
-  test reads far less card text (it plays a commander with a vote ability, for example, as a card
-  it never casts).
-- No database change, so this update saves no before-upgrade copy, and going back to 0.7.44 needs
-  only the `MTG_TAG` and `MF_TAG` changes.
-- No new settings or secrets.
+- **Start from the new stack file and example variables file**, as in
+  [docs/UPGRADING.md](docs/UPGRADING.md), and copy your values in: the address and sign-in lines,
+  the nodes, folders, `PUID`, `PGID`, the network, `MTG_TAG`, and any security or
+  identity-provider line you changed. The new files name the exact research service, Forge and
+  ntfy images and their limits, so there is nothing to change for those.
+- **These are now only on the Settings page** (`/admin/settings`). A line left in your variables
+  for one of them does nothing, so set any you had changed again on the page after the update:
+  `MTG_SERVER_NAME`, `MTG_LOG_LEVEL`, `MTG_APPROVAL_MODE_DEFAULT`, `MTG_APPROVAL_MODE_MAX`,
+  `MTG_AUTO_APPLY_MAX_ROWS`, `MTG_AUTO_BIG_EDIT_ROWS`, `MTG_PROPOSAL_EXPIRY_DAYS`,
+  `MTG_ARCHIDEKT_CALLS_PER_10_MIN`, `MTG_ARCHIDEKT_MIN_INTERVAL`, `MTG_ARCHIDEKT_MAX_PER_MINUTE`,
+  `MTG_ARCHIDEKT_RETRIES`, `MTG_ARCHIDEKT_BACKOFF_BASE`, `MTG_ARCHIDEKT_CACHE_SECONDS`,
+  `MTG_ARCHIDEKT_CARD_CACHE_SECONDS`, `MTG_ARCHIDEKT_BACKUP_COPIES`,
+  `MTG_ARCHIDEKT_BACKUP_BOX_DEFAULT`, `MTG_ARCHIDEKT_BACKUP_FOLDER`, `MTG_SNAPSHOTS_PER_DECK`,
+  `MTG_BACKUP_HOUR_UTC`, `MTG_BACKUP_KEEP_DAYS`, `MTG_FORGE_GAMES`, `MTG_FORGE_PARALLEL_GAMES`,
+  `MTG_WATCH_MAX_CARDS`, `MTG_WATCH_MAX_DECKS`, `MTG_PRICE_HISTORY_DAYS`, `MTG_PRICE_HOUR_UTC`,
+  `MTG_SCRYFALL_LOOKUP_INTERVAL` and every `MTG_SCAN_*` setting except `MTG_SCAN_ART_ENABLED`.
+- **Removed:** `MTG_CHATGPT_NAME` (ChatGPT now shows the gateway name), `MTG_AUTHENTIK_API_URL`
+  (the clean-up uses the issuer's address), `MTG_ALLOWED_HOSTS` (worked out from the public URL),
+  `MTG_LISTEN_HOST`, `MTG_LISTEN_PORT`, `MTG_PLUGIN_DIR`, `MTG_APP_DIR`,
+  `MTG_ANDROID_ASSETLINKS`, `MTG_ANDROID_PACKAGE`, `MTG_IMAGE`, `MF_IMAGE`, `MF_TAG`, `MF_NODE`
+  (the research service may run on any node), `MF_MEMORY_LIMIT`, `FORGE_IMAGE`, `FORGE_TAG`,
+  `FORGE_XMX`, `FORGE_MAX_METASPACE`, `FORGE_OOM_SCORE_ADJ`, `FORGE_GAME_SECONDS`,
+  `FORGE_MAX_GAMES`, `FORGE_MAX_PARALLEL` (Forge works out games at once from its memory and CPU
+  limits), `NTFY_IMAGE`, `NTFY_MEMORY_LIMIT`, `COMPOSE_PROFILES`,
+  `COMPOSE_PROJECT_NAME`, `CADDYFILE` and `MTG_SECRETS_DIR`. With Compose, the Caddyfile stays at
+  `deploy/proxy/caddy/Caddyfile` and the secret files in `./secrets/`. `MTG_FORGE_URL` is now a
+  fixed line in the stack files.
+- **Every feature is on unless you turn it off.** Deck edits now reach Archidekt unless
+  `MTG_WRITES_ENABLED=false`, and watchlists are on unless `MTG_WATCHLISTS_ENABLED=false`.
+  `MTG_ARCHIDEKT_BACKUPS`, `MTG_APPLY_IN_CHAT`, `MTG_SCAN_ART_ENABLED`, `MTG_UPDATE_CHECK` and
+  `MTG_DECK_SYNC_MINUTES` work the same way: empty means on and changeable on the Settings page,
+  and `false` (or `0` for the deck check) turns it off and locks its row.
+- **Forge follows `FORGE_REPLICAS` alone** (`1` on, `0` off), with Compose too. If you had turned
+  Forge off with `COMPOSE_PROFILES`, set `FORGE_REPLICAS=0`, or Forge comes back on.
+- **Approval rules set in your variables.** If you capped what members may choose with
+  `MTG_APPROVAL_MODE_MAX`, or changed `MTG_APPROVAL_MODE_DEFAULT`, `MTG_AUTO_APPLY_MAX_ROWS` or
+  `MTG_AUTO_BIG_EDIT_ROWS`, set the same values on the Settings page right after the update and
+  before members use their assistants: until then the defaults apply (members may choose any mode),
+  and deck edits now reach Archidekt by default.
+- **Backup folder.** The default name is now "MTG Gateway Backups". A member who already has an
+  "MTG Gateway backups" folder on Archidekt keeps using it (the name is matched whatever its
+  capitals); new members get "MTG Gateway Backups". The new Settings row "Backup folder on
+  Archidekt" changes the name.
+- No database change, so this update saves no before-upgrade copy. Going back to 0.7.44 needs its
+  stack file and example variables file, with your values copied back in.
+- No new secrets.
+
+### Changed
+- **Shorter deployment files.** The example variables files and stack files list only what a
+  deployment needs: about 90 lines instead of 350 for the variables, 290 instead of 460 for the
+  stack.
+- **ChatGPT's name** is the gateway name, cut at a word to 80 characters (ChatGPT refuses a longer
+  one), in the plugin file and the setup steps alike. The "Name in ChatGPT" setting and its warnings
+  are gone.
+- **"Backup folder on Archidekt"** is a new row on the Settings page; a new name applies to the next
+  backup copy.
 
 ### Fixed
+- **The Claude logo** beside a Claude connection: Claude registers sign-in addresses on both
+  claude.ai and claude.com, and only claude.ai was recognised, so it got the plain icon.
 - **Forge seeds in Claude and ChatGPT.** The seed the gateway picks for a report's Forge games and
   its Forge solo test could be too large for the apps to show exactly, so an assistant read a
   rounded number that Forge never used. The gateway now picks seeds every app shows in full. Seeds

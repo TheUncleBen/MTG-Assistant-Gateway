@@ -1,6 +1,7 @@
-"""The shipped deployment files keep the safer settings: the example env files leave in-chat applying
-off, the Compose services are capped, the settings the admin Settings page manages are left to it,
-and CI checks the Gradle wrapper before any Android build. Plain text checks, no YAML parser."""
+"""The shipped deployment files: the example env files list exactly what the stack files read, every
+feature is on, the settings the admin Settings page manages are left to it, the Compose services are
+capped, and CI checks the Gradle wrapper before any Android build. Plain text checks, no YAML
+parser."""
 
 from __future__ import annotations
 
@@ -22,15 +23,13 @@ def _env(path: Path) -> dict[str, str]:
     return out
 
 
-@pytest.mark.parametrize("name", ["deploy/stack.env.example", "deploy/compose/.env.example"])
-def test_example_env_keeps_the_default_approval_mode_manual(name: str):
-    # Out of the box every change waits for the member's own press; members loosen their own
-    # mode on the Account page, and the examples do not cap it.
-    env = _env(ROOT / name)
-    text = (ROOT / name).read_text()
-    assert "\n# MTG_APPROVAL_MODE_DEFAULT=manual\n" in text and "\n# MTG_APPROVAL_MODE_MAX=auto\n" in text
-    assert "MTG_APPROVAL_MODE_DEFAULT" not in env and "MTG_APPROVAL_MODE_MAX" not in env
-    assert "MTG_APPLY_VIA_MCP" not in env and "MTG_APPLY_MIN_AGE_SECONDS" not in env
+def test_out_of_the_box_every_change_waits_for_the_members_press():
+    # Members loosen their own mode on the Account page; the Settings page sets the default and cap.
+    from mtg_gateway.config import MANAGED_SETTINGS
+
+    assert MANAGED_SETTINGS["approval_mode_default"].default == "manual"
+    assert MANAGED_SETTINGS["approval_mode_max"].default == "auto"
+    assert not MANAGED_SETTINGS["approval_mode_default"].env
 
 
 def _service(compose: str, name: str) -> str:
@@ -99,72 +98,54 @@ def _glob_match(rel: str, pattern: str) -> bool:
     return rel.count("/") == pattern.count("/") and fnmatch.fnmatch(rel, pattern)
 
 
-@pytest.mark.parametrize("name", ["deploy/stack.env.example", "deploy/compose/.env.example"])
-def test_example_env_keeps_watchlists_off(name: str):
-    assert "MTG_WATCHLISTS_ENABLED" not in _env(ROOT / name)
-    assert "\n# MTG_WATCHLISTS_ENABLED=false\n" in (ROOT / name).read_text()
+ENV_FILES = ["deploy/stack.env.example", "deploy/compose/.env.example"]
+STACK_FILES = ["deploy/portainer-stack.yml", "deploy/compose/docker-compose.yml"]
+
+
+def _switches() -> list[str]:
     from mtg_gateway.config import MANAGED_SETTINGS
 
-    assert MANAGED_SETTINGS["watchlists_enabled"].default is False
+    return [s.env for s in MANAGED_SETTINGS.values() if s.env]
 
 
-@pytest.mark.parametrize("name", ["deploy/portainer-stack.yml", "deploy/compose/docker-compose.yml"])
-def test_stack_files_leave_the_settings_page_its_settings(name: str):
-    """0.7.29: a setting the Settings page manages is passed empty unless the
-    env sets it. A default written here would count as "set in your stack" and lock it there."""
-    from mtg_gateway.config import MANAGED_SETTINGS
+def test_only_the_feature_switches_have_an_env_variable_and_each_is_on():
+    """Ben, 2026-10-25: every feature is on by default; an env variable only turns one off."""
+    from mtg_gateway.config import MANAGED_SETTINGS, Settings
 
-    text = (ROOT / name).read_text()
-    for spec in MANAGED_SETTINGS.values():
-        lines = re.findall(rf"^\s*{spec.env}:.*$", text, re.M)
-        assert lines in ([], [f"      {spec.env}: ${{{spec.env}:-}}"]), lines
-    assert "MTG_WATCHLISTS_ENABLED: ${MTG_WATCHLISTS_ENABLED:-}\n" in text
-
-
-@pytest.mark.parametrize("name", ["deploy/stack.env.example", "deploy/compose/.env.example"])
-def test_example_env_files_leave_the_settings_page_its_settings(name: str):
-    """Each managed setting is shown commented out, with the gateway's own default."""
-    from mtg_gateway.config import MANAGED_SETTINGS
-
-    env, text = _env(ROOT / name), (ROOT / name).read_text()
-    for spec in MANAGED_SETTINGS.values():
-        assert spec.env not in env, spec.env
-        for value in re.findall(rf"^# {spec.env}=(.*)$", text, re.M):
-            default = spec.default
-            shown = str(default).lower() if isinstance(default, bool) else str(default)
-            # every one, the gateway name too ("# MTG_SERVER_NAME=" passed before)
-            assert value == shown, (spec.env, value)
-
-
-@pytest.mark.parametrize(
-    ("stack_file", "example"),
-    [
-        ("deploy/portainer-stack.yml", "deploy/stack.env.example"),
-        ("deploy/compose/docker-compose.yml", "deploy/compose/.env.example"),
-    ],
-)
-def test_every_managed_setting_the_stack_passes_is_in_its_example(stack_file: str, example: str):
-    """A setting the stack file passes is listed (commented out) in the example file next to it, so
-    the example's note ("Lines starting # MTG_ are settings…") covers every one of them."""
-    from mtg_gateway.config import MANAGED_SETTINGS
-
-    passed = {
-        s.env
-        for s in MANAGED_SETTINGS.values()
-        if f"      {s.env}: ${{{s.env}:-}}" in (ROOT / stack_file).read_text()
+    on = {s.env: s.default for s in MANAGED_SETTINGS.values() if s.env}
+    assert set(on) == {
+        "MTG_WATCHLISTS_ENABLED",
+        "MTG_ARCHIDEKT_BACKUPS",
+        "MTG_APPLY_IN_CHAT",
+        "MTG_SCAN_ART_ENABLED",
+        "MTG_UPDATE_CHECK",
+        "MTG_DECK_SYNC_MINUTES",
     }
-    text = (ROOT / example).read_text()
-    listed = {s.env for s in MANAGED_SETTINGS.values() if re.search(rf"^# {s.env}=", text, re.M)}
-    assert passed and passed - listed == set()
-    # 0.7.32: every one of them, so an env value always reaches the gateway and locks the setting
-    # (until 0.7.31 the stack files left out 21 of them, and setting those did nothing)
-    assert passed == {s.env for s in MANAGED_SETTINGS.values()}
+    assert all(v is True for k, v in on.items() if k != "MTG_DECK_SYNC_MINUTES")
+    assert on["MTG_DECK_SYNC_MINUTES"] > 0
+    assert Settings.__dataclass_fields__["writes_enabled"].default is True
 
 
-# The stack files and the Compose proxy overrides each example file covers, and what an example
-# may list that no file interpolates (COMPOSE_PROFILES is read by Docker Compose itself).
+@pytest.mark.parametrize("name", ENV_FILES)
+def test_example_env_files_leave_each_switch_empty_so_the_page_can_change_it(name: str):
+    """R-208: a value written here would lock the Settings page row; empty means on."""
+    env = _env(ROOT / name)
+    for var in _switches():
+        assert env.get(var) == "", var
+    assert env["MTG_WRITES_ENABLED"] == "true"
+
+
+@pytest.mark.parametrize("name", STACK_FILES)
+def test_stack_files_pass_each_switch_empty_and_writes_on(name: str):
+    text = (ROOT / name).read_text()
+    for var in _switches():
+        assert re.findall(rf"^\s*{var}:.*$", text, re.M) == [f"      {var}: ${{{var}:-}}"], var
+    assert "      MTG_WRITES_ENABLED: ${MTG_WRITES_ENABLED:-true}\n" in text
+
+
+# The stack files and the Compose proxy overrides each example file covers.
 COVERED = [
-    ("deploy/stack.env.example", ["deploy/portainer-stack.yml"], set()),
+    ("deploy/stack.env.example", ["deploy/portainer-stack.yml"]),
     (
         "deploy/compose/.env.example",
         [
@@ -172,13 +153,9 @@ COVERED = [
             "deploy/proxy/caddy/compose.caddy.yml",
             "deploy/proxy/traefik/compose.traefik.yml",
         ],
-        {"COMPOSE_PROFILES"},
     ),
 ]
 EXAMPLE_LINE = re.compile(r"^(# ?)?([A-Z][A-Z0-9_]*)=(.*)$")
-REQUIRED = re.compile(r"^# REQUIRED\b")
-ON_PAGE = "# Optional. On the Settings page if not set here."
-OFF_PAGE = "# Optional. Not on the Settings page."
 
 
 def _interpolated(files: list[str]) -> dict[str, tuple[str, str]]:
@@ -193,71 +170,51 @@ def _interpolated(files: list[str]) -> dict[str, tuple[str, str]]:
     return out
 
 
-def _example(name: str) -> dict[str, tuple[str, bool, str]]:
-    """{variable: (label, set, value)}. The label is the last REQUIRED or Optional line of the
-    comment just above the variable (other variable lines in between belong to the same note)."""
-    out: dict[str, tuple[str, bool, str]] = {}
-    label = ""
+def _example(name: str, *, optional_only: bool = False) -> dict[str, str]:
+    """{variable: value}, commented-out lines included; with ``optional_only``, none from a
+    "(REQUIRED)" section, whose values are placeholders to replace."""
+    out: dict[str, str] = {}
+    required = False
     for line in (ROOT / name).read_text().splitlines():
+        if line.startswith("# ---"):
+            required = "(REQUIRED)" in line
         m = EXAMPLE_LINE.match(line)
-        if m:
-            out[m.group(2)] = (label, m.group(1) is None, m.group(3))
-        elif not line.strip() or line.startswith("# ---"):
-            label = ""
-        elif REQUIRED.match(line) or line.startswith("# Optional."):
-            label = line
+        if m and not (optional_only and required):
+            out[m.group(2)] = m.group(3)
     return out
 
 
-@pytest.mark.parametrize(("example", "files", "extra"), COVERED)
-def test_every_variable_the_stack_reads_is_in_its_example(example: str, files: list[str], extra: set):
+@pytest.mark.parametrize(("example", "files"), COVERED)
+def test_every_variable_the_stack_reads_is_in_its_example(example: str, files: list[str]):
     """R-220: the example lists every variable its stack file reads, and nothing it doesn't."""
     read, listed = set(_interpolated(files)), set(_example(example))
     assert read - listed == set()
-    assert listed - read - extra == set()
+    assert listed - read == set()
 
 
-@pytest.mark.parametrize(("example", "files", "extra"), COVERED)
-def test_every_example_variable_says_required_or_optional_and_where_it_is_changed(
-    example: str, files: list[str], extra: set
-):
-    """R-220: each variable's note says REQUIRED or Optional, and an optional one says whether it
-    is on the Settings page when it isn't set in the file (R-208: setting it there locks it)."""
-    from mtg_gateway.config import MANAGED_SETTINGS
-
-    managed = {s.env for s in MANAGED_SETTINGS.values()}
+@pytest.mark.parametrize(("example", "files"), COVERED)
+def test_every_optional_example_value_is_its_default(example: str, files: list[str]):
+    """R-220: an optional line shows the value used when it isn't set (the stack file's fallback),
+    except the second backup folder, whose fallback (/dev/null, mounted in its place) means none."""
     read = _interpolated(files)
-    for var, (label, _set, _value) in _example(example).items():
-        if REQUIRED.match(label):
-            assert var not in managed, var
+    for var, value in _example(example, optional_only=True).items():
+        op, default = read[var]
+        if op == ":?" or var == "MTG_BACKUP_COPY_DIR":
             continue
-        assert label.startswith(ON_PAGE if var in managed else OFF_PAGE), (var, label)
-        # what the stack file insists on is never labelled optional
-        assert read.get(var, ("", ""))[0] != ":?", var
+        assert value == default, (var, value, default)
 
 
-# Optional variables whose example value isn't the value used when unset, each with the reason
-# its note gives: writes on (Ben's call, B5, 0.7.31), a placeholder for a value needed with Forge
-# on, and the second backup folder, whose fallback (/dev/null, mounted in its place) means none.
-NOT_THE_DEFAULT = {"MTG_WRITES_ENABLED", "FORGE_NODE", "MTG_BACKUP_COPY_DIR"}
-
-
-@pytest.mark.parametrize(("example", "files", "extra"), COVERED)
-def test_every_optional_example_value_is_its_default(example: str, files: list[str], extra: set):
-    """R-220: an optional line shows the value used when it isn't set: the stack file's fallback,
-    or for a setting the stack passes empty, the gateway's own default."""
-    from mtg_gateway.config import MANAGED_SETTINGS
-
-    defaults = {s.env: s.default for s in MANAGED_SETTINGS.values()}
-    read = _interpolated(files)
-    for var, (label, _set, value) in _example(example).items():
-        if REQUIRED.match(label) or var in NOT_THE_DEFAULT or var in extra:
-            continue
-        if var in defaults:
-            d = defaults[var]
-            assert value == (str(d).lower() if isinstance(d, bool) else str(d)), var
-        else:
-            assert value == read[var][1], (var, value, read[var])
+@pytest.mark.parametrize("name", ENV_FILES + STACK_FILES)
+def test_no_removed_variable_is_left_in_the_deploy_files(name: str):
+    """Settings that moved to the Settings page, and values the stack fixes, are gone (2026-10-25)."""
+    text = (ROOT / name).read_text()
+    for gone in (
+        "MTG_SERVER_NAME", "MTG_CHATGPT_NAME", "MTG_LOG_LEVEL", "MTG_APPROVAL_MODE", "MTG_FORGE_GAMES",
+        "MTG_ARCHIDEKT_BACKUP_FOLDER", "MTG_AUTHENTIK_API_URL", "MTG_ALLOWED_HOSTS", "MTG_IMAGE",
+        "MF_NODE", "MF_TAG", "FORGE_TAG", "FORGE_XMX", "FORGE_MAX_PARALLEL", "COMPOSE_PROFILES",
+        "MTG_PLUGIN_DIR", "MTG_APP_DIR", "MTG_SCAN_GLARE",
+    ):  # fmt: skip
+        assert gone not in text, gone
 
 
 @pytest.mark.parametrize(
@@ -317,63 +274,3 @@ def test_the_release_manifest_check_finds_the_hook_and_never_passes_on_nothing(t
     assert r.returncode == 1 and "PushTestHooks" in r.stderr
     # another flavor's manifests are not this build's
     assert subprocess.run(["bash", str(check), str(build), "applinks"], capture_output=True).returncode == 1
-
-
-def test_upgrading_lists_the_range_of_every_setting_the_0732_stack_newly_passes(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The 0.7.32 upgrade note lists each of the 21 settings the stack file now passes with the
-    values the gateway accepts at start, and those are the values load_settings accepts."""
-    from mtg_gateway.config import ConfigError, load_settings
-
-    from .test_admin import _env
-
-    text = (ROOT / "docs" / "UPGRADING.md").read_text(encoding="utf-8")
-    section = text.split("### 0.7.32", 1)[1].split("\n### ", 1)[0]
-    rows = dict(re.findall(r"^\s*\| `(MTG_[A-Z_]+)` \| (.+?) \|$", section, re.M))
-    newly = {
-        "MTG_AUTO_BIG_EDIT_ROWS",
-        "MTG_PROPOSAL_EXPIRY_DAYS",
-        "MTG_ARCHIDEKT_BACKUP_COPIES",
-        "MTG_ARCHIDEKT_BACKUP_BOX_DEFAULT",
-        "MTG_SNAPSHOTS_PER_DECK",
-        "MTG_FORGE_PARALLEL_GAMES",
-    } | {n for n in rows if n.startswith("MTG_SCAN_")}
-    assert set(rows) == newly and len(rows) == 21, sorted(rows)
-    _env(tmp_path, monkeypatch)
-    for name, allowed in rows.items():
-        if allowed == "`true` or `false`":
-            continue
-        lo, hi = allowed.split(" to ")
-        step = "1" if "." not in hi else "0.001"
-        above = str(float(hi) + float(step)) if "." in hi else str(int(hi) + 1)
-        below = str(float(lo) - float(step)) if "." in lo else str(int(lo) - 1)
-        for ok in (lo, hi):
-            monkeypatch.setenv(name, ok)
-            load_settings()
-        for bad in (above, below):
-            monkeypatch.setenv(name, bad)
-            with pytest.raises(ConfigError, match=name):
-                load_settings()
-        monkeypatch.delenv(name)
-
-
-def test_a_setting_that_is_not_a_number_names_seconds_only_for_a_time(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A non-number in a decimal setting stops the gateway with a message that says what is
-    wanted: a number of seconds for the pacing gaps, a plain number for a ratio or score."""
-    from mtg_gateway.config import ConfigError, load_settings
-
-    from .test_admin import _env
-
-    _env(tmp_path, monkeypatch)
-    monkeypatch.setenv("MTG_SCAN_GLARE_RATIO", "lots")
-    with pytest.raises(ConfigError) as err:
-        load_settings()
-    assert str(err.value) == "MTG_SCAN_GLARE_RATIO must be a number"
-    monkeypatch.delenv("MTG_SCAN_GLARE_RATIO")
-    monkeypatch.setenv("MTG_SCRYFALL_LOOKUP_INTERVAL", "soon")
-    with pytest.raises(ConfigError) as err:
-        load_settings()
-    assert str(err.value) == "MTG_SCRYFALL_LOOKUP_INTERVAL must be a number of seconds"

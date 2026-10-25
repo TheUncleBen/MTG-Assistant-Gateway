@@ -25,7 +25,7 @@ SHOTS = os.environ.get("MTG_SETTINGS_SHOTS")
 TEXT = (
     ".set-group h2, .set-group summary, .set-label, .set-help, .set-src, .set-err, .range, .unit, "
     ".set-seg label, .set-choices label, .set-confirm, .set-nav a, .set-save button, .reset, .notice, "
-    ".notice li, .set-warn, .set-badge, .set-confirm .lead, .set-confirm .tick, code"
+    ".notice li, .set-badge, .set-confirm .lead, .set-confirm .tick, code"
 )
 
 # Every visible control at least as tall as the site's standard control (--ctl, 39 px).
@@ -41,7 +41,9 @@ TAPS = """
 
 @pytest.fixture
 def server(tmp_path: Path):
-    s = Server(tmp_path, admin_group="mtg-admins", forge_games=12, env_set=frozenset({"forge_games"}))
+    s = Server(
+        tmp_path, admin_group="mtg-admins", deck_sync_minutes=60, env_set=frozenset({"deck_sync_minutes"})
+    )
     s.start()
     try:
         yield s
@@ -83,9 +85,9 @@ def test_the_settings_page_reads_and_works_everywhere(server: Server, width: int
         _shot(page, f"settings-{width}-{theme}.png")
 
         # the deployment's value: shown, not editable
-        forge = page.locator("#f-forge_games")
-        assert forge.is_disabled() and forge.input_value() == "12"
-        assert "MTG_FORGE_GAMES" in page.locator("#s-forge_games").inner_text()
+        sync = page.locator("#f-deck_sync_minutes")
+        assert sync.is_disabled() and sync.input_value() == "60"
+        assert "MTG_DECK_SYNC_MINUTES" in page.locator("#s-deck_sync_minutes").inner_text()
 
         # a refused value: nothing saved, the message by the field, the typed value kept
         page.fill("#f-archidekt_backup_copies", "99")
@@ -155,8 +157,8 @@ def test_review_round_1_settings_details(server: Server, width: int, zoom: str) 
         page.goto(f"{server.base}/admin/settings", wait_until="networkidle")
         if zoom:  # 200% text, as test_text_zoom_browser makes it
             page.evaluate(ROOT_200 if zoom == "root" else TEXT_200)
-        code = page.locator("#s-forge_games code")
-        assert code.inner_text() == "MTG_FORGE_GAMES"
+        code = page.locator("#s-deck_sync_minutes code")
+        assert code.inner_text() == "MTG_DECK_SYNC_MINUTES"
         # it breaks only after an underscore, never mid-word (round 2 made this the rule at any size)
         assert page.evaluate(MIDWORD_BREAKS) == []
         modes = page.locator("#s-row-approval_mode_max .set-choices label")
@@ -206,12 +208,11 @@ def test_review_round_1_settings_details(server: Server, width: int, zoom: str) 
 # A setting the stack sets is shown where it would be changed, greyed out, with
 # its value, and nothing on the page can change it.
 LOCKED = {
-    "forge_games": 12,
-    "archidekt_backups": False,
-    "approval_mode_max": "semi",
-    "server_name": "Our Table",
-    "log_level": "WARNING",
+    "apply_in_chat": False,
     "deck_sync_minutes": 60,
+    "archidekt_backups": False,
+    "watchlists_enabled": False,
+    "update_check": False,
 }
 
 # Per locked row: its controls' state, shown value, text contrast over the greyed background
@@ -297,11 +298,8 @@ def test_a_setting_the_stack_sets_shows_greyed_out_and_cannot_be_changed(
                 "stack, then redeploy."
             )
             assert r["low"] == [] and r["grey"], r
-        assert rows["forge_games"]["shown"] == ["12"]
-        assert rows["archidekt_backups"]["shown"] == ["off"]
-        assert rows["approval_mode_max"]["shown"] == ["semi"]
-        assert rows["server_name"]["shown"] == ["Our Table"]
-        assert "WARNING" in rows["log_level"]["shown"]
+        for key in ("apply_in_chat", "archidekt_backups", "watchlists_enabled", "update_check"):
+            assert rows[key]["shown"] == ["off"], key
         assert rows["deck_sync_minutes"]["shown"] == ["60"]
         # no stack box: each locked row says so beside its name, and the chip shows
         # only those rows, then everything again
@@ -309,7 +307,7 @@ def test_a_setting_the_stack_sets_shows_greyed_out_and_cannot_be_changed(
         for key in LOCKED:
             assert "Set in your stack" in page.locator(f"#s-row-{key} .sl .set-badge").all_inner_texts(), key
         chip = page.locator(".set-nav .lockchip")
-        assert chip.inner_text().split() == ["Set", "in", "your", "stack", "6"]
+        assert chip.inner_text().split() == ["Set", "in", "your", "stack", "5"]
         chip.click()
         assert chip.get_attribute("aria-pressed") == "true" and page.url.endswith("?locked=1")
         shown = page.evaluate(
@@ -328,9 +326,9 @@ def test_a_setting_the_stack_sets_shows_greyed_out_and_cannot_be_changed(
             landed.add(page.evaluate("() => (document.activeElement.closest('.set-row') || {}).id || ''"))
         assert not {f"s-row-{k}" for k in LOCKED} & landed
         # a screen reader hears the row's name, that it is unavailable, and the stack line
-        num = page.locator("#f-forge_games")
+        num = page.locator("#f-deck_sync_minutes")
         assert num.get_attribute("disabled") is not None
-        assert "s-forge_games" in num.get_attribute("aria-describedby")
+        assert "s-deck_sync_minutes" in num.get_attribute("aria-describedby")
         assert page.evaluate(MEASURE) == []
         assert page.evaluate(CONTRAST, TEXT) == []
         _shot(page, f"settings-locked-{width}-{theme}.png", page.locator("#g-general"))
@@ -358,8 +356,8 @@ MIDWORD_BREAKS = """
 })
 """
 
-# A locked On/Off or approval-mode row: each label's words, the chosen one, and the radios' own look
-# (in On/Off they stay invisible over their label, in the mode list plain: no grey dashed face).
+# A locked On/Off row: each label's words, the chosen one, and the radios' own look (they stay
+# invisible over their label: no grey dashed face).
 LOCKED_CHOICES = """
 (keys) => keys.map(key => {
   const row = document.getElementById('s-row-' + key);
@@ -389,9 +387,8 @@ LOCKED_CHOICES = """
 def test_a_locked_setting_shows_its_value_in_words_and_its_variable_whole(
     locked_server: Server, width: int, theme: str, zoom: str
 ) -> None:
-    """A locked On/Off row shows "On"/"Off", not the radios on top of them; the
-    approval modes keep plain radios (no dashed ring); and at 200% text the variable name breaks
-    only after an underscore."""
+    """A locked On/Off row shows "On"/"Off", not the radios on top of them, with no dashed ring; and
+    at 200% text the variable name breaks only after an underscore."""
     from playwright.sync_api import sync_playwright
 
     exe = _chromium()
@@ -402,23 +399,13 @@ def test_a_locked_setting_shows_its_value_in_words_and_its_variable_whole(
         if zoom:
             page.evaluate(ROOT_200 if zoom == "root" else TEXT_200)
         assert page.evaluate(MIDWORD_BREAKS) == []
-        rows = {
-            r["key"]: r for r in page.evaluate(LOCKED_CHOICES, ["archidekt_backups", "approval_mode_max"])
-        }
-        backups, modes = rows["archidekt_backups"], rows["approval_mode_max"]
+        (backups,) = page.evaluate(LOCKED_CHOICES, ["archidekt_backups"])
         assert backups["words"] == ["On", "Off"] and backups["chosen"] == ["Off"], backups
         assert backups["segInputs"] and set(backups["segInputs"]) == {"0"}, backups
-        semi = MODE_LABELS["semi"]
-        assert len(modes["words"]) == 3 and modes["chosen"] == [semi], modes
-        assert backups["dashedRadios"] == 0 and modes["dashedRadios"] == 0
+        assert backups["dashedRadios"] == 0
         assert page.evaluate(MEASURE) == []
         assert page.evaluate(CONTRAST, TEXT) == []
         _shot(page, f"settings-locked-r2-{width}-{theme}-{zoom or 'plain'}.png", page.locator("#g-backups"))
-        _shot(
-            page,
-            f"settings-locked-r2-modes-{width}-{theme}-{zoom or 'plain'}.png",
-            page.locator("#g-approvals"),
-        )
         browser.close()
     assert errors == []
 

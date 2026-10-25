@@ -366,8 +366,8 @@ assistant applies what that mode allows, with a snapshot first for a change to o
   **Apply checked** or **Reject checked** to do them together.
 - Before an edit is applied, the gateway checks the change still fits the
   deck as it is now, saves a **snapshot** and, with backups on (the operator's
-  setting), puts a backup copy of the deck in an "MTG Gateway backups" folder
-  on your Archidekt account, then reads the deck back to confirm. The deck
+  setting), puts a backup copy of the deck in your backup folder on
+  Archidekt ("MTG Gateway Backups" unless the operator renamed it), then reads the deck back to confirm. The deck
   page's own saves, Card search's Add to deck, and the deck editor's save with
   its backup box unticked make no backup copy.
 - **Updated** and **Needs a look**: Archidekt is the master copy of your
@@ -398,9 +398,9 @@ assistant applies what that mode allows, with a snapshot first for a change to o
 
 ## Watchlist and prices
 
-Watchlists are off unless the operator turns them on; until then the page,
-the card viewer's price buttons and your assistant's watchlist abilities are
-not there.
+Watchlists are on unless the operator turns them off; then the page, the
+card viewer's price buttons and your assistant's watchlist abilities are not
+there.
 
 The **Watchlist** page (in the account menu, and under More on a phone)
 keeps the price of cards and decks you choose, once a day:

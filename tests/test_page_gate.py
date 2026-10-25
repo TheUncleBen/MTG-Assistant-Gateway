@@ -16,7 +16,7 @@ NAVIGATE = {"Sec-Fetch-Mode": "navigate", "Accept": "text/html"}
 
 @pytest.fixture
 async def harness(tmp_path: Path, idp: FakeIdP, monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("MTG_PLUGIN_DIR", str(REPO_PLUGIN))
+    monkeypatch.setattr("mtg_gateway.plugin_page.PLUGIN_DIRS", (REPO_PLUGIN,))
     async with running(Harness(make_settings(tmp_path, required_group="mtg-users"), idp)) as h:
         yield h
 

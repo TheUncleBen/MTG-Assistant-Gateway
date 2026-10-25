@@ -209,10 +209,7 @@ def test_the_stack_files_attach_the_authentik_secret_with_no_line_to_uncomment(n
     text = (ROOT / name).read_text()
     assert "# mtg_authentik_api_token" not in text and "# - mtg_authentik_api_token" not in text
     assert "\n  mtg_authentik_api_token:\n" in text and "\n      - mtg_authentik_api_token\n" in text
-    assert (
-        "MTG_AUTHENTIK_API_TOKEN_FILE: ${MTG_AUTHENTIK_API_TOKEN_FILE:-/run/secrets/mtg_authentik_api_token}"
-        in text
-    )
+    assert "      MTG_AUTHENTIK_API_TOKEN_FILE: /run/secrets/mtg_authentik_api_token\n" in text
 
 
 def test_make_secrets_writes_off_and_keeps_a_token_already_there(tmp_path: Path) -> None:
@@ -225,7 +222,7 @@ def test_make_secrets_writes_off_and_keeps_a_token_already_there(tmp_path: Path)
     secrets = tmp_path / "secrets"
     secrets.mkdir()
     (secrets / "mtg_oidc_client_secret.txt").write_text("x")  # so the script asks nothing
-    env = {"PATH": os.environ["PATH"], "MTG_SECRETS_DIR": str(secrets)}
+    env = {"PATH": os.environ["PATH"]}
     subprocess.run(["sh", str(script)], cwd=tmp_path, env=env, check=True, capture_output=True)
     assert (secrets / "mtg_authentik_api_token.txt").read_text() == "off"
     (secrets / "mtg_authentik_api_token.txt").write_text("a-real-token")

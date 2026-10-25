@@ -31,7 +31,7 @@ async def harness(tmp_path: Path, idp: FakeIdP, monkeypatch: pytest.MonkeyPatch)
             }
         )
     )
-    monkeypatch.setenv("MTG_APP_DIR", str(app_dir))
+    monkeypatch.setattr("mtg_gateway.app_page.IMAGE_APP_DIR", app_dir)
     async with running(Harness(make_settings(tmp_path), idp)) as h:
         yield h
 
@@ -80,7 +80,7 @@ async def test_signed_in_user_gets_page_and_apk(harness: Harness) -> None:
 
 
 async def test_gateway_without_the_app(tmp_path: Path, idp: FakeIdP, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("MTG_APP_DIR", str(tmp_path / "nowhere"))
+    monkeypatch.setattr("mtg_gateway.app_page.IMAGE_APP_DIR", tmp_path / "nowhere")
     async with running(Harness(make_settings(tmp_path), idp)) as h:
         b = Browser(h)
         try:
@@ -104,7 +104,7 @@ async def test_page_without_a_recorded_certificate(
     (app_dir / "mtg-assistant-gateway.json").write_text(
         json.dumps({"version_name": "0.1.0", "cert_sha256": "<b>nope</b>"})
     )
-    monkeypatch.setenv("MTG_APP_DIR", str(app_dir))
+    monkeypatch.setattr("mtg_gateway.app_page.IMAGE_APP_DIR", app_dir)
     async with running(Harness(make_settings(tmp_path), idp)) as h:
         b = Browser(h)
         try:
@@ -146,7 +146,7 @@ async def test_latest_json_for_the_apps_update_check(harness: Harness) -> None:
 async def test_latest_json_without_the_app(
     tmp_path: Path, idp: FakeIdP, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("MTG_APP_DIR", str(tmp_path / "nowhere"))
+    monkeypatch.setattr("mtg_gateway.app_page.IMAGE_APP_DIR", tmp_path / "nowhere")
     async with running(Harness(make_settings(tmp_path), idp)) as h:
         b = Browser(h)
         try:

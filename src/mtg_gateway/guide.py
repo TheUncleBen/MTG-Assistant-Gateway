@@ -322,7 +322,7 @@ def guide_body(
     max_rows: int = modes.DEFAULT_MAX_ROWS,
     big_rows: int = modes.DEFAULT_BIG_EDIT_ROWS,
     archidekt_backups: bool = True,
-    backup_folder: str = "MTG Gateway backups",
+    backup_folder: str = "MTG Gateway Backups",
     watchlists: bool = False,
     live: LiveSettings | None = None,
 ) -> str:
@@ -1221,7 +1221,7 @@ def add_guide_routes(server: MCPServer, state: AppState) -> None:
                 has_collection=getattr(state, "collection", None) is not None,
                 max_rows=int(getattr(s, "auto_apply_max_rows", modes.DEFAULT_MAX_ROWS)),
                 archidekt_backups=bool(state.live.get("archidekt_backups")),
-                backup_folder=s.archidekt_backup_folder,
+                backup_folder=state.decks.backup_folder,
                 watchlists=bool(s.watchlists_enabled),
             ),
             site=s.server_name,

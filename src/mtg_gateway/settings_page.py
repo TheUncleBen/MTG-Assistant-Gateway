@@ -14,7 +14,6 @@ from typing import Any
 from . import ui
 from .config import MANAGED_SETTINGS, STACK_LOCK_HOW, LiveSettings, SettingError, SettingSpec, _number
 from .modes import MODE_LABELS
-from .plugin_page import CHATGPT_NAME_MAX, chatgpt_name_too_long
 from .theme import icon
 from .ui import label as label_html
 
@@ -33,8 +32,8 @@ GROUPS: tuple[tuple[str, str, str], ...] = (
     (
         "pacing",
         "Archidekt and Scryfall pacing",
-        "Here these can only be set to ask Archidekt and Scryfall less often than the gateway's "
-        "defaults, to stay gentle on their servers. Only your stack can make them ask more often.",
+        "These can only be set to ask Archidekt and Scryfall less often than the gateway's "
+        "defaults, to stay gentle on their servers.",
     ),
     (
         "scan",
@@ -88,6 +87,11 @@ TEXT: dict[str, tuple[str, str]] = {
         "box unticked). An edit within 15 minutes of the deck's last copy, or with the deck unchanged "
         "since, shares that copy instead of making another.",
     ),
+    "archidekt_backup_folder": (
+        "Backup folder on Archidekt",
+        "Each member's own private folder on Archidekt, made when their first backup copy needs it. A new "
+        "name applies to the next copy; copies already made stay where they are.",
+    ),
     "archidekt_backup_copies": (
         "Backup copies kept per deck",
         "Older copies are deleted from the backup folder on Archidekt, one at a time, once that deck gets "
@@ -139,11 +143,6 @@ TEXT: dict[str, tuple[str, str]] = {
         "When prices are checked and summaries are sent, 0 to 23.",
     ),
     "server_name": ("Gateway name", "Shown in the top bar, on sign-in and in Claude's connector list."),
-    "chatgpt_name": (
-        "Name in ChatGPT",
-        "Leave it blank to use the gateway name. ChatGPT refuses a plugin file whose name is over 80 "
-        "characters.",
-    ),
     "update_check": (
         "Check for new versions",
         "Twice a day, one anonymous request to GitHub. Admins see a notice when a new version is out.",
@@ -257,8 +256,6 @@ form > .set-row:first-of-type{border-top:0}
 .set-src code{font-size:.8rem}
 .set-lock code{overflow-wrap:break-word}
 .set-err{margin:.35rem 0 0;color:var(--danger-text);font-weight:700;font-size:.88rem}
-.set-warn{margin:.35rem 0 0;padding:.4rem .6rem;border-left:4px solid var(--orange);font-size:.88rem;
-  background:var(--orange-tint);color:var(--orange-text);border-radius:var(--radius)}
 .set-row.bad input:not([type=checkbox]):not([type=radio]),.set-row.bad select{border-color:var(--danger-text)}
 .set-ctl{display:flex;flex-direction:column;gap:.35rem;min-width:0}
 .set-ctl input:not([type=radio]):not([type=checkbox]),.set-ctl select:not(.msel-native),.set-ctl .msel-btn{
@@ -467,7 +464,6 @@ def settings_body(
     stack" chip without scripts, ``?locked=1``)."""
     outcome = outcome or Outcome()
     rows = {d["key"]: d for d in live.describe()}
-    warns = {"chatgpt_name": chatgpt_name_warning(live)}
     locked_total = sum(1 for k in MANAGED_SETTINGS if live.locked(k))
     jump = [
         f"<a class='ui-chip' href='#g-{g}'>{html.escape(title)}</a>"
@@ -490,7 +486,7 @@ def settings_body(
         keys = group_keys(group)
         if not keys:
             continue
-        fields = "".join(_row(rows[k], running, outcome, who, when, warns.get(k, "")) for k in keys)
+        fields = "".join(_row(rows[k], running, outcome, who, when) for k in keys)
         n_locked = sum(1 for k in keys if live.locked(k))
         editable = n_locked < len(keys)
         save = (
@@ -525,27 +521,7 @@ def settings_body(
     return f"<div class='{cls}'>{''.join(parts)}</div>"
 
 
-def chatgpt_name_warning(live: LiveSettings) -> str:
-    """The warning under "Name in ChatGPT" when the name ChatGPT gets (this setting, else the gateway
-    name) is over the plugin file's limit, as the start-up log and the admin page warn."""
-    long = chatgpt_name_too_long(live.get("server_name"), live.get("chatgpt_name") or None)
-    if not long:
-        return ""
-    fix = (
-        f"change {MANAGED_SETTINGS['chatgpt_name'].env} in your stack to a name of {CHATGPT_NAME_MAX} "
-        "characters or fewer, then redeploy"
-        if live.locked("chatgpt_name")
-        else f"set a name of {CHATGPT_NAME_MAX} characters or fewer here"
-    )
-    return (
-        f"ChatGPT gets the name “{long[0]}”, which is {long[1]} characters. ChatGPT refuses a plugin file "
-        f"whose name is over {CHATGPT_NAME_MAX} characters, so {fix}."
-    )
-
-
-def _row(
-    d: dict[str, Any], running: Any, outcome: Outcome, who: Callable, when: Callable, warn: str = ""
-) -> str:
+def _row(d: dict[str, Any], running: Any, outcome: Outcome, who: Callable, when: Callable) -> str:
     key = d["key"]
     spec = MANAGED_SETTINGS[key]
     name, help_text = TEXT.get(key, (key, ""))
@@ -553,7 +529,7 @@ def _row(
     err = outcome.errors.get(key)
     value = outcome.posted.get(key, d["value"])
     help_id = f"h-{key}"
-    described = f"{help_id} s-{key}" + (f" w-{key}" if warn else "") + (f" e-{key}" if err else "")
+    described = f"{help_id} s-{key}" + (f" e-{key}" if err else "")
     control = _control(spec, value, locked=locked, described=described)
     src = _source(d, spec, running, who, when)
     reset = ""
@@ -582,7 +558,6 @@ def _row(
             else f"<span id='{help_id}' hidden></span>"
         )
         + f"<p class='set-src' id='s-{key}'>{src}</p>"
-        + (f"<p class='set-warn' id='w-{key}'>{html.escape(warn)}</p>" if warn else "")
         + (f"<p class='set-err' id='e-{key}' role='alert'>{html.escape(err)}</p>" if err else "")
         + f"</div><div class='set-ctl'>{control}{reset}</div>{confirm}</div>"
     )
@@ -634,8 +609,6 @@ def _source(d: dict[str, Any], spec: SettingSpec, running: Any, who: Callable, w
     else:
         text = "Default."
     now = getattr(running, spec.key, d["value"])
-    if spec.key == "chatgpt_name":
-        now = now or ""
     if spec.restart and now != d["value"]:
         text += f" The gateway uses {html.escape(shown(spec, now))} until it restarts."
     return text

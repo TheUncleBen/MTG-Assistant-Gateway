@@ -1,7 +1,7 @@
 """Watchlists and price history.
 
 A member watches cards (by name, or one printing by set code and collector number, in a finish)
-and whole decks. Once a day, at ``MTG_PRICE_HOUR_UTC``, the gateway asks Scryfall for today's
+and whole decks. Once a day, at the price_hour_utc setting, the gateway asks Scryfall for today's
 prices of the watched printings only, through the shared Scryfall client (its pacer, its 429
 back-off) with ``POST /cards/collection`` in batches of 75, spaced at the single-lookup pace.
 It stores one price point per printing a day (USD, USD foil, USD etched, EUR, EUR foil, where
@@ -13,9 +13,9 @@ it), so its value follows the cards it holds; when the read fails, the last card
 
 Optional alerts per card: a move of more than a set percentage from one day to the next, or a
 crossing of a price the member sets (above or below). They go out through ntfy (notify.py) for
-members who opted in. Limits per member (``MTG_WATCH_MAX_CARDS``, ``MTG_WATCH_MAX_DECKS``) and how
-long points are kept (``MTG_PRICE_HISTORY_DAYS``, purged with the rest in db.purge_expired) are
-the operator's. Watching changes only the member's own gateway data, never Archidekt.
+members who opted in. Limits per member (watch_max_cards, watch_max_decks) and how
+long points are kept (price_history_days, purged with the rest in db.purge_expired) are
+Settings page rows. Watching changes only the member's own gateway data, never Archidekt.
 """
 
 from __future__ import annotations
@@ -734,7 +734,7 @@ def _alerts(pct: Any, above: Any, below: Any) -> tuple[float | None, float | Non
 
 class DailyJobs:
     """The daily price check and the members' scheduled summaries, run once a day at
-    ``MTG_PRICE_HOUR_UTC`` (summaries right after the prices, so they include them). Which day
+    price_hour_utc (summaries right after the prices, so they include them). Which day
     each last ran is kept in the database, so a restart neither repeats nor skips one. With
     watchlists off ``prices`` is None and only the summaries run (app.py starts this only when
     watchlists or notifications are on)."""

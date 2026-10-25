@@ -152,7 +152,7 @@ def test_the_editor_has_no_watch_with_watchlists_off(tmp_path: Path) -> None:
     from playwright.sync_api import sync_playwright
 
     exe = _exe()
-    server = _server(tmp_path)
+    server = _server(tmp_path, watchlists_enabled=False)
     try:
         sid = _link(server)
         with sync_playwright() as p:
@@ -223,7 +223,7 @@ def test_the_top_bar_menu_has_no_watch_with_watchlists_off(tmp_path: Path) -> No
     from playwright.sync_api import sync_playwright
 
     exe = _exe()
-    server = _server(tmp_path)
+    server = _server(tmp_path, watchlists_enabled=False)
     try:
         sid = server.sign_in()
         with sync_playwright() as p:

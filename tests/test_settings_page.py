@@ -20,13 +20,13 @@ from .test_decks_and_proxy import Browser
 
 @pytest.fixture
 async def gw(tmp_path: Path, idp: FakeIdP):
-    # forge_games is set by "the deployment" here, so the page must show it locked.
+    # MTG_DECK_SYNC_MINUTES is set by "the deployment" here, so the page must show it locked.
     settings = make_settings(
         tmp_path,
         required_group="mtg-users",
         admin_group="mtg-admins",
-        forge_games=12,
-        env_set=frozenset({"forge_games"}),
+        deck_sync_minutes=60,
+        env_set=frozenset({"deck_sync_minutes"}),
     )
     async with running(_with_admin(Harness(settings, idp))) as h:
         yield h
@@ -71,9 +71,12 @@ async def test_the_page_lists_every_setting_and_locks_the_deployments(gw: Harnes
         for key in MANAGED_SETTINGS:
             assert f"id='s-row-{key}'" in r.text, key
             assert settings_page.label(key) in page, key
+        sync = r.text.split("id='s-row-deck_sync_minutes'", 1)[1].split("id='s-row-", 1)[0]
+        assert "Set in your stack" in sync and "<code>MTG_<wbr>DECK_<wbr>SYNC_<wbr>MINUTES</code>" in sync
+        assert "disabled" in sync and "value='60'" in sync and "Back to default" not in sync
+        # a setting with no env variable is never locked
         forge = r.text.split("id='s-row-forge_games'", 1)[1].split("id='s-row-", 1)[0]
-        assert "Set in your stack" in forge and "<code>MTG_<wbr>FORGE_<wbr>GAMES</code>" in forge
-        assert "disabled" in forge and "value='12'" in forge and "Back to default" not in forge
+        assert "Set in your stack" not in forge and "disabled" not in forge
         # the scan thresholds start folded away; the others are open
         assert (
             "<details><summary><span class='sum'><span class='h2'>Card scanning (advanced)</span>" in r.text
@@ -315,19 +318,20 @@ async def test_back_to_default_and_a_save_with_no_change(gw: Harness) -> None:
 async def test_a_locked_or_unknown_setting_cannot_be_changed(gw: Harness) -> None:
     b = await admin_browser(gw)
     try:
-        r = await _post(b, {"group": "simulation", "v_forge_games": "3", "v_forge_parallel_games": "2"})
-        assert r.status_code == 303
-        assert _live(gw).get("forge_games") == 12 and _live(gw).get("forge_parallel_games") == 2
-        r = await _post(b, {"reset": "forge_games"})
+        r = await _post(b, {"group": "sync", "v_deck_sync_minutes": "90"})
+        assert r.status_code == 303 and _live(gw).get("deck_sync_minutes") == 60
+        r = await _post(b, {"group": "simulation", "v_forge_parallel_games": "2"})
+        assert r.status_code == 303 and _live(gw).get("forge_parallel_games") == 2
+        r = await _post(b, {"reset": "deck_sync_minutes"})
         assert r.status_code == 400
         assert (
-            "Set in your stack (MTG_FORGE_GAMES), so it can't be changed here. Change or remove it in "
-            "your stack, then redeploy." in html.unescape(r.text)
+            "Set in your stack (MTG_DECK_SYNC_MINUTES), so it can't be changed here. Change or remove it "
+            "in your stack, then redeploy." in html.unescape(r.text)
         )
         r = await _post(b, {"reset": "writes_enabled"})
         assert r.status_code == 400 and "isn't one this page can change" in html.unescape(r.text)
-        r = await _post(b, {"group": "general", "v_writes_enabled": "on"})
-        assert r.status_code == 303 and not gw.app.state.gateway.settings.writes_enabled
+        r = await _post(b, {"group": "general", "v_writes_enabled": "off"})
+        assert r.status_code == 303 and gw.app.state.gateway.settings.writes_enabled is True
     finally:
         await b.aclose()
 
@@ -345,15 +349,15 @@ async def test_the_form_needs_its_csrf_token(gw: Harness) -> None:
 def test_saved_values_apply_at_the_next_start(tmp_path: Path) -> None:
     db = Database(tmp_path / "g.sqlite")
     db.save_setting("backup_hour_utc", 5, by="admin-1")
-    db.save_setting("forge_games", 3, by="admin-1")
-    db.save_setting("chatgpt_name", "", by="admin-1")
+    db.save_setting("deck_sync_minutes", 90, by="admin-1")
+    db.save_setting("archidekt_backup_folder", "Old decks", by="admin-1")
     db.save_setting("archidekt_backup_copies", 500, by="admin-1")  # out of bounds: skipped
-    db.save_setting("not_a_setting", 1, by="admin-1")
-    s = make_settings(tmp_path, forge_games=12, env_set=frozenset({"forge_games"}), chatgpt_name="X")
+    db.save_setting("chatgpt_name", "X", by="admin-1")  # a row that no longer exists: skipped
+    s = make_settings(tmp_path, deck_sync_minutes=60, env_set=frozenset({"deck_sync_minutes"}))
     started = with_stored(s, db)
     assert started.backup_hour_utc == 5
-    assert started.forge_games == 12  # the deployment wins
-    assert started.chatgpt_name is None  # blank: follow the server name
+    assert started.deck_sync_minutes == 60  # the deployment wins
+    assert started.archidekt_backup_folder == "Old decks"
     assert started.archidekt_backup_copies == 10
     assert with_stored(make_settings(tmp_path), Database(tmp_path / "empty.sqlite")).backup_hour_utc == 3
     db.close()
@@ -392,31 +396,6 @@ async def test_member_cannot_reach_it_signed_out(gw: Harness) -> None:
     try:
         r = await b.http.get("/admin/settings", headers=NAVIGATE)
         assert r.status_code in (302, 303) and "/login" in r.headers["location"]
-    finally:
-        await b.aclose()
-
-
-async def test_a_chatgpt_name_over_80_characters_is_warned_about(gw: Harness) -> None:
-    """The page warns as the start-up log does, and still saves the name (it is not refused)."""
-    b = await admin_browser(gw)
-    try:
-        page = (await b.http.get("/admin/settings", headers=NAVIGATE)).text
-        assert "id='w-chatgpt_name'" not in page
-        long = "A" * 81
-        r = await _post(b, {"group": "general", "v_chatgpt_name": long})
-        assert r.status_code == 303 and _live(gw).get("chatgpt_name") == long
-        page = (await b.http.get("/admin/settings", headers=NAVIGATE)).text
-        row = html.unescape(page.split("id='s-row-chatgpt_name'", 1)[1].split("id='s-row-", 1)[0])
-        assert f"ChatGPT gets the name “{long}”, which is 81 characters." in row
-        assert (
-            "ChatGPT refuses a plugin file whose name is over 80 characters, so set a name of 80 "
-            "characters or fewer here." in row
-        )
-        assert "aria-describedby='h-chatgpt_name s-chatgpt_name w-chatgpt_name'" in row
-        # Blank follows the gateway name, which is checked too.
-        await _post(b, {"group": "general", "v_chatgpt_name": "", "v_server_name": "B" * 90})
-        page = html.unescape((await b.http.get("/admin/settings", headers=NAVIGATE)).text)
-        assert f"ChatGPT gets the name “{'B' * 90}”, which is 90 characters." in page
     finally:
         await b.aclose()
 

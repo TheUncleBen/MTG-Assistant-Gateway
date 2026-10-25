@@ -1,7 +1,6 @@
 #!/bin/sh
-# Creates the five secret files docker-compose.yml expects, in ./secrets/
-# (or MTG_SECRETS_DIR from the environment or .env). Existing files are left
-# alone, so it's safe to re-run.
+# Creates the five secret files docker-compose.yml expects, in ./secrets/.
+# Existing files are left alone, so it's safe to re-run.
 #
 #   ./make-secrets.sh            # as the PUID user, or with sudo
 #
@@ -17,8 +16,7 @@ from_env_file() {
   sed -n "s/^$1=//p" .env | tail -n 1 | tr -d "\"'\r"
 }
 
-dir="${MTG_SECRETS_DIR:-$(from_env_file MTG_SECRETS_DIR)}"
-dir="${dir:-./secrets}"
+dir=./secrets
 mkdir -p "$dir"
 
 if [ ! -s "$dir/mtg_fernet_key.txt" ]; then

@@ -357,7 +357,7 @@ NAV_FIT = """() => {
 def test_the_top_bar_links_fit_at_every_width_and_text_size(chromium, server: Server, theme: str) -> None:
     from .test_text_zoom_browser import ROOT_200, TEXT_200
 
-    sid = _admin(server)  # nine links from 1200 px: the most the bar carries
+    sid = _admin(server)  # ten links from 1200 px (watchlists on): the most the bar carries
     problems: list[str] = []
     with _session(chromium) as browser:
         for touch in (False, True):
@@ -371,7 +371,7 @@ def test_the_top_bar_links_fit_at_every_width_and_text_size(chromium, server: Se
             )
             page = ctx.new_page()
             for path in ("/history", "/decks", "/reports"):
-                for width in (344, 360, 599, 600, 673, 717, 800, 899, 900, 1000, 1280, 1440):
+                for width in (344, 360, 599, 600, 673, 717, 800, 899, 900, 1000, 1200, 1280, 1440):
                     for zoom in ("none", "root", "text"):
                         page.set_viewport_size({"width": width, "height": 800})
                         _open(page, f"{server.base}{path}")
@@ -384,10 +384,10 @@ def test_the_top_bar_links_fit_at_every_width_and_text_size(chromium, server: Se
                             problems.append(where)
                         if g["links"] and g["contrast"] < 4.5:
                             problems.append(f"contrast {where}")
-                        # a mouse from 600 px shows the links: an admin's nine from 1200 px at the
+                        # a mouse from 600 px shows the links: an admin's ten from 1200 px at the
                         # normal size, else five and More ▾; at the normal size on one row in
                         # the 50 px bar, as before
-                        want = 9 if width >= 1200 and zoom == "none" else 6
+                        want = 10 if width >= 1200 and zoom == "none" else 6
                         if not touch and width >= 600 and g["links"] != want:
                             problems.append(f"links {where}")
                         if (

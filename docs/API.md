@@ -54,7 +54,7 @@ code and a human `message`:
 | `not_linked` | 409 | no Archidekt account linked yet; send the user to `/account` |
 | `changed` | 409 | the proposal changed since the page showed it (the `version` sent is out of date); `review_url` and the current version are included |
 | `not_pending` / `already_applied` / `stale` | 409 | the proposal cannot be applied in its current state |
-| `rate_limited` | 429 | Archidekt asked the gateway to slow down, the member already has three Archidekt actions running or waiting and the next one waited 20 seconds without a turn (or eight others were already waiting), the member's Archidekt budget (`MTG_ARCHIDEKT_CALLS_PER_10_MIN`) is used up, the member already has two research calls running when a report is asked for, or too many pending proposals (100 per member) |
+| `rate_limited` | 429 | Archidekt asked the gateway to slow down, the member already has three Archidekt actions running or waiting and the next one waited 20 seconds without a turn (or eight others were already waiting), the member's Archidekt budget (120 per 10 minutes by default, set on the admin Settings page) is used up, the member already has two research calls running when a report is asked for, or too many pending proposals (100 per member) |
 | `auth` | 409 | Archidekt asked for a sign-in on a deck read the gateway made without one: with no account linked, or after the member's session could not read the deck. A stored session Archidekt no longer accepts is otherwise `not_linked`. Linking an account happens only on the Account page, not through this API, and a username and password Archidekt refuses are reported on that page |
 | `backup_failed` | 502 | the Archidekt backup copy could not be made before the change; nothing was changed and the proposal is still pending, so it can be applied again |
 | `verify_mismatch` | 502 | Archidekt accepted the change, but reading it back shows it doesn't match; the message names what differs and, for a change to an existing deck, the snapshot kept from before it |
@@ -189,7 +189,7 @@ cookie, set by `POST /theme`); internal links never open a new tab.
 | `/collection?q=&sort=added|edition&view=grid|list&page=` | My collection: the member's Archidekt Collection, filtered by name, grid or list, plus and minus, remove, add by name, a details menu per row (finish, condition, language, price paid; `action=details`); `/collection/export.csv` downloads it |
 | `/guide` | The in-app guide (end-user documentation) |
 | `/cards?q=` | Card search by name (picture, mana cost, type), each card in the card viewer, and an add to one of the member's decks; `/cards/api/text` and `/cards/api/rulings` feed the viewer |
-| `/watchlist` (GET, POST) | The member's card watchlist and price history; only when `MTG_WATCHLISTS_ENABLED=true` |
+| `/watchlist` (GET, POST) | The member's card watchlist and price history; only while watchlists are on (the default) |
 | `/install`, `/install.md` | The setup hub: connecting Claude and ChatGPT, the skill, the plugins and the Android app (`?for=` opens one section) |
 | `/skill`, `/skill/mtg-gateway.zip` | `/skill` redirects to `/install?for=skill`; the ZIP is the end-user skill |
 | `/plugin/marketplace.json`, `/plugin/{name}.zip`, `/plugin/{name}-chatgpt.zip` | The Claude plugin marketplace and plugin, and the ChatGPT plugin ZIP ([PLUGIN.md](PLUGIN.md)) |
@@ -227,7 +227,7 @@ cookie, set by `POST /theme`); internal links never open a new tab.
 | `/admin/models` (GET, POST) | Admin: the simulator's kept card models, who added each and when, with a Remove button per model |
 | `/admin/settings` (GET, POST) | Admin: the gateway's settings, grouped, with where each value comes from; a value set in the deployment is shown read-only, the others can be changed here |
 | `/app.webmanifest`, `/sw.js`, `/static/{file}` | App shell |
-| `/.well-known/assetlinks.json` | Android App Links statement from `MTG_ANDROID_ASSETLINKS` (empty list when unset) |
+| `/.well-known/assetlinks.json` | Android App Links statement (an empty list when none is set) |
 
 The pages keep the strict CSP (`default-src 'none'`); the deck page and editor allow card images
 from `cards.scryfall.io` and `connect-src 'self'`, and the deck, deck list and editor pages allow

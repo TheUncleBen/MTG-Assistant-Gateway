@@ -28,12 +28,10 @@ from . import ui
 from .app_page import APK_NAME, RELEASES_URL, android_facts
 from .pages import _csrf, browser_session, login_redirect
 from .plugin_page import (
-    CHATGPT_NAME_MAX,
     CONNECTOR_ICON_PATH,
     SERVER_DESCRIPTION,
     SETUP_SKILL,
     chatgpt_label,
-    chatgpt_name_too_long,
     chatgpt_zip_name,
     claude_connect_link,
     plugin_slug,
@@ -132,7 +130,6 @@ class Context:
     public_url: str
     site: str
     gpt_text: str | None = None  # the ChatGPT project instructions (skill_page.chatgpt_text)
-    gpt_name: str | None = None  # the owner's MTG_CHATGPT_NAME: the name ChatGPT shows, when set
     app: dict[str, Any] | None = None  # app_page.android_facts, or None when no APK is shipped
     page: bool = True  # False for the public Markdown
 
@@ -368,17 +365,7 @@ def section(key: str, ctx: Context) -> Section:
             ),
         )
     if key == "chatgpt":
-        # The name to type: the owner's MTG_CHATGPT_NAME (filtered as the plugin file writes it)
-        # when set, else the site's name as it is.
-        gpt_name = chatgpt_label(site, ctx.gpt_name) if ctx.gpt_name else site
-        long = chatgpt_name_too_long(site, ctx.gpt_name)
-        plugin_warn = (
-            f"This gateway's ChatGPT connector name, “{long[0]}”, is {long[1]} characters, and ChatGPT "
-            f"refuses a plugin file whose name is over {CHATGPT_NAME_MAX} characters. Add the connector by "
-            "hand with the steps above instead, or ask the gateway's owner to shorten the name."
-            if long
-            else None
-        )
+        gpt_name = chatgpt_label(site)  # the name the plugin file carries too
         return Section(
             key,
             CLIENTS[key],
@@ -480,7 +467,6 @@ def section(key: str, ctx: Context) -> Section:
                         primary=False,
                         icon="download",
                     ),
-                    warn=plugin_warn,
                 ),
                 Block(
                     "If ChatGPT blocks write tools",
@@ -566,10 +552,7 @@ def section(key: str, ctx: Context) -> Section:
                             if gpt or not ctx.page
                             else None,
                         ),
-                        Step(
-                            f"Chat inside that project with the "
-                            f"{chatgpt_label(site, ctx.gpt_name) if ctx.gpt_name else site} connector on."
-                        ),
+                        Step(f"Chat inside that project with the {chatgpt_label(site)} connector on."),
                     ),
                     notes=(
                         "ChatGPT supports custom connectors on the web only, not in its phone apps.",
@@ -847,9 +830,7 @@ def _context(state: AppState, *, page: bool) -> Context:
 
         base = skill_dir()
         gpt = chatgpt_text(base) if base is not None else None
-    return Context(
-        s.public_url, s.server_name, gpt_text=gpt, gpt_name=s.chatgpt_name, app=android_facts(), page=page
-    )
+    return Context(s.public_url, s.server_name, gpt_text=gpt, app=android_facts(), page=page)
 
 
 def add_setup_routes(server: MCPServer, state: AppState) -> None:

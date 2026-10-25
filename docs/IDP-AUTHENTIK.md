@@ -545,12 +545,9 @@ goes only into a Docker secret, in step 6.
    gateway at it, so neither needs an edit: in Portainer, **Update the stack**; without Portainer,
    `docker stack deploy` again; with Compose, `docker compose up -d --force-recreate gateway` (the
    gateway reads the token when it starts, and a plain `up -d` doesn't restart it when only the
-   file changed). You don't need to set either variable:
-
-   | Variable | Value |
-   | --- | --- |
-   | `MTG_AUTHENTIK_API_TOKEN_FILE` | leave unset: the stack and Compose files use `/run/secrets/mtg_authentik_api_token` |
-   | `MTG_AUTHENTIK_API_URL` | leave empty: the issuer's address (`https://auth.example.com`) is used. Set it only if the gateway must reach Authentik's API at another https address |
+   file changed). There is nothing to set: the stack and Compose files point
+   `MTG_AUTHENTIK_API_TOKEN_FILE` at `/run/secrets/mtg_authentik_api_token`, and the gateway reaches
+   Authentik's API at the scheme and host of `MTG_OIDC_ISSUER` (`https://auth.example.com`).
 
 8. **Check it on the admin page.** Open **Admin**. In the **System** card,
    the **Removed-member clean-up** row says what is happening and what to
@@ -567,14 +564,14 @@ goes only into a Docker secret, in step 6.
 | *Off: it needs MTG_REQUIRED_GROUP.* | There is a token but no required group to compare with. | Set `MTG_REQUIRED_GROUP` and redeploy. |
 | *On. The first check runs 2 minutes after the gateway starts; reload this page then.* | It is set up and waiting for its first round. | Reload the page after two minutes. |
 | *Working. Last check at …: N members with access; no one lost access. Nothing for you to do.* or *…; deleted the saved Archidekt sign-in of N people who lost access. Nothing for you to do.* | The last round worked. | Nothing. |
-| *Not working. The last check at … failed and deleted nothing: Authentik could not be reached (…)* | The gateway can't reach Authentik's address. | Check that the gateway's network reaches `https://auth.example.com` (or `MTG_AUTHENTIK_API_URL`). It tries again by itself. |
+| *Not working. The last check at … failed and deleted nothing: Authentik could not be reached (…)* | The gateway can't reach Authentik's address. | Check that the gateway's network reaches `https://auth.example.com` (the scheme and host of `MTG_OIDC_ISSUER`). It tries again by itself. |
 | *… failed and deleted nothing: Authentik answered HTTP 401* or *HTTP 403* | Authentik refused the token: it expired or was deleted, or the service account was deactivated. | Make a new token (step 5) and a new secret (step 6), then redeploy (step 7). |
-| *… failed and deleted nothing: Authentik answered HTTP* (another number) | Authentik had a problem, or sent the request somewhere else. | Wait for the next try. If it stays, check `MTG_AUTHENTIK_API_URL`. |
+| *… failed and deleted nothing: Authentik answered HTTP* (another number) | Authentik had a problem, or sent the request somewhere else. | Wait for the next try. If it stays, check that `MTG_OIDC_ISSUER` is Authentik's own address, not one that redirects. |
 | *… failed and deleted nothing: group '…' found 0 times* | The group name doesn't match, or the role can't view that group. | Check the spelling of `MTG_REQUIRED_GROUP` and `MTG_ADMIN_GROUP` against Authentik, and step 4 on each group. |
 | *… failed and deleted nothing: Authentik says nobody is in the groups* | Both groups came back without an active member. | Check that the groups have members, and step 4 on each group. |
 | *… failed and deleted nothing: nobody the gateway knows is among the members* | The provider's subject mode or the group names are wrong, so everyone would look removed. | Set the provider's **Subject mode** to **Based on the User's hashed ID** (section 4), and check the group names. |
 | *… failed and deleted nothing: it would delete N of M stored Archidekt sessions at once* | More than three sessions, and more than a quarter of them, would go in one round. | If you removed those people on purpose, press **Disable** for each on the admin **Users** page. Otherwise check the subject mode and the group names. |
-| *… failed and deleted nothing:* anything else | Authentik's answer was not what the gateway expects. | Check that `MTG_AUTHENTIK_API_URL` (or the issuer) points at Authentik itself, then read the gateway's log. |
+| *… failed and deleted nothing:* anything else | Authentik's answer was not what the gateway expects. | Check that `MTG_OIDC_ISSUER` points at Authentik itself, then read the gateway's log. |
 
 After a failure the next try waits longer: one hour, then two, four, up to
 six. The gateway's log tells the same story: `removed-member clean-up is

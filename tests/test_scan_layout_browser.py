@@ -249,6 +249,7 @@ def test_the_list_cards_menu_opens_every_way_and_its_items_work(server: Server, 
             "Open card",
             "Add to deck…",
             "Add to collection",
+            "Watch this card",
             "Change printing…",
             "One fewer",
             "One more",
@@ -256,17 +257,17 @@ def test_the_list_cards_menu_opens_every_way_and_its_items_work(server: Server, 
             "Open on Scryfall",
             "Remove",
         ]
-        # Add to deck… is the card search for the name; Watch this card only with watchlists on
+        # Add to deck… is the card search for the name; Watch this card is there with watchlists on
         add = menu.locator("a[role=menuitem]", has_text="Add to deck…")
         assert add.get_attribute("href") == "/cards?q=Sol%20Ring"
-        assert not page.evaluate("() => document.body.hasAttribute('data-watchlist')")
+        assert page.evaluate("() => document.body.hasAttribute('data-watchlist')")
         page.keyboard.press("Escape")
         expect(menu).to_have_count(0)
-        page.evaluate("() => document.body.setAttribute('data-watchlist', '')")
+        page.evaluate("() => document.body.removeAttribute('data-watchlist')")  # watchlists off
         rows.first.locator(".name > span").first.click(button="right")
         expect(menu).to_be_visible()
-        assert _menu_items(page)[:4] == ["Open card", "Add to deck…", "Add to collection", "Watch this card"]
-        page.evaluate("() => document.body.removeAttribute('data-watchlist')")
+        assert _menu_items(page)[:4] == ["Open card", "Add to deck…", "Add to collection", "Change printing…"]
+        page.evaluate("() => document.body.setAttribute('data-watchlist', '')")
         page.keyboard.press("Escape")
         expect(menu).to_have_count(0)
         rows.first.locator(".name > span").first.click(button="right")

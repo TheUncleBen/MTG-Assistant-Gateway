@@ -38,8 +38,9 @@ small and safe:
   cards out of a deck (no snapshot puts them back). Like consent, no mode lets an assistant apply
   it; a deck deletion is applied only on its review page (not the card in the chat).
 
-The operator may set the default mode for members who have not chosen (``MTG_APPROVAL_MODE_DEFAULT``)
-and cap what members may choose (``MTG_APPROVAL_MODE_MAX``, default ``auto`` = no cap).
+An admin may set the default mode for members who have not chosen (``approval_mode_default``)
+and cap what members may choose (``approval_mode_max``, default ``auto`` = no cap), on the
+Settings page.
 """
 
 from __future__ import annotations

@@ -116,7 +116,7 @@ def test_the_page_has_the_hint_and_the_picker_and_marks_watched_cards(server: Se
 
 
 def test_with_watchlists_off_there_is_no_watch(tmp_path: Path) -> None:
-    s = Server(tmp_path)
+    s = Server(tmp_path, watchlists_enabled=False)
     s.sf.catalog = CATALOG
     s.app.state.gateway.scan.names.set_names(s.sf.catalog)
     s.start()

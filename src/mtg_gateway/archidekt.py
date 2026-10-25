@@ -393,7 +393,7 @@ class ArchidektError(Exception):
         self.retry_after = retry_after
 
 
-BACKUP_FOLDER_NAME = "MTG Gateway backups"
+BACKUP_FOLDER_NAME = "MTG Gateway Backups"
 DECK_ID_RE = re.compile(r"[0-9]{1,12}")
 
 
