@@ -556,7 +556,13 @@ def _loading_looks(d: Driver) -> None:
         do()
         page.wait_for_timeout(400)
         looks = page.evaluate("() => window.__looks")
-        waits = [a for a in asked if not (remembers and a == "POST /api/v1/prefs")]
+        # the bell's count is the page's own read after it loads (static/bell.js, when the browser
+        # is idle, up to 2 s later), not the control's: on a busy runner it can land in this window
+        waits = [
+            a
+            for a in asked
+            if not (remembers and a == "POST /api/v1/prefs") and a != "GET /notifications/count"
+        ]
         assert waits == [] and looks == [], (name, d.width, asked, looks)
         if undo:
             undo()
