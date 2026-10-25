@@ -373,7 +373,7 @@ address and shared CI runners hit that limit. As a fallback for anything a
 build still fetches from Docker Hub, the image jobs sign in to Docker Hub when
 the repository secrets `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` (a
 read-only access token) exist; without them the step is skipped. The
-Mystic Forge image is built once per tag (`1.3.2-mag5`) and not rebuilt by
+Mystic Forge image is built once per tag (`1.3.2-mag6`) and not rebuilt by
 later releases; a manual run of its workflow from `main` rebuilds it from
 the base image `main` pins. GitHub
 Actions are pinned by commit, Python dependencies by version
@@ -526,9 +526,9 @@ licence, from upstream). It's built from upstream commit
 rules, precon and goldfish tools, and the gateway relays an allowlisted set
 of them to signed-in users.
 
-Upstream code is unchanged apart from eight patches in
-`docker/mystic-forge/patches/`, which is where the `-mag5` in the image tag
-`1.3.2-mag5` comes from:
+Upstream code is unchanged apart from nine patches in
+`docker/mystic-forge/patches/`, which is where the `-mag6` in the image tag
+`1.3.2-mag6` comes from:
 
 - `0001-archidekt-null-categories.patch`: Archidekt sends
   `"categories": null` for cards that never got a category (it happens in
@@ -579,6 +579,9 @@ Upstream code is unchanged apart from eight patches in
   only partly read plays the read parts, unless an unread part limits them
   ("only once each turn", for example); `goldfish_annotate` lists what was
   read and what was not.
+- `0010-goldfish-short-run-turn-labels.patch`: a run shorter than five turns
+  said "made every land drop through T5" (and "by T6", "by T4" elsewhere);
+  the text and the report tiles now name the last turn the run played.
 
 What to know about it:
 
@@ -608,7 +611,7 @@ What to know about it:
 | Variable | Default | What it does |
 | --- | --- | --- |
 | `MF_IMAGE` | `ghcr.io/theuncleben/mtg-assistant-mysticforge` | Image. A copy of the project that builds its own images sets `ghcr.io/<your account>/mtg-assistant-mysticforge` |
-| `MF_TAG` | `1.3.2-mag5` | Image tag |
+| `MF_TAG` | `1.3.2-mag6` | Image tag |
 | `MF_PUBLIC_BASE` | `http://mtg-assistant-mysticforge:8000` | Base URL Mystic Forge uses in links (its own default points at the upstream author's site, so keep this) |
 | `MF_NODE` | none, required | Hostname of the node it runs on. The stack won't start without it |
 | `MF_MEMORY_LIMIT` | `512M` | Memory cap |

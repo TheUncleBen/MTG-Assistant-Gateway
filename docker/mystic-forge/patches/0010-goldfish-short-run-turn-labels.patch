@@ -1,0 +1,137 @@
+Subject: Goldfish: a run shorter than T4-T6 names the turns it played
+
+The summary said "made every land drop through T5" and "by T4, T5, T6",
+and the report tiles "On-curve through T5" and "4+-spell turn by T6", in
+runs shorter than those turns, while metrics.py already judges on-curve
+through min(5, until_turn) and 4+-spell turns through min(6, until_turn).
+The labels now name min(turn, until_turn), and the commander by-turn
+figures past the run's last turn are left out.
+
+diff --git a/mystic_forge/goldfish/report.py b/mystic_forge/goldfish/report.py
+index 4a2a6d2..20f7834 100644
+--- a/mystic_forge/goldfish/report.py
++++ b/mystic_forge/goldfish/report.py
+@@ -278,17 +278,23 @@ def _tile(label: str, p: dict) -> str:
+ 
+ 
+ def _stat_tiles(m: dict, until_turn: int, constructed: bool = False) -> str:
++    # A run shorter than T4/T5/T6 names the turns it played (metrics.py
++    # judges on-curve through min(5, until_turn), 4+-spell turns through 6).
+     tiles = [] if constructed else [
+         _tile(f"Commander cast by T{until_turn}",
+               m["commander_cast"]["reached_pct"]),
+-        _tile("Commander cast by T4", m["commander_cast"]["pct_by_turn"]["4"]),
+     ]
++    if not constructed and until_turn >= 4:
++        tiles.append(_tile("Commander cast by T4",
++                           m["commander_cast"]["pct_by_turn"]["4"]))
+     tiles += [
+         _tile(f"Kill ({20 if constructed else 40} damage) by T{until_turn}",
+               m["kill"]["reached_pct"]),
+         _tile("Games mulliganed", m["mulligans"]["pct_mulliganed"]),
+-        _tile("On-curve through T5", m["on_curve"]["pct_all_drops_through_t5"]),
+-        _tile("4+-spell turn by T6", m["casts"]["pct_4plus_turn_by_t6"]),
++        _tile(f"On-curve through T{min(5, until_turn)}",
++              m["on_curve"]["pct_all_drops_through_t5"]),
++        _tile(f"4+-spell turn by T{min(6, until_turn)}",
++              m["casts"]["pct_4plus_turn_by_t6"]),
+     ]
+     return '<div class="tiles">' + "".join(tiles) + "</div>"
+ 
+diff --git a/server.py b/server.py
+index aeb6eee..0d3547e 100644
+--- a/server.py
++++ b/server.py
+@@ -4623,11 +4623,14 @@ def _goldfish_summary_lines(m: dict, until_turn: int,
+     kill = m["kill"]
+     dmg = m["damage"]
+     mull = m["mulligans"]
++    # A run shorter than T4/T5/T6 names only the turns it played: a cast "by
++    # T4" in a 3-turn run is a cast by T3, said once in "reached".
++    by_text = ", ".join(f"{'by ' if i == 0 else ''}T{t} {_goldfish_fmt_prop(by[str(t)])}"
++                        for i, t in enumerate(t for t in (4, 5, 6) if t <= until_turn))
+     lines = [] if constructed else [
+         (f"- Commander cast: median {_goldfish_fmt_turn(cc['median_among_reached'])} "
+-         f"(reached {_goldfish_fmt_prop(cc['reached_pct'])}); "
+-         f"by T4 {_goldfish_fmt_prop(by['4'])}, T5 {_goldfish_fmt_prop(by['5'])}, "
+-         f"T6 {_goldfish_fmt_prop(by['6'])}"),
++         f"(reached {_goldfish_fmt_prop(cc['reached_pct'])})"
++         + (f"; {by_text}" if by_text else "")),
+     ]
+     lines += [
+         (f"- Kill ({20 if constructed else 40} damage): reached "
+@@ -4641,7 +4644,7 @@ def _goldfish_summary_lines(m: dict, until_turn: int,
+          f"avg kept hand {mull['avg_kept_hand_size']:.1f} with "
+          f"{mull['avg_kept_lands']:.1f} lands"),
+         (f"- On-curve: {_goldfish_fmt_prop(m['on_curve']['pct_all_drops_through_t5'])} "
+-         f"made every land drop through T5"),
++         f"made every land drop through T{min(5, until_turn)}"),
+     ]
+     top = sorted(m["trigger_fires"].items(), key=lambda kv: (-kv[1], kv[0]))[:3]
+     for key, avg_fires in top:
+diff --git a/tests/goldfish/test_short_run_labels.py b/tests/goldfish/test_short_run_labels.py
+new file mode 100644
+index 0000000..8c4504a
+--- /dev/null
++++ b/tests/goldfish/test_short_run_labels.py
+@@ -0,0 +1,60 @@
++"""A run shorter than the summary's fixed turns names the turns it played.
++
++The on-curve metric is judged through min(5, until_turn) and the 4+-spell
++turn through min(6, until_turn) (metrics.py), and a commander cast "by T4"
++in a 3-turn run is only a cast by T3. The text and the report tiles said
++T4, T5 and T6 whatever the run's length.
++"""
++from mystic_forge.goldfish import report
++import server as srv
++
++
++def _p(v=0.5):
++    return {"value": v, "ci": [0.4, 0.6]}
++
++
++def _metrics():
++    return {
++        "commander_cast": {"reached_pct": _p(), "median_among_reached": 3,
++                           "pct_by_turn": {"4": _p(), "5": _p(), "6": _p()}},
++        "kill": {"reached_pct": _p(0.0), "median_among_reached": None},
++        "damage": {"avg_total": 4.0, "combat": {"avg_total": 4.0},
++                   "noncombat": {"avg_total": 0.0}},
++        "mulligans": {"pct_mulliganed": _p(), "avg_kept_hand_size": 6.9,
++                      "avg_kept_lands": 3.0},
++        "on_curve": {"pct_all_drops_through_t5": _p(0.9)},
++        "casts": {"pct_4plus_turn_by_t6": _p(0.0)},
++        "trigger_fires": {},
++    }
++
++
++def test_short_run_summary_names_the_turns_played():
++    text = "\n".join(srv._goldfish_summary_lines(_metrics(), 3))
++    assert "through T3" in text
++    assert "T5" not in text and "T4" not in text and "T6" not in text
++
++
++def test_long_run_summary_is_unchanged():
++    text = "\n".join(srv._goldfish_summary_lines(_metrics(), 10))
++    assert "by T4 50.0% [40.0–60.0], T5 50.0% [40.0–60.0], T6 50.0% [40.0–60.0]" in text
++    assert "made every land drop through T5" in text
++
++
++def test_short_run_constructed_summary():
++    text = "\n".join(srv._goldfish_summary_lines(_metrics(), 4, constructed=True))
++    assert "made every land drop through T4" in text
++
++
++def test_short_run_tiles_name_the_turns_played():
++    html = report._stat_tiles(_metrics(), 3)
++    assert "On-curve through T3" in html
++    assert "4+-spell turn by T3" in html
++    assert "Commander cast by T4" not in html
++    assert "T5" not in html and "T6" not in html
++
++
++def test_long_run_tiles_are_unchanged():
++    html = report._stat_tiles(_metrics(), 10)
++    assert "On-curve through T5" in html
++    assert "4+-spell turn by T6" in html
++    assert "Commander cast by T4" in html

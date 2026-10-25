@@ -30,11 +30,12 @@ Scryfall and tells the assistant how sure it is:
 | `deferred` | not looked up yet because Scryfall asked the gateway to wait; `retry_in` says how many seconds, and `complete` is false |
 | `conflict` | the set and number are a different card from the name; `card` is what the name matched, `requested` the printing asked for. Left out of the decklist and the changes until you say which card you mean, and `complete` is false |
 
-With no set given, a card gets its newest printing that is already out
-(released today or earlier, UTC) and sold on paper, in foil when foil was
-asked for. Scryfall's own default is its newest printing, which can be a
-preview that isn't out yet; any newer printings passed over are listed in
-`newer_printings`. When foil was asked for and the printing has no foil,
+With no set given, a card keeps Scryfall's own default printing when that
+one is already out (released today or earlier, UTC) and sold on paper, in
+foil when foil was asked for. Scryfall's default is not always its newest
+printing. When the default isn't out yet (a preview) or isn't sold on paper,
+the card gets its newest printing that is, and the newer printings passed
+over are listed in `newer_printings`. When foil was asked for and the printing has no foil,
 the card comes back non-foil with `finish_unavailable` and a note naming
 the finishes it does come in, and it is listed in `needs_review`.
 

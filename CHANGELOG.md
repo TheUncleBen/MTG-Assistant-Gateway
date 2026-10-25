@@ -9,13 +9,19 @@ with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 
 ## [0.7.45] - 2026-10-24
 
-An assistant now reads the same Forge seed the report page shows, and Forge's load problems leave
-out Java's own warnings.
+An assistant now reads the same Forge seed the report page shows, Forge's load problems leave out
+Java's own warnings, and a solo test shorter than five turns no longer talks about turn 5.
 
 ### Upgrade notes
-- None beyond the [update steps](docs/UPGRADING.md). There is no database change, so this update
-  saves no before-upgrade copy, and going back to 0.7.44 needs only the `MTG_TAG` change.
-- No new settings or secrets: your variables file works as it is.
+- Update as usual ([docs/UPGRADING.md](docs/UPGRADING.md)): the newest stack file and example
+  variables file, with your values in it. The research service image is new (`1.3.2-mag6`), and the
+  newest stack file and example variables file already name it. If your variables file sets
+  `MF_TAG`, it must read `1.3.2-mag6`: an older tag keeps an older research service, whose solo
+  test reads far less card text (it plays a commander with a vote ability, for example, as a card
+  it never casts).
+- No database change, so this update saves no before-upgrade copy, and going back to 0.7.44 needs
+  only the `MTG_TAG` and `MF_TAG` changes.
+- No new settings or secrets.
 
 ### Fixed
 - **Forge seeds in Claude and ChatGPT.** The seed the gateway picks for a report's Forge games and
@@ -24,6 +30,12 @@ out Java's own warnings.
   you give yourself are used as they are.
 - **Forge's load problems** no longer list the Java runtime's own start-up warnings ("Skipping
   jdk/proxy1/…: Unsupported location"), which an assistant could read as cards Forge could not load.
+- **Short solo tests.** A solo test played to turn 3 said "made every land drop through T5" and
+  gave the commander's cast "by T4, T5, T6". The text and the research service's own report now
+  name the last turn the run played.
+- **Which printing a card gets** when no set is given is now described as it works, in the
+  assistant's tool description and [docs/SCANNING.md](docs/SCANNING.md): Scryfall's own default
+  printing when it is out on paper, which is not always the newest one, else the newest that is.
 
 ## [0.7.44] - 2026-10-24
 
